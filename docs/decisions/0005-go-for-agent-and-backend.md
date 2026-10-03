@@ -9,7 +9,7 @@
 
 The agent runs permanently on a server with about 2 GB RAM next to Plesk, MariaDB and mail; it must be
 small, easy to install and free of a runtime that has to be maintained on the server. The backend runs as
-one Docker container on a Synology NAS. Both share the data model, the wire format and the log parsing.
+one Docker container on a NAS or server. Both share the data model, the wire format and the log parsing.
 
 ## Options considered
 
