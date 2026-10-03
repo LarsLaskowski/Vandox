@@ -102,7 +102,8 @@ action yourself — including follow-up issues the Lead decides on.
    the formatter and clears analyzer diagnostics. Then verify yourself, without formatting, with the
    commands from `.squad/stack.md`: *Format check* exits 0, the *Analyzer gate* passes (no diagnostic of
    any severity in a changed file), *Test* is green with the same tests, and the *Coverage gate* still
-   passes. Structural items handed back go to `squad-dev` (or
+   passes. Record status and index are the Lead's in step 9: treat any status claim in the
+   Code Officer's report as unverified until you have read the file. Structural items handed back go to `squad-dev` (or
    `squad-tester`), followed by another code check. This is the gate before the PR; CI is not meant to find anything here.
 8. **Review.** Launch `squad-reviewer` (round 1, full) and — for `standard` and `security` —
    `squad-security` in mode `diff`, in parallel, against the base ref. Pass both the work folder
