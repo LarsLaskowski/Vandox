@@ -1,3 +1,4 @@
+// Command vandoxd is the Vandox backend with web UI.
 package main
 
 import (

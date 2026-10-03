@@ -1,0 +1,84 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Surface newly-published CVEs against an otherwise unchanged codebase
+    # without waiting for the next push/PR.
+    - cron: "0 6 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  build-test-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build
+        run: go build ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test ./... -race -cover
+
+      - name: Lint
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          version: v2.13.1
+
+  sonarqube:
+    name: SonarQube
+    runs-on: ubuntu-latest
+    # Dependabot runs do not receive repository secrets, so SONAR_TOKEN would be
+    # empty and the scan would fail; skip the job for those PRs.
+    if: ${{ github.actor != 'dependabot[bot]' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # disable shallow clone for better analysis relevancy
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Generate coverage
+        run: go test ./... -race -coverprofile=coverage.out
+
+      - name: SonarQube Scan
+        uses: SonarSource/sonarqube-scan-action@ba9859eae8dd6bd29e412f25ddbbef3d032000f4 # v8.2.2
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+  govulncheck:
+    name: Vulnerability scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # govulncheck is a go.mod "tool" dependency (go 1.24+), so `go tool` runs
+      # a go.sum-verified, checksummed version instead of an unpinned
+      # `go install ...@latest` (which trips SonarCloud's S8545
+      # dependency-pinning check). Dependabot's gomod ecosystem tracks and
+      # bumps it like any other module requirement. The vulnerability
+      # database itself is still fetched fresh at run time over the network,
+      # independent of the tool's pinned version, so scans stay current.
+      - name: Run govulncheck
+        run: go tool govulncheck ./...
