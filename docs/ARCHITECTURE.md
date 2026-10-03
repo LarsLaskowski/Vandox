@@ -45,6 +45,7 @@ flowchart LR
         AN --> RU[Rules]
         RU --> TG[Telegram notifier]
         DB --> RP[Reports]
+        RP --> TG
         DB --> UI[Web UI]
     end
     SN --> IN
