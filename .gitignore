@@ -1,0 +1,12 @@
+# Go build output
+/bin/
+/dist/
+/vandox-agent
+/vandoxd
+*.exe
+*.test
+*.out
+
+# Coverage
+coverage.*
+*.coverprofile
