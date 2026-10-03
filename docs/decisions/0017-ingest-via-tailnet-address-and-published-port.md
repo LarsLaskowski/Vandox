@@ -7,8 +7,8 @@
 
 ## Context
 
-The agent reaches the backend over Tailscale (0010). The backend runs as a Docker container on a Synology
-NAS on which Tailscale already runs.
+The agent reaches the backend over Tailscale (0010). The backend runs as a Docker container on a NAS or
+server on which Tailscale already runs.
 
 ## Options considered
 
