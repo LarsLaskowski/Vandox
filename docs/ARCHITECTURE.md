@@ -5,28 +5,164 @@ Vandox is lean monitoring for a Plesk-managed Linux server, with analysis first:
 from logs and system metrics and warns early. `vandox-agent` runs on the monitored server; `vandoxd`, the
 backend with web UI, runs as a Docker container on a Synology NAS in the home network.
 
+This document describes the target architecture; as of now only the two binaries' `--version` exist, and
+sections are marked as implemented as features land. The decisions behind it are recorded in
+[`docs/decisions/`](decisions/README.md); each section links the records it rests on. Vandox is an own
+project rather than an off-the-shelf stack ([0004](decisions/0004-own-project-instead-of-off-the-shelf-stack.md)).
+
+## Monitored server
+
+The monitored server runs Ubuntu 22.04 and Plesk 18 with about 2 GB of RAM. The failure mode Vandox is built
+to explain is memory exhaustion, then the OOM killer, then MariaDB, Plesk and mail going down. The RAM stays
+at 2 GB; relief comes from swap, tuning the backups and an inventory of running services
+([0025](decisions/0025-server-ram-stays-at-2-gb.md)). Services are only disabled in a reversible, documented
+way, and agents of the hosting provider are never disabled or changed
+([0026](decisions/0026-services-disabled-reversibly-only.md)).
+
 ## Components
 
-- `cmd/vandox-agent` — collects metrics and logs on the monitored server, keeps them in an on-disk spool and
-  sends them to the backend.
-- `cmd/vandoxd` — the backend: ingest API, SQLite storage, log analysis, alerting and web UI.
+- `cmd/vandox-agent` — Go, runs as a systemd service on the monitored server. It collects metrics, process
+  and network snapshots (read from `/proc`), service and MariaDB state, kernel events and logs, keeps them in
+  an on-disk spool and sends them to the backend. It checks the state of the mail services, not individual
+  mail accounts.
+- `cmd/vandoxd` — Go, one container on the NAS: ingest API, SQLite storage, analysis, rules, Telegram
+  notifier, reports and web UI.
 - `internal/` — packages shared by both binaries: data model and versioned wire format, log parsing,
   signatures, version information.
 
+Importing historical logs (including the legacy `top`/`lsof` log) and continuously shipping new log lines are
+core parts of Vandox. Both binaries are written in Go in one module.
+
 ```mermaid
 flowchart LR
-    S[Monitored server] --> A[vandox-agent]
-    A -- "metrics, logs (Tailscale)" --> B[vandoxd]
-    B --> D[(SQLite)]
-    B --> W[Web UI]
-    B --> T[Telegram]
+    subgraph Server["Monitored server"]
+        C[Collectors] --> SP[(On-disk spool)]
+        SP --> SN[Sender]
+    end
+    subgraph NAS["vandoxd on the NAS"]
+        IN[Ingest API] --> DB[(SQLite)]
+        DB --> AN[Analysis]
+        AN --> RU[Rules]
+        RU --> TG[Telegram notifier]
+        DB --> RP[Reports]
+        DB --> UI[Web UI]
+    end
+    SN --> IN
+    INT[internal/ shared packages] -.-> Server
+    INT -.-> NAS
 ```
 
-## Main flow
+Records: [0004](decisions/0004-own-project-instead-of-off-the-shelf-stack.md),
+[0005](decisions/0005-go-for-agent-and-backend.md),
+[0011](decisions/0011-own-go-web-ui-without-grafana.md),
+[0013](decisions/0013-mariadb-access-via-unix-socket-process-privilege.md),
+[0014](decisions/0014-log-import-is-a-core-component.md),
+[0015](decisions/0015-mail-services-checked-not-mail-accounts.md),
+[0019](decisions/0019-agent-reads-proc-instead-of-top-lsof.md),
+[0027](decisions/0027-project-name-and-docker-image.md).
 
-The agent collects metrics and ships logs, spools them on disk and transmits them to the backend, which
-stores and analyzes them and raises alerts. The detailed flow and its guarantees are documented here as the
-features land; the planned guarantees are listed in `.squad/project.md` (*Guarantees*).
+## Data flow
+
+The agent collects data and writes it to its spool, then sends it in batches over Tailscale to the ingest
+API. The backend stores the batches in SQLite; analysis, rules, the web UI and Telegram work from the stored
+data. Detection, incident reconstruction and alerting are deterministic (rules, thresholds, log signatures);
+AI is optional and only used to write the nightly report, which is sent at 06:00, or as soon as the backfill
+has completed if the NAS was off at that time. The first release (v0.1.0) is the forensics release:
+collection, log import, spool and backfill, storage and the historical views; alerting, the nightly report
+and remote actions build on it.
+
+```mermaid
+flowchart LR
+    A[vandox-agent] -- "batches over Tailscale" --> I[Ingest API]
+    I --> D[(SQLite)]
+    D --> AN[Analysis]
+    D --> R[Rules]
+    D --> W[Web UI]
+    AN --> R
+    R --> T[Telegram]
+```
+
+Records: [0006](decisions/0006-agent-connects-outbound-only.md),
+[0007](decisions/0007-sqlite-with-fts5-no-external-database.md),
+[0008](decisions/0008-deterministic-detection-and-alerting.md),
+[0012](decisions/0012-agent-never-contacts-telegram.md),
+[0020](decisions/0020-analysis-before-alerting-forensics-release.md),
+[0024](decisions/0024-nightly-report-timing.md).
+
+## Network
+
+The agent connects outbound only and never listens on a port. It sends to the ingest port published on the
+NAS's tailnet address; `vandoxd` does not embed Tailscale. The Tailscale ACL allows the monitored server to
+reach only that port and nothing else. The web UI is reachable in the home LAN only and requires a login;
+TLS for it is terminated by the Synology reverse proxy, while the ingest path bypasses the proxy and is
+encrypted by Tailscale. Telegram is contacted only by the backend, never by the agent.
+
+```mermaid
+flowchart LR
+    subgraph Internet["Internet / server"]
+        AG[vandox-agent]
+        TGA[Telegram API]
+    end
+    subgraph Tailnet["Tailnet"]
+        ING["NAS tailnet address : ingest port"]
+    end
+    subgraph LAN["Home LAN"]
+        BR[Browser] -- "HTTPS, login" --> RP[Synology reverse proxy, TLS]
+        RP --> UI[vandoxd web UI]
+        ING --> BE[vandoxd]
+        BE -- "outbound" --> TGA
+    end
+    AG -- "outbound only, ACL: ingest port" --> ING
+```
+
+Records: [0010](decisions/0010-tailscale-with-strict-acl.md),
+[0016](decisions/0016-web-ui-in-home-lan-with-login.md),
+[0017](decisions/0017-ingest-via-tailnet-address-and-published-port.md),
+[0023](decisions/0023-tls-through-synology-reverse-proxy.md).
+
+## Offline behavior and backfill
+
+The NAS runs 24/7 but is sometimes switched off at night (typically 22:00–09:00) a few times a year. While
+the backend is unreachable the agent keeps collecting and spools at least 7 days on disk. When the backend
+is reachable again it sends current data first, then backfills the spool chronologically and throttled.
+Every batch carries an identity and sequence number, so a resend is idempotent and the backend can detect
+gaps. `vandoxd` classifies every record as live or backfilled from its capture time, its receive time and
+gaps in the sequence numbers; alert rules are evaluated on live data only, and backfilled data is stored and
+analyzed but never alerts. The nightly report waits for the backfill if the NAS was off at 06:00.
+
+Records: [0018](decisions/0018-agent-spools-seven-days-and-backfills.md),
+[0022](decisions/0022-backfill-detection-and-live-only-alerts.md),
+[0024](decisions/0024-nightly-report-timing.md).
+
+## Storage and retention
+
+`vandoxd` stores everything in SQLite with the FTS5 extension for log search, in WAL mode, with these
+retention tiers:
+
+| Data | Retention |
+| ---- | --------- |
+| Raw data | 30 days |
+| 5-minute rollups | 1 year |
+| Hourly rollups | 3 years |
+| Incidents | unlimited |
+| Logs | 90 days |
+| Process and connection snapshots | 30 days |
+
+Log data is stored as it is, without pseudonymization: it is the operator's own server and the data stays in
+the home network.
+
+Records: [0007](decisions/0007-sqlite-with-fts5-no-external-database.md),
+[0021](decisions/0021-no-pseudonymization-of-log-data.md).
+
+## Remote actions (later)
+
+Remote actions are not part of v0.1.0. They exist only as signed commands that reference an action from a
+fixed list configured locally on the monitored server, and only after the user has confirmed them. The agent
+pulls the commands from the backend and verifies the signature before executing; commands are never pushed
+to the server.
+
+Records: [0006](decisions/0006-agent-connects-outbound-only.md),
+[0009](decisions/0009-remote-actions-as-signed-commands.md).
 
 ## Configuration
 
@@ -35,13 +171,22 @@ is not implemented yet.
 
 ## Security model
 
-The agent and the backend communicate only over a private Tailscale network. The web UI is protected by a
-login and runs behind the Synology reverse proxy. Secrets are never logged. Kept in sync with `SECURITY.md`
-and the *Security areas* in `.squad/project.md`.
+The agent and the backend communicate only over a private Tailscale network. The agent connects outbound
+only and never listens on a port, and the Tailscale ACL lets the monitored server reach only the ingest port
+on the NAS. The web UI is protected by a login and runs behind the Synology reverse proxy. The Telegram token
+exists only on the NAS. The agent reads MariaDB over the local socket as the user `vandox-agent`, identified
+via `unix_socket` and granted only `PROCESS`. Log data is not pseudonymized. Secrets are never logged. Kept
+in sync with `SECURITY.md` and the *Security areas* in `.squad/project.md`.
+
+Records: [0006](decisions/0006-agent-connects-outbound-only.md),
+[0010](decisions/0010-tailscale-with-strict-acl.md),
+[0013](decisions/0013-mariadb-access-via-unix-socket-process-privilege.md),
+[0021](decisions/0021-no-pseudonymization-of-log-data.md).
 
 ## Deployment
 
-The agent is released as a binary for the monitored server, the backend as a Docker image. See the
+The agent is released as a binary for the monitored server, the backend as a Docker image published on
+Docker Hub as `networlddev/vandox` ([0027](decisions/0027-project-name-and-docker-image.md)). See the
 *Versioning and releases* section in [`CONTRIBUTING.md`](CONTRIBUTING.md).
 <!-- project:end architecture -->
 

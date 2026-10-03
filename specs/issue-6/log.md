@@ -6,3 +6,4 @@ One line per pipeline step: date, step, member, result. Lead decisions and escal
 | ---- | ---- | ------ | ------ |
 | 2026-10-03 | 1 Intake | Orchestrator | Issue #6 read (open, no comments); branch fix-issue-6-architecture-decisions off main |
 | 2026-10-03 | 2 Plan | Lead | RESULT: DONE, tier trivial; plan.md and 24 Proposed records 0004-0027 written; steps 3-5 skipped |
+| 2026-10-03 | 6 Implement | Dev | ARCHITECTURE.md project block rewritten (3 Mermaid diagrams, all 24 records linked); all hunks inside the block markers |
