@@ -1,4 +1,4 @@
-# 0023: TLS through the Synology reverse proxy
+# 0023: TLS through the Synology reverse proxy for example
 
 - **Status:** Accepted
 - **Date:** 2026-10-03
@@ -7,13 +7,13 @@
 
 ## Context
 
-The web UI needs TLS so the login and the data are not sent in clear text in the LAN. The Synology NAS
+The web UI needs TLS so the login and the data are not sent in clear text in the LAN. The Synology NAS (as example) 
 already has a reverse proxy with certificate management.
 
 ## Options considered
 
 1. **TLS in `vandoxd`** — self-contained; certificate handling and renewal in the backend.
-2. **TLS terminated by the Synology reverse proxy** — certificates managed by DSM; `vandoxd` serves plain
+2. **TLS terminated by the Synology reverse proxy** — certificates managed by DSM (Synology); `vandoxd` serves plain
    HTTP to the proxy only.
 
 ## Decision
