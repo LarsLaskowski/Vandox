@@ -1,3 +1,4 @@
+// Command vandox-agent runs on the monitored Linux server and ships data to the backend.
 package main
 
 import (
