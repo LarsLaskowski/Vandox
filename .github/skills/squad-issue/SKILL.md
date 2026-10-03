@@ -155,8 +155,9 @@ action yourself — including follow-up issues the Lead decides on.
     unclear or contradictory, a tool that misbehaved, an agent that could not be launched, a step that
     had to be improvised), each with the role it concerns and a concrete proposal, and file them as
     `.squad/routing.md`, *Squad lessons*, says: lessons about template-managed files as **one** issue
-    labelled `squad` in the template repository named in `.squad/template.json` (attach that repository to the session if
-    needed; without access, file it here with the label `squad-upstream`), lessons about project knowledge
+    labelled `squad` in the template repository named in `.squad/template.json` (a general lesson belongs there, never in this
+    repository: attach that repository to the session first if needed, with the access to create the issue;
+    only if attaching is refused, file it here with the label `squad-upstream`), lessons about project knowledge
     as **one** issue labelled `squad` in this repository (create the labels if missing). Link the issues
     from the working record comment. Do **not** edit `.squad/`, `.claude/` or the instruction files.
     Report the branch, the PR URL, the tier, the `squad` issues (or "no lessons") and any escalation or
