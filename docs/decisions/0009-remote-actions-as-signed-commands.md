@@ -1,6 +1,6 @@
 # 0009: Remote actions only as signed commands from a fixed local action list
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-03
 - **Source:** Issue #6
 - **Supersedes:** —

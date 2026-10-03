@@ -1,6 +1,6 @@
 # 0015: Mail services are checked, mail accounts are not
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-03
 - **Source:** Issue #6
 - **Supersedes:** —

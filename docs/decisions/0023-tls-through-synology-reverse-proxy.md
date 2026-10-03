@@ -1,6 +1,6 @@
 # 0023: TLS through the Synology reverse proxy
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-03
 - **Source:** Issue #6
 - **Supersedes:** —

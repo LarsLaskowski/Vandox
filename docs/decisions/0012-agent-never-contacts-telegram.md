@@ -1,6 +1,6 @@
 # 0012: The agent never contacts Telegram itself
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-03
 - **Source:** Issue #6
 - **Supersedes:** —

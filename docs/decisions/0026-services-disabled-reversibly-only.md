@@ -1,6 +1,6 @@
 # 0026: Services are only disabled reversibly; hosting-provider agents are never touched
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-03
 - **Source:** Issue #6
 - **Supersedes:** —

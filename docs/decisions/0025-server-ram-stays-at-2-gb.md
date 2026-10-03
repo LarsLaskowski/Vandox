@@ -1,6 +1,6 @@
 # 0025: The server's RAM stays at 2 GB
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-03
 - **Source:** Issue #6
 - **Supersedes:** —

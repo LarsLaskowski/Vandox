@@ -1,6 +1,6 @@
 # 0011: Own Go web UI with historical views, no Grafana
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-03
 - **Source:** Issue #6
 - **Supersedes:** —

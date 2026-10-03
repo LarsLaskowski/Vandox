@@ -1,6 +1,6 @@
 # 0019: The agent reads /proc itself instead of running top or lsof
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-03
 - **Source:** Issue #6
 - **Supersedes:** —

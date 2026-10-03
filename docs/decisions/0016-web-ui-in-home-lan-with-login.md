@@ -1,6 +1,6 @@
 # 0016: Web UI reachable in the home LAN with a login
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-03
 - **Source:** Issue #6
 - **Supersedes:** —

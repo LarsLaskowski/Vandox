@@ -1,6 +1,6 @@
 # 0004: Own project instead of an off-the-shelf monitoring stack
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-03
 - **Source:** Issue #6
 - **Supersedes:** —

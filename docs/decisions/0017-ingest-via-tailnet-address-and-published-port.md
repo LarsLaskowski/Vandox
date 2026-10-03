@@ -1,6 +1,6 @@
 # 0017: Ingest via the NAS's tailnet address and a published port, not tsnet
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-03
 - **Source:** Issue #6
 - **Supersedes:** —

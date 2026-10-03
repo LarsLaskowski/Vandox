@@ -1,6 +1,6 @@
 # 0006: The agent connects outbound only; commands are pulled
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-03
 - **Source:** Issue #6
 - **Supersedes:** —

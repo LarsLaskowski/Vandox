@@ -1,6 +1,6 @@
 # 0013: MariaDB access through a unix_socket user with only the PROCESS privilege
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-03
 - **Source:** Issue #6
 - **Supersedes:** —

@@ -1,6 +1,6 @@
 # 0007: SQLite with FTS5, no external database
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-03
 - **Source:** Issue #6
 - **Supersedes:** —

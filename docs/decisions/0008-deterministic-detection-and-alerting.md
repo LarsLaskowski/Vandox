@@ -1,6 +1,6 @@
 # 0008: Deterministic detection and alerting; AI only for the nightly report
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-03
 - **Source:** Issue #6
 - **Supersedes:** —

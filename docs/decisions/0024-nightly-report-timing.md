@@ -1,6 +1,6 @@
 # 0024: Nightly report at 06:00, or after the backfill if the NAS was off
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-03
 - **Source:** Issue #6
 - **Supersedes:** —

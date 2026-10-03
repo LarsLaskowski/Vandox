@@ -1,6 +1,6 @@
 # 0018: The agent spools at least 7 days and backfills gaplessly and idempotently
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-03
 - **Source:** Issue #6
 - **Supersedes:** —

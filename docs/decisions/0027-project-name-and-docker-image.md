@@ -1,6 +1,6 @@
 # 0027: Project name Vandox; images on Docker Hub as networlddev/vandox
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-03
 - **Source:** Issue #6
 - **Supersedes:** —
