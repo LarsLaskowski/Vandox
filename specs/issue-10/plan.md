@@ -27,11 +27,16 @@ Claims of the issue, checked against the code (`main` at 23aa2f0):
   therefore *not* part of the wire format (0044).
 - Dependencies #4 and #5: **confirmed** closed.
 
-Related inaccuracy found on the way: `docs/ARCHITECTURE.md` (*Offline behavior and backfill*) says "Every
-batch carries an identity and sequence number", while the issue, #39 and #40 put the sequence number on
-every record and deduplicate by (agent ID, sequence number). The Dev corrects that sentence (see
-*Documentation updates*). The same document's "as of now only the two binaries' `--version` exist" becomes
-untrue with this change and is updated too.
+Related gap found on the way: accepted record 0018 (and, quoting it, the context of 0028,
+`docs/ARCHITECTURE.md` *Offline behavior and backfill* and `.squad/project.md` *Security areas* 1) says
+"every batch carries an identity and sequence number" without defining either, while the issue, #39, #40
+and #41 put the sequence number on every record and deduplicate by (agent ID, sequence number). This is a
+decision, not a wording slip: 0045 (Proposed) supersedes 0018, restates its spool-and-backfill decision
+unchanged and defines the batch identity as the header's `agent_id` plus the sequence numbers of the
+batch's records; the documents quoting it are updated with it (see *Documentation updates*). 0028 is not
+superseded: its decision does not depend on the wording, and its context names 0018 as history. The same
+`ARCHITECTURE.md`'s "as of now only the two binaries' `--version` exist" becomes untrue with this change and
+is updated too.
 
 ## Acceptance criteria
 
@@ -71,16 +76,35 @@ All `FieldError` assertions check `errors.Is(err, model.ErrInvalid)` and the exa
   `records[i].` (e.g. `records[2].data.name`); header errors are prefixed `header.` (e.g.
   `header.agent_id`).
 - [ ] AC14 Round trip: a batch with at least one record of every kind (all optional fields set, including
-  times with a `+00:00`-equivalent offset built with `time.FixedZone("", 0)`) encoded with `EncodeBatch`
-  and read back with `NewDecoder`/`Next` yields the same header and records (times compared with
-  `Equal`, everything else with `reflect.DeepEqual`), then `io.EOF`. The encoded bytes start with the
-  gzip magic `1f 8b`; decompressed, line 1 is the header, there is exactly one line per record, every
-  line ends with `\n`, every `captured_at` ends in `Z`, and no line contains the keys `origin` or
-  `received_at`.
+  `ProcessSample.truncated`, `MariaDBThread.truncated` and `MariaDBStatus.complete`; every time built with
+  `time.Date(…, time.UTC)`, so it carries no monotonic reading) encoded with `EncodeBatch` and read back
+  with `NewDecoder`/`Next` yields a header and records that are `reflect.DeepEqual` to the input, then
+  `io.EOF`. A second case encodes records whose `captured_at` and nested times (`Gap.from`/`to`,
+  `ProcessSample.started_at`) are in `time.FixedZone("", 0)` and `time.FixedZone("X", 0)`: each decoded
+  record is `reflect.DeepEqual` to the input with every time replaced by its `.UTC()`, and every decoded
+  time's `Location()` is `time.UTC` (which only holds if the encoder wrote `Z`, since `+00:00` decodes to
+  a fixed zone). The encoded bytes start with the gzip magic `1f 8b`; decompressed, line 1 is the header,
+  there is exactly one line per record, every line ends with `\n`, and no line contains the keys `origin`
+  or `received_at`.
 - [ ] AC15 `EncodeBatch`: an invalid batch (invalid header, empty, bad record, wrong origin, sequence
-  order) returns the matching error and writes **zero bytes** to `w`; a record whose encoded line exceeds
-  `DefaultLimits().MaxLineBytes` returns `wire.ErrLimitExceeded`; a failing writer's error is returned
-  wrapped (`errors.Is`).
+  order) returns the matching error and writes **zero bytes** to `w`; a batch whose record 2 is valid in
+  the model but encodes to more than `DefaultLimits().MaxLineBytes` bytes returns a `*wire.RecordSizeError`
+  with `Index == 2`, `Size` the encoded length and `Limit == DefaultLimits().MaxLineBytes`, for which
+  `errors.Is(err, wire.ErrRecordTooLarge)` and `errors.Is(err, wire.ErrLimitExceeded)` both hold, and
+  writes zero bytes; a batch whose lines together exceed `DefaultLimits().MaxBatchBytes` returns
+  `wire.ErrLimitExceeded` and writes zero bytes; a failing writer's error is returned wrapped
+  (`errors.Is`).
+- [ ] AC24 `CheckRecord`: a valid agent record returns `n` equal to the length of its encoded line
+  including the `\n` (compared with the corresponding line of `EncodeBatch` output) and a nil error; a
+  record that fails `Record.Validate` returns that `*model.FieldError` unprefixed (e.g. `data.name`); origin
+  `import` → field `origin`; a `MariaDBStatus` with 500 threads of `MaxTextBytes` `info` (which passes
+  `Record.Validate`) → `*wire.RecordSizeError` with `Index == -1`, wrapping `wire.ErrRecordTooLarge`; the
+  same status with every `info` cut to 64 bytes and `truncated` set passes. Worst-case records of the kinds
+  0044 says always fit pass `CheckRecord`: a `MetricPoint` with `MaxLabels` labels, a `LogLine`, a
+  `KernelEvent` (OOM kill) — each with every text at its maximum byte length made of `\x01` (escaped as
+  six bytes each) and every name at `MaxNameBytes`. `RecordSizeError.Error()` reads
+  `"wire: records[2]: encoded record is <Size> bytes, limit <Limit>"`, without `records[…]: ` when
+  `Index` is -1.
 - [ ] AC16 Version rejection: a stream whose header has `format_major` 2 (or 0, -1, missing, `null`) is
   rejected by `NewDecoder` with `wire.ErrUnsupportedVersion` and `DecodeError.Line == 1`, **also when the
   rest of that header has an incompatible shape** (e.g. `"agent_id": {"x": 1}`); a header
@@ -112,9 +136,11 @@ All `FieldError` assertions check `errors.Is(err, model.ErrInvalid)` and the exa
   `Close` closes the gzip reader and does not close the underlying reader (an `io.ReadCloser` fake records
   no `Close` call).
 - [ ] AC23 Documentation (verified by the Reviewer in step 8, not by a unit test): `docs/WIRE_FORMAT.md`
-  describes the stream layout, header, envelope, every record kind with its fields and rules, the limits,
-  the versioning rules of 0043, the batch rules of 0044, the accepted forms and a decompressed example
-  batch; it matches the code. `README.md`, `docs/ARCHITECTURE.md` and `.squad/project.md` are updated as
+  describes the stream layout, header (including the capture-context meaning of `boot_id` and
+  `clock_offset_ns` and the batching rule of 0046), envelope, every record kind with its fields and rules,
+  the limits, the versioning rules of 0043, the batch rules and the producer size contract of 0044, the
+  batch identity of 0045, the producer mapping for connection endpoints (see *Approach*), the accepted
+  forms and a decompressed example batch; it matches the code. `README.md`, `docs/ARCHITECTURE.md` and `.squad/project.md` are updated as
   listed below.
 
 ## Approach
@@ -134,7 +160,7 @@ Two packages, both standard library only (0042):
 - **Short text**: at most `MaxShortTextBytes` (1024) bytes; **text**: at most `MaxTextBytes` (16384)
   bytes. Lengths are in bytes. No character restriction (0021; display escaping is area 12, not this
   change).
-- **Lists and maps**: at most `MaxItems` (4096) entries each.
+- **Lists and maps**: at most `MaxItems` (4096) entries each; metric labels at most `MaxLabels` (32).
 - **UTC time**: non-zero and zone offset 0 (`_, off := t.Zone(); off == 0`); optional times
   (`omitzero`) are checked only when non-zero.
 - **Floats**: finite (`!math.IsNaN && !math.IsInf`); percentages and rates additionally ≥ 0.
@@ -160,12 +186,13 @@ The receive timestamp is not part of the model or the wire; the backend stores i
 Required means non-empty / non-zero. Each row is one test case at least.
 
 **`MetricPoint`** (`metric`): `name` required, name pattern → `name`; `value` finite → `value`; `unit`
-optional, name pattern → `unit`; `labels` ≤ `MaxItems` → `labels`; each key name pattern →
+optional, name pattern → `unit`; `labels` ≤ `MaxLabels` → `labels`; each key name pattern →
 `labels[<key>]`; each value short text → `labels[<key>]`. Counters are named with suffix `_total`
 (documented convention, not validated).
 
-**`ProcessSnapshot`** (`process_snapshot`): fields `complete bool`, `total *uint32` (processes on the
-system, if known), `processes []ProcessSample`, `programs []ProgramAggregate`. At least one process or
+**`ProcessSnapshot`** (`process_snapshot`): fields `complete bool` (true only if `processes` holds every
+process and `programs` every program the producer saw; false when the source shows only part of them or
+entries were left out for size, 0044), `total *uint32` (processes on the system, if known), `processes []ProcessSample`, `programs []ProgramAggregate`. At least one process or
 program → `processes`; `processes` ≤ `MaxItems` → `processes`; `programs` ≤ `MaxItems` → `programs`; PIDs
 unique → `processes[i].pid`; program names unique → `programs[i].program`.
 `ProcessSample`: `pid` > 0 → `processes[i].pid`; `ppid` ≥ 0 → `.ppid`; `user` short text → `.user`;
@@ -178,7 +205,9 @@ cmdline cut by the source, e.g. `sw-engi+` in the legacy log); `state` empty or 
 `cpu_percent` finite ≥ 0 → `.cpu_percent`; `rss_bytes uint64`; `pss_bytes *uint64`; `rss_overcounted
 bool` (RSS sum counts shared pages once per process, #20).
 
-**`ConnectionSnapshot`** (`connection_snapshot`): `complete bool` (`connections` holds every socket);
+**`ConnectionSnapshot`** (`connection_snapshot`): `complete bool` (true only if no entry the producer saw
+was left out of any list — in particular `connections` holds every socket; false after a reduction for
+size, 0044);
 `states []StateCount`, `processes []ProcessConnections`, `remotes []RemoteCount`, `listeners
 []Listener`, `connections []Connection`, each ≤ `MaxItems` → the list name. An entirely empty snapshot is
 valid (a server with no sockets is a fact, not an error).
@@ -190,6 +219,13 @@ NEW_SYN_RECV`; `state` for `tcp`/`tcp6` required and in the set, for `udp`/`udp6
 `RemoteCount{addr netip.Addr valid, count}` → `remotes[i].addr`; `Listener{proto, local netip.AddrPort
 valid, pid ≥ 0, command short text}` → `listeners[i].local`; `Connection{proto, local, remote
 netip.AddrPort valid, state, pid ≥ 0, command short text}` → `connections[i].local` / `.remote`.
+Addresses are numeric; mapping a source's notation is the producer's job and is stated in
+`docs/WIRE_FORMAT.md`: a wildcard local address (`*` in `lsof`) becomes `0.0.0.0` for IPv4 and `::` for
+IPv6 sockets; a port given as a service name (legacy `lsof -ni` without `-P`, issue #20) is mapped to its
+number by the producer from a built-in table, never by a lookup on the host; a socket whose address or port
+cannot be mapped is left out with a warning and the snapshot's `complete` set to false; an unconnected
+socket without a remote endpoint (listening TCP, unconnected UDP) goes to `listeners`, never to
+`connections`.
 
 **`ServiceState`** (`service_state`): `unit` required, `^[A-Za-z0-9:_.@\\-]+$`, ≤ 256 bytes → `unit`;
 `load_state` one of `loaded not-found bad-setting error masked stub merged` → `load_state`;
@@ -200,11 +236,13 @@ time → `active_enter_at`; `restarts uint32`.
 **`MariaDBStatus`** (`mariadb_status`): `availability` one of `up`, `down`, `not_answering` →
 `availability`; `ping_latency` `*time.Duration` (wire `ping_latency_ns`) ≥ 0 → `ping_latency_ns`;
 `status map[string]uint64` (numeric global status), `variables map[string]string` (system variables),
-`threads []MariaDBThread`, each ≤ `MaxItems` → the name; keys `^[A-Za-z][A-Za-z0-9_]*$` ≤ `MaxNameBytes` →
+`threads []MariaDBThread`, each ≤ `MaxItems` → the name; `complete bool` (true only if `status`,
+`variables` and `threads` hold every entry the producer read; false for a configured subset or a reduction
+for size, 0044; no rule); keys `^[A-Za-z][A-Za-z0-9_]*$` ≤ `MaxNameBytes` →
 `status[<key>]` / `variables[<key>]`; variable values short text → `variables[<key>]`; when availability is
 not `up`, `status`, `variables` and `threads` must be empty → `availability`.
 `MariaDBThread`: `id uint64`, `user`, `host`, `db`, `command`, `state` short text → `threads[i].<field>`;
-`time_seconds uint64`; `info` text → `threads[i].info`.
+`time_seconds uint64`; `info` text → `threads[i].info`; `truncated bool` (the producer shortened `info`).
 
 **`KernelEvent`** (`kernel_event`): `type` one of `oom_kill`, `boot` → `type`; exactly the matching
 sub-struct set: `oom_kill` requires `oom_kill` non-nil and `boot` nil, and vice versa → `oom_kill` /
@@ -232,11 +270,29 @@ and `sequence_missing` → `first_seq`. Origin rule in `Record.Validate` (AC3): 
 
 - Header line: `{"format_major":1,"format_minor":0,"agent_id":"…","boot_id":"…","clock_offset_ns":…,"mode":"live"}`.
   `agent_id` `^[A-Za-z0-9][A-Za-z0-9._-]*$`, 1..64 bytes; `boot_id` lower-case UUID as in `Boot`;
-  `clock_offset_ns` optional (agent clock minus reference time; positive = agent ahead; any int64);
-  `mode` `live` or `backfill`, a hint only (0022).
+  `clock_offset_ns` optional (agent clock minus the reference time of its time synchronization; positive =
+  agent ahead; any int64; omitted = unknown); `mode` `live` or `backfill`, a hint only (0022).
+- Capture context (0046): `boot_id` is the boot during which every record of the batch was captured, and
+  `clock_offset_ns` the offset estimate valid for the capture of every record (corrected time =
+  `captured_at − clock_offset_ns`) — both describe capture, not sending. Producer contract (#38/#39, not
+  checkable by the decoder): boot ID and offset estimate are spooled with each record, and a batch holds
+  only records with the same boot ID and the same estimate (or all without one). Doc comments on
+  `Header.BootID` and `Header.ClockOffset` state this.
+- Batch identity (0045): no batch ID; a batch is identified by `agent_id` and the `seq` values of its
+  records, taken from one persistent, never reused per-agent counter. The backend deduplicates per record
+  by (agent ID, seq) (#40).
 - Record line: `{"kind":"…","source":"…","seq":N,"captured_at":"…Z","data":{…}}`.
 - Batch rules (0044): ≥ 1 record, ≤ `MaxRecords`, every record origin `agent` with `seq` > 0, `seq`
   strictly increasing (gaps allowed — the backend detects them, #41).
+- Per-record size (0044): `CheckRecord(r)` runs `r.Validate()`, requires origin `agent` (field `origin`),
+  marshals the envelope exactly as `EncodeBatch` does and returns `len(line)+1` (the bytes the record adds to
+  the decompressed batch). If `len(line)` (without the `\n`, as the decoder's line limit counts it) exceeds
+  `DefaultLimits().MaxLineBytes`, it returns `*RecordSizeError{Index: -1, Size: len(line), Limit: …}`.
+  Producer contract in `docs/WIRE_FORMAT.md`: call `CheckRecord` when a record is created, before it enters
+  the spool; on `ErrRecordTooLarge` shorten `cmdline` / `info` with `truncated` set, then leave out entries
+  with `complete` false; `metric`, `service_state`, `kernel_event`, `log_line` and `gap` always fit (at
+  maximum field sizes with every byte escaped as `\uXXXX`, the largest, a metric with 32 labels, stays near
+  200 KiB).
 - `NewDecoder`: wraps `r` in `gzip.NewReader` (multistream as by default), counts decompressed bytes
   against `MaxBatchBytes`, reads lines with a `bufio.Scanner` whose maximum token size admits exactly
   `MaxLineBytes` bytes before the `\n` (a trailing `\r` counts towards the line and is then JSON
@@ -248,10 +304,12 @@ and `sequence_missing` → `first_seq`. Origin rule in `Record.Validate` (AC3): 
   `Record.Validate`; checks the sequence order and the record count. At end of input it surfaces any
   scanner/gzip error (CRC, truncation, trailing bytes) as `ErrMalformed`, returns `ErrEmptyBatch` if no
   record was read, otherwise `io.EOF`. Errors are wrapped in `*DecodeError{Line, Err}` and sticky.
-- `EncodeBatch`: `b.Validate()` first (nothing written on failure); marshals every line in memory, checks
-  each against `DefaultLimits().MaxLineBytes` and the running total against `MaxBatchBytes` before writing
-  through `gzip.NewWriter(w)`; writes `captured_at` as `.UTC()`; closes the gzip writer (not `w`). On a
-  limit or write error the output is incomplete and must be discarded (documented).
+- `EncodeBatch`: `b.Validate()` first (nothing written on failure); marshals every line in memory with the
+  same unexported function `CheckRecord` uses, checks each against `DefaultLimits().MaxLineBytes`
+  (`*RecordSizeError` with the record's index) and the running total against `MaxBatchBytes`
+  (`ErrLimitExceeded`) before writing anything through `gzip.NewWriter(w)`; writes `captured_at` as
+  `.UTC()`; closes the gzip writer (not `w`). On a write error the output is incomplete and must be
+  discarded (documented).
 - No `context.Context`: like `encoding/json`, the codec does no I/O of its own (0042).
 
 ### Accepted forms (guard on the decoder input)
@@ -305,8 +363,8 @@ K = `ErrUnknownKind`, F = `model.ErrInvalid` with field, L = `ErrLimitExceeded`)
 | ------- | ----------- | ------ |
 | `internal/model` | `model.go` | new: package doc, bounds, `Kind`, `Origin`, `Meta`, `Record`, `Payload`, `ErrInvalid`, `FieldError`, unexported pattern/text/time helpers |
 | `internal/model` | `metric.go`, `process.go`, `connection.go`, `service.go`, `mariadb.go`, `kernel.go`, `logline.go`, `gap.go` | new: one payload type (plus its element types) per file |
-| `internal/wire` | `wire.go` | new: package doc, version constants, `Mode`, `Header`, `NewHeader`, `Batch`, `Limits`, `DefaultLimits`, sentinel errors, `DecodeError` |
-| `internal/wire` | `encode.go` | new: `EncodeBatch`, unexported envelope |
+| `internal/wire` | `wire.go` | new: package doc, version constants, `Mode`, `Header`, `NewHeader`, `Batch`, `Limits`, `DefaultLimits`, sentinel errors (including `ErrRecordTooLarge`), `DecodeError`, `RecordSizeError` |
+| `internal/wire` | `encode.go` | new: `EncodeBatch`, `CheckRecord`, unexported envelope and line marshalling shared by both |
 | `internal/wire` | `decode.go` | new: `Decoder`, `NewDecoder`, `Header`, `Next`, `Close`, kind table |
 | docs | `docs/WIRE_FORMAT.md` | new |
 | docs | `README.md`, `docs/ARCHITECTURE.md`, `.squad/project.md` | updated (see below) |
@@ -328,6 +386,7 @@ const (
 	MaxShortTextBytes = 1024
 	MaxTextBytes      = 16384
 	MaxItems          = 4096
+	MaxLabels         = 32
 )
 
 type Kind string
@@ -523,6 +582,7 @@ type MariaDBStatus struct {
 	Status       map[string]uint64   `json:"status,omitempty"`
 	Variables    map[string]string   `json:"variables,omitempty"`
 	Threads      []MariaDBThread     `json:"threads,omitempty"`
+	Complete     bool                `json:"complete"`
 }
 
 type MariaDBThread struct {
@@ -534,6 +594,7 @@ type MariaDBThread struct {
 	TimeSeconds uint64 `json:"time_seconds"`
 	State       string `json:"state,omitempty"`
 	Info        string `json:"info,omitempty"`
+	Truncated   bool   `json:"truncated,omitempty"`
 }
 
 func (s *MariaDBStatus) Kind() Kind
@@ -638,16 +699,27 @@ var (
 	ErrSequence           = errors.New("sequence numbers not strictly increasing")
 	ErrEmptyBatch         = errors.New("batch has no records")
 	ErrLimitExceeded      = errors.New("batch limit exceeded")
+	ErrRecordTooLarge     = fmt.Errorf("%w: record too large", ErrLimitExceeded)
 )
 
 type Header struct {
 	FormatMajor int            `json:"format_major"`
 	FormatMinor int            `json:"format_minor"`
 	AgentID     string         `json:"agent_id"`
-	BootID      string         `json:"boot_id"`
-	ClockOffset *time.Duration `json:"clock_offset_ns,omitempty"`
+	BootID      string         `json:"boot_id"`                   // boot in which every record was captured (0046)
+	ClockOffset *time.Duration `json:"clock_offset_ns,omitempty"` // valid for every record's capture (0046)
 	Mode        Mode           `json:"mode"`
 }
+
+// RecordSizeError reports a record whose encoded line exceeds the line limit (0044).
+type RecordSizeError struct {
+	Index int // position in Batch.Records; -1 when returned by CheckRecord
+	Size  int // encoded line length in bytes, without the trailing '\n'
+	Limit int // DefaultLimits().MaxLineBytes
+}
+
+func (e *RecordSizeError) Error() string // "wire: records[<Index>]: encoded record is <Size> bytes, limit <Limit>"; no "records[…]: " when Index < 0
+func (e *RecordSizeError) Unwrap() error // returns ErrRecordTooLarge
 
 func NewHeader(agentID, bootID string, mode Mode) Header
 func (h *Header) Validate() error
@@ -679,6 +751,10 @@ func (e *DecodeError) Unwrap() error
 ```go
 // internal/wire/encode.go
 func EncodeBatch(w io.Writer, b *Batch) error
+
+// CheckRecord validates one agent record and returns the number of bytes its line adds to the
+// decompressed batch (including '\n'); *RecordSizeError if the line exceeds the line limit.
+func CheckRecord(r *model.Record) (int, error)
 ```
 
 ```go
@@ -708,8 +784,9 @@ Per *Layout* in `.squad/stack.md` (one `_test.go` per source file):
 - `internal/model/kernel_test.go` — AC9
 - `internal/model/logline_test.go` — AC10
 - `internal/model/gap_test.go` — AC11
-- `internal/wire/wire_test.go` — AC12, AC13, `DefaultLimits` and `DecodeError` formatting (part of AC18)
-- `internal/wire/encode_test.go` — AC14, AC15
+- `internal/wire/wire_test.go` — AC12, AC13, `DefaultLimits` and `DecodeError` formatting (part of AC18),
+  `RecordSizeError` formatting and unwrapping (part of AC24)
+- `internal/wire/encode_test.go` — AC14, AC15, AC24 (`CheckRecord`)
 - `internal/wire/decode_test.go` — AC16–AC22
 
 Raw gzip/JSON fixtures are built in the test code (small helpers with `t.Helper()` that gzip a string), not
@@ -723,28 +800,45 @@ All by the Dev:
 
 - `docs/WIRE_FORMAT.md` (new): purpose and scope; stream layout (gzip, JSON Lines, header line, record
   lines); header fields; envelope fields and the meaning of `captured_at`; every record kind with its fields,
-  types, units and rules (the tables under *Approach*); limits and bounds with their defaults; versioning
-  rules (0043); batch validity and trust rules (0044); accepted forms (the table above, in user terms);
-  a short decompressed example batch with one record of each of at least three kinds; links to 0042–0044.
+  types, units and rules (the tables under *Approach*), including the meaning of every `complete` and
+  `truncated` flag; the producer mapping for connection endpoints (wildcard, service-name ports, unmappable
+  sockets, unconnected sockets — named for the legacy `lsof -ni` parser, #20); limits and bounds with their
+  defaults; the producer size contract (`CheckRecord` at creation, reduction order, the kinds that always
+  fit) (0044); the capture-context meaning of `boot_id` and `clock_offset_ns` and the batching rule (0046);
+  the batch identity and deduplication key (0045); versioning rules (0043); batch validity and trust rules
+  (0044); accepted forms (the table above, in user terms); a short decompressed example batch with one
+  record of each of at least three kinds; links to 0042–0046.
 - `README.md`: in *Layout*, name `internal/model` and `internal/wire` and link `docs/WIRE_FORMAT.md`.
 - `docs/ARCHITECTURE.md` (inside the project block): replace "as of now only the two binaries' `--version`
   exist" with a statement that the binaries' `--version` and the shared data model and wire format
   (`internal/model`, `internal/wire`, not yet used by the binaries) exist; in *Components*, link
-  `docs/WIRE_FORMAT.md` from the `internal/` bullet; in *Offline behavior and backfill*, change "Every batch
-  carries an identity and sequence number" to "Every batch carries the agent's identity and every record a
-  sequence number"; add records 0042–0044 to the record lists of *Components* and *Offline behavior and
-  backfill*.
-- `.squad/project.md`, *Security areas* 10: name the concrete code, "the ingest wire format
-  (`internal/wire`: `NewDecoder`, `Decoder.Next`, `wire.Limits`)". No other entry changes; *Test doubles*
-  gets no new row (no new external surface).
+  `docs/WIRE_FORMAT.md` from the `internal/` bullet; in *Offline behavior and backfill*, replace "Every batch
+  carries an identity and sequence number, so a resend is idempotent and the backend can detect gaps." with
+  "Every agent record carries a sequence number from a persistent per-agent counter, and every batch the
+  agent's ID; a batch is identified by the agent ID and the sequence numbers of its records, so a resend is
+  idempotent (the backend stores each agent ID and sequence number once) and the backend can detect gaps.";
+  add records 0042–0044 to the record list of *Components*; in the record list of *Offline behavior and
+  backfill*, replace 0018 by 0045 and add 0044 and 0046.
+- `.squad/project.md`: *Security areas* 1, replace "a resent batch (same identity and sequence number) is
+  stored once and never overwrites stored data. Records 0018, 0032." with "a resent record (same agent ID
+  and sequence number), and so a resent batch, is stored once and never overwrites stored data. Records
+  0032, 0044, 0045."; *Security areas* 9, "Record 0018." → "Record 0045."; the guarantee *No data gaps
+  unless explicitly recorded*, "records 0018, 0028" → "records 0028, 0045"; *Security areas* 10, name the
+  concrete code, "the ingest wire format (`internal/wire`: `NewDecoder`, `Decoder.Next`, `wire.Limits`)".
+  No other entry changes; *Test doubles* gets no new row (no new external surface).
 
 ## Architecture check
 
-- **No data gaps unless explicitly recorded (0018, 0028)**: preserved and enabled — the `gap` kind exists
-  from format 1.0 with the causes 0028 names; every agent record carries a sequence number, strictly
+- **No data gaps unless explicitly recorded (0018 → 0045, 0028)**: preserved and enabled — the `gap` kind
+  exists from format 1.0 with the causes 0028 names; every agent record carries a sequence number, strictly
   increasing within a batch, so the backend can detect missing ranges (#41). Rejecting a whole invalid
   batch (0044) does not lose data silently: the agent keeps it in its spool (#38/#39), and a spool drop is
-  itself a `spool_dropped` gap.
+  itself a `spool_dropped` gap. A record too large for a line is found by `CheckRecord` before it is
+  spooled and reduced visibly (`truncated`, `complete` false), so it can neither block the spool nor be
+  dropped silently.
+- **0018 superseded by 0045**: the spool-and-backfill decision is carried over unchanged; only the
+  undefined "batch identity and sequence number" is made precise (agent ID plus per-record sequence
+  numbers). No guarantee in `docs/ARCHITECTURE.md` is weakened, so no Product Manager decision is needed.
 - **Backfilled data never raises an alert by itself (0022)**: preserved — `mode` is documented and named as
   a hint only; the receive timestamp is set only by the backend and cannot be supplied by the agent (0044).
 - **A hanging collector never blocks the agent (0029)**: not touched (no collector code).
@@ -773,7 +867,8 @@ All by the Dev:
 - Integrity and atomicity: gzip CRC/ISIZE errors surface only at the end of the stream; `Next` returns
   `io.EOF` only after they passed, and the documented contract (0044) is to commit nothing before `io.EOF`.
 - Trust: origin and receive time are not on the wire; backend-only gap causes are rejected in agent
-  records; the batch `mode` is a hint. Not covered here and left to #40 (stated in `docs/WIRE_FORMAT.md`):
+  records; the batch `mode` is a hint; `boot_id` and `clock_offset_ns` are agent-supplied context, no more
+  trusted than `captured_at` (0046). Not covered here and left to #40 (stated in `docs/WIRE_FORMAT.md`):
   the header's `agent_id` must be checked against the agent the token belongs to, and deduplication by
   (agent ID, sequence number).
 - Secrets: none in the format (the token travels in the HTTP request, #40, 0032). Error text: a
@@ -792,8 +887,17 @@ All by the Dev:
 - `docs/decisions/0043-wire-format-major-minor-versioning.md` (Proposed) — integer major/minor, version
   pre-read, unknown majors rejected, minor additive, unknown keys ignored, unknown kinds rejected.
 - `docs/decisions/0044-batch-validated-as-a-whole-agent-records-only.md` (Proposed) — atomic batch,
-  agent-only records without origin/receive time on the wire, format limits and the accepted allocation
-  residual.
+  agent-only records without origin/receive time on the wire, format limits, the per-record size check
+  with the producer reduction contract, and the accepted allocation residual.
+- `docs/decisions/0045-batch-identified-by-agent-id-and-record-sequence-numbers.md` (Proposed, supersedes
+  0018) — spool and backfill as in 0018; a batch is identified by the agent ID and its records' sequence
+  numbers, no batch ID. At approval the Lead sets 0018's status to `Superseded by 0045` (the only edit
+  allowed) and updates the index row.
+- `docs/decisions/0046-batch-header-describes-the-capture-context.md` (Proposed) — `boot_id` and
+  `clock_offset_ns` describe the capture of every record in the batch; batching rule for the agent.
+
+A search for "identity and sequence number" in `docs/` and `.squad/` after the change finds only 0018,
+0028 (context, history) and 0045 (which quotes 0018).
 
 ## Out of scope / follow-ups
 
@@ -805,6 +909,51 @@ All by the Dev:
   spool from #38) and a link from a snapshot to the event that triggered it (#36): added later as new kinds
   or optional fields in a minor version (0043).
 - Sequence-number scope after an agent loses its persisted counter (reinstall, wiped spool): a resent
-  `seq` would be deduplicated away by #40. #38/#40 must keep the counter persistent or rotate the agent ID;
-  an optional header field for a counter epoch can be added in a minor version if needed. Named here so
-  #38 and #40 plan for it; no follow-up issue, since both issues already exist.
+  `seq` would be deduplicated away by #40. #38/#40 must keep the counter persistent or rotate the agent ID
+  (0045); an optional header field for a counter epoch can be added in a minor version if needed. Named
+  here so #38 and #40 plan for it; no follow-up issue, since both issues already exist.
+- Producer obligations stated here and in `docs/WIRE_FORMAT.md`, implemented by their own issues: spooling
+  boot ID and offset per record and batching by them (#38, #39, 0046); calling `CheckRecord` at creation
+  and reducing oversized records (the collectors #31–#36, the spool #38); endpoint mapping for the legacy
+  `lsof -ni` output, i.e. wildcard and service-name ports (#20). No follow-up issue: each issue exists and
+  its plan reads `docs/WIRE_FORMAT.md`.
+
+## Challenge
+
+Devil's Advocate, round 1 (3 major, 2 minor). All five accepted; scope kept, tier stays `security`.
+
+1. **major — batch identity contradicts accepted 0018**: accepted. The original plan treated 0018's
+   sentence as a wording bug; it is a decision, and it was quoted in 0028's context, `ARCHITECTURE.md` and
+   security area 1. Of the two fixes offered, a header batch ID was rejected (recorded in 0045, *Options
+   considered*): it deduplicates only if the agent re-cuts the spool into identical batches, which it
+   cannot promise across restarts or the live/backfill split, and it cannot locate a gap inside a batch.
+   Instead 0045 supersedes 0018, carries its spool-and-backfill decision over unchanged and defines the
+   batch identity as `agent_id` plus the records' sequence numbers. `ARCHITECTURE.md`, security area 1
+   (and the 0018 references in area 9 and the gap guarantee) are updated together (*Documentation
+   updates*); 0018's status is set at approval. 0028 is not superseded: its decision does not depend on
+   the sentence.
+2. **major — valid records can exceed `MaxLineBytes` and block every batch**: accepted. Confirmed by
+   arithmetic: 500 threads × 16 KiB `info` ≈ 8 MiB, and 4096 labels of 1 KiB would make even a metric
+   exceed 1 MiB. Fix (0044, options a–d): metric labels bounded to `MaxLabels` (32) in the model; new
+   `wire.CheckRecord` that producers call at creation, before spooling, returning the line size or a
+   `*RecordSizeError` (`ErrRecordTooLarge`, wrapping `ErrLimitExceeded`); `EncodeBatch` reports the same
+   error with the record's index; reduction markers `MariaDBThread.truncated` and `MariaDBStatus.complete`
+   added, `complete` on both snapshots redefined to cover reductions; the producer contract documented in
+   `docs/WIRE_FORMAT.md`. New AC24 and a revised AC15 cover the identifiable error, including the 500 ×
+   16 KiB case, and pin the claim that the other five kinds always fit. Raising `MaxLineBytes` to the
+   model's worst case was rejected (> 100 MiB per line on a 2 GB server).
+3. **major — `boot_id` / `clock_offset_ns` undefined for backfill**: accepted. 0046 fixes both to the
+   capture of every record in the batch (corrected time = `captured_at − clock_offset_ns`, offset relative
+   to the agent's time-sync reference, omitted = unknown) with the batching rule for #38/#39; a per-record
+   boot ID was rejected as redundant on almost every line and kept open as an additive minor change.
+   Documented in `docs/WIRE_FORMAT.md` and on the `Header` fields; not unit-testable in the decoder,
+   verified under AC23.
+4. **minor — AC14 `DeepEqual` vs zero-offset zones; "ends in Z" proves nothing**: accepted. Confirmed:
+   RFC 3339 formatting prints `Z` for every zero offset, so the string check could not fail. AC14 now
+   uses `time.UTC` times for the `DeepEqual` round trip and a separate case with
+   `time.FixedZone("", 0)` / `("X", 0)` compared against the input normalized with `.UTC()`, asserting
+   `Location() == time.UTC` on every decoded time (only true if `Z` was written).
+5. **minor — legacy `lsof -ni` emits `*` and service names**: accepted, not relaxed. The fields stay
+   numeric `netip.AddrPort`; the producer mapping (wildcard → `0.0.0.0` / `::`, service names via a
+   built-in table, unmappable sockets left out with `complete` false, unconnected sockets as listeners) is
+   stated under *Approach* and in `docs/WIRE_FORMAT.md`, and named for #20 under *Out of scope*.
