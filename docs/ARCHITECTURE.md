@@ -24,7 +24,9 @@ way, and agents of the hosting provider are never disabled or changed
 - `cmd/vandox-agent` — Go, runs as a systemd service on the monitored server. It collects metrics, process
   and network snapshots (read from `/proc`), service and MariaDB state, kernel events and logs, keeps them in
   an on-disk spool and sends them to the backend. It checks the state of the mail services, not individual
-  mail accounts.
+  mail accounts. Each collector runs in its own goroutine under a deadline and is abandoned when the
+  deadline passes, so a hanging collector or database never blocks the agent; a missed sample is recorded
+  as a gap, and a collector that is still stuck is not started again.
 - `cmd/vandoxd` — Go, one container on the backend host: ingest API, SQLite storage, analysis, rules, Telegram
   notifier, reports and web UI.
 - `internal/` — packages shared by both binaries: data model and versioned wire format, log parsing,
@@ -60,7 +62,8 @@ Records: [0004](decisions/0004-own-project-instead-of-off-the-shelf-stack.md),
 [0014](decisions/0014-log-import-is-a-core-component.md),
 [0015](decisions/0015-mail-services-checked-not-mail-accounts.md),
 [0019](decisions/0019-agent-reads-proc-instead-of-top-lsof.md),
-[0027](decisions/0027-project-name-and-docker-image.md).
+[0027](decisions/0027-project-name-and-docker-image.md),
+[0029](decisions/0029-hanging-collector-never-blocks-the-agent.md).
 
 ## Data flow
 
@@ -129,11 +132,14 @@ is reachable again it sends current data first, then backfills the spool chronol
 Every batch carries an identity and sequence number, so a resend is idempotent and the backend can detect
 gaps. `vandoxd` classifies every record as live or backfilled from its capture time, its receive time and
 gaps in the sequence numbers; alert rules are evaluated on live data only, and backfilled data is stored and
-analyzed but never alerts. The nightly report waits for the backfill if the backend host was off at 06:00.
+analyzed but never alerts. The nightly report waits for the backfill if the backend host was off at 06:00. Data that is
+nevertheless lost (agent stopped, spool full, collector timed out) is recorded as a gap, so there are no
+data gaps unless explicitly recorded.
 
 Records: [0018](decisions/0018-agent-spools-seven-days-and-backfills.md),
 [0022](decisions/0022-backfill-detection-and-live-only-alerts.md),
-[0024](decisions/0024-nightly-report-timing.md).
+[0024](decisions/0024-nightly-report-timing.md),
+[0028](decisions/0028-data-gaps-are-always-recorded.md).
 
 ## Storage and retention
 
@@ -168,7 +174,8 @@ Records: [0006](decisions/0006-agent-connects-outbound-only.md),
 ## Configuration
 
 Both binaries are configured through a configuration file and environment variables. Configuration loading
-is not implemented yet.
+is not implemented yet. Secrets are read only from environment variables or Docker secrets, never from the
+configuration file ([0032](decisions/0032-secrets-only-from-environment-or-docker-secrets.md)).
 
 ## Security model
 
@@ -176,13 +183,27 @@ The agent and the backend communicate only over a private Tailscale network. The
 only and never listens on a port, and the Tailscale ACL lets the monitored server reach only the ingest port
 on the backend host. The web UI is protected by a login and runs behind a reverse proxy. The Telegram token
 exists only on the backend host. The agent reads MariaDB over the local socket as the user `vandox-agent`, identified
-via `unix_socket` and granted only `PROCESS`. Log data is not pseudonymized. Secrets are never logged. Kept
+via `unix_socket` and granted only `PROCESS`. Log data is not pseudonymized. Secrets are never logged. The agent runs as the
+dedicated user `vandox-agent`, never as root, with only the groups and capabilities listed in `deploy/agent/`
+and, from v0.6.0, a polkit rule that allows restarting only the configured units. The two capabilities it
+needs to read other users' processes (`CAP_SYS_PTRACE`, `CAP_DAC_READ_SEARCH`) give it root's read access,
+so its systemd unit denies the process-attach system calls and grants no write-side capability: a
+compromised agent can read everything on the server but cannot use its capabilities to write as or run
+code as another user; credentials it reads may still lead to root through other services (password reuse,
+Plesk or MariaDB administration)
+([0030](decisions/0030-agent-runs-unprivileged-with-named-capabilities.md)). The Telegram bot sends to and
+accepts updates only from allowlisted users in their private chats
+([0031](decisions/0031-telegram-user-allowlist.md)). Secrets come only from environment variables or Docker
+secrets ([0032](decisions/0032-secrets-only-from-environment-or-docker-secrets.md)). Kept
 in sync with `SECURITY.md` and the *Security areas* in `.squad/project.md`.
 
 Records: [0006](decisions/0006-agent-connects-outbound-only.md),
 [0010](decisions/0010-tailscale-with-strict-acl.md),
 [0013](decisions/0013-mariadb-access-via-unix-socket-process-privilege.md),
-[0021](decisions/0021-no-pseudonymization-of-log-data.md).
+[0021](decisions/0021-no-pseudonymization-of-log-data.md),
+[0030](decisions/0030-agent-runs-unprivileged-with-named-capabilities.md),
+[0031](decisions/0031-telegram-user-allowlist.md),
+[0032](decisions/0032-secrets-only-from-environment-or-docker-secrets.md).
 
 ## Deployment
 
