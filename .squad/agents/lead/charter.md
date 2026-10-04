@@ -11,6 +11,9 @@ in squad-maintenance PRs, never in a product PR.)
   signatures of new/changed API (for the Dev's skeleton), the documentation updates, and an architecture check against
   `docs/ARCHITECTURE.md` — the deliberate guarantees listed in `.squad/project.md` may not be weakened
   without the Product Manager.
+- **Guards against bypasses:** when the plan adds or tightens a guard on input that a parser or tool
+  consumes, enumerate in the first draft every form that parser accepts (read its source or documentation,
+  not only the example the issue names) and state the guard's behavior on each.
 - **Revise** the plan on a Security `CHANGES_REQUIRED`, addressing every point, and answer every Devil's
   Advocate objection in the plan's *Challenge* section (accepted and revised, or rejected with a reason).
 - **Decide** when a loop limit is hit or members disagree: accept with justification (for a pure wording defect: accept and fix it, then one Security delta

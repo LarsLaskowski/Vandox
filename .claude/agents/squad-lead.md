@@ -39,6 +39,11 @@ The orchestrator tells you which **mode** to run:
     gate* are not applicable (*Changes without production or test code* in `.squad/routing.md`) and a
     *Verification without tests* section naming, per acceptance criterion, where and by whom it is verified
     instead — or, if code does change, no such declaration;
+  - for a guard against bypasses (a validation, allow-list or check on input that a parser or tool
+    consumes): the **accepted forms** of that input, enumerated in the first draft from the real parser or
+    consumer (its source or documentation; case, indentation, continuation lines, comment styles, BOM,
+    directives, encodings) and not only from the example the issue names, with the guard's behavior on each
+    — a revision for a Security finding re-checks the whole list, not just the reported form;
   - the **documentation updates** the change requires (`README.md` configuration table and env vars,
     `docs/*.md`), which the Dev makes.
 
