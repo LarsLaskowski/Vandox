@@ -188,7 +188,9 @@ dedicated user `vandox-agent`, never as root, with only the groups and capabilit
 and, from v0.6.0, a polkit rule that allows restarting only the configured units. The two capabilities it
 needs to read other users' processes (`CAP_SYS_PTRACE`, `CAP_DAC_READ_SEARCH`) give it root's read access,
 so its systemd unit denies the process-attach system calls and grants no write-side capability: a
-compromised agent can read everything on the server but cannot write as or run code as another user
+compromised agent can read everything on the server but cannot use its capabilities to write as or run
+code as another user; credentials it reads may still lead to root through other services (password reuse,
+Plesk or MariaDB administration)
 ([0030](decisions/0030-agent-runs-unprivileged-with-named-capabilities.md)). The Telegram bot sends to and
 accepts updates only from allowlisted users in their private chats
 ([0031](decisions/0031-telegram-user-allowlist.md)). Secrets come only from environment variables or Docker

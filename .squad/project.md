@@ -42,10 +42,12 @@ files or endpoints.
    once self-healing exists, a polkit rule that allows restarting only the configured units, each listed
    and justified in `deploy/agent/`. While any capability is granted, the unit is confined:
    `NoNewPrivileges=yes`; `SystemCallFilter=` denies at least `ptrace`, `process_vm_readv`,
-   `process_vm_writev`, `pidfd_getfd` and `open_by_handle_at`, with `SystemCallArchitectures=native`; no
-   write-side capability. So a compromised agent cannot write as or run code as another user. Accepted
-   residual, stated openly: its read access equals root's, i.e. every file on the server, and the memory
-   and environment of every process. `ProtectHome=yes` and `InaccessiblePaths=` (at least `/etc/shadow`,
+   `process_vm_writev`, `pidfd_getfd` and `open_by_handle_at` (with `SystemCallErrorNumber=EPERM`), and
+   `SystemCallArchitectures=native`; no write-side capability. So a compromised agent cannot use its
+   capabilities to write as or run code as another user. Accepted residual, stated openly: its read access
+   equals root's, i.e. every file on the server, and the memory and environment of every process, and
+   credentials read that way may still lead to root through other services (password reuse, Plesk or
+   MariaDB administration). `ProtectHome=yes` and `InaccessiblePaths=` (at least `/etc/shadow`,
    `/etc/gshadow`) are defence in depth against accidental reads only, not a limit on a compromised agent,
    which bypasses them through `/proc/<pid>/root`. Records 0013, 0030.
 7. **MariaDB monitoring user**: *Goal:* the agent connects over the local socket as `vandox-agent`,
