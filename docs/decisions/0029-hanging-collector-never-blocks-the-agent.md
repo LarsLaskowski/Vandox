@@ -1,6 +1,6 @@
 # 0029: A hanging collector or database never blocks the agent
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-04
 - **Source:** Issue #7
 - **Supersedes:** —

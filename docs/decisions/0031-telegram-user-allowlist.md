@@ -1,6 +1,6 @@
 # 0031: The Telegram bot talks only to allowlisted users in private chats
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-04
 - **Source:** Issue #7
 - **Supersedes:** —

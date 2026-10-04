@@ -1,6 +1,6 @@
 # 0030: The agent runs as a dedicated user with only named rights, not as root
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-04
 - **Source:** Issue #7
 - **Supersedes:** —

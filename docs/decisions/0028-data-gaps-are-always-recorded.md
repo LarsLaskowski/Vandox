@@ -1,6 +1,6 @@
 # 0028: Data gaps are always recorded, never silent
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-04
 - **Source:** Issue #7
 - **Supersedes:** —

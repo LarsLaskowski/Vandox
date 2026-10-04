@@ -54,4 +54,10 @@ links the record.
 | [0025](0025-server-ram-stays-at-2-gb.md) | The server's RAM stays at 2 GB | Accepted | 2026-10-03 |
 | [0026](0026-services-disabled-reversibly-only.md) | Services are only disabled reversibly; hosting-provider agents are never touched | Accepted | 2026-10-03 |
 | [0027](0027-project-name-and-docker-image.md) | Project name Vandox; images on Docker Hub as networlddev/vandox | Accepted | 2026-10-03 |
+| [0028](0028-data-gaps-are-always-recorded.md) | Data gaps are always recorded, never silent | Accepted | 2026-10-04 |
+| [0029](0029-hanging-collector-never-blocks-the-agent.md) | A hanging collector or database never blocks the agent | Accepted | 2026-10-04 |
+| [0030](0030-agent-runs-unprivileged-with-named-capabilities.md) | The agent runs as a dedicated user with only named rights, not as root | Accepted | 2026-10-04 |
+| [0031](0031-telegram-user-allowlist.md) | The Telegram bot talks only to allowlisted users in private chats | Accepted | 2026-10-04 |
+| [0032](0032-secrets-only-from-environment-or-docker-secrets.md) | Secrets only from environment variables or Docker secrets | Accepted | 2026-10-04 |
+| [0033](0033-pre-existing-coverage-gap-accepted-for-issue-7.md) | Pre-existing overall coverage gap accepted for a documentation-only change | Accepted | 2026-10-04 |
 <!-- project:end index -->
