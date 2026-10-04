@@ -159,8 +159,8 @@ func invalid(field, reason string) error { return &FieldError{Field: field, Reas
 // prefixed prepends path to the field of a *FieldError; other errors are returned unchanged. An empty
 // field becomes path itself.
 func prefixed(path string, err error) error {
-	fe, ok := err.(*FieldError)
-	if !ok {
+	var fe *FieldError
+	if !errors.As(err, &fe) {
 		return err
 	}
 	if fe.Field == "" {
@@ -177,12 +177,12 @@ func indexed(list string, i int) string { return list + "[" + strconv.Itoa(i) + 
 
 func keyed(field, key string) string { return field + "[" + QuoteName(key) + "]" }
 
-// checkPattern requires s to be non-empty, at most max bytes and to match re.
-func checkPattern(field, s string, re *regexp.Regexp, max int) error {
+// checkPattern requires s to be non-empty, at most limit bytes and to match re.
+func checkPattern(field, s string, re *regexp.Regexp, limit int) error {
 	switch {
 	case s == "":
 		return invalid(field, "required")
-	case len(s) > max:
+	case len(s) > limit:
 		return invalid(field, "too long")
 	case !re.MatchString(s):
 		return invalid(field, "invalid characters")
@@ -208,8 +208,8 @@ func checkOptionalUUID(field, s string) error {
 	return checkUUID(field, s)
 }
 
-func checkLen(field, s string, max int) error {
-	if len(s) > max {
+func checkLen(field, s string, limit int) error {
+	if len(s) > limit {
 		return invalid(field, "too long")
 	}
 	return nil
