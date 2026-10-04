@@ -21,3 +21,4 @@ One line per pipeline step: date, step, member, result. Lead decisions and escal
 | 2026-10-04 | 8 Fix round 1 | squad-tester, squad-dev | tests added (3 failed first as expected), decode.go D2/D5 and docs fixed; tests -race and coverage gate PASS (verified) |
 | 2026-10-04 | 7 Code check (after fixes) | squad-code-officer | no edits needed; format, analyzer gate, tests, coverage PASS (verified) |
 | 2026-10-04 | 8 Review delta (round 2) | squad-reviewer, squad-security | both APPROVED, no findings |
+| 2026-10-04 | 9 PR approval | squad-lead | APPROVED; decisions 0042-0046 Accepted, 0018 Superseded by 0045, index updated |

@@ -1,6 +1,6 @@
 # 0045: The agent spools at least 7 days and backfills; a batch is identified by the agent ID and its records' sequence numbers
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-04
 - **Source:** Issue #10
 - **Supersedes:** 0018

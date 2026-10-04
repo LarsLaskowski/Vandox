@@ -1,6 +1,6 @@
 # 0046: The batch header's boot ID and clock offset describe when the records were captured, not when they were sent
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-04
 - **Source:** Issue #10
 - **Supersedes:** —

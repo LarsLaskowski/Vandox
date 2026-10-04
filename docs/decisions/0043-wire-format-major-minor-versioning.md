@@ -1,6 +1,6 @@
 # 0043: Wire format versioned by integer major and minor; unknown majors are rejected before parsing
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-04
 - **Source:** Issue #10
 - **Supersedes:** —

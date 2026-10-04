@@ -1,6 +1,6 @@
 # 0044: A batch is valid only as a whole, carries only agent records and is bounded by format limits
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-04
 - **Source:** Issue #10
 - **Supersedes:** —

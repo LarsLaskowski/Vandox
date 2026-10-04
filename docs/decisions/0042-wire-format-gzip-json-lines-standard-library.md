@@ -1,6 +1,6 @@
 # 0042: Wire format is gzip-compressed JSON Lines, built on the standard library only
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-04
 - **Source:** Issue #10
 - **Supersedes:** —
