@@ -94,38 +94,11 @@ func TestLoadAgent_Example(t *testing.T) {
 		if err != nil {
 			t.Fatalf("LoadAgent(%q) error = %v, want nil", agentExample, err)
 		}
-		if got.AgentID != "web-1" {
-			t.Errorf("AgentID = %q, want %q", got.AgentID, "web-1")
-		}
-		if got.Backend.URL != "http://100.64.0.1:8081" {
-			t.Errorf("Backend.URL = %q, want %q", got.Backend.URL, "http://100.64.0.1:8081")
-		}
-		if got.Spool.Directory != "/var/lib/vandox/spool" {
-			t.Errorf("Spool.Directory = %q, want %q", got.Spool.Directory, "/var/lib/vandox/spool")
-		}
-		if got.Log.Level != "info" {
-			t.Errorf("Log.Level = %q, want %q", got.Log.Level, "info")
-		}
-		if got.Secrets.AgentToken.Value() != agentToken {
-			t.Errorf("Secrets.AgentToken.Value() = %q, want %q", got.Secrets.AgentToken.Value(), agentToken)
-		}
+		requireExampleValues(t, got)
 	})
 
 	t.Run("sets every option explicitly and keeps the defaults", func(t *testing.T) {
-		data, err := os.ReadFile(agentExample)
-		if err != nil {
-			t.Fatalf("os.ReadFile(%q) error = %v, want nil", agentExample, err)
-		}
-		probe := DefaultAgent()
-		lines, err := decodeStrict(agentExample, data, &probe)
-		if err != nil {
-			t.Fatalf("decodeStrict(%q) error = %v, want nil", agentExample, err)
-		}
-		for _, key := range AgentKeys() {
-			if lines[key] <= 0 {
-				t.Errorf("example %q does not set %q explicitly (line %d)", agentExample, key, lines[key])
-			}
-		}
+		requireExampleSetsEveryKey(t)
 		got, err := LoadAgent(agentExample, agentEnv())
 		if err != nil {
 			t.Fatalf("LoadAgent(%q) error = %v, want nil", agentExample, err)
@@ -138,6 +111,45 @@ func TestLoadAgent_Example(t *testing.T) {
 			t.Errorf("example Log = %+v, want the default %+v", got.Log, def.Log)
 		}
 	})
+}
+
+// requireExampleValues checks the values the agent example file declares.
+func requireExampleValues(t *testing.T, got *Agent) {
+	t.Helper()
+	if got.AgentID != "web-1" {
+		t.Errorf("AgentID = %q, want %q", got.AgentID, "web-1")
+	}
+	if got.Backend.URL != "http://100.64.0.1:8081" {
+		t.Errorf("Backend.URL = %q, want %q", got.Backend.URL, "http://100.64.0.1:8081")
+	}
+	if got.Spool.Directory != "/var/lib/vandox/spool" {
+		t.Errorf("Spool.Directory = %q, want %q", got.Spool.Directory, "/var/lib/vandox/spool")
+	}
+	if got.Log.Level != "info" {
+		t.Errorf("Log.Level = %q, want %q", got.Log.Level, "info")
+	}
+	if got.Secrets.AgentToken.Value() != agentToken {
+		t.Errorf("Secrets.AgentToken.Value() = %q, want %q", got.Secrets.AgentToken.Value(), agentToken)
+	}
+}
+
+// requireExampleSetsEveryKey checks that the agent example sets every option explicitly.
+func requireExampleSetsEveryKey(t *testing.T) {
+	t.Helper()
+	data, err := os.ReadFile(agentExample)
+	if err != nil {
+		t.Fatalf("os.ReadFile(%q) error = %v, want nil", agentExample, err)
+	}
+	probe := DefaultAgent()
+	lines, err := decodeStrict(agentExample, data, &probe)
+	if err != nil {
+		t.Fatalf("decodeStrict(%q) error = %v, want nil", agentExample, err)
+	}
+	for _, key := range AgentKeys() {
+		if lines[key] <= 0 {
+			t.Errorf("example %q does not set %q explicitly (line %d)", agentExample, key, lines[key])
+		}
+	}
 }
 
 func TestLoadAgent_Defaults(t *testing.T) {
@@ -285,10 +297,7 @@ func TestLoadAgent_AcceptedValues(t *testing.T) {
 	urls := []string{"http://100.64.0.1:8081", "https://nas.tailnet.ts.net", "http://[fd7a:115c:a1e0::1]:8081", "HTTP://h:1/", "http://h:65535", "http://h"}
 	for _, u := range urls {
 		t.Run("url "+u, func(t *testing.T) {
-			got, err := LoadAgent(writeTemp(t, agentDoc(map[string]string{"backend.url": quote(u)})), agentEnv())
-			if err != nil {
-				t.Fatalf("LoadAgent(url %q) error = %v, want nil", u, err)
-			}
+			got := loadAcceptedAgent(t, "url", "backend.url", quote(u))
 			if got.Backend.URL != u {
 				t.Errorf("LoadAgent(url %q).Backend.URL = %q, want %q", u, got.Backend.URL, u)
 			}
@@ -296,10 +305,7 @@ func TestLoadAgent_AcceptedValues(t *testing.T) {
 	}
 	for _, id := range []string{"web-1", "a", strings.Repeat("a", 64), "A.b_c-1"} {
 		t.Run("agent_id "+truncate(id), func(t *testing.T) {
-			got, err := LoadAgent(writeTemp(t, agentDoc(map[string]string{"agent_id": id})), agentEnv())
-			if err != nil {
-				t.Fatalf("LoadAgent(agent_id %q) error = %v, want nil", id, err)
-			}
+			got := loadAcceptedAgent(t, "agent_id", "agent_id", id)
 			if got.AgentID != id {
 				t.Errorf("LoadAgent(agent_id %q).AgentID = %q, want %q", id, got.AgentID, id)
 			}
@@ -307,24 +313,29 @@ func TestLoadAgent_AcceptedValues(t *testing.T) {
 	}
 	for _, lvl := range []string{"debug", "info", "warn", "error"} {
 		t.Run("level "+lvl, func(t *testing.T) {
-			got, err := LoadAgent(writeTemp(t, agentDoc(map[string]string{"log.level": lvl})), agentEnv())
-			if err != nil {
-				t.Fatalf("LoadAgent(level %q) error = %v, want nil", lvl, err)
-			}
+			got := loadAcceptedAgent(t, "level", "log.level", lvl)
 			if got.Log.Level != lvl {
 				t.Errorf("LoadAgent(level %q).Log.Level = %q, want %q", lvl, got.Log.Level, lvl)
 			}
 		})
 	}
 	t.Run("directory", func(t *testing.T) {
-		got, err := LoadAgent(writeTemp(t, agentDoc(map[string]string{"spool.directory": "/srv/spool"})), agentEnv())
-		if err != nil {
-			t.Fatalf("LoadAgent(directory) error = %v, want nil", err)
-		}
+		got := loadAcceptedAgent(t, "directory", "spool.directory", "/srv/spool")
 		if got.Spool.Directory != "/srv/spool" {
 			t.Errorf("LoadAgent(directory).Spool.Directory = %q, want %q", got.Spool.Directory, "/srv/spool")
 		}
 	})
+}
+
+// loadAcceptedAgent loads a valid agent file with the one option key set to value
+// and fails the test if it is rejected. what names the option in failure messages.
+func loadAcceptedAgent(t *testing.T, what, key, value string) *Agent {
+	t.Helper()
+	got, err := LoadAgent(writeTemp(t, agentDoc(map[string]string{key: value})), agentEnv())
+	if err != nil {
+		t.Fatalf("LoadAgent(%s %q) error = %v, want nil", what, value, err)
+	}
+	return got
 }
 
 func TestLoadAgent_UnsupportedYAML(t *testing.T) {
@@ -355,39 +366,42 @@ func TestLoadAgent_FileErrors(t *testing.T) {
 		if err == nil || !errors.Is(err, fs.ErrNotExist) || !strings.Contains(err.Error(), path) {
 			t.Errorf("LoadAgent(missing) error = %v, want fs.ErrNotExist naming %q", err, path)
 		}
-		var ke *KeyError
-		if errors.As(err, &ke) {
-			t.Errorf("LoadAgent(missing) error is a *KeyError, want a file error")
-		}
+		requireNotKeyError(t, err, "LoadAgent(missing)")
 	})
 	for name, path := range map[string]string{"directory": t.TempDir(), "device file": os.DevNull} {
 		t.Run(name, func(t *testing.T) {
 			_, err := LoadAgent(path, agentEnv())
-			if err == nil || !strings.Contains(err.Error(), path) {
-				t.Fatalf("LoadAgent(%q) error = %v, want an error naming the path", path, err)
-			}
-			var ke *KeyError
-			if errors.As(err, &ke) {
-				t.Errorf("LoadAgent(%q) error is a *KeyError, want a file error", path)
-			}
+			requireFileErrorNaming(t, err, path, fmt.Sprintf("LoadAgent(%q)", path))
 		})
 	}
 	t.Run("file larger than the limit", func(t *testing.T) {
 		path := writeTemp(t, strings.Repeat("#\n", MaxFileBytes/2)+"#")
 		_, err := LoadAgent(path, agentEnv())
-		if err == nil || !strings.Contains(err.Error(), path) {
-			t.Fatalf("LoadAgent(MaxFileBytes+1) error = %v, want an error naming the path", err)
-		}
-		var ke *KeyError
-		if errors.As(err, &ke) {
-			t.Errorf("LoadAgent(MaxFileBytes+1) error is a *KeyError, want a file error")
-		}
+		requireFileErrorNaming(t, err, path, "LoadAgent(MaxFileBytes+1)")
 	})
 	t.Run("file of exactly the limit is read", func(t *testing.T) {
 		path := writeTemp(t, strings.Repeat("#\n", MaxFileBytes/2))
 		_, err := LoadAgent(path, agentEnv())
 		_ = requireKeyError(t, err, "agent_id", 0) // required key missing shows that the file was read
 	})
+}
+
+// requireNotKeyError fails the test if err is a *KeyError instead of a file error.
+func requireNotKeyError(t *testing.T, err error, label string) {
+	t.Helper()
+	var ke *KeyError
+	if errors.As(err, &ke) {
+		t.Errorf("%s error is a *KeyError, want a file error", label)
+	}
+}
+
+// requireFileErrorNaming fails the test unless err is a non-key error naming path.
+func requireFileErrorNaming(t *testing.T, err error, path, label string) {
+	t.Helper()
+	if err == nil || !strings.Contains(err.Error(), path) {
+		t.Fatalf("%s error = %v, want an error naming the path", label, err)
+	}
+	requireNotKeyError(t, err, label)
 }
 
 func TestLoadAgent_Secrets(t *testing.T) {

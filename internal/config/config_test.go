@@ -142,22 +142,28 @@ func TestReadFile(t *testing.T) {
 	}
 	for _, tt := range failures {
 		t.Run(tt.name, func(t *testing.T) {
-			path := tt.path(t)
-			got, err := readFile(path, 8)
-			if err == nil {
-				t.Fatalf("readFile(%q, 8) = %q, nil, want an error", path, got)
-			}
-			if !strings.Contains(err.Error(), path) {
-				t.Errorf("readFile(%q, 8) error = %q, want it to contain the path", path, err)
-			}
-			if tt.wantIs != nil && !errors.Is(err, tt.wantIs) {
-				t.Errorf("readFile(%q, 8) error = %v, want errors.Is %v", path, err, tt.wantIs)
-			}
-			var ke *KeyError
-			if errors.As(err, &ke) {
-				t.Errorf("readFile(%q, 8) error is a *KeyError, want a plain file error", path)
-			}
+			requireReadFileFails(t, tt.path(t), tt.wantIs)
 		})
+	}
+}
+
+// requireReadFileFails checks that readFile rejects path with a plain file error naming it and,
+// when wantIs is not nil, matching errors.Is.
+func requireReadFileFails(t *testing.T, path string, wantIs error) {
+	t.Helper()
+	got, err := readFile(path, 8)
+	if err == nil {
+		t.Fatalf("readFile(%q, 8) = %q, nil, want an error", path, got)
+	}
+	if !strings.Contains(err.Error(), path) {
+		t.Errorf("readFile(%q, 8) error = %q, want it to contain the path", path, err)
+	}
+	if wantIs != nil && !errors.Is(err, wantIs) {
+		t.Errorf("readFile(%q, 8) error = %v, want errors.Is %v", path, err, wantIs)
+	}
+	var ke *KeyError
+	if errors.As(err, &ke) {
+		t.Errorf("readFile(%q, 8) error is a *KeyError, want a plain file error", path)
 	}
 }
 

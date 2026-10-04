@@ -38,6 +38,26 @@ func decodeDoc(t *testing.T, doc string) (testDoc, map[string]int, error) {
 	return got, lines, err
 }
 
+// mustDecodeDoc decodes doc and fails the test if it is rejected.
+func mustDecodeDoc(t *testing.T, doc string) testDoc {
+	t.Helper()
+	got, _, err := decodeDoc(t, doc)
+	if err != nil {
+		t.Fatalf("decodeStrict(%q) error = %v, want nil", doc, err)
+	}
+	return got
+}
+
+// requireLines checks the recorded line of every key in want.
+func requireLines(t *testing.T, doc string, lines, want map[string]int) {
+	t.Helper()
+	for k, l := range want {
+		if lines[k] != l {
+			t.Errorf("decodeStrict(%q) lines[%q] = %d, want %d", doc, k, lines[k], l)
+		}
+	}
+}
+
 func TestDecodeStrict_Valid(t *testing.T) {
 	t.Run("values are set and lines recorded", func(t *testing.T) {
 		doc := "title: hello\ncount: 5\nflag: true\nwait: 5s\nsection:\n  name: nm\n"
@@ -51,11 +71,7 @@ func TestDecodeStrict_Valid(t *testing.T) {
 			t.Errorf("decodeStrict(%q) = %+v, want %+v", doc, got, want)
 		}
 		wantLines := map[string]int{"title": 1, "count": 2, "flag": 3, "wait": 4, "section.name": 6}
-		for k, l := range wantLines {
-			if lines[k] != l {
-				t.Errorf("decodeStrict(%q) lines[%q] = %d, want %d", doc, k, lines[k], l)
-			}
-		}
+		requireLines(t, doc, lines, wantLines)
 	})
 
 	defaultsKept := []struct {
@@ -77,10 +93,7 @@ func TestDecodeStrict_Valid(t *testing.T) {
 	}
 	for _, tt := range defaultsKept {
 		t.Run("defaults kept: "+tt.name, func(t *testing.T) {
-			got, _, err := decodeDoc(t, tt.doc)
-			if err != nil {
-				t.Fatalf("decodeStrict(%q) error = %v, want nil", tt.doc, err)
-			}
+			got := mustDecodeDoc(t, tt.doc)
 			if want := testDocDefaults(); !reflect.DeepEqual(got, want) {
 				t.Errorf("decodeStrict(%q) = %+v, want the defaults %+v", tt.doc, got, want)
 			}
@@ -104,10 +117,7 @@ func TestDecodeStrict_Valid(t *testing.T) {
 	}
 	for _, tt := range titles {
 		t.Run(tt.name, func(t *testing.T) {
-			got, _, err := decodeDoc(t, tt.doc)
-			if err != nil {
-				t.Fatalf("decodeStrict(%q) error = %v, want nil", tt.doc, err)
-			}
+			got := mustDecodeDoc(t, tt.doc)
 			if got.Title != tt.want {
 				t.Errorf("decodeStrict(%q) Title = %q, want %q", tt.doc, got.Title, tt.want)
 			}

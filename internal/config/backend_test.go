@@ -60,27 +60,36 @@ func TestLoadBackend_Example(t *testing.T) {
 		if got.Web != def.Web || got.Ingest != def.Ingest || got.Storage != def.Storage || got.Log != def.Log {
 			t.Errorf("LoadBackend(%q) = %+v, want the example values %+v", backendExample, got, def)
 		}
-		if got.Secrets.AgentToken.IsSet() || got.Secrets.WebPasswordHash.IsSet() || got.Secrets.TelegramBotToken.IsSet() {
+		if anySecretSet(got.Secrets) {
 			t.Error("LoadBackend(example, nil) has a secret set, want none")
 		}
 	})
 
-	t.Run("sets every option explicitly", func(t *testing.T) {
-		data, err := os.ReadFile(backendExample)
-		if err != nil {
-			t.Fatalf("os.ReadFile(%q) error = %v, want nil", backendExample, err)
+	t.Run("sets every option explicitly", requireBackendExampleSetsEveryKey)
+}
+
+// anySecretSet reports whether any of the three backend secrets is set.
+func anySecretSet(s BackendSecrets) bool {
+	return s.AgentToken.IsSet() || s.WebPasswordHash.IsSet() || s.TelegramBotToken.IsSet()
+}
+
+// requireBackendExampleSetsEveryKey checks that the backend example sets every option explicitly.
+func requireBackendExampleSetsEveryKey(t *testing.T) {
+	t.Helper()
+	data, err := os.ReadFile(backendExample)
+	if err != nil {
+		t.Fatalf("os.ReadFile(%q) error = %v, want nil", backendExample, err)
+	}
+	probe := DefaultBackend()
+	lines, err := decodeStrict(backendExample, data, &probe)
+	if err != nil {
+		t.Fatalf("decodeStrict(%q) error = %v, want nil", backendExample, err)
+	}
+	for _, key := range BackendKeys() {
+		if lines[key] <= 0 {
+			t.Errorf("example %q does not set %q explicitly (line %d)", backendExample, key, lines[key])
 		}
-		probe := DefaultBackend()
-		lines, err := decodeStrict(backendExample, data, &probe)
-		if err != nil {
-			t.Fatalf("decodeStrict(%q) error = %v, want nil", backendExample, err)
-		}
-		for _, key := range BackendKeys() {
-			if lines[key] <= 0 {
-				t.Errorf("example %q does not set %q explicitly (line %d)", backendExample, key, lines[key])
-			}
-		}
-	})
+	}
 }
 
 func TestLoadBackend_Defaults(t *testing.T) {
@@ -197,16 +206,20 @@ func TestLoadBackend_ListenPorts(t *testing.T) {
 				if err != nil {
 					t.Fatalf("LoadBackend(%s %q) error = %v, want nil", key, v, err)
 				}
-				have := got.Web.Listen
-				if key == "ingest.listen" {
-					have = got.Ingest.Listen
-				}
-				if have != v {
+				if have := listenOf(got, key); have != v {
 					t.Errorf("LoadBackend(%s %q) = %q, want %q", key, v, have, v)
 				}
 			})
 		}
 	}
+}
+
+// listenOf returns the listen address of the web or ingest listener named by key.
+func listenOf(cfg *Backend, key string) string {
+	if key == "ingest.listen" {
+		return cfg.Ingest.Listen
+	}
+	return cfg.Web.Listen
 }
 
 func TestLoadBackend_AcceptedValues(t *testing.T) {
@@ -286,7 +299,7 @@ func TestLoadBackend_Secrets(t *testing.T) {
 		if err != nil {
 			t.Fatalf("LoadBackend(no secrets) error = %v, want nil", err)
 		}
-		if got.Secrets.AgentToken.IsSet() || got.Secrets.WebPasswordHash.IsSet() || got.Secrets.TelegramBotToken.IsSet() {
+		if anySecretSet(got.Secrets) {
 			t.Errorf("LoadBackend(no secrets) secrets set, want IsSet false for all three")
 		}
 	})
@@ -295,11 +308,7 @@ func TestLoadBackend_Secrets(t *testing.T) {
 		if err != nil {
 			t.Fatalf("LoadBackend(all secrets) error = %v, want nil", err)
 		}
-		s := got.Secrets
-		if s.AgentToken.Value() != agentToken || s.WebPasswordHash.Value() != phcHash || s.TelegramBotToken.Value() != botToken {
-			t.Errorf("LoadBackend(all secrets) = %q, %q, %q, want %q, %q, %q",
-				s.AgentToken.Value(), s.WebPasswordHash.Value(), s.TelegramBotToken.Value(), agentToken, phcHash, botToken)
-		}
+		requireAllSecrets(t, got.Secrets, "LoadBackend(all secrets)")
 	})
 	t.Run("all three from files", func(t *testing.T) {
 		got, err := LoadBackend(file, []string{
@@ -310,10 +319,7 @@ func TestLoadBackend_Secrets(t *testing.T) {
 		if err != nil {
 			t.Fatalf("LoadBackend(secret files) error = %v, want nil", err)
 		}
-		s := got.Secrets
-		if s.AgentToken.Value() != agentToken || s.WebPasswordHash.Value() != phcHash || s.TelegramBotToken.Value() != botToken {
-			t.Errorf("LoadBackend(secret files) = %q, %q, %q, want the file contents", s.AgentToken.Value(), s.WebPasswordHash.Value(), s.TelegramBotToken.Value())
-		}
+		requireAllSecrets(t, got.Secrets, "LoadBackend(secret files)")
 	})
 	t.Run("agent token of 31 characters", func(t *testing.T) {
 		_, err := LoadBackend(file, []string{tokenVar + "=" + strings.Repeat("t", MinAgentTokenBytes-1)})
@@ -329,21 +335,30 @@ func TestLoadBackend_Secrets(t *testing.T) {
 			t.Errorf("LoadBackend(short telegram token) error = %v, want nil", err)
 		}
 	})
-	invalid := []struct{ name, env, want string }{
-		{"hash with space", webHashVar + "=a b", webHashVar},
-		{"empty hash", webHashVar + "=", webHashVar},
-		{"both variable and file", telegramVar + "=" + botToken, anyKey},
-		{"relative file", webHashVar + "_FILE=rel/x", webHashVar + "_FILE"},
+	invalid := []struct {
+		name string
+		env  []string
+		want string
+	}{
+		{"hash with space", []string{webHashVar + "=a b"}, webHashVar},
+		{"empty hash", []string{webHashVar + "="}, webHashVar},
+		{"both variable and file", []string{telegramVar + "=" + botToken, telegramVar + "_FILE=" + write("t2", botToken)}, anyKey},
+		{"relative file", []string{webHashVar + "_FILE=rel/x"}, webHashVar + "_FILE"},
 	}
 	for _, tt := range invalid {
 		t.Run(tt.name, func(t *testing.T) {
-			env := []string{tt.env}
-			if tt.name == "both variable and file" {
-				env = append(env, telegramVar+"_FILE="+write("t2", botToken))
-			}
-			_, err := LoadBackend(file, env)
+			_, err := LoadBackend(file, tt.env)
 			_ = requireSecretError(t, err, tt.want)
 		})
+	}
+}
+
+// requireAllSecrets checks that all three backend secrets carry the test values.
+func requireAllSecrets(t *testing.T, s BackendSecrets, label string) {
+	t.Helper()
+	if s.AgentToken.Value() != agentToken || s.WebPasswordHash.Value() != phcHash || s.TelegramBotToken.Value() != botToken {
+		t.Errorf("%s = %q, %q, %q, want %q, %q, %q",
+			label, s.AgentToken.Value(), s.WebPasswordHash.Value(), s.TelegramBotToken.Value(), agentToken, phcHash, botToken)
 	}
 }
 

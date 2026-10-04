@@ -29,89 +29,101 @@ func secretFixture(value string) Secret { return Secret{value: value} }
 func TestSecret_Redaction(t *testing.T) {
 	s := secretFixture(secretValue)
 
-	t.Run("formatting verbs", func(t *testing.T) {
-		for _, verb := range []string{"%v", "%+v", "%#v", "%s", "%q", "%x", "%X", "%d"} {
-			got := fmt.Sprintf(verb, s)
-			if strings.Contains(got, secretValue) {
-				t.Errorf("fmt.Sprintf(%q, secret) = %q, want the secret absent", verb, got)
-			}
-			if !strings.Contains(got, redacted) {
-				t.Errorf("fmt.Sprintf(%q, secret) = %q, want it to contain %q", verb, got, redacted)
-			}
-		}
-		if got := fmt.Sprint(s); got != redacted {
-			t.Errorf("fmt.Sprint(secret) = %q, want %q", got, redacted)
-		}
-		if got := s.String(); got != redacted {
-			t.Errorf("secret.String() = %q, want %q", got, redacted)
-		}
-	})
+	t.Run("formatting verbs", func(t *testing.T) { requireFormattingRedacted(t, s) })
+	t.Run("a struct holding a secret", func(t *testing.T) { requireHolderFormattingRedacted(t, s) })
+	t.Run("marshaling", func(t *testing.T) { requireMarshalingRedacted(t, s) })
+	t.Run("slog handlers", func(t *testing.T) { requireSlogRedacted(t, s) })
+	t.Run("value and IsSet", func(t *testing.T) { requireValueAndIsSet(t, s) })
+}
 
-	t.Run("a struct holding a secret", func(t *testing.T) {
-		type holder struct{ S Secret }
-		for _, verb := range []string{"%v", "%+v", "%#v"} {
-			got := fmt.Sprintf(verb, holder{S: s})
-			if strings.Contains(got, secretValue) || !strings.Contains(got, redacted) {
-				t.Errorf("fmt.Sprintf(%q, holder) = %q, want %q and not the secret", verb, got, redacted)
-			}
-		}
-	})
+// secretHolder is a struct that holds a secret in an exported field.
+type secretHolder struct{ S Secret }
 
-	t.Run("marshaling", func(t *testing.T) {
-		type holder struct{ S Secret }
-		gotJSON, err := json.Marshal(holder{S: s})
-		if err != nil {
-			t.Fatalf("json.Marshal error = %v, want nil", err)
+func requireFormattingRedacted(t *testing.T, s Secret) {
+	t.Helper()
+	for _, verb := range []string{"%v", "%+v", "%#v", "%s", "%q", "%x", "%X", "%d"} {
+		got := fmt.Sprintf(verb, s)
+		if strings.Contains(got, secretValue) {
+			t.Errorf("fmt.Sprintf(%q, secret) = %q, want the secret absent", verb, got)
 		}
-		if want := `{"S":"[redacted]"}`; string(gotJSON) != want {
-			t.Errorf("json.Marshal(holder) = %s, want %s", gotJSON, want)
+		if !strings.Contains(got, redacted) {
+			t.Errorf("fmt.Sprintf(%q, secret) = %q, want it to contain %q", verb, got, redacted)
 		}
-		gotYAML, err := yaml.Marshal(holder{S: s})
-		if err != nil {
-			t.Fatalf("yaml.Marshal error = %v, want nil", err)
-		}
-		if strings.Contains(string(gotYAML), secretValue) || !strings.Contains(string(gotYAML), redacted) {
-			t.Errorf("yaml.Marshal(holder) = %q, want %q and not the secret", gotYAML, redacted)
-		}
-		text, err := s.MarshalText()
-		if err != nil || string(text) != redacted {
-			t.Errorf("secret.MarshalText() = %q, %v, want %q, nil", text, err, redacted)
-		}
-	})
+	}
+	if got := fmt.Sprint(s); got != redacted {
+		t.Errorf("fmt.Sprint(secret) = %q, want %q", got, redacted)
+	}
+	if got := s.String(); got != redacted {
+		t.Errorf("secret.String() = %q, want %q", got, redacted)
+	}
+}
 
-	t.Run("slog handlers", func(t *testing.T) {
-		handlers := map[string]func(*bytes.Buffer) slog.Handler{
-			"text": func(b *bytes.Buffer) slog.Handler { return slog.NewTextHandler(b, nil) },
-			"json": func(b *bytes.Buffer) slog.Handler { return slog.NewJSONHandler(b, nil) },
+func requireHolderFormattingRedacted(t *testing.T, s Secret) {
+	t.Helper()
+	for _, verb := range []string{"%v", "%+v", "%#v"} {
+		got := fmt.Sprintf(verb, secretHolder{S: s})
+		if strings.Contains(got, secretValue) || !strings.Contains(got, redacted) {
+			t.Errorf("fmt.Sprintf(%q, holder) = %q, want %q and not the secret", verb, got, redacted)
 		}
-		for name, mk := range handlers {
-			var buf bytes.Buffer
-			slog.New(mk(&buf)).Info("msg", slog.Any("s", s))
-			got := buf.String()
-			if strings.Contains(got, secretValue) || !strings.Contains(got, redacted) {
-				t.Errorf("slog %s output = %q, want %q and not the secret", name, got, redacted)
-			}
-		}
-		if got := s.LogValue().String(); got != redacted {
-			t.Errorf("secret.LogValue() = %q, want %q", got, redacted)
-		}
-	})
+	}
+}
 
-	t.Run("value and IsSet", func(t *testing.T) {
-		if got := s.Value(); got != secretValue {
-			t.Errorf("secret.Value() = %q, want %q", got, secretValue)
+func requireMarshalingRedacted(t *testing.T, s Secret) {
+	t.Helper()
+	gotJSON, err := json.Marshal(secretHolder{S: s})
+	if err != nil {
+		t.Fatalf("json.Marshal error = %v, want nil", err)
+	}
+	if want := `{"S":"[redacted]"}`; string(gotJSON) != want {
+		t.Errorf("json.Marshal(holder) = %s, want %s", gotJSON, want)
+	}
+	gotYAML, err := yaml.Marshal(secretHolder{S: s})
+	if err != nil {
+		t.Fatalf("yaml.Marshal error = %v, want nil", err)
+	}
+	if strings.Contains(string(gotYAML), secretValue) || !strings.Contains(string(gotYAML), redacted) {
+		t.Errorf("yaml.Marshal(holder) = %q, want %q and not the secret", gotYAML, redacted)
+	}
+	text, err := s.MarshalText()
+	if err != nil || string(text) != redacted {
+		t.Errorf("secret.MarshalText() = %q, %v, want %q, nil", text, err, redacted)
+	}
+}
+
+func requireSlogRedacted(t *testing.T, s Secret) {
+	t.Helper()
+	handlers := map[string]func(*bytes.Buffer) slog.Handler{
+		"text": func(b *bytes.Buffer) slog.Handler { return slog.NewTextHandler(b, nil) },
+		"json": func(b *bytes.Buffer) slog.Handler { return slog.NewJSONHandler(b, nil) },
+	}
+	for name, mk := range handlers {
+		var buf bytes.Buffer
+		slog.New(mk(&buf)).Info("msg", slog.Any("s", s))
+		got := buf.String()
+		if strings.Contains(got, secretValue) || !strings.Contains(got, redacted) {
+			t.Errorf("slog %s output = %q, want %q and not the secret", name, got, redacted)
 		}
-		if !s.IsSet() {
-			t.Error("secret.IsSet() = false, want true")
-		}
-		var zero Secret
-		if zero.IsSet() {
-			t.Error("Secret{}.IsSet() = true, want false")
-		}
-		if got := zero.Value(); got != "" {
-			t.Errorf("Secret{}.Value() = %q, want empty", got)
-		}
-	})
+	}
+	if got := s.LogValue().String(); got != redacted {
+		t.Errorf("secret.LogValue() = %q, want %q", got, redacted)
+	}
+}
+
+func requireValueAndIsSet(t *testing.T, s Secret) {
+	t.Helper()
+	if got := s.Value(); got != secretValue {
+		t.Errorf("secret.Value() = %q, want %q", got, secretValue)
+	}
+	if !s.IsSet() {
+		t.Error("secret.IsSet() = false, want true")
+	}
+	var zero Secret
+	if zero.IsSet() {
+		t.Error("Secret{}.IsSet() = true, want false")
+	}
+	if got := zero.Value(); got != "" {
+		t.Errorf("Secret{}.Value() = %q, want empty", got)
+	}
 }
 
 func TestSecretError_Error(t *testing.T) {
@@ -258,13 +270,7 @@ func TestReadSecret_FromEnvironment(t *testing.T) {
 	}
 	for _, v := range valid {
 		t.Run("valid "+truncate(v), func(t *testing.T) {
-			got, err := readSecret(secretEnv(tokenVar, v), tokenVar)
-			if err != nil {
-				t.Fatalf("readSecret(%q) error = %v, want nil", truncate(v), err)
-			}
-			if got.Value() != v || !got.IsSet() {
-				t.Errorf("readSecret(%q) = %q (set %v), want the value", truncate(v), got.Value(), got.IsSet())
-			}
+			requireSecretFromEnv(t, v)
 		})
 	}
 	invalid := []string{
@@ -275,9 +281,7 @@ func TestReadSecret_FromEnvironment(t *testing.T) {
 		t.Run("invalid "+truncate(v), func(t *testing.T) {
 			got, err := readSecret(secretEnv(tokenVar, v), tokenVar)
 			_ = requireSecretError(t, err, tokenVar)
-			if got.IsSet() {
-				t.Error("readSecret returned a set secret together with an error, want the zero Secret")
-			}
+			requireZeroSecret(t, got)
 			requireNoLeak(t, err, sentinel)
 		})
 	}
@@ -290,16 +294,42 @@ func TestReadSecret_FromEnvironment(t *testing.T) {
 	t.Run("both variable and file", func(t *testing.T) {
 		_, err := readSecret(secretEnv(tokenVar, "x", tokenFile, "/x"), tokenVar)
 		_ = requireSecretError(t, err, anyKey)
-		for _, name := range []string{tokenVar, tokenFile} {
-			if !strings.Contains(err.Error(), name) {
-				t.Errorf("error %q, want it to name %q", err, name)
-			}
-		}
+		requireErrorNames(t, err, tokenVar, tokenFile)
 	})
 	t.Run("both present with empty values", func(t *testing.T) {
 		_, err := readSecret(secretEnv(tokenVar, "", tokenFile, ""), tokenVar)
 		_ = requireSecretError(t, err, anyKey)
 	})
+}
+
+// requireSecretFromEnv checks that readSecret accepts v from the environment variable unchanged.
+func requireSecretFromEnv(t *testing.T, v string) {
+	t.Helper()
+	got, err := readSecret(secretEnv(tokenVar, v), tokenVar)
+	if err != nil {
+		t.Fatalf("readSecret(%q) error = %v, want nil", truncate(v), err)
+	}
+	if got.Value() != v || !got.IsSet() {
+		t.Errorf("readSecret(%q) = %q (set %v), want the value", truncate(v), got.Value(), got.IsSet())
+	}
+}
+
+// requireZeroSecret fails the test if got is set although the read returned an error.
+func requireZeroSecret(t *testing.T, got Secret) {
+	t.Helper()
+	if got.IsSet() {
+		t.Error("readSecret returned a set secret together with an error, want the zero Secret")
+	}
+}
+
+// requireErrorNames fails the test unless the message of err contains every name.
+func requireErrorNames(t *testing.T, err error, names ...string) {
+	t.Helper()
+	for _, name := range names {
+		if !strings.Contains(err.Error(), name) {
+			t.Errorf("error %q, want it to name %q", err, name)
+		}
+	}
 }
 
 // truncate shortens long test values for subtest names.
@@ -356,9 +386,7 @@ func TestReadSecret_FromFile(t *testing.T) {
 			path := writeTemp(t, tt.content)
 			got, err := readSecret(secretEnv(tokenFile, path), tokenVar)
 			_ = requireSecretError(t, err, anyKey)
-			if got.IsSet() {
-				t.Error("readSecret returned a set secret together with an error, want the zero Secret")
-			}
+			requireZeroSecret(t, got)
 			requireNoLeak(t, err, sentinel, path)
 		})
 	}
@@ -367,15 +395,7 @@ func TestReadSecret_FromFile(t *testing.T) {
 func TestReadSecret_FileVariable(t *testing.T) {
 	t.Run("relative or empty path is rejected without a file access", func(t *testing.T) {
 		for _, v := range []string{"", "rel/x", secretValue, "./x"} {
-			_, err := readSecret(secretEnv(tokenFile, v), tokenVar)
-			se := requireSecretError(t, err, tokenFile)
-			if !strings.Contains(se.Reason, "must be an absolute path") {
-				t.Errorf("value %q: Reason = %q, want it to contain %q", v, se.Reason, "must be an absolute path")
-			}
-			if u := errors.Unwrap(err); u != nil {
-				t.Errorf("value %q: errors.Unwrap(err) = %v, want nil", v, u)
-			}
-			requireNoLeak(t, err, sentinel, "rel/x")
+			requireRelativePathRejected(t, v)
 		}
 	})
 
@@ -383,13 +403,7 @@ func TestReadSecret_FileVariable(t *testing.T) {
 		path := filepath.Join(t.TempDir(), secretValue)
 		_, err := readSecret(secretEnv(tokenFile, path), tokenVar)
 		_ = requireSecretError(t, err, tokenFile)
-		if !errors.Is(err, fs.ErrNotExist) {
-			t.Errorf("errors.Is(err, fs.ErrNotExist) = false for %v, want true", err)
-		}
-		var pe *fs.PathError
-		if errors.As(err, &pe) {
-			t.Errorf("errors.As(err, *fs.PathError) = true for %v, want false (the path must not be kept)", err)
-		}
+		requireNotExistWithoutPath(t, err)
 		requireNoLeak(t, err, sentinel, path)
 	})
 
@@ -402,18 +416,52 @@ func TestReadSecret_FileVariable(t *testing.T) {
 	}
 
 	t.Run("symlink to a regular file is followed", func(t *testing.T) {
-		dir := t.TempDir()
-		target := filepath.Join(dir, "target")
-		link := filepath.Join(dir, "link")
-		if err := os.WriteFile(target, []byte("tok\n"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.Symlink(target, link); err != nil {
-			t.Skipf("symlinks not available: %v", err)
-		}
+		link := symlinkToFile(t, "tok\n")
 		got, err := readSecret(secretEnv(tokenFile, link), tokenVar)
 		if err != nil || got.Value() != "tok" {
 			t.Errorf("readSecret(symlink) = %q, %v, want %q, nil", got.Value(), err, "tok")
 		}
 	})
+}
+
+// requireRelativePathRejected checks that a relative or empty file path v is rejected as such.
+func requireRelativePathRejected(t *testing.T, v string) {
+	t.Helper()
+	_, err := readSecret(secretEnv(tokenFile, v), tokenVar)
+	se := requireSecretError(t, err, tokenFile)
+	if !strings.Contains(se.Reason, "must be an absolute path") {
+		t.Errorf("value %q: Reason = %q, want it to contain %q", v, se.Reason, "must be an absolute path")
+	}
+	if u := errors.Unwrap(err); u != nil {
+		t.Errorf("value %q: errors.Unwrap(err) = %v, want nil", v, u)
+	}
+	requireNoLeak(t, err, sentinel, "rel/x")
+}
+
+// requireNotExistWithoutPath checks that err matches fs.ErrNotExist but does not keep the path.
+func requireNotExistWithoutPath(t *testing.T, err error) {
+	t.Helper()
+	if !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("errors.Is(err, fs.ErrNotExist) = false for %v, want true", err)
+	}
+	var pe *fs.PathError
+	if errors.As(err, &pe) {
+		t.Errorf("errors.As(err, *fs.PathError) = true for %v, want false (the path must not be kept)", err)
+	}
+}
+
+// symlinkToFile writes content to a file and returns a symlink to it; it skips the test
+// where symlinks are not available.
+func symlinkToFile(t *testing.T, content string) string {
+	t.Helper()
+	dir := t.TempDir()
+	target := filepath.Join(dir, "target")
+	link := filepath.Join(dir, "link")
+	if err := os.WriteFile(target, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlinks not available: %v", err)
+	}
+	return link
 }
