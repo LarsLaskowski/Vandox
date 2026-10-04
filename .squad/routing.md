@@ -118,10 +118,11 @@ skip is a blocking finding. If production or test code changes after all, steps 
 | 11 | After the PR | Dev, Code Officer, Reviewer | CI green, SonarQube Cloud quality gate passed, review comments worked |
 | 12 | Wrap-up | Orchestrator | Squad lessons filed as one issue per destination (*Squad lessons*), or "no lessons" logged; user informed |
 
-A change without production or test code (tier `docs`, or a `security`-tier change that edits only
-documentation and project knowledge) skips steps 4 and 5; step 6 is the Dev's edits alone, and the *Coverage
-gate* is not run, because such a change cannot alter coverage. For a `security`-tier change step 7 still
-runs *Format check* and the *Analyzer gate*; for tier `docs` only the read-only *Format check* runs.
+A change without production or test code (tier `docs`, or any other tier whose plan declares it, see
+*Changes without production or test code*) skips steps 4 and 5; step 6 is the Dev's edits alone, and the
+*Coverage gate* is not run, because such a change cannot alter coverage. For a change of another tier than
+`docs` step 7 still runs *Format check* and the *Analyzer gate*; for tier `docs` only the read-only *Format
+check* runs.
 
 Commits and pushes to the work branch happen right after intake (`specs/<folder>/log.md`, so a stop hook
 or a crashed session finds no untracked files) and after every further completed step; with *Squash and
