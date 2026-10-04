@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -525,6 +526,34 @@ func TestDecoder_Limits(t *testing.T) {
 		}
 	})
 
+	t.Run("unterminated last line of exactly MaxLineBytes is read", func(t *testing.T) {
+		data := gzipString(t, headerJSON+"\n"+padded(t, metricLine(1), 400))
+		recs, err := decodeAll(t, data, small(400, 10, 1<<20))
+		if err != nil || len(recs) != 1 {
+			t.Errorf("decoding = %d records, %v, want 1 record and nil", len(recs), err)
+		}
+	})
+
+	t.Run("unterminated last line one byte over MaxLineBytes", func(t *testing.T) {
+		data := gzipString(t, headerJSON+"\n"+padded(t, metricLine(1), 401))
+		_, err := decodeAll(t, data, small(400, 10, 1<<20))
+		want{is: wire.ErrLimitExceeded}.check(t, err)
+	})
+
+	t.Run("unterminated last line with carriage return counts towards the line", func(t *testing.T) {
+		data := gzipString(t, headerJSON+"\n"+padded(t, metricLine(1), 400)+"\r")
+		_, err := decodeAll(t, data, small(400, 10, 1<<20))
+		want{is: wire.ErrLimitExceeded}.check(t, err)
+	})
+
+	t.Run("MaxLineBytes of math.MaxInt decodes a valid batch", func(t *testing.T) {
+		lim := wire.Limits{MaxLineBytes: math.MaxInt, MaxBatchBytes: 1 << 20, MaxRecords: 10}
+		recs, err := decodeAll(t, withHeader(t, metricLine(1), metricLine(2)), lim)
+		if err != nil || len(recs) != 2 {
+			t.Errorf("decoding = %d records, %v, want 2 records and nil", len(recs), err)
+		}
+	})
+
 	t.Run("zero and negative fields mean the defaults", func(t *testing.T) {
 		for name, lim := range map[string]wire.Limits{
 			"zero":     {},
@@ -806,4 +835,46 @@ func TestDecoder_Close(t *testing.T) {
 	if src.closed {
 		t.Errorf("Close() closed the underlying reader, want it left open")
 	}
+}
+
+// gzipWithHeader gzips s with the given gzip header fields.
+func gzipWithHeader(t *testing.T, h gzip.Header, s string) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	zw := gzip.NewWriter(&buf)
+	zw.Header = h
+	if _, err := zw.Write([]byte(s)); err != nil {
+		t.Fatalf("gzip write = %v, want nil", err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatalf("gzip close = %v, want nil", err)
+	}
+	return buf.Bytes()
+}
+
+func TestDecoder_GzipHeaderFields(t *testing.T) {
+	body := joinLines(headerJSON, metricLine(1))
+
+	t.Run("short name, comment and extra are accepted", func(t *testing.T) {
+		h := gzip.Header{Name: "batch.ndjson", Comment: "a comment", Extra: []byte{'a', 'b', 2, 0, 1, 2}}
+		recs, err := decodeAll(t, gzipWithHeader(t, h, body), wire.Limits{})
+		if err != nil || len(recs) != 1 {
+			t.Errorf("decoding = %d records, %v, want 1 record and nil", len(recs), err)
+		}
+	})
+
+	t.Run("overlong fields are malformed on line 1", func(t *testing.T) {
+		long := strings.Repeat("a", 512)
+		for name, h := range map[string]gzip.Header{
+			"name 512 bytes":    {Name: long},
+			"comment 512 bytes": {Comment: long},
+		} {
+			_, err := decodeAll(t, gzipWithHeader(t, h, body), wire.Limits{})
+			if err == nil {
+				t.Errorf("%s: got nil error, want ErrMalformed", name)
+				continue
+			}
+			want{is: wire.ErrMalformed, line: 1}.check(t, err)
+		}
+	})
 }
