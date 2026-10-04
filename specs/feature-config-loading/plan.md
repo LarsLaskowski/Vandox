@@ -1,7 +1,7 @@
 # Plan: Configuration loading for agent and backend
 
 Source: Issue #11 | [spec.md](spec.md)
-Status: Draft
+Status: Approved by Lead
 Tier: security. The change adds a dependency (`go.yaml.in/yaml/v3`), and it implements two security areas
 from `.squad/project.md`: area 8 (*Secrets handling*) and area 10 (*Parsing of external input*, which
 names "configuration").
@@ -54,16 +54,16 @@ All in package `internal/config` unless stated otherwise. "The value never appea
 a sentinel string such as `S3NT1NEL-value` into the offending place and asserts `err.Error()` does not
 contain it.
 
-- [ ] AC1 *Agent example loads*: `LoadAgent("../../deploy/agent/agent.yaml", env)` with
+- [x] AC1 *Agent example loads*: `LoadAgent("../../deploy/agent/agent.yaml", env)` with
   `env = []string{"VANDOX_AGENT_TOKEN=<32+ printable chars>"}` returns no error. `AgentID`, `Backend.URL`,
   `Spool.Directory` and `Log.Level` equal the values written in the file.
-- [ ] AC2 *Backend example loads*: `LoadBackend("../../deploy/backend/vandoxd.yaml", nil)` returns no error
+- [x] AC2 *Backend example loads*: `LoadBackend("../../deploy/backend/vandoxd.yaml", nil)` returns no error
   and the values written in the file.
-- [ ] AC3 *Examples cover every option with its default*: every key path of the schema (`AgentKeys()` /
+- [x] AC3 *Examples cover every option with its default*: every key path of the schema (`AgentKeys()` /
   `BackendKeys()`) is set explicitly in the example file, which is checked through the decoder's key-line
   map. For every key that has a default, the loaded value equals `DefaultAgent()` / `DefaultBackend()`.
   For the required agent keys (`agent_id`, `backend.url`) the example holds a valid placeholder.
-- [ ] AC4 *Defaults*: a file that omits optional keys, holds an empty section (`spool:`) or a section with
+- [x] AC4 *Defaults*: a file that omits optional keys, holds an empty section (`spool:`) or a section with
   all children commented out, or is empty or only comments, yields the defaults:
   - agent: `spool.directory` = `/var/lib/vandox/spool`, `log.level` = `info`;
   - backend: `web.listen` = `:8080`, `ingest.listen` = `:8081`, `storage.directory` = `/data`,
@@ -71,7 +71,7 @@ contain it.
 
   An empty agent file fails with a `*KeyError` `{Key: "agent_id", Line: 0}`. That is the first required
   key, and `backend.url` comes next once `agent_id` is set. An empty backend file loads.
-- [ ] AC5 *Unknown keys*: an unknown key at the top level (`agnet_id`) and inside a section
+- [x] AC5 *Unknown keys*: an unknown key at the top level (`agnet_id`) and inside a section
   (`spool.directry`) fails with a `*KeyError` whose `Key` is the full dotted path (`agnet_id`,
   `spool.directry`) and whose `Line` is the key's line. Keys are case-sensitive (`Log.level` is unknown).
   A key whose last segment contains `token`, `password` or `secret` (in any letter case, e.g. `token`,
@@ -86,7 +86,7 @@ contain it.
   32-character key `S3NT1NEL` + 24 × `a` (sentinel absent), a block-scalar key `? |` with a sentinel line,
   and a quoted key with a dot, `"a.b": 1` (not shown, since `.` would read as a path separator). Known keys and the secret
   hint are matched before the display decision, so `token: x` still gets the hint.
-- [ ] AC6 *Invalid values* fail with a `*KeyError` that names key and line. The value never appears. Table
+- [x] AC6 *Invalid values* fail with a `*KeyError` that names key and line. The value never appears. Table
   per key (accepted forms in *Approach → Value rules*):
   - `agent_id`: empty, 65 bytes, leading `-`, a space, a `/`.
   - `backend.url`: empty; `ftp://h:1`; `h:1` (no scheme); `http://` (no host); `http://u:p@h:1` (user
@@ -111,7 +111,7 @@ contain it.
   - A string value containing a character of Unicode category Cc, Cf, Zl or Zp fails: `"a\x01b"`, a
     block scalar with a newline, `"a b"` (Zl), `"a b"` (Zp), `"a‮b"` and `"﻿a"` (Cf),
     each as `log.level` and as `spool.directory` (`"/var/lib/‮x"`), with the sentinel absent.
-- [ ] AC7 *Unsupported YAML constructs* fail with a `*KeyError` that carries the line (and the key where
+- [x] AC7 *Unsupported YAML constructs* fail with a `*KeyError` that carries the line (and the key where
   there is one): a duplicate key (top level and within a section, line of the second occurrence); a second
   YAML document (`---`); an anchor or alias (`&a`/`*a`); a merge key (`<<: *a` and `<<: {…}`); a
   non-string key (`? [a]`); a custom or unsupported tag (`!env X`, `!!binary aGk=`, `!foo {a: 1}`); a
@@ -137,11 +137,11 @@ contain it.
   `a: b: c` (Line 0, message still begins `config: <file>:`), `a: "\q"`, `a: !x!y z`,
   `a: 1` + newline + `S3NT1NEL: [` (Line 2), and `a: 1` / `---` / `b: [` (a syntax error in the second
   document, Line 3). Line values verified with v3.0.5.
-- [ ] AC8 *File errors* return an error that contains the path and is not a `*KeyError`: missing file
+- [x] AC8 *File errors* return an error that contains the path and is not a `*KeyError`: missing file
   (`errors.Is(err, fs.ErrNotExist)`), a directory, `/dev/null` (not a regular file) and a file of
   `MaxFileBytes+1` bytes. A file of exactly `MaxFileBytes` bytes made of
   comment lines loads (agent: then fails on `agent_id` required, which shows it was read).
-- [ ] AC9 *Secret sources* (`VANDOX_AGENT_TOKEN` as the example, same function for all three):
+- [x] AC9 *Secret sources* (`VANDOX_AGENT_TOKEN` as the example, same function for all three):
   - value from `VANDOX_AGENT_TOKEN` → `Secrets.AgentToken.Value()` equals it;
   - value from `VANDOX_AGENT_TOKEN_FILE=<abs path>` → equals the file content; content `tok\n` and
     `tok\r\n` give `tok`. `tok\n\n`, `tok\r` and `tok \n` are rejected;
@@ -162,11 +162,11 @@ contain it.
     `0x21`–`0x7E` (e.g. a PHC string `$argon2id$v=19$m=65536,t=3,p=4$c2FsdA$aGFzaA`, a Telegram token
     `123456:ABC-def_GHI`) is accepted;
   - the secret value never appears in any of these errors (sentinel in the value or the file).
-- [ ] AC10 *Required and optional secrets*: the agent without `VANDOX_AGENT_TOKEN`/`_FILE` fails with
+- [x] AC10 *Required and optional secrets*: the agent without `VANDOX_AGENT_TOKEN`/`_FILE` fails with
   `*SecretError{Var: "VANDOX_AGENT_TOKEN"}`. An agent token of 31 characters fails on both binaries, and
   32 is accepted. The backend loads with no secret set, and `IsSet()` is then false for all three. The
   backend with all three set returns each value.
-- [ ] AC11 *Environment strictness*: `VANDOX_TELEGRAM_BOT_TOKEN` or `VANDOX_WEB_PASSWORD_HASH` (and their
+- [x] AC11 *Environment strictness*: `VANDOX_TELEGRAM_BOT_TOKEN` or `VANDOX_WEB_PASSWORD_HASH` (and their
   `_FILE` forms) in the agent's environment, `VANDOX_AGENT_TOKN` (typo) and `vandox_agent_token`
   (lower case) on either binary each fail with a `*SecretError` naming the variable. The same known
   variable twice in `environ` fails. Entries without `=` and variables without the prefix (`PATH`,
@@ -174,18 +174,18 @@ contain it.
   is 1–64 bytes of `[A-Za-z0-9_]`. Otherwise `Var` is empty and `Reason` is `unknown VANDOX_ variable (name
   not shown: …)` with the rule. Cases: `VANDOX_A\nB=x`, `VANDOX_‮X=x` (U+202E), `VANDOX_A-B=x`, and
   `VANDOX_` + 58 × `A` (65 bytes); `err.Error()` contains no `\n`, no U+202E and not the name.
-- [ ] AC12 *Redaction*: for a `Secret` holding a sentinel, none of `fmt.Sprintf` with `%v %+v %#v %s %q %x
+- [x] AC12 *Redaction*: for a `Secret` holding a sentinel, none of `fmt.Sprintf` with `%v %+v %#v %s %q %x
   %X %d`, `fmt.Sprint`, `fmt.Sprintf("%+v", agent)` / `("%#v", agent)` of a loaded `*Agent` and of a
   `Backend` value, `json.Marshal(agent)`, `slog` text and JSON handler output of `slog.Any("cfg", agent)`
   and of `slog.Any("s", secret)` contains the sentinel. Each contains `[redacted]`. `Value()` returns the
   sentinel. The zero `Secret` has `IsSet() == false`.
-- [ ] AC13 *Error order and types*: when a file has two problems, the first in document order is reported.
+- [x] AC13 *Error order and types*: when a file has two problems, the first in document order is reported.
   Structure and value errors come before secret and environment errors. `errors.As` finds `*KeyError` and
   `*SecretError`. `KeyError.Error()` has the form `config: <file>:<line>: <key>: <reason>` (`<file>:` alone
   when `Line` is 0, and no `<key>: ` when `Key` is empty). `SecretError.Error()` has the form
   `config: <var>: <reason>` (`config: <reason>` when `Var` is empty), followed by `: <err>` when `Err` is
   set.
-- [ ] AC14 (`internal/wire`) *Shared agent ID rule*: `wire.ValidateAgentID` accepts `web-1`, `a`, 64 × `a`,
+- [x] AC14 (`internal/wire`) *Shared agent ID rule*: `wire.ValidateAgentID` accepts `web-1`, `a`, 64 × `a`,
   `A.b_c-1`, and rejects ``, 65 × `a`, `-a`, `.a`, `a b`, `a/b`, `ä` with a `*model.FieldError{Field:
   "agent_id"}`. The existing `Header.Validate` tests keep passing unchanged.
 

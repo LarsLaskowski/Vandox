@@ -1,6 +1,6 @@
 # 0049: Strict configuration file: schema-only keys, no YAML extras, errors name file, line and key but never the value
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-04
 - **Source:** Issue #11
 - **Supersedes:** —

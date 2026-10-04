@@ -48,14 +48,14 @@ secrets, never from the configuration file, and left *how* loading enforces that
 
 ## Acceptance criteria
 
-- [ ] AC1: Unknown keys, invalid values and unsupported YAML constructs produce a start-up error naming the
+- [x] AC1: Unknown keys, invalid values and unsupported YAML constructs produce a start-up error naming the
   file, line and key, never the value.
-- [ ] AC2: Secrets are taken only from environment variables or `*_FILE` files, under the rules above. The
+- [x] AC2: Secrets are taken only from environment variables or `*_FILE` files, under the rules above. The
   configuration file cannot carry one, and a secret never appears in an error message or in formatted
   output.
-- [ ] AC3: Example configurations exist under `deploy/agent/` and `deploy/backend/`, a test loads them, and
+- [x] AC3: Example configurations exist under `deploy/agent/` and `deploy/backend/`, a test loads them, and
   a test pins that they cover every option with its default.
-- [ ] AC4: Missing options take their defaults, and missing required options are errors.
+- [x] AC4: Missing options take their defaults, and missing required options are errors.
 
 (The plan breaks these into testable criteria AC1–AC14.)
 

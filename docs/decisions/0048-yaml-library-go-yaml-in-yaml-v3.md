@@ -1,6 +1,6 @@
 # 0048: go.yaml.in/yaml/v3 parses the configuration files, through a node tree, not direct decoding
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-04
 - **Source:** Issue #11
 - **Supersedes:** —
