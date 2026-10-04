@@ -129,6 +129,14 @@ or a crashed session finds no untracked files) and after every further completed
 merge* only the PR title and description reach `main`, so intermediate commits may describe the step.
 They never contain secrets.
 
+## Reading issues and pull requests
+
+In the remote sessions GraphQL is blocked, so `gh issue view`, `gh pr view` and `gh search` fail. A member
+that reads an issue or a pull request itself (the Lead checking the issue's claims, the Devil's Advocate,
+the Reviewer) uses `gh api repos/<owner>/<repo>/issues/<n>` and `.../issues/<n>/comments` (for a pull
+request `.../pulls/<n>`), or the GitHub MCP `issue_read` where the member has the tool. Members never post
+to GitHub; the orchestrator does.
+
 ## Concurrency
 
 Only one member that builds or runs tests may work at a time: concurrent builds and test runs share

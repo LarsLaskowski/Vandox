@@ -40,6 +40,10 @@ round number, and — from round 2 on — the previous round's findings and the
 commits that were supposed to fix them. If no round number is given, assume
 round 1.
 
+To read an issue or pull request yourself use `gh api repos/<owner>/<repo>/issues/<n>` (`.../comments`,
+`.../pulls/<n>`); `gh issue view` and `gh pr view` fail where GraphQL is blocked (*Reading issues and pull
+requests* in `.squad/routing.md`).
+
 When invoked by the squad (`squad-issue` / `squad-spec`), the calling session
 also gives you the work folder (`specs/<folder>/`). Then additionally read
 `.squad/agents/reviewer/charter.md` and the folder's `plan.md` (and `spec.md`

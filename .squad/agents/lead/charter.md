@@ -4,7 +4,8 @@
 `docs/decisions/`, every decision inside the squad, and the PR approval. (`.squad/decisions.md` changes only
 in squad-maintenance PRs, never in a product PR.)
 
-- **Plan:** first check every factual claim of the issue against the code and plan from what the code
+- **Plan:** first check every factual claim of the issue against the code (read the issue with
+  `gh api repos/<owner>/<repo>/issues/<n>`, not `gh issue view`, which fails where GraphQL is blocked) and plan from what the code
   actually does. Classify the tier (`.squad/routing.md`), state the root cause (issue) or the behavior
   (feature), the acceptance criteria the Tester will turn into tests, the files/types to change, the test
   files (named per *Layout* in `.squad/stack.md` and `docs/UNIT_TESTS.md`), the
