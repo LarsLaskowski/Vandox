@@ -70,8 +70,10 @@ rules still hold, and `1.24` appears there only as the value at the time.
 
 - The next by-hand bump is due when Go 1.27 leaves support, that is, when Go 1.29 ships. It changes the
   `go` line, the builder tag and the builder digest together (0038).
-- Contributors need a golangci-lint built with Go 1.27 or later (v2.13.1 works). Older builds refuse to
-  run (*Known pitfalls* in `.squad/stack.md`).
+- Contributors need a golangci-lint built with Go 1.27 or later. The v2.13.1 release binary qualifies; a
+  plain `go install …@v2.13.1` does not, because with `GOTOOLCHAIN=auto` it builds with the go1.26
+  toolchain named in golangci-lint's own `go.mod`. Older builds refuse to run (*Known pitfalls* in
+  `.squad/stack.md`, corrected by this change).
 - A local run with `GOTOOLCHAIN=auto` uses `go1.27.0`, so `govulncheck` can report standard-library issues
   locally that are already fixed in the patch CI uses. `.squad/stack.md` documents this pitfall.
 - The planned `/proc` reader can use the standard `io/fs.ReadLinkFS` (Go 1.25 and later; implemented by

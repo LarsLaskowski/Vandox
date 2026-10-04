@@ -40,8 +40,12 @@ Related defects found on the way:
 3. **This sandbox's local golangci-lint is v2.5.0, built with go1.25.1.** It refuses to run against both
    `go 1.26` and `go 1.27`: "the Go language version (go1.25) used to build golangci-lint is lower than the
    targeted Go version". This is the known pitfall in `.squad/stack.md`. The Code Officer must use v2.13.1,
-   the CI version, which is built with go1.27.0 and verified to report `0 issues` on the changed module.
-   It is environment, not repository content.
+   the CI version: the release binary is built with go1.27.0 and was verified to report `0 issues` on
+   the changed module. A plain `go install …@v2.13.1` does **not** give that: golangci-lint's own `go.mod`
+   says `go 1.26.0`, so with `GOTOOLCHAIN=auto` it is built with a go1.26 toolchain and refuses to lint a
+   `go 1.27` module. The advice in the existing pitfall (`.squad/stack.md:75-78`) leads into exactly this
+   trap and is corrected below (Devil's Advocate objection 2). The local binary is environment, not
+   repository content.
 
 Environment facts for this run: local Go is go1.24.7 with `GOTOOLCHAIN=auto`. The `go` command downloads
 the toolchain from `go.mod` itself (with `go 1.27` that is go1.27.0). Docker Hub's registry API is
@@ -58,13 +62,17 @@ is blocked (403)**, so the image build and the online govulncheck scan can only 
   `FROM golang:1.27-trixie@sha256:3b77fc618ec235a1ab412de7737f120dd507c57e8d87de4cbb7994fb94275ed5 AS build`.
   No other line of the Dockerfile changes. The runtime `FROM` keeps its tag and digest.
 - [ ] AC3: `.squad/stack.md` *Toolchain* names Go `1.27`. *Known pitfalls* has the new local-govulncheck
-  entry (wording below). `go.mod`, the builder tag and `stack.md` all name 1.27.
+  entry and the corrected golangci-lint entry, which no longer recommends a plain
+  `go install …@<version>` (wording below). `go.mod`, the builder tag and `stack.md` all name 1.27.
 - [ ] AC4: `.squad/project.md` row `/proc` no longer claims that `io/fs` has no link-reading interface
   (wording below).
 - [ ] AC5: `docs/CONTRIBUTING.md` no longer contains the obsolete section *Before the first stable tag*
-  (lines 142-146, inside the `releases` project block). `rg -n '1\.24' --glob '!specs/**'` finds only
+  (lines 142-146, inside the `releases` project block).
+  `rg -n --hidden '1\.24' --glob '!specs/**' --glob '!.git/**'` finds only
   `.github/workflows/ci.yml:85` (correct, see above), `docs/decisions/0038-…` (accepted record, not
-  rewritten) and record 0040, which names the old value.
+  rewritten) and record 0040, which names the old value. `--hidden` is required: without it `rg` skips
+  `.squad/` and `.github/` (before the change it would miss `.squad/stack.md:9`, `.squad/project.md:149`
+  and `ci.yml:85`).
 - [ ] AC6: Locally under Go 1.27: *Format check*, *Build*, `go vet ./...`, *Test*, and golangci-lint
   v2.13.1 (*Analyzer gate*) are clean.
 - [ ] AC7: In the pull request, CI is green: `build-test-lint`, `Vulnerability scan` (govulncheck against
@@ -89,7 +97,7 @@ none under go1.27.0.
 | AC3 | Read-only diff of `.squad/stack.md`; `grep -n '1\.27' go.mod deploy/backend/Dockerfile .squad/stack.md` | Reviewer (step 8) |
 | AC4 | Read-only diff of `.squad/project.md` | Reviewer (step 8) |
 | AC5 | Read-only diff of `docs/CONTRIBUTING.md`; the `rg` command from AC5 | Reviewer (step 8) |
-| AC6 | *Format check*, *Build*, `go vet ./...`, *Test*, *Analyzer gate* with golangci-lint v2.13.1 on the PATH (`go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.1`). Local `go tool govulncheck ./...` cannot reach vuln.go.dev in this sandbox, so state that plainly in the log; it is not a pass. | Code Officer (step 7) |
+| AC6 | *Format check*, *Build*, `go vet ./...`, *Test*, *Analyzer gate* with golangci-lint v2.13.1 on the PATH, built with Go 1.27: either the release tarball binary (built with go1.27.0) or `GOTOOLCHAIN=go1.27.1 go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.1` — never a plain `go install`, which builds with go1.26 (see related defect 3). Confirm with `golangci-lint version`, which must name `go1.27.x`. Local `go tool govulncheck ./...` cannot reach vuln.go.dev in this sandbox, so state that plainly in the log; it is not a pass. | Code Officer (step 7) |
 | AC7 | GitHub Actions on the PR: `CI` (all three jobs), `CodeQL`, `Release` (dry run, `v0.0.0-dryrun`) | Orchestrator reads the check results in step 11. A red check goes back through steps 7-8 |
 | AC8 | `git diff --name-only origin/main...HEAD`. Allowed: `go.mod`, `go.sum`, `deploy/backend/Dockerfile`, `.squad/stack.md`, `.squad/project.md`, `docs/CONTRIBUTING.md`, `docs/decisions/0040-…`, `specs/issue-103/*` | Reviewer (step 8) |
 
@@ -143,15 +151,18 @@ The Dev makes all of these.
    `` - Go `1.27` (module `github.com/LarsLaskowski/Vandox`); `go.mod` names the minor version without a patch, so `setup-go` uses the newest 1.27.x. ``
 2. `.squad/stack.md`, *Known pitfalls*: append this bullet:
    `` - With `GOTOOLCHAIN=auto`, a local Go older than `go.mod` switches to the `.0` release of that minor version (`go 1.27` → `go1.27.0`). `go tool govulncheck ./...` can then report standard-library vulnerabilities that the current patch, the one CI uses, already fixes. Select the current patch (`GOTOOLCHAIN=go1.27.<n>`) before trusting a local scan. ``
-3. `.squad/project.md:149`, row `/proc`: replace
+3. `.squad/stack.md`, *Known pitfalls*, lines 75-78 (the golangci-lint bullet): replace the whole bullet with
+   `` - `golangci-lint` must be on the PATH; the version in CI (`.github/workflows/ci.yml`) is the reference. It refuses to run ("the Go language version used to build golangci-lint is lower than the targeted Go version") when it was built with an older Go than `go.mod` targets. A plain `go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@<version>` does not avoid this: with `GOTOOLCHAIN=auto` it builds with the Go version from golangci-lint's own `go.mod`, which can be older than this module's. Use the binary from the golangci-lint GitHub release, or force a toolchain at least as new as `go.mod` (`GOTOOLCHAIN=go1.27.<n> go install …@<version>`); `golangci-lint version` shows the Go it was built with. ``
+   (wrapped at the file's usual line width).
+4. `.squad/project.md:149`, row `/proc`: replace
    `` symlink targets such as `/proc/<pid>/fd/*` through a link-reading method on the same small interface, since Go 1.24's `io/fs` has none `` with
    `` symlink targets such as `/proc/<pid>/fd/*` through `io/fs.ReadLinkFS` (Go 1.25 and later; implemented by `os.DirFS` and `fstest.MapFS`, so the blocking wrapper implements it too) ``.
    The rest of the row stays.
-4. `docs/CONTRIBUTING.md`: delete lines 142-146 (the heading `### Before the first stable tag` at 142,
+5. `docs/CONTRIBUTING.md`: delete lines 142-146 (the heading `### Before the first stable tag` at 142,
    the blank line at 143, the two-line paragraph at 144-145 and the blank line at 146), so that line 141
    (blank) is followed directly by `### Re-running a failed release`. This change fulfils that requirement. Keep the
    `<!-- project:… releases -->` markers intact.
-5. `README.md`, `docs/ARCHITECTURE.md`: no change. Neither names a Go version. ARCHITECTURE.md:223
+6. `README.md`, `docs/ARCHITECTURE.md`: no change. Neither names a Go version. ARCHITECTURE.md:223
    ("only after `govulncheck` passes") stays true.
 
 ## Architecture check
@@ -188,6 +199,23 @@ No guarantee from `docs/ARCHITECTURE.md` or `.squad/project.md` is weakened:
   over 1.26), the patch-less `go` directive, and govulncheck raised to v1.8.0. Records 0037 and 0038 are
   neither superseded nor edited: their rules hold. A search for `1\.24` finds this record and 0038 (the
   historical value), plus `ci.yml:85`.
+
+## Challenge
+
+Devil's Advocate verdict: OBJECTIONS, 0 major, 2 minor. Both accepted.
+
+1. **minor — AC5's `rg` skips hidden directories.** Accepted, confirmed: `rg -n '1\.24' --glob '!specs/**'`
+   today misses `.squad/stack.md:9`, `.squad/project.md:149` and `.github/workflows/ci.yml:85`, so AC5
+   could pass with the two `.squad/` lines left stale. AC5 now uses
+   `rg -n --hidden '1\.24' --glob '!specs/**' --glob '!.git/**'` and says why `--hidden` is required. The
+   expected hits are unchanged (`ci.yml:85`, 0038, 0040), and they now include the hidden file they name.
+2. **minor — AC6's `go install …@v2.13.1` produces a go1.26 build that refuses the go 1.27 module.**
+   Accepted, confirmed: golangci-lint v2.13.1's `go.mod` declares `go 1.26.0` with no `toolchain` line, so
+   `GOTOOLCHAIN=auto` builds it with a go1.26 toolchain. The AC6 row now requires the release tarball
+   binary or `GOTOOLCHAIN=go1.27.1 go install …@v2.13.1`, checked with `golangci-lint version`. Related
+   defect 3 explains the trap. *Documentation updates* item 3 rewrites the golangci-lint pitfall at
+   `.squad/stack.md:75-78`, and AC3 checks it. Record 0040 (*Consequences*) no longer says "v2.13.1 works"
+   without qualification.
 
 ## Out of scope / follow-ups
 
