@@ -55,7 +55,10 @@ Security against the diff:
   Tailscale ACL; web UI login; command signing for remote actions (later); Telegram allowlist; agent
   privileges; MariaDB monitoring user; secrets handling), each with a **protection goal** and the decision
   records it rests on — and keeps the four existing code-level areas (file writes, parsing of external
-  input, outbound calls, logging of external data), each also with a protection goal.
+  input, outbound calls, logging of external data), each also with a protection goal. Area 6 names both
+  capabilities, the confinement and the read-everything residual (0030); area 11 keeps transport security
+  (tailnet only for the agent, HTTPS with certificate verification for Telegram and the AI service,
+  certificate verification for TLS checks, never skipped); area 12 covers Telegram messages.
 - [ ] AC2: *Guarantees* states the three guarantees (no data gaps unless explicitly recorded; a hanging
   collector or database never blocks the agent; backfilled data never raises an alert by itself), each with
   its record (0028, 0029, 0022) and its `docs/ARCHITECTURE.md` section; "_None recorded yet._" is gone.
@@ -107,12 +110,21 @@ Keep the title, the intro paragraph and the intro sentence of every section. Rep
 5. **Telegram allowlist** (not implemented yet) — *Goal:* the bot sends only to the private chats of
    allowlisted Telegram user IDs and acts on an update (message, command, callback) only when its sender is
    allowlisted and it comes from that user's private chat; every other update, including any from a group,
-   is ignored without acting on its content and logged only as sanitized metadata. Records 0012, 0031.
+   is ignored without acting on its content and logged only as sanitized metadata. Updates arrive by
+   outbound polling (`getUpdates`) or through a webhook; a webhook is a new inbound endpoint reachable from
+   the internet that 0006, 0012 and 0016 do not cover and needs its own decision (choice left to #60).
+   Records 0012, 0031.
 6. **Agent privileges** (`deploy/agent/`: user, systemd unit; from v0.6.0 the polkit rule) — *Goal:* the
-   agent never runs as root; it holds only the group memberships (`adm`, `systemd-journal`) and
-   capabilities listed and justified in `deploy/agent/`, and — once self-healing exists — a polkit rule
-   that allows restarting only the configured units; a compromised agent gains nothing beyond them.
-   Records 0013, 0030.
+   agent never runs as root; it holds only the group memberships (`adm`, `systemd-journal`), from #42 the
+   capabilities `CAP_SYS_PTRACE` and `CAP_DAC_READ_SEARCH` (bounding set limited to exactly these), and —
+   once self-healing exists — a polkit rule that allows restarting only the configured units, each listed
+   and justified in `deploy/agent/`. While any capability is granted, the unit is confined:
+   `NoNewPrivileges=yes`; `SystemCallFilter=` denies at least `ptrace`, `process_vm_readv`,
+   `process_vm_writev`, `pidfd_getfd` and `open_by_handle_at`, with `SystemCallArchitectures=native`; no
+   write-side capability; `ProtectHome=yes` and `InaccessiblePaths=` for at least `/etc/shadow` and
+   `/etc/gshadow`. So a compromised agent cannot write as or run code as another user. Accepted residual,
+   stated openly: its read access equals root's (every file not made inaccessible, and every process's
+   memory and environment). Records 0013, 0030.
 7. **MariaDB monitoring user** — *Goal:* the agent connects over the local socket as `vandox-agent`,
    authenticated by `unix_socket`, with only the `PROCESS` privilege: no database password exists and no
    table data is readable; the agent issues read-only status queries only. Record 0013.
@@ -127,12 +139,18 @@ Keep the title, the intro paragraph and the intro sentence of every section. Rep
 10. **Parsing of external input** (log files: journal, syslog, MariaDB, mail, Plesk, web server; the ingest
     wire format; CLI arguments and configuration; later Telegram commands) — *Goal:* malformed or hostile
     input yields an error or a skipped record, never a crash, an unbounded allocation or a hang.
-11. **Outbound calls** (Telegram, external checks, the agent's connection to the backend) — *Goal:* every
-    call has a timeout and goes only to its configured destination; the agent's only destination is the
-    ingest port. Records 0006, 0012.
-12. **Logging and display of external data** (log lines and process names from the monitored server) —
-    *Goal:* they cannot inject into log output (control characters, newlines) or into the web UI (HTML is
-    escaped). No record (none decides this yet).
+11. **Outbound calls** (Telegram, external checks, the optional AI service of the nightly report, the
+    agent's connection to the backend) — *Goal:* every call has a timeout, goes only to its configured
+    destination and leaves encrypted to a verified peer. The agent's only destination is the ingest port,
+    reached only over the tailnet (WireGuard encryption and node authentication by Tailscale), never over a
+    public address. Telegram and the AI service are called over HTTPS with certificate verification;
+    external checks verify the certificate whenever they use TLS, and a failed verification is a check
+    result. Certificate verification is never switched off (no `InsecureSkipVerify`), and no secret is sent
+    over an unencrypted connection. Records 0006, 0008, 0010, 0012, 0017, 0023.
+12. **Logging and display of external data** (log lines, process names and text derived from them, e.g. an
+    AI-written report) — *Goal:* they cannot inject into log output (control characters, newlines), into
+    the web UI (HTML is escaped) or into Telegram messages (escaped for the parse mode used, or sent as plain
+    text without a parse mode). Record 0031 for Telegram; none decides log output and UI escaping yet.
 
 **Guarantees** (each: statement, `docs/ARCHITECTURE.md` section, record):
 
@@ -184,15 +202,18 @@ rows; the first feature that introduces a surface adds its double under this nam
   readable only by the service user" with "only in environment variables or Docker secrets, never in the
   configuration file or on the command line" (0032); "run the agent with minimal privileges" becomes "run
   the agent as the dedicated user `vandox-agent`, never as root, with only the rights listed in
-  `deploy/agent/`" (0030); add: the Tailscale ACL must allow the monitored server only the ingest port on
+  `deploy/agent/`, and keep the unit's confinement (system-call filter, no further capabilities); its
+  capabilities give it read access to everything on the server, so treat the server's credentials as
+  readable by the agent" (0030); add: the Tailscale ACL must allow the monitored server only the ingest port on
   the backend host (0010), and the Telegram user allowlist must be set (0031).
 - *Scope*, in scope: replace the inline list with the area names from `.squad/project.md` *Security areas*
   (ingest authentication, Tailscale ACL and port binding as documented, web UI login, command signing for
   remote actions once released, Telegram allowlist, agent privileges, MariaDB monitoring user, secrets
-  handling, file writes, parsing of external input, outbound calls, logging and display of external data).
+  handling, file writes, parsing of external input, outbound calls including their transport security,
+  logging and display of external data in log output, the web UI and Telegram messages).
   Add explicitly: attacks by an unprivileged local user of the monitored server against the agent or its
-  secrets (e.g. reading a secret from `/proc/<pid>/cmdline` or the environment, abusing the agent's rights)
-  are in scope.
+  secrets (e.g. reading a secret from `/proc/<pid>/cmdline` or the environment, abusing the agent's rights,
+  escaping the agent unit's confinement to write or run code as another user) are in scope.
 - *Scope*, out of scope: replace "Attacks that require local system access or physical access to the host"
   with "Attacks that require root or physical access to the monitored server or to the backend host" — the
   old wording would exclude exactly the local-access threats that the agent-privilege (0030) and secrets
@@ -211,7 +232,10 @@ rows; the first feature that introduces a surface adds its double under this nam
   from the configuration file (0032).
 - *Security model*: add the agent runs as the dedicated user `vandox-agent`, never as root, with only the
   groups and capabilities listed in `deploy/agent/`, and from v0.6.0 a polkit rule that allows restarting
-  only the configured units (0030); the Telegram bot sends to and accepts updates only from allowlisted
+  only the configured units; the two capabilities it needs to read other users' processes
+  (`CAP_SYS_PTRACE`, `CAP_DAC_READ_SEARCH`) give it root's read access, so its systemd unit denies the
+  process-attach system calls and grants no write-side capability — a compromised agent can read
+  everything on the server but cannot write as or run code as another user (0030); the Telegram bot sends to and accepts updates only from allowlisted
   users in their private chats (0031); secrets come only from environment variables or Docker secrets
   (0032). Add 0030, 0031, 0032 to *Records*.
 
@@ -257,7 +281,9 @@ without contradicting it; 0030 extends 0013 (the agent runs as OS user `vandox-a
 The content is the security model itself, hence tier `security`. Points for Security to check: that no
 existing area was dropped while restructuring; that the protection goals are verifiable by later reviews;
 that `SECURITY.md` keeps the private reporting channel and does not invite public disclosure; that no
-secret, internal hostname, tailnet address or Telegram user or chat ID is written into any file.
+secret, internal hostname, tailnet address or Telegram user or chat ID is written into any file; that 0030
+describes the capabilities, the confinement and the residual accurately enough for the #42 diff review to
+check the unit against it.
 
 ## Decision records
 
@@ -307,12 +333,51 @@ records and issues #42, #43, #60, #69, #70, #73, #78, and accepted. Scope and ti
 7. **Minor — area 12 cites 0021.** Accepted: area 12 cites no record, since none decides output escaping
    yet.
 
+## Security review
+
+Security, plan review round 1: CHANGES_REQUIRED (3 blocking, 1 non-blocking). All four accepted; scope and
+tier unchanged.
+
+1. **B1 — "not root" was false for the capabilities #42 needs.** Accepted, option (a). 0030 now names
+   `CAP_SYS_PTRACE` (ptrace access check for `smaps_rollup` and `fd` link targets; also attach to any
+   process) and `CAP_DAC_READ_SEARCH` (listing `/proc/<pid>/fd`; also read every file, other processes'
+   `environ`/`mem`, `open_by_handle_at`). The decision is now option 4: the two capabilities with a
+   mandatory confinement — `NoNewPrivileges=yes`, `SystemCallFilter=` denying at least `ptrace`,
+   `process_vm_readv`, `process_vm_writev`, `pidfd_getfd` and `open_by_handle_at` with
+   `SystemCallArchitectures=native`, no write-side capability, `ProtectHome=yes` and `InaccessiblePaths=`
+   for `/etc/shadow` and `/etc/gshadow`. Checked as asked: the filter is consistent with the reads, because
+   procfs applies the ptrace access check (`ptrace_may_access`) inside `open`/`readlink`/`read`, not through
+   `ptrace(2)`; the record says so, and that `pidfd_open`/`pidfd_send_signal` (used by Go's `os/exec`) must
+   stay allowed. The read-everything residual (files, process memory and environment — the latter are
+   plain reads no filter can block) is stated openly as accepted, including that credentials read this way
+   may lead to root through other services. Unconfined capabilities (option 3) and a privileged helper
+   (option 5) are recorded as rejected with reasons. Area 6's goal, the `docs/ARCHITECTURE.md`
+   *Security model* edit, the `SECURITY.md` deployment advice and scope, and AC1 follow. The #42 review must
+   verify on the target system that the reads work under the filter and `PTRACE_SEIZE` fails with `EPERM`.
+   No escalation: the guarantee "never runs as root" holds; what is narrowed is a claim no accepted record
+   or `docs/ARCHITECTURE.md` made ("gains nothing beyond them"), and it is replaced by the true statement.
+2. **B2 — transport security dropped from outbound calls.** Accepted. Area 11 now requires every call to
+   leave encrypted to a verified peer: the agent only over the tailnet (0010, 0017, 0023), Telegram and the
+   optional AI service of the nightly report (0008, found on the way: also an outbound call) over HTTPS with
+   certificate verification, TLS checks with verification, never `InsecureSkipVerify`, no secret over an
+   unencrypted connection. For external checks the wording is "whenever they use TLS", since a check
+   may probe a plain-text port (e.g. a mail service's banner) where no certificate exists; a failed verification is a check result.
+3. **B3 — Telegram missing from area 12.** Accepted. Area 12 now covers Telegram messages (external data
+   escaped for the parse mode used, or sent as plain text), including AI-written text; 0031 gains the same
+   consequence; the `SECURITY.md` scope names log output, web UI and Telegram messages.
+4. **N1 — polling vs. webhook.** Accepted. 0031 *Consequences* and area 5 state that `getUpdates` polling
+   adds no inbound endpoint, a webhook would be a new internet-facing endpoint not covered by 0006, 0012 and
+   0016 and needs its own decision; the choice stays with #60.
+
 ## Out of scope / follow-ups
 
 - Choosing the password-hash algorithm, session lifetime and rate-limit values: with the web UI login
   feature (its own record).
-- The concrete capabilities: with each collector that needs them and the hardening work (#42, 0030); the
-  polkit rule: with the restart feature (#70).
+- The unit file with the two capabilities and the confinement 0030 requires, further `InaccessiblePaths=`
+  entries for credential stores on the target system, and the on-target check that reads work and
+  `PTRACE_SEIZE` fails: with #42 (0030); the polkit rule: with the restart feature (#70). Moving the
+  capabilities into a separate helper (0030 option 5) would need a superseding record.
+- Telegram update delivery (polling or webhook; a webhook needs its own decision): with #60 (0031).
 - How configuration loading enforces "no secrets in the configuration file": with the configuration
   feature (0032).
 - Whether maintainer devices may reach the web UI over the tailnet (#43) next to 0016's "home LAN only":

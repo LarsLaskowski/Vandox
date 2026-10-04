@@ -41,3 +41,11 @@ and accepts nothing.
 - Rejected updates are logged (issue #73) only as sanitized metadata (sender ID, chat type, time), never
   with their content.
 - Sending alerts to a group would need a superseding record.
+- The allowlist only works if updates reach `vandoxd` through a channel this record covers. Receiving
+  updates by outbound polling (`getUpdates`) adds no inbound endpoint; a webhook would be a new endpoint
+  reachable from the internet, which 0006, 0012 and 0016 do not cover and which would need its own
+  `security`-tier decision (verifying Telegram's secret token, exposure through the reverse proxy). The
+  choice is left to issue #60.
+- Messages carry external data (log lines, process names, a report possibly written by the optional AI,
+  0008): it is escaped for the parse mode used, or the message is sent as plain text without a parse mode,
+  so log content cannot alter the message's formatting or links.
