@@ -3,7 +3,7 @@
 <!-- project:begin architecture -->
 Vandox is lean monitoring for a Plesk-managed Linux server, with analysis first: it reconstructs outages
 from logs and system metrics and warns early. `vandox-agent` runs on the monitored server; `vandoxd`, the
-backend with web UI, runs as a Docker container on a Synology NAS in the home network.
+backend with web UI, runs as a Docker container on any Docker host in the home network (for example a NAS such as Synology or QNAP, a mini PC or a server; called the *backend host* below).
 
 This document describes the target architecture; as of now only the two binaries' `--version` exist, and
 sections are marked as implemented as features land. The decisions behind it are recorded in
@@ -25,7 +25,7 @@ way, and agents of the hosting provider are never disabled or changed
   and network snapshots (read from `/proc`), service and MariaDB state, kernel events and logs, keeps them in
   an on-disk spool and sends them to the backend. It checks the state of the mail services, not individual
   mail accounts.
-- `cmd/vandoxd` — Go, one container on the NAS: ingest API, SQLite storage, analysis, rules, Telegram
+- `cmd/vandoxd` — Go, one container on the backend host: ingest API, SQLite storage, analysis, rules, Telegram
   notifier, reports and web UI.
 - `internal/` — packages shared by both binaries: data model and versioned wire format, log parsing,
   signatures, version information.
@@ -39,7 +39,7 @@ flowchart LR
         C[Collectors] --> SP[(On-disk spool)]
         SP --> SN[Sender]
     end
-    subgraph NAS["vandoxd on the NAS"]
+    subgraph NAS["vandoxd on the backend host"]
         IN[Ingest API] --> DB[(SQLite)]
         DB --> AN[Analysis]
         AN --> RU[Rules]
@@ -68,7 +68,7 @@ The agent collects data and writes it to its spool, then sends it in batches ove
 API. The backend stores the batches in SQLite; analysis, rules, the web UI and Telegram work from the stored
 data. Detection, incident reconstruction and alerting are deterministic (rules, thresholds, log signatures);
 AI is optional and only used to write the nightly report, which is sent at 06:00, or as soon as the backfill
-has completed if the NAS was off at that time. The first release (v0.1.0) is the forensics release:
+has completed if the backend host was off at that time. The first release (v0.1.0) is the forensics release:
 collection, log import, spool and backfill, storage and the historical views; alerting, the nightly report
 and remote actions build on it.
 
@@ -93,9 +93,9 @@ Records: [0006](decisions/0006-agent-connects-outbound-only.md),
 ## Network
 
 The agent connects outbound only and never listens on a port. It sends to the ingest port published on the
-NAS's tailnet address; `vandoxd` does not embed Tailscale. The Tailscale ACL allows the monitored server to
+backend host's tailnet address; `vandoxd` does not embed Tailscale. The Tailscale ACL allows the monitored server to
 reach only that port and nothing else. The web UI is reachable in the home LAN only and requires a login;
-TLS for it is terminated by the Synology reverse proxy, while the ingest path bypasses the proxy and is
+TLS for it is terminated by a reverse proxy in front of the container (e.g. the NAS's built-in one), while the ingest path bypasses the proxy and is
 encrypted by Tailscale. Telegram is contacted only by the backend, never by the agent.
 
 ```mermaid
@@ -105,10 +105,10 @@ flowchart LR
         TGA[Telegram API]
     end
     subgraph Tailnet["Tailnet"]
-        ING["NAS tailnet address : ingest port"]
+        ING["Backend host tailnet address : ingest port"]
     end
     subgraph LAN["Home LAN"]
-        BR[Browser] -- "HTTPS, login" --> RP[Synology reverse proxy, TLS]
+        BR[Browser] -- "HTTPS, login" --> RP[Reverse proxy, TLS]
         RP --> UI[vandoxd web UI]
         ING --> BE[vandoxd]
         BE -- "outbound" --> TGA
@@ -119,17 +119,17 @@ flowchart LR
 Records: [0010](decisions/0010-tailscale-with-strict-acl.md),
 [0016](decisions/0016-web-ui-in-home-lan-with-login.md),
 [0017](decisions/0017-ingest-via-tailnet-address-and-published-port.md),
-[0023](decisions/0023-tls-through-synology-reverse-proxy.md).
+[0023](decisions/0023-tls-through-a-reverse-proxy.md).
 
 ## Offline behavior and backfill
 
-The NAS runs 24/7 but is sometimes switched off at night (typically 22:00–09:00) a few times a year. While
+The backend host runs 24/7 but is sometimes switched off at night (typically 22:00–09:00) a few times a year. While
 the backend is unreachable the agent keeps collecting and spools at least 7 days on disk. When the backend
 is reachable again it sends current data first, then backfills the spool chronologically and throttled.
 Every batch carries an identity and sequence number, so a resend is idempotent and the backend can detect
 gaps. `vandoxd` classifies every record as live or backfilled from its capture time, its receive time and
 gaps in the sequence numbers; alert rules are evaluated on live data only, and backfilled data is stored and
-analyzed but never alerts. The nightly report waits for the backfill if the NAS was off at 06:00.
+analyzed but never alerts. The nightly report waits for the backfill if the backend host was off at 06:00.
 
 Records: [0018](decisions/0018-agent-spools-seven-days-and-backfills.md),
 [0022](decisions/0022-backfill-detection-and-live-only-alerts.md),
@@ -174,8 +174,8 @@ is not implemented yet.
 
 The agent and the backend communicate only over a private Tailscale network. The agent connects outbound
 only and never listens on a port, and the Tailscale ACL lets the monitored server reach only the ingest port
-on the NAS. The web UI is protected by a login and runs behind the Synology reverse proxy. The Telegram token
-exists only on the NAS. The agent reads MariaDB over the local socket as the user `vandox-agent`, identified
+on the backend host. The web UI is protected by a login and runs behind a reverse proxy. The Telegram token
+exists only on the backend host. The agent reads MariaDB over the local socket as the user `vandox-agent`, identified
 via `unix_socket` and granted only `PROCESS`. Log data is not pseudonymized. Secrets are never logged. Kept
 in sync with `SECURITY.md` and the *Security areas* in `.squad/project.md`.
 

@@ -43,14 +43,14 @@ links the record.
 | [0014](0014-log-import-is-a-core-component.md) | Log import is a core component | Accepted | 2026-10-03 |
 | [0015](0015-mail-services-checked-not-mail-accounts.md) | Mail services are checked, mail accounts are not | Accepted | 2026-10-03 |
 | [0016](0016-web-ui-in-home-lan-with-login.md) | Web UI reachable in the home LAN with a login | Accepted | 2026-10-03 |
-| [0017](0017-ingest-via-tailnet-address-and-published-port.md) | Ingest via the NAS's tailnet address and a published port, not tsnet | Accepted | 2026-10-03 |
+| [0017](0017-ingest-via-tailnet-address-and-published-port.md) | Ingest via the backend host's tailnet address and a published port, not tsnet | Accepted | 2026-10-03 |
 | [0018](0018-agent-spools-seven-days-and-backfills.md) | The agent spools at least 7 days and backfills gaplessly and idempotently | Accepted | 2026-10-03 |
 | [0019](0019-agent-reads-proc-instead-of-top-lsof.md) | The agent reads /proc itself instead of running top or lsof | Accepted | 2026-10-03 |
 | [0020](0020-analysis-before-alerting-forensics-release.md) | Analysis before alerting — v0.1.0 is the forensics release | Accepted | 2026-10-03 |
 | [0021](0021-no-pseudonymization-of-log-data.md) | No pseudonymization of log data | Accepted | 2026-10-03 |
 | [0022](0022-backfill-detection-and-live-only-alerts.md) | Backfill is recognized from the data; alerts only on live values | Accepted | 2026-10-03 |
-| [0023](0023-tls-through-synology-reverse-proxy.md) | TLS through the Synology reverse proxy | Accepted | 2026-10-03 |
-| [0024](0024-nightly-report-timing.md) | Nightly report at 06:00, or after the backfill if the NAS was off | Accepted | 2026-10-03 |
+| [0023](0023-tls-through-a-reverse-proxy.md) | TLS through a reverse proxy | Accepted | 2026-10-03 |
+| [0024](0024-nightly-report-timing.md) | Nightly report at 06:00, or after the backfill if the backend host was off | Accepted | 2026-10-03 |
 | [0025](0025-server-ram-stays-at-2-gb.md) | The server's RAM stays at 2 GB | Accepted | 2026-10-03 |
 | [0026](0026-services-disabled-reversibly-only.md) | Services are only disabled reversibly; hosting-provider agents are never touched | Accepted | 2026-10-03 |
 | [0027](0027-project-name-and-docker-image.md) | Project name Vandox; images on Docker Hub as networlddev/vandox | Accepted | 2026-10-03 |

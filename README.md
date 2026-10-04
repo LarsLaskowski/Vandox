@@ -9,7 +9,7 @@ parsing and signatures.
 | Binary | Runs on | Purpose |
 |---|---|---|
 | `vandox-agent` | the monitored Linux server | collects data and ships it to the backend |
-| `vandoxd` | Docker container on a Synology NAS in the home network | backend with web UI |
+| `vandoxd` | Docker container on any Docker host in the home network (NAS, mini PC, server) | backend with web UI |
 
 Both support `--version`, which prints version, commit and build date.
 

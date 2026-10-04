@@ -8,7 +8,7 @@
 ## Context
 
 The monitored server is reachable from the internet and hosts customer services. Every listening port on
-it is attack surface. The backend sits on a NAS in the home network that is not always on.
+it is attack surface. The backend sits on a Docker host in the home network that is not always on.
 
 ## Options considered
 

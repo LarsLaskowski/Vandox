@@ -7,7 +7,7 @@
 
 ## Context
 
-The agent on an internet-facing server has to reach the backend on a NAS in the home network. The home
+The agent on an internet-facing server has to reach the backend on a Docker host in the home network. The home
 network should not open a port to the internet, and a compromised server must not be able to reach the
 rest of the home network.
 
@@ -22,7 +22,7 @@ rest of the home network.
 ## Decision
 
 Option 3: agent and backend communicate over Tailscale. The tailnet ACL allows the monitored server to
-reach only the ingest port on the NAS and nothing else.
+reach only the ingest port on the backend host and nothing else.
 
 ## Consequences
 
