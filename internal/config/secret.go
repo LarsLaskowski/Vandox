@@ -19,20 +19,33 @@ const (
 )
 
 // Secret holds a secret value and never reveals it through formatting, logging or marshaling.
+//
+// The value is stored behind a pointer on purpose: for a verb that does not apply to a struct, such as %p
+// on a non-pointer, fmt skips the Formatter and prints the struct fields through reflection, which would
+// show a string field. A pointer field is printed as an address only.
 type Secret struct {
-	value string
+	value *string
 }
 
-// Value returns the secret value. It is the only accessor.
-func (s Secret) Value() string { return s.value }
+// newSecret returns a Secret holding v.
+func newSecret(v string) Secret { return Secret{value: &v} }
+
+// Value returns the secret value, or "" if the secret is not set. It is the only accessor.
+func (s Secret) Value() string {
+	if s.value == nil {
+		return ""
+	}
+	return *s.value
+}
 
 // IsSet reports whether the secret holds a value.
-func (s Secret) IsSet() bool { return s.value != "" }
+func (s Secret) IsSet() bool { return s.value != nil && *s.value != "" }
 
 // String returns "[redacted]".
 func (s Secret) String() string { return redactedText }
 
-// Format writes "[redacted]" for every verb.
+// Format writes "[redacted]" for every verb that fmt passes to the Formatter. A bad verb on a non-pointer
+// value is not passed on, which the pointer in the value field covers.
 func (s Secret) Format(f fmt.State, _ rune) { _, _ = io.WriteString(f, redactedText) }
 
 // LogValue returns slog.StringValue("[redacted]").
@@ -149,7 +162,7 @@ func secretFromValue(variable, v string) (Secret, error) {
 			return Secret{}, &SecretError{Var: variable, Reason: "must consist of printable ASCII characters without spaces"}
 		}
 	}
-	return Secret{value: v}, nil
+	return newSecret(v), nil
 }
 
 // readSecretFile reads a secret from the file at path, which is the value of fileVar. Neither the path nor
@@ -212,7 +225,7 @@ func readAgentToken(env map[string]string, required bool) (Secret, error) {
 		}
 		return Secret{}, nil
 	}
-	if len(token.value) < MinAgentTokenBytes {
+	if len(token.Value()) < MinAgentTokenBytes {
 		return Secret{}, &SecretError{Var: EnvAgentToken, Reason: "must be at least " + strconv.Itoa(MinAgentTokenBytes) + " characters"}
 	}
 	return token, nil

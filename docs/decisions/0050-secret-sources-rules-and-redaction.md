@@ -54,7 +54,9 @@ load time. Unknown `VANDOX_` variables are rejected (option 6 rejected).
   binary knows, and each may appear only once. Otherwise loading fails. The Telegram or web secrets in the
   agent's environment are therefore a start-up error.
 - Secrets are held in `config.Secret`. Every `fmt` verb, `String()`, `slog` (`LogValuer`) and text/JSON
-  marshalling print `[redacted]`. Only `Value()` returns the secret. `*SecretError` names the variable
+  marshalling print `[redacted]`. A verb that does not apply to a non-pointer value, such as `%p`, is not
+  passed to `Format`: `fmt` prints the struct fields by reflection instead. The value is therefore stored
+  behind a pointer (`value *string`), which such a path prints as an address only. Only `Value()` returns the secret. `*SecretError` names the variable
   and the rule, never the value, the file content or the `_FILE` value. An empty or relative `_FILE`
   value is rejected without any file system call. An absolute `_FILE` path is not shown either; for a
   file system error only the bare error number is kept (so "no such file or directory" still shows and

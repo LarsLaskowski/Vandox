@@ -23,8 +23,8 @@ const (
 )
 
 // secretFixture returns a Secret holding value. The value field is set directly because the package is
-// tested white-box and the constructor is the loader.
-func secretFixture(value string) Secret { return Secret{value: value} }
+// tested white-box; it goes through newSecret because the value field is a pointer.
+func secretFixture(value string) Secret { return newSecret(value) }
 
 func TestSecret_Redaction(t *testing.T) {
 	s := secretFixture(secretValue)
