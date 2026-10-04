@@ -16,6 +16,12 @@ A Docker Hub personal access token cannot be limited to one repository: its scop
 secret is readable by any workflow run that a person with write access starts on any branch. It is not
 readable by fork pull requests or by Dependabot.
 
+A tag push runs the workflow file *as it is in the tagged commit*, and an environment's deployment rule
+matches only the ref name. Anyone who can create a `v*.*.*` tag can therefore tag a side-branch commit
+carrying a modified `release.yml`, for example one without the ancestry check or one that prints the token.
+The environment alone does not prevent this. The repository is public and owned by a user account. On
+2026-10-04 its only ruleset was the branch ruleset `main-Protection`.
+
 ## Options considered
 
 1. **Where the token is stored**
@@ -37,11 +43,24 @@ readable by fork pull requests or by Dependabot.
    - *As an environment variable `DOCKERHUB_USERNAME`*: it is not confidential.
 
    Chosen: the variable.
+4. **Who may start a release (who may create `v*` tags)**
+   - *Anyone with write access* (no tag protection): the environment would protect nothing against a
+     collaborator, as described above.
+   - *A tag ruleset on `refs/tags/v*` that restricts creation, update and deletion, with only Repository
+     admin as bypass*: only the owner, who controls the token anyway, can start a release.
+   - *Additionally, a required reviewer on environment `release`*: stops even an admin's tag until someone
+     approves. With a single maintainer this only adds a manual click on their own release, which goes
+     against issue #9's "without manual steps".
+
+   Chosen: the tag ruleset. The required reviewer is optional, and recommended once a second person has
+   write access.
 
 ## Decision
 
 The token is stored as the secret `DOCKERHUB_TOKEN` of the GitHub environment `release`, with a deployment
-rule for tags `v*.*.*` only. The login name is the environment variable `DOCKERHUB_USERNAME`.
+rule for tags `v*.*.*` only. A repository tag ruleset `release-tags` on `refs/tags/v*` restricts creating,
+moving and deleting those tags to the Repository admin role. The maintainer creates it before storing the
+token. The login name is the environment variable `DOCKERHUB_USERNAME`.
 
 Only the `publish-image` job of `.github/workflows/release.yml` declares the environment. It passes the
 token to `docker login --password-stdin`, never on a command line, and runs `docker logout` at the end. The
@@ -55,8 +74,12 @@ describes creating and rotating it.
 - A leaked token can push to `networlddev/vandox` only, not to other repositories of the organization.
   Within that repository it can still overwrite tags. The workflow itself never overwrites a version tag
   (0038).
-- Creating the environment, the token and its scope is a manual step for the maintainer and cannot be
-  verified from the repository.
+- Creating the ruleset, the environment, the token and its scope is a manual step for the maintainer. It
+  cannot be verified from the repository. The ruleset can be checked with `gh api repos/{owner}/{repo}/rulesets`.
+- Residual risk: the boundary for "published only from `main`" is the tag ruleset. The in-workflow ancestry
+  check (0037) cannot be that boundary. Anyone allowed to create `v*` tags controls the workflow run that
+  reads the token. That is the admin today; adding a bypass actor extends it. Without the ruleset, every
+  collaborator with write access could publish.
 - If the Docker Hub subscription offers neither organization access tokens nor teams, the "this
   repository only" scope cannot be reached. Accepting an account-wide token then needs a new record that
   states the residual.

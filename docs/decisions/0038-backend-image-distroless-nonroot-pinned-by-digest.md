@@ -39,6 +39,24 @@ and says the Dockerfile must live there. `vandoxd` currently only prints its ver
    - Only for the highest stable tag: `latest` is always the newest stable release.
 
    Chosen: only for the highest stable tag.
+5. **Keeping both binaries on the same Go toolchain**
+   - The problem: `vandox-agent` is built on the runner with `setup-go` from `go.mod`, and `vandoxd` in the
+     Docker builder stage. Dependabot's `docker` ecosystem proposes newer `golang` version tags
+     (`1.24-trixie` → `1.26-trixie`), so the two could drift apart.
+   - *Single-stage image*: build `vandoxd` on the runner with the agent's flags and `COPY` it into
+     distroless. One toolchain and one ldflags string. Rejected: issue #13 asks for a multi-stage
+     Dockerfile, and the image could no longer be rebuilt from the tag with `docker build` alone.
+   - *Multi-stage, with a Dependabot `ignore` for `golang` minor and major updates, plus a workflow check*
+     that the builder tag's `<major>.<minor>` equals `go.mod`'s `go` directive.
+
+   Chosen: the ignore rule and the check.
+6. **Checking that a version already exists**
+   - *Fail only if `docker manifest inspect` succeeds*: any other error (rate limit, 5xx, network, missing
+     rights) would count as "absent". The check would fail open.
+   - *Count only an explicit not-found (`no such manifest` / `manifest unknown`) as absent, and fail on any
+     other error*.
+
+   Chosen: the second. It fails closed.
 
 ## Decision
 
@@ -49,14 +67,17 @@ builds `vandoxd` with the flags from record 0037. The runtime stage is
 `gcr.io/distroless/static-debian13:nonroot@sha256:…` with `USER 65532:65532` and `ENTRYPOINT ["/vandoxd"]`.
 
 Every `FROM` carries the multi-arch index digest after the tag, and the release workflow fails if one does
-not. Dependabot (0036) updates the digests.
+not. Dependabot (0036) updates the digests. `.github/dependabot.yml` ignores `golang` minor and major
+version updates (`version-update:semver-minor`, `version-update:semver-major`). The release workflow fails if
+the builder tag's `<major>.<minor>` differs from the `go` directive in `go.mod`.
 
 Image tags:
 
 - a stable tag `vX.Y.Z` is published as `X.Y.Z`, and also as `latest` when it is the highest stable `v*.*.*`
   tag (`sort -V`)
 - a pre-release `vX.Y.Z-…` is published only as `X.Y.Z-…`
-- an existing version tag on Docker Hub is never overwritten
+- an existing version tag on Docker Hub is never overwritten. The publish job pushes only after
+  `docker manifest inspect` has reported an explicit not-found. Any other error stops the job.
 
 ## Consequences
 
@@ -67,5 +88,9 @@ Image tags:
   a different runtime base (`distroless/base` or `cc`) and a record superseding this one.
 - Volumes mounted into the container must be writable by UID/GID 65532. #13 documents this for the
   backend host.
-- The builder follows `go.mod`'s Go version. Raising it means changing the builder tag and digest in the
-  same change.
+- The builder follows `go.mod`'s Go version. Raising it means changing the builder tag and digest by hand
+  in the same change. Dependabot does not propose it, and the workflow check rejects a mismatch.
+- The two binaries share the Go minor version but may differ in patch version. `setup-go` takes the latest
+  patch release, and the pinned builder digest only moves when Dependabot updates it. This is accepted.
+- A Docker Hub outage or rate limit during a release stops the publish job before the push. A re-run
+  continues from there.

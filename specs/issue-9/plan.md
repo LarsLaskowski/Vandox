@@ -319,7 +319,9 @@ Made by the Dev, inside the `<!-- project:… -->` blocks where the file has the
   alerts) concern runtime behavior. This change does not touch them.
 - 0027 (Docker Hub, `networlddev/vandox`): implemented as decided.
 - 0036 (Dependabot `docker` at `/deploy/backend`): the Dockerfile lands in that directory, so Dependabot
-  starts updating both pinned digests.
+  starts updating both pinned digests. The new `ignore` rule for `golang` minor and major updates narrows
+  that entry but does not contradict 0036: the entry, its directory and its schedule stay. Record 0038
+  explains the reason.
 - 0001 / 0035 (gates local, CI as system of record): unchanged. The release workflow adds no coverage or
   analyzer gate.
 - 0032 (secrets only from environment or Docker secrets) concerns the product's runtime secrets. The CI
@@ -366,17 +368,19 @@ Made by the Dev, inside the `<!-- project:… -->` blocks where the file has the
 
 ## Maintainer actions (outside the repository; flagged to the Product Manager)
 
-0. Create the tag ruleset `release-tags` (AC12) before storing the token. *Settings → Rules → Rulesets → New
-   tag ruleset*: target `refs/tags/v*`, enforcement *Active*, enable *Restrict creations*, *Restrict updates*
-   and *Restrict deletions*, and add the bypass *Repository admin* with mode *Always*.
-1. Create the GitHub environment `release`. Under *Deployment branches and tags* choose *Selected branches
-   and tags*, with the tag rule `v*.*.*` and no branch.
-2. Create the Docker Hub token (record 0039; steps in `docs/CONTRIBUTING.md`). Store it as the environment
-   secret `DOCKERHUB_TOKEN` and the login name as the environment variable `DOCKERHUB_USERNAME`. Make sure the
-   repository `networlddev/vandox` exists. If the subscription offers neither an organization access token nor
-   teams, AC10 ("token scoped to push for this repository only") cannot be met. The maintainer then has to
-   decide whether to accept an account-wide *Read & Write* token as a recorded residual.
-3. After merge, push a test tag on `main` (recommended `v0.0.1-rc.1`) and check AC9. Removing the test
+1. Create the tag ruleset `release-tags` (AC12) **before** storing the token. Go to *Settings → Rules →
+   Rulesets → New tag ruleset*. Set the target `refs/tags/v*` and the enforcement *Active*. Enable *Restrict
+   creations*, *Restrict updates* and *Restrict deletions*, and add the bypass *Repository admin* with mode
+   *Always*.
+2. Create the GitHub environment `release`. Under *Deployment branches and tags* choose *Selected branches
+   and tags*, with the tag rule `v*.*.*` and no branch. A required reviewer is optional, and recommended
+   only once a second person has write access (record 0039).
+3. Create the Docker Hub token (record 0039; steps in `docs/CONTRIBUTING.md`). Store it as the environment
+   secret `DOCKERHUB_TOKEN`, and the login name as the environment variable `DOCKERHUB_USERNAME`. Make sure the
+   repository `networlddev/vandox` exists. If the subscription offers neither an organization access token
+   nor teams, AC10 ("token scoped to push for this repository only") cannot be met. The maintainer then has
+   to decide whether to accept an account-wide *Read & Write* token as a recorded residual.
+4. After merge, push a test tag on `main` (recommended `v0.0.1-rc.1`) and check AC9. Removing the test
    release, tag or image tag afterwards is the maintainer's call. Deleting tags or releases needs explicit
    approval under the golden rules.
 
@@ -400,3 +404,46 @@ Not in this change:
 - the serving backend, `HEALTHCHECK` and compose file (#13)
 - agent installation files (#42)
 - the Docker Hub repository description
+
+## Challenge
+
+Devil's Advocate, 2026-10-04: 1 major, 3 minor objections. All four are accepted. Scope and tier are unchanged
+(`security`).
+
+1. **major — the "only from a tag on `main`" guarantee is enforced by code the tagger controls. Accepted.**
+   The objection is correct. On a tag push, GitHub runs `release.yml` as it is in the tagged commit. The
+   environment's deployment rule matches only the tag name. So anyone with write access could push a
+   modified workflow on a side branch, tag it `v9.9.9` and get the token.
+   - Revised:
+     - new maintainer criterion AC12 and maintainer action 1: a tag ruleset `release-tags` on
+       `refs/tags/v*` that restricts creation, update and deletion to *Repository admin*. The repository is
+       public and user-owned, so the ruleset is available, and the admin is the owner, who controls the token
+       anyway. Today only the branch ruleset `main-Protection` exists (`gh api …/rulesets`).
+     - the token is stored only after the ruleset exists.
+     - AC1 and *Security considerations* now say that the ancestry check catches mistakes and is not a
+       security boundary.
+     - the `.squad/project.md` goal and the `docs/ARCHITECTURE.md` wording name the ruleset as the boundary.
+     - 0039 records the threat, the ruleset and the residual risk.
+   - Not adopted: a required reviewer on environment `release` is documented as optional, not required. With
+     a single maintainer it adds a manual approval of their own tag and no protection. Issue #9 asks for a
+     release "without manual steps". 0039 recommends it once a second person has write access.
+2. **minor — Dependabot will bump the `golang` builder tag away from `go.mod`. Accepted.** The repository's
+   `.github/dependabot.yml` `docker` entry has no `ignore`, and Dependabot proposes newer version tags with
+   the same suffix (`1.24-trixie` → `1.26-trixie`).
+   - Revised:
+     - an `ignore` rule for `golang` with `version-update:semver-major` and `version-update:semver-minor`.
+       Digest updates of `1.24-trixie` continue.
+     - a workflow check (AC4, build step 6) that fails when the builder's `<major>.<minor>` differs from
+       `go.mod`'s. It also catches a hand edit. Because the dry run now also runs on Dockerfile changes, it
+       catches a Dependabot PR if the ignore rule ever behaves differently than expected.
+   - The single-stage alternative (build `vandoxd` on the runner, `COPY` into distroless) is rejected and
+     recorded in 0038. Issue #13 asks for a multi-stage Dockerfile. A self-contained build lets anyone
+     rebuild the image from the tag alone. The matching check gives the same toolchain guarantee at minor
+     level. A patch-level difference between `setup-go`'s latest 1.24.x and the pinned builder digest
+     remains, and is accepted in 0038.
+3. **minor — the dry-run `paths` miss `cmd/**` and `internal/**`. Accepted.** Both are added (AC1, *Approach*,
+   0037). Dropping the filter was not chosen: documentation-only PRs would then build an image for nothing.
+4. **minor — the never-overwrite check fails open. Accepted.** The check now treats the version as absent
+   only when the error output says `no such manifest` or `manifest unknown`. Any other error fails the job
+   before the push (AC5, `publish-image`, 0038). The Lead confirmed the not-found message locally on
+   2026-10-04, without a daemon.

@@ -49,10 +49,14 @@ because its length varies; the full SHA is unambiguous.
 
 Option 3, in `.github/workflows/release.yml`:
 
-- **Trigger:** on `push` of tags `v*.*.*`, and as a dry run on pull requests to `main` that change the
-  workflow, `deploy/backend/Dockerfile`, `.dockerignore`, `go.mod` or `go.sum`.
+- **Trigger:** on `push` of tags `v*.*.*`. Also as a dry run on pull requests to `main` that change the
+  workflow, `deploy/backend/Dockerfile`, `.dockerignore`, `go.mod`, `go.sum`, `cmd/**` or `internal/**`. The
+  `cmd/**` and `internal/**` paths are included because the `--version` checks depend on them. The filter is
+  kept so that documentation-only pull requests do not build an image.
 - **Tag checks:** the tag must match strict SemVer, `^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?$`,
-  and its commit must be reachable from `origin/main`.
+  and its commit must be reachable from `origin/main`. The ancestry check catches a maintainer's mistake
+  but is not a security boundary. A tag push runs the workflow file of the tagged commit, so who may start a
+  release is decided by who may create the tag (record 0039).
 - **Build flags:** both binaries are built with `CGO_ENABLED=0 -trimpath -buildvcs=false -ldflags "-s -w -X …"`:
   - `Version` = the tag (with `v`)
   - `Commit` = the full SHA of the tagged commit
