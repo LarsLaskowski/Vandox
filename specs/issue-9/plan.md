@@ -44,7 +44,8 @@ Related defects and observations found on the way:
   `go-version-file: go.mod`. Go 1.24 left support when Go 1.26 shipped in February 2026, so released
   binaries would be built with a toolchain that no longer gets security fixes. This plan does not change
   that, because it would be a toolchain bump touching all of CI. The builder image follows `go.mod`
-  (`golang:1.24-…`). Proposed follow-up issue below.
+  (`golang:1.24-…`). Proposed follow-up issue below; it is required before the first stable tag `v0.1.0`
+  (maintainer action 5).
 - The `README.md` `-ldflags` example uses `git rev-parse --short HEAD` and the current time. The release
   uses the full commit SHA and the commit time (record 0037), so the example is aligned with that.
 
@@ -93,17 +94,30 @@ maintainer after merge.
   GitHub from the merged pull requests since the previous release (`--generate-notes`), plus a line naming
   the pushed image as `networlddev/vandox:<version>@sha256:<digest>`. The assets are
   `vandox-agent-linux-amd64` and `SHA256SUMS`. A pre-release tag is marked `--prerelease`, and
-  `--latest=false` is set whenever the image did not get `latest`.
+  `--latest=false` is set whenever the image did not get `latest`. The job has no checkout, so the `gh` step
+  sets `GH_REPO` through `env:` (`GH_REPO: ${{ github.repository }}`), and `gh` never guesses the repository
+  from a working directory.
 - [ ] AC7 — Credentials and least privilege: the workflow-level `permissions` is `{}`. Only the GitHub
   release job has `contents: write`. The Docker Hub token is read only in the publish-image job, from the
   secret `DOCKERHUB_TOKEN` of the GitHub environment `release`, whose deployment rule allows only tags
   `v*.*.*`. The user name comes from the environment variable `vars.DOCKERHUB_USERNAME` (not a secret, so
   the image name is not masked in logs). The token reaches `docker login` only through `--password-stdin`.
-  Dry runs never read a secret. No `${{ … }}` expression from event data (tag name, PR fields) appears
-  inside a `run:` script; event data enters scripts only through `env:`. Every action is pinned by full
-  commit SHA with a version comment, as in `ci.yml`.
+  Dry runs never read a secret. **No `${{ … }}` expression of any kind appears inside a `run:` script** —
+  not event data, not step or job outputs (`steps.*.outputs`, `needs.*.outputs`), not `vars`, `secrets` or
+  `github.*`. Every value a script uses enters through `env:`. (`${{ }}` stays allowed in `if:`, `env:`,
+  `with:`, `environment:` and `concurrency:`.) Every action is pinned by full commit SHA with a version
+  comment, as in `ci.yml`. Every `actions/checkout` sets `persist-credentials: false`; no later step needs
+  the `GITHUB_TOKEN` in `.git/config` (the repository is public, so the ancestry check's `git fetch` works
+  without it).
+- [ ] AC7a — Build isolation (no restored CI caches): in job `build`, on the tag run and on the dry run,
+  `actions/setup-go` has `cache: false`, and no step uses `actions/cache` or any other cache restore. The
+  image is built with the plain Docker CLI as `docker build --no-cache …`, with no `--cache-from`, no
+  `--cache-to`, no `type=gha` (or any other) cache backend and no `docker/*` build action. So both release
+  binaries are compiled from source and modules fetched through the Go module proxy and verified against
+  `go.sum`, never from a Go build or module cache that another workflow run (for example `ci.yml` on
+  `main`) saved. The Reviewer checks this in the workflow text.
 - [ ] AC8 — The dry run passes on this pull request (CI), covering AC1's pattern check on the dry-run
-  version and AC2–AC4.
+  version, AC2–AC4 and AC13.
 - [ ] AC9 **(maintainer)** — After merge, a test tag on `main` (recommended: `v0.0.1-rc.1`, a
   pre-release, so `latest` is not moved) creates a GitHub pre-release with both assets, and
   `networlddev/vandox:0.0.1-rc.1`. `docker run --rm networlddev/vandox:0.0.1-rc.1 --version` prints the tag,
@@ -117,6 +131,11 @@ maintainer after merge.
   `gh api repos/LarsLaskowski/Vandox/rulesets`. As of 2026-10-04 that returns only `main-Protection`
   (target *branch*). The repository is public and owned by a user account, so tag rulesets are available
   and only the owner holds the admin role.
+- [ ] AC13 — Vulnerability gate before publishing: job `build` runs `go tool govulncheck ./...` (the
+  `tool` dependency in `go.mod`, as in `ci.yml`) after `setup-go` and before the artifact upload, on the
+  tag run and on the dry run. A finding (non-zero exit) fails the job, so nothing is uploaded, pushed or
+  released. This scans the code against the runner's Go toolchain (the agent's). The builder image's Go
+  standard library has the same minor version (AC4) and is kept current by Dependabot digest updates.
 
 ## Approach
 
@@ -154,9 +173,10 @@ maintainer after merge.
   'cmd/**', 'internal/**']`.
   `permissions: {}` at the top. `concurrency: { group: release-${{ github.ref }}, cancel-in-progress: false }`.
 - Job **`build`** (`runs-on: ubuntu-latest`, `permissions: contents: read`, both events):
-  1. `actions/checkout` (same pinned SHA as `ci.yml`) with `fetch-depth: 0`. The full history and tags
-     are needed for the `latest` decision and the ancestry check.
-  2. *Resolve version*: on a tag push, `TAG` comes from `env: TAG: ${{ github.ref_name }}`. On a pull request,
+  1. `actions/checkout` (same pinned SHA as `ci.yml`) with `fetch-depth: 0` and `persist-credentials: false`.
+     The full history and tags are needed for the `latest` decision and the ancestry check.
+  2. *Resolve version*: on a tag push, `TAG` comes from `env: TAG: ${{ github.ref_name }}`, and the event
+     name from `env: EVENT: ${{ github.event_name }}` (AC7: no `${{ }}` inside `run:`). On a pull request,
      `TAG=v0.0.0-dryrun`. Then run the SemVer regex check from AC1. Write to `$GITHUB_OUTPUT`:
      `tag`, `version` (the tag without `v`), `commit` (`git rev-parse HEAD`), `date`
      (`TZ=UTC git log -1 --format=%cd --date=format-local:%Y-%m-%dT%H:%M:%SZ`), `prerelease` (`true` if
@@ -164,17 +184,23 @@ maintainer after merge.
      `git tag -l 'v*.*.*' | grep -v -- - | sort -V | tail -n1`.
   3. *Check tag is on main* (tag push only): `git fetch --no-tags origin main` and
      `git merge-base --is-ancestor HEAD FETCH_HEAD`, or fail with an `::error::`.
-  4. `actions/setup-go` (same pinned SHA as `ci.yml`, `go-version-file: go.mod`). Build the agent with
+  4. `actions/setup-go` (same pinned SHA as `ci.yml`, `go-version-file: go.mod`, **`cache: false`**, AC7a;
+     `ci.yml` keeps `cache: true`, which is exactly the cache the release must not restore). Then
+     *Vulnerability scan*: `go tool govulncheck ./...` (AC13). Build the agent with
      `CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -buildvcs=false -ldflags "-s -w -X …Version=$TAG -X …Commit=$COMMIT -X …Date=$DATE" -o dist/vandox-agent-linux-amd64 ./cmd/vandox-agent`,
-     using the same flags as the Dockerfile. Then `(cd dist && sha256sum vandox-agent-linux-amd64 > SHA256SUMS)`.
+     using the same flags as the Dockerfile. The values come from the version step's outputs through
+     `env:` (`TAG: ${{ steps.version.outputs.tag }}` and so on), never as `${{ }}` in the script (AC7).
+     Then `(cd dist && sha256sum vandox-agent-linux-amd64 > SHA256SUMS)`.
   5. *Verify agent*: AC2 (`sha256sum -c`, `file` checks) and AC3 (exact `--version` comparison).
   6. *Check base image pinning*: AC4's grep over `FROM` lines. *Check builder Go version*: read the `go`
      directive from `go.mod` (`go mod edit -json`, field `Go`, or `awk '$1=="go"{print $2}' go.mod`), cut it to
      `<major>.<minor>`, extract `<major>.<minor>` from the `FROM golang:` line of the Dockerfile, and fail with an
      `::error::` naming both values if they differ or if either is missing.
-  7. *Build image*: `docker build -f deploy/backend/Dockerfile --build-arg VERSION=… --build-arg
-     COMMIT=… --build-arg DATE=… -t vandox:local .`, using the plain Docker CLI on the runner (no third-party
-     action).
+  7. *Build image*: `docker build --no-cache -f deploy/backend/Dockerfile --build-arg VERSION="$TAG" --build-arg
+     COMMIT="$COMMIT" --build-arg DATE="$DATE" -t vandox:local .`, using the plain Docker CLI on the runner (no
+     third-party action, no buildx setup). No `--cache-from`, no `--cache-to` and no GitHub cache backend
+     (`type=gha`), AC7a. The hosted runner's Docker daemon starts empty, and `--no-cache` makes the
+     no-reuse rule visible in the workflow text.
   8. *Verify image*: AC3 for `vandoxd` (`docker run --rm vandox:local --version`) and AC4 (`.Config.User`).
   9. Tag push only: `docker save vandox:local -o dist/vandox-image.tar`, then `actions/upload-artifact`
      (pinned by SHA) with name `release`, `dist/` content, `retention-days: 1`. Job `outputs`: `tag`,
@@ -183,7 +209,8 @@ maintainer after merge.
   'refs/tags/v')`; `environment: release`; `permissions: {}`):
   `actions/download-artifact` (pinned) → `docker load -i vandox-image.tar` →
   `docker login docker.io -u "$DOCKERHUB_USERNAME" --password-stdin` (token from `env:` via
-  `secrets.DOCKERHUB_TOKEN`). Run `docker manifest inspect networlddev/vandox:$VERSION`, capturing stderr.
+  `secrets.DOCKERHUB_TOKEN`; `DOCKERHUB_USERNAME` from `vars`, `VERSION` and `LATEST` from
+  `needs.build.outputs`, all through `env:`, AC7). Run `docker manifest inspect networlddev/vandox:$VERSION`, capturing stderr.
   Exit 0 means the version exists, so the job fails. A non-zero exit with stderr matching `no such manifest` or
   `manifest unknown` means the version is absent, so the job continues. Any other non-zero exit fails the job
   and prints the error, so the check fails closed (AC5). The Lead confirmed the not-found text on
@@ -194,7 +221,10 @@ maintainer after merge.
 - Job **`github-release`** (`needs: [build, publish-image]`, same `if`, `permissions: contents: write`):
   `actions/download-artifact`, then `gh release create "$TAG" --verify-tag --title "$TAG" --generate-notes
   --notes "Docker image: networlddev/vandox:$VERSION@$DIGEST" [--prerelease] [--latest=false]
-  vandox-agent-linux-amd64 SHA256SUMS` with `GH_TOKEN: ${{ github.token }}`. It uploads only those two
+  vandox-agent-linux-amd64 SHA256SUMS` with `env:` `GH_TOKEN: ${{ github.token }}`, `GH_REPO: ${{
+  github.repository }}` (the job has no checkout, AC6), and `TAG`, `VERSION`, `DIGEST`, `PRERELEASE`, `LATEST`
+  from `needs.build.outputs` / `needs.publish-image.outputs`. The optional flags are added in the script from
+  those variables (AC7). It uploads only those two
   files, not the image tar. (`--notes` and `--generate-notes` together append the generated notes to the
   given text. The Dev confirms this with `gh release create --help` on the runner's `gh`. If they do not
   combine, the Dev writes the generated notes with `gh api repos/{owner}/{repo}/releases/generate-notes` and
@@ -275,6 +305,12 @@ Made by the Dev, inside the `<!-- project:… -->` blocks where the file has the
       `DOCKERHUB_TOKEN` and the variable `DOCKERHUB_USERNAME`
     - optional: a required reviewer on the environment once the repository has more than one person with
       write access (record 0039)
+    - optional, recommended if the Docker Hub subscription offers it: immutable tags on
+      `networlddev/vandox` for the version tags only (for example the rule
+      `^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$`), never for `latest`, which has to move. Docker Hub then
+      refuses to overwrite a published version even with a leaked token (record 0039)
+  - **Before the first stable tag:** the Go toolchain follow-up (a supported Go version in `go.mod`) must be
+    done before `v0.1.0` or any other stable tag; pre-release tags may be cut before it
   - **How to create the Docker Hub token (record 0039):** an organization access token limited to the
     repository `networlddev/vandox` with push and pull, and `DOCKERHUB_USERNAME` = `networlddev`. If the
     plan offers no organization access tokens, the fallback is a dedicated Docker Hub user that is a member of
@@ -288,6 +324,7 @@ Made by the Dev, inside the `<!-- project:… -->` blocks where the file has the
     pinned by digest and runs as UID 65532
   - releases are built by `.github/workflows/release.yml` only from SemVer tags on `main`. Only the repository
     admin may create these tags (tag ruleset), and the workflow checks that the tagged commit is on `main`.
+  - release binaries are built from source without restored CI caches and only after `govulncheck` passes
   - links to 0037, 0038 and 0039
 
   In *Security model*, add one sentence on the release credential (0039) and cite it in that section's
@@ -299,9 +336,12 @@ Made by the Dev, inside the `<!-- project:… -->` blocks where the file has the
     `release-tags`), and whose commit the workflow checks is on `main`. The ancestry check runs in code the
     tagger controls, so the ruleset is the boundary.
   - every action is pinned by commit SHA, and every base image by digest
+  - release binaries are built without restored CI caches (`setup-go` `cache: false`, plain
+    `docker build --no-cache`, no cache backend), and only after `govulncheck` passes
   - the registry token is readable only by the tag-triggered publish job, enters `docker login` only via
     stdin, and is limited to pushing `networlddev/vandox`
-  - event data reaches scripts only through `env:`
+  - no `${{ }}` expression of any kind appears inside a `run:` script; every value goes through `env:`, and
+    checkout does not persist the job token
   - the published image runs as a non-root user
   - a published version tag is never overwritten
   - every published binary has a checksum in `SHA256SUMS`
@@ -336,8 +376,9 @@ Made by the Dev, inside the `<!-- project:… -->` blocks where the file has the
 
 ## Security considerations
 
-- **Script injection:** `github.ref_name` and other event data go into scripts only through `env:`. The tag
-  is validated against the strict SemVer regex before any use. The PR dry run uses a constant version.
+- **Script injection:** no `${{ }}` expression of any kind appears inside `run:`; event data, step and job
+  outputs, `vars` and `github.*` reach scripts only through `env:` (AC7). The tag is validated against the
+  strict SemVer regex before any use. The PR dry run uses a constant version.
 - **Least privilege:** the workflow-level `permissions` is `{}`. Only `build` has `contents: read`, and only
   `github-release` has `contents: write`. `publish-image` has no `GITHUB_TOKEN` permission at all.
 - **Secret exposure:** the token is only available in the `release` environment (tag rule `v*.*.*`). A
@@ -350,6 +391,17 @@ Made by the Dev, inside the `<!-- project:… -->` blocks where the file has the
   `release-tags` (AC12) limits creating, moving and deleting `v*` tags to the repository admin, who already
   controls the token. The in-workflow ancestry check catches only mistakes. The residual risk is recorded in
   0039: until the ruleset exists, every collaborator with write access can trigger a release.
+- **Build isolation:** the release build restores no cache. GitHub lets a tag run restore caches saved on the
+  default branch, and `ci.yml` saves the Go build and module cache there (`setup-go` `cache: true`) after
+  running third-party actions and dependency code. A poisoned object in that cache would be linked into the
+  release binary without changing `--version` or the `file` output. So `setup-go` has `cache: false`, there
+  is no `actions/cache`, and the image is built with plain `docker build --no-cache` and no cache backend
+  (AC7a). Modules are fetched through the Go module proxy and checked against `go.sum`. The cost is a cold
+  build of a few minutes per run, accepted (0037).
+- **Credentials on disk:** `actions/checkout` runs with `persist-credentials: false`, so the job token is not
+  left in `.git/config` for later steps (AC7).
+- **Known vulnerabilities:** `go tool govulncheck ./...` must pass before anything is uploaded or
+  published (AC13).
 - **Integrity:** the release is built only from tags on `main`. The image pushed is the one verified, never
   rebuilt. Actions are pinned by SHA and base images by digest, with Dependabot updating both. Binaries
   are `-trimpath`, have VCS stamping off, and use commit-time dates, so they can be rebuilt bit for bit
@@ -379,10 +431,14 @@ Made by the Dev, inside the `<!-- project:… -->` blocks where the file has the
    secret `DOCKERHUB_TOKEN`, and the login name as the environment variable `DOCKERHUB_USERNAME`. Make sure the
    repository `networlddev/vandox` exists. If the subscription offers neither an organization access token
    nor teams, AC10 ("token scoped to push for this repository only") cannot be met. The maintainer then has
-   to decide whether to accept an account-wide *Read & Write* token as a recorded residual.
+   to decide whether to accept an account-wide *Read & Write* token as a recorded residual. Optional, and
+   recommended where the subscription offers it: enable immutable tags on `networlddev/vandox` for the
+   version-tag pattern only, not `latest` (see *Documentation updates*, record 0039).
 4. After merge, push a test tag on `main` (recommended `v0.0.1-rc.1`) and check AC9. Removing the test
    release, tag or image tag afterwards is the maintainer's call. Deleting tags or releases needs explicit
    approval under the golden rules.
+5. Do not push a stable tag (`v0.1.0` or later, without `-`) until the follow-up "[Repo] Move to a supported
+   Go toolchain" is merged. Only pre-release tags such as `v0.0.1-rc.1` are cut before that.
 
 ## Out of scope / follow-ups
 
@@ -393,7 +449,10 @@ Proposed follow-up issues for the orchestrator to create:
   (`golang:1.24-trixie`) build with it, so released binaries miss Go security fixes. The issue would raise
   `go` in `go.mod`, the builder image tag and digest (by hand: `.github/dependabot.yml` ignores minor updates
   of `golang`, and the release workflow requires the builder minor version to match `go.mod`), and
-  `.squad/stack.md` *Toolchain*.
+  `.squad/stack.md` *Toolchain*. **Required before the first stable tag (`v0.1.0`)**: label it accordingly
+  (e.g. milestone `v0.1.0`) and state in the body that no stable release is cut until it is merged; only
+  pre-release tags may precede it. `govulncheck` in the release build (AC13) catches known standard-library
+  vulnerabilities that reach the code, but not the lack of upstream support itself.
 - **"[CI] Sign release artifacts and publish provenance"**: add GitHub artifact attestations (or cosign) for
   `vandox-agent-linux-amd64` and the image `networlddev/vandox`, and optionally an SBOM. Document
   verification with `gh attestation verify`.
@@ -447,3 +506,32 @@ Devil's Advocate, 2026-10-04: 1 major, 3 minor objections. All four are accepted
    only when the error output says `no such manifest` or `manifest unknown`. Any other error fails the job
    before the push (AC5, `publish-image`, 0038). The Lead confirmed the not-found message locally on
    2026-10-04, without a daemon.
+
+Security plan review, round 1, 2026-10-04: CHANGES_REQUIRED with 1 blocking and 5 non-blocking points. All
+six are accepted. Tier stays `security`.
+
+- **B1 (blocking) — the release build could link objects from a Go build cache saved by `ci.yml` on `main`.
+  Accepted.** Confirmed in the code: every `setup-go` step in `.github/workflows/ci.yml` sets `cache: true`,
+  and those runs push to `main` after third-party actions (`golangci-lint-action`, `sonarqube-scan-action`)
+  and dependency code have run. A tag run can restore caches saved on the default branch. Revised:
+  - new AC7a: `setup-go` in `build` has `cache: false` on the tag run and the dry run, no `actions/cache`,
+    and the image is built with plain `docker build --no-cache` without `--cache-from`, `--cache-to` or a
+    GitHub cache backend. The Reviewer checks it in the workflow text.
+  - build steps 4 and 7 and *Security considerations* (*Build isolation*) say so.
+  - the `.squad/project.md` area 13 goal states "release binaries are built without restored CI caches";
+    `docs/ARCHITECTURE.md` *Deployment* says the same.
+  - record 0037 lists caching as a considered option, rejected, with the cold-build cost accepted.
+- **N1 — `persist-credentials: false` on checkout. Accepted.** Build step 1 and AC7. The ancestry check's
+  `git fetch origin main` needs no credentials, because the repository is public.
+- **N2 — no `${{ }}` of any kind inside `run:`. Accepted.** AC7 now forbids every expression in `run:`,
+  including step and job outputs, `vars` and `github.*`. The build, publish and release steps name the
+  `env:` variables they read. Record 0037 states the rule.
+- **N3 — Docker Hub immutable tags. Accepted as an optional maintainer action.** It depends on the
+  subscription and lives outside the repository. Maintainer action 3, the CONTRIBUTING one-time setup and
+  record 0039 recommend it for the version-tag pattern only, never for `latest`.
+- **N4 — Go toolchain follow-up required before the first stable tag, plus `govulncheck` in `build`.
+  Accepted.** The follow-up is marked required before `v0.1.0` (*Follow-ups*, maintainer action 5,
+  CONTRIBUTING). New AC13: `go tool govulncheck ./...` runs in `build` after `setup-go` and before the artifact
+  upload, so a finding stops the release before anything is published. Record 0037 states it.
+- **N5 — `gh release create` without a checkout. Accepted.** The step sets `GH_REPO: ${{ github.repository }}`
+  through `env:` (AC6, `github-release`).

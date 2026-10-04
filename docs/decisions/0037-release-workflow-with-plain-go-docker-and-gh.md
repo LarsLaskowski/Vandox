@@ -40,6 +40,17 @@ broken workflow would otherwise first show up on a real release.
      credential never leaves one job; the published image is the verified one.
    - Cons: a longer YAML file the project maintains itself.
 
+For build caches, two options were considered:
+
+- *Restore the Go build and module cache (`setup-go` `cache: true`) and a Docker layer cache
+  (`--cache-from`, the `type=gha` backend)*: faster releases. Rejected: a tag run can restore caches saved
+  on the default branch, and `ci.yml` saves the Go cache there after third-party actions and dependency code
+  have run in the same job. A poisoned object in that cache would be linked into the release binary, and
+  neither `--version` nor `file` would notice.
+- *Build cold*: `setup-go` with `cache: false`, no `actions/cache`, plain `docker build --no-cache` without a
+  cache backend. Modules come from the Go module proxy and are checked against `go.sum`. Costs a few minutes
+  per run.
+
 For the build date, the time of the build and the commit time of the tagged commit were both considered. The
 build time makes every rebuild produce a different binary. The commit time makes the build reproducible, so
 anyone can rebuild from the tag and compare against `SHA256SUMS`. For the commit, the short SHA was rejected
@@ -61,8 +72,13 @@ Option 3, in `.github/workflows/release.yml`:
   - `Version` = the tag (with `v`)
   - `Commit` = the full SHA of the tagged commit
   - `Date` = the commit time in UTC as `%Y-%m-%dT%H:%M:%SZ`
-- **Verification before publishing:** before anything is published, the workflow checks that each
-  binary's `--version` output equals the expected line exactly.
+- **No restored caches:** the `build` job (tag run and dry run) uses `setup-go` with `cache: false`, no
+  `actions/cache`, and `docker build --no-cache` without `--cache-from`, `--cache-to` or a cache backend.
+- **Verification before publishing:** before anything is published, `go tool govulncheck ./...` must pass,
+  and the workflow checks that each binary's `--version` output equals the expected line exactly.
+- **Script hygiene:** no `${{ }}` expression of any kind appears inside a `run:` script; event data, step
+  and job outputs, `vars` and `github.*` reach scripts only through `env:`. `actions/checkout` runs with
+  `persist-credentials: false`. The `github-release` job has no checkout and passes `GH_REPO` to `gh`.
 - **Agent asset:** `vandox-agent-linux-amd64`, a raw binary, not an archive, listed in `SHA256SUMS`.
 - **Order:** the image is pushed first. Then the GitHub release is created with `--verify-tag` and
   GitHub-generated notes from the merged pull requests, with the image digest added to the notes.
@@ -71,6 +87,11 @@ Option 3, in `.github/workflows/release.yml`:
 ## Consequences
 
 - A broken release workflow, Dockerfile or base-image bump fails in pull-request CI, not on the release tag.
+- Every release and dry run builds cold, which takes a few minutes longer. This is accepted in exchange for
+  binaries that do not depend on a cache another workflow wrote.
+- A newly published vulnerability that reaches the code stops a release until it is fixed. `govulncheck`
+  does not flag a Go version that is merely out of upstream support, so the Go toolchain is moved to a
+  supported version before the first stable tag (`v0.1.0`), in a separate change.
 - The ldflags string exists twice, in the workflow (agent) and in the Dockerfile (backend). The exact
   `--version` checks catch any drift between them.
 - Release notes follow the PR titles. Their quality depends on the `[area] Description` titles from
