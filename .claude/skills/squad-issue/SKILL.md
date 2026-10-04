@@ -84,7 +84,10 @@ action yourself — including follow-up issues the Lead decides on.
 3. **Plan security review** (`security` tier only). Launch `squad-security` in mode `plan`. On
    `CHANGES_REQUIRED`, launch `squad-lead` in mode `revise` and repeat. After the **2nd** rejection launch
    `squad-lead` in mode `decide` (scope down, split into issues, abort, escalate, or — for a pure wording defect — accept and fix it followed by exactly one `squad-security` delta confirmation).
-4. **Skeleton** (only if the plan adds or changes API; skipped, like step 5, for a change without production or test code). Launch `squad-dev` in mode `skeleton`: the planned
+4. **Skeleton** (only if the plan adds or changes API; not applicable when the plan declares the change free of
+   production and test code — see *Changes without production or test code* in `.squad/routing.md`, which also
+   skips step 5 and the *Coverage gate* in step 6 and requires the plan's *Verification without tests* section;
+   log the skipped steps and run the verification named there instead). Launch `squad-dev` in mode `skeleton`: the planned
    signatures built as *Skeleton* in `.squad/stack.md` describes (bodies fail when called), plus the existing
    test call sites the plan assigns to the Dev for an incompatible signature change, so the tests of step 5
    compile.

@@ -21,6 +21,9 @@ commit/push rules and the orchestrator role are identical to the `squad-issue` s
 - **Decision records:** features usually involve real design choices, so expect at least one record in
   `docs/decisions/`; the Lead also updates `docs/ARCHITECTURE.md` when the feature changes a flow or
   guarantee.
+- **Steps 4–6 and code-free changes:** a plan may declare steps 4, 5 and the *Coverage gate* not applicable
+  as described in *Changes without production or test code* in `.squad/routing.md`; its *Verification without
+  tests* section then says where each acceptance criterion is verified, and you log the skipped steps.
 - **Step 3** reviews `spec.md` and `plan.md` together.
 - **Steps 4–6** run per task or group of tasks from `tasks.md`; tick tasks off as they are done. Run
   Tester and Dev one after another, never in parallel (see *Concurrency* in `.squad/routing.md`).

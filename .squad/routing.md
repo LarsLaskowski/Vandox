@@ -89,6 +89,18 @@ command or gate in `.squad/stack.md` that the pipeline runs, changes what the sq
 A squad-maintenance PR (*Squad lessons*) is only for lessons the squad itself raised, never for an issue a
 person filed about the product.
 
+### Changes without production or test code
+
+For **any** tier, a plan may declare steps 4 (*Skeleton*), 5 (*Tests first*) and the *Coverage gate* of step 6
+**not applicable** when the change touches no production or test code (for example a workflow, a Dockerfile,
+build or CI configuration, or documentation only). The tier is not lowered by this: a `security` change
+keeps its plan challenge, steps 3 and 8 and every other step. The Lead then names in `plan.md`, under
+*Verification without tests*, where each acceptance criterion is verified instead (a workflow verification
+step, a PR dry run, a build of the image, a read-only check) and who runs it; the orchestrator logs the
+skipped steps with a pointer to that section. The Reviewer checks that the statement exists, that it covers
+every acceptance criterion and that the diff really contains no production or test code — otherwise the
+skip is a blocking finding. If production or test code changes after all, steps 4–6 apply again.
+
 ## Pipeline
 
 | # | Step | Owner | Exit condition |
@@ -106,10 +118,11 @@ person filed about the product.
 | 11 | After the PR | Dev, Code Officer, Reviewer | CI green, SonarQube Cloud quality gate passed, review comments worked |
 | 12 | Wrap-up | Orchestrator | Squad lessons filed as one issue per destination (*Squad lessons*), or "no lessons" logged; user informed |
 
-A change without production or test code (tier `docs`, or a `security`-tier change that edits only
-documentation and project knowledge) skips steps 4 and 5; step 6 is the Dev's edits alone, and the *Coverage
-gate* is not run, because such a change cannot alter coverage. For a `security`-tier change step 7 still
-runs *Format check* and the *Analyzer gate*; for tier `docs` only the read-only *Format check* runs.
+A change without production or test code (tier `docs`, or any other tier whose plan declares it, see
+*Changes without production or test code*) skips steps 4 and 5; step 6 is the Dev's edits alone, and the
+*Coverage gate* is not run, because such a change cannot alter coverage. For a change of another tier than
+`docs` step 7 still runs *Format check* and the *Analyzer gate*; for tier `docs` only the read-only *Format
+check* runs.
 
 Commits and pushes to the work branch happen right after intake (`specs/<folder>/log.md`, so a stop hook
 or a crashed session finds no untracked files) and after every further completed step; with *Squash and
