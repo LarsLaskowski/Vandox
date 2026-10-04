@@ -208,7 +208,7 @@ jobs:
         with:
           name: release
           path: dist/
-          retention-days: 1
+          retention-days: 7
           if-no-files-found: error
 
   publish-image:

@@ -111,8 +111,9 @@ Pre-release tags look like `vX.Y.Z-rc.N`. Build metadata (`+...`) is not allowed
 ### Dry run on pull requests
 
 A pull request that changes the workflow, the Dockerfile, `.dockerignore`, `go.mod`, `go.sum`, `cmd/**` or
-`internal/**` runs steps 1 to 4 with the version `v0.0.0-dryrun`. It uploads, pushes and releases nothing and
-reads no secret.
+`internal/**` runs steps 1 to 4 with the version `v0.0.0-dryrun`, without the origin/main ancestry check
+(step 1 then only checks the constant dry-run version against the pattern). It uploads, pushes and releases
+nothing and reads no secret.
 
 ### One-time setup (maintainer)
 
@@ -146,10 +147,18 @@ must be merged before `v0.1.0` or any other stable tag. Pre-release tags may be 
 ### Re-running a failed release
 
 If a job fails before the image is pushed, nothing was published: fix the cause and use "Re-run all jobs"
-(or, if the tag itself was wrong, ask the repository admin to delete and recreate it). If only
-`github-release` failed after the push, use "Re-run failed jobs"; it reruns just that job and the image
-stays as pushed. A published image version is never replaced; a faulty release gets a new patch version.
-<!-- project:end releases --><!-- project:end releases -->
+(or, if the tag itself was wrong, ask the repository admin to delete and recreate it).
+
+If only `github-release` failed, use "Re-run failed jobs". It reruns just that job and works while the run's
+release artifact exists, that is 7 days after the tag run.
+
+If `publish-image` failed after `networlddev/vandox:<version>` was pushed (it failed while pushing `latest`
+or reading the digest), a re-run stops at the never-overwrite check. Do not push by hand; cut a new patch
+version. The orphaned version tag stays on Docker Hub without a GitHub release. The same applies once the
+7-day window has passed.
+
+A published image version is never replaced; a faulty release gets a new patch version.
+<!-- project:end releases -->
 
 <!-- project:begin stability -->
 ## Stability policy
