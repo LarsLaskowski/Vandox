@@ -8,6 +8,12 @@ import (
 	"github.com/LarsLaskowski/Vandox/internal/wire"
 )
 
+// Keys of the agent configuration that are named in several places.
+const (
+	keyAgentID    = "agent_id"
+	keyBackendURL = "backend.url"
+)
+
 // Agent is the configuration of vandox-agent.
 type Agent struct {
 	AgentID string        `yaml:"agent_id"`
@@ -47,7 +53,7 @@ func DefaultAgent() Agent {
 
 // AgentKeys returns every option key path in file order: agent_id, backend.url, spool.directory, log.level.
 func AgentKeys() []string {
-	return []string{"agent_id", "backend.url", "spool.directory", "log.level"}
+	return []string{keyAgentID, keyBackendURL, "spool.directory", "log.level"}
 }
 
 // LoadAgent reads the agent configuration file at path and the secrets from environ (in os.Environ form).
@@ -76,17 +82,17 @@ func LoadAgent(path string, environ []string) (*Agent, error) {
 
 // validate checks the options in struct field order.
 func (a *Agent) validate(file string, lines map[string]int) error {
-	if err := requireKey(file, lines, "agent_id"); err != nil {
+	if err := requireKey(file, lines, keyAgentID); err != nil {
 		return err
 	}
 	if wire.ValidateAgentID(a.AgentID) != nil {
-		return keyError(file, lines, "agent_id", "must be 1 to 64 characters of [A-Za-z0-9._-], starting with a letter or digit")
+		return keyError(file, lines, keyAgentID, "must be 1 to 64 characters of [A-Za-z0-9._-], starting with a letter or digit")
 	}
-	if err := requireKey(file, lines, "backend.url"); err != nil {
+	if err := requireKey(file, lines, keyBackendURL); err != nil {
 		return err
 	}
 	if reason := urlProblem(a.Backend.URL); reason != "" {
-		return keyError(file, lines, "backend.url", reason)
+		return keyError(file, lines, keyBackendURL, reason)
 	}
 	if err := checkDirectory(file, lines, "spool.directory", a.Spool.Directory); err != nil {
 		return err

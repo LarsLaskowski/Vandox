@@ -13,9 +13,10 @@ import (
 )
 
 const (
-	redactedText = "[redacted]"
-	envPrefix    = "VANDOX_"
-	maxNameBytes = 64
+	reasonUnreadable = "cannot read the file"
+	redactedText     = "[redacted]"
+	envPrefix        = "VANDOX_"
+	maxNameBytes     = 64
 )
 
 // Secret holds a secret value and never reveals it through formatting, logging or marshaling.
@@ -79,7 +80,7 @@ func (e *SecretError) Unwrap() error { return e.Err }
 
 // checkEnviron rejects unknown and duplicate VANDOX_ variables in environ and returns the known ones.
 // known holds the full variable names including the _FILE forms.
-func checkEnviron(environ []string, known []string) (map[string]string, error) {
+func checkEnviron(environ, known []string) (map[string]string, error) {
 	out := make(map[string]string, len(known))
 	for _, entry := range environ {
 		name, value, ok := strings.Cut(entry, "=")
@@ -173,19 +174,19 @@ func readSecretFile(fileVar, path string) (Secret, error) {
 	}
 	info, err := os.Stat(path)
 	if err != nil {
-		return Secret{}, fileError(fileVar, "cannot read the file", err)
+		return Secret{}, fileError(fileVar, reasonUnreadable, err)
 	}
 	if !info.Mode().IsRegular() {
 		return Secret{}, &SecretError{Var: fileVar, Reason: "must name a regular file"}
 	}
 	f, err := os.Open(path)
 	if err != nil {
-		return Secret{}, fileError(fileVar, "cannot read the file", err)
+		return Secret{}, fileError(fileVar, reasonUnreadable, err)
 	}
 	defer func() { _ = f.Close() }()
 	data, err := io.ReadAll(io.LimitReader(f, MaxSecretBytes+3))
 	if err != nil {
-		return Secret{}, fileError(fileVar, "cannot read the file", err)
+		return Secret{}, fileError(fileVar, reasonUnreadable, err)
 	}
 	if len(data) > MaxSecretBytes+2 {
 		return Secret{}, &SecretError{Var: fileVar, Reason: "file is larger than " + strconv.Itoa(MaxSecretBytes) + " bytes plus the line ending"}

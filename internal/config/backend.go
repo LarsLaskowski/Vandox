@@ -1,5 +1,8 @@
 package config
 
+// keyIngestListen is the key of the ingest listen address.
+const keyIngestListen = "ingest.listen"
+
 // Backend is the configuration of vandoxd.
 type Backend struct {
 	Web     Listener       `yaml:"web"`
@@ -39,7 +42,7 @@ func DefaultBackend() Backend {
 // BackendKeys returns every option key path in file order: web.listen, ingest.listen, storage.directory,
 // log.level.
 func BackendKeys() []string {
-	return []string{"web.listen", "ingest.listen", "storage.directory", "log.level"}
+	return []string{"web.listen", keyIngestListen, "storage.directory", "log.level"}
 }
 
 // LoadBackend reads the backend configuration file at path and the secrets from environ (in os.Environ
@@ -78,12 +81,12 @@ func (b *Backend) validate(file string, lines map[string]int) error {
 	if err != nil {
 		return err
 	}
-	ingestPort, err := checkListen(file, lines, "ingest.listen", b.Ingest.Listen)
+	ingestPort, err := checkListen(file, lines, keyIngestListen, b.Ingest.Listen)
 	if err != nil {
 		return err
 	}
 	if webPort == ingestPort {
-		return keyError(file, lines, "ingest.listen", "must not use the same port as web.listen")
+		return keyError(file, lines, keyIngestListen, "must not use the same port as web.listen")
 	}
 	if err := checkDirectory(file, lines, "storage.directory", b.Storage.Directory); err != nil {
 		return err
