@@ -2,6 +2,7 @@ package wire_test
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -283,4 +284,21 @@ func TestBatch_Validate_Invalid(t *testing.T) {
 		b.Header.AgentID = ""
 		requireFieldError(t, b.Validate(), "header.agent_id")
 	})
+}
+
+func TestValidateAgentID(t *testing.T) {
+	valid := []string{"web-1", "a", strings.Repeat("a", 64), "A.b_c-1", "1", "a.b"}
+	for _, id := range valid {
+		t.Run("valid "+id, func(t *testing.T) {
+			if err := wire.ValidateAgentID(id); err != nil {
+				t.Errorf("ValidateAgentID(%q) = %v, want nil", id, err)
+			}
+		})
+	}
+	invalid := []string{"", strings.Repeat("a", 65), "-a", ".a", "_a", "a b", "a/b", "\u00e4", "a\n", "a\x00"}
+	for _, id := range invalid {
+		t.Run(fmt.Sprintf("invalid %q", id), func(t *testing.T) {
+			requireFieldError(t, wire.ValidateAgentID(id), "agent_id")
+		})
+	}
 }
