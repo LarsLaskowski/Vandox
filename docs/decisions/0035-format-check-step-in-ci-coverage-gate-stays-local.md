@@ -1,6 +1,6 @@
 # 0035: Explicit format check step in CI; the coverage gate stays local, SonarQube measures coverage in CI
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-04
 - **Source:** Issue #8
 - **Supersedes:** —

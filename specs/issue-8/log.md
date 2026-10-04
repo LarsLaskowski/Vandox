@@ -11,3 +11,4 @@ One line per pipeline step: date, step, member, result. Lead decisions and escal
 | 2026-10-04 | 6 Implement | Dev | Format check step in ci.yml + docker entry in dependabot.yml; no Go code so no coverage gate; format step fails on unformatted file in scratch copy |
 | 2026-10-04 | 7 Code check | Code Officer | No changes needed; format, analyzer gate, build, tests verified by orchestrator |
 | 2026-10-04 | 8 Review | Reviewer / Security | Round 1: both APPROVE, no blocking or non-blocking findings |
+| 2026-10-04 | 9 PR approval | Lead | APPROVED; decisions 0035, 0036 Accepted and indexed |

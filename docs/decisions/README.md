@@ -61,4 +61,6 @@ links the record.
 | [0032](0032-secrets-only-from-environment-or-docker-secrets.md) | Secrets only from environment variables or Docker secrets | Accepted | 2026-10-04 |
 | [0033](0033-pre-existing-coverage-gap-accepted-for-issue-7.md) | Pre-existing overall coverage gap accepted for a documentation-only change | Accepted | 2026-10-04 |
 | [0034](0034-entry-points-delegate-to-a-testable-run-function.md) | Entry points delegate to a testable run function; main stays uncovered wiring | Accepted | 2026-10-04 |
+| [0035](0035-format-check-step-in-ci-coverage-gate-stays-local.md) | Explicit format check step in CI; the coverage gate stays local, SonarQube measures coverage in CI | Accepted | 2026-10-04 |
+| [0036](0036-dependabot-docker-entry-before-the-dockerfile-exists.md) | Dependabot watches /deploy/backend for Docker before the Dockerfile exists | Accepted | 2026-10-04 |
 <!-- project:end index -->
