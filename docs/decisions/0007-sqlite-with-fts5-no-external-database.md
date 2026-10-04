@@ -8,7 +8,7 @@
 ## Context
 
 The backend stores metrics, rollups, snapshots, incidents and logs from one server and has to search the
-logs in full text. It runs as a single container on a NAS or server; deployment and backups should stay
+logs in full text. It runs as a single container on a Docker host (typically a NAS); deployment and backups should stay
 simple.
 
 ## Options considered

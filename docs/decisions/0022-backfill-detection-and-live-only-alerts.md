@@ -7,7 +7,7 @@
 
 ## Context
 
-After the NAS was off, the agent sends current data and backfills hours of spooled data (0018). Alerting
+After the backend host was off, the agent sends current data and backfills hours of spooled data (0018). Alerting
 on backfilled values would send a burst of stale alerts for problems that are long over. The backend has
 to tell live data from backfill reliably, without trusting a flag the agent could get wrong.
 
@@ -25,7 +25,7 @@ and analyzed but never alerts.
 
 ## Consequences
 
-- No alert storm after a NAS downtime; incidents during the downtime still appear in the analysis and in
+- No alert storm after a backend host downtime; incidents during the downtime still appear in the analysis and in
   the report (0024).
 - The classification depends on the agent's clock being reasonably correct; the threshold between live
   and backfilled has to be chosen and tested.

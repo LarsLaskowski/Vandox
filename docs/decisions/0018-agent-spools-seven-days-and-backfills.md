@@ -7,7 +7,7 @@
 
 ## Context
 
-The NAS usually runs 24/7 but is switched off at night (typically 22:00–09:00) a few times a year, and
+The backend host usually runs 24/7 but is switched off at night (typically 22:00–09:00) a few times a year, and
 it may be unavailable longer (maintenance, holidays). Outages often happen exactly when nobody is
 watching; losing that data defeats the purpose of forensics.
 
@@ -27,7 +27,7 @@ backend can detect gaps.
 
 ## Consequences
 
-- Gapless history across NAS downtime, without loading the 2 GB server or the link during backfill.
+- Gapless history across backend host downtime, without loading the 2 GB server or the link during backfill.
 - The spool is a file-write area (security area) and needs a size bound and handling when full.
 - The wire format needs batch identity and sequence numbers from v0.1.0 on; changing it later is a
   compatibility concern.

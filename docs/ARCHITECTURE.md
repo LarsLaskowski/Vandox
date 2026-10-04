@@ -119,7 +119,7 @@ flowchart LR
 Records: [0010](decisions/0010-tailscale-with-strict-acl.md),
 [0016](decisions/0016-web-ui-in-home-lan-with-login.md),
 [0017](decisions/0017-ingest-via-tailnet-address-and-published-port.md),
-[0028](decisions/0028-tls-through-a-reverse-proxy-on-any-host.md).
+[0023](decisions/0023-tls-through-a-reverse-proxy.md).
 
 ## Offline behavior and backfill
 

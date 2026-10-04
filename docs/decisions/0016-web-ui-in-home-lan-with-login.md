@@ -25,4 +25,4 @@ internet, and it is not offered on the tailnet to the monitored server (0010).
 
 - Authentication and sessions of the web UI are a security area.
 - Access from outside the home needs a separate, deliberate decision.
-- TLS for the UI is provided by the Synology reverse proxy (0023).
+- TLS for the UI is provided by a reverse proxy (0023).
