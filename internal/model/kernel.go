@@ -1,7 +1,6 @@
 package model
 
 import (
-	"errors"
 	"time"
 )
 
@@ -39,7 +38,63 @@ type Boot struct {
 }
 
 // Kind returns KindKernelEvent.
-func (e *KernelEvent) Kind() Kind { return "" }
+func (e *KernelEvent) Kind() Kind { return KindKernelEvent }
 
 // Validate checks the payload.
-func (e *KernelEvent) Validate() error { return errors.New("not implemented") }
+func (e *KernelEvent) Validate() error {
+	if e == nil {
+		return nilReceiver()
+	}
+	if err := checkOneOf("type", e.Type, KernelEventOOMKill, KernelEventBoot); err != nil {
+		return err
+	}
+	switch e.Type {
+	case KernelEventOOMKill:
+		if e.OOMKill == nil {
+			return invalid("oom_kill", "required for type oom_kill")
+		}
+		if e.Boot != nil {
+			return invalid("boot", "not allowed for type oom_kill")
+		}
+		if err := e.OOMKill.validate(); err != nil {
+			return err
+		}
+	case KernelEventBoot:
+		if e.Boot == nil {
+			return invalid("boot", "required for type boot")
+		}
+		if e.OOMKill != nil {
+			return invalid("oom_kill", "not allowed for type boot")
+		}
+		if err := e.Boot.validate(); err != nil {
+			return err
+		}
+	}
+	return checkText("message", e.Message)
+}
+
+func (o *OOMKill) validate() error {
+	if o.VictimPID <= 0 {
+		return invalid("oom_kill.victim_pid", "must be greater than 0")
+	}
+	if err := checkRequiredShort("oom_kill.victim_command", o.VictimCommand); err != nil {
+		return err
+	}
+	return checkOOMScoreAdj("oom_kill.oom_score_adj", o.OOMScoreAdj)
+}
+
+func (b *Boot) validate() error {
+	if err := checkUUID("boot.boot_id", b.BootID); err != nil {
+		return err
+	}
+	if err := checkOptionalUUID("boot.previous_boot_id", b.PreviousBootID); err != nil {
+		return err
+	}
+	if err := checkOptionalTime("boot.booted_at", b.BootedAt); err != nil {
+		return err
+	}
+	if b.PreviousUptime != nil && *b.PreviousUptime < 0 {
+		return invalid("boot.previous_uptime_ns", "must not be negative")
+	}
+	return nil
+}

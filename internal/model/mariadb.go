@@ -1,7 +1,7 @@
 package model
 
 import (
-	"errors"
+	"regexp"
 	"time"
 )
 
@@ -39,7 +39,61 @@ type MariaDBThread struct {
 }
 
 // Kind returns KindMariaDBStatus.
-func (s *MariaDBStatus) Kind() Kind { return "" }
+func (s *MariaDBStatus) Kind() Kind { return KindMariaDBStatus }
+
+var statusKeyPattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]*$`)
 
 // Validate checks the payload.
-func (s *MariaDBStatus) Validate() error { return errors.New("not implemented") }
+func (s *MariaDBStatus) Validate() error {
+	if s == nil {
+		return nilReceiver()
+	}
+	if err := checkOneOf("availability", s.Availability, MariaDBUp, MariaDBDown, MariaDBNotAnswering); err != nil {
+		return err
+	}
+	if s.PingLatency != nil && *s.PingLatency < 0 {
+		return invalid("ping_latency_ns", "must not be negative")
+	}
+	for _, c := range []struct {
+		name string
+		n    int
+	}{{"status", len(s.Status)}, {"variables", len(s.Variables)}, {"threads", len(s.Threads)}} {
+		if err := checkCount(c.name, c.n); err != nil {
+			return err
+		}
+	}
+	if s.Availability != MariaDBUp && (len(s.Status) > 0 || len(s.Variables) > 0 || len(s.Threads) > 0) {
+		return invalid("availability", "status, variables and threads must be empty unless up")
+	}
+	for _, k := range sortedKeys(s.Status) {
+		if err := checkPattern(keyed("status", k), k, statusKeyPattern, MaxNameBytes); err != nil {
+			return err
+		}
+	}
+	for _, k := range sortedKeys(s.Variables) {
+		path := keyed("variables", k)
+		if err := checkPattern(path, k, statusKeyPattern, MaxNameBytes); err != nil {
+			return err
+		}
+		if err := checkShort(path, s.Variables[k]); err != nil {
+			return err
+		}
+	}
+	for i := range s.Threads {
+		if err := s.Threads[i].validate(indexed("threads", i)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (t *MariaDBThread) validate(path string) error {
+	for _, f := range []struct{ name, value string }{
+		{"user", t.User}, {"host", t.Host}, {"db", t.DB}, {"command", t.Command}, {"state", t.State},
+	} {
+		if err := checkShort(path+"."+f.name, f.value); err != nil {
+			return err
+		}
+	}
+	return checkText(path+".info", t.Info)
+}

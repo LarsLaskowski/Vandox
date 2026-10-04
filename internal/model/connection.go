@@ -1,7 +1,6 @@
 package model
 
 import (
-	"errors"
 	"net/netip"
 )
 
@@ -65,7 +64,125 @@ type Connection struct {
 }
 
 // Kind returns KindConnectionSnapshot.
-func (s *ConnectionSnapshot) Kind() Kind { return "" }
+func (s *ConnectionSnapshot) Kind() Kind { return KindConnectionSnapshot }
+
+var tcpStates = []string{
+	"ESTABLISHED", "SYN_SENT", "SYN_RECV", "FIN_WAIT1", "FIN_WAIT2", "TIME_WAIT", "CLOSE", "CLOSE_WAIT",
+	"LAST_ACK", "LISTEN", "CLOSING", "NEW_SYN_RECV",
+}
 
 // Validate checks the payload.
-func (s *ConnectionSnapshot) Validate() error { return errors.New("not implemented") }
+func (s *ConnectionSnapshot) Validate() error {
+	if s == nil {
+		return nilReceiver()
+	}
+	for _, c := range []struct {
+		name string
+		n    int
+	}{
+		{"states", len(s.States)}, {"processes", len(s.Processes)}, {"remotes", len(s.Remotes)},
+		{"listeners", len(s.Listeners)}, {"connections", len(s.Connections)},
+	} {
+		if err := checkCount(c.name, c.n); err != nil {
+			return err
+		}
+	}
+	for i := range s.States {
+		e := &s.States[i]
+		path := indexed("states", i)
+		if err := checkProto(path, e.Proto, e.State); err != nil {
+			return err
+		}
+		if err := checkCountValue(path, e.Count); err != nil {
+			return err
+		}
+	}
+	for i := range s.Processes {
+		e := &s.Processes[i]
+		path := indexed("processes", i)
+		if e.PID <= 0 {
+			return invalid(path+".pid", "must be greater than 0")
+		}
+		if err := checkRequiredShort(path+".command", e.Command); err != nil {
+			return err
+		}
+		if err := checkCountValue(path, e.Count); err != nil {
+			return err
+		}
+	}
+	for i := range s.Remotes {
+		e := &s.Remotes[i]
+		path := indexed("remotes", i)
+		if err := checkAddr(path+".addr", e.Addr); err != nil {
+			return err
+		}
+		if err := checkCountValue(path, e.Count); err != nil {
+			return err
+		}
+	}
+	for i := range s.Listeners {
+		e := &s.Listeners[i]
+		path := indexed("listeners", i)
+		if err := checkProtoOnly(path, e.Proto); err != nil {
+			return err
+		}
+		if err := checkAddrPort(path+".local", e.Local); err != nil {
+			return err
+		}
+		if err := checkProcess(path, e.PID, e.Command); err != nil {
+			return err
+		}
+	}
+	for i := range s.Connections {
+		e := &s.Connections[i]
+		path := indexed("connections", i)
+		if err := checkProto(path, e.Proto, e.State); err != nil {
+			return err
+		}
+		if err := checkAddrPort(path+".local", e.Local); err != nil {
+			return err
+		}
+		if err := checkAddrPort(path+".remote", e.Remote); err != nil {
+			return err
+		}
+		if err := checkProcess(path, e.PID, e.Command); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func checkProtoOnly(path string, p Proto) error {
+	return checkOneOf(path+".proto", p, ProtoTCP, ProtoTCP6, ProtoUDP, ProtoUDP6)
+}
+
+// checkProto checks the protocol and the state: required for TCP, optional for UDP.
+func checkProto(path string, p Proto, state string) error {
+	if err := checkProtoOnly(path, p); err != nil {
+		return err
+	}
+	if state == "" && (p == ProtoUDP || p == ProtoUDP6) {
+		return nil
+	}
+	if err := checkOneOf(path+".state", state, tcpStates...); err != nil {
+		if state == "" {
+			return invalid(path+".state", "required")
+		}
+		return err
+	}
+	return nil
+}
+
+func checkCountValue(path string, n uint32) error {
+	if n < 1 {
+		return invalid(path+".count", "must be at least 1")
+	}
+	return nil
+}
+
+func checkProcess(path string, pid int32, command string) error {
+	if pid < 0 {
+		return invalid(path+".pid", "must not be negative")
+	}
+	return checkShort(path+".command", command)
+}

@@ -1,7 +1,6 @@
 package model
 
 import (
-	"errors"
 	"time"
 )
 
@@ -29,7 +28,37 @@ type Gap struct {
 }
 
 // Kind returns KindGap.
-func (g *Gap) Kind() Kind { return "" }
+func (g *Gap) Kind() Kind { return KindGap }
 
 // Validate checks the payload.
-func (g *Gap) Validate() error { return errors.New("not implemented") }
+func (g *Gap) Validate() error {
+	if g == nil {
+		return nilReceiver()
+	}
+	if err := checkTime("from", g.From); err != nil {
+		return err
+	}
+	if err := checkTime("to", g.To); err != nil {
+		return err
+	}
+	if !g.To.After(g.From) {
+		return invalid("to", "must be after from")
+	}
+	if err := checkOneOf("cause", g.Cause, GapAgentNotRunning, GapSpoolDropped, GapCollectorTimeout,
+		GapSequenceMissing, GapNoData, GapUnknown); err != nil {
+		return err
+	}
+	if err := checkOptionalName("collector", g.Collector); err != nil {
+		return err
+	}
+	if g.Cause == GapCollectorTimeout && g.Collector == "" {
+		return invalid("collector", "required for cause collector_timeout")
+	}
+	if (g.FirstSeq == 0) != (g.LastSeq == 0) || g.FirstSeq > g.LastSeq {
+		return invalid("last_seq", "first_seq and last_seq must both be set, first_seq not after last_seq")
+	}
+	if g.FirstSeq == 0 && (g.Cause == GapSpoolDropped || g.Cause == GapSequenceMissing) {
+		return invalid("first_seq", "required for this cause")
+	}
+	return nil
+}
