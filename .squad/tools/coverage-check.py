@@ -15,9 +15,10 @@ filesystem.
 Usage, from the repository root, after *Test with coverage* from `.squad/stack.md`:
     python3 .squad/tools/coverage-check.py [--threshold 80]
 
-Exit code 0 when both values reach the threshold, 1 otherwise. When the diff contains no production code,
-the overall value is only reported: such a change cannot make coverage worse, so a gap that already exists
-on the base does not fail it.
+Exit code 0 when both values reach the threshold, 1 otherwise. When the diff contains neither production
+nor test code, the overall value is only reported: such a change cannot make coverage worse, so a gap that
+already exists on the base does not fail it. A diff that only changes or deletes tests is gated, because
+it can lower overall coverage.
 """
 import argparse
 import glob
@@ -59,6 +60,19 @@ def changed_lines():
             start, count = int(match.group(1)), int(match.group(2) or "1")
             result[current].update(range(start, start + count))
     return result
+
+
+def changed_test_files():
+    """Return the repo-relative test files changed since the merge base with origin/main (working tree
+    included): the paths in COVERAGE_TEST_PATHSPECS, by default the COVERAGE_EXCLUDES of squad_settings."""
+    merge_base = subprocess.run(
+        ["git", "merge-base", BASE_REF, "HEAD"], capture_output=True, text=True, check=True).stdout.strip()
+    pathspecs = getattr(settings, "COVERAGE_TEST_PATHSPECS", settings.COVERAGE_EXCLUDES)
+    if not pathspecs:
+        return []
+    return subprocess.run(
+        ["git", "diff", "--name-only", merge_base, "--", *pathspecs],
+        capture_output=True, text=True, check=True).stdout.splitlines()
 
 
 def run_reports():
@@ -207,9 +221,9 @@ def main():
 
     print(f"\nNew/changed code: {new_code:.1f}% ({covered}/{coverable} lines)")
     print(f"Overall:          {overall:.1f}% ({total_hit}/{total} lines)")
-    gated = bool(changed)
+    gated = bool(changed) or bool(changed_test_files())
     if not gated:
-        print("No production code changed: overall coverage is reported, not gated (the change cannot lower it).")
+        print("No production or test code changed: overall coverage is reported, not gated (the change cannot lower it).")
     ok = not gated or (new_code >= args.threshold and overall >= args.threshold)
     print(f"Threshold {args.threshold:.0f}%: {'PASS' if ok else 'FAIL'}")
     return 0 if ok else 1
