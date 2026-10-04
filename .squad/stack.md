@@ -7,7 +7,8 @@ profile and owned by this repository: keep it true when the build changes.
 ## Toolchain
 
 - Go `1.27` (module `github.com/LarsLaskowski/Vandox`); `go.mod` names the minor version without a patch,
-  so `setup-go` uses the newest 1.27.x.
+  so `setup-go` uses the newest 1.27.x available on the runner (toolcache first, then the versions
+  manifest).
 - `gofmt` as the formatter, `go vet` and **golangci-lint** `v2.13.1` (configured in `.golangci.yml`) as the
   analyzers, `govulncheck` (a `tool` dependency in `go.mod`) for known vulnerabilities.
 - The SessionStart hook `.claude/hooks/session-start.sh` runs `go mod download` in remote sessions.
