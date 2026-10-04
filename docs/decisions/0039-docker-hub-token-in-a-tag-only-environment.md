@@ -1,6 +1,6 @@
 # 0039: Docker Hub token is repository-scoped and lives in a tag-only GitHub environment
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-04
 - **Source:** Issue #9
 - **Supersedes:** —

@@ -20,3 +20,4 @@ One line per pipeline step: date, step, member, result. Lead decisions and escal
 | 2026-10-04 | 8 Fix round 1 | Dev | duplicate project:end marker removed; dry-run wording corrected; retention-days 7; CONTRIBUTING re-run section rewritten; orchestrator re-verified format, analyzer gate, config-check, actionlint |
 | 2026-10-04 | 8 Review round 2 (delta) | Reviewer | APPROVE: all three round 1 findings fixed, 7-day window consistent, no new defects |
 | 2026-10-04 | 8 Security diff review (delta) | Security | APPROVED: retention 7 days has no security impact, docs consistent with 0039 |
+| 2026-10-04 | 9 PR approval | Lead | APPROVED; decision records 0037-0039 Accepted and indexed; conditions: Docker steps verified only by PR dry run (must be green before merge); maintainer actions and follow-up issues listed in PR |

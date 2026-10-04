@@ -1,6 +1,6 @@
 # 0037: Release workflow built from plain go build, the Docker CLI and gh; verified once, published as built
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-04
 - **Source:** Issue #9
 - **Supersedes:** —
