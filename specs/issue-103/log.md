@@ -24,3 +24,4 @@ One line per pipeline step: date, step, member, result. Lead decisions and escal
 | 2026-10-04 | 11 Plan security delta | Security | APPROVED, no findings |
 | 2026-10-04 | 11 Implement (Sonar fix) | Dev | Dockerfile ARG-based pins, release.yml checks, dependabot docker entry removed, CONTRIBUTING/ARCHITECTURE/project.md updated; local script cases pass (good + all negatives); build/vet/test green; docker build, Sonar S8431, release dry run only in CI |
 | 2026-10-04 | 11 Code check (Sonar fix) | Code Officer | format, analyzer gate, config-check, build, tests green; AC9 negative cases 1-9, N1, N2, N4 and Go-minor case 14 verified; no edits |
+| 2026-10-04 | 11 Review (Sonar fix) | Reviewer, Security | both APPROVE, no findings; digests re-read from registries and match |
