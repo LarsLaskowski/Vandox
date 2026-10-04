@@ -75,6 +75,12 @@ var (
 
 const maxAgentIDBytes = 64
 
+// ValidateAgentID reports whether id is a valid agent ID: 1 to 64 characters of [A-Za-z0-9._-],
+// starting with a letter or digit. The error is a *model.FieldError for field "agent_id".
+func ValidateAgentID(id string) error {
+	return errors.New("not implemented")
+}
+
 // NewHeader returns a valid header of the current format version.
 func NewHeader(agentID, bootID string, mode Mode) Header {
 	return Header{
