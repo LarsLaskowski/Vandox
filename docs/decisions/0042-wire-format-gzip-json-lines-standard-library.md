@@ -23,7 +23,7 @@ watched by `govulncheck` for the life of the project.
    dependency; streamable line by line with a hard per-line bound; readable with `zcat | jq` while
    debugging an outage; gzip of repetitive JSON keys reaches a ratio that makes the larger raw size
    irrelevant at the volumes of one server. Cons: larger and slower than a binary encoding; `encoding/json`
-   matches keys case-insensitively and lets the last duplicate key win (both handled, see the format
+   matches keys case-insensitively, with Unicode case folding (`"Kind"` is read as `kind`), and lets the last duplicate key win (both handled, see the format
    description).
 2. **JSON Lines with zstd (`github.com/klauspost/compress/zstd`)** — better ratio and speed than gzip. Cons:
    a dependency on both binaries for a gain that does not matter at this volume; zstd decoders need

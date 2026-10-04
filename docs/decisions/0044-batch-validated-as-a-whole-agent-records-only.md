@@ -45,6 +45,21 @@ For records that are valid in the model but larger than a line may be:
 - **d. Split a large snapshot into several records** — the backend would have to reassemble them, and a
   lost part would look like a complete snapshot. Rejected.
 
+For the zone of an IPv6 address (`fe80::1%eth0`), which `net/netip` accepts with any text of any length:
+
+- **Bound the zone and check it against an interface-name pattern** (e.g. at most 16 bytes) — keeps the
+  zone, but a zone names an interface of the agent host and means nothing to the backend, so the bounded
+  string is stored for no use. Rejected.
+- **Reject any zone; the producer strips it** — no zone string reaches storage at all. Chosen.
+
+For agent-supplied text in error messages (map keys in field paths, an unknown `kind`):
+
+- **Raw, as `encoding/json` does** — a key with a newline or markup and up to a line's length ends up in
+  logs. Rejected.
+- **Quoted with `strconv.Quote` and cut to `model.MaxNameBytes` with a `...` marker (`model.QuoteName`)** —
+  bounded and free of control bytes, still recognizable. Chosen for this package's own errors; wrapped
+  parser errors are left intact so `errors.As` keeps working, see *Consequences*.
+
 ## Decision
 
 Option 2 with c:
@@ -59,7 +74,11 @@ Option 2 with c:
 - The decoder enforces `wire.Limits`: at most `MaxLineBytes` per line (default 1 MiB), `MaxBatchBytes`
   decompressed bytes per batch (default 16 MiB, the bound against gzip bombs) and `MaxRecords` records
   (default 20 000). The model bounds every list and map to `model.MaxItems` (4096) entries, metric labels
-  to `model.MaxLabels` (32), and every string to a documented byte length.
+  to `model.MaxLabels` (32), and every string to a documented byte length. Network addresses are
+  numeric and carry no zone (a zoned address is invalid; the producer strips the zone).
+- Error text: a `model.FieldError` names the field path and a fixed reason, never a field's value; a map
+  key in a path and an unknown `kind` in a wire error are rendered with `model.QuoteName` (quoted, cut to
+  `model.MaxNameBytes`, `...` when cut).
 - Per-record size: `wire.CheckRecord` validates one agent record and returns its encoded line length;
   a record whose line exceeds the default `MaxLineBytes` yields a `*wire.RecordSizeError` that wraps
   `wire.ErrRecordTooLarge` (itself wrapping `wire.ErrLimitExceeded`). `wire.EncodeBatch` reports the same
@@ -87,6 +106,10 @@ Option 2 with c:
   objects costs tens of MiB transiently on the backend host. This is accepted because only an agent holding
   a valid token reaches the decoder (security area 1) and lines are decoded one at a time; consumers stream
   records instead of collecting a whole batch.
+- Errors wrapped from the standard library still carry raw agent text of up to `MaxLineBytes`: `time` and
+  `netip` quote the rejected string, and `encoding/json` type errors name the struct field path including
+  raw map keys. A consumer logs or displays decode errors only through the sanitization of security area
+  12 (stated in `docs/WIRE_FORMAT.md`, implemented in #40).
 - A batch larger than the limits is invalid for every backend of major version 1; the agent's batching
   (#39) has to stay below them, using the size `wire.CheckRecord` returns. Raising a default is a minor
   change, lowering one is a major change (0043).

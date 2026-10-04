@@ -163,7 +163,9 @@ All `FieldError` assertions check `errors.Is(err, model.ErrInvalid)` and the exa
   `clock_offset_ns` and the batching rule of 0046), envelope, every record kind with its fields and rules,
   the limits, the versioning rules of 0043, the batch rules and the producer size contract of 0044, the
   batch identity of 0045, the producer mapping for connection endpoints (see *Approach*), the accepted
-  forms and a decompressed example batch; it matches the code. `README.md`, `docs/ARCHITECTURE.md` and `.squad/project.md` are updated as
+  forms (including zone rejection and Unicode key folding), the error-text and consumer duties of #40
+  (sanitized logging, `http.MaxBytesReader` on the compressed body, server timeouts) and a decompressed
+  example batch; it matches the code. `README.md`, `docs/ARCHITECTURE.md` and `.squad/project.md` are updated as
   listed below.
 
 ## Approach
@@ -844,13 +846,22 @@ All by the Dev:
 - `docs/WIRE_FORMAT.md` (new): purpose and scope; stream layout (gzip, JSON Lines, header line, record
   lines); header fields; envelope fields and the meaning of `captured_at`; every record kind with its fields,
   types, units and rules (the tables under *Approach*), including the meaning of every `complete` and
-  `truncated` flag; the producer mapping for connection endpoints (wildcard, service-name ports, unmappable
-  sockets, unconnected sockets — named for the legacy `lsof -ni` parser, #20); limits and bounds with their
+  `truncated` flag; the producer mapping for connection endpoints (zones stripped, wildcard, service-name
+  ports, unmappable sockets, unconnected sockets — named for the legacy `lsof -ni` parser, #20); limits and bounds with their
   defaults; the producer size contract (`CheckRecord` at creation, reduction order, the kinds that always
   fit) (0044); the capture-context meaning of `boot_id` and `clock_offset_ns` and the batching rule (0046);
   the batch identity and deduplication key (0045); versioning rules (0043); batch validity and trust rules
-  (0044); accepted forms (the table above, in user terms); a short decompressed example batch with one
-  record of each of at least three kinds; links to 0042–0046.
+  (0044); accepted forms (the table above, in user terms), including that addresses carry no zone (the
+  producer strips it) and that keys are matched with Unicode case folding (`"Kind"` counts as `kind`),
+  so `zcat | jq` can show a key the decoder reads under another name; error text: field paths quote and
+  cut map keys (`QuoteName`), but wrapped parser errors (`time`, `netip`, `encoding/json` including raw map
+  keys) carry agent text of up to `MaxLineBytes`, so a consumer logs or displays decode errors only through
+  the area-12 sanitization; consumer duties of the ingest API (#40): wrap the request body in
+  `http.MaxBytesReader` on the **compressed** bytes before `NewDecoder` (the decoder bounds only the
+  decompressed bytes), set server read/read-header/write/idle timeouts so a slow reader cannot block, check
+  the header's `agent_id` against the token's agent, deduplicate by (agent ID, seq), and commit only after
+  `io.EOF`; a short decompressed example batch with one record of each of at least three kinds; links to
+  0042–0046.
 - `README.md`: in *Layout*, name `internal/model` and `internal/wire` and link `docs/WIRE_FORMAT.md`.
 - `docs/ARCHITECTURE.md` (inside the project block): replace "as of now only the two binaries' `--version`
   exist" with a statement that the binaries' `--version` and the shared data model and wire format
@@ -938,7 +949,8 @@ All by the Dev:
   pre-read, unknown majors rejected, minor additive, unknown keys ignored, unknown kinds rejected.
 - `docs/decisions/0044-batch-validated-as-a-whole-agent-records-only.md` (Proposed) — atomic batch,
   agent-only records without origin/receive time on the wire, format limits, the per-record size check
-  with the producer reduction contract, and the accepted allocation residual.
+  with the producer reduction contract, the accepted allocation residual, addresses without zone and the
+  rendering of agent text in error paths (revised after Security round 1).
 - `docs/decisions/0045-batch-identified-by-agent-id-and-record-sequence-numbers.md` (Proposed, supersedes
   0018) — spool and backfill as in 0018; a batch is identified by the agent ID and its records' sequence
   numbers, no batch ID. At approval the Lead sets 0018's status to `Superseded by 0045` (the only edit
@@ -965,7 +977,8 @@ A search for "identity and sequence number" in `docs/` and `.squad/` after the c
 - Producer obligations stated here and in `docs/WIRE_FORMAT.md`, implemented by their own issues: spooling
   boot ID and offset per record and batching by them (#38, #39, 0046); calling `CheckRecord` at creation
   and reducing oversized records (the collectors #31–#36, the spool #38); endpoint mapping for the legacy
-  `lsof -ni` output, i.e. wildcard and service-name ports (#20). No follow-up issue: each issue exists and
+  `lsof -ni` output, i.e. wildcard and service-name ports (#20), and zone stripping for every connection
+  collector (#33, #20). No follow-up issue: each issue exists and
   its plan reads `docs/WIRE_FORMAT.md`.
 
 ## Challenge
@@ -1007,3 +1020,40 @@ Devil's Advocate, round 1 (3 major, 2 minor). All five accepted; scope kept, tie
    numeric `netip.AddrPort`; the producer mapping (wildcard → `0.0.0.0` / `::`, service names via a
    built-in table, unmappable sockets left out with `complete` false, unconnected sockets as listeners) is
    stated under *Approach* and in `docs/WIRE_FORMAT.md`, and named for #20 under *Out of scope*.
+
+Security plan review, round 1 (CHANGES_REQUIRED: 2 blocking, 3 non-blocking). All five accepted; scope
+and tier unchanged. Each claim was re-checked with a scratch program under Go 1.27.0 before revising.
+
+- **B1 (blocking) — unbounded, unvalidated address zone**: accepted, first option. Confirmed:
+  `netip.AddrPort.UnmarshalText("[fe80::1%x]:]:80")` succeeds with zone `x]:`, `netip.Addr` accepts a zone
+  of `\n<b>x]:` and one of 5000 bytes. Bounding the zone to an interface-name pattern was rejected: a zone
+  names an interface of the agent host and has no meaning on the backend, so storing it gains nothing and
+  only adds a string to bound (recorded in 0044, *Options considered*). The model now rejects any zone in
+  `RemoteCount.addr`, `Listener.local`, `Connection.local` and `Connection.remote` (reason `zone not
+  allowed`, field `<list>[i].addr|local|remote`), also on IPv4-mapped addresses; the producer strips it
+  (*Common rules*, *ConnectionSnapshot*, producer mapping in `docs/WIRE_FORMAT.md`, follow-up note for
+  #33/#20). The *Accepted forms* rows for addresses were split into rejected-with-zone, parse-error and
+  accepted forms; AC6 and AC17 have the `\n`, 5000-byte and `]:` zone cases. Re-check of the whole
+  accepted-forms list for other unbounded strings: every remaining agent string is either enumerated
+  (`kind`, `proto`, `mode`, states, causes), matched by a pattern with a byte bound (names, IDs, units,
+  map keys) or bounded short text/text; time and number strings only reach a parse error.
+- **B2 (blocking) — raw map keys in `FieldError.Field` and in wrapped `encoding/json` errors**: accepted.
+  Confirmed: `json: cannot unmarshal string into Go struct field M.status.evil\nkey<script> of type
+  uint64` carries the raw key with a newline byte. New exported `model.QuoteName` (cut to `MaxNameBytes`
+  bytes, `strconv.Quote`, `...` marker when cut) renders every map key in a field path (`labels["…"]`,
+  `status["…"]`, `variables["…"]`); AC1 tests the helper, AC4 and AC8 the exact paths for `"a\nb"` and an
+  over-long key. The *Security considerations* claim is corrected: this change's own error text carries no
+  field value and only quoted, cut keys; wrapped `time`, `netip` and `encoding/json` errors (the last with
+  raw map keys in the struct field path) carry raw agent text bounded by `MaxLineBytes`, and the consumer
+  sanitization duty stays in `docs/WIRE_FORMAT.md`. Rewriting wrapped errors in the decoder was not chosen,
+  so `errors.As` on `*json.UnmarshalTypeError` keeps working.
+- **N1 — Unicode-folded keys**: accepted. Confirmed: `"Kind"` and `"ſeq"` decode as `kind` and
+  `seq`, and a folded duplicate wins over an earlier `kind`. New *Accepted forms* row (accepted,
+  documented), two AC17 cases, and a note in `docs/WIRE_FORMAT.md` that `jq` shows a different key.
+  Rejecting folded keys would need a second tokenizer pass over every line; not worth it, since the
+  decoder's reading is deterministic and the same in the version pre-read.
+- **N2 — unbounded kind in `ErrUnknownKind`**: accepted. The kind is rendered with `model.QuoteName`
+  instead of `%q` (*Next*, AC17 with a 5000-byte kind containing `\n`).
+- **N3 — #40 duties for the compressed body and timeouts**: accepted. `docs/WIRE_FORMAT.md` states
+  `http.MaxBytesReader` on the compressed body before `NewDecoder`, the server timeouts, the `agent_id`
+  check, deduplication and commit-after-`io.EOF` as consumer duties (*Documentation updates*, AC23).
