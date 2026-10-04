@@ -184,6 +184,43 @@ func decodeBatch(t *testing.T, data []byte) (wire.Header, []model.Record) {
 	return wire.Header{}, nil
 }
 
+// encodeBytes encodes b and returns the gzip stream.
+func encodeBytes(t *testing.T, b *wire.Batch) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	if err := wire.EncodeBatch(&buf, b); err != nil {
+		t.Fatalf("EncodeBatch() = %v, want nil", err)
+	}
+	return buf.Bytes()
+}
+
+// requireSameRecords fails the test when got differs from want.
+func requireSameRecords(t *testing.T, got, want []model.Record) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("decoded %d records, want %d", len(got), len(want))
+	}
+	for i := range got {
+		if !reflect.DeepEqual(got[i], want[i]) {
+			t.Errorf("record %d (%s) = %+v (data %+v), want %+v (data %+v)", i, want[i].Kind(), got[i], got[i].Data, want[i], want[i].Data)
+		}
+	}
+}
+
+// requireUTCTimes fails the test when a decoded time of metricAll, processAll and gapAll is not in UTC.
+func requireUTCTimes(t *testing.T, got []model.Record) {
+	t.Helper()
+	times := []time.Time{got[0].CapturedAt}
+	times = append(times, got[1].Data.(*model.ProcessSnapshot).Processes[0].StartedAt)
+	gap := got[2].Data.(*model.Gap)
+	times = append(times, gap.From, gap.To)
+	for i, ts := range times {
+		if ts.Location() != time.UTC {
+			t.Errorf("decoded time %d (%v) has location %v, want UTC", i, ts, ts.Location())
+		}
+	}
+}
+
 func TestEncodeBatch_RoundTrip(t *testing.T) {
 	t.Run("every kind with all optional fields", func(t *testing.T) {
 		b := &wire.Batch{
@@ -191,22 +228,11 @@ func TestEncodeBatch_RoundTrip(t *testing.T) {
 			Records: allKindRecords(time.UTC),
 		}
 		b.Header.ClockOffset = ptr(-1500 * time.Millisecond)
-		var buf bytes.Buffer
-		if err := wire.EncodeBatch(&buf, b); err != nil {
-			t.Fatalf("EncodeBatch() = %v, want nil", err)
-		}
-		h, recs := decodeBatch(t, buf.Bytes())
+		h, recs := decodeBatch(t, encodeBytes(t, b))
 		if !reflect.DeepEqual(h, b.Header) {
 			t.Errorf("decoded header = %+v, want %+v", h, b.Header)
 		}
-		if len(recs) != len(b.Records) {
-			t.Fatalf("decoded %d records, want %d", len(recs), len(b.Records))
-		}
-		for i := range recs {
-			if !reflect.DeepEqual(recs[i], b.Records[i]) {
-				t.Errorf("record %d (%s) = %+v (data %+v), want %+v (data %+v)", i, b.Records[i].Kind(), recs[i], recs[i].Data, b.Records[i], b.Records[i].Data)
-			}
-		}
+		requireSameRecords(t, recs, b.Records)
 	})
 
 	t.Run("zero-offset zones are written as Z and decode as UTC", func(t *testing.T) {
@@ -216,40 +242,57 @@ func TestEncodeBatch_RoundTrip(t *testing.T) {
 				in := []model.Record{metricAll(1, loc), processAll(2, loc), gapAll(3, loc)}
 				want := []model.Record{metricAll(1, time.UTC), processAll(2, time.UTC), gapAll(3, time.UTC)}
 				b := &wire.Batch{Header: wire.NewHeader("agent-1", testBootID, wire.ModeLive), Records: in}
-				var buf bytes.Buffer
-				if err := wire.EncodeBatch(&buf, b); err != nil {
-					t.Fatalf("EncodeBatch() = %v, want nil", err)
-				}
-				_, got := decodeBatch(t, buf.Bytes())
-				if len(got) != len(want) {
-					t.Fatalf("decoded %d records, want %d", len(got), len(want))
-				}
-				for i := range got {
-					if !reflect.DeepEqual(got[i], want[i]) {
-						t.Errorf("record %d = %+v, want %+v", i, got[i], want[i])
-					}
-				}
-				times := []time.Time{got[0].CapturedAt}
-				times = append(times, got[1].Data.(*model.ProcessSnapshot).Processes[0].StartedAt)
-				gap := got[2].Data.(*model.Gap)
-				times = append(times, gap.From, gap.To)
-				for i, ts := range times {
-					if ts.Location() != time.UTC {
-						t.Errorf("decoded time %d (%v) has location %v, want UTC", i, ts, ts.Location())
-					}
-				}
+				_, got := decodeBatch(t, encodeBytes(t, b))
+				requireSameRecords(t, got, want)
+				requireUTCTimes(t, got)
 			})
 		}
 	})
 }
 
+// requireHeaderLine checks the JSON header line of an encoded batch without a clock offset.
+func requireHeaderLine(t *testing.T, line string) {
+	t.Helper()
+	var header map[string]any
+	if err := json.Unmarshal([]byte(line), &header); err != nil {
+		t.Fatalf("line 1 is not a JSON object: %v", err)
+	}
+	for key, want := range map[string]any{"format_major": float64(1), "format_minor": float64(0), "agent_id": "agent-1", "boot_id": testBootID, "mode": "live"} {
+		if header[key] != want {
+			t.Errorf("header[%q] = %v, want %v", key, header[key], want)
+		}
+	}
+	if _, ok := header["clock_offset_ns"]; ok {
+		t.Errorf("header has clock_offset_ns although it is unknown, want the key omitted")
+	}
+}
+
+// requireRecordLine checks the envelope keys of the encoded record line number lineNo.
+func requireRecordLine(t *testing.T, line string, lineNo int) {
+	t.Helper()
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(line), &obj); err != nil {
+		t.Fatalf("line %d is not a JSON object: %v", lineNo, err)
+	}
+	for _, key := range []string{"origin", "received_at"} {
+		if _, ok := obj[key]; ok {
+			t.Errorf("line %d has key %q, want it absent", lineNo, key)
+		}
+	}
+	for _, key := range []string{"kind", "source", "seq", "captured_at", "data"} {
+		if _, ok := obj[key]; !ok {
+			t.Errorf("line %d lacks key %q", lineNo, key)
+		}
+	}
+	var capturedAt string
+	if err := json.Unmarshal(obj["captured_at"], &capturedAt); err != nil || !strings.HasSuffix(capturedAt, "Z") {
+		t.Errorf("line %d captured_at = %s, want a string ending in Z", lineNo, obj["captured_at"])
+	}
+}
+
 func TestEncodeBatch_StreamLayout(t *testing.T) {
 	b := &wire.Batch{Header: wire.NewHeader("agent-1", testBootID, wire.ModeLive), Records: allKindRecords(time.UTC)}
-	var buf bytes.Buffer
-	if err := wire.EncodeBatch(&buf, b); err != nil {
-		t.Fatalf("EncodeBatch() = %v, want nil", err)
-	}
-	data := buf.Bytes()
+	data := encodeBytes(t, b)
 	if len(data) < 2 || data[0] != 0x1f || data[1] != 0x8b {
 		t.Fatalf("encoded bytes start with % x, want gzip magic 1f 8b", data[:min(2, len(data))])
 	}
@@ -262,38 +305,9 @@ func TestEncodeBatch_StreamLayout(t *testing.T) {
 	}
 	lines := strings.Split(strings.TrimSuffix(text, "\n"), "\n")
 
-	var header map[string]any
-	if err := json.Unmarshal([]byte(lines[0]), &header); err != nil {
-		t.Fatalf("line 1 is not a JSON object: %v", err)
-	}
-	for key, want := range map[string]any{"format_major": float64(1), "format_minor": float64(0), "agent_id": "agent-1", "boot_id": testBootID, "mode": "live"} {
-		if header[key] != want {
-			t.Errorf("header[%q] = %v, want %v", key, header[key], want)
-		}
-	}
-	if _, ok := header["clock_offset_ns"]; ok {
-		t.Errorf("header has clock_offset_ns although it is unknown, want the key omitted")
-	}
-
+	requireHeaderLine(t, lines[0])
 	for i, line := range lines[1:] {
-		var obj map[string]json.RawMessage
-		if err := json.Unmarshal([]byte(line), &obj); err != nil {
-			t.Fatalf("line %d is not a JSON object: %v", i+2, err)
-		}
-		for _, key := range []string{"origin", "received_at"} {
-			if _, ok := obj[key]; ok {
-				t.Errorf("line %d has key %q, want it absent", i+2, key)
-			}
-		}
-		for _, key := range []string{"kind", "source", "seq", "captured_at", "data"} {
-			if _, ok := obj[key]; !ok {
-				t.Errorf("line %d lacks key %q", i+2, key)
-			}
-		}
-		var capturedAt string
-		if err := json.Unmarshal(obj["captured_at"], &capturedAt); err != nil || !strings.HasSuffix(capturedAt, "Z") {
-			t.Errorf("line %d captured_at = %s, want a string ending in Z", i+2, obj["captured_at"])
-		}
+		requireRecordLine(t, line, i+2)
 	}
 }
 

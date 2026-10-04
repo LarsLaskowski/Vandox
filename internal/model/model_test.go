@@ -146,29 +146,37 @@ func TestQuoteName(t *testing.T) {
 			}
 		})
 	}
+}
 
-	t.Run("split rune is shown as byte escape", func(t *testing.T) {
-		got := model.QuoteName(split)
-		if !strings.Contains(got, `\xc3`) || !strings.HasSuffix(got, `"...`) {
-			t.Errorf("QuoteName(split rune) = %q, want a \\xc3 escape and the ... marker", got)
-		}
-	})
+func TestQuoteName_SplitRuneIsShownAsByteEscape(t *testing.T) {
+	// 127 ASCII bytes plus a two-byte rune: the cut at 128 bytes falls inside the rune.
+	split := strings.Repeat("a", model.MaxNameBytes-1) + "é"
+	got := model.QuoteName(split)
+	if !strings.Contains(got, `\xc3`) || !strings.HasSuffix(got, `"...`) {
+		t.Errorf("QuoteName(split rune) = %q, want a \\xc3 escape and the ... marker", got)
+	}
+}
 
-	t.Run("no control byte and bounded length", func(t *testing.T) {
-		key := strings.Repeat("\x01", 5000) + "\n\r\x00"
-		got := model.QuoteName(key)
-		if !strings.HasPrefix(got, `"`) || !strings.HasSuffix(got, `"...`) {
-			t.Fatalf("QuoteName(control bytes) = %q, want a quoted string followed by ...", got)
+// requireNoControlByte fails the test when s holds a byte below 0x20.
+func requireNoControlByte(t *testing.T, s string) {
+	t.Helper()
+	for i := 0; i < len(s); i++ {
+		if s[i] < 0x20 {
+			t.Fatalf("QuoteName(control bytes) holds byte 0x%02x at %d, want none below 0x20", s[i], i)
 		}
-		for i := 0; i < len(got); i++ {
-			if got[i] < 0x20 {
-				t.Fatalf("QuoteName(control bytes) holds byte 0x%02x at %d, want none below 0x20", got[i], i)
-			}
-		}
-		if limit := 4*model.MaxNameBytes + 5; len(got) > limit {
-			t.Errorf("len(QuoteName(control bytes)) = %d, want <= %d", len(got), limit)
-		}
-	})
+	}
+}
+
+func TestQuoteName_NoControlByteAndBoundedLength(t *testing.T) {
+	key := strings.Repeat("\x01", 5000) + "\n\r\x00"
+	got := model.QuoteName(key)
+	if !strings.HasPrefix(got, `"`) || !strings.HasSuffix(got, `"...`) {
+		t.Fatalf("QuoteName(control bytes) = %q, want a quoted string followed by ...", got)
+	}
+	requireNoControlByte(t, got)
+	if limit := 4*model.MaxNameBytes + 5; len(got) > limit {
+		t.Errorf("len(QuoteName(control bytes)) = %d, want <= %d", len(got), limit)
+	}
 }
 
 func TestMeta_Validate(t *testing.T) {

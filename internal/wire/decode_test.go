@@ -114,31 +114,41 @@ func (w want) check(t *testing.T, err error) {
 		t.Errorf("error = %v, want errors.Is(err, %v)", err, w.is)
 	}
 	if w.field != "" || w.fieldSuffix != "" || w.reason != "" {
-		var fe *model.FieldError
-		if !errors.As(err, &fe) {
-			t.Fatalf("error = %T (%v), want a *model.FieldError", err, err)
-		}
-		if !errors.Is(err, model.ErrInvalid) {
-			t.Errorf("error = %v, want errors.Is(err, model.ErrInvalid)", err)
-		}
-		if w.field != "" && fe.Field != w.field {
-			t.Errorf("field = %q, want %q (reason %q)", fe.Field, w.field, fe.Reason)
-		}
-		if w.fieldSuffix != "" && !strings.HasSuffix(fe.Field, w.fieldSuffix) {
-			t.Errorf("field = %q, want suffix %q", fe.Field, w.fieldSuffix)
-		}
-		if w.reason != "" && fe.Reason != w.reason {
-			t.Errorf("reason = %q, want %q", fe.Reason, w.reason)
-		}
+		w.checkFieldError(t, err)
 	}
 	if w.line > 0 {
-		var de *wire.DecodeError
-		if !errors.As(err, &de) {
-			t.Fatalf("error = %T (%v), want a *wire.DecodeError", err, err)
-		}
-		if de.Line != w.line {
-			t.Errorf("DecodeError.Line = %d, want %d (%v)", de.Line, w.line, err)
-		}
+		w.checkLine(t, err)
+	}
+}
+
+func (w want) checkFieldError(t *testing.T, err error) {
+	t.Helper()
+	var fe *model.FieldError
+	if !errors.As(err, &fe) {
+		t.Fatalf("error = %T (%v), want a *model.FieldError", err, err)
+	}
+	if !errors.Is(err, model.ErrInvalid) {
+		t.Errorf("error = %v, want errors.Is(err, model.ErrInvalid)", err)
+	}
+	if w.field != "" && fe.Field != w.field {
+		t.Errorf("field = %q, want %q (reason %q)", fe.Field, w.field, fe.Reason)
+	}
+	if w.fieldSuffix != "" && !strings.HasSuffix(fe.Field, w.fieldSuffix) {
+		t.Errorf("field = %q, want suffix %q", fe.Field, w.fieldSuffix)
+	}
+	if w.reason != "" && fe.Reason != w.reason {
+		t.Errorf("reason = %q, want %q", fe.Reason, w.reason)
+	}
+}
+
+func (w want) checkLine(t *testing.T, err error) {
+	t.Helper()
+	var de *wire.DecodeError
+	if !errors.As(err, &de) {
+		t.Fatalf("error = %T (%v), want a *wire.DecodeError", err, err)
+	}
+	if de.Line != w.line {
+		t.Errorf("DecodeError.Line = %d, want %d (%v)", de.Line, w.line, err)
 	}
 }
 
@@ -372,78 +382,94 @@ func TestDecoder_UnknownKindText(t *testing.T) {
 	}
 }
 
-func TestDecoder_AcceptedForms(t *testing.T) {
+type recordCheck func(t *testing.T, recs []model.Record)
+
+// metricSeq checks that the first record is a metric with the given seq.
+func metricSeq(seq uint64) recordCheck {
+	return func(t *testing.T, recs []model.Record) {
+		t.Helper()
+		if recs[0].Kind() != model.KindMetric || recs[0].Seq != seq {
+			t.Errorf("record = kind %q seq %d, want metric seq %d", recs[0].Kind(), recs[0].Seq, seq)
+		}
+	}
+}
+
+func checkSeq3(t *testing.T, recs []model.Record) {
+	t.Helper()
+	if recs[0].Seq != 3 {
+		t.Errorf("Seq = %d, want 3", recs[0].Seq)
+	}
+}
+
+func checkOriginAgent(t *testing.T, recs []model.Record) {
+	t.Helper()
+	if recs[0].Origin != model.OriginAgent {
+		t.Errorf("Origin = %q, want %q", recs[0].Origin, model.OriginAgent)
+	}
+}
+
+func checkZeroOffsetTimes(t *testing.T, recs []model.Record) {
+	t.Helper()
+	for i, r := range recs {
+		if _, off := r.CapturedAt.Zone(); off != 0 {
+			t.Errorf("record %d CapturedAt offset = %d, want 0", i, off)
+		}
+	}
+	if want := time.Date(2026, 3, 1, 12, 0, 0, 123456789, time.UTC); !recs[2].CapturedAt.Equal(want) {
+		t.Errorf("record 2 CapturedAt = %v, want %v", recs[2].CapturedAt, want)
+	}
+}
+
+// logMessage checks the message of the first record, a log line.
+func logMessage(want string) recordCheck {
+	return func(t *testing.T, recs []model.Record) {
+		t.Helper()
+		if got := recs[0].Data.(*model.LogLine).Message; got != want {
+			t.Errorf("Message = %q, want %q", got, want)
+		}
+	}
+}
+
+func checkKindMetric(t *testing.T, recs []model.Record) {
+	t.Helper()
+	if recs[0].Kind() != model.KindMetric {
+		t.Errorf("Kind() = %q, want %q", recs[0].Kind(), model.KindMetric)
+	}
+}
+
+type acceptedCase struct {
+	name  string
+	data  []byte
+	count int
+	check recordCheck
+}
+
+func acceptedFormCases(t *testing.T) []acceptedCase {
+	t.Helper()
 	const keyHeader = `{"FORMAT_MAJOR":1,"Format_Minor":0,"AGENT_ID":"agent-1","Boot_ID":"` + testBootID + `","MODE":"live"}`
-	cases := []struct {
-		name  string
-		data  []byte
-		count int
-		check func(t *testing.T, recs []model.Record)
-	}{
+	return []acceptedCase{
 		{"CRLF line ends", gzipString(t, headerJSON+"\r\n"+metricLine(1)+"\r\n"+metricLine(2)+"\r\n"), 2, nil},
 		{"last line without newline", gzipString(t, headerJSON+"\n"+metricLine(1)), 1, nil},
 		{"spaces and tabs around objects", gzipString(t, " \t"+headerJSON+"\t \n \t"+metricLine(1)+" \t\n"), 1, nil},
-		{"keys in other case", stream(t, keyHeader, `{"KIND":"metric","Source":"proc.stat","SEQ":4,"Captured_At":`+tsJSON+`,"DATA":{"NAME":"cpu","Value":1}}`), 1,
-			func(t *testing.T, recs []model.Record) {
-				if recs[0].Kind() != model.KindMetric || recs[0].Seq != 4 {
-					t.Errorf("record = kind %q seq %d, want metric seq 4", recs[0].Kind(), recs[0].Seq)
-				}
-			}},
-		{"duplicate keys, last wins", stream(t, headerJSON, `{"kind":"metric","source":"proc.stat","seq":9,"seq":3,"captured_at":`+tsJSON+`,"data":{"name":"x y","name":"cpu","value":1}}`), 1,
-			func(t *testing.T, recs []model.Record) {
-				if recs[0].Seq != 3 {
-					t.Errorf("Seq = %d, want 3", recs[0].Seq)
-				}
-			}},
+		{"keys in other case", stream(t, keyHeader, `{"KIND":"metric","Source":"proc.stat","SEQ":4,"Captured_At":`+tsJSON+`,"DATA":{"NAME":"cpu","Value":1}}`), 1, metricSeq(4)},
+		{"duplicate keys, last wins", stream(t, headerJSON, `{"kind":"metric","source":"proc.stat","seq":9,"seq":3,"captured_at":`+tsJSON+`,"data":{"name":"x y","name":"cpu","value":1}}`), 1, checkSeq3},
 		{"unknown keys at any depth", stream(t, headerJSON, `{"kind":"metric","source":"proc.stat","seq":1,"captured_at":`+tsJSON+`,"extra":{"a":[1,{"b":null}]},"data":{"name":"cpu","value":1,"extra":[[[]]]}}`), 1, nil},
-		{"origin and received_at keys are ignored", stream(t, headerJSON, `{"kind":"metric","origin":"backend","received_at":"2026-03-02T00:00:00Z","source":"proc.stat","seq":1,"captured_at":`+tsJSON+`,"data":`+okData+`}`), 1,
-			func(t *testing.T, recs []model.Record) {
-				if recs[0].Origin != model.OriginAgent {
-					t.Errorf("Origin = %q, want %q", recs[0].Origin, model.OriginAgent)
-				}
-			}},
+		{"origin and received_at keys are ignored", stream(t, headerJSON, `{"kind":"metric","origin":"backend","received_at":"2026-03-02T00:00:00Z","source":"proc.stat","seq":1,"captured_at":`+tsJSON+`,"data":`+okData+`}`), 1, checkOriginAgent},
 		{"time forms with zero offset", withHeader(t,
 			envelope("metric", 1, `"2026-03-01T12:00:00+00:00"`, okData),
 			envelope("metric", 2, `"2026-03-01T12:00:00-00:00"`, okData),
-			envelope("metric", 3, `"2026-03-01T12:00:00.123456789Z"`, okData)), 3,
-			func(t *testing.T, recs []model.Record) {
-				for i, r := range recs {
-					if _, off := r.CapturedAt.Zone(); off != 0 {
-						t.Errorf("record %d CapturedAt offset = %d, want 0", i, off)
-					}
-				}
-				if want := time.Date(2026, 3, 1, 12, 0, 0, 123456789, time.UTC); !recs[2].CapturedAt.Equal(want) {
-					t.Errorf("record 2 CapturedAt = %v, want %v", recs[2].CapturedAt, want)
-				}
-			}},
-		{"invalid UTF-8 in a string", withHeader(t, kindLine("log_line", "{\"log\":\"journal\",\"message\":\"a\xffb\"}")), 1,
-			func(t *testing.T, recs []model.Record) {
-				if got := recs[0].Data.(*model.LogLine).Message; got != "a�b" {
-					t.Errorf("Message = %q, want %q", got, "a�b")
-				}
-			}},
-		{"escaped control characters in a text", withHeader(t, kindLine("log_line", `{"log":"journal","message":"a\u0000b\n"}`)), 1,
-			func(t *testing.T, recs []model.Record) {
-				if got := recs[0].Data.(*model.LogLine).Message; got != "a\x00b\n" {
-					t.Errorf("Message = %q, want %q", got, "a\x00b\n")
-				}
-			}},
+			envelope("metric", 3, `"2026-03-01T12:00:00.123456789Z"`, okData)), 3, checkZeroOffsetTimes},
+		{"invalid UTF-8 in a string", withHeader(t, kindLine("log_line", "{\"log\":\"journal\",\"message\":\"a\xffb\"}")), 1, logMessage("a\ufffdb")},
+		{"escaped control characters in a text", withHeader(t, kindLine("log_line", `{"log":"journal","message":"a\u0000b\n"}`)), 1, logMessage("a\x00b\n")},
 		{"IPv4-mapped address without zone", withHeader(t, kindLine("connection_snapshot", `{"remotes":[{"addr":"::ffff:1.2.3.4","count":1}]}`)), 1, nil},
 		{"empty connection snapshot", withHeader(t, kindLine("connection_snapshot", `{"complete":true}`)), 1, nil},
-		{"Kelvin sign and long s in keys", withHeader(t, "{\"Kind\":\"metric\",\"source\":\"proc.stat\",\"ſeq\":5,\"captured_at\":"+tsJSON+",\"data\":"+okData+"}"), 1,
-			func(t *testing.T, recs []model.Record) {
-				if recs[0].Kind() != model.KindMetric || recs[0].Seq != 5 {
-					t.Errorf("record = kind %q seq %d, want metric seq 5", recs[0].Kind(), recs[0].Seq)
-				}
-			}},
-		{"folded duplicate key wins", withHeader(t, "{\"kind\":\"gap\",\"Kind\":\"metric\",\"source\":\"proc.stat\",\"seq\":1,\"captured_at\":"+tsJSON+",\"data\":"+okData+"}"), 1,
-			func(t *testing.T, recs []model.Record) {
-				if recs[0].Kind() != model.KindMetric {
-					t.Errorf("Kind() = %q, want %q", recs[0].Kind(), model.KindMetric)
-				}
-			}},
+		{"Kelvin sign and long s in keys", withHeader(t, "{\"Kind\":\"metric\",\"source\":\"proc.stat\",\"\u017feq\":5,\"captured_at\":"+tsJSON+",\"data\":"+okData+"}"), 1, metricSeq(5)},
+		{"folded duplicate key wins", withHeader(t, "{\"kind\":\"gap\",\"Kind\":\"metric\",\"source\":\"proc.stat\",\"seq\":1,\"captured_at\":"+tsJSON+",\"data\":"+okData+"}"), 1, checkKindMetric},
 	}
-	for _, tc := range cases {
+}
+
+func TestDecoder_AcceptedForms(t *testing.T) {
+	for _, tc := range acceptedFormCases(t) {
 		t.Run(tc.name, func(t *testing.T) {
 			recs, err := decodeAll(t, tc.data, wire.DefaultLimits())
 			if err != nil {
@@ -459,44 +485,107 @@ func TestDecoder_AcceptedForms(t *testing.T) {
 	}
 }
 
-func TestDecoder_Limits(t *testing.T) {
-	small := func(line, rec int, batch int64) wire.Limits {
-		return wire.Limits{MaxLineBytes: line, MaxBatchBytes: batch, MaxRecords: rec}
+// requireDecoded fails the test unless decoding produced exactly n records and no error.
+func requireDecoded(t *testing.T, label string, recs []model.Record, err error, n int) {
+	t.Helper()
+	if err != nil || len(recs) != n {
+		t.Errorf("%sdecoding = %d records, %v, want %d records and nil", label, len(recs), err, n)
 	}
+}
+
+// requireRecordCount fails the test unless exactly n records were decoded before the error.
+func requireRecordCount(t *testing.T, recs []model.Record, n int) {
+	t.Helper()
+	if len(recs) != n {
+		t.Errorf("decoded %d records before the error, want %d", len(recs), n)
+	}
+}
+
+// requireLimitExceeded fails the test unless err is ErrLimitExceeded (on line, when line > 0).
+func requireLimitExceeded(t *testing.T, err error, line int) {
+	t.Helper()
+	want{is: wire.ErrLimitExceeded, line: line}.check(t, err)
+}
+
+func smallLimits(line, rec int, batch int64) wire.Limits {
+	return wire.Limits{MaxLineBytes: line, MaxBatchBytes: batch, MaxRecords: rec}
+}
+
+// metricLines returns n metric lines with seq 1..n.
+func metricLines(n int) []string {
+	lines := make([]string, n)
+	for i := range lines {
+		lines[i] = metricLine(i + 1)
+	}
+	return lines
+}
+
+// paddedMetricLines returns n metric lines with seq 1..n, each padded to size bytes.
+func paddedMetricLines(t *testing.T, n, size int) []string {
+	t.Helper()
+	lines := make([]string, n)
+	for i := range lines {
+		lines[i] = padded(t, metricLine(i+1), size)
+	}
+	return lines
+}
+
+func TestDecoder_LimitsLine(t *testing.T) {
+	small := smallLimits
 
 	t.Run("line of exactly MaxLineBytes is read", func(t *testing.T) {
 		recs, err := decodeAll(t, withHeader(t, padded(t, metricLine(1), 400)), small(400, 10, 1<<20))
-		if err != nil || len(recs) != 1 {
-			t.Errorf("decoding = %d records, %v, want 1 record and nil", len(recs), err)
-		}
+		requireDecoded(t, "", recs, err, 1)
 	})
 
 	t.Run("line one byte over MaxLineBytes", func(t *testing.T) {
 		_, err := decodeAll(t, withHeader(t, padded(t, metricLine(1), 401)), small(400, 10, 1<<20))
-		want{is: wire.ErrLimitExceeded, line: 2}.check(t, err)
+		requireLimitExceeded(t, err, 2)
 	})
 
 	t.Run("carriage return counts towards the line", func(t *testing.T) {
 		recs, err := decodeAll(t, gzipString(t, headerJSON+"\n"+padded(t, metricLine(1), 399)+"\r\n"), small(400, 10, 1<<20))
-		if err != nil || len(recs) != 1 {
-			t.Errorf("399 bytes plus CR: decoding = %d records, %v, want 1 record and nil", len(recs), err)
-		}
+		requireDecoded(t, "399 bytes plus CR: ", recs, err, 1)
 		_, err = decodeAll(t, gzipString(t, headerJSON+"\n"+padded(t, metricLine(1), 400)+"\r\n"), small(400, 10, 1<<20))
-		want{is: wire.ErrLimitExceeded}.check(t, err)
+		requireLimitExceeded(t, err, 0)
 	})
 
 	t.Run("header line over MaxLineBytes", func(t *testing.T) {
 		_, err := decodeAll(t, stream(t, padded(t, headerJSON, 500), metricLine(1)), small(400, 10, 1<<20))
-		want{is: wire.ErrLimitExceeded, line: 1}.check(t, err)
+		requireLimitExceeded(t, err, 1)
 	})
 
+	t.Run("unterminated last line of exactly MaxLineBytes is read", func(t *testing.T) {
+		data := gzipString(t, headerJSON+"\n"+padded(t, metricLine(1), 400))
+		recs, err := decodeAll(t, data, small(400, 10, 1<<20))
+		requireDecoded(t, "", recs, err, 1)
+	})
+
+	t.Run("unterminated last line one byte over MaxLineBytes", func(t *testing.T) {
+		data := gzipString(t, headerJSON+"\n"+padded(t, metricLine(1), 401))
+		_, err := decodeAll(t, data, small(400, 10, 1<<20))
+		requireLimitExceeded(t, err, 0)
+	})
+
+	t.Run("unterminated last line with carriage return counts towards the line", func(t *testing.T) {
+		data := gzipString(t, headerJSON+"\n"+padded(t, metricLine(1), 400)+"\r")
+		_, err := decodeAll(t, data, small(400, 10, 1<<20))
+		requireLimitExceeded(t, err, 0)
+	})
+
+	t.Run("MaxLineBytes of math.MaxInt decodes a valid batch", func(t *testing.T) {
+		lim := wire.Limits{MaxLineBytes: math.MaxInt, MaxBatchBytes: 1 << 20, MaxRecords: 10}
+		recs, err := decodeAll(t, withHeader(t, metricLine(1), metricLine(2)), lim)
+		requireDecoded(t, "", recs, err, 2)
+	})
+}
+
+func TestDecoder_LimitsBatchAndRecords(t *testing.T) {
+	small := smallLimits
+
 	t.Run("decompressed size over MaxBatchBytes", func(t *testing.T) {
-		lines := make([]string, 100)
-		for i := range lines {
-			lines[i] = metricLine(i + 1)
-		}
-		recs, err := decodeAll(t, withHeader(t, lines...), small(1<<20, 1000, 2000))
-		want{is: wire.ErrLimitExceeded}.check(t, err)
+		recs, err := decodeAll(t, withHeader(t, metricLines(100)...), small(1<<20, 1000, 2000))
+		requireLimitExceeded(t, err, 0)
 		if len(recs) >= 100 {
 			t.Errorf("decoded %d records, want fewer than 100 before the limit", len(recs))
 		}
@@ -508,61 +597,29 @@ func TestDecoder_Limits(t *testing.T) {
 			t.Fatalf("test setup: gzip stream has %d bytes, want a small one", len(data))
 		}
 		_, err := decodeAll(t, data, small(1<<20, 10, 10000))
-		want{is: wire.ErrLimitExceeded}.check(t, err)
+		requireLimitExceeded(t, err, 0)
 	})
 
 	t.Run("exactly MaxRecords records", func(t *testing.T) {
-		recs, err := decodeAll(t, withHeader(t, metricLine(1), metricLine(2), metricLine(3)), small(1<<20, 3, 1<<20))
-		if err != nil || len(recs) != 3 {
-			t.Errorf("decoding = %d records, %v, want 3 records and nil", len(recs), err)
-		}
+		recs, err := decodeAll(t, withHeader(t, metricLines(3)...), small(1<<20, 3, 1<<20))
+		requireDecoded(t, "", recs, err, 3)
 	})
 
 	t.Run("MaxRecords plus one records", func(t *testing.T) {
-		recs, err := decodeAll(t, withHeader(t, metricLine(1), metricLine(2), metricLine(3), metricLine(4)), small(1<<20, 3, 1<<20))
-		want{is: wire.ErrLimitExceeded}.check(t, err)
-		if len(recs) != 3 {
-			t.Errorf("decoded %d records before the error, want 3", len(recs))
-		}
+		recs, err := decodeAll(t, withHeader(t, metricLines(4)...), small(1<<20, 3, 1<<20))
+		requireLimitExceeded(t, err, 0)
+		requireRecordCount(t, recs, 3)
 	})
+}
 
-	t.Run("unterminated last line of exactly MaxLineBytes is read", func(t *testing.T) {
-		data := gzipString(t, headerJSON+"\n"+padded(t, metricLine(1), 400))
-		recs, err := decodeAll(t, data, small(400, 10, 1<<20))
-		if err != nil || len(recs) != 1 {
-			t.Errorf("decoding = %d records, %v, want 1 record and nil", len(recs), err)
-		}
-	})
-
-	t.Run("unterminated last line one byte over MaxLineBytes", func(t *testing.T) {
-		data := gzipString(t, headerJSON+"\n"+padded(t, metricLine(1), 401))
-		_, err := decodeAll(t, data, small(400, 10, 1<<20))
-		want{is: wire.ErrLimitExceeded}.check(t, err)
-	})
-
-	t.Run("unterminated last line with carriage return counts towards the line", func(t *testing.T) {
-		data := gzipString(t, headerJSON+"\n"+padded(t, metricLine(1), 400)+"\r")
-		_, err := decodeAll(t, data, small(400, 10, 1<<20))
-		want{is: wire.ErrLimitExceeded}.check(t, err)
-	})
-
-	t.Run("MaxLineBytes of math.MaxInt decodes a valid batch", func(t *testing.T) {
-		lim := wire.Limits{MaxLineBytes: math.MaxInt, MaxBatchBytes: 1 << 20, MaxRecords: 10}
-		recs, err := decodeAll(t, withHeader(t, metricLine(1), metricLine(2)), lim)
-		if err != nil || len(recs) != 2 {
-			t.Errorf("decoding = %d records, %v, want 2 records and nil", len(recs), err)
-		}
-	})
-
+func TestDecoder_LimitsDefaults(t *testing.T) {
 	t.Run("zero and negative fields mean the defaults", func(t *testing.T) {
 		for name, lim := range map[string]wire.Limits{
 			"zero":     {},
 			"negative": {MaxLineBytes: -1, MaxBatchBytes: -1, MaxRecords: -1},
 		} {
 			recs, err := decodeAll(t, withHeader(t, metricLine(1), metricLine(2)), lim)
-			if err != nil || len(recs) != 2 {
-				t.Errorf("%s limits: decoding = %d records, %v, want 2 records and nil", name, len(recs), err)
-			}
+			requireDecoded(t, name+" limits: ", recs, err, 2)
 		}
 	})
 
@@ -570,34 +627,41 @@ func TestDecoder_Limits(t *testing.T) {
 		def := wire.DefaultLimits()
 		lim := wire.Limits{MaxRecords: 5}
 		recs, err := decodeAll(t, withHeader(t, padded(t, metricLine(1), def.MaxLineBytes)), lim)
-		if err != nil || len(recs) != 1 {
-			t.Errorf("line of %d bytes: decoding = %d records, %v, want 1 record and nil", def.MaxLineBytes, len(recs), err)
-		}
+		requireDecoded(t, fmt.Sprintf("line of %d bytes: ", def.MaxLineBytes), recs, err, 1)
 		_, err = decodeAll(t, withHeader(t, padded(t, metricLine(1), def.MaxLineBytes+1)), lim)
-		want{is: wire.ErrLimitExceeded}.check(t, err)
+		requireLimitExceeded(t, err, 0)
 	})
 
 	t.Run("default record limit applies when the field is zero", func(t *testing.T) {
-		lines := make([]string, wire.DefaultLimits().MaxRecords+1)
-		for i := range lines {
-			lines[i] = metricLine(i + 1)
-		}
-		recs, err := decodeAll(t, withHeader(t, lines...), wire.Limits{})
-		want{is: wire.ErrLimitExceeded}.check(t, err)
-		if len(recs) != wire.DefaultLimits().MaxRecords {
-			t.Errorf("decoded %d records before the error, want %d", len(recs), wire.DefaultLimits().MaxRecords)
-		}
+		limit := wire.DefaultLimits().MaxRecords
+		recs, err := decodeAll(t, withHeader(t, metricLines(limit+1)...), wire.Limits{})
+		requireLimitExceeded(t, err, 0)
+		requireRecordCount(t, recs, limit)
 	})
 
 	t.Run("default batch limit applies when the field is zero", func(t *testing.T) {
-		def := wire.DefaultLimits()
-		lines := make([]string, 0, 18)
-		for i := range 17 {
-			lines = append(lines, padded(t, metricLine(i+1), def.MaxLineBytes))
-		}
+		lines := paddedMetricLines(t, 17, wire.DefaultLimits().MaxLineBytes)
 		_, err := decodeAll(t, withHeader(t, lines...), wire.Limits{})
-		want{is: wire.ErrLimitExceeded}.check(t, err)
+		requireLimitExceeded(t, err, 0)
 	})
+}
+
+// requireMalformedAfter decodes data and expects ErrMalformed after exactly n records.
+func requireMalformedAfter(t *testing.T, data []byte, n int) {
+	t.Helper()
+	recs, err := decodeAll(t, data, wire.DefaultLimits())
+	want{is: wire.ErrMalformed}.check(t, err)
+	requireRecordCount(t, recs, n)
+}
+
+// newTestDecoder opens a decoder over data with the default limits.
+func newTestDecoder(t *testing.T, data []byte) *wire.Decoder {
+	t.Helper()
+	d, err := wire.NewDecoder(bytes.NewReader(data), wire.DefaultLimits())
+	if err != nil {
+		t.Fatalf("NewDecoder() = %v, want nil", err)
+	}
+	return d
 }
 
 func TestDecoder_Integrity(t *testing.T) {
@@ -608,30 +672,15 @@ func TestDecoder_Integrity(t *testing.T) {
 	}
 
 	t.Run("corrupted CRC", func(t *testing.T) {
-		data := damaged(func(b []byte) []byte { b[len(b)-8] ^= 0xff; return b })
-		recs, err := decodeAll(t, data, wire.DefaultLimits())
-		want{is: wire.ErrMalformed}.check(t, err)
-		if len(recs) != 5 {
-			t.Errorf("decoded %d records before the error, want 5", len(recs))
-		}
+		requireMalformedAfter(t, damaged(func(b []byte) []byte { b[len(b)-8] ^= 0xff; return b }), 5)
 	})
 
 	t.Run("corrupted ISIZE", func(t *testing.T) {
-		data := damaged(func(b []byte) []byte { b[len(b)-1] ^= 0xff; return b })
-		recs, err := decodeAll(t, data, wire.DefaultLimits())
-		want{is: wire.ErrMalformed}.check(t, err)
-		if len(recs) != 5 {
-			t.Errorf("decoded %d records before the error, want 5", len(recs))
-		}
+		requireMalformedAfter(t, damaged(func(b []byte) []byte { b[len(b)-1] ^= 0xff; return b }), 5)
 	})
 
 	t.Run("missing trailer", func(t *testing.T) {
-		data := damaged(func(b []byte) []byte { return b[:len(b)-8] })
-		recs, err := decodeAll(t, data, wire.DefaultLimits())
-		want{is: wire.ErrMalformed}.check(t, err)
-		if len(recs) != 5 {
-			t.Errorf("decoded %d records before the error, want 5", len(recs))
-		}
+		requireMalformedAfter(t, damaged(func(b []byte) []byte { return b[:len(b)-8] }), 5)
 	})
 
 	t.Run("truncated inside the compressed data", func(t *testing.T) {
@@ -644,27 +693,17 @@ func TestDecoder_Integrity(t *testing.T) {
 	})
 
 	t.Run("trailing non-gzip bytes", func(t *testing.T) {
-		data := damaged(func(b []byte) []byte { return append(b, []byte("this is not a gzip member")...) })
-		recs, err := decodeAll(t, data, wire.DefaultLimits())
-		want{is: wire.ErrMalformed}.check(t, err)
-		if len(recs) != 5 {
-			t.Errorf("decoded %d records before the error, want 5", len(recs))
-		}
+		requireMalformedAfter(t, damaged(func(b []byte) []byte { return append(b, []byte("this is not a gzip member")...) }), 5)
 	})
 
 	t.Run("concatenated gzip members", func(t *testing.T) {
 		data := append(gzipString(t, joinLines(headerJSON, metricLine(1))), gzipString(t, joinLines(metricLine(2), metricLine(3)))...)
 		recs, err := decodeAll(t, data, wire.DefaultLimits())
-		if err != nil || len(recs) != 3 {
-			t.Errorf("decoding = %d records, %v, want 3 records and nil", len(recs), err)
-		}
+		requireDecoded(t, "", recs, err, 3)
 	})
 
 	t.Run("header only", func(t *testing.T) {
-		d, err := wire.NewDecoder(bytes.NewReader(stream(t, headerJSON)), wire.DefaultLimits())
-		if err != nil {
-			t.Fatalf("NewDecoder() = %v, want nil", err)
-		}
+		d := newTestDecoder(t, stream(t, headerJSON))
 		if _, err := d.Next(); !errors.Is(err, wire.ErrEmptyBatch) {
 			t.Errorf("Next() = %v, want ErrEmptyBatch", err)
 		}
@@ -675,78 +714,70 @@ func TestDecoder_BatchRules(t *testing.T) {
 	t.Run("equal sequence numbers", func(t *testing.T) {
 		recs, err := decodeAll(t, withHeader(t, metricLine(1), metricLine(2), metricLine(2)), wire.DefaultLimits())
 		want{is: wire.ErrSequence, line: 4}.check(t, err)
-		if len(recs) != 2 {
-			t.Errorf("decoded %d records before the error, want 2", len(recs))
-		}
+		requireRecordCount(t, recs, 2)
 	})
 
 	t.Run("decreasing sequence numbers", func(t *testing.T) {
 		recs, err := decodeAll(t, withHeader(t, metricLine(5), metricLine(4)), wire.DefaultLimits())
 		want{is: wire.ErrSequence, line: 3}.check(t, err)
-		if len(recs) != 1 {
-			t.Errorf("decoded %d records before the error, want 1", len(recs))
-		}
+		requireRecordCount(t, recs, 1)
 	})
 
 	t.Run("gaps in sequence numbers are allowed", func(t *testing.T) {
 		recs, err := decodeAll(t, withHeader(t, metricLine(5), metricLine(9), metricLine(1000)), wire.DefaultLimits())
-		if err != nil || len(recs) != 3 {
-			t.Errorf("decoding = %d records, %v, want 3 records and nil", len(recs), err)
-		}
+		requireDecoded(t, "", recs, err, 3)
 	})
 
 	t.Run("seq zero", func(t *testing.T) {
 		_, err := decodeAll(t, withHeader(t, envelope("metric", 0, tsJSON, okData)), wire.DefaultLimits())
 		want{is: model.ErrInvalid, field: "seq", line: 2}.check(t, err)
 	})
+}
 
-	t.Run("errors are sticky", func(t *testing.T) {
-		d, err := wire.NewDecoder(bytes.NewReader(withHeader(t, metricLine(1), metricLine(1), metricLine(2))), wire.DefaultLimits())
-		if err != nil {
-			t.Fatalf("NewDecoder() = %v, want nil", err)
-		}
-		if _, err := d.Next(); err != nil {
-			t.Fatalf("first Next() = %v, want nil", err)
-		}
-		_, first := d.Next()
-		want{is: wire.ErrSequence, line: 3}.check(t, first)
-		for i := range 3 {
-			rec, again := d.Next()
-			if again == nil || again.Error() != first.Error() || !errors.Is(again, wire.ErrSequence) {
-				t.Errorf("Next() #%d after the error = %v, want the same error %v", i+1, again, first)
-			}
-			if rec.Data != nil {
-				t.Errorf("Next() #%d after the error returned a record %+v, want none", i+1, rec)
-			}
-		}
-	})
+// requireStickyError fails the test unless again repeats the first error and no record was returned.
+func requireStickyError(t *testing.T, n int, first, again error, rec model.Record) {
+	t.Helper()
+	if again == nil || again.Error() != first.Error() || !errors.Is(again, wire.ErrSequence) {
+		t.Errorf("Next() #%d after the error = %v, want the same error %v", n, again, first)
+	}
+	if rec.Data != nil {
+		t.Errorf("Next() #%d after the error returned a record %+v, want none", n, rec)
+	}
+}
 
-	t.Run("io.EOF is repeated", func(t *testing.T) {
-		d, err := wire.NewDecoder(bytes.NewReader(withHeader(t, metricLine(1))), wire.DefaultLimits())
-		if err != nil {
-			t.Fatalf("NewDecoder() = %v, want nil", err)
-		}
-		if _, err := d.Next(); err != nil {
-			t.Fatalf("first Next() = %v, want nil", err)
-		}
-		for i := range 3 {
-			if _, err := d.Next(); !errors.Is(err, io.EOF) {
-				t.Errorf("Next() #%d at the end = %v, want io.EOF", i+1, err)
-			}
-		}
-	})
+func TestDecoder_StickyErrors(t *testing.T) {
+	d := newTestDecoder(t, withHeader(t, metricLine(1), metricLine(1), metricLine(2)))
+	if _, err := d.Next(); err != nil {
+		t.Fatalf("first Next() = %v, want nil", err)
+	}
+	_, first := d.Next()
+	want{is: wire.ErrSequence, line: 3}.check(t, first)
+	for i := range 3 {
+		rec, again := d.Next()
+		requireStickyError(t, i+1, first, again, rec)
+	}
+}
 
-	t.Run("empty batch error is sticky", func(t *testing.T) {
-		d, err := wire.NewDecoder(bytes.NewReader(stream(t, headerJSON)), wire.DefaultLimits())
-		if err != nil {
-			t.Fatalf("NewDecoder() = %v, want nil", err)
+// requireRepeated fails the test unless each of n further Next calls fails with target.
+func requireRepeated(t *testing.T, d *wire.Decoder, n int, target error) {
+	t.Helper()
+	for i := range n {
+		if _, err := d.Next(); !errors.Is(err, target) {
+			t.Errorf("Next() #%d = %v, want %v", i+1, err, target)
 		}
-		for i := range 2 {
-			if _, err := d.Next(); !errors.Is(err, wire.ErrEmptyBatch) {
-				t.Errorf("Next() #%d = %v, want ErrEmptyBatch", i+1, err)
-			}
-		}
-	})
+	}
+}
+
+func TestDecoder_EOFIsRepeated(t *testing.T) {
+	d := newTestDecoder(t, withHeader(t, metricLine(1)))
+	if _, err := d.Next(); err != nil {
+		t.Fatalf("first Next() = %v, want nil", err)
+	}
+	requireRepeated(t, d, 3, io.EOF)
+}
+
+func TestDecoder_EmptyBatchErrorIsSticky(t *testing.T) {
+	requireRepeated(t, newTestDecoder(t, stream(t, headerJSON)), 2, wire.ErrEmptyBatch)
 }
 
 func TestDecoder_OriginAndReceiveTimeCannotBeInjected(t *testing.T) {
