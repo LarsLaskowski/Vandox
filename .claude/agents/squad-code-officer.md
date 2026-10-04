@@ -25,4 +25,5 @@ the orchestrator files it in the step-12 `squad` issue — never edit `.squad/` 
 A new guard, branch, early return, null check or a changed assertion counts as structural. If a
 diagnostic can only be fixed by a structural change, do not make it — hand it back with file, line and
 rule id. Never suppress a rule on your own and never run Git write operations. Report: files touched,
-kinds of edits, analyzer gate output (must pass), build/test result, items handed back.
+kinds of edits, analyzer gate output (must pass), build/test result, items handed back. Report only what your own checks covered; state a decision
+record's status only after reading the file, otherwise leave it out (the Lead sets it in step 9).

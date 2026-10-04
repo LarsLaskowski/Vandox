@@ -18,3 +18,6 @@ replace this step, so nothing the Code Officer lets through is caught before the
   the exact diagnostic.
 - Only touches files already in the diff. Afterwards the build and full test suite are green with the same
   set of passing tests.
+- **Reporting:** report only what its own checks covered (format, analyzer diagnostics, link and fence
+  checks, build and test). State a decision record's status only after reading the file; otherwise leave it
+  out. Record status and the index belong to the Lead in squad step 9.

@@ -61,9 +61,13 @@ Every lesson from step 12 is filed once, where it can actually be fixed:
 | a **managed** file, or the template part of a **marked** file (squad rules, charters, agents, skills, tools, the shared sections of the instruction files) | an issue labelled `squad` in the template repository named in `.squad/template.json` (`repository`), titled `[Squad] <lesson> (from <this repository>#<issue>)` and linking the run | a PR in the template repository, then a refresh of every repository that uses the template (`adopt-template`) — never a local edit, which the next refresh would overwrite |
 | **project knowledge**: `.squad/stack.md`, `.squad/project.md`, `.squad/tools/squad_settings.py`, a `<!-- project:… -->` block, another seeded file | an issue labelled `squad` in this repository | a small squad-maintenance PR in this repository, checked with `.squad/tools/config-check.py` |
 
-One run's lessons go into at most one issue per destination. If the session cannot create an issue in the
-template repository (no access), it files that issue in this repository with the label `squad-upstream`
-and tells the user, who moves it to the template repository; it is never worked here.
+One run's lessons go into at most one issue per destination. A lesson that is general — one that would change
+the template — is filed in the template repository, not in the product repository, and the session attaches
+the template repository first if it is not yet part of the session (with the access it needs to create the
+issue, e.g. `add_repo`). Only if attaching is refused (no access) it files that issue in this repository with
+the label `squad-upstream` and tells the user, who moves it to the template repository; it is never worked
+here. Once the template repository has fixed the lesson, the product repository adopts the change with
+`adopt-template` (*Template-managed files*).
 
 ## Tiers
 
