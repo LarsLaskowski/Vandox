@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"time"
 
 	"github.com/LarsLaskowski/Vandox/internal/model"
@@ -78,6 +79,7 @@ func NewDecoder(r io.Reader, lim Limits) (*Decoder, error) {
 	if lim.MaxLineBytes <= 0 {
 		lim.MaxLineBytes = def.MaxLineBytes
 	}
+	lim.MaxLineBytes = min(lim.MaxLineBytes, math.MaxInt-1)
 	if lim.MaxBatchBytes <= 0 {
 		lim.MaxBatchBytes = def.MaxBatchBytes
 	}
@@ -100,11 +102,17 @@ func NewDecoder(r io.Reader, lim Limits) (*Decoder, error) {
 }
 
 // splitLines is bufio.ScanLines, except that an unterminated last line is dropped when the stream
-// failed, because it may have been cut by the failure.
+// failed, because it may have been cut by the failure, and is rejected as too long when it exceeds
+// MaxLineBytes (a trailing \r counts), because the scanner buffer would otherwise accept it.
 func (d *Decoder) splitLines(data []byte, atEOF bool) (int, []byte, error) {
 	advance, token, err := bufio.ScanLines(data, atEOF)
-	if token != nil && atEOF && d.guard.err != nil && data[advance-1] != '\n' {
-		return 0, nil, nil
+	if token != nil && atEOF && data[advance-1] != '\n' {
+		if d.guard.err != nil {
+			return 0, nil, nil
+		}
+		if len(data) > d.lim.MaxLineBytes {
+			return 0, nil, bufio.ErrTooLong
+		}
 	}
 	return advance, token, err
 }

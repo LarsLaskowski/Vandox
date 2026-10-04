@@ -150,7 +150,7 @@ func prefixField(path string, err error) error {
 	return &model.FieldError{Field: path + "." + fe.Field, Reason: fe.Reason}
 }
 
-// Limits bounds what the decoder accepts.
+// Limits bounds what the decoder accepts. A MaxLineBytes above math.MaxInt-1 is clamped to that value.
 type Limits struct {
 	MaxLineBytes  int
 	MaxBatchBytes int64

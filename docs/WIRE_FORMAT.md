@@ -205,10 +205,11 @@ What the decoder does with unusual input; each row is a test case.
 | Input | Result |
 | ----- | ------ |
 | Not gzip (plain JSON Lines, zstd, empty input) | rejected, `ErrMalformed`, line 1 |
-| gzip name/comment/extra fields, concatenated members | accepted |
+| gzip name/comment/extra fields | accepted; name or comment over 511 bytes rejected, `ErrMalformed` |
+| gzip concatenated members | accepted |
 | Truncated stream, bad CRC or size, trailing non-gzip bytes | rejected at the end of the stream, `ErrMalformed` |
 | More decompressed bytes than `MaxBatchBytes` | rejected, `ErrLimitExceeded` |
-| Line longer than `MaxLineBytes` | rejected, `ErrLimitExceeded` |
+| Line longer than `MaxLineBytes`, also an unterminated last line | rejected, `ErrLimitExceeded` |
 | `\n` or `\r\n` line ends; last line without `\n` | accepted |
 | Lone `\r` separator; empty or whitespace-only line; UTF-8 BOM | rejected, `ErrMalformed` |
 | Spaces or tabs around the object | accepted |
@@ -216,7 +217,7 @@ What the decoder does with unusual input; each row is a test case.
 | Line is `null` | header: `ErrUnsupportedVersion`; record: `ErrUnknownKind` |
 | Line is an array, string or number | rejected, `ErrMalformed` |
 | Keys in other case (`FORMAT_MAJOR`, `Kind`) | accepted as the field |
-| Keys that are Unicode case-fold equivalents (`"Kind"` with U+212A KELVIN SIGN, `"ſeq"` with U+017F) | accepted as the field; the last of several spellings wins |
+| Keys that are Unicode case-fold equivalents (`"Kind"` with U+212A KELVIN SIGN, `"ſeq"` with U+017F) | accepted as the field; the last of several spellings wins |
 | Duplicate keys | the last one wins |
 | Unknown keys at any depth | ignored |
 | `format_major` missing, `null`, 0, negative, not 1 | rejected, `ErrUnsupportedVersion`, line 1 |
@@ -235,7 +236,7 @@ What the decoder does with unusual input; each row is a test case.
 | IDs and names in other forms (upper-case UUID, braces, `urn:uuid:`, trailing newline) | rejected, field error |
 
 Because keys are matched with Unicode case folding, `zcat batch | jq` can show a key that the decoder reads
-under another name (`"Kind"` counts as `kind`).
+under another name (`"Kind"` counts as `kind`).
 
 ## Error text and consumer duties
 
@@ -253,11 +254,15 @@ Duties of the ingest API (#40), which this package cannot take over:
 - check the header's `agent_id` against the agent the token belongs to;
 - deduplicate by (agent ID, `seq`);
 - commit only after `Next` returned `io.EOF`;
+- run one concurrent decoder per agent and cap the total, sized from the per-decoder peak and the backend
+  container memory: a hostile line at the default 1 MiB `MaxLineBytes` can make one decoder allocate about
+  270 MiB with a heap peak of about 160-170 MB (roughly 160 x `MaxLineBytes`), from a body of about 1 KB
+  compressed, so `http.MaxBytesReader` does not bound it;
 - map `ErrUnsupportedVersion`, `ErrLimitExceeded` and the other errors to HTTP responses.
 
 ## Example
 
-Decompressed content of a batch of four records (the real stream is gzip-compressed):
+Decompressed content of a batch of three records (the real stream is gzip-compressed):
 
 ```
 {"format_major":1,"format_minor":0,"agent_id":"web-1","boot_id":"0b6f9b0c-2d1e-4c43-9a4e-7f1b2c3d4e5f","mode":"live"}
