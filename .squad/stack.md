@@ -6,7 +6,8 @@ profile and owned by this repository: keep it true when the build changes.
 
 ## Toolchain
 
-- Go `1.24` (module `github.com/LarsLaskowski/Vandox`).
+- Go `1.27` (module `github.com/LarsLaskowski/Vandox`); `go.mod` names the minor version without a patch,
+  so `setup-go` uses the newest 1.27.x.
 - `gofmt` as the formatter, `go vet` and **golangci-lint** `v2.13.1` (configured in `.golangci.yml`) as the
   analyzers, `govulncheck` (a `tool` dependency in `go.mod`) for known vulnerabilities.
 - The SessionStart hook `.claude/hooks/session-start.sh` runs `go mod download` in remote sessions.
@@ -74,5 +75,13 @@ time so results are attributable.
 
 - `golangci-lint` must be on the PATH; the version in CI (`.github/workflows/ci.yml`) is the reference.
   It refuses to run ("the Go language version used to build golangci-lint is lower than the targeted Go
-  version") when it was built with an older Go than `go.mod` targets — install a release built with a
-  matching Go version (`go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@<version>`).
+  version") when it was built with an older Go than `go.mod` targets. A plain
+  `go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@<version>` does not avoid this: with
+  `GOTOOLCHAIN=auto` it builds with the Go version from golangci-lint's own `go.mod`, which can be older
+  than this module's. Use the binary from the golangci-lint GitHub release, or force a toolchain at least
+  as new as `go.mod` (`GOTOOLCHAIN=go1.27.<n> go install ...@<version>`); `golangci-lint version` shows
+  the Go it was built with.
+- With `GOTOOLCHAIN=auto`, a local Go older than `go.mod` switches to the `.0` release of that minor
+  version (`go 1.27` -> `go1.27.0`). `go tool govulncheck ./...` can then report standard-library
+  vulnerabilities that the current patch, the one CI uses, already fixes. Select the current patch
+  (`GOTOOLCHAIN=go1.27.<n>`) before trusting a local scan.

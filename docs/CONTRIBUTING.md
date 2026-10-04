@@ -139,11 +139,6 @@ access token of that user with the scope *Read & Write*. A personal access token
 account is not acceptable, because it is not limited to one repository. To rotate the token, create the new
 one, replace the environment secret, then delete the old token on Docker Hub.
 
-### Before the first stable tag
-
-The Go toolchain follow-up (a supported Go version in `go.mod`, "[Repo] Move to a supported Go toolchain")
-must be merged before `v0.1.0` or any other stable tag. Pre-release tags may be cut before it.
-
 ### Re-running a failed release
 
 If a job fails before the image is pushed, nothing was published: fix the cause and use "Re-run all jobs"
