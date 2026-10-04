@@ -2,19 +2,20 @@
 package main
 
 import (
-	"flag"
-	"fmt"
+	"io"
+	"os"
 
-	"github.com/LarsLaskowski/Vandox/internal/version"
+	"github.com/LarsLaskowski/Vandox/internal/cli"
 )
 
-func main() {
-	showVersion := flag.Bool("version", false, "print version, commit and build date and exit")
-	flag.Parse()
+// binaryName is the name the binary reports in its version line and usage.
+const binaryName = "vandox-agent"
 
-	if *showVersion {
-		fmt.Println(version.String("vandox-agent"))
-		return
-	}
-	flag.Usage()
+func main() {
+	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
+}
+
+// run executes the command with args and returns the process exit code.
+func run(args []string, stdout, stderr io.Writer) int {
+	return cli.Run(binaryName, args, stdout, stderr)
 }
