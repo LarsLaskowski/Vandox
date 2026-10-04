@@ -1,7 +1,7 @@
 # Plan: Move to a supported Go toolchain
 
 Source: Issue #103
-Status: Draft (revised after the PR, see *Revision after the PR*)
+Status: Draft (revised after the PR, see *Revision after the PR*; revised after Security plan review round 2, see *Challenge*)
 Tier: security — the change raises the toolchain in `go.mod`, edits both Docker base image lines, the release workflow and the Dependabot configuration, and updates a dependency (`golang.org/x/vuln`); `.squad/routing.md` places all of them in `security`.
 
 ## Problem / root cause
@@ -558,6 +558,26 @@ pattern of the other repositories (PlexToJellyfinSync), even if 0038 must change
 - Tier stays `security`. The revision touches Docker, CI and Dependabot configuration and the wording of
   security area 13. No production or test code changes, so steps 4-5 and the *Coverage gate* remain not
   applicable. Steps 3, 6, 7 and 8 run again for the revision: a delta round with Reviewer and Security.
+
+### Security plan review, round 2 (revision): CHANGES_REQUIRED
+
+- **B1 (blocking) — the rewritten pinning check can be bypassed.** Accepted, confirmed in a scratch copy:
+  a lower-case or indented `FROM` stage is never read by the `^FROM` loop (true of today's
+  `release.yml:143-154` as well), and a multi-name, lower-case or indented `ARG` re-declares a global
+  default that the `^ARG[[:space:]]+NAME=` counts never see. Security's two guards are added verbatim
+  right after `f=…` (item 8). The Lead tested further and found that three cases still passed with only
+  those two guards: `ARG X=1\` without a space before the continuation, a `# syntax=` directive (an
+  unpinned frontend image that runs the build), and a ``# escape=` `` directive (which makes `` ` `` the
+  continuation character). Two more guards close them (item 8). AC9 lists every fail case, its
+  verification row lists the fourteen cases that were run, the *Architecture check* claim names the new
+  rejections, and record 0041 *Decision* lists them.
+- **N1 (non-blocking) — tag and digest cannot be matched statically.** Noted. *Security considerations*
+  (*Known limits*) states it, 0041 *Consequences* already did, and the follow-up issue text now suggests
+  an in-build `RUN go version` guard.
+- **N2 (non-blocking) — weaker posture without Dependabot.** Noted. This is already stated in 0041
+  (*Consequences*), in *Security considerations* (*Patch currency*) and in the *Architecture check*, and
+  it was accepted by the Product Manager's decision. No further change.
+- Tier stays `security`. No production or test code changes.
 
 ## Out of scope / follow-ups
 

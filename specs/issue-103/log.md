@@ -19,3 +19,4 @@ One line per pipeline step: date, step, member, result. Lead decisions and escal
 | 2026-10-04 | 8 Review round 3 (delta) | Reviewer | APPROVE, no findings |
 | 2026-10-04 | 9 PR approval | Lead | APPROVED; record 0040 accepted and indexed |
 | 2026-10-04 | 11 After PR | Orchestrator | SonarQube Cloud gate failed: docker:S8431 (tag and digest in one FROM, Dockerfile:4 now new code; line 25 pre-existing). PM decision: follow the pattern of the PM's other repos (PlexToJellyfinSync: ARG image/tag/digest, `FROM ${IMAGE}@${DIGEST}`, OCI base labels), even if record 0038 must change |
+| 2026-10-04 | 11 Plan revise (Sonar fix) | Lead, Security | Plan revised to ARG-based base image pins (PlexToJellyfinSync pattern), record 0041 supersedes 0036/0038; Security round 2 CHANGES_REQUIRED (B1 pinning check bypass), Lead accepted and added 2 more guards; delta confirmation follows |

@@ -85,6 +85,14 @@ For an ARG-based `FROM`, it finds no dependency at all: it proposes no tag updat
      the built `vandoxd`): this is new tooling or a new release gate, beyond fixing a quality-gate finding.
 
    Chosen: by hand now. Automation is a follow-up issue.
+7. **How strict the release pinning check is**
+   - *Read only upper-case, unindented `FROM` and `ARG NAME=` lines*: simple, but a lower-case or
+     indented `FROM`, or a global default re-declared on a lower-case, indented, multi-name or continued
+     `ARG` line, passes unseen (found in the Security plan review). Rejected.
+   - *Parse the Dockerfile fully* (case-insensitive instructions, continuations, multi-name `ARG`):
+     exact, but a hand-written parser in a workflow step is easy to get wrong. Rejected.
+   - *Reject every form the simple reader cannot see, then read the simple form*: fails closed on
+     anything unusual. Chosen.
 
 ## Decision
 
@@ -100,6 +108,12 @@ re-declares the three `BASE_RUNTIME_*` arguments without defaults. It adds
 
 The release workflow fails in these cases:
 
+- a line starts with `from` or `arg` in any case, with or without leading white space, and is not an
+  upper-case `FROM` or `ARG` at the very start of the line;
+- an `ARG` line declares more than one argument, or ends with `\` or `` ` `` (continues onto the next
+  line);
+- the Dockerfile sets a `syntax` or `escape` parser directive (a `syntax` frontend image would run the
+  build without a pin);
 - a `FROM` line is not `FROM ${BASE_<NAME>_IMAGE}@${BASE_<NAME>_DIGEST}` (optionally `AS <stage>`) with the
   same `<NAME>` twice;
 - one of `BASE_<NAME>_IMAGE`, `_TAG` or `_DIGEST` is not declared exactly once, with a default, before
@@ -108,6 +122,12 @@ The release workflow fails in these cases:
 - the build stage is not `FROM ${BASE_BUILD_IMAGE}@${BASE_BUILD_DIGEST} AS build` with
   `BASE_BUILD_IMAGE` `golang`;
 - the `<major>.<minor>` at the start of `BASE_BUILD_TAG` differs from `go.mod`'s `go` directive.
+
+The first three cases exist because the other checks read the Dockerfile with line-anchored, upper-case
+patterns. Without them, a lower-case or indented `FROM`, or a global default re-declared on a lower-case,
+indented, multi-name or continued `ARG` line, would pass unseen. They are deliberately conservative and
+also reject legal but unusual forms, which fails closed. The checks cover the base image of every stage,
+not an image named in `COPY --from=` or `RUN --mount=…,from=`; the Dockerfile has none.
 
 The release `docker build` passes only `VERSION`, `COMMIT` and `DATE`.
 
@@ -137,7 +157,8 @@ Carried over from 0038 unchanged, with the reasons given there:
 - Changing the builder minor still changes `go.mod`, `BASE_BUILD_TAG` and `BASE_BUILD_DIGEST` together
   (0040). Nobody checks that a tag and its digest belong together: a tag next to a digest from another tag
   passes the release checks. This was true in 0038 too, because Docker ignored the tag. Whoever refreshes
-  a digest reads it for exactly the tag in `BASE_<NAME>_TAG`.
+  a digest reads it for exactly the tag in `BASE_<NAME>_TAG`. An in-build guard (e.g. `RUN go version`
+  compared with the builder minor) is left to the follow-up issue.
 - Issue #8 asked for Dependabot coverage of `docker`. That coverage has gone: with this Dockerfile it
   covered nothing.
 - If the backend gains a compose file (#13), its images are a separate decision (0036 left that to #13).
