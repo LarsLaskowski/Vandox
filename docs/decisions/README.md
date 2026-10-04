@@ -60,4 +60,5 @@ links the record.
 | [0031](0031-telegram-user-allowlist.md) | The Telegram bot talks only to allowlisted users in private chats | Accepted | 2026-10-04 |
 | [0032](0032-secrets-only-from-environment-or-docker-secrets.md) | Secrets only from environment variables or Docker secrets | Accepted | 2026-10-04 |
 | [0033](0033-pre-existing-coverage-gap-accepted-for-issue-7.md) | Pre-existing overall coverage gap accepted for a documentation-only change | Accepted | 2026-10-04 |
+| [0034](0034-entry-points-delegate-to-a-testable-run-function.md) | Entry points delegate to a testable run function; main stays uncovered wiring | Accepted | 2026-10-04 |
 <!-- project:end index -->
