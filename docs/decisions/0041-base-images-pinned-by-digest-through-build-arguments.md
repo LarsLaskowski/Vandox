@@ -91,8 +91,14 @@ For an ARG-based `FROM`, it finds no dependency at all: it proposes no tag updat
      `ARG` line, passes unseen (found in the Security plan review). Rejected.
    - *Parse the Dockerfile fully* (case-insensitive instructions, continuations, multi-name `ARG`):
      exact, but a hand-written parser in a workflow step is easy to get wrong. Rejected.
+   - *Allow only a fixed set of line forms before the first `FROM`* (a whitelist): closes unknown
+     directive forms too, but it is a larger new check for a repository-owned Dockerfile that every pull
+     request review already covers. Rejected as out of proportion for a defence-in-depth check.
    - *Reject every form the simple reader cannot see, then read the simple form*: fails closed on
-     anything unusual. Chosen.
+     anything unusual. Chosen. The parser-directive forms rejected are the ones BuildKit reads: `#` and
+     `//` comments, indented or not, after an optional byte order mark (found in the Security plan
+     review, round 3). Its JSON form needs the whole file to be a JSON object, which a file with
+     `FROM` lines cannot be.
 
 ## Decision
 
@@ -112,8 +118,9 @@ The release workflow fails in these cases:
   upper-case `FROM` or `ARG` at the very start of the line;
 - an `ARG` line declares more than one argument, or ends with `\` or `` ` `` (continues onto the next
   line);
-- the Dockerfile sets a `syntax` or `escape` parser directive (a `syntax` frontend image would run the
-  build without a pin);
+- the Dockerfile contains a UTF-8 byte order mark, or sets a `syntax` or `escape` parser directive in
+  `#` or `//` comment form, indented or not (a `syntax` frontend image would run the build without a pin;
+  BuildKit strips a leading byte order mark and accepts both comment forms);
 - a `FROM` line is not `FROM ${BASE_<NAME>_IMAGE}@${BASE_<NAME>_DIGEST}` (optionally `AS <stage>`) with the
   same `<NAME>` twice;
 - one of `BASE_<NAME>_IMAGE`, `_TAG` or `_DIGEST` is not declared exactly once, with a default, before

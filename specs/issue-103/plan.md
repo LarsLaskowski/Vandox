@@ -1,7 +1,7 @@
 # Plan: Move to a supported Go toolchain
 
 Source: Issue #103
-Status: Draft (revised after the PR, see *Revision after the PR*; revised after Security plan review round 2, see *Challenge*)
+Status: Draft (revised after the PR, see *Revision after the PR*; revised after Security plan review rounds 2 and 3, see *Challenge*)
 Tier: security — the change raises the toolchain in `go.mod`, edits both Docker base image lines, the release workflow and the Dependabot configuration, and updates a dependency (`golang.org/x/vuln`); `.squad/routing.md` places all of them in `security`.
 
 ## Problem / root cause
@@ -131,7 +131,10 @@ is the follow-up issue (*Out of scope / follow-ups*).
   - an `ARG` line declares more than one argument (e.g. `ARG X=1 BASE_BUILD_IMAGE=evil/golang
     BASE_BUILD_DIGEST=sha256:…`, or `ARG X=1 \` followed by a continuation line);
   - an `ARG` line ends with `\` or `` ` `` (a continuation, e.g. `ARG X=1\`);
-  - the Dockerfile sets a `syntax` or `escape` parser directive;
+  - the Dockerfile contains a UTF-8 byte order mark (`EF BB BF`) anywhere;
+  - a line, with or without leading white space, is a `#` or `//` comment of the form
+    `syntax=…` or `escape=…` in any case (the `syntax` or `escape` parser directive, e.g.
+    `# syntax=evil/frontend:latest`, `// syntax=evil/frontend:latest`, ``  # escape=` ``);
   - the Dockerfile has no `FROM` line;
   - a `FROM` line is not `FROM ${BASE_<NAME>_IMAGE}@${BASE_<NAME>_DIGEST}` (optionally `AS <stage>`) with
     the same `<NAME>` twice;
@@ -176,7 +179,7 @@ none under go1.27.0.
 | AC6 | *Format check*, *Build*, `go vet ./...`, *Test*, *Analyzer gate* with golangci-lint v2.13.1 on the PATH, built with Go 1.27: either the release tarball binary (built with go1.27.0) or `GOTOOLCHAIN=go1.27.1 go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.1` — never a plain `go install`, which builds with go1.26 (see related defect 3). Confirm with `golangci-lint version`, which must name `go1.27.x`. Local `go tool govulncheck ./...` cannot reach vuln.go.dev in this sandbox, so state that plainly in the log; it is not a pass. | Code Officer (step 7) |
 | AC7 | GitHub Actions on the PR: `CI` (all three jobs), `CodeQL`, `Release` (dry run, `v0.0.0-dryrun`) | Orchestrator reads the check results in step 11. A red check goes back through steps 7-8 |
 | AC8 | `git diff --name-only origin/main...HEAD`. Allowed: `go.mod`, `go.sum`, `deploy/backend/Dockerfile`, `.github/workflows/release.yml`, `.github/dependabot.yml`, `.squad/stack.md`, `.squad/project.md`, `docs/CONTRIBUTING.md`, `docs/ARCHITECTURE.md`, `docs/decisions/README.md`, `docs/decisions/0036-…` and `0038-…` (status line only, at approval), `docs/decisions/0040-…`, `docs/decisions/0041-…`, `specs/issue-103/*`. `git diff origin/main...HEAD -- .github/workflows/release.yml` touches only the header comment and the two check steps. | Reviewer (step 8) |
-| AC9 | Read-only diff of `release.yml` against item 8. Optionally run the two scripts locally with `bash` from the repository root: both must print nothing and exit 0. The Lead checked the scripts (revision after Security round 2) in a scratch copy of the AC2 Dockerfile, built from item 7's text: both pass there (exit 0, no output), and each of these fourteen cases exits 1 with an `::error::`: (1) appended `from alpine:latest AS evil`; (2) appended `  FROM alpine:latest AS evil`; (3) `ARG X=1 BASE_BUILD_IMAGE=evil/golang BASE_BUILD_DIGEST=sha256:000…` after the global ARGs; (4) `arg BASE_BUILD_IMAGE=evil/golang`; (5) `  ARG BASE_BUILD_TAG=1.26-trixie`; (6) `ARG X=1 \` plus a continuation line `    BASE_BUILD_DIGEST=sha256:000…`; (7) the same with `ARG X=1\` (no space); (8) `# syntax=evil/frontend:latest` as line 1; (9) ``# escape=` `` as line 1; (10) a literal `FROM` with a tag; (11) a non-sha256 digest default; (12) a stage-local ARG with a default; (13) mismatched `<NAME>`s; (14) a builder tag `1.26-trixie` and `BASE_BUILD_IMAGE` other than `golang` (Go check, one case each). With only Security's two guards, cases 7-9 still pass, which is why the Lead added the last two guards. The Code Officer repeats at least the good case and cases 1-6 in step 7. Finally verified by the release dry run (AC13). | Code Officer runs the scripts in step 7; Reviewer and Security (step 8); CI |
+| AC9 | Read-only diff of `release.yml` against item 8. Optionally run the two scripts locally with `bash` from the repository root: both must print nothing and exit 0. The Lead checked the scripts (revision after Security round 2) in a scratch copy of the AC2 Dockerfile, built from item 7's text: both pass there (exit 0, no output), and each of these fourteen cases exits 1 with an `::error::`: (1) appended `from alpine:latest AS evil`; (2) appended `  FROM alpine:latest AS evil`; (3) `ARG X=1 BASE_BUILD_IMAGE=evil/golang BASE_BUILD_DIGEST=sha256:000…` after the global ARGs; (4) `arg BASE_BUILD_IMAGE=evil/golang`; (5) `  ARG BASE_BUILD_TAG=1.26-trixie`; (6) `ARG X=1 \` plus a continuation line `    BASE_BUILD_DIGEST=sha256:000…`; (7) the same with `ARG X=1\` (no space); (8) `# syntax=evil/frontend:latest` as line 1; (9) ``# escape=` `` as line 1; (10) a literal `FROM` with a tag; (11) a non-sha256 digest default; (12) a stage-local ARG with a default; (13) mismatched `<NAME>`s; (14) a builder tag `1.26-trixie` and `BASE_BUILD_IMAGE` other than `golang` (Go check, one case each). With only Security's round-2 guards, cases 7-9 still passed, which is why the Lead added two guards then. After Security round 3 the Lead reran the good case and all fourteen cases with the round-3 guards (same results), plus Security's cases (N1) a UTF-8 BOM followed by `# syntax=evil/frontend:latest` as line 1, (N2) `// syntax=evil/frontend:latest` as line 1, (N4) ``  # escape=` `` (indented) as line 1, and three more: a BOM alone before line 1, a shebang line followed by `#SYNTAX = evil/x`, and `#<TAB>syntax<TAB>=evil`. Each exits 1 with an `::error::`. The Code Officer repeats at least the good case, cases 1-6 and N1, N2, N4 in step 7. Finally verified by the release dry run (AC13). | Code Officer runs the scripts in step 7; Reviewer and Security (step 8); CI |
 | AC10 | Read-only diff of `.github/dependabot.yml` | Reviewer (step 8) |
 | AC11 | Read-only diff of the three files; the `rg` command from AC11 | Reviewer (step 8) |
 | AC12 | Read-only comparison of record 0041 with the diff; status and index edits | Lead (step 9) |
@@ -314,7 +317,11 @@ Revision after the PR (SonarQube `docker:S8431`, record 0041). The Dev makes ite
        echo "::error::an ARG line in $f must not continue onto the next line"
        exit 1
      fi
-     if grep -nEi '^#[[:space:]]*(syntax|escape)[[:space:]]*=' "$f"; then
+     if LC_ALL=C grep -n $'\xef\xbb\xbf' "$f"; then
+       echo "::error::$f must not contain a byte order mark"
+       exit 1
+     fi
+     if grep -nEi '^[[:space:]]*(#|//)[[:space:]]*(syntax|escape)[[:space:]]*=' "$f"; then
        echo "::error::$f must not set the syntax or escape parser directive"
        exit 1
      fi
@@ -385,13 +392,18 @@ Revision after the PR (SonarQube `docker:S8431`, record 0041). The Dev makes ite
      *Check base image pinning* runs first, so the `BASE_BUILD_*` declarations are already known to be
      unique, upper-case, unindented and one per line by the time this step reads them.
 
-     The four guards at the top of the pinning script come from the Security plan review (round 2, B1)
+     The five guards at the top of the pinning script come from the Security plan review (rounds 2 and 3, B1)
      and close bypasses of the line-anchored, upper-case `grep`s below: a lower-case or indented `FROM`
      that the `^FROM` loop never sees, a lower-case or indented `ARG` that re-declares a default unseen,
      an `ARG` line that declares several names (Docker accepts `ARG A=1 B=2`), an `ARG` line continued
-     onto the next line with `\` (or with `` ` `` after an `escape` directive), and a `# syntax=` directive,
+     onto the next line with `\` (or with `` ` `` after an `escape` directive), and a `syntax` directive,
      which would let an unpinned frontend image run the whole build. The first two guards are Security's
-     text verbatim; the last two are the Lead's additions for the same class.
+     text verbatim (round 2); the third is the Lead's addition for the same class. The byte-order-mark
+     guard and the directive guard are Security's text verbatim (round 3): BuildKit strips a UTF-8 BOM and
+     reads the directive in `#` or `//` comment form, also indented, so the guard matches both forms
+     anywhere in the file (a mid-file comment of that shape is rejected too, which fails closed). BuildKit's
+     third, JSON form (`{"syntax": …}`) applies only when the whole file is a JSON object, which no file
+     with a `FROM` line at the start of a line can be.
    - The step order stays the same, and nothing else in the file changes, in particular *Build image* (AC8).
 9. `docs/CONTRIBUTING.md` (all inside the `releases` project block):
    - Line 81: `[0038](decisions/0038-backend-image-distroless-nonroot-pinned-by-digest.md) and` →
@@ -441,8 +453,8 @@ No guarantee from `docs/ARCHITECTURE.md` or `.squad/project.md` is weakened:
   preserved. Both stages pull by digest only (`image@sha256:…` from build-argument defaults), and the
   release check now validates the arguments: it is at least as strict as the old `@sha256:` grep, because
   it also rejects stage-local overrides and mismatched name pairs, and, unlike the old grep, a lower-case
-  or indented `FROM`/`ARG`, an `ARG` line with several names or a continuation, and a `syntax` or
-  `escape` parser directive (Security round 2, B1; the old check at `release.yml:143-154` let a lower-case
+  or indented `FROM`/`ARG`, an `ARG` line with several names or a continuation, a byte order mark, and a
+  `syntax` or `escape` parser directive in `#` or `//` form (Security rounds 2 and 3, B1; the old check at `release.yml:143-154` let a lower-case
   or indented `FROM` through). The minor is read from
   `BASE_BUILD_TAG`, and the check enforces 1.27 = 1.27.
 - **What changes (accepted by the Product Manager's decision):** Dependabot no longer refreshes the
@@ -479,8 +491,8 @@ No guarantee from `docs/ARCHITECTURE.md` or `.squad/project.md` is weakened:
 - **Check robustness (revision).** The new checks fail closed: a missing `FROM`, an unparseable
   argument, a duplicate or stage-local default, or an unreadable minor all produce an `::error::` and
   exit 1. Instructions the line-anchored `grep`s could miss are rejected up front: lower-case or indented
-  `FROM`/`ARG`, multi-name or continued `ARG` lines, and the `syntax`/`escape` parser directives (an
-  unpinned `# syntax=` frontend image would run the whole build). The guards are deliberately
+  `FROM`/`ARG`, multi-name or continued `ARG` lines, a UTF-8 byte order mark, and the `syntax`/`escape`
+  parser directives in `#` or `//` form (an unpinned `syntax` frontend image would run the whole build). The guards are deliberately
   conservative: they also reject legal but unusual forms (e.g. a quoted default with a space), which
   fails closed. They contain no `${{ }}` expression, and they read only the checked-out repository.
 - **Known limits of the static check (Security round 2, N1 and the Lead's own note).** It cannot tell
@@ -577,6 +589,31 @@ pattern of the other repositories (PlexToJellyfinSync), even if 0038 must change
 - **N2 (non-blocking) — weaker posture without Dependabot.** Noted. This is already stated in 0041
   (*Consequences*), in *Security considerations* (*Patch currency*) and in the *Architecture check*, and
   it was accepted by the Product Manager's decision. No further change.
+- Tier stays `security`. No production or test code changes.
+
+### Security plan review, round 3: CHANGES_REQUIRED — Lead decision (plan security loop limit)
+
+Security's second CHANGES_REQUIRED on the plan hit the loop limit, so the Lead decides.
+
+- **B1 (blocking) — the directive guard misses a UTF-8 BOM before `# syntax=` and the `// syntax=` form.**
+  Accepted, confirmed: BuildKit's directive detection strips a leading UTF-8 BOM and falls back to `//`
+  comments, so either form would select an unpinned frontend image.
+- **N4 — an indented `  # escape=` passes.** Accepted, fixed by the same guard.
+- **Decision: Security's fix verbatim (option 1), not a simpler check scope (option 2).** The defect is in
+  the wording of one guard, and the fix is two `grep`s that Security and the Lead both ran: the AC2
+  Dockerfile still passes, and N1, N2, N4 and the fourteen earlier cases exit 1 (AC9 row). A narrower scope
+  was considered and rejected. Dropping the directive guards would leave a known way to run an unpinned
+  image in the release build, which contradicts security area 13 ("every base image by digest"). Replacing
+  them with a positive whitelist ("only these lines may appear before the first `FROM`") would be a new,
+  larger check that needs its own review round. Proportionality is kept by stopping here: the Dockerfile
+  is repository-owned and every change to it is reviewed in a pull request, so the release check is a
+  defence-in-depth guardrail, not the only control. Further hypothetical parser forms (for example new
+  BuildKit directive syntaxes) are not chased in this change: if one appears, it is a follow-up for the
+  pinning check, and the PR review remains the primary control. AC9, item 8, *Security considerations*,
+  the *Architecture check* and record 0041 (*Decision*, option 7) are updated.
+- **Process:** no further plan-review round except **one Security delta confirmation** of this guard
+  change. If that confirmation raises a new blocking point, the Lead decides again rather than starting
+  another plan round.
 - Tier stays `security`. No production or test code changes.
 
 ## Out of scope / follow-ups
