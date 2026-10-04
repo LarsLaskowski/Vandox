@@ -215,8 +215,10 @@ Docker Hub as `networlddev/vandox` ([0027](decisions/0027-project-name-and-docke
 *Versioning and releases* section in [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 - The agent binary `vandox-agent-linux-amd64` and `SHA256SUMS` are GitHub release assets.
-- The image is built from `deploy/backend/Dockerfile` on a distroless static base pinned by digest and runs
-  as UID 65532.
+- The image is built from `deploy/backend/Dockerfile` on a distroless static base and runs as UID 65532.
+  The builder and runtime base images are pinned by digest: each `FROM` names an image and a digest from
+  build arguments, and the tag is kept in a separate build argument and in the image's OCI base-image
+  labels. The release build sets none of these arguments, and the digests are refreshed by hand.
 - Releases are built by `.github/workflows/release.yml` only from SemVer tags on `main`. Only the
   repository admin may create these tags (tag ruleset `release-tags`), and the workflow checks that the
   tagged commit is on `main`.
@@ -224,7 +226,7 @@ Docker Hub as `networlddev/vandox` ([0027](decisions/0027-project-name-and-docke
   The image that was verified is the image that is pushed, and a published version is never overwritten.
 
 Records: [0037](decisions/0037-release-workflow-with-plain-go-docker-and-gh.md),
-[0038](decisions/0038-backend-image-distroless-nonroot-pinned-by-digest.md),
+[0041](decisions/0041-base-images-pinned-by-digest-through-build-arguments.md),
 [0039](decisions/0039-docker-hub-token-in-a-tag-only-environment.md).
 <!-- project:end architecture -->
 

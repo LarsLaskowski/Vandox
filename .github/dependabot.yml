@@ -19,20 +19,3 @@ updates:
       go-modules:
         patterns:
           - "*"
-
-  - package-ecosystem: docker
-    directory: "/deploy/backend"
-    schedule:
-      interval: weekly
-    open-pull-requests-limit: 10
-    groups:
-      docker-images:
-        patterns:
-          - "*"
-    # The builder image must stay on the Go minor version of go.mod (checked by
-    # release.yml); digest updates of the same tag continue.
-    ignore:
-      - dependency-name: "golang"
-        update-types:
-          - "version-update:semver-major"
-          - "version-update:semver-minor"
