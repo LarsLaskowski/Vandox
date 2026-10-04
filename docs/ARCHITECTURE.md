@@ -194,7 +194,9 @@ Plesk or MariaDB administration)
 ([0030](decisions/0030-agent-runs-unprivileged-with-named-capabilities.md)). The Telegram bot sends to and
 accepts updates only from allowlisted users in their private chats
 ([0031](decisions/0031-telegram-user-allowlist.md)). Secrets come only from environment variables or Docker
-secrets ([0032](decisions/0032-secrets-only-from-environment-or-docker-secrets.md)). Kept
+secrets ([0032](decisions/0032-secrets-only-from-environment-or-docker-secrets.md)). The only release
+credential, the Docker Hub token, is readable only by the tag-triggered publish job and limited to pushing
+`networlddev/vandox` ([0039](decisions/0039-docker-hub-token-in-a-tag-only-environment.md)). Kept
 in sync with `SECURITY.md` and the *Security areas* in `.squad/project.md`.
 
 Records: [0006](decisions/0006-agent-connects-outbound-only.md),
@@ -203,13 +205,27 @@ Records: [0006](decisions/0006-agent-connects-outbound-only.md),
 [0021](decisions/0021-no-pseudonymization-of-log-data.md),
 [0030](decisions/0030-agent-runs-unprivileged-with-named-capabilities.md),
 [0031](decisions/0031-telegram-user-allowlist.md),
-[0032](decisions/0032-secrets-only-from-environment-or-docker-secrets.md).
+[0032](decisions/0032-secrets-only-from-environment-or-docker-secrets.md),
+[0039](decisions/0039-docker-hub-token-in-a-tag-only-environment.md).
 
 ## Deployment
 
 The agent is released as a binary for the monitored server, the backend as a Docker image published on
 Docker Hub as `networlddev/vandox` ([0027](decisions/0027-project-name-and-docker-image.md)). See the
 *Versioning and releases* section in [`CONTRIBUTING.md`](CONTRIBUTING.md).
+
+- The agent binary `vandox-agent-linux-amd64` and `SHA256SUMS` are GitHub release assets.
+- The image is built from `deploy/backend/Dockerfile` on a distroless static base pinned by digest and runs
+  as UID 65532.
+- Releases are built by `.github/workflows/release.yml` only from SemVer tags on `main`. Only the
+  repository admin may create these tags (tag ruleset `release-tags`), and the workflow checks that the
+  tagged commit is on `main`.
+- Release binaries are built from source without restored CI caches and only after `govulncheck` passes.
+  The image that was verified is the image that is pushed, and a published version is never overwritten.
+
+Records: [0037](decisions/0037-release-workflow-with-plain-go-docker-and-gh.md),
+[0038](decisions/0038-backend-image-distroless-nonroot-pinned-by-digest.md),
+[0039](decisions/0039-docker-hub-token-in-a-tag-only-environment.md).
 <!-- project:end architecture -->
 
 ## Development process

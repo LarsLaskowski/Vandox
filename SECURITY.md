@@ -50,7 +50,8 @@ The following are considered in scope for vulnerability reports:
   Tailscale ACL and port binding as documented, web UI login, command signing for remote actions once
   released, the Telegram allowlist, agent privileges, the MariaDB monitoring user, secrets handling, file
   writes, parsing of external input, outbound calls including their transport security, and logging and
-  display of external data in log output, the web UI and Telegram messages
+  display of external data in log output, the web UI and Telegram messages, and the release pipeline and
+  published artifacts (agent binary, checksums, Docker image)
 - Attacks by an unprivileged local user of the monitored server against the agent or its secrets (for
   example reading a secret from `/proc/<pid>/cmdline` or the environment, abusing the agent's rights, or
   escaping the agent unit's confinement to write or run code as another user)

@@ -75,8 +75,81 @@ expected to arrive clean (see the decision record on quality gates in [`decision
 ## Versioning and releases
 
 A release is a `v<major>.<minor>.<patch>` tag created manually on `main`; it publishes the agent binary and
-the backend Docker image. Merging a PR by itself never publishes a release.
-<!-- project:end releases -->
+the backend Docker image. Merging a PR by itself never publishes a release. The workflow is
+`.github/workflows/release.yml`; the reasoning is in
+[0037](decisions/0037-release-workflow-with-plain-go-docker-and-gh.md),
+[0038](decisions/0038-backend-image-distroless-nonroot-pinned-by-digest.md) and
+[0039](decisions/0039-docker-hub-token-in-a-tag-only-environment.md).
+
+### Cutting a release
+
+On an up-to-date `main`:
+
+```bash
+git tag -a vX.Y.Z -m "vX.Y.Z"
+git push origin vX.Y.Z
+```
+
+Pre-release tags look like `vX.Y.Z-rc.N`. Build metadata (`+...`) is not allowed.
+
+### What the release workflow does
+
+1. Checks that the tag is strict SemVer and that its commit is reachable from `origin/main`.
+2. Runs `go tool govulncheck ./...`; a finding stops the release.
+3. Builds `vandox-agent` (linux/amd64, static, `-trimpath`) and `SHA256SUMS`, and builds the image from
+   `deploy/backend/Dockerfile` with `docker build --no-cache`. Nothing is restored from a CI cache.
+4. Verifies both binaries' `--version` output against the tag, the full commit SHA and the commit time, the
+   checksum, that the binary is static, that every `FROM` is pinned by digest, that the builder's Go minor
+   version equals `go.mod`'s, and that the image runs as `65532:65532`.
+5. Pushes exactly the verified image as `networlddev/vandox:X.Y.Z`, and as `latest` when the tag is the
+   highest stable `v*.*.*` tag. A pre-release tag publishes only its own version. If the version already
+   exists on Docker Hub, or the check cannot tell, the job fails before pushing: a published version is
+   never overwritten.
+6. Creates the GitHub release with generated notes, the image digest, `vandox-agent-linux-amd64` and
+   `SHA256SUMS`; a pre-release is marked as such.
+
+### Dry run on pull requests
+
+A pull request that changes the workflow, the Dockerfile, `.dockerignore`, `go.mod`, `go.sum`, `cmd/**` or
+`internal/**` runs steps 1 to 4 with the version `v0.0.0-dryrun`. It uploads, pushes and releases nothing and
+reads no secret.
+
+### One-time setup (maintainer)
+
+1. **Tag ruleset.** Create the ruleset `release-tags` (Settings, Rules, Rulesets, new tag ruleset) with the
+   target `refs/tags/v*`, enforcement *Active*, the rules *Restrict creations*, *Restrict updates* and
+   *Restrict deletions*, and *Repository admin* as the only bypass. A tag push runs the workflow file of
+   the tagged commit, so whoever can create the tag controls what runs with the Docker Hub token. Create
+   the ruleset before storing the token.
+2. **Environment.** Create the GitHub environment `release` with deployment branches and tags set to
+   *Selected branches and tags*: the tag rule `v*.*.*` and no branch. Store the secret `DOCKERHUB_TOKEN`
+   and the variable `DOCKERHUB_USERNAME` there. A required reviewer is optional; it is worth adding once
+   more than one person has write access (0039).
+3. **Immutable tags (optional, recommended where the Docker Hub subscription offers it).** Enable immutable
+   tags on `networlddev/vandox` for version tags only, for example the rule
+   `^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$`, never for `latest`, which has to move.
+
+### Creating the Docker Hub token
+
+Create an organization access token limited to the repository `networlddev/vandox` with push and pull, and
+set `DOCKERHUB_USERNAME` to `networlddev`. If the plan offers no organization access tokens, use a dedicated
+Docker Hub user that is a member of a team with *Read & Write* on `networlddev/vandox` only, plus a personal
+access token of that user with the scope *Read & Write*. A personal access token of the maintainer's own
+account is not acceptable, because it is not limited to one repository. To rotate the token, create the new
+one, replace the environment secret, then delete the old token on Docker Hub.
+
+### Before the first stable tag
+
+The Go toolchain follow-up (a supported Go version in `go.mod`, "[Repo] Move to a supported Go toolchain")
+must be merged before `v0.1.0` or any other stable tag. Pre-release tags may be cut before it.
+
+### Re-running a failed release
+
+If a job fails before the image is pushed, nothing was published: fix the cause and use "Re-run all jobs"
+(or, if the tag itself was wrong, ask the repository admin to delete and recreate it). If only
+`github-release` failed after the push, use "Re-run failed jobs"; it reruns just that job and the image
+stays as pushed. A published image version is never replaced; a faulty release gets a new patch version.
+<!-- project:end releases --><!-- project:end releases -->
 
 <!-- project:begin stability -->
 ## Stability policy
