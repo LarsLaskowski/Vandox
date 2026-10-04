@@ -92,24 +92,42 @@ contain it.
   - `backend.url`: empty; `ftp://h:1`; `h:1` (no scheme); `http://` (no host); `http://u:p@h:1` (user
     info; the sentinel is the password); `http://h:1/?token=x` (query); `http://h:1/?` (empty query);
     `http://h:1/#f` (fragment); `http://h:1/ingest` (path other than empty or `/`); `http://h:0`;
-    `http://h:65536`; `http://h:x`; `http:opaque`. Accepted: `http://100.64.0.1:8081`,
-    `https://nas.tailnet.ts.net`, `HTTP://h:1/` (the scheme is case-insensitive).
+    `http://h:65536`; `http://h:x`; `http://h:+80`; `http:opaque`; a host that is neither an IP literal
+    nor a name of `[A-Za-z0-9.-]` after percent-decoding: `http://a%E2%80%A8b:1` (decodes to U+2028),
+    `http://a%2Fb:1`, `http://h_1:1`. Accepted: `http://100.64.0.1:8081`,
+    `https://nas.tailnet.ts.net`, `http://[fd7a:115c:a1e0::1]:8081`, `HTTP://h:1/` (the scheme is
+    case-insensitive).
   - `spool.directory`, `storage.directory`: empty, relative (`spool`), not clean (`/var/lib/../x`,
     `/var/lib/vandox/`).
   - `log.level` (both): `INFO`, `trace`, empty. Accepted: `debug`, `info`, `warn`, `error`.
   - `web.listen`, `ingest.listen`: `8080` (no colon), `:0`, `:65536`, `:http` (named port),
-    `localhost:8080` (host name), `[::1]:x`. Accepted: `:8080`, `0.0.0.0:8080`, `[::]:8081`,
+    `:+80` and `[::1]:+80` (sign; `strconv.Atoi` would accept it), `:-1`, `: 80`, `:808080` (more than
+    5 digits), `localhost:8080` (host name), `[::1]:x`. Accepted: `:8080`, `0.0.0.0:8080`, `[::]:8081`,
     `192.168.1.10:8080`.
   - `web.listen` and `ingest.listen` with the same port (`:8080` and `0.0.0.0:8080`) fail with a
     `*KeyError` on `ingest.listen`.
   - A value of the wrong YAML kind for a string option (a mapping, a sequence) and an explicit null
     (`agent_id:`, `agent_id: ~`) fail with a `*KeyError` on that key.
-  - A string value containing a control character (`"a\x01b"`, a block scalar with a newline) fails.
+  - A string value containing a character of Unicode category Cc, Cf, Zl or Zp fails: `"a\x01b"`, a
+    block scalar with a newline, `"a b"` (Zl), `"a b"` (Zp), `"a‮b"` and `"﻿a"` (Cf),
+    each as `log.level` and as `spool.directory` (`"/var/lib/‮x"`), with the sentinel absent.
 - [ ] AC7 *Unsupported YAML constructs* fail with a `*KeyError` that carries the line (and the key where
   there is one): a duplicate key (top level and within a section, line of the second occurrence); a second
   YAML document (`---`); an anchor or alias (`&a`/`*a`); a merge key (`<<: *a` and `<<: {…}`); a
   non-string key (`? [a]`); a custom or unsupported tag (`!env X`, `!!binary aGk=`, `!foo {a: 1}`); a
   top-level sequence or scalar. A file that holds only `---` or `~` counts as empty (AC4).
+  *Second document after an empty or null first one*: `~` / `---` / `agent_id: x`, `---` / `---`, and
+  `agent_id: x` / `---` (a trailing empty document) fail with `Line` = the line of the second `---` (2 in
+  each case). The check that a second `Decode` returns `io.EOF` runs whatever the first document holds.
+  *Tag sibling forms*, the allowlist being checked on the resolved `Node.Tag` (verified with v3.0.5, the
+  resolved tag in parentheses): `%TAG !! tag:evil.example,2000:` / `---` / `a: !!str x`
+  (`tag:evil.example,2000:str`), `%TAG !e! tag:yaml.org,2002:` / `---` / `a: !e!binary aGk=` (`!!binary`),
+  `a: !<tag:yaml.org,2002:binary> aGk=` (`!!binary`), `a: !!set {x}` (`!!set`) and `a: !!omap [{x: 1}]`
+  (`!!omap`) are rejected. `a: !<tag:yaml.org,2002:str> x` and `a: ! x` resolve to `!!str` and are
+  accepted. The tag text is never shown (sentinel in a `%TAG` prefix and in a `!S3NT1NEL` local tag).
+  *Null tag with content*: a scalar tagged `!!null` whose value is not one of `""`, `~`, `null`, `Null`,
+  `NULL` fails, both on a section (`spool: !!null S3NT1NEL`, sentinel absent, defaults not silently kept)
+  and on a leaf (`agent_id: !!null x`). `spool: !!null` and `spool: !!null ~` keep the defaults.
   *Errors reported by the YAML parser itself* (syntax errors, and an alias to an undefined anchor, which
   `yaml.v3` rejects while parsing, before any node exists) are also a `*KeyError`, with `Key` empty,
   `Reason` exactly `not valid YAML (syntax error or alias to an undefined anchor)` and `Line` taken from
@@ -128,9 +146,17 @@ contain it.
   - value from `VANDOX_AGENT_TOKEN_FILE=<abs path>` → equals the file content; content `tok\n` and
     `tok\r\n` give `tok`. `tok\n\n`, `tok\r` and `tok \n` are rejected;
   - both set → `*SecretError` naming both variables;
-  - `_FILE` set to an empty value, a relative path, a missing file, a directory, `/dev/null`, a file of
-    `MaxSecretBytes+3` bytes, or an empty file → `*SecretError` naming `VANDOX_AGENT_TOKEN_FILE` and, where
-    it is a path problem, the path. A file of `MaxSecretBytes` printable characters plus `\r\n` is accepted;
+  - `_FILE` set to an empty value or a non-absolute value → `*SecretError{Var: "VANDOX_AGENT_TOKEN_FILE"}`
+    with the reason "must be an absolute path", **no `os` call is made** and the value is never shown.
+    Cases: `""`, `rel/x`, and `S3NT1NEL-value` (a secret pasted into the `_FILE` variable): `err.Error()`
+    does not contain the sentinel and `errors.Unwrap(err) == nil`;
+  - `_FILE` set to an absolute path that is a missing file, a directory, `/dev/null`, a file of
+    `MaxSecretBytes+3` bytes, or an empty file → `*SecretError{Var: "VANDOX_AGENT_TOKEN_FILE"}` with the
+    rule. **The path is never shown either** (a base64 secret can begin with `/`): a test uses the missing
+    path `<tempdir>/S3NT1NEL-value` and asserts the sentinel is absent. For an `os` error, `Err` is only the
+    errno taken from the `*fs.PathError` (so `errors.Is(err, fs.ErrNotExist)` holds for the missing file
+    and `errors.As(err, new(*fs.PathError))` is false). A file of `MaxSecretBytes` printable characters plus
+    `\r\n` is accepted;
   - a value that is empty, contains a space, a tab, a control character, a non-ASCII character or a UTF-8
     BOM (`\xEF\xBB\xBF` prefix, also from a file) → `*SecretError`. A value of printable ASCII
     `0x21`–`0x7E` (e.g. a PHC string `$argon2id$v=19$m=65536,t=3,p=4$c2FsdA$aGFzaA`, a Telegram token
@@ -144,7 +170,10 @@ contain it.
   `_FILE` forms) in the agent's environment, `VANDOX_AGENT_TOKN` (typo) and `vandox_agent_token`
   (lower case) on either binary each fail with a `*SecretError` naming the variable. The same known
   variable twice in `environ` fails. Entries without `=` and variables without the prefix (`PATH`,
-  `VANDOXX`) are ignored.
+  `VANDOXX`) are ignored. *Unknown names are shown only when safe*: the name is put into `Var` only if it
+  is 1–64 bytes of `[A-Za-z0-9_]`. Otherwise `Var` is empty and `Reason` is `unknown VANDOX_ variable (name
+  not shown: …)` with the rule. Cases: `VANDOX_A\nB=x`, `VANDOX_‮X=x` (U+202E), `VANDOX_A-B=x`, and
+  `VANDOX_` + 58 × `A` (65 bytes); `err.Error()` contains no `\n`, no U+202E and not the name.
 - [ ] AC12 *Redaction*: for a `Secret` holding a sentinel, none of `fmt.Sprintf` with `%v %+v %#v %s %q %x
   %X %d`, `fmt.Sprint`, `fmt.Sprintf("%+v", agent)` / `("%#v", agent)` of a loaded `*Agent` and of a
   `Backend` value, `json.Marshal(agent)`, `slog` text and JSON handler output of `slog.Any("cfg", agent)`
@@ -154,7 +183,8 @@ contain it.
   Structure and value errors come before secret and environment errors. `errors.As` finds `*KeyError` and
   `*SecretError`. `KeyError.Error()` has the form `config: <file>:<line>: <key>: <reason>` (`<file>:` alone
   when `Line` is 0, and no `<key>: ` when `Key` is empty). `SecretError.Error()` has the form
-  `config: <var>: <reason>`.
+  `config: <var>: <reason>` (`config: <reason>` when `Var` is empty), followed by `: <err>` when `Err` is
+  set.
 - [ ] AC14 (`internal/wire`) *Shared agent ID rule*: `wire.ValidateAgentID` accepts `web-1`, `a`, 64 × `a`,
   `A.b_c-1`, and rejects ``, 65 × `a`, `-a`, `.a`, `a b`, `a/b`, `ä` with a `*model.FieldError{Field:
   "agent_id"}`. The existing `Header.Validate` tests keep passing unchanged.
@@ -164,7 +194,7 @@ contain it.
 ### Package layout (`internal/config`)
 
 - `config.go`: the package doc, constants, `KeyError`, `readFile` (bounded read of a regular file) and the
-  value checks shared by both binaries (directory, listen address, log level, string control characters).
+  value checks shared by both binaries (directory, listen address, log level, Cc/Cf/Zl/Zp characters in strings).
 - `decode.go`: the strict decoder `decodeStrict`, which parses with `yaml.v3` into a `yaml.Node` and then
   walks the node tree itself against the target struct (reflection over fields with an explicit `yaml` tag
   name). It never calls `Decode` on a whole document, so no `yaml.v3` value error text reaches the user.
@@ -193,8 +223,9 @@ scratch module where marked ✓.
 | ---------- | -------- |
 | UTF-8, UTF-8 with BOM, UTF-16 LE/BE with BOM ✓ | Decoded by `yaml.v3`. The guard runs on the node tree, so it is encoding-independent. |
 | Empty file, only comments ✓ (`Decode` → `io.EOF`) | Empty configuration, defaults apply (AC4). |
-| Single document `---` / explicit null `~` ✓ (`!!null` scalar) | Empty configuration (AC4). |
-| Second document after `---` ✓ (parsed without error) | `*KeyError` on the line of the second document (AC7). Checked by a second `Decode` that must return `io.EOF`. |
+| Single document `---` / explicit null `~` ✓ (`!!null` scalar) | Empty configuration (AC4), provided no second document follows (next row). |
+| Second document after `---` ✓ (parsed without error), including after a null or empty first document (`~` / `---` / `agent_id: x` ✓: document 0 is `!!null`, document 1 a mapping) and a trailing empty one (`a: 1` / `---` ✓) | `*KeyError` on the line of the second document's `---` (the document node's `Line`) (AC7). Checked by a second `Decode` that must return `io.EOF`. This check runs **unconditionally** after the first `Decode` succeeded, before the first document's content is interpreted, so a null first document cannot skip it. |
+| Directives: `%YAML 1.1` ✓ accepted; `%YAML 1.2` ✓ and unknown `%FOO` ✓ fail inside the parser; `%TAG` ✓ re-maps a handle (`!!` or `!e!`) | `%YAML 1.1`: no effect. Parser failures: parser-error row. `%TAG` only changes the resolved `Node.Tag`, so the tag allowlist (below), which is applied to `Node.Tag`, covers every re-mapping (AC7). |
 | Top level a sequence or non-null scalar | `*KeyError` "top level must be a mapping" (AC7). |
 | Block and flow mappings (`a: {b: c}`), quoted keys (`"agent_id":`) | Same nodes, accepted. Quoted keys match by their value. |
 | Key case variants (`Agent_ID`) | Unknown key (case-sensitive) (AC5). |
@@ -204,14 +235,15 @@ scratch module where marked ✓.
 | Anchors `&a` and aliases `*a` ✓ (incl. self-referencing `&a [*a]`, which `yaml.v3` parses without error) | Any node with an `Anchor` or of kind `AliasNode` → `*KeyError` (AC7). There is no alias expansion, so no "billion laughs". |
 | Alias to an undefined anchor (`a: *x`) ✓ (fails inside the parser, `unknown anchor 'x' referenced`, no line) | Parser-error row below: `*KeyError`, `Key` empty, generic reason, the anchor name never shown (AC7). |
 | Key containing any character outside `[A-Za-z0-9_-]` (newline from `"a\nb"` ✓ or a block-scalar key `? \|`, other Cc, Cf such as U+202E, `.`, `:`, `$`, non-ASCII) or longer than 31 bytes | Matched against the schema first (no schema key contains such a character, so it is unknown). Reported as unknown with the enclosing section's path as `Key` and the name not shown (AC5). |
-| Tags: resolved or explicit core tags `!!str !!int !!bool !!float !!null !!timestamp !!map !!seq` | Accepted, and the leaf rules apply. |
-| Other tags ✓ (`!foo bar` decodes to `"bar"`; `!!binary` base64-decodes; `!env X`) | `*KeyError` "unsupported tag" on any node (AC7). |
-| Section key with null value (`spool:`, `spool: ~`) | Defaults of that section kept (AC4). |
+| Tags: the resolved `Node.Tag` is one of `!!str !!int !!bool !!float !!null !!timestamp !!map !!seq` — implicit, explicit (`!!str x`), verbatim (`!<tag:yaml.org,2002:str> x` ✓) or non-specific (`! x` ✓), all of which `yaml.v3` normalises to these short forms | Accepted, and the leaf rules apply. The allowlist is a comparison of `Node.Tag` with these eight strings; it never looks at the source text or `Node.Style`. |
+| Any other `Node.Tag` ✓: custom (`!foo bar` decodes to `"bar"`; `!env X`), other core-like tags (`!!binary` base64-decodes, `!!set` ✓, `!!omap` ✓, `!!pairs`), a `%TAG`-re-mapped `!!` (`tag:evil.example,2000:str` ✓), a re-mapped handle or verbatim form of `!!binary` (normalised to `!!binary` ✓) | `*KeyError` "unsupported tag" on any node, mapping and sequence nodes included (AC7). The tag text is never shown. |
+| Scalar tagged `!!null` (implicitly or explicitly) whose value is not a null spelling of the core schema (`""`, `~`, `null`, `Null`, `NULL`): `spool: !!null x` ✓ gives `Tag !!null`, `Value "x"` | `*KeyError` "null tag with a value" on that key, never treated as null (AC7). The value is not shown. |
+| Section key with null value (`spool:`, `spool: ~`, `spool: !!null`) | Defaults of that section kept (AC4). |
 | Leaf with null value (`agent_id:`) | `*KeyError` "has no value" (AC6). |
 | Leaf given a mapping or sequence | `*KeyError` "want a string" (more generally: the description of the field's type) (AC6). |
 | Leaf scalar not decodable into the field type (only reachable with non-string fields, covered by a white-box test struct in `decode_test.go` with `int`, `bool`, `time.Duration` and `[]string` fields) | `*KeyError` "invalid value, want <type description>". `yaml.v3`'s error text is discarded (AC6). |
 | Plain scalars `5`, `true` for a string option | Taken as their text (`"5"`), then the option's own rule applies. |
-| Block scalars (`|`, `>`) and quoted strings with escapes (`"a\x01b"`) ✓ | Decoded, then any control character (Unicode category Cc, which includes `\n`, `\t` and DEL) → `*KeyError` (AC6). |
+| Block scalars (`|`, `>`) and quoted strings with escapes (`"a\x01b"`, `" "`, `"‮"`) ✓ | Decoded, then any character of Unicode category Cc (includes `\n`, `\t`, DEL, C1), Cf (U+202E, U+FEFF, U+200B, U+00AD), Zl (U+2028) or Zp (U+2029) → `*KeyError` (AC6). |
 | Nesting deeper than the schema | The leaf rule ("want a string") applies at the first level below a leaf. |
 | File > `MaxFileBytes` (1 MiB), not a regular file, missing | `readFile` error with the path (AC8). Bounded read with `io.LimitReader(MaxFileBytes+1)`. |
 | Any error from `yaml.v3` while parsing into a `yaml.Node` (scanner/parser syntax errors, undefined alias; in the first and in a second document) ✓ — its text may quote document text and lacks a line for problems on line 1 | `*KeyError{File: path, Line: N, Key: "", Reason: "not valid YAML (syntax error or alias to an undefined anchor)"}`. `N` comes from the prefix `yaml: line N: ` (parsed with `strconv.Atoi` on the digits after that exact prefix, `decode.go:128-129` of v3.0.5), else 0. The library error is dropped, not wrapped. If a later library version changes the prefix, `Line` degrades to 0 and the message stays value-free (AC7). |
@@ -227,8 +259,10 @@ their own patterns (`agent_id`, listen address, log level), or they are paths.
 
 - `agent_id` (required): `wire.ValidateAgentID`.
 - `backend.url` (required): `url.Parse` succeeds; scheme `http` or `https` (url.Parse lower-cases it);
-  `Opaque` empty; `User == nil`; `Host` non-empty with a non-empty `Hostname()`; the port, if present, is
-  decimal 1–65535; `RawQuery == ""` and `!ForceQuery`; `Fragment == ""` and `RawFragment == ""`; `Path` is
+  `Opaque` empty; `User == nil`; `Host` non-empty with a non-empty `Hostname()`; the (percent-decoded)
+  `Hostname()` is either accepted by `netip.ParseAddr` or 1–253 bytes of `[A-Za-z0-9.-]` (so a
+  percent-encoded U+2028 or `/` that the raw-string character check cannot see is rejected); the port, if
+  present, is 1–5 ASCII digits with a value of 1–65535; `RawQuery == ""` and `!ForceQuery`; `Fragment == ""` and `RawFragment == ""`; `Path` is
   `""` or `"/"`. Plain `http` is allowed because the transport is the tailnet (0010, 0017). The URL is not
   checked to be a tailnet address, because MagicDNS names cannot be verified without resolving them. The
   Tailscale ACL stays the boundary (0049). `url.Parse`'s error text quotes the URL (it could hold user
@@ -237,8 +271,11 @@ their own patterns (`agent_id`, listen address, log level), or they are paths.
 - `spool.directory`, `storage.directory`: `filepath.IsAbs` and `filepath.Clean(p) == p`.
 - `log.level`: exactly one of `debug`, `info`, `warn`, `error`.
 - `web.listen`, `ingest.listen`: `net.SplitHostPort` succeeds; host empty or `netip.ParseAddr` succeeds
-  (zones allowed); port decimal 1–65535. The two ports must differ (error on `ingest.listen`).
-- Every string leaf: no Unicode Cc character.
+  (zones allowed); the port is 1–5 ASCII digits (checked byte by byte before conversion, because
+  `net.SplitHostPort(":+80")` returns `"+80"` and `strconv.Atoi` accepts the sign ✓) and its value
+  (`strconv.ParseUint(p, 10, 16)`) is 1–65535. The two ports must differ (error on `ingest.listen`).
+- Every string leaf: no character of Unicode category Cc, Cf, Zl or Zp (checked on the decoded value,
+  before the option's own rule).
 - Every unknown key: its name is echoed only under the safe-name rule of AC5.
 
 ### Accepted forms: secrets from the environment (guard: secrets only from env/files)
@@ -251,17 +288,18 @@ plus `VANDOX_WEB_PASSWORD_HASH`, `VANDOX_WEB_PASSWORD_HASH_FILE`, `VANDOX_TELEGR
 | ---------- | -------- |
 | Entry without `=` | Ignored (cannot be set through `os.Setenv`, may appear in a raw environ). |
 | Name not starting with `VANDOX_` case-insensitively (`PATH`, `VANDOXX`) | Ignored. |
-| Name starting with `VANDOX_` case-insensitively but not known to this binary (typo, lower case, the other binary's secret) | `*SecretError` naming the variable (AC11). |
+| Name starting with `VANDOX_` case-insensitively but not known to this binary (typo, lower case, the other binary's secret) | `*SecretError` naming the variable if the name is 1–64 bytes of `[A-Za-z0-9_]`; otherwise (a name may hold any byte except `=` and NUL: newline, U+202E, `-`, non-ASCII, overlong) `Var` is empty and the reason says the name is not shown (AC11). |
 | Known name twice | `*SecretError` "set more than once" (AC11). |
 | `NAME` and `NAME_FILE` both present | `*SecretError` naming both (AC9). A present but empty value counts as present. |
 | Neither present | Unset. The agent token is required on the agent (AC10). |
 | `NAME=""` | `*SecretError` "is empty". |
 | `NAME=v` | `v` must be 1–`MaxSecretBytes` bytes of printable ASCII `0x21`–`0x7E`. Anything else, including space, tab, CR/LF, NUL, DEL, non-ASCII and a BOM, → `*SecretError` with the reason only (AC9). |
-| `NAME_FILE=""` / relative path | `*SecretError` "must be an absolute path". |
-| `NAME_FILE=/abs` | `os.Stat` (follows symlinks, so the symlinked Docker/Kubernetes secrets work) must be a regular file. The file may hold at most `MaxSecretBytes+2` bytes (value plus `\r\n`), read through `io.LimitReader(MaxSecretBytes+3)`, and more is a "too large" error. Exactly one trailing `\n` is removed, then one trailing `\r` if that `\n` was removed. The rest must satisfy the value rule. The error wraps the `os` error (path included, content never) (AC9). |
+| `NAME_FILE=""` / any value for which `filepath.IsAbs` is false (`rel/x`, a secret pasted into the variable) | `*SecretError{Var: NAME_FILE, Reason: "must be an absolute path"}`, `Err` nil. No `os` call is made, and the value is never shown (AC9). |
+| `NAME_FILE=/abs` | `os.Stat` (follows symlinks, so the symlinked Docker/Kubernetes secrets work) must be a regular file. The file may hold at most `MaxSecretBytes+2` bytes (value plus `\r\n`), read through `io.LimitReader(MaxSecretBytes+3)`, and more is a "too large" error. Exactly one trailing `\n` is removed, then one trailing `\r` if that `\n` was removed. The rest must satisfy the value rule. The path is never shown either (a base64 secret can start with `/`, and a path can hold control characters). For an `os` error, `Err` is the errno from the `*fs.PathError` (`errors.As` to `*fs.PathError`, take `.Err`), never the `*fs.PathError` itself, whose text contains the path; any other `os` error is replaced by the reason alone. Content never appears (AC9). |
 | Agent token present on either binary | At least `MinAgentTokenBytes` (32) bytes (AC10). |
 
-Error messages name the variable, the path and the rule, never the value or the file content.
+Error messages name the variable (when its name is safe) and the rule, never the value, a `_FILE` path or
+the file content.
 
 ### Redaction
 
@@ -344,11 +382,11 @@ func (s Secret) MarshalText() ([]byte, error)        // []byte("[redacted]"), ni
 
 // SecretError reports a problem with a secret's environment variable or file.
 type SecretError struct {
-	Var    string // e.g. "VANDOX_AGENT_TOKEN_FILE"
-	Reason string // never contains the value or the file content
-	Err    error  // underlying error (e.g. from os.Stat), may be nil
+	Var    string // e.g. "VANDOX_AGENT_TOKEN_FILE"; empty for an unknown name that is not shown (AC11)
+	Reason string // never contains the value, a *_FILE path or the file content
+	Err    error  // only the errno of an *fs.PathError (e.g. syscall.ENOENT), never the PathError; may be nil
 }
-func (e *SecretError) Error() string // "config: <Var>: <Reason>[: <Err>]"
+func (e *SecretError) Error() string // "config: <Var>: <Reason>[: <Err>]", "config: <Reason>[: <Err>]" if Var == ""
 func (e *SecretError) Unwrap() error
 
 // unexported
@@ -454,7 +492,9 @@ Existing test code that calls a changed signature: none. No existing signature c
   `Env*` constant, the known-variable list of each binary that reads it, the README secrets table". In
   *Security areas* 8 and 10, name `internal/config` (`readSecret`, `checkEnviron`, `Secret`;
   `decodeStrict`, `readFile`). In area 12, add that configuration error texts never echo document text
-  other than schema or safe key names (`decodeStrict`). `SECURITY.md` needs no change, because it already says env or Docker
+  other than schema or safe key names (`decodeStrict`), never a `_FILE` value or path or an unsafe
+  variable name (`readSecret`, `checkEnviron`), and that configuration values, although free of Cc, Cf, Zl
+  and Zp characters, are logged only as `slog` attributes. `SECURITY.md` needs no change, because it already says env or Docker
   secrets only.
 
 ## Architecture check
@@ -484,7 +524,12 @@ Existing test code that calls a changed signature: none. No existing signature c
   a panic. Nesting is bounded by the schema, and the parser's own depth limit applies before that.
 - Area 12: no error text contains document text that is not a schema key name or a safe unknown key name
   (AC5), so neither a secret nor a control character from the file reaches the journal or `docker logs`.
-  `yaml.v3`'s own messages are never passed through (AC6, AC7).
+  `yaml.v3`'s own messages are never passed through (AC6, AC7), and tags are not shown. Secret errors show
+  neither a `_FILE` value or path nor an unsafe variable name (AC9, AC11). For the later logging of
+  configured values (#13, #30), every string option is free of Cc, Cf, Zl and Zp characters, and
+  `backend.url`'s decoded host is an IP literal or an LDH-style name (AC6). Those features should still
+  log configuration values only as `slog` attributes, never concatenated into a message; this is noted in
+  area 12 of `.squad/project.md`.
 - Area 9: the directories are only validated (absolute, clean), not created. Creating them is #38's and
   #13's job.
 - Area 11: `backend.url` restricts scheme, host and port form. The restriction to tailnet addresses stays
@@ -528,3 +573,43 @@ Devil's Advocate, round 1: 0 major, 3 minor objections. All three accepted; tier
 3. *Undefined alias is outside the anchor/alias rule* (minor): **accepted.** AC7 now lists `a: *x` (and the
    sentinel form) explicitly, pins it as a `*KeyError` with `Key` empty, `Line` 0 and the fixed reason, and
    asserts the anchor name is absent. The YAML accepted-forms table has a row for it.
+
+## Security review
+
+Plan security review, round 1: CHANGES_REQUIRED, 1 blocking and 6 non-blocking findings. All seven
+accepted; tier unchanged (security). Forms marked ✓ were re-verified with v3.0.5 in a scratch module.
+
+1. *AC9 echoes a relative `_FILE` value* (blocking): **accepted, and widened.** AC9 contradicted the
+   environment table. Now an empty or non-absolute `_FILE` value gets "must be an absolute path" with no
+   `os` call, no wrapped error and the value never shown (AC9 case `VANDOX_AGENT_TOKEN_FILE=S3NT1NEL-value`).
+   Security allowed showing absolute paths; the plan goes further and never shows a `_FILE` path, because
+   a base64 secret can begin with `/` and an absolute path can hold control characters. `SecretError.Err`
+   is only the errno of an `*fs.PathError`, so `errors.Is(err, fs.ErrNotExist)` still works without the
+   path in the text (AC9 case with the missing path `<tempdir>/S3NT1NEL-value`). Signature comment of
+   `SecretError`, environment table and record 0050 updated; spec *Behavior* updated.
+2. *Second document after a null first document* (non-blocking): **accepted.** Verified: `~` / `---` /
+   `agent_id: x` parses as a `!!null` document and a mapping, and `a: 1` / `---` yields an empty second
+   document. The table now says the second-`Decode`-must-be-`io.EOF` check runs unconditionally, before
+   the first document is interpreted; AC7 gains three cases.
+3. *Tag sibling forms* (non-blocking): **accepted.** Verified: `%TAG !! tag:evil.example,2000:` turns
+   `!!str` into `tag:evil.example,2000:str`; `%TAG !e! tag:yaml.org,2002:` + `!e!binary` and
+   `!<tag:yaml.org,2002:binary>` both resolve to `!!binary`; `!!set` and `!!omap` keep their tags. The
+   allowlist is stated as a comparison of `Node.Tag` with eight strings, never the source text or
+   `Node.Style`; AC7 pins every form, and the tag text is never shown. A *Directives* row was added
+   (`%YAML 1.2` and unknown directives fail inside the parser, `%TAG` is covered by the allowlist).
+4. *`!!null` with content silently treated as null* (non-blocking): **accepted.** Verified:
+   `spool: !!null x` gives `Tag !!null`, `Value "x"`. A `!!null` scalar is null only for the core-schema
+   spellings `""`, `~`, `null`, `Null`, `NULL`; any other value is a `*KeyError` (AC7). Considered and
+   not chosen: rejecting every explicitly tagged node, which would rely on `Node.Style` (finding 3).
+5. *Cf/Zl/Zp in string values, percent-encoded host* (non-blocking): **accepted, both options.** String
+   leaves now reject Cc, Cf, Zl and Zp. Verified that `http://a%E2%80%A8b:1` parses with `Hostname()`
+   `"a b"`, so `backend.url`'s decoded host must be an IP literal or 1–253 bytes of `[A-Za-z0-9.-]`
+   (AC6). Area 12 of `.squad/project.md` additionally says configuration values are logged only as `slog`
+   attributes (*Documentation updates*).
+6. *Port with a sign* (non-blocking): **accepted.** Verified: `net.SplitHostPort(":+80")` returns `"+80"`
+   and `strconv.Atoi` accepts it (`url.Parse` already rejects `http://h:+80`). Ports are 1–5 ASCII digits,
+   checked before `strconv.ParseUint(p, 10, 16)`; AC6 gains `:+80`, `[::1]:+80`, `:-1`, `: 80`, `:808080`
+   and `http://h:+80`.
+7. *Unknown `VANDOX_` names echoed raw* (non-blocking): **accepted.** A name is shown only if it is 1–64
+   bytes of `[A-Za-z0-9_]`; otherwise `Var` is empty and the reason says the name is not shown, consistent
+   with AC5. `SecretError.Error()` drops the `<var>: ` part then (AC11, AC13, signature comment).

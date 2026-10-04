@@ -29,6 +29,10 @@ secrets)". The secrets known today are the agent/ingest token (both binaries), t
 6. **Ignore unknown environment variables**. That is the usual behavior, but a typo such as
    `VANDOX_TELEGRAM_BOT_TOKN` silently disables a feature, and a secret of the other binary goes
    unnoticed.
+7. **Show the `_FILE` path in errors** (only when it is absolute). It helps to find a wrong mount, but the
+   most likely mistake is pasting the secret itself into the `_FILE` variable, a base64 secret can begin
+   with `/`, and a path can hold control characters. The variable name identifies the setting, so the
+   path is never shown.
 
 ## Decision
 
@@ -50,8 +54,14 @@ load time. Unknown `VANDOX_` variables are rejected (option 6 rejected).
   binary knows, and each may appear only once. Otherwise loading fails. The Telegram or web secrets in the
   agent's environment are therefore a start-up error.
 - Secrets are held in `config.Secret`. Every `fmt` verb, `String()`, `slog` (`LogValuer`) and text/JSON
-  marshalling print `[redacted]`. Only `Value()` returns the secret. `*SecretError` names the variable,
-  the path and the rule, never the value or the file content.
+  marshalling print `[redacted]`. Only `Value()` returns the secret. `*SecretError` names the variable
+  and the rule, never the value, the file content or the `_FILE` value. An empty or relative `_FILE`
+  value is rejected without any file system call. An absolute `_FILE` path is not shown either; for a
+  file system error only the bare error number is kept (so "no such file or directory" still shows and
+  `errors.Is(err, fs.ErrNotExist)` still works), never the `*fs.PathError` that quotes the path (option 7
+  rejected).
+- An unknown `VANDOX_` variable is named only if its name is 1–64 characters of letters, digits and `_`;
+  any other name (it may contain any byte but `=` and NUL, including a newline) is reported as not shown.
 - The configuration file cannot carry a secret. No secret field has a YAML key, and `backend.url` rejects
   user info and queries (0049).
 

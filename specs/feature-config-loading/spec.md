@@ -30,9 +30,13 @@ secrets, never from the configuration file, and left *how* loading enforces that
 - Secrets come only from environment variables: `VANDOX_<NAME>` holds the value, or `VANDOX_<NAME>_FILE`
   names an absolute path to a file that holds it (Docker secrets, systemd credentials). Setting both is an
   error. A secret must be printable ASCII without spaces. From a file, one trailing line ending is removed.
+  An error about a secret names the variable and the rule, but never the value, the `_FILE` path (a
+  secret pasted into the `_FILE` variable must not reach the logs) or the file content.
 - An environment variable that starts with `VANDOX_` (in any letter case) but is not a known secret
   variable of that binary is an error. For example, the Telegram token in the agent's environment is
-  rejected (0012).
+  rejected (0012). The error shows the variable's name only when it consists of letters, digits and `_`.
+- String options may not contain control, format or line/paragraph separator characters, so values are
+  safe to log later.
 - The agent token is required by the agent and must be at least 32 characters. The backend's secrets are
   optional at load time. The features that use them (#25 login, #40 ingest, #60 Telegram) decide what
   happens when one is missing.

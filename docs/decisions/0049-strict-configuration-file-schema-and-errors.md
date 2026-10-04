@@ -42,11 +42,20 @@ not be copied there.
 6. **Show unknown key names quoted** (`strconv.Quote`). This neutralizes newlines and other control
    characters, but still copies a secret pasted as a key into the logs. Rejected in favor of showing a name
    only when it is short and made of safe characters.
+7. **Reject only control characters (Cc) in string values** and leave log safety to the features that
+   log the values. It is the narrower rule, but U+2028/U+2029 and bidirectional overrides (U+202E) would
+   pass and could split or disguise a log line later. Rejected; Cf, Zl and Zp are rejected as well.
 
 ## Decision
 
 Option 1, with these specifics:
 
+- YAML constructs: exactly one document. A second document is rejected even when the first one is null
+  or empty, and a trailing `---` counts as a second document. The tag allowlist (`!!str !!int !!bool
+  !!float !!null !!timestamp !!map !!seq`) is checked on the tag the parser resolved for each node, never
+  on the source text, so `%TAG` re-mappings, verbatim tags (`!<tag:yaml.org,2002:binary>`), `!!set` and
+  `!!omap` are rejected. A `!!null`-tagged scalar is null only for `""`, `~`, `null`, `Null` and `NULL`;
+  `!!null x` is an error rather than a silently ignored value. A rejected tag is not shown.
 - `internal/config` owns the loading. `LoadAgent(path, environ)` and `LoadBackend(path, environ)` read
   the file at `path` and the environment `environ` (in `os.Environ()` form). Default paths are
   `/etc/vandox/agent.yaml` and `/etc/vandox/vandoxd.yaml` (mounted into the container). The binaries are
@@ -56,7 +65,9 @@ Option 1, with these specifics:
   "defaults only".
 - Only keys of the schema are accepted, and they are case-sensitive. A section key with a null value keeps
   the section's defaults, while a leaf with a null value is an error. String values may not contain
-  control characters. Non-secret options exist only in the file, with no environment overrides (option 3
+  characters of Unicode category Cc, Cf, Zl or Zp (control and format characters such as U+202E, line and
+  paragraph separators), so the values #13 and #30 will log cannot break a log line or reorder its
+  display (option 7 rejected). Non-secret options exist only in the file, with no environment overrides (option 3
   rejected).
 - The first error is reported (option 4 rejected): structure and values in document and field order, then
   the environment and secrets. `*KeyError` (`File`, `Line`, `Key`, `Reason`) carries file, line and key.
@@ -76,10 +87,12 @@ Option 1, with these specifics:
   - backend: `web.listen` (`:8080`), `ingest.listen` (`:8081`, a different port), `storage.directory`
     (`/data`) and `log.level` (`info`).
 - `backend.url` must be `http` or `https` with a host, an optional port from 1 to 65535, no user info, no
-  query, no fragment and an empty path or `/`. Plain `http` is allowed because the tailnet encrypts and
+  query, no fragment and an empty path or `/`. After percent-decoding, the host must be an IP literal or
+  consist of letters, digits, `.` and `-` (a percent-encoded U+2028 or `/` is rejected). Plain `http` is allowed because the tailnet encrypts and
   authenticates the transport (0010, 0017). Whether the host is a tailnet address is not checked, because
   a MagicDNS name cannot be verified without resolving it, so the Tailscale ACL remains the boundary.
-- Listen addresses are `host:port` with an empty host or an IP literal and a numeric port. Host names are
+- Listen addresses are `host:port` with an empty host or an IP literal and a port of one to five ASCII
+  digits (no sign: `:+80` is rejected although `strconv.Atoi` would accept it). Host names are
   rejected, because binding to a name is ambiguous.
 - Directories must be absolute and clean. They are not created here.
 - The loader takes no `context.Context`. It reads one local regular file and at most three small secret

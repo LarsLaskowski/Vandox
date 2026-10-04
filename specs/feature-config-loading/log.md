@@ -9,3 +9,4 @@ One line per pipeline step: date, step, member, result. Lead decisions and escal
 | 2026-10-04 | 2 Plan challenge | squad-devils-advocate | OBJECTIONS 0 major, 3 minor (syntax errors echo text, raw unknown keys, undefined alias) |
 | 2026-10-04 | 2 Plan revise | squad-lead | All 3 objections accepted, plan revised, tier stays security |
 | 2026-10-04 | 3 Plan security review (1st) | squad-security | CHANGES_REQUIRED: 1 blocking (AC9 echoes relative _FILE path), 6 non-blocking (2nd doc after null doc, tag sibling forms, !!null with content, Cf/Zl/Zp in values, port digits only, VANDOX_ name echo) |
+| 2026-10-04 | 3 Plan revise (1st) | squad-lead | All 7 security findings accepted, tier stays security |
