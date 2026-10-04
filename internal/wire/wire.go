@@ -169,7 +169,9 @@ type DecodeError struct {
 }
 
 // Error returns "wire: line <Line>: <Err>".
-func (e *DecodeError) Error() string { return "wire: line " + strconv.Itoa(e.Line) + ": " + e.Err.Error() }
+func (e *DecodeError) Error() string {
+	return "wire: line " + strconv.Itoa(e.Line) + ": " + e.Err.Error()
+}
 
 // Unwrap returns the wrapped error.
 func (e *DecodeError) Unwrap() error { return e.Err }

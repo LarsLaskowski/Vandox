@@ -60,8 +60,8 @@ func allKindRecords(loc *time.Location) []model.Record {
 		metricAll(1, loc),
 		processAll(2, loc),
 		{Meta: agentMeta(3, "lsof", loc), Data: &model.ConnectionSnapshot{
-			Complete: true,
-			States:   []model.StateCount{{Proto: model.ProtoTCP, State: "ESTABLISHED", Count: 3}},
+			Complete:  true,
+			States:    []model.StateCount{{Proto: model.ProtoTCP, State: "ESTABLISHED", Count: 3}},
 			Processes: []model.ProcessConnections{{PID: 10, Command: "nginx", Count: 2}},
 			Remotes:   []model.RemoteCount{{Addr: netip.MustParseAddr("2001:db8::1"), Count: 4}},
 			Listeners: []model.Listener{{Proto: model.ProtoTCP6, Local: netip.MustParseAddrPort("[::]:443"), PID: 10, Command: "nginx"}},
