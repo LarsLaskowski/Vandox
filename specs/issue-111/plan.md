@@ -23,9 +23,12 @@ Claims of the issue, checked:
   `FIXED`/`CLOSED`. `main` has 0 open `go:S3776` issues.
 - "the local Analyzer gate was clean because gocognit is not in the linter set" — **confirmed** (see above).
 - "add gocognit with a threshold of 15 so the local gate matches the CI code analysis" — **partly refuted**:
-  gocognit at 15 does catch every SonarQube finding (on the PR #110 tree as SonarQube analyzed it, 389aef8,
-  it reports 9 test functions, a superset of the 7), but it does **not** match SonarQube exactly.
-  SonarQube's Go analyzer does not count `if err != nil` blocks; gocognit does. On `main` (a7e9b4a) gocognit
+  in every case measured (PR #110 at 389aef8, `main` at a7e9b4a) gocognit at 15 flagged at least what
+  SonarQube flagged (on 389aef8 it reports 9 test functions, a superset of the 7), but it does **not** match
+  SonarQube exactly and the sample is small. Per-function scores differ by 1–7 points on several constructs
+  (both tools score `TestDecoder_Limits` 38). The largest known difference: SonarQube's Go analyzer does not
+  count an `if` whose condition is the bare `err != nil` check; gocognit does. A compound condition such as
+  `if err != nil || len(recs) != 1` is counted by both. On `main` (a7e9b4a) gocognit
   at 15 reports two production functions SonarQube accepts:
   `internal/model/connection.go:75` `(*ConnectionSnapshot).Validate` (gocognit 37; SonarQube: 15 for the
   whole file) and `internal/model/mariadb.go:47` `(*MariaDBStatus).Validate` (gocognit 21; SonarQube: 11
@@ -64,7 +67,8 @@ candidate `squad` issue in the template repository.
 - [ ] AC5: The exclusions do not hide other functions: a function above 15 added to a scratch copy of
   `internal/model/connection.go` is reported.
 - [ ] AC6: `.squad/stack.md`, *Analyzer gate*, states that gocognit (threshold 15) is the local stand-in for
-  SonarQube's `go:S3776`, that it counts `if err != nil` blocks and so can be stricter than SonarQube, that
+  SonarQube's `go:S3776` — without claiming it reports every function SonarQube would — that it counts
+  bare `if err != nil` checks, which SonarQube does not, and so can be stricter than SonarQube, that
   a gocognit finding is fixed like any diagnostic and a new exclusion needs a Lead decision record, and
   points to record 0047; the sentence "SonarQube Cloud has no local Go equivalent here" is narrowed to the
   findings that still have none (other rules, duplication, hotspots).
@@ -112,7 +116,7 @@ this session is built with Go 1.25 and refuses to run — use the v2.13.1 build 
        - unconvert
      settings:
        gocognit:
-         # Matches SonarQube's go:S3776 threshold; stricter for `if err != nil` sequences (record 0047).
+         # SonarQube's go:S3776 threshold; stricter for bare `if err != nil` checks (record 0047).
          min-complexity: 15
      exclusions:
        warn-unused: true
@@ -134,8 +138,9 @@ this session is built with Go 1.25 and refuses to run — use the v2.13.1 build 
 
 2. Dev updates `.squad/stack.md`, *Analyzer gate* (AC6). Suggested text replacing the last sentence of that
    section: "`gocognit` (threshold 15, `.golangci.yml`) stands in for SonarQube Cloud's cognitive-complexity
-   rule `go:S3776`: it reports every function SonarQube would, but it also counts `if err != nil` blocks,
-   which SonarQube does not, so it can flag a function SonarQube accepts. Such a finding is fixed like any
+   rule `go:S3776`. The two measures are close but not identical: in every case measured (PR #110, `main`)
+   gocognit flagged at least what SonarQube flagged, and it also counts an `if` on the bare `err != nil`
+   check, which SonarQube does not, so it can flag a function SonarQube accepts. Such a finding is fixed like any
    other diagnostic; a new exclusion in `.golangci.yml` needs a Lead decision record (two existing
    validators are excluded by name, record 0047). Other SonarQube Cloud findings (further rules,
    duplication, hotspots) have no local Go equivalent here and arrive in squad step 11."
@@ -200,9 +205,31 @@ from the CI profile — this narrows that difference) and 0035 (CI keeps its ste
 
 - `docs/decisions/0047-gocognit-as-local-stand-in-for-sonar-cognitive-complexity.md` (Proposed)
 
+## Challenge
+
+Devil's Advocate objections (plan challenge, step 3):
+
+1. *minor — the claim that gocognit "reports every function SonarQube would" / "implements the same
+   cognitive-complexity specification" rests on 7 samples; the tools differ by 1–7 points on other
+   constructs, and SonarQube does count compound conditions such as `if err != nil || len(recs) != 1`.*
+   **Accepted.** The equivalence claim is dropped everywhere: *Claims of the issue, checked*, AC6, the
+   suggested `.squad/stack.md` text (Approach, step 2) and record 0047 (*Context*, option 1, *Decision*)
+   now say "in every case measured (PR #110, `main`) it flagged at least what SonarQube flagged", and the
+   idiom wording is narrowed to an `if` on the bare `err != nil` check. The `.golangci.yml` comment is
+   reworded to match. The decision itself is unchanged: the gate is a stand-in that narrows the gap of
+   record 0001, not a guarantee of parity; a SonarQube finding gocognit misses still arrives in step 11.
+2. *minor — record 0047 omits `//nolint:gocognit // reason` on the two `Validate` methods
+   (`internal/model/connection.go:75`, `internal/model/mariadb.go:47`).* **Accepted as an option, rejected
+   as the choice.** Record 0047 now lists it (option 2) with the reason: it edits two production Go files,
+   which AC7 excludes and which a squad-maintenance change (*Squad lessons*) should not touch; it would make
+   the change a code change with its own review surface; and the exception would live in two places (the
+   code and the record) instead of one auditable list in `.golangci.yml` that `warn-unused` keeps honest
+   (an unused `//nolint` is reported only with `nolintlint`, which is not enabled). The two options are
+   otherwise equivalent in scope (one linter, one function each).
+
 ## Out of scope / follow-ups
 
-- Refactoring the two excluded validators (record 0047, option 2): not needed while SonarQube accepts them.
+- Refactoring the two excluded validators (record 0047, option 3): not needed while SonarQube accepts them.
 - Step-12 lesson for the template repository: the `go` profile's seeded `.golangci.yml` should enable
   `gocognit` at 15, and the profile's `stack.md` should not claim SonarQube has no local equivalent for
   `go:S3776`.
