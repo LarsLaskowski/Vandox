@@ -73,4 +73,5 @@ links the record.
 | [0044](0044-batch-validated-as-a-whole-agent-records-only.md) | A batch is valid only as a whole, carries only agent records and is bounded by format limits | Accepted | 2026-10-04 |
 | [0045](0045-batch-identified-by-agent-id-and-record-sequence-numbers.md) | The agent spools at least 7 days and backfills; a batch is identified by the agent ID and its records' sequence numbers | Accepted | 2026-10-04 |
 | [0046](0046-batch-header-describes-the-capture-context.md) | The batch header's boot ID and clock offset describe when the records were captured, not when they were sent | Accepted | 2026-10-04 |
+| [0047](0047-gocognit-as-local-stand-in-for-sonar-cognitive-complexity.md) | gocognit at 15 as the local stand-in for SonarQube's cognitive complexity rule; two existing validators excluded by name | Accepted | 2026-10-04 |
 <!-- project:end index -->

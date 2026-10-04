@@ -1,6 +1,6 @@
 # 0047: gocognit at 15 as the local stand-in for SonarQube's cognitive complexity rule; two existing validators excluded by name
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-04
 - **Source:** Issue #111
 - **Supersedes:** —
