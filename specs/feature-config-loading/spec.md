@@ -19,8 +19,11 @@ secrets, never from the configuration file, and left *how* loading enforces that
   container). The binaries are not wired to it yet; #13 and #30 call it at start-up.
 - Parsing is strict. A key that is not a known option, a value that has the wrong type or fails its rule,
   and every YAML construct the loader does not support (duplicate keys, several documents, anchors and
-  aliases, merge keys, custom tags, non-string keys) are errors. The error names the file, the line and the
-  full dotted key (e.g. `backend.url`). It never contains the offending value.
+  aliases, merge keys, custom tags, non-string keys) are errors. The error names the file, the line (for
+  a YAML syntax error: when the parser reports one) and the full dotted key (e.g. `backend.url`). It never
+  contains the offending value or other text from the file: an unknown key's name is shown only when it is
+  short and made of letters, digits, `_` and `-`, and the YAML library's own messages are never passed
+  through.
 - Options that are missing take documented defaults. Required options without a sensible default
   (`agent_id`, `backend.url`) are errors when missing.
 - Non-secret options exist only in the file. There are no environment overrides for them.

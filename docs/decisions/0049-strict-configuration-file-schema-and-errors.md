@@ -35,6 +35,13 @@ not be copied there.
 4. **Every error collected and reported at once** (`errors.Join`). This is convenient for the operator,
    but it makes "which error is reported" harder to pin in tests, and a start-up check rarely finds more
    than one mistake.
+5. **Pass the YAML library's syntax error message through** (wrapped with the file name). It is the most
+   detailed description, but the messages can quote document text (`a: *S3NT1NEL` gives
+   `unknown anchor 'S3NT1NEL' referenced`), so a token pasted unquoted after a `*` would reach the logs.
+   Rejected in favor of a fixed reason plus the line number.
+6. **Show unknown key names quoted** (`strconv.Quote`). This neutralizes newlines and other control
+   characters, but still copies a secret pasted as a key into the logs. Rejected in favor of showing a name
+   only when it is short and made of safe characters.
 
 ## Decision
 
@@ -55,6 +62,13 @@ Option 1, with these specifics:
   the environment and secrets. `*KeyError` (`File`, `Line`, `Key`, `Reason`) carries file, line and key.
   The value never appears in the message. A key that looks like a secret (`token`, `password`, `secret` in
   its last segment) gets a hint that secrets belong in environment variables.
+- No other text from the file appears in an error either. An unknown key's name is shown only if it is
+  1–31 bytes of `[A-Za-z0-9_-]` (shorter than the minimum agent token, so a pasted token is never shown);
+  otherwise the error names the enclosing section and the line (option 6 rejected). Errors the YAML
+  parser reports itself (syntax errors, an alias to an undefined anchor) become a `*KeyError` with an
+  empty key, a fixed reason and the line from the library's `yaml: line N: ` prefix, or no line when the
+  library gives none (it omits it for problems on the first line); the library's message is neither
+  printed nor wrapped (option 5 rejected).
 - Options in this change (others arrive with their features through the integration surface in
   `.squad/project.md`):
   - agent: `agent_id` (required, the wire format's agent ID rule via `wire.ValidateAgentID`),

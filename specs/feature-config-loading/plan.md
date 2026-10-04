@@ -37,6 +37,14 @@ Related findings on the way (no defect, but relevant):
 - `yaml.v3` parses duplicate keys, several documents, aliases and custom tags (`!foo bar` → `"bar"`) into a
   `yaml.Node` without error (verified with v3.0.5). The strict decoder must reject each of them itself
   (AC7).
+- `yaml.v3`'s *syntax* error texts can echo document text too (verified with v3.0.5, Challenge 1):
+  `a: *S3NT1NEL` gives `yaml: unknown anchor 'S3NT1NEL' referenced`. Several of them carry no line,
+  because the library omits the `line N:` prefix whenever its 0-based mark is 0, i.e. for problems on the
+  first line (`a: b: c` → `yaml: mapping values are not allowed in this context`; also
+  `found unknown escape character`, `found undefined tag handle`). So no `yaml.v3` error text at all is
+  passed through (AC7).
+- Keys can hold any character, including newlines (`"a\nb": 1` parses to the key `"a\nb"`, verified).
+  Echoing an unknown key verbatim would allow log injection (security area 12) (AC5).
 - `gopkg.in/yaml.v3` is archived. Its maintained continuation is `go.yaml.in/yaml/v3` (same code, module
   `go.yaml.in/yaml/v3`, v3.0.5, no requirements of its own) (0048).
 
@@ -69,6 +77,15 @@ contain it.
   A key whose last segment contains `token`, `password` or `secret` (in any letter case, e.g. `token`,
   `backend.agent_token`, `web.password_hash`, `telegram.bot_token`) is unknown too, and its `Reason`
   additionally says that secrets come only from environment variables. The value never appears.
+  *Unknown key names are shown only when safe*: a key segment is echoed only if it is 1–31 bytes of
+  `[A-Za-z0-9_-]` (shorter than `MinAgentTokenBytes`, so a pasted agent token is never shown, and a
+  Telegram token or PHC hash contains `:` or `$` and never matches). Otherwise `Key` is the dotted path of
+  the enclosing section (empty at the top level), `Line` is the key's line, and `Reason` is
+  `unknown key (name not shown: …)` with the rule. Test cases: `"a\nb": 1` and `"x‮y": 1` at the top
+  level and inside `spool` (`err.Error()` contains no `\n` and no U+202E, `Key` is `""` / `spool`), a
+  32-character key `S3NT1NEL` + 24 × `a` (sentinel absent), a block-scalar key `? |` with a sentinel line,
+  and a quoted key with a dot, `"a.b": 1` (not shown, since `.` would read as a path separator). Known keys and the secret
+  hint are matched before the display decision, so `token: x` still gets the hint.
 - [ ] AC6 *Invalid values* fail with a `*KeyError` that names key and line. The value never appears. Table
   per key (accepted forms in *Approach → Value rules*):
   - `agent_id`: empty, 65 bytes, leading `-`, a space, a `/`.
@@ -93,9 +110,18 @@ contain it.
   YAML document (`---`); an anchor or alias (`&a`/`*a`); a merge key (`<<: *a` and `<<: {…}`); a
   non-string key (`? [a]`); a custom or unsupported tag (`!env X`, `!!binary aGk=`, `!foo {a: 1}`); a
   top-level sequence or scalar. A file that holds only `---` or `~` counts as empty (AC4).
+  *Errors reported by the YAML parser itself* (syntax errors, and an alias to an undefined anchor, which
+  `yaml.v3` rejects while parsing, before any node exists) are also a `*KeyError`, with `Key` empty,
+  `Reason` exactly `not valid YAML (syntax error or alias to an undefined anchor)` and `Line` taken from
+  the library's `yaml: line N: ` prefix when present, else 0. No `yaml.v3` text is passed through and the
+  error wraps nothing (`errors.Unwrap(err) == nil`). Cases, each asserting type, `Line` and that the
+  sentinel is absent: `a: [` (Line 1), `a: *S3NT1NEL` (undefined alias; Line 0; sentinel absent),
+  `a: b: c` (Line 0, message still begins `config: <file>:`), `a: "\q"`, `a: !x!y z`,
+  `a: 1` + newline + `S3NT1NEL: [` (Line 2), and `a: 1` / `---` / `b: [` (a syntax error in the second
+  document, Line 3). Line values verified with v3.0.5.
 - [ ] AC8 *File errors* return an error that contains the path and is not a `*KeyError`: missing file
-  (`errors.Is(err, fs.ErrNotExist)`), a directory, `/dev/null` (not a regular file), a file of
-  `MaxFileBytes+1` bytes, and a YAML syntax error (`a: [`). A file of exactly `MaxFileBytes` bytes made of
+  (`errors.Is(err, fs.ErrNotExist)`), a directory, `/dev/null` (not a regular file) and a file of
+  `MaxFileBytes+1` bytes. A file of exactly `MaxFileBytes` bytes made of
   comment lines loads (agent: then fails on `agent_id` required, which shows it was read).
 - [ ] AC9 *Secret sources* (`VANDOX_AGENT_TOKEN` as the example, same function for all three):
   - value from `VANDOX_AGENT_TOKEN` → `Secrets.AgentToken.Value()` equals it;
@@ -176,6 +202,8 @@ scratch module where marked ✓.
 | Non-scalar key (`? [a]`) ✓ / non-string scalar key (`1:`, `true:`) | Non-scalar key: `*KeyError` "key must be a string". A scalar key is matched by its text and is therefore unknown (AC5/AC7). |
 | Merge key `<<` ✓ (tag `!!merge`) | Rejected as an unsupported construct, not merged (AC7). |
 | Anchors `&a` and aliases `*a` ✓ (incl. self-referencing `&a [*a]`, which `yaml.v3` parses without error) | Any node with an `Anchor` or of kind `AliasNode` → `*KeyError` (AC7). There is no alias expansion, so no "billion laughs". |
+| Alias to an undefined anchor (`a: *x`) ✓ (fails inside the parser, `unknown anchor 'x' referenced`, no line) | Parser-error row below: `*KeyError`, `Key` empty, generic reason, the anchor name never shown (AC7). |
+| Key containing any character outside `[A-Za-z0-9_-]` (newline from `"a\nb"` ✓ or a block-scalar key `? \|`, other Cc, Cf such as U+202E, `.`, `:`, `$`, non-ASCII) or longer than 31 bytes | Matched against the schema first (no schema key contains such a character, so it is unknown). Reported as unknown with the enclosing section's path as `Key` and the name not shown (AC5). |
 | Tags: resolved or explicit core tags `!!str !!int !!bool !!float !!null !!timestamp !!map !!seq` | Accepted, and the leaf rules apply. |
 | Other tags ✓ (`!foo bar` decodes to `"bar"`; `!!binary` base64-decodes; `!env X`) | `*KeyError` "unsupported tag" on any node (AC7). |
 | Section key with null value (`spool:`, `spool: ~`) | Defaults of that section kept (AC4). |
@@ -186,7 +214,7 @@ scratch module where marked ✓.
 | Block scalars (`|`, `>`) and quoted strings with escapes (`"a\x01b"`) ✓ | Decoded, then any control character (Unicode category Cc, which includes `\n`, `\t` and DEL) → `*KeyError` (AC6). |
 | Nesting deeper than the schema | The leaf rule ("want a string") applies at the first level below a leaf. |
 | File > `MaxFileBytes` (1 MiB), not a regular file, missing | `readFile` error with the path (AC8). Bounded read with `io.LimitReader(MaxFileBytes+1)`. |
-| Syntax error | `fmt.Errorf("config: %s: %w", path, err)`, the `yaml.v3` scanner/parser message. That message carries a line and a description but no document text in the cases tested. The file holds no secrets by rule. |
+| Any error from `yaml.v3` while parsing into a `yaml.Node` (scanner/parser syntax errors, undefined alias; in the first and in a second document) ✓ — its text may quote document text and lacks a line for problems on line 1 | `*KeyError{File: path, Line: N, Key: "", Reason: "not valid YAML (syntax error or alias to an undefined anchor)"}`. `N` comes from the prefix `yaml: line N: ` (parsed with `strconv.Atoi` on the digits after that exact prefix, `decode.go:128-129` of v3.0.5), else 0. The library error is dropped, not wrapped. If a later library version changes the prefix, `Line` degrades to 0 and the message stays value-free (AC7). |
 
 Secret-carrying paths through the file, enumerated: the only keys that exist are `agent_id`, `backend.url`,
 `spool.directory`, `log.level` (agent) and `web.listen`, `ingest.listen`, `storage.directory`, `log.level`
@@ -211,6 +239,7 @@ their own patterns (`agent_id`, listen address, log level), or they are paths.
 - `web.listen`, `ingest.listen`: `net.SplitHostPort` succeeds; host empty or `netip.ParseAddr` succeeds
   (zones allowed); port decimal 1–65535. The two ports must differ (error on `ingest.listen`).
 - Every string leaf: no Unicode Cc character.
+- Every unknown key: its name is echoed only under the safe-name rule of AC5.
 
 ### Accepted forms: secrets from the environment (guard: secrets only from env/files)
 
@@ -286,9 +315,10 @@ const (
 // KeyError reports a problem in the configuration file, at a key or at a line.
 type KeyError struct {
 	File   string // path as given to the loader
-	Line   int    // 1-based; 0 when the key is missing
-	Key    string // dotted key path, e.g. "backend.url"; empty for document-level problems
-	Reason string // never contains the value
+	Line   int    // 1-based; 0 when the key is missing or the YAML parser reported no line
+	Key    string // dotted key path, e.g. "backend.url"; empty for document-level problems and parser
+	              // errors; the enclosing section's path for an unknown key whose name is not shown (AC5)
+	Reason string // never contains the value or any other document text
 }
 func (e *KeyError) Error() string // "config: <File>:<Line>: <Key>: <Reason>", see AC13
 
@@ -385,7 +415,8 @@ compiles with the import.
   `checkListen`, `checkLogLevel` tables (AC6).
 - `internal/config/decode_test.go`: `decodeStrict` against a white-box test struct (string, int, bool,
   `time.Duration`, `[]string`, nested section, `yaml:"-"` field). Covers every row of the YAML
-  accepted-forms table (AC5, AC6 leaf kinds, AC7) and the returned line map.
+  accepted-forms table (AC5 including the safe-name rule, AC6 leaf kinds, AC7 including the parser-error
+  cases) and the returned line map.
 - `internal/config/secret_test.go`: `Secret` redaction (AC12 for the bare `Secret`), `SecretError` format,
   `checkEnviron` (AC11), `readSecret` (AC9).
 - `internal/config/agent_test.go`: `LoadAgent`, including the example file (AC1, AC3), defaults (AC4),
@@ -422,7 +453,8 @@ Existing test code that calls a changed signature: none. No existing signature c
   `internal/config/agent_test.go` and `internal/config/backend_test.go`. Add a bullet "a new secret: its
   `Env*` constant, the known-variable list of each binary that reads it, the README secrets table". In
   *Security areas* 8 and 10, name `internal/config` (`readSecret`, `checkEnviron`, `Secret`;
-  `decodeStrict`, `readFile`). `SECURITY.md` needs no change, because it already says env or Docker
+  `decodeStrict`, `readFile`). In area 12, add that configuration error texts never echo document text
+  other than schema or safe key names (`decodeStrict`). `SECURITY.md` needs no change, because it already says env or Docker
   secrets only.
 
 ## Architecture check
@@ -450,6 +482,9 @@ Existing test code that calls a changed signature: none. No existing signature c
   anything but regular files (no FIFO hang), every YAML form enumerated above, and no panics. The
   reflection walker only handles the kinds the schema uses, and any other kind is a "want …" error, never
   a panic. Nesting is bounded by the schema, and the parser's own depth limit applies before that.
+- Area 12: no error text contains document text that is not a schema key name or a safe unknown key name
+  (AC5), so neither a secret nor a control character from the file reaches the journal or `docker logs`.
+  `yaml.v3`'s own messages are never passed through (AC6, AC7).
 - Area 9: the directories are only validated (absolute, clean), not created. Creating them is #38's and
   #13's job.
 - Area 11: `backend.url` restricts scheme, host and port form. The restriction to tailnet addresses stays
@@ -470,3 +505,26 @@ Existing test code that calls a changed signature: none. No existing signature c
 - Options of later features (see spec *Out of scope*). Each adds its key, default, example entry, README
   row and test, as the integration surface requires.
 - Per-agent tokens on the backend: #89 will supersede the single `VANDOX_AGENT_TOKEN` on the backend.
+
+## Challenge
+
+Devil's Advocate, round 1: 0 major, 3 minor objections. All three accepted; tier unchanged (security).
+
+1. *Syntax errors can echo document text* (minor): **accepted.** Reproduced with v3.0.5:
+   `a: *S3NT1NEL` → `yaml: unknown anchor 'S3NT1NEL' referenced`, and `a: b: c`, `a: "\q"`,
+   `a: !x!y z` carry no line (the library drops `line N:` when its 0-based mark is 0, `decode.go:114-129`).
+   The plan's earlier claim "no document text in the cases tested" is withdrawn. Revised: every error from
+   `yaml.v3` while parsing becomes a `*KeyError` with an empty `Key`, a fixed reason and the line parsed
+   from the `yaml: line N: ` prefix (else 0); the library error is neither printed nor wrapped (YAML
+   accepted-forms table, AC7). AC8 no longer covers syntax errors; AC7 gains the cases the objection asked
+   for (sentinel anchor name absent, an error without a line still names the file). Records 0048 and 0049
+   updated.
+2. *Unknown keys echoed raw, including control characters* (minor): **accepted, and widened.** Verified
+   that `"a\nb": 1` yields the key `a\nb`. Instead of checking only Cc, an unknown key's name is shown only
+   if it is 1–31 bytes of `[A-Za-z0-9_-]`; otherwise the error names the enclosing section and the line.
+   This also covers Cf characters (U+202E), `.` (which would garble the dotted path) and a pasted secret
+   used as a key (32+ characters, or containing `:`/`$`). `strconv.Quote` was rejected: it would still copy
+   a pasted secret into the log. AC5 gains the cases; record 0049 updated.
+3. *Undefined alias is outside the anchor/alias rule* (minor): **accepted.** AC7 now lists `a: *x` (and the
+   sentinel form) explicitly, pins it as a `*KeyError` with `Key` empty, `Line` 0 and the fixed reason, and
+   asserts the anchor name is absent. The YAML accepted-forms table has a row for it.
