@@ -460,22 +460,36 @@ func TestEncodeBatch_WriterError(t *testing.T) {
 // worstText is a text of n bytes that JSON escapes as six bytes per byte.
 func worstText(n int) string { return strings.Repeat("\x01", n) }
 
+// worstCaseRecords returns records of every kind with the largest legal field values, by name.
+func worstCaseRecords() map[string]model.Record {
+	longName := strings.Repeat("n", model.MaxNameBytes)
+	meta := model.Meta{Origin: model.OriginAgent, Source: longName, Seq: 1, CapturedAt: testTime}
+	labels := make(map[string]string, model.MaxLabels)
+	for i := range model.MaxLabels {
+		key := string(rune('a'+i%26)) + string(rune('a'+i/26)) + strings.Repeat("k", model.MaxNameBytes-2)
+		labels[key] = worstText(model.MaxShortTextBytes)
+	}
+	return map[string]model.Record{
+		"metric with max labels": {
+			Meta: meta,
+			Data: &model.MetricPoint{Name: longName, Value: 1, Unit: longName, Labels: labels},
+		},
+		"log line": {
+			Meta: meta,
+			Data: &model.LogLine{Log: worstText(model.MaxShortTextBytes), Program: worstText(model.MaxShortTextBytes), PID: 1, Priority: ptr(uint8(7)), Message: worstText(model.MaxTextBytes), Truncated: true},
+		},
+		"kernel event": {
+			Meta: meta,
+			Data: &model.KernelEvent{
+				Type: model.KernelEventOOMKill, Message: worstText(model.MaxTextBytes),
+				OOMKill: &model.OOMKill{VictimPID: 1, VictimCommand: worstText(model.MaxShortTextBytes), AnonRSSBytes: ptr(uint64(1)), OOMScoreAdj: ptr(int16(1000))},
+			},
+		},
+	}
+}
+
 func TestCheckRecord_Valid(t *testing.T) {
-	t.Run("size equals the encoded line plus newline", func(t *testing.T) {
-		recs := allKindRecords(time.UTC)
-		b := &wire.Batch{Header: wire.NewHeader("agent-1", testBootID, wire.ModeLive), Records: recs}
-		lines := encodedLines(t, b)
-		for i := range recs {
-			n, err := wire.CheckRecord(&recs[i])
-			if err != nil {
-				t.Errorf("CheckRecord(%s) = %v, want nil", recs[i].Kind(), err)
-				continue
-			}
-			if want := len(lines[i+1]) + 1; n != want {
-				t.Errorf("CheckRecord(%s) = %d, want %d", recs[i].Kind(), n, want)
-			}
-		}
-	})
+	t.Run("size equals the encoded line plus newline", checkRecordSizeEqualsLine)
 
 	t.Run("status with every info cut and truncated", func(t *testing.T) {
 		r := model.Record{Meta: agentMetaOf(metricRecord(1)), Data: bigStatus(500, 64, true)}
@@ -484,29 +498,7 @@ func TestCheckRecord_Valid(t *testing.T) {
 		}
 	})
 
-	longName := strings.Repeat("n", model.MaxNameBytes)
-	worst := map[string]model.Record{}
-	labels := make(map[string]string, model.MaxLabels)
-	for i := range model.MaxLabels {
-		key := string(rune('a'+i%26)) + string(rune('a'+i/26)) + strings.Repeat("k", model.MaxNameBytes-2)
-		labels[key] = worstText(model.MaxShortTextBytes)
-	}
-	worst["metric with max labels"] = model.Record{
-		Meta: model.Meta{Origin: model.OriginAgent, Source: longName, Seq: 1, CapturedAt: testTime},
-		Data: &model.MetricPoint{Name: longName, Value: 1, Unit: longName, Labels: labels},
-	}
-	worst["log line"] = model.Record{
-		Meta: model.Meta{Origin: model.OriginAgent, Source: longName, Seq: 1, CapturedAt: testTime},
-		Data: &model.LogLine{Log: worstText(model.MaxShortTextBytes), Program: worstText(model.MaxShortTextBytes), PID: 1, Priority: ptr(uint8(7)), Message: worstText(model.MaxTextBytes), Truncated: true},
-	}
-	worst["kernel event"] = model.Record{
-		Meta: model.Meta{Origin: model.OriginAgent, Source: longName, Seq: 1, CapturedAt: testTime},
-		Data: &model.KernelEvent{
-			Type: model.KernelEventOOMKill, Message: worstText(model.MaxTextBytes),
-			OOMKill: &model.OOMKill{VictimPID: 1, VictimCommand: worstText(model.MaxShortTextBytes), AnonRSSBytes: ptr(uint64(1)), OOMScoreAdj: ptr(int16(1000))},
-		},
-	}
-	for name, r := range worst {
+	for name, r := range worstCaseRecords() {
 		t.Run("worst case "+name, func(t *testing.T) {
 			if err := r.Validate(); err != nil {
 				t.Fatalf("test setup: worst-case record is invalid: %v", err)
@@ -519,6 +511,22 @@ func TestCheckRecord_Valid(t *testing.T) {
 				t.Errorf("CheckRecord() = %d, want at most %d", n, limit+1)
 			}
 		})
+	}
+}
+
+func checkRecordSizeEqualsLine(t *testing.T) {
+	recs := allKindRecords(time.UTC)
+	b := &wire.Batch{Header: wire.NewHeader("agent-1", testBootID, wire.ModeLive), Records: recs}
+	lines := encodedLines(t, b)
+	for i := range recs {
+		n, err := wire.CheckRecord(&recs[i])
+		if err != nil {
+			t.Errorf("CheckRecord(%s) = %v, want nil", recs[i].Kind(), err)
+			continue
+		}
+		if want := len(lines[i+1]) + 1; n != want {
+			t.Errorf("CheckRecord(%s) = %d, want %d", recs[i].Kind(), n, want)
+		}
 	}
 }
 
