@@ -125,15 +125,22 @@ func TestRun(t *testing.T) {
 			if stdout.String() != tc.wantStdout {
 				t.Errorf("Run(%q, %q) stdout = %q, want %q", tc.binary, tc.args, stdout.String(), tc.wantStdout)
 			}
-			if len(tc.wantStderr) == 0 && stderr.Len() != 0 {
-				t.Errorf("Run(%q, %q) stderr = %q, want empty", tc.binary, tc.args, stderr.String())
-			}
-			for _, want := range tc.wantStderr {
-				if !strings.Contains(stderr.String(), want) {
-					t.Errorf("Run(%q, %q) stderr = %q, want it to contain %q", tc.binary, tc.args, stderr.String(), want)
-				}
-			}
+			assertStderr(t, tc.binary, tc.args, stderr.String(), tc.wantStderr)
 		})
+	}
+}
+
+// assertStderr checks that stderr contains every wanted substring, or is empty when none are wanted.
+func assertStderr(t *testing.T, binary string, args []string, stderr string, want []string) {
+	t.Helper()
+
+	if len(want) == 0 && stderr != "" {
+		t.Errorf("Run(%q, %q) stderr = %q, want empty", binary, args, stderr)
+	}
+	for _, w := range want {
+		if !strings.Contains(stderr, w) {
+			t.Errorf("Run(%q, %q) stderr = %q, want it to contain %q", binary, args, stderr, w)
+		}
 	}
 }
 
