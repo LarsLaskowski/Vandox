@@ -126,7 +126,9 @@ All `FieldError` assertions check `errors.Is(err, model.ErrInvalid)` and the exa
   envelope and payload is accepted and the known fields decode.
 - [ ] AC17 Malformed input: every form marked *rejected* in the *Accepted forms* table returns an error of
   the listed class from `NewDecoder` or `Next` (with the listed `Line` where given) and never panics; every
-  form marked *accepted* decodes. Unknown `kind` (e.g. `"Metric"`, `"backup_run"`) and missing/empty
+  form marked *accepted* decodes. gzip header fields: a stream written with `gzip.Writer` `Header.Name`,
+  `Header.Comment` and `Header.Extra` set decodes; a stream with a `Name` of 512 bytes (and one with a
+  `Comment` of 512 bytes) → `wire.ErrMalformed` from `NewDecoder` with `DecodeError.Line == 1`. Unknown `kind` (e.g. `"Metric"`, `"backup_run"`) and missing/empty
   `kind` → `wire.ErrUnknownKind`; missing `data` and `"data": null` → field `data`. The error text for
   an unknown kind is `"wire: line <n>: unknown record kind: " + model.QuoteName(kind)`; a 5000-byte kind
   containing `\n` yields exactly that text (cut to `MaxNameBytes` with `...`, no newline byte). A
@@ -139,7 +141,10 @@ All `FieldError` assertions check `errors.Is(err, model.ErrInvalid)` and the exa
   value → `ErrMalformed` (the wrapped `encoding/json` text carries the raw key; the test asserts only the
   class, not the text).
 - [ ] AC18 Limits, each tested with small explicit limits: a line of exactly `MaxLineBytes` bytes is
-  read, one byte more → `wire.ErrLimitExceeded`; decompressed content beyond `MaxBatchBytes` (a small
+  read, one byte more → `wire.ErrLimitExceeded`; the same for an unterminated last line (no `\n`): exactly
+  `MaxLineBytes` bytes is read, `MaxLineBytes + 1` bytes → `wire.ErrLimitExceeded` (a trailing `\r`
+  counts towards the line); `NewDecoder` with `MaxLineBytes` = `math.MaxInt` does not panic and decodes a
+  valid batch (the value is clamped to `math.MaxInt - 1`); decompressed content beyond `MaxBatchBytes` (a small
   gzip of many zero-padded or repeated lines) → `wire.ErrLimitExceeded`; `MaxRecords + 1` records →
   `wire.ErrLimitExceeded`; `DefaultLimits()` returns 1 MiB / 16 MiB / 20 000; a zero or negative field in
   the `Limits` passed to `NewDecoder` means that field's default.
@@ -164,7 +169,8 @@ All `FieldError` assertions check `errors.Is(err, model.ErrInvalid)` and the exa
   the limits, the versioning rules of 0043, the batch rules and the producer size contract of 0044, the
   batch identity of 0045, the producer mapping for connection endpoints (see *Approach*), the accepted
   forms (including zone rejection and Unicode key folding), the error-text and consumer duties of #40
-  (sanitized logging, `http.MaxBytesReader` on the compressed body, server timeouts) and a decompressed
+  (sanitized logging, `http.MaxBytesReader` on the compressed body, server timeouts, concurrent decoders
+  limited per agent and in total with the measured per-decoder peak) and a decompressed
   example batch; it matches the code. `README.md`, `docs/ARCHITECTURE.md` and `.squad/project.md` are updated as
   listed below.
 
@@ -332,7 +338,10 @@ and `sequence_missing` → `first_seq`. Origin rule in `Record.Validate` (AC3): 
 - `NewDecoder`: wraps `r` in `gzip.NewReader` (multistream as by default), counts decompressed bytes
   against `MaxBatchBytes`, reads lines with a `bufio.Scanner` whose maximum token size admits exactly
   `MaxLineBytes` bytes before the `\n` (a trailing `\r` counts towards the line and is then JSON
-  whitespace). Line 1: unmarshal into `struct{ FormatMajor *int \`json:"format_major"\` }` first; nil or ≠ 1
+  whitespace); the split function also rejects an unterminated last line longer than `MaxLineBytes`
+  (returns `bufio.ErrTooLong`, mapped to `ErrLimitExceeded`; when the stream itself failed, the stream
+  error keeps precedence as before). `MaxLineBytes` above `math.MaxInt - 1` is clamped to
+  `math.MaxInt - 1`, so the scanner's `MaxLineBytes + 1` cannot overflow (no panic). Line 1: unmarshal into `struct{ FormatMajor *int \`json:"format_major"\` }` first; nil or ≠ 1
   → `ErrUnsupportedVersion`; then unmarshal the full `Header` and `Validate` it.
 - `Next`: reads one line, `json.Unmarshal` into an unexported envelope with `Data json.RawMessage`;
   missing/`null` data → `FieldError{Field:"data"}`; looks the kind up in an unexported kind → constructor
@@ -363,7 +372,7 @@ K = `ErrUnknownKind`, F = `model.ErrInvalid` with field, L = `ErrLimitExceeded`)
 | Concatenated gzip members | read as one stream (multistream default) | accepted |
 | Trailing non-gzip bytes, truncated stream, bad CRC/ISIZE | error only at end of stream | rejected M at the end, after earlier records (consumer commits only on `io.EOF`, 0044) |
 | Decompressed size > `MaxBatchBytes` (gzip bomb) | counted by the decoder | rejected L |
-| Line > `MaxLineBytes` | `bufio.ErrTooLong` | rejected L |
+| Line > `MaxLineBytes`, terminated or unterminated last line | `bufio.ErrTooLong` (unterminated: from the decoder's split function) | rejected L |
 | `\n` line ends, `\r\n` line ends, last line without `\n` | `ScanLines` splits on `\n`, drops one trailing `\r` | accepted |
 | Lone `\r` as separator | not a separator → two objects on one line | rejected M |
 | Empty or whitespace-only line (also a trailing one) | `json.Unmarshal`: unexpected end of input | rejected M |
@@ -859,8 +868,10 @@ All by the Dev:
   the area-12 sanitization; consumer duties of the ingest API (#40): wrap the request body in
   `http.MaxBytesReader` on the **compressed** bytes before `NewDecoder` (the decoder bounds only the
   decompressed bytes), set server read/read-header/write/idle timeouts so a slow reader cannot block, check
-  the header's `agent_id` against the token's agent, deduplicate by (agent ID, seq), and commit only after
-  `io.EOF`; a short decompressed example batch with one record of each of at least three kinds; links to
+  the header's `agent_id` against the token's agent, deduplicate by (agent ID, seq), commit only after
+  `io.EOF`, and limit concurrent decoders to one per agent and to a total sized from the per-decoder peak
+  (~160–170 MB heap at the default 1 MiB `MaxLineBytes`, roughly 160 times the line limit) and the
+  backend's memory, stating that peak in the limits section; a short decompressed example batch with one record of each of at least three kinds; links to
   0042–0046.
 - `README.md`: in *Layout*, name `internal/model` and `internal/wire` and link `docs/WIRE_FORMAT.md`.
 - `docs/ARCHITECTURE.md` (inside the project block): replace "as of now only the two binaries' `--version`
@@ -913,8 +924,11 @@ All by the Dev:
   sees the bytes), line length (`MaxLineBytes`, enforced by the scanner before `json.Unmarshal`), record
   count (`MaxRecords`), list/map sizes (`MaxItems`) and string lengths. Accepted residual, stated in 0044:
   `encoding/json` allocates list elements before `Validate` can reject an over-long list, so one hostile
-  1 MiB line costs tens of MiB transiently; reachable only with a valid agent token (area 1), one line at a
-  time. gzip FEXTRA is bounded by the format to 64 KiB and FNAME/FCOMMENT to 511 bytes by `compress/gzip`.
+  1 MiB line of empty objects allocates ~270 MiB and holds a heap peak of ~160–170 MB per decoder (measured
+  in diff review round 1; ~1.1 KB compressed, so `http.MaxBytesReader` does not bound it); reachable only
+  with a valid agent token (area 1), one line at a time, and bounded across requests by the #40 duty to
+  limit concurrent decoders per agent (one) and in total, sized from that per-decoder peak (Lead decision
+  after review round 1; lowering `MaxLineBytes` and an element pre-count were rejected, see 0044). gzip FEXTRA is bounded by the format to 64 KiB and FNAME/FCOMMENT to 511 bytes by `compress/gzip`.
 - No hang: the decoder only reads from the caller's reader; CPU per byte is linear (RE2 regular
   expressions, `encoding/json`, `compress/gzip`). Blocking on a slow reader is bounded by the caller (#40:
   server timeouts, `http.MaxBytesReader` on the compressed body).

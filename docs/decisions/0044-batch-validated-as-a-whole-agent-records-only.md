@@ -60,6 +60,23 @@ For agent-supplied text in error messages (map keys in field paths, an unknown `
   bounded and free of control bytes, still recognizable. Chosen for this package's own errors; wrapped
   parser errors are left intact so `errors.As` keeps working, see *Consequences*.
 
+For the allocation amplification of `encoding/json` (list elements are allocated before `Validate` can
+reject a list longer than `MaxItems`; measured in the diff review: a ~1 MiB line `"processes":[{},{},…]`
+with ~349 000 elements allocates ~270 MiB and peaks at ~160–170 MB heap, and it gzips to ~1.1 KB, so a
+limit on the compressed body does not help):
+
+- **Lower `MaxLineBytes`** (e.g. 256 KiB) — the peak scales with the line, so it shrinks roughly fourfold
+  but stays tens of MiB, so the consumer still has to bound concurrency; the always-fit kinds reach ~200 KiB
+  at their maximum field sizes (`metric` with 32 labels), leaving almost no margin, and snapshots would
+  need reducing far more often. Rejected.
+- **Count list elements before decoding into typed slices** — a second, hand-written scan over hostile
+  input (strings, escapes, nesting) that would itself need its own accepted-forms list and doubles the
+  parsing cost of every line. Rejected for this change; it can be added later without a format change if
+  the consumer-side bound proves insufficient.
+- **Accept the residual with the measured figure and make the ingest API (#40) bound the number of
+  concurrent decoders per agent and in total, sized from the per-decoder peak** — no new parser, the
+  bound sits where the concurrency is decided. Chosen.
+
 ## Decision
 
 Option 2 with c:
@@ -102,10 +119,14 @@ Option 2 with c:
   snapshot reduced for size is visibly incomplete, so the analysis does not mistake it for the whole
   picture (spirit of 0028).
 - Memory per decoded line is bounded but not equal to the line size: `encoding/json` allocates list
-  elements before validation can reject a list longer than `MaxItems`, so a hostile 1 MiB line of empty
-  objects costs tens of MiB transiently on the backend host. This is accepted because only an agent holding
-  a valid token reaches the decoder (security area 1) and lines are decoded one at a time; consumers stream
-  records instead of collecting a whole batch.
+  elements before validation can reject a list longer than `MaxItems`, so a hostile line of empty objects
+  at the default 1 MiB limit allocates ~270 MiB and holds a heap peak of ~160–170 MB per decoder
+  transiently on the backend host (roughly 160 times `MaxLineBytes`), from a compressed body of about
+  1 KB. This is accepted because only an agent holding a valid token reaches the decoder (security area 1),
+  lines are decoded one at a time and consumers stream records instead of collecting a whole batch — and
+  on the condition, stated as a duty in `docs/WIRE_FORMAT.md`, that the ingest API (#40) limits concurrent
+  decoders per agent (one) and in total, the total sized from this per-decoder peak and the memory the
+  backend container may use.
 - Errors wrapped from the standard library still carry raw agent text of up to `MaxLineBytes`: `time` and
   `netip` quote the rejected string, and `encoding/json` type errors name the struct field path including
   raw map keys. A consumer logs or displays decode errors only through the sanitization of security area
