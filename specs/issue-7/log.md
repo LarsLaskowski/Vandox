@@ -15,3 +15,4 @@ One line per pipeline step: date, step, member, result. Lead decisions and escal
 | 2026-10-04 | 7 Code check | squad-code-officer / Orchestrator | No changes needed; format check, analyzer gate, config-check verified PASS; docs/decisions/README.md index rows 0028-0032 left to Lead (step 9) |
 | 2026-10-04 | 8 Review round 1 | squad-reviewer / squad-security | Reviewer: 0 blocking, 1 non-blocking (overall coverage gate fails on main already, no Go code changed). Security: CHANGES_REQUIRED B1 (project.md:46 and ARCHITECTURE.md:191 claim unqualified "cannot write as or run code as another user", contradicting 0030 residual), N1 (add SystemCallErrorNumber=EPERM to area 6) |
 | 2026-10-04 | 8 Fix round 1 | squad-dev | B1 wording qualified in .squad/project.md and docs/ARCHITECTURE.md; N1 EPERM added to area 6; config-check PASS |
+| 2026-10-04 | 8 Review round 2 (delta) | squad-reviewer / squad-security | Both APPROVE; B1 and N1 resolved |
