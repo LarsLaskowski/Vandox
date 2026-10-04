@@ -22,3 +22,5 @@ One line per pipeline step: date, step, member, result. Lead decisions and escal
 | 2026-10-04 | 8 Security diff round 1 | squad-security | CHANGES_REQUIRED: %p prints raw secret via reflection (Secret.value unexported field); fix: store behind pointer; add %p to AC12 tests. govulncheck not runnable (network 403) - CI must confirm |
 | 2026-10-04 | 8 Fix round 1: tests | squad-tester | Decode guard tests added (mutation-checked); %p redaction tests added, failing on current code as intended |
 | 2026-10-04 | 8 Fix round 1 | squad-dev + squad-tester | %p leak fixed (Secret.value *string, record 0050 and docs corrected), ARCHITECTURE component list updated, secretFixture adapted; verified: gofmt clean, analyzer 0 issues, tests -race green, coverage PASS (changed 96.1%, overall 96.8%) |
+| 2026-10-04 | 8 Review round 2 (delta) | squad-reviewer | APPROVE; round-1 findings resolved (mutation-tested), no new findings |
+| 2026-10-04 | 8 Security diff round 2 | squad-security | APPROVED; %p leak closed across all fmt verbs, encoders and slog; no aliasing issue |
