@@ -18,3 +18,5 @@ One line per pipeline step: date, step, member, result. Lead decisions and escal
 | 2026-10-04 | 6 Tests fixed | squad-tester | Three test defects fixed per Lead decision; verified: go test ./... -race green, coverage gate PASS (changed 93.8%, overall 95.9%) |
 | 2026-10-04 | 7 Code check (1st) | squad-code-officer | gofmt clean, vet clean; style fixes (QF1001, errcheck); 11 gocognit findings in test functions handed to Tester (limit 15) |
 | 2026-10-04 | 7 Code check (2nd) | squad-tester + orchestrator | gocognit findings fixed in tests; verified: gofmt clean, analyzer gate PASS (0 issues), tests green with -race, coverage PASS (changed 93.8%, overall 95.9%) |
+| 2026-10-04 | 8 Review round 1 | squad-reviewer | BLOCKING 1 (untested decode guards: root node tag/anchor, list leaf anchor/tag/Cc), NON-BLOCKING 1 (ARCHITECTURE.md:34 component list lacks internal/config) |
+| 2026-10-04 | 8 Security diff round 1 | squad-security | CHANGES_REQUIRED: %p prints raw secret via reflection (Secret.value unexported field); fix: store behind pointer; add %p to AC12 tests. govulncheck not runnable (network 403) - CI must confirm |
