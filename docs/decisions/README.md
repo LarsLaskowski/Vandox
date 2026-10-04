@@ -49,9 +49,10 @@ links the record.
 | [0020](0020-analysis-before-alerting-forensics-release.md) | Analysis before alerting — v0.1.0 is the forensics release | Accepted | 2026-10-03 |
 | [0021](0021-no-pseudonymization-of-log-data.md) | No pseudonymization of log data | Accepted | 2026-10-03 |
 | [0022](0022-backfill-detection-and-live-only-alerts.md) | Backfill is recognized from the data; alerts only on live values | Accepted | 2026-10-03 |
-| [0023](0023-tls-through-synology-reverse-proxy.md) | TLS through the Synology reverse proxy | Accepted | 2026-10-03 |
+| [0023](0023-tls-through-synology-reverse-proxy.md) | TLS through the Synology reverse proxy | Superseded by 0028 | 2026-10-03 |
 | [0024](0024-nightly-report-timing.md) | Nightly report at 06:00, or after the backfill if the NAS was off | Accepted | 2026-10-03 |
 | [0025](0025-server-ram-stays-at-2-gb.md) | The server's RAM stays at 2 GB | Accepted | 2026-10-03 |
 | [0026](0026-services-disabled-reversibly-only.md) | Services are only disabled reversibly; hosting-provider agents are never touched | Accepted | 2026-10-03 |
 | [0027](0027-project-name-and-docker-image.md) | Project name Vandox; images on Docker Hub as networlddev/vandox | Accepted | 2026-10-03 |
+| [0028](0028-tls-through-a-reverse-proxy-on-any-host.md) | TLS through a reverse proxy; the backend runs on any Docker host | Accepted | 2026-10-04 |
 <!-- project:end index -->

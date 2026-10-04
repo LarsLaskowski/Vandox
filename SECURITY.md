@@ -31,7 +31,7 @@ process.
 ## Deployment Security Considerations
 
 Vandox is meant for a private setup: `vandox-agent` runs on the monitored server and `vandoxd` runs as a Docker
-container on a Synology NAS in the home network, behind the Synology reverse proxy. The two communicate only
+container on a Docker host in the home network (for example a NAS), behind a TLS-terminating reverse proxy. The two communicate only
 over a private Tailscale network. An operator must not expose `vandoxd` to the internet, must protect the
 web UI with its login, must keep secrets (tokens, keys) in environment variables or files readable only by the
 service user, and must run the agent with minimal privileges.

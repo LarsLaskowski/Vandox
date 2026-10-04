@@ -15,7 +15,7 @@ license to pick either one.
 Vandox is lean monitoring for a Plesk-managed Linux server, with analysis first: it reconstructs outages from
 logs and system metrics and warns early. It consists of two Go binaries: `vandox-agent` runs on the monitored
 server and collects metrics and logs, and `vandoxd` is the backend with web UI, which runs as a Docker
-container on a Synology NAS in the home network. See [`ARCHITECTURE.md`](/docs/ARCHITECTURE.md) for how it fits together.
+container on any Docker host in the home network (for example a NAS such as Synology or QNAP, a mini PC or a server). See [`ARCHITECTURE.md`](/docs/ARCHITECTURE.md) for how it fits together.
 <!-- project:end overview -->
 
 ## Golden rules

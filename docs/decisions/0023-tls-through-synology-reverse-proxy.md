@@ -1,6 +1,6 @@
 # 0023: TLS through the Synology reverse proxy for example
 
-- **Status:** Accepted
+- **Status:** Superseded by 0028
 - **Date:** 2026-10-03
 - **Source:** Issue #6
 - **Supersedes:** —
