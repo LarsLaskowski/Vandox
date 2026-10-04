@@ -4,10 +4,27 @@ linters:
   default: standard
   enable:
     - errorlint
+    - gocognit
     - gocritic
     - misspell
     - revive
     - unconvert
+  settings:
+    gocognit:
+      # SonarQube's go:S3776 threshold; stricter for bare `if err != nil` checks (record 0047).
+      min-complexity: 15
+  exclusions:
+    warn-unused: true
+    rules:
+      # Sequential error checks that SonarQube rates at most 15 (record 0047).
+      - path: ^internal/model/connection\.go$
+        linters:
+          - gocognit
+        text: "`\\(\\*ConnectionSnapshot\\)\\.Validate`"
+      - path: ^internal/model/mariadb\.go$
+        linters:
+          - gocognit
+        text: "`\\(\\*MariaDBStatus\\)\\.Validate`"
 
 formatters:
   enable:
