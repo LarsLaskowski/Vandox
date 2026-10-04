@@ -70,9 +70,14 @@ the decision and is checked in the review of #42 and of every later change to th
   deny `pidfd_open` or `pidfd_send_signal`, which Go's `os/exec` uses.
 - No write-side capability (`CAP_DAC_OVERRIDE`, `CAP_FOWNER`, `CAP_SYS_ADMIN` or any other) is granted, so
   another user's `/proc/<pid>/mem` and files cannot be opened for writing.
-- `ProtectHome=yes` and `InaccessiblePaths=` for at least `/etc/shadow` and `/etc/gshadow`; further
+- `ProtectHome=yes` and `InaccessiblePaths=` for at least `/etc/shadow` and `/etc/gshadow`, as defence in
+  depth against **accidental** reads only (a bug or a misconfigured path in the agent itself); further
   credential stores the agent does not need are added in #42 once their paths on the target system are
-  known.
+  known. They are **not** a limit on a compromised agent: they only hide paths inside the unit's private
+  mount namespace, and with `CAP_SYS_PTRACE` and `CAP_DAC_READ_SEARCH` the agent can open the same files
+  through another process's root, e.g. `/proc/1/root/etc/shadow` — a plain `open`/`read` that no
+  system-call filter can block, and that cannot be closed by hiding other processes in `/proc` without
+  breaking the reads #42 needs.
 
 Each group membership, each capability and each confinement setting is listed and justified in the
 deployment files under `deploy/agent/` when the collector that needs it is introduced. Anything not listed
@@ -82,13 +87,17 @@ is not granted.
 
 - A compromised agent does not run as root and, with the confinement in place, cannot write as or run code
   as another user through its capabilities.
-- **Residual, accepted:** its read access equals root's. It can read every file not made inaccessible by
-  the unit and the memory and environment of every process (`/proc/<pid>/mem`, `/proc/<pid>/environ`,
-  which no system-call filter can block, since they are plain `open`/`read`). Credentials read that way may
-  lead to root through other services (password reuse, Plesk or MariaDB administration). The
-  `InaccessiblePaths=` list narrows this but cannot close it. Option 5 is the way to reduce it further.
-- The review of #42 verifies on the target system that the reads work under the filter and that
-  `ptrace(PTRACE_SEIZE)` on another process fails with `EPERM`.
+- **Residual, accepted:** its read access equals root's. It can read every file on the server, and the
+  memory and environment of every process (`/proc/<pid>/mem`, `/proc/<pid>/environ`), all through plain
+  `open`/`read`, which no system-call filter can block; `ProtectHome=` and `InaccessiblePaths=` do not change
+  this, since a compromised agent bypasses them through `/proc/<pid>/root`. Credentials read that way may
+  lead to root through other services (password reuse, Plesk or MariaDB administration). Option 5 is the
+  way to reduce it.
+- The review of #42 verifies on the target system that the reads work under the filter, that
+  `ptrace(PTRACE_SEIZE)` on another process fails with `EPERM`, and that the documentation of the unit
+  matches the actual reach: a path listed in `InaccessiblePaths=` stays readable through
+  `/proc/1/root/<path>`, so no deployment file may present that list as protection against a compromised
+  agent.
 - Removing a confinement setting, adding a capability or a group, or adding a collector that needs a new
   right changes `deploy/agent/` and is a `security`-tier change; removing a confinement setting while a
   capability is granted needs a superseding record.

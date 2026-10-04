@@ -56,7 +56,9 @@ Security against the diff:
   privileges; MariaDB monitoring user; secrets handling), each with a **protection goal** and the decision
   records it rests on — and keeps the four existing code-level areas (file writes, parsing of external
   input, outbound calls, logging of external data), each also with a protection goal. Area 6 names both
-  capabilities, the confinement and the read-everything residual (0030); area 11 keeps transport security
+  capabilities, the confinement and the read-everything residual without exception (every file, every
+  process's memory and environment), and labels `ProtectHome=`/`InaccessiblePaths=` as defence in depth
+  against accidental reads only, bypassable via `/proc/<pid>/root` (0030); area 11 keeps transport security
   (tailnet only for the agent, HTTPS with certificate verification for Telegram and the AI service,
   certificate verification for TLS checks, never skipped); area 12 covers Telegram messages.
 - [ ] AC2: *Guarantees* states the three guarantees (no data gaps unless explicitly recorded; a hanging
@@ -121,10 +123,11 @@ Keep the title, the intro paragraph and the intro sentence of every section. Rep
    and justified in `deploy/agent/`. While any capability is granted, the unit is confined:
    `NoNewPrivileges=yes`; `SystemCallFilter=` denies at least `ptrace`, `process_vm_readv`,
    `process_vm_writev`, `pidfd_getfd` and `open_by_handle_at`, with `SystemCallArchitectures=native`; no
-   write-side capability; `ProtectHome=yes` and `InaccessiblePaths=` for at least `/etc/shadow` and
-   `/etc/gshadow`. So a compromised agent cannot write as or run code as another user. Accepted residual,
-   stated openly: its read access equals root's (every file not made inaccessible, and every process's
-   memory and environment). Records 0013, 0030.
+   write-side capability. So a compromised agent cannot write as or run code as another user. Accepted
+   residual, stated openly: its read access equals root's — every file on the server, and the memory and
+   environment of every process. `ProtectHome=yes` and `InaccessiblePaths=` (at least `/etc/shadow`,
+   `/etc/gshadow`) are defence in depth against accidental reads only, not a limit on a compromised agent,
+   which bypasses them through `/proc/<pid>/root`. Records 0013, 0030.
 7. **MariaDB monitoring user** — *Goal:* the agent connects over the local socket as `vandox-agent`,
    authenticated by `unix_socket`, with only the `PROCESS` privilege: no database password exists and no
    table data is readable; the agent issues read-only status queries only. Record 0013.
@@ -345,7 +348,7 @@ tier unchanged.
    mandatory confinement — `NoNewPrivileges=yes`, `SystemCallFilter=` denying at least `ptrace`,
    `process_vm_readv`, `process_vm_writev`, `pidfd_getfd` and `open_by_handle_at` with
    `SystemCallArchitectures=native`, no write-side capability, `ProtectHome=yes` and `InaccessiblePaths=`
-   for `/etc/shadow` and `/etc/gshadow`. Checked as asked: the filter is consistent with the reads, because
+   for `/etc/shadow` and `/etc/gshadow` (the latter two re-labelled after round 2, see B4). Checked as asked: the filter is consistent with the reads, because
    procfs applies the ptrace access check (`ptrace_may_access`) inside `open`/`readlink`/`read`, not through
    `ptrace(2)`; the record says so, and that `pidfd_open`/`pidfd_send_signal` (used by Go's `os/exec`) must
    stay allowed. The read-everything residual (files, process memory and environment — the latter are
@@ -369,13 +372,31 @@ tier unchanged.
    adds no inbound endpoint, a webhook would be a new internet-facing endpoint not covered by 0006, 0012 and
    0016 and needs its own decision; the choice stays with #60.
 
+Security, plan review round 2: CHANGES_REQUIRED (1 blocking). Second rejection, so the Lead decided
+(mode `decide`): a pure wording defect, accepted and fixed; scope and tier unchanged, no split, no
+escalation.
+
+5. **B4 — `ProtectHome=`/`InaccessiblePaths=` presented as a limit they are not.** Accepted. Confirmed:
+   both only hide paths inside the unit's private mount namespace; with `CAP_SYS_PTRACE` (passes the
+   ptrace access check on `/proc/<pid>/root`) and `CAP_DAC_READ_SEARCH` the agent opens
+   `/proc/1/root/etc/shadow` with a plain `open`/`read`, which no system-call filter blocks; hiding other
+   processes (`ProtectProc=invisible`) would break the reads #42 needs. Kept, labelled as defence in depth
+   against accidental reads only, in 0030 *Decision*, area 6 and AC1. The residual in 0030 *Consequences*
+   and area 6 is now "every file on the server, and the memory and environment of every process" without
+   the "not made inaccessible" exception; "narrows this" is removed. The #42 on-target check (0030
+   *Consequences*, follow-ups) now includes the `/proc/<pid>/root` bypass. The `SECURITY.md` advice
+   ("treat the server's credentials as readable by the agent") and the `docs/ARCHITECTURE.md` *Security
+   model* edit ("can read everything on the server") were already correct and are unchanged.
+
 ## Out of scope / follow-ups
 
 - Choosing the password-hash algorithm, session lifetime and rate-limit values: with the web UI login
   feature (its own record).
 - The unit file with the two capabilities and the confinement 0030 requires, further `InaccessiblePaths=`
-  entries for credential stores on the target system, and the on-target check that reads work and
-  `PTRACE_SEIZE` fails: with #42 (0030); the polkit rule: with the restart feature (#70). Moving the
+  entries for credential stores on the target system (defence in depth against accidental reads only), and
+  the on-target check that reads work, `PTRACE_SEIZE` fails, and a path in `InaccessiblePaths=` is still
+  readable through `/proc/1/root/<path>` so that no deployment file presents the list as protection
+  against a compromised agent: with #42 (0030); the polkit rule: with the restart feature (#70). Moving the
   capabilities into a separate helper (0030 option 5) would need a superseding record.
 - Telegram update delivery (polling or webhook; a webhook needs its own decision): with #60 (0031).
 - How configuration loading enforces "no secrets in the configuration file": with the configuration
