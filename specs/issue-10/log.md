@@ -10,3 +10,4 @@ One line per pipeline step: date, step, member, result. Lead decisions and escal
 | 2026-10-04 | 2 Plan revise | squad-lead | All 5 objections accepted; scope unchanged, tier security; new records 0045 (supersedes 0018), 0046; 0044 rewritten |
 | 2026-10-04 | 3 Plan security review (round 1) | squad-security | CHANGES_REQUIRED: B1 unbounded address zone; B2 raw map keys in FieldError paths; N1 unicode-folded keys, N2 unbounded kind in error, N3 compressed-body limit docs |
 | 2026-10-04 | 3 Plan revise | squad-lead | B1 (zones rejected), B2 (QuoteName for map keys), N1-N3 accepted; scope and tier unchanged |
+| 2026-10-04 | 3 Plan security review (round 2) | squad-security | APPROVED; B1/B2 resolved, N1-N3 handled |
