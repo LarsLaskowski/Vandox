@@ -69,8 +69,8 @@ candidate `squad` issue in the template repository.
 - [ ] AC6: `.squad/stack.md`, *Analyzer gate*, states that gocognit (threshold 15) is the local stand-in for
   SonarQube's `go:S3776` — without claiming it reports every function SonarQube would — that it counts
   bare `if err != nil` checks, which SonarQube does not, and so can be stricter than SonarQube, that
-  a gocognit finding is fixed like any diagnostic and a new exclusion needs a Lead decision record, and
-  points to record 0047; the sentence "SonarQube Cloud has no local Go equivalent here" is narrowed to the
+  a gocognit finding is fixed like any diagnostic and a new gocognit exclusion — a rule in `.golangci.yml`
+  or a `//nolint:gocognit` directive — needs a Lead decision record, and points to record 0047; the sentence "SonarQube Cloud has no local Go equivalent here" is narrowed to the
   findings that still have none (other rules, duplication, hotspots).
 - [ ] AC7: The diff contains only `.golangci.yml`, `.squad/stack.md`, `docs/decisions/0047-…md`,
   `docs/decisions/README.md` (index row, at approval) and `specs/issue-111/`; no Go file and no
@@ -141,8 +141,9 @@ this session is built with Go 1.25 and refuses to run — use the v2.13.1 build 
    rule `go:S3776`. The two measures are close but not identical: in every case measured (PR #110, `main`)
    gocognit flagged at least what SonarQube flagged, and it also counts an `if` on the bare `err != nil`
    check, which SonarQube does not, so it can flag a function SonarQube accepts. Such a finding is fixed like any
-   other diagnostic; a new exclusion in `.golangci.yml` needs a Lead decision record (two existing
-   validators are excluded by name, record 0047). Other SonarQube Cloud findings (further rules,
+   other diagnostic; a new gocognit exclusion — a rule in `.golangci.yml` or a `//nolint:gocognit`
+   directive — needs a Lead decision record (two existing validators are excluded by name, without a
+   complexity cap, record 0047). Other SonarQube Cloud findings (further rules,
    duplication, hotspots) have no local Go equivalent here and arrive in squad step 11."
 3. Code Officer runs *Format check*, the *Analyzer gate*, `golangci-lint config verify` and
    `golangci-lint run ./...`.
@@ -162,7 +163,9 @@ issue message, here ``cognitive complexity N of func `(*T).Validate` is high (> 
 | the same method name in another file (moved or copied) | reported: the anchored path does not match |
 | a file named e.g. `internal/model/connection.go.bak` or `x/internal/model/connection.go` | not a Go file resp. path anchored with `^…$`: not excluded |
 | any other linter on the two validators | reported: the rule lists only `gocognit` |
-| an unused rule after a refactoring | warning from `warn-unused: true`; the rule is removed in that change |
+| an unused rule after a refactoring | warning from `warn-unused: true` only (the run still passes); removing the rule in that change is a review duty |
+| a `//nolint:gocognit` directive anywhere | suppresses the finding (golangci-lint honors `//nolint`); not prevented by configuration — needs a Lead decision record like a new rule, a missing record is a review finding |
+| the excluded validator growing more complex | still excluded: the rules carry no complexity cap; SonarQube `go:S3776` in step 11 remains the check |
 
 ## Affected projects and types
 
@@ -197,7 +200,10 @@ from the CI profile — this narrows that difference) and 0035 (CI keeps its ste
 - Tightens a gate only; no workflow, action, permission, secret or dependency changes (`gocognit` ships with
   the pinned golangci-lint v2.13.1, nothing is added to `go.mod`).
 - The only loosening is the two exclusions, scoped to one linter, one file and one exact function name each
-  (table above), recorded in 0047; new exclusions need a Lead record.
+  (table above), recorded in 0047. They apply at any complexity: the two validators are no longer capped
+  locally, only by SonarQube in step 11. A new gocognit exclusion — a `.golangci.yml` rule or a
+  `//nolint:gocognit` directive — needs a Lead record; a stale rule is only warned about, so its removal is
+  a review duty.
 - CI's Lint step now enforces gocognit on the whole module; `main` passes today (AC3), so no PR is blocked by
   pre-existing code.
 
@@ -226,6 +232,22 @@ Devil's Advocate objections (plan challenge, step 3):
    code and the record) instead of one auditable list in `.golangci.yml` that `warn-unused` keeps honest
    (an unused `//nolint` is reported only with `nolintlint`, which is not enabled). The two options are
    otherwise equivalent in scope (one linter, one function each).
+
+## Lead decisions
+
+Security plan review (step 3): approved with three non-blocking findings, each fixed now.
+
+1. *`//nolint:gocognit` is a second suppression path; AC6 and the suggested `.squad/stack.md` text only
+   covered a new `.golangci.yml` exclusion.* **Fixed now.** AC6, Approach step 2 and record 0047
+   (*Consequences*) now say: a new gocognit exclusion — a rule in `.golangci.yml` or a `//nolint:gocognit`
+   directive — needs a Lead decision record. The exclusion-scope table lists the directive.
+2. *The two exclusions apply at any complexity.* **Fixed now.** Record 0047 (*Consequences*), the suggested
+   `.squad/stack.md` text, the exclusion-scope table and *Security considerations* state that the two
+   validators are no longer capped locally; SonarQube `go:S3776` in step 11 remains the check for them.
+   A cap (e.g. a text regex on the score) is not added: the score sits in the message, and pinning it would
+   turn every harmless edit to the validators into a config change.
+3. *`warn-unused` only warns.* **Fixed now.** The exclusion-scope table, *Security considerations* and record
+   0047 (*Consequences*) state that the run still passes and removing a stale rule is a review duty.
 
 ## Out of scope / follow-ups
 

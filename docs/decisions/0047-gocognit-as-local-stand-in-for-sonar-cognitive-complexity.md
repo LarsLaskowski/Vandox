@@ -83,9 +83,14 @@ it is stricter than SonarQube for bare `if err != nil` checks, without claiming 
 - A function above 15 now fails the local *Analyzer gate* (changed files) and CI's Lint step (whole module)
   before SonarQube sees it.
 - gocognit can flag a function SonarQube would accept. Such a finding is still fixed like any analyzer
-  diagnostic (usually by extracting helpers); a new exclusion needs its own Lead decision record. Adding
-  more exclusions without one is a review finding.
+  diagnostic (usually by extracting helpers). A new gocognit exclusion — a rule in `.golangci.yml` or a
+  `//nolint:gocognit` directive — needs its own Lead decision record; golangci-lint honors `//nolint`
+  without any configuration, so adding either without a record is a review finding.
+- The two exclusions apply at any complexity: the two validators are no longer capped locally, and a later
+  edit that makes them more complex is not reported by the *Analyzer gate* or CI's Lint step. SonarQube
+  Cloud's `go:S3776` (squad step 11) remains the check for them.
 - The two excluded validators stay as they are. When one of them is refactored below 16, its exclusion rule
-  becomes unused, golangci-lint warns, and the rule should be removed in that change.
+  becomes unused and golangci-lint warns (`warn-unused: true`), but the run still passes. Removing the stale
+  rule in that change is a review duty.
 - Revisit if SonarQube's Go analyzer or gocognit changes how error checks are counted, or if a local tool
   that implements SonarQube's Go measure becomes available.
