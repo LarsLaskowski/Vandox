@@ -31,9 +31,25 @@ func TestSecret_Redaction(t *testing.T) {
 
 	t.Run("formatting verbs", func(t *testing.T) { requireFormattingRedacted(t, s) })
 	t.Run("a struct holding a secret", func(t *testing.T) { requireHolderFormattingRedacted(t, s) })
+	t.Run("pointer verb", func(t *testing.T) {
+		requirePointerVerbRedacted(t, s, secretValue)
+		requirePointerVerbRedacted(t, secretHolder{S: s}, secretValue)
+		requirePointerVerbRedacted(t, AgentSecrets{AgentToken: s}, secretValue)
+		requirePointerVerbRedacted(t, BackendSecrets{AgentToken: s}, secretValue)
+	})
 	t.Run("marshaling", func(t *testing.T) { requireMarshalingRedacted(t, s) })
 	t.Run("slog handlers", func(t *testing.T) { requireSlogRedacted(t, s) })
 	t.Run("value and IsSet", func(t *testing.T) { requireValueAndIsSet(t, s) })
+}
+
+// requirePointerVerbRedacted fails the test if %p of v shows secret. The verb is not valid for these types,
+// so fmt prints the value through its reflection path unless the type hides it.
+func requirePointerVerbRedacted(t *testing.T, v any, secret string) {
+	t.Helper()
+	verb := "%p"
+	if got := fmt.Sprintf(verb, v); strings.Contains(got, secret) {
+		t.Errorf("fmt.Sprintf(%q, %T) = %q, want the secret absent", verb, v, got)
+	}
 }
 
 // secretHolder is a struct that holds a secret in an exported field.

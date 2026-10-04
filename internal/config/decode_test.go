@@ -193,6 +193,8 @@ func TestDecodeStrict_Errors(t *testing.T) {
 		{"tag handle remapped to binary", "%TAG !e! tag:yaml.org,2002:\n---\ntitle: !e!binary aGk=\n", anyKey, 3},
 		{"top-level sequence", "- a\n", "", 1},
 		{"top-level scalar", "foo\n", "", 1},
+		{"custom tag on top-level mapping", "!foo {title: x}\n", "", 1},
+		{"anchor on top-level mapping", "&a {title: x}\n", "", 1},
 		{"null tag with content on section", "section: !!null " + sentinel + "\n", "section", 1},
 		{"null tag with content on leaf", "title: !!null x\n", "title", 1},
 
@@ -220,6 +222,11 @@ func TestDecodeStrict_Errors(t *testing.T) {
 		{"bool field not a bool", "flag: " + sentinel + "-value\n", "flag", 1},
 		{"duration field not a duration", "wait: " + sentinel + "-value\n", "wait", 1},
 		{"slice field given a scalar", "tags: " + sentinel + "-value\n", "tags", 1},
+		{"anchor and alias in list", "tags: [&a x, *a]\n", "tags", 1},
+		{"anchor on list element", "tags:\n  - a\n  - &a x\n", "tags", 3},
+		{"custom tag on list element", "tags:\n  - a\n  - !foo x\n", "tags", 3},
+		{"bidi override in list element", "tags:\n  - a\n  - \"a\\u202Eb\"\n", "tags", 1},
+		{"control character in list element", "tags: [\"a\\x01b\"]\n", "tags", 1},
 		{"int field given a mapping", "count: {a: b}\n", "count", 1},
 	}
 	for _, tt := range tests {

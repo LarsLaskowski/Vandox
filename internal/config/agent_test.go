@@ -498,6 +498,8 @@ func TestLoadAgent_Redaction(t *testing.T) {
 		t.Fatalf("Secrets.AgentToken.Value() = %q, want %q", got.Secrets.AgentToken.Value(), token)
 	}
 	requireRedacted(t, got, secretValue)
+	requirePointerVerbRedacted(t, got, secretValue)
+	requirePointerVerbRedacted(t, *got, secretValue)
 }
 
 func TestLoadAgent_ErrorOrder(t *testing.T) {

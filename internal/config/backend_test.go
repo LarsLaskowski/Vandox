@@ -403,6 +403,8 @@ func TestLoadBackend_Redaction(t *testing.T) {
 	}
 	requireRedacted(t, *got, secretValue)
 	requireRedacted(t, got, secretValue)
+	requirePointerVerbRedacted(t, got, secretValue)
+	requirePointerVerbRedacted(t, *got, secretValue)
 }
 
 func TestLoadBackend_ErrorOrder(t *testing.T) {
