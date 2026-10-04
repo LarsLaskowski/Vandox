@@ -31,12 +31,42 @@ testdata/           fixtures for tests
 go build ./...
 ```
 
-Inject version information with `-ldflags`:
+Inject version information with `-ldflags`. This is the form the release uses: the full commit SHA, the
+commit time in UTC, `-trimpath` and a static binary.
 
 ```
-go build -ldflags "\
+go build -trimpath -buildvcs=false -ldflags "\
+  -s -w \
   -X github.com/LarsLaskowski/Vandox/internal/version.Version=v0.1.0 \
-  -X github.com/LarsLaskowski/Vandox/internal/version.Commit=$(git rev-parse --short HEAD) \
-  -X github.com/LarsLaskowski/Vandox/internal/version.Date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  -X github.com/LarsLaskowski/Vandox/internal/version.Commit=$(git rev-parse HEAD) \
+  -X github.com/LarsLaskowski/Vandox/internal/version.Date=$(TZ=UTC git log -1 --format=%cd --date=format-local:%Y-%m-%dT%H:%M:%SZ)" \
   -o bin/ ./cmd/...
 ```
+
+Set `CGO_ENABLED=0` for a statically linked binary, as the release does.
+
+## Install
+
+Releases are published from `v<major>.<minor>.<patch>` tags on `main`
+(see [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md#versioning-and-releases)).
+
+**Agent.** Download `vandox-agent-linux-amd64` and `SHA256SUMS` from the
+[GitHub release](https://github.com/LarsLaskowski/Vandox/releases), verify and install the binary (the full
+agent installation, with user and systemd unit, is described under `deploy/agent/` once it exists):
+
+```
+sha256sum -c SHA256SUMS
+sudo install -m 0755 vandox-agent-linux-amd64 /usr/local/bin/vandox-agent
+vandox-agent --version
+```
+
+**Backend.** Pull the image from Docker Hub, either by version or by the digest given in the release notes:
+
+```
+docker pull networlddev/vandox:<X.Y.Z>
+docker pull networlddev/vandox@sha256:<digest>
+```
+
+Image tags: `X.Y.Z` for the release `vX.Y.Z`; `latest` is the highest stable release; a pre-release
+(`vX.Y.Z-rc.N`) is published only under its own tag `X.Y.Z-rc.N`. A published version tag is never
+overwritten. The image runs as UID/GID 65532 (non-root) on a distroless static base.

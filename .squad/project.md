@@ -76,6 +76,18 @@ files or endpoints.
     AI-written report): *Goal:* they cannot inject into log output (control characters, newlines), into the
     web UI (HTML is escaped) or into Telegram messages (escaped for the parse mode used, or sent as plain
     text without a parse mode). Record 0031 for Telegram; none decides log output and UI escaping yet.
+13. **Release pipeline and published artifacts** (`.github/workflows/release.yml`,
+    `deploy/backend/Dockerfile`, `.dockerignore`, the GitHub environment `release`): *Goal:* artifacts are
+    published only from a SemVer tag that only the repository admin can create (tag ruleset `release-tags`)
+    and whose commit the workflow checks is on `main`; the ancestry check runs in code the tagger controls,
+    so the ruleset is the boundary. Every action is pinned by commit SHA and every base image by digest.
+    Release binaries are built without restored CI caches (`setup-go` `cache: false`, plain
+    `docker build --no-cache`, no cache backend) and only after `govulncheck` passes. The registry token is
+    readable only by the tag-triggered publish job, enters `docker login` only via stdin, and is limited to
+    pushing `networlddev/vandox`. No `${{ }}` expression of any kind appears inside a `run:` script; every
+    value goes through `env:`, and checkout does not persist the job token. The published image runs as a
+    non-root user, a published version tag is never overwritten, and every published binary has a checksum
+    in `SHA256SUMS`. Records 0027, 0037, 0038, 0039.
 
 ## Guarantees
 

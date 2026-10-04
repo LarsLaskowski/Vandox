@@ -1,0 +1,311 @@
+name: Release
+
+# A SemVer tag (v*.*.*) builds, verifies and publishes the agent binary and the
+# backend image. Pull requests that change a release input run the same build
+# job as a dry run: nothing is uploaded, pushed or released and no secret is read.
+# See docs/CONTRIBUTING.md (Versioning and releases) and records 0037 to 0039.
+
+on:
+  push:
+    tags: ["v*.*.*"]
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/release.yml"
+      - "deploy/backend/Dockerfile"
+      - ".dockerignore"
+      - "go.mod"
+      - "go.sum"
+      - "cmd/**"
+      - "internal/**"
+
+permissions: {}
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      version: ${{ steps.version.outputs.version }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
+      latest: ${{ steps.version.outputs.latest }}
+    steps:
+      # Full history and tags: needed for the `latest` decision and the ancestry check.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Resolve version
+        id: version
+        env:
+          EVENT: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" = "push" ]; then
+            TAG="$REF_NAME"
+          else
+            TAG="v0.0.0-dryrun"
+          fi
+          semver='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?$'
+          if ! printf '%s' "$TAG" | grep -Eq "$semver"; then
+            echo "::error::tag '$TAG' is not a strict SemVer tag (vMAJOR.MINOR.PATCH[-prerelease], no build metadata)"
+            exit 1
+          fi
+          prerelease=false
+          case "$TAG" in *-*) prerelease=true ;; esac
+          latest=false
+          if [ "$EVENT" = "push" ] && [ "$prerelease" = "false" ]; then
+            highest="$(git tag -l 'v*.*.*' | grep -v -- - | sort -V | tail -n1)"
+            if [ "$highest" = "$TAG" ]; then
+              latest=true
+            fi
+          fi
+          {
+            echo "tag=$TAG"
+            echo "version=${TAG#v}"
+            echo "commit=$(git rev-parse HEAD)"
+            echo "date=$(TZ=UTC git log -1 --format=%cd --date=format-local:%Y-%m-%dT%H:%M:%SZ)"
+            echo "prerelease=$prerelease"
+            echo "latest=$latest"
+          } >> "$GITHUB_OUTPUT"
+
+      # Guards against a maintainer's mistake only; the tag ruleset is the security boundary.
+      - name: Check tag is on main
+        if: github.event_name == 'push'
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin main
+          if ! git merge-base --is-ancestor HEAD FETCH_HEAD; then
+            echo "::error::the tagged commit is not reachable from origin/main"
+            exit 1
+          fi
+
+      # cache: false on purpose. A tag run may restore caches saved on the default
+      # branch by ci.yml; the release is compiled from source only.
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Vulnerability scan
+        run: go tool govulncheck ./...
+
+      - name: Build agent
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+          COMMIT: ${{ steps.version.outputs.commit }}
+          DATE: ${{ steps.version.outputs.date }}
+        run: |
+          set -euo pipefail
+          pkg=github.com/LarsLaskowski/Vandox/internal/version
+          mkdir -p dist
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -buildvcs=false \
+            -ldflags "-s -w -X $pkg.Version=$TAG -X $pkg.Commit=$COMMIT -X $pkg.Date=$DATE" \
+            -o dist/vandox-agent-linux-amd64 ./cmd/vandox-agent
+          (cd dist && sha256sum vandox-agent-linux-amd64 > SHA256SUMS)
+
+      - name: Verify agent
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+          COMMIT: ${{ steps.version.outputs.commit }}
+          DATE: ${{ steps.version.outputs.date }}
+        run: |
+          set -euo pipefail
+          (cd dist && sha256sum -c SHA256SUMS)
+          if [ "$(wc -l < dist/SHA256SUMS)" != "1" ] || ! grep -Eq '^[0-9a-f]{64}  vandox-agent-linux-amd64$' dist/SHA256SUMS; then
+            echo "::error::SHA256SUMS must hold exactly the line for vandox-agent-linux-amd64"
+            exit 1
+          fi
+          info="$(file dist/vandox-agent-linux-amd64)"
+          echo "$info"
+          for want in "ELF 64-bit" "x86-64" "statically linked"; do
+            case "$info" in
+              *"$want"*) ;;
+              *) echo "::error::agent binary is not '$want'"; exit 1 ;;
+            esac
+          done
+          got="$(dist/vandox-agent-linux-amd64 --version)"
+          want="vandox-agent $TAG (commit $COMMIT, built $DATE)"
+          if [ "$got" != "$want" ]; then
+            echo "::error::agent --version mismatch: got '$got', want '$want'"
+            exit 1
+          fi
+
+      - name: Check base image pinning
+        run: |
+          set -euo pipefail
+          bad=0
+          while IFS= read -r line; do
+            if ! printf '%s' "$line" | grep -Eq '@sha256:[0-9a-f]{64}'; then
+              echo "::error::FROM line without a sha256 digest: $line"
+              bad=1
+            fi
+          done < <(grep -E '^FROM[[:space:]]' deploy/backend/Dockerfile)
+          if [ "$bad" -ne 0 ]; then
+            exit 1
+          fi
+
+      - name: Check builder Go version
+        run: |
+          set -euo pipefail
+          mod="$(awk '$1=="go"{print $2; exit}' go.mod | cut -d. -f1,2)"
+          img="$(grep -E '^FROM[[:space:]]+golang:' deploy/backend/Dockerfile | head -n1 | sed -E 's/^FROM[[:space:]]+golang:([0-9]+\.[0-9]+).*/\1/')"
+          if ! printf '%s' "$mod" | grep -Eq '^[0-9]+\.[0-9]+$' || ! printf '%s' "$img" | grep -Eq '^[0-9]+\.[0-9]+$'; then
+            echo "::error::could not read Go versions (go.mod: '$mod', Dockerfile builder: '$img')"
+            exit 1
+          fi
+          if [ "$mod" != "$img" ]; then
+            echo "::error::builder image Go $img differs from go.mod Go $mod"
+            exit 1
+          fi
+
+      # Plain Docker CLI, no cache of any kind (no --cache-from/--cache-to, no cache backend).
+      - name: Build image
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+          COMMIT: ${{ steps.version.outputs.commit }}
+          DATE: ${{ steps.version.outputs.date }}
+        run: |
+          set -euo pipefail
+          docker build --no-cache -f deploy/backend/Dockerfile \
+            --build-arg VERSION="$TAG" --build-arg COMMIT="$COMMIT" --build-arg DATE="$DATE" \
+            -t vandox:local .
+
+      - name: Verify image
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+          COMMIT: ${{ steps.version.outputs.commit }}
+          DATE: ${{ steps.version.outputs.date }}
+        run: |
+          set -euo pipefail
+          got="$(docker run --rm vandox:local --version)"
+          want="vandoxd $TAG (commit $COMMIT, built $DATE)"
+          if [ "$got" != "$want" ]; then
+            echo "::error::vandoxd --version mismatch: got '$got', want '$want'"
+            exit 1
+          fi
+          user="$(docker image inspect --format '{{.Config.User}}' vandox:local)"
+          if [ "$user" != "65532:65532" ]; then
+            echo "::error::image user is '$user', want 65532:65532"
+            exit 1
+          fi
+
+      - name: Save image
+        if: github.event_name == 'push'
+        run: docker save vandox:local -o dist/vandox-image.tar
+
+      - name: Upload release files
+        if: github.event_name == 'push'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release
+          path: dist/
+          retention-days: 7
+          if-no-files-found: error
+
+  publish-image:
+    needs: build
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    environment: release
+    permissions: {}
+    outputs:
+      digest: ${{ steps.push.outputs.digest }}
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release
+          path: dist
+
+      - name: Load image
+        run: docker load -i dist/vandox-image.tar
+
+      - name: Log in to Docker Hub
+        env:
+          DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$DOCKERHUB_TOKEN" | docker login docker.io -u "$DOCKERHUB_USERNAME" --password-stdin
+
+      # Fails closed: only an explicit not-found counts as "version absent".
+      - name: Check version is not published
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          set -uo pipefail
+          err="$(docker manifest inspect "networlddev/vandox:$VERSION" 2>&1 >/dev/null)"
+          rc=$?
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::networlddev/vandox:$VERSION already exists; published versions are never overwritten"
+            exit 1
+          fi
+          if printf '%s' "$err" | grep -Eqi 'no such manifest|manifest unknown'; then
+            echo "networlddev/vandox:$VERSION is not published yet"
+            exit 0
+          fi
+          echo "::error::could not determine whether networlddev/vandox:$VERSION exists: $err"
+          exit 1
+
+      - name: Push image
+        id: push
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+          LATEST: ${{ needs.build.outputs.latest }}
+        run: |
+          set -euo pipefail
+          docker tag vandox:local "networlddev/vandox:$VERSION"
+          docker push "networlddev/vandox:$VERSION"
+          if [ "$LATEST" = "true" ]; then
+            docker tag vandox:local networlddev/vandox:latest
+            docker push networlddev/vandox:latest
+          fi
+          repo_digest="$(docker image inspect --format '{{index .RepoDigests 0}}' "networlddev/vandox:$VERSION")"
+          echo "digest=${repo_digest#*@}" >> "$GITHUB_OUTPUT"
+
+      - name: Log out of Docker Hub
+        if: always()
+        run: docker logout docker.io
+
+  github-release:
+    needs: [build, publish-image]
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release
+          path: dist
+
+      # No checkout in this job: GH_REPO tells gh which repository to use.
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.build.outputs.tag }}
+          VERSION: ${{ needs.build.outputs.version }}
+          DIGEST: ${{ needs.publish-image.outputs.digest }}
+          PRERELEASE: ${{ needs.build.outputs.prerelease }}
+          LATEST: ${{ needs.build.outputs.latest }}
+        run: |
+          set -euo pipefail
+          args=(--verify-tag --title "$TAG" --generate-notes
+            --notes "Docker image: networlddev/vandox:$VERSION@$DIGEST")
+          if [ "$PRERELEASE" = "true" ]; then
+            args+=(--prerelease)
+          fi
+          if [ "$LATEST" != "true" ]; then
+            args+=(--latest=false)
+          fi
+          cd dist
+          gh release create "$TAG" "${args[@]}" vandox-agent-linux-amd64 SHA256SUMS
