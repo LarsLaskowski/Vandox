@@ -440,7 +440,10 @@ No guarantee from `docs/ARCHITECTURE.md` or `.squad/project.md` is weakened:
 - **Base images pinned by digest; builder minor follows `go.mod`** (0038, superseded by 0041). This is
   preserved. Both stages pull by digest only (`image@sha256:…` from build-argument defaults), and the
   release check now validates the arguments: it is at least as strict as the old `@sha256:` grep, because
-  it also rejects stage-local overrides and mismatched name pairs. The minor is read from
+  it also rejects stage-local overrides and mismatched name pairs, and, unlike the old grep, a lower-case
+  or indented `FROM`/`ARG`, an `ARG` line with several names or a continuation, and a `syntax` or
+  `escape` parser directive (Security round 2, B1; the old check at `release.yml:143-154` let a lower-case
+  or indented `FROM` through). The minor is read from
   `BASE_BUILD_TAG`, and the check enforces 1.27 = 1.27.
 - **What changes (accepted by the Product Manager's decision):** Dependabot no longer refreshes the
   digests (0036 and 0038's "Dependabot updates the digests"). No guarantee in `docs/ARCHITECTURE.md` or
@@ -475,7 +478,17 @@ No guarantee from `docs/ARCHITECTURE.md` or `.squad/project.md` is weakened:
   published artifact.
 - **Check robustness (revision).** The new checks fail closed: a missing `FROM`, an unparseable
   argument, a duplicate or stage-local default, or an unreadable minor all produce an `::error::` and
-  exit 1. They contain no `${{ }}` expression, and they read only the checked-out repository.
+  exit 1. Instructions the line-anchored `grep`s could miss are rejected up front: lower-case or indented
+  `FROM`/`ARG`, multi-name or continued `ARG` lines, and the `syntax`/`escape` parser directives (an
+  unpinned `# syntax=` frontend image would run the whole build). The guards are deliberately
+  conservative: they also reject legal but unusual forms (e.g. a quoted default with a space), which
+  fails closed. They contain no `${{ }}` expression, and they read only the checked-out repository.
+- **Known limits of the static check (Security round 2, N1 and the Lead's own note).** It cannot tell
+  whether `BASE_<NAME>_TAG` and `BASE_<NAME>_DIGEST` belong together (0041 *Consequences*): only the
+  person refreshing the digest and the review can. The follow-up issue mentions an in-build guard. The
+  check also covers only stage bases: an image named in `COPY --from=<image>` or `RUN --mount=…,from=<image>`
+  is not checked, as before this change. The Dockerfile has only `COPY --from=build`, and any new
+  `--from=` is a Dockerfile change that Reviewer and Security see.
 - **OCI labels.** `base.name` and `base.digest` name the public base image only. They expose nothing that
   is not already in the public Dockerfile.
 - No secret, permission or workflow trigger changes. The runtime image content is unchanged, and so are
@@ -566,5 +579,9 @@ pattern of the other repositories (PlexToJellyfinSync), even if 0038 must change
     (c) a release-time `govulncheck -mode=binary` on the built `vandoxd`. Because the binary is built with
     `-s -w`, this check works at module level and blocks on any standard-library vulnerability of the
     builder's patch.
+    Separately, the release checks cannot verify statically that `BASE_BUILD_TAG` and
+    `BASE_BUILD_DIGEST` belong together. A cheap in-build guard is a `RUN go version` (or a comparison of
+    `go env GOVERSION` with the minor from `BASE_BUILD_TAG`) in the build stage, which makes a mismatched
+    builder minor fail the image build; consider it together with the chosen option.
     Decide on one option with a decision record that extends 0041."
 - No other follow-up issue.
