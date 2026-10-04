@@ -1,6 +1,6 @@
 # 0036: Dependabot watches /deploy/backend for Docker before the Dockerfile exists
 
-- **Status:** Accepted
+- **Status:** Superseded by 0041
 - **Date:** 2026-10-04
 - **Source:** Issue #8
 - **Supersedes:** —

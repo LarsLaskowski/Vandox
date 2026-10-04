@@ -1,6 +1,6 @@
 # 0041: Base images pinned by digest through build arguments, tag kept alongside; digests refreshed by hand
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-04
 - **Source:** Issue #103 / PR #107
 - **Supersedes:** 0036, 0038
