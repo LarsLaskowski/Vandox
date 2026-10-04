@@ -2,7 +2,8 @@
 
 ## Supported Versions
 
-Only the latest release receives security fixes.
+No release has been published yet, so fixes go to `main`. From the first release (v0.1.0) on, only the
+latest release receives security fixes.
 
 | Version | Supported |
 | ------- | --------- |
@@ -33,19 +34,29 @@ process.
 Vandox is meant for a private setup: `vandox-agent` runs on the monitored server and `vandoxd` runs as a Docker
 container on a Docker host in the home network (for example a NAS), behind a TLS-terminating reverse proxy. The two communicate only
 over a private Tailscale network. An operator must not expose `vandoxd` to the internet, must protect the
-web UI with its login, must keep secrets (tokens, keys) in environment variables or files readable only by the
-service user, and must run the agent with minimal privileges.
+web UI with its login, and must keep secrets (tokens, keys) only in environment variables or Docker
+secrets, never in the configuration file or on the command line. The agent must run as the dedicated user
+`vandox-agent`, never as root, with only the rights listed in `deploy/agent/`, and the unit's confinement
+(system-call filter, no further capabilities) must be kept; its capabilities give it read access to
+everything on the server, so treat the server's credentials as readable by the agent. The Tailscale ACL must
+allow the monitored server only the ingest port on the backend host, and the Telegram user allowlist must be
+set.
 
 ## Scope
 
 The following are considered in scope for vulnerability reports:
 
-- The attack surface listed under *Security areas* in `.squad/project.md`: secrets and tokens, web UI
-  authentication, the agent-to-backend ingest API, parsing of log files, file writes, outbound calls and
-  (planned) remote actions
+- The attack surface listed under *Security areas* in `.squad/project.md`: ingest authentication, the
+  Tailscale ACL and port binding as documented, web UI login, command signing for remote actions once
+  released, the Telegram allowlist, agent privileges, the MariaDB monitoring user, secrets handling, file
+  writes, parsing of external input, outbound calls including their transport security, and logging and
+  display of external data in log output, the web UI and Telegram messages
+- Attacks by an unprivileged local user of the monitored server against the agent or its secrets (for
+  example reading a secret from `/proc/<pid>/cmdline` or the environment, abusing the agent's rights, or
+  escaping the agent unit's confinement to write or run code as another user)
 - Dependency vulnerabilities in packages consumed by the project
 
 The following are **out of scope**:
 
-- Attacks that require local system access or physical access to the host
+- Attacks that require root or physical access to the monitored server or to the backend host
 - Issues arising from misconfiguration of the deployment environment
