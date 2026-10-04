@@ -13,3 +13,4 @@ One line per pipeline step: date, step, member, result. Lead decisions and escal
 | 2026-10-04 | 6 Implement | squad-dev | cli.Run implemented, docs updated; verified: tests green with -race, coverage 81.8 % overall / 84.6 % new code; only uncovered lines are the accepted main() bodies; separate Tester coverage pass skipped as gate already passes with no gap |
 | 2026-10-04 | 7 Code check | squad-code-officer | no edits needed; verified: format check exit 0, analyzer gate PASS, tests green, coverage 81.8 % |
 | 2026-10-04 | 8 Review r1 | squad-reviewer, squad-security | Security diff: APPROVED, no findings. Reviewer: BLOCKING 0 / NON-BLOCKING 2 (0034 coverage numbers 31 vs 33 lines; misnamed test case in cli_test.go:115) |
+| 2026-10-04 | 8 Review r1 decision | squad-lead | DECIDED: fix both non-blocking findings now (0034 coverage figures corrected to 33 lines / 81.8 %; Tester removes two duplicate order-dependent cases from TestRun); delta review round required |

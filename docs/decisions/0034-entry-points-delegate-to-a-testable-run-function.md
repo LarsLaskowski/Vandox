@@ -26,7 +26,7 @@ is the system of record for the CI quality gate (0001) and counts duplicated blo
    packages then contain only uncovered lines and the local gate stays red (about 76 % overall).
 3. **Shared `internal/cli.Run` behind a thin per-binary `run`** — no duplication; each binary's `run` is
    covered by a test that pins the name it reports; only the one-statement `main()` bodies stay
-   uncovered (about 81 % overall at the time of the change). `run` is also where binary-specific wiring
+   uncovered (about 82 % overall at the time of the change). `run` is also where binary-specific wiring
    will grow.
 4. **Cover `main()` as well by re-executing the test binary in a subprocess** — removes the last
    uncovered lines, but needs `GOCOVERDIR` and merging of a second coverage format that the gate does not
@@ -52,7 +52,7 @@ Option 3.
 
 - The overall coverage gate passes on `main` again; 0033's acceptance is no longer needed by any change.
 - The margin is small at first: the two `main()` bodies count as six uncovered lines in the local gate
-  (it counts each block's full line range) against about 31 lines in total. It grows as covered code is
+  (it counts each block's full line range) against 33 lines in total (27 of 33 covered, 81.8 %). It grows as covered code is
   added.
 - A new binary follows the same pattern: `main` only calls `os.Exit(run(...))`, and `run` is tested in
   `main_test.go`.

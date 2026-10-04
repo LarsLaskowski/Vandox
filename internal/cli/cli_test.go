@@ -111,21 +111,6 @@ func TestRun(t *testing.T) {
 				versionFlag,
 			},
 		},
-		{
-			name:     "version after a parse-free call still prints version",
-			binary:   backendName,
-			args:     []string{"-version"},
-			wantCode: 0,
-			// Follows the cases above in one process: no state may leak between calls.
-			wantStdout: version.String(backendName) + "\n",
-		},
-		{
-			name:       "no arguments after a version call still print usage",
-			binary:     backendName,
-			args:       nil,
-			wantCode:   0,
-			wantStderr: []string{usageHeader(backendName), versionFlag},
-		},
 	}
 
 	for _, tc := range tests {
