@@ -10,7 +10,7 @@
 Vandox handles several secrets: the agent's ingest token, the web UI password (hash), the Telegram bot
 token and later the command-signing key (0009). Both binaries read a configuration file and environment
 variables (`docs/ARCHITECTURE.md`, *Configuration*). Configuration files are copied, shared in issues and
-committed to backups; command-line arguments are visible to every user in `/proc/<pid>/cmdline`.
+committed to backups; command-line arguments are visible to every local user in `/proc/<pid>/cmdline`.
 
 ## Options considered
 
@@ -24,13 +24,15 @@ committed to backups; command-line arguments are visible to every user in `/proc
 ## Decision
 
 Option 3: secrets are read only from environment variables or Docker secrets, never from the configuration
-file or the command line. They are never logged, never shown in the web UI, never written to the spool or
-error messages, and compared in constant time.
+file or the command line. They are never logged, never shown in the web UI, and never written to the spool
+or into error messages. A secret that is checked against input (the ingest token presented by the agent,
+later a TOTP code) is compared in constant time; the web UI password is checked through its hash function's
+own comparison.
 
 ## Consequences
 
 - The configuration file can be shared without redaction.
-- The configuration loading rejects a configuration file that contains a secret key, with an error that
-  names the key but not its value; the README
-  configuration table names the environment variable or Docker secret for each secret.
+- The README configuration table names the environment variable or Docker secret for each secret.
+- How configuration loading enforces the rule (for example by rejecting a secret key found in the
+  configuration file) is decided with the configuration feature; it is not part of this record.
 - `SECURITY.md` tells operators where secrets belong.
