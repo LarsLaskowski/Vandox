@@ -34,7 +34,10 @@ neighboring test file before inventing a new pattern.
 **Threshold: at least 80 % line coverage on new or changed production code, and at least 80 % overall** —
 the same measure as SonarQube's "coverage on new code". Check it locally before a push with *Test with
 coverage* and the *Coverage gate* from [`.squad/stack.md`](../.squad/stack.md). Lines that genuinely
-cannot be covered by a unit test (for example `main` wiring) need an explicit, recorded decision.
+cannot be covered by a unit test (for example `main` wiring) need an explicit, recorded decision. A
+binary's `main` therefore only calls `os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))`; `run` is tested in
+the package's `main_test.go`, and the `main` body is the accepted uncovered wiring
+([decision 0034](decisions/0034-entry-points-delegate-to-a-testable-run-function.md)).
 
 ## Checklist for new tests
 

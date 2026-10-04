@@ -30,7 +30,7 @@ way, and agents of the hosting provider are never disabled or changed
 - `cmd/vandoxd` — Go, one container on the backend host: ingest API, SQLite storage, analysis, rules, Telegram
   notifier, reports and web UI.
 - `internal/` — packages shared by both binaries: data model and versioned wire format, log parsing,
-  signatures, version information.
+  signatures, version information, command-line handling.
 
 Importing historical logs (including the legacy `top`/`lsof` log) and continuously shipping new log lines are
 core parts of Vandox. Both binaries are written in Go in one module.
