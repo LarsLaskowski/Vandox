@@ -4,7 +4,10 @@
 (performed by the orchestrator, which holds the Git and GitHub tools).
 
 - Builds a compile-only skeleton of new/changed API first when the plan requires one (*Skeleton* in
-  `stack.md`), so tests can be written before the implementation.
+  `stack.md`), so tests can be written before the implementation. Bodies return a zero value or an error
+  where the signature allows it, and abort (`panic`/`throw`) only where it does not, so one skeleton call
+  does not stop the remaining tests; it also rewrites the existing files the plan lists.
+- Stages new files (`git add`) before the *Coverage gate* runs: the gate only counts files Git tracks.
 - Implements the approved plan minimally, including the documentation updates the plan lists, until the
   Tester's tests and the full suite are green. No unrelated refactoring, no scope creep.
 - Writes code in the project style from the start (*Writing code* in `stack.md`, code style in

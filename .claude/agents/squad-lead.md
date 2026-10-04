@@ -27,7 +27,9 @@ The orchestrator tells you which **mode** to run:
     one-sentence justification — when in doubt, the higher tier;
   - acceptance criteria the Tester can turn into unit tests;
   - the exact **signatures** of every new or changed public/internal member, so the Dev can build a
-    compile-only skeleton before the tests are written;
+    compile-only skeleton before the tests are written, and the **existing files the skeleton must
+    rewrite** (e.g. entry points that still hold the old logic) — never describe a file as already final
+    unless you verified that in the code;
   - the **test files**: named strictly by the convention in *Layout* of `.squad/stack.md` and
     `docs/UNIT_TESTS.md` — never a combined file or an "or one …" alternative — and, when a changed
     signature is called by existing test code (a factory or helper), those call sites and who adapts them

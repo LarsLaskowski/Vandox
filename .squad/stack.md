@@ -56,7 +56,9 @@ helpers, `t.TempDir()` for files, failure messages that state got and want.
 ## Skeleton
 
 New functions and methods with their full signature and doc comment, bodies
-`panic("not implemented")`, so the module builds and the tests compile and fail.
+return a zero value or an error (`errors.New("not implemented")`) where the signature allows it, and
+`panic("not implemented")` only where it does not (a `panic` aborts the whole test binary), so the module
+builds and the tests compile and fail.
 
 ## Dependencies
 

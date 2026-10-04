@@ -17,7 +17,10 @@ Mode `tests-first`:
    signature whose old form still exists, move them to the new signature as the plan says. For a bug, use the input reported in the issue.
 2. Build and run the new tests. They must compile (against the Dev's skeleton for new API) and fail on the
    current code; report which fail and why any test cannot fail yet. Never leave the test suite in a
-   state that does not build — that would break every other test.
+   state that does not build — that would break every other test. A skeleton body that aborts the process
+   (e.g. `panic`) stops the whole test run at the first test that calls it: report which tests could not
+   run because of the abort, and ask the Dev (via the orchestrator) for skeleton bodies that return a zero
+   value or an error where the signature allows it.
 
 Mode `coverage` (after the Dev's implementation):
 
