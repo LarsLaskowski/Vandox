@@ -182,7 +182,7 @@ func TestLoadAgent_RequiredKeys(t *testing.T) {
 			if got != nil {
 				t.Errorf("LoadAgent(%q) = %+v, want nil on error", tt.doc, got)
 			}
-			requireKeyError(t, err, tt.key, 0)
+			_ = requireKeyError(t, err, tt.key, 0)
 		})
 	}
 }
@@ -246,7 +246,7 @@ func TestLoadAgent_InvalidValues(t *testing.T) {
 				if got != nil {
 					t.Errorf("LoadAgent(%q) = %+v, want nil on error", doc, got)
 				}
-				requireKeyError(t, err, key, agentLine[key])
+				_ = requireKeyError(t, err, key, agentLine[key])
 				requireNoLeakBesidesFile(t, err, path, sentinel)
 			})
 		}
@@ -263,7 +263,7 @@ func TestLoadAgent_ControlCharacters(t *testing.T) {
 				doc := agentDoc(map[string]string{key: v})
 				path := writeTemp(t, doc)
 				_, err := LoadAgent(path, agentEnv())
-				requireKeyError(t, err, key, agentLine[key])
+				_ = requireKeyError(t, err, key, agentLine[key])
 				requireNoLeakBesidesFile(t, err, path, sentinel, "\u202E", "\u2028", "\n")
 			})
 		}
@@ -271,13 +271,13 @@ func TestLoadAgent_ControlCharacters(t *testing.T) {
 	t.Run("block scalar with a newline", func(t *testing.T) {
 		doc := agentDoc(map[string]string{"log.level": "|\n    " + sentinel})
 		_, err := LoadAgent(writeTemp(t, doc), agentEnv())
-		requireKeyError(t, err, "log.level", agentLine["log.level"])
+		_ = requireKeyError(t, err, "log.level", agentLine["log.level"])
 		requireNoLeak(t, err, sentinel)
 	})
 	t.Run("bidi in a path", func(t *testing.T) {
 		doc := agentDoc(map[string]string{"spool.directory": `"/var/lib/\u202Ex"`})
 		_, err := LoadAgent(writeTemp(t, doc), agentEnv())
-		requireKeyError(t, err, "spool.directory", agentLine["spool.directory"])
+		_ = requireKeyError(t, err, "spool.directory", agentLine["spool.directory"])
 	})
 }
 
@@ -343,7 +343,7 @@ func TestLoadAgent_UnsupportedYAML(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := LoadAgent(writeTemp(t, tt.doc), agentEnv())
-			requireKeyError(t, err, anyKey, tt.line)
+			_ = requireKeyError(t, err, anyKey, tt.line)
 		})
 	}
 }
@@ -386,7 +386,7 @@ func TestLoadAgent_FileErrors(t *testing.T) {
 	t.Run("file of exactly the limit is read", func(t *testing.T) {
 		path := writeTemp(t, strings.Repeat("#\n", MaxFileBytes/2))
 		_, err := LoadAgent(path, agentEnv())
-		requireKeyError(t, err, "agent_id", 0) // required key missing shows that the file was read
+		_ = requireKeyError(t, err, "agent_id", 0) // required key missing shows that the file was read
 	})
 }
 
@@ -416,11 +416,11 @@ func TestLoadAgent_Secrets(t *testing.T) {
 	})
 	t.Run("token missing", func(t *testing.T) {
 		_, err := LoadAgent(file, nil)
-		requireSecretError(t, err, tokenVar)
+		_ = requireSecretError(t, err, tokenVar)
 	})
 	t.Run("token of 31 characters", func(t *testing.T) {
 		_, err := LoadAgent(file, []string{tokenVar + "=" + strings.Repeat("t", MinAgentTokenBytes-1)})
-		requireSecretError(t, err, tokenVar)
+		_ = requireSecretError(t, err, tokenVar)
 	})
 	t.Run("token of 32 characters", func(t *testing.T) {
 		if _, err := LoadAgent(file, []string{tokenVar + "=" + strings.Repeat("t", MinAgentTokenBytes)}); err != nil {
@@ -429,11 +429,11 @@ func TestLoadAgent_Secrets(t *testing.T) {
 	})
 	t.Run("both variable and file", func(t *testing.T) {
 		_, err := LoadAgent(file, []string{tokenVar + "=" + agentToken, tokenFile + "=" + tokenPath})
-		requireSecretError(t, err, anyKey)
+		_ = requireSecretError(t, err, anyKey)
 	})
 	t.Run("relative file path", func(t *testing.T) {
 		_, err := LoadAgent(file, []string{tokenFile + "=" + secretValue})
-		requireSecretError(t, err, tokenFile)
+		_ = requireSecretError(t, err, tokenFile)
 		requireNoLeak(t, err, sentinel)
 	})
 }
@@ -459,13 +459,13 @@ func TestLoadAgent_Environment(t *testing.T) {
 	for _, tt := range rejected {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := LoadAgent(file, append(agentEnv(), tt.env))
-			requireSecretError(t, err, tt.want)
+			_ = requireSecretError(t, err, tt.want)
 			requireNoLeak(t, err, "\n", "\u202E", "A-B")
 		})
 	}
 	t.Run("same variable twice", func(t *testing.T) {
 		_, err := LoadAgent(file, append(agentEnv(), tokenVar+"="+agentToken))
-		requireSecretError(t, err, tokenVar)
+		_ = requireSecretError(t, err, tokenVar)
 	})
 	t.Run("unrelated entries are ignored", func(t *testing.T) {
 		if _, err := LoadAgent(file, append(agentEnv(), "PATH=/bin", "NOEQUALS", "VANDOXX=1")); err != nil {
@@ -490,24 +490,24 @@ func TestLoadAgent_ErrorOrder(t *testing.T) {
 	t.Run("first invalid value in document order", func(t *testing.T) {
 		doc := agentDoc(map[string]string{"agent_id": "-a", "backend.url": "'ftp://h:1'", "log.level": "trace"})
 		_, err := LoadAgent(writeTemp(t, doc), agentEnv())
-		requireKeyError(t, err, "agent_id", 1)
+		_ = requireKeyError(t, err, "agent_id", 1)
 	})
 	t.Run("later invalid value when the first is valid", func(t *testing.T) {
 		doc := agentDoc(map[string]string{"backend.url": "'ftp://h:1'", "log.level": "trace"})
 		_, err := LoadAgent(writeTemp(t, doc), agentEnv())
-		requireKeyError(t, err, "backend.url", 3)
+		_ = requireKeyError(t, err, "backend.url", 3)
 	})
 	t.Run("first structure error in document order", func(t *testing.T) {
 		_, err := LoadAgent(writeTemp(t, "foo: 1\nagent_id: a\nagent_id: b\n"), agentEnv())
-		requireKeyError(t, err, "foo", 1)
+		_ = requireKeyError(t, err, "foo", 1)
 	})
 	t.Run("file error before secret error", func(t *testing.T) {
 		_, err := LoadAgent(writeTemp(t, agentDoc(map[string]string{"agent_id": "-a"})), []string{"VANDOX_AGENT_TOKN=x"})
-		requireKeyError(t, err, "agent_id", 1)
+		_ = requireKeyError(t, err, "agent_id", 1)
 	})
 	t.Run("missing required key before missing token", func(t *testing.T) {
 		_, err := LoadAgent(writeTemp(t, ""), nil)
-		requireKeyError(t, err, "agent_id", 0)
+		_ = requireKeyError(t, err, "agent_id", 0)
 	})
 	t.Run("both error types are found with errors.As", func(t *testing.T) {
 		_, err := LoadAgent(writeTemp(t, validAgent), nil)

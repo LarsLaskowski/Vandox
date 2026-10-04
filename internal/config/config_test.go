@@ -228,7 +228,7 @@ func TestCheckListen(t *testing.T) {
 			if got != 0 {
 				t.Errorf("checkListen(%q) port = %d, want 0 on error", v, got)
 			}
-			requireKeyError(t, err, "web.listen", 2)
+			_ = requireKeyError(t, err, "web.listen", 2)
 			requireNoLeak(t, err, sentinel)
 		})
 	}
@@ -246,7 +246,7 @@ func TestCheckLogLevel(t *testing.T) {
 	for _, v := range []string{"INFO", "Info", "trace", "", "warning", " info", sentinel} {
 		t.Run("invalid "+v, func(t *testing.T) {
 			err := checkLogLevel("f.yaml", lines, "log.level", v)
-			requireKeyError(t, err, "log.level", 9)
+			_ = requireKeyError(t, err, "log.level", 9)
 			requireNoLeak(t, err, sentinel)
 		})
 	}

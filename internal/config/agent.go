@@ -166,7 +166,7 @@ func validHost(host string) bool {
 	}
 	for i := 0; i < len(host); i++ {
 		c := host[i]
-		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '.' || c == '-') {
+		if (c < 'a' || c > 'z') && (c < 'A' || c > 'Z') && (c < '0' || c > '9') && c != '.' && c != '-' {
 			return false
 		}
 	}

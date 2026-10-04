@@ -195,7 +195,7 @@ func TestCheckEnviron_Rejected(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := checkEnviron(tt.environ, agentKnown)
-			requireSecretError(t, err, tt.wantVar)
+			_ = requireSecretError(t, err, tt.wantVar)
 			if got != nil {
 				t.Errorf("checkEnviron(%q) map = %v, want nil on error", tt.environ, got)
 			}
@@ -235,7 +235,7 @@ func TestCheckEnviron_UnsafeNames(t *testing.T) {
 	t.Run("64 bytes is shown", func(t *testing.T) {
 		name := "VANDOX_" + strings.Repeat("A", 57)
 		_, err := checkEnviron([]string{name + "=x"}, agentKnown)
-		requireSecretError(t, err, name)
+		_ = requireSecretError(t, err, name)
 	})
 }
 
@@ -274,7 +274,7 @@ func TestReadSecret_FromEnvironment(t *testing.T) {
 	for _, v := range invalid {
 		t.Run("invalid "+truncate(v), func(t *testing.T) {
 			got, err := readSecret(secretEnv(tokenVar, v), tokenVar)
-			requireSecretError(t, err, tokenVar)
+			_ = requireSecretError(t, err, tokenVar)
 			if got.IsSet() {
 				t.Error("readSecret returned a set secret together with an error, want the zero Secret")
 			}
@@ -289,7 +289,7 @@ func TestReadSecret_FromEnvironment(t *testing.T) {
 	})
 	t.Run("both variable and file", func(t *testing.T) {
 		_, err := readSecret(secretEnv(tokenVar, "x", tokenFile, "/x"), tokenVar)
-		requireSecretError(t, err, anyKey)
+		_ = requireSecretError(t, err, anyKey)
 		for _, name := range []string{tokenVar, tokenFile} {
 			if !strings.Contains(err.Error(), name) {
 				t.Errorf("error %q, want it to name %q", err, name)
@@ -298,7 +298,7 @@ func TestReadSecret_FromEnvironment(t *testing.T) {
 	})
 	t.Run("both present with empty values", func(t *testing.T) {
 		_, err := readSecret(secretEnv(tokenVar, "", tokenFile, ""), tokenVar)
-		requireSecretError(t, err, anyKey)
+		_ = requireSecretError(t, err, anyKey)
 	})
 }
 
@@ -355,7 +355,7 @@ func TestReadSecret_FromFile(t *testing.T) {
 		t.Run("rejected "+tt.name, func(t *testing.T) {
 			path := writeTemp(t, tt.content)
 			got, err := readSecret(secretEnv(tokenFile, path), tokenVar)
-			requireSecretError(t, err, anyKey)
+			_ = requireSecretError(t, err, anyKey)
 			if got.IsSet() {
 				t.Error("readSecret returned a set secret together with an error, want the zero Secret")
 			}
@@ -382,7 +382,7 @@ func TestReadSecret_FileVariable(t *testing.T) {
 	t.Run("missing file", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), secretValue)
 		_, err := readSecret(secretEnv(tokenFile, path), tokenVar)
-		requireSecretError(t, err, tokenFile)
+		_ = requireSecretError(t, err, tokenFile)
 		if !errors.Is(err, fs.ErrNotExist) {
 			t.Errorf("errors.Is(err, fs.ErrNotExist) = false for %v, want true", err)
 		}
@@ -396,7 +396,7 @@ func TestReadSecret_FileVariable(t *testing.T) {
 	for name, path := range map[string]string{"directory": t.TempDir(), "device file": os.DevNull} {
 		t.Run(name, func(t *testing.T) {
 			_, err := readSecret(secretEnv(tokenFile, path), tokenVar)
-			requireSecretError(t, err, tokenFile)
+			_ = requireSecretError(t, err, tokenFile)
 			requireNoLeak(t, err, path)
 		})
 	}

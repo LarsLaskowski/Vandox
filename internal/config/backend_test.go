@@ -163,14 +163,14 @@ func TestLoadBackend_InvalidValues(t *testing.T) {
 				if got != nil {
 					t.Errorf("LoadBackend(%q) = %+v, want nil on error", doc, got)
 				}
-				requireKeyError(t, err, key, backendLine[key])
+				_ = requireKeyError(t, err, key, backendLine[key])
 				requireNoLeakBesidesFile(t, err, path, sentinel, "\u202E", "\u2028")
 			})
 		}
 	}
 	t.Run("storage directory with control characters", func(t *testing.T) {
 		_, err := LoadBackend(writeTemp(t, backendDoc(map[string]string{"storage.directory": `"/data/\u202Ex"`})), nil)
-		requireKeyError(t, err, "storage.directory", backendLine["storage.directory"])
+		_ = requireKeyError(t, err, "storage.directory", backendLine["storage.directory"])
 	})
 }
 
@@ -178,11 +178,11 @@ func TestLoadBackend_ListenPorts(t *testing.T) {
 	t.Run("same port on both listeners", func(t *testing.T) {
 		doc := backendDoc(map[string]string{"web.listen": "':8080'", "ingest.listen": "'0.0.0.0:8080'"})
 		_, err := LoadBackend(writeTemp(t, doc), nil)
-		requireKeyError(t, err, "ingest.listen", backendLine["ingest.listen"])
+		_ = requireKeyError(t, err, "ingest.listen", backendLine["ingest.listen"])
 	})
 	t.Run("same port with default of the other listener", func(t *testing.T) {
 		_, err := LoadBackend(writeTemp(t, "web:\n  listen: ':8081'\n"), nil)
-		requireKeyError(t, err, "ingest.listen", 0)
+		_ = requireKeyError(t, err, "ingest.listen", 0)
 	})
 	t.Run("different ports on the same host", func(t *testing.T) {
 		doc := backendDoc(map[string]string{"web.listen": "'0.0.0.0:8080'", "ingest.listen": "'0.0.0.0:8081'"})
@@ -246,7 +246,7 @@ func TestLoadBackend_UnsupportedYAML(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := LoadBackend(writeTemp(t, tt.doc), nil)
-			requireKeyError(t, err, anyKey, tt.line)
+			_ = requireKeyError(t, err, anyKey, tt.line)
 		})
 	}
 }
@@ -317,7 +317,7 @@ func TestLoadBackend_Secrets(t *testing.T) {
 	})
 	t.Run("agent token of 31 characters", func(t *testing.T) {
 		_, err := LoadBackend(file, []string{tokenVar + "=" + strings.Repeat("t", MinAgentTokenBytes-1)})
-		requireSecretError(t, err, tokenVar)
+		_ = requireSecretError(t, err, tokenVar)
 	})
 	t.Run("agent token of 32 characters", func(t *testing.T) {
 		if _, err := LoadBackend(file, []string{tokenVar + "=" + agentToken}); err != nil {
@@ -342,7 +342,7 @@ func TestLoadBackend_Secrets(t *testing.T) {
 				env = append(env, telegramVar+"_FILE="+write("t2", botToken))
 			}
 			_, err := LoadBackend(file, env)
-			requireSecretError(t, err, tt.want)
+			_ = requireSecretError(t, err, tt.want)
 		})
 	}
 }
@@ -360,13 +360,13 @@ func TestLoadBackend_Environment(t *testing.T) {
 	for _, tt := range rejected {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := LoadBackend(file, []string{tt.env})
-			requireSecretError(t, err, tt.want)
+			_ = requireSecretError(t, err, tt.want)
 			requireNoLeak(t, err, "\n", "\u202E")
 		})
 	}
 	t.Run("same variable twice", func(t *testing.T) {
 		_, err := LoadBackend(file, []string{webHashVar + "=a", webHashVar + "=b"})
-		requireSecretError(t, err, webHashVar)
+		_ = requireSecretError(t, err, webHashVar)
 	})
 	t.Run("unrelated entries are ignored", func(t *testing.T) {
 		if _, err := LoadBackend(file, []string{"PATH=/bin", "NOEQUALS", "VANDOXX=1"}); err != nil {
@@ -394,12 +394,12 @@ func TestLoadBackend_ErrorOrder(t *testing.T) {
 	t.Run("first invalid value in document order", func(t *testing.T) {
 		doc := backendDoc(map[string]string{"web.listen": "'8080'", "log.level": "trace"})
 		_, err := LoadBackend(writeTemp(t, doc), nil)
-		requireKeyError(t, err, "web.listen", 2)
+		_ = requireKeyError(t, err, "web.listen", 2)
 	})
 	t.Run("file error before secret error", func(t *testing.T) {
 		doc := backendDoc(map[string]string{"log.level": "trace"})
 		_, err := LoadBackend(writeTemp(t, doc), []string{"VANDOX_AGENT_TOKN=x"})
-		requireKeyError(t, err, "log.level", 8)
+		_ = requireKeyError(t, err, "log.level", 8)
 	})
 	t.Run("secret error is not a key error", func(t *testing.T) {
 		_, err := LoadBackend(writeTemp(t, ""), []string{"VANDOX_AGENT_TOKN=x"})
@@ -407,6 +407,6 @@ func TestLoadBackend_ErrorOrder(t *testing.T) {
 		if errors.As(err, &ke) {
 			t.Errorf("LoadBackend(bad environment) error = %v, want a *SecretError, not a *KeyError", err)
 		}
-		requireSecretError(t, err, "VANDOX_AGENT_TOKN")
+		_ = requireSecretError(t, err, "VANDOX_AGENT_TOKN")
 	})
 }
