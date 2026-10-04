@@ -125,6 +125,13 @@ is the follow-up issue (*Out of scope / follow-ups*).
 - [ ] AC9: In `.github/workflows/release.yml`, *Check base image pinning* and *Check builder Go version*
   are replaced by the scripts in *Documentation updates* item 8, and the header comment names
   "records 0037, 0039 and 0041". The pinning check fails if any of the following holds:
+  - a line starts with `from` or `arg` in any case, with or without leading white space, unless it is
+    exactly upper-case `FROM`/`ARG` at the start of the line (e.g. `from alpine:latest AS evil`,
+    `  FROM …`, `arg BASE_BUILD_IMAGE=…`, `  ARG BASE_BUILD_TAG=…`);
+  - an `ARG` line declares more than one argument (e.g. `ARG X=1 BASE_BUILD_IMAGE=evil/golang
+    BASE_BUILD_DIGEST=sha256:…`, or `ARG X=1 \` followed by a continuation line);
+  - an `ARG` line ends with `\` or `` ` `` (a continuation, e.g. `ARG X=1\`);
+  - the Dockerfile sets a `syntax` or `escape` parser directive;
   - the Dockerfile has no `FROM` line;
   - a `FROM` line is not `FROM ${BASE_<NAME>_IMAGE}@${BASE_<NAME>_DIGEST}` (optionally `AS <stage>`) with
     the same `<NAME>` twice;
@@ -169,7 +176,7 @@ none under go1.27.0.
 | AC6 | *Format check*, *Build*, `go vet ./...`, *Test*, *Analyzer gate* with golangci-lint v2.13.1 on the PATH, built with Go 1.27: either the release tarball binary (built with go1.27.0) or `GOTOOLCHAIN=go1.27.1 go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.1` — never a plain `go install`, which builds with go1.26 (see related defect 3). Confirm with `golangci-lint version`, which must name `go1.27.x`. Local `go tool govulncheck ./...` cannot reach vuln.go.dev in this sandbox, so state that plainly in the log; it is not a pass. | Code Officer (step 7) |
 | AC7 | GitHub Actions on the PR: `CI` (all three jobs), `CodeQL`, `Release` (dry run, `v0.0.0-dryrun`) | Orchestrator reads the check results in step 11. A red check goes back through steps 7-8 |
 | AC8 | `git diff --name-only origin/main...HEAD`. Allowed: `go.mod`, `go.sum`, `deploy/backend/Dockerfile`, `.github/workflows/release.yml`, `.github/dependabot.yml`, `.squad/stack.md`, `.squad/project.md`, `docs/CONTRIBUTING.md`, `docs/ARCHITECTURE.md`, `docs/decisions/README.md`, `docs/decisions/0036-…` and `0038-…` (status line only, at approval), `docs/decisions/0040-…`, `docs/decisions/0041-…`, `specs/issue-103/*`. `git diff origin/main...HEAD -- .github/workflows/release.yml` touches only the header comment and the two check steps. | Reviewer (step 8) |
-| AC9 | Read-only diff of `release.yml` against item 8. Optionally run the two scripts locally with `bash` from the repository root: both must print nothing and exit 0. The Lead checked the scripts in a scratch copy of the AC2 Dockerfile: they pass there, and each of these six cases fails with an `::error::`: a literal `FROM` with a tag, a non-sha256 digest default, a stage-local ARG with a default, mismatched `<NAME>`s, a builder tag `1.26-trixie`, and `BASE_BUILD_IMAGE` other than `golang`. Finally verified by the release dry run (AC13). | Code Officer runs the scripts in step 7; Reviewer and Security (step 8); CI |
+| AC9 | Read-only diff of `release.yml` against item 8. Optionally run the two scripts locally with `bash` from the repository root: both must print nothing and exit 0. The Lead checked the scripts (revision after Security round 2) in a scratch copy of the AC2 Dockerfile, built from item 7's text: both pass there (exit 0, no output), and each of these fourteen cases exits 1 with an `::error::`: (1) appended `from alpine:latest AS evil`; (2) appended `  FROM alpine:latest AS evil`; (3) `ARG X=1 BASE_BUILD_IMAGE=evil/golang BASE_BUILD_DIGEST=sha256:000…` after the global ARGs; (4) `arg BASE_BUILD_IMAGE=evil/golang`; (5) `  ARG BASE_BUILD_TAG=1.26-trixie`; (6) `ARG X=1 \` plus a continuation line `    BASE_BUILD_DIGEST=sha256:000…`; (7) the same with `ARG X=1\` (no space); (8) `# syntax=evil/frontend:latest` as line 1; (9) ``# escape=` `` as line 1; (10) a literal `FROM` with a tag; (11) a non-sha256 digest default; (12) a stage-local ARG with a default; (13) mismatched `<NAME>`s; (14) a builder tag `1.26-trixie` and `BASE_BUILD_IMAGE` other than `golang` (Go check, one case each). With only Security's two guards, cases 7-9 still pass, which is why the Lead added the last two guards. The Code Officer repeats at least the good case and cases 1-6 in step 7. Finally verified by the release dry run (AC13). | Code Officer runs the scripts in step 7; Reviewer and Security (step 8); CI |
 | AC10 | Read-only diff of `.github/dependabot.yml` | Reviewer (step 8) |
 | AC11 | Read-only diff of the three files; the `rg` command from AC11 | Reviewer (step 8) |
 | AC12 | Read-only comparison of record 0041 with the diff; status and index edits | Lead (step 9) |
@@ -295,6 +302,22 @@ Revision after the PR (SonarQube `docker:S8431`, record 0041). The Dev makes ite
      ```bash
      set -euo pipefail
      f=deploy/backend/Dockerfile
+     if grep -nEi '^[[:space:]]*(from|arg)([[:space:]]|$)' "$f" | grep -vE '^[0-9]+:(FROM|ARG)[[:space:]]'; then
+       echo "::error::FROM and ARG must be upper-case and start at the beginning of the line in $f"
+       exit 1
+     fi
+     if grep -nE '^ARG[[:space:]]+[^[:space:]]+[[:space:]]+[^[:space:]]' "$f"; then
+       echo "::error::each ARG line in $f must declare exactly one argument"
+       exit 1
+     fi
+     if grep -nE '^ARG.*[\\`][[:space:]]*$' "$f"; then
+       echo "::error::an ARG line in $f must not continue onto the next line"
+       exit 1
+     fi
+     if grep -nEi '^#[[:space:]]*(syntax|escape)[[:space:]]*=' "$f"; then
+       echo "::error::$f must not set the syntax or escape parser directive"
+       exit 1
+     fi
      first_from="$(grep -nE '^FROM[[:space:]]' "$f" | head -n1 | cut -d: -f1)"
      if [ -z "$first_from" ]; then
        echo "::error::no FROM line in $f"
@@ -360,7 +383,15 @@ Revision after the PR (SonarQube `docker:S8431`, record 0041). The Dev makes ite
      ```
 
      *Check base image pinning* runs first, so the `BASE_BUILD_*` declarations are already known to be
-     unique by the time this step reads them.
+     unique, upper-case, unindented and one per line by the time this step reads them.
+
+     The four guards at the top of the pinning script come from the Security plan review (round 2, B1)
+     and close bypasses of the line-anchored, upper-case `grep`s below: a lower-case or indented `FROM`
+     that the `^FROM` loop never sees, a lower-case or indented `ARG` that re-declares a default unseen,
+     an `ARG` line that declares several names (Docker accepts `ARG A=1 B=2`), an `ARG` line continued
+     onto the next line with `\` (or with `` ` `` after an `escape` directive), and a `# syntax=` directive,
+     which would let an unpinned frontend image run the whole build. The first two guards are Security's
+     text verbatim; the last two are the Lead's additions for the same class.
    - The step order stays the same, and nothing else in the file changes, in particular *Build image* (AC8).
 9. `docs/CONTRIBUTING.md` (all inside the `releases` project block):
    - Line 81: `[0038](decisions/0038-backend-image-distroless-nonroot-pinned-by-digest.md) and` →
