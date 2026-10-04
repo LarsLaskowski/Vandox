@@ -44,7 +44,7 @@ links the record.
 | [0015](0015-mail-services-checked-not-mail-accounts.md) | Mail services are checked, mail accounts are not | Accepted | 2026-10-03 |
 | [0016](0016-web-ui-in-home-lan-with-login.md) | Web UI reachable in the home LAN with a login | Accepted | 2026-10-03 |
 | [0017](0017-ingest-via-tailnet-address-and-published-port.md) | Ingest via the backend host's tailnet address and a published port, not tsnet | Accepted | 2026-10-03 |
-| [0018](0018-agent-spools-seven-days-and-backfills.md) | The agent spools at least 7 days and backfills gaplessly and idempotently | Accepted | 2026-10-03 |
+| [0018](0018-agent-spools-seven-days-and-backfills.md) | The agent spools at least 7 days and backfills gaplessly and idempotently | Superseded by [0045](0045-batch-identified-by-agent-id-and-record-sequence-numbers.md) | 2026-10-03 |
 | [0019](0019-agent-reads-proc-instead-of-top-lsof.md) | The agent reads /proc itself instead of running top or lsof | Accepted | 2026-10-03 |
 | [0020](0020-analysis-before-alerting-forensics-release.md) | Analysis before alerting — v0.1.0 is the forensics release | Accepted | 2026-10-03 |
 | [0021](0021-no-pseudonymization-of-log-data.md) | No pseudonymization of log data | Accepted | 2026-10-03 |
@@ -68,4 +68,9 @@ links the record.
 | [0039](0039-docker-hub-token-in-a-tag-only-environment.md) | Docker Hub token is repository-scoped and lives in a tag-only GitHub environment | Accepted | 2026-10-04 |
 | [0040](0040-go-1-27-toolchain-and-govulncheck-v1-8.md) | Go 1.27 toolchain without a patch version in go.mod; govulncheck raised to v1.8.0 | Accepted | 2026-10-04 |
 | [0041](0041-base-images-pinned-by-digest-through-build-arguments.md) | Base images pinned by digest through build arguments, tag kept alongside; digests refreshed by hand | Accepted | 2026-10-04 |
+| [0042](0042-wire-format-gzip-json-lines-standard-library.md) | Wire format is gzip-compressed JSON Lines, built on the standard library only | Accepted | 2026-10-04 |
+| [0043](0043-wire-format-major-minor-versioning.md) | Wire format versioned by integer major and minor; unknown majors are rejected before parsing | Accepted | 2026-10-04 |
+| [0044](0044-batch-validated-as-a-whole-agent-records-only.md) | A batch is valid only as a whole, carries only agent records and is bounded by format limits | Accepted | 2026-10-04 |
+| [0045](0045-batch-identified-by-agent-id-and-record-sequence-numbers.md) | The agent spools at least 7 days and backfills; a batch is identified by the agent ID and its records' sequence numbers | Accepted | 2026-10-04 |
+| [0046](0046-batch-header-describes-the-capture-context.md) | The batch header's boot ID and clock offset describe when the records were captured, not when they were sent | Accepted | 2026-10-04 |
 <!-- project:end index -->

@@ -13,8 +13,9 @@ files or endpoints.
 1. **Ingest authentication** (backend ingest API, not implemented yet): the agent token, request limits and
    deduplication. *Goal:* only an agent holding a valid token can store data; the token is compared in
    constant time; request size, batch size and rate are bounded so a valid agent cannot exhaust the
-   backend's memory or disk; a resent batch (same identity and sequence number) is stored once and never
-   overwrites stored data. Records 0018, 0032.
+   backend's memory or disk; a resent record (same agent ID
+   and sequence number), and so a resent batch, is stored once and never overwrites stored data. Records
+   0032, 0044, 0045.
 2. **Tailscale ACL and port binding** (deployment files under `deploy/backend/` and the documented ACL):
    *Goal:* a compromised monitored server can reach only the ingest port on the backend host's tailnet
    address and nothing else in the tailnet or home LAN; the ingest port is bound only to the tailnet
@@ -60,9 +61,9 @@ files or endpoints.
    time, the UI password through its hash function's comparison. Record 0032.
 9. **File writes and paths derived from external input** (log import, the agent's on-disk spool, database
    backups): *Goal:* no write outside the configured directories (no path traversal), the spool is
-   size-bounded, files are created with restrictive permissions. Record 0018.
+   size-bounded, files are created with restrictive permissions. Record 0045.
 10. **Parsing of external input** (log files: journal, syslog, MariaDB, mail, Plesk, web server; the ingest
-    wire format; CLI arguments and configuration; later Telegram commands): *Goal:* malformed or hostile
+    wire format (`internal/wire`: `NewDecoder`, `Decoder.Next`, `wire.Limits`); CLI arguments and configuration; later Telegram commands): *Goal:* malformed or hostile
     input yields an error or a skipped record, never a crash, an unbounded allocation or a hang.
 11. **Outbound calls** (Telegram, external checks, the optional AI service of the nightly report, the
     agent's connection to the backend): *Goal:* every call has a timeout, goes only to its configured
@@ -99,7 +100,7 @@ Deliberate behavior that must not change without the Product Manager. Each one i
 - **No data gaps unless explicitly recorded**: collection is gapless across backend downtime (spool and
   backfill); data that is nevertheless missing (agent stopped, spool full, collector timed out, sequence
   numbers missing) is recorded as a gap and treated as "unknown", never as "normal". `docs/ARCHITECTURE.md`
-  section *Offline behavior and backfill*; records 0018, 0028.
+  section *Offline behavior and backfill*; records 0028, 0045.
 - **A hanging collector or database never blocks the agent**: every collector runs in its own goroutine
   under a deadline and is abandoned when the deadline passes (a blocked `/proc` or `/sys` read cannot be
   cancelled, only abandoned; sources that take a context also get it); a hung source (`/proc`, `/sys`,

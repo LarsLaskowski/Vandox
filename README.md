@@ -18,7 +18,9 @@ Both support `--version`, which prints version, commit and build date.
 ```
 cmd/vandox-agent/   entry point of the agent
 cmd/vandoxd/        entry point of the backend
-internal/           shared packages (data model, log parsing, signatures, ...)
+internal/model/     shared record types and their validation
+internal/wire/      versioned batch format, see docs/WIRE_FORMAT.md
+internal/           further shared packages (log parsing, signatures, ...)
 deploy/agent/       deployment files for the agent
 deploy/backend/     deployment files for the backend
 docs/               documentation

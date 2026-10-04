@@ -5,7 +5,8 @@ Vandox is lean monitoring for a Plesk-managed Linux server, with analysis first:
 from logs and system metrics and warns early. `vandox-agent` runs on the monitored server; `vandoxd`, the
 backend with web UI, runs as a Docker container on any Docker host in the home network (for example a NAS such as Synology or QNAP, a mini PC or a server; called the *backend host* below).
 
-This document describes the target architecture; as of now only the two binaries' `--version` exist, and
+This document describes the target architecture; as of now the binaries' `--version` and the shared data model and wire format
+(`internal/model`, `internal/wire`, not yet used by the binaries) exist, and
 sections are marked as implemented as features land. The decisions behind it are recorded in
 [`docs/decisions/`](decisions/README.md); each section links the records it rests on. Vandox is an own
 project rather than an off-the-shelf stack ([0004](decisions/0004-own-project-instead-of-off-the-shelf-stack.md)).
@@ -29,8 +30,8 @@ way, and agents of the hosting provider are never disabled or changed
   as a gap, and a collector that is still stuck is not started again.
 - `cmd/vandoxd` — Go, one container on the backend host: ingest API, SQLite storage, analysis, rules, Telegram
   notifier, reports and web UI.
-- `internal/` — packages shared by both binaries: data model and versioned wire format, log parsing,
-  signatures, version information, command-line handling.
+- `internal/` — packages shared by both binaries: data model and versioned wire format (see
+  [`WIRE_FORMAT.md`](WIRE_FORMAT.md)), log parsing, signatures, version information, command-line handling.
 
 Importing historical logs (including the legacy `top`/`lsof` log) and continuously shipping new log lines are
 core parts of Vandox. Both binaries are written in Go in one module.
@@ -63,7 +64,10 @@ Records: [0004](decisions/0004-own-project-instead-of-off-the-shelf-stack.md),
 [0015](decisions/0015-mail-services-checked-not-mail-accounts.md),
 [0019](decisions/0019-agent-reads-proc-instead-of-top-lsof.md),
 [0027](decisions/0027-project-name-and-docker-image.md),
-[0029](decisions/0029-hanging-collector-never-blocks-the-agent.md).
+[0029](decisions/0029-hanging-collector-never-blocks-the-agent.md),
+[0042](decisions/0042-wire-format-gzip-json-lines-standard-library.md),
+[0043](decisions/0043-wire-format-major-minor-versioning.md),
+[0044](decisions/0044-batch-validated-as-a-whole-agent-records-only.md).
 
 ## Data flow
 
@@ -129,17 +133,20 @@ Records: [0010](decisions/0010-tailscale-with-strict-acl.md),
 The backend host runs 24/7 but is sometimes switched off at night (typically 22:00–09:00) a few times a year. While
 the backend is unreachable the agent keeps collecting and spools at least 7 days on disk. When the backend
 is reachable again it sends current data first, then backfills the spool chronologically and throttled.
-Every batch carries an identity and sequence number, so a resend is idempotent and the backend can detect
-gaps. `vandoxd` classifies every record as live or backfilled from its capture time, its receive time and
+Every agent record carries a sequence number from a persistent per-agent counter, and every batch the
+agent's ID; a batch is identified by the agent ID and the sequence numbers of its records, so a resend is
+idempotent (the backend stores each agent ID and sequence number once) and the backend can detect gaps. `vandoxd` classifies every record as live or backfilled from its capture time, its receive time and
 gaps in the sequence numbers; alert rules are evaluated on live data only, and backfilled data is stored and
 analyzed but never alerts. The nightly report waits for the backfill if the backend host was off at 06:00. Data that is
 nevertheless lost (agent stopped, spool full, collector timed out) is recorded as a gap, so there are no
 data gaps unless explicitly recorded.
 
-Records: [0018](decisions/0018-agent-spools-seven-days-and-backfills.md),
-[0022](decisions/0022-backfill-detection-and-live-only-alerts.md),
+Records: [0022](decisions/0022-backfill-detection-and-live-only-alerts.md),
 [0024](decisions/0024-nightly-report-timing.md),
-[0028](decisions/0028-data-gaps-are-always-recorded.md).
+[0028](decisions/0028-data-gaps-are-always-recorded.md),
+[0044](decisions/0044-batch-validated-as-a-whole-agent-records-only.md),
+[0045](decisions/0045-batch-identified-by-agent-id-and-record-sequence-numbers.md),
+[0046](decisions/0046-batch-header-describes-the-capture-context.md).
 
 ## Storage and retention
 
