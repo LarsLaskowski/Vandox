@@ -3,8 +3,14 @@
 package config
 
 import (
-	"errors"
 	"fmt"
+	"io"
+	"net"
+	"net/netip"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
 )
 
 // File locations, limits and environment variables.
@@ -39,29 +45,112 @@ type KeyError struct {
 	Reason string // never contains the value or any other document text
 }
 
-// Error returns "config: <File>:<Line>: <Key>: <Reason>".
+// Error returns "config: <File>:<Line>: <Key>: <Reason>". The line is left out when it is 0 and the key
+// when it is empty.
 func (e *KeyError) Error() string {
-	return fmt.Sprintf("config: %s: %s", e.File, e.Reason)
+	var b strings.Builder
+	b.WriteString("config: ")
+	b.WriteString(e.File)
+	if e.Line > 0 {
+		b.WriteString(":")
+		b.WriteString(strconv.Itoa(e.Line))
+	}
+	b.WriteString(": ")
+	if e.Key != "" {
+		b.WriteString(e.Key)
+		b.WriteString(": ")
+	}
+	b.WriteString(e.Reason)
+	return b.String()
 }
 
-var errNotImplemented = errors.New("not implemented")
+// keyError returns a *KeyError for key, at the line the decoder recorded for it (0 when it was not set).
+func keyError(file string, lines map[string]int, key, reason string) *KeyError {
+	return &KeyError{File: file, Line: lines[key], Key: key, Reason: reason}
+}
 
-// readFile reads the regular file at path, at most limit bytes.
+// requireKey fails when the file did not set key.
+func requireKey(file string, lines map[string]int, key string) error {
+	if lines[key] == 0 {
+		return &KeyError{File: file, Key: key, Reason: "required key is missing"}
+	}
+	return nil
+}
+
+// readFile reads the regular file at path, at most limit bytes. The path is checked before it is opened,
+// so a FIFO cannot block the read.
 func readFile(path string, limit int64) ([]byte, error) {
-	return nil, errNotImplemented
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, fmt.Errorf("config: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("config: %s: not a regular file", path)
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("config: %w", err)
+	}
+	defer func() { _ = f.Close() }()
+	data, err := io.ReadAll(io.LimitReader(f, limit+1))
+	if err != nil {
+		return nil, fmt.Errorf("config: %s: %w", path, err)
+	}
+	if int64(len(data)) > limit {
+		return nil, fmt.Errorf("config: %s: file is larger than %d bytes", path, limit)
+	}
+	return data, nil
 }
 
 // checkDirectory checks that value is an absolute, clean directory path.
 func checkDirectory(file string, lines map[string]int, key, value string) error {
-	return errNotImplemented
+	if !filepath.IsAbs(value) || filepath.Clean(value) != value {
+		return keyError(file, lines, key, "must be an absolute, clean path (no trailing slash, no . or .. elements)")
+	}
+	return nil
 }
 
 // checkListen checks that value is a listen address with a port of 1 to 65535 and returns the port.
 func checkListen(file string, lines map[string]int, key, value string) (port uint16, err error) {
-	return 0, errNotImplemented
+	const reason = "must be [host]:port with an empty host or an IP address and a port of 1 to 65535"
+	host, portText, splitErr := net.SplitHostPort(value)
+	if splitErr != nil {
+		return 0, keyError(file, lines, key, reason)
+	}
+	if host != "" {
+		if _, parseErr := netip.ParseAddr(host); parseErr != nil {
+			return 0, keyError(file, lines, key, reason)
+		}
+	}
+	port, ok := parsePort(portText)
+	if !ok {
+		return 0, keyError(file, lines, key, reason)
+	}
+	return port, nil
+}
+
+// parsePort converts 1 to 5 ASCII digits to a port of 1 to 65535. A sign, a space or a name is not accepted.
+func parsePort(text string) (uint16, bool) {
+	if len(text) < 1 || len(text) > 5 {
+		return 0, false
+	}
+	for i := 0; i < len(text); i++ {
+		if text[i] < '0' || text[i] > '9' {
+			return 0, false
+		}
+	}
+	n, err := strconv.ParseUint(text, 10, 16)
+	if err != nil || n == 0 {
+		return 0, false
+	}
+	return uint16(n), true
 }
 
 // checkLogLevel checks that value is one of debug, info, warn and error.
 func checkLogLevel(file string, lines map[string]int, key, value string) error {
-	return errNotImplemented
+	switch value {
+	case "debug", "info", "warn", "error":
+		return nil
+	}
+	return keyError(file, lines, key, "must be one of debug, info, warn, error")
 }

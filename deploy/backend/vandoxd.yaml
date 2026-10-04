@@ -1,0 +1,31 @@
+# Configuration of vandoxd. Default location: /etc/vandox/vandoxd.yaml (mount the file into the container).
+#
+# The file is parsed strictly: an unknown key, a duplicate key, a second YAML document, an anchor, a
+# custom tag or an invalid value stops the backend at start-up, and the error names the file, the line and
+# the key. Every key is optional; the values below are the defaults.
+#
+# Secrets NEVER go into this file. They are read from the environment of the container (or, for a Docker
+# secret, from a file whose absolute path is given in the variable with the _FILE suffix). Set either the
+# variable or its _FILE form, not both:
+#
+#   VANDOX_AGENT_TOKEN           token the agents present (at least 32 printable ASCII characters)
+#   VANDOX_WEB_PASSWORD_HASH     password hash of the web UI (printable ASCII, for example an argon2id PHC string)
+#   VANDOX_TELEGRAM_BOT_TOKEN    token of the Telegram bot used for alerts
+#   (each also as VANDOX_..._FILE)
+
+web:
+  # Address of the web UI as [host]:port. The host is empty (all interfaces) or an IP address, the port is
+  # 1 to 65535 and differs from the ingest port. Default: :8080
+  listen: :8080
+
+ingest:
+  # Address of the ingest endpoint the agents send to, same format as web.listen. Default: :8081
+  listen: :8081
+
+storage:
+  # Directory where the backend keeps its data. An absolute, clean path (no trailing slash). Default: /data
+  directory: /data
+
+log:
+  # Log level: debug, info, warn or error. Default: info
+  level: info
