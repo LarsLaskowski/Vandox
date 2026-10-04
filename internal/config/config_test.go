@@ -60,6 +60,21 @@ func requireNoLeak(t *testing.T, err error, forbidden ...string) {
 	}
 }
 
+// requireNoLeakBesidesFile replaces every occurrence of file in the text of err with "<file>" and fails the
+// test if the remaining text contains any of the forbidden strings. It returns early when err is nil.
+func requireNoLeakBesidesFile(t *testing.T, err error, file string, forbidden ...string) {
+	t.Helper()
+	if err == nil {
+		return
+	}
+	text := strings.ReplaceAll(err.Error(), file, "<file>")
+	for _, f := range forbidden {
+		if strings.Contains(text, f) {
+			t.Errorf("error text %q contains %q, want it absent", text, f)
+		}
+	}
+}
+
 // requireSecretError fails the test unless err is a *SecretError. When v is not anyKey, the variable must match.
 func requireSecretError(t *testing.T, err error, v string) *SecretError {
 	t.Helper()

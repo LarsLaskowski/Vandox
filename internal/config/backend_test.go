@@ -158,12 +158,13 @@ func TestLoadBackend_InvalidValues(t *testing.T) {
 		for _, v := range values {
 			t.Run(key+" "+truncate(v), func(t *testing.T) {
 				doc := backendDoc(map[string]string{key: v})
-				got, err := LoadBackend(writeTemp(t, doc), nil)
+				path := writeTemp(t, doc)
+				got, err := LoadBackend(path, nil)
 				if got != nil {
 					t.Errorf("LoadBackend(%q) = %+v, want nil on error", doc, got)
 				}
 				requireKeyError(t, err, key, backendLine[key])
-				requireNoLeak(t, err, sentinel, "\u202E", "\u2028")
+				requireNoLeakBesidesFile(t, err, path, sentinel, "\u202E", "\u2028")
 			})
 		}
 	}

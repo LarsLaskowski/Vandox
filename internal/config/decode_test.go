@@ -2,6 +2,7 @@ package config
 
 import (
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -276,10 +277,13 @@ func TestDecodeStrict_ParserErrors(t *testing.T) {
 			if u := errors.Unwrap(err); u != nil {
 				t.Errorf("errors.Unwrap(err) = %v, want nil (no yaml text passed through)", u)
 			}
-			if !strings.HasPrefix(err.Error(), "config: test.yaml:") {
-				t.Errorf("err.Error() = %q, want it to begin with %q", err.Error(), "config: test.yaml:")
+			want := "config: test.yaml: " + wantReason
+			if ke.Line != 0 {
+				want = fmt.Sprintf("config: test.yaml:%d: %s", ke.Line, wantReason)
 			}
-			requireNoLeak(t, err, sentinel, "yaml:", "unknown anchor")
+			if got := err.Error(); got != want {
+				t.Errorf("err.Error() = %q, want %q", got, want)
+			}
 		})
 	}
 }

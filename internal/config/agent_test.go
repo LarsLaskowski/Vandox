@@ -241,12 +241,13 @@ func TestLoadAgent_InvalidValues(t *testing.T) {
 		for _, v := range values {
 			t.Run(key+" "+truncate(v), func(t *testing.T) {
 				doc := agentDoc(map[string]string{key: v})
-				got, err := LoadAgent(writeTemp(t, doc), agentEnv())
+				path := writeTemp(t, doc)
+				got, err := LoadAgent(path, agentEnv())
 				if got != nil {
 					t.Errorf("LoadAgent(%q) = %+v, want nil on error", doc, got)
 				}
 				requireKeyError(t, err, key, agentLine[key])
-				requireNoLeak(t, err, sentinel)
+				requireNoLeakBesidesFile(t, err, path, sentinel)
 			})
 		}
 	}
@@ -260,14 +261,15 @@ func TestLoadAgent_ControlCharacters(t *testing.T) {
 		for _, v := range values {
 			t.Run(key+" "+v, func(t *testing.T) {
 				doc := agentDoc(map[string]string{key: v})
-				_, err := LoadAgent(writeTemp(t, doc), agentEnv())
+				path := writeTemp(t, doc)
+				_, err := LoadAgent(path, agentEnv())
 				requireKeyError(t, err, key, agentLine[key])
-				requireNoLeak(t, err, sentinel, "\u202E", "\u2028", "\n")
+				requireNoLeakBesidesFile(t, err, path, sentinel, "\u202E", "\u2028", "\n")
 			})
 		}
 	}
 	t.Run("block scalar with a newline", func(t *testing.T) {
-		doc := agentDoc(map[string]string{"log.level": "|\n  " + sentinel})
+		doc := agentDoc(map[string]string{"log.level": "|\n    " + sentinel})
 		_, err := LoadAgent(writeTemp(t, doc), agentEnv())
 		requireKeyError(t, err, "log.level", agentLine["log.level"])
 		requireNoLeak(t, err, sentinel)

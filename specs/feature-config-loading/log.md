@@ -15,3 +15,4 @@ One line per pipeline step: date, step, member, result. Lead decisions and escal
 | 2026-10-04 | 5 Tests first | squad-tester | Tests for internal/config and wire.ValidateAgentID written; verified: compile, vet clean, fail on stubs (only 2 trivially passing subtests justified) |
 | 2026-10-04 | 6 Implement | squad-dev | Implemented; coverage gate passes (changed code 93.8%); 4 test functions disputed (sentinel in t.TempDir path, 'yaml:' substring vs test.yaml filename, block-scalar indent) |
 | 2026-10-04 | 6 Lead decide | squad-lead | All 3 disputes are test defects; Tester fixes (new helper requireNoLeakBesidesFile, exact text comparison for parser errors, 4-space block scalar indent); no code change, no record |
+| 2026-10-04 | 6 Tests fixed | squad-tester | Three test defects fixed per Lead decision; verified: go test ./... -race green, coverage gate PASS (changed 93.8%, overall 95.9%) |
