@@ -1,6 +1,6 @@
 # 0040: Go 1.27 toolchain; `go` directive without a patch version; govulncheck raised to v1.8.0
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-04
 - **Source:** Issue #103
 - **Supersedes:** —

@@ -66,4 +66,5 @@ links the record.
 | [0037](0037-release-workflow-with-plain-go-docker-and-gh.md) | Release workflow built from plain go build, the Docker CLI and gh; verified once, published as built | Accepted | 2026-10-04 |
 | [0038](0038-backend-image-distroless-nonroot-pinned-by-digest.md) | Backend image on distroless static, non-root, base images pinned by digest; version tags without "v" | Accepted | 2026-10-04 |
 | [0039](0039-docker-hub-token-in-a-tag-only-environment.md) | Docker Hub token is repository-scoped and lives in a tag-only GitHub environment | Accepted | 2026-10-04 |
+| [0040](0040-go-1-27-toolchain-and-govulncheck-v1-8.md) | Go 1.27 toolchain without a patch version in go.mod; govulncheck raised to v1.8.0 | Accepted | 2026-10-04 |
 <!-- project:end index -->
