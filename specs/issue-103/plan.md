@@ -182,7 +182,8 @@ No guarantee from `docs/ARCHITECTURE.md` or `.squad/project.md` is weakened:
 - **Supply chain.** The builder digest comes from Docker Hub's official `library/golang` repository. I
   verified it by hashing the raw index body against `docker-content-digest`. Security should re-read it
   independently in step 8. The x/vuln update brings new `golang.org/x/*` versions (official Go
-  sub-repositories) and three test-only modules in `go.sum` (`google/go-cmdtest`, `go-cmp`, `renameio`).
+  sub-repositories) and five test-only modules in `go.sum` (`google/go-cmdtest`, `go-cmp`, `renameio`,
+  and the deprecated `golang.org/x/tools/go/expect` and `golang.org/x/tools/go/packages/packagestest`).
   None of them is linked into either binary: they are dependencies of the `tool` only, and
   `go version -m` on the binaries should show no `golang.org/x` modules.
 - **Vulnerability gate stays effective.** Without the tool update, govulncheck panics under 1.27 when a

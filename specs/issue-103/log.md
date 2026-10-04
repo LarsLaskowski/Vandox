@@ -16,3 +16,4 @@ One line per pipeline step: date, step, member, result. Lead decisions and escal
 | 2026-10-04 | 8 Fix | Dev | Both non-blocking wording findings fixed now; delta review follows |
 | 2026-10-04 | 8 Review round 2 (delta) | Reviewer | both findings resolved; 1 new non-blocking (Lstat missing from ReadLinkFS note) |
 | 2026-10-04 | 8 Fix | Dev | project.md:149 now names fs.ReadLinkFS (ReadLink and Lstat); one-line wording, covered by Lead's approve-pr check |
+| 2026-10-04 | 8 Review round 3 (delta) | Reviewer | APPROVE, no findings |
