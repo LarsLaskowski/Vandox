@@ -46,6 +46,10 @@ All `FieldError` assertions check `errors.Is(err, model.ErrInvalid)` and the exa
 
 - [ ] AC1 `FieldError`: `Error()` returns `"model: <Field>: <Reason>"` (and `"model: <Reason>"` when
   `Field` is empty); `errors.Is(fe, model.ErrInvalid)` is true; `errors.As` recovers `Field` and `Reason`.
+  `QuoteName`: `"mount"` → `"\"mount\""`; `"a\nb"` → `"\"a\\nb\""` (Go literals; the result holds no byte
+  below 0x20); a key of `MaxNameBytes` bytes is quoted whole without marker; a key of `MaxNameBytes`+1 and
+  of 5000 bytes → `strconv.Quote(key[:MaxNameBytes]) + "..."`; a key whose cut falls inside a multi-byte
+  rune is quoted with the partial bytes as `\x..` escapes (deterministic, no panic); `""` → `"\"\""`.
 - [ ] AC2 `Meta.Validate`: a valid agent meta passes; `origin` not one of `agent`/`import`/`backend` →
   field `origin`; `source` empty, longer than `MaxNameBytes`, or not matching the name pattern (e.g.
   `"-x"`, `"a b"`, `"a\n"`) → field `source`; zero `captured_at` → field `captured_at`; `captured_at` with
@@ -60,7 +64,16 @@ All `FieldError` assertions check `errors.Is(err, model.ErrInvalid)` and the exa
   and each rule in the payload table under *Approach* violated on its own fails with exactly the listed
   field path (table-driven, one case per rule). Every type's `Kind()` returns its constant. AC4
   `MetricPoint`, AC5 `ProcessSnapshot`, AC6 `ConnectionSnapshot`, AC7 `ServiceState`, AC8 `MariaDBStatus`,
-  AC9 `KernelEvent`, AC10 `LogLine`, AC11 `Gap`.
+  AC9 `KernelEvent`, AC10 `LogLine`, AC11 `Gap`. Map-key paths are rendered with `QuoteName` and checked
+  exactly: AC4 a label key `"a\nb"` → `Field == "labels[\"a\\nb\"]"` (Go literal, i.e. the text
+  `labels["a\nb"]` with a backslash, no newline byte); a 200-byte label key of `k` → `Field ==
+  "labels[" + strconv.Quote(strings.Repeat("k", 128)) + "...]"`; an over-long label value under a valid key
+  `mount` → `labels["mount"]`. AC8 the same two key cases for `status[…]` and `variables[…]`. AC6 zone
+  cases, each rejected with reason `zone not allowed` and the listed field: `remotes[0].addr` =
+  `fe80::1%eth0`, `listeners[0].local` = `[fe80::1%eth0]:80`, `connections[0].local` and
+  `connections[0].remote` each with a zone containing `\n`, a 5000-byte zone, and a zone containing `]:`
+  (`[fe80::1%x]:]:80`); an IPv4-mapped address with a zone (`::ffff:1.2.3.4%eth0`) is rejected too; the same
+  addresses without zone pass.
 
 **Wire (`internal/wire`)**
 
@@ -114,7 +127,17 @@ All `FieldError` assertions check `errors.Is(err, model.ErrInvalid)` and the exa
 - [ ] AC17 Malformed input: every form marked *rejected* in the *Accepted forms* table returns an error of
   the listed class from `NewDecoder` or `Next` (with the listed `Line` where given) and never panics; every
   form marked *accepted* decodes. Unknown `kind` (e.g. `"Metric"`, `"backup_run"`) and missing/empty
-  `kind` → `wire.ErrUnknownKind`; missing `data` and `"data": null` → field `data`.
+  `kind` → `wire.ErrUnknownKind`; missing `data` and `"data": null` → field `data`. The error text for
+  an unknown kind is `"wire: line <n>: unknown record kind: " + model.QuoteName(kind)`; a 5000-byte kind
+  containing `\n` yields exactly that text (cut to `MaxNameBytes` with `...`, no newline byte). A
+  connection snapshot line whose `remotes[0].addr` is `"fe80::1%\n<b>x]:"`, whose
+  `listeners[0].local` has a 5000-byte zone, or whose `connections[0].remote` is `"[fe80::1%x]:]:80"` →
+  field `data.<list>[0].<addr|local|remote>` (reason `zone not allowed`). Unicode-folded keys: a record line
+  with the keys `"Kind"` (KELVIN SIGN) and `"ſeq"` (LONG S) decodes as `kind` and `seq`
+  (documented, accepted); a line with `"kind":"gap"` followed by `"Kind":"metric"` decodes as
+  `metric` (last key wins across folded spellings). A `status` key `"evil\nkey<script>"` with a string
+  value → `ErrMalformed` (the wrapped `encoding/json` text carries the raw key; the test asserts only the
+  class, not the text).
 - [ ] AC18 Limits, each tested with small explicit limits: a line of exactly `MaxLineBytes` bytes is
   read, one byte more → `wire.ErrLimitExceeded`; decompressed content beyond `MaxBatchBytes` (a small
   gzip of many zero-padded or repeated lines) → `wire.ErrLimitExceeded`; `MaxRecords + 1` records →
@@ -166,9 +189,18 @@ Two packages, both standard library only (0042):
 - **Floats**: finite (`!math.IsNaN && !math.IsInf`); percentages and rates additionally ≥ 0.
 - **Unknown vs zero**: an optional measurement that may be unknown is a pointer (`*uint64`, `*int16`,
   `*time.Duration`, `*uint8`) with `omitempty`; nil means "not known", never 0 (spirit of 0028).
-- Field paths: JSON names, list index in brackets, map key in brackets: `processes[3].pid`,
-  `labels[mount]`, `status[Uptime]`. Payload `Validate` returns paths relative to the payload;
-  `Record.Validate` prefixes `data.`.
+- Field paths: JSON names, list index in brackets, map key in brackets rendered with `QuoteName`:
+  `processes[3].pid`, `labels["mount"]`, `status["Uptime"]`. `QuoteName(key)` cuts the key to its first
+  `MaxNameBytes` bytes (a byte cut; a split rune becomes `\x..` escapes), quotes it with `strconv.Quote`
+  and appends `...` after the closing quote if it was cut. A map key is attacker-controlled and is the only
+  value that ever enters a `Field`; quoted and cut it carries no control byte and at most
+  `4 × MaxNameBytes + 5` bytes. Payload `Validate` returns paths relative to the payload; `Record.Validate`
+  prefixes `data.`.
+- **Addresses**: numeric `netip.Addr` / `netip.AddrPort`, valid, and **without zone** (`Zone() == ""`, also
+  for IPv4-mapped IPv6). `netip` accepts any zone text of any length (including `\n`, `]:` and 5000
+  bytes), and a zone names an interface of the sending host that means nothing to the backend, so the model
+  rejects it (reason `zone not allowed`) instead of bounding it; the producer strips the zone (the
+  link-local address itself is kept).
 
 ### Meta (every record)
 
@@ -187,7 +219,7 @@ Required means non-empty / non-zero. Each row is one test case at least.
 
 **`MetricPoint`** (`metric`): `name` required, name pattern → `name`; `value` finite → `value`; `unit`
 optional, name pattern → `unit`; `labels` ≤ `MaxLabels` → `labels`; each key name pattern →
-`labels[<key>]`; each value short text → `labels[<key>]`. Counters are named with suffix `_total`
+`labels[<QuoteName(key)>]`; each value short text → `labels[<QuoteName(key)>]`. Counters are named with suffix `_total`
 (documented convention, not validated).
 
 **`ProcessSnapshot`** (`process_snapshot`): fields `complete bool` (true only if `processes` holds every
@@ -216,11 +248,12 @@ valid (a server with no sockets is a fact, not an error).
 NEW_SYN_RECV`; `state` for `tcp`/`tcp6` required and in the set, for `udp`/`udp6` empty or in the set →
 `<list>[i].state`. `count` ≥ 1 → `<list>[i].count`.
 `StateCount{proto, state, count}`; `ProcessConnections{pid > 0, command required short text, count}`;
-`RemoteCount{addr netip.Addr valid, count}` → `remotes[i].addr`; `Listener{proto, local netip.AddrPort
-valid, pid ≥ 0, command short text}` → `listeners[i].local`; `Connection{proto, local, remote
-netip.AddrPort valid, state, pid ≥ 0, command short text}` → `connections[i].local` / `.remote`.
-Addresses are numeric; mapping a source's notation is the producer's job and is stated in
-`docs/WIRE_FORMAT.md`: a wildcard local address (`*` in `lsof`) becomes `0.0.0.0` for IPv4 and `::` for
+`RemoteCount{addr netip.Addr valid, no zone, count}` → `remotes[i].addr`; `Listener{proto, local
+netip.AddrPort valid, no zone, pid ≥ 0, command short text}` → `listeners[i].local`; `Connection{proto,
+local, remote netip.AddrPort valid, no zone, state, pid ≥ 0, command short text}` → `connections[i].local`
+/ `.remote` (invalid and zoned addresses fail on the same path; reasons `invalid address` / `zone not
+allowed`). Addresses are numeric without zone; mapping a source's notation is the producer's job and is
+stated in `docs/WIRE_FORMAT.md`: a zone (`fe80::1%eth0`) is stripped; a wildcard local address (`*` in `lsof`) becomes `0.0.0.0` for IPv4 and `::` for
 IPv6 sockets; a port given as a service name (legacy `lsof -ni` without `-P`, issue #20) is mapped to its
 number by the producer from a built-in table, never by a lookup on the host; a socket whose address or port
 cannot be mapped is left out with a warning and the snapshot's `complete` set to false; an unconnected
@@ -239,7 +272,8 @@ time → `active_enter_at`; `restarts uint32`.
 `threads []MariaDBThread`, each ≤ `MaxItems` → the name; `complete bool` (true only if `status`,
 `variables` and `threads` hold every entry the producer read; false for a configured subset or a reduction
 for size, 0044; no rule); keys `^[A-Za-z][A-Za-z0-9_]*$` ≤ `MaxNameBytes` →
-`status[<key>]` / `variables[<key>]`; variable values short text → `variables[<key>]`; when availability is
+`status[<QuoteName(key)>]` / `variables[<QuoteName(key)>]`; variable values short text →
+`variables[<QuoteName(key)>]`; when availability is
 not `up`, `status`, `variables` and `threads` must be empty → `availability`.
 `MariaDBThread`: `id uint64`, `user`, `host`, `db`, `command`, `state` short text → `threads[i].<field>`;
 `time_seconds uint64`; `info` text → `threads[i].info`; `truncated bool` (the producer shortened `info`).
@@ -300,7 +334,8 @@ and `sequence_missing` → `first_seq`. Origin rule in `Record.Validate` (AC3): 
   → `ErrUnsupportedVersion`; then unmarshal the full `Header` and `Validate` it.
 - `Next`: reads one line, `json.Unmarshal` into an unexported envelope with `Data json.RawMessage`;
   missing/`null` data → `FieldError{Field:"data"}`; looks the kind up in an unexported kind → constructor
-  table (unknown → `ErrUnknownKind`); unmarshals `data` into the payload; sets `Origin = OriginAgent`;
+  table (unknown → `fmt.Errorf("%w: %s", ErrUnknownKind, model.QuoteName(kind))`, so the kind in the text
+  is cut to `MaxNameBytes` and quoted); unmarshals `data` into the payload; sets `Origin = OriginAgent`;
   `Record.Validate`; checks the sequence order and the record count. At end of input it surfaces any
   scanner/gzip error (CRC, truncation, trailing bytes) as `ErrMalformed`, returns `ErrEmptyBatch` if no
   record was read, otherwise `io.EOF`. Errors are wrapped in `*DecodeError{Line, Err}` and sticky.
@@ -336,6 +371,8 @@ K = `ErrUnknownKind`, F = `model.ErrInvalid` with field, L = `ErrLimitExceeded`)
 | Line is `null` | unmarshals to the zero struct | header: rejected V (no `format_major`); record: rejected K (empty kind) |
 | Line is an array, string or number | type error | rejected M |
 | Keys in other case (`FORMAT_MAJOR`, `Kind`, `DATA`) | matched case-insensitively | accepted as the field |
+| Keys with Unicode case-folding equivalents (`"Kind"` KELVIN SIGN for `k`, `"ſeq"` LONG S for `s`) | `encoding/json` folds them like ASCII case (struct field names only, not map keys) | accepted as the field; a folded duplicate takes part in last-key-wins; documented in `docs/WIRE_FORMAT.md` because `jq` shows a different key than the decoder uses |
+| Map keys (`labels`, `status`, `variables`) with control characters, `<`, or over `MaxNameBytes` | kept as-is by `encoding/json` | rejected F by the key pattern; the path shows the key through `QuoteName` (quoted, cut); a type error inside such a map is rejected M and the wrapped `encoding/json` text carries the raw key |
 | Duplicate keys | last one wins (same parser in the version pre-read and the full read, so both agree) | validated as the last value |
 | Unknown keys (any nesting depth ≤ the JSON depth limit 10000) | ignored | accepted (0043); `origin`, `received_at` ignored too (0044) |
 | `format_major` missing, `null`, 0, negative, ≠ 1 | pre-read | rejected V, line 1 |
@@ -354,14 +391,16 @@ K = `ErrUnknownKind`, F = `model.ErrInvalid` with field, L = `ErrLimitExceeded`)
 | Strings with invalid UTF-8 bytes | replaced by U+FFFD | accepted (documented, 0042) |
 | Strings with escaped control characters (`\u0000`, `\n`) | decoded as such | accepted where the field is text; rejected F where a name pattern applies |
 | Address `""`, hostname (`host:80`), missing port | `""` → zero value (then F), others parse error | rejected F / M |
-| Address with zone (`[fe80::1%eth0]:80`), IPv4-mapped IPv6 | parsed | accepted |
+| Address with zone (`fe80::1%eth0`, `[fe80::1%eth0]:80`, `::ffff:1.2.3.4%eth0`), including a zone with `\n`, `]:` or 5000 bytes | parsed, any zone text accepted by `netip` | rejected F `<list>[i].addr` / `.local` / `.remote`, reason `zone not allowed` |
+| Empty zone (`fe80::1%`), zone on plain IPv4 (`1.2.3.4%eth0`) | parse error | rejected M |
+| IPv4-mapped IPv6 without zone (`::ffff:1.2.3.4`) | parsed | accepted |
 | Boot ID / agent ID / names in other forms (upper case, braces, `urn:uuid:`, trailing newline) | exact pattern | rejected F |
 
 ## Affected projects and types
 
 | Project | Type / file | Change |
 | ------- | ----------- | ------ |
-| `internal/model` | `model.go` | new: package doc, bounds, `Kind`, `Origin`, `Meta`, `Record`, `Payload`, `ErrInvalid`, `FieldError`, unexported pattern/text/time helpers |
+| `internal/model` | `model.go` | new: package doc, bounds, `Kind`, `Origin`, `Meta`, `Record`, `Payload`, `ErrInvalid`, `FieldError`, `QuoteName`, unexported pattern/text/time/address helpers |
 | `internal/model` | `metric.go`, `process.go`, `connection.go`, `service.go`, `mariadb.go`, `kernel.go`, `logline.go`, `gap.go` | new: one payload type (plus its element types) per file |
 | `internal/wire` | `wire.go` | new: package doc, version constants, `Mode`, `Header`, `NewHeader`, `Batch`, `Limits`, `DefaultLimits`, sentinel errors (including `ErrRecordTooLarge`), `DecodeError`, `RecordSizeError` |
 | `internal/wire` | `encode.go` | new: `EncodeBatch`, `CheckRecord`, unexported envelope and line marshalling shared by both |
@@ -419,6 +458,10 @@ type FieldError struct {
 
 func (e *FieldError) Error() string
 func (e *FieldError) Unwrap() error // returns ErrInvalid
+
+// QuoteName returns s for use in a field path or error message: cut to its first MaxNameBytes bytes,
+// quoted with strconv.Quote, followed by "..." when it was cut.
+func QuoteName(s string) string
 
 type Payload interface {
 	Kind() Kind
@@ -871,13 +914,20 @@ All by the Dev:
   trusted than `captured_at` (0046). Not covered here and left to #40 (stated in `docs/WIRE_FORMAT.md`):
   the header's `agent_id` must be checked against the agent the token belongs to, and deduplication by
   (agent ID, sequence number).
-- Secrets: none in the format (the token travels in the HTTP request, #40, 0032). Error text: a
-  `FieldError` reason and the wire package's own messages name the field path, the line number and the
-  offending kind (quoted with `%q`) or version, never a field's value or a whole line. Wrapped parser errors
-  are different: `time` and `netip` quote the offending string (`parsing time "…"`, `ParseAddr("…")`) and
-  `encoding/json` names a character or type. That text comes from the agent and is bounded only by
-  `MaxLineBytes`. `docs/WIRE_FORMAT.md` therefore states that a consumer logs decode errors only through the
-  area-12 sanitization (#40). The decoder does not truncate them itself, so `errors.As` still works.
+- Secrets: none in the format (the token travels in the HTTP request, #40, 0032). Error text of this
+  change's own errors: a `FieldError` names the field path and a fixed reason; the only agent-supplied
+  text in a path is a map key, rendered with `QuoteName` (quoted, no control byte, cut to `MaxNameBytes`
+  with `...`, at most 517 bytes); the wire package's own messages add the line number, the version (an
+  integer) and an unknown kind, likewise through `QuoteName`. They never carry a field's value or a whole
+  line. Wrapped parser errors are different and carry raw agent text, bounded only by `MaxLineBytes`:
+  `time` and `netip` quote the offending string (`parsing time "…"`, `ParseAddr("…")`), and
+  `encoding/json` type errors name the Go struct field path **including raw map keys** (verified: `json:
+  cannot unmarshal string into Go struct field M.status.evil\nkey<script> of type uint64`, with a real
+  newline byte; a 3000-byte key gives a 3078-byte message). `docs/WIRE_FORMAT.md` therefore states that a
+  consumer logs or displays decode errors only through the area-12 sanitization (#40). The decoder does not
+  rewrite wrapped errors, so `errors.As` (e.g. `*json.UnmarshalTypeError`) still works.
+- Zones: no address carries a zone (rejected in the model), so no unbounded zone string is stored; the
+  zone text appears only in a `netip` parse error, covered by the previous point.
 - No new dependency (0042); `govulncheck` must stay clean.
 
 ## Decision records
