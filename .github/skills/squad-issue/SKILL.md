@@ -158,7 +158,9 @@ action yourself — including follow-up issues the Lead decides on.
     `docs`: the first log row; features:
     also `spec.md` and `tasks.md`) from the "Squad working record" comment, or via
     `git show <commit-before-removal>:specs/<folder>/<file>`, and record each log row by editing that
-    comment. Never skip, disable or weaken a test to get green.
+    comment. Edit a restored working record in one batch: interim commits that a stop hook demands while it
+    is half edited each re-trigger the code analysis on the open PR. Never skip, disable or weaken a test to
+    get green.
 12. **Wrap-up (mandatory).** Collect what this run taught about the squad itself (a rule that was
     unclear or contradictory, a tool that misbehaved, an agent that could not be launched, a step that
     had to be improvised), each with the role it concerns and a concrete proposal, and file them as
