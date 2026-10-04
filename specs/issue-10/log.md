@@ -20,3 +20,4 @@ One line per pipeline step: date, step, member, result. Lead decisions and escal
 | 2026-10-04 | 8 Lead decide (fix round 1) | squad-lead | D1 memory residual accepted with corrected figure (~270 MiB alloc, ~160-170 MB peak) + #40 duty one decoder per agent; D2 splitLines reject unterminated over-limit line; D3 gzip header AC17 cases; D4 doc fixes; D5 clamp MaxLineBytes to MaxInt-1. Order: Tester, Dev, Code Officer, delta review |
 | 2026-10-04 | 8 Fix round 1 | squad-tester, squad-dev | tests added (3 failed first as expected), decode.go D2/D5 and docs fixed; tests -race and coverage gate PASS (verified) |
 | 2026-10-04 | 7 Code check (after fixes) | squad-code-officer | no edits needed; format, analyzer gate, tests, coverage PASS (verified) |
+| 2026-10-04 | 8 Review delta (round 2) | squad-reviewer, squad-security | both APPROVED, no findings |
