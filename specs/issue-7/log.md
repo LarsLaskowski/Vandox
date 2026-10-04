@@ -12,3 +12,4 @@ One line per pipeline step: date, step, member, result. Lead decisions and escal
 | 2026-10-04 | 3 Lead decide (Security rejection 2) | squad-lead | B4 accepted as wording defect: ProtectHome/InaccessiblePaths labelled defence in depth only (bypassable via /proc/<pid>/root); residual = every file and every process memory/environment; #42 on-target check extended; scope and tier unchanged; Security delta confirmation required |
 | 2026-10-04 | 3 Security plan review (delta) | squad-security | APPROVED; skeleton (4) and tests (5) skipped: no code |
 | 2026-10-04 | 6 Implement | squad-dev | Docs edited: .squad/project.md, SECURITY.md, docs/ARCHITECTURE.md; config-check PASS |
+| 2026-10-04 | 7 Code check | squad-code-officer / Orchestrator | No changes needed; format check, analyzer gate, config-check verified PASS; docs/decisions/README.md index rows 0028-0032 left to Lead (step 9) |
