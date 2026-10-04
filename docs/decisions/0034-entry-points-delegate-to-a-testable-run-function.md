@@ -1,6 +1,6 @@
 # 0034: Entry points delegate to a testable run function; main stays uncovered wiring
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-04
 - **Source:** Issue #98
 - **Supersedes:** —
