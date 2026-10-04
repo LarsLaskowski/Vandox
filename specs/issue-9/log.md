@@ -19,3 +19,4 @@ One line per pipeline step: date, step, member, result. Lead decisions and escal
 | 2026-10-04 | 8 Lead decide | Lead | Non-blocking re-run finding fixed in this PR: artifact retention 1 -> 7 days (release.yml), CONTRIBUTING re-run section documents partial-publish case with new patch version as recovery and no manual push (0039); 0037 Consequences amended; delta round covers release.yml, CONTRIBUTING, 0037; no follow-up issue |
 | 2026-10-04 | 8 Fix round 1 | Dev | duplicate project:end marker removed; dry-run wording corrected; retention-days 7; CONTRIBUTING re-run section rewritten; orchestrator re-verified format, analyzer gate, config-check, actionlint |
 | 2026-10-04 | 8 Review round 2 (delta) | Reviewer | APPROVE: all three round 1 findings fixed, 7-day window consistent, no new defects |
+| 2026-10-04 | 8 Security diff review (delta) | Security | APPROVED: retention 7 days has no security impact, docs consistent with 0039 |
