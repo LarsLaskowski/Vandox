@@ -203,7 +203,7 @@ maintainer after merge.
      no-reuse rule visible in the workflow text.
   8. *Verify image*: AC3 for `vandoxd` (`docker run --rm vandox:local --version`) and AC4 (`.Config.User`).
   9. Tag push only: `docker save vandox:local -o dist/vandox-image.tar`, then `actions/upload-artifact`
-     (pinned by SHA) with name `release`, `dist/` content, `retention-days: 1`. Job `outputs`: `tag`,
+     (pinned by SHA) with name `release`, `dist/` content, `retention-days: 7`. Job `outputs`: `tag`,
      `version`, `prerelease`, `latest`.
 - Job **`publish-image`** (`needs: build`; `if: github.event_name == 'push' && startsWith(github.ref,
   'refs/tags/v')`; `environment: release`; `permissions: {}`):

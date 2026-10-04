@@ -96,6 +96,15 @@ Option 3, in `.github/workflows/release.yml`:
   `--version` checks catch any drift between them.
 - Release notes follow the PR titles. Their quality depends on the `[area] Description` titles from
   `docs/CONTRIBUTING.md`.
+- The `release` artifact is kept for 7 days, so "Re-run failed jobs" on `publish-image` or
+  `github-release` works for a week after the tag run. After that, or for a run that is not re-runnable,
+  the release gets a new patch version.
+- `publish-image` is not idempotent: if it fails after `networlddev/vandox:$VERSION` was pushed (while
+  pushing `latest` or reading the digest), a re-run stops at the never-overwrite check, and neither
+  `latest` nor the GitHub release is created. The recovery is a new patch version, not a manual push:
+  pushing by hand would need the Docker Hub token outside the `release` environment (record 0039). Making
+  the job resume when the published digest equals the built image was considered and left out, because it
+  weakens the never-overwrite check for a rare failure.
 - Signing and provenance (cosign, GitHub artifact attestations, SBOM) are not part of this decision. Adding
   them is a new record.
 - More platforms (e.g. arm64) mean a build matrix and more asset names. That needs a new record if the
