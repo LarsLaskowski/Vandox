@@ -89,6 +89,18 @@ command or gate in `.squad/stack.md` that the pipeline runs, changes what the sq
 A squad-maintenance PR (*Squad lessons*) is only for lessons the squad itself raised, never for an issue a
 person filed about the product.
 
+### Changes without production or test code
+
+For **any** tier, a plan may declare steps 4 (*Skeleton*), 5 (*Tests first*) and the *Coverage gate* of step 6
+**not applicable** when the change touches no production or test code (for example a workflow, a Dockerfile,
+build or CI configuration, or documentation only). The tier is not lowered by this: a `security` change
+keeps its plan challenge, steps 3 and 8 and every other step. The Lead then names in `plan.md`, under
+*Verification without tests*, where each acceptance criterion is verified instead (a workflow verification
+step, a PR dry run, a build of the image, a read-only check) and who runs it; the orchestrator logs the
+skipped steps with a pointer to that section. The Reviewer checks that the statement exists, that it covers
+every acceptance criterion and that the diff really contains no production or test code — otherwise the
+skip is a blocking finding. If production or test code changes after all, steps 4–6 apply again.
+
 ## Pipeline
 
 | # | Step | Owner | Exit condition |

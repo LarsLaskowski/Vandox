@@ -13,6 +13,13 @@ Each factual claim of the issue, checked against the code: confirmed or refuted.
 
 - [ ] AC1: ... (the Tester turns each one into at least one unit test)
 
+## Verification without tests
+
+Only when the change touches no production or test code: steps 4, 5 and the *Coverage gate* are not
+applicable (*Changes without production or test code* in `.squad/routing.md`). Per acceptance criterion,
+where and by whom it is verified instead (workflow step, PR dry run, read-only check) — otherwise delete
+this section.
+
 ## Approach
 
 ## Affected projects and types

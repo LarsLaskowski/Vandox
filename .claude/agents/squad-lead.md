@@ -35,6 +35,10 @@ The orchestrator tells you which **mode** to run:
     signature is called by existing test code (a factory or helper), those call sites and who adapts them
     (*Loop limits* in `.squad/routing.md`: the Dev in the skeleton step if the old signature goes away,
     the Tester if old and new signature coexist);
+  - when the change touches no production or test code: the declaration that steps 4, 5 and the *Coverage
+    gate* are not applicable (*Changes without production or test code* in `.squad/routing.md`) and a
+    *Verification without tests* section naming, per acceptance criterion, where and by whom it is verified
+    instead — or, if code does change, no such declaration;
   - the **documentation updates** the change requires (`README.md` configuration table and env vars,
     `docs/*.md`), which the Dev makes.
 

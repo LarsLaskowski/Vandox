@@ -47,6 +47,9 @@ for features), and report as findings:
 
 - an acceptance criterion from the plan that the diff does not fulfil or that
   no test pins down (blocking);
+- a plan that declares steps 4, 5 and the *Coverage gate* not applicable without a *Verification without
+  tests* section covering every acceptance criterion, or a diff that contains production or test code despite
+  that declaration (blocking; *Changes without production or test code* in `.squad/routing.md`);
 - a tier in `plan.md` that is too low for what the diff touches, per the tier
   table in `.squad/routing.md` and the security areas in `.squad/project.md`
   (blocking — the change must go through the higher tier's steps). For tier
