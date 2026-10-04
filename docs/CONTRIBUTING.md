@@ -78,10 +78,12 @@ A release is a `v<major>.<minor>.<patch>` tag created manually on `main`; it pub
 the backend Docker image. Merging a PR by itself never publishes a release. The workflow is
 `.github/workflows/release.yml`; the reasoning is in
 [0037](decisions/0037-release-workflow-with-plain-go-docker-and-gh.md),
-[0038](decisions/0038-backend-image-distroless-nonroot-pinned-by-digest.md) and
+[0041](decisions/0041-base-images-pinned-by-digest-through-build-arguments.md) and
 [0039](decisions/0039-docker-hub-token-in-a-tag-only-environment.md).
 
 ### Cutting a release
+
+Before tagging, check that the base image digests are current (*Base image digests* below).
 
 On an up-to-date `main`:
 
@@ -99,14 +101,25 @@ Pre-release tags look like `vX.Y.Z-rc.N`. Build metadata (`+...`) is not allowed
 3. Builds `vandox-agent` (linux/amd64, static, `-trimpath`) and `SHA256SUMS`, and builds the image from
    `deploy/backend/Dockerfile` with `docker build --no-cache`. Nothing is restored from a CI cache.
 4. Verifies both binaries' `--version` output against the tag, the full commit SHA and the commit time, the
-   checksum, that the binary is static, that every `FROM` is pinned by digest, that the builder's Go minor
-   version equals `go.mod`'s, and that the image runs as `65532:65532`.
+   checksum, that the binary is static, that every `FROM` uses a base image build argument pinned by a sha256 digest, that the builder tag's Go
+   minor version equals `go.mod`'s, and that the image runs as `65532:65532`.
 5. Pushes exactly the verified image as `networlddev/vandox:X.Y.Z`, and as `latest` when the tag is the
    highest stable `v*.*.*` tag. A pre-release tag publishes only its own version. If the version already
    exists on Docker Hub, or the check cannot tell, the job fails before pushing: a published version is
    never overwritten.
 6. Creates the GitHub release with generated notes, the image digest, `vandox-agent-linux-amd64` and
    `SHA256SUMS`; a pre-release is marked as such.
+
+### Base image digests
+
+`deploy/backend/Dockerfile` names each base image in three build arguments: `BASE_<NAME>_IMAGE`,
+`BASE_<NAME>_TAG` and `BASE_<NAME>_DIGEST`. `FROM` uses only the image and the digest. Dependabot cannot
+read these lines, so the digests are refreshed by hand: before every release tag, and whenever a Go
+patch release or a distroless update appears. Read the multi-arch index digest of exactly the tag in
+`BASE_<NAME>_TAG`, for example `docker buildx imagetools inspect golang:1.27-trixie` (the `Digest:`
+line), and write it to `BASE_<NAME>_DIGEST` in a pull request. A new Go minor version changes the
+`go` line in `go.mod`, `BASE_BUILD_TAG` and `BASE_BUILD_DIGEST` together. The release build passes no
+`BASE_*` build argument, so the pinned defaults are what it uses.
 
 ### Dry run on pull requests
 
@@ -138,11 +151,6 @@ Docker Hub user that is a member of a team with *Read & Write* on `networlddev/v
 access token of that user with the scope *Read & Write*. A personal access token of the maintainer's own
 account is not acceptable, because it is not limited to one repository. To rotate the token, create the new
 one, replace the environment secret, then delete the old token on Docker Hub.
-
-### Before the first stable tag
-
-The Go toolchain follow-up (a supported Go version in `go.mod`, "[Repo] Move to a supported Go toolchain")
-must be merged before `v0.1.0` or any other stable tag. Pre-release tags may be cut before it.
 
 ### Re-running a failed release
 

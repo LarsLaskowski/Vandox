@@ -80,14 +80,16 @@ files or endpoints.
     `deploy/backend/Dockerfile`, `.dockerignore`, the GitHub environment `release`): *Goal:* artifacts are
     published only from a SemVer tag that only the repository admin can create (tag ruleset `release-tags`)
     and whose commit the workflow checks is on `main`; the ancestry check runs in code the tagger controls,
-    so the ruleset is the boundary. Every action is pinned by commit SHA and every base image by digest.
+    so the ruleset is the boundary. Every action is pinned by commit SHA and every base image by
+    digest (`FROM ${BASE_<NAME>_IMAGE}@${BASE_<NAME>_DIGEST}` with build-argument defaults that the release
+    build never overrides; the release workflow checks the form).
     Release binaries are built without restored CI caches (`setup-go` `cache: false`, plain
     `docker build --no-cache`, no cache backend) and only after `govulncheck` passes. The registry token is
     readable only by the tag-triggered publish job, enters `docker login` only via stdin, and is limited to
     pushing `networlddev/vandox`. No `${{ }}` expression of any kind appears inside a `run:` script; every
     value goes through `env:`, and checkout does not persist the job token. The published image runs as a
     non-root user, a published version tag is never overwritten, and every published binary has a checksum
-    in `SHA256SUMS`. Records 0027, 0037, 0038, 0039.
+    in `SHA256SUMS`. Records 0027, 0037, 0039, 0041.
 
 ## Guarantees
 
@@ -146,7 +148,7 @@ double under this name and changes the status.
 
 | Surface | Test double |
 | ------- | ----------- |
-| `/proc` | collectors read through an `io/fs.FS` (production `os.DirFS("/proc")`; symlink targets such as `/proc/<pid>/fd/*` through a link-reading method on the same small interface, since Go 1.24's `io/fs` has none); tests use fixtures under `testdata/proc/` (via `os.DirFS`) or `fstest.MapFS`, plus a **blocking filesystem wrapper** whose reads block until the test releases them (in `t.Cleanup`), for 0029 |
+| `/proc` | collectors read through an `io/fs.FS` (production `os.DirFS("/proc")`; symlink targets such as `/proc/<pid>/fd/*` through `io/fs.ReadLinkFS` (Go 1.25 and later; implemented by `os.DirFS` and `fstest.MapFS`, the blocking wrapper must implement `fs.ReadLinkFS` (`ReadLink` and `Lstat`) as well)); tests use fixtures under `testdata/proc/` (via `os.DirFS`) or `fstest.MapFS`, plus a **blocking filesystem wrapper** whose reads block until the test releases them (in `t.Cleanup`), for 0029 |
 | `/sys` | same filesystem interface and blocking wrapper; fixtures under `testdata/sys/` |
 | systemd D-Bus | fake systemd reader (scripted unit states and errors, and a reader that blocks until its context is cancelled, for 0029) |
 | journald | fake journal reader (scripted entries, cursors and errors, and a reader that blocks until its context is cancelled, for 0029) |

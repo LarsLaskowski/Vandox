@@ -62,8 +62,10 @@ links the record.
 | [0033](0033-pre-existing-coverage-gap-accepted-for-issue-7.md) | Pre-existing overall coverage gap accepted for a documentation-only change | Accepted | 2026-10-04 |
 | [0034](0034-entry-points-delegate-to-a-testable-run-function.md) | Entry points delegate to a testable run function; main stays uncovered wiring | Accepted | 2026-10-04 |
 | [0035](0035-format-check-step-in-ci-coverage-gate-stays-local.md) | Explicit format check step in CI; the coverage gate stays local, SonarQube measures coverage in CI | Accepted | 2026-10-04 |
-| [0036](0036-dependabot-docker-entry-before-the-dockerfile-exists.md) | Dependabot watches /deploy/backend for Docker before the Dockerfile exists | Accepted | 2026-10-04 |
+| [0036](0036-dependabot-docker-entry-before-the-dockerfile-exists.md) | Dependabot watches /deploy/backend for Docker before the Dockerfile exists | Superseded by [0041](0041-base-images-pinned-by-digest-through-build-arguments.md) | 2026-10-04 |
 | [0037](0037-release-workflow-with-plain-go-docker-and-gh.md) | Release workflow built from plain go build, the Docker CLI and gh; verified once, published as built | Accepted | 2026-10-04 |
-| [0038](0038-backend-image-distroless-nonroot-pinned-by-digest.md) | Backend image on distroless static, non-root, base images pinned by digest; version tags without "v" | Accepted | 2026-10-04 |
+| [0038](0038-backend-image-distroless-nonroot-pinned-by-digest.md) | Backend image on distroless static, non-root, base images pinned by digest; version tags without "v" | Superseded by [0041](0041-base-images-pinned-by-digest-through-build-arguments.md) | 2026-10-04 |
 | [0039](0039-docker-hub-token-in-a-tag-only-environment.md) | Docker Hub token is repository-scoped and lives in a tag-only GitHub environment | Accepted | 2026-10-04 |
+| [0040](0040-go-1-27-toolchain-and-govulncheck-v1-8.md) | Go 1.27 toolchain without a patch version in go.mod; govulncheck raised to v1.8.0 | Accepted | 2026-10-04 |
+| [0041](0041-base-images-pinned-by-digest-through-build-arguments.md) | Base images pinned by digest through build arguments, tag kept alongside; digests refreshed by hand | Accepted | 2026-10-04 |
 <!-- project:end index -->

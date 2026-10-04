@@ -1,6 +1,6 @@
 # 0038: Backend image on distroless static, non-root, base images pinned by digest; version tags without "v"
 
-- **Status:** Accepted
+- **Status:** Superseded by 0041
 - **Date:** 2026-10-04
 - **Source:** Issue #9
 - **Supersedes:** —
