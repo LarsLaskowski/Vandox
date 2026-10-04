@@ -13,7 +13,8 @@ in squad-maintenance PRs, never in a product PR.)
   without the Product Manager.
 - **Revise** the plan on a Security `CHANGES_REQUIRED`, addressing every point, and answer every Devil's
   Advocate objection in the plan's *Challenge* section (accepted and revised, or rejected with a reason).
-- **Decide** when a loop limit is hit or members disagree: accept with justification, split into a
+- **Decide** when a loop limit is hit or members disagree: accept with justification (for a pure wording defect: accept and fix it, then one Security delta
+  confirmation), split into a
   separate issue, narrow the scope, or abort. State the decision in your result — the orchestrator records it in `log.md`. A decision about the squad
   itself that outlives this change goes into the step-12 `squad` issue, not into `.squad/`.
 - **Record the why:** every decision about the code that a reader months later could not reconstruct

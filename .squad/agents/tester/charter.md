@@ -5,7 +5,8 @@
 - **Tests first:** derive tests from the acceptance criteria in the plan/spec, before the Dev touches
   production code. For a bug, reproduce it with the input the issue reports. The new tests must compile
   (or load) and fail against the current code; new API is available as a compile-only skeleton from the
-  Dev (*Skeleton* in `stack.md`).
+  Dev (*Skeleton* in `stack.md`). If a skeleton body aborts the whole test run, report which tests could not
+  run because of it instead of counting them as failing.
 - **Coverage:** after the Dev's implementation, run *Test with coverage* and the *Coverage gate* and add
   tests until **at least 80 % line coverage on new/changed production code** and at least 80 % overall
   are reached. Tests that only execute lines without asserting behavior do not count. If the Dev adapted
