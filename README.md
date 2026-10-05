@@ -51,21 +51,21 @@ the value.
 
 **Agent options**
 
-| Key | Environment variable | Default | Description |
-| --- | -------------------- | ------- | ----------- |
-| `agent_id` | — | required | Name of the server, 1 to 64 characters of `[A-Za-z0-9._-]`, starting with a letter or digit. |
-| `backend.url` | — | required | Base URL of the backend ingest endpoint: `http` or `https`, a host and an optional port, no user info, path or query. |
-| `spool.directory` | — | `/var/lib/vandox/spool` | Directory of the local spool, an absolute and clean path. |
-| `log.level` | — | `info` | `debug`, `info`, `warn` or `error`. |
+| Key | Default | Description |
+| --- | ------- | ----------- |
+| `agent_id` | required | Name of the server, 1 to 64 characters of `[A-Za-z0-9._-]`, starting with a letter or digit. |
+| `backend.url` | required | Base URL of the backend ingest endpoint: `http` or `https`, a host and an optional port, no user info, path or query. |
+| `spool.directory` | `/var/lib/vandox/spool` | Directory of the local spool, an absolute and clean path. |
+| `log.level` | `info` | `debug`, `info`, `warn` or `error`. |
 
 **Backend options**
 
-| Key | Environment variable | Default | Description |
-| --- | -------------------- | ------- | ----------- |
-| `web.listen` | — | `:8080` | Address of the web UI as `[host]:port`. |
-| `ingest.listen` | — | `:8081` | Address of the ingest endpoint, on a port other than `web.listen`. |
-| `storage.directory` | — | `/data` | Directory of the backend's data, an absolute and clean path. |
-| `log.level` | — | `info` | `debug`, `info`, `warn` or `error`. |
+| Key | Default | Description |
+| --- | ------- | ----------- |
+| `web.listen` | `:8080` | Address of the web UI as `[host]:port`. |
+| `ingest.listen` | `:8081` | Address of the ingest endpoint, on a port other than `web.listen`. |
+| `storage.directory` | `/data` | Directory of the backend's data, an absolute and clean path. |
+| `log.level` | `info` | `debug`, `info`, `warn` or `error`. |
 
 **Secrets**
 
