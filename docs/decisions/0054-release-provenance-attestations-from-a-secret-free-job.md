@@ -82,6 +82,18 @@ Facts this decision rests on (checked on 2026-10-05):
      subject or a broken verification command stops the release instead of reaching users.
 
    Chosen: yes.
+6. **What the documented image check names**
+   - *The version tag* (`oci://docker.io/networlddev/vandox:<X.Y.Z>`, then `docker pull` by tag): short and
+     matches the tag users know. Cons: a tag is resolved anew on every request; anyone with push rights to
+     `networlddev/vandox` could re-point it between the check and the pull (the workflow only refuses to
+     overwrite a version tag itself, and immutable tags on Docker Hub are optional), so the check would
+     not prove anything about the image actually pulled.
+   - *The digest from the release notes* (`oci://docker.io/networlddev/vandox@sha256:<digest>`, then
+     `docker pull networlddev/vandox@sha256:<digest>`): the verified image and the pulled image are the
+     same by construction. The release notes already state the digest.
+
+   Chosen: the digest for the documented consumer check. The workflow's own check (option 5) keeps the tag
+   on purpose: right after the push it shows that the published tag resolves to the attested digest.
 
 ## Decision
 
@@ -96,7 +108,12 @@ Facts this decision rests on (checked on 2026-10-05):
    `subject-digest` from `publish-image`; `push-to-registry` is not enabled;
 5. verifies both with the commands documented in `README.md`: `gh attestation verify` with `--repo`,
    `--signer-workflow <owner>/<repo>/.github/workflows/release.yml`, `--source-ref refs/tags/<tag>` and
-   `--deny-self-hosted-runners`, for the binary file and for `oci://docker.io/networlddev/vandox:<version>`.
+   `--deny-self-hosted-runners`, for the binary file and for `oci://docker.io/networlddev/vandox:<version>`
+   (the tag, so a tag that does not resolve to the attested digest fails the release).
+
+`README.md` and `docs/CONTRIBUTING.md` document the same flags for consumers, but name the image by the
+digest from the release notes (`oci://docker.io/networlddev/vandox@sha256:<digest>`) and tell the user to
+pull that digest, not the tag.
 
 `github-release` gets `needs: [build, publish-image, attest]`, so no GitHub release exists without verified
 attestations. The workflow-level `permissions: {}`, the other jobs' permissions, the trigger (0053), the
@@ -108,6 +125,8 @@ published.
 - Consumers can check that a binary or an image digest was built by `release.yml` of this repository for a
   given tag on a GitHub-hosted runner, with `gh` logged in to GitHub. `SHA256SUMS` stays for a plain
   integrity check.
+- The image check covers the image actually run only if the user pulls by the verified digest, as
+  documented; pulling by tag after verifying stays possible but is outside what the check proves.
 - An attestation shows which workflow file at which tag built the artifact. It does not show that the
   tagged commit is on `main`: whoever may create a `v*` tag controls the workflow file that runs, and so
   what gets attested. The tag ruleset `release-tags` stays the boundary (0039).

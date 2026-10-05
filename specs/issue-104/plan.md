@@ -54,9 +54,10 @@ before the GitHub release exists.
   (passed via `env:`) matches `^sha256:[0-9a-f]{64}$` and fails otherwise. The image is then attested with
   the same pinned `actions/attest`, `subject-name: docker.io/networlddev/vandox` (no tag), `subject-digest`
   set to that output, no `push-to-registry`.
-- [ ] AC4: A final `run:` step in `attest` verifies both attestations with exactly the commands documented
-  in `README.md` (see *Approach*): the binary file and `oci://docker.io/networlddev/vandox:$VERSION`, each
-  with `--repo`, `--signer-workflow`, `--source-ref refs/tags/$TAG` and `--deny-self-hosted-runners`; all
+- [ ] AC4: A final `run:` step in `attest` verifies both attestations with the flags documented in
+  `README.md` (see *Approach*): the binary file and `oci://docker.io/networlddev/vandox:$VERSION` (the
+  published **tag**, so a tag that does not resolve to the attested digest fails the release), each with
+  `--repo`, `--signer-workflow`, `--source-ref refs/tags/$TAG` and `--deny-self-hosted-runners`; all
   values via `env:`; a failure fails the job.
 - [ ] AC5: `github-release` has `needs: [build, publish-image, attest]`; its permissions and steps are
   otherwise unchanged.
@@ -64,8 +65,12 @@ before the GitHub release exists.
   (permissions, environment, steps); the trigger stays `push` of `v*.*.*` tags only (0053); no `${{ }}` of
   any kind inside any `run:` script; every `uses:` pinned by a 40-hex commit SHA; no cache of any kind
   added; `ci.yml` unchanged (no attestation in pull-request runs).
-- [ ] AC7: Documentation updated as listed under *Documentation updates* (verification commands identical
-  to the ones in the AC4 step, apart from placeholders).
+- [ ] AC7: Documentation updated as listed under *Documentation updates*: the documented commands use the
+  same flags as the AC4 step, apart from placeholders; the documented image check names the image **by
+  digest** (`oci://docker.io/networlddev/vandox@sha256:<digest>`, digest from the release notes), never by
+  tag, and the README tells the user to pull that same digest after verifying it, with one sentence on why
+  (a tag is resolved anew on every request and can be re-pointed by anyone with push rights to the
+  repository; the digest names exactly the image that was verified).
 - [ ] AC8 (issue acceptance): a release tag produces attestations for the binary and the image, and the
   documented verification command succeeds for the released version. Verified on the first tag run (see
   *Verification without tests*).
@@ -81,10 +86,10 @@ any `security` change.
 | AC | Verified where | By whom |
 | -- | -------------- | ------- |
 | AC1–AC3, AC5 | Read-only check of the diff of `release.yml`: job keys, `needs`, permissions, absence of `environment`/checkout/`secrets.`, `actions/attest` inputs; the pinned SHA re-resolved with `git ls-remote --tags https://github.com/actions/attest` (must equal the tag in the version comment) | Dev (step 6), Reviewer and Security (step 8) |
-| AC4 | Read-only check that the step's commands equal the README commands; `gh attestation verify --help` (local `gh` 2.89.0 lists `--repo`, `--signer-workflow`, `--source-ref`, `--deny-self-hosted-runners`) to confirm every flag exists | Dev (step 6), Reviewer (step 8) |
+| AC4 | Read-only check that the step's commands use the README's flags (image subject: tag in the step, digest in the README, per AC4/AC7); `gh attestation verify --help` (local `gh` 2.89.0 lists `--repo`, `--signer-workflow`, `--source-ref`, `--deny-self-hosted-runners`) to confirm every flag exists | Dev (step 6), Reviewer (step 8) |
 | AC6 | `git diff origin/main -- .github/workflows/` shows only the new job and the changed `needs` of `github-release`; `grep -n '\${{' .github/workflows/release.yml` reviewed for any hit inside a `run:` block; `grep -n 'uses:'` all 40-hex SHAs; YAML parses (`python3 -c 'import yaml,sys; yaml.safe_load(open(sys.argv[1]))' .github/workflows/release.yml`); `actionlint` if available on the PATH | Code Officer (step 7: YAML parse), Reviewer and Security (step 8) |
 | AC7 | Read-only review of the listed files against this plan | Reviewer (step 8) |
-| AC8 | Cannot run in the pull request: `release.yml` runs only on a version tag (0053), and `ci.yml` must not sign. On the first tag after the merge, the `attest` job's verify step runs the documented commands against the released binary and image; the maintainer then runs the README commands once on a workstation for the released version and checks the run's attestation summary. A failure there is a new issue; the release has no GitHub release in that case (AC5) | Workflow on the tag run; maintainer after the first release (named in the PR's *Next Steps*) |
+| AC8 | Cannot run in the pull request: `release.yml` runs only on a version tag (0053), and `ci.yml` must not sign. On the first tag after the merge, the `attest` job's verify step runs the documented flags against the released binary and the image tag; the maintainer then runs the README commands (image by digest from the release notes) once on a workstation for the released version and checks the run's attestation summary. A failure there is a new issue; the release has no GitHub release in that case (AC5) | Workflow on the tag run; maintainer after the first release (named in the PR's *Next Steps*) |
 
 ## Approach
 
@@ -196,14 +201,21 @@ Made by the Dev in step 6:
       --signer-workflow LarsLaskowski/Vandox/.github/workflows/release.yml \
       --source-ref refs/tags/vX.Y.Z --deny-self-hosted-runners
     ```
-  - **Backend**: the same for the image:
+  - **Backend**: the same for the image, **by digest** (the digest from the release notes,
+    `Docker image: networlddev/vandox:<X.Y.Z>@sha256:<digest>`, written by `github-release`), followed by
+    pulling that same digest:
     ```
-    gh attestation verify oci://docker.io/networlddev/vandox:<X.Y.Z> --repo LarsLaskowski/Vandox \
+    gh attestation verify oci://docker.io/networlddev/vandox@sha256:<digest> --repo LarsLaskowski/Vandox \
       --signer-workflow LarsLaskowski/Vandox/.github/workflows/release.yml \
       --source-ref refs/tags/v<X.Y.Z> --deny-self-hosted-runners
+    docker pull networlddev/vandox@sha256:<digest>
     ```
-    and a sentence that the attestation is stored on GitHub, not in Docker Hub (so `--bundle-from-oci` and
-    registry-side tools do not find it).
+    with one sentence on why the check names the digest and not the tag: a tag is resolved anew on every
+    request and anyone with push rights to `networlddev/vandox` could re-point it between the check and the
+    pull, while the digest names exactly the verified image. Plus a sentence that the attestation is
+    stored on GitHub, not in Docker Hub (so `--bundle-from-oci` and registry-side tools do not find it).
+    The existing `docker pull networlddev/vandox:<X.Y.Z>` line may stay as the unverified convenience
+    form, but the verification paragraph must not use the tag.
 - `docs/CONTRIBUTING.md` (inside `<!-- project:begin releases -->`):
   - intro paragraph: add record 0054 to the list of records;
   - *What the release workflow does*: a new step between 5 and 6 — the `attest` job creates SLSA build
@@ -211,8 +223,11 @@ Made by the Dev in step 6:
     GitHub, not in Docker Hub), in a job with only `id-token: write` and `attestations: write`, no
     environment and no secret, and verifies them with the README commands; the GitHub release is created
     only after that; step 6 renumbered;
-  - a short *Verifying a release* subsection pointing to the README commands (or repeating them) and
-    stating that `--source-ref` pins the tag and `--signer-workflow` pins `release.yml`;
+  - a short *Verifying a release* subsection pointing to the README commands (or repeating them, then with
+    the image by digest exactly as in the README) and stating that `--source-ref` pins the tag,
+    `--signer-workflow` pins `release.yml`, and the image is verified and pulled by digest because a tag
+    can be re-pointed (immutable tags are optional, see *One-time setup (maintainer)*, item 3); the workflow's own check uses
+    the tag on purpose, to catch a tag that does not resolve to the attested digest;
   - *Re-running a failed release*: if `attest` failed, the image is already published and no GitHub release
     exists; "Re-run failed jobs" reruns `attest` and `github-release` within the 7-day artifact window; a
     second attestation for the same digest is harmless; after that, a new patch version.
@@ -247,6 +262,10 @@ documented in `docs/ARCHITECTURE.md` and security area 13.
 - **What an attestation proves:** workflow file `release.yml` of this repository at the given tag, on a
   GitHub-hosted runner. It does not prove the tagged commit is on `main`; the tag ruleset `release-tags`
   stays the boundary (0039). Stated in record 0054 and to be stated in the README/CONTRIBUTING text.
+- **Check-to-use gap for the image:** the documented consumer check verifies the image by digest and the
+  README pulls that digest, so the verified image is the one run; a re-pointed tag cannot slip in between
+  (Challenge, objection 1). The workflow's own check uses the tag to detect a tag/digest mismatch at
+  release time.
 - **Fail closed:** malformed digest output, failed attestation or failed verification stops the run before
   the GitHub release.
 - **Script hygiene:** values reach `run:` only through `env:`; the digest from another job is validated
@@ -262,7 +281,7 @@ documented in `docs/ARCHITECTURE.md` and security area 13.
   artifact attestations via `actions/attest` instead of cosign or the SLSA generator; a separate secret-free
   `attest` job instead of `build` or `publish-image`; attestation stored on GitHub only, no
   `push-to-registry`; no SBOM in this change (follow-up issue); in-workflow verification gating the GitHub
-  release. Lead sets it to `Accepted` and adds it to the index at approval.
+  release (by tag); documented consumer check and pull by digest. Lead sets it to `Accepted` and adds it to the index at approval.
 
 ## Out of scope / follow-ups
 
@@ -277,3 +296,21 @@ documented in `docs/ARCHITECTURE.md` and security area 13.
 - Pushing the image attestation to Docker Hub (`push-to-registry`): not planned; would need a new record
   (0054, *Consequences*).
 - cosign signatures, more platforms: not part of this issue.
+
+## Challenge
+
+Devil's Advocate verdict: OBJECTIONS — 0 major, 1 minor.
+
+1. **(minor) The documented image check verifies a tag, not the image the user then pulls.** — **Accepted,
+   plan revised.** Confirmed against the code: the planned README command named
+   `oci://docker.io/networlddev/vandox:<X.Y.Z>`, while README lines 117–120 offer `docker pull` by tag; a
+   tag is resolved anew per request, `release.yml` only refuses to overwrite a version tag itself, and
+   immutable tags are only "optional, recommended" (`docs/CONTRIBUTING.md`, *One-time setup (maintainer)*,
+   item 3). The release notes already carry the digest (`release.yml` line 260,
+   `networlddev/vandox:$VERSION@$DIGEST`). Changes: AC7 and *Documentation updates* now require the README
+   and CONTRIBUTING check to name the image by digest (`oci://docker.io/networlddev/vandox@sha256:<digest>`),
+   followed by `docker pull networlddev/vandox@sha256:<digest>`, with one sentence on why; AC4 keeps the
+   in-workflow check on the tag and states why (it catches a tag that does not resolve to the attested
+   digest); *Security considerations* names the gap and its closure. Record 0054 gains option 6 (*What the
+   documented image check names*) with the tag form as the rejected option, and its *Decision* and
+   *Consequences* are updated accordingly. Tier unchanged (`security`).
