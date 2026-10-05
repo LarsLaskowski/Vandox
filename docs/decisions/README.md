@@ -81,4 +81,5 @@ links the record.
 | [0052](0052-image-labels-description-added-no-logo-label.md) | Backend image gets a description label; no logo label | Accepted | 2026-10-05 |
 | [0053](0053-releases-are-manual-and-started-only-by-a-version-tag.md) | Releases are always created manually; the only trigger is a new vX.Y.Z tag, the PR dry run lives in ci.yml | Accepted | 2026-10-05 |
 | [0054](0054-release-provenance-attestations-from-a-secret-free-job.md) | Release binary and image digest get GitHub build provenance attestations from a separate, secret-free attest job; no SBOM yet | Accepted | 2026-10-05 |
+| [0055](0055-stale-base-image-digests-reported-weekly-builder-go-checked-in-build.md) | Stale base image digests reported weekly as an issue; the build stage checks the builder's Go version against its tag | Accepted | 2026-10-05 |
 <!-- project:end index -->

@@ -1,6 +1,6 @@
 # 0055: Stale base image digests are reported by a weekly workflow as an issue; the build stage checks the builder's Go version
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-05
 - **Source:** Issue #108
 - **Supersedes:** —
