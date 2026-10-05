@@ -83,6 +83,7 @@ wrap_token=''
 wrap_open=0
 cleanup() {
   if [[ $wrap_open -eq 1 ]]; then
+    echo # an interrupted print may have left a partial line
     echo "::$wrap_token::"
     wrap_open=0
   fi
@@ -132,6 +133,7 @@ wrap_open=1
 for log in agent.log image.log; do
   echo "--- generator output: $log ---"
   cat -- "$log_dir/$log"
+  echo # the log may not end in a newline; the next marker must start its own line
 done
 echo "::$wrap_token::"
 wrap_open=0
