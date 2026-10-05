@@ -1,7 +1,8 @@
 # Plan: Backend skeleton and container
 
 Source: Issue #13 | [spec.md](spec.md)
-Status: Draft (revised after the plan challenge, see *Challenge*)
+Status: Draft (revised after the plan challenge, see *Challenge*; amended by the Lead's decision on the
+four non-blocking findings of the plan security review, see *Security review findings*)
 Tier: security — the change adds a dependency (`modernc.org/sqlite`), changes `deploy/backend/Dockerfile`
 and `ci.yml`, and touches security areas 2 (the web port binding in `deploy/backend/`; the ingest port is
 deliberately not published yet), 8 (secrets in the compose file), 9 (database file created under `storage.directory`), 10 (configuration and CLI input), 11 (the
@@ -27,7 +28,7 @@ Claims of the issue, checked against the code (`main` at 938de24):
 - *"Dockerfile: multi-stage build, minimal non-root runtime image, pinned base image"* — already true:
   `deploy/backend/Dockerfile` exists (records 0038 → 0041, 0055): multi-stage, distroless static `nonroot`,
   `USER 65532:65532`, both bases pinned by digest through build arguments. Missing: `HEALTHCHECK`, a
-  `/data` directory, `EXPOSE`.
+  `/data` directory. (No `EXPOSE` either, and none is added: see *Dockerfile*.)
 - Issue comment *"The Dependabot `docker` entry (PR #102) watches /deploy/backend (decision 0036). Place the
   Dockerfile there, or move the directory"* — refuted / outdated: 0036 is `Superseded by 0041`, and
   `.github/dependabot.yml` has no `docker` entry any more (0041, option 5: Dependabot cannot read the
@@ -158,7 +159,11 @@ criteria*). Every AC-R/S/D criterion gets at least one unit test.
 - [ ] AC-D3: `Ping` returns nil on an open store, and an error after `Close`; `Ping` with a cancelled
   context returns an error.
 - [ ] AC-D4: `Open` fails (error, no panic, no file created) when the directory does not exist, when it is a
-  regular file, and when `vandox.db` is a directory; it fails when `vandox.db` exists with non-SQLite
+  regular file, and when `vandox.db` is a directory; it fails, and creates or changes no file at the link
+  target, when `vandox.db` is a symbolic link — to a regular file outside the directory (the target's
+  content and mode are unchanged afterwards, no `-wal`/`-shm` file appears next to it), to a directory, and
+  dangling (the target is not created) — and when `vandox.db` is a regular database but `vandox.db-wal` or
+  `vandox.db-shm` is a symbolic link (table test; links made with `os.Symlink` in `t.TempDir()`); it fails when `vandox.db` exists with non-SQLite
   content (e.g. 4 KiB of `x`), and when `meta.schema_version` is `2` (a database of a newer version is
   refused, not modified: the value is still `2` afterwards).
 - [ ] AC-D5: a storage directory whose name contains `?`, `#`, `%20` and a space opens, and the database
@@ -168,8 +173,8 @@ criteria*). Every AC-R/S/D criterion gets at least one unit test.
 
 **Container and compose** (verified as described in *Verification of container criteria*)
 
-- [ ] AC-C1: `deploy/backend/Dockerfile` keeps the 0041 pattern (the pinning check passes unchanged), adds
-  `EXPOSE 8080 8081`, ships `/data` (owned `65532:65532`, mode `0700`) and
+- [ ] AC-C1: `deploy/backend/Dockerfile` keeps the 0041 pattern (the pinning check passes unchanged), has
+  no `EXPOSE` instruction (`docker inspect` `Config.ExposedPorts` of the image is empty), ships `/data` (owned `65532:65532`, mode `0700`) and
   `HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --start-interval=2s --retries=3 CMD ["/vandoxd", "-healthcheck"]`;
   `docker run --rm vandox:local --version` still prints the version line.
 - [ ] AC-C2: `deploy/backend/docker-compose.yml` has the content listed under *Approach / Compose file*:
@@ -286,7 +291,11 @@ handling, the service wiring, the logger and the health-check client.
 and creating it would hide a missing mount); `path = filepath.Join(dir, FileName)`; if absent, create it
 with `os.OpenFile(path, O_RDWR|O_CREATE|O_EXCL, 0o600)` and close it (`created = true`) — SQLite gives the
 `-wal` and `-shm` files the main file's mode (checked locally: all three `0600`); if present it must be a
-regular file. DSN: `(&url.URL{Scheme: "file", Path: path, RawQuery: "_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)"}).String()`
+regular file according to `os.Lstat` (not `os.Stat`: SQLite resolves a symbolic link and would put the
+database and its `-wal`/`-shm` files at the link target, outside `storage.directory`); `vandox.db-wal` and
+`vandox.db-shm`, if present, must be regular files according to `os.Lstat` too. `O_EXCL` already refuses
+to create through a link (dangling or not). Every refusal is an error `store: <step>: …` naming the file
+and its type, never a removal or repair. DSN: `(&url.URL{Scheme: "file", Path: path, RawQuery: "_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)"}).String()`
 with driver name `sqlite` (escaping checked locally: a directory `we?ird#d%20ir` resolves to exactly that
 path). Then verify `PRAGMA journal_mode` = `wal` (else error: WAL needs shared memory, which some network
 file systems lack), `CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL) STRICT`,
@@ -298,8 +307,11 @@ wrapped as `store: <step>: %w`.
 ### Dockerfile (`deploy/backend/Dockerfile`)
 
 - Build stage: `RUN mkdir -p -m 0700 /out/data` (anywhere after `WORKDIR`).
-- Runtime stage: `COPY --from=build --chown=65532:65532 /out/data /data`; `EXPOSE 8080 8081`;
-  `STOPSIGNAL SIGTERM`; the `HEALTHCHECK` line of AC-C1; `USER` and `ENTRYPOINT` unchanged; no `CMD`
+- Runtime stage: `COPY --from=build --chown=65532:65532 /out/data /data`; **no `EXPOSE`** (Lead decision on
+  Security's plan finding 3: `docker run -P`, and NAS container managers that pre-fill mappings from the
+  exposed ports, would publish every exposed port on all interfaces — the ingest port with nothing behind
+  it before #40, the web port against 0023; the ports are documented by the compose file and `vandoxd.yaml`,
+  which is where they are bound); `STOPSIGNAL SIGTERM`; the `HEALTHCHECK` line of AC-C1; `USER` and `ENTRYPOINT` unchanged; no `CMD`
   (no arguments = serve).
 - No `FROM`/`ARG` change; header comment extended by one line about the health check. No configuration
   file is baked into the image (record 0059): the file is mounted.
@@ -334,8 +346,11 @@ Commented for Synology Container Manager / QNAP / `docker compose` (record 0060)
 - Hardening: `read_only: true`, `tmpfs: [/tmp]` (SQLite's temporary files), `cap_drop: [ALL]`,
   `security_opt: ["no-new-privileges:true"]`, `logging` with the `json-file` driver, `max-size: 10m`,
   `max-file: "3"`.
-- Header comment: the files the operator creates (`vandoxd.yaml` from the example, `secrets/` readable by
-  UID 65532, `import/`, optionally `.env` with `WEB_BIND_ADDRESS`), that the container web port must match
+- Header comment: the files the operator creates (`vandoxd.yaml` from the example;
+  `secrets/vandox_agent_token` owned by the container user and readable only by it —
+  `chown 65532:65532 secrets/vandox_agent_token` and `chmod 0400` (or `0600`), never world-readable, because
+  Compose applies no `uid`/`mode` to file secrets outside Swarm and the container sees the host file's
+  ownership and mode; `import/`, optionally `.env` with `WEB_BIND_ADDRESS`), that the container web port must match
   `web.listen`, and that a bind-mounted data directory must be owned by 65532. No Tailscale prerequisite yet.
 - No Dependabot `docker-compose` entry (record 0060).
 
@@ -347,12 +362,16 @@ does not commit them.
 `.github/scripts/smoke-test-backend.sh <image>` (bash, `set -euo pipefail`), called from a new step
 *Smoke test backend container* in `ci.yml`, job `release-build`, right after *Build and verify image*,
 with `vandox:local`. It copies `deploy/backend/docker-compose.yml` and `deploy/backend/vandoxd.yaml` into a
-`mktemp -d` project directory, creates `secrets/vandox_agent_token` (`openssl rand -hex 32`, mode `0644` so
-UID 65532 can read it — CI only), `import/`, and an override file setting `image: <image>` and
+`mktemp -d` project directory, creates `secrets/vandox_agent_token` exactly as the README and the compose
+header tell the operator to — `openssl rand -hex 32` into the file, then `sudo chown 65532:65532` and
+`sudo chmod 0400` (GitHub-hosted runners have passwordless `sudo`; it is used for these two commands and
+for removing the project directory in the `trap`, nothing else) — so the smoke test proves that the
+documented ownership and mode work (the service reads the token at start, AC-C3's `healthy` depends on
+it) and no world-readable example exists to copy; `import/`, and an override file setting `image: <image>` and
 `pull_policy: never`; runs with `WEB_BIND_ADDRESS=127.0.0.1` and a unique project name; `trap` runs
 `docker compose down -v` on exit. Checks, each failing with `::error::`: `docker compose config --quiet`;
 `up -d`; health `healthy` within 60 s; `curl -fsS http://127.0.0.1:8080/healthz` is `ok`; `docker inspect`
-shows no host binding for `8081/tcp`, memory 536870912, restart policy `unless-stopped`, `ReadonlyRootfs`
+shows no host binding for `8081/tcp`, an empty `Config.ExposedPorts` on the image, memory 536870912, restart policy `unless-stopped`, `ReadonlyRootfs`
 true, `Config.User` `65532:65532`; `docker compose stop` → `State.ExitCode` 0 and logs contain
 `vandoxd stopped`; `docker compose down` (no `-v`, the named volume stays) → `docker compose up -d` → a new
 container ID, `healthy` within 60 s, and its logs contain `"created":false`. No secret of the repository, no network beyond
@@ -368,7 +387,7 @@ loopback, no push. All values reach `run:` through the script arguments, no `${{
 | `cmd/vandoxd/internal/store` | `store.go` | new package |
 | `internal/cli` | `cli.go` | package comment only: used by `vandox-agent` (no behavior change) |
 | module | `go.mod`, `go.sum` | `modernc.org/sqlite` and its indirect requirements |
-| deploy | `deploy/backend/Dockerfile` | `/data`, `EXPOSE`, `STOPSIGNAL`, `HEALTHCHECK` |
+| deploy | `deploy/backend/Dockerfile` | `/data`, `STOPSIGNAL`, `HEALTHCHECK` (no `EXPOSE`) |
 | deploy | `deploy/backend/docker-compose.yml` | new |
 | deploy | `deploy/backend/vandoxd.yaml` | comment only: the listen ports must match the compose port mappings |
 | CI | `.github/workflows/ci.yml`, `.github/scripts/smoke-test-backend.sh` | new smoke-test step and script |
@@ -509,10 +528,15 @@ The Dev makes these:
 
 - `README.md`: *Binaries* — `vandoxd` without arguments runs the service, flags `-config`, `-healthcheck`;
   *Layout* — `cmd/vandoxd/internal/`; *Install / Backend* — a "Run with Docker Compose" part: the files to
-  create (`vandoxd.yaml`, `secrets/vandox_agent_token` readable by UID 65532, `import/`, optional `.env`
-  with `WEB_BIND_ADDRESS`), `docker compose up -d`, the reverse proxy pointing at `127.0.0.1:8080`,
-  `/healthz` for monitoring (through the proxy), that a bind-mounted data directory must be owned by 65532,
-  and that the ingest port is not published until the ingest API (#40). No configuration-table change (no
+  create (`vandoxd.yaml`; `secrets/vandox_agent_token` with the commands
+  `sudo chown 65532:65532 secrets/vandox_agent_token` and `sudo chmod 0400 secrets/vandox_agent_token` and the
+  warning that it must not be world-readable — Compose does not set ownership or mode of file secrets
+  outside Swarm; `import/`; optional `.env` with `WEB_BIND_ADDRESS`), `docker compose up -d`, the reverse
+  proxy pointing at `127.0.0.1:8080`, `/healthz` for monitoring (through the proxy), that a bind-mounted data
+  directory must be owned by 65532, that the ingest port is not published until the ingest API (#40), and
+  that the loopback binding keeps the web port off the LAN only as far as the Docker Engine and host
+  firewall enforce it (it is defense in depth, not the access control — the login of #25 is; see record
+  0060). No configuration-table change (no
   new option, no new secret).
 - `docs/ARCHITECTURE.md`: intro (configuration loading now used by `vandoxd`; the backend service, its
   `/healthz` and the database file exist); *Components* — `cmd/vandoxd` with `cmd/vandoxd/internal/`
@@ -528,10 +552,14 @@ The Dev makes these:
 - `docs/CONTRIBUTING.md` (*Release build check on pull requests*): the job also starts the image with the
   compose file and checks health, graceful stop and that the database survives re-creation of the container.
 - `SECURITY.md` (*Deployment Security Considerations*): keep the web port on loopback (or bound to the proxy
-  host) as in the compose file; the ingest port is not published until the ingest API exists.
+  host) as in the compose file; the ingest port is not published until the ingest API exists; the agent
+  token file `0400` owned by 65532; the loopback binding is defense in depth, not an access boundary
+  (depending on the Docker Engine version and host firewall, LAN hosts may reach published container ports
+  directly — use a current Docker Engine and a host firewall where that matters).
 - `.squad/project.md` (product facts this change makes untrue or incomplete): area 2 names
   `deploy/backend/docker-compose.yml` and its web port binding (ingest not yet published); area 9 names the database file
-  (`cmd/vandoxd/internal/store`, mode 0600, no directory creation); area 11 names the loopback health-check
+  (`cmd/vandoxd/internal/store`, mode 0600, no directory creation, symbolic links for `vandox.db` and its
+  `-wal`/`-shm` files refused); area 11 names the loopback health-check
   call (`healthcheck.go`: timeout, no proxy, no redirects, no environment); area 12 names the JSON `slog` handler of
   `vandoxd`; area 13 names the smoke script `.github/scripts/smoke-test-backend.sh` (runs on pull
   requests, reads no secret, pushes nothing); *Test doubles* gains the
@@ -550,7 +578,9 @@ The Dev makes these:
   verified at open, the database in the data volume.
 - 0016/0023 (UI in the LAN behind a TLS proxy; "the UI port must only be reachable by the reverse proxy"):
   the compose file publishes the web port on `127.0.0.1` by default; the issue's "home-network monitoring"
-  reaches `/healthz` through the proxy. `/healthz` is unauthenticated by requirement; #25 must keep it
+  reaches `/healthz` through the proxy. The binding is defense in depth, not the boundary (Docker Engine
+  and host firewall dependent); 0023 is implemented as far as a compose file can, the residual is recorded
+  in 0060 and handed to #25, whose login is the boundary. `/healthz` is unauthenticated by requirement; #25 must keep it
   outside the login (named in 0059).
 - 0010/0017 (ingest only on the tailnet address): kept by publishing the ingest port nowhere until #40
   adds it on the tailnet address; the ingest listener serves no health or UI route. 0017 is not
@@ -579,8 +609,17 @@ Guards and the inputs they see, with the accepted forms:
   Cc/Cf/Zl/Zp by 0049).** The file name is the constant `vandox.db`; the path goes into the SQLite URI only
   through `url.URL.Path`, so `?`, `#`, `%` and spaces cannot add URI parameters (`_pragma`, `mode`,
   `vfs`, `immutable`) or cut the path (AC-D5); the only query parameters are the three constant pragmas.
-  The file is created `0600` with `O_EXCL`; an existing non-regular file is refused; the directory is not
-  created (area 9).
+  The file is created `0600` with `O_EXCL`; the directory is not created (area 9). Forms of the entries
+  SQLite will open in that directory, checked with `os.Lstat` (SQLite's unix VFS follows symbolic links of
+  the main file and places `-wal`/`-shm` next to the resolved target), and the guard's behavior:
+  `vandox.db` absent → created with `O_CREATE|O_EXCL` (which fails on any existing name, including a
+  dangling link); regular file → opened; symbolic link (to a file, to a directory, dangling) → refused;
+  directory, FIFO, socket, device → refused; `vandox.db-wal`/`vandox.db-shm` absent or regular → accepted
+  (SQLite creates or reuses them), symbolic link or any other non-regular type → refused. The storage
+  directory itself may be a symbolic link (an operator's choice of where the volume lives; `os.Stat`
+  follows it). Not covered and accepted: a hard link (it cannot leave the file system, and making one, like
+  swapping an entry between the check and SQLite's open, needs write access to the `0700` directory owned
+  by UID 65532, i.e. the service's own identity, which can rewrite the database anyway).
 - **Compose port interpolation.** `${WEB_BIND_ADDRESS:-127.0.0.1}`: unset or empty → loopback. A value that
   is not an address of the host makes the container fail to start (bind error), i.e. fails closed. The
   ingest port has no `ports` entry, so nothing of `vandoxd` is published beyond the web port; the smoke
@@ -594,7 +633,8 @@ Guards and the inputs they see, with the accepted forms:
   attributes, not message text; `config.Secret` logs as `[redacted]`; the start line logs no secret.
 - **Container.** Non-root 65532, read-only root file system, `cap_drop: ALL`, `no-new-privileges`,
   configuration and import mounted read-only, the token as a Docker secret; the CI smoke test reads no
-  repository secret and pushes nothing (area 13). The health probe runs every 30 s without environment and
+  repository secret, pushes nothing, and uses `sudo` only for `chown`/`chmod` of its generated token file
+  and removing its temporary project directory (area 13). The health probe runs every 30 s without environment and
   so never opens a secret file (areas 8, 11).
 
 Accepted residual: `/healthz` is unauthenticated and reveals only whether the database answers (issue
@@ -602,8 +642,20 @@ requirement). On a backend host where Tailscale runs in userspace-networking mod
 connections are forwarded to the host's loopback, where the web port is published; the Tailscale ACL
 (0010: the monitored server may reach only the ingest port) remains the control that keeps the web port
 from the monitored server — the binding is defense in depth only on TUN-mode hosts. Unchanged by this
-feature (no agent exists before v0.2.0) and handed to #40 below. The secret file on the host must be readable by UID 65532, which on a NAS usually means
-`chown 65532`; documented, not enforced.
+feature (no agent exists before v0.2.0) and handed to #40 below. The secret file on the host must be owned by
+UID 65532 with mode `0400`/`0600` (Compose sets neither outside Swarm); documented in README and the compose
+header and exercised by the smoke test, not enforced by `vandoxd`.
+
+Accepted residual (Lead decision on Security's plan finding 4): **the loopback binding is not a security
+boundary** for 0023's "the UI port must only be reachable by the reverse proxy". Depending on the Docker
+Engine version and the host's firewall, a host on the same LAN may reach a published container port — or
+the container's bridge address — directly, bypassing the `127.0.0.1` host binding (reported for older
+engines; not verified for this feature). In this feature the web listener serves only `/healthz`, which is
+unauthenticated by requirement, so nothing more is exposed. The residual is recorded in 0060 and handed to
+#25 (the login must protect every route except `/healthz` on its own and must not trust the peer address,
+loopback or forwarded headers as proof of having passed the proxy) and #40 (a tailnet-address binding of
+the ingest port has the same limit; ingest authentication is the boundary) — proposed comments under
+*Out of scope / follow-ups*.
 
 ## Decision records
 
@@ -636,9 +688,41 @@ All `Proposed`, written with this plan:
   tailnet address is not a host interface (the bind fails) and inbound tailnet connections are forwarded to
   127.0.0.1, where the web port is published. Document the prerequisite (e.g. TUN mode) in the compose file,
   README and a decision record, extend the CI smoke test, and check it against security area 2 and records
-  0010, 0016, 0017."
+  0010, 0016, 0017. Note also (record 0060): a host-address port binding is not a security boundary —
+  depending on the Docker Engine version and host firewall, LAN hosts may reach a published container port
+  or the container's bridge address directly — so ingest authentication, not the tailnet binding, must be
+  what keeps others out. #13 deliberately has no `EXPOSE` in the Dockerfile (`docker run -P` and NAS
+  container managers would publish exposed ports on all interfaces); keep it that way when the ingest port
+  is published."
+- **Loopback binding is not an access boundary: #25.** Proposed comment on issue #25 (posted by the
+  orchestrator): "#13 publishes the web port on `127.0.0.1` by default for the reverse proxy (records 0023,
+  0060). That binding is defense in depth only: depending on the Docker Engine version and the host's
+  firewall, hosts on the LAN may reach a published container port or the container's bridge address
+  directly. The login must therefore protect every route except `/healthz` (record 0059) on its own, and
+  must not treat the peer address, loopback, or `X-Forwarded-*` headers as proof that a request came through
+  the proxy (trust forwarded headers only from configured proxy addresses, if at all). Please verify the
+  engine behavior on the supported NAS Docker versions and record the result."
 - Schema migrations beyond version 1, retention, rollups: with the storage features.
 - `/healthz` staying outside the login: #25 (named in 0059).
+
+## Security review findings
+
+Plan security review (2026-10-05): APPROVED with four non-blocking findings; Lead decision (mode `decide`):
+
+1. **Symlinked `vandox.db`** — fixed in this plan: `os.Lstat` for `vandox.db`, `vandox.db-wal` and
+   `vandox.db-shm`, symbolic links and other non-regular types refused; AC-D4 extended; accepted forms
+   enumerated under *Security considerations*; record 0057 (*Decision*) follows.
+2. **Host secret file permissions** — fixed in this plan: compose header and README give
+   `chown 65532:65532` and `chmod 0400` (or `0600`) and say never world-readable; the smoke test creates
+   its token the documented way (`sudo chown`/`chmod 0400`) instead of `0644`, so it proves the documented
+   setup and leaves no bad example; record 0060 follows.
+3. **`EXPOSE 8081`** — fixed, and widened: the Dockerfile gets **no** `EXPOSE` at all (`-P` and NAS
+   container managers would publish `8080` on all interfaces too, against 0023); AC-C1 and the smoke test
+   check that `Config.ExposedPorts` is empty; record 0059 follows; #40 is told to keep it so.
+4. **Loopback binding not a boundary** — accepted as a residual, not fixable in a compose file: recorded in
+   0060 (*Consequences*), documented in README and `SECURITY.md`, and handed to #25 (login is the boundary,
+   no trust in peer address or forwarded headers) and #40 (ingest authentication is the boundary) with the
+   proposed comments under *Out of scope / follow-ups*.
 
 ## Challenge
 
