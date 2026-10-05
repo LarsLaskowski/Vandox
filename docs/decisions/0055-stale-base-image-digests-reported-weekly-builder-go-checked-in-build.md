@@ -94,6 +94,11 @@ Facts checked on 2026-10-05:
    Hub rate limit) is only a warning there; failing the check would block unrelated pull requests on a
    registry hiccup. Dropping the digest step from CI altogether was rejected: it is the only place that
    shows a stale digest on the pull request that should refresh it.
+7. **In-build guard for the builder** (from the issue):
+   - *`RUN go version` only*: prints, never fails. Rejected.
+   - *Compare `go env GOVERSION` with the version at the start of `BASE_BUILD_TAG`*: a digest of another Go
+     minor (or, for a tag with a patch, another patch) fails the image build. It cannot tell two variants of
+     the same version apart (`1.27-trixie` and `1.27-bookworm`). Chosen.
 8. **What the report shows for a stale base**:
    - *Only "stale" with both digests*: rejected — because the `golang` and distroless tags are rebuilt for
      Debian updates, "stale" is the normal state and does not show whether the builder's Go patch lags,
@@ -108,11 +113,20 @@ Facts checked on 2026-10-05:
    - *By title and author `github-actions[bot]`*, with a failed lookup ending the job before any write
      (otherwise an API error would create a duplicate issue). Chosen. A `creator=` query parameter is not
      relied on.
-7. **In-build guard for the builder** (from the issue):
-   - *`RUN go version` only*: prints, never fails. Rejected.
-   - *Compare `go env GOVERSION` with the version at the start of `BASE_BUILD_TAG`*: a digest of another Go
-     minor (or, for a tag with a patch, another patch) fails the image build. It cannot tell two variants of
-     the same version apart (`1.27-trixie` and `1.27-bookworm`). Chosen.
+10. **Where the job token is available**:
+    - *`GH_TOKEN` on the job, one `run` step* that runs the script and writes the issue: rejected —
+      `docker buildx` and `jq`, which talk to and parse answers from external registries, would run with
+      the token in their environment for no reason.
+    - *Two steps*: the script runs in a step without any token and hands the issue body over as a file
+      under `$RUNNER_TEMP` (outside the checkout) and a fixed step output `stale=true`; only the issue step
+      gets `GH_TOKEN`. Chosen.
+11. **How a value from the registry is checked against its pattern**:
+    - *`printf '%s' "$v" | grep -Eq '^…$'`*, as the two existing scripts do: rejected — `grep` matches line
+      by line, so a `jq -r` value with an embedded newline (`sha256:<64 hex>` followed by a mention or a
+      link) passes and would reach the issue body and the annotations. (In the existing scripts the values
+      come from one Dockerfile line each, so they are not affected and stay unchanged.)
+    - *Bash whole-string match `[[ $v =~ $re ]]` under `LC_ALL=C`*, with a `jq` failure counted as a lookup
+      error and a rejected value printed nowhere. Chosen.
 
 ## Decision
 
@@ -122,7 +136,9 @@ is how a stale digest is noticed, and the build stage now checks the builder's G
 - `.github/scripts/check-base-image-digests.sh` runs `.github/scripts/check-base-image-pinning.sh` first.
   It then takes every `BASE_<NAME>` from the `FROM` lines, reads the `_IMAGE`, `_TAG` and `_DIGEST`
   defaults, and resolves `<image>:<tag>` with `docker buildx imagetools inspect` to its index digest. Image,
-  tag, pinned and resolved digest are checked against fixed patterns before use. For a stale base it also
+  tag, pinned and resolved digest are checked against fixed patterns before use, each as a whole-string
+  match (`[[ =~ ]]` under `LC_ALL=C`, option 11); a `jq` failure or a value that does not match is a
+  lookup error, and the value is printed nowhere. For a stale base it also
   reads `GOLANG_VERSION` from the current tag's `linux/amd64` image configuration and, if it matches
   `^[0-9]+\.[0-9]+(\.[0-9]+)?$`, shows `stale (Go <ver> available)`; otherwise plain `stale`. That read
   never changes the exit status. Exit status 0: every digest is current. Exit status 3: at least one is
@@ -130,10 +146,13 @@ is how a stale digest is noticed, and the build stage now checks the builder's G
   registry lookup failed or answered with no valid digest. Exit status 1: any other error (pinning check,
   pattern check). Precedence 1 > 4 > 3 > 0.
 - `.github/workflows/base-image-digests.yml` runs the script every Monday and on manual dispatch. Its only
-  job holds `contents: read` and `issues: write`. On status 3 it looks for an open issue titled *Base image
-  digests are stale* opened by `github-actions[bot]` and updates its body, or else opens that issue (labels
-  `dependencies`, `area: docker`); a failed issue lookup fails the job before any write. On status 0 it
-  does nothing; on any other status it fails. It writes no file, pushes nothing and opens no pull request.
+  job holds `contents: read` and `issues: write`. The script runs in a step without a GitHub token; on
+  status 3 that step writes the issue body to a file under `$RUNNER_TEMP` and sets the output
+  `stale=true`. Only then a second step, the only one with `GH_TOKEN` (option 10), looks for an open issue
+  titled *Base image digests are stale* opened by `github-actions[bot]` and updates its body, or else
+  opens that issue (labels `dependencies`, `area: docker`); a failed issue lookup fails the job before any
+  write. On status 0 it does nothing; on any other status it fails. It writes no file into the
+  repository, pushes nothing and opens no pull request.
 - The *Release build check* job in `ci.yml` runs the script after the builder Go version check. Status 3
   passes with the warning, status 4 passes with a warning that freshness was not checked; any other
   non-zero status fails the job.

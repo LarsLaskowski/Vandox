@@ -55,11 +55,13 @@ Related defect found on the way: none.
     fixed list, and reads the `_IMAGE`, `_TAG` and `_DIGEST` defaults;
   - c. exits 1 with `::error::` unless the image matches `^[a-z0-9][a-z0-9._/-]*$`, the tag matches
     `^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$` and the pinned digest matches `^sha256:[0-9a-f]{64}$`, before
-    any of them is passed to a command;
+    any of them is passed to a command; each check is a **whole-string match** per AC2 i;
   - d. resolves `<image>:<tag>` with `docker buildx imagetools inspect --format '{{json .Manifest}}'` and
-    `jq -r .digest`; a non-zero exit of the lookup (e.g. HTTP 429) or a result that does not match
-    `^sha256:[0-9a-f]{64}$` is a **lookup error**: `::warning::lookup of <image>:<tag> failed` on standard
-    error and exit status 4, never a stale or current result;
+    `jq -r .digest`; a non-zero exit of the lookup (e.g. HTTP 429), a non-zero exit of `jq` (e.g. the
+    answer is an array) or a result that is not, as a whole string (AC2 i), `^sha256:[0-9a-f]{64}$` (e.g.
+    `null`, empty, several lines, an embedded newline) is a **lookup error**:
+    `::warning::lookup of <image>:<tag> failed` on standard error and exit status 4, never a stale or
+    current result; the rejected value is written nowhere (neither to the table nor to a warning);
   - e. prints to standard output a Markdown table `| Base | Image | Pinned digest | Current digest | State |`
     with one row per base (`BASE_<NAME>`, `<image>:<tag>`, the two digests, the state per AC2 h);
   - f. for each stale base prints `::warning::BASE_<NAME>_DIGEST is stale: <image>:<tag> is now <current>, pinned <pinned>`
@@ -70,28 +72,42 @@ Related defect found on the way: none.
   - h. state column: `current`; or for a stale base `stale (Go <ver> available)` when
     `docker buildx imagetools inspect --format '{{json .Image}}' <image>:<tag>` succeeds and
     `."linux/amd64".config.Env` holds `GOLANG_VERSION=<ver>` with `<ver>` matching
-    `^[0-9]+\.[0-9]+(\.[0-9]+)?$`; otherwise plain `stale`. This second lookup runs only for a stale base,
-    and its failure or a missing/non-matching value never changes the exit status (informational only).
+    `^[0-9]+\.[0-9]+(\.[0-9]+)?$` as a whole string (AC2 i; two `GOLANG_VERSION` entries give two lines and
+    do not match); otherwise plain `stale`. This second lookup runs only for a stale base, and its failure,
+    a `jq` failure or a missing/non-matching value never changes the exit status (informational only);
+  - i. every pattern check on a value (image, tag, pinned digest, resolved digest, Go version) is a bash
+    whole-string match `[[ $v =~ $re ]]` with the anchored pattern held in a variable (`re='^…$'`), never
+    `printf '%s' "$v" | grep -Eq` (grep matches line by line, so a value with an embedded newline whose
+    first or any line matches would pass). The script sets `export LC_ALL=C` right after `set -euo pipefail`,
+    so the bracket ranges `[a-z]`, `[0-9a-f]` and `[A-Za-z]` are byte ranges in every locale. Only
+    regex-matched values reach standard output, the `::warning::` lines or a command line.
 - [ ] AC3: `.github/workflows/base-image-digests.yml` exists with:
   - a. triggers exactly `schedule` (`cron: "0 5 * * 1"`) and `workflow_dispatch`; no `push`,
     `pull_request` or other trigger;
   - b. top-level `permissions: {}`; one job with exactly `contents: read` and `issues: write`;
-    `concurrency` group `base-image-digests`, `cancel-in-progress: false`;
+    `concurrency` group `base-image-digests`, `cancel-in-progress: false`; no job-level or workflow-level
+    `env:`;
   - c. `actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1` with
     `persist-credentials: false`; no other action;
   - d. no `${{ }}` expression inside any `run:` script; `GH_TOKEN: ${{ github.token }}` and
-    `GH_REPO: ${{ github.repository }}` only through `env:`;
-  - e. the `run` script uses `set -euo pipefail`. Script status 0: logs "current" and succeeds without any
-    GitHub write; status 3: looks up open issues through `gh api` (REST, `--paginate`) and keeps only those
+    `GH_REPO: ${{ github.repository }}` only through the step-level `env:` of the issue step (AC3 e), so
+    the step that runs the script, `docker buildx` and `jq` has no token in its environment;
+  - e. two `run` steps, each with `set -euo pipefail`. Step `Check base image digests` (id `digests`, no
+    `env:`) runs the script. Status 0: logs "current" and succeeds; status 3: writes the issue body (AC3 f)
+    to `$RUNNER_TEMP/base-image-digests.md` and the fixed line `stale=true` to `$GITHUB_OUTPUT`; any other
+    status (1, 4, …): fails the job with `::error::` (so no write follows). Step `Report stale digests`
+    runs only `if: steps.digests.outputs.stale == 'true'`, reads the body from that file, then
+    looks up open issues through `gh api` (REST, `--paginate`) and keeps only those
     with `.pull_request == null`, `.user.login == "github-actions[bot]"` and the exact title
     `Base image digests are stale` (an issue with that title opened by anyone else is ignored and never
     edited); a failed lookup (non-zero exit of `gh api`) fails the job with `::error::` before any write,
     never falls through to creating an issue; the first match is taken without a pipe into `head`; if one
     exists, `PATCH`es its body; otherwise creates it with the labels `dependencies` and `area: docker`
-    (both exist in the repository); any other status (1, 4, …): fails the job without writing;
+    (both exist in the repository);
   - f. the issue body is the script's table plus fixed text pointing to `docs/CONTRIBUTING.md`,
     *Base image digests*; no other variable content;
-  - g. writes no file into the repository, pushes nothing, opens no pull request, closes no issue.
+  - g. writes no file into the repository (the body file lives under `$RUNNER_TEMP`, outside the
+    checkout), pushes nothing, opens no pull request, closes no issue.
 - [ ] AC4: In `.github/workflows/ci.yml`, job `release-build`, a step `Check base image digests` follows
   `Check builder Go version`: it runs the script; status 0 and 3 pass (3 leaves the warning annotations);
   status 4 (registry lookup error) passes with `::warning::base image digest lookup failed; freshness not
@@ -120,45 +136,78 @@ plan challenge, steps 3 and 8 and step 7 (*Format check*, *Analyzer gate*) still
 | AC | Where verified | By whom |
 | -- | -------------- | ------- |
 | AC1 | Reading the record against the diff | Reviewer (step 8), Lead (step 9) |
-| AC2 a–h | Dev runs the script in the repository root and in a scratch `git worktree` with (1) the committed Dockerfile, (2) one `_DIGEST` default changed to another valid sha256 (expect 3, warning, table row `stale`; for `BASE_BUILD`, if Docker Hub answers, `stale (Go <ver> available)`; for `BASE_RUNTIME` plain `stale`), (3) a tag default set to `-x` and to `'nonroot'` (expect 1 before any lookup), (4) a FROM line broken (expect 1 from the pinning check), (5) an unresolvable tag such as `nonroot-doesnotexist` (expect 4), (6) case (5) together with case (3) on the other base (expect 1, precedence); reports each exit status and output. A Docker Hub 429 during a run is itself the lookup-error check for `golang` (expect 4); the `gcr.io` runtime base resolves from this session. `bash -n` on the script; `shellcheck` if available. Then the PR's *Release build check* run on a GitHub runner (AC4) shows the real result for both bases | Dev (step 6), Reviewer and Security re-run (1)–(3) read-only in a scratch worktree (step 8) |
-| AC3 a–d, f, g | Read-only review of the workflow file; `grep -n '\${{' .github/workflows/base-image-digests.yml` shows hits only in `env:` lines | Reviewer, Security (step 8) |
-| AC3 e | Cannot run before merge (a `workflow_dispatch` needs the file on `main`). The status handling is a `case` on the script status and the lookup's `if !` guard, reviewed in step 8; the `--jq` filter is run read-only once by the Dev with `gh api --paginate "repos/LarsLaskowski/Vandox/issues?state=open&per_page=100" --jq '<filter>'` (expect no output and exit 0) and with the repository name misspelled (expect non-zero exit); after the merge the maintainer runs the workflow once by `workflow_dispatch` and confirms a green run with no issue (digests current) — recorded as a post-merge check in the PR's *Next steps* | Reviewer, Security (step 8); maintainer after merge |
+| AC2 a–h | Dev runs the script in the repository root and in a scratch `git worktree` with (1) the committed Dockerfile, (2) one `_DIGEST` default changed to another valid sha256 (expect 3, warning, table row `stale`; for `BASE_BUILD`, if Docker Hub answers, `stale (Go <ver> available)`; for `BASE_RUNTIME` plain `stale`), (3) a tag default set to `-x` and to `'nonroot'` (expect 1 before any lookup), (4) a FROM line broken (expect 1 from the pinning check), (5) an unresolvable tag such as `nonroot-doesnotexist` (expect 4), (6) case (5) together with case (3) on the other base (expect 1, precedence); with a stub `docker` first on `PATH` (a script in a scratch directory that prints a fixed JSON per `--format`): (7) `.Manifest` answer `{"digest":"sha256:<64 hex>\n@LarsLaskowski [x](https://e.vil)"}` (JSON `\n`, so `jq -r` yields an embedded newline) — expect 4, and neither standard output nor standard error contains `@LarsLaskowski` or `e.vil`; (8) `.Manifest` answer a JSON array `[{"digest":"sha256:<64 hex>"}]` — expect 4; (9) `.Manifest` answer a valid digest different from the pinned one and `.Image` answer `{"linux/amd64":{"config":{"Env":["GOLANG_VERSION=1.27.3","GOLANG_VERSION=1.27.4"]}}}` — expect 3 and the state column plain `stale`; (10) as (9) with a single `GOLANG_VERSION=1.27.3` — expect 3 and `stale (Go 1.27.3 available)`; (11) every `grep` hit in the script reads the Dockerfile (e.g. the `FROM` lines), none checks a value variable, and `export LC_ALL=C` follows `set -euo pipefail`; reports each exit status and output. A Docker Hub 429 during a run is itself the lookup-error check for `golang` (expect 4); the `gcr.io` runtime base resolves from this session. `bash -n` on the script; `shellcheck` if available. Then the PR's *Release build check* run on a GitHub runner (AC4) shows the real result for both bases | Dev (step 6), Reviewer and Security re-run (1)–(3) and (7)–(9) read-only in a scratch worktree (step 8) |
+| AC3 a–d, f, g | Read-only review of the workflow file; `grep -n '\${{' .github/workflows/base-image-digests.yml` shows hits only in the `env:` lines of the step `Report stale digests`, and `grep -n 'GH_TOKEN'` only there | Reviewer, Security (step 8) |
+| AC3 e | Cannot run before merge (a `workflow_dispatch` needs the file on `main`). The status handling is a `case` on the script status, the `if:` on the step output and the lookup's `if !` guard, reviewed in step 8; the `--jq` filter is run read-only once by the Dev with `gh api --paginate "repos/LarsLaskowski/Vandox/issues?state=open&per_page=100" --jq '<filter>'` (expect no output and exit 0) and with the repository name misspelled (expect non-zero exit); after the merge the maintainer runs the workflow once by `workflow_dispatch` and confirms a green run with no issue (digests current) — recorded as a post-merge check in the PR's *Next steps* | Reviewer, Security (step 8); maintainer after merge |
 | AC4 | The PR's CI run: `Release build check` contains the new step, green, with a warning only if a digest is stale or a lookup failed; the `case` mapping (0/3/4 pass, other fail) is reviewed in the diff | Orchestrator reads the run (step 11), Reviewer (diff) |
 | AC5 | The PR's `Release build check` builds the image (guard passes with the pinned builder). The guard command is run under `sh` with a stub `go` for the cases in *Accepted forms* (as done at plan time); a local `docker build --build-arg BASE_BUILD_TAG=1.26-trixie` (expect failure at the guard) if Docker Hub allows the pull. Both existing scripts run against the new Dockerfile and pass | Dev (step 6), Security (step 8) |
 | AC6, AC7 | `git diff --stat origin/main...HEAD` and the `grep` in AC7 | Reviewer (step 8), Lead (step 9) |
 
 ## Approach
 
-1. **Script** `.github/scripts/check-base-image-digests.sh` (AC2). Structure follows the two existing
-   scripts (same header comment style, `f=deploy/backend/Dockerfile`). Reads defaults with the same pattern
+1. **Script** `.github/scripts/check-base-image-digests.sh` (AC2). Header comment style and
+   `f=deploy/backend/Dockerfile` as in the two existing scripts, but **not** their value checks: the
+   existing scripts check values with `printf '%s' "$v" | grep -Eq '^…$'`, which matches line by line.
+   There that is safe (each value comes from one `sed`-matched Dockerfile line, declared once), but the
+   registry answer and `jq -r` output can hold several lines. The new script starts with
+   `set -euo pipefail` and `export LC_ALL=C`, defines its patterns once as variables
+   (`image_re='^[a-z0-9][a-z0-9._/-]*$'`, `tag_re='^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$'`,
+   `digest_re='^sha256:[0-9a-f]{64}$'`, `go_re='^[0-9]+\.[0-9]+(\.[0-9]+)?$'`) and checks every value with
+   `[[ $v =~ $digest_re ]]` and so on (bash ERE without `REG_NEWLINE`: `^`/`$` anchor the whole string,
+   verified at plan-revise time — a digest with an embedded newline is rejected by `[[ =~ ]]` and passed by
+   `grep -Eq`). Reads defaults with the same pattern
    the existing scripts use, `sed -nE "s/^ARG[[:space:]]+${name}=\"?([^\"[:space:]]+)\"?[[:space:]]*$/\1/p"`;
    the pinning check run first guarantees each is declared exactly once before the first `FROM`. Tracks
    `stale=0`, `lookup_failed=0` and `failed=0`; after the loop exits 1 if `failed`, 4 if `lookup_failed`,
    3 if `stale`, else 0. A lookup is run as
    `if ! manifest="$(docker buildx imagetools inspect --format '{{json .Manifest}}' "$image:$tag")"; then … lookup_failed=1; continue; fi`
-   so `set -e` does not abort before the other bases. For a stale base only, the Go version is read with
+   so `set -e` does not abort before the other bases; the digest is then taken as
+   `if ! current="$(jq -r .digest <<<"$manifest")" || ! [[ $current =~ $digest_re ]]; then … lookup_failed=1; continue; fi`
+   (a `jq` error, `null`, empty or multi-line value is a lookup error; the value is not printed). For a stale base only, the Go version is read with
    `if config="$(docker buildx imagetools inspect --format '{{json .Image}}' "$image:$tag")"` and
    `jq -r '(."linux/amd64".config.Env // .config.Env // [])[] | select(startswith("GOLANG_VERSION=")) | ltrimstr("GOLANG_VERSION=")'`
    (the `// .config.Env` covers a single-platform manifest; `jq` failure inside the `if` is tolerated),
-   then pattern-checked; checked at plan time that for an index `.Image` is a map keyed by platform
+   then checked with `[[ $go =~ $go_re ]]` (two entries give two lines and fail the match); checked at plan time that for an index `.Image` is a map keyed by platform
    (`gcr.io/distroless/static-debian13:nonroot`: keys `linux/amd64` … `linux/s390x`, `Env` without
    `GOLANG_VERSION`); the `golang` lookup was rate-limited (429), so the presence of `GOLANG_VERSION` in its
    `Env` (the official image's documented convention) is confirmed by the Dev's run (5)/(2) or on the PR's
    CI run. The `::warning::`/`::error::` lines go to standard error, the table to standard output.
-2. **Workflow** `.github/workflows/base-image-digests.yml` (AC3). One job `check`, one checkout step and one
-   `run` step, shaped like:
+2. **Workflow** `.github/workflows/base-image-digests.yml` (AC3). One job `check` with no job-level `env:`,
+   a checkout step and two `run` steps. The script (and with it `docker buildx` and `jq`, which talk to the
+   registries) runs in a step without the job token in its environment; only the issue step gets
+   `GH_TOKEN`/`GH_REPO`. The body crosses the step boundary as a file under `$RUNNER_TEMP` (outside the
+   checkout, removed with the runner), the "stale" signal as a fixed step output.
+
+   ```yaml
+   - name: Check base image digests
+     id: digests
+     run: |
+       set -euo pipefail
+       rc=0
+       report="$(.github/scripts/check-base-image-digests.sh)" || rc=$?
+       case "$rc" in
+         0) echo "base image digests are current"; exit 0 ;;
+         3) ;;
+         *) echo "::error::base image digest check failed with status $rc" >&2; exit 1 ;;
+       esac
+       printf '%s\n\n%s\n\n%s\n' "<fixed sentence>" "$report" "<fixed pointer to docs/CONTRIBUTING.md, Base image digests>" \
+         > "$RUNNER_TEMP/base-image-digests.md"
+       echo "stale=true" >> "$GITHUB_OUTPUT"
+   - name: Report stale digests
+     if: steps.digests.outputs.stale == 'true'
+     env:
+       GH_TOKEN: ${{ github.token }}
+       GH_REPO: ${{ github.repository }}
+     run: |
+       …
+   ```
+
+   The `Report stale digests` script:
 
    ```bash
    set -euo pipefail
-   rc=0
-   report="$(.github/scripts/check-base-image-digests.sh)" || rc=$?
-   case "$rc" in
-     0) echo "base image digests are current"; exit 0 ;;
-     3) ;;
-     *) echo "::error::base image digest check failed with status $rc" >&2; exit 1 ;;
-   esac
    title="Base image digests are stale"
-   body="$(printf '%s\n\n%s\n\n%s\n' "<fixed sentence>" "$report" "<fixed pointer to docs/CONTRIBUTING.md, Base image digests>")"
+   body="$(< "$RUNNER_TEMP/base-image-digests.md")"
    if ! numbers="$(gh api --paginate "repos/$GH_REPO/issues?state=open&per_page=100" \
        --jq '.[] | select(.pull_request == null and .user.login == "github-actions[bot]" and .title == "Base image digests are stale") | .number')"; then
      echo "::error::looking up the open issue failed; nothing written" >&2
@@ -227,15 +276,27 @@ case and indented, continuation with `\` (or the `escape` character), comments, 
 | `ARG BASE_X_TAG=${Y}` or any `$`, space, `:`, `@`, leading `-` in image or tag | image/tag pattern | exit 1 |
 | trailing comment `ARG BASE_X_TAG=v # c` | read yields nothing; pinning script's "non-empty default" fails | exit 1 |
 | `FROM --platform=… ${…}@${…}` or any other `FROM` shape | pinning script `FROM` pattern | exit 1 |
+| any read that yields several lines (only possible with a second declaration) | pinning script; independently the whole-string image/tag/digest match | exit 1 |
 | bare `ARG BASE_BUILD_TAG` inside a stage (the new guard line) | not matched by either reader (both require `=`), not a multi-name or continued line | accepted, ignored |
 
-**Registry answer** (`imagetools inspect` JSON): only `.digest` matching `^sha256:[0-9a-f]{64}$` is used;
-a single-platform manifest instead of an index still has a `digest` and would be compared as is (a
-change of the tag from index to single manifest then shows as stale, which is the right signal). Lookup
-errors (401, 404, 429, network) and an empty or non-matching result are lookup errors (exit 4). From the
-image config only a `GOLANG_VERSION` value matching `^[0-9]+\.[0-9]+(\.[0-9]+)?$` is used (written into
-the state column); anything else (absent, `rc`/`beta` versions, other characters, several values joined
-by newlines, a failed lookup) yields plain `stale`.
+**Registry answer** (`imagetools inspect` JSON, read by `jq -r`): only a `.digest` that is, as a whole
+string, `^sha256:[0-9a-f]{64}$` (bash `[[ =~ ]]`, `LC_ALL=C`) is used; a single-platform manifest instead
+of an index still has a `digest` and would be compared as is (a change of the tag from index to single
+manifest then shows as stale, which is the right signal). Behavior per answer form:
+
+| Answer | Result |
+| ------ | ------ |
+| lookup exits non-zero (401, 404, 429, network) | lookup error, exit 4 |
+| `.Manifest` an object with a valid `digest` | used |
+| `digest` missing or `null` (`jq -r` prints `null`), empty, upper-case hex, other algorithm | lookup error, exit 4 |
+| `digest` with an embedded newline (JSON `\n`) or trailing text, e.g. Markdown, a mention, a link | lookup error, exit 4; value printed nowhere |
+| `.Manifest` an array or a scalar (`jq` exits non-zero) | lookup error, exit 4 |
+| several JSON documents (`jq -r` prints several lines) | lookup error, exit 4 |
+
+From the image config only a `GOLANG_VERSION` value that is, as a whole string,
+`^[0-9]+\.[0-9]+(\.[0-9]+)?$` is used (written into the state column); anything else (absent, `rc`/`beta`
+versions, other characters, several `GOLANG_VERSION` entries — `jq` prints several lines, which the
+whole-string match rejects —, a `jq` error, a failed lookup) yields plain `stale`.
 
 **GitHub issue list** (`gh api` JSON): only issues with `.pull_request == null`,
 `.user.login == "github-actions[bot]"` and the exact literal title are candidates; an issue with the same
@@ -333,8 +394,12 @@ Made by the Dev:
 - New write permission: `issues: write` on the `GITHUB_TOKEN` of a scheduled/dispatched job on the default
   branch. It can create and edit issues only; it receives no secret, no environment, no
   `contents: write`. Anyone who can dispatch it already has write access.
-- Untrusted input: the registry's JSON answer. Only a value matching `^sha256:[0-9a-f]{64}$` is used and
-  written to the issue; anything else is an error. Image and tag come from the repository's Dockerfile
+- Untrusted input: the registry's JSON answer. Only a value that matches `^sha256:[0-9a-f]{64}$` as a
+  whole string (bash `[[ =~ ]]` under `LC_ALL=C`, not line-wise `grep`) is used and written to the issue;
+  anything else is a lookup error and is printed nowhere, so a multi-line answer cannot smuggle
+  mentions, links or Markdown into the bot-authored issue or the `::warning::` annotations.
+- Token exposure: `GH_TOKEN` is set only on the issue step. The step that runs `docker buildx`, `jq` and
+  the registry lookups has no GitHub token in its environment, and checkout persists none. Image and tag come from the repository's Dockerfile
   and are pattern-checked before reaching `docker` (no option injection through a leading `-`) and before
   reaching the issue body (no Markdown or mention injection: no `@`, spaces, brackets or backticks).
 - The issue title is a literal; the jq filter contains no shell-interpolated value.
@@ -345,7 +410,7 @@ Made by the Dev:
 - Lookup failure: the issue list call runs under `set -euo pipefail` inside an `if !` guard; a failure
   ends the job before any write, so a GitHub API error cannot create a duplicate issue.
 - The Go version shown in the state column comes from the registry's image config and is written into
-  the issue only after matching `^[0-9]+\.[0-9]+(\.[0-9]+)?$`.
+  the issue only after matching `^[0-9]+\.[0-9]+(\.[0-9]+)?$` as a whole string.
 - The in-build guard uses only `BASE_BUILD_TAG`, quoted in the `case` pattern; an override cannot make it
   pass for another version (table above). It runs before any repository file is copied in.
 - Availability: a registry lookup error is only a warning in the CI release build check (status 4), so a
@@ -356,7 +421,8 @@ Made by the Dev:
 
 - `docs/decisions/0055-stale-base-image-digests-reported-weekly-builder-go-checked-in-build.md` (Proposed)
   — extends 0041 (0041 stays Accepted, like 0053 amends 0037); options (a) PR / fail-only / issue, (b), (c),
-  freshness gate, in-build guard variants.
+  freshness gate, in-build guard variants, report content, issue lookup, token placement (option 10),
+  value check method (option 11).
 
 ## Challenge
 
@@ -383,6 +449,27 @@ Devil's Advocate: `OBJECTIONS`, 0 major, 3 minor. All three accepted.
    distroless at revise time; the `golang` lookup was rate-limited, so the `GOLANG_VERSION` presence is
    confirmed in the Dev's run or the PR's CI. The record now also states the expected noise level.
    Changed: AC2 h, Approach step 1, *Accepted forms*, *Documentation updates*, record 0055.
+
+Security plan review (1st): `CHANGES_REQUIRED`, 1 blocking, 1 non-blocking. Both accepted. The whole
+*Accepted forms* section was re-checked against whole-string matching: the `ARG` table gains a row for a
+multi-line read; the registry answer is now a table of answer forms; the GitHub issue list and the
+`BASE_BUILD_TAG` guard are unaffected (`number` comes only from `.number`, the guard does not use grep).
+
+- B1 *Line-wise `grep -Eq` lets a multi-line registry value through* — **accepted.** Reproduced at revise
+  time: for a `jq -r` value `sha256:<64 hex>\n@x [x](https://e.vil)`, `printf '%s' "$v" | grep -Eq
+  '^sha256:[0-9a-f]{64}$'` matches and `[[ $v =~ $re ]]` rejects; a `.Manifest` array makes `jq` exit 5;
+  two `GOLANG_VERSION` entries fail the whole-string Go pattern. Every value check is now a bash
+  whole-string match with `export LC_ALL=C` (new AC2 i, referenced from AC2 c, d, h); a `jq` failure is a
+  lookup error; a rejected value is printed nowhere. Approach step 1 no longer says the structure follows
+  the existing scripts without qualification and states why their `grep` checks are safe there and not
+  here (existing scripts unchanged, AC6). Verification cases (7)–(11) added: embedded newline → 4 with no
+  injected text in the output, array → 4, doubled `GOLANG_VERSION` → 3 with plain `stale`. Changed: AC2 c,
+  d, h, i, *Verification* AC2, Approach step 1, *Accepted forms*, *Security considerations*, record 0055.
+- N1 *Token in the environment of `docker buildx`* — **accepted.** The workflow now has two `run` steps:
+  `Check base image digests` (no `env:`) runs the script and, on status 3, writes the body to
+  `$RUNNER_TEMP/base-image-digests.md` and `stale=true` to `$GITHUB_OUTPUT`; `Report stale digests` runs
+  only on that output and alone holds `GH_TOKEN`/`GH_REPO`. No job- or workflow-level `env:`. Changed:
+  AC3 b, d, e, g, *Verification* AC3, Approach step 2, *Security considerations*, record 0055 (option 10).
 
 ## Out of scope / follow-ups
 
