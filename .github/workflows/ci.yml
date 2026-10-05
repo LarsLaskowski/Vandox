@@ -91,3 +91,69 @@ jobs:
       # independent of the tool's pinned version, so scans stay current.
       - name: Run govulncheck
         run: go tool govulncheck ./...
+
+  # Builds the agent and the backend image the way the release does, with a fixed
+  # dry-run version. Nothing is uploaded or pushed and no secret is read. The real
+  # release runs only on a version tag (release.yml, record 0053).
+  release-build:
+    name: Release build check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Check base image pinning
+        run: .github/scripts/check-base-image-pinning.sh
+
+      - name: Check builder Go version
+        run: .github/scripts/check-builder-go-version.sh
+
+      - name: Build and verify agent
+        run: |
+          set -euo pipefail
+          tag=v0.0.0-dryrun
+          commit="$(git rev-parse HEAD)"
+          date="$(TZ=UTC git log -1 --format=%cd --date=format-local:%Y-%m-%dT%H:%M:%SZ)"
+          pkg=github.com/LarsLaskowski/Vandox/internal/version
+          mkdir -p dist
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -buildvcs=false \
+            -ldflags "-s -w -X $pkg.Version=$tag -X $pkg.Commit=$commit -X $pkg.Date=$date" \
+            -o dist/vandox-agent-linux-amd64 ./cmd/vandox-agent
+          info="$(file dist/vandox-agent-linux-amd64)"
+          for want in "ELF 64-bit" "x86-64" "statically linked"; do
+            case "$info" in
+              *"$want"*) ;;
+              *) echo "::error::agent binary is not '$want'"; exit 1 ;;
+            esac
+          done
+          got="$(dist/vandox-agent-linux-amd64 --version)"
+          want="vandox-agent $tag (commit $commit, built $date)"
+          if [ "$got" != "$want" ]; then
+            echo "::error::agent --version mismatch: got '$got', want '$want'"
+            exit 1
+          fi
+
+      - name: Build and verify image
+        run: |
+          set -euo pipefail
+          tag=v0.0.0-dryrun
+          commit="$(git rev-parse HEAD)"
+          date="$(TZ=UTC git log -1 --format=%cd --date=format-local:%Y-%m-%dT%H:%M:%SZ)"
+          docker build -f deploy/backend/Dockerfile \
+            --build-arg VERSION="$tag" --build-arg COMMIT="$commit" --build-arg DATE="$date" \
+            -t vandox:local .
+          got="$(docker run --rm vandox:local --version)"
+          want="vandoxd $tag (commit $commit, built $date)"
+          if [ "$got" != "$want" ]; then
+            echo "::error::vandoxd --version mismatch: got '$got', want '$want'"
+            exit 1
+          fi
+          user="$(docker image inspect --format '{{.Config.User}}' vandox:local)"
+          if [ "$user" != "65532:65532" ]; then
+            echo "::error::image user is '$user', want 65532:65532"
+            exit 1
+          fi

@@ -75,8 +75,11 @@ expected to arrive clean (see the decision record on quality gates in [`decision
 ## Versioning and releases
 
 A release is a `v<major>.<minor>.<patch>` tag created manually on `main`; it publishes the agent binary and
-the backend Docker image. Merging a PR by itself never publishes a release. The workflow is
-`.github/workflows/release.yml`; the reasoning is in
+the backend Docker image. A release is always created manually, and the only trigger is pushing a new tag
+such as `v0.1.0`; merging a PR, pushing to `main` or a schedule never publishes one. `release.yml`
+does not run on pull requests; `ci.yml` checks the release build there (*Release build check* below). The
+workflow is `.github/workflows/release.yml`; the reasoning is in
+[0053](decisions/0053-releases-are-manual-and-started-only-by-a-version-tag.md),
 [0037](decisions/0037-release-workflow-with-plain-go-docker-and-gh.md),
 [0041](decisions/0041-base-images-pinned-by-digest-through-build-arguments.md) and
 [0039](decisions/0039-docker-hub-token-in-a-tag-only-environment.md).
@@ -121,12 +124,12 @@ line), and write it to `BASE_<NAME>_DIGEST` in a pull request. A new Go minor ve
 `go` line in `go.mod`, `BASE_BUILD_TAG` and `BASE_BUILD_DIGEST` together. The release build passes no
 `BASE_*` build argument, so the pinned defaults are what it uses.
 
-### Dry run on pull requests
+### Release build check on pull requests
 
-A pull request that changes the workflow, the Dockerfile, `.dockerignore`, `go.mod`, `go.sum`, `cmd/**` or
-`internal/**` runs steps 1 to 4 with the version `v0.0.0-dryrun`, without the origin/main ancestry check
-(step 1 then only checks the constant dry-run version against the pattern). It uploads, pushes and releases
-nothing and reads no secret.
+`release.yml` runs only for a version tag. Pull requests are covered by the `Release build check` job in
+`ci.yml`: it runs the base image pinning and builder Go version checks (`.github/scripts/`), builds the
+agent and the image with the version `v0.0.0-dryrun`, and verifies `--version`, the static binary and the
+image user. It uploads, pushes and releases nothing and reads no secret.
 
 ### One-time setup (maintainer)
 
