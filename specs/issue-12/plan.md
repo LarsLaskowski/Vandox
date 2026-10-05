@@ -27,7 +27,8 @@ Claims of the issue, checked against the repository (`main` at `56c78f6`, branch
   `internal/config/config.go:35`, marked "#60" in `internal/config/backend.go:29`). The bot is #60 (open).
   A bot's profile picture is set by its owner in BotFather, not by code.
 - *"OCI labels on the image: title, description, source, licenses, plus the logo URL if supported"* —
-  **partly already true**: `deploy/backend/Dockerfile` exists (lines 41–48) and already sets
+  **partly already true**: `deploy/backend/Dockerfile` exists (`LABEL` block of the runtime stage at
+  lines 43–50 on the branch) and already sets
   `org.opencontainers.image.title="vandox"`, `.source="https://github.com/LarsLaskowski/Vandox"` and
   `.licenses="MIT"` (matches `LICENSE`). `.description` is missing. **A logo URL is not supported**: the
   OCI image annotation keys (`created`, `authors`, `url`, `documentation`, `source`, `version`,
@@ -44,9 +45,19 @@ Claims of the issue, checked against the repository (`main` at `56c78f6`, branch
   `@media (prefers-color-scheme:dark)` in its `<style>`.
 - *"The original PNG is added by the maintainer"* — not part of the squad's diff (see *Out of scope*).
 
-Related defect found on the way (not a bug today, a trap for #24): `go:embed` patterns may not contain
-`..`, and `.dockerignore` excludes `docs/` from the build context. The web UI therefore cannot embed
-`docs/assets/` directly; #24 has to copy the files it serves into its own package (see record 0051).
+Related constraint found on the way (not a bug today, a trap for #24), stated precisely:
+
+- `go:embed` patterns are relative to the embedding package's directory and may not contain `.` or `..`
+  elements, so a package under `cmd/` or `internal/` cannot embed `docs/assets/`. A package whose
+  directory contains `docs/assets/` (the module root) or a package inside `docs/assets/` itself could.
+- The image build is the real obstacle: `.dockerignore` is an allow-list (`*`, then `!go.mod`, `!go.sum`,
+  `!cmd/`, `!internal/`, `!LICENSE`), and the build stage of `deploy/backend/Dockerfile` copies only
+  `cmd/` and `internal/` (lines 20–21). Any embedding of `docs/assets/` therefore needs either copies
+  inside `cmd/`/`internal/` or a change to `.dockerignore` and the Dockerfile's `COPY` lines.
+
+How #24 resolves this (copies pinned by a test, or a Go package at the root or in `docs/assets/` plus
+build-context changes) is #24's decision; record 0051 names both paths and decides neither (see
+*Challenge*, objection 2).
 
 ## Acceptance criteria
 
@@ -176,16 +187,17 @@ Sections, in this order (wording is the Dev's; the facts are fixed):
    `docs/assets/` use exactly these values, so a color change means changing the tokens and every SVG
    together.
 4. `## Where the logo is used` — README (`<picture>` switching via `prefers-color-scheme`, done); web UI
-   (favicon and header logo, with #24: `go:embed` cannot reach `docs/assets/` — patterns may not contain
-   `..` and `.dockerignore` keeps `docs/` out of the build context — so the web package keeps copies and
-   a test pins them to `docs/assets/`, record 0051); Telegram bot (profile picture rendered from
+   (favicon and header logo, with #24; `docs/assets/` stays the single source, and the image build
+   context currently contains only `go.mod`, `go.sum`, `cmd/`, `internal/` and `LICENSE`, so #24 decides
+   how the served files reach the binary, record 0051); Telegram bot (profile picture rendered from
    `vandox-icon.svg` at 512×512 and set in BotFather, with #60); container image (OCI labels title,
    description, source and licenses; no logo label, record 0052).
 
 ### `deploy/backend/Dockerfile`, exact edit
 
-In the `LABEL` block of the runtime stage (currently lines 41–48), insert after line 41
-(`LABEL org.opencontainers.image.title="vandox" \`):
+In the `LABEL` block of the runtime stage, insert directly after the line
+`LABEL org.opencontainers.image.title="vandox" \` (and before
+`      org.opencontainers.image.source="https://github.com/LarsLaskowski/Vandox" \`):
 
 ```
       org.opencontainers.image.description="Vandox backend: lean monitoring for a Plesk-managed Linux server that reconstructs outages from logs and metrics" \
@@ -210,7 +222,7 @@ signature.
 changes; the *Deployment* section does not list labels other than the base-image ones, which are
 unchanged). `README.md` configuration table and environment variables: none (no option added).
 `.squad/project.md`, `.squad/stack.md`: none (no new security area, command or coupling point in code yet;
-#24 adds the "web assets must match `docs/assets/`" coupling when it creates the copies).
+#24 adds a coupling point if its chosen way of embedding the assets creates one).
 
 ## Architecture check
 
@@ -234,9 +246,29 @@ assets do not enter the image.
 
 - `docs/decisions/0051-brand-assets-in-docs-assets-web-ui-and-telegram-with-their-features.md` (Proposed)
   — the SVG set lives in `docs/assets/` as the single source; web UI and Telegram parts of #12 are done
-  with #24 and #60; the web UI keeps pinned copies because `go:embed` cannot reach `docs/assets/`.
+  with #24 and #60; the embedding constraint (no `..` in `go:embed` patterns, allow-list build context)
+  is recorded and the way to embed (pinned copies or a root/`docs/assets/` package with build-context
+  changes) is left to #24.
 - `docs/decisions/0052-image-labels-description-added-no-logo-label.md` (Proposed) — description label
   added; no logo label, because OCI defines none and Docker Hub reads none.
+
+## Challenge
+
+Devil's Advocate, round 1: 0 major, 2 minor.
+
+1. **minor — Dockerfile line numbers wrong** (the `LABEL` block is lines 43–50, line 41 is
+   `ARG DATE=unknown`). **Accepted.** Verified with `cat -n deploy/backend/Dockerfile`. The *Problem* section
+   now says lines 43–50; the exact edit no longer uses line numbers and anchors only on the quoted
+   `title` line and the following `source` line.
+2. **minor — "`go:embed` cannot reach `docs/assets/`" overstated.** **Accepted.** The `..` restriction only
+   rules out packages under `cmd/` and `internal/`; a package at the module root or inside `docs/assets/`
+   could embed the files. The binding obstacle is the image build: `.dockerignore` is an allow-list and
+   the Dockerfile copies only `cmd/` and `internal/` (lines 20–21). Changed: the constraint is stated
+   precisely in *Problem / root cause*, in the `docs/BRANDING.md` content (section 4, which no longer
+   prescribes copies) and in the #24 comment, which now offers both paths. Record 0051 lists the
+   root/`docs/assets/` embed package as option 4 and leaves the choice between it and pinned copies to
+   #24 instead of requiring copies; its context section is corrected the same way. No change to tier,
+   acceptance criteria or the diff of this issue beyond the `docs/BRANDING.md` wording.
 
 ## Out of scope / follow-ups
 
@@ -247,9 +279,12 @@ assets do not enter the image.
   > From #12: the logo files are in `docs/assets/` and the color tokens in `docs/BRANDING.md`. Please use
   > `vandox-favicon.svg` as the favicon (it switches colors itself) and `vandox-logo-horizontal.svg` /
   > `vandox-logo-horizontal-dark.svg` in the header per theme, with the `--vandox-color-*` tokens.
-  > `go:embed` cannot reach `docs/assets/` (no `..` in patterns, and `.dockerignore` excludes `docs/`),
-  > so keep copies in the web package and add a test that compares them byte for byte with
-  > `docs/assets/` (record 0051).
+  > Note for embedding: a package under `cmd/` or `internal/` cannot embed `docs/assets/` (`go:embed`
+  > patterns may not contain `..`), and the image build context is an allow-list (`.dockerignore`) of
+  > `go.mod`, `go.sum`, `cmd/`, `internal/` and `LICENSE`, with the Dockerfile copying only `cmd/` and
+  > `internal/`. Either keep copies in the web package with a test that compares them byte for byte with
+  > `docs/assets/`, or embed from a package at the module root or in `docs/assets/` and extend
+  > `.dockerignore` and the Dockerfile accordingly — your call, see record 0051.
 - **Telegram profile picture** → existing issue #60. The orchestrator posts this comment on #60:
   > From #12: when the bot exists, render `docs/assets/vandox-icon.svg` to a 512×512 PNG (e.g.
   > `rsvg-convert -w 512 -h 512 docs/assets/vandox-icon.svg -o vandox-icon-512.png`) and set it as the

@@ -18,9 +18,12 @@ Telegram code was the configuration of its token. The issue's acceptance criteri
 `docs/assets/`, README in light and dark mode, color tokens documented, OCI labels set) do not depend on
 either.
 
-Two facts constrain how the web UI can use the files: `go:embed` patterns may not contain `..`, so a
-package under `internal/` or `cmd/` cannot embed `docs/assets/`; and `.dockerignore` keeps `docs/` out of
-the image build context.
+Two facts constrain how the web UI can embed the files. `go:embed` patterns are relative to the
+package's directory and may not contain `.` or `..` elements, so a package under `cmd/` or `internal/`
+cannot embed `docs/assets/`; a package at the module root or inside `docs/assets/` could. And the image
+build context is an allow-list: `.dockerignore` admits only `go.mod`, `go.sum`, `cmd/`, `internal/` and
+`LICENSE`, and the build stage of `deploy/backend/Dockerfile` copies only `cmd/` and `internal/`, so any
+embedding from `docs/assets/` also needs the build context and the `COPY` lines extended.
 
 ## Options considered
 
@@ -33,6 +36,11 @@ the image build context.
 3. **Store the assets inside a Go package (e.g. under `internal/`) so they can be embedded directly** —
    avoids copies later, but puts documentation images into production code before any code uses them,
    and the README would point into a code package.
+4. **Prescribe now how #24 embeds the files** — either copies in the web package pinned by a test, or a Go
+   package at the module root or in `docs/assets/` that embeds them directly, with `.dockerignore` and the
+   Dockerfile's `COPY` lines extended. Not decided here: both are workable, the choice depends on the web
+   package layout and build-context policy that #24 designs, and deciding it before that code exists
+   would bind #24 without a consumer to judge against.
 
 ## Decision
 
@@ -45,13 +53,16 @@ The original PNG is added to `docs/assets/` by the maintainer.
 
 ## Consequences
 
-- #24 keeps copies of the files it serves (`vandox-favicon.svg`, `vandox-logo-horizontal.svg`,
-  `vandox-logo-horizontal-dark.svg`) in its web package for `go:embed`, with a unit test that compares
-  each copy byte for byte with `docs/assets/`, so the two cannot drift. Served as images (`<img>`,
-  `<link rel="icon">`), the SVGs run no script and their inline `<style>` needs no CSP exception.
+- #24 chooses how the files it serves (`vandox-favicon.svg`, `vandox-logo-horizontal.svg`,
+  `vandox-logo-horizontal-dark.svg`) reach the binary (option 4), and records the choice: copies in the
+  web package need a unit test that compares each copy byte for byte with `docs/assets/`, so the two
+  cannot drift; a root-level or `docs/assets/` package needs `.dockerignore` and the Dockerfile extended,
+  which is a change to the release pipeline's build context. Either way `docs/assets/` stays the single
+  source. Served as images (`<img>`, `<link rel="icon">`), the SVGs run no script and their inline
+  `<style>` needs no CSP exception.
 - #60 renders `vandox-icon.svg` to a 512×512 PNG and sets it in BotFather; Telegram's circular crop may
   need padding, because the icon's bar reaches nearly to the edges of its square.
 - A color change means changing the tokens in `docs/BRANDING.md` and every SVG together (and, after #24,
-  the copies through the pinning test).
+  whatever #24 embeds from them).
 - Revisit if the assets need a build step (e.g. generated PNGs): then a generator in the repository would
   replace hand-copied files.
