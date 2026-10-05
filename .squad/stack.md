@@ -87,7 +87,8 @@ time so results are attributable.
   `GOTOOLCHAIN=auto` it builds with the Go version from golangci-lint's own `go.mod`, which can be older
   than this module's. Use the binary from the golangci-lint GitHub release, or force a toolchain at least
   as new as `go.mod` (`GOTOOLCHAIN=go1.27.<n> go install ...@<version>`); `golangci-lint version` shows
-  the Go it was built with.
+  the Go it was built with. The session-start hook does this for remote sessions, using the version pinned
+  in `.github/workflows/ci.yml`.
 - With `GOTOOLCHAIN=auto`, a local Go older than `go.mod` switches to the `.0` release of that minor
   version (`go 1.27` -> `go1.27.0`). `go tool govulncheck ./...` can then report standard-library
   vulnerabilities that the current patch, the one CI uses, already fixes. Select the current patch

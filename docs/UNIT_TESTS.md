@@ -26,6 +26,11 @@ neighboring test file before inventing a new pattern.
 - Arrange / Act / Assert inside each case; one act per case.
 - Failure messages state what was called, what came back and what was expected:
   `t.Errorf("Parse(%q) = %v, want %v", in, got, want)`.
+- Leak tests (a secret must not appear in an error or log): keep the sentinel out of subtest names —
+  `t.TempDir()` embeds the sanitized subtest name in the path, and an error that legitimately shows the
+  path then contains the sentinel. Strip the file path from the error text before the leak check.
+- Where the plan fixes an error format, assert the exact text instead of forbidding substrings; a
+  forbidden substring must not overlap text the format requires.
 - `t.Helper()` in helpers; `t.TempDir()` for files; no real network, no real clock (inject a clock or a
   fixture path); tests pass under `-race`.
 

@@ -14,6 +14,14 @@ Each factual claim of the issue, checked against the code: confirmed or refuted.
 - [ ] AC1: ... (the Tester turns each one into at least one unit test; in a plan without production or test
   code, *Verification without tests* below says how it is verified instead)
 
+When the issue or spec supplies assets or generated content verbatim (images, SVG, configuration,
+fixtures) and "identical to the issue" is an acceptance criterion: render or otherwise exercise that
+content once before fixing the criterion, and record here what you did and any mismatch between the literal
+content and the evident intent as an escalation question — at plan time, not at approval time.
+
+When an acceptance criterion requires a file path (or another environment-dependent value) in an error
+message, state how the tests strip it from leak checks.
+
 ## Verification without tests
 
 Only when the change touches no production or test code, in any tier: steps 4, 5 and the *Coverage gate*

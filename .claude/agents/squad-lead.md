@@ -42,6 +42,10 @@ The orchestrator tells you which **mode** to run:
     gate* are not applicable (*Changes without production or test code* in `.squad/routing.md`) and a
     *Verification without tests* section naming, per acceptance criterion, where and by whom it is verified
     instead — or, if code does change, no such declaration;
+  - when the issue or spec supplies assets or generated content verbatim (images, SVG, configuration,
+    fixtures) and "identical to the issue" would become an acceptance criterion: first render or otherwise
+    exercise that content once (not only check it for well-formedness), and record any mismatch between the
+    literal content and the evident intent as an escalation question in the plan, at plan time;
   - for a guard against bypasses (a validation, allow-list or check on input that a parser or tool
     consumes): the **accepted forms** of that input, enumerated in the first draft from the real parser or
     consumer (its source or documentation; case, indentation, continuation lines, comment styles, BOM,

@@ -38,7 +38,7 @@ action yourself — including follow-up issues the Lead decides on.
   untracked files, and after every further completed step. PRs are merged with *Squash and merge*, so only
   the PR title and description reach `main`; intermediate commit messages may name the step, but never
   contain secrets. Interim work-in-progress commits — e.g. demanded by a stop hook while a member is still
-  working — are fine for the same reason. Stage with plain `git add -A`: ignored paths such as `TestResults/`
+  working — are fine for the same reason; the commit that closes the round gets a final subject. Stage with plain `git add -A`: ignored paths such as `TestResults/`
   are skipped anyway, and an exclusion pathspec for an ignored path makes `git add` fail and stage
   nothing. Never commit to `main`.
 - **GitHub access:** use the GitHub MCP tools (`mcp__github__*`) for issues, comments, labels and pull
@@ -97,7 +97,8 @@ action yourself — including follow-up issues the Lead decides on.
    system — then the PR says so.
 6. **Implement and cover.** For a change without production or test code this is the Dev's edits alone: no
    `squad-tester`, no *Test with coverage*, no *Coverage gate*. Launch `squad-dev` in mode `implement` with the plan and the test names; it
-   also makes the documentation updates the plan lists. If the Dev disputes a test, launch `squad-lead`
+   also makes the documentation updates the plan lists and may adapt a test call site that no longer
+   compiles only because of a signature or field change it made itself (`.squad/routing.md`, *Loop limits*). If the Dev disputes a test, launch `squad-lead`
    in mode `decide`; the Tester changes a test only if the Lead says so. Then run *Test with coverage* and
    the *Coverage gate* yourself (both in `.squad/stack.md`). Launch `squad-tester` in mode `coverage` only
    when the gate fails or the Dev reports uncovered new lines; if the gate already passes and the only
