@@ -3,7 +3,7 @@ name: Release
 # A SemVer tag (v*.*.*) builds, verifies and publishes the agent binary and the
 # backend image. This is the only trigger: a release is always created manually by
 # pushing a tag. Pull requests are checked by ci.yml, never by this workflow.
-# See docs/CONTRIBUTING.md (Versioning and releases) and records 0037, 0039, 0041 and 0053.
+# See docs/CONTRIBUTING.md (Versioning and releases) and records 0037, 0039, 0041, 0053 and 0054.
 
 on:
   push:
@@ -233,8 +233,63 @@ jobs:
         if: always()
         run: docker logout docker.io
 
-  github-release:
+  # Signs build provenance for the published binary and image (record 0054). Holds the
+  # OIDC signing permission and nothing else: no environment, no secret, no checkout.
+  attest:
     needs: [build, publish-image]
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release
+          path: dist
+
+      - name: Check release files
+        run: |
+          set -euo pipefail
+          cd dist && sha256sum -c SHA256SUMS
+
+      - name: Check image digest
+        env:
+          DIGEST: ${{ needs.publish-image.outputs.digest }}
+        run: |
+          set -euo pipefail
+          if [[ ! $DIGEST =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "::error::publish-image digest '$DIGEST' is not sha256:<64 hex>"
+            exit 1
+          fi
+
+      - name: Attest agent
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: dist/vandox-agent-linux-amd64
+
+      - name: Attest image
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: docker.io/networlddev/vandox
+          subject-digest: ${{ needs.publish-image.outputs.digest }}
+
+      - name: Verify attestations
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.build.outputs.tag }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          set -euo pipefail
+          flags=(--repo "$GH_REPO"
+            --signer-workflow "$GH_REPO/.github/workflows/release.yml"
+            --source-ref "refs/tags/$TAG"
+            --deny-self-hosted-runners)
+          gh attestation verify dist/vandox-agent-linux-amd64 "${flags[@]}"
+          gh attestation verify "oci://docker.io/networlddev/vandox:$VERSION" "${flags[@]}"
+
+  github-release:
+    needs: [build, publish-image, attest]
     runs-on: ubuntu-latest
     permissions:
       contents: write

@@ -10,3 +10,4 @@ One line per pipeline step: date, step, member, result. Lead decisions and escal
 | 2026-10-05 | 2 Plan revise | Lead | Objection accepted: docs verify and pull by digest; workflow check stays on tag; plan and record 0054 revised; tier stays security |
 | 2026-10-05 | 3 Plan security review | Security | APPROVED; non-blocking: digest guard must use bash [[ =~ ^sha256:[0-9a-f]{64}$ ]] (grep -x does not reject multi-line values), correct plan note |
 | 2026-10-05 | 4-5 Skeleton, tests first | Orchestrator | skipped: no production or test code changes (plan Verification without tests) |
+| 2026-10-05 | 6 Implement | Dev | attest job added to release.yml, github-release gated on it, docs and project.md updated; no tests/coverage (no code change) |

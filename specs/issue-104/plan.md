@@ -121,7 +121,7 @@ and comments may be adjusted, the guarantees above may not):
           DIGEST: ${{ needs.publish-image.outputs.digest }}
         run: |
           set -euo pipefail
-          if ! printf '%s' "$DIGEST" | grep -Eqx 'sha256:[0-9a-f]{64}'; then
+          if [[ ! $DIGEST =~ ^sha256:[0-9a-f]{64}$ ]]; then
             echo "::error::publish-image digest '$DIGEST' is not sha256:<64 hex>"
             exit 1
           fi
@@ -155,8 +155,9 @@ and comments may be adjusted, the guarantees above may not):
 
 Notes for the Dev:
 
-- `grep -x` with the pattern above anchors the whole line; `printf '%s'` without newline gives `grep` one
-  line. Accepted forms of `subject-digest` in `actions/attest` (`src/subject.ts`, `parseSubjectDigest`):
+- The guard is a bash `[[ =~ ]]` test whose pattern is anchored with `^` and `$` on the whole string, so a
+  multi-line value is rejected too (`grep -Eqx` checks line by line and would accept a value with an
+  extra line). Accepted forms of `subject-digest` in `actions/attest` (`src/subject.ts`, `parseSubjectDigest`):
   `<alg>:<hex>` with `alg` in sha224/sha256/sha384/sha512/sha512_224/sha512_256 and hex of either case at
   the matching length. The guard accepts only the subset `sha256:` + 64 lower-case hex (what Docker writes
   in `RepoDigests`); upper-case hex, other algorithms, an empty output, a value with a tag or a name

@@ -82,7 +82,8 @@ workflow is `.github/workflows/release.yml`; the reasoning is in
 [0053](decisions/0053-releases-are-manual-and-started-only-by-a-version-tag.md),
 [0037](decisions/0037-release-workflow-with-plain-go-docker-and-gh.md),
 [0041](decisions/0041-base-images-pinned-by-digest-through-build-arguments.md) and
-[0039](decisions/0039-docker-hub-token-in-a-tag-only-environment.md).
+[0039](decisions/0039-docker-hub-token-in-a-tag-only-environment.md) and
+[0054](decisions/0054-release-provenance-attestations-from-a-secret-free-job.md).
 
 ### Cutting a release
 
@@ -110,8 +111,23 @@ Pre-release tags look like `vX.Y.Z-rc.N`. Build metadata (`+...`) is not allowed
    highest stable `v*.*.*` tag. A pre-release tag publishes only its own version. If the version already
    exists on Docker Hub, or the check cannot tell, the job fails before pushing: a published version is
    never overwritten.
-6. Creates the GitHub release with generated notes, the image digest, `vandox-agent-linux-amd64` and
-   `SHA256SUMS`; a pre-release is marked as such.
+6. Creates SLSA build provenance attestations for the binary and the image digest (GitHub artifact
+   attestations, stored on GitHub, not in Docker Hub) in the `attest` job, which holds only
+   `id-token: write` and `attestations: write`, has no environment and reads no secret, and verifies them
+   with the commands from the README.
+7. Creates the GitHub release, only after the attestations exist and verify, with generated notes, the image
+   digest, `vandox-agent-linux-amd64` and `SHA256SUMS`; a pre-release is marked as such.
+
+### Verifying a release
+
+The README (*Install*) has the commands: `gh attestation verify` for the binary and, by digest, for the
+image (`oci://docker.io/networlddev/vandox@sha256:<digest>`, the digest from the release notes), followed by
+pulling that same digest. `--source-ref` pins the tag, `--signer-workflow` pins `release.yml`, and
+`--deny-self-hosted-runners` requires a GitHub-hosted runner. The image is verified and pulled by digest
+because a tag can be re-pointed (immutable tags are optional, see *One-time setup (maintainer)*, item 3). The
+workflow's own check uses the tag on purpose, to catch a tag that does not resolve to the attested digest.
+An attestation does not prove that the tagged commit is on `main`; the tag ruleset `release-tags` stays
+that boundary.
 
 ### Base image digests
 
@@ -162,6 +178,10 @@ If a job fails before the image is pushed, nothing was published: fix the cause 
 
 If only `github-release` failed, use "Re-run failed jobs". It reruns just that job and works while the run's
 release artifact exists, that is 7 days after the tag run.
+
+If `attest` failed, the image is already published and no GitHub release exists. "Re-run failed jobs" reruns
+`attest` and `github-release` within the 7-day artifact window; a second attestation for the same digest is
+harmless. After that window, cut a new patch version.
 
 If `publish-image` failed after `networlddev/vandox:<version>` was pushed (it failed while pushing `latest`
 or reading the digest), a re-run stops at the never-overwrite check. Do not push by hand; cut a new patch
