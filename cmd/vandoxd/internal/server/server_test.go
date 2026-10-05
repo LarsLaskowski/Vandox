@@ -242,8 +242,12 @@ func TestRun_GracefulShutdownWaitsForRequest(t *testing.T) {
 		err    error
 	}
 	replies := make(chan reply, 1)
+	// The request must not be abandoned when Run returns (as h.get does): once the pinger is
+	// released Run may return before the client has read the response. It is bounded by guard only.
+	reqCtx, reqCancel := context.WithTimeout(t.Context(), guard)
+	defer reqCancel()
 	go func() {
-		status, _, err := h.get(web, "/healthz")
+		status, _, err := doGet(reqCtx, web, "/healthz")
 		replies <- reply{status, err}
 	}()
 	h.await(pinger.entered, "the request reached the database")
