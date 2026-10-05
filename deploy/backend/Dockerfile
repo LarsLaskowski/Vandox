@@ -2,7 +2,8 @@
 #   docker build -f deploy/backend/Dockerfile .
 # Base images are pinned by digest only; each tag is kept in its own ARG for readability and the
 # OCI base-image labels. The builder tag follows the `go` directive in go.mod. The release workflow
-# checks both; the digests are refreshed by hand (docs/CONTRIBUTING.md, record 0041).
+# checks both. The digests are refreshed by hand in a pull request; a weekly workflow and the CI
+# release build check report a stale digest (docs/CONTRIBUTING.md, records 0041 and 0055).
 ARG BASE_BUILD_IMAGE="golang"
 ARG BASE_BUILD_TAG="1.27-trixie"
 ARG BASE_BUILD_DIGEST="sha256:3b77fc618ec235a1ab412de7737f120dd507c57e8d87de4cbb7994fb94275ed5"
@@ -13,6 +14,14 @@ ARG BASE_RUNTIME_DIGEST="sha256:e2e927ec666bae08560abb3c55d0659eceabb657f56b6782
 FROM ${BASE_BUILD_IMAGE}@${BASE_BUILD_DIGEST} AS build
 
 WORKDIR /src
+
+# The builder's Go version must match BASE_BUILD_TAG, so a digest read for another Go version fails
+# the build (record 0055). Runs before go.mod is copied, so no toolchain switch can answer instead.
+ARG BASE_BUILD_TAG
+RUN want="go${BASE_BUILD_TAG%%-*}"; got="$(go env GOVERSION)"; \
+    case "$got" in "$want"|"$want".*) ;; \
+      *) echo "builder Go $got does not match BASE_BUILD_TAG $BASE_BUILD_TAG (want $want)" >&2; exit 1 ;; \
+    esac
 
 COPY go.mod go.sum ./
 RUN go mod download

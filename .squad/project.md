@@ -84,7 +84,8 @@ files or endpoints.
     `checkEnviron`). Configuration values are free of Cc, Cf, Zl and Zp characters but are still logged only
     as `slog` attributes, never concatenated into a message.
 13. **Release pipeline and published artifacts** (`.github/workflows/release.yml`,
-    `deploy/backend/Dockerfile`, `.dockerignore`, the GitHub environment `release`): *Goal:* artifacts are
+    `.github/workflows/base-image-digests.yml`, `.github/scripts/`, `deploy/backend/Dockerfile`,
+    `.dockerignore`, the GitHub environment `release`): *Goal:* artifacts are
     published only from a SemVer tag that only the repository admin can create (tag ruleset `release-tags`)
     and whose commit the workflow checks is on `main`; the ancestry check runs in code the tagger controls,
     so the ruleset is the boundary. Every action is pinned by commit SHA and every base image by
@@ -99,7 +100,9 @@ files or endpoints.
     in `SHA256SUMS`. The OIDC signing permission (`id-token: write`, `attestations: write`) is granted only
     to the `attest` job, which declares no environment, reads no secret and runs no repository code; every
     published binary and image digest gets a build provenance attestation that the workflow verifies before
-    the GitHub release is created. Records 0027, 0037, 0039, 0041, 0054.
+    the GitHub release is created. The scheduled digest check holds only `contents: read` and
+    `issues: write`, writes only regex-checked image, tag, digest and Go version values into the issue, and never writes
+    to the repository. Records 0027, 0037, 0039, 0041, 0054, 0055.
 
 ## Guarantees
 

@@ -82,12 +82,15 @@ workflow is `.github/workflows/release.yml`; the reasoning is in
 [0053](decisions/0053-releases-are-manual-and-started-only-by-a-version-tag.md),
 [0037](decisions/0037-release-workflow-with-plain-go-docker-and-gh.md),
 [0041](decisions/0041-base-images-pinned-by-digest-through-build-arguments.md),
-[0039](decisions/0039-docker-hub-token-in-a-tag-only-environment.md) and
-[0054](decisions/0054-release-provenance-attestations-from-a-secret-free-job.md).
+[0039](decisions/0039-docker-hub-token-in-a-tag-only-environment.md),
+[0054](decisions/0054-release-provenance-attestations-from-a-secret-free-job.md) and
+[0055](decisions/0055-stale-base-image-digests-reported-weekly-builder-go-checked-in-build.md).
 
 ### Cutting a release
 
-Before tagging, check that the base image digests are current (*Base image digests* below).
+Before tagging, check that the base image digests are current (*Base image digests* below): run the
+*Base image digests* workflow (Actions, *Run workflow*) or check that the latest `Release build check` on
+`main` has no stale-digest warning, and that no issue *Base image digests are stale* is open.
 
 On an up-to-date `main`:
 
@@ -133,19 +136,33 @@ that boundary.
 
 `deploy/backend/Dockerfile` names each base image in three build arguments: `BASE_<NAME>_IMAGE`,
 `BASE_<NAME>_TAG` and `BASE_<NAME>_DIGEST`. `FROM` uses only the image and the digest. Dependabot cannot
-read these lines, so the digests are refreshed by hand: before every release tag, and whenever a Go
-patch release or a distroless update appears. Read the multi-arch index digest of exactly the tag in
+read these lines, so the digests are refreshed by hand in a pull request: before every release tag, and
+whenever a Go patch release or a distroless update appears. Read the multi-arch index digest of exactly the tag in
 `BASE_<NAME>_TAG`, for example `docker buildx imagetools inspect golang:1.27-trixie` (the `Digest:`
 line), and write it to `BASE_<NAME>_DIGEST` in a pull request. A new Go minor version changes the
 `go` line in `go.mod`, `BASE_BUILD_TAG` and `BASE_BUILD_DIGEST` together. The release build passes no
 `BASE_*` build argument, so the pinned defaults are what it uses.
+
+A weekly workflow, `.github/workflows/base-image-digests.yml` (Mondays, and on manual dispatch), compares
+every `BASE_<NAME>_DIGEST` with the current index digest of its tag and opens or updates the issue *Base
+image digests are stale*; the `Release build check` shows the same as a warning. The refresh pull request
+should close that issue (`Closes #n`). The issue's state column shows the Go version the `golang` tag now
+carries (`stale (Go <ver> available)`). A `golang` or distroless digest often moves without a Go change
+(Debian package updates), so a stale report is routine; refresh at least when a new Go patch is shown or
+before a release. The check can be run locally from the repository root with
+`.github/scripts/check-base-image-digests.sh` (needs `docker buildx` and `jq`). The build stage of the
+Dockerfile fails when the builder's Go version does not match `BASE_BUILD_TAG`. If GitHub disables the
+scheduled workflow after 60 days without repository activity, re-enable it under Actions. Record
+[0055](decisions/0055-stale-base-image-digests-reported-weekly-builder-go-checked-in-build.md).
 
 ### Release build check on pull requests
 
 `release.yml` runs only for a version tag. Pull requests are covered by the `Release build check` job in
 `ci.yml`: it runs the base image pinning and builder Go version checks (`.github/scripts/`), builds the
 agent and the image with the version `v0.0.0-dryrun`, and verifies `--version`, the static binary and the
-image user. It uploads, pushes and releases nothing and reads no secret.
+image user. It also compares the base image digests with the registry (*Base image digests*); a stale
+digest or a failed registry lookup is only a warning there, not a failure. It uploads, pushes and releases
+nothing and reads no secret.
 
 ### One-time setup (maintainer)
 
