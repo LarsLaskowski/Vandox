@@ -25,6 +25,12 @@ build context is an allow-list: `.dockerignore` admits only `go.mod`, `go.sum`, 
 `LICENSE`, and the build stage of `deploy/backend/Dockerfile` copies only `cmd/` and `internal/`, so any
 embedding from `docs/assets/` also needs the build context and the `COPY` lines extended.
 
+The favicon as given in #12 has a CSS defect. Its `<style>` sets `fill` and `stroke` on the class `.c`,
+which both the shield group (`<g class="c" stroke="none">`) and the pulse line
+(`<polyline class="c" … fill="none">`) carry. A style-sheet rule overrides SVG presentation attributes, so
+the pulse line rendered as filled spikes instead of a line, and the shield segments got an outline. The
+other five files have no `<style>` and render as intended.
+
 ## Options considered
 
 1. **Implement every requirement of #12 now** — a web package with templates and a favicon handler, and a
@@ -41,11 +47,23 @@ embedding from `docs/assets/` also needs the build context and the `COPY` lines 
    Dockerfile's `COPY` lines extended. Not decided here: both are workable, the choice depends on the web
    package layout and build-context policy that #24 designs, and deciding it before that code exists
    would bind #24 without a consumer to judge against.
+5. **Keep the favicon byte-exact as given in #12** (and fix it later or leave it to the issue author) —
+   keeps every file traceable to the issue text, but commits a favicon that does not render as the issue
+   describes ("heavier pulse line") into the single source that #24 will serve. Rejected by the Product
+   Manager in favor of correcting it now.
+6. **Correct the favicon with an inline `style` attribute on the polyline** — fixes the fill, but a
+   `style` attribute cannot switch on `prefers-color-scheme`, so the pulse line would stay light-mode
+   green in dark mode. Rejected.
 
 ## Decision
 
-Option 2. The six SVG files live in `docs/assets/` exactly as given in #12 and are the single source of
-the logo; `docs/BRANDING.md` documents the files, their use and the color tokens (`--vandox-color-brand`
+Option 2. The six SVG files live in `docs/assets/` and are the single source of the logo. Five are
+byte-identical to #12. The favicon is corrected in its `<style>` element and the polyline's `class` only
+(Product Manager decision): `.c` sets only `fill`, so the group's `stroke="none"` applies again, and a
+new class `.l` (`fill:none` and the stroke color, switched in the dark-mode block) replaces `.c` on the
+polyline:
+`<style>.c{fill:#086030}.l{fill:none;stroke:#086030}@media (prefers-color-scheme:dark){.c{fill:#3DAA6E}.l{stroke:#3DAA6E}}</style>`.
+Everything else in the file is as given. `docs/BRANDING.md` documents the files, their use and the color tokens (`--vandox-color-brand`
 `#086030` / dark `#3DAA6E`, `--vandox-color-ink` `#243142` / dark `#E6EAF0`). The README shows the logo
 through a `<picture>` element that switches on `prefers-color-scheme`. The web UI favicon and header logo
 are done with #24, the Telegram profile picture with #60; both issues receive a comment with the details.
@@ -62,6 +80,9 @@ The original PNG is added to `docs/assets/` by the maintainer.
   `<style>` needs no CSP exception.
 - #60 renders `vandox-icon.svg` to a 512×512 PNG and sets it in BotFather; Telegram's circular crop may
   need padding, because the icon's bar reaches nearly to the edges of its square.
+- `docs/assets/` and not the code blocks in #12 is the reference for the favicon; the #24 comment says so.
+  Anyone editing an SVG with a `<style>` must not rely on presentation attributes to override a class
+  rule.
 - A color change means changing the tokens in `docs/BRANDING.md` and every SVG together (and, after #24,
   whatever #24 embeds from them).
 - Revisit if the assets need a build step (e.g. generated PNGs): then a generator in the repository would

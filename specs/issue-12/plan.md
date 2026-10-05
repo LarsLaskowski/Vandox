@@ -65,8 +65,17 @@ Taken from the issue, narrowed to what exists (record 0051):
 
 - [ ] AC1: `docs/assets/` contains exactly the six SVG files `vandox-logo.svg`, `vandox-logo-dark.svg`,
   `vandox-logo-horizontal.svg`, `vandox-logo-horizontal-dark.svg`, `vandox-icon.svg`,
-  `vandox-favicon.svg`, each byte-identical to the issue's code block (SHA-256 below). (The original PNG
-  is the maintainer's part of the issue's first criterion.)
+  `vandox-favicon.svg`. The first five are byte-identical to the issue's code blocks. `vandox-favicon.svg`
+  is identical to the issue's code block except for exactly two replacements (Product Manager decision,
+  record 0051; see *Favicon correction* below):
+  - the `<style>` element
+    `<style>.c{fill:#086030;stroke:#086030}@media (prefers-color-scheme:dark){.c{fill:#3DAA6E;stroke:#3DAA6E}}</style>`
+    becomes
+    `<style>.c{fill:#086030}.l{fill:none;stroke:#086030}@media (prefers-color-scheme:dark){.c{fill:#3DAA6E}.l{stroke:#3DAA6E}}</style>`;
+  - `<polyline class="c"` becomes `<polyline class="l"`; all other attributes of the polyline (including
+    `fill="none"`), the `<g class="c" stroke="none">`, every path, the line endings (LF) and the trailing
+    newline stay unchanged (984 → 1000 bytes).
+  SHA-256 of all six below. (The original PNG is the maintainer's part of the issue's first criterion.)
 - [ ] AC2: `README.md` starts with a `<picture>` element that shows `docs/assets/vandox-logo-dark.svg`
   under `(prefers-color-scheme: dark)` and `docs/assets/vandox-logo.svg` otherwise, with `alt="Vandox"`.
 - [ ] AC3: `docs/BRANDING.md` documents the color tokens with light and dark values (`#086030`/`#3DAA6E`,
@@ -76,7 +85,9 @@ Taken from the issue, narrowed to what exists (record 0051):
   `.description`, `.source` and `.licenses`; no logo label; every other line of the Dockerfile unchanged.
 - [ ] AC5: decision records 0051 and 0052 exist and match what was built.
 
-SHA-256 of the six files (from the scratchpad copies, which equal the issue text):
+SHA-256 of the six files as they must be in `docs/assets/` (the first five from the scratchpad copies,
+which equal the issue text; the favicon computed by applying exactly the two replacements above to the
+issue's favicon, and verified equal to the Dev's edited file):
 
 ```
 586ced3831f01b5aee4daf31ed690ee0083ce0586007d6475296812de93242a5  vandox-logo.svg
@@ -84,8 +95,27 @@ SHA-256 of the six files (from the scratchpad copies, which equal the issue text
 2baa235d55653dcf77a38427c993511000ecafa32fa8e669495f6c46aed75ecd  vandox-logo-horizontal.svg
 783f550c8ab08df05b5a26b50970cf17caeef1f3eb876c778bb3a86fcc3bcd1a  vandox-logo-horizontal-dark.svg
 2c21472869c1c44e8390b48cb94e200d06cd476c6f9d6fb53d94c256c7b6a85f  vandox-icon.svg
-292d0a9c021e1064ef07825b8bd186851b36b5bca42e3fc8ba77aa75b6b028f5  vandox-favicon.svg
+bb6c594550fd4e907e3065c08be745478e683b033c65f716293bdc595288dbbf  vandox-favicon.svg
 ```
+
+The issue's favicon (`292d0a9c021e1064ef07825b8bd186851b36b5bca42e3fc8ba77aa75b6b028f5`, 984 bytes) is
+the version committed in `df65a04`; `git show df65a04:docs/assets/vandox-favicon.svg | sha256sum`
+reproduces that hash.
+
+### Favicon correction
+
+Found in review after implementation: in the issue's favicon the class `.c` sets `fill` and `stroke` in a
+`<style>` sheet, and a style-sheet rule overrides SVG presentation attributes (presentation attributes
+count as author-level rules with specificity 0, overridden by any selector). So on
+`<polyline class="c" … fill="none">` the `fill:#086030` wins and the pulse line renders as filled
+spikes (polygon areas between the zigzag and its chord) instead of a 14-unit line, and on
+`<g class="c" stroke="none">` the `stroke:#086030` wins and gives every shield segment an extra
+1-unit outline. Rendered with resvg: the issue's file shows the filled spikes; the corrected file shows
+the stroked pulse line and unchanged shield segments. The issue's stated intent ("shield only, heavier
+pulse line; switches colors itself") is met only by the corrected file. The Product Manager chose to
+correct it now (option A of the escalation): `.c` keeps only `fill` (so the group's `stroke="none"`
+applies again), the new class `.l` carries `fill:none` and the stroke color for the polyline, and the
+dark-mode block switches both. The other five files have no `<style>` and are unaffected.
 
 ## Verification without tests
 
@@ -96,7 +126,7 @@ no Go file changes). Per criterion:
 
 | AC | Verified where | By whom |
 | -- | -------------- | ------- |
-| AC1 | `cd docs/assets && sha256sum -c` against the six lines above, and `ls docs/assets` shows exactly those six files (plus the maintainer's PNG if it was added meanwhile); `python3 -c "import xml.dom.minidom,sys;[xml.dom.minidom.parse(f) for f in sys.argv[1:]]" docs/assets/*.svg` parses all | Code Officer in step 7 (read-only), Reviewer in step 8 |
+| AC1 | (a) `cd docs/assets && sha256sum -c` against the six lines above, and `ls docs/assets` shows exactly those six files (plus the maintainer's PNG if it was added meanwhile); (b) `python3 -c "import xml.dom.minidom,sys;[xml.dom.minidom.parse(f) for f in sys.argv[1:]]" docs/assets/*.svg` parses all; (c) favicon deviation limited to the two replacements: `git show df65a04:docs/assets/vandox-favicon.svg \| sha256sum` gives `292d0a9c…` (the issue's file) and `git diff --word-diff=plain df65a04 -- docs/assets/` shows exactly two changes, both in `vandox-favicon.svg`: the `<style>` element and `class="c"` → `class="l"` on the polyline; (d) optional where a renderer is available (e.g. `rsvg-convert` or resvg): the favicon renders the pulse as an unfilled line and the shield segments without an outline | Code Officer in step 7 re-run (read-only, (a)–(c)), Reviewer and Security in the step-8 delta round |
 | AC2 | Read-only check of the `README.md` diff; after the push, the README on the branch viewed on GitHub in light and in dark theme | Reviewer in step 8; orchestrator after the push (logged) |
 | AC3 | `docs/BRANDING.md` values compared with the issue and with `grep -o '#[0-9A-Fa-f]\{6\}' docs/assets/*.svg` | Reviewer in step 8 |
 | AC4 | Read-only diff of `deploy/backend/Dockerfile`: exactly one added line in the `LABEL` block; the release workflow's pull-request dry run (`.github/workflows/release.yml`, triggered by the Dockerfile path) builds and verifies the image in step 11. Where a Docker daemon is available: `docker build -f deploy/backend/Dockerfile -t vandox:issue12 .` and `docker image inspect --format '{{json .Config.Labels}}' vandox:issue12` lists the four keys (no daemon in the planning session) | Security and Reviewer in step 8; orchestrator in step 11 |
@@ -104,7 +134,9 @@ no Go file changes). Per criterion:
 
 ## Approach
 
-1. Copy the six scratchpad files byte-exact into `docs/assets/` (`cp`, not retyped).
+1. Copy the six scratchpad files byte-exact into `docs/assets/` (`cp`, not retyped); then apply exactly
+   the two favicon replacements of AC1 to `docs/assets/vandox-favicon.svg` (Dev, after the Product
+   Manager's decision; nothing else in any SVG changes).
 2. Edit `README.md` (exact edits below).
 3. Add `docs/BRANDING.md` (content below).
 4. Add the description label to `deploy/backend/Dockerfile`.
@@ -120,7 +152,7 @@ no Go file changes). Per criterion:
 | docs | `docs/assets/vandox-logo-horizontal.svg` | new, byte-exact copy |
 | docs | `docs/assets/vandox-logo-horizontal-dark.svg` | new, byte-exact copy |
 | docs | `docs/assets/vandox-icon.svg` | new, byte-exact copy |
-| docs | `docs/assets/vandox-favicon.svg` | new, byte-exact copy |
+| docs | `docs/assets/vandox-favicon.svg` | new, copy of the issue's file with the two CSS replacements of AC1 |
 | docs | `docs/BRANDING.md` | new |
 | repo | `README.md` | logo header, layout line |
 | deploy | `deploy/backend/Dockerfile` | one `LABEL` line added |
@@ -237,7 +269,8 @@ assets do not enter the image.
   release workflow's form checks (`ARG` one per line, no continuation on `ARG`, no BOM, no
   `syntax`/`escape` directive, `FROM ${BASE_*_IMAGE}@${BASE_*_DIGEST}`) are unaffected.
 - SVG content: no `<script>`, no event attributes, no `href`/external reference, no `<foreignObject>`
-  (checked). The favicon's `<style>` is self-contained. When #24 serves them, an SVG loaded as an image
+  (checked). The favicon's `<style>` is self-contained; the correction only changes selectors and
+  property values inside it (no `@import`, no `url()`, no external reference added). When #24 serves them, an SVG loaded as an image
   (`<img>`, `<link rel="icon">`) runs no script; the page's CSP (#24) does not need `style-src
   'unsafe-inline'` for a style inside an image-context SVG. Named for #24 in record 0051.
 - No secret, no input parsing, no network.
@@ -248,7 +281,8 @@ assets do not enter the image.
   — the SVG set lives in `docs/assets/` as the single source; web UI and Telegram parts of #12 are done
   with #24 and #60; the embedding constraint (no `..` in `go:embed` patterns, allow-list build context)
   is recorded and the way to embed (pinned copies or a root/`docs/assets/` package with build-context
-  changes) is left to #24.
+  changes) is left to #24; the favicon deviates from the issue's code block by a CSS correction (Product
+  Manager decision), the other five files are byte-exact.
 - `docs/decisions/0052-image-labels-description-added-no-logo-label.md` (Proposed) — description label
   added; no logo label, because OCI defines none and Docker Hub reads none.
 
@@ -270,6 +304,14 @@ Devil's Advocate, round 1: 0 major, 2 minor.
    #24 instead of requiring copies; its context section is corrected the same way. No change to tier,
    acceptance criteria or the diff of this issue beyond the `docs/BRANDING.md` wording.
 
+Escalation after implementation (favicon CSS defect, see *Favicon correction*): the Product Manager chose
+option A — correct the favicon now, favicon only, the other five files byte-exact. **Accepted** into the
+plan: AC1, the SHA-256 list, the AC1 verification, *Approach* step 1, *Affected projects*, *Security
+considerations*, the #24 comment and the PR-body note are revised; record 0051 records the deviation and
+the rejected option "keep the favicon byte-exact". Tier stays `security` (the Dockerfile part is
+unchanged); no Go code, so steps 4, 5 and the *Coverage gate* remain not applicable. The changed SVG
+needs a step-7 re-run and a step-8 delta round.
+
 ## Out of scope / follow-ups
 
 - **Original PNG**: added by the maintainer (issue text). The PR body says so; the first acceptance
@@ -285,12 +327,21 @@ Devil's Advocate, round 1: 0 major, 2 minor.
   > `internal/`. Either keep copies in the web package with a test that compares them byte for byte with
   > `docs/assets/`, or embed from a package at the module root or in `docs/assets/` and extend
   > `.dockerignore` and the Dockerfile accordingly — your call, see record 0051.
+  > Take the files from `docs/assets/`, not from the code blocks in #12: the favicon there was corrected
+  > (its `<style>` overrode the pulse line's `fill="none"`, so the line rendered filled), see record 0051.
 - **Telegram profile picture** → existing issue #60. The orchestrator posts this comment on #60:
   > From #12: when the bot exists, render `docs/assets/vandox-icon.svg` to a 512×512 PNG (e.g.
   > `rsvg-convert -w 512 -h 512 docs/assets/vandox-icon.svg -o vandox-icon-512.png`) and set it as the
   > bot's profile picture in BotFather (`/setuserpic`). Telegram crops profile pictures to a circle and the
   > icon's horizontal bar reaches nearly to the edges of its square, so check the crop and add padding if
   > needed (record 0051).
+- **PR-body note** (the orchestrator puts this in the PR description, e.g. under *Notes*):
+  > `docs/assets/vandox-favicon.svg` deviates from the code block in #12 in its `<style>` only: in the
+  > issue's version the class rule `.c{fill:…;stroke:…}` overrides the pulse line's `fill="none"` (CSS
+  > rules take precedence over SVG presentation attributes), so the line rendered as filled spikes, and
+  > the shield segments got an outline despite `stroke="none"`. The fix keeps `.c` for the fill only and
+  > adds `.l{fill:none;stroke:…}` (with the dark-mode color) for the polyline. The other five SVGs are
+  > byte-identical to the issue. See decision record 0051.
 - **Issue #12 itself** stays open after this PR only if the maintainer wants it to track the PNG; the PR
   uses "Closes #12" otherwise — the maintainer's choice at merge time, named in the PR body.
 - Not done: `org.opencontainers.image.url`, `.documentation`, `.vendor`, `.authors` (not requested).

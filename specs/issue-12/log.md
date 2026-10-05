@@ -10,3 +10,7 @@ One line per pipeline step: date, step, member, result. Lead decisions and escal
 | 2026-10-05 | 3 Plan security | squad-security | APPROVED; steps 4, 5 and Coverage gate skipped (no .go change), verification per plan |
 | 2026-10-05 | 6 Implement | squad-dev | six SVGs (cmp-identical to issue), BRANDING.md, README header, Dockerfile description label; no .go change |
 | 2026-10-05 | 7 Code check | squad-code-officer | Format check, go vet, build, test green; golangci-lint needed v2.13.1/go1.27 (installed one v2.5.0 too old; env issue, lessons) and had no changed Go file to lint |
+| 2026-10-05 | 8 Review round 1 | squad-reviewer / squad-security | Reviewer 0 blocking, 1 non-blocking (favicon polyline filled: CSS .c overrides fill=none); Security APPROVED |
+| 2026-10-05 | 9 Lead | squad-lead | ESCALATE: issue says exact content, favicon defect in issue source |
+| 2026-10-05 | PM | user | Option A: fix favicon (style/class only), other five byte-exact |
+| 2026-10-05 | 2 Revise | squad-lead | PM Option A applied: AC1, SHA, verification, #24 comment, PR-body note, ADR 0051 (options 5, 6) revised; Dev fixed favicon (SHA bb6c5945...) |
