@@ -60,7 +60,7 @@ links the record.
 | [0031](0031-telegram-user-allowlist.md) | The Telegram bot talks only to allowlisted users in private chats | Accepted | 2026-10-04 |
 | [0032](0032-secrets-only-from-environment-or-docker-secrets.md) | Secrets only from environment variables or Docker secrets | Accepted | 2026-10-04 |
 | [0033](0033-pre-existing-coverage-gap-accepted-for-issue-7.md) | Pre-existing overall coverage gap accepted for a documentation-only change | Accepted | 2026-10-04 |
-| [0034](0034-entry-points-delegate-to-a-testable-run-function.md) | Entry points delegate to a testable run function; main stays uncovered wiring | Accepted | 2026-10-04 |
+| [0034](0034-entry-points-delegate-to-a-testable-run-function.md) | Entry points delegate to a testable run function; main stays uncovered wiring | Superseded by [0058](0058-vandoxd-runs-the-service-by-default-with-a-shutdown-deadline.md) | 2026-10-04 |
 | [0035](0035-format-check-step-in-ci-coverage-gate-stays-local.md) | Explicit format check step in CI; the coverage gate stays local, SonarQube measures coverage in CI | Accepted | 2026-10-04 |
 | [0036](0036-dependabot-docker-entry-before-the-dockerfile-exists.md) | Dependabot watches /deploy/backend for Docker before the Dockerfile exists | Superseded by [0041](0041-base-images-pinned-by-digest-through-build-arguments.md) | 2026-10-04 |
 | [0037](0037-release-workflow-with-plain-go-docker-and-gh.md) | Release workflow built from plain go build, the Docker CLI and gh; verified once, published as built | Accepted | 2026-10-04 |
@@ -83,4 +83,10 @@ links the record.
 | [0054](0054-release-provenance-attestations-from-a-secret-free-job.md) | Release binary and image digest get GitHub build provenance attestations from a separate, secret-free attest job; no SBOM yet | Accepted | 2026-10-05 |
 | [0055](0055-stale-base-image-digests-reported-weekly-builder-go-checked-in-build.md) | Stale base image digests reported weekly as an issue; the build stage checks the builder's Go version against its tag | Accepted | 2026-10-05 |
 | [0056](0056-release-sboms-from-a-digest-pinned-syft-container.md) | Release SBOMs (SPDX 2.3) come from a digest-pinned, network-less syft container in the build job and are attested in the attest job | Accepted | 2026-10-05 |
+| [0057](0057-sqlite-driver-modernc-pure-go.md) | modernc.org/sqlite as the SQLite driver: pure Go, no cgo, FTS5 included | Accepted | 2026-10-05 |
+| [0058](0058-vandoxd-runs-the-service-by-default-with-a-shutdown-deadline.md) | vandoxd runs the service without arguments, logs JSON with slog and stops within a 10 s deadline | Accepted | 2026-10-05 |
+| [0059](0059-healthz-checks-the-database-and-the-binary-is-the-health-probe.md) | /healthz on the web listener checks the database; vandoxd -healthcheck is the image's health probe | Accepted | 2026-10-05 |
+| [0060](0060-compose-file-port-bindings-volumes-and-memory-limit.md) | Compose file publishes the web port on loopback and the ingest port not yet; named data volume, 512 MiB limit | Accepted | 2026-10-05 |
+| [0061](0061-backend-only-packages-under-cmd-vandoxd-internal.md) | Backend-only packages live under cmd/vandoxd/internal; internal/ stays shared | Accepted | 2026-10-05 |
+| [0062](0062-timeout-tests-use-synctest-or-injected-durations.md) | Timeout tests use testing/synctest without network, and injected short durations over loopback | Accepted | 2026-10-05 |
 <!-- project:end index -->

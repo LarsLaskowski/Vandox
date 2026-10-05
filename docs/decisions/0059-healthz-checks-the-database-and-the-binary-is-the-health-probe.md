@@ -1,6 +1,6 @@
 # 0059: /healthz on the web listener checks the database; vandoxd -healthcheck is the image's health probe
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-05
 - **Source:** Issue #13
 - **Supersedes:** —

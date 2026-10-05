@@ -1,6 +1,6 @@
 # 0061: Backend-only packages live under cmd/vandoxd/internal; internal/ stays shared
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-05
 - **Source:** Issue #13
 - **Supersedes:** —

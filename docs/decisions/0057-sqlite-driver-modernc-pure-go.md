@@ -1,6 +1,6 @@
 # 0057: modernc.org/sqlite as the SQLite driver: pure Go, no cgo, FTS5 included
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-05
 - **Source:** Issue #13
 - **Supersedes:** —

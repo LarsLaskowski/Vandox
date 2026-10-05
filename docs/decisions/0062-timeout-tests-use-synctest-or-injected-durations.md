@@ -1,6 +1,6 @@
 # 0062: Timeout tests use testing/synctest without network, and injected short durations over loopback
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-05
 - **Source:** Issue #13
 - **Supersedes:** —

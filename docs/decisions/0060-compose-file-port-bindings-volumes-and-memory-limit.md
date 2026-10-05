@@ -1,6 +1,6 @@
 # 0060: Compose file publishes the web port on loopback and the ingest port not yet; named data volume, 512 MiB limit
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-05
 - **Source:** Issue #13
 - **Supersedes:** —
