@@ -41,8 +41,10 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -buildvcs=false \
       -X github.com/LarsLaskowski/Vandox/internal/version.Date=${DATE}" \
     -o /out/vandoxd ./cmd/vandoxd
 
-# Empty data directory, copied into the runtime image as the seed of the data volume (record 0059).
-RUN mkdir -p -m 0700 /out/data
+# Empty data directory, staged as /rootfs/data and copied into the runtime image as the seed of the data
+# volume (record 0059). It is staged inside a root tree so that /data is itself a copied entry, which keeps
+# its mode 0700; COPY of a directory only copies its contents into a new destination directory with 0755.
+RUN mkdir -p /rootfs && mkdir -m 0700 /rootfs/data
 
 FROM ${BASE_RUNTIME_IMAGE}@${BASE_RUNTIME_DIGEST}
 
@@ -68,7 +70,9 @@ COPY --from=build /out/vandoxd /vandoxd
 # The only resource owned by the non-root user: one empty directory that is the writable seed of the data
 # volume (docker:S6504 is accepted, record 0059). A new named volume copies its ownership, and the
 # distroless runtime has no shell for a `RUN chown`; the binary and everything else stay root-owned.
-COPY --from=build --chown=65532:65532 /out/data /data
+# The source is a root tree holding only data/: the contents are merged into the existing `/`, whose
+# owner and mode stay untouched, while data/ keeps its mode 0700 and gets the owner 65532:65532.
+COPY --from=build --chown=65532:65532 /rootfs/ /
 
 USER 65532:65532
 
