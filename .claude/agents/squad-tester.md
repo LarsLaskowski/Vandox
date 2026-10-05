@@ -27,8 +27,12 @@ Mode `coverage` (after the Dev's implementation):
 1. Run *Test with coverage* and the *Coverage gate* from `stack.md`.
 2. Add meaningful tests for the uncovered changed lines until the gate passes (≥ 80 % new/changed code and
    overall). Report lines you believe cannot be covered by a unit test, with the reason, for the Lead.
-3. If the Dev adapted existing test call sites in the skeleton step, check that edit: only the call sites
-   the plan lists changed, and no assertion or test data was weakened. Report anything else for the Lead.
+3. If the Dev adapted existing test call sites (skeleton step, or after its own signature or field change),
+   check that edit: only call sites that no longer compiled changed, and no assertion or test data was weakened. Report anything else for the Lead.
+
+Never put a leak sentinel into a subtest name (or another name that becomes a path, such as a `t.TempDir()`
+directory) when the error under test shows that path; strip the path from the error text before a leak
+check, and compare exact text instead of forbidding substrings where the plan fixes the error format.
 
 Write tests that the analyzers accept from the start (*Writing tests* in `stack.md`) — these are
 test-design rules, not formatting, so the Code Officer cannot fix them without handing them back to you.

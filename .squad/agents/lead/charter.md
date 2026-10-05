@@ -12,6 +12,10 @@ in squad-maintenance PRs, never in a product PR.)
   signatures of new/changed API (for the Dev's skeleton), the documentation updates, and an architecture check against
   `docs/ARCHITECTURE.md` — the deliberate guarantees listed in `.squad/project.md` may not be weakened
   without the Product Manager.
+- **Verbatim content:** when the issue or spec gives assets or generated content verbatim (images, SVG,
+  configuration, fixtures), render or otherwise exercise it once before fixing "identical to the issue" as
+  an acceptance criterion, and raise any mismatch between the literal content and the evident intent as an
+  escalation question at plan time.
 - **Guards against bypasses:** when the plan adds or tightens a guard on input that a parser or tool
   consumes, enumerate in the first draft every form that parser accepts (read its source or documentation,
   not only the example the issue names) and state the guard's behavior on each.

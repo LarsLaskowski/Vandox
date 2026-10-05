@@ -127,7 +127,8 @@ check* runs.
 Commits and pushes to the work branch happen right after intake (`specs/<folder>/log.md`, so a stop hook
 or a crashed session finds no untracked files) and after every further completed step; with *Squash and
 merge* only the PR title and description reach `main`, so intermediate commits may describe the step.
-They never contain secrets.
+They never contain secrets. A stop hook may demand a commit while a member is still working; that interim
+commit ("Work in progress: …") is fine, and the commit that closes the round gets a final subject.
 
 ## Reading issues and pull requests
 
@@ -172,8 +173,12 @@ told so.
   (*Skeleton*) — mechanically, to the new signature, without touching an assertion — so *Build* passes
   before the Tester starts. If old and new signature coexist (e.g. an added overload), nothing breaks, and
   the **Tester** moves the listed call sites to the new signature in step 5 where the plan asks for it.
-  This is the only case in which the Dev edits test code; the Tester checks the Dev's edit of those call
-  sites in its coverage step (only those sites, no assertion weakened).
+  The Dev also adapts, in any later step, a test call site that stops compiling only because of a
+  signature or field change the Dev made itself (a type changed from `T` to `*T`, a renamed field) — the
+  same mechanical edit to the new signature, no assertion touched, listed in the Dev's report. Anything
+  else about a test goes to the Tester. These are the only cases in which the Dev edits test code; the
+  Tester checks the Dev's edits of call sites in its coverage step (only call sites that no longer
+  compiled, no assertion weakened).
 - **Dev ↔ Tester disagreements:** if the Dev believes a step-5 test is wrong, the Lead decides (the test
   is not changed silently). Not counted against a loop limit.
 - **Code check needs a structural change** (or breaks build/tests): the Code Officer's edit is reverted

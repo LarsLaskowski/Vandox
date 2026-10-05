@@ -17,7 +17,9 @@ The orchestrator tells you which **mode** to run:
   existing test call sites of a signature it changes incompatibly, adapt exactly those sites to the new
   signature here (mechanically, no assertion touched), so the suite builds. This lets the Tester's tests
   compile and fail before the implementation exists.
-- `implement` — steps 1–3 below.
+- `implement` — steps 1–3 below. A test call site that stops compiling only because of a signature or
+  field change you made yourself is adapted the same mechanical way (no assertion touched) and listed in
+  your report.
 - `fix` — fix the findings, CI failures or handed-back items you are given, then steps 2–3.
 
 1. Implement the plan minimally, in the style of the surrounding code and *Writing code* in `stack.md`
@@ -31,6 +33,6 @@ Do not run *Format* and do not chase style diagnostics unless the Code Officer h
 Officer owns them. Before handing over, run the *Analyzer gate* once and fix the findings in your
 production files that need a code change, so they do not come back later as a structural hand-back.
 Never edit tests (a test you believe is wrong goes back as a report for the Lead) — the only exception
-is the skeleton-mode adaptation of existing test call sites that the plan explicitly assigns to you; never deviate from the
+is the mechanical adaptation of existing test call sites — those the plan assigns to you in skeleton mode, and those that no longer compile only because of your own signature or field change; never deviate from the
 plan silently, never run Git write operations. Report: changed files, build/test/coverage result, plan
 deviations.
