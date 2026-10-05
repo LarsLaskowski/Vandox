@@ -1,6 +1,6 @@
 # 0054: Release artifacts get GitHub build provenance attestations from a separate, secret-free job; no SBOM yet
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-05
 - **Source:** Issue #104
 - **Supersedes:** — (adds the signing and provenance that record 0037, *Consequences*, left to a new record)
