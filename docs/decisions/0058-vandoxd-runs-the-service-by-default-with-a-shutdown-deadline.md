@@ -67,4 +67,6 @@ the accepted uncovered line, and `run` is tested in `main_test.go`.
 - The 10 s deadline and the 2 s health ping timeout are constants. Making them configurable is a new option
   under 0049 and a new record.
 - The compose file's `stop_grace_period` must stay above 10 s (0060).
-- Tests drive shutdown by cancelling `ctx` and once by a real SIGTERM to the test process.
+- Tests drive shutdown by cancelling `ctx` and once by a real SIGTERM to the test process. Shutdown and
+  ping timeouts are tested as record 0062 lays down (`testing/synctest` without network, injected short
+  durations over loopback).

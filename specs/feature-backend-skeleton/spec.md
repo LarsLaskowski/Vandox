@@ -1,6 +1,6 @@
 # Spec: Backend skeleton and container
 
-Status: Draft
+Status: Draft (revised after the plan challenge)
 
 Source: GitHub issue #13 (`[Backend] Backend skeleton and container`). Depends on #10 (PR #110) and #11
 (PR #114), both merged.
@@ -27,8 +27,8 @@ and monitored from the home network.
 - On `SIGTERM` (or `SIGINT`) the service stops accepting connections, lets in-flight requests finish
   within a fixed deadline (10 s), closes the database and exits 0. If requests outlast the deadline their
   connections are closed and the exit code is 1. A second signal during shutdown terminates at once.
-- `vandoxd -healthcheck` reads the same configuration, sends one `GET /healthz` to the web listener over
-  loopback and exits 0 on `200`, 1 otherwise. The image's `HEALTHCHECK` uses it, because the distroless
+- `vandoxd -healthcheck` reads the same configuration file (without the environment, so it reads no
+  secret), sends one `GET /healthz` to the web listener over loopback and exits 0 on `200`, 1 otherwise. The image's `HEALTHCHECK` uses it, because the distroless
   image has no shell or `curl`.
 - `vandoxd -version` keeps its output. `-h`/`-help` print the usage and exit 0; an unknown flag or a
   positional argument prints the usage and exits 2.
@@ -38,15 +38,17 @@ and monitored from the home network.
 - `deploy/backend/docker-compose.yml` runs the image on a Docker host: a named data volume, a read-only
   import directory, the configuration file mounted read-only, the agent token as a Docker secret,
   `mem_limit`, a restart policy, a stop grace period longer than the shutdown deadline, a read-only root
-  file system, and port bindings that publish the web port on loopback by default (for the reverse proxy)
-  and the ingest port only on the backend host's tailnet address, which must be set.
+  file system, and a port binding that publishes the web port on loopback by default (for the reverse
+  proxy). The ingest port is not published: the ingest listener has no routes until the ingest API (#40),
+  which adds the binding on the backend host's tailnet address. The file therefore starts on any Docker
+  host without a Tailscale prerequisite.
 
 ## Acceptance criteria
 
 - [ ] AC1: The container starts on a Docker host from `deploy/backend/docker-compose.yml` and `/healthz`
   returns 200; the container's health status becomes `healthy`.
-- [ ] AC2: Data survives container restarts: the database file lives in the `/data` volume and is reopened,
-  not recreated, after a restart.
+- [ ] AC2: Data survives container restarts and re-creation: the database file lives in the `/data` named
+  volume and is reopened, not recreated, after `docker compose down` (without `-v`) and `up -d`.
 - [ ] AC3: `mem_limit` is set in the compose file.
 - [ ] AC4: Graceful shutdown on SIGTERM with a deadline is tested (unit tests and the container smoke test).
 - [ ] AC5: Structured logging with `log/slog`; configuration from `internal/config`; separate web and ingest
@@ -62,8 +64,9 @@ The detailed, testable criteria are in [plan.md](plan.md).
   login (#25), ingest authentication (#40), Telegram (#60).
 - A configurable shutdown deadline or health timeout (constants for now).
 - Running the image on architectures other than linux/amd64.
-- Tailscale running in userspace-networking mode on the backend host (see plan, *Out of scope / follow-ups*).
+- Publishing the ingest port and the Tailscale setup it needs on the backend host: #40 (record 0060, plan
+  *Out of scope / follow-ups*).
 
 ## Open questions
 
-None that need the Product Manager; the choices are recorded as `Proposed` decision records 0057–0061.
+None that need the Product Manager; the choices are recorded as `Proposed` decision records 0057–0062.

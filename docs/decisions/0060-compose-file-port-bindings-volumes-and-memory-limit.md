@@ -1,4 +1,4 @@
-# 0060: Compose file publishes the web port on loopback and ingest only on the tailnet address; named data volume, 512 MiB limit
+# 0060: Compose file publishes the web port on loopback and the ingest port not yet; named data volume, 512 MiB limit
 
 - **Status:** Proposed
 - **Date:** 2026-10-05
@@ -24,12 +24,23 @@ environment or Docker secrets (0032, 0050); 0036 left a Dependabot `docker-compo
      reverse proxy reaches it; a proxy on another host sets the variable.
 
    Chosen: loopback by default.
-2. **Ingest port binding**
+2. **Ingest port binding** — the ingest listener has no routes in this feature; the ingest API (#40) and
+   the agent that would use it belong to release v0.2.0.
    - *A literal placeholder address* to edit — an unedited file fails to bind, but the error is obscure.
    - *A required variable (`${TAILNET_ADDRESS:?…}:8081:8081`)* — `docker compose` stops with a clear message
-     when it is unset or empty, so the port is never published on all interfaces by accident.
+     when it is unset or empty, so the port is never published on all interfaces by accident. Rejected:
+     on a backend host where Tailscale runs in userspace-networking mode (the default of the Synology DSM 7
+     package) the tailnet address is not a host interface, so the bind fails and the container does not
+     start at all — for a port that serves nothing yet.
+   - *Required variable plus a documented prerequisite (Tailscale with a TUN interface)* — the container
+     starts where the prerequisite holds, but every operator must set up the tailnet binding now for no
+     function, and the supported Tailscale setup would be decided before the feature that needs it.
+   - *No ingest port published until #40* — nothing of the ingest listener is reachable from outside the
+     container (fail-closed), the file starts on every Docker host regardless of Tailscale, and #40 adds the
+     binding together with the API it exposes and the prerequisite it needs.
 
-   Chosen: the required variable.
+   Chosen: no ingest port published. This does not change 0017, which says where the port goes once it is
+   published.
 3. **Data volume**
    - *Bind mount of a host directory* — visible in the NAS file browser, but the operator must `chown 65532`
      it first.
@@ -56,9 +67,9 @@ environment or Docker secrets (0032, 0050); 0036 left a Dependabot `docker-compo
 `deploy/backend/docker-compose.yml` defines the project `vandox` with the service `vandoxd`:
 `image: networlddev/vandox:latest`, `restart: unless-stopped`, `mem_limit: 512m`,
 `stop_grace_period: 30s` (above the 10 s shutdown deadline of 0058), `environment` `GOMEMLIMIT: 400MiB` and
-`VANDOX_AGENT_TOKEN_FILE: /run/secrets/vandox_agent_token`, ports
-`${WEB_BIND_ADDRESS:-127.0.0.1}:8080:8080` and
-`${TAILNET_ADDRESS:?…}:8081:8081`, volumes `vandox-data:/data`, `./import:/import:ro` and
+`VANDOX_AGENT_TOKEN_FILE: /run/secrets/vandox_agent_token`, the single port
+`${WEB_BIND_ADDRESS:-127.0.0.1}:8080:8080` (no ingest port; a comment names #40 and 0017), volumes
+`vandox-data:/data`, `./import:/import:ro` and
 `./vandoxd.yaml:/etc/vandox/vandoxd.yaml:ro`, the file secret `vandox_agent_token` from
 `./secrets/vandox_agent_token` (the web password hash and Telegram token as commented entries for #25 and
 #60), `read_only: true`, `tmpfs: [/tmp]`, `cap_drop: [ALL]`, `security_opt: ["no-new-privileges:true"]` and
@@ -66,21 +77,24 @@ environment or Docker secrets (0032, 0050); 0036 left a Dependabot `docker-compo
 and `deploy/backend/.env`.
 
 `.github/scripts/smoke-test-backend.sh`, run by the `Release build check` job in `ci.yml` after the image
-build, starts this compose file with the built image (`pull_policy: never`, both addresses on
-`127.0.0.1`), and checks: health `healthy`, `/healthz` 200 on the web port and 404 on the ingest port,
-memory limit, restart policy, read-only root file system and user, exit code 0 and `vandoxd stopped` after
-`docker compose stop`, and `"created":false` after `docker compose start`. It reads no secret and pushes
-nothing.
+build, starts this compose file with the built image (`pull_policy: never`, the web port on
+`127.0.0.1`), and checks: health `healthy`, `/healthz` 200 on the web port, no host binding for the ingest
+port, memory limit, restart policy, read-only root file system and user, exit code 0 and `vandoxd stopped`
+after `docker compose stop`, and — after `docker compose down` without `-v` and `docker compose up -d` — a
+new container that becomes `healthy` and logs `"created":false` (the database survived re-creation in the
+named volume). It reads no secret and pushes nothing.
 
 ## Consequences
 
-- An operator must provide `TAILNET_ADDRESS` (e.g. in `.env`), `vandoxd.yaml`, `secrets/vandox_agent_token`
-  readable by UID 65532, and `import/`.
+- An operator must provide `vandoxd.yaml`, `secrets/vandox_agent_token` readable by UID 65532, and
+  `import/`; `.env` with `WEB_BIND_ADDRESS` is optional. No Tailscale setup is needed for v0.1.0.
 - Home monitoring reaches `/healthz` through the reverse proxy unless `WEB_BIND_ADDRESS` is changed.
-- The container ports are fixed at 8080 and 8081; a changed `web.listen`/`ingest.listen` port needs the
-  matching change in the compose file.
-- On a backend host where Tailscale runs in userspace-networking mode (the default of the Synology package),
-  the tailnet address is not a host interface and the ingest binding fails; the supported setup is left to
-  a follow-up issue before ingest (#40) ships.
+- The published container port is fixed at 8080; a changed `web.listen` port needs the matching change in
+  the compose file (the same will hold for `ingest.listen` once #40 publishes it).
+- #40 must add the ingest `ports` entry on the tailnet address (0017), decide the supported Tailscale mode
+  on the backend host (userspace networking: the tailnet address is not a host interface, and inbound
+  tailnet connections are forwarded to the host's loopback, where the web port is published), extend the
+  smoke test, and record it. Until then the Tailscale ACL (0010) is what keeps a userspace-mode host's
+  loopback web port from the monitored server.
 - A bind-mounted secret's ownership and mode come from the host file; Compose does not apply `uid`/`mode` to
   file secrets outside Swarm.

@@ -1,10 +1,10 @@
 # Plan: Backend skeleton and container
 
 Source: Issue #13 | [spec.md](spec.md)
-Status: Draft
+Status: Draft (revised after the plan challenge, see *Challenge*)
 Tier: security — the change adds a dependency (`modernc.org/sqlite`), changes `deploy/backend/Dockerfile`
-and `ci.yml`, and touches security areas 2 (port binding in `deploy/backend/`), 8 (secrets in the compose
-file), 9 (database file created under `storage.directory`), 10 (configuration and CLI input), 11 (the
+and `ci.yml`, and touches security areas 2 (the web port binding in `deploy/backend/`; the ingest port is
+deliberately not published yet), 8 (secrets in the compose file), 9 (database file created under `storage.directory`), 10 (configuration and CLI input), 11 (the
 health-check HTTP call), 12 (log output) and 13 (Dockerfile, `.github/scripts/`).
 
 ## Problem / root cause
@@ -105,6 +105,9 @@ criteria*). Every AC-R/S/D criterion gets at least one unit test.
   exit 1 and stderr `vandoxd: health check failed: unexpected status 503\n`; a 302 redirect → exit 1 (not
   followed: the redirect target handler records no request); configuration invalid → exit 1 with the
   configuration error on stderr. The injected `listen` is never called and no database file is created.
+  The health check ignores the environment: with `environ` holding `VANDOX_AGENT_TOKEN_FILE=<missing file>`
+  and an unknown `VANDOX_BOGUS=1` (with the same `environ`, `serve` fails on either; AC-R9 covers the
+  unknown variable), status 200 still → exit 0 with empty stderr.
 - [ ] AC-R14: `healthURL(listen)` (table test) maps `:8080` → `http://127.0.0.1:8080/healthz`,
   `0.0.0.0:8080` → `http://127.0.0.1:8080/healthz`, `[::]:8080` → `http://[::1]:8080/healthz`,
   `[::ffff:0.0.0.0]:8080` → `http://127.0.0.1:8080/healthz`, `127.0.0.1:9000` → `http://127.0.0.1:9000/healthz`,
@@ -123,7 +126,9 @@ criteria*). Every AC-R/S/D criterion gets at least one unit test.
 - [ ] AC-S2: a pinger that blocks until released: the request returns 503 after `pingTimeout`; while that
   ping is still blocked, further concurrent requests start no second `Ping` (call count stays 1) and also
   answer 503 after their timeout; after the pinger is released with nil, the next request starts a new
-  `Ping` and answers 200. The pinger receives a context with a deadline.
+  `Ping` and answers 200. The pinger receives a context with a deadline. Tested in a `synctest` bubble
+  (*Timing in tests*), so the checker must wait on channels (a `select`), not on a mutex held across the
+  ping.
 - [ ] AC-S3: `NewIngestHandler` answers 404 to `GET /`, `GET /healthz` and `POST /v1/batches`.
 - [ ] AC-S4: `newHTTPServer` sets `ReadHeaderTimeout` 5 s, `ReadTimeout` 30 s, `WriteTimeout` 30 s,
   `IdleTimeout` 120 s, `MaxHeaderBytes` 16 KiB and a non-nil `ErrorLog`.
@@ -131,7 +136,9 @@ criteria*). Every AC-R/S/D criterion gets at least one unit test.
   nil and both listeners are closed (a new dial fails).
 - [ ] AC-S6: graceful shutdown: a `/healthz` request in flight (pinger blocked, `PingTimeout` 1 min) when
   `ctx` is cancelled keeps `Run` waiting; releasing the pinger lets the request complete with 200 and `Run`
-  return nil.
+  return nil. The test releases the pinger only after the web listener's `Close` was recorded (a wrapping
+  listener signals it on a channel: `Shutdown` closes the listeners first), so "shutdown has begun" is
+  observed, not waited for.
 - [ ] AC-S7: shutdown deadline: same setup with `ShutdownTimeout` 50 ms and the pinger never released
   before `Run` returns: `Run` returns an error for which `errors.Is(err, context.DeadlineExceeded)` holds,
   and the client's request fails (connection closed). The pinger is released in `t.Cleanup`.
@@ -169,9 +176,13 @@ criteria*). Every AC-R/S/D criterion gets at least one unit test.
   data volume, read-only import mount, read-only configuration file, the agent-token secret, `mem_limit`,
   restart policy, `stop_grace_period`, read-only root file system, port bindings.
 - [ ] AC-C3: started from the compose file on a Docker host, the container becomes `healthy`, `/healthz` on
-  the published web port answers 200, the published ingest port answers 404 to `/healthz`.
+  the published web port answers 200, and the ingest port 8081 has no host binding
+  (`docker inspect` `NetworkSettings.Ports["8081/tcp"]` is null or empty). The ingest listener's 404 is
+  covered by AC-R5 and AC-S3.
 - [ ] AC-C4: `docker compose stop` ends the container with exit code 0 and the log line `vandoxd stopped`;
-  after `docker compose start` it becomes `healthy` again and logs `"created":false`.
+  then `docker compose down` (without `-v`) removes the container and `docker compose up -d` creates a new
+  one (different container ID) that becomes `healthy` and logs `"created":false` — the database survived
+  the re-creation in the named volume.
 - [ ] AC-C5: the running container has `HostConfig.Memory` 536870912 (512 MiB), restart policy
   `unless-stopped`, a read-only root file system and user `65532:65532`.
 
@@ -185,6 +196,26 @@ file and CI, which a Go unit test cannot exercise; they are verified as follows:
 | AC-C1 | `ci.yml` `Release build check`: *Check base image pinning* (unchanged script) and *Build and verify image* (`--version`, user); the new smoke test for the health check and `/data` | CI on the PR; Dev builds the image locally once (`docker build -f deploy/backend/Dockerfile .`) if Docker is available, else CI |
 | AC-C2 | Read-only review of the file against *Approach / Compose file*; `docker compose config --quiet` inside the smoke test | Reviewer, Security; CI |
 | AC-C3, AC-C4, AC-C5 | New step *Smoke test backend container* in `ci.yml` (`Release build check` job, after *Build and verify image*) running `.github/scripts/smoke-test-backend.sh` | CI on the PR; the orchestrator links the green run in `log.md` before step 9 |
+
+## Timing in tests
+
+Some criteria exercise timeouts of `context` and `net/http` (AC-S2, AC-S6, AC-S7) and one a real signal
+(AC-R7, no clock involved). An own fake clock cannot drive `context.WithTimeout` or
+`http.Server.Shutdown`, so record 0062 applies:
+
+- **AC-S2** runs inside `synctest.Test` (`testing/synctest`, Go 1.27): the handler is called with
+  `httptest.NewRecorder` (no network), the fake `Pinger` blocks on a channel created in the bubble,
+  `pingTimeout` is e.g. 2 s of fake time, and `synctest.Wait` replaces any waiting. No real timer runs.
+- **AC-S6, AC-S7** need `server.Run` with real loopback listeners, which `synctest` cannot drive durably;
+  they use real timers: durations injected through `Options` (50 ms where the timeout must fire, 1 min
+  where it must not), synchronization on channels and recorded events, never `time.Sleep`, no assertion on
+  elapsed time, and every outcome holds for any scheduling delay (the blocked pinger is released only in
+  `t.Cleanup`).
+- All other tests use the production constants (2 s ping, 10 s shutdown) only on paths where they never
+  expire.
+
+`docs/UNIT_TESTS.md` gains this next to "no real clock"; the `time` row in `.squad/project.md` *Test
+doubles* stays planned for code that reads the current time.
 
 ## Approach
 
@@ -225,9 +256,13 @@ handling, the service wiring, the logger and the health-check client.
   `slog.Level.UnmarshalText` after checking the value is one of the four names `internal/config` accepts.
   JSON is chosen because it escapes control characters and is machine-readable in `docker logs` (record
   0058).
-- `healthcheck.go`: loads the configuration like `serve` (same `-config`, same `environ`), builds the URL with
+- `healthcheck.go`: loads the configuration with `config.LoadBackend(configPath, nil)` — the same file as
+  `serve`, but no environment, so the probe neither reads a secret file nor depends on one being readable
+  (with a nil `environ`, `LoadBackend` finds no variable for `checkEnviron` to reject and no secret for
+  `readBackendSecrets` to read; all three backend secrets are optional, `internal/config/backend.go:68`, `:72`, `:101`); builds the URL with
   `healthURL(cfg.Web.Listen)`, `probe`s it with `newHealthClient()` and a 4 s context; prints
-  `vandoxd: health check failed: <reason>` to stderr on failure. No logger, no store, no listener.
+  `vandoxd: health check failed: <reason>` to stderr on failure. No logger, no store, no listener, no
+  secret. `run` passes `environ` only to `serve`.
 
 ### `cmd/vandoxd/internal/server`
 
@@ -268,6 +303,14 @@ wrapped as `store: <step>: %w`.
   (no arguments = serve).
 - No `FROM`/`ARG` change; header comment extended by one line about the health check. No configuration
   file is baked into the image (record 0059): the file is mounted.
+- SonarQube Cloud may raise the security hotspot `docker:S6504` ("allowing non-root users to modify
+  resources copied to an image") on the `COPY --chown`. It is accepted (record 0059): the copied resource is
+  one empty directory whose only purpose is to be the non-root user's writable data volume; the binary and
+  everything else stay root-owned. The distroless runtime has no shell, so `RUN chown` there is impossible,
+  and a root-owned `/data` would make a fresh named volume unwritable. The Dockerfile carries a comment
+  saying so above the line. If the hotspot appears, the PR description names it and the maintainer marks it
+  *Safe* in SonarQube with that reason (a hotspot review is a SonarQube UI action, not a code change); the
+  Code Officer does not change the line.
 
 ### Compose file (`deploy/backend/docker-compose.yml`)
 
@@ -278,10 +321,12 @@ Commented for Synology Container Manager / QNAP / `docker compose` (record 0060)
 - `mem_limit: 512m`; `environment: GOMEMLIMIT: 400MiB` (the Go runtime collects before the cgroup limit is
   hit) and `VANDOX_AGENT_TOKEN_FILE: /run/secrets/vandox_agent_token`.
 - `stop_grace_period: 30s` (longer than the 10 s shutdown deadline, so Docker's SIGKILL never cuts it).
-- `ports`: `"${WEB_BIND_ADDRESS:-127.0.0.1}:8080:8080"` (web/health port on loopback for the reverse proxy,
-  0023; override for a proxy on another host) and
-  `"${TAILNET_ADDRESS:?set TAILNET_ADDRESS to the backend host's tailnet IP address}:8081:8081"` (ingest
-  only on the tailnet address, 0017; unset or empty stops `docker compose` before anything starts).
+- `ports`: only `"${WEB_BIND_ADDRESS:-127.0.0.1}:8080:8080"` (web/health port on loopback for the reverse
+  proxy, 0023; override for a proxy on another host). The ingest port is **not published**: the ingest API
+  arrives with #40 (release v0.2.0, together with the agent), and until then the ingest listener serves
+  nothing. A comment in the file says so and that #40 adds the binding on the backend host's tailnet address
+  (0017). Publishing nothing on the tailnet is the fail-closed state and lets the file start on every
+  Docker host, whatever mode Tailscale runs in (record 0060).
 - `volumes`: `vandox-data:/data` (named volume; Docker copies the image's `/data` ownership into a new
   volume), `./import:/import:ro`, `./vandoxd.yaml:/etc/vandox/vandoxd.yaml:ro`.
 - `secrets: [vandox_agent_token]`, top-level `secrets.vandox_agent_token.file: ./secrets/vandox_agent_token`;
@@ -290,8 +335,8 @@ Commented for Synology Container Manager / QNAP / `docker compose` (record 0060)
   `security_opt: ["no-new-privileges:true"]`, `logging` with the `json-file` driver, `max-size: 10m`,
   `max-file: "3"`.
 - Header comment: the files the operator creates (`vandoxd.yaml` from the example, `secrets/` readable by
-  UID 65532, `import/`, `.env` with `TAILNET_ADDRESS`), that the container ports must match `web.listen`
-  and `ingest.listen`, and that a bind-mounted data directory must be owned by 65532.
+  UID 65532, `import/`, optionally `.env` with `WEB_BIND_ADDRESS`), that the container web port must match
+  `web.listen`, and that a bind-mounted data directory must be owned by 65532. No Tailscale prerequisite yet.
 - No Dependabot `docker-compose` entry (record 0060).
 
 `.gitignore` gains `deploy/backend/secrets/` and `deploy/backend/.env` so an operator working in a clone
@@ -304,13 +349,13 @@ does not commit them.
 with `vandox:local`. It copies `deploy/backend/docker-compose.yml` and `deploy/backend/vandoxd.yaml` into a
 `mktemp -d` project directory, creates `secrets/vandox_agent_token` (`openssl rand -hex 32`, mode `0644` so
 UID 65532 can read it — CI only), `import/`, and an override file setting `image: <image>` and
-`pull_policy: never`; runs with `TAILNET_ADDRESS=127.0.0.1` and `WEB_BIND_ADDRESS=127.0.0.1` and a unique
-project name; `trap` runs `docker compose down -v` on exit. Checks, each failing with `::error::`:
-`docker compose config --quiet`; `up -d`; health `healthy` within 60 s; `curl -fsS
-http://127.0.0.1:8080/healthz` is `ok`; `curl` on `127.0.0.1:8081/healthz` is 404; `docker inspect`
-memory 536870912, restart policy `unless-stopped`, `ReadonlyRootfs` true, `Config.User` `65532:65532`;
-`docker compose stop` → `State.ExitCode` 0 and logs contain `vandoxd stopped`; `docker compose start` →
-`healthy` within 60 s and logs contain `"created":false`. No secret of the repository, no network beyond
+`pull_policy: never`; runs with `WEB_BIND_ADDRESS=127.0.0.1` and a unique project name; `trap` runs
+`docker compose down -v` on exit. Checks, each failing with `::error::`: `docker compose config --quiet`;
+`up -d`; health `healthy` within 60 s; `curl -fsS http://127.0.0.1:8080/healthz` is `ok`; `docker inspect`
+shows no host binding for `8081/tcp`, memory 536870912, restart policy `unless-stopped`, `ReadonlyRootfs`
+true, `Config.User` `65532:65532`; `docker compose stop` → `State.ExitCode` 0 and logs contain
+`vandoxd stopped`; `docker compose down` (no `-v`, the named volume stays) → `docker compose up -d` → a new
+container ID, `healthy` within 60 s, and its logs contain `"created":false`. No secret of the repository, no network beyond
 loopback, no push. All values reach `run:` through the script arguments, no `${{ }}` in the script.
 
 ## Affected projects and types
@@ -352,8 +397,9 @@ func serve(ctx context.Context, configPath string, environ []string, stderr io.W
 // newLogger returns a JSON slog logger writing to w at level (debug, info, warn or error).
 func newLogger(w io.Writer, level string) (*slog.Logger, error)
 
-// healthcheck probes /healthz of the web listener configured in configPath and returns the exit code.
-func healthcheck(ctx context.Context, configPath string, environ []string, stderr io.Writer) int
+// healthcheck probes /healthz of the web listener configured in configPath and returns the exit code. It
+// loads the configuration without environment, so it reads no secret.
+func healthcheck(ctx context.Context, configPath string, stderr io.Writer) int
 
 // healthURL returns the /healthz URL for the web listen address listen, using loopback for an empty or
 // unspecified host.
@@ -463,26 +509,30 @@ The Dev makes these:
 
 - `README.md`: *Binaries* — `vandoxd` without arguments runs the service, flags `-config`, `-healthcheck`;
   *Layout* — `cmd/vandoxd/internal/`; *Install / Backend* — a "Run with Docker Compose" part: the files to
-  create (`vandoxd.yaml`, `secrets/vandox_agent_token` readable by UID 65532, `import/`, `.env` with
-  `TAILNET_ADDRESS`, optional `WEB_BIND_ADDRESS`), `docker compose up -d`, the reverse proxy pointing at
-  `127.0.0.1:8080`, `/healthz` for monitoring (through the proxy), and that a bind-mounted data directory
-  must be owned by 65532. No configuration-table change (no new option, no new secret).
+  create (`vandoxd.yaml`, `secrets/vandox_agent_token` readable by UID 65532, `import/`, optional `.env`
+  with `WEB_BIND_ADDRESS`), `docker compose up -d`, the reverse proxy pointing at `127.0.0.1:8080`,
+  `/healthz` for monitoring (through the proxy), that a bind-mounted data directory must be owned by 65532,
+  and that the ingest port is not published until the ingest API (#40). No configuration-table change (no
+  new option, no new secret).
 - `docs/ARCHITECTURE.md`: intro (configuration loading now used by `vandoxd`; the backend service, its
   `/healthz` and the database file exist); *Components* — `cmd/vandoxd` with `cmd/vandoxd/internal/`
-  (0061); *Network* — the compose port bindings (web on loopback for the proxy, ingest on the tailnet
-  address); *Storage and retention* — the database file `vandox.db` in `storage.directory`, mode 0600,
+  (0061); *Network* — the compose port binding (web on loopback for the proxy; the ingest port is not
+  published until #40, which binds it to the tailnet address per 0017); *Storage and retention* — the database file `vandox.db` in `storage.directory`, mode 0600,
   `modernc.org/sqlite` (0057); *Deployment* — `HEALTHCHECK` through `vandoxd -healthcheck`, `/data` owned by
   65532, the compose file (0059, 0060); links to the new records.
 - `docs/UNIT_TESTS.md` (*Code coverage*): `main` only calls `os.Exit(run(...))` with the process boundaries
-  as arguments; link 0058 instead of 0034.
+  as arguments; link 0058 instead of 0034. (*Structure*): next to "no real clock", record 0062 —
+  `testing/synctest` for timeouts without network; injected short durations, channel synchronization, no
+  `time.Sleep` and no elapsed-time assertion for timeouts over loopback listeners. Same in the checklist
+  line.
 - `docs/CONTRIBUTING.md` (*Release build check on pull requests*): the job also starts the image with the
-  compose file and checks health, restart persistence and graceful stop.
+  compose file and checks health, graceful stop and that the database survives re-creation of the container.
 - `SECURITY.md` (*Deployment Security Considerations*): keep the web port on loopback (or bound to the proxy
-  host) and the ingest port on the tailnet address as in the compose file.
+  host) as in the compose file; the ingest port is not published until the ingest API exists.
 - `.squad/project.md` (product facts this change makes untrue or incomplete): area 2 names
-  `deploy/backend/docker-compose.yml` and its port bindings; area 9 names the database file
+  `deploy/backend/docker-compose.yml` and its web port binding (ingest not yet published); area 9 names the database file
   (`cmd/vandoxd/internal/store`, mode 0600, no directory creation); area 11 names the loopback health-check
-  call (`healthcheck.go`: timeout, no proxy, no redirects); area 12 names the JSON `slog` handler of
+  call (`healthcheck.go`: timeout, no proxy, no redirects, no environment); area 12 names the JSON `slog` handler of
   `vandoxd`; area 13 names the smoke script `.github/scripts/smoke-test-backend.sh` (runs on pull
   requests, reads no secret, pushes nothing); *Test doubles* gains the
   database row (fake `Pinger` in `cmd/vandoxd/internal/server`, status implemented) and the `time` row
@@ -502,11 +552,12 @@ The Dev makes these:
   the compose file publishes the web port on `127.0.0.1` by default; the issue's "home-network monitoring"
   reaches `/healthz` through the proxy. `/healthz` is unauthenticated by requirement; #25 must keep it
   outside the login (named in 0059).
-- 0010/0017 (ingest only on the tailnet address): the compose file refuses to start without
-  `TAILNET_ADDRESS`; the ingest listener serves no health or UI route.
+- 0010/0017 (ingest only on the tailnet address): kept by publishing the ingest port nowhere until #40
+  adds it on the tailnet address; the ingest listener serves no health or UI route. 0017 is not
+  superseded: it governs where the port goes once it is published.
 - 0032/0050 (secrets): the compose file passes the token only as a Docker secret through
-  `VANDOX_AGENT_TOKEN_FILE`; `GOMEMLIMIT` and the compose interpolation variables (`TAILNET_ADDRESS`,
-  `WEB_BIND_ADDRESS`) carry no `VANDOX_` prefix and do not reach `checkEnviron` (interpolation variables are
+  `VANDOX_AGENT_TOKEN_FILE`; `GOMEMLIMIT` and the compose interpolation variable `WEB_BIND_ADDRESS` carry
+  no `VANDOX_` prefix and do not reach `checkEnviron` (interpolation variables are
   not passed into the container). Secrets are never logged (AC-R10).
 - 0041/0055 (base image pinning): no `FROM`/`ARG` change; the pinning script stays as it is.
 - 0049 (no environment overrides, strict file): no new option; the config path is a flag, not a
@@ -530,10 +581,10 @@ Guards and the inputs they see, with the accepted forms:
   `vfs`, `immutable`) or cut the path (AC-D5); the only query parameters are the three constant pragmas.
   The file is created `0600` with `O_EXCL`; an existing non-regular file is refused; the directory is not
   created (area 9).
-- **Compose port interpolation.** `${TAILNET_ADDRESS:?…}`: unset and empty both stop `docker compose`
-  (`:?` semantics), so the ingest port is never published on all interfaces by accident;
-  `${WEB_BIND_ADDRESS:-127.0.0.1}`: unset or empty → loopback. A value that is not an address of the host
-  makes the container fail to start (bind error), i.e. fails closed (area 2).
+- **Compose port interpolation.** `${WEB_BIND_ADDRESS:-127.0.0.1}`: unset or empty → loopback. A value that
+  is not an address of the host makes the container fail to start (bind error), i.e. fails closed. The
+  ingest port has no `ports` entry, so nothing of `vandoxd` is published beyond the web port; the smoke
+  test asserts that 8081 has no host binding (area 2).
 - **Command line.** Flags only (`-config`, `-healthcheck`, `-version`); positional arguments are rejected;
   no secret is accepted on the command line (0032).
 - **HTTP server.** Header, read, write and idle timeouts and a 16 KiB header limit on both listeners, so a
@@ -543,10 +594,15 @@ Guards and the inputs they see, with the accepted forms:
   attributes, not message text; `config.Secret` logs as `[redacted]`; the start line logs no secret.
 - **Container.** Non-root 65532, read-only root file system, `cap_drop: ALL`, `no-new-privileges`,
   configuration and import mounted read-only, the token as a Docker secret; the CI smoke test reads no
-  repository secret and pushes nothing (area 13).
+  repository secret and pushes nothing (area 13). The health probe runs every 30 s without environment and
+  so never opens a secret file (areas 8, 11).
 
 Accepted residual: `/healthz` is unauthenticated and reveals only whether the database answers (issue
-requirement). The secret file on the host must be readable by UID 65532, which on a NAS usually means
+requirement). On a backend host where Tailscale runs in userspace-networking mode, inbound tailnet
+connections are forwarded to the host's loopback, where the web port is published; the Tailscale ACL
+(0010: the monitored server may reach only the ingest port) remains the control that keeps the web port
+from the monitored server — the binding is defense in depth only on TUN-mode hosts. Unchanged by this
+feature (no agent exists before v0.2.0) and handed to #40 below. The secret file on the host must be readable by UID 65532, which on a NAS usually means
 `chown 65532`; documented, not enforced.
 
 ## Decision records
@@ -566,20 +622,58 @@ All `Proposed`, written with this plan:
   CI smoke test.
 - [`docs/decisions/0061-backend-only-packages-under-cmd-vandoxd-internal.md`](../../docs/decisions/0061-backend-only-packages-under-cmd-vandoxd-internal.md) —
   backend-only packages under `cmd/vandoxd/internal/`.
+- [`docs/decisions/0062-timeout-tests-use-synctest-or-injected-durations.md`](../../docs/decisions/0062-timeout-tests-use-synctest-or-injected-durations.md) —
+  timeout tests: `testing/synctest` without network, injected short durations over loopback.
 
 ## Out of scope / follow-ups
 
-- **Tailscale in userspace-networking mode on the backend host.** The Tailscale package on Synology DSM 7
-  runs in userspace-networking mode unless TUN is set up; then the tailnet address is not a host
-  interface, binding the ingest port to it fails (fails closed), and inbound tailnet connections are
-  delivered to the host's loopback instead. How to bind the ingest port there without offering the web
-  port to the tailnet is a deployment question for the ingest feature (#40), not for this skeleton.
-  Proposed follow-up issue — title: `[Docs] Ingest port binding when Tailscale runs in userspace networking
-  on the backend host`; body: "`deploy/backend/docker-compose.yml` (#13, record 0060) publishes the ingest
-  port on `${TAILNET_ADDRESS}`. On a Synology NAS the Tailscale package runs in userspace-networking mode by
-  default, where the tailnet address is not a host interface, so the bind fails, and inbound tailnet
-  connections are forwarded to 127.0.0.1, where the web port is published. Decide and document the
-  supported setup (TUN mode required, or a different binding with an ACL argument), and check it against
-  security area 2 and records 0010, 0016, 0017."
+- **Publishing the ingest port and the Tailscale mode it needs: #40.** This feature publishes no ingest
+  port (record 0060), so it needs no follow-up issue; the binding belongs to the feature that gives the
+  port something to serve. Proposed comment on issue #40 (posted by the orchestrator): "#13 deliberately
+  does not publish the ingest port in `deploy/backend/docker-compose.yml` (record 0060). This issue adds the
+  `ports` entry on the backend host's tailnet address (record 0017) and must settle the supported Tailscale
+  setup on the backend host: the Synology package runs in userspace-networking mode by default, where the
+  tailnet address is not a host interface (the bind fails) and inbound tailnet connections are forwarded to
+  127.0.0.1, where the web port is published. Document the prerequisite (e.g. TUN mode) in the compose file,
+  README and a decision record, extend the CI smoke test, and check it against security area 2 and records
+  0010, 0016, 0017."
 - Schema migrations beyond version 1, retention, rollups: with the storage features.
 - `/healthz` staying outside the login: #25 (named in 0059).
+
+## Challenge
+
+Devil's Advocate, one round (2026-10-05): 1 major, 4 minor objections. All accepted; scope narrowed
+(ingest port not published), tier unchanged (`security`).
+
+1. **MAJOR — compose file will not start on Synology with userspace Tailscale, but `TAILNET_ADDRESS` was
+   mandatory.** Accepted; decided here, not in a follow-up. Of the two options offered — state a TUN
+   prerequisite, or leave the ingest binding out until #40 — the plan takes the second: the ingest listener
+   has no routes in this skeleton, the ingest API (#40) and the agent belong to v0.2.0, so a published port
+   would serve nothing in v0.1.0 while making AC1 depend on the host's Tailscale mode. Not publishing is the
+   fail-closed state and does not contradict 0017 (which governs where a published ingest port goes). No
+   product decision is needed: the issue asks for listeners "prepared", not published, and no guarantee is
+   weakened. Changed: *Compose file* (`ports` has only the web entry, a comment points to #40), AC-C3 (8081
+   has no host binding), smoke test, README/ARCHITECTURE/SECURITY/project.md updates, *Security
+   considerations*, *Architecture check*, the follow-up became a proposed comment on #40, records 0060
+   (option 2 rewritten, the required-variable option kept as rejected) and 0059 (context).
+2. **MINOR — persistence check proves only restart, not re-creation.** Accepted. AC-C4 and the smoke test
+   now run `docker compose stop` (exit code 0, `vandoxd stopped`), then `docker compose down` without `-v`
+   and `docker compose up -d`, and require a new container ID, `healthy` and `"created":false`. spec.md AC2
+   and record 0060 follow.
+3. **MINOR — `healthcheck` reads the secret files every 30 s.** Accepted. `healthcheck` calls
+   `config.LoadBackend(configPath, nil)` and loses its `environ` parameter (new signature in *Signatures*);
+   AC-R13 adds a case proving a missing token file and an unknown `VANDOX_` variable do not affect the
+   probe. Record 0059 updated.
+4. **MINOR — timing tests vs "no real clock".** Accepted. New record 0062 and the section *Timing in
+   tests*: the single-flight ping timeout (AC-S2) is tested with `testing/synctest` on fake time (handler
+   plus recorder, no network); the two `Run`-level tests that need real loopback listeners (AC-S6, AC-S7)
+   use injected short durations under explicit rules (channel synchronization, no `time.Sleep`, no
+   elapsed-time assertion). AC-S6 now synchronizes on the recorded listener `Close`. An own injectable clock
+   was rejected: `context.WithTimeout` and `http.Server.Shutdown` read the runtime's timers. AC-R7's SIGTERM
+   involves no clock. `docs/UNIT_TESTS.md` gains the exception (Dev, *Documentation updates*).
+5. **MINOR — SonarQube `docker:S6504` on `COPY --chown`.** Accepted as expected and justified, pattern
+   kept: *Dockerfile* states why (the only copied resource is the empty writable volume seed; no shell in
+   the runtime stage for `RUN chown`; a root-owned `/data` breaks fresh named volumes), the Dockerfile
+   comments the line, and record 0059 records the accepted hotspot. The alternative of relying on
+   `COPY --from` preserving the build stage's ownership was rejected: Docker documents copied files as
+   owned by 0:0 unless `--chown` is given.
