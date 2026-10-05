@@ -75,8 +75,11 @@ expected to arrive clean (see the decision record on quality gates in [`decision
 ## Versioning and releases
 
 A release is a `v<major>.<minor>.<patch>` tag created manually on `main`; it publishes the agent binary and
-the backend Docker image. Merging a PR by itself never publishes a release. The workflow is
-`.github/workflows/release.yml`; the reasoning is in
+the backend Docker image. A release is always created manually, and the only trigger is pushing a new tag
+such as `v0.1.0`; merging a PR, pushing to `main` or a schedule never publishes one. On pull requests the
+`publish-image` and `github-release` jobs are skipped on purpose; only the `build` dry run runs. The
+workflow is `.github/workflows/release.yml`; the reasoning is in
+[0053](decisions/0053-releases-are-manual-and-started-only-by-a-version-tag.md),
 [0037](decisions/0037-release-workflow-with-plain-go-docker-and-gh.md),
 [0041](decisions/0041-base-images-pinned-by-digest-through-build-arguments.md) and
 [0039](decisions/0039-docker-hub-token-in-a-tag-only-environment.md).
