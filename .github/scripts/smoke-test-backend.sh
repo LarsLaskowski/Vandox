@@ -2,8 +2,8 @@
 # Smoke test of the backend container started from deploy/backend/docker-compose.yml (record 0060).
 # Usage: smoke-test-backend.sh <image>   (the image must exist locally, for example vandox:local)
 #
-# Checks the health check, the port bindings, the resource limits, the graceful stop and that the database
-# survives re-creating the container. Reads no repository secret, pushes nothing and uses no network beyond
+# Checks the health check, the port bindings, the resource limits, the owner and mode of /data in the image
+# (65532:65532, 0700), the graceful stop and that the database survives re-creating the container. Reads no repository secret, pushes nothing and uses no network beyond
 # loopback. sudo is used only to give the generated token file to the container user (as the README tells
 # the operator) and to remove the temporary project directory it owns.
 set -euo pipefail
@@ -20,8 +20,13 @@ project="vandoxsmoke$$"
 dir="$(mktemp -d)"
 [ -n "$dir" ] && [ -d "$dir" ] || fail "could not create the project directory"
 
+cid=""
+
 cleanup() {
   # Remove the containers and the volume first: the files they use are removed afterwards.
+  if [ -n "$cid" ]; then
+    docker rm -f "$cid" >/dev/null 2>&1 || true
+  fi
   (cd "$dir" && docker compose -p "$project" down -v --remove-orphans) >/dev/null 2>&1 || true
   if [ -n "$dir" ] && [ -d "$dir" ]; then
     sudo rm -rf -- "$dir"
@@ -87,10 +92,21 @@ esac
 [ "$(inspect '{{.HostConfig.ReadonlyRootfs}}')" = "true" ] || fail "root file system is not read-only"
 [ "$(inspect '{{.Config.User}}')" = "65532:65532" ] || fail "container user is not 65532:65532"
 
+# The /data directory baked into the image must belong to the container user and be private (AC-C1).
+cid="$(docker create "$image")"
+[ -n "$cid" ] || fail "could not create a container from the image"
+listing="$(docker export "$cid" | tar --numeric-owner -tvf - data/)"
+dataentry="$(grep -E ' data/$' <<<"$listing" || true)"
+case "$dataentry" in
+  "drwx------ 65532/65532"*) ;;
+  *) fail "/data in the image is '$dataentry', want drwx------ 65532/65532" ;;
+esac
+
 first="$(container_id)"
 compose stop
 [ "$(docker inspect --format '{{.State.ExitCode}}' "$first")" = "0" ] || fail "container did not exit with code 0 on stop"
-docker logs "$first" 2>&1 | grep -q 'vandoxd stopped' || fail "log has no 'vandoxd stopped' line"
+logs="$(docker logs "$first" 2>&1)"
+grep -q 'vandoxd stopped' <<<"$logs" || fail "log has no 'vandoxd stopped' line"
 
 # Re-create the container; the named volume stays (no -v).
 compose down
@@ -98,6 +114,7 @@ compose up -d
 second="$(container_id)"
 [ -n "$second" ] && [ "$second" != "$first" ] || fail "container was not re-created"
 wait_healthy
-docker logs "$second" 2>&1 | grep -q '"created":false' || fail "database was not reopened after re-creation (no \"created\":false)"
+logs="$(docker logs "$second" 2>&1)"
+grep -q '"created":false' <<<"$logs" || fail "database was not reopened after re-creation (no \"created\":false)"
 
 echo "backend container smoke test passed"

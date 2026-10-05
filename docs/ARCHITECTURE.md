@@ -36,8 +36,8 @@ way, and agents of the hosting provider are never disabled or changed
   graceful shutdown) and `store` (the SQLite database)
   ([0061](decisions/0061-backend-only-packages-under-cmd-vandoxd-internal.md)).
 - `internal/` — packages shared by both binaries: data model and versioned wire format (see
-  [`WIRE_FORMAT.md`](WIRE_FORMAT.md)), log parsing, signatures, version information, command-line handling, configuration loading (see
-  *Configuration*).
+  [`WIRE_FORMAT.md`](WIRE_FORMAT.md)), log parsing, signatures, version information, configuration loading (see
+  *Configuration*). Command-line handling (`internal/cli`) is used by `vandox-agent` only.
 
 Importing historical logs (including the legacy `top`/`lsof` log) and continuously shipping new log lines are
 core parts of Vandox. Both binaries are written in Go in one module.

@@ -14,6 +14,9 @@ import (
 	"github.com/LarsLaskowski/Vandox/internal/version"
 )
 
+// binaryName is the name of this binary in usage and version output.
+const binaryName = "vandoxd"
+
 // listenFunc opens a listener for network and address; main passes (&net.ListenConfig{}).Listen.
 type listenFunc func(ctx context.Context, network, address string) (net.Listener, error)
 
@@ -24,7 +27,7 @@ func main() {
 // run executes vandoxd with args (without the program name) and returns the process exit code: 0 on success,
 // 1 on a runtime or start-up failure, 2 on a usage error.
 func run(ctx context.Context, args, environ []string, stdout, stderr io.Writer, listen listenFunc) int {
-	fs := flag.NewFlagSet("vandoxd", flag.ContinueOnError)
+	fs := flag.NewFlagSet(binaryName, flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	configPath := fs.String("config", config.DefaultBackendFile, "path of the configuration file")
 	healthFlag := fs.Bool("healthcheck", false, "probe /healthz of the running service and exit 0 when it is healthy")
@@ -36,7 +39,7 @@ func run(ctx context.Context, args, environ []string, stdout, stderr io.Writer, 
 		return 2
 	}
 	if *versionFlag {
-		if _, err := fmt.Fprintln(stdout, version.String("vandoxd")); err != nil {
+		if _, err := fmt.Fprintln(stdout, version.String(binaryName)); err != nil {
 			return 1
 		}
 		return 0
