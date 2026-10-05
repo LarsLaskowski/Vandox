@@ -28,14 +28,13 @@ func logLines(t *testing.T, out string) []map[string]any {
 func TestNewLogger_Levels(t *testing.T) {
 	tests := []struct {
 		level string
-		below *slog.Level // a record one level below, which must be dropped
-		at    slog.Level  // a record at the level, which must be written
+		at    slog.Level // a record at the level is written, one level step below it is dropped
 		name  string
 	}{
-		{"debug", nil, slog.LevelDebug, "DEBUG"},
-		{"info", levelPtr(slog.LevelDebug), slog.LevelInfo, "INFO"},
-		{"warn", levelPtr(slog.LevelInfo), slog.LevelWarn, "WARN"},
-		{"error", levelPtr(slog.LevelWarn), slog.LevelError, "ERROR"},
+		{"debug", slog.LevelDebug, "DEBUG"},
+		{"info", slog.LevelInfo, "INFO"},
+		{"warn", slog.LevelWarn, "WARN"},
+		{"error", slog.LevelError, "ERROR"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.level, func(t *testing.T) {
@@ -45,9 +44,7 @@ func TestNewLogger_Levels(t *testing.T) {
 				t.Fatalf("newLogger(w, %q) error = %v, want nil", tc.level, err)
 			}
 
-			if tc.below != nil {
-				logger.Log(t.Context(), *tc.below, "below")
-			}
+			logger.Log(t.Context(), tc.at-4, "below")
 			logger.Log(t.Context(), tc.at, "at level")
 
 			lines := logLines(t, buf.String())
@@ -63,8 +60,6 @@ func TestNewLogger_Levels(t *testing.T) {
 		})
 	}
 }
-
-func levelPtr(l slog.Level) *slog.Level { return &l }
 
 func TestNewLogger_EscapesControlCharacters(t *testing.T) {
 	var buf bytes.Buffer
