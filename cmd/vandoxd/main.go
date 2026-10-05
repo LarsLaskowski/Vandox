@@ -3,9 +3,15 @@ package main
 
 import (
 	"context"
+	"errors"
+	"flag"
+	"fmt"
 	"io"
 	"net"
 	"os"
+
+	"github.com/LarsLaskowski/Vandox/internal/config"
+	"github.com/LarsLaskowski/Vandox/internal/version"
 )
 
 // listenFunc opens a listener for network and address; main passes (&net.ListenConfig{}).Listen.
@@ -18,5 +24,30 @@ func main() {
 // run executes vandoxd with args (without the program name) and returns the process exit code: 0 on success,
 // 1 on a runtime or start-up failure, 2 on a usage error.
 func run(ctx context.Context, args, environ []string, stdout, stderr io.Writer, listen listenFunc) int {
-	return 1
+	fs := flag.NewFlagSet("vandoxd", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	configPath := fs.String("config", config.DefaultBackendFile, "path of the configuration file")
+	healthFlag := fs.Bool("healthcheck", false, "probe /healthz of the running service and exit 0 when it is healthy")
+	versionFlag := fs.Bool("version", false, "print the version and exit")
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
+		return 2
+	}
+	if *versionFlag {
+		if _, err := fmt.Fprintln(stdout, version.String("vandoxd")); err != nil {
+			return 1
+		}
+		return 0
+	}
+	if fs.NArg() > 0 {
+		_, _ = fmt.Fprintf(stderr, "vandoxd: unexpected argument %q\n", fs.Arg(0))
+		fs.Usage()
+		return 2
+	}
+	if *healthFlag {
+		return healthcheck(ctx, *configPath, stderr)
+	}
+	return serve(ctx, *configPath, environ, stderr, listen)
 }
