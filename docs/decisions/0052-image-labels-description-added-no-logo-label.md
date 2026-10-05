@@ -1,6 +1,6 @@
 # 0052: Backend image gets a description label; no logo label
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-05
 - **Source:** Issue #12
 - **Supersedes:** —

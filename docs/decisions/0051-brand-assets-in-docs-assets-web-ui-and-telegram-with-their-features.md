@@ -1,6 +1,6 @@
 # 0051: Brand assets live in docs/assets; the web UI and the Telegram bot adopt them with their own issues
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-05
 - **Source:** Issue #12
 - **Supersedes:** —

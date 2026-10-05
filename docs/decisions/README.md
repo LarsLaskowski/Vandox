@@ -77,4 +77,6 @@ links the record.
 | [0048](0048-yaml-library-go-yaml-in-yaml-v3.md) | go.yaml.in/yaml/v3 parses the configuration files, through a node tree, not direct decoding | Accepted | 2026-10-04 |
 | [0049](0049-strict-configuration-file-schema-and-errors.md) | Strict configuration file: schema-only keys, no YAML extras, errors name file, line and key but never the value | Accepted | 2026-10-04 |
 | [0050](0050-secret-sources-rules-and-redaction.md) | Secrets from VANDOX_* variables or *_FILE files, strict value rules, unknown VANDOX_ variables rejected, redacted type | Accepted | 2026-10-04 |
+| [0051](0051-brand-assets-in-docs-assets-web-ui-and-telegram-with-their-features.md) | Brand assets live in docs/assets; the web UI and the Telegram bot adopt them with their own issues | Accepted | 2026-10-05 |
+| [0052](0052-image-labels-description-added-no-logo-label.md) | Backend image gets a description label; no logo label | Accepted | 2026-10-05 |
 <!-- project:end index -->
