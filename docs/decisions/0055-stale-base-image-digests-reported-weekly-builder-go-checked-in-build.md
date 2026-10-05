@@ -27,7 +27,12 @@ Facts checked on 2026-10-05:
 - `docker buildx imagetools inspect --format '{{json .Manifest}}' <image>:<tag>` returns the multi-arch
   index, whose `digest` is the value 0041 pins (for `gcr.io/distroless/static-debian13:nonroot` it equals
   the pinned `BASE_RUNTIME_DIGEST`). A Docker Hub lookup can fail with `429 Too Many Requests`; that is an
-  error, not an answer.
+  error, not an answer. With `--format '{{json .Image}}'` the same command returns the image configuration
+  per platform (for an index, a map keyed by `linux/amd64` and so on); the official `golang` images carry
+  their Go version as `GOLANG_VERSION` in its `Env`.
+- The `golang` tag is rebuilt for Debian package updates as well as for Go releases, and distroless is
+  rebuilt often, so a pinned digest is usually stale within days even when the Go version has not moved.
+- The repository is public: anyone can open an issue with any title.
 - govulncheck v1.8.0 (`internal/vulncheck/binary.go`, `internal/buildinfo/additions_scan.go`): for a binary
   without a symbol table, which `-ldflags "-s -w"` produces, it falls back to "go.mod-level precision" and
   treats every known vulnerable symbol of an affected module as used. For the standard library that means
@@ -85,7 +90,24 @@ Facts checked on 2026-10-05:
      tag is not reused); a failure on every pull request blocks unrelated changes on an upstream event.
 
    Rejected. Pull requests and pushes to `main` show a stale digest as a warning in the *Release build
-   check*; the release is not gated.
+   check*; the release is not gated. For the same reason a failed registry lookup (for example a Docker
+   Hub rate limit) is only a warning there; failing the check would block unrelated pull requests on a
+   registry hiccup. Dropping the digest step from CI altogether was rejected: it is the only place that
+   shows a stale digest on the pull request that should refresh it.
+8. **What the report shows for a stale base**:
+   - *Only "stale" with both digests*: rejected — because the `golang` and distroless tags are rebuilt for
+     Debian updates, "stale" is the normal state and does not show whether the builder's Go patch lags,
+     which is the actual risk.
+   - *Also the Go version the current tag carries* (`GOLANG_VERSION` from its image configuration), as
+     `stale (Go <ver> available)`: one extra registry lookup per stale base, informational only. Chosen.
+   - *Also the Go version of the pinned digest*: a further lookup per run for a value the build stage
+     guard already bounds to the tag's minor. Rejected.
+9. **Finding the open issue to update**:
+   - *By title only*: rejected — in a public repository an outsider can open an issue with that title,
+     and the workflow would then edit an issue whose author it does not control.
+   - *By title and author `github-actions[bot]`*, with a failed lookup ending the job before any write
+     (otherwise an API error would create a duplicate issue). Chosen. A `creator=` query parameter is not
+     relied on.
 7. **In-build guard for the builder** (from the issue):
    - *`RUN go version` only*: prints, never fails. Rejected.
    - *Compare `go env GOVERSION` with the version at the start of `BASE_BUILD_TAG`*: a digest of another Go
@@ -100,16 +122,21 @@ is how a stale digest is noticed, and the build stage now checks the builder's G
 - `.github/scripts/check-base-image-digests.sh` runs `.github/scripts/check-base-image-pinning.sh` first.
   It then takes every `BASE_<NAME>` from the `FROM` lines, reads the `_IMAGE`, `_TAG` and `_DIGEST`
   defaults, and resolves `<image>:<tag>` with `docker buildx imagetools inspect` to its index digest. Image,
-  tag, pinned and resolved digest are checked against fixed patterns before use. Exit status 0: every
-  digest is current. Exit status 3: at least one is stale, with a `::warning::` per stale base and a Markdown
-  table on standard output. Exit status 1: any error, including a failed lookup; an error wins over stale.
+  tag, pinned and resolved digest are checked against fixed patterns before use. For a stale base it also
+  reads `GOLANG_VERSION` from the current tag's `linux/amd64` image configuration and, if it matches
+  `^[0-9]+\.[0-9]+(\.[0-9]+)?$`, shows `stale (Go <ver> available)`; otherwise plain `stale`. That read
+  never changes the exit status. Exit status 0: every digest is current. Exit status 3: at least one is
+  stale, with a `::warning::` per stale base and a Markdown table on standard output. Exit status 4: a
+  registry lookup failed or answered with no valid digest. Exit status 1: any other error (pinning check,
+  pattern check). Precedence 1 > 4 > 3 > 0.
 - `.github/workflows/base-image-digests.yml` runs the script every Monday and on manual dispatch. Its only
-  job holds `contents: read` and `issues: write`. On status 3 it opens the issue *Base image digests are
-  stale* (labels `dependencies`, `area: docker`), or updates the body of the open issue with that title; on
-  status 0 it does nothing; on any other status it fails. It writes no file, pushes nothing and opens no
-  pull request.
+  job holds `contents: read` and `issues: write`. On status 3 it looks for an open issue titled *Base image
+  digests are stale* opened by `github-actions[bot]` and updates its body, or else opens that issue (labels
+  `dependencies`, `area: docker`); a failed issue lookup fails the job before any write. On status 0 it
+  does nothing; on any other status it fails. It writes no file, pushes nothing and opens no pull request.
 - The *Release build check* job in `ci.yml` runs the script after the builder Go version check. Status 3
-  passes with the warning; any other non-zero status fails the job.
+  passes with the warning, status 4 passes with a warning that freshness was not checked; any other
+  non-zero status fails the job.
 - The build stage of `deploy/backend/Dockerfile` re-declares `ARG BASE_BUILD_TAG` and, before `go.mod` is
   copied, fails unless `go env GOVERSION` is `go<v>` or starts with `go<v>.`, where `<v>` is
   `BASE_BUILD_TAG` up to the first `-`.
@@ -125,9 +152,12 @@ is how a stale digest is noticed, and the build stage now checks the builder's G
   patch (0041).
 - A builder digest from another Go minor than `BASE_BUILD_TAG` now fails the image build, in CI and in the
   release. Two variants of the same Go version still cannot be told apart.
-- The CI release build check now also depends on a registry lookup per base image. It already pulled both
-  images, so this adds no new external dependency, but a registry error now fails the check before the
-  build.
+- Expected noise: the stale issue will be open most of the time, because both tags are rebuilt for Debian
+  updates without a Go change. The Go version in the state column is what tells a routine refresh from
+  an urgent one (a newer Go patch than the builder's); a refresh is due at the latest before a release.
+- The CI release build check now also makes a registry lookup per base image (two for a stale `golang`
+  base). A failed lookup is only a warning there, so it does not fail unrelated pull requests; the
+  scheduled workflow fails on it and reports again the following week.
 - The scheduled workflow is a second workflow with a write permission (`issues: write`), in security area
   13. If GitHub disables it after 60 days without activity, it has to be re-enabled.
 - To revisit: if Dependabot learns to resolve `ARG` defaults in `FROM` lines (0041), the `docker` entry can
