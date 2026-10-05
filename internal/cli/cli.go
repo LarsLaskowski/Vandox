@@ -1,4 +1,4 @@
-// Package cli holds the command-line handling shared by vandox-agent and vandoxd.
+// Package cli holds the command-line handling of vandox-agent. vandoxd parses its own flags (record 0058).
 package cli
 
 import (

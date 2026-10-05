@@ -10,3 +10,7 @@
 # Coverage
 coverage.*
 *.coverprofile
+
+# Operator files of the backend compose setup (secrets, environment)
+deploy/backend/secrets/
+deploy/backend/.env

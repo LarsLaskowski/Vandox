@@ -13,6 +13,9 @@
 #   VANDOX_TELEGRAM_BOT_TOKEN    token of the Telegram bot used for alerts
 #   (each also as VANDOX_..._FILE)
 
+# In the container, the ports below must match the port mappings of docker-compose.yml: the container
+# side of "8080:8080" is web.listen. The health check of the image probes web.listen on loopback.
+
 web:
   # Address of the web UI as [host]:port. The host is empty (all interfaces) or an IP address, the port is
   # 1 to 65535 and differs from the ingest port. Default: :8080

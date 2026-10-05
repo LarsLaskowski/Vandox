@@ -1,0 +1,76 @@
+# Compose file of the Vandox backend for Synology Container Manager, QNAP Container Station or plain
+# `docker compose up -d` (record 0060). Put this file, vandoxd.yaml and the files below in one directory.
+#
+# Files you create next to this file:
+#   vandoxd.yaml                 copy of deploy/backend/vandoxd.yaml; its web.listen port must match the
+#                                container side of the "ports" entry below (8080)
+#   secrets/vandox_agent_token   the token the agents present: at least 32 printable ASCII characters, for
+#                                example `openssl rand -hex 32`. Compose applies no owner or mode to a file
+#                                secret outside Swarm, and the container sees the owner and mode of the host
+#                                file. The service runs as 65532, so the file must belong to it and must
+#                                never be world-readable:
+#                                  sudo chown 65532:65532 secrets/vandox_agent_token
+#                                  sudo chmod 0400 secrets/vandox_agent_token
+#   import/                      directory for the log import (mounted read-only)
+#   .env (optional)              WEB_BIND_ADDRESS=<address of this host the reverse proxy reaches>
+#
+# The web port is published on 127.0.0.1 by default, for a reverse proxy on this host. Set WEB_BIND_ADDRESS
+# for a proxy on another host. The binding is defense in depth, not the access control: depending on the
+# Docker Engine version and the host firewall, hosts on the LAN may reach a published port directly.
+#
+# The ingest port (8081) is deliberately not published: the ingest API arrives with issue #40, which adds
+# the binding on this host's tailnet address (record 0017). Until then the ingest listener serves nothing.
+#
+# A bind-mounted data directory (instead of the named volume) must be owned by 65532.
+# The Docker image has no Tailscale prerequisite yet.
+name: vandox
+
+services:
+  vandoxd:
+    # Pin X.Y.Z or a digest for controlled upgrades instead of following latest.
+    image: networlddev/vandox:latest
+    container_name: vandoxd
+    restart: unless-stopped
+    # The Go runtime collects before the container's memory limit is hit.
+    mem_limit: 512m
+    environment:
+      GOMEMLIMIT: 400MiB
+      VANDOX_AGENT_TOKEN_FILE: /run/secrets/vandox_agent_token
+    # Longer than the 10 s shutdown deadline of vandoxd, so Docker's SIGKILL never cuts it short.
+    stop_grace_period: 30s
+    ports:
+      - "${WEB_BIND_ADDRESS:-127.0.0.1}:8080:8080"
+    volumes:
+      # A new named volume takes over the owner (65532) of /data in the image.
+      - vandox-data:/data
+      - ./import:/import:ro
+      - ./vandoxd.yaml:/etc/vandox/vandoxd.yaml:ro
+    secrets:
+      - vandox_agent_token
+      # Issue #25: the password hash of the web UI. Issue #60: the Telegram bot token.
+      # - vandox_web_password_hash
+      # - vandox_telegram_bot_token
+    read_only: true
+    # SQLite's temporary files.
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - "no-new-privileges:true"
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+volumes:
+  vandox-data:
+
+secrets:
+  vandox_agent_token:
+    file: ./secrets/vandox_agent_token
+  # vandox_web_password_hash:
+  #   file: ./secrets/vandox_web_password_hash
+  # vandox_telegram_bot_token:
+  #   file: ./secrets/vandox_telegram_bot_token

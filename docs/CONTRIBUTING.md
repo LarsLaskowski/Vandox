@@ -181,7 +181,11 @@ between `::stop-commands::` markers so it cannot issue workflow commands. Record
 `release.yml` runs only for a version tag. Pull requests are covered by the `Release build check` job in
 `ci.yml`: it runs the base image pinning and builder Go version checks (`.github/scripts/`), builds the
 agent and the image with the version `v0.0.0-dryrun`, and verifies `--version`, the static binary and the
-image user, and generates and checks the SBOMs from that agent binary and image (*SBOM generator*). It also
+image user, and generates and checks the SBOMs from that agent binary and image (*SBOM generator*). It
+also starts the image with `deploy/backend/docker-compose.yml`
+(`.github/scripts/smoke-test-backend.sh`) and checks the health check, the port bindings, a graceful stop
+and that the database survives re-creating the container (record
+[0060](decisions/0060-compose-file-port-bindings-volumes-and-memory-limit.md)). It also
 compares the base image digests with the registry (*Base image digests*); a stale
 digest or a failed registry lookup is only a warning there, not a failure. It uploads, pushes and releases
 nothing and reads no secret.

@@ -172,6 +172,11 @@ jobs:
             exit 1
           fi
 
+      # Starts the image from deploy/backend/docker-compose.yml: health check, port bindings, graceful stop
+      # and a database that survives re-creating the container (record 0060). Reads no secret.
+      - name: Smoke test backend container
+        run: .github/scripts/smoke-test-backend.sh vandox:local
+
       # The release's SBOM step on the dry-run build; the image tar stays outside the checkout. Nothing is
       # uploaded (record 0056).
       - name: Generate and check SBOMs

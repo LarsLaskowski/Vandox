@@ -32,7 +32,12 @@ neighboring test file before inventing a new pattern.
 - Where the plan fixes an error format, assert the exact text instead of forbidding substrings; a
   forbidden substring must not overlap text the format requires.
 - `t.Helper()` in helpers; `t.TempDir()` for files; no real network, no real clock (inject a clock or a
-  fixture path); tests pass under `-race`.
+  fixture path); tests pass under `-race`. Loopback listeners, as `httptest` uses them, are the only network.
+- Timeouts of `context` and `net/http` cannot be driven by an own fake clock, so
+  [decision 0062](decisions/0062-timeout-tests-use-synctest-or-injected-durations.md) applies: without a
+  network, test them in a `testing/synctest` bubble (fake time, `synctest.Wait`); over loopback listeners,
+  inject short durations (where the timeout must fire) or a long one (where it must not), synchronize on
+  channels and recorded events, never `time.Sleep`, and assert no elapsed time.
 
 ## Code coverage
 
@@ -40,9 +45,11 @@ neighboring test file before inventing a new pattern.
 the same measure as SonarQube's "coverage on new code". Check it locally before a push with *Test with
 coverage* and the *Coverage gate* from [`.squad/stack.md`](../.squad/stack.md). Lines that genuinely
 cannot be covered by a unit test (for example `main` wiring) need an explicit, recorded decision. A
-binary's `main` therefore only calls `os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))`; `run` is tested in
-the package's `main_test.go`, and the `main` body is the accepted uncovered wiring
-([decision 0034](decisions/0034-entry-points-delegate-to-a-testable-run-function.md)).
+binary's `main` therefore only calls `os.Exit(run(...))` with the process boundaries (context, arguments,
+environment, standard streams and, for `vandoxd`, the listen function) as arguments; `run` is tested in the
+package's `main_test.go`, and the `main` body is the accepted uncovered wiring
+([decision 0058](decisions/0058-vandoxd-runs-the-service-by-default-with-a-shutdown-deadline.md), which
+supersedes [0034](decisions/0034-entry-points-delegate-to-a-testable-run-function.md) for `vandoxd`).
 
 ## Checklist for new tests
 
@@ -50,5 +57,5 @@ the package's `main_test.go`, and the `main` body is the accepted uncovered wiri
 - [ ] The *Analyzer gate* passes.
 - [ ] At least 80 % line coverage on new/changed production code and overall (*Coverage gate*).
 - [ ] Table-driven where there is more than one input; failure messages with got and want.
-- [ ] Passes with `-race`; no real network or clock.
+- [ ] Passes with `-race`; no real network or clock (timeouts: `synctest` or injected durations, decision 0062).
 - [ ] *Format* from `.squad/stack.md` run before committing.

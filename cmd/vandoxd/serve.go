@@ -97,4 +97,3 @@ func serveListeners(ctx context.Context, cfg *config.Backend, logger *slog.Logge
 		ShutdownTimeout: shutdownTimeout,
 	})
 }
-

@@ -4,6 +4,7 @@
 # OCI base-image labels. The builder tag follows the `go` directive in go.mod. The release workflow
 # checks both. The digests are refreshed by hand in a pull request; a weekly workflow and the CI
 # release build check report a stale digest (docs/CONTRIBUTING.md, records 0041 and 0055).
+# The HEALTHCHECK runs `vandoxd -healthcheck` (record 0059); the image declares no EXPOSE on purpose.
 ARG BASE_BUILD_IMAGE="golang"
 ARG BASE_BUILD_TAG="1.27-trixie"
 ARG BASE_BUILD_DIGEST="sha256:3b77fc618ec235a1ab412de7737f120dd507c57e8d87de4cbb7994fb94275ed5"
@@ -40,6 +41,9 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -buildvcs=false \
       -X github.com/LarsLaskowski/Vandox/internal/version.Date=${DATE}" \
     -o /out/vandoxd ./cmd/vandoxd
 
+# Empty data directory, copied into the runtime image as the seed of the data volume (record 0059).
+RUN mkdir -p -m 0700 /out/data
+
 FROM ${BASE_RUNTIME_IMAGE}@${BASE_RUNTIME_DIGEST}
 
 ARG BASE_RUNTIME_IMAGE
@@ -61,6 +65,19 @@ LABEL org.opencontainers.image.title="vandox" \
 
 COPY --from=build /out/vandoxd /vandoxd
 
+# The only resource owned by the non-root user: one empty directory that is the writable seed of the data
+# volume (docker:S6504 is accepted, record 0059). A new named volume copies its ownership, and the
+# distroless runtime has no shell for a `RUN chown`; the binary and everything else stay root-owned.
+COPY --from=build --chown=65532:65532 /out/data /data
+
 USER 65532:65532
+
+# No EXPOSE: `docker run -P` and NAS container managers would publish every exposed port on all
+# interfaces. The ports are bound in deploy/backend/docker-compose.yml (record 0059).
+STOPSIGNAL SIGTERM
+
+# The binary is the probe: the distroless image has no shell or curl. No arguments means: serve.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --start-interval=2s --retries=3 \
+    CMD ["/vandoxd", "-healthcheck"]
 
 ENTRYPOINT ["/vandoxd"]

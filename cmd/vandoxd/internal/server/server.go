@@ -5,10 +5,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sync"
 	"log/slog"
 	"net"
 	"net/http"
+	"sync"
 	"time"
 )
 
