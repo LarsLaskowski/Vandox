@@ -218,7 +218,9 @@ accepts updates only from allowlisted users in their private chats
 ([0031](decisions/0031-telegram-user-allowlist.md)). Secrets come only from environment variables or Docker
 secrets ([0032](decisions/0032-secrets-only-from-environment-or-docker-secrets.md)). The only release
 credential, the Docker Hub token, is readable only by the tag-triggered publish job and limited to pushing
-`networlddev/vandox` ([0039](decisions/0039-docker-hub-token-in-a-tag-only-environment.md)). Kept
+`networlddev/vandox` ([0039](decisions/0039-docker-hub-token-in-a-tag-only-environment.md)). The OIDC
+signing permission exists only in the secret-free `attest` job
+([0054](decisions/0054-release-provenance-attestations-from-a-secret-free-job.md)). Kept
 in sync with `SECURITY.md` and the *Security areas* in `.squad/project.md`.
 
 Records: [0006](decisions/0006-agent-connects-outbound-only.md),
@@ -246,10 +248,14 @@ Docker Hub as `networlddev/vandox` ([0027](decisions/0027-project-name-and-docke
   tagged commit is on `main`.
 - Release binaries are built from source without restored CI caches and only after `govulncheck` passes.
   The image that was verified is the image that is pushed, and a published version is never overwritten.
+- The binary and the image digest get SLSA build provenance attestations (GitHub artifact attestations) from
+  a separate job that holds only the signing permission and no secret; the workflow verifies them before it
+  creates the GitHub release.
 
 Records: [0037](decisions/0037-release-workflow-with-plain-go-docker-and-gh.md),
 [0041](decisions/0041-base-images-pinned-by-digest-through-build-arguments.md),
-[0039](decisions/0039-docker-hub-token-in-a-tag-only-environment.md).
+[0039](decisions/0039-docker-hub-token-in-a-tag-only-environment.md),
+[0054](decisions/0054-release-provenance-attestations-from-a-secret-free-job.md).
 <!-- project:end architecture -->
 
 ## Development process

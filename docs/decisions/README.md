@@ -80,4 +80,5 @@ links the record.
 | [0051](0051-brand-assets-in-docs-assets-web-ui-and-telegram-with-their-features.md) | Brand assets live in docs/assets; the web UI and the Telegram bot adopt them with their own issues | Accepted | 2026-10-05 |
 | [0052](0052-image-labels-description-added-no-logo-label.md) | Backend image gets a description label; no logo label | Accepted | 2026-10-05 |
 | [0053](0053-releases-are-manual-and-started-only-by-a-version-tag.md) | Releases are always created manually; the only trigger is a new vX.Y.Z tag, the PR dry run lives in ci.yml | Accepted | 2026-10-05 |
+| [0054](0054-release-provenance-attestations-from-a-secret-free-job.md) | Release binary and image digest get GitHub build provenance attestations from a separate, secret-free attest job; no SBOM yet | Accepted | 2026-10-05 |
 <!-- project:end index -->

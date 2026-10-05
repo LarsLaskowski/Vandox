@@ -109,16 +109,38 @@ agent installation, with user and systemd unit, is described under `deploy/agent
 
 ```
 sha256sum -c SHA256SUMS
+gh attestation verify vandox-agent-linux-amd64 --repo LarsLaskowski/Vandox \
+  --signer-workflow LarsLaskowski/Vandox/.github/workflows/release.yml \
+  --source-ref refs/tags/vX.Y.Z --deny-self-hosted-runners
 sudo install -m 0755 vandox-agent-linux-amd64 /usr/local/bin/vandox-agent
 vandox-agent --version
 ```
 
-**Backend.** Pull the image from Docker Hub, either by version or by the digest given in the release notes:
+The checksum only shows that the download is intact. `gh attestation verify` needs the GitHub CLI logged in
+(`gh auth login`) and proves that the binary was built by this repository's release workflow for that tag.
+
+**Backend.** Pull the image from Docker Hub, either by version or by the digest given in the release notes
+(`Docker image: networlddev/vandox:<X.Y.Z>@sha256:<digest>`):
 
 ```
 docker pull networlddev/vandox:<X.Y.Z>
 docker pull networlddev/vandox@sha256:<digest>
 ```
+
+To check that the image was built by this repository's release workflow, verify it by digest and then pull
+that same digest:
+
+```
+gh attestation verify oci://docker.io/networlddev/vandox@sha256:<digest> --repo LarsLaskowski/Vandox \
+  --signer-workflow LarsLaskowski/Vandox/.github/workflows/release.yml \
+  --source-ref refs/tags/v<X.Y.Z> --deny-self-hosted-runners
+docker pull networlddev/vandox@sha256:<digest>
+```
+
+The check names the digest and not the tag because a tag is resolved anew on every request and anyone with
+push rights to `networlddev/vandox` could re-point it between the check and the pull, while the digest names
+exactly the image that was verified. The attestation is stored on GitHub, not in Docker Hub, so
+`--bundle-from-oci` and registry-side tools do not find it.
 
 Image tags: `X.Y.Z` for the release `vX.Y.Z`; `latest` is the highest stable release; a pre-release
 (`vX.Y.Z-rc.N`) is published only under its own tag `X.Y.Z-rc.N`. A published version tag is never
