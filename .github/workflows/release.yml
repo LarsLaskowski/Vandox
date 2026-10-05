@@ -3,7 +3,7 @@ name: Release
 # A SemVer tag (v*.*.*) builds, verifies and publishes the agent binary and the
 # backend image. This is the only trigger: a release is always created manually by
 # pushing a tag. Pull requests are checked by ci.yml, never by this workflow.
-# See docs/CONTRIBUTING.md (Versioning and releases) and records 0037, 0039, 0041, 0053 and 0054.
+# See docs/CONTRIBUTING.md (Versioning and releases) and records 0037, 0039, 0041, 0053, 0054 and 0056.
 
 on:
   push:
@@ -162,6 +162,14 @@ jobs:
       - name: Save image
         run: docker save vandox:local -o dist/vandox-image.tar
 
+      # SPDX SBOMs for the binary and the image, from a digest-pinned syft container that runs without
+      # network and without access to dist/ (record 0056). They travel in the release artifact and are
+      # attested in the attest job; they are not release assets.
+      - name: Generate SBOMs
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: .github/scripts/generate-sbom.sh dist/vandox-agent-linux-amd64 dist/vandox-image.tar "$TAG" dist
+
       - name: Upload release files
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -233,8 +241,8 @@ jobs:
         if: always()
         run: docker logout docker.io
 
-  # Signs build provenance for the published binary and image (record 0054). Holds the
-  # OIDC signing permission and nothing else: no environment, no secret, no checkout.
+  # Signs build provenance and SBOM attestations for the published binary and image (records 0054 and
+  # 0056). Holds the OIDC signing permission and nothing else: no environment, no secret, no checkout.
   attest:
     needs: [build, publish-image]
     runs-on: ubuntu-latest
@@ -273,6 +281,19 @@ jobs:
           subject-name: docker.io/networlddev/vandox
           subject-digest: ${{ needs.publish-image.outputs.digest }}
 
+      - name: Attest agent SBOM
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: dist/vandox-agent-linux-amd64
+          sbom-path: dist/vandox-agent-linux-amd64.spdx.json
+
+      - name: Attest image SBOM
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: docker.io/networlddev/vandox
+          subject-digest: ${{ needs.publish-image.outputs.digest }}
+          sbom-path: dist/vandox-image.spdx.json
+
       - name: Verify attestations
         env:
           GH_TOKEN: ${{ github.token }}
@@ -287,6 +308,9 @@ jobs:
             --deny-self-hosted-runners)
           gh attestation verify dist/vandox-agent-linux-amd64 "${flags[@]}"
           gh attestation verify "oci://docker.io/networlddev/vandox:$VERSION" "${flags[@]}"
+          sbom_type=https://spdx.dev/Document/v2.3
+          gh attestation verify dist/vandox-agent-linux-amd64 "${flags[@]}" --predicate-type "$sbom_type"
+          gh attestation verify "oci://docker.io/networlddev/vandox:$VERSION" "${flags[@]}" --predicate-type "$sbom_type"
 
   github-release:
     needs: [build, publish-image, attest]

@@ -82,4 +82,5 @@ links the record.
 | [0053](0053-releases-are-manual-and-started-only-by-a-version-tag.md) | Releases are always created manually; the only trigger is a new vX.Y.Z tag, the PR dry run lives in ci.yml | Accepted | 2026-10-05 |
 | [0054](0054-release-provenance-attestations-from-a-secret-free-job.md) | Release binary and image digest get GitHub build provenance attestations from a separate, secret-free attest job; no SBOM yet | Accepted | 2026-10-05 |
 | [0055](0055-stale-base-image-digests-reported-weekly-builder-go-checked-in-build.md) | Stale base image digests reported weekly as an issue; the build stage checks the builder's Go version against its tag | Accepted | 2026-10-05 |
+| [0056](0056-release-sboms-from-a-digest-pinned-syft-container.md) | Release SBOMs (SPDX 2.3) come from a digest-pinned, network-less syft container in the build job and are attested in the attest job | Accepted | 2026-10-05 |
 <!-- project:end index -->

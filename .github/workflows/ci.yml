@@ -93,7 +93,8 @@ jobs:
         run: go tool govulncheck ./...
 
   # Builds the agent and the backend image the way the release does, with a fixed
-  # dry-run version. Nothing is uploaded or pushed and no secret is read. The real
+  # dry-run version, and generates and checks the SBOMs (record 0056). Nothing is uploaded or pushed and
+  # no secret is read. The real
   # release runs only on a version tag (release.yml, record 0053).
   release-build:
     name: Release build check
@@ -170,3 +171,14 @@ jobs:
             echo "::error::image user is '$user', want 65532:65532"
             exit 1
           fi
+
+      # The release's SBOM step on the dry-run build; the image tar stays outside the checkout. Nothing is
+      # uploaded (record 0056).
+      - name: Generate and check SBOMs
+        run: |
+          set -euo pipefail
+          work="$(mktemp -d)"
+          docker save vandox:local -o "$work/vandox-image.tar"
+          mkdir "$work/sbom"
+          .github/scripts/generate-sbom.sh dist/vandox-agent-linux-amd64 "$work/vandox-image.tar" v0.0.0-dryrun "$work/sbom"
+          ls -l "$work/sbom"

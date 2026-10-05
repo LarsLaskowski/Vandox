@@ -99,10 +99,12 @@ files or endpoints.
     non-root user, a published version tag is never overwritten, and every published binary has a checksum
     in `SHA256SUMS`. The OIDC signing permission (`id-token: write`, `attestations: write`) is granted only
     to the `attest` job, which declares no environment, reads no secret and runs no repository code; every
-    published binary and image digest gets a build provenance attestation that the workflow verifies before
-    the GitHub release is created. The scheduled digest check holds only `contents: read` and
+    published binary and image digest gets a build provenance attestation and an SBOM attestation that the
+    workflow verifies before the GitHub release is created. The SBOM generator is a container image pinned by
+    index digest (form-checked in `.github/scripts/generate-sbom.sh`), run without network, capabilities,
+    token or writable access to `dist/`. The scheduled digest check holds only `contents: read` and
     `issues: write`, writes only regex-checked image, tag, digest and Go version values into the issue, and never writes
-    to the repository. Records 0027, 0037, 0039, 0041, 0054, 0055.
+    to the repository. Records 0027, 0037, 0039, 0041, 0054, 0055, 0056.
 
 ## Guarantees
 
