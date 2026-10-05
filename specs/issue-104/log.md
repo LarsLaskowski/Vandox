@@ -12,3 +12,6 @@ One line per pipeline step: date, step, member, result. Lead decisions and escal
 | 2026-10-05 | 4-5 Skeleton, tests first | Orchestrator | skipped: no production or test code changes (plan Verification without tests) |
 | 2026-10-05 | 6 Implement | Dev | attest job added to release.yml, github-release gated on it, docs and project.md updated; no tests/coverage (no code change) |
 | 2026-10-05 | 7 Code check | Code Officer | clean, no edits; orchestrator verified format, analyzer gate, YAML parse, no ${{ in run: |
+| 2026-10-05 | 8 Review round 1 | Reviewer | BLOCKING 0, NON-BLOCKING 3 (CONTRIBUTING wording: double "and" in record list; step 6 says README commands though image is checked by tag; failed-attest advice must cover digest mismatch = do not re-run) |
+| 2026-10-05 | 8 Review round 1 | Security | APPROVED; residual risk: first real attest run happens on first tag (documented recovery) |
+| 2026-10-05 | 8 Triage | Orchestrator | all three non-blocking findings are small, correct docs fixes: fix now (Dev), then delta review; Lead confirms at step 9 |
