@@ -45,8 +45,8 @@ read on a hung volume can block in a system call that no context cancels.
    contradicts Docker's documentation (copied files are owned by 0:0 unless `--chown` is given); a
    root-owned `/data` makes a fresh named volume unwritable. Chosen: `COPY --chown=65532:65532` of one empty
    directory, accepting SonarQube's security hotspot `docker:S6504` (non-root user may modify a copied
-   resource) — that writability is the purpose; apart from the base image's `/home/nonroot`, nothing in
-   the image is owned by 65532, which the container smoke test checks.
+   resource) — that writability is the purpose; apart from `/data` and the base image's `/home/nonroot`,
+   nothing else in the image is owned by 65532, which the container smoke test checks.
 6. **`EXPOSE` in the image**
    - *`EXPOSE 8080 8081`* — documents the ports in the image metadata, but `docker run -P` and NAS
      container managers that pre-fill port mappings from it publish every exposed port on all interfaces:
