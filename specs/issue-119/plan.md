@@ -43,11 +43,14 @@ style of the block they extend and leaves the old lines alone.)
   against `^ghcr\.io/anchore/syft:v[0-9]+\.[0-9]+\.[0-9]+@sha256:[0-9a-f]{64}$` (`[[ =~ ]]`) and exits 1
   otherwise. No other image, download or installer is used.
 - [ ] AC2 — **Isolation.** Each `docker run` of the generator uses `--rm --network none --read-only
-  --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges --user "$(id -u):$(id -g)"`, bind-mounts the
-  input file read-only (`:ro`), and has exactly one writable bind mount: a directory freshly created with
-  `mktemp -d` that is not inside `dist/`. Environment passed: only `SYFT_CHECK_FOR_APP_UPDATE=false` and, if
-  syft needs a writable home or cache, variables pointing into `/tmp` (the tmpfs) — no host path, no token,
-  no Docker socket, no cache volume.
+  --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges --user "$(id -u):$(id -g)"`, mounts the
+  input file with `--mount type=bind,source=<absolute path>,target=/in/<fixed name>,readonly` (never `-v`,
+  whose `src:dst:ro` form reads a relative source as a named volume and is split at `:`), and has exactly
+  one writable mount, `--mount type=bind,source=<absolute path>,target=/out`: a directory freshly created
+  with `mktemp -d` that is not inside `dist/`. Every `source=` value is an absolute path that passed the
+  path check of AC5. Environment passed: only `SYFT_CHECK_FOR_APP_UPDATE=false` and, if syft needs a
+  writable home or cache, variables pointing into `/tmp` (the tmpfs) — no host path, no token, no Docker
+  socket, no cache volume.
 - [ ] AC3 — **Output.** The script runs `scan file:<agent>` and `scan docker-archive:<image tar>` with output
   `spdx-json@2.3` and `--source-name` (`vandox-agent-linux-amd64`, `networlddev/vandox`) /
   `--source-version` (the version argument). It copies to `<dest-dir>` only
@@ -56,13 +59,21 @@ style of the block they extend and leaves the old lines alone.)
 - [ ] AC4 — **Content check** (with `jq` on the copied files): `.spdxVersion == "SPDX-2.3"`; each document
   has a package named `stdlib` and a package for the main module `github.com/LarsLaskowski/Vandox`; the image
   document has at least one package with an external reference whose locator starts with `pkg:deb/`; each
-  file is at most 16 MiB (`actions/attest` limit). Any failure exits 1 with an `::error::` line. (If syft
+  file is at most 16 MiB (`actions/attest` limit). Any failure exits 1 with an `::error::` line whose text is
+  fixed in the script (it may add the script's own file names and counts, never a value read from an SBOM
+  or from the container's output, AC11). (If syft
   names the main-module package differently, the Dev reports the observed name from the CI dry run to the
   Lead instead of weakening the check.)
-- [ ] AC5 — **Arguments.** Usage `generate-sbom.sh <agent-binary> <image-tar> <version> <dest-dir>`; wrong
-  argument count, a missing input file or a version not matching
-  `^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?$` exits 1 before any `docker` call
-  (`v0.0.0-dryrun` passes).
+- [ ] AC5 — **Arguments.** Usage `generate-sbom.sh <agent-binary> <image-tar> <version> <dest-dir>`. Each
+  path argument is made absolute (prefixed with `$PWD/` unless it starts with `/`; no `realpath`, which would
+  follow a symlink). Exits 1 before any `docker` call on: wrong argument count; an input
+  (`<agent-binary>`, `<image-tar>`) that is not a regular file or is a symlink (`[[ -f … && ! -L … ]]`);
+  a `<dest-dir>` that is not a directory or is a symlink (`[[ -d … && ! -L … ]]`), or that already contains
+  an entry named `vandox-agent-linux-amd64.spdx.json` or `vandox-image.spdx.json` (any kind, checked with
+  `-e`/`-L`); any absolute path — the three arguments and the `mktemp -d` scratch directory — not matching
+  `^/[A-Za-z0-9._/+-]+$` (this excludes `,`, `:`, `=`, quotes, whitespace and control characters, which
+  `--mount` or `-v` would parse); a version not matching
+  `^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?$` (`v0.0.0-dryrun` passes).
 - [ ] AC6 — **Release build job.** In `release.yml`, job `build`, a step `Generate SBOMs` between `Save image`
   and `Upload release files` runs the script with `dist/vandox-agent-linux-amd64`, `dist/vandox-image.tar`,
   the tag and `dist`; the tag reaches the script only through `env:`. The `release` artifact then contains
@@ -84,6 +95,15 @@ style of the block they extend and leaves the old lines alone.)
   workflow-level `permissions: {}` in `release.yml` unchanged; trigger unchanged (0053); `publish-image`
   unchanged.
 - [ ] AC10 — **Documentation** as listed under *Documentation updates*, consistent with record 0056.
+- [ ] AC11 — **Log isolation.** Neither the generator container nor the Docker CLI writes directly to the
+  job log: stdout and stderr of both `docker run` calls (including pull progress) are redirected to files
+  in a second `mktemp -d` directory that is **not** mounted into the container. The script prints those
+  files, and anything else derived from an SBOM (e.g. a diagnostic package list), only between
+  `::stop-commands::<token>` and `::<token>::`, where `<token>` is 32 lower-case hex characters read from
+  `/dev/urandom` (`od -An -N16 -tx1 /dev/urandom | tr -d ' \n'`, checked against `^[0-9a-f]{32}$`) after the
+  container runs have finished; the resume line is also emitted by the `EXIT` trap if the script exits
+  inside the wrap. Every `::error::` line is printed outside the wrap and follows AC4 (fixed text, own file
+  names, counts). A non-zero `docker run` exit is reported with a fixed `::error::` line after the logs.
 
 ## Verification without tests
 
@@ -98,21 +118,24 @@ stays `security`: plan challenge, steps 3 and 8 and every other step run. Step 7
 | AC1 | Read-only check of the script; `docker buildx imagetools inspect ghcr.io/anchore/syft:vX.Y.Z`, tag and digest quoted in the Dev's report; the PR's `Release build check` pulls by that digest | Dev (lookup), Reviewer and Security (diff), orchestrator (CI result) |
 | AC2 | Read-only check of every `docker run` line in the diff | Reviewer, Security |
 | AC3, AC4 | `Release build check` on the PR runs the script end to end on a real agent binary and image tar; the Dev runs the script once locally if Docker can pull the pinned image (`ghcr.io` blobs may be blocked by the session proxy — then CI is the run) and attaches the `jq` summary (package count, `stdlib` versions, number of `pkg:deb/` packages) to the report; additionally the Dev exercises the failure paths in a scratch copy (wrong form of the constant, symlink in the output dir, missing file) and reports the exit codes | Dev, orchestrator (CI result), Reviewer |
-| AC5 | Local run of the script with wrong argument count, missing file and bad version (no Docker needed: these exit before any `docker` call) | Dev (report), Reviewer |
+| AC5 | Local run of the script with wrong argument count, missing file, an input that is a symlink or a directory, a `<dest-dir>` that is a symlink or already holds an SBOM name, a path with `,` or `:`, a relative path (accepted, resolved) and bad version (no Docker needed: these exit before any `docker` call) | Dev (report), Reviewer |
 | AC6 | Read-only check of `release.yml`; the step order and artifact path match AC6 | Reviewer, Security |
 | AC7 | Read-only check of the `attest` job against AC7 and against `actions/attest` `action.yml` at the pinned SHA. The attestation calls themselves can only run on a real tag (0053, 0054); the first release tag is their first run, and `github-release` does not run if they fail | Reviewer, Security; first tag by the maintainer |
 | AC8 | `Release build check` green on the PR, its log shows both SBOM files written and checked | Orchestrator (CI result), Reviewer |
 | AC9 | `grep -n '\${{' ` over `run:` blocks of both workflows (none), `grep -n 'cache'`, `grep -n 'uses:'` (all SHA-pinned) | Reviewer, Security |
 | AC10 | Read-only check of the docs against record 0056 and the workflow | Reviewer |
+| AC11 | Read-only check that both `docker run` lines redirect stdout and stderr to the unmounted log directory, that the logs and any SBOM-derived text are printed only inside the `::stop-commands::` wrap, and that every `::error::` text is fixed; the `Release build check` log shows the wrap; the Dev runs the script once in a scratch copy with a `docker` stub on `PATH` that prints `::error::injected` and exits non-zero, and reports that the line appears only inside the wrap and the fixed error follows | Dev (report), Reviewer, Security |
 
 ## Approach
 
 1. Look up the newest syft release tag and its index digest on `ghcr.io` (only there); write the constant
    into the new script.
 2. Write `.github/scripts/generate-sbom.sh` (bash, `set -euo pipefail`, `LC_ALL=C`, header comment naming
-   its callers and record 0056, like the existing scripts): argument checks (AC5), constant check (AC1),
-   `mktemp -d` output directory with an `EXIT` trap that removes it, two hardened `docker run` calls (AC2,
-   AC3), copy with file-kind checks (AC3), `jq` content checks (AC4). Executable bit set (`git` mode 100755,
+   its callers and record 0056, like the existing scripts): argument and path checks (AC5), constant check
+   (AC1), two `mktemp -d` directories (output, mounted; logs, not mounted) with an `EXIT` trap that removes
+   them and resumes workflow commands if needed, two hardened `docker run` calls with `--mount` and output
+   redirected to the log directory (AC2, AC3, AC11), the logs printed inside the `::stop-commands::` wrap
+   (AC11), copy with file-kind checks (AC3), `jq` content checks with fixed error texts (AC4). Executable bit set (`git` mode 100755,
    like the existing scripts).
 3. `release.yml`: `Generate SBOMs` step in `build` (AC6); two attest steps and two more verify calls in
    `attest` (AC7); update the header comment's record list (`… 0054, 0056`) and the `attest` job comment.
@@ -123,7 +146,7 @@ stays `security`: plan challenge, steps 3 and 8 and every other step run. Step 7
 
 | Project | Type / file | Change |
 | ------- | ----------- | ------ |
-| CI | `.github/scripts/generate-sbom.sh` | new: pinned, isolated syft run, copy and content check |
+| CI | `.github/scripts/generate-sbom.sh` | new: pinned, network-less, restricted syft run, log wrap, copy and content check |
 | CI | `.github/workflows/release.yml` | `build`: step `Generate SBOMs`; `attest`: 2 SBOM attest steps, 2 verify calls; comments |
 | CI | `.github/workflows/ci.yml` | `Release build check`: save image, run the script |
 | Docs | `README.md`, `docs/CONTRIBUTING.md`, `docs/ARCHITECTURE.md`, `.squad/project.md` | see *Documentation updates* |
@@ -210,6 +233,21 @@ Made by the Dev:
     it reaches only `--source-version`.
   - *Copied files*: regular file and not a symlink accepted; missing, symlink (to file or directory),
     directory, FIFO, device rejected.
+  - *Input and directory paths* (consumer: Docker's `--mount` parser, a CSV list of `key=value` fields where
+    `,` separates fields and `"` quotes; and, avoided here, `-v`, where `:` separates fields and a source
+    without a leading `/` names a volume): every path is made absolute and must match `^/[A-Za-z0-9._/+-]+$`
+    as a whole string. Accepted: absolute paths and relative paths (prefixed with `$PWD/`, which itself must
+    pass), `..` components (harmless: the mount is a read-only regular file or our own fresh directory).
+    Rejected: `,`, `:`, `=`, `"`, `'`, whitespace, newline and other control characters, non-ASCII bytes.
+    Inputs must be regular files and not symlinks (a symlink would mount its target, possibly a directory);
+    `<dest-dir>` must be a directory, not a symlink, and must not already hold either SBOM name (a planted
+    symlink there would make the copy write through it).
+- **Runner log.** The container's output reaches the job log only through the script, which prints it
+  inside a `::stop-commands::` wrap whose token the container never sees (generated after the runs, not
+  passed in); so a malicious generator cannot set outputs, environment, masks or annotations through
+  workflow commands. `::error::` texts never carry SBOM- or container-derived strings (AC11). The step
+  remains exposed to log noise only, not to command injection. `GITHUB_ENV`, `GITHUB_OUTPUT` and
+  `GITHUB_PATH` are files on the host the container cannot reach (not mounted).
 - **Signing job.** No change to its permissions; `sbom-path` reads a file from the downloaded artifact.
 - **Supply-chain freshness.** The pin ages until refreshed by hand (follow-up below).
 
@@ -250,3 +288,20 @@ Devil's Advocate, round 1 (0 major, 2 minor):
    mismatch. AC1, the AC1 row, Approach step 1 and the *SBOM generator* refresh instructions now name
    `ghcr.io` as the only source. Record 0056 no longer claims both registries carry the same digest and lists
    the cross-check as a rejected option under *Options considered*, item 1.
+
+Security, plan review (VERDICT: APPROVED, 2 non-blocking findings):
+
+1. *Container output reaches the job log, where `::` lines are workflow commands; "isolated from the runner"
+   overstates it* — **accepted.** New AC11: both `docker run` calls redirect stdout and stderr to an
+   unmounted log directory; logs and any SBOM-derived text are printed only between
+   `::stop-commands::<random token>` and `::<token>::`; `::error::` lines carry fixed text (AC4 amended). The
+   observed main-module name the Dev may have to report (AC4) is obtained inside the wrap or locally, and AC4
+   is not weakened. *Security considerations* gains a *Runner log* item; record 0056 now says the container has
+   no access to the job token, the Docker socket, the network or `dist/` and is not fully isolated from the
+   runner (its output reaches the log, only inside the wrap), instead of "isolated from the runner".
+2. *Bind-mount syntax* — **accepted.** AC2 now requires `--mount type=bind,source=<absolute>,target=…,readonly`
+   (output mount without `readonly`), never `-v`. AC5 now makes every path absolute, requires inputs to be
+   regular non-symlink files and `<dest-dir>` a non-symlink directory without existing SBOM names, and checks
+   every path (arguments and scratch directory) against the allow-list `^/[A-Za-z0-9._/+-]+$`, which excludes
+   `,` and `:` and every other character the `--mount` or `-v` parser treats specially. The accepted forms are
+   listed under *Security considerations*; the AC5 verification row covers the new failure paths.

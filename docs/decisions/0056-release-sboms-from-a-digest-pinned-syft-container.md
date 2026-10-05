@@ -60,8 +60,10 @@ Facts this decision rests on (checked on 2026-10-05):
      so a malicious build could alter `dist/` or the runner's action files before the artifact upload.
    - *The syft container image, pinned by index digest* (`ghcr.io/anchore/syft:vX.Y.Z@sha256:…`), run with no
      network, a read-only root file system, no capabilities, the runner's UID, the inputs mounted read-only
-     and only a fresh, empty output directory writable: pinned and checksum-verified by the daemon, and
-     isolated from the runner, the job token, the Docker socket and `dist/`.
+     and only a fresh, empty output directory writable: pinned and checksum-verified by the daemon, with no
+     access to the job token, the Docker socket, the network or `dist/`. It is not fully isolated from the
+     runner: its output reaches the job log, where lines starting with `::` are workflow commands, so the
+     script captures that output in files and prints it only inside a `::stop-commands::` wrap (*Decision*).
 
    Registry for the pin:
    - *`ghcr.io` only*: the digest is read there and the image is pulled from there; the daemon verifies the
@@ -85,7 +87,7 @@ Facts this decision rests on (checked on 2026-10-05):
    - *In a separate job between `build` and `attest`*: no job token scope, but the job would have to download
      and re-upload artifacts; a compromised generator with access to the artifact runtime token could replace
      the `release` artifact that `publish-image`, `attest` and `github-release` consume.
-   - *As a step of the `build` job, inside the isolated container*: the SBOMs are written before the upload
+   - *As a step of the `build` job, inside the restricted container*: the SBOMs are written before the upload
      and travel in the `release` artifact; the container cannot reach the job token, the artifact service or
      `dist/` (option 1).
 
@@ -122,10 +124,20 @@ Facts this decision rests on (checked on 2026-10-05):
   `ghcr.io/anchore/syft:vX.Y.Z@sha256:<index digest>` (a release tag, never `latest`), checks its form as a
   whole string before use, and runs it twice with `docker run --rm --network none --read-only --tmpfs /tmp
   --cap-drop ALL --security-opt no-new-privileges --user <runner uid>:<gid>`, the two inputs bind-mounted
-  read-only and a fresh empty directory as the only writable mount: `scan file:` for the binary and
+  read-only and a fresh empty directory as the only writable mount, each as
+  `--mount type=bind,source=<absolute path>,…` (never `-v`, whose `:`-separated form reads a relative source
+  as a named volume): `scan file:` for the binary and
   `scan docker-archive:` for the image tarball, output `spdx-json@2.3`, application update check off. It
   copies only the two expected regular files (not symlinks) to `<dest-dir>` as
   `vandox-agent-linux-amd64.spdx.json` and `vandox-image.spdx.json` and checks their content (option 5).
+- Before any `docker` call the script makes every path absolute and accepts it only if it matches
+  `^/[A-Za-z0-9._/+-]+$` (no `,`, `:` or other character the mount parsers treat specially); the inputs must
+  be regular files and not symlinks, the destination a directory, not a symlink, without either SBOM name.
+- The container's stdout and stderr (and the Docker CLI's pull output) go to files in a directory that is
+  not mounted into the container; the script prints them, and anything else read from an SBOM, only between
+  `::stop-commands::<token>` and `::<token>::`, with a random token generated after the container runs, so
+  the generator cannot issue workflow commands. `::error::` lines carry fixed text, never SBOM- or
+  container-derived strings.
 - `release.yml`, job `build`: a step `Generate SBOMs` after `Save image` and before the upload; the two files
   travel in the `release` artifact. `SHA256SUMS` still lists only the binary.
 - `release.yml`, job `attest`: unchanged permissions (`id-token: write`, `attestations: write`), no
@@ -146,8 +158,8 @@ Facts this decision rests on (checked on 2026-10-05):
   `docker build`; an attacker who controls that job can falsify the SBOM as well as the binary, as for the
   provenance (0054). The predicate is workflow-controlled content, not a guarantee by the signer.
 - A new third-party tool is in the release pipeline, confined by digest and by the container restrictions.
-  A malicious build of that exact digest could still write false SBOMs, but cannot reach the job token,
-  `dist/` or the network.
+  A malicious build of that exact digest could still write false SBOMs and noise in the job log, but cannot
+  reach the job token, `dist/` or the network, nor issue workflow commands.
 - The syft pin ages until it is refreshed by hand; a stale syft gives a less complete SBOM, not a weaker
   release. Follow-up: report the syft pin in the weekly digest workflow.
 - `ghcr.io` must be reachable for every release and every `Release build check`; an outage fails both.
