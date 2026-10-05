@@ -16,3 +16,4 @@ One line per pipeline step: date, step, member, result. Lead decisions and escal
 | 2026-10-05 | 8 Fix round 1 | Dev | Blocking finding fixed: newline after each log and before the EXIT-trap resume marker in generate-sbom.sh; stub runs show the marker on its own line and the fixed ::error:: after it |
 | 2026-10-05 | 7 Code check (2) | Code Officer | No edits; verified by orchestrator: gofmt clean, analyzer gate PASS, tests green |
 | 2026-10-05 | 8 Review round 2 (delta) | Reviewer | VERDICT: APPROVE; blocking finding resolved, nothing new; stub reproduction shows resume marker and fixed ::error:: each on their own line |
+| 2026-10-05 | 9 PR approval | Lead | RESULT: APPROVED; record 0056 Accepted and indexed in docs/decisions/README.md |
