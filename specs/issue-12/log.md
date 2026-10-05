@@ -14,3 +14,4 @@ One line per pipeline step: date, step, member, result. Lead decisions and escal
 | 2026-10-05 | 9 Lead | squad-lead | ESCALATE: issue says exact content, favicon defect in issue source |
 | 2026-10-05 | PM | user | Option A: fix favicon (style/class only), other five byte-exact |
 | 2026-10-05 | 2 Revise | squad-lead | PM Option A applied: AC1, SHA, verification, #24 comment, PR-body note, ADR 0051 (options 5, 6) revised; Dev fixed favicon (SHA bb6c5945...) |
+| 2026-10-05 | 8 Review round 2 (delta) | squad-reviewer / squad-security | both APPROVE, no findings |
