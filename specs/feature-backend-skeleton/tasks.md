@@ -1,6 +1,6 @@
 # Tasks: Backend skeleton and container
 
-Plan: [plan.md](plan.md) — Status: Draft (revised after the plan challenge)
+Plan: [plan.md](plan.md) — Status: Draft (revised after the plan challenge and the plan security review)
 
 | # | Task | Files | Tests (AC) | Owner | Done |
 | - | ---- | ----- | ---------- | ----- | ---- |
@@ -14,7 +14,7 @@ Plan: [plan.md](plan.md) — Status: Draft (revised after the plan challenge)
 | 8 | Implement `run`, `serve`, logger and health check; correct the `internal/cli` package comment | `cmd/vandoxd/main.go`, `serve.go`, `logger.go`, `healthcheck.go`, `internal/cli/cli.go` | AC-R1–AC-R15 | Dev | [ ] |
 | 9 | Dockerfile: `/data` (65532, 0700, comment on why `--chown`, record 0059), `STOPSIGNAL`, `HEALTHCHECK`, no `EXPOSE`; pinning check unchanged | `deploy/backend/Dockerfile` | AC-C1 | Dev | [ ] |
 | 10 | Compose file (web port only; ingest port not published, comment naming #40), `.gitignore` entries, example-config comment | `deploy/backend/docker-compose.yml`, `.gitignore`, `deploy/backend/vandoxd.yaml` | AC-C2, AC-C5 | Dev | [ ] |
-| 11 | CI smoke test script and step (no 8081 binding; stop, then `down` without `-v` and `up -d` for persistence) | `.github/scripts/smoke-test-backend.sh`, `.github/workflows/ci.yml` | AC-C1, AC-C3–AC-C5 | Dev | [ ] |
+| 11 | CI smoke test script and step (token file `sudo chown 65532:65532` + `chmod 0400`; no 8081 binding; empty `ExposedPorts`; stop, then `down` without `-v` and `up -d` for persistence) | `.github/scripts/smoke-test-backend.sh`, `.github/workflows/ci.yml` | AC-C1, AC-C3–AC-C5 | Dev | [ ] |
 | 12 | Coverage ≥ 80 % on new/changed code and overall | — | all AC-R/S/D | Tester, Dev | [ ] |
 | 13 | Documentation updates from the plan | `README.md`, `docs/ARCHITECTURE.md`, `docs/UNIT_TESTS.md`, `docs/CONTRIBUTING.md`, `SECURITY.md`, `.squad/project.md` | — | Dev | [ ] |
 | 14 | *Format* and *Analyzer gate* (including `gocognit` on `run`, `serve`, `Run`) | changed Go files | — | Code Officer | [ ] |

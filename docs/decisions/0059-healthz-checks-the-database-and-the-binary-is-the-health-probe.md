@@ -46,7 +46,17 @@ read on a hung volume can block in a system call that no context cancels.
    root-owned `/data` makes a fresh named volume unwritable. Chosen: `COPY --chown=65532:65532` of one empty
    directory, accepting SonarQube's security hotspot `docker:S6504` (non-root user may modify a copied
    resource) — that writability is the purpose, and nothing else in the image is owned by 65532.
-6. **A configuration file baked into the image** — `docker run` would work without a mount, but a missing
+6. **`EXPOSE` in the image**
+   - *`EXPOSE 8080 8081`* — documents the ports in the image metadata, but `docker run -P` and NAS
+     container managers that pre-fill port mappings from it publish every exposed port on all interfaces:
+     the ingest port with nothing behind it before #40, and the web port against 0023. Rejected (plan
+     security review of #13).
+   - *`EXPOSE 8080` only* — the same objection for the web port.
+   - *No `EXPOSE`* — the ports are documented where they are bound: the compose file (0060) and
+     `vandoxd.yaml`; `-p` mappings work without `EXPOSE`.
+
+   Chosen: no `EXPOSE`.
+7. **A configuration file baked into the image** — `docker run` would work without a mount, but a missing
    mount would then go unnoticed and the image would carry a copy that can drift from the example. Rejected:
    the file is mounted (compose, 0060).
 
@@ -64,7 +74,7 @@ read on a hung volume can block in a system call that no context cancels.
   200, 1 otherwise with one line on stderr. It opens no database and no listener.
 - `deploy/backend/Dockerfile`:
   `HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --start-interval=2s --retries=3 CMD ["/vandoxd", "-healthcheck"]`,
-  `EXPOSE 8080 8081`, `STOPSIGNAL SIGTERM`, and `/data` created in the build stage and copied with
+  no `EXPOSE` instruction, `STOPSIGNAL SIGTERM`, and `/data` created in the build stage and copied with
   `--chown=65532:65532`, mode `0700`, so a new named volume mounted there is writable by the non-root user;
   a comment above the line states why. If SonarQube Cloud raises `docker:S6504` on it, the hotspot is
   reviewed as *Safe* with this record as the reason. No configuration file in the image.

@@ -82,11 +82,17 @@ build, starts this compose file with the built image (`pull_policy: never`, the 
 port, memory limit, restart policy, read-only root file system and user, exit code 0 and `vandoxd stopped`
 after `docker compose stop`, and — after `docker compose down` without `-v` and `docker compose up -d` — a
 new container that becomes `healthy` and logs `"created":false` (the database survived re-creation in the
-named volume). It reads no secret and pushes nothing.
+named volume). It reads no repository secret and pushes nothing. It generates its agent token file and
+gives it the ownership and mode the operator is told to use (`chown 65532:65532`, `chmod 0400`, through
+`sudo` on the runner), so the documented setup is the tested one and no world-readable example exists.
+
+The compose header comment and the README tell the operator to create `secrets/vandox_agent_token` owned
+by `65532:65532` with mode `0400` (or `0600`), never world-readable.
 
 ## Consequences
 
-- An operator must provide `vandoxd.yaml`, `secrets/vandox_agent_token` readable by UID 65532, and
+- An operator must provide `vandoxd.yaml`, `secrets/vandox_agent_token` owned by UID 65532 with mode
+  `0400`/`0600`, and
   `import/`; `.env` with `WEB_BIND_ADDRESS` is optional. No Tailscale setup is needed for v0.1.0.
 - Home monitoring reaches `/healthz` through the reverse proxy unless `WEB_BIND_ADDRESS` is changed.
 - The published container port is fixed at 8080; a changed `web.listen` port needs the matching change in
@@ -97,4 +103,13 @@ named volume). It reads no secret and pushes nothing.
   smoke test, and record it. Until then the Tailscale ACL (0010) is what keeps a userspace-mode host's
   loopback web port from the monitored server.
 - A bind-mounted secret's ownership and mode come from the host file; Compose does not apply `uid`/`mode` to
-  file secrets outside Swarm.
+  file secrets outside Swarm. Hence the documented `chown`/`chmod`; `vandoxd` does not enforce them.
+- **Accepted residual: the loopback binding is not a security boundary.** It implements 0023's "the UI
+  port must only be reachable by the reverse proxy" as far as a compose file can, but depending on the
+  Docker Engine version and the host's firewall, a host on the same LAN may reach a published container
+  port, or the container's bridge address, directly (reported for older engines; not verified in #13). In
+  #13 the web listener serves only the unauthenticated `/healthz`, so nothing more is exposed. The access
+  control for the UI is the login of #25, which must protect every route except `/healthz` on its own and
+  must not treat the peer address, loopback or `X-Forwarded-*` headers as proof of having passed the
+  proxy; likewise ingest authentication, not the tailnet binding, is the boundary for #40. README and
+  `SECURITY.md` say so.

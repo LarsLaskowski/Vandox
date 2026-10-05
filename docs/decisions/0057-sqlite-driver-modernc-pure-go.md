@@ -45,6 +45,13 @@ query `_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=foreign_keys
 `PRAGMA journal_mode` does not report `wal`. A unit test creates an FTS5 table so a driver without FTS5
 fails the build.
 
+Before handing the path to the driver, the store checks `vandox.db`, `vandox.db-wal` and `vandox.db-shm`
+with `os.Lstat` and refuses a symbolic link or any other non-regular file (a missing `vandox.db` is
+created with `O_CREATE|O_EXCL`, mode `0600`). SQLite follows a symbolic link of the main file and puts the
+database and its `-wal`/`-shm` files next to the resolved target, so an `os.Stat` check would let the
+database be written outside `storage.directory` (plan security review of #13). The storage directory
+itself may be a link.
+
 ## Consequences
 
 - The Dockerfile stays `CGO_ENABLED=0` on distroless static; the binary stays static.

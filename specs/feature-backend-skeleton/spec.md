@@ -1,6 +1,6 @@
 # Spec: Backend skeleton and container
 
-Status: Draft (revised after the plan challenge)
+Status: Draft (revised after the plan challenge and the plan security review)
 
 Source: GitHub issue #13 (`[Backend] Backend skeleton and container`). Depends on #10 (PR #110) and #11
 (PR #114), both merged.
@@ -33,7 +33,9 @@ and monitored from the home network.
 - `vandoxd -version` keeps its output. `-h`/`-help` print the usage and exit 0; an unknown flag or a
   positional argument prints the usage and exits 2.
 - Data lives in the database file in `storage.directory` (`/data` in the container), which is a Docker
-  volume, so it survives container restarts and re-creation. The image ships `/data` owned by UID 65532
+  volume, so it survives container restarts and re-creation. A `vandox.db` (or its `-wal`/`-shm` file)
+  that is a symbolic link or another non-regular file is refused, so the database is never written
+  outside `storage.directory`. The image ships `/data` owned by UID 65532
   so a fresh named volume is writable by the non-root user.
 - `deploy/backend/docker-compose.yml` runs the image on a Docker host: a named data volume, a read-only
   import directory, the configuration file mounted read-only, the agent token as a Docker secret,
@@ -41,7 +43,9 @@ and monitored from the home network.
   file system, and a port binding that publishes the web port on loopback by default (for the reverse
   proxy). The ingest port is not published: the ingest listener has no routes until the ingest API (#40),
   which adds the binding on the backend host's tailnet address. The file therefore starts on any Docker
-  host without a Tailscale prerequisite.
+  host without a Tailscale prerequisite. The image declares no `EXPOSE`, so `docker run -P` publishes
+  nothing. The operator creates the agent token file owned by UID 65532 with mode `0400`. The loopback
+  binding is defense in depth, not the access control (that is the login of #25).
 
 ## Acceptance criteria
 
