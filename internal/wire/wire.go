@@ -75,6 +75,15 @@ var (
 
 const maxAgentIDBytes = 64
 
+// ValidateAgentID reports whether id is a valid agent ID: 1 to 64 characters of [A-Za-z0-9._-],
+// starting with a letter or digit. The error is a *model.FieldError for field "agent_id".
+func ValidateAgentID(id string) error {
+	if id == "" || len(id) > maxAgentIDBytes || !agentIDPattern.MatchString(id) {
+		return &model.FieldError{Field: "agent_id", Reason: "must be 1 to 64 characters of [A-Za-z0-9._-], starting with a letter or digit"}
+	}
+	return nil
+}
+
 // NewHeader returns a valid header of the current format version.
 func NewHeader(agentID, bootID string, mode Mode) Header {
 	return Header{
@@ -94,8 +103,8 @@ func (h *Header) Validate() error {
 	if h.FormatMinor < 0 {
 		return &model.FieldError{Field: "format_minor", Reason: "must not be negative"}
 	}
-	if h.AgentID == "" || len(h.AgentID) > maxAgentIDBytes || !agentIDPattern.MatchString(h.AgentID) {
-		return &model.FieldError{Field: "agent_id", Reason: "must be 1 to 64 characters of [A-Za-z0-9._-], starting with a letter or digit"}
+	if err := ValidateAgentID(h.AgentID); err != nil {
+		return err
 	}
 	if !bootIDPattern.MatchString(h.BootID) {
 		return &model.FieldError{Field: "boot_id", Reason: "must be a lower-case UUID"}

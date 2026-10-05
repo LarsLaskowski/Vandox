@@ -18,6 +18,7 @@ Both support `--version`, which prints version, commit and build date.
 ```
 cmd/vandox-agent/   entry point of the agent
 cmd/vandoxd/        entry point of the backend
+internal/config/    configuration loading of both binaries, see Configuration below
 internal/model/     shared record types and their validation
 internal/wire/      versioned batch format, see docs/WIRE_FORMAT.md
 internal/           further shared packages (log parsing, signatures, ...)
@@ -26,6 +27,50 @@ deploy/backend/     deployment files for the backend
 docs/               documentation
 testdata/           fixtures for tests
 ```
+
+## Configuration
+
+Each binary reads one strict YAML file for its options. The secrets come only from the environment (or
+from files named by `*_FILE` variables), never from the file
+([0032](docs/decisions/0032-secrets-only-from-environment-or-docker-secrets.md)).
+
+| Binary | File | Commented example |
+| ------ | ---- | ----------------- |
+| `vandox-agent` | `/etc/vandox/agent.yaml` | [`deploy/agent/agent.yaml`](deploy/agent/agent.yaml) |
+| `vandoxd` | `/etc/vandox/vandoxd.yaml` (mounted into the container) | [`deploy/backend/vandoxd.yaml`](deploy/backend/vandoxd.yaml) |
+
+An unknown key, an unknown `VANDOX_` variable, a duplicate key, a second document, an anchor, a custom
+tag or an invalid value is an error at start-up. Errors name the file, the line and the key, and never
+the value.
+
+**Agent options**
+
+| Key | Environment variable | Default | Description |
+| --- | -------------------- | ------- | ----------- |
+| `agent_id` | — | required | Name of the server, 1 to 64 characters of `[A-Za-z0-9._-]`, starting with a letter or digit. |
+| `backend.url` | — | required | Base URL of the backend ingest endpoint: `http` or `https`, a host and an optional port, no user info, path or query. |
+| `spool.directory` | — | `/var/lib/vandox/spool` | Directory of the local spool, an absolute and clean path. |
+| `log.level` | — | `info` | `debug`, `info`, `warn` or `error`. |
+
+**Backend options**
+
+| Key | Environment variable | Default | Description |
+| --- | -------------------- | ------- | ----------- |
+| `web.listen` | — | `:8080` | Address of the web UI as `[host]:port`. |
+| `ingest.listen` | — | `:8081` | Address of the ingest endpoint, on a port other than `web.listen`. |
+| `storage.directory` | — | `/data` | Directory of the backend's data, an absolute and clean path. |
+| `log.level` | — | `info` | `debug`, `info`, `warn` or `error`. |
+
+**Secrets**
+
+| Variable | File variant | Binary | Required | Rule |
+| -------- | ------------ | ------ | -------- | ---- |
+| `VANDOX_AGENT_TOKEN` | `VANDOX_AGENT_TOKEN_FILE` | agent, backend | agent: yes, backend: no | At least 32 printable ASCII characters without spaces, e.g. `openssl rand -hex 32`. |
+| `VANDOX_WEB_PASSWORD_HASH` | `VANDOX_WEB_PASSWORD_HASH_FILE` | backend | no | Printable ASCII without spaces, 1 to 4096 characters. |
+| `VANDOX_TELEGRAM_BOT_TOKEN` | `VANDOX_TELEGRAM_BOT_TOKEN_FILE` | backend | no | Printable ASCII without spaces, 1 to 4096 characters. |
+
+Set either the variable or its `_FILE` form, not both. The `_FILE` value is an absolute path to a regular
+file (for example a Docker secret) whose content is the secret, with at most one trailing line ending.
 
 ## Build
 

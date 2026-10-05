@@ -5,8 +5,9 @@ Vandox is lean monitoring for a Plesk-managed Linux server, with analysis first:
 from logs and system metrics and warns early. `vandox-agent` runs on the monitored server; `vandoxd`, the
 backend with web UI, runs as a Docker container on any Docker host in the home network (for example a NAS such as Synology or QNAP, a mini PC or a server; called the *backend host* below).
 
-This document describes the target architecture; as of now the binaries' `--version` and the shared data model and wire format
-(`internal/model`, `internal/wire`, not yet used by the binaries) exist, and
+This document describes the target architecture; as of now the binaries' `--version`, the shared data model and wire format
+(`internal/model`, `internal/wire`) and the configuration loading (`internal/config`) exist, the latter
+three not yet used by the binaries, and
 sections are marked as implemented as features land. The decisions behind it are recorded in
 [`docs/decisions/`](decisions/README.md); each section links the records it rests on. Vandox is an own
 project rather than an off-the-shelf stack ([0004](decisions/0004-own-project-instead-of-off-the-shelf-stack.md)).
@@ -31,7 +32,8 @@ way, and agents of the hosting provider are never disabled or changed
 - `cmd/vandoxd` — Go, one container on the backend host: ingest API, SQLite storage, analysis, rules, Telegram
   notifier, reports and web UI.
 - `internal/` — packages shared by both binaries: data model and versioned wire format (see
-  [`WIRE_FORMAT.md`](WIRE_FORMAT.md)), log parsing, signatures, version information, command-line handling.
+  [`WIRE_FORMAT.md`](WIRE_FORMAT.md)), log parsing, signatures, version information, command-line handling, configuration loading (see
+  *Configuration*).
 
 Importing historical logs (including the legacy `top`/`lsof` log) and continuously shipping new log lines are
 core parts of Vandox. Both binaries are written in Go in one module.
@@ -180,9 +182,22 @@ Records: [0006](decisions/0006-agent-connects-outbound-only.md),
 
 ## Configuration
 
-Both binaries are configured through a configuration file and environment variables. Configuration loading
-is not implemented yet. Secrets are read only from environment variables or Docker secrets, never from the
-configuration file ([0032](decisions/0032-secrets-only-from-environment-or-docker-secrets.md)).
+Both binaries are configured through one YAML file each (`/etc/vandox/agent.yaml`, `/etc/vandox/vandoxd.yaml`;
+commented examples under `deploy/agent/` and `deploy/backend/`) and environment variables. The shared package
+`internal/config` implements this: `LoadAgent` and `LoadBackend` read the file, validate every option and read
+the secrets. The binaries do not call it yet; that comes with the backend and the agent features.
+
+The file is parsed strictly. A decoder walks the YAML node tree against the option structs, so unknown and
+duplicate keys, a second document, anchors, aliases, custom tags and invalid values are errors. Errors
+name file, line and key and never echo the document text, so a secret pasted into the wrong place does not
+reach a log ([0048](decisions/0048-yaml-library-go-yaml-in-yaml-v3.md),
+[0049](decisions/0049-strict-configuration-file-schema-and-errors.md)).
+
+Secrets are read only from `VANDOX_*` environment variables or from the file named by the matching `*_FILE`
+variable, never from the configuration file. An unknown `VANDOX_` variable is an error, a secret value never
+appears in an error text, and the `Secret` type prints `[redacted]` in every format, log and JSON output
+([0032](decisions/0032-secrets-only-from-environment-or-docker-secrets.md),
+[0050](decisions/0050-secret-sources-rules-and-redaction.md)).
 
 ## Security model
 

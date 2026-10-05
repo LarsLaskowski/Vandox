@@ -58,13 +58,15 @@ files or endpoints.
    key): *Goal:* secrets are read only from environment variables or Docker secrets, never from the
    configuration file or the command line; never logged, shown in the UI, written to the spool or put into
    error messages; a secret checked against input (ingest token, later TOTP codes) is compared in constant
-   time, the UI password through its hash function's comparison. Record 0032.
+   time, the UI password through its hash function's comparison. Implemented in `internal/config`
+   (`readSecret`, `checkEnviron`, `Secret`). Record 0032, 0050.
 9. **File writes and paths derived from external input** (log import, the agent's on-disk spool, database
    backups): *Goal:* no write outside the configured directories (no path traversal), the spool is
    size-bounded, files are created with restrictive permissions. Record 0045.
 10. **Parsing of external input** (log files: journal, syslog, MariaDB, mail, Plesk, web server; the ingest
     wire format (`internal/wire`: `NewDecoder`, `Decoder.Next`, `wire.Limits`); CLI arguments and configuration; later Telegram commands): *Goal:* malformed or hostile
-    input yields an error or a skipped record, never a crash, an unbounded allocation or a hang.
+    input yields an error or a skipped record, never a crash, an unbounded allocation or a hang. The
+    configuration file is read by `internal/config` (`decodeStrict`, `readFile`). Records 0048, 0049.
 11. **Outbound calls** (Telegram, external checks, the optional AI service of the nightly report, the
     agent's connection to the backend): *Goal:* every call has a timeout, goes only to its configured
     destination and leaves encrypted to a verified peer. The agent's only destination is the ingest port,
@@ -77,6 +79,10 @@ files or endpoints.
     AI-written report): *Goal:* they cannot inject into log output (control characters, newlines), into the
     web UI (HTML is escaped) or into Telegram messages (escaped for the parse mode used, or sent as plain
     text without a parse mode). Record 0031 for Telegram; none decides log output and UI escaping yet.
+    Configuration error texts never echo document text other than schema or safe key names
+    (`decodeStrict`), never a `_FILE` value or path or an unsafe variable name (`readSecret`,
+    `checkEnviron`). Configuration values are free of Cc, Cf, Zl and Zp characters but are still logged only
+    as `slog` attributes, never concatenated into a message.
 13. **Release pipeline and published artifacts** (`.github/workflows/release.yml`,
     `deploy/backend/Dockerfile`, `.dockerignore`, the GitHub environment `release`): *Goal:* artifacts are
     published only from a SemVer tag that only the repository admin can create (tag ruleset `release-tags`)
@@ -117,10 +123,13 @@ What the Reviewer checks when the diff introduces or changes a thing of this kin
 change with it.
 
 **A new or changed configuration option** touches:
-- the configuration type and its loading for the agent and the backend (not implemented yet)
-- the default configuration file under `deploy/agent/` or `deploy/backend/`
+- the configuration type and its loading for the agent and the backend: `internal/config` (`Agent`/`Backend`, `LoadAgent`/`LoadBackend`, `AgentKeys`/`BackendKeys`)
+- the commented example file `deploy/agent/agent.yaml` or `deploy/backend/vandoxd.yaml`
 - the configuration table in `README.md` (key, environment variable, default)
-- the test that pins the configuration loading
+- the tests that pin the configuration loading: `internal/config/agent_test.go` and `internal/config/backend_test.go`
+
+**A new secret** touches: its `Env*` constant, the known-variable list of each binary that reads it, the
+secrets table in `README.md`
 
 **A new or changed service / module** touches:
 - its exported interface and the package that owns it under `internal/`
