@@ -67,8 +67,9 @@ LABEL org.opencontainers.image.title="vandox" \
 
 COPY --from=build /out/vandoxd /vandoxd
 
-# The only resource owned by the non-root user: one empty directory that is the writable seed of the data
-# volume (docker:S6504 is accepted, record 0059). A new named volume copies its ownership, and the
+# The only resource this image adds that is owned by the non-root user (the base image's /home/nonroot
+# aside): one empty directory that is the writable seed of the data volume (docker:S6504 is accepted,
+# record 0059). A new named volume copies its ownership, and the
 # distroless runtime has no shell for a `RUN chown`; the binary and everything else stay root-owned.
 # The source is a root tree holding only data/: the contents are merged into the existing `/`, whose
 # owner and mode stay untouched, while data/ keeps its mode 0700 and gets the owner 65532:65532.
