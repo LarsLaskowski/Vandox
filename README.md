@@ -1,4 +1,9 @@
-# Vandox
+<h1 align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/vandox-logo-dark.svg">
+    <img src="docs/assets/vandox-logo.svg" alt="Vandox" width="280">
+  </picture>
+</h1>
 
 Vandox monitors a Linux server and keeps the evidence needed for forensics.
 It consists of two Go binaries that share packages for the data model, log
@@ -25,6 +30,7 @@ internal/           further shared packages (log parsing, signatures, ...)
 deploy/agent/       deployment files for the agent
 deploy/backend/     deployment files for the backend
 docs/               documentation
+docs/assets/        logo, icon and favicon, see docs/BRANDING.md
 testdata/           fixtures for tests
 ```
 
