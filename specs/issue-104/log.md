@@ -15,3 +15,4 @@ One line per pipeline step: date, step, member, result. Lead decisions and escal
 | 2026-10-05 | 8 Review round 1 | Reviewer | BLOCKING 0, NON-BLOCKING 3 (CONTRIBUTING wording: double "and" in record list; step 6 says README commands though image is checked by tag; failed-attest advice must cover digest mismatch = do not re-run) |
 | 2026-10-05 | 8 Review round 1 | Security | APPROVED; residual risk: first real attest run happens on first tag (documented recovery) |
 | 2026-10-05 | 8 Triage | Orchestrator | all three non-blocking findings are small, correct docs fixes: fix now (Dev), then delta review; Lead confirms at step 9 |
+| 2026-10-05 | 8 Fix | Dev | three CONTRIBUTING wording findings fixed |
