@@ -1,0 +1,67 @@
+name: Base image digests
+
+# Reports a stale base image digest of deploy/backend/Dockerfile as an issue (record 0055).
+# Writes nothing to the repository, opens no pull request, closes no issue.
+on:
+  schedule:
+    - cron: "0 5 * * 1"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: base-image-digests
+  cancel-in-progress: false
+
+jobs:
+  check:
+    name: Check base image digests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # No token in this step's environment: it runs docker buildx and jq against the registries.
+      - name: Check base image digests
+        id: digests
+        run: |
+          set -euo pipefail
+          rc=0
+          report="$(.github/scripts/check-base-image-digests.sh)" || rc=$?
+          case "$rc" in
+            0) echo "base image digests are current"; exit 0 ;;
+            3) ;;
+            *) echo "::error::base image digest check failed with status $rc" >&2; exit 1 ;;
+          esac
+          printf '%s\n\n%s\n\n%s\n' \
+            "At least one base image digest in deploy/backend/Dockerfile is not the current digest of its tag." \
+            "$report" \
+            "Refresh the digests as described in docs/CONTRIBUTING.md, section Base image digests." \
+            > "$RUNNER_TEMP/base-image-digests.md"
+          echo "stale=true" >> "$GITHUB_OUTPUT"
+
+      - name: Report stale digests
+        if: steps.digests.outputs.stale == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          title="Base image digests are stale"
+          body="$(< "$RUNNER_TEMP/base-image-digests.md")"
+          if ! numbers="$(gh api --paginate "repos/$GH_REPO/issues?state=open&per_page=100" \
+              --jq '.[] | select(.pull_request == null and .user.login == "github-actions[bot]" and .title == "Base image digests are stale") | .number')"; then
+            echo "::error::looking up the open issue failed; nothing written" >&2
+            exit 1
+          fi
+          number="${numbers%%$'\n'*}"
+          if [ -n "$number" ]; then
+            gh api -X PATCH "repos/$GH_REPO/issues/$number" -f body="$body" > /dev/null
+          else
+            gh api "repos/$GH_REPO/issues" -f title="$title" -f body="$body" \
+              -f 'labels[]=dependencies' -f 'labels[]=area: docker' > /dev/null
+          fi

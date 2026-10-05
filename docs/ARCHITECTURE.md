@@ -242,7 +242,9 @@ Docker Hub as `networlddev/vandox` ([0027](decisions/0027-project-name-and-docke
 - The image is built from `deploy/backend/Dockerfile` on a distroless static base and runs as UID 65532.
   The builder and runtime base images are pinned by digest: each `FROM` names an image and a digest from
   build arguments, and the tag is kept in a separate build argument and in the image's OCI base-image
-  labels. The release build sets none of these arguments, and the digests are refreshed by hand.
+  labels. The release build sets none of these arguments. The digests are refreshed by hand in a pull
+  request, a weekly workflow reports a stale digest as an issue, and the build stage checks that the
+  builder's Go version matches its tag.
 - Releases are built by `.github/workflows/release.yml` only from SemVer tags on `main`. Only the
   repository admin may create these tags (tag ruleset `release-tags`), and the workflow checks that the
   tagged commit is on `main`.
@@ -255,7 +257,8 @@ Docker Hub as `networlddev/vandox` ([0027](decisions/0027-project-name-and-docke
 Records: [0037](decisions/0037-release-workflow-with-plain-go-docker-and-gh.md),
 [0041](decisions/0041-base-images-pinned-by-digest-through-build-arguments.md),
 [0039](decisions/0039-docker-hub-token-in-a-tag-only-environment.md),
-[0054](decisions/0054-release-provenance-attestations-from-a-secret-free-job.md).
+[0054](decisions/0054-release-provenance-attestations-from-a-secret-free-job.md),
+[0055](decisions/0055-stale-base-image-digests-reported-weekly-builder-go-checked-in-build.md).
 <!-- project:end architecture -->
 
 ## Development process
