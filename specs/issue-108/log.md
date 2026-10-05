@@ -14,3 +14,4 @@ One line per pipeline step: date, step, member, result. Lead decisions and escal
 | 2026-10-05 | 6 Implement | Dev | Done; verification cases 1-11, AC3 d/e, AC5 guard pass; unverifiable here: issue-writing step, ci.yml on runner, real docker build guard failure. Orchestrator re-ran digest script: rc 0 |
 | 2026-10-05 | 7 Code check | Code Officer | No edits; format ok, analyzer gate passes; shellcheck/actionlint unavailable (bash -n, YAML parse only). Orchestrator re-verified format and analyzer |
 | 2026-10-05 | 8 Review round 1 | Reviewer, Security | Reviewer: 0 blocking, 2 non-blocking (project.md sentence omits Go version; CONTRIBUTING record list comma); Security: APPROVED. Both nits to be fixed now by Dev, then delta round |
+| 2026-10-05 | 8 Fix | Dev | Both non-blocking doc nits fixed (project.md Go version wording, CONTRIBUTING record list comma) |

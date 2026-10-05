@@ -101,7 +101,7 @@ files or endpoints.
     to the `attest` job, which declares no environment, reads no secret and runs no repository code; every
     published binary and image digest gets a build provenance attestation that the workflow verifies before
     the GitHub release is created. The scheduled digest check holds only `contents: read` and
-    `issues: write`, writes only regex-checked image, tag and digest values into the issue, and never writes
+    `issues: write`, writes only regex-checked image, tag, digest and Go version values into the issue, and never writes
     to the repository. Records 0027, 0037, 0039, 0041, 0054, 0055.
 
 ## Guarantees

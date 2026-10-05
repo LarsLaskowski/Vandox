@@ -82,7 +82,7 @@ workflow is `.github/workflows/release.yml`; the reasoning is in
 [0053](decisions/0053-releases-are-manual-and-started-only-by-a-version-tag.md),
 [0037](decisions/0037-release-workflow-with-plain-go-docker-and-gh.md),
 [0041](decisions/0041-base-images-pinned-by-digest-through-build-arguments.md),
-[0039](decisions/0039-docker-hub-token-in-a-tag-only-environment.md) and
+[0039](decisions/0039-docker-hub-token-in-a-tag-only-environment.md),
 [0054](decisions/0054-release-provenance-attestations-from-a-secret-free-job.md) and
 [0055](decisions/0055-stale-base-image-digests-reported-weekly-builder-go-checked-in-build.md).
 
