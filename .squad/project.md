@@ -130,8 +130,8 @@ change with it.
 
 **A new or changed configuration option** touches:
 - the configuration type and its loading for the agent and the backend: `internal/config` (`Agent`/`Backend`, `LoadAgent`/`LoadBackend`, `AgentKeys`/`BackendKeys`)
-- the commented example file `deploy/agent/agent.yaml` or `deploy/backend/vandoxd.yaml`
-- the configuration table in `README.md` (key, environment variable, default)
+- the commented example file `deploy/agent/agent.yaml` or `deploy/backend/vandoxd.yaml`, which must set the option explicitly (an optional one at its default): `TestLoadAgent_Example` and `TestLoadBackend_Example` load these files and fail when a key from `AgentKeys`/`BackendKeys` is missing (0049)
+- the *Agent options* or *Backend options* table in `README.md` (key, default, description); a non-secret option has no environment variable (0049), a secret is added as **a new secret** below instead
 - the tests that pin the configuration loading: `internal/config/agent_test.go` and `internal/config/backend_test.go`
 
 **A new secret** touches: its `Env*` constant, the known-variable list of each binary that reads it, the
