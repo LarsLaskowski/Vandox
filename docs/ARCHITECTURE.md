@@ -250,15 +250,17 @@ Docker Hub as `networlddev/vandox` ([0027](decisions/0027-project-name-and-docke
   tagged commit is on `main`.
 - Release binaries are built from source without restored CI caches and only after `govulncheck` passes.
   The image that was verified is the image that is pushed, and a published version is never overwritten.
-- The binary and the image digest get SLSA build provenance attestations (GitHub artifact attestations) from
-  a separate job that holds only the signing permission and no secret; the workflow verifies them before it
-  creates the GitHub release.
+- The binary and the image digest get SLSA build provenance attestations and SPDX SBOM attestations (GitHub
+  artifact attestations) from a separate job that holds only the signing permission and no secret; the
+  workflow verifies them before it creates the GitHub release. The SBOMs are generated in the build job by a
+  digest-pinned syft container that runs without network and without access to `dist/`.
 
 Records: [0037](decisions/0037-release-workflow-with-plain-go-docker-and-gh.md),
 [0041](decisions/0041-base-images-pinned-by-digest-through-build-arguments.md),
 [0039](decisions/0039-docker-hub-token-in-a-tag-only-environment.md),
 [0054](decisions/0054-release-provenance-attestations-from-a-secret-free-job.md),
-[0055](decisions/0055-stale-base-image-digests-reported-weekly-builder-go-checked-in-build.md).
+[0055](decisions/0055-stale-base-image-digests-reported-weekly-builder-go-checked-in-build.md),
+[0056](decisions/0056-release-sboms-from-a-digest-pinned-syft-container.md).
 <!-- project:end architecture -->
 
 ## Development process

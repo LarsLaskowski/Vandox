@@ -83,8 +83,9 @@ workflow is `.github/workflows/release.yml`; the reasoning is in
 [0037](decisions/0037-release-workflow-with-plain-go-docker-and-gh.md),
 [0041](decisions/0041-base-images-pinned-by-digest-through-build-arguments.md),
 [0039](decisions/0039-docker-hub-token-in-a-tag-only-environment.md),
-[0054](decisions/0054-release-provenance-attestations-from-a-secret-free-job.md) and
-[0055](decisions/0055-stale-base-image-digests-reported-weekly-builder-go-checked-in-build.md).
+[0054](decisions/0054-release-provenance-attestations-from-a-secret-free-job.md),
+[0055](decisions/0055-stale-base-image-digests-reported-weekly-builder-go-checked-in-build.md) and
+[0056](decisions/0056-release-sboms-from-a-digest-pinned-syft-container.md).
 
 ### Cutting a release
 
@@ -107,17 +108,23 @@ Pre-release tags look like `vX.Y.Z-rc.N`. Build metadata (`+...`) is not allowed
 2. Runs `go tool govulncheck ./...`; a finding stops the release.
 3. Builds `vandox-agent` (linux/amd64, static, `-trimpath`) and `SHA256SUMS`, and builds the image from
    `deploy/backend/Dockerfile` with `docker build --no-cache`. Nothing is restored from a CI cache.
+   After the image is saved, `.github/scripts/generate-sbom.sh` generates SPDX 2.3 SBOMs for the binary and
+   the image with a syft container pinned by digest (*SBOM generator* below), run without network and
+   without access to `dist/`.
 4. Verifies both binaries' `--version` output against the tag, the full commit SHA and the commit time, the
    checksum, that the binary is static, that every `FROM` uses a base image build argument pinned by a sha256 digest, that the builder tag's Go
-   minor version equals `go.mod`'s, and that the image runs as `65532:65532`.
+   minor version equals `go.mod`'s, and that the image runs as `65532:65532`. The SBOM script checks its
+   own output (SPDX 2.3, the Go standard library and the main module listed, Debian packages in the image
+   SBOM, at most 16 MiB each).
 5. Pushes exactly the verified image as `networlddev/vandox:X.Y.Z`, and as `latest` when the tag is the
    highest stable `v*.*.*` tag. A pre-release tag publishes only its own version. If the version already
    exists on Docker Hub, or the check cannot tell, the job fails before pushing: a published version is
    never overwritten.
-6. Creates SLSA build provenance attestations for the binary and the image digest (GitHub artifact
-   attestations, stored on GitHub, not in Docker Hub) in the `attest` job, which holds only
-   `id-token: write` and `attestations: write`, has no environment and reads no secret, and verifies them
-   with the README's flags (the image by its published tag, see *Verifying a release*).
+6. Creates SLSA build provenance attestations and SBOM attestations (`sbom-path`, SPDX) for the binary and
+   the image digest (GitHub artifact attestations, stored on GitHub, not in Docker Hub) in the `attest` job,
+   which holds only `id-token: write` and `attestations: write`, has no environment and reads no secret, and
+   verifies all of them with the README's flags, the SBOM ones with `--predicate-type
+   https://spdx.dev/Document/v2.3` (the image by its published tag, see *Verifying a release*).
 7. Creates the GitHub release, only after the attestations exist and verify, with generated notes, the image
    digest, `vandox-agent-linux-amd64` and `SHA256SUMS`; a pre-release is marked as such.
 
@@ -125,7 +132,8 @@ Pre-release tags look like `vX.Y.Z-rc.N`. Build metadata (`+...`) is not allowed
 
 The README (*Install*) has the commands: `gh attestation verify` for the binary and, by digest, for the
 image (`oci://docker.io/networlddev/vandox@sha256:<digest>`, the digest from the release notes), followed by
-pulling that same digest. `--source-ref` pins the tag, `--signer-workflow` pins `release.yml`, and
+pulling that same digest, and the same commands with `--predicate-type https://spdx.dev/Document/v2.3`
+(and `--format json --jq` to save the SBOM) for the SBOM attestations. `--source-ref` pins the tag, `--signer-workflow` pins `release.yml`, and
 `--deny-self-hosted-runners` requires a GitHub-hosted runner. The image is verified and pulled by digest
 because a tag can be re-pointed (immutable tags are optional, see *One-time setup (maintainer)*, item 3). The
 workflow's own check uses the tag on purpose, to catch a tag that does not resolve to the attested digest.
@@ -155,12 +163,26 @@ Dockerfile fails when the builder's Go version does not match `BASE_BUILD_TAG`. 
 scheduled workflow after 60 days without repository activity, re-enable it under Actions. Record
 [0055](decisions/0055-stale-base-image-digests-reported-weekly-builder-go-checked-in-build.md).
 
+### SBOM generator
+
+`.github/scripts/generate-sbom.sh` holds the only reference to the SBOM generator, the constant
+`syft_image='ghcr.io/anchore/syft:vX.Y.Z@sha256:<index digest>'`; the script refuses any other form before it
+calls Docker. Dependabot cannot read it, so it is refreshed by hand in a pull request, whose
+`Release build check` proves the new pin works: take the newest syft release tag (never `latest`), read the
+digest of exactly that tag with `docker buildx imagetools inspect ghcr.io/anchore/syft:vX.Y.Z` (the `Digest:`
+line, the multi-arch index digest) and write both into the constant. `ghcr.io` is the only source. The script
+runs the image without network, with a read-only root file system, no capabilities and the runner's UID, the
+inputs mounted read-only and only a fresh empty directory writable, and prints the generator's output only
+between `::stop-commands::` markers so it cannot issue workflow commands. Record
+[0056](decisions/0056-release-sboms-from-a-digest-pinned-syft-container.md).
+
 ### Release build check on pull requests
 
 `release.yml` runs only for a version tag. Pull requests are covered by the `Release build check` job in
 `ci.yml`: it runs the base image pinning and builder Go version checks (`.github/scripts/`), builds the
 agent and the image with the version `v0.0.0-dryrun`, and verifies `--version`, the static binary and the
-image user. It also compares the base image digests with the registry (*Base image digests*); a stale
+image user, and generates and checks the SBOMs from that agent binary and image (*SBOM generator*). It also
+compares the base image digests with the registry (*Base image digests*); a stale
 digest or a failed registry lookup is only a warning there, not a failure. It uploads, pushes and releases
 nothing and reads no secret.
 
@@ -197,8 +219,8 @@ If only `github-release` failed, use "Re-run failed jobs". It reruns just that j
 release artifact exists, that is 7 days after the tag run.
 
 If `attest` failed, the image is already published and no GitHub release exists. "Re-run failed jobs" reruns
-`attest` and `github-release` within the 7-day artifact window; a second attestation for the same digest is
-harmless. After that window, cut a new patch version. If the "Verify attestations" step reports a digest
+`attest` and `github-release` within the 7-day artifact window; a second provenance or SBOM attestation for
+the same digest is harmless. After that window, cut a new patch version. If the "Verify attestations" step reports a digest
 mismatch (the version tag does not resolve to the attested digest), do not re-run it; investigate and cut a
 new patch version.
 
