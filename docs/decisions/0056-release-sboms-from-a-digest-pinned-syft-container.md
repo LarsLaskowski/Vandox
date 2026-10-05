@@ -122,7 +122,7 @@ Facts this decision rests on (checked on 2026-10-05):
 
 - `.github/scripts/generate-sbom.sh <agent-binary> <image-tar> <version> <dest-dir>` holds the constant
   `ghcr.io/anchore/syft:vX.Y.Z@sha256:<index digest>` (a release tag, never `latest`), checks its form as a
-  whole string before use, and runs it twice with `docker run --rm --network none --read-only --tmpfs /tmp
+  whole string before use, and runs it twice with `docker run --rm --network none --read-only --tmpfs /tmp:rw,mode=1777,noexec,nosuid,nodev
   --cap-drop ALL --security-opt no-new-privileges --user <runner uid>:<gid>`, the two inputs bind-mounted
   read-only and a fresh empty directory as the only writable mount, each as
   `--mount type=bind,source=<absolute path>,…` (never `-v`, whose `:`-separated form reads a relative source

@@ -33,10 +33,11 @@ fi
 
 # Makes a path absolute without following symlinks (no realpath).
 absolute() {
-  if [[ $1 == /* ]]; then
-    printf '%s' "$1"
+  local path=$1
+  if [[ $path == /* ]]; then
+    printf '%s' "$path"
   else
-    printf '%s/%s' "$PWD" "$1"
+    printf '%s/%s' "$PWD" "$path"
   fi
 }
 
@@ -105,7 +106,7 @@ done
 # progress) goes to a file, never to the job log.
 run_syft() {
   local input=$1 target=$2 prefix=$3 source_name=$4 output=$5 log=$6
-  docker run --rm --network none --read-only --tmpfs /tmp --cap-drop ALL \
+  docker run --rm --network none --read-only --tmpfs /tmp:rw,mode=1777,noexec,nosuid,nodev --cap-drop ALL \
     --security-opt no-new-privileges --user "$(id -u):$(id -g)" \
     --env SYFT_CHECK_FOR_APP_UPDATE=false --env HOME=/tmp --env XDG_CACHE_HOME=/tmp/cache \
     --mount "type=bind,source=$input,target=/in/$target,readonly" \
@@ -150,8 +151,9 @@ for name in "$agent_sbom" "$image_sbom"; do
 done
 
 check() { # <file> <jq filter> <error text>
-  if ! jq -e "$2" "$dest/$1" > /dev/null 2>&1; then
-    fail "$3 ($1)"
+  local file=$1 filter=$2 message=$3
+  if ! jq -e "$filter" "$dest/$file" > /dev/null 2>&1; then
+    fail "$message ($file)"
   fi
 }
 for name in "$agent_sbom" "$image_sbom"; do
