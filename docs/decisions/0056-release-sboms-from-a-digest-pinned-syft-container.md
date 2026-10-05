@@ -29,9 +29,9 @@ Facts this decision rests on (checked on 2026-10-05):
 - syft (Anchore) catalogs Go modules from a binary's embedded build information (present despite `-s -w`) and
   Debian packages from a distroless image's `/var/lib/dpkg/status.d/`, and reads an image from a
   `docker save` tarball (`docker-archive:`) without a Docker daemon or network. It is published as a
-  multi-arch image `anchore/syft` on Docker Hub and `ghcr.io/anchore/syft`; both carry the same index digest
-  for a tag. Anonymous Docker Hub lookups from shared addresses hit `429 Too Many Requests` (observed while
-  planning this change); `ghcr.io` is GitHub's own registry.
+  multi-arch image `ghcr.io/anchore/syft` (and as `anchore/syft` on Docker Hub). Anonymous Docker Hub lookups
+  from shared addresses hit `429 Too Many Requests` (observed while planning this change); `ghcr.io` is
+  GitHub's own registry.
 - A pull by `name:tag@sha256:<digest>` ignores the tag and is verified by the Docker daemon against the
   digest: the content is checksum-verified by construction.
 - Dependabot's `github-actions` and `gomod` entries do not read image references inside `run:` scripts.
@@ -63,7 +63,15 @@ Facts this decision rests on (checked on 2026-10-05):
      and only a fresh, empty output directory writable: pinned and checksum-verified by the daemon, and
      isolated from the runner, the job token, the Docker socket and `dist/`.
 
-   Chosen: the syft container image pinned by index digest, pulled from `ghcr.io`.
+   Registry for the pin:
+   - *`ghcr.io` only*: the digest is read there and the image is pulled from there; the daemon verifies the
+     pulled content against that digest.
+   - *`ghcr.io`, cross-checked against the same tag's digest on Docker Hub*: adds no assurance about what
+     actually runs (the pull is verified against the pinned digest regardless), is blocked by anonymous
+     Docker Hub rate limits, and leaves no defined action on a mismatch (the two registries are published
+     separately). Rejected.
+
+   Chosen: the syft container image pinned by index digest, read from and pulled from `ghcr.io` only.
 2. **Format**
    - *SPDX 2.3 JSON* (`spdx-json@2.3`): an ISO standard, the format of GitHub's dependency-graph export; the
      version in the output format pins the predicate type `https://spdx.dev/Document/v2.3`, so the documented

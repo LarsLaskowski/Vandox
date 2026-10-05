@@ -9,7 +9,7 @@ tool into the release pipeline.
 ## Problem / root cause
 
 Not a bug. The release (`.github/workflows/release.yml`) attests build provenance for
-`vandox-agent-linux-amd64` and the image digest in the `attest` job (lines 545–598, record 0054) and publishes
+`vandox-agent-linux-amd64` and the image digest in the `attest` job (lines 238–289, record 0054) and publishes
 no SBOM. Record 0054, option 4, left the SBOM out because every generator considered there was a
 third-party tool or an image not pinned by digest. Issue #119 asks for SBOMs for both artifacts, attested
 with `actions/attest` (`sbom-path`) in `attest`.
@@ -24,7 +24,7 @@ Claims of the issue, checked:
   CycloneDX JSON, ≤ 16 MB, not combinable with `predicate*`); for SPDX it derives the predicate type
   `https://spdx.dev/Document/v<spdxVersion>` (read in `action.yml` and `src/sbom.ts` at that commit).
 - "The `attest` job keeps only `id-token: write` and `attestations: write`" — **confirmed** as the current
-  state (release.yml lines 550–552); the plan keeps it.
+  state (release.yml lines 241–243); the plan keeps it.
 - "Verification is documented (`gh attestation verify --predicate-type …`)" — **confirmed feasible**:
   `gh attestation verify` (2.89) enforces `https://slsa.dev/provenance/v1` by default and has
   `--predicate-type`, `--format json` and `--jq`.
@@ -38,8 +38,8 @@ style of the block they extend and leaves the old lines alone.)
 - [ ] AC1 — **Generator pin.** `.github/scripts/generate-sbom.sh` holds exactly one generator reference, a
   constant of the form `ghcr.io/anchore/syft:vX.Y.Z@sha256:<64 hex>`: `vX.Y.Z` is the newest syft release at
   implementation time (never `latest`), the digest is that tag's multi-arch **index** digest, read with
-  `docker buildx imagetools inspect ghcr.io/anchore/syft:vX.Y.Z` (the `Digest:` line) and found identical for
-  `docker.io/anchore/syft:vX.Y.Z`. Before any `docker` call the script checks the constant as a whole string
+  `docker buildx imagetools inspect ghcr.io/anchore/syft:vX.Y.Z` (the `Digest:` line). `ghcr.io` is the only
+  source: no lookup on or comparison with Docker Hub is required. Before any `docker` call the script checks the constant as a whole string
   against `^ghcr\.io/anchore/syft:v[0-9]+\.[0-9]+\.[0-9]+@sha256:[0-9a-f]{64}$` (`[[ =~ ]]`) and exits 1
   otherwise. No other image, download or installer is used.
 - [ ] AC2 — **Isolation.** Each `docker run` of the generator uses `--rm --network none --read-only
@@ -95,7 +95,7 @@ stays `security`: plan challenge, steps 3 and 8 and every other step run. Step 7
 
 | AC | Verified where | By whom |
 | -- | -------------- | ------- |
-| AC1 | Read-only check of the script; `docker buildx imagetools inspect` of the tag on both registries, digests compared and quoted in the Dev's report; the PR's `Release build check` pulls by that digest | Dev (lookup), Reviewer and Security (diff), orchestrator (CI result) |
+| AC1 | Read-only check of the script; `docker buildx imagetools inspect ghcr.io/anchore/syft:vX.Y.Z`, tag and digest quoted in the Dev's report; the PR's `Release build check` pulls by that digest | Dev (lookup), Reviewer and Security (diff), orchestrator (CI result) |
 | AC2 | Read-only check of every `docker run` line in the diff | Reviewer, Security |
 | AC3, AC4 | `Release build check` on the PR runs the script end to end on a real agent binary and image tar; the Dev runs the script once locally if Docker can pull the pinned image (`ghcr.io` blobs may be blocked by the session proxy — then CI is the run) and attaches the `jq` summary (package count, `stdlib` versions, number of `pkg:deb/` packages) to the report; additionally the Dev exercises the failure paths in a scratch copy (wrong form of the constant, symlink in the output dir, missing file) and reports the exit codes | Dev, orchestrator (CI result), Reviewer |
 | AC5 | Local run of the script with wrong argument count, missing file and bad version (no Docker needed: these exit before any `docker` call) | Dev (report), Reviewer |
@@ -107,8 +107,8 @@ stays `security`: plan challenge, steps 3 and 8 and every other step run. Step 7
 
 ## Approach
 
-1. Look up the newest syft release tag and its index digest on `ghcr.io` (and confirm the same digest on
-   Docker Hub); write the constant into the new script.
+1. Look up the newest syft release tag and its index digest on `ghcr.io` (only there); write the constant
+   into the new script.
 2. Write `.github/scripts/generate-sbom.sh` (bash, `set -euo pipefail`, `LC_ALL=C`, header comment naming
    its callers and record 0056, like the existing scripts): argument checks (AC5), constant check (AC1),
    `mktemp -d` output directory with an `EXIT` trap that removes it, two hardened `docker run` calls (AC2,
@@ -163,8 +163,8 @@ Made by the Dev:
   after the attestations exist and verify" covers them. *Verifying a release*: the `--predicate-type`
   check. *Release build check on pull requests*: it also generates and checks the SBOMs. New subsection
   *SBOM generator* (after *Base image digests*): where the pin lives, how to refresh it (newest syft release
-  tag, `docker buildx imagetools inspect ghcr.io/anchore/syft:vX.Y.Z` `Digest:` line, same digest on Docker
-  Hub, never `latest`, in a pull request whose `Release build check` proves it), that Dependabot does not
+  tag, `docker buildx imagetools inspect ghcr.io/anchore/syft:vX.Y.Z` `Digest:` line, `ghcr.io` only, never
+  `latest`, in a pull request whose `Release build check` proves it), that Dependabot does not
   update it. *Re-running a failed release*: a re-run of `attest` also adds second SBOM attestations, which is
   harmless. Add 0056 to the record list of *Versioning and releases*.
 - `docs/ARCHITECTURE.md`, *Deployment*: the attestation bullet also names SBOM attestations (SPDX, generated
@@ -234,3 +234,19 @@ Follow-up issue for the orchestrator to create:
 
 Not planned: SBOMs as release assets, SBOM attestations in Docker Hub (`push-to-registry`), CycloneDX in
 addition to SPDX (0056, options 2 and 4).
+
+## Challenge
+
+Devil's Advocate, round 1 (0 major, 2 minor):
+
+1. *Wrong `release.yml` line numbers* — **accepted.** `release.yml` has 323 lines; the `attest` job is at
+   lines 238–289 and its `permissions` block at lines 241–243. Both references under *Problem / root cause*
+   are corrected.
+2. *Docker Hub digest cross-check in AC1, the verification table, Approach step 1 and the CONTRIBUTING.md
+   refresh steps* — **accepted; the cross-check is dropped.** The script pulls only from `ghcr.io`, the AC1
+   form check admits only that registry, and the daemon verifies the pulled content against the digest in
+   the constant, so a Docker Hub comparison adds no assurance to what runs; it would only add a step that
+   anonymous Docker Hub rate limits (429, record 0056 *Facts*) can block, with no defined outcome on a
+   mismatch. AC1, the AC1 row, Approach step 1 and the *SBOM generator* refresh instructions now name
+   `ghcr.io` as the only source. Record 0056 no longer claims both registries carry the same digest and lists
+   the cross-check as a rejected option under *Options considered*, item 1.
