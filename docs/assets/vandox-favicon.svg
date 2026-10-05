@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="544 147 320 320" role="img" aria-label="Vandox"><title>Vandox</title><style>.c{fill:#086030;stroke:#086030}@media (prefers-color-scheme:dark){.c{fill:#3DAA6E;stroke:#3DAA6E}}</style><g class="c" stroke="none">
+<path d="M577 206 L697 155 L697 186 L607 228 Z"/>
+<path d="M567 220 L598 241 L601 290 L571 290 Q567 256 567 220 Z"/>
+<path d="M581 329 L615 329 C630 370 660 404 697 426 L697 461 C648 436 600 392 581 329 Z"/>
+<g transform="translate(1408 0) scale(-1 1)">
+<path d="M577 206 L697 155 L697 186 L607 228 Z"/>
+<path d="M567 220 L598 241 L601 290 L571 290 Q567 256 567 220 Z"/>
+<path d="M581 329 L615 329 C630 370 660 404 697 426 L697 461 C648 436 600 392 581 329 Z"/>
+</g>
+<path d="M520 311 L626 303 L794 303 L888 311 L794 319 L626 319 Z"/></g>
+<polyline class="c" points="628,311 641,311 659,266 681,349 706,214 733,380 758,274 774,311 790,311" fill="none" stroke-width="14" stroke-linejoin="miter" stroke-miterlimit="12"/></svg>

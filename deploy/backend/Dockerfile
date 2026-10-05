@@ -41,6 +41,7 @@ ARG COMMIT=unknown
 ARG DATE=unknown
 
 LABEL org.opencontainers.image.title="vandox" \
+      org.opencontainers.image.description="Vandox backend: lean monitoring for a Plesk-managed Linux server that reconstructs outages from logs and metrics" \
       org.opencontainers.image.source="https://github.com/LarsLaskowski/Vandox" \
       org.opencontainers.image.licenses="MIT" \
       org.opencontainers.image.version="${VERSION}" \
