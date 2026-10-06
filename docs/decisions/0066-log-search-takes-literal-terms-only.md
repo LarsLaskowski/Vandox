@@ -1,6 +1,6 @@
 # 0066: Log search takes literal terms only; every term is quoted for FTS5, operators and prefixes are not offered yet
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-06
 - **Source:** Issue #14
 - **Supersedes:** —

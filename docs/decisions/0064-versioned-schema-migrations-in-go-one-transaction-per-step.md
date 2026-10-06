@@ -1,6 +1,6 @@
 # 0064: Versioned schema migrations in Go, applied at start-up in one transaction per step; a newer schema is refused
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-06
 - **Source:** Issue #14
 - **Supersedes:** —

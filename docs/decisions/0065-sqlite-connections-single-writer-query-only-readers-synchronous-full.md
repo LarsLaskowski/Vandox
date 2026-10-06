@@ -1,6 +1,6 @@
 # 0065: SQLite connections: modernc.org/sqlite kept; one writer connection with BEGIN IMMEDIATE, a query-only reader pool, synchronous FULL
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-06
 - **Source:** Issue #14
 - **Supersedes:** 0057

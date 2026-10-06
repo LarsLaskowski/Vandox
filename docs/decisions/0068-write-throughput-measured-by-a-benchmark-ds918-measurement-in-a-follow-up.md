@@ -1,6 +1,6 @@
 # 0068: Write throughput is measured by a Go benchmark and never asserted in tests; the DS918+ measurement is a follow-up issue
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-06
 - **Source:** Issue #14
 - **Supersedes:** —

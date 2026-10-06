@@ -1,6 +1,6 @@
 # 0067: The store package defines small repository interfaces; storetest.Fake is a scripted fake, the store itself is tested against real files
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-06
 - **Source:** Issue #14
 - **Supersedes:** —

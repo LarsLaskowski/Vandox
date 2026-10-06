@@ -1,6 +1,6 @@
 # 0063: Storage schema: one records table holds every record's identity, metrics and log lines get own tables, other payloads are stored as JSON
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-06
 - **Source:** Issue #14
 - **Supersedes:** —

@@ -83,10 +83,16 @@ links the record.
 | [0054](0054-release-provenance-attestations-from-a-secret-free-job.md) | Release binary and image digest get GitHub build provenance attestations from a separate, secret-free attest job; no SBOM yet | Accepted | 2026-10-05 |
 | [0055](0055-stale-base-image-digests-reported-weekly-builder-go-checked-in-build.md) | Stale base image digests reported weekly as an issue; the build stage checks the builder's Go version against its tag | Accepted | 2026-10-05 |
 | [0056](0056-release-sboms-from-a-digest-pinned-syft-container.md) | Release SBOMs (SPDX 2.3) come from a digest-pinned, network-less syft container in the build job and are attested in the attest job | Accepted | 2026-10-05 |
-| [0057](0057-sqlite-driver-modernc-pure-go.md) | modernc.org/sqlite as the SQLite driver: pure Go, no cgo, FTS5 included | Accepted | 2026-10-05 |
+| [0057](0057-sqlite-driver-modernc-pure-go.md) | modernc.org/sqlite as the SQLite driver: pure Go, no cgo, FTS5 included | Superseded by [0065](0065-sqlite-connections-single-writer-query-only-readers-synchronous-full.md) | 2026-10-05 |
 | [0058](0058-vandoxd-runs-the-service-by-default-with-a-shutdown-deadline.md) | vandoxd runs the service without arguments, logs JSON with slog and stops within a 10 s deadline | Accepted | 2026-10-05 |
 | [0059](0059-healthz-checks-the-database-and-the-binary-is-the-health-probe.md) | /healthz on the web listener checks the database; vandoxd -healthcheck is the image's health probe | Accepted | 2026-10-05 |
 | [0060](0060-compose-file-port-bindings-volumes-and-memory-limit.md) | Compose file publishes the web port on loopback and the ingest port not yet; named data volume, 512 MiB limit | Accepted | 2026-10-05 |
 | [0061](0061-backend-only-packages-under-cmd-vandoxd-internal.md) | Backend-only packages live under cmd/vandoxd/internal; internal/ stays shared | Accepted | 2026-10-05 |
 | [0062](0062-timeout-tests-use-synctest-or-injected-durations.md) | Timeout tests use testing/synctest without network, and injected short durations over loopback | Accepted | 2026-10-05 |
+| [0063](0063-storage-schema-records-table-typed-metric-and-log-tables-json-payloads.md) | Storage schema: one records table holds every record's identity, metrics and log lines get own tables, other payloads are stored as JSON | Accepted | 2026-10-06 |
+| [0064](0064-versioned-schema-migrations-in-go-one-transaction-per-step.md) | Versioned schema migrations in Go, applied at start-up in one transaction per step; a newer schema is refused | Accepted | 2026-10-06 |
+| [0065](0065-sqlite-connections-single-writer-query-only-readers-synchronous-full.md) | SQLite connections: modernc.org/sqlite kept; one writer connection with BEGIN IMMEDIATE, a query-only reader pool, synchronous FULL | Accepted | 2026-10-06 |
+| [0066](0066-log-search-takes-literal-terms-only.md) | Log search takes literal terms only; every term is quoted for FTS5, operators and prefixes are not offered yet | Accepted | 2026-10-06 |
+| [0067](0067-storage-repository-interfaces-and-a-scripted-fake-in-storetest.md) | The store package defines small repository interfaces; storetest.Fake is a scripted fake, the store itself is tested against real files | Accepted | 2026-10-06 |
+| [0068](0068-write-throughput-measured-by-a-benchmark-ds918-measurement-in-a-follow-up.md) | Write throughput is measured by a Go benchmark and never asserted in tests; the DS918+ measurement is a follow-up issue | Accepted | 2026-10-06 |
 <!-- project:end index -->

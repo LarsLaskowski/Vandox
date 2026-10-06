@@ -1,6 +1,6 @@
 # 0057: modernc.org/sqlite as the SQLite driver: pure Go, no cgo, FTS5 included
 
-- **Status:** Accepted
+- **Status:** Superseded by [0065](0065-sqlite-connections-single-writer-query-only-readers-synchronous-full.md)
 - **Date:** 2026-10-05
 - **Source:** Issue #13
 - **Supersedes:** —
