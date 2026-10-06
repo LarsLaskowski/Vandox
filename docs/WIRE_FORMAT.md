@@ -7,8 +7,9 @@ encoder and streaming decoder); both use only the standard library. The decision
 [0043](decisions/0043-wire-format-major-minor-versioning.md) (versioning),
 [0044](decisions/0044-batch-validated-as-a-whole-agent-records-only.md) (validation, trust, limits),
 [0045](decisions/0045-batch-identified-by-agent-id-and-record-sequence-numbers.md) (batch identity) and
-[0046](decisions/0046-batch-header-describes-the-capture-context.md) (capture context). Nothing in `cmd/`
-uses the package yet; the first consumers are the agent sender (#39) and the ingest API (#40).
+[0046](decisions/0046-batch-header-describes-the-capture-context.md) (capture context). The backend store
+(`cmd/vandoxd/internal/store`) validates agent IDs with `wire.ValidateAgentID`; the codec's first consumers are
+still the agent sender (#39) and the ingest API (#40).
 
 ## Stream layout
 
@@ -58,8 +59,8 @@ persistent or use a new agent ID (#38, #40).
 | ----- | ---- |
 | `kind` | one of the kinds below, exact lower-case match; an unknown kind rejects the batch |
 | `source` | name pattern (collector or parser, e.g. `proc.meminfo`, `journal`) |
-| `seq` | integer > 0, strictly increasing within the batch (gaps allowed; the backend detects them, #41) |
-| `captured_at` | RFC 3339 in UTC, written with `Z`; the time the data describes (a log line: the time stamped in the line, else when it was read; a gap: when it was recorded) |
+| `seq` | integer > 0, strictly increasing within the batch (gaps allowed; the backend detects them, #41); the backend stores at most 2^63 - 1 ([0063](decisions/0063-storage-schema-records-table-typed-metric-and-log-tables-json-payloads.md)) |
+| `captured_at` | RFC 3339 in UTC, written with `Z`; the time the data describes (a log line: the time stamped in the line, else when it was read; a gap: when it was recorded); the backend stores instants from 1677-09-21 to 2262-04-11 (nanoseconds in an int64, 0063) |
 | `data` | the payload object of the kind; required, not `null` |
 
 Records of origin `import` (log importer) and `backend` exist in the model but never on the wire: a batch with

@@ -3,7 +3,7 @@ package storetest
 
 import (
 	"context"
-	"errors"
+	"slices"
 	"sync"
 
 	"github.com/LarsLaskowski/Vandox/cmd/vandoxd/internal/store"
@@ -25,32 +25,88 @@ type Fake struct {
 
 // WriteBatch records b and returns the scripted result.
 func (f *Fake) WriteBatch(ctx context.Context, b store.Batch) (store.WriteResult, error) {
-	return store.WriteResult{}, errors.New("not implemented")
+	f.mu.Lock()
+	f.batches = append(f.batches, cloneBatch(b))
+	f.mu.Unlock()
+	if err := f.wait(ctx); err != nil {
+		return store.WriteResult{}, err
+	}
+	if f.OnWrite == nil {
+		return store.WriteResult{Stored: len(b.Records)}, nil
+	}
+	return f.OnWrite(b)
 }
 
 // Records records q and returns the scripted result.
 func (f *Fake) Records(ctx context.Context, q store.RecordQuery) ([]store.StoredRecord, error) {
-	return nil, errors.New("not implemented")
+	f.mu.Lock()
+	f.queries = append(f.queries, q)
+	f.mu.Unlock()
+	if err := f.wait(ctx); err != nil {
+		return nil, err
+	}
+	if f.OnRecords == nil {
+		return nil, nil
+	}
+	return f.OnRecords(q)
 }
 
 // SearchLogs records q and returns the scripted result.
 func (f *Fake) SearchLogs(ctx context.Context, q store.LogSearch) ([]store.StoredRecord, error) {
-	return nil, errors.New("not implemented")
+	f.mu.Lock()
+	f.searches = append(f.searches, q)
+	f.mu.Unlock()
+	if err := f.wait(ctx); err != nil {
+		return nil, err
+	}
+	if f.OnSearch == nil {
+		return nil, nil
+	}
+	return f.OnSearch(q)
+}
+
+// wait blocks until Block is closed or ctx is done; it returns at once when Block is nil.
+func (f *Fake) wait(ctx context.Context) error {
+	if f.Block == nil {
+		return nil
+	}
+	select {
+	case <-f.Block:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// cloneBatch returns b with its own Records slice.
+func cloneBatch(b store.Batch) store.Batch {
+	b.Records = slices.Clone(b.Records)
+	return b
 }
 
 // Batches returns copies of the batches written so far, in call order.
 func (f *Fake) Batches() []store.Batch {
-	return nil
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]store.Batch, len(f.batches))
+	for i, b := range f.batches {
+		out[i] = cloneBatch(b)
+	}
+	return out
 }
 
 // RecordQueries returns the record queries made so far, in call order.
 func (f *Fake) RecordQueries() []store.RecordQuery {
-	return nil
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.queries)
 }
 
 // LogSearches returns the log searches made so far, in call order.
 func (f *Fake) LogSearches() []store.LogSearch {
-	return nil
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.searches)
 }
 
 var (

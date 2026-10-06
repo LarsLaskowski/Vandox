@@ -7,7 +7,8 @@ backend with web UI, runs as a Docker container on any Docker host in the home n
 
 This document describes the target architecture; as of now the binaries' `--version`, the shared data model and wire format
 (`internal/model`, `internal/wire`), the configuration loading (`internal/config`, used by `vandoxd`) and the
-backend service skeleton exist: `vandoxd` loads its configuration, opens its SQLite database, listens on the
+backend service skeleton exist: `vandoxd` loads its configuration, opens and migrates its SQLite database (schema, batched writes, queries and log search
+exist as the storage layer; nothing calls it yet), listens on the
 web and ingest ports, answers `/healthz` and shuts down gracefully, and ships as a container with a health
 check. Sections are marked as implemented as features land. The decisions behind it are recorded in
 [`docs/decisions/`](decisions/README.md); each section links the records it rests on. Vandox is an own
@@ -33,7 +34,7 @@ way, and agents of the hosting provider are never disabled or changed
 - `cmd/vandoxd` — Go, one container on the backend host: ingest API, SQLite storage, analysis, rules, Telegram
   notifier, reports and web UI. Without arguments it runs the service; `-healthcheck` probes its `/healthz`.
 - `cmd/vandoxd/internal/` — packages used only by the backend: `server` (the web and ingest listeners, `/healthz`,
-  graceful shutdown) and `store` (the SQLite database)
+  graceful shutdown) and `store` (the SQLite database: schema, migrations, writing batches, queries and log search)
   ([0061](decisions/0061-backend-only-packages-under-cmd-vandoxd-internal.md)).
 - `internal/` — packages shared by both binaries: data model and versioned wire format (see
   [`WIRE_FORMAT.md`](WIRE_FORMAT.md)), log parsing, signatures, version information, configuration loading (see
@@ -166,9 +167,34 @@ Records: [0022](decisions/0022-backfill-detection-and-live-only-alerts.md),
 `vandoxd` stores everything in SQLite with the FTS5 extension for log search, in WAL mode, with these
 retention tiers. The database is the file `vandox.db` in `storage.directory`, created with mode 0600; the
 pure-Go driver `modernc.org/sqlite` needs no C toolchain
-([0057](decisions/0057-sqlite-driver-modernc-pure-go.md)). The storage directory is not created (a missing
-mount must not be hidden), and a symbolic link in place of the database or its `-wal`/`-shm` files is
-refused.
+([0065](decisions/0065-sqlite-connections-single-writer-query-only-readers-synchronous-full.md), which keeps the
+driver choice of 0057). The storage directory is not created (a missing mount must not be hidden), and a
+symbolic link in place of the database or its `-wal`/`-shm` files is refused.
+
+Implemented by `cmd/vandoxd/internal/store`:
+
+- **Schema** ([0063](decisions/0063-storage-schema-records-table-typed-metric-and-log-tables-json-payloads.md)):
+  one `records` table holds the metadata of every record (kind, origin, source, agent ID, sequence number,
+  capture and receive time as nanoseconds since the Unix epoch, boot ID, clock offset). Metrics and log lines
+  have typed tables (`metrics`, `log_lines`) keyed by the record ID; every other kind keeps its payload as a
+  JSON document in `records.data`. A partial unique index on (agent ID, sequence number) for origin `agent`
+  makes a resent record a no-op that never overwrites the stored one; imported and backend records are not
+  deduplicated. Capture times are storable between 1677-09-21 and 2262-04-11 and sequence numbers up to
+  2^63 - 1.
+- **Migrations** ([0064](decisions/0064-versioned-schema-migrations-in-go-one-transaction-per-step.md)): at
+  start-up every step above the stored `meta.schema_version` runs in its own transaction; a database with a
+  newer version is refused.
+- **Connections** (0065): one writer connection (immediate transactions, one batch per transaction) and a pool
+  of query-only readers, in WAL mode with `synchronous=FULL`, so a committed batch is durable and reads (and
+  `/healthz`) do not wait for a write.
+- **Log search** ([0066](decisions/0066-log-search-takes-literal-terms-only.md)): the FTS5 index of the log
+  messages is filled by the write path in the same transaction, so a line is searchable when it is committed.
+  The search text is taken as literal terms only (no FTS5 operators, bounded length and term count). The cost
+  of a search grows with the stored lines that contain its terms, so callers bound it with a context deadline.
+- **Interfaces** ([0067](decisions/0067-storage-repository-interfaces-and-a-scripted-fake-in-storetest.md)):
+  `store.Writer`, `store.RecordReader` and `store.LogSearcher`, with a scripted fake in `store/storetest`.
+- **Write throughput** ([0068](decisions/0068-write-throughput-measured-by-a-benchmark-ds918-measurement-in-a-follow-up.md)):
+  measured by a benchmark, see [`BENCHMARKS.md`](BENCHMARKS.md).
 
 | Data | Retention |
 | ---- | --------- |
