@@ -68,11 +68,15 @@ internal sealed class PingChecker
     {
         await Task.Yield();
 
+        using var deadline = new CancellationTokenSource(_timeout);
+
         try
         {
-            using var deadline = new CancellationTokenSource(_timeout);
-
             await _ping(deadline.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (deadline.IsCancellationRequested)
+        {
+            throw new TimeoutException("the database did not answer within the timeout");
         }
         finally
         {

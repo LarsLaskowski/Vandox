@@ -1,9 +1,10 @@
 # Allow-list build context: everything is ignored except what the image build needs.
 *
-!go.mod
-!go.sum
-!cmd/
-!internal/
+!global.json
+!Directory.Build.props
+!Directory.Packages.props
+!Vandox.slnx
+!src/
 !LICENSE
-**/*_test.go
-**/testdata
+**/bin
+**/obj

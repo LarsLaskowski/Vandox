@@ -12,7 +12,6 @@ f=deploy/backend/Dockerfile
 image_re='^[a-z0-9][a-z0-9._/-]*$'
 tag_re='^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$'
 digest_re='^sha256:[0-9a-f]{64}$'
-go_re='^[0-9]+\.[0-9]+(\.[0-9]+)?$'
 from_re='^FROM[[:space:]]+\$\{(BASE_[A-Z]+)_IMAGE\}@'
 
 if ! .github/scripts/check-base-image-pinning.sh; then
@@ -81,12 +80,6 @@ for name in "${names[@]}"; do
   if [[ $current != "${pinned[$name]}" ]]; then
     stale=1
     state=stale
-    # Informational only: the Go version the tag carries now. Never changes the exit status.
-    if config="$(docker buildx imagetools inspect --format '{{json .Image}}' "$ref" 2> /dev/null)" &&
-      go="$(jq -r '(."linux/amd64".config.Env // .config.Env // [])[] | select(startswith("GOLANG_VERSION=")) | ltrimstr("GOLANG_VERSION=")' <<<"$config" 2> /dev/null)" &&
-      [[ $go =~ $go_re ]]; then
-      state="stale (Go $go available)"
-    fi
     echo "::warning::${name}_DIGEST is stale: $ref is now $current, pinned ${pinned[$name]}" >&2
   fi
   echo "| $name | $ref | ${pinned[$name]} | $current | $state |"

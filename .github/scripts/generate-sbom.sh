@@ -162,18 +162,20 @@ for name in "$agent_sbom" "$image_sbom"; do
     fail "$name is larger than 16 MiB, the limit of actions/attest"
   fi
   check "$name" '.spdxVersion == "SPDX-2.3"' "spdxVersion is not SPDX-2.3"
-  check "$name" 'any(.packages[]?; .name == "stdlib")' "no package named stdlib"
-  check "$name" "any(.packages[]?; .name == \"$main_module\")" "no package for the main module $main_module"
 done
+# The agent is a Go binary: the standard library and the main module. The image is a .NET application on the
+# chiseled ASP.NET runtime: its NuGet packages come from vandoxd.deps.json.
+check "$agent_sbom" 'any(.packages[]?; .name == "stdlib")' "no package named stdlib"
+check "$agent_sbom" "any(.packages[]?; .name == \"$main_module\")" "no package for the main module $main_module"
 check "$image_sbom" \
-  'any(.packages[]?; any(.externalRefs[]?; (.referenceLocator | type == "string") and (.referenceLocator | startswith("pkg:deb/"))))' \
-  "the image SBOM lists no Debian package (pkg:deb/)"
+  'any(.packages[]?; any(.externalRefs[]?; (.referenceLocator | type == "string") and (.referenceLocator | startswith("pkg:nuget/"))))' \
+  "the image SBOM lists no NuGet package (pkg:nuget/)"
 
 # Summary derived from the SBOMs: printed only inside the wrap.
 echo "::stop-commands::$wrap_token"
 wrap_open=1
 for name in "$agent_sbom" "$image_sbom"; do
-  jq -r '"\(input_filename): \(.packages | length) packages, stdlib \([.packages[] | select(.name == "stdlib") | .versionInfo] | join(",")), \([.packages[]?.externalRefs[]? | select((.referenceLocator | type == "string") and (.referenceLocator | startswith("pkg:deb/")))] | length) pkg:deb refs"' "$dest/$name" || true
+  jq -r '"\(input_filename): \(.packages | length) packages, stdlib \([.packages[] | select(.name == "stdlib") | .versionInfo] | join(",")), \([.packages[]?.externalRefs[]? | select((.referenceLocator | type == "string") and (.referenceLocator | startswith("pkg:nuget/")))] | length) pkg:nuget refs"' "$dest/$name" || true
 done
 echo "::$wrap_token::"
 wrap_open=0

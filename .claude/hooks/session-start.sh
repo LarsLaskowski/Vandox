@@ -1,6 +1,7 @@
 #!/bin/bash
-# SessionStart hook for Claude Code on the web (Go profile): downloads the modules so the squad can
-# format, vet, lint, test and check coverage. Idempotent; does nothing outside remote sessions.
+# SessionStart hook for Claude Code on the web (Go agent and .NET backend): downloads the Go modules and
+# restores the NuGet packages and the local .NET tools so the squad can format, build, lint, test and check
+# coverage. Idempotent; does nothing outside remote sessions.
 set -euo pipefail
 
 if [[ "${CLAUDE_CODE_REMOTE:-}" != "true" ]]; then
@@ -10,6 +11,13 @@ fi
 cd "${CLAUDE_PROJECT_DIR:-$(pwd)}"
 
 go mod download
+
+if command -v dotnet >/dev/null 2>&1; then
+  dotnet tool restore || echo "dotnet tool restore failed; the .NET formatter is unavailable." >&2
+  dotnet restore Vandox.slnx || echo "dotnet restore failed; the .NET build needs the NuGet packages." >&2
+else
+  echo "The .NET SDK is not installed; the backend cannot be built (see .squad/stack.md)." >&2
+fi
 
 # The analyzer gate needs the golangci-lint release pinned in CI, built with the Go version that go.mod
 # targets; a stock or older binary refuses to run. Install it once into $HOME/go/bin and put that on PATH.
