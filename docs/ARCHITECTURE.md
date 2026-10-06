@@ -8,7 +8,7 @@ backend with web UI, runs as a Docker container on any Docker host in the home n
 This document describes the target architecture; as of now the binaries' `--version`, the shared data model and wire format
 (`internal/model`, `internal/wire`), the configuration loading (`internal/config`, used by `vandoxd`) and the
 backend service skeleton and the log import framework exist (`vandoxd import`, without a parser yet): `vandoxd` loads its configuration, opens and migrates its SQLite database (schema, batched writes, queries and log search
-exist as the storage layer; nothing calls it yet), listens on the
+exist as the storage layer; the service does not call it yet, `vandoxd import` writes through it), listens on the
 web and ingest ports, answers `/healthz` and shuts down gracefully, and ships as a container with a health
 check. Sections are marked as implemented as features land. The decisions behind it are recorded in
 [`docs/decisions/`](decisions/README.md); each section links the records it rests on. Vandox is an own

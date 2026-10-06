@@ -51,8 +51,8 @@ cannot be covered by a unit test (for example `main` wiring) need an explicit, r
 binary's `main` therefore only calls `os.Exit(run(...))` with the process boundaries (context, arguments,
 environment, standard streams and, for `vandoxd`, the listen function) as arguments; `run` is tested in the
 package's `main_test.go`, and the `main` body is the accepted uncovered wiring
-([decision 0058](decisions/0058-vandoxd-runs-the-service-by-default-with-a-shutdown-deadline.md), which
-supersedes [0034](decisions/0034-entry-points-delegate-to-a-testable-run-function.md) for `vandoxd`).
+([decision 0072](decisions/0072-vandoxd-import-sub-command-output-and-exit-codes.md), which carries over
+0058 and supersedes [0034](decisions/0034-entry-points-delegate-to-a-testable-run-function.md) for `vandoxd`).
 
 ## Checklist for new tests
 
