@@ -496,9 +496,14 @@ func TestScan_MemoryStaysBoundedForHugeEntryNames(t *testing.T) {
 	}
 }
 
-// writeDotPaddedNameArchive writes a tar.gz with count regular entries holding content, whose raw PAX path is
-// "<index>" followed by padPairs times "/." (about 2*padPairs bytes) and cleans to the 5-byte "<index>".
-func writeDotPaddedNameArchive(t *testing.T, path string, count, padPairs int, content string) {
+// tarEntryOf is one entry of an archive written by writeEntriesArchive.
+type tarEntryOf struct {
+	hdr     tar.Header
+	content string
+}
+
+// writeEntriesArchive writes a tar.gz with count entries made by entry(i).
+func writeEntriesArchive(t *testing.T, path string, count int, entry func(i int) tarEntryOf) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		t.Fatalf("MkdirAll(%q) error = %v, want nil", filepath.Dir(path), err)
@@ -509,16 +514,14 @@ func writeDotPaddedNameArchive(t *testing.T, path string, count, padPairs int, c
 	}
 	zw := gzip.NewWriter(f)
 	tw := tar.NewWriter(zw)
-	pad := strings.Repeat("/.", padPairs)
 	for i := range count {
-		h := &tar.Header{
-			Name: fmt.Sprintf("%05d", i) + pad, Typeflag: tar.TypeReg, Mode: 0o644, ModTime: modA,
-			Size: int64(len(content)), Format: tar.FormatPAX,
-		}
-		if err := tw.WriteHeader(h); err != nil {
+		e := entry(i)
+		h := e.hdr
+		h.Mode, h.ModTime, h.Format, h.Size = 0o644, modA, tar.FormatPAX, int64(len(e.content))
+		if err := tw.WriteHeader(&h); err != nil {
 			t.Fatalf("WriteHeader(entry %d) error = %v, want nil", i, err)
 		}
-		if _, err := tw.Write([]byte(content)); err != nil {
+		if _, err := tw.Write([]byte(e.content)); err != nil {
 			t.Fatalf("Write(entry %d) error = %v, want nil", i, err)
 		}
 	}
@@ -533,14 +536,68 @@ func writeDotPaddedNameArchive(t *testing.T, path string, count, padPairs int, c
 	}
 }
 
+// scanHeapGrowth scans root with the alpha parser and returns the result and the growth of the live heap in bytes.
+func scanHeapGrowth(t *testing.T, root string) (got []found, growth int64, err error) {
+	t.Helper()
+	runtime.GC()
+	var before runtime.MemStats
+	runtime.ReadMemStats(&before)
+
+	got, err = scanOf(t, root, alphaParser())
+
+	runtime.GC()
+	var after runtime.MemStats
+	runtime.ReadMemStats(&after)
+	runtime.KeepAlive(got)
+	return got, int64(after.HeapAlloc) - int64(before.HeapAlloc), err
+}
+
+// shortNameWant is what a scan of the short-named entries must list.
+type shortNameWant struct {
+	name       func(i int) string
+	wantParser bool
+	wantReason string
+}
+
+// checkShortNames checks that got lists entries under their short names.
+func checkShortNames(t *testing.T, got []found, w shortNameWant) {
+	t.Helper()
+	for i, f := range got {
+		wantName := w.name(i)
+		wantPath := "names.tar.gz:" + wantName
+		if f.result.Path != wantPath || f.file.Name != wantName {
+			t.Fatalf("file %d = path %q, name %q, want path %q, name %q", i, f.result.Path, f.file.Name, wantPath, wantName)
+		}
+		if (f.parser != nil) != w.wantParser || f.result.Reason != w.wantReason {
+			t.Fatalf("file %d = parser %v, reason %q, want parser %v, reason %q",
+				i, f.parser != nil, f.result.Reason, w.wantParser, w.wantReason)
+		}
+	}
+}
+
+// checkBoundedScan scans an archive of entries entries made by entry and checks the names and the heap growth.
+func checkBoundedScan(t *testing.T, entries int, entry func(i int) tarEntryOf, w shortNameWant) {
+	t.Helper()
+	const maxGrowth = 16 << 20
+	root := filepath.Join(t.TempDir(), "in")
+	writeEntriesArchive(t, filepath.Join(root, "names.tar.gz"), entries, entry)
+
+	got, growth, err := scanHeapGrowth(t, root)
+
+	if err != nil || len(got) != entries {
+		t.Fatalf("scan() = %d files, error %v, want %d files and nil", len(got), err, entries)
+	}
+	checkShortNames(t, got, w)
+	if growth > maxGrowth {
+		t.Errorf("live heap grew by %d MiB while %d entries with oversized headers were kept, want less than %d MiB",
+			growth>>20, entries, maxGrowth>>20)
+	}
+}
+
 // TestScan_MemoryStaysBoundedForHugeNamesThatCleanToShortOnes checks that a short cleaned name does not pin the
 // 1 MB raw header name it was cut from, both for a listed entry and for a recognized one.
 func TestScan_MemoryStaysBoundedForHugeNamesThatCleanToShortOnes(t *testing.T) {
-	const (
-		entries   = 300
-		padPairs  = 500_000
-		maxGrowth = 16 << 20
-	)
+	const padPairs = 500_000
 	tests := []struct {
 		name       string
 		content    string
@@ -552,36 +609,39 @@ func TestScan_MemoryStaysBoundedForHugeNamesThatCleanToShortOnes(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			root := filepath.Join(t.TempDir(), "in")
-			writeDotPaddedNameArchive(t, filepath.Join(root, "names.tar.gz"), entries, padPairs, tc.content)
-			runtime.GC()
-			var before runtime.MemStats
-			runtime.ReadMemStats(&before)
+			pad := strings.Repeat("/.", padPairs)
+			entry := func(i int) tarEntryOf {
+				return tarEntryOf{hdr: tar.Header{Name: fmt.Sprintf("%05d", i) + pad, Typeflag: tar.TypeReg}, content: tc.content}
+			}
+			w := shortNameWant{func(i int) string { return fmt.Sprintf("%05d", i) }, tc.wantParser, tc.wantReason}
+			checkBoundedScan(t, 300, entry, w)
+		})
+	}
+}
 
-			got, err := scanOf(t, root, alphaParser())
-
-			runtime.GC()
-			var after runtime.MemStats
-			runtime.ReadMemStats(&after)
-			runtime.KeepAlive(got)
-			if err != nil || len(got) != entries {
-				t.Fatalf("scan() = %d files, error %v, want %d files and nil", len(got), err, entries)
+// TestScan_MemoryStaysBoundedForShortNamesWithHugePAXRecords checks that a short name that is already clean, and
+// so arrives as a substring of a PAX header of up to 1 MiB, does not pin that header.
+func TestScan_MemoryStaysBoundedForShortNamesWithHugePAXRecords(t *testing.T) {
+	tests := []struct {
+		name       string
+		typeflag   byte
+		linkname   string
+		content    string
+		wantParser bool
+		wantReason string
+	}{
+		{"symbolic link", tar.TypeSymlink, "target", "", false, reasonSymlink},
+		{"recognized file", tar.TypeReg, "", "alpha line\n", true, ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			huge := map[string]string{"comment": strings.Repeat("c", 1_000_000)}
+			entry := func(i int) tarEntryOf {
+				h := tar.Header{Name: fmt.Sprintf("é%05d.log", i), Typeflag: tc.typeflag, Linkname: tc.linkname, PAXRecords: huge}
+				return tarEntryOf{hdr: h, content: tc.content}
 			}
-			for i, f := range got {
-				wantName := fmt.Sprintf("%05d", i)
-				wantPath := "names.tar.gz:" + wantName
-				if f.result.Path != wantPath || f.file.Name != wantName {
-					t.Fatalf("file %d = path %q, name %q, want path %q, name %q", i, f.result.Path, f.file.Name, wantPath, wantName)
-				}
-				if (f.parser != nil) != tc.wantParser || f.result.Reason != tc.wantReason {
-					t.Fatalf("file %d = parser %v, reason %q, want parser %v, reason %q",
-						i, f.parser != nil, f.result.Reason, tc.wantParser, tc.wantReason)
-				}
-			}
-			if growth := int64(after.HeapAlloc) - int64(before.HeapAlloc); growth > maxGrowth {
-				t.Errorf("live heap grew by %d MiB while %d entries with raw names of %d bytes were kept, want less than %d MiB",
-					growth>>20, entries, 2*padPairs, maxGrowth>>20)
-			}
+			w := shortNameWant{func(i int) string { return fmt.Sprintf("é%05d.log", i) }, tc.wantParser, tc.wantReason}
+			checkBoundedScan(t, 300, entry, w)
 		})
 	}
 }
