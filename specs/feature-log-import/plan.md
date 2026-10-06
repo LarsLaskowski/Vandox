@@ -195,7 +195,7 @@ Command (`cmd/vandoxd`)
   reason and every file with skipped lines with its first problems.
 - [ ] AC-C2: every path and reason in the summary is printed quoted (Go `%q`): a file name containing a
   newline and an ANSI escape produces one summary line with the characters escaped; a file name containing
-  U+009B (C1 CSI) and U+202E (right-to-left override) appears as `\u009b` and `‮`, and stdout holds
+  U+009B (C1 CSI) and U+202E (right-to-left override) appears as `\u009b` and `\u202e`, and stdout holds
   neither rune raw (no bytes `C2 9B` or `E2 80 AE`).
 - [ ] AC-C3: exit code 1 with the summary printed when a file failed or the import was interrupted; exit
   code 1 with a JSON error line on stderr for an invalid configuration, a database that cannot be opened
