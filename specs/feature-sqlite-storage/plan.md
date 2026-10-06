@@ -30,7 +30,7 @@ Claims of the issue, checked:
 | "single writer with batched transactions" | **Refuted for the current code**: one unbounded pool, deferred transactions. |
 | "Schema for all record types, versioned migrations" | **Refuted**: only `meta`; versioning is a single fixed value. |
 | "/healthz checks database reachability" (#13) | **Confirmed**: `server.pingChecker.ping` (`health.go` l. 80) calls `Store.Ping` (`store.go` l. 155), which reads `meta.schema_version` (0059). Kept; `Ping` moves to the reader pool. |
-| "10,000 records in one transaction under one second on a DS918+" | **Cannot be measured here.** Measured on this session's 2.1 GHz Xeon with a prototype of the planned schema: ~0.14 s for 10,000 metric records, ~0.45 s for 10,000 log lines (~0.3 s of it FTS5 indexing). The J3455 is several times slower: metrics should pass, log lines may not. Split into a follow-up issue (0068). |
+| "10,000 records in one transaction under one second on a DS918+" | **Cannot be measured here, so this change does not fulfil it.** Measured on this session's 2.1 GHz Xeon (4 vCPU) with prototypes of the planned schema and writer DSN, several successive 10,000-record batches into one database: metric records 0.12–0.15 s; 9,000 metric + 1,000 log lines 0.13–0.20 s; kernel OOM-kill lines (~150 bytes) 0.18–0.33 s with the FTS5 index filled by the write path (revised design, 0063), 0.50–0.79 s with the `AFTER INSERT` trigger of the first draft (the Devil's Advocate measured 0.53–0.64 s; the first draft's "~0.45 s" was too low). The J3455 is slower per core by an unmeasured factor. #14 stays open; the DS918+ measurement is a follow-up issue (0068). |
 
 Facts verified with the pinned driver (v1.60.1, SQLite 3.53.4) that the plan relies on:
 
@@ -47,6 +47,15 @@ Facts verified with the pinned driver (v1.60.1, SQLite 3.53.4) that the plan rel
 - `EXPLAIN QUERY PLAN` of the planned queries: `SEARCH m USING INDEX metrics_source_name_time (source=? AND
   name=? AND captured_at>? AND captured_at<?)` and `SEARCH records USING COVERING INDEX
   records_kind_source_time (...)`, without `USE TEMP B-TREE` for `ORDER BY captured_at, id`.
+- The log search, in contrast, runs `SCAN log_fts VIRTUAL TABLE INDEX 0:M1`, primary-key lookups of every
+  hit, the time and source filter afterwards, and `USE TEMP B-TREE FOR ORDER BY` (Devil's Advocate:
+  300,000 lines containing `mariadbd`, 60-second window, 77 ms). Its cost grows with the term's hits over the
+  whole retention; the bound is the caller's context deadline (0066).
+- Filling `log_fts` by an explicit `INSERT INTO log_fts(rowid, message) VALUES(?, ?)` per log line in the
+  write transaction (interleaved or at the end) gives the same index as the trigger (FTS5
+  `INSERT INTO log_fts(log_fts, rank) VALUES('integrity-check', 1)` passes, 200,000 of 200,000 lines found)
+  at about a third of the cost. A `log_lines` row without its index entry makes that `integrity-check` fail
+  ("database disk image is malformed").
 
 ## Acceptance criteria
 
@@ -57,7 +66,7 @@ All tests use a real database in `t.TempDir()`, no real clock (times are fixed v
 - [ ] AC-M1: `Open` on an empty directory creates a database at `SchemaVersion` (= 2): `meta.schema_version`
   is `"2"`, and `sqlite_master` contains the tables `meta`, `records`, `metrics`, `log_lines`, `log_fts`,
   the indexes `records_agent_seq`, `records_kind_source_time`, `records_kind_time`,
-  `metrics_source_name_time` and the trigger `log_lines_ai`.
+  `metrics_source_name_time`, and no trigger (0063: the index is filled by the write path).
 - [ ] AC-M2: Opening the same database a second time applies no step: the `sqlite_master` rows (type, name,
   sql) and all data written before are unchanged.
 - [ ] AC-M3: A database in the #13 layout (only `meta` with `schema_version = '1'` and an extra row
@@ -120,6 +129,12 @@ All tests use a real database in `t.TempDir()`, no real clock (times are fixed v
 - [ ] AC-W8: `MaxBatchRecords == wire.DefaultLimits().MaxRecords`.
 - [ ] AC-W9: An error from `WriteBatch` does not contain a log message, metric label value or other payload
   text of the batch (sentinel in a log message of an otherwise invalid record).
+- [ ] AC-W10: FTS5 index in step with `log_lines` (0063): after writing, in one test, a batch of log lines
+  and metrics, the same batch again (all duplicates), a batch that contains one log line's seq twice, and the
+  failing batch of AC-W4, `INSERT INTO log_fts(log_fts, rank) VALUES('integrity-check', 1)` through `s.db`
+  returns nil and `SELECT count(*) FROM log_fts_docsize` equals `SELECT count(*) FROM log_lines`. Negative
+  control: after inserting a `records` row and a `log_lines` row directly through `s.db` (no index entry),
+  the same `integrity-check` returns an error.
 
 ### Reading (`read.go`, 0063)
 
@@ -147,7 +162,8 @@ All tests use a real database in `t.TempDir()`, no real clock (times are fixed v
   where the literal words occur in a stored line it finds that line, and `kill*` does not find `killed`.
 - [ ] AC-S4: Rejected with `ErrInvalidQuery`: the `RecordQuery` rules of AC-R2 that apply (time range,
   limit), and the text rules; the error text never contains the search text (sentinel test).
-- [ ] AC-S5: A cancelled context → error; a closed store → error.
+- [ ] AC-S5: A cancelled context → error wrapping `context.Canceled`; a closed store → error. (The context
+  is the only bound on a search's duration, 0066.)
 
 ### Interfaces and fake (`repository.go`, `storetest/fake.go`, 0067)
 
@@ -167,11 +183,15 @@ All tests use a real database in `t.TempDir()`, no real clock (times are fixed v
 
 - [ ] AC-B1: `BenchmarkStore_WriteBatch` with sub-benchmarks `metric`, `log_line`, `mixed` (9,000 metric +
   1,000 log lines) writes 10,000 new records per iteration in one `WriteBatch` call (fresh sequence numbers
-  per iteration, store created outside the timed section) and reports `records/s` via `b.ReportMetric`.
+  per iteration, store created outside the timed section; the database keeps the earlier iterations' records,
+  so the index grows as in production) and reports `records/s` via `b.ReportMetric`. Log lines are the
+  kernel OOM-kill line with numbers varying per record (`Out of memory: Killed process <pid> (mariadbd)
+  total-vm:<n>kB, anon-rss:<n>kB, file-rss:0kB, shmem-rss:0kB UID:27 pgtables:<n>kB oom_score_adj:0`).
   `go test -run '^$' -bench BenchmarkStore_WriteBatch -benchtime 3x ./cmd/vandoxd/internal/store` passes.
 - [ ] AC-B2: `docs/BENCHMARKS.md` exists with the procedure (below) and the development host's measured
-  results (CPU model, date, the three ns/op values), and a DS918+ row marked *pending* with the follow-up
-  issue's number.
+  results (CPU model, date, the three ns/op values, labelled as the development host, not the reference
+  host), and a DS918+ row marked *pending* with the follow-up issue's number and the note that #14's
+  criterion stays open until this row is filled.
 
 ## Approach
 
@@ -226,18 +246,18 @@ All tests use a real database in `t.TempDir()`, no real clock (times are fixed v
    ) STRICT;
    CREATE VIRTUAL TABLE log_fts USING fts5(message, content='log_lines', content_rowid='record_id',
      tokenize='unicode61 remove_diacritics 2');
-   CREATE TRIGGER log_lines_ai AFTER INSERT ON log_lines BEGIN
-     INSERT INTO log_fts(rowid, message) VALUES (new.record_id, new.message);
-   END;
    ```
 
-   (`unit` and `program` store `""` as `''`; `priority` `NULL` for nil; `truncated` 0/1.)
+   (`unit` and `program` store `""` as `''`; `priority` `NULL` for nil; `truncated` 0/1.) No trigger: the
+   index is filled by `WriteBatch` (step 3, 0063).
 3. **Writing** (`write.go`): validate the whole batch first (AC-W6; nothing is written on a validation
    error). Then one transaction on the writer pool: prepared statements for `records` (`INSERT ... ON
-   CONFLICT DO NOTHING`), `metrics` and `log_lines`; per record insert into `records` (`seq` `NULL` unless
-   origin agent; `data` = `json.Marshal(r.Data)` for kinds other than metric and log line, else `NULL`); if
-   `RowsAffected() == 0` count a duplicate and skip the payload row, else insert the payload row with the new
-   id. Commit; on any error roll back and return it wrapped (`store: writing batch: %w`). The error never
+   CONFLICT DO NOTHING`), `metrics`, `log_lines` and `log_fts` (`INSERT INTO log_fts(rowid, message)
+   VALUES(?, ?)`); per record insert into `records` (`seq` `NULL` unless origin agent; `data` =
+   `json.Marshal(r.Data)` for kinds other than metric and log line, else `NULL`); if `RowsAffected() == 0`
+   count a duplicate and skip the payload row (and the index entry), else insert the payload row with the new
+   id, and for a log line its index entry with the same id and the same message, right after it.
+   `WriteBatch` is the only code that inserts into `log_lines`. Commit; on any error roll back and return it wrapped (`store: writing batch: %w`). The error never
    includes payload values (model errors carry field paths only).
 4. **Reading** (`read.go`): validate the query (AC-R2), build SQL with `recordsQuery` (metric with name →
    `metrics` joined to `records`; otherwise `records` filtered by kind/source, left-joined to `metrics` or
@@ -460,7 +480,7 @@ tests call only the members listed above.
 
 - `cmd/vandoxd/internal/store/store_test.go` (existing): AC-C1, AC-C2, AC-C4; adapt AC-M4.
 - `cmd/vandoxd/internal/store/migrate_test.go` (new): AC-M1–AC-M3, AC-M5–AC-M8.
-- `cmd/vandoxd/internal/store/write_test.go` (new): AC-W1–AC-W9, AC-C3, `BenchmarkStore_WriteBatch` (AC-B1).
+- `cmd/vandoxd/internal/store/write_test.go` (new): AC-W1–AC-W10, AC-C3, `BenchmarkStore_WriteBatch` (AC-B1).
 - `cmd/vandoxd/internal/store/read_test.go` (new): AC-R1–AC-R4, AC-S1–AC-S5.
 - `cmd/vandoxd/internal/store/storetest/fake_test.go` (new): AC-F2–AC-F5 (AC-F1 is compile-time, in the
   production files).
@@ -481,7 +501,9 @@ Made by the Dev:
   *Components*: `store` described as "the SQLite database: schema, migrations, writing batches, queries and
   log search"; *Storage and retention*: schema overview (records table, metrics and log lines, JSON
   payloads), migrations at start-up, single writer and query-only readers with `synchronous=FULL`, literal-term
-  log search; the 0057 link is replaced by 0065, and 0063–0068 are linked.
+  log search (FTS5 index filled by the write path in the same transaction, a line searchable at commit;
+  search cost grows with the term's hits, bounded by the caller's context deadline); the 0057 link is
+  replaced by 0065, and 0063–0068 are linked.
 - `docs/WIRE_FORMAT.md`: in *Records*, the `seq` and `captured_at` rows note the backend storage limits
   (seq at most 2^63 − 1; `captured_at` between 1677-09-21 and 2262-04-11, 0063); the sentence "Nothing in
   `cmd/` uses the package yet" is corrected: the store validates agent IDs with `wire.ValidateAgentID`, and
@@ -490,7 +512,8 @@ Made by the Dev:
   `CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go test -c -o store.test ./cmd/vandoxd/internal/store`, copy to the
   NAS, `TMPDIR=<dir on the data volume> ./store.test -test.run '^$' -test.bench BenchmarkStore_WriteBatch
   -test.benchtime 5x`; results table (benchmark, host, CPU, date, ns/op, records/s) with the development host's
-  numbers and the DS918+ row *pending — issue #<follow-up>*; the 1 s target of #14.
+  numbers (labelled as the development host) and the DS918+ row *pending — issue #<follow-up>*; the 1 s
+  target of #14, which stays open until the DS918+ row is filled.
 - `docs/UNIT_TESTS.md`: a bullet under *Structure*: benchmarks live in the `_test.go` file of the code they
   measure, never assert a duration, and their reference-host results go into `docs/BENCHMARKS.md` (0068).
 - `.squad/project.md` (product facts made untrue by this change): *Security areas* 1 — deduplication is
@@ -524,7 +547,9 @@ Made by the Dev:
 - **Area 9 (database file)**: the `Lstat`/`O_EXCL` checks run before either pool is opened, unchanged. Residual
   as in 0057: a connection opened later re-opens the path without re-checking (0065 *Consequences*).
 - **Area 10 (FTS5 query)**: the guard above; the expression is bound, never concatenated; errors never echo
-  the text; context cancellation interrupts a running query (driver behavior).
+  the text. The guard bounds the expression, not the work: a search's cost grows with the stored lines that
+  contain its terms. Context cancellation interrupts a running query (driver behavior, AC-S5); callers that
+  serve a user (#26, #47) must pass a deadline (0066).
 - **Area 12**: store errors carry field paths and rule names only, never payload values (AC-W9, AC-S4).
   Log text is returned raw; escaping for the UI or Telegram is the display layer's job.
 - No new dependency; no change to Docker, CI or configuration.
@@ -539,16 +564,50 @@ Made by the Dev:
 - `docs/decisions/0067-storage-repository-interfaces-and-a-scripted-fake-in-storetest.md` (Proposed)
 - `docs/decisions/0068-write-throughput-measured-by-a-benchmark-ds918-measurement-in-a-follow-up.md` (Proposed)
 
+## Challenge
+
+Devil's Advocate, 2026-10-06 (1 major, 1 minor):
+
+1. **Major — the write path will probably miss the 1 s criterion on the DS918+, and the likely remedy
+   (changing the schema created here) was left to a follow-up.** **Accepted**, with both of the asked
+   decisions taken:
+   - *(b) Indexing strategy settled now.* The Lead re-measured the Devil's Advocate's case and alternatives
+     (*Facts verified*, 0063 *Options considered*): the per-row `AFTER INSERT` trigger costs 0.50–0.79 s per
+     10,000 OOM-kill lines on this host, an explicit `INSERT INTO log_fts` per line from the write path in
+     the same transaction 0.18–0.33 s (same index, `integrity-check` clean), indexing after the commit about
+     0.11 s plus a separate index pass. The plan now drops the trigger from migration step 2 and fills the
+     index in `WriteBatch` (Approach steps 2 and 3, AC-M1, new AC-W10). Atomicity and "searchable at commit"
+     are kept; deferred indexing is recorded as the next candidate (0063 option c) and needs the Product
+     Manager because it changes when a line becomes searchable.
+   - *(a) #14 is not closed.* Even at 0.18–0.33 s here, the J3455 result is unknown, and the criterion says
+     "measured and noted". The PR refers to #14 without a closing keyword; #14 stays open with that criterion
+     until the follow-up notes the DS918+ result (0068, spec AC8). "Pending" now means "open", not "done".
+   - The "~0.45 s" figure is corrected in this plan, 0065 and 0068 and the follow-up body; the benchmark's
+     log-line fixture is the kernel OOM-kill line (AC-B1).
+2. **Minor — the claimed bound on search cost is false.** **Accepted.** The guard bounds the expression,
+   not the work. spec.md now says a search's cost grows with the number of stored lines containing its words
+   and that the caller limits it with a context deadline; 0066 *Consequences* states the query plan, the
+   measurement and the deadline requirement for #26/#47; *Security considerations* area 10 and AC-S5 say the
+   same. A plan that narrows by time first is not possible with the current IDs (imports and backfills are
+   not in capture order) and is left to #26 if measurements require it.
+
 ## Out of scope / follow-ups
 
+- **Pull request and #14:** the PR refers to #14 **without a closing keyword** (`Part of #14`, not
+  `Closes #14`); #14 stays open with the DS918+ criterion unmet (0068). The PR body states that the
+  DS918+ measurement has not been made and gives the development host's numbers as such.
 - Follow-up issue (created by the orchestrator, number goes into `docs/BENCHMARKS.md` and the PR):
   **Title:** `[Tests] Measure the storage write benchmark on the DS918+`
   **Body:** "Issue #14 requires that writing 10,000 records in one transaction takes under one second on the
-  reference host, a DS918+ (measured and noted). The benchmark `BenchmarkStore_WriteBatch` and the procedure
-  are in `docs/BENCHMARKS.md`; the development host measured about 0.14 s (metrics) and 0.45 s (log lines,
-  most of it FTS5 indexing) on a 2.1 GHz Xeon. Run the procedure on the DS918+ with the temporary directory on
-  the data volume, note the results in `docs/BENCHMARKS.md`, and, if a sub-benchmark exceeds one second,
-  decide on a remedy (e.g. FTS5 indexing in a separate transaction after the commit) in a decision record.
-  Record 0068."
+  reference host, a DS918+ (measured and noted). The storage layer was merged without that measurement, so
+  #14 stays open for this criterion. The benchmark `BenchmarkStore_WriteBatch` and the procedure are in
+  `docs/BENCHMARKS.md`. On the development host (2.1 GHz Xeon, 4 vCPU) 10,000 records per transaction took
+  0.12–0.15 s for metrics, 0.13–0.20 s for the mixed batch and 0.18–0.33 s for kernel OOM-kill log lines; the
+  J3455 is slower per core by an unknown factor. Run the procedure on the DS918+ with the temporary
+  directory on the data volume and note the results in `docs/BENCHMARKS.md`; the PR that does so closes this
+  issue and #14. If a sub-benchmark exceeds one second, decide on a remedy in a decision record first: the
+  next candidate is indexing FTS5 after the commit (record 0063, option c), which changes when a log line
+  becomes searchable and needs the Product Manager. Records 0063, 0068."
 - Not in this change: ingest (#40), import (#15), classification and gap objects (#41), rollups, retention
-  and the FTS5 delete trigger (#46), query API (#47), backup (#55), search operators (#26).
+  and removing FTS5 entries of deleted lines (#46), query API (#47), backup (#55), search operators and
+  search deadlines (#26).

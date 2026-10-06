@@ -18,7 +18,7 @@ in `.squad/project.md`: external input yields an error, never a crash, an unboun
 ## Options considered
 
 1. **Pass the text to `MATCH` unchanged** — full FTS5 syntax for users; every syntax error becomes a database
-   error, and cost is bounded only by the query timeout.
+   error, and prefix and `OR` queries add cost on top of the plain lookups.
 2. **Own query language** (e.g. `-word`, `"phrase"`) translated to FTS5 — useful, but a user-facing design
    that belongs to #26, which has not been planned.
 3. **Literal terms** — the text is split at white space and each term is quoted as an FTS5 string, so every
@@ -40,8 +40,18 @@ Option 3. `store.SearchLogs` takes `LogSearch.Text` and builds the `MATCH` expre
 
 ## Consequences
 
-- No input can produce an FTS5 syntax error or invoke an operator; the cost of a query is bounded by 16
-  phrase lookups plus the result limit.
+- No input can produce an FTS5 syntax error or invoke an operator, and the expression has at most 16
+  phrases of together at most 1024 bytes.
+- The cost of a search is **not** bounded by the time range or the result limit: SQLite runs the `MATCH`
+  first (`SCAN log_fts VIRTUAL TABLE INDEX 0:M1`), looks up every matching line, filters by time and source
+  afterwards and sorts the remainder (`USE TEMP B-TREE FOR ORDER BY`). The cost grows with the number of
+  stored lines that contain the terms over the whole retention (90 days of logs); measured on 2026-10-06 on a
+  2.1 GHz Xeon, a common word in 300,000 lines and a 60-second window took about 77 ms. The bound is time:
+  `SearchLogs` honors its context, and a cancelled or expired context interrupts the running query (driver
+  behavior, tested). Every caller that serves a user (the logs view, #26; the query API, #47) must pass a
+  context with a deadline. A plan that narrows by time first (e.g. FTS5 `rowid` ranges, which needs record
+  IDs ordered by capture time — not the case for imports and backfills) is left to #26 if measurements
+  require it.
 - Users cannot search by prefix, with `OR` or `NOT`, or by column. #26 may add an own syntax or allow
   operators; that is a new decision that supersedes this one.
 - `ß` is not folded to `ss` by the tokenizer (`grosse` does not find `Größe`).

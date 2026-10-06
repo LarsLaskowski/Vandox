@@ -23,8 +23,8 @@ its spool, so a committed batch must survive a power cut of the backend host (no
 
 1. **Driver** — `mattn/go-sqlite3` (cgo) and `ncruces/go-sqlite3` (WebAssembly) were rejected in 0057 for the
    reasons given there; nothing has changed. Measured on 2026-10-06 with v1.60.1 on a 2.1 GHz Xeon: 10,000
-   metric records in one transaction take about 0.14 s, 10,000 log lines about 0.45 s, of which about 0.3 s
-   is FTS5 indexing.
+   metric records in one transaction take 0.12 to 0.15 s, 10,000 log lines 0.18 to 0.33 s with the FTS5
+   index filled by the write path (0.50 to 0.79 s with an `AFTER INSERT` trigger, 0063).
 2. **Single writer**
    - *A mutex around writes on the shared pool* — readers and writers still share connections, and a
      deferred transaction can still hit `SQLITE_BUSY` against another process.
