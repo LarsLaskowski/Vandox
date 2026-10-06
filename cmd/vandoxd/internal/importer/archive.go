@@ -12,5 +12,20 @@ import (
 // returns the first error of the reader or of fn, without reading r any further after fn returned an error.
 // It adds no read-ahead buffer of its own (the caller's gzip reader is the only buffering layer).
 func eachEntry(ctx context.Context, r io.Reader, fn func(index int, h *tar.Header, content io.Reader) error) error {
-	return errors.New("not implemented")
+	tr := tar.NewReader(r)
+	for index := 0; ; index++ {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		h, err := tr.Next()
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
+		if err != nil && (h == nil || !errors.Is(err, tar.ErrInsecurePath)) {
+			return err
+		}
+		if err := fn(index, h, tr); err != nil {
+			return err
+		}
+	}
 }

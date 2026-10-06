@@ -58,6 +58,21 @@ var migrations = []migration{
 		`CREATE VIRTUAL TABLE log_fts USING fts5(message, content='log_lines', content_rowid='record_id',
   tokenize='unicode61 remove_diacritics 2')`,
 	}},
+	{version: 3, stmts: []string{
+		`CREATE TABLE import_files (
+  id INTEGER PRIMARY KEY,
+  sha256 BLOB NOT NULL UNIQUE CHECK (length(sha256) = 32),
+  size INTEGER NOT NULL CHECK (size >= 0),
+  name TEXT NOT NULL,
+  file_name BLOB NOT NULL CHECK (length(file_name) <= 1024),
+  mod_time INTEGER,
+  source_type TEXT NOT NULL,
+  records INTEGER NOT NULL DEFAULT 0 CHECK (records >= 0),
+  complete INTEGER NOT NULL DEFAULT 0 CHECK (complete IN (0, 1)),
+  started_at INTEGER NOT NULL,
+  completed_at INTEGER
+) STRICT`,
+	}},
 }
 
 // migrate applies every step of steps above the database's current version, each in one transaction.

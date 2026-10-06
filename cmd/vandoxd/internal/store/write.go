@@ -61,7 +61,7 @@ func invalidBatch(format string, args ...any) error {
 
 // validateBatch checks b completely before anything is written.
 func validateBatch(b Batch) error {
-	if len(b.Records) == 0 {
+	if len(b.Records) == 0 && (b.Import == nil || !b.Import.Complete) {
 		return invalidBatch("no records")
 	}
 	if len(b.Records) > MaxBatchRecords {
@@ -81,8 +81,30 @@ func validateBatch(b Batch) error {
 			return fmt.Errorf("%w: %w", ErrInvalidBatch, err)
 		}
 	}
+	if b.Import != nil {
+		return validateImportBatch(b)
+	}
 	for i := range b.Records {
 		if err := validateRecord(&b.Records[i], b.AgentID != ""); err != nil {
+			return fmt.Errorf("%w: records[%d]: %w", ErrInvalidBatch, i, err)
+		}
+	}
+	return nil
+}
+
+// validateImportBatch checks the rules of a batch with Import: no agent, a valid step, import records only.
+func validateImportBatch(b Batch) error {
+	if b.AgentID != "" {
+		return invalidBatch("an import batch has no agent ID")
+	}
+	if b.Import.FileID <= 0 {
+		return invalidBatch("import file ID must be positive")
+	}
+	if b.Import.Done < 0 {
+		return invalidBatch("import done must not be negative")
+	}
+	for i := range b.Records {
+		if err := CheckImportRecord(&b.Records[i]); err != nil {
 			return fmt.Errorf("%w: records[%d]: %w", ErrInvalidBatch, i, err)
 		}
 	}
@@ -123,6 +145,11 @@ func (s *Store) WriteBatch(ctx context.Context, b Batch) (WriteResult, error) {
 		return WriteResult{}, fmt.Errorf("store: writing batch: %w", err)
 	}
 	defer w.close()
+	if b.Import != nil {
+		if err := advanceImport(ctx, tx, *b.Import, len(b.Records), b.ReceivedAt); err != nil {
+			return WriteResult{}, fmt.Errorf("store: writing batch: %w", err)
+		}
+	}
 	var res WriteResult
 	for i := range b.Records {
 		stored, err := w.write(ctx, &b, &b.Records[i])

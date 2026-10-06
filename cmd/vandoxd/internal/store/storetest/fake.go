@@ -3,14 +3,13 @@ package storetest
 
 import (
 	"context"
-	"errors"
 	"slices"
 	"sync"
 
 	"github.com/LarsLaskowski/Vandox/cmd/vandoxd/internal/store"
 )
 
-// Fake is a scripted stand-in for store.Writer, store.RecordReader and store.LogSearcher. It is safe for
+// Fake is a scripted stand-in for store.Writer, store.RecordReader, store.LogSearcher and store.ImportTracker. It is safe for
 // concurrent use; set the hook and Block fields before the first call.
 type Fake struct {
 	OnWrite   func(b store.Batch) (store.WriteResult, error)          // nil: every record stored
@@ -24,6 +23,7 @@ type Fake struct {
 	batches  []store.Batch
 	queries  []store.RecordQuery
 	searches []store.LogSearch
+	starts   []store.ImportFileStart
 }
 
 // WriteBatch records b and returns the scripted result.
@@ -42,12 +42,27 @@ func (f *Fake) WriteBatch(ctx context.Context, b store.Batch) (store.WriteResult
 
 // BeginImport records s and returns the scripted import state.
 func (f *Fake) BeginImport(ctx context.Context, s store.ImportFileStart) (store.ImportFile, error) {
-	return store.ImportFile{}, errors.New("not implemented")
+	f.mu.Lock()
+	f.starts = append(f.starts, s)
+	id := int64(len(f.starts))
+	f.mu.Unlock()
+	if err := f.wait(ctx); err != nil {
+		return store.ImportFile{}, err
+	}
+	if f.OnBeginImport != nil {
+		return f.OnBeginImport(s)
+	}
+	return store.ImportFile{
+		ID: id, SHA256: s.SHA256, Size: s.Size, Name: s.Name, FileName: s.FileName, ModTime: s.ModTime,
+		SourceType: s.SourceType, StartedAt: s.StartedAt,
+	}, nil
 }
 
 // ImportStarts returns the BeginImport arguments so far, in call order.
 func (f *Fake) ImportStarts() []store.ImportFileStart {
-	return nil
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.starts)
 }
 
 // Records records q and returns the scripted result.

@@ -19,7 +19,7 @@ import (
 const FileName = "vandox.db"
 
 // SchemaVersion is the database schema version this build reads and writes.
-const SchemaVersion = 2
+const SchemaVersion = 3
 
 // filePerm is the mode of the database file; SQLite gives its -wal and -shm files the same mode.
 const filePerm = 0o600
