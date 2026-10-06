@@ -5,8 +5,6 @@ package config
 import (
 	"fmt"
 	"io"
-	"net"
-	"net/netip"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -17,8 +15,6 @@ import (
 const (
 	// DefaultAgentFile is the default location of the agent configuration file.
 	DefaultAgentFile = "/etc/vandox/agent.yaml"
-	// DefaultBackendFile is the default location of the backend configuration file.
-	DefaultBackendFile = "/etc/vandox/vandoxd.yaml"
 
 	// MaxFileBytes is the largest configuration file read.
 	MaxFileBytes = 1 << 20
@@ -29,10 +25,6 @@ const (
 
 	// EnvAgentToken is the environment variable of the agent token.
 	EnvAgentToken = "VANDOX_AGENT_TOKEN"
-	// EnvWebPasswordHash is the environment variable of the web UI password hash.
-	EnvWebPasswordHash = "VANDOX_WEB_PASSWORD_HASH"
-	// EnvTelegramBotToken is the environment variable of the Telegram bot token.
-	EnvTelegramBotToken = "VANDOX_TELEGRAM_BOT_TOKEN"
 	// FileSuffix is appended to a secret's variable name to name the variable that holds a file path.
 	FileSuffix = "_FILE"
 )
@@ -108,25 +100,6 @@ func checkDirectory(file string, lines map[string]int, key, value string) error 
 		return keyError(file, lines, key, "must be an absolute, clean path (no trailing slash, no . or .. elements)")
 	}
 	return nil
-}
-
-// checkListen checks that value is a listen address with a port of 1 to 65535 and returns the port.
-func checkListen(file string, lines map[string]int, key, value string) (port uint16, err error) {
-	const reason = "must be [host]:port with an empty host or an IP address and a port of 1 to 65535"
-	host, portText, splitErr := net.SplitHostPort(value)
-	if splitErr != nil {
-		return 0, keyError(file, lines, key, reason)
-	}
-	if host != "" {
-		if _, parseErr := netip.ParseAddr(host); parseErr != nil {
-			return 0, keyError(file, lines, key, reason)
-		}
-	}
-	port, ok := parsePort(portText)
-	if !ok {
-		return 0, keyError(file, lines, key, reason)
-	}
-	return port, nil
 }
 
 // parsePort converts 1 to 5 ASCII digits to a port of 1 to 65535. A sign, a space or a name is not accepted.

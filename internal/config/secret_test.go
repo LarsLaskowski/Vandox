@@ -35,7 +35,6 @@ func TestSecret_Redaction(t *testing.T) {
 		requirePointerVerbRedacted(t, s, secretValue)
 		requirePointerVerbRedacted(t, secretHolder{S: s}, secretValue)
 		requirePointerVerbRedacted(t, AgentSecrets{AgentToken: s}, secretValue)
-		requirePointerVerbRedacted(t, BackendSecrets{AgentToken: s}, secretValue)
 	})
 	t.Run("marshaling", func(t *testing.T) { requireMarshalingRedacted(t, s) })
 	t.Run("slog handlers", func(t *testing.T) { requireSlogRedacted(t, s) })
