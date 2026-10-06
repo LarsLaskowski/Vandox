@@ -24,7 +24,12 @@ land, `vandoxd import` recognizes no file and lists every file as not recognized
   (`storage.directory`). In the container the compose file already mounts `./import` read-only at
   `/import` (0060), so the operator runs `docker exec -it vandoxd /vandoxd import /import/<name>` (`-it`
   so that Ctrl-C reaches the import). The import runs as the container's user 65532; files it cannot read
-  are listed as failed, and the README tells how to make a copied `/var/log` readable.
+  are listed as failed, and the README tells how to grant read access to a copied `/var/log` to that user
+  only (`chown` to 65532 or an ACL entry), never to everyone — it holds `auth.log` and `mail.log`.
+- **Limits:** a run handles at most 20,000 entries (files, subdirectories, archive entries); the import
+  stops as soon as the input exceeds that, before anything is stored, and larger inputs must be split.
+  There is no size limit: a huge decompressed input takes long and, once parsers exist, its records fill the
+  database's disk until the operator stops it with Ctrl-C (progress shows it).
 - **Inputs:** a directory (read recursively), a `.tar`, a gzip-compressed tar (`.tar.gz`, `.tgz`), a
   single gzip file (a rotated log), or a plain file. Compression and archives are recognized by their
   content, not by the file name. Gzip-compressed files inside a directory or a tar archive are
@@ -51,13 +56,15 @@ land, `vandoxd import` recognizes no file and lists every file as not recognized
 - **Summary** on standard output at the end: number of files found, imported, already imported, not
   recognized and failed; lines read, records stored and lines skipped; the time range of the stored
   records; the list of files not recognized and of files that failed, each with its reason; and lines a
-  parser skipped, with the first reasons per file. Names from the input are printed quoted, so a control
-  character in a file name cannot forge output lines.
+  parser skipped, with the first reasons per file. Names from the input are printed quoted — in the
+  summary and in the progress lines — so a control, C1 or bidirectional-override character in a file name
+  can neither forge output lines nor send escape sequences to the terminal.
 - **Exit code:** 0 when every file was imported, already imported or not recognized; 1 when a file
   failed, the import was interrupted, or the configuration, the database or the input could not be
   opened; 2 for a usage error.
 - **Failures** of one file (a corrupt or truncated gzip file, a parser error, a file that changed while it
-  was read) are reported in the summary and the import continues with the next file. A file that cannot
+  was read) are reported in the summary and the import continues with the next file. (Records a file that
+  changed during the import produced before the change was noticed stay stored; see 0069.) A file that cannot
   be read completely is not imported at all. A database error stops the import; running it again
   continues it.
 - The service and an import may run at the same time; they share the database's single-writer lock in

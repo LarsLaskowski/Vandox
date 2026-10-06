@@ -132,11 +132,17 @@ Importer (`cmd/vandoxd/internal/importer`)
   of the first `size` bytes, the appended bytes neither parsed nor counted in `Lines`; `ErrImportConflict`
   → `OutcomeFailed`.
 - [ ] AC-I7 (run-level errors): a missing root, a root that is neither a directory nor a regular file, and
-  more than `MaxFiles` files (nothing written, `ErrTooManyFiles`) return an error; any other store error
+  more than `MaxFiles` entries (`ErrTooManyFiles`, nothing written) return an error; any other store error
   stops the run with an error and a summary of what was done; invalid `Options` (nil registry, store or
   clock; `BatchRecords` above `store.MaxBatchRecords`; a negative `BatchRecords`, `BatchBytes` or
   `ProgressBytes`) return an error before
-  anything is read.
+  anything is read. The entry limit stops the scan **at the entry `MaxFiles`+1**, without reading, detecting
+  or hashing anything after it, pinned with: (a) a `.tar.gz` root of `MaxFiles`+3 regular entries of one
+  byte each, all claimed by a counting `DetectFunc` — `Run` returns an error wrapping `ErrTooManyFiles`,
+  `DetectFunc` was called exactly `MaxFiles` times, `storetest.Fake.ImportStarts` and `Batches` are empty;
+  (b) a root directory holding `MaxFiles`+1 one-byte files — `ErrTooManyFiles` and `DetectFunc` never called
+  (the directory's entries are counted while it is read, before any file is opened); (c) AC-I14's
+  stop-without-reading-further test of `eachEntry`.
 - [ ] AC-I8 (batching): a batch is flushed when it holds `BatchRecords` records, or when a record is added
   and the input consumed since the batch's first record was buffered has reached `BatchBytes` bytes,
   whichever comes first; the byte bound never flushes an empty batch. Every batch carries `Import` with
@@ -164,8 +170,21 @@ Importer (`cmd/vandoxd/internal/importer`)
 - [ ] AC-I12 (format sniffing, `sniffFormat`): table of heads — gzip (`1f 8b 08`), tar (USTAR/PAX and GNU
   magic at offset 257), empty, bzip2, xz, zstd, lz4, zip, 7z, a head shorter than 262 bytes, plain text,
   `1f 8b` with another method byte (plain).
-- [ ] AC-I13 (`openRegular`): opens a regular file; refuses a symbolic link (to a file and to a directory),
-  a directory and a FIFO with an error and without blocking.
+- [ ] AC-I13 (`openSource`, `openRegular`, `openDir`): `openSource` opens a directory root and a regular-file
+  root (through the directory holding it), resolves a symbolic link as root once, and refuses a FIFO, a
+  socket and a missing path without opening it. `openRegular(root, name)` opens a regular file below the
+  root; it refuses with an error and without blocking: a directory, a FIFO, a symbolic link whose target is
+  outside the root (`../`), a symbolic link with an absolute target, a symbolic link to a directory, a name
+  with `..` leaving the root. A symbolic link to a regular file **inside** the root is opened (`os.Root`
+  semantics; documented, since the scan lists links before and never passes one to `openRegular`).
+  `openDir(root, name)` opens a directory below the root and refuses a FIFO (without blocking) and a regular
+  file.
+- [ ] AC-I14 (`eachEntry`): calls `fn` for every header with its ordinal and content; with
+  `t.Setenv("GODEBUG", "tarinsecurepath=0")` an archive with entries named `../x`, `/abs` and `ok` gives the
+  same three calls (names unchanged, `tar.ErrInsecurePath` with a header is not an error) as without it;
+  when `fn` returns an error for entry *k*, `eachEntry` returns that error, calls `fn` no more, and never
+  reads the stream past the end of header *k* (a test reader that fails every read beyond that offset,
+  measured while the test archive is written).
 
 Command (`cmd/vandoxd`)
 
@@ -175,7 +194,9 @@ Command (`cmd/vandoxd`)
   (RFC 3339 UTC, or that no records were stored), and lists every not-recognized and failed file with its
   reason and every file with skipped lines with its first problems.
 - [ ] AC-C2: every path and reason in the summary is printed quoted (Go `%q`): a file name containing a
-  newline and an ANSI escape produces one summary line with the characters escaped.
+  newline and an ANSI escape produces one summary line with the characters escaped; a file name containing
+  U+009B (C1 CSI) and U+202E (right-to-left override) appears as `\u009b` and `‮`, and stdout holds
+  neither rune raw (no bytes `C2 9B` or `E2 80 AE`).
 - [ ] AC-C3: exit code 1 with the summary printed when a file failed or the import was interrupted; exit
   code 1 with a JSON error line on stderr for an invalid configuration, a database that cannot be opened
   and a missing root.
@@ -185,7 +206,11 @@ Command (`cmd/vandoxd`)
   lists the `import` sub-command.
 - [ ] AC-C5: progress is logged as JSON lines on stderr through the `log.level` of the configuration
   (one `file finished` line per file at `info`, one `hashing` line per `EventScanProgress` at `info` with the
-  path and the bytes read as attributes); `-version` still wins over everything.
+  path and the bytes read as attributes); `-version` still wins over everything. Every attribute whose value
+  derives from the input or the command line — `path`, `reason`, and `error` of a run-level error — is
+  logged as `strconv.Quote(value)`: for a file named with U+009B, U+202E, ESC, DEL and a newline, each stderr
+  line decodes as JSON, its `path` equals `strconv.Quote(name)`, and stderr holds none of these runes raw
+  (in particular no bytes `C2 9B`, `E2 80 AE` or `7F`).
 - [ ] AC-C6: `importParsers()` returns no parser (pinned until #16 adds the first).
 
 ## Approach
@@ -200,8 +225,13 @@ sub-command. `cmd/vandoxd/internal/store`: migration step 3, `BeginImport`, `Bat
 **Two passes** (0069). *Scan* (pass 1) walks the input, opens archives, decompresses gzip, reads the first
 `logparse.SniffBytes` bytes of every file for sniffing and detection, and — only for recognized files —
 reads the rest to compute SHA-256 and size; files that cannot be read completely fail here and are never
-partly imported. Unrecognized, failed and non-regular entries are listed. More than `MaxFiles` files stop
-the run before anything is written. While a recognized file is hashed, the scan reports `EventScanProgress`
+partly imported. Unrecognized, failed and non-regular entries are listed. **The entry limit is enforced
+while scanning, not after it**: every directory entry read and every tar header (except PAX global headers)
+counts; a directory is read in chunks (`(*os.File).ReadDir(256)`) and its entries are counted before they are
+sorted, and a tar header is counted before its content is touched; the entry that brings the count to
+`MaxFiles`+1 ends the scan at once with `ErrTooManyFiles` — it is neither read nor detected nor hashed, no
+further header or directory chunk is read, and nothing has been written (pass 2 has not started). Memory
+held by the scan is thus bounded by `MaxFiles` entries whatever the input holds. While a recognized file is hashed, the scan reports `EventScanProgress`
 every `ProgressBytes` bytes, so a multi-GB file shows progress before pass 2 starts. *Import* (pass 2)
 handles the recognized files in input order: it calls `BeginImport` with the hash, the size and the file's
 `logparse.File` (name and modification time); a complete file is already imported; a file stored with another
@@ -229,9 +259,20 @@ first runs `UPDATE import_files SET records = records + ?, complete = ?, complet
 records = ? AND complete = 0` and refuses with `ErrImportConflict` unless exactly one row changed; then the
 records go through the existing write path, so `log_fts` stays in step (0063).
 
-**Input handling** follows the table below and 0071: nothing below the root is followed, every file is
-opened with `O_NOFOLLOW|O_NONBLOCK` and checked to be regular after opening, nothing is extracted, names
+**Input handling** follows the table below and 0071: the root is resolved once and opened as an `os.Root`
+(a directory root itself, a file root through the directory holding it); every directory and file below it
+is opened through that `os.Root` (`openDir`, `openRegular`: `O_NONBLOCK`, `O_DIRECTORY` for directories, and
+`Fstat` on the opened descriptor), so no path component — not only the last — can lead outside the root,
+even when the input is swapped while it is read. Listing never follows a link; nothing is extracted; names
 from the input are labels only.
+
+**Logging input-derived text** (0072): `slog`'s JSON handler escapes only `"`, `\`, characters below U+0020
+and U+2028/U+2029; it writes C1 controls (U+0080–U+009F, e.g. U+009B CSI), DEL and format characters (e.g.
+U+202E) raw — verified in the security review and again here. So `importCommand` logs every attribute whose
+value derives from the input or the command line (`path`, `reason`, `error` of a run-level error) as
+`strconv.Quote(value)`, which escapes every rune that `strconv.IsPrint` rejects — all of categories Cc, Cf,
+Zl and Zp (checked over the whole Unicode range with Go 1.27), and invalid UTF-8. Message texts and the
+other attributes (outcome, source type — `CheckType`-validated —, counts) are fixed or numeric.
 
 **Command** (0072): `run` dispatches the first positional argument `import` to `importCommand`, which has
 its own flag set (`-config`, default the global value), loads the configuration, opens the store, builds the
@@ -240,24 +281,30 @@ progress with the JSON `slog` logger to stderr and writes the summary to stdout.
 
 ### Accepted input forms
 
-From the real consumers: `os`/`io/fs` (`filepath.WalkDir` reports entries with `Lstat` semantics and does not
-follow symbolic links), `compress/gzip` (multistream by default; header, data, checksum and trailing-data
+From the real consumers: `os` (`(*os.File).ReadDir` reports entry types with `Lstat` semantics and does not
+follow symbolic links; `os.Root` opens names component by component with `openat(…, O_NOFOLLOW)`, resolves a
+symbolic link only when its target stays inside the root and is relative, and refuses `..` leaving it;
+`filepath.WalkDir` is **not** used, because it reads each directory completely before the limit could stop
+it), `compress/gzip` (multistream by default; header, data, checksum and trailing-data
 errors), `archive/tar` (`Reader.Next` resolves PAX `x` and GNU `L`/`K` headers itself, returns PAX global
 headers `g` as headers, converts `TypeRegA` to `TypeReg` or `TypeDir`, expands PAX sparse files and keeps
-`TypeGNUSparse`; it bounds special headers to 1 MiB).
+`TypeGNUSparse`; it bounds special headers to 1 MiB; with `GODEBUG=tarinsecurepath=0` it returns a valid
+header **together with** `tar.ErrInsecurePath` for a non-local name and continues with the next call —
+`eachEntry` treats that pair as a normal header, since names are labels only).
 
 | Input form | Behavior |
 | ---------- | -------- |
 | Root: directory | walked recursively, entries in lexical order |
 | Root: regular file | read as one file (gzip and tar detection apply) |
 | Root: symbolic link | resolved once with `filepath.EvalSymlinks` (the operator named it); nothing below is followed |
-| Root: FIFO, socket, device; missing; unreadable | `Run` error; a FIFO is never opened |
+| Root: FIFO, socket, device; missing; unreadable (also: the directory holding a root file is not readable, since a file root is opened through it) | `Run` error; a FIFO is never opened |
 | Directory entry: regular file | read |
 | Directory entry: subdirectory | descended |
 | Directory entry: symbolic link (to file or directory) | listed unrecognized, "symbolic link (not followed)" |
 | Directory entry: FIFO, socket, device | listed unrecognized, "not a regular file"; never opened |
 | Directory entry: unreadable subdirectory or file | listed failed with the OS error (without repeating the path); walk continues |
-| Regular file replaced by a link or FIFO between listing and opening | `openRegular` fails (`O_NOFOLLOW`, `O_NONBLOCK`, `Fstat` not regular) → failed |
+| Regular file or directory replaced between listing and opening by a FIFO, device, directory or regular file of the other kind | `openRegular`/`openDir` fail without blocking (`O_NONBLOCK`, `O_DIRECTORY`, `Fstat` on the descriptor) → failed |
+| Any path component replaced between listing and opening by a symbolic link | resolved by `os.Root` only when relative and inside the root, else the open fails → failed; never a read outside the root (a link to another file of the input reads that file, which is input anyway) |
 | Relative path or entry name longer than `MaxPathBytes` (1024) | listed failed, "path too long", shown cut |
 | Name with control characters, invalid UTF-8, `..`, absolute, `./`, `//` | read normally; a label only (never a file system path); cleaned with `path.Clean`, leading `/` removed; printed with `%q`; stored with U+FFFD, cut to 1024 bytes |
 | Content starting `1f 8b 08` (gzip, any file name) | decompressed, all members; one layer only; `.gz` (case-insensitive) removed from the parser name |
@@ -266,7 +313,8 @@ headers `g` as headers, converts `TypeRegA` to `TypeReg` or `TypeDir`, expands P
 | Content (after optional gzip) with `ustar\x0000` or `ustar  \x00` at offset 257 | a tar archive: read when it is the root or in the root's directory tree |
 | Tar without magic (V7) | not an archive; goes to detection, normally "no parser recognized the file" |
 | Tar entry `TypeReg` (incl. converted `TypeRegA`, PAX sparse) | read |
-| Tar entry `TypeDir`, PAX global header | not listed |
+| Tar entry `TypeDir`, PAX global header | not listed (a `TypeDir` header counts toward `MaxFiles`, a PAX global header does not) |
+| Tar entry with a non-local name while `GODEBUG=tarinsecurepath=0` (`Next` returns the header and `tar.ErrInsecurePath`) | handled like any header of its type; the name is a label |
 | Tar entry `TypeSymlink` | listed unrecognized, "symbolic link (not followed)" |
 | Tar entry `TypeLink` | listed unrecognized, "hard link (the content is in the linked entry)" |
 | Tar entry `TypeChar`, `TypeBlock`, `TypeFifo`, `TypeCont`, `TypeGNUSparse`, unknown type | listed unrecognized, "not a regular file" |
@@ -276,8 +324,8 @@ headers `g` as headers, converts `TypeRegA` to `TypeReg` or `TypeDir`, expands P
 | Content `BZh`, `FD 37 7A 58 5A 00`, `28 B5 2F FD`, `04 22 4D 18`, `50 4B 03 04`, `37 7A BC AF 27 1C` | listed unrecognized, "unsupported format: bzip2/xz/zstd/lz4/zip/7z" |
 | Empty content (0 bytes, after decompression) | listed unrecognized, "empty" |
 | Anything else (text, BOM, CR LF, NUL bytes, invalid UTF-8, binary) | head and stream passed to the parsers unchanged; no parser → listed unrecognized, "no parser recognized the file" |
-| More than `MaxFiles` (20,000) files in the input | `Run` error `ErrTooManyFiles` after the scan, nothing written |
-| Very large content (GNU sparse expansion, gzip bomb) | streamed; bounded in memory, not in time — the context (SIGINT/SIGTERM: Ctrl-C under `docker exec -it`) stops it cleanly; stopping the container kills it, and the per-batch transactions keep the database consistent |
+| More than `MaxFiles` (20,000) entries in the input (directory entries of any kind, tar headers except PAX global headers; e.g. a tar.gz of millions of tiny entries, a directory of millions of files) | `Run` error `ErrTooManyFiles` **as soon as entry `MaxFiles`+1 is counted** — before its content is read, without reading further headers or directory chunks; nothing written |
+| Very large content (GNU sparse expansion, gzip bomb) | streamed; bounded in memory, not in time — the context (SIGINT/SIGTERM: Ctrl-C under `docker exec -it`) stops it cleanly; stopping the container kills it, and the per-batch transactions keep the database consistent. A bomb of **valid lines** (once parsers exist) is also stored, and so fills `storage.directory` until stopped — the operator watches the progress lines |
 | Content appended to a file after pass 1 hashed it | pass 2 reads only the hashed `size` bytes; the appended bytes are ignored |
 | Modification time outside the storable range (tar `mtime` before 1678 or after 2262) | detection sees it; stored as unknown, so `Parse` receives the zero time |
 
@@ -296,10 +344,10 @@ headers `g` as headers, converts `TypeRegA` to `TypeReg` or `TypeDir`, expands P
 | `cmd/vandoxd/internal/store` | `repository.go` | `ImportTracker`; compile-time assertion |
 | `cmd/vandoxd/internal/store/storetest` | `fake.go` | `OnBeginImport`, `BeginImport`, `ImportStarts`; `cloneBatch` copies `Import` |
 | `cmd/vandoxd/internal/importer` | `importer.go` (new) | constants, `ErrTooManyFiles`, `Store`, `Options`, `Outcome`, `FileResult`, `Problem`, `Summary`, `Count`, `Event`, `Progress`, `Run`, pass 2 |
-| `cmd/vandoxd/internal/importer` | `scan.go` (new) | pass 1: `scan`, `found`, `location` |
+| `cmd/vandoxd/internal/importer` | `scan.go` (new) | pass 1: `source`, `openSource`, `scan`, `found`, `location`; entry limit while scanning |
 | `cmd/vandoxd/internal/importer` | `archive.go` (new) | `eachEntry` |
 | `cmd/vandoxd/internal/importer` | `sniff.go` (new) | `format`, `sniffFormat` |
-| `cmd/vandoxd/internal/importer` | `open_unix.go` (new, `//go:build unix`), `open_other.go` (new, `//go:build !unix`) | `openRegular` |
+| `cmd/vandoxd/internal/importer` | `open_unix.go` (new, `//go:build unix`), `open_other.go` (new, `//go:build !unix`) | `openRegular`, `openDir` |
 | `cmd/vandoxd` | `main.go` | dispatch of `import`, usage text listing it |
 | `cmd/vandoxd` | `import.go` (new) | `importEnv`, `importParsers`, `importCommand`, `writeSummary` |
 
@@ -478,7 +526,7 @@ func (f *Fake) ImportStarts() []store.ImportFileStart
 // Package importer imports log files, directories and archives into the store.
 package importer
 const (
-	MaxFiles            = 20000   // files (incl. listed ones) one run handles
+	MaxFiles            = 20000   // entries one run handles: directory entries of any kind and tar headers except PAX global headers; enforced while scanning
 	MaxPathBytes        = 1024    // longest relative path or entry name
 	DefaultBatchRecords = 2000    // records per batch
 	DefaultBatchBytes   = 4 << 20 // input bytes per batch
@@ -563,9 +611,18 @@ type Progress struct {
 func Run(ctx context.Context, root string, opts Options) (Summary, error)
 
 // cmd/vandoxd/internal/importer/scan.go
+// source is the opened import root.
+type source struct {
+	root *os.Root // the root directory, or the directory holding a root file
+	file string   // the root file's name in root; "" when the root is a directory
+}
+// openSource resolves path once with filepath.EvalSymlinks, checks it with os.Lstat and opens it: a directory as
+// the root, a regular file through the directory holding it. Anything else is an error, and nothing is opened
+// before Lstat reported a directory or a regular file. The caller closes source.root.
+func openSource(path string) (source, error)
 // location tells where the content of a found file is read again.
 type location struct {
-	fsPath      string // the file, or the archive containing the entry
+	fsPath      string // the file, or the archive containing the entry; a name in source.root
 	entry       int    // ordinal of the entry among the archive's headers; -1 for a plain file
 	archiveGzip bool   // the archive is gzip-compressed
 	gzip        bool   // the file or entry content is gzip-compressed
@@ -579,12 +636,16 @@ type found struct {
 	sum    [32]byte
 	size   int64
 }
-// scan walks root (pass 1), lists every file and hashes the recognized ones.
-func scan(ctx context.Context, root string, reg *logparse.Registry) ([]found, error)
+// scan walks src (pass 1), lists every file and hashes the recognized ones, detecting with opts.Parsers and
+// reporting EventFileFinished and EventScanProgress (every opts.ProgressBytes) to opts.Progress. It returns an
+// error wrapping ErrTooManyFiles as soon as entry MaxFiles+1 is counted, without reading further.
+func scan(ctx context.Context, src source, opts Options) ([]found, error)
 
 // cmd/vandoxd/internal/importer/archive.go
 // eachEntry reads the tar stream r and calls fn for every header Next returns, with its ordinal and content;
-// it checks ctx between entries and returns the first error of the reader or of fn.
+// a header returned together with tar.ErrInsecurePath is a normal header. It checks ctx between entries and
+// returns the first error of the reader or of fn, without reading r any further after fn returned an error.
+// It adds no read-ahead buffer of its own (the caller's gzip reader is the only buffering layer).
 func eachEntry(ctx context.Context, r io.Reader, fn func(index int, h *tar.Header, content io.Reader) error) error
 
 // cmd/vandoxd/internal/importer/sniff.go
@@ -600,10 +661,13 @@ const (
 func sniffFormat(head []byte) (format, string)
 
 // cmd/vandoxd/internal/importer/open_unix.go and open_other.go
-// openRegular opens path read-only without following a symbolic link and without blocking, and returns an
-// error unless it is a regular file (checked on the open file). On non-unix systems it returns
-// errors.ErrUnsupported.
-func openRegular(path string) (*os.File, error)
+// openRegular opens name in root read-only with O_NONBLOCK and returns an error unless the opened file is
+// regular (Fstat on the descriptor). os.Root resolves a symbolic link only inside root. On non-unix systems
+// it returns errors.ErrUnsupported.
+func openRegular(root *os.Root, name string) (*os.File, error)
+// openDir opens the directory name in root read-only with O_DIRECTORY|O_NONBLOCK, so a FIFO or a file swapped
+// in fails without blocking. On non-unix systems it returns errors.ErrUnsupported.
+func openDir(root *os.Root, name string) (*os.File, error)
 
 // cmd/vandoxd/import.go
 // importEnv is what importCommand takes from the process: the parsers and the clock.
@@ -616,6 +680,8 @@ func importParsers() []logparse.Parser
 // importCommand runs "vandoxd import" with the arguments after "import" and returns the exit code.
 func importCommand(ctx context.Context, args []string, configPath string, environ []string, stdout, stderr io.Writer, env importEnv) int
 // writeSummary writes s as text to w; every path and reason is quoted with %q.
+// (Logging: importCommand passes path, reason and a run error's text to slog as strconv.Quote(value); the helper
+// doing so is unexported and free for the Dev.)
 func writeSummary(w io.Writer, s importer.Summary) error
 ```
 
@@ -634,10 +700,11 @@ when `fs.Arg(0) == "import"` and `-healthcheck` is not set.
 - `cmd/vandoxd/internal/importer/importer_test.go` (AC-I1–AC-I11, end to end through `Run`, against a real
   store in `t.TempDir()` where store semantics matter — AC-I3, AC-I4, AC-I6 — per 0067, and against
   `storetest.Fake` or a test-local discarding store otherwise; AC-I9 must not use `storetest.Fake`, which
-  keeps every batch), `cmd/vandoxd/internal/importer/scan_test.go` (`scan` on the listed forms of AC-I2 and
-  AC-I7's limits), `cmd/vandoxd/internal/importer/archive_test.go` (`eachEntry`),
+  keeps every batch; AC-I7 (a) and (b) through `Run`), `cmd/vandoxd/internal/importer/scan_test.go` (`scan`
+  on the listed forms of AC-I2, and `openSource` of AC-I13), `cmd/vandoxd/internal/importer/archive_test.go`
+  (AC-I14, `eachEntry`; the `GODEBUG` test uses `t.Setenv` and so is not parallel),
   `cmd/vandoxd/internal/importer/sniff_test.go` (AC-I12), `cmd/vandoxd/internal/importer/open_unix_test.go`
-  (AC-I13). Test files that create FIFOs (`syscall.Mkfifo`) carry `//go:build unix`. `open_other.go` is not
+  (AC-I13: `openRegular`, `openDir`). Test files that create FIFOs (`syscall.Mkfifo`) carry `//go:build unix`. `open_other.go` is not
   compiled on Linux and has no test. Archives are built in the test with `archive/tar` and `compress/gzip`
   in `t.TempDir()`; no binary fixture is committed. Tests that need an unreadable file skip when running as
   root (`os.Geteuid() == 0`).
@@ -656,22 +723,27 @@ Made by the Dev:
 
 - `README.md`: *Binaries* — the `import` sub-command; *Layout* — `internal/logparse/` and the importer under
   `cmd/vandoxd/internal/`; a new subsection *Import logs* under *Run the backend with Docker Compose*: put the
-  directory, archive or file into `import/`, make it readable for the container's user 65532 (e.g.
-  `sudo chmod -R a+rX import/<name>` — a copied `/var/log` holds files like `0640 root:adm` that are
-  otherwise listed as failed with "permission denied"), run `docker exec -it vandoxd /vandoxd import
+  directory, archive or file into `import/`, grant read access **to the container's user 65532 only** —
+  `sudo chown -R 65532:65532 import/<name> && sudo chmod -R u+rX import/<name>`, or, keeping the owner,
+  `sudo setfacl -R -m u:65532:rX import/<name>` — never world-readable (a copied `/var/log` holds
+  `0640 root:adm` files such as `auth.log` and `mail.log`, which are otherwise listed as failed with
+  "permission denied", and which must not become readable for every local user); `import/` itself only
+  needs to stay readable and searchable (as created, `0755`). Run `docker exec -it vandoxd /vandoxd import
   /import/<name>` (`-it` so that Ctrl-C reaches the import; without a terminal the import keeps running
   when the client is closed), what is read (input forms, nothing followed or extracted), the summary and
   the exit codes, re-import and resume (Ctrl-C stops after the current batch; stopping or restarting the
   container kills the import, which loses nothing stored and continues on the next run), the limitation for
   files that grew since their import (and that lines appended while the import runs are left for a later
-  import), and that the parsers arrive with #16–#20.
+  import), that a run handles at most 20,000 entries (split larger inputs), that a huge decompressed input
+  of valid lines (a gzip bomb, once parsers exist) is stored and fills `storage.directory` until it is stopped
+  — watch the progress lines and press Ctrl-C —, and that the parsers arrive with #16–#20.
 - `docs/ARCHITECTURE.md`: the status paragraph (the import framework exists, no parser yet); *Components* —
   `importer` under `cmd/vandoxd/internal/`, `logparse` under `internal/`, and `vandoxd import`; *Data flow* —
   one paragraph on the import path (origin `import`, never live, so never alerting, 0022); *Storage and
   retention* — schema version 3 with `import_files`, and that imports are made idempotent per file content,
   not per record; links to 0069–0072, and 0072 instead of 0058 where the command line is described.
-- `.squad/project.md`: *Security areas* 9 and 10 name `cmd/vandoxd/internal/importer` (`scan`, `openRegular`,
-  `eachEntry`, `sniffFormat`, the limits) and `internal/logparse` (`LineReader`) with records 0069–0071;
+- `.squad/project.md`: *Security areas* 9 and 10 name `cmd/vandoxd/internal/importer` (`scan`, `openSource`,
+  `openRegular`, `openDir`, `eachEntry`, `sniffFormat`, the limits) and `internal/logparse` (`LineReader`) with records 0069–0071;
   *Test doubles* — a row for log parsers (`logparsetest.Parser`, implemented) and `storetest.Fake`'s
   `BeginImport`; *Integration surface* — a new entry **A new log parser** touches: its type in `internal/`,
   registration in `importParsers` (`cmd/vandoxd/import.go`), detection tests against the other registered
@@ -701,12 +773,19 @@ Made by the Dev:
 - **No writes from input** (area 9): nothing is extracted; entry names and paths are labels in the summary,
   in logs and in `import_files.name`, never file system paths. The only file the import writes is the
   database through the store (existing checks of 0065).
-- **No following, no blocking** (areas 9, 10): see *Accepted input forms*. `openRegular` uses
-  `O_NOFOLLOW|O_NONBLOCK|O_CLOEXEC` and `Fstat` on the opened descriptor, so a swap between listing and
-  opening cannot redirect the read or block on a FIFO.
+- **No following, no blocking** (areas 9, 10): see *Accepted input forms*. Listing never follows a link.
+  Every open below the root goes through one `os.Root`, which opens each path component with
+  `openat(…, O_NOFOLLOW)` and resolves a link only when it is relative and stays inside the root — so a swap
+  of **any** component between listing and opening cannot redirect the read outside the root (a plain
+  `O_NOFOLLOW` would protect only the last component). The narrower, accurate claim: such a swap can at
+  most make another file **of the input** be read under the listed name. `openRegular` and `openDir` add
+  `O_NONBLOCK` (and `O_DIRECTORY`) and check the opened descriptor with `Fstat`, so a swap cannot block on a
+  FIFO either.
 - **Bounded memory** (area 10): streams only; one decompression layer; head of 4 KiB; line length 16 KiB
-  (`LineReader`); batches of at most 2,000 records and 4 MiB of input; at most 20,000 files of at most
-  1024-byte paths per run (the scan's list stays below ~50 MiB in the worst case, typical inputs far less);
+  (`LineReader`); batches of at most 2,000 records and 4 MiB of input; at most 20,000 entries of at most
+  1024-byte paths per run, **enforced while scanning** — the entry `MaxFiles`+1 ends the scan before it is
+  read, and directories are read in chunks and counted before they are sorted — so the scan's list and a
+  directory's entries stay below ~50 MiB in the worst case (typical inputs far less);
   `archive/tar` bounds its special headers to 1 MiB. **Time** is not bounded (a gzip bomb or a huge sparse
   entry is read to its end); every read checks the context, so SIGINT or SIGTERM to the import process
   (Ctrl-C under `docker exec -it`) ends it cleanly, and the run resumes later. The plan does **not** rely on
@@ -715,19 +794,27 @@ Made by the Dev:
   `synchronous = FULL`, an uncommitted batch is rolled back at the next open) and the `Done`
   compare-and-set: a killed run leaves at most committed batches with a matching count, which the next run
   resumes.
-- **Output injection** (area 12): the summary prints every path and reason with `%q`; progress goes through
-  the JSON `slog` handler as attributes. Parser `Skip` reasons are fixed texts by contract and are quoted
-  anyway. OS errors are reported without repeating the path.
+- **Output injection** (area 12): the summary prints every path and reason with `%q`. Progress goes through
+  the JSON `slog` handler, which alone is **not** enough: it writes C1 controls such as U+009B (CSI, which
+  terminals interpret like `ESC [`), DEL and format characters such as U+202E raw (verified). Every
+  attribute derived from the input or the command line (`path`, `reason`, a run error's text) is therefore
+  logged as `strconv.Quote(value)`, which escapes every Cc, Cf, Zl and Zp rune and invalid UTF-8 (AC-C2,
+  AC-C5). Parser `Skip` reasons are fixed texts by contract and are quoted anyway. OS errors are reported
+  without repeating the path. Volume: a gzip bomb of valid lines fills `storage.directory` until it is
+  stopped (no size limit, 0071); the progress lines make that visible.
 - **Idempotency under concurrency**: the `Done` compare-and-set of `ImportStep` in the batch transaction makes
   two concurrent runs of the same content, or a run racing a resumed one, fail with `ErrImportConflict`
   instead of storing twice.
 - **Integrity**: SHA-256 over the decompressed content; pass 2 reads exactly the `size` bytes pass 1 hashed,
   so a content whose hashed part changes or shrinks between the passes fails and is not completed, while
-  bytes appended afterwards are not read. A resumed content is parsed with the `File` stored at its first
+  bytes appended afterwards are not read. The change is only detected when pass 2 ends: records written from
+  the changed content before that stay stored and counted under the original hash (0069, *Consequences*). A resumed content is parsed with the `File` stored at its first
   import, so the records of both runs come from one deterministic parse (0069, 0070).
 - **Permissions**: the import runs as the container's user 65532 and reads only what that user may read; it
   gains no privilege. An unreadable file is listed as failed with the OS error; the README tells the
-  operator to make the input readable rather than to run the import as root.
+  operator to grant read access to user 65532 only (`chown` to 65532 or a `setfacl` entry for it) rather
+  than to run the import as root or to make the copy world-readable — a copied `/var/log` holds
+  `auth.log` and `mail.log`, which must stay unreadable for other local users.
 - No new dependency (`archive/tar`, `compress/gzip`, `crypto/sha256`, `syscall`).
 
 ## Decision records
@@ -792,3 +879,39 @@ Devil's Advocate, one round: 0 major, 6 minor objections. All six accepted; scop
 6. **The decision index lacks 0069–0072 and 0058's status** — accepted as scheduled, not done now: the index
    lists only decided records, so rows for Proposed records would break its convention. The Lead adds them
    (and changes 0058) in `approve-pr`, as *Decision records* now states with owner and file.
+
+### Security plan review, round 1
+
+Security: CHANGES_REQUIRED with 3 blocking and 4 non-blocking points. All seven accepted; scope and tier
+unchanged (`security`). (The `chmod -R a+rX` named in answer 3 above is replaced by B3.)
+
+- **B1 — `MaxFiles` was checked after the scan, so a tar.gz of millions of tiny entries grows memory
+  without bound** — accepted, fixed. The limit is enforced while scanning: every directory entry and every
+  tar header except PAX global headers counts, directories are read in chunks of 256 and counted before
+  sorting (so `filepath.WalkDir`, which reads a whole directory first, is no longer used), and the entry that
+  brings the count to `MaxFiles`+1 ends the scan with `ErrTooManyFiles` before its content is read and
+  without reading further. Revised: *Approach*, the input table row, `MaxFiles`, `scan` and `eachEntry` doc
+  comments, *Bounded memory*, AC-I7 (tests a–c), new AC-I14; 0071 *Limits*.
+- **B2 — the JSON `slog` handler writes U+009B and U+202E raw, so names can inject terminal escapes** —
+  accepted, fixed; reproduced here (also DEL raw; ESC and U+2028 are escaped). Input-derived attributes
+  (`path`, `reason`, a run error's text) are logged as `strconv.Quote(value)`; checked over the whole Unicode
+  range that `strconv.Quote` escapes every Cc, Cf, Zl and Zp rune. The claim in *Output injection* is
+  corrected. Revised: *Approach* (new paragraph), *Output injection*, AC-C2, AC-C5; 0072.
+- **B3 — the README must not make a copied `/var/log` world-readable** — accepted, fixed: `chown -R
+  65532:65532` plus `chmod -R u+rX`, or `setfacl -R -m u:65532:rX`, on `import/<name>` only. Revised:
+  *Documentation updates*, *Permissions*; 0071, 0072, spec.
+- **N1 — `O_NOFOLLOW` covers only the final component** — accepted, and both options taken: every open below
+  the root now goes through `os.Root` (`openSource`, `openRegular(root, name)`, new `openDir`), which refuses
+  any component leading outside the root; the claim is narrowed to what `os.Root` guarantees (a swapped
+  in-root link can make another input file be read, never a file outside the root). Revised: *Input
+  handling*, consumers paragraph, input table, signatures, AC-I13, *No following, no blocking*; 0071.
+- **N2 — with `GODEBUG=tarinsecurepath=0`, `Next` returns a header and `tar.ErrInsecurePath`** — accepted;
+  confirmed in `archive/tar/reader.go` (Go 1.27: the error is not sticky, the next call continues).
+  `eachEntry` treats the pair as a normal header; AC-I14 tests it with `t.Setenv`.
+- **N3 — a gzip bomb of valid lines also fills `storage.directory`** — accepted: stated in the input table,
+  *Output injection* (volume), the README text and 0071 *Consequences*.
+- **N4 — records from content that changed during pass 2 stay counted under the old hash** — accepted as a
+  documented limitation in 0069 *Consequences* and *Integrity*; detecting the change before writing would
+  need the hash before the parse, i.e. a third pass or a temporary copy (rejected in 0069, options 5 and 6).
+  Removing such records belongs to "deleting or re-doing an import", already out of scope (spec); no
+  separate follow-up issue.

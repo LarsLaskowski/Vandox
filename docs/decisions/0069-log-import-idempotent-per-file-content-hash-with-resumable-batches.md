@@ -94,7 +94,8 @@ content that can never be completed.)
   AND complete = 0`; unless exactly one row changed, it returns `ErrImportConflict` and writes nothing. A batch
   without records is valid only to complete a file. The records go through the existing write path, so
   `WriteBatch` stays the only writer of `log_lines` and `log_fts` (0063).
-- The importer (`cmd/vandoxd/internal/importer`) runs two passes. Pass 1 lists every file, detects its parser
+- The importer (`cmd/vandoxd/internal/importer`) runs two passes. Pass 1 lists every file (stopping at the
+  entry limit of 0071 as soon as it is exceeded), detects its parser
   and, for recognized files, reads the whole decompressed content to compute SHA-256 and size; a file that
   cannot be read completely (truncated or corrupt gzip, I/O error) fails here and is not imported at all.
   While a file is hashed, pass 1 reports progress every 64 MiB (0072).
@@ -120,7 +121,14 @@ content that can never be completed.)
   copy of `/var/log`. Recognizing a known prefix is split into a follow-up issue.
 - A file whose hashed part changes or shrinks while it is imported fails; the records written before the
   change stay stored, and the file is not completed, so it is imported again under its new hash later. Inputs
-  are copies, so this is rare; the summary says so. A file that is only appended to while it is imported is
+  are copies, so this is rare; the summary says so. The change is detected only when pass 2 has read the
+  whole hashed size, so **the records written before that come from the changed content but stay counted
+  under the original hash** (`import_files.records` of that content). Should the original content be
+  imported later, it resumes after that count, dropping as many of its own records as the changed content
+  produced — the stored records of that file then mix both contents. Detecting the change before writing
+  would need the hash before parsing, i.e. a third pass or a temporary copy (options 5 and 6). Removing such
+  records needs the record-to-file link below and falls under deleting or re-doing an import, which is out
+  of scope. A file that is only appended to while it is imported is
   imported up to the size hashed in pass 1; the appended lines come with a later import of the grown file
   (and fall under the grown-file limit above). A line half-written at that size is imported as a last line
   without newline.

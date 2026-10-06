@@ -26,10 +26,11 @@ must exist as data (`importer.Summary`), not only as text.
    `import`, because `vandoxd import -config f p` is what users type and `vandoxd -config f import p` is
    what the global flag set already parses.
 2. **Where output goes**: everything as JSON log lines on stderr (uniform, but the summary becomes hard to
-   read for a person at a terminal); everything as text (progress loses the escaping of the JSON handler and
-   is hard to filter); or **progress as JSON lines on stderr through the same `slog` handler as the service,
+   read for a person at a terminal); everything as text (progress is hard to filter); or **progress as JSON lines on stderr through the same `slog` handler as the service,
    the summary as text on stdout** — readable at the end, filterable during the run, and stdout carries only
-   the result.
+   the result. For input-derived values the JSON handler's escaping alone was considered sufficient at
+   first; the security plan review showed it writes U+009B and U+202E raw, so those values are quoted
+   before they reach the handler (see *Decision*).
 3. **Exit codes**: 0 also when files failed (the summary tells), or **1 whenever a file failed or the run was
    interrupted**, so scripts notice; "not recognized" alone stays 0, because a saved `/var/log` always holds
    files no parser claims (e.g. `wtmp`, `lastlog`).
@@ -61,7 +62,12 @@ Changed:
   (path, outcome, source type, reason, lines, records, skipped), one `hashing` line per
   `importer.DefaultProgressBytes` (64 MiB) of a file hashed in the scan (path, bytes), one when the scan is
   done (files, pending), one per `importer.ProgressLines` lines of a large file. Names are attributes, never
-  part of the message.
+  part of the message. The JSON handler alone does not make them safe for a terminal: it escapes `"`, `\`,
+  characters below U+0020 and U+2028/U+2029, but writes C1 controls (U+009B is a CSI that terminals act on),
+  DEL and format characters such as U+202E raw. Every attribute derived from the input or the command line —
+  `path`, `reason` and the text of a run-level error — is therefore logged as `strconv.Quote(value)`, which
+  escapes every rune of categories Cc, Cf, Zl and Zp and invalid UTF-8; the other attributes are fixed
+  texts, validated source types or numbers.
 - The summary is written to stdout as text: counts per outcome, lines read, records stored, lines skipped,
   the time range of the stored records in RFC 3339 UTC (or that none were stored), whether the run was
   interrupted, then the files not recognized and the files that failed, each with its reason, and the files
@@ -76,8 +82,10 @@ Changed:
   documents it. `-it` is needed for Ctrl-C to reach the import (without a terminal, `docker exec` forwards no
   signal, and closing the client leaves the import running); stopping the container kills the import, which
   loses nothing committed and resumes on the next run (0069, 0071). The import runs as the container's user
-  65532, so the README tells the operator to make the input readable (`chmod -R a+rX`) — a copied
-  `/var/log` holds `0640 root:adm` files. The import shares the container's memory limit with the service,
+  65532, so the README tells the operator to grant read access to that user only (`chown -R 65532:65532`
+  plus `chmod -R u+rX`, or `setfacl -R -m u:65532:rX`, on `import/<name>`) — a copied `/var/log` holds
+  `0640 root:adm` files such as `auth.log` and `mail.log`, which must not become world-readable (0071). The
+  import shares the container's memory limit with the service,
   which the bounded batches of 0071 allow for.
 - Scripts can rely on stdout holding only the summary and on exit code 1 for any failed file.
 - The web UI (later issue) calls `importer.Run` and renders `importer.Summary` itself; the text format is the
