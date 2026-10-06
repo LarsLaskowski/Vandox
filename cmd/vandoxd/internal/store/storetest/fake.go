@@ -3,6 +3,7 @@ package storetest
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"sync"
 
@@ -15,6 +16,8 @@ type Fake struct {
 	OnWrite   func(b store.Batch) (store.WriteResult, error)          // nil: every record stored
 	OnRecords func(q store.RecordQuery) ([]store.StoredRecord, error) // nil: no records
 	OnSearch  func(q store.LogSearch) ([]store.StoredRecord, error)   // nil: no hits
+	// OnBeginImport scripts BeginImport; nil: a new, incomplete file with IDs 1, 2, …
+	OnBeginImport func(f store.ImportFileStart) (store.ImportFile, error)
 	Block     chan struct{}                                           // non-nil: every call waits until closed or ctx is done
 
 	mu       sync.Mutex
@@ -35,6 +38,16 @@ func (f *Fake) WriteBatch(ctx context.Context, b store.Batch) (store.WriteResult
 		return store.WriteResult{Stored: len(b.Records)}, nil
 	}
 	return f.OnWrite(b)
+}
+
+// BeginImport records s and returns the scripted import state.
+func (f *Fake) BeginImport(ctx context.Context, s store.ImportFileStart) (store.ImportFile, error) {
+	return store.ImportFile{}, errors.New("not implemented")
+}
+
+// ImportStarts returns the BeginImport arguments so far, in call order.
+func (f *Fake) ImportStarts() []store.ImportFileStart {
+	return nil
 }
 
 // Records records q and returns the scripted result.
@@ -81,6 +94,10 @@ func (f *Fake) wait(ctx context.Context) error {
 // cloneBatch returns b with its own Records slice.
 func cloneBatch(b store.Batch) store.Batch {
 	b.Records = slices.Clone(b.Records)
+	if b.Import != nil {
+		step := *b.Import
+		b.Import = &step
+	}
 	return b
 }
 
@@ -113,4 +130,5 @@ var (
 	_ store.Writer       = (*Fake)(nil)
 	_ store.RecordReader = (*Fake)(nil)
 	_ store.LogSearcher  = (*Fake)(nil)
+	_ store.ImportTracker = (*Fake)(nil)
 )

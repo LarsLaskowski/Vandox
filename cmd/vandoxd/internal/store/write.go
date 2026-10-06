@@ -26,6 +26,7 @@ type Batch struct {
 	ClockOffset *time.Duration // optional
 	ReceivedAt  time.Time      // required, UTC
 	Records     []model.Record
+	Import      *ImportStep // optional: every record has origin import, AgentID is ""; the step is applied in the same transaction
 }
 
 // WriteResult counts the records of a batch that were stored and those already present.

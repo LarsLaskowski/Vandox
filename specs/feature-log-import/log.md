@@ -13,3 +13,4 @@ One line per pipeline step: date, step, member, result. Lead decisions and escal
 | 2026-10-06 | 3 Plan security review (round 2) | squad-security | CHANGES_REQUIRED: B1-B3, N1-N4 resolved, os.Root design sound; one new blocking wording defect: plan.md AC-C2 (line ~198) contains a literal U+202E where the escaped text U+202E was meant |
 | 2026-10-06 | 3 Plan decide | squad-lead | DECIDED: wording defect in AC-C2 (raw rune, plan.md:198) accepted and fixed with escaped text; scan of plan files and records 0069-0072 finds no other Cc/Cf/Zl/Zp characters; one security delta confirmation follows |
 | 2026-10-06 | 3 Plan security delta | squad-security | APPROVED (AC-C2 wording fixed, no other change) |
+| 2026-10-06 | 4 Skeleton | squad-dev | DONE: all new types/functions stubbed, build and vet green, no migration step 3 |

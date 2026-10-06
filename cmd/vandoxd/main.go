@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"time"
 
 	"github.com/LarsLaskowski/Vandox/internal/config"
 	"github.com/LarsLaskowski/Vandox/internal/version"
@@ -43,6 +44,9 @@ func run(ctx context.Context, args, environ []string, stdout, stderr io.Writer, 
 			return 1
 		}
 		return 0
+	}
+	if fs.Arg(0) == "import" && !*healthFlag {
+		return importCommand(ctx, fs.Args()[1:], *configPath, environ, stdout, stderr, importEnv{parsers: importParsers(), now: time.Now})
 	}
 	if fs.NArg() > 0 {
 		_, _ = fmt.Fprintf(stderr, "vandoxd: unexpected argument %q\n", fs.Arg(0))
