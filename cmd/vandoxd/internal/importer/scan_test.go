@@ -2,10 +2,13 @@ package importer
 
 import (
 	"archive/tar"
+	"compress/gzip"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -428,6 +431,68 @@ func testLongDirectoryPath(t *testing.T) {
 	checkTooLong(t, got[0], MaxPathBytes+16)
 	if got[1].parser == nil {
 		t.Error("the file after the long path was not recognized, want the scan to continue")
+	}
+}
+
+// writeLongNameArchive writes a tar.gz with count regular entries whose PAX path is nameBytes long.
+func writeLongNameArchive(t *testing.T, path string, count, nameBytes int) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatalf("MkdirAll(%q) error = %v, want nil", filepath.Dir(path), err)
+	}
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatalf("Create(%q) error = %v, want nil", path, err)
+	}
+	zw := gzip.NewWriter(f)
+	tw := tar.NewWriter(zw)
+	for i := range count {
+		name := fmt.Sprintf("%05d", i) + strings.Repeat("a", nameBytes-5)
+		h := &tar.Header{Name: name, Typeflag: tar.TypeReg, Mode: 0o644, ModTime: modA, Format: tar.FormatPAX}
+		if err := tw.WriteHeader(h); err != nil {
+			t.Fatalf("WriteHeader(entry %d) error = %v, want nil", i, err)
+		}
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatalf("tar Close() error = %v, want nil", err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatalf("gzip Close() error = %v, want nil", err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatalf("Close(%q) error = %v, want nil", path, err)
+	}
+}
+
+func TestScan_MemoryStaysBoundedForHugeEntryNames(t *testing.T) {
+	const (
+		entries   = 300
+		nameBytes = 1_000_000
+		maxGrowth = 16 << 20
+	)
+	root := filepath.Join(t.TempDir(), "in")
+	writeLongNameArchive(t, filepath.Join(root, "names.tar.gz"), entries, nameBytes)
+	runtime.GC()
+	var before runtime.MemStats
+	runtime.ReadMemStats(&before)
+
+	got, err := scanOf(t, root, alphaParser())
+
+	runtime.GC()
+	var after runtime.MemStats
+	runtime.ReadMemStats(&after)
+	runtime.KeepAlive(got)
+	if err != nil || len(got) != entries {
+		t.Fatalf("scan() = %d files, error %v, want %d files and nil", len(got), err, entries)
+	}
+	for i, f := range got {
+		if f.result.Outcome != OutcomeFailed || !strings.Contains(f.result.Reason, "path too long") || f.parser != nil {
+			t.Fatalf("file %d result = %+v, want failed with the reason path too long", i, f.result)
+		}
+	}
+	if growth := int64(after.HeapAlloc) - int64(before.HeapAlloc); growth > maxGrowth {
+		t.Errorf("live heap grew by %d MiB while %d entries with names of %d bytes were listed, want less than %d MiB",
+			growth>>20, entries, nameBytes, maxGrowth>>20)
 	}
 }
 
