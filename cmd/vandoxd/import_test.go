@@ -325,7 +325,7 @@ func TestWriteSummary_QuotesEveryPathAndReason(t *testing.T) {
 					t.Errorf("summary = %q, want %s quoted", text, want)
 				}
 			}
-			if forged := lineStarting(text, "red-forged-line"); forged {
+			if lineStarting(text, "red-forged-line") {
 				t.Errorf("summary = %q, want no line forged by a newline in a name", text)
 			}
 		})

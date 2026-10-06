@@ -1868,7 +1868,7 @@ func TestRun_MemoryStaysFlatForALargeFile(t *testing.T) {
 	if samples < 10 {
 		t.Fatalf("heap sampled %d times during the import, want at least 10", samples)
 	}
-	if limit := base.HeapAlloc + 16<<20; peak >= limit {
+	if peak >= base.HeapAlloc+16<<20 {
 		t.Errorf("live heap during the import peaked at %d bytes, want below the baseline %d plus 16 MiB", peak, base.HeapAlloc)
 	}
 	if sum.Lines != lines || sum.Records != lines || st.records.Load() != lines {
