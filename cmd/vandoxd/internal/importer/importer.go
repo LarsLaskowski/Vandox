@@ -152,8 +152,8 @@ func Run(ctx context.Context, root string, opts Options) (Summary, error) {
 		return sum, fmt.Errorf("importer: opening the input: %w", err)
 	}
 	defer func() { _ = src.root.Close() }()
-	r := &runner{ctx: ctx, src: src, opts: opts}
-	err = r.run()
+	r := &runner{src: src, opts: opts}
+	err = r.run(ctx)
 	sum.Interrupted = err != nil && ctx.Err() != nil && errors.Is(err, ctx.Err())
 	r.summarize(&sum)
 	sum.Finished = opts.Now().UTC()
@@ -184,7 +184,6 @@ func (o *Options) normalize() error {
 
 // runner holds the state of a run.
 type runner struct {
-	ctx   context.Context
 	src   source
 	opts  Options
 	items []found
@@ -192,8 +191,8 @@ type runner struct {
 }
 
 // run executes pass 1 and pass 2.
-func (r *runner) run() error {
-	items, err := scan(r.ctx, r.src, r.opts)
+func (r *runner) run(ctx context.Context) error {
+	items, err := scan(ctx, r.src, r.opts)
 	r.items = items
 	if err != nil {
 		return err
@@ -205,7 +204,7 @@ func (r *runner) run() error {
 		}
 	}
 	r.report(Progress{Event: EventScanned, Files: len(items), Pending: pending})
-	return r.importAll()
+	return r.importAll(ctx)
 }
 
 // report passes p to the progress callback, if any.
@@ -246,17 +245,17 @@ var errDone = errors.New("importer: archive done")
 
 // importAll imports the recognized files in input order. The entries of one archive are imported in a single
 // pass over the archive.
-func (r *runner) importAll() error {
+func (r *runner) importAll(ctx context.Context) error {
 	for i := 0; i < len(r.items); {
 		it := &r.items[i]
 		switch {
 		case it.parser == nil:
 			i++
 		case it.loc.entry < 0:
-			r.importPlain(it)
+			r.importPlain(ctx, it)
 			i++
 		default:
-			i = r.importArchive(i)
+			i = r.importArchive(ctx, i)
 		}
 		if r.fatal != nil {
 			return r.fatal
@@ -266,8 +265,8 @@ func (r *runner) importAll() error {
 }
 
 // importPlain imports the file it, a file of the root that may be gzip-compressed.
-func (r *runner) importPlain(it *found) {
-	file, ok := r.begin(it)
+func (r *runner) importPlain(ctx context.Context, it *found) {
+	file, ok := r.begin(ctx, it)
 	if !ok {
 		return
 	}
@@ -282,12 +281,12 @@ func (r *runner) importPlain(it *found) {
 		r.failFile(it, reasonOf(err))
 		return
 	}
-	r.importContent(it, file, content)
+	r.importContent(ctx, it, file, content)
 }
 
 // importArchive imports the recognized entries of the archive that holds r.items[first] in one pass over the
 // archive and returns the index of the first item after the archive's items.
-func (r *runner) importArchive(first int) int {
+func (r *runner) importArchive(ctx context.Context, first int) int {
 	end := first
 	var group []int
 	for end < len(r.items) && r.items[end].loc.fsPath == r.items[first].loc.fsPath && r.items[end].loc.entry >= 0 {
@@ -296,9 +295,9 @@ func (r *runner) importArchive(first int) int {
 		}
 		end++
 	}
-	pos, err := r.readArchive(r.items[first].loc, group)
-	if r.fatal == nil && r.ctx.Err() != nil {
-		r.fatal = r.ctx.Err()
+	pos, err := r.readArchive(ctx, r.items[first].loc, group)
+	if r.fatal == nil && ctx.Err() != nil {
+		r.fatal = ctx.Err()
 	}
 	if r.fatal != nil {
 		return end
@@ -316,7 +315,7 @@ func (r *runner) importArchive(first int) int {
 // readArchive opens the archive at loc and imports the entries of group, which are in ascending order of
 // their ordinals. It returns how many entries of group were handled and the error that ended the reading
 // before that, if any.
-func (r *runner) readArchive(loc location, group []int) (int, error) {
+func (r *runner) readArchive(ctx context.Context, loc location, group []int) (int, error) {
 	f, err := openRegular(r.src.root, loc.fsPath)
 	if err != nil {
 		return 0, err
@@ -327,13 +326,13 @@ func (r *runner) readArchive(loc location, group []int) (int, error) {
 		return 0, err
 	}
 	pos := 0
-	err = eachEntry(r.ctx, raw, func(index int, _ *tar.Header, content io.Reader) error {
+	err = eachEntry(ctx, raw, func(index int, _ *tar.Header, content io.Reader) error {
 		it := &r.items[group[pos]]
 		if it.loc.entry != index {
 			return nil
 		}
 		pos++
-		r.importEntry(it, content)
+		r.importEntry(ctx, it, content)
 		if r.fatal != nil {
 			return r.fatal
 		}
@@ -349,8 +348,8 @@ func (r *runner) readArchive(loc location, group []int) (int, error) {
 }
 
 // importEntry imports the archive entry it, whose raw content is content.
-func (r *runner) importEntry(it *found, content io.Reader) {
-	file, ok := r.begin(it)
+func (r *runner) importEntry(ctx context.Context, it *found, content io.Reader) {
+	file, ok := r.begin(ctx, it)
 	if !ok {
 		return
 	}
@@ -359,7 +358,7 @@ func (r *runner) importEntry(it *found, content io.Reader) {
 		r.failFile(it, reasonOf(err))
 		return
 	}
-	r.importContent(it, file, body)
+	r.importContent(ctx, it, file, body)
 }
 
 // decompress returns r, or its gzip decompression when gzipped is set.
@@ -372,8 +371,8 @@ func decompress(r io.Reader, gzipped bool) (io.Reader, error) {
 
 // begin asks the store about the content of it. It returns the stored state and true when the content is to be
 // imported (again); otherwise the result of it is final. A store error ends the run.
-func (r *runner) begin(it *found) (store.ImportFile, bool) {
-	file, err := r.opts.Store.BeginImport(r.ctx, store.ImportFileStart{
+func (r *runner) begin(ctx context.Context, it *found) (store.ImportFile, bool) {
+	file, err := r.opts.Store.BeginImport(ctx, store.ImportFileStart{
 		SHA256:     it.sum,
 		Size:       it.size,
 		Name:       it.result.Path,
@@ -384,7 +383,7 @@ func (r *runner) begin(it *found) (store.ImportFile, bool) {
 	})
 	switch {
 	case err != nil:
-		r.failFile(it, r.storeReason(err))
+		r.failFile(it, r.storeReason(ctx, err))
 		return file, false
 	case file.Complete:
 		it.result.Outcome = OutcomeAlreadyImported
@@ -414,17 +413,21 @@ func (r *runner) finished(it *found) {
 var errChanged = errors.New("the content changed while it was imported")
 
 // importContent parses the content of it and stores its records.
-func (r *runner) importContent(it *found, file store.ImportFile, content io.Reader) {
+func (r *runner) importContent(ctx context.Context, it *found, file store.ImportFile, content io.Reader) {
 	res := &it.result
 	res.ResumedAfter = file.Records
 	r.report(Progress{Event: EventFileStarted, Path: res.Path, SourceType: res.SourceType})
-	cr := &contentReader{ctx: r.ctx, r: io.LimitReader(content, it.size), h: sha256.New(), next: ProgressLines}
+	cr := &contentReader{check: ctx.Err, r: io.LimitReader(content, it.size), h: sha256.New(), next: ProgressLines}
 	cr.emit = func(lines int64) {
 		r.report(Progress{Event: EventFileProgress, Path: res.Path, SourceType: res.SourceType, Lines: lines, Records: res.Records})
 	}
-	em := &emitter{r: r, it: it, cr: cr, step: store.ImportStep{FileID: file.ID, Done: file.Records}, drop: file.Records}
-	parseErr := it.parser.Parse(r.ctx, logparse.File{Name: file.FileName, ModTime: file.ModTime}, cr, em)
-	reason := r.judge(em, parseErr)
+	write := func(b store.Batch) error {
+		_, err := r.opts.Store.WriteBatch(ctx, b)
+		return err
+	}
+	em := &emitter{r: r, write: write, it: it, cr: cr, step: store.ImportStep{FileID: file.ID, Done: file.Records}, drop: file.Records}
+	parseErr := it.parser.Parse(ctx, logparse.File{Name: file.FileName, ModTime: file.ModTime}, cr, em)
+	reason := r.judge(ctx, em, parseErr)
 	res.Lines = cr.lines()
 	if reason != "" {
 		r.failFile(it, reason)
@@ -436,17 +439,17 @@ func (r *runner) importContent(it *found, file store.ImportFile, content io.Read
 
 // judge finishes the import of a content after Parse returned parseErr and returns why it failed, or "" when it
 // was imported completely.
-func (r *runner) judge(em *emitter, parseErr error) string {
+func (r *runner) judge(ctx context.Context, em *emitter, parseErr error) string {
 	if em.err == nil {
-		parseErr = r.settle(em, parseErr)
+		parseErr = r.settle(ctx, em, parseErr)
 	}
 	switch {
 	case em.err != nil:
-		return r.storeReason(em.err)
+		return r.storeReason(ctx, em.err)
 	case parseErr == nil:
 		return ""
-	case r.ctx.Err() != nil:
-		r.fatal = r.ctx.Err()
+	case ctx.Err() != nil:
+		r.fatal = ctx.Err()
 		return "interrupted"
 	}
 	return parseErr.Error()
@@ -455,9 +458,9 @@ func (r *runner) judge(em *emitter, parseErr error) string {
 // settle stores what the emitter still holds: after a parser error what was parsed before it, otherwise, once
 // the whole hashed content was read again unchanged, the last batch that completes the file. It returns the
 // error that failed the file, if any.
-func (r *runner) settle(em *emitter, parseErr error) error {
+func (r *runner) settle(ctx context.Context, em *emitter, parseErr error) error {
 	if parseErr != nil {
-		if r.ctx.Err() == nil {
+		if ctx.Err() == nil {
 			_ = em.flush(false)
 		}
 		return parseErr
@@ -471,10 +474,10 @@ func (r *runner) settle(em *emitter, parseErr error) error {
 
 // storeReason returns the reason for a failed store call. A done context is an interruption and a store error
 // other than a conflict ends the run.
-func (r *runner) storeReason(err error) string {
+func (r *runner) storeReason(ctx context.Context, err error) string {
 	switch {
-	case r.ctx.Err() != nil:
-		r.fatal = r.ctx.Err()
+	case ctx.Err() != nil:
+		r.fatal = ctx.Err()
 		return "interrupted"
 	case errors.Is(err, store.ErrImportConflict):
 		return "the import state changed (another import of the same content is running?)"
@@ -486,6 +489,7 @@ func (r *runner) storeReason(err error) string {
 // emitter receives the records of a parser, drops those an earlier run stored and writes the rest in batches.
 type emitter struct {
 	r          *runner
+	write      func(store.Batch) error // stores one batch with the context of the run
 	it         *found
 	cr         *contentReader
 	step       store.ImportStep // FileID and Done, the number of records stored so far
@@ -539,7 +543,7 @@ func (e *emitter) flush(complete bool) error {
 	step := e.step
 	step.Complete = complete
 	batch := store.Batch{ReceivedAt: e.r.opts.Now().UTC(), Records: e.buf, Import: &step}
-	if _, err := e.r.opts.Store.WriteBatch(e.r.ctx, batch); err != nil {
+	if err := e.write(batch); err != nil {
 		e.err = err
 		return err
 	}
@@ -570,7 +574,7 @@ func (e *emitter) verify() error {
 // contentReader hashes and counts what the parser reads, reports every ProgressLines lines and stops with the
 // context.
 type contentReader struct {
-	ctx      context.Context
+	check    func() error // reports the error of the done context
 	r        io.Reader
 	h        hash.Hash
 	n        int64 // bytes read
@@ -581,7 +585,7 @@ type contentReader struct {
 }
 
 func (c *contentReader) Read(p []byte) (int, error) {
-	if err := c.ctx.Err(); err != nil {
+	if err := c.check(); err != nil {
 		return 0, err
 	}
 	n, err := c.r.Read(p)

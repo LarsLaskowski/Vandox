@@ -91,22 +91,21 @@ type found struct {
 // reporting EventFileFinished and EventScanProgress (every opts.ProgressBytes) to opts.Progress. It returns an
 // error wrapping ErrTooManyFiles as soon as entry MaxFiles+1 is counted, without reading further.
 func scan(ctx context.Context, src source, opts Options) ([]found, error) {
-	s := &scanner{ctx: ctx, src: src, opts: opts}
+	s := &scanner{src: src, opts: opts}
 	if s.opts.ProgressBytes <= 0 {
 		s.opts.ProgressBytes = DefaultProgressBytes
 	}
 	var err error
 	if src.file != "" {
-		err = s.regularFile(src.file)
+		err = s.regularFile(ctx, src.file)
 	} else {
-		err = s.walkDir(".")
+		err = s.walkDir(ctx, ".")
 	}
 	return s.found, err
 }
 
 // scanner holds the state of pass 1.
 type scanner struct {
-	ctx     context.Context
 	src     source
 	opts    Options
 	found   []found
@@ -147,17 +146,17 @@ type listed struct {
 
 // walkDir lists the directory rel of the root, counting its entries while it reads them, and examines them in
 // lexical order.
-func (s *scanner) walkDir(rel string) error {
-	entries, err := s.readDir(rel)
+func (s *scanner) walkDir(ctx context.Context, rel string) error {
+	entries, err := s.readDir(ctx, rel)
 	if err != nil {
-		if rel == "." || s.ctx.Err() != nil || errors.Is(err, ErrTooManyFiles) {
+		if rel == "." || ctx.Err() != nil || errors.Is(err, ErrTooManyFiles) {
 			return err
 		}
 		s.list(item{display: cutPath(rel), loc: location{fsPath: rel, entry: -1}}, OutcomeFailed, reasonOf(err))
 		return nil
 	}
 	for _, e := range entries {
-		if err := s.dirEntry(rel, e); err != nil {
+		if err := s.dirEntry(ctx, rel, e); err != nil {
 			return err
 		}
 	}
@@ -166,7 +165,7 @@ func (s *scanner) walkDir(rel string) error {
 
 // readDir reads the entries of the directory rel in chunks and returns them sorted by name. The entry that
 // exceeds MaxFiles ends the read at once.
-func (s *scanner) readDir(rel string) ([]listed, error) {
+func (s *scanner) readDir(ctx context.Context, rel string) ([]listed, error) {
 	d, err := openDir(s.src.root, rel)
 	if err != nil {
 		return nil, err
@@ -174,7 +173,7 @@ func (s *scanner) readDir(rel string) ([]listed, error) {
 	defer func() { _ = d.Close() }()
 	var entries []listed
 	for {
-		if err := s.ctx.Err(); err != nil {
+		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
 		chunk, err := d.ReadDir(dirChunk)
@@ -196,7 +195,7 @@ func (s *scanner) readDir(rel string) ([]listed, error) {
 }
 
 // dirEntry examines one entry of the directory dir.
-func (s *scanner) dirEntry(dir string, e listed) error {
+func (s *scanner) dirEntry(ctx context.Context, dir string, e listed) error {
 	rel := e.name
 	if dir != "." {
 		rel = dir + "/" + e.name
@@ -206,11 +205,11 @@ func (s *scanner) dirEntry(dir string, e listed) error {
 	case len(rel) > MaxPathBytes:
 		s.list(it, OutcomeFailed, reasonTooLong)
 	case e.mode.IsDir():
-		return s.walkDir(rel)
+		return s.walkDir(ctx, rel)
 	case e.mode&fs.ModeSymlink != 0:
 		s.list(it, OutcomeUnrecognized, reasonSymlink)
 	case e.mode.IsRegular():
-		return s.regularFile(rel)
+		return s.regularFile(ctx, rel)
 	default:
 		s.list(it, OutcomeUnrecognized, reasonNotRegular)
 	}
@@ -218,19 +217,19 @@ func (s *scanner) dirEntry(dir string, e listed) error {
 }
 
 // regularFile opens the file rel of the root and examines its content.
-func (s *scanner) regularFile(rel string) error {
+func (s *scanner) regularFile(ctx context.Context, rel string) error {
 	it := item{display: rel, name: rel, loc: location{fsPath: rel, entry: -1}}
 	f, err := openRegular(s.src.root, rel)
 	if err != nil {
-		return s.fail(it, err)
+		return s.fail(ctx, it, err)
 	}
 	defer func() { _ = f.Close() }()
 	info, err := f.Stat()
 	if err != nil {
-		return s.fail(it, err)
+		return s.fail(ctx, it, err)
 	}
 	it.mod = info.ModTime().UTC()
-	return s.stream(it, f)
+	return s.stream(ctx, it, f)
 }
 
 // list records a file that is not imported and reports it as finished.
@@ -247,8 +246,8 @@ func (s *scanner) list(it item, outcome Outcome, reason string) {
 
 // fail lists it as failed with the reason err. It returns the error that must stop the scan instead when the
 // context is done or when the raw content of the archive entry could not be read (which ends the archive).
-func (s *scanner) fail(it item, err error) error {
-	if cerr := s.ctx.Err(); cerr != nil {
+func (s *scanner) fail(ctx context.Context, it item, err error) error {
+	if cerr := ctx.Err(); cerr != nil {
 		return cerr
 	}
 	if it.trk != nil && it.trk.err != nil {
@@ -260,11 +259,11 @@ func (s *scanner) fail(it item, err error) error {
 
 // stream examines the content raw of it: it recognizes one gzip layer, then lists, opens as an archive or hands
 // the content to the parsers.
-func (s *scanner) stream(it item, raw io.Reader) error {
-	br := bufio.NewReaderSize(&ctxReader{ctx: s.ctx, r: raw}, logparse.SniffBytes)
+func (s *scanner) stream(ctx context.Context, it item, raw io.Reader) error {
+	br := bufio.NewReaderSize(&ctxReader{check: ctx.Err, r: raw}, logparse.SniffBytes)
 	head, err := br.Peek(logparse.SniffBytes)
 	if err != nil && !errors.Is(err, io.EOF) {
-		return s.fail(it, err)
+		return s.fail(ctx, it, err)
 	}
 	kind, unsupported := sniffFormat(head)
 	content := br
@@ -273,19 +272,19 @@ func (s *scanner) stream(it item, raw io.Reader) error {
 		it.name = trimGzip(it.name)
 		zr, err := gzip.NewReader(br)
 		if err != nil {
-			return s.fail(it, err)
+			return s.fail(ctx, it, err)
 		}
 		content = bufio.NewReaderSize(zr, logparse.SniffBytes)
 		if head, err = content.Peek(logparse.SniffBytes); err != nil && !errors.Is(err, io.EOF) {
-			return s.fail(it, err)
+			return s.fail(ctx, it, err)
 		}
 		kind, unsupported = sniffFormat(head)
 	}
-	return s.classify(it, kind, unsupported, head, content)
+	return s.classify(ctx, it, kind, unsupported, head, content)
 }
 
 // classify acts on the format of the (decompressed) content.
-func (s *scanner) classify(it item, kind format, unsupported string, head []byte, content *bufio.Reader) error {
+func (s *scanner) classify(ctx context.Context, it item, kind format, unsupported string, head []byte, content *bufio.Reader) error {
 	switch kind {
 	case formatGzip:
 		s.list(it, OutcomeUnrecognized, reasonTwice)
@@ -298,16 +297,16 @@ func (s *scanner) classify(it item, kind format, unsupported string, head []byte
 			s.list(it, OutcomeUnrecognized, reasonNested)
 			return nil
 		}
-		return s.archive(it, content)
+		return s.archive(ctx, it, content)
 	default:
-		return s.recognize(it, head, content)
+		return s.recognize(ctx, it, head, content)
 	}
 	return nil
 }
 
 // recognize lets the registry pick a parser for the file and, when one claims it, reads the content to its end
 // to hash it.
-func (s *scanner) recognize(it item, head []byte, content io.Reader) error {
+func (s *scanner) recognize(ctx context.Context, it item, head []byte, content io.Reader) error {
 	file := logparse.File{Name: it.name, ModTime: it.mod}
 	parser, _ := s.opts.Parsers.Detect(file, head)
 	if parser == nil {
@@ -319,7 +318,7 @@ func (s *scanner) recognize(it item, head []byte, content io.Reader) error {
 	hr.emit = func(mark int64) { s.report(Progress{Event: EventScanProgress, Path: it.display, Bytes: mark}) }
 	size, err := io.Copy(io.Discard, hr)
 	if err != nil {
-		return s.fail(it, err)
+		return s.fail(ctx, it, err)
 	}
 	f := found{
 		result: FileResult{Path: it.display, SourceType: parser.Type()},
@@ -335,14 +334,14 @@ func (s *scanner) recognize(it item, head []byte, content io.Reader) error {
 
 // archive reads the tar archive it and examines its entries; an error of the archive itself is listed as the
 // archive's failure.
-func (s *scanner) archive(it item, content io.Reader) error {
-	err := eachEntry(s.ctx, content, func(index int, h *tar.Header, c io.Reader) error {
-		return s.tarEntry(it, index, h, c)
+func (s *scanner) archive(ctx context.Context, it item, content io.Reader) error {
+	err := eachEntry(ctx, content, func(index int, h *tar.Header, c io.Reader) error {
+		return s.tarEntry(ctx, it, index, h, c)
 	})
 	if err == nil {
 		return nil
 	}
-	if s.ctx.Err() != nil || errors.Is(err, ErrTooManyFiles) {
+	if ctx.Err() != nil || errors.Is(err, ErrTooManyFiles) {
 		return err
 	}
 	s.list(item{display: it.display, name: it.name, mod: it.mod, loc: location{fsPath: it.loc.fsPath, entry: -1}},
@@ -351,7 +350,7 @@ func (s *scanner) archive(it item, content io.Reader) error {
 }
 
 // tarEntry examines one header of the archive it.
-func (s *scanner) tarEntry(arc item, index int, h *tar.Header, content io.Reader) error {
+func (s *scanner) tarEntry(ctx context.Context, arc item, index int, h *tar.Header, content io.Reader) error {
 	if h.Typeflag == tar.TypeXGlobalHeader {
 		return nil
 	}
@@ -374,7 +373,7 @@ func (s *scanner) tarEntry(arc item, index int, h *tar.Header, content io.Reader
 		s.list(e, OutcomeFailed, reasonTooLong)
 	case h.Typeflag == tar.TypeReg:
 		e.trk = &errTracker{r: content}
-		return s.stream(e, e.trk)
+		return s.stream(ctx, e, e.trk)
 	case h.Typeflag == tar.TypeSymlink:
 		s.list(e, OutcomeUnrecognized, reasonSymlink)
 	case h.Typeflag == tar.TypeLink:
@@ -420,14 +419,14 @@ func reasonOf(err error) string {
 	return err.Error()
 }
 
-// ctxReader fails every read once ctx is done.
+// ctxReader fails every read once check reports an error (the context is done).
 type ctxReader struct {
-	ctx context.Context
-	r   io.Reader
+	check func() error
+	r     io.Reader
 }
 
 func (c *ctxReader) Read(p []byte) (int, error) {
-	if err := c.ctx.Err(); err != nil {
+	if err := c.check(); err != nil {
 		return 0, err
 	}
 	return c.r.Read(p)
