@@ -1,8 +1,10 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/Vandox.Core/Vandox.Core.csproj" />
+    <Project Path="src/Vandox.Storage/Vandox.Storage.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Vandox.Core.Tests/Vandox.Core.Tests.csproj" />
+    <Project Path="tests/Vandox.Storage.Tests/Vandox.Storage.Tests.csproj" />
   </Folder>
 </Solution>
