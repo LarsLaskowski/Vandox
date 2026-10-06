@@ -237,7 +237,7 @@ func (s *scanner) regularFile(rel string) error {
 func (s *scanner) list(it item, outcome Outcome, reason string) {
 	f := found{
 		result: FileResult{Path: it.display, Outcome: outcome, Reason: reason},
-		file:   logparse.File{Name: it.name, ModTime: it.mod},
+		file:   logparse.File{Name: cutPath(it.name), ModTime: it.mod},
 		loc:    it.loc,
 	}
 	s.found = append(s.found, f)
@@ -398,7 +398,7 @@ func trimGzip(name string) string {
 	return name
 }
 
-// cutPath returns p cut to MaxPathBytes bytes at a rune boundary.
+// cutPath returns p cut to MaxPathBytes bytes at a rune boundary. A cut copy does not pin the memory of p.
 func cutPath(p string) string {
 	if len(p) <= MaxPathBytes {
 		return p
@@ -407,7 +407,7 @@ func cutPath(p string) string {
 	for n > 0 && !utf8.RuneStart(p[n]) {
 		n--
 	}
-	return p[:n]
+	return strings.Clone(p[:n])
 }
 
 // reasonOf returns the text of err for the summary, without the path of an operating system error.
