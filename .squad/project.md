@@ -19,7 +19,10 @@ files or endpoints.
 2. **Tailscale ACL and port binding** (deployment files under `deploy/backend/` and the documented ACL):
    *Goal:* a compromised monitored server can reach only the ingest port on the backend host's tailnet
    address and nothing else in the tailnet or home LAN; the ingest port is bound only to the tailnet
-   address; the web UI is not offered on the tailnet to the monitored server. Records 0010, 0016, 0017.
+   address; the web UI is not offered on the tailnet to the monitored server.
+   `deploy/backend/docker-compose.yml` publishes the web port on `127.0.0.1` by default (defense in depth, not
+   the boundary) and publishes no ingest port yet (issue #40); the Dockerfile has no `EXPOSE`. Records 0010,
+   0016, 0017, 0059, 0060.
 3. **Web UI login** (not implemented yet): password hashing, sessions, CSRF, rate limiting, reverse-proxy
    trust. *Goal:* the password is stored only as a salted, deliberately slow hash; session IDs are random,
    expire, are invalidated on logout and travel only in `HttpOnly`, `Secure`, `SameSite` cookies; every
@@ -62,7 +65,10 @@ files or endpoints.
    (`readSecret`, `checkEnviron`, `Secret`). Record 0032, 0050.
 9. **File writes and paths derived from external input** (log import, the agent's on-disk spool, database
    backups): *Goal:* no write outside the configured directories (no path traversal), the spool is
-   size-bounded, files are created with restrictive permissions. Record 0045.
+   size-bounded, files are created with restrictive permissions. The database file `vandox.db`
+   (`cmd/vandoxd/internal/store`) is created with mode 0600 inside the existing `storage.directory`, which is
+   never created, and a symbolic link or other non-regular file in place of `vandox.db` or its `-wal`/`-shm`
+   files is refused. Records 0045, 0057.
 10. **Parsing of external input** (log files: journal, syslog, MariaDB, mail, Plesk, web server; the ingest
     wire format (`internal/wire`: `NewDecoder`, `Decoder.Next`, `wire.Limits`); CLI arguments and configuration; later Telegram commands): *Goal:* malformed or hostile
     input yields an error or a skipped record, never a crash, an unbounded allocation or a hang. The
@@ -74,7 +80,9 @@ files or endpoints.
     public address. Telegram and the AI service are called over HTTPS with certificate verification;
     external checks verify the certificate whenever they use TLS, and a failed verification is a check
     result. Certificate verification is never switched off (no `InsecureSkipVerify`), and no secret is sent
-    over an unencrypted connection. Records 0006, 0008, 0010, 0012, 0017, 0023.
+    over an unencrypted connection. The image's health check (`cmd/vandoxd/healthcheck.go`) calls only the
+    configured web listener, on loopback for an unspecified host, with a 4 s timeout, no proxy, no redirects,
+    no credentials and no environment. Records 0006, 0008, 0010, 0012, 0017, 0023, 0059.
 12. **Logging and display of external data** (log lines, process names and text derived from them, e.g. an
     AI-written report): *Goal:* they cannot inject into log output (control characters, newlines), into the
     web UI (HTML is escaped) or into Telegram messages (escaped for the parse mode used, or sent as plain
@@ -82,10 +90,13 @@ files or endpoints.
     Configuration error texts never echo document text other than schema or safe key names
     (`decodeStrict`), never a `_FILE` value or path or an unsafe variable name (`readSecret`,
     `checkEnviron`). Configuration values are free of Cc, Cf, Zl and Zp characters but are still logged only
-    as `slog` attributes, never concatenated into a message.
+    as `slog` attributes, never concatenated into a message. `vandoxd` logs through the JSON `slog` handler
+    (`cmd/vandoxd/logger.go`), which escapes control characters, and `/healthz` never returns an error text.
+    Record 0058.
 13. **Release pipeline and published artifacts** (`.github/workflows/release.yml`,
     `.github/workflows/base-image-digests.yml`, `.github/scripts/`, `deploy/backend/Dockerfile`,
-    `.dockerignore`, the GitHub environment `release`): *Goal:* artifacts are
+    `.dockerignore`, the GitHub environment `release`; the smoke script
+    `.github/scripts/smoke-test-backend.sh` runs on pull requests, reads no secret and pushes nothing): *Goal:* artifacts are
     published only from a SemVer tag that only the repository admin can create (tag ruleset `release-tags`)
     and whose commit the workflow checks is on `main`; the ancestry check runs in code the tagger controls,
     so the ruleset is the boundary. Every action is pinned by commit SHA and every base image by
@@ -161,7 +172,7 @@ socket, the Telegram Bot API, the Tailscale network) touches:
 The hand-written fakes and stubs the tests reuse (no mocking library unless `docs/UNIT_TESTS.md` says
 otherwise):
 
-Status of every row: planned (not implemented yet). The first feature that introduces a surface adds its
+Status of every row: planned (not implemented yet), except where the row says implemented. The first feature that introduces a surface adds its
 double under this name and changes the status.
 
 | Surface | Test double |
@@ -171,6 +182,7 @@ double under this name and changes the status.
 | systemd D-Bus | fake systemd reader (scripted unit states and errors, and a reader that blocks until its context is cancelled, for 0029) |
 | journald | fake journal reader (scripted entries, cursors and errors, and a reader that blocks until its context is cancelled, for 0029) |
 | MariaDB socket | fake MariaDB status source (status variables, process list, errors, and a source that hangs until its context is cancelled, for 0029) |
+| database | fake `Pinger` (scripted result, call counter, blocks until released in `t.Cleanup`; `cmd/vandoxd/internal/server`); the SQLite store itself is tested against a real database file in `t.TempDir()` (implemented) |
 | Telegram Bot API | fake Telegram client (records sent messages, returns scripted updates; no network) |
 | Tailscale network | none in code (0017: `vandoxd` embeds no Tailscale); the agent's sender is tested against a `net/http/httptest` server standing in for the ingest port; the ACL itself is deployment configuration, reviewed, not unit-tested |
 | time | injectable clock (spool age, live/backfill classification, deadlines) |

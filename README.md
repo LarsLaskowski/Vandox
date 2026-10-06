@@ -16,13 +16,17 @@ parsing and signatures.
 | `vandox-agent` | the monitored Linux server | collects data and ships it to the backend |
 | `vandoxd` | Docker container on any Docker host in the home network (NAS, mini PC, server) | backend with web UI |
 
-Both support `--version`, which prints version, commit and build date.
+Both support `--version`, which prints version, commit and build date. `vandoxd` without arguments runs the
+service; `-config <file>` names its configuration file (default `/etc/vandox/vandoxd.yaml`) and
+`-healthcheck` probes `/healthz` of a running service and exits 0 when it is healthy (the image's Docker
+`HEALTHCHECK` uses it).
 
 ## Layout
 
 ```
 cmd/vandox-agent/   entry point of the agent
 cmd/vandoxd/        entry point of the backend
+cmd/vandoxd/internal/  packages used only by the backend (web and ingest server, SQLite store)
 internal/config/    configuration loading of both binaries, see Configuration below
 internal/model/     shared record types and their validation
 internal/wire/      versioned batch format, see docs/WIRE_FORMAT.md
@@ -168,3 +172,42 @@ provenance attestations and are not published as release assets.
 Image tags: `X.Y.Z` for the release `vX.Y.Z`; `latest` is the highest stable release; a pre-release
 (`vX.Y.Z-rc.N`) is published only under its own tag `X.Y.Z-rc.N`. A published version tag is never
 overwritten. The image runs as UID/GID 65532 (non-root) on a distroless static base.
+
+### Run the backend with Docker Compose
+
+`deploy/backend/docker-compose.yml` starts the backend with a data volume, a read-only root file system and
+a memory limit of 512 MiB. Copy it and `deploy/backend/vandoxd.yaml` into one directory on the Docker host
+(Synology Container Manager, QNAP Container Station or plain `docker compose`) and create:
+
+- `vandoxd.yaml`, the configuration file (every key is optional). Its `web.listen` port must match the
+  container side of the `ports` entry in the compose file (8080).
+- `secrets/vandox_agent_token`, the token the agents present (at least 32 printable ASCII characters, for
+  example `openssl rand -hex 32 > secrets/vandox_agent_token`). Compose sets no owner or mode on file
+  secrets outside Swarm, and the container sees the host file's owner and mode, so give the file to the
+  container user and never leave it world-readable:
+
+  ```
+  sudo chown 65532:65532 secrets/vandox_agent_token
+  sudo chmod 0400 secrets/vandox_agent_token
+  ```
+
+- `import/`, the directory for the log import (mounted read-only).
+- optionally `.env` with `WEB_BIND_ADDRESS=<address>` (default `127.0.0.1`).
+
+Then start it:
+
+```
+docker compose up -d
+docker compose ps        # the container becomes "healthy"
+```
+
+The web port is published on `127.0.0.1:8080` for a reverse proxy on the same host; point the proxy at
+`127.0.0.1:8080` and set `WEB_BIND_ADDRESS` for a proxy on another host. `/healthz` answers `ok` (200) while
+the database is reachable and `unavailable` (503) otherwise; use it through the proxy for monitoring. The
+loopback binding is defense in depth, not the access control: depending on the Docker Engine version and the
+host firewall, hosts on the LAN may reach a published container port directly. The login of the web UI is
+the access control (record 0060).
+
+The ingest port (8081) is not published yet: the ingest API arrives with issue #40, which adds the binding on
+the host's tailnet address. The database lives in the named volume `vandox-data` (`/data` in the container,
+owned by 65532); a bind-mounted data directory instead of the volume must be owned by 65532 as well.

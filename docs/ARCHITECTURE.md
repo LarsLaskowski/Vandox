@@ -6,9 +6,10 @@ from logs and system metrics and warns early. `vandox-agent` runs on the monitor
 backend with web UI, runs as a Docker container on any Docker host in the home network (for example a NAS such as Synology or QNAP, a mini PC or a server; called the *backend host* below).
 
 This document describes the target architecture; as of now the binaries' `--version`, the shared data model and wire format
-(`internal/model`, `internal/wire`) and the configuration loading (`internal/config`) exist, the latter
-three not yet used by the binaries, and
-sections are marked as implemented as features land. The decisions behind it are recorded in
+(`internal/model`, `internal/wire`), the configuration loading (`internal/config`, used by `vandoxd`) and the
+backend service skeleton exist: `vandoxd` loads its configuration, opens its SQLite database, listens on the
+web and ingest ports, answers `/healthz` and shuts down gracefully, and ships as a container with a health
+check. Sections are marked as implemented as features land. The decisions behind it are recorded in
 [`docs/decisions/`](decisions/README.md); each section links the records it rests on. Vandox is an own
 project rather than an off-the-shelf stack ([0004](decisions/0004-own-project-instead-of-off-the-shelf-stack.md)).
 
@@ -30,10 +31,13 @@ way, and agents of the hosting provider are never disabled or changed
   deadline passes, so a hanging collector or database never blocks the agent; a missed sample is recorded
   as a gap, and a collector that is still stuck is not started again.
 - `cmd/vandoxd` — Go, one container on the backend host: ingest API, SQLite storage, analysis, rules, Telegram
-  notifier, reports and web UI.
+  notifier, reports and web UI. Without arguments it runs the service; `-healthcheck` probes its `/healthz`.
+- `cmd/vandoxd/internal/` — packages used only by the backend: `server` (the web and ingest listeners, `/healthz`,
+  graceful shutdown) and `store` (the SQLite database)
+  ([0061](decisions/0061-backend-only-packages-under-cmd-vandoxd-internal.md)).
 - `internal/` — packages shared by both binaries: data model and versioned wire format (see
-  [`WIRE_FORMAT.md`](WIRE_FORMAT.md)), log parsing, signatures, version information, command-line handling, configuration loading (see
-  *Configuration*).
+  [`WIRE_FORMAT.md`](WIRE_FORMAT.md)), log parsing, signatures, version information, configuration loading (see
+  *Configuration*). Command-line handling (`internal/cli`) is used by `vandox-agent` only.
 
 Importing historical logs (including the legacy `top`/`lsof` log) and continuously shipping new log lines are
 core parts of Vandox. Both binaries are written in Go in one module.
@@ -107,6 +111,13 @@ reach only that port and nothing else. The web UI is reachable in the home LAN o
 TLS for it is terminated by a reverse proxy in front of the container (e.g. the NAS's built-in one), while the ingest path bypasses the proxy and is
 encrypted by Tailscale. Telegram is contacted only by the backend, never by the agent.
 
+The compose file `deploy/backend/docker-compose.yml` publishes the web port on `127.0.0.1` by default, for the
+reverse proxy on the same host. This is defense in depth, not the access control: depending on the Docker
+Engine version and the host firewall, hosts on the LAN may reach a published container port directly, so the
+web login is the boundary. The ingest port is not published until the ingest API exists (issue #40), which
+binds it to the backend host's tailnet address as described above
+([0060](decisions/0060-compose-file-port-bindings-volumes-and-memory-limit.md)).
+
 ```mermaid
 flowchart LR
     subgraph Internet["Internet / server"]
@@ -153,7 +164,11 @@ Records: [0022](decisions/0022-backfill-detection-and-live-only-alerts.md),
 ## Storage and retention
 
 `vandoxd` stores everything in SQLite with the FTS5 extension for log search, in WAL mode, with these
-retention tiers:
+retention tiers. The database is the file `vandox.db` in `storage.directory`, created with mode 0600; the
+pure-Go driver `modernc.org/sqlite` needs no C toolchain
+([0057](decisions/0057-sqlite-driver-modernc-pure-go.md)). The storage directory is not created (a missing
+mount must not be hidden), and a symbolic link in place of the database or its `-wal`/`-shm` files is
+refused.
 
 | Data | Retention |
 | ---- | --------- |
@@ -185,7 +200,7 @@ Records: [0006](decisions/0006-agent-connects-outbound-only.md),
 Both binaries are configured through one YAML file each (`/etc/vandox/agent.yaml`, `/etc/vandox/vandoxd.yaml`;
 commented examples under `deploy/agent/` and `deploy/backend/`) and environment variables. The shared package
 `internal/config` implements this: `LoadAgent` and `LoadBackend` read the file, validate every option and read
-the secrets. The binaries do not call it yet; that comes with the backend and the agent features.
+the secrets. `vandoxd` calls `LoadBackend` at start-up; the agent will call `LoadAgent` with the agent feature.
 
 The file is parsed strictly. A decoder walks the YAML node tree against the option structs, so unknown and
 duplicate keys, a second document, anchors, aliases, custom tags and invalid values are errors. Errors
@@ -245,6 +260,13 @@ Docker Hub as `networlddev/vandox` ([0027](decisions/0027-project-name-and-docke
   labels. The release build sets none of these arguments. The digests are refreshed by hand in a pull
   request, a weekly workflow reports a stale digest as an issue, and the build stage checks that the
   builder's Go version matches its tag.
+- The image has a `HEALTHCHECK` that runs `vandoxd -healthcheck` (the distroless image has no shell or curl),
+  ships an empty `/data` owned by UID 65532 so that a new named volume is writable, and declares no `EXPOSE`
+  ([0059](decisions/0059-healthz-checks-the-database-and-the-binary-is-the-health-probe.md)). The compose file
+  `deploy/backend/docker-compose.yml` runs it with a data volume, a read-only root file system, dropped
+  capabilities and a memory limit; CI starts the image from it
+  ([0058](decisions/0058-vandoxd-runs-the-service-by-default-with-a-shutdown-deadline.md),
+  [0060](decisions/0060-compose-file-port-bindings-volumes-and-memory-limit.md)).
 - Releases are built by `.github/workflows/release.yml` only from SemVer tags on `main`. Only the
   repository admin may create these tags (tag ruleset `release-tags`), and the workflow checks that the
   tagged commit is on `main`.
@@ -260,7 +282,10 @@ Records: [0037](decisions/0037-release-workflow-with-plain-go-docker-and-gh.md),
 [0039](decisions/0039-docker-hub-token-in-a-tag-only-environment.md),
 [0054](decisions/0054-release-provenance-attestations-from-a-secret-free-job.md),
 [0055](decisions/0055-stale-base-image-digests-reported-weekly-builder-go-checked-in-build.md),
-[0056](decisions/0056-release-sboms-from-a-digest-pinned-syft-container.md).
+[0056](decisions/0056-release-sboms-from-a-digest-pinned-syft-container.md),
+[0058](decisions/0058-vandoxd-runs-the-service-by-default-with-a-shutdown-deadline.md),
+[0059](decisions/0059-healthz-checks-the-database-and-the-binary-is-the-health-probe.md),
+[0060](decisions/0060-compose-file-port-bindings-volumes-and-memory-limit.md).
 <!-- project:end architecture -->
 
 ## Development process

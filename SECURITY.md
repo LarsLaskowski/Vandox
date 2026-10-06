@@ -42,6 +42,13 @@ everything on the server, so treat the server's credentials as readable by the a
 allow the monitored server only the ingest port on the backend host, and the Telegram user allowlist must be
 set.
 
+Keep the web port as `deploy/backend/docker-compose.yml` publishes it, on `127.0.0.1` (or on the address of the
+host that runs the reverse proxy). That binding is defense in depth, not an access boundary: depending on the
+Docker Engine version and the host firewall, hosts on the LAN may reach a published container port directly,
+so use a current Docker Engine and a host firewall where that matters. The ingest port is not published until
+the ingest API exists. The agent token file (`secrets/vandox_agent_token`) must be owned by UID 65532 with mode
+`0400`, never world-readable, because Compose sets no owner or mode on file secrets outside Swarm.
+
 ## Scope
 
 The following are considered in scope for vulnerability reports:
