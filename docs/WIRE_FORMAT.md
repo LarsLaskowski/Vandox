@@ -1,14 +1,20 @@
 # Wire format
 
 The format of the batches the agent sends to the backend, and the shared record model behind it. It is
-implemented by `internal/model` (record types and their validation) and `internal/wire` (header, batch,
-encoder and streaming decoder); both use only the standard library. The decisions behind it are
+implemented twice. The Go agent uses `internal/model` (record types and their validation) and `internal/wire`
+(header, batch, encoder and streaming decoder; standard library only) and is the reference producer. The .NET
+backend decodes and validates with `Vandox.Core.Model` and `Vandox.Core.Wire` (`BatchDecoder`, `WireLimits`),
+which implement the same rules. A golden batch with one record of every kind, `testdata/wire/all-kinds.jsonl`,
+is written by the Go encoder (`internal/wire/golden_test.go`; `VANDOX_UPDATE_GOLDEN=1` rewrites it) and decoded
+by the C# contract test (`WireContractTests`), so the two sides cannot drift apart unnoticed
+([0075](decisions/0075-wire-contract-pinned-by-golden-fixtures.md)). The C# decoder reads gzip with strict
+validation ([0076](decisions/0076-strict-gzip-validation-in-the-backend.md)). The decisions behind it are
 [0042](decisions/0042-wire-format-gzip-json-lines-standard-library.md) (encoding, compression),
 [0043](decisions/0043-wire-format-major-minor-versioning.md) (versioning),
 [0044](decisions/0044-batch-validated-as-a-whole-agent-records-only.md) (validation, trust, limits),
 [0045](decisions/0045-batch-identified-by-agent-id-and-record-sequence-numbers.md) (batch identity) and
 [0046](decisions/0046-batch-header-describes-the-capture-context.md) (capture context). The backend store
-(`cmd/vandoxd/internal/store`) validates agent IDs with `wire.ValidateAgentID`; the codec's first consumers are
+(`src/Vandox.Storage`) validates agent IDs with the same rules as `wire.ValidateAgentID`; the codec's first consumers are
 still the agent sender (#39) and the ingest API (#40).
 
 ## Stream layout
@@ -78,7 +84,7 @@ one is invalid, and the decoder sets the origin of every decoded record to `agen
 - **Unknown versus zero**: an optional measurement that may be unknown is omitted, never 0.
 - **Addresses** are numeric and carry no zone (see *Producer mapping for connection endpoints*).
 - **Field paths** in errors use the JSON names, list indexes in brackets and map keys in brackets rendered
-  with `model.QuoteName` (cut to 128 bytes, quoted with Go escaping, `...` appended when cut), e.g.
+  with `model.QuoteName` / `FieldError.QuoteName` (cut to 128 bytes, quoted with Go escaping, `...` appended when cut), e.g.
   `data.processes[3].pid`, `data.labels["mount"]`.
 
 ### `metric`

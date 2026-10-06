@@ -1,6 +1,8 @@
 # Project
 
-What the squad needs to know about this project that is not stack-specific. Read by the Lead, the Devil's
+What the squad needs to know about this project that is not stack-specific. The repository has two
+languages (record 0073): the agent `vandox-agent` is Go (`cmd/vandox-agent`, `internal/`), the backend `vandoxd`
+is .NET 10 with Blazor (`src/Vandox.*`). An entry names the place in each language where it applies. Read by the Lead, the Devil's
 Advocate, Security, the Tester and the Reviewer. Not template-managed: `adopt-template` creates it once
 and never overwrites it. A product PR updates it when the change makes an entry untrue
 (`.squad/routing.md`, *Scope of a product PR*).
@@ -15,8 +17,8 @@ files or endpoints.
    constant time; request size, batch size and rate are bounded so a valid agent cannot exhaust the
    backend's memory or disk; a resent record (same agent ID
    and sequence number), and so a resent batch, is stored once and never overwrites stored data. The
-   deduplication is implemented by `store.WriteBatch` (partial unique index `records_agent_seq`,
-   `INSERT ... ON CONFLICT DO NOTHING`, no code path updates a record row). Records 0032, 0044, 0045, 0063.
+   deduplication is implemented by `BatchWriter` in `src/Vandox.Storage` (partial unique index `records_agent_seq`,
+   `INSERT ... ON CONFLICT DO NOTHING`, no code path updates a record row). Records 0032, 0044, 0045, 0063, 0077.
 2. **Tailscale ACL and port binding** (deployment files under `deploy/backend/` and the documented ACL):
    *Goal:* a compromised monitored server can reach only the ingest port on the backend host's tailnet
    address and nothing else in the tailnet or home LAN; the ingest port is bound only to the tailnet
@@ -62,27 +64,32 @@ files or endpoints.
    key): *Goal:* secrets are read only from environment variables or Docker secrets, never from the
    configuration file or the command line; never logged, shown in the UI, written to the spool or put into
    error messages; a secret checked against input (ingest token, later TOTP codes) is compared in constant
-   time, the UI password through its hash function's comparison. Implemented in `internal/config`
-   (`readSecret`, `checkEnviron`, `Secret`). Record 0032, 0050.
+   time, the UI password through its hash function's comparison. Implemented for the agent in `internal/config`
+   (`readSecret`, `checkEnviron`, `Secret`) and for the backend in `src/Vandox.Core/Configuration`
+   (`SecretReader`, `Secret`, `BackendSecrets`). Records 0032, 0050, 0078.
 9. **File writes and paths derived from external input** (log import, the agent's on-disk spool, database
    backups): *Goal:* no write outside the configured directories (no path traversal), the spool is
    size-bounded, files are created with restrictive permissions. The database file `vandox.db`
-   (`cmd/vandoxd/internal/store`) is created with mode 0600 inside the existing `storage.directory`, which is
-   never created, and a symbolic link or other non-regular file in place of `vandox.db` or its `-wal`/`-shm`
-   files is refused. The log import (`cmd/vandoxd/internal/importer`: `scan`, `openSource`, `openRegular`,
-   `openDir`, `eachEntry`) extracts nothing and writes no file: every open below the import root goes through
-   one `os.Root`, links and special files are listed and never followed or opened (`O_NONBLOCK`), entry names
-   and paths are labels only, and a run handles at most 20,000 entries, counted while scanning. Records 0045,
-   0065, 0069, 0071.
+   (`src/Vandox.Storage`: `DatabaseFile`, `SqliteStore`) is created with mode 0600 inside the existing
+   `storage.directory`, which is never created, and a symbolic link or other non-regular file in place of
+   `vandox.db` or its `-wal`/`-shm` files is refused. The log import (`src/Vandox.Import`: `Scanner`,
+   `SourceRoot`, `Importer`; `src/Vandox.Core/IO`: `SecureRoot`, `FileProbe`) extracts nothing and writes no
+   file: every open below the import root goes through `SecureRoot` (`openat2` with `RESOLVE_BENEATH` and
+   `RESOLVE_NO_SYMLINKS`, falling back to component-wise `O_NOFOLLOW` opens on kernels without `openat2`, such as
+   NAS kernels 4.4, where containment is not kernel-enforced), links and special files are listed and never
+   followed or opened (`O_NONBLOCK`), entry names and paths are labels only, and a run handles at most 20,000
+   entries, counted while scanning. Records 0045, 0069, 0077, 0079.
 10. **Parsing of external input** (log files: journal, syslog, MariaDB, mail, Plesk, web server; the ingest
-    wire format (`internal/wire`: `NewDecoder`, `Decoder.Next`, `wire.Limits`); CLI arguments and configuration; later Telegram commands): *Goal:* malformed or hostile
+    wire format (backend: `Vandox.Core.Wire.BatchDecoder`, `WireLimits`; Go: `internal/wire`: `NewDecoder`, `Decoder.Next`,
+    `wire.Limits`; truncated or corrupt gzip is an error, record 0076); CLI arguments and configuration; later Telegram commands): *Goal:* malformed or hostile
     input yields an error or a skipped record, never a crash, an unbounded allocation or a hang. The
-    configuration file is read by `internal/config` (`decodeStrict`, `readFile`). The log search text
-    (`store.SearchLogs`, `ftsQuery`) reaches SQLite's FTS5 query parser and is reduced to quoted literal terms
+    configuration files are read by `internal/config` (`decodeStrict`, `readFile`; agent) and
+    `Vandox.Core.Configuration` (`StrictYamlDecoder`, `BackendConfigLoader`; backend). The log search text
+    (`SqliteStore` search, `FtsQuery`) reaches SQLite's FTS5 query parser and is reduced to quoted literal terms
     with bounded length and term count. Log files and archives reach the log import
-    (`cmd/vandoxd/internal/importer`: `scan`, `sniffFormat`, `eachEntry`, the limits of entries, path length and
-    batch size) and the parsers through `internal/logparse` (`LineReader` cuts lines at 16 KiB, a parser's memory
-    is bounded independently of the input size). Records 0048, 0049, 0066, 0069, 0070, 0071.
+    (`src/Vandox.Import`: `Scanner`, `FormatSniffer`, `ImportLimits`: entries, path length and batch size) and the
+    parsers through `Vandox.Core.LogParsing` (`LogLineReader` cuts lines at 16 KiB, a parser's memory is bounded
+    independently of the input size). Records 0048, 0049, 0066, 0069, 0076, 0078, 0079.
 11. **Outbound calls** (Telegram, external checks, the optional AI service of the nightly report, the
     agent's connection to the backend): *Goal:* every call has a timeout, goes only to its configured
     destination and leaves encrypted to a verified peer. The agent's only destination is the ingest port,
@@ -90,24 +97,25 @@ files or endpoints.
     public address. Telegram and the AI service are called over HTTPS with certificate verification;
     external checks verify the certificate whenever they use TLS, and a failed verification is a check
     result. Certificate verification is never switched off (no `InsecureSkipVerify`), and no secret is sent
-    over an unencrypted connection. The image's health check (`cmd/vandoxd/healthcheck.go`) calls only the
+    over an unencrypted connection. The image's health check (`HealthCheckCommand` in `src/Vandox.Backend/Cli`) calls only the
     configured web listener, on loopback for an unspecified host, with a 4 s timeout, no proxy, no redirects,
     no credentials and no environment. Records 0006, 0008, 0010, 0012, 0017, 0023, 0059.
 12. **Logging and display of external data** (log lines, process names and text derived from them, e.g. an
     AI-written report): *Goal:* they cannot inject into log output (control characters, newlines), into the
     web UI (HTML is escaped) or into Telegram messages (escaped for the parse mode used, or sent as plain
-    text without a parse mode). Record 0031 for Telegram; none decides log output and UI escaping yet.
+    text without a parse mode). Record 0031 for Telegram; Razor escapes HTML by default in the web UI (record
+    0081).
     Configuration error texts never echo document text other than schema or safe key names
-    (`decodeStrict`), never a `_FILE` value or path or an unsafe variable name (`readSecret`,
-    `checkEnviron`). Configuration values are free of Cc, Cf, Zl and Zp characters but are still logged only
-    as `slog` attributes, never concatenated into a message. `vandoxd` logs through the JSON `slog` handler
-    (`cmd/vandoxd/logger.go`), which escapes control characters, and `/healthz` never returns an error text.
-    `vandoxd import` prints every path and reason in its summary with `%q` and logs every input-derived
-    attribute (`path`, `reason`, a run error's text) as `strconv.Quote(value)`, because the JSON handler writes
-    C1 controls, DEL and format characters raw (`cmd/vandoxd/import.go`). Records 0058, 0072.
+    (`decodeStrict`, `StrictYamlDecoder`), never a `_FILE` value or path or an unsafe variable name
+    (`readSecret`/`SecretReader`, `checkEnviron`). Configuration values are free of Cc, Cf, Zl and Zp characters but
+    are still logged only as structured attributes, never concatenated into a message. `vandoxd` logs through the
+    JSON line provider (`src/Vandox.Backend/Logging`), which escapes control characters, with `[LoggerMessage]`
+    methods (`BackendLog`), and `/healthz` never returns an error text. `vandoxd import` prints every path and
+    reason in its summary through `Terminal.Quote` and logs every input-derived attribute (`path`, `reason`, a
+    run error's text) quoted the same way (`ImportSummaryWriter`, `ImportProgressLogger`). Records 0072, 0081.
 13. **Release pipeline and published artifacts** (`.github/workflows/release.yml`,
     `.github/workflows/base-image-digests.yml`, `.github/scripts/`, `deploy/backend/Dockerfile`,
-    `.dockerignore`, the GitHub environment `release`; the smoke script
+    `.dockerignore`, `dotnet-tools.json`, the GitHub environment `release`; the smoke script
     `.github/scripts/smoke-test-backend.sh` runs on pull requests, reads no secret and pushes nothing): *Goal:* artifacts are
     published only from a SemVer tag that only the repository admin can create (tag ruleset `release-tags`)
     and whose commit the workflow checks is on `main`; the ancestry check runs in code the tagger controls,
@@ -115,7 +123,9 @@ files or endpoints.
     digest (`FROM ${BASE_<NAME>_IMAGE}@${BASE_<NAME>_DIGEST}` with build-argument defaults that the release
     build never overrides; the release workflow checks the form).
     Release binaries are built without restored CI caches (`setup-go` `cache: false`, plain
-    `docker build --no-cache`, no cache backend) and only after `govulncheck` passes. The registry token is
+    `docker build --no-cache`, no cache backend) and only after `govulncheck` and the NuGet vulnerability check
+    (`dotnet list package --vulnerable --include-transitive`) pass. The builder image's .NET version must equal the
+    target framework (`check-builder-dotnet-version.sh`, record 0080). The registry token is
     readable only by the tag-triggered publish job, enters `docker login` only via stdin, and is limited to
     pushing `networlddev/vandox`. No `${{ }}` expression of any kind appears inside a `run:` script; every
     value goes through `env:`, and checkout does not persist the job token. The published image runs as a
@@ -126,8 +136,8 @@ files or endpoints.
     workflow verifies before the GitHub release is created. The SBOM generator is a container image pinned by
     index digest (form-checked in `.github/scripts/generate-sbom.sh`), run without network, capabilities,
     token or writable access to `dist/`. The scheduled digest check holds only `contents: read` and
-    `issues: write`, writes only regex-checked image, tag, digest and Go version values into the issue, and never writes
-    to the repository. Records 0027, 0037, 0039, 0041, 0054, 0055, 0056.
+    `issues: write`, writes only regex-checked image, tag and digest values into the issue, and never writes
+    to the repository. Records 0027, 0037, 0039, 0041, 0054, 0056, 0080.
 
 ## Guarantees
 
@@ -138,7 +148,7 @@ Deliberate behavior that must not change without the Product Manager. Each one i
   backfill); data that is nevertheless missing (agent stopped, spool full, collector timed out, sequence
   numbers missing) is recorded as a gap and treated as "unknown", never as "normal". `docs/ARCHITECTURE.md`
   section *Offline behavior and backfill*; records 0028, 0045.
-- **A hanging collector or database never blocks the agent**: every collector runs in its own goroutine
+- **A hanging collector or database never blocks the agent** (Go agent): every collector runs in its own goroutine
   under a deadline and is abandoned when the deadline passes (a blocked `/proc` or `/sys` read cannot be
   cancelled, only abandoned; sources that take a context also get it); a hung source (`/proc`, `/sys`,
   D-Bus, journald, MariaDB) loses only its own sample, recorded as a gap, while the other collectors, the
@@ -154,25 +164,33 @@ What the Reviewer checks when the diff introduces or changes a thing of this kin
 change with it.
 
 **A new or changed configuration option** touches:
-- the configuration type and its loading for the agent and the backend: `internal/config` (`Agent`/`Backend`, `LoadAgent`/`LoadBackend`, `AgentKeys`/`BackendKeys`)
-- the commented example file `deploy/agent/agent.yaml` or `deploy/backend/vandoxd.yaml`, which must set the option explicitly (an optional one at its default): `TestLoadAgent_Example` and `TestLoadBackend_Example` load these files and fail when a key from `AgentKeys`/`BackendKeys` is missing (0049)
+- the configuration type and its loading: for the agent `internal/config` (`Agent`, `LoadAgent`, `AgentKeys`), for the backend `src/Vandox.Core/Configuration` (`BackendConfig` and its option classes with `ConfigKey` attributes, `BackendConfigLoader`)
+- the commented example file `deploy/agent/agent.yaml` or `deploy/backend/vandoxd.yaml`, which must set the option explicitly (an optional one at its default): `TestLoadAgent_Example` and `BackendConfigLoaderLoadsRepositoryExample` load these files and fail when a key is missing (0049)
 - the *Agent options* or *Backend options* table in `README.md` (key, default, description); a non-secret option has no environment variable (0049), a secret is added as **a new secret** below instead
-- the tests that pin the configuration loading: `internal/config/agent_test.go` and `internal/config/backend_test.go`
+- the tests that pin the configuration loading: `internal/config/agent_test.go` and `tests/Vandox.Core.Tests/BackendConfigLoaderTests.cs`
 
-**A new secret** touches: its `Env*` constant, the known-variable list of each binary that reads it, the
-secrets table in `README.md`
+**A new secret** touches: its `Env*` constant (`internal/config` for the agent, `ConfigConstants` and
+`BackendSecrets` for the backend), the known-variable list of each binary that reads it, the secrets table in
+`README.md`
 
 **A new or changed service / module** touches:
-- its exported interface and the package that owns it under `internal/`
-- where it is wired up in `cmd/vandox-agent` or `cmd/vandoxd`
+- its public interface and the package (Go, under `internal/`) or project (C#, under `src/`) that owns it
+- where it is wired up: `cmd/vandox-agent`, or `src/Vandox.Backend` (`Hosting`, `Cli`, `Program.cs`)
 - the test double used by the tests of its callers
 - the component list in `docs/ARCHITECTURE.md`
 
 **A new log parser** touches:
-- its type in `internal/` (implementing `logparse.Parser`, with a source type accepted by `logparse.CheckType`)
-- its registration in `importParsers` (`cmd/vandoxd/import.go`), in priority order
+- its type in `src/` (implementing `ILogParser`, with a type accepted by `ParserTypes.IsValid`)
+- its registration where `ImportCommand` builds the `ParserRegistry` (`src/Vandox.Backend/Cli`), in priority order
 - detection tests against the other registered parsers, so that no file is claimed by two of them
 - the list of supported sources in `README.md` (*Import logs*)
+
+**A new or changed wire format field or record kind** touches (record 0075):
+- the Go model and encoder (`internal/model`, `internal/wire`) and the C# model and decoder
+  (`src/Vandox.Core/Model`, `src/Vandox.Core/Wire`)
+- the golden batch `testdata/wire/all-kinds.jsonl` (regenerate with `VANDOX_UPDATE_GOLDEN=1 go test ./internal/wire`)
+  and both tests that read it (`internal/wire/golden_test.go`, `WireContractTests`)
+- `docs/WIRE_FORMAT.md` and, for a version change, the major/minor rules (0043)
 
 **A new external API call or DTO** touches:
 - the client and its types — the external shape must not leak past it
@@ -188,7 +206,7 @@ socket, the Telegram Bot API, the Tailscale network) touches:
 ## Test doubles
 
 The hand-written fakes and stubs the tests reuse (no mocking library unless `docs/UNIT_TESTS.md` says
-otherwise):
+otherwise). Go rows are for the agent, C# rows for the backend:
 
 Status of every row: planned (not implemented yet), except where the row says implemented. The first feature that introduces a surface adds its
 double under this name and changes the status.
@@ -200,8 +218,9 @@ double under this name and changes the status.
 | systemd D-Bus | fake systemd reader (scripted unit states and errors, and a reader that blocks until its context is cancelled, for 0029) |
 | journald | fake journal reader (scripted entries, cursors and errors, and a reader that blocks until its context is cancelled, for 0029) |
 | MariaDB socket | fake MariaDB status source (status variables, process list, errors, and a source that hangs until its context is cancelled, for 0029) |
-| database | fake `Pinger` (scripted result, call counter, blocks until released in `t.Cleanup`; `cmd/vandoxd/internal/server`); `storetest.Fake` for `store.Writer`, `RecordReader`, `LogSearcher` (scripted hooks, recorded calls, `Block`; `cmd/vandoxd/internal/store/storetest`) (implemented); `storetest.Fake` also scripts `store.ImportTracker` (`BeginImport`, `ImportStarts`; implemented); the SQLite store itself is tested against a real database file in `t.TempDir()` (implemented) |
-| log parsers | `logparsetest.Parser` (scripted `Detect` and `Parse`, records the files it parsed) with `logparsetest.Lines` and `HeadPrefix`; `internal/logparse/logparsetest` (implemented) |
+| database (C#) | `FakeImportStore` for `IImportStore` (in-memory import state and records, scripted begin and write failures, `AfterBatch` hook; `tests/Vandox.Import.Tests`); a scripted ping delegate for `PingChecker` (`tests/Vandox.Backend.Tests`); the SQLite store itself is tested against a real database file in a `TempDirectory` (implemented) |
+| log parsers (C#) | `FakeParser` (scripted `Detect` and `Parse`) in `tests/Vandox.Core.Tests`, `LineParser` in `tests/Vandox.Import.Tests` (implemented) |
+| files (C#) | `TempDirectory` helper per test project (a unique directory below the temp path, removed on dispose); `RepositoryFiles.Path` for fixtures such as `testdata/` and `deploy/` |
 | Telegram Bot API | fake Telegram client (records sent messages, returns scripted updates; no network) |
 | Tailscale network | none in code (0017: `vandoxd` embeds no Tailscale); the agent's sender is tested against a `net/http/httptest` server standing in for the ingest port; the ACL itself is deployment configuration, reviewed, not unit-tested |
-| time | injectable clock (spool age, live/backfill classification, deadlines) |
+| time | Go: injectable clock (spool age, live/backfill classification, deadlines); C#: `TimeProvider` with `FakeTimeProvider` (`Microsoft.Extensions.TimeProvider.Testing`) |

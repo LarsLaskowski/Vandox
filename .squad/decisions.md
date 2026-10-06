@@ -8,3 +8,11 @@ one. Changed only in squad-maintenance PRs.
   `go`. Reason: one shared, stack-neutral squad and rule set across all repositories; project
   knowledge lives in `.squad/stack.md`, `.squad/project.md` and the `<!-- project:… -->` sections of the
   instruction files.
+- 2026-10-06 — Repository becomes two-language: the agent stays Go, the backend moves to .NET 10 with
+  Blazor (decision records 0073 and 0074). `.squad/stack.md` names both toolchains with one command per gate;
+  `analyzer-check.py` runs `go vet`, golangci-lint and a warnings-as-errors `dotnet build`;
+  `coverage-check.py` merges coverlet's Cobertura reports with the Go profile converted by
+  `go-coverage-to-cobertura.py`; `squad_settings.py` lists `*.go`, `*.cs` and `*.razor` as production code. The
+  template has one stack profile per repository, so these extensions are local and recorded in
+  `.squad/template.json` (`additionalProfiles`); an `adopt-template` refresh must keep them. The squad
+  agents, skills and routing are stack-neutral and unchanged.

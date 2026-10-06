@@ -1,82 +1,129 @@
-# Stack: Go
+# Stack: Go agent and .NET backend
 
-The toolchain and the exact commands of this repository. Every squad member, skill and instruction file
-refers to the entries below by their *italic name*. Seeded from the Squad-Spec-Repository-Template `go`
-profile and owned by this repository: keep it true when the build changes.
+The toolchain and the exact commands of this repository, which has two languages: the agent
+(`vandox-agent`) is Go, the backend (`vandoxd`) is .NET 10 with Blazor (record 0073). Every squad member,
+skill and instruction file refers to the entries below by their *italic name*; each command covers both
+languages. Seeded from the Squad-Spec-Repository-Template `go` profile, extended for .NET and owned by this
+repository (record 0074): keep it true when the build changes.
 
 ## Toolchain
 
-- Go `1.27` (module `github.com/LarsLaskowski/Vandox`); `go.mod` names the minor version without a patch,
-  so `setup-go` uses the newest 1.27.x available on the runner (toolcache first, then the versions
-  manifest).
-- `gofmt` as the formatter, `go vet` and **golangci-lint** `v2.13.1` (configured in `.golangci.yml`) as the
-  analyzers, `govulncheck` (a `tool` dependency in `go.mod`) for known vulnerabilities.
-- The SessionStart hook `.claude/hooks/session-start.sh` runs `go mod download` in remote sessions.
+- Go `1.27` (module `github.com/LarsLaskowski/Vandox`; agent only); `go.mod` names the minor version without a
+  patch, so `setup-go` uses the newest 1.27.x available on the runner. `gofmt` as the formatter, `go vet` and
+  **golangci-lint** `v2.13.1` (`.golangci.yml`) as the analyzers, `govulncheck` (a `tool` dependency in
+  `go.mod`) for known vulnerabilities.
+- .NET SDK `10.0` (`global.json`, `rollForward: latestFeature`), solution `Vandox.slnx`, central package
+  management (`Directory.Packages.props`), shared build settings in `Directory.Build.props`. Analyzers:
+  `Reihitsu.Analyzer` and `SonarAnalyzer.CSharp`, every diagnostic an error (`TreatWarningsAsErrors`). Formatter:
+  `reihitsu-format` (local tool, `dotnet-tools.json`). Tests: MSTest 4 with coverlet (`coverlet.runsettings`).
+- The SessionStart hook `.claude/hooks/session-start.sh` runs `go mod download`, `dotnet tool restore` and
+  `dotnet restore` in remote sessions.
 
 ## Layout
 
-- Production code: `cmd/vandox-agent`, `cmd/vandoxd`, `internal/`.
-- Tests: colocated `_test.go` files next to the code they cover, one per source file under test
-  (`foo.go` → `foo_test.go`).
+- Go (agent): `cmd/vandox-agent`, `internal/` (model, wire, config, cli, version); tests colocated as
+  `foo_test.go` next to `foo.go`.
+- .NET (backend): `src/Vandox.Core` (model, wire decoder, configuration, safe file access, log parsing),
+  `src/Vandox.Storage`, `src/Vandox.Import`, `src/Vandox.Backend` (host, CLI, Blazor; assembly `vandoxd`).
+  Tests in `tests/<Project>.Tests`, mirroring the namespace and file of the class under test
+  (`Foo.cs` → `FooTests.cs`).
+- Shared by both: `testdata/` (including the golden wire batch `testdata/wire/all-kinds.jsonl`, record 0075).
 
 ## Commands
 
 | Name | Command |
 | ---- | ------- |
-| *Restore* | `go mod download` |
-| *Format* (Code Officer only in the squad) | `gofmt -w .` |
-| *Format check* | `test -z "$(gofmt -l .)"` |
-| *Build* | `go build ./...` |
-| *Test* | `go test ./... -race` |
-| *Single test* | `go test ./<package> -run '^TestName$'` |
-| *Test with coverage* | `go test ./... -race -coverprofile=coverage.out` (overwrites `coverage.out`) |
+| *Restore* | `go mod download && dotnet tool restore && dotnet restore Vandox.slnx` |
+| *Format* (Code Officer only in the squad) | `gofmt -w . && reihitsu-format src tests` (or `dotnet tool run reihitsu-format src tests`) |
+| *Format check* | `test -z "$(gofmt -l .)" && reihitsu-format --check src tests` |
+| *Build* | `go build ./... && dotnet build Vandox.slnx` |
+| *Test* | `go test ./... -race && dotnet test Vandox.slnx` |
+| *Single test* | Go: `go test ./<package> -run '^TestName$'`; .NET: `dotnet test tests/<Project>.Tests --filter <ClassOrMethodName>` |
+| *Test with coverage* | `rm -rf TestResults coverage.out && go test ./... -race -coverprofile=coverage.out && python3 .squad/tools/go-coverage-to-cobertura.py && dotnet test Vandox.slnx --settings coverlet.runsettings --results-directory TestResults` (clears the results first) |
 | *Coverage gate* | `python3 .squad/tools/coverage-check.py` |
 | *Analyzer gate* | `python3 .squad/tools/analyzer-check.py` |
 
+`reihitsu-format` needs `DOTNET_ROOT` when it runs as a global tool outside the SDK's directory (for example
+`DOTNET_ROOT=/usr/lib/dotnet`).
+
 ## Analyzer gate
 
-`analyzer-check.py` runs `go vet ./...` (must pass for the whole module) and
-`golangci-lint run --new-from-merge-base=origin/main --whole-files ./...`, which reports every issue
-anywhere in a file changed since the merge base with `origin/main`. Fixable style findings are the Code Officer's; findings that need a
-code change go to the Dev or Tester. `gocognit` (threshold 15, `.golangci.yml`) stands in for SonarQube
-Cloud's cognitive-complexity rule `go:S3776`. The two measures are close but not identical: in every case
-measured (PR #110, `main`) gocognit flagged at least what SonarQube flagged, and it also counts an `if` on
-the bare `err != nil` check, which SonarQube does not, so it can flag a function SonarQube accepts. Such a
-finding is fixed like any other diagnostic; a new gocognit exclusion — a rule in `.golangci.yml` or a
-`//nolint:gocognit` directive — needs a Lead decision record (two existing validators are excluded by
-name, without a complexity cap, record 0047). Other SonarQube Cloud findings (further rules,
-duplication, hotspots) have no local Go equivalent here and arrive in squad step 11.
+`analyzer-check.py` runs three steps; each must pass:
+
+1. `go vet ./...` for the whole module.
+2. `golangci-lint run --new-from-merge-base=origin/main --whole-files ./...`, which reports every issue
+   anywhere in a Go file changed since the merge base with `origin/main`. `gocognit` (threshold 15,
+   `.golangci.yml`) stands in for SonarQube Cloud's cognitive-complexity rule `go:S3776`. The two measures are
+   close but not identical: in every case measured (PR #110, `main`) gocognit flagged at least what
+   SonarQube flagged, and it also counts an `if` on the bare `err != nil` check, which SonarQube does not, so
+   it can flag a function SonarQube accepts. Such a finding is fixed like any other diagnostic; a new gocognit
+   exclusion — a rule in `.golangci.yml` or a `//nolint:gocognit` directive — needs a Lead decision record (two
+   existing validators are excluded by name, without a complexity cap, record 0047).
+3. `dotnet build Vandox.slnx --no-incremental -warnaserror`: Reihitsu and SonarAnalyzer run inside the build on
+   the whole solution with every rule, info level included, so no changed C# file may carry any diagnostic.
+   Fixable style findings are the Code Officer's; findings that need a code change go to the Dev or Tester.
+   Never trust a test result after a build that failed on analyzer errors: the test run uses the stale DLLs.
+
+Other SonarQube Cloud findings (further rules, duplication, hotspots) have no local equivalent and arrive in
+squad step 11.
+
+Two analyzer rules collide and are settled once (record 0074): RH3001 forbids the negation operator `!`,
+S1125 forbids comparing a boolean with a literal (`== false`, `is false`). Write positive conditions, early
+returns or a small `Require`-style helper; never a workaround such as `== default(bool)`.
+
+## Coverage gate
+
+`coverage-check.py` merges every `TestResults/**/coverage.cobertura.xml`: coverlet's report of each .NET test
+project and `TestResults/go/coverage.cobertura.xml`, which `go-coverage-to-cobertura.py` writes from
+`coverage.out`. Production code is every `*.go`, `*.cs` and `*.razor` file outside `tests/` and `*_test.go`
+(`.squad/tools/squad_settings.py`). The thresholds are 80 % on new/changed code and 80 % overall.
 
 ## Writing code
 
+Go (agent):
 - `gofmt` formatting; package names short and lower-case; exported identifiers documented with a comment
   that starts with the identifier's name.
 - Errors are returned and wrapped with context (`fmt.Errorf("…: %w", err)`), never ignored; no `panic` in
   library code.
 - `context.Context` is the first parameter of anything that does I/O or can block, and is honored.
-- Both binaries print their build information through `internal/version`, set via `-ldflags`.
+- The agent prints its build information through `internal/version`, set via `-ldflags`.
+
+C# (backend): follow the surrounding code and the analyzers; in particular
+- file-scoped namespaces, `#region` sections and XML documentation on every member as in the existing files
+  (Reihitsu enforces the layout; run *Format* before building);
+- nullable reference types on, `CancellationToken` as the last parameter of anything that does I/O or can
+  block, and honored;
+- logging through `[LoggerMessage]` methods (`BackendLog`), never string interpolation in a log call;
+- exceptions carry context in their message and are never swallowed; `Program.Main` and similar wiring stay
+  thin and hold no logic (record 0074);
+- the backend prints its build information from the assembly metadata set by `-p:VandoxVersion`,
+  `-p:VandoxCommit` and `-p:VandoxDate`.
 
 ## Writing tests
 
-See `docs/UNIT_TESTS.md`: the standard `testing` package, table-driven tests with `t.Run`, `t.Helper()` in
-helpers, `t.TempDir()` for files, failure messages that state got and want.
+See `docs/UNIT_TESTS.md`. Go: the standard `testing` package, table-driven tests with `t.Run`, `t.Helper()` in
+helpers, `t.TempDir()` for files, failure messages that state got and want. .NET: MSTest, one test class per
+class under test, Arrange/Act/Assert comments, helper classes for temporary directories and fakes.
 
 ## Skeleton
 
-New functions and methods with their full signature and doc comment, bodies
+Go: new functions and methods with their full signature and doc comment, bodies
 return a zero value or an error (`errors.New("not implemented")`) where the signature allows it, and
 `panic("not implemented")` only where it does not (a `panic` aborts the whole test binary), so the module
-builds and the tests compile and fail.
+builds and the tests compile and fail. C#: new types and members with their full signature and XML
+documentation, bodies `throw new NotImplementedException();`, so the solution builds and the tests compile and fail.
 
 ## Dependencies
 
-`go get <module>@<version>`, then `go mod tidy`; commit `go.mod` and `go.sum` together. A new dependency is
-a `security`-tier change.
+Go: `go get <module>@<version>`, then `go mod tidy`; commit `go.mod` and `go.sum` together. .NET: add the
+package version to `Directory.Packages.props` and a `PackageReference` without a version to the project; the
+restore must stay reproducible. A new dependency in either language is a `security`-tier change.
 
 ## Concurrency
 
 Builds and test runs share the Go build cache safely, but run one squad member that builds or tests at a
-time so results are attributable.
+time so results are attributable. Two `dotnet build` or `dotnet test` runs at once on the same solution
+collide on `obj/` and `bin/`.
 
 ## Known pitfalls
 
