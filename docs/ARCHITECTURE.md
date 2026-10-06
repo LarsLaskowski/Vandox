@@ -7,8 +7,8 @@ backend with web UI, runs as a Docker container on any Docker host in the home n
 
 This document describes the target architecture; as of now the binaries' `--version`, the shared data model and wire format
 (`internal/model`, `internal/wire`), the configuration loading (`internal/config`, used by `vandoxd`) and the
-backend service skeleton exist: `vandoxd` loads its configuration, opens and migrates its SQLite database (schema, batched writes, queries and log search
-exist as the storage layer; nothing calls it yet), listens on the
+backend service skeleton and the log import framework exist (`vandoxd import`, without a parser yet): `vandoxd` loads its configuration, opens and migrates its SQLite database (schema, batched writes, queries and log search
+exist as the storage layer; the service does not call it yet, `vandoxd import` writes through it), listens on the
 web and ingest ports, answers `/healthz` and shuts down gracefully, and ships as a container with a health
 check. Sections are marked as implemented as features land. The decisions behind it are recorded in
 [`docs/decisions/`](decisions/README.md); each section links the records it rests on. Vandox is an own
@@ -32,13 +32,22 @@ way, and agents of the hosting provider are never disabled or changed
   deadline passes, so a hanging collector or database never blocks the agent; a missed sample is recorded
   as a gap, and a collector that is still stuck is not started again.
 - `cmd/vandoxd` — Go, one container on the backend host: ingest API, SQLite storage, analysis, rules, Telegram
-  notifier, reports and web UI. Without arguments it runs the service; `-healthcheck` probes its `/healthz`.
+  notifier, reports and web UI. Without arguments it runs the service; `-healthcheck` probes its `/healthz`;
+  `vandoxd import <path>` imports logs saved on the backend host
+  ([0072](decisions/0072-vandoxd-import-sub-command-output-and-exit-codes.md), which supersedes 0058 where
+  the command line is concerned).
 - `cmd/vandoxd/internal/` — packages used only by the backend: `server` (the web and ingest listeners, `/healthz`,
-  graceful shutdown) and `store` (the SQLite database: schema, migrations, writing batches, queries and log search)
-  ([0061](decisions/0061-backend-only-packages-under-cmd-vandoxd-internal.md)).
+  graceful shutdown), `store` (the SQLite database: schema, migrations, writing batches, queries and log search)
+  and `importer` (reads a directory, archive or file as streams, detects the parser per file, hashes the
+  content, writes the parsers' records in resumable batches and builds the summary)
+  ([0061](decisions/0061-backend-only-packages-under-cmd-vandoxd-internal.md),
+  [0069](decisions/0069-log-import-idempotent-per-file-content-hash-with-resumable-batches.md),
+  [0071](decisions/0071-log-import-reads-input-without-following-links-or-extracting.md)).
 - `internal/` — packages shared by both binaries: data model and versioned wire format (see
-  [`WIRE_FORMAT.md`](WIRE_FORMAT.md)), log parsing, signatures, version information, configuration loading (see
-  *Configuration*). Command-line handling (`internal/cli`) is used by `vandox-agent` only.
+  [`WIRE_FORMAT.md`](WIRE_FORMAT.md)), log parsing (`internal/logparse`: the `Parser` interface, the registry
+  that picks one parser per file and a line reader that bounds the line length;
+  [0070](decisions/0070-log-parser-interface-and-explicit-registry-in-internal-logparse.md)), signatures,
+  version information, configuration loading (see *Configuration*). Command-line handling (`internal/cli`) is used by `vandox-agent` only.
 
 Importing historical logs (including the legacy `top`/`lsof` log) and continuously shipping new log lines are
 core parts of Vandox. Both binaries are written in Go in one module.
@@ -97,12 +106,26 @@ flowchart LR
     R --> T[Telegram]
 ```
 
+The log import is a second path into the same database. `vandoxd import <path>` reads a directory, a tar or
+tar.gz archive, a gzip file or a plain file as streams (nothing is extracted, no link is followed, at most
+20,000 entries per run) in two passes: the first lists every file, picks a parser from the registry by name and
+first 4 KiB, and computes the SHA-256 of the decompressed content; the second writes the parser's records in
+batches of at most 2,000 records or 4 MiB of input through `store.WriteBatch`. Imported records have origin
+`import`; they are never live, so they never raise an alert ([0022](decisions/0022-backfill-detection-and-live-only-alerts.md)).
+Files no parser claims are listed with the reason in the summary on standard output; progress goes to standard
+error as JSON log lines. The import runs next to the service in the same container and shares the database's
+single writer lock in short batches.
+
 Records: [0006](decisions/0006-agent-connects-outbound-only.md),
 [0007](decisions/0007-sqlite-with-fts5-no-external-database.md),
 [0008](decisions/0008-deterministic-detection-and-alerting.md),
 [0012](decisions/0012-agent-never-contacts-telegram.md),
 [0020](decisions/0020-analysis-before-alerting-forensics-release.md),
-[0024](decisions/0024-nightly-report-timing.md).
+[0024](decisions/0024-nightly-report-timing.md),
+[0069](decisions/0069-log-import-idempotent-per-file-content-hash-with-resumable-batches.md),
+[0070](decisions/0070-log-parser-interface-and-explicit-registry-in-internal-logparse.md),
+[0071](decisions/0071-log-import-reads-input-without-following-links-or-extracting.md),
+[0072](decisions/0072-vandoxd-import-sub-command-output-and-exit-codes.md).
 
 ## Network
 
@@ -179,11 +202,18 @@ Implemented by `cmd/vandoxd/internal/store`:
   have typed tables (`metrics`, `log_lines`) keyed by the record ID; every other kind keeps its payload as a
   JSON document in `records.data`. A partial unique index on (agent ID, sequence number) for origin `agent`
   makes a resent record a no-op that never overwrites the stored one; imported and backend records are not
-  deduplicated. Capture times are storable between 1677-09-21 and 2262-04-11 and sequence numbers up to
+  deduplicated (an import is made idempotent per file content, see below). Capture times are storable between 1677-09-21 and 2262-04-11 and sequence numbers up to
   2^63 - 1.
 - **Migrations** ([0064](decisions/0064-versioned-schema-migrations-in-go-one-transaction-per-step.md)): at
   start-up every step above the stored `meta.schema_version` runs in its own transaction; a database with a
-  newer version is refused.
+  newer version is refused. Schema version 3 adds the table `import_files`.
+- **Imports** ([0069](decisions/0069-log-import-idempotent-per-file-content-hash-with-resumable-batches.md)):
+  `import_files` holds one row per imported file content (SHA-256 of the decompressed content, size, the name
+  and modification time the parser got, the source type, the number of records stored so far and whether the
+  import is complete). A batch with an import step advances the row in the same transaction as its records, as
+  a compare-and-set on the expected count, so an interrupted import resumes where it stopped and two runs of
+  the same content never store it twice. Records do not reference their file; imports are idempotent per
+  file content, not per record.
 - **Connections** (0065): one writer connection (immediate transactions, one batch per transaction) and a pool
   of query-only readers, in WAL mode with `synchronous=FULL`, so a committed batch is durable and reads (and
   `/healthz`) do not wait for a write.
@@ -192,7 +222,8 @@ Implemented by `cmd/vandoxd/internal/store`:
   The search text is taken as literal terms only (no FTS5 operators, bounded length and term count). The cost
   of a search grows with the stored lines that contain its terms, so callers bound it with a context deadline.
 - **Interfaces** ([0067](decisions/0067-storage-repository-interfaces-and-a-scripted-fake-in-storetest.md)):
-  `store.Writer`, `store.RecordReader` and `store.LogSearcher`, with a scripted fake in `store/storetest`.
+  `store.Writer`, `store.RecordReader`, `store.LogSearcher` and `store.ImportTracker`, with a scripted fake in
+  `store/storetest`.
 - **Write throughput** ([0068](decisions/0068-write-throughput-measured-by-a-benchmark-ds918-measurement-in-a-follow-up.md)):
   measured by a benchmark, see [`BENCHMARKS.md`](BENCHMARKS.md).
 

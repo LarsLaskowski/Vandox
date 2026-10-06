@@ -69,13 +69,20 @@ files or endpoints.
    size-bounded, files are created with restrictive permissions. The database file `vandox.db`
    (`cmd/vandoxd/internal/store`) is created with mode 0600 inside the existing `storage.directory`, which is
    never created, and a symbolic link or other non-regular file in place of `vandox.db` or its `-wal`/`-shm`
-   files is refused. Records 0045, 0065.
+   files is refused. The log import (`cmd/vandoxd/internal/importer`: `scan`, `openSource`, `openRegular`,
+   `openDir`, `eachEntry`) extracts nothing and writes no file: every open below the import root goes through
+   one `os.Root`, links and special files are listed and never followed or opened (`O_NONBLOCK`), entry names
+   and paths are labels only, and a run handles at most 20,000 entries, counted while scanning. Records 0045,
+   0065, 0069, 0071.
 10. **Parsing of external input** (log files: journal, syslog, MariaDB, mail, Plesk, web server; the ingest
     wire format (`internal/wire`: `NewDecoder`, `Decoder.Next`, `wire.Limits`); CLI arguments and configuration; later Telegram commands): *Goal:* malformed or hostile
     input yields an error or a skipped record, never a crash, an unbounded allocation or a hang. The
     configuration file is read by `internal/config` (`decodeStrict`, `readFile`). The log search text
     (`store.SearchLogs`, `ftsQuery`) reaches SQLite's FTS5 query parser and is reduced to quoted literal terms
-    with bounded length and term count. Records 0048, 0049, 0066.
+    with bounded length and term count. Log files and archives reach the log import
+    (`cmd/vandoxd/internal/importer`: `scan`, `sniffFormat`, `eachEntry`, the limits of entries, path length and
+    batch size) and the parsers through `internal/logparse` (`LineReader` cuts lines at 16 KiB, a parser's memory
+    is bounded independently of the input size). Records 0048, 0049, 0066, 0069, 0070, 0071.
 11. **Outbound calls** (Telegram, external checks, the optional AI service of the nightly report, the
     agent's connection to the backend): *Goal:* every call has a timeout, goes only to its configured
     destination and leaves encrypted to a verified peer. The agent's only destination is the ingest port,
@@ -95,7 +102,9 @@ files or endpoints.
     `checkEnviron`). Configuration values are free of Cc, Cf, Zl and Zp characters but are still logged only
     as `slog` attributes, never concatenated into a message. `vandoxd` logs through the JSON `slog` handler
     (`cmd/vandoxd/logger.go`), which escapes control characters, and `/healthz` never returns an error text.
-    Record 0058.
+    `vandoxd import` prints every path and reason in its summary with `%q` and logs every input-derived
+    attribute (`path`, `reason`, a run error's text) as `strconv.Quote(value)`, because the JSON handler writes
+    C1 controls, DEL and format characters raw (`cmd/vandoxd/import.go`). Records 0058, 0072.
 13. **Release pipeline and published artifacts** (`.github/workflows/release.yml`,
     `.github/workflows/base-image-digests.yml`, `.github/scripts/`, `deploy/backend/Dockerfile`,
     `.dockerignore`, the GitHub environment `release`; the smoke script
@@ -159,6 +168,12 @@ secrets table in `README.md`
 - the test double used by the tests of its callers
 - the component list in `docs/ARCHITECTURE.md`
 
+**A new log parser** touches:
+- its type in `internal/` (implementing `logparse.Parser`, with a source type accepted by `logparse.CheckType`)
+- its registration in `importParsers` (`cmd/vandoxd/import.go`), in priority order
+- detection tests against the other registered parsers, so that no file is claimed by two of them
+- the list of supported sources in `README.md` (*Import logs*)
+
 **A new external API call or DTO** touches:
 - the client and its types — the external shape must not leak past it
 - the fake/stub in the tests
@@ -185,7 +200,8 @@ double under this name and changes the status.
 | systemd D-Bus | fake systemd reader (scripted unit states and errors, and a reader that blocks until its context is cancelled, for 0029) |
 | journald | fake journal reader (scripted entries, cursors and errors, and a reader that blocks until its context is cancelled, for 0029) |
 | MariaDB socket | fake MariaDB status source (status variables, process list, errors, and a source that hangs until its context is cancelled, for 0029) |
-| database | fake `Pinger` (scripted result, call counter, blocks until released in `t.Cleanup`; `cmd/vandoxd/internal/server`); `storetest.Fake` for `store.Writer`, `RecordReader`, `LogSearcher` (scripted hooks, recorded calls, `Block`; `cmd/vandoxd/internal/store/storetest`) (implemented); the SQLite store itself is tested against a real database file in `t.TempDir()` (implemented) |
+| database | fake `Pinger` (scripted result, call counter, blocks until released in `t.Cleanup`; `cmd/vandoxd/internal/server`); `storetest.Fake` for `store.Writer`, `RecordReader`, `LogSearcher` (scripted hooks, recorded calls, `Block`; `cmd/vandoxd/internal/store/storetest`) (implemented); `storetest.Fake` also scripts `store.ImportTracker` (`BeginImport`, `ImportStarts`; implemented); the SQLite store itself is tested against a real database file in `t.TempDir()` (implemented) |
+| log parsers | `logparsetest.Parser` (scripted `Detect` and `Parse`, records the files it parsed) with `logparsetest.Lines` and `HeadPrefix`; `internal/logparse/logparsetest` (implemented) |
 | Telegram Bot API | fake Telegram client (records sent messages, returns scripted updates; no network) |
 | Tailscale network | none in code (0017: `vandoxd` embeds no Tailscale); the agent's sender is tested against a `net/http/httptest` server standing in for the ingest port; the ACL itself is deployment configuration, reviewed, not unit-tested |
 | time | injectable clock (spool age, live/backfill classification, deadlines) |

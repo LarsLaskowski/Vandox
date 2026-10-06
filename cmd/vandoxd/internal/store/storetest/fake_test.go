@@ -314,3 +314,183 @@ func TestFake_ConcurrentUse(t *testing.T) {
 		t.Errorf("recorded log searches = %d, want %d", got, goroutines)
 	}
 }
+
+// importStart returns an ImportFileStart whose hash starts with tag.
+func importStart(tag byte) store.ImportFileStart {
+	var sum [32]byte
+	sum[0] = tag
+	return store.ImportFileStart{
+		SHA256: sum, Size: 100 + int64(tag), Name: "var/log/syslog." + string(rune('0'+tag)), FileName: "syslog",
+		ModTime: baseTime.Add(-time.Hour), SourceType: "syslog", StartedAt: baseTime,
+	}
+}
+
+func TestFake_BeginImport_DefaultIsANewIncompleteFile(t *testing.T) {
+	f := &storetest.Fake{}
+	ctx := context.Background()
+
+	for i, start := range []store.ImportFileStart{importStart(1), importStart(2), importStart(3)} {
+		got, err := f.BeginImport(ctx, start)
+
+		want := store.ImportFile{
+			ID: int64(i + 1), SHA256: start.SHA256, Size: start.Size, Name: start.Name, FileName: start.FileName,
+			ModTime: start.ModTime, SourceType: start.SourceType, StartedAt: start.StartedAt,
+		}
+		if err != nil || !reflect.DeepEqual(got, want) {
+			t.Errorf("BeginImport() call %d = %+v, %v, want %+v, nil", i+1, got, err, want)
+		}
+		if got.Records != 0 || got.Complete || !got.CompletedAt.IsZero() {
+			t.Errorf("BeginImport() call %d = %+v, want 0 records, not complete, no completion time", i+1, got)
+		}
+	}
+}
+
+func TestFake_OnBeginImport(t *testing.T) {
+	want := store.ImportFile{ID: 42, Records: 7, Complete: true, SourceType: "mail", CompletedAt: baseTime}
+	var seen store.ImportFileStart
+	f := &storetest.Fake{OnBeginImport: func(s store.ImportFileStart) (store.ImportFile, error) {
+		seen = s
+		return want, errBoom
+	}}
+
+	got, err := f.BeginImport(context.Background(), importStart(5))
+
+	if !reflect.DeepEqual(got, want) || !errors.Is(err, errBoom) {
+		t.Errorf("BeginImport() = %+v, %v, want %+v, %v", got, err, want, errBoom)
+	}
+	if seen != importStart(5) {
+		t.Errorf("OnBeginImport received %+v, want %+v", seen, importStart(5))
+	}
+	if got := f.ImportStarts(); len(got) != 1 || got[0] != importStart(5) {
+		t.Errorf("ImportStarts() = %+v, want the scripted call recorded", got)
+	}
+}
+
+func TestFake_ImportStarts(t *testing.T) {
+	t.Run("none before the first call", func(t *testing.T) {
+		if got := (&storetest.Fake{}).ImportStarts(); len(got) != 0 {
+			t.Errorf("ImportStarts() = %+v, want none", got)
+		}
+	})
+	t.Run("calls in order, returned slice is a copy", func(t *testing.T) {
+		f := &storetest.Fake{}
+		ctx := context.Background()
+		for _, tag := range []byte{4, 2, 9} {
+			if _, err := f.BeginImport(ctx, importStart(tag)); err != nil {
+				t.Fatalf("BeginImport() error = %v, want nil", err)
+			}
+		}
+
+		got := f.ImportStarts()
+		want := []store.ImportFileStart{importStart(4), importStart(2), importStart(9)}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("ImportStarts() = %+v, want %+v", got, want)
+		}
+		got[0] = importStart(77)
+
+		if again := f.ImportStarts(); !reflect.DeepEqual(again, want) {
+			t.Errorf("ImportStarts() after the caller changed the result = %+v, want %+v", again, want)
+		}
+	})
+}
+
+func TestFake_BeginImport_Block(t *testing.T) {
+	run := func(ctx context.Context, f *storetest.Fake) error {
+		_, err := f.BeginImport(ctx, importStart(1))
+		return err
+	}
+	t.Run("proceeds when closed", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			f := &storetest.Fake{Block: make(chan struct{})}
+			done := make(chan error, 1)
+			go func() { done <- run(context.Background(), f) }()
+
+			synctest.Wait()
+			recorded := len(f.ImportStarts())
+			early, _ := finished(done)
+			close(f.Block)
+			synctest.Wait()
+			late, err := finished(done)
+
+			if recorded != 1 {
+				t.Errorf("recorded BeginImport calls while blocked = %d, want 1", recorded)
+			}
+			if early {
+				t.Error("BeginImport returned while Block was open, want it to wait")
+			}
+			if !late || err != nil {
+				t.Errorf("BeginImport after Block was closed = %v (returned: %v), want nil and returned", err, late)
+			}
+		})
+	})
+	t.Run("returns the context error when cancelled", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			f := &storetest.Fake{Block: make(chan struct{})}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			done := make(chan error, 1)
+			go func() { done <- run(ctx, f) }()
+
+			synctest.Wait()
+			cancel()
+			synctest.Wait()
+			returned, err := finished(done)
+
+			if !returned || !errors.Is(err, context.Canceled) {
+				t.Errorf("BeginImport after cancel = %v (returned: %v), want context.Canceled and returned", err, returned)
+			}
+		})
+	})
+}
+
+func TestFake_BatchesCopyTheImportStep(t *testing.T) {
+	f := &storetest.Fake{}
+	b := batchOf(1)
+	b.Import = &store.ImportStep{FileID: 3, Done: 10, Complete: false}
+	if _, err := f.WriteBatch(context.Background(), b); err != nil {
+		t.Fatalf("WriteBatch() error = %v, want nil", err)
+	}
+
+	b.Import.Done = 99
+	got := f.Batches()
+	if len(got) != 1 || got[0].Import == nil {
+		t.Fatalf("Batches() = %+v, want one batch with its Import step", got)
+	}
+	if want := (store.ImportStep{FileID: 3, Done: 10}); *got[0].Import != want {
+		t.Errorf("recorded Import after the caller changed its step = %+v, want %+v", *got[0].Import, want)
+	}
+	got[0].Import.Done = 55
+
+	if again := f.Batches(); again[0].Import.Done != 10 {
+		t.Errorf("recorded Import after the caller changed the returned step = %+v, want Done 10", *again[0].Import)
+	}
+}
+
+func TestFake_BeginImportConcurrentUse(t *testing.T) {
+	const goroutines = 16
+	f := &storetest.Fake{}
+	ids := make(chan int64, goroutines)
+	var wg sync.WaitGroup
+	for i := range goroutines {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			got, _ := f.BeginImport(context.Background(), importStart(byte(i)))
+			ids <- got.ID
+			_ = f.ImportStarts()
+		}()
+	}
+	wg.Wait()
+	close(ids)
+
+	seen := map[int64]bool{}
+	for id := range ids {
+		seen[id] = true
+	}
+	if len(seen) != goroutines {
+		t.Errorf("distinct IDs from %d concurrent BeginImport calls = %d, want %d", goroutines, len(seen), goroutines)
+	}
+	if got := len(f.ImportStarts()); got != goroutines {
+		t.Errorf("recorded imports = %d, want %d", got, goroutines)
+	}
+}

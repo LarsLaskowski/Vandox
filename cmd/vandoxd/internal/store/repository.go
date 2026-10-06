@@ -17,8 +17,14 @@ type LogSearcher interface {
 	SearchLogs(ctx context.Context, q LogSearch) ([]StoredRecord, error)
 }
 
+// ImportTracker records which file contents have been imported.
+type ImportTracker interface {
+	BeginImport(ctx context.Context, f ImportFileStart) (ImportFile, error)
+}
+
 var (
-	_ Writer       = (*Store)(nil)
-	_ RecordReader = (*Store)(nil)
-	_ LogSearcher  = (*Store)(nil)
+	_ Writer        = (*Store)(nil)
+	_ RecordReader  = (*Store)(nil)
+	_ LogSearcher   = (*Store)(nil)
+	_ ImportTracker = (*Store)(nil)
 )

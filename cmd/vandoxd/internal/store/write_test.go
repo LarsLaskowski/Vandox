@@ -8,7 +8,9 @@ import (
 	"net/netip"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -746,6 +748,291 @@ func BenchmarkStore_WriteBatch(b *testing.B) {
 				total += size
 			}
 			b.ReportMetric(float64(total)/b.Elapsed().Seconds(), "records/s")
+		})
+	}
+}
+
+// importBatch returns a batch of the import file with the given step, received at baseTime plus one hour.
+func importBatch(file ImportFile, done int64, complete bool, recs ...model.Record) Batch {
+	return Batch{
+		ReceivedAt: baseTime.Add(time.Hour),
+		Records:    recs,
+		Import:     &ImportStep{FileID: file.ID, Done: done, Complete: complete},
+	}
+}
+
+func TestStore_WriteBatch_ImportAdvancesTheFile(t *testing.T) {
+	s := openStore(t, t.TempDir())
+	start := importStart(1)
+	file := beginImport(t, s, start)
+
+	first := writeOK(t, s, importBatch(file, 0, false, importLogRecord("a", 1), importLogRecord("b", 2), importLogRecord("c", 3)))
+	afterFirst := beginImport(t, s, start)
+	last := importBatch(file, 3, true, importLogRecord("d", 4), importLogRecord("e", 5))
+	second := writeOK(t, s, last)
+	afterSecond := beginImport(t, s, start)
+
+	if first != (WriteResult{Stored: 3}) || second != (WriteResult{Stored: 2}) {
+		t.Errorf("WriteBatch() = %+v, %+v, want {Stored: 3}, {Stored: 2}", first, second)
+	}
+	if afterFirst.Records != 3 || afterFirst.Complete || !afterFirst.CompletedAt.IsZero() {
+		t.Errorf("file after the first batch = %+v, want 3 records, not complete, no completion time", afterFirst)
+	}
+	if afterSecond.Records != 5 || !afterSecond.Complete || !afterSecond.CompletedAt.Equal(last.ReceivedAt) {
+		t.Errorf("file after the last batch = %+v, want 5 records, complete, completed at %v", afterSecond, last.ReceivedAt)
+	}
+	if n := countRows(t, s, "records"); n != 5 {
+		t.Errorf("rows in records = %d, want 5", n)
+	}
+	for _, sr := range readAll(t, s, model.KindLogLine) {
+		if sr.Record.Origin != model.OriginImport || sr.AgentID != "" {
+			t.Errorf("stored record origin, agent = %q, %q, want %q, no agent", sr.Record.Origin, sr.AgentID, model.OriginImport)
+		}
+	}
+}
+
+func TestStore_WriteBatch_ImportCompletesWithAnEmptyBatch(t *testing.T) {
+	s := openStore(t, t.TempDir())
+	start := importStart(1)
+	file := beginImport(t, s, start)
+	b := importBatch(file, 0, true)
+
+	res, err := s.WriteBatch(context.Background(), b)
+
+	if err != nil || res != (WriteResult{}) {
+		t.Fatalf("WriteBatch(empty, Complete) = %+v, %v, want {}, nil", res, err)
+	}
+	got := beginImport(t, s, start)
+	if got.Records != 0 || !got.Complete || !got.CompletedAt.Equal(b.ReceivedAt) {
+		t.Errorf("file after the completing empty batch = %+v, want 0 records, complete, completed at %v", got, b.ReceivedAt)
+	}
+	if n := countRows(t, s, "records"); n != 0 {
+		t.Errorf("rows in records = %d, want 0", n)
+	}
+}
+
+func TestStore_WriteBatch_ImportEmptyBatchNeedsComplete(t *testing.T) {
+	s := openStore(t, t.TempDir())
+	start := importStart(1)
+	file := beginImport(t, s, start)
+
+	_, err := s.WriteBatch(context.Background(), importBatch(file, 0, false))
+
+	if !errors.Is(err, ErrInvalidBatch) {
+		t.Errorf("WriteBatch(empty, not Complete) error = %v, want an error wrapping ErrInvalidBatch", err)
+	}
+	if got := beginImport(t, s, start); got.Records != 0 || got.Complete {
+		t.Errorf("file after the refused batch = %+v, want unchanged", got)
+	}
+}
+
+func TestStore_WriteBatch_ImportKeepsTheFullTextIndexInStep(t *testing.T) {
+	s := openStore(t, t.TempDir())
+	file := beginImport(t, s, importStart(1))
+	var done int64
+	for batch := range 3 {
+		var recs []model.Record
+		for i := range 4 {
+			n := batch*4 + i
+			recs = append(recs, importLogRecord("kernel oom marker"+strconv.Itoa(n)+" killed", n))
+		}
+		writeOK(t, s, importBatch(file, done, batch == 2, recs...))
+		done += int64(len(recs))
+	}
+
+	if err := integrityCheck(s); err != nil {
+		t.Errorf("FTS5 integrity-check error = %v, want nil", err)
+	}
+	if docs, lines := countRows(t, s, "log_fts_docsize"), countRows(t, s, "log_lines"); docs != lines || lines != 12 {
+		t.Errorf("rows in log_fts_docsize = %d, log_lines = %d, want 12 both", docs, lines)
+	}
+	for n := range 12 {
+		hits, err := s.SearchLogs(context.Background(), LogSearch{
+			Text: "marker" + strconv.Itoa(n), From: baseTime.Add(-time.Hour), To: baseTime.Add(48 * time.Hour), Limit: 10,
+		})
+		if err != nil || len(hits) != 1 {
+			t.Errorf("SearchLogs(marker%d) = %d hits, %v, want 1 hit", n, len(hits), err)
+		}
+	}
+}
+
+// checkImportConflict writes a batch whose step is step after setup and checks that it is refused with
+// ErrImportConflict and changes nothing.
+func checkImportConflict(t *testing.T, setup func(t *testing.T, s *Store, file ImportFile), step func(file ImportFile) ImportStep) {
+	t.Helper()
+	s := openStore(t, t.TempDir())
+	start := importStart(1)
+	file := beginImport(t, s, start)
+	setup(t, s, file)
+	stateBefore := beginImport(t, s, start)
+	recordsBefore, linesBefore := countRows(t, s, "records"), countRows(t, s, "log_lines")
+	st := step(file)
+	b := Batch{ReceivedAt: baseTime.Add(2 * time.Hour), Records: []model.Record{importLogRecord("late", 9)}, Import: &st}
+
+	res, err := s.WriteBatch(context.Background(), b)
+
+	if !errors.Is(err, ErrImportConflict) || res != (WriteResult{}) {
+		t.Errorf("WriteBatch() = %+v, %v, want {} and an error wrapping ErrImportConflict", res, err)
+	}
+	if got := countRows(t, s, "records"); got != recordsBefore {
+		t.Errorf("rows in records = %d after the conflict, want %d", got, recordsBefore)
+	}
+	if got := countRows(t, s, "log_lines"); got != linesBefore {
+		t.Errorf("rows in log_lines = %d after the conflict, want %d", got, linesBefore)
+	}
+	if got := beginImport(t, s, start); !sameImportFile(got, stateBefore) {
+		t.Errorf("file after the conflict = %+v, want unchanged %+v", got, stateBefore)
+	}
+}
+
+// writeTwo stores two records of the file without completing it.
+func writeTwo(t *testing.T, s *Store, f ImportFile) {
+	t.Helper()
+	writeOK(t, s, importBatch(f, 0, false, importLogRecord("x", 1), importLogRecord("y", 2)))
+}
+
+func TestStore_WriteBatch_ImportConflict(t *testing.T) {
+	nothing := func(*testing.T, *Store, ImportFile) {}
+	tests := []struct {
+		name  string
+		setup func(t *testing.T, s *Store, file ImportFile)
+		step  func(file ImportFile) ImportStep
+	}{
+		{"Done above the stored count", nothing,
+			func(f ImportFile) ImportStep { return ImportStep{FileID: f.ID, Done: 1} }},
+		{"Done below the stored count", writeTwo,
+			func(f ImportFile) ImportStep { return ImportStep{FileID: f.ID, Done: 0} }},
+		{"Done above the stored count after progress", writeTwo,
+			func(f ImportFile) ImportStep { return ImportStep{FileID: f.ID, Done: 5} }},
+		{"complete file with the matching count", func(t *testing.T, s *Store, f ImportFile) {
+			writeOK(t, s, importBatch(f, 0, true, importLogRecord("x", 1), importLogRecord("y", 2)))
+		}, func(f ImportFile) ImportStep { return ImportStep{FileID: f.ID, Done: 2} }},
+		{"complete file, completing again", func(t *testing.T, s *Store, f ImportFile) {
+			writeOK(t, s, importBatch(f, 0, true))
+		}, func(f ImportFile) ImportStep { return ImportStep{FileID: f.ID, Done: 0, Complete: true} }},
+		{"unknown file", nothing,
+			func(f ImportFile) ImportStep { return ImportStep{FileID: f.ID + 1000, Done: 0} }},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) { checkImportConflict(t, tc.setup, tc.step) })
+	}
+}
+
+func TestStore_WriteBatch_ImportConcurrentRunsStoreOnce(t *testing.T) {
+	s := openStore(t, t.TempDir())
+	start := importStart(1)
+	file := beginImport(t, s, start)
+	b := importBatch(file, 0, true, importLogRecord("a", 1), importLogRecord("b", 2), importLogRecord("c", 3))
+	const runs = 4
+	errs := make([]error, runs)
+	var wg sync.WaitGroup
+	for i := range runs {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, errs[i] = s.WriteBatch(context.Background(), b)
+		}()
+	}
+	wg.Wait()
+
+	succeeded, conflicts := 0, 0
+	for _, err := range errs {
+		switch {
+		case err == nil:
+			succeeded++
+		case errors.Is(err, ErrImportConflict):
+			conflicts++
+		default:
+			t.Errorf("WriteBatch() error = %v, want nil or ErrImportConflict", err)
+		}
+	}
+	if succeeded != 1 || conflicts != runs-1 {
+		t.Errorf("concurrent identical import batches: %d succeeded, %d conflicts, want 1 and %d", succeeded, conflicts, runs-1)
+	}
+	if n := countRows(t, s, "records"); n != 3 {
+		t.Errorf("rows in records = %d, want 3 (stored once)", n)
+	}
+	if got := beginImport(t, s, start); got.Records != 3 || !got.Complete {
+		t.Errorf("file after the runs = %+v, want 3 records, complete", got)
+	}
+}
+
+func TestStore_WriteBatch_ImportFailureRollsBackTheCounter(t *testing.T) {
+	s := openStore(t, t.TempDir())
+	start := importStart(1)
+	file := beginImport(t, s, start)
+	stmt := "CREATE TRIGGER poison BEFORE INSERT ON records WHEN new.source = 'poison' BEGIN SELECT RAISE(ABORT, 'injected'); END"
+	if _, err := s.db.ExecContext(context.Background(), stmt); err != nil {
+		t.Fatalf("creating the failure trigger error = %v, want nil", err)
+	}
+	poison := importLogRecord("bad", 3)
+	poison.Source = "poison"
+
+	_, err := s.WriteBatch(context.Background(), importBatch(file, 0, true, importLogRecord("a", 1), importLogRecord("b", 2), poison))
+
+	if err == nil {
+		t.Fatal("WriteBatch() with a failing record error = nil, want an error")
+	}
+	if got := beginImport(t, s, start); got.Records != 0 || got.Complete {
+		t.Errorf("file after the failed batch = %+v, want 0 records, not complete (same transaction)", got)
+	}
+	if n := countRows(t, s, "records"); n != 0 {
+		t.Errorf("rows in records = %d, want 0", n)
+	}
+}
+
+func TestStore_WriteBatch_ImportRejections(t *testing.T) {
+	agentRecord := metricRecord("node", "cpu.load", 1, baseTime)
+	backendRecord := importLogRecord("x", 1)
+	backendRecord.Origin = model.OriginBackend
+	tests := []struct {
+		name  string
+		batch func(file ImportFile) Batch
+	}{
+		{"record of origin agent", func(f ImportFile) Batch { return importBatch(f, 0, false, importLogRecord("ok", 1), agentRecord) }},
+		{"record of origin backend", func(f ImportFile) Batch { return importBatch(f, 0, false, backendRecord) }},
+		{"agent ID with import records", func(f ImportFile) Batch {
+			b := importBatch(f, 0, false, importLogRecord("ok", 1))
+			b.AgentID = testAgent
+			return b
+		}},
+		{"FileID zero", func(f ImportFile) Batch {
+			b := importBatch(f, 0, false, importLogRecord("ok", 1))
+			b.Import.FileID = 0
+			return b
+		}},
+		{"negative FileID", func(f ImportFile) Batch {
+			b := importBatch(f, 0, false, importLogRecord("ok", 1))
+			b.Import.FileID = -3
+			return b
+		}},
+		{"negative Done", func(f ImportFile) Batch { return importBatch(f, -1, false, importLogRecord("ok", 1)) }},
+		{"invalid record", func(f ImportFile) Batch {
+			bad := importLogRecord("ok", 1)
+			bad.Data = &model.LogLine{Log: "", Message: "x"}
+			return importBatch(f, 0, false, bad)
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			s := openStore(t, t.TempDir())
+			start := importStart(1)
+			file := beginImport(t, s, start)
+
+			res, err := s.WriteBatch(context.Background(), tc.batch(file))
+
+			if !errors.Is(err, ErrInvalidBatch) {
+				t.Errorf("WriteBatch() error = %v, want an error wrapping ErrInvalidBatch", err)
+			}
+			if res != (WriteResult{}) {
+				t.Errorf("WriteBatch() = %+v with the rejection, want {}", res)
+			}
+			if n := countRows(t, s, "records"); n != 0 {
+				t.Errorf("rows in records = %d after the rejection, want 0", n)
+			}
+			if got := beginImport(t, s, start); got.Records != 0 || got.Complete {
+				t.Errorf("file after the rejection = %+v, want unchanged", got)
+			}
 		})
 	}
 }

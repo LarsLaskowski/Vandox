@@ -19,18 +19,20 @@ parsing and signatures.
 Both support `--version`, which prints version, commit and build date. `vandoxd` without arguments runs the
 service; `-config <file>` names its configuration file (default `/etc/vandox/vandoxd.yaml`) and
 `-healthcheck` probes `/healthz` of a running service and exits 0 when it is healthy (the image's Docker
-`HEALTHCHECK` uses it).
+`HEALTHCHECK` uses it). `vandoxd import <path>` imports a directory, an archive or a log file into the
+database, see *Import logs* below.
 
 ## Layout
 
 ```
 cmd/vandox-agent/   entry point of the agent
 cmd/vandoxd/        entry point of the backend
-cmd/vandoxd/internal/  packages used only by the backend (web and ingest server, SQLite store)
+cmd/vandoxd/internal/  packages used only by the backend (web and ingest server, SQLite store, log importer)
 internal/config/    configuration loading of both binaries, see Configuration below
 internal/model/     shared record types and their validation
 internal/wire/      versioned batch format, see docs/WIRE_FORMAT.md
-internal/           further shared packages (log parsing, signatures, ...)
+internal/logparse/  parser interface, parser registry and line reader of the log import
+internal/           further shared packages (signatures, ...)
 deploy/agent/       deployment files for the agent
 deploy/backend/     deployment files for the backend
 docs/               documentation
@@ -211,3 +213,57 @@ the access control (record 0060).
 The ingest port (8081) is not published yet: the ingest API arrives with issue #40, which adds the binding on
 the host's tailnet address. The database lives in the named volume `vandox-data` (`/data` in the container,
 owned by 65532); a bind-mounted data directory instead of the volume must be owned by 65532 as well.
+
+### Import logs
+
+`vandoxd import <path>` reads logs the operator saved on the backend host and stores their records
+(origin `import`, never live, so they never raise an alert). The compose file mounts `./import` read-only at
+`/import`. Put the directory, archive or file into `import/` and run the import inside the running
+container; `-it` is needed so that Ctrl-C reaches the import (without a terminal the import keeps running
+when the client is closed):
+
+```
+docker exec -it vandoxd /vandoxd import /import/<name>
+```
+
+The import runs as the container's user 65532 and reads only what that user may read. A copied `/var/log`
+holds files such as `auth.log` and `mail.log` (`0640 root:adm`), which are listed as failed with "permission
+denied" until that user may read them. Give read access to the user 65532 only, never to everyone, because
+these files must not become readable for every local user on the host:
+
+```
+sudo chown -R 65532:65532 import/<name> && sudo chmod -R u+rX import/<name>
+```
+
+or, keeping the owner and with ACL support, `sudo setfacl -R -m u:65532:rX import/<name>`. The directory
+`import/` itself only needs to stay readable and searchable (as created, `0755`).
+
+What is read: a directory (recursively, in lexical order), a `.tar`, a gzip-compressed tar (`.tar.gz`,
+`.tgz`), a single gzip file (a rotated log) or a plain file. Compression and archives are recognized by their
+content, not by the file name; gzip files inside a directory or a tar archive are decompressed, and a tar
+archive in the directory is read as well, but an archive inside an archive is not opened. Nothing is
+extracted to disk, and symbolic links, FIFOs, sockets and devices are never followed or opened. Files are
+read as streams, so memory use does not grow with the file size; lines longer than 16 KiB are cut. A run
+handles at most 20,000 entries (files, subdirectories and archive entries); a larger input is refused before
+anything is stored and has to be split. There is no size limit: a gzip bomb of valid lines is decompressed
+and, once parsers exist, its records fill `storage.directory` until the import is stopped, so watch the
+progress lines and press Ctrl-C.
+
+Every file is read twice, first to detect its type and compute the SHA-256 of its decompressed content, then
+to import it. A file no parser claims is listed as not recognized with the reason (no parser, empty,
+unsupported compression such as bzip2, xz, zstd or zip, nested archive, symbolic link, not a regular file);
+nothing is skipped silently. Progress is logged as JSON lines on standard error (what was found, each file,
+progress every 64 MiB hashed and every 100,000 lines), and a summary on standard output lists the files
+imported, already imported, not recognized and failed, the lines read, records stored and lines skipped, the
+time range of the stored records and the reasons. Names from the input are printed quoted. The exit code is 0
+when every file was imported, already imported or not recognized, 1 when a file failed, the import was
+interrupted or the configuration, the database or the input could not be opened, and 2 for a usage error.
+
+Importing is repeatable: a file whose content was imported completely is not imported again, also under
+another name or compressed differently (`syslog.1` and the later `syslog.2.gz`). An import that was stopped
+(Ctrl-C, a database error) continues where it stopped when the same content is imported again, and no record
+is stored twice. Stopping or restarting the container kills a running import; nothing committed is lost, and
+the next import resumes. Limits: a file that grew since it was imported (the same log with more lines, as in
+a newer copy of `/var/log`) has another content hash and is imported as a whole, and lines appended to a log
+while it is imported are left for a later import. The parsers for the log formats arrive with the issues
+#16 to #20; until then `vandoxd import` recognizes no file and lists every file as not recognized.

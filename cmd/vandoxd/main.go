@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"time"
 
 	"github.com/LarsLaskowski/Vandox/internal/config"
 	"github.com/LarsLaskowski/Vandox/internal/version"
@@ -32,6 +33,11 @@ func run(ctx context.Context, args, environ []string, stdout, stderr io.Writer, 
 	configPath := fs.String("config", config.DefaultBackendFile, "path of the configuration file")
 	healthFlag := fs.Bool("healthcheck", false, "probe /healthz of the running service and exit 0 when it is healthy")
 	versionFlag := fs.Bool("version", false, "print the version and exit")
+	fs.Usage = func() {
+		_, _ = fmt.Fprintf(fs.Output(), "Usage of %s:\n", binaryName)
+		fs.PrintDefaults()
+		_, _ = fmt.Fprintf(fs.Output(), "\nSub-command:\n  %s [flags] import [-config file] <path>\n    \timport the log directory, archive or file at <path>\n", binaryName)
+	}
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
@@ -43,6 +49,9 @@ func run(ctx context.Context, args, environ []string, stdout, stderr io.Writer, 
 			return 1
 		}
 		return 0
+	}
+	if fs.Arg(0) == "import" && !*healthFlag {
+		return importCommand(ctx, fs.Args()[1:], *configPath, environ, stdout, stderr, importEnv{parsers: importParsers(), now: time.Now})
 	}
 	if fs.NArg() > 0 {
 		_, _ = fmt.Fprintf(stderr, "vandoxd: unexpected argument %q\n", fs.Arg(0))

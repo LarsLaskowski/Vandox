@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -65,13 +66,13 @@ func TestOpen_CreatesSchema(t *testing.T) {
 	if got := queryString(t, s.db, "SELECT value FROM meta WHERE key = 'schema_version'"); got != strconv.Itoa(SchemaVersion) {
 		t.Errorf("meta schema_version = %q, want %q", got, strconv.Itoa(SchemaVersion))
 	}
-	if SchemaVersion != 2 {
-		t.Errorf("SchemaVersion = %d, want 2", SchemaVersion)
+	if SchemaVersion != 3 {
+		t.Errorf("SchemaVersion = %d, want 3", SchemaVersion)
 	}
 	for _, want := range []struct{ typ, name string }{
 		{"table", "meta"}, {"table", "records"}, {"table", "metrics"}, {"table", "log_lines"}, {"table", "log_fts"},
 		{"index", "records_agent_seq"}, {"index", "records_kind_source_time"}, {"index", "records_kind_time"},
-		{"index", "metrics_source_name_time"},
+		{"index", "metrics_source_name_time"}, {"table", "import_files"},
 	} {
 		if got := masterCount(t, s.db, want.typ, want.name); got != 1 {
 			t.Errorf("sqlite_master rows of %s %s = %d, want 1", want.typ, want.name, got)
@@ -326,7 +327,7 @@ func TestOpen_ConcurrentOpensOfANewDirectory(t *testing.T) {
 	if got := queryString(t, stores[0].db, "SELECT value FROM meta WHERE key = 'schema_version'"); got != strconv.Itoa(SchemaVersion) {
 		t.Errorf("schema_version = %q, want %q", got, strconv.Itoa(SchemaVersion))
 	}
-	for _, table := range []string{"meta", "records", "metrics", "log_lines", "log_fts"} {
+	for _, table := range []string{"meta", "records", "metrics", "log_lines", "log_fts", "import_files"} {
 		if got := masterCount(t, stores[0].db, "table", table); got != 1 {
 			t.Errorf("sqlite_master rows of table %s = %d, want 1", table, got)
 		}
@@ -352,4 +353,148 @@ func TestMigrations_AreOrderedWithoutGaps(t *testing.T) {
 	if last := migrations[len(migrations)-1].version; last != SchemaVersion {
 		t.Errorf("last migration version = %d, want SchemaVersion (%d)", last, SchemaVersion)
 	}
+}
+
+// snapshotWithoutImportFiles returns every sqlite_master row (type, name, sql) except those of import_files and
+// its automatic indexes as one text value.
+const snapshotWithoutImportFiles = "SELECT coalesce(group_concat(type || '|' || name || '|' || coalesce(sql, ''), char(10)), '') " +
+	"FROM (SELECT type, name, sql FROM sqlite_master WHERE name NOT LIKE '%import_files%' ORDER BY type, name)"
+
+// versionTwoDatabase creates a database in dir with the schema steps 1 and 2 only, one metric record and one log
+// line record of origin import, and closes it.
+func versionTwoDatabase(t *testing.T, dir string) {
+	t.Helper()
+	ctx := context.Background()
+	db, err := sql.Open("sqlite", dsn(filepath.Join(dir, FileName), writerQuery))
+	if err != nil {
+		t.Fatalf("sql.Open() error = %v, want nil", err)
+	}
+	defer func() { _ = db.Close() }()
+	db.SetMaxOpenConns(1)
+	if len(migrations) < 2 {
+		t.Fatalf("migrations has %d steps, want at least 2", len(migrations))
+	}
+	if err := migrate(ctx, db, migrations[:2]); err != nil {
+		t.Fatalf("migrate(steps 1 and 2) error = %v, want nil", err)
+	}
+	for _, stmt := range []string{
+		"INSERT INTO records(kind, origin, source, captured_at, received_at) VALUES ('log_line', 'import', 'syslog', 1, 2)",
+		"INSERT INTO log_lines(record_id, log, program, pid, message, truncated) VALUES (1, 'syslog', '', 0, 'kept line', 0)",
+		"INSERT INTO log_fts(rowid, message) VALUES (1, 'kept line')",
+	} {
+		if _, err := db.ExecContext(ctx, stmt); err != nil {
+			t.Fatalf("version 2 setup %q error = %v, want nil", stmt, err)
+		}
+	}
+}
+
+func TestOpen_MigratesVersion2KeepsRecords(t *testing.T) {
+	dir := t.TempDir()
+	versionTwoDatabase(t, dir)
+	path := filepath.Join(dir, FileName)
+	if got := rawQueryString(t, path, "SELECT value FROM meta WHERE key = 'schema_version'"); got != "2" {
+		t.Fatalf("schema_version of the prepared database = %q, want %q", got, "2")
+	}
+	before := rawQueryString(t, path, snapshotWithoutImportFiles)
+
+	s := openStore(t, dir)
+
+	if got := queryString(t, s.db, "SELECT value FROM meta WHERE key = 'schema_version'"); got != "3" {
+		t.Errorf("schema_version after the migration = %q, want %q", got, "3")
+	}
+	if got := masterCount(t, s.db, "table", "import_files"); got != 1 {
+		t.Errorf("import_files after the migration: sqlite_master rows = %d, want 1", got)
+	}
+	if got := queryString(t, s.db, snapshotWithoutImportFiles); got != before {
+		t.Errorf("schema objects of steps 1 and 2 after the migration = %q, want unchanged %q", got, before)
+	}
+	if got := queryString(t, s.db, "SELECT (SELECT count(*) FROM records) || '|' || (SELECT message FROM log_lines)"); got != "1|kept line" {
+		t.Errorf("records and log line after the migration = %q, want %q", got, "1|kept line")
+	}
+	if err := integrityCheck(s); err != nil {
+		t.Errorf("FTS5 integrity-check after the migration error = %v, want nil", err)
+	}
+	if got := countRows(t, s, "import_files"); got != 0 {
+		t.Errorf("rows in import_files after the migration = %d, want 0", got)
+	}
+}
+
+func TestMigrations_Step3CreatesImportFiles(t *testing.T) {
+	s := openStore(t, t.TempDir())
+	rows, err := s.db.QueryContext(context.Background(), "SELECT name, type, \"notnull\" FROM pragma_table_info('import_files') ORDER BY cid")
+	if err != nil {
+		t.Fatalf("table_info(import_files) error = %v, want nil", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var got []string
+	for rows.Next() {
+		var name, typ string
+		var notNull int
+		if err := rows.Scan(&name, &typ, &notNull); err != nil {
+			t.Fatalf("scanning table_info error = %v, want nil", err)
+		}
+		got = append(got, name+" "+typ+" "+strconv.Itoa(notNull))
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("reading table_info error = %v, want nil", err)
+	}
+	want := []string{
+		"id INTEGER 0", "sha256 BLOB 1", "size INTEGER 1", "name TEXT 1", "file_name BLOB 1", "mod_time INTEGER 0",
+		"source_type TEXT 1", "records INTEGER 1", "complete INTEGER 1", "started_at INTEGER 1", "completed_at INTEGER 0",
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("columns of import_files (name type notnull) = %q, want %q", got, want)
+	}
+	if sqlText := queryString(t, s.db, "SELECT sql FROM sqlite_master WHERE name = 'import_files'"); !strings.Contains(sqlText, "STRICT") {
+		t.Errorf("import_files definition = %q, want a STRICT table", sqlText)
+	}
+}
+
+func TestMigrations_Step3Constraints(t *testing.T) {
+	sum := make([]byte, 32)
+	tests := []struct {
+		name    string
+		sha     []byte
+		size    int64
+		file    []byte
+		records int64
+		done    int64
+		wantErr bool
+	}{
+		{"valid row", sum, 0, []byte("name"), 0, 0, false},
+		{"file name of 1024 bytes", sum, 0, make([]byte, 1024), 0, 0, false},
+		{"hash of 31 bytes", sum[:31], 0, []byte("n"), 0, 0, true},
+		{"hash of 33 bytes", append(slices.Clone(sum), 0), 0, []byte("n"), 0, 0, true},
+		{"negative size", sum, -1, []byte("n"), 0, 0, true},
+		{"file name of 1025 bytes", sum, 0, make([]byte, 1025), 0, 0, true},
+		{"negative records", sum, 0, []byte("n"), -1, 0, true},
+		{"complete other than 0 or 1", sum, 0, []byte("n"), 0, 2, true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			s := openStore(t, t.TempDir())
+
+			_, err := s.db.ExecContext(context.Background(),
+				"INSERT INTO import_files(sha256, size, name, file_name, source_type, records, complete, started_at) VALUES (?, ?, 'n', ?, 'syslog', ?, ?, 1)",
+				tc.sha, tc.size, tc.file, tc.records, tc.done)
+
+			if (err != nil) != tc.wantErr {
+				t.Errorf("insert into import_files error = %v, want an error: %v", err, tc.wantErr)
+			}
+		})
+	}
+	t.Run("defaults and unique hash", func(t *testing.T) {
+		s := openStore(t, t.TempDir())
+		const insert = "INSERT INTO import_files(sha256, size, name, file_name, source_type, started_at) VALUES (?, 1, 'n', ?, 'syslog', 1)"
+		if _, err := s.db.ExecContext(context.Background(), insert, sum, []byte("n")); err != nil {
+			t.Fatalf("first insert error = %v, want nil", err)
+		}
+
+		if got := queryString(t, s.db, "SELECT records || '|' || complete || '|' || coalesce(completed_at, 'null') || '|' || coalesce(mod_time, 'null') FROM import_files"); got != "0|0|null|null" {
+			t.Errorf("defaults of records, complete, completed_at, mod_time = %q, want %q", got, "0|0|null|null")
+		}
+		if _, err := s.db.ExecContext(context.Background(), insert, sum, []byte("n")); err == nil {
+			t.Error("second insert with the same hash error = nil, want a unique violation")
+		}
+	})
 }
