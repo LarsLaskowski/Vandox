@@ -245,7 +245,10 @@ func buildTar(t *testing.T, entries ...tarEntry) []byte {
 
 // tarHeader returns the header of the entry e.
 func tarHeader(e tarEntry) *tar.Header {
-	h := &tar.Header{Name: e.name, Typeflag: e.typ, Linkname: e.link, Mode: 0o644, ModTime: e.mod, Format: e.format}
+	if e.typ == tar.TypeXGlobalHeader {
+		return &tar.Header{Name: e.name, Typeflag: e.typ, PAXRecords: e.global, Format: tar.FormatPAX}
+	}
+	h :=&tar.Header{Name: e.name, Typeflag: e.typ, Linkname: e.link, Mode: 0o644, ModTime: e.mod, Format: e.format}
 	if h.Typeflag == 0 {
 		h.Typeflag = tar.TypeReg
 	}
@@ -255,9 +258,6 @@ func tarHeader(e tarEntry) *tar.Header {
 	switch h.Typeflag {
 	case tar.TypeDir:
 		h.Mode = 0o755
-	case tar.TypeXGlobalHeader:
-		h.PAXRecords = e.global
-		h.Format = tar.FormatPAX
 	case tar.TypeReg:
 		h.Size = int64(len(e.content))
 	}
