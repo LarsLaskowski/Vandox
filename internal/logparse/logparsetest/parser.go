@@ -17,7 +17,7 @@ import (
 // Parser is a scripted logparse.Parser; safe for concurrent use. Set the fields before the first call.
 type Parser struct {
 	TypeName   string
-	DetectFunc func(f logparse.File, head []byte) logparse.Confidence                               // nil: NoMatch
+	DetectFunc func(f logparse.File, head []byte) logparse.Confidence                              // nil: NoMatch
 	ParseFunc  func(ctx context.Context, f logparse.File, r io.Reader, out logparse.Emitter) error // nil: reads nothing
 
 	mu     sync.Mutex

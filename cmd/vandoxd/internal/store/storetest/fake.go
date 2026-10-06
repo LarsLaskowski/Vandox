@@ -17,7 +17,7 @@ type Fake struct {
 	OnSearch  func(q store.LogSearch) ([]store.StoredRecord, error)   // nil: no hits
 	// OnBeginImport scripts BeginImport; nil: a new, incomplete file with IDs 1, 2, …
 	OnBeginImport func(f store.ImportFileStart) (store.ImportFile, error)
-	Block     chan struct{}                                           // non-nil: every call waits until closed or ctx is done
+	Block         chan struct{} // non-nil: every call waits until closed or ctx is done
 
 	mu       sync.Mutex
 	batches  []store.Batch
@@ -142,8 +142,8 @@ func (f *Fake) LogSearches() []store.LogSearch {
 }
 
 var (
-	_ store.Writer       = (*Fake)(nil)
-	_ store.RecordReader = (*Fake)(nil)
-	_ store.LogSearcher  = (*Fake)(nil)
+	_ store.Writer        = (*Fake)(nil)
+	_ store.RecordReader  = (*Fake)(nil)
+	_ store.LogSearcher   = (*Fake)(nil)
 	_ store.ImportTracker = (*Fake)(nil)
 )

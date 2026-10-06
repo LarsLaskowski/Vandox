@@ -15,5 +15,5 @@ Plan: [plan.md](plan.md) — Status: Draft
 | 9 | Implement `vandoxd import`: dispatch and usage in `run`, `importCommand` (input-derived log attributes quoted), `writeSummary`, `importParsers` | `cmd/vandoxd/main.go`, `cmd/vandoxd/import.go` | AC-C1–AC-C6 | Dev | [x] |
 | 10 | Documentation: README (*Binaries*, *Layout*, *Import logs* incl. `docker exec -it`, read access for 65532 only via `chown`/`setfacl` — never world-readable, what a container stop does, the 20,000-entry limit, a gzip bomb of valid lines filling `storage.directory`), `docs/ARCHITECTURE.md` (status, components, data flow, storage, links 0069–0072, 0072 for 0058), `.squad/project.md` (security areas 9 and 10, test doubles, integration surface "a new log parser") | `README.md`, `docs/ARCHITECTURE.md`, `.squad/project.md` | — | Dev | [x] |
 | 11 | Coverage ≥ 80 % on new/changed code and overall; add tests for uncovered branches | test files above | all | Tester | [x] |
-| 12 | Format and analyzer gate (incl. gocognit on `scan` and pass 2) | changed files | — | Code Officer | [ ] |
+| 12 | Format and analyzer gate (incl. gocognit on `scan` and pass 2) | changed files | — | Code Officer | [x] |
 | 13 | At approval: decision index rows 0069–0072 (`Accepted`), 0058 row and status line `Superseded by 0072` | `docs/decisions/README.md`, `docs/decisions/0058-…md` | — | Lead | [ ] |

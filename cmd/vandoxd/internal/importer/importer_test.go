@@ -248,7 +248,7 @@ func tarHeader(e tarEntry) *tar.Header {
 	if e.typ == tar.TypeXGlobalHeader {
 		return &tar.Header{Name: e.name, Typeflag: e.typ, PAXRecords: e.global, Format: tar.FormatPAX}
 	}
-	h :=&tar.Header{Name: e.name, Typeflag: e.typ, Linkname: e.link, Mode: 0o644, ModTime: e.mod, Format: e.format}
+	h := &tar.Header{Name: e.name, Typeflag: e.typ, Linkname: e.link, Mode: 0o644, ModTime: e.mod, Format: e.format}
 	if h.Typeflag == 0 {
 		h.Typeflag = tar.TypeReg
 	}
@@ -657,7 +657,7 @@ func TestRun_SameContentUnderAnotherNameOrCompressionIsAlreadyImported(t *testin
 	}
 	forms := map[string]func() string{
 		"gzip-compressed under another name": func() string { return writeFile(t, dir, "two/syslog.2.gz", gz(t, textAlpha)) },
-		"multi-member gzip": func() string { return writeFile(t, dir, "three/s.gz", gz(t, "alpha 1\n", "alpha 2\nalpha 3\n")) },
+		"multi-member gzip":                  func() string { return writeFile(t, dir, "three/s.gz", gz(t, "alpha 1\n", "alpha 2\nalpha 3\n")) },
 		"entry of a tar": func() string {
 			return writeFile(t, dir, "four/l.tar", buildTar(t, tarEntry{name: "var/log/messages", content: textAlpha}))
 		},

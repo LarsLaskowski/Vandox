@@ -23,8 +23,8 @@ type ImportTracker interface {
 }
 
 var (
-	_ Writer       = (*Store)(nil)
-	_ RecordReader = (*Store)(nil)
-	_ LogSearcher  = (*Store)(nil)
+	_ Writer        = (*Store)(nil)
+	_ RecordReader  = (*Store)(nil)
+	_ LogSearcher   = (*Store)(nil)
 	_ ImportTracker = (*Store)(nil)
 )
