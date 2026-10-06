@@ -22,7 +22,11 @@ internal static class BackendLogging
     {
         if (LogLevels.TryParse(level, out var minimum))
         {
-            return LoggerFactory.Create(builder => builder.SetMinimumLevel(minimum).AddProvider(new JsonLineLoggerProvider(writer, minimum, clock)));
+            // The framework logs every request at information level, the health probe every 30 s included; its
+            // categories only speak from warning on unless the operator asks for debug.
+            var framework = minimum <= LogLevel.Debug ? minimum : LogLevel.Warning;
+
+            return LoggerFactory.Create(builder => builder.SetMinimumLevel(minimum).AddFilter("Microsoft", framework).AddProvider(new JsonLineLoggerProvider(writer, minimum, clock)));
         }
 
         return null;

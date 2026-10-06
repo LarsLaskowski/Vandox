@@ -102,6 +102,7 @@ jobs:
       - name: Restore tools
         run: dotnet tool restore
 
+      # The settings are arguments, not a sonar-project.properties file: the scanner for .NET refuses a repository that has one.
       # One analysis for both languages: the scanner for .NET wraps the C# build, and its bundled scanner
       # analyses the Go agent from the same run.
       - name: Begin analysis
@@ -113,7 +114,10 @@ jobs:
             /d:sonar.token="$SONAR_TOKEN" \
             /d:sonar.host.url=https://sonarcloud.io \
             /d:sonar.cs.opencover.reportsPaths="TestResults/**/coverage.opencover.xml" \
-            /d:sonar.go.coverage.reportPaths=coverage.out
+            /d:sonar.go.coverage.reportPaths=coverage.out \
+            /d:sonar.test.inclusions="**/*_test.go,tests/**" \
+            /d:sonar.exclusions="**/*_test.go,tests/**,bin/**,dist/**,**/obj/**,**/bin/**,TestResults/**" \
+            /d:sonar.coverage.exclusions=".squad/**,.claude/**"
 
       - name: Build, test and generate coverage
         run: |

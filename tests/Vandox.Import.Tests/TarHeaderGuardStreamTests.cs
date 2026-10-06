@@ -1,0 +1,124 @@
+using System.Text;
+
+namespace Vandox.Import.Tests;
+
+/// <summary>
+/// Tests for <see cref="TarHeaderGuardStream"/>
+/// </summary>
+[TestClass]
+public class TarHeaderGuardStreamTests
+{
+    #region Properties
+
+    /// <summary>
+    /// Gets or sets the context of the running test.
+    /// </summary>
+    public TestContext TestContext { get; set; } = null!;
+
+    #endregion // Properties
+
+    #region Methods
+
+    /// <summary>
+    /// An extended header above the limit is refused as soon as its header block is read, whatever its type.
+    /// </summary>
+    /// <param name="type">The type flag</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [DataRow('x')]
+    [DataRow('g')]
+    [DataRow('L')]
+    [DataRow('K')]
+    public async Task TarHeaderGuardStreamRefusesLargeMetadataHeader(char type)
+    {
+        // Arrange
+        await using var guard = new TarHeaderGuardStream(new MemoryStream(Header("pax", type, OctalSize(ImportLimits.MaxTarMetadataBytes + 1))));
+        var buffer = new byte[1024];
+
+        // Act and assert
+        await Assert.ThrowsExactlyAsync<TarMetadataTooLargeException>(async () => await guard.ReadAtLeastAsync(buffer, 512, true, TestContext.CancellationToken));
+    }
+
+    /// <summary>
+    /// A base-256 size that does not fit is refused as well.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task TarHeaderGuardStreamRefusesHugeBase256Size()
+    {
+        // Arrange
+        var size = new byte[12];
+
+        size.AsSpan().Fill(0xFF);
+
+        await using var guard = new TarHeaderGuardStream(new MemoryStream(Header("pax", 'x', size)));
+        var buffer = new byte[1024];
+
+        // Act and assert
+        await Assert.ThrowsExactlyAsync<TarMetadataTooLargeException>(async () => await guard.ReadAtLeastAsync(buffer, 512, true, TestContext.CancellationToken));
+    }
+
+    /// <summary>
+    /// Metadata at the limit, large file data, link entries and an invalid size field pass; only the block structure is followed.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task TarHeaderGuardStreamPassesEntriesWithinLimits()
+    {
+        // Arrange
+        var stream = new MemoryStream();
+        var data = new byte[1024];
+
+        await stream.WriteAsync(Header("a", '0', OctalSize(1024)), TestContext.CancellationToken);
+        await stream.WriteAsync(data, TestContext.CancellationToken);
+        await stream.WriteAsync(Header("link", '2', OctalSize(5L << 30)), TestContext.CancellationToken);
+        await stream.WriteAsync(Header("junk", '0', Encoding.ASCII.GetBytes("zzzzzzzzzzz\0")), TestContext.CancellationToken);
+        await stream.WriteAsync(Header("pax", 'x', OctalSize(ImportLimits.MaxTarMetadataBytes)), TestContext.CancellationToken);
+        await stream.WriteAsync(new byte[(int)ImportLimits.MaxTarMetadataBytes], TestContext.CancellationToken);
+        await stream.WriteAsync(Header("b", '0', OctalSize(0)), TestContext.CancellationToken);
+        stream.Position = 0;
+
+        await using var guard = new TarHeaderGuardStream(stream);
+        var read = 0;
+        var buffer = new byte[700];
+
+        // Act
+        for (var count = await guard.ReadAsync(buffer, TestContext.CancellationToken); count > 0; count = await guard.ReadAsync(buffer, TestContext.CancellationToken))
+        {
+            read += count;
+        }
+
+        // Assert
+        Assert.AreEqual(stream.Length, read, "every byte is passed on");
+    }
+
+    /// <summary>
+    /// Builds a tar header block.
+    /// </summary>
+    /// <param name="name">The entry name</param>
+    /// <param name="type">The type flag</param>
+    /// <param name="size">The size field of 12 bytes</param>
+    /// <returns>The block</returns>
+    private static byte[] Header(string name, char type, byte[] size)
+    {
+        var block = new byte[512];
+
+        Encoding.ASCII.GetBytes(name).CopyTo(block, 0);
+        size.CopyTo(block, 124);
+        block[156] = (byte)type;
+
+        return block;
+    }
+
+    /// <summary>
+    /// Writes a size as the 12-byte octal field of a tar header.
+    /// </summary>
+    /// <param name="size">The size</param>
+    /// <returns>The field</returns>
+    private static byte[] OctalSize(long size)
+    {
+        return Encoding.ASCII.GetBytes(Convert.ToString(size, 8).PadLeft(11, '0') + "\0");
+    }
+
+    #endregion // Methods
+}

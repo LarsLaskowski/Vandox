@@ -19,6 +19,11 @@ public static class ImportLimits
     public const int MaxPathBytes = 1024;
 
     /// <summary>
+    /// The largest extended header (PAX or GNU long name) of a tar entry in bytes.
+    /// </summary>
+    public const long MaxTarMetadataBytes = 1L << 20;
+
+    /// <summary>
     /// The default number of records per batch.
     /// </summary>
     public const int DefaultBatchRecords = 2000;

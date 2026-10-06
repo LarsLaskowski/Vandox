@@ -1,4 +1,5 @@
 using System.Formats.Tar;
+using System.Text;
 
 using Vandox.Core.Model;
 
@@ -138,6 +139,32 @@ public class ImporterArchiveTests
         // Assert
         Assert.IsNull(run.Error, "the run goes on");
         Assert.IsTrue(run.Summary.Files.Any(file => file.Outcome == ImportOutcome.Failed), "the archive fails");
+    }
+
+    /// <summary>
+    /// An archive whose extended header declares gigabytes of metadata fails without being read into memory.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task ImporterFailsArchiveWithHugeMetadataHeader()
+    {
+        // Arrange
+        using var harness = new ImportHarness();
+        var header = new byte[512];
+
+        Encoding.ASCII.GetBytes("pax").CopyTo(header, 0);
+        Encoding.ASCII.GetBytes("14000000000\0").CopyTo(header, 124);
+        Encoding.ASCII.GetBytes("ustar\000").CopyTo(header, 257);
+        header[156] = (byte)'x';
+
+        harness.Write("bomb.tar", header);
+
+        // Act
+        var run = await harness.RunAsync(TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsNull(run.Error, "the run goes on");
+        Assert.IsTrue(run.Summary.Files.Any(file => file.Outcome == ImportOutcome.Failed && file.Reason == "tar metadata header is too large"), $"the archive fails with the reason: {string.Join(";", run.Summary.Files.Select(file => $"{file.Outcome}/{file.Reason}"))}");
     }
 
     /// <summary>

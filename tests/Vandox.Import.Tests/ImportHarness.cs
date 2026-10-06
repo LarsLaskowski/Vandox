@@ -51,6 +51,11 @@ internal sealed class ImportHarness : IDisposable
     /// </summary>
     internal List<ImportProgress> Events { get; } = [];
 
+    /// <summary>
+    /// Gets or sets a value indicating whether paths are resolved without <c>openat2</c>.
+    /// </summary>
+    internal bool Fallback { get; set; }
+
     #endregion // Properties
 
     #region Methods
@@ -96,7 +101,8 @@ internal sealed class ImportHarness : IDisposable
                           Parsers = new ParserRegistry([Parser]),
                           Store = Store,
                           Clock = Clock,
-                          Progress = Events.Add
+                          Progress = Events.Add,
+                          ResolveWithoutKernel = Fallback
                       };
 
         tweak?.Invoke(options);

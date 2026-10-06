@@ -43,9 +43,10 @@ internal sealed class SourceRoot : IDisposable
     /// it. Nothing is opened before the type was checked.
     /// </summary>
     /// <param name="path">The path given by the operator</param>
+    /// <param name="withoutKernel">Whether to resolve paths without <c>openat2</c></param>
     /// <returns>The opened root</returns>
     /// <exception cref="IOException">The path is empty, missing, or neither a directory nor a regular file</exception>
-    internal static SourceRoot Open(string path)
+    internal static SourceRoot Open(string path, bool withoutKernel)
     {
         if (path.Length == 0)
         {
@@ -57,14 +58,25 @@ internal sealed class SourceRoot : IDisposable
         switch (FileProbe.GetKind(resolved, followLinks: false))
         {
             case FileKind.Directory:
-                return new SourceRoot(SecureRoot.Open(resolved), string.Empty);
+                return new SourceRoot(OpenRoot(resolved, withoutKernel), string.Empty);
             case FileKind.Regular:
-                return new SourceRoot(SecureRoot.Open(Path.GetDirectoryName(resolved) ?? "/"), Path.GetFileName(resolved));
+                return new SourceRoot(OpenRoot(Path.GetDirectoryName(resolved) ?? "/", withoutKernel), Path.GetFileName(resolved));
             case FileKind.Missing:
                 throw new SafeIoException("no such file or directory");
             default:
                 throw new SafeIoException("neither a directory nor a regular file");
         }
+    }
+
+    /// <summary>
+    /// Opens a directory as the root of the import.
+    /// </summary>
+    /// <param name="path">The full path</param>
+    /// <param name="withoutKernel">Whether to resolve paths without <c>openat2</c></param>
+    /// <returns>The root</returns>
+    private static SecureRoot OpenRoot(string path, bool withoutKernel)
+    {
+        return withoutKernel ? SecureRoot.OpenWithoutKernelResolution(path) : SecureRoot.Open(path);
     }
 
     /// <summary>

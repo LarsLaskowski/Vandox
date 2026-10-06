@@ -149,6 +149,8 @@ public class BackendConfigLoaderTests
     [DataRow("web.listen", "\":+80\"", "must be [host]:port with an empty host or an IP address and a port of 1 to 65535")]
     [DataRow("web.listen", "\"localhost:80\"", "must be [host]:port with an empty host or an IP address and a port of 1 to 65535")]
     [DataRow("web.listen", "\"::1:80\"", "must be [host]:port with an empty host or an IP address and a port of 1 to 65535")]
+    [DataRow("web.listen", "\"[[::1]:80]:18080\"", "must be [host]:port with an empty host or an IP address and a port of 1 to 65535")]
+    [DataRow("web.listen", "\"[::1%eth0]:80\"", "must be [host]:port with an empty host or an IP address and a port of 1 to 65535")]
     [DataRow("web.listen", "\"1.2.3.4:\"", "must be [host]:port with an empty host or an IP address and a port of 1 to 65535")]
     [DataRow("ingest.listen", "\":9999\"", "must not use the same port as web.listen")]
     [DataRow("storage.directory", "data", "must be an absolute, clean path (no trailing slash, no . or .. elements)")]

@@ -108,6 +108,7 @@ public class PayloadValidationTests
     [DataRow("connection_snapshot", """{"processes":[{"pid":1,"command":"","count":1}]}""", "processes[0].command", "required")]
     [DataRow("connection_snapshot", """{"remotes":[{"count":1}]}""", "remotes[0].addr", "invalid address")]
     [DataRow("connection_snapshot", """{"remotes":[{"addr":"fe80::1%1","count":1}]}""", "remotes[0].addr", "zone not allowed")]
+    [DataRow("connection_snapshot", """{"remotes":[{"addr":"2001:db8::1%nosuch","count":1}]}""", "remotes[0].addr", "zone not allowed")]
     [DataRow("connection_snapshot", """{"listeners":[{"proto":"tcp"}]}""", "listeners[0].local", "invalid address")]
     [DataRow("connection_snapshot", """{"listeners":[{"proto":"tcp","local":"1.2.3.4:1","pid":-1}]}""", "listeners[0].pid", "must not be negative")]
     [DataRow("connection_snapshot", """{"connections":[{"proto":"udp","local":"1.2.3.4:1"}]}""", "connections[0].remote", "invalid address")]

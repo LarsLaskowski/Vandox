@@ -24,7 +24,7 @@ Option 2. `ListenerRoutes` labels each listener (`web`, `ingest`); `PortRoutingM
 request whose connection has no label or whose label does not match the endpoint (fail closed). `/healthz`
 exists only on the web port and never returns an error text. Logs are JSON lines through a custom
 `ILoggerProvider` with the keys of the former `slog` output (`time`, `level`, `msg`, attributes; control
-characters escaped, the exception text in `exception`); application messages use `[LoggerMessage]` methods. The
+characters escaped, the exception type name in `exception`, never its text); application messages use `[LoggerMessage]` methods, and the framework's own categories (`Microsoft.*`) log from warning on unless the level is debug, so the health probe does not fill the log. The
 UI is a Blazor Web App with the Interactive Server render mode; HTML escaping is the Razor default. Shutdown keeps
 the 10 s deadline and logs `vandoxd stopped`.
 

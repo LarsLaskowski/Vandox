@@ -22,12 +22,17 @@ public class ImporterDirectoryTests
     /// <summary>
     /// A directory is imported in lexical order, every recognized file with its records, lines and capture range.
     /// </summary>
+    /// <param name="fallback">Whether paths are resolved without <c>openat2</c></param>
     /// <returns>A task that completes when the test is done</returns>
     [TestMethod]
-    public async Task ImporterImportsDirectoryInLexicalOrder()
+    [DataRow(false)]
+    [DataRow(true)]
+    public async Task ImporterImportsDirectoryInLexicalOrder(bool fallback)
     {
         // Arrange
         using var harness = new ImportHarness();
+
+        harness.Fallback = fallback;
 
         harness.Write("b.log", TestInputs.Log(3));
         harness.Write("sub/c.log", TestInputs.Log(2, "LOG other"));
@@ -175,14 +180,18 @@ public class ImporterDirectoryTests
     /// <summary>
     /// Symbolic links and special files are listed and never followed or opened.
     /// </summary>
+    /// <param name="fallback">Whether paths are resolved without <c>openat2</c></param>
     /// <returns>A task that completes when the test is done</returns>
     [TestMethod]
-    public async Task ImporterNeverFollowsLinksOrOpensSpecialFiles()
+    [DataRow(false)]
+    [DataRow(true)]
+    public async Task ImporterNeverFollowsLinksOrOpensSpecialFiles(bool fallback)
     {
         // Arrange
         using var harness = new ImportHarness();
         using var outside = new TempDirectory();
 
+        harness.Fallback = fallback;
         await File.WriteAllTextAsync(Path.Combine(outside.Path, "outside.log"), TestInputs.Log(3), TestContext.CancellationToken);
         File.CreateSymbolicLink(Path.Combine(harness.Directory.Path, "file-link.log"), Path.Combine(outside.Path, "outside.log"));
         Directory.CreateSymbolicLink(Path.Combine(harness.Directory.Path, "dir-link"), outside.Path);

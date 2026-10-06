@@ -10,6 +10,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Vandox.Core.Tests" />
+    <InternalsVisibleTo Include="Vandox.Import" />
   </ItemGroup>
 
 </Project>

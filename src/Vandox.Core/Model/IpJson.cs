@@ -20,7 +20,7 @@ public static partial class IpJson
     #region Methods
 
     /// <summary>
-    /// Parses a dotted-decimal IPv4 address or an IPv6 address; a zone (<c>%eth0</c>) is accepted and kept as scope ID.
+    /// Parses a dotted-decimal IPv4 address or an IPv6 address; brackets are rejected, and a zone (<c>%eth0</c>) is accepted and kept as a non-zero scope ID so that validation can refuse it.
     /// </summary>
     /// <param name="text">The text</param>
     /// <param name="address">The address</param>
@@ -29,10 +29,21 @@ public static partial class IpJson
     {
         address = null;
 
+        if (text.AsSpan().ContainsAny('[', ']'))
+        {
+            return false;
+        }
+
         if (text.Contains(':', StringComparison.Ordinal))
         {
             if (IPAddress.TryParse(text, out var parsed) && parsed.AddressFamily == AddressFamily.InterNetworkV6)
             {
+                // A zone that names no interface leaves the scope ID at 0; the text decides, so a zone is never lost.
+                if (parsed.ScopeId == 0 && text.Contains('%', StringComparison.Ordinal))
+                {
+                    parsed.ScopeId = 1;
+                }
+
                 address = parsed;
 
                 return true;

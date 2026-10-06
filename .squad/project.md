@@ -75,8 +75,9 @@ files or endpoints.
    `vandox.db` or its `-wal`/`-shm` files is refused. The log import (`src/Vandox.Import`: `Scanner`,
    `SourceRoot`, `Importer`; `src/Vandox.Core/IO`: `SecureRoot`, `FileProbe`) extracts nothing and writes no
    file: every open below the import root goes through `SecureRoot` (`openat2` with `RESOLVE_BENEATH` and
-   `RESOLVE_NO_SYMLINKS`, falling back to component-wise `O_NOFOLLOW` opens on kernels without `openat2`, such as
-   NAS kernels 4.4, where containment is not kernel-enforced), links and special files are listed and never
+   `RESOLVE_NO_SYMLINKS`; on kernels without `openat2`, such as NAS kernels 4.4, `lstat` of every directory of the path
+   and a refusal of `..`, then an open of the last element with `O_NOFOLLOW`, so containment is checked by the
+   application, not enforced by the kernel, and a link swapped in between check and open is not caught), links and special files are listed and never
    followed or opened (`O_NONBLOCK`), entry names and paths are labels only, and a run handles at most 20,000
    entries, counted while scanning. Records 0045, 0069, 0077, 0079.
 10. **Parsing of external input** (log files: journal, syslog, MariaDB, mail, Plesk, web server; the ingest
@@ -111,8 +112,9 @@ files or endpoints.
     are still logged only as structured attributes, never concatenated into a message. `vandoxd` logs through the
     JSON line provider (`src/Vandox.Backend/Logging`), which escapes control characters, with `[LoggerMessage]`
     methods (`BackendLog`), and `/healthz` never returns an error text. `vandoxd import` prints every path and
-    reason in its summary through `Terminal.Quote` and logs every input-derived attribute (`path`, `reason`, a
-    run error's text) quoted the same way (`ImportSummaryWriter`, `ImportProgressLogger`). Records 0072, 0081.
+    reason in its summary through `Terminal.Quote`; its log lines carry the input-derived attributes (`path`, `reason`,
+    a run error's text) as JSON strings, whose encoder escapes control characters, DEL, C1 controls and
+    format characters (`ImportSummaryWriter`, `ImportProgressLogger`). Records 0072, 0081.
 13. **Release pipeline and published artifacts** (`.github/workflows/release.yml`,
     `.github/workflows/base-image-digests.yml`, `.github/scripts/`, `deploy/backend/Dockerfile`,
     `.dockerignore`, `dotnet-tools.json`, the GitHub environment `release`; the smoke script

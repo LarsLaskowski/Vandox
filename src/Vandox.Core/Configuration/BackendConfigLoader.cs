@@ -82,7 +82,7 @@ public static class BackendConfigLoader
             return 0;
         }
 
-        if (host.Length == 0 || IpJson.TryParseAddress(host, out _))
+        if (host.Length == 0 || (host.IndexOf('%', StringComparison.Ordinal) < 0 && IpJson.TryParseAddress(host, out _)))
         {
             return ParsePort(value[(colon + 1)..]);
         }

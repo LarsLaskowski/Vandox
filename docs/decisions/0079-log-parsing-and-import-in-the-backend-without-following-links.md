@@ -15,8 +15,9 @@ to C#. Go's `os.Root` gave the import its link- and escape-safe file access; .NE
 
 1. **Plain `File.Open` plus path checks** — races between check and open; links followed.
 2. **P/Invoke to the kernel** — `openat2` with `RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS` where available, `statx`
-   to classify entries without following links, and `O_NOFOLLOW`/`O_NONBLOCK` component-wise opens as the
-   fallback for kernels without `openat2` (NAS kernels such as 4.4).
+   to classify entries without following links, and as the fallback for kernels without `openat2` (NAS kernels
+   such as 4.4) an `lstat` of every directory of the path, a refusal of `..` and an `O_NOFOLLOW`/`O_NONBLOCK` open of
+   the last element.
 
 ## Decision
 
@@ -31,5 +32,6 @@ import runs in two passes with batches that resume by count, keyed by the SHA-25
 ## Consequences
 
 - Linux only for the import; other platforms are not supported by the backend image anyway.
-- The NAS kernel fallback is weaker than `openat2` (no kernel-enforced containment) and is stated openly in
-  `.squad/project.md`; the tests cover both paths.
+- The NAS kernel fallback is weaker than `openat2` (the application checks the path, the kernel does not enforce it,
+  and a link swapped in between check and open is not caught) and is stated openly in `.squad/project.md`; the
+  tests of `SecureRoot` and of the importer run both paths (`SecureRoot.OpenWithoutKernelResolution`).

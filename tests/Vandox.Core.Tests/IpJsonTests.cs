@@ -22,6 +22,8 @@ public class IpJsonTests
     [DataRow("255.255.255.255")]
     [DataRow("::1")]
     [DataRow("2001:db8::1")]
+    [DataRow("::1%nosuch")]
+    [DataRow("fe80::1%eth0")]
     public void IpJsonTryParseAddressAcceptsAddress(string text)
     {
         // Act
@@ -45,6 +47,8 @@ public class IpJsonTests
     [DataRow("1.2.3.4\n")]
     [DataRow("::g")]
     [DataRow("host")]
+    [DataRow("[::1]")]
+    [DataRow("[::1]:80")]
     public void IpJsonTryParseAddressRefusesText(string text)
     {
         // Act

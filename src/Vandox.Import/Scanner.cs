@@ -458,7 +458,7 @@ internal sealed class Scanner
     {
         try
         {
-            await using var reader = new TarReader(content, leaveOpen: true);
+            await using var reader = new TarReader(new TarHeaderGuardStream(content), leaveOpen: true);
             var index = 0;
 
             while (await reader.GetNextEntryAsync(false, cancellationToken).ConfigureAwait(false) is { } entry)

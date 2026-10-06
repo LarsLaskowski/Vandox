@@ -116,6 +116,11 @@ public sealed partial class SecureRoot : IDisposable
             {
                 throw new SafeIoException("the directory cannot be opened beneath the root");
             }
+
+            if (check is null)
+            {
+                RequireNoLinkBelow(relative, true);
+            }
         }
 
         return Directory.EnumerateFileSystemEntries(FullPath(relative)).Select(Path.GetFileName).OfType<string>();
@@ -134,6 +139,8 @@ public sealed partial class SecureRoot : IDisposable
 
         if (handle is null)
         {
+            RequireNoLinkBelow(relative, false);
+
             return FileProbe.OpenRegular(FullPath(relative), followLinks: false);
         }
 
@@ -145,6 +152,21 @@ public sealed partial class SecureRoot : IDisposable
         }
 
         return new FileStream(handle, FileAccess.Read, 1, false);
+    }
+
+    /// <summary>
+    /// Opens the directory like <see cref="Open(string)"/> but resolves every path without <c>openat2</c>, as on a kernel
+    /// that does not support it.
+    /// </summary>
+    /// <param name="path">The path of the directory</param>
+    /// <returns>The root</returns>
+    internal static SecureRoot OpenWithoutKernelResolution(string path)
+    {
+        var root = Open(path);
+
+        root._kernelResolves = false;
+
+        return root;
     }
 
     /// <summary>
@@ -167,6 +189,36 @@ public sealed partial class SecureRoot : IDisposable
     /// <returns>The descriptor, or -1</returns>
     [LibraryImport("libc", EntryPoint = "syscall", StringMarshalling = StringMarshalling.Utf8, SetLastError = true)]
     private static partial long Openat2(long number, SafeFileHandle directory, string path, ref OpenHow how, nuint size);
+
+    /// <summary>
+    /// Refuses a path with a link or a parent reference in one of its directories. Without <c>openat2</c> this check
+    /// (<c>lstat</c> of every directory, then the open of the last element with <c>O_NOFOLLOW</c>) replaces the kernel's
+    /// resolution; it cannot close the window between check and open.
+    /// </summary>
+    /// <param name="relative">The path below the root</param>
+    /// <param name="includeLast">Whether the last element is one of the directories to check</param>
+    /// <exception cref="SafeIoException">A directory of the path is a link or the path leaves the root</exception>
+    private void RequireNoLinkBelow(string relative, bool includeLast)
+    {
+        var parts = relative.Split('/');
+        var count = includeLast ? parts.Length : parts.Length - 1;
+        var current = ".";
+
+        for (var index = 0; index < count; index++)
+        {
+            if (parts[index] == "..")
+            {
+                throw new SafeIoException("the path leaves the root");
+            }
+
+            current = current == "." ? parts[index] : $"{current}/{parts[index]}";
+
+            if (FileProbe.GetKind(FullPath(current), followLinks: false) == FileKind.Symlink)
+            {
+                throw new SafeIoException("the path holds a symbolic link");
+            }
+        }
+    }
 
     /// <summary>
     /// Returns the full path of an entry below the root.

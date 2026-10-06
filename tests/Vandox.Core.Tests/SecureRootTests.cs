@@ -13,8 +13,11 @@ public class SecureRootTests
     /// <summary>
     /// Regular files below the root are opened, listed and classified.
     /// </summary>
+    /// <param name="fallback">Whether paths are resolved without <c>openat2</c></param>
     [TestMethod]
-    public void SecureRootOpensListsAndClassifiesEntries()
+    [DataRow(false)]
+    [DataRow(true)]
+    public void SecureRootOpensListsAndClassifiesEntries(bool fallback)
     {
         // Arrange
         using var directory = new TempDirectory();
@@ -23,7 +26,7 @@ public class SecureRootTests
         directory.Write("a.log", "alpha");
         directory.Write("sub/b.log", "beta");
 
-        using var root = SecureRoot.Open(directory.Path);
+        using var root = fallback ? SecureRoot.OpenWithoutKernelResolution(directory.Path) : SecureRoot.Open(directory.Path);
 
         // Act
         using var first = root.OpenRegular("a.log");
@@ -44,8 +47,11 @@ public class SecureRootTests
     /// <summary>
     /// A symbolic link is never followed, as the last element or as a directory in the path.
     /// </summary>
+    /// <param name="fallback">Whether paths are resolved without <c>openat2</c></param>
     [TestMethod]
-    public void SecureRootRefusesLinks()
+    [DataRow(false)]
+    [DataRow(true)]
+    public void SecureRootRefusesLinks(bool fallback)
     {
         // Arrange
         using var outside = new TempDirectory();
@@ -58,7 +64,7 @@ public class SecureRootTests
         File.CreateSymbolicLink(Path.Combine(directory.Path, "dir-link"), outside.Path);
         File.CreateSymbolicLink(Path.Combine(directory.Path, "inside-link"), Path.Combine(directory.Path, "real"));
 
-        using var root = SecureRoot.Open(directory.Path);
+        using var root = fallback ? SecureRoot.OpenWithoutKernelResolution(directory.Path) : SecureRoot.Open(directory.Path);
 
         // Act and Assert
         Assert.ThrowsExactly<SafeIoException>(() => root.OpenRegular("file-link"), "link to a file outside");
@@ -69,17 +75,41 @@ public class SecureRootTests
     }
 
     /// <summary>
-    /// Directories, missing files and special files are refused.
+    /// Without <c>openat2</c> a parent reference in the path is refused.
     /// </summary>
     [TestMethod]
-    public void SecureRootRefusesNonRegularFiles()
+    public void SecureRootFallbackRefusesParentReference()
+    {
+        // Arrange
+        using var outside = new TempDirectory();
+        using var directory = new TempDirectory();
+
+        Directory.CreateDirectory(Path.Combine(directory.Path, "sub"));
+        outside.Write("secret.txt", "secret");
+
+        using var root = SecureRoot.OpenWithoutKernelResolution(directory.Path);
+
+        // Act and Assert
+        Assert.ThrowsExactly<SafeIoException>(() => root.OpenRegular("sub/../../secret.txt"), "parent reference");
+        Assert.ThrowsExactly<SafeIoException>(() => root.ListNames("sub/..").ToList(), "parent reference in a listing");
+        Assert.IsFalse(root.KernelResolves, "the fallback is active");
+    }
+
+    /// <summary>
+    /// Directories, missing files and special files are refused.
+    /// </summary>
+    /// <param name="fallback">Whether paths are resolved without <c>openat2</c></param>
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public void SecureRootRefusesNonRegularFiles(bool fallback)
     {
         // Arrange
         using var directory = new TempDirectory();
 
         Directory.CreateDirectory(Path.Combine(directory.Path, "sub"));
 
-        using var root = SecureRoot.Open(directory.Path);
+        using var root = fallback ? SecureRoot.OpenWithoutKernelResolution(directory.Path) : SecureRoot.Open(directory.Path);
 
         // Act and Assert
         Assert.ThrowsExactly<SafeIoException>(() => root.OpenRegular("sub"), "directory");

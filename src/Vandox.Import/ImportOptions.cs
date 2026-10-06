@@ -44,5 +44,11 @@ public sealed class ImportOptions
     /// </summary>
     public long ProgressBytes { get; set; }
 
+    /// <summary>
+    /// Gets or sets a value indicating whether paths are resolved without <c>openat2</c>, as on a kernel that lacks it.
+    /// Tests use it to run the fallback on a kernel that has it.
+    /// </summary>
+    internal bool ResolveWithoutKernel { get; set; }
+
     #endregion // Properties
 }

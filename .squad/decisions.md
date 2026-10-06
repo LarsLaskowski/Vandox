@@ -13,6 +13,9 @@ one. Changed only in squad-maintenance PRs.
   `analyzer-check.py` runs `go vet`, golangci-lint and a warnings-as-errors `dotnet build`;
   `coverage-check.py` merges coverlet's Cobertura reports with the Go profile converted by
   `go-coverage-to-cobertura.py`; `squad_settings.py` lists `*.go`, `*.cs` and `*.razor` as production code. The
-  template has one stack profile per repository, so these extensions are local and recorded in
-  `.squad/template.json` (`additionalProfiles`); an `adopt-template` refresh must keep them. The squad
-  agents, skills and routing are stack-neutral and unchanged.
+  template has one stack profile per repository and its refresh (`adopt-template`) rewrites the managed files
+  `.squad/tools/analyzer-check.py`, `.claude/hooks/session-start.sh`, `.squad/template.json` and the `stack:` blocks
+  of the instruction files, so a refresh removes the .NET extensions: they must be restored by hand until the template
+  supports several profiles (LarsLaskowski/Squad-Spec-Repository-Template#43). The new files
+  `.squad/tools/go-coverage-to-cobertura.py` and the `squad_settings.py` globs are not touched by a refresh. The
+  squad agents, skills and routing are stack-neutral and unchanged.

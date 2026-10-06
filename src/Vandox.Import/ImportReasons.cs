@@ -25,6 +25,7 @@ internal static class ImportReasons
                    SafeIoException safe => safe.Message,
                    FileNotFoundException or DirectoryNotFoundException => "no such file or directory",
                    UnauthorizedAccessException => "permission denied",
+                   TarMetadataTooLargeException => "tar metadata header is too large",
                    InvalidDataException => "invalid compressed data",
                    EndOfStreamException => "unexpected end of data",
                    IOException => "i/o error",

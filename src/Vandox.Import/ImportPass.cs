@@ -247,7 +247,7 @@ internal sealed class ImportPass
     {
         await using var file = _source.Root.OpenRegular(location.FsPath);
         await using var raw = Decompress(file, location.ArchiveGzip);
-        await using var reader = new TarReader(raw, leaveOpen: true);
+        await using var reader = new TarReader(new TarHeaderGuardStream(raw), leaveOpen: true);
         var position = 0;
         var index = 0;
 

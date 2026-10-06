@@ -33,7 +33,7 @@ public static class Importer
 
         try
         {
-            source = SourceRoot.Open(root);
+            source = SourceRoot.Open(root, effective.ResolveWithoutKernel);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
@@ -105,6 +105,7 @@ public static class Importer
                    Store = options.Store,
                    Clock = options.Clock,
                    Progress = options.Progress,
+                   ResolveWithoutKernel = options.ResolveWithoutKernel,
                    BatchRecords = options.BatchRecords == 0 ? ImportLimits.DefaultBatchRecords : options.BatchRecords,
                    BatchBytes = options.BatchBytes == 0 ? ImportLimits.DefaultBatchBytes : options.BatchBytes,
                    ProgressBytes = options.ProgressBytes == 0 ? ImportLimits.DefaultProgressBytes : options.ProgressBytes
