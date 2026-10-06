@@ -47,12 +47,15 @@ Store (`cmd/vandoxd/internal/store`)
   in 0069); `SchemaVersion` is 3; a version-2 database with records is migrated and keeps its records;
   steps 1 and 2 are unchanged.
 - [ ] AC-S2: `BeginImport` with an unknown SHA-256 inserts a file (records 0, not complete) and returns it
-  with its ID; with a known SHA-256 it returns the stored file unchanged (name, type, records, completion
-  of the first import), whatever the other fields say.
+  with its ID; with a known SHA-256 it returns the stored file unchanged (name, file name, modification
+  time, type, records, completion of the first import), whatever the other fields say. `FileName` is
+  stored and returned byte for byte (also invalid UTF-8 and control characters); `ModTime` is returned in
+  UTC with nanoseconds, and as the zero time when it was zero or outside the storable range (stored as
+  unknown).
 - [ ] AC-S3: `BeginImport` refuses, with an error wrapping `ErrInvalidImport` and writing nothing: a zero or
-  non-UTC `StartedAt`, a negative `Size`, a `SourceType` that `logparse.CheckType` refuses. It stores
-  `Name` with invalid UTF-8 replaced by U+FFFD and cut to `MaxImportNameBytes` bytes (not inside a UTF-8
-  sequence).
+  non-UTC `StartedAt`, a negative `Size`, a `SourceType` that `logparse.CheckType` refuses, a `FileName`
+  longer than `MaxImportNameBytes` bytes. It stores `Name` with invalid UTF-8 replaced by U+FFFD and cut to
+  `MaxImportNameBytes` bytes (not inside a UTF-8 sequence).
 - [ ] AC-S4: `WriteBatch` with `Batch.Import` stores the records and advances the file's `records` by their
   number in the same transaction; with `Complete` it also sets `complete = 1` and `completed_at` to
   `ReceivedAt`. A batch without records is valid only with `Import.Complete`. After import batches of log
@@ -104,7 +107,12 @@ Importer (`cmd/vandoxd/internal/importer`)
   files with the same content in one run are stored once.
 - [ ] AC-I4 (resume): when the context is cancelled after the first committed batch of a file, `Run`
   returns `context.Canceled` with `Summary.Interrupted`; a second `Run` stores exactly the remaining records
-  (`ResumedAfter` = records stored before), and the store then holds every record of the file once.
+  (`ResumedAfter` = records stored before), and the store then holds every record of the file once. When
+  the second `Run` reads the same content under another name and with another modification time (e.g. the
+  file renamed, or gzip-compressed with a newer mtime), the parser's `Parse` receives the `logparse.File`
+  (name and `ModTime`) of the interrupted first run — pinned with `logparsetest.Parser.Parsed` — and the
+  records stored by both runs are those of one parse under that `File`. A first import (unknown content)
+  passes the current `File`, with a `ModTime` outside the storable range passed as the zero time.
 - [ ] AC-I5 (summary): `Summary` holds, per file, path, source type, outcome, reason, lines, records,
   skipped, first and last capture time and at most `MaxProblems` problems; the totals `Lines`, `Records`,
   `Skipped`, `First`, `Last` over the run; `Started`/`Finished` from `Options.Now`; `len(Files)` equals the
@@ -115,25 +123,41 @@ Importer (`cmd/vandoxd/internal/importer`)
   the two entries imported and the archive listed `OutcomeFailed`; a parser returning an error →
   `OutcomeFailed` with the records emitted before it stored; a record that `store.CheckImportRecord`
   refuses → counted in `Skipped` with a problem, the other records stored; a file whose stored import has
-  another source type → `OutcomeFailed`; content that changed between the two passes → `OutcomeFailed`
-  ("changed while it was imported") and the file not marked complete; `ErrImportConflict` →
-  `OutcomeFailed`.
+  another source type → `OutcomeFailed`; content whose first `size` bytes (the size pass 1 hashed) changed
+  between the two passes, or that became shorter → `OutcomeFailed` ("changed while it was imported") and
+  the file not marked complete; content that only **grew** between the passes (bytes appended after pass 1,
+  — the test changes, truncates or appends to a plain file in the root directory from its `Options.Progress`
+  callback on `EventScanned`, which runs between the passes; no test hook in production code) →
+  `OutcomeImported` with exactly the records
+  of the first `size` bytes, the appended bytes neither parsed nor counted in `Lines`; `ErrImportConflict`
+  → `OutcomeFailed`.
 - [ ] AC-I7 (run-level errors): a missing root, a root that is neither a directory nor a regular file, and
   more than `MaxFiles` files (nothing written, `ErrTooManyFiles`) return an error; any other store error
   stops the run with an error and a summary of what was done; invalid `Options` (nil registry, store or
-  clock; `BatchRecords` above `store.MaxBatchRecords`; a negative batch bound) return an error before
+  clock; `BatchRecords` above `store.MaxBatchRecords`; a negative `BatchRecords`, `BatchBytes` or
+  `ProgressBytes`) return an error before
   anything is read.
-- [ ] AC-I8 (batching): batches are flushed after `BatchRecords` records and after `BatchBytes` bytes of
-  input consumed since the last flush, whichever comes first; every batch carries `Import` with `Done`
-  equal to the records stored before it, the last one `Complete`; a recognized file without records is
-  completed with an empty batch; every record has origin `import`; `ReceivedAt` is `Options.Now()` in UTC.
+- [ ] AC-I8 (batching): a batch is flushed when it holds `BatchRecords` records, or when a record is added
+  and the input consumed since the batch's first record was buffered has reached `BatchBytes` bytes,
+  whichever comes first; the byte bound never flushes an empty batch. Every batch carries `Import` with
+  `Done` equal to the records stored before it, the last one `Complete`; only that last batch may be empty
+  (a recognized file without stored records — none parsed, all skipped, or all dropped on resume — is
+  completed with one empty batch); every record has origin `import`; `ReceivedAt` is `Options.Now()` in
+  UTC. Pinned with: (a) a resume that drops more than `BatchBytes` of input before the first new record
+  (small `BatchBytes`) — no empty batch before the last, every batch accepted by the real store; (b) a
+  parser that only calls `Skip` over more than `BatchBytes` of input — exactly one batch, empty and
+  `Complete`.
 - [ ] AC-I9 (flat memory): importing a generated gzip file of at least 64 MiB of decompressed lines through
   `Run` (test parser built on `logparsetest.Lines`, a test store that discards batches) keeps the live heap,
   sampled after `runtime.GC()` at least ten times during the import, below the baseline before `Run` plus
   16 MiB, and reports every line.
-- [ ] AC-I10 (progress): `Options.Progress` receives `EventFileFinished` for every file listed in the scan,
-  then `EventScanned` with `Files` and `Pending`, then per imported file `EventFileStarted`, at least one
-  `EventFileProgress` per `ProgressLines` lines, and `EventFileFinished` with the file's `Result`.
+- [ ] AC-I10 (progress): during the scan, `Options.Progress` receives `EventFileFinished` for every file
+  listed in the scan and, while a recognized file is hashed, one `EventScanProgress` (with `Path` and
+  `Bytes`, the decompressed bytes of that file read so far) each time another `ProgressBytes` bytes of it
+  have been read — a file of `n` bytes gives exactly `n / ProgressBytes` such events (pinned with a small
+  `Options.ProgressBytes`); then `EventScanned` with `Files` and `Pending`; then per imported file
+  `EventFileStarted`, one `EventFileProgress` per `ProgressLines` lines, and `EventFileFinished` with the
+  file's `Result`.
 - [ ] AC-I11 (parser stops early, context): a parser that returns before the end of its input still gets
   the whole content hashed and its lines counted; a parser that ignores the context is stopped by the
   importer's reader returning `ctx.Err()`.
@@ -160,7 +184,8 @@ Command (`cmd/vandoxd`)
   existing usage errors (`extra`, `-config f extra`, `-healthcheck extra`) are unchanged; the main usage
   lists the `import` sub-command.
 - [ ] AC-C5: progress is logged as JSON lines on stderr through the `log.level` of the configuration
-  (one `file finished` line per file at `info`); `-version` still wins over everything.
+  (one `file finished` line per file at `info`, one `hashing` line per `EventScanProgress` at `info` with the
+  path and the bytes read as attributes); `-version` still wins over everything.
 - [ ] AC-C6: `importParsers()` returns no parser (pinned until #16 adds the first).
 
 ## Approach
@@ -176,16 +201,27 @@ sub-command. `cmd/vandoxd/internal/store`: migration step 3, `BeginImport`, `Bat
 `logparse.SniffBytes` bytes of every file for sniffing and detection, and — only for recognized files —
 reads the rest to compute SHA-256 and size; files that cannot be read completely fail here and are never
 partly imported. Unrecognized, failed and non-regular entries are listed. More than `MaxFiles` files stop
-the run before anything is written. *Import* (pass 2) handles the recognized files in input order: it calls
-`BeginImport` with the hash; a complete file is already imported; an incomplete file of the same source type
-is resumed after its stored record count; otherwise the content is opened again (a directory file by path,
-archive entries by reading the archive once more, sequentially, matching entries by ordinal), passed through
-a reader that hashes, counts lines and bytes and checks the context, and parsed. Records are validated with
+the run before anything is written. While a recognized file is hashed, the scan reports `EventScanProgress`
+every `ProgressBytes` bytes, so a multi-GB file shows progress before pass 2 starts. *Import* (pass 2)
+handles the recognized files in input order: it calls `BeginImport` with the hash, the size and the file's
+`logparse.File` (name and modification time); a complete file is already imported; a file stored with another
+source type fails; otherwise the file is (re)imported — resumed after its stored record count when an earlier
+run was interrupted. **`Parse` always receives the `File` stored with the content** (`ImportFile.FileName`,
+`ImportFile.ModTime`), which is the current one for a new content and the first run's one for a resumed
+content, so a parser that derives data from the name or the modification time (#16's year inference) gives
+the same records on resume (0069, 0070). The content is opened again (a directory file by path, archive
+entries by reading the archive once more, sequentially, matching entries by ordinal), **limited to the
+`size` bytes pass 1 hashed** (`io.LimitReader` on the decompressed stream), passed through a reader that
+hashes, counts lines and bytes and checks the context, and parsed. Records are validated with
 `store.CheckImportRecord` (refused ones are skipped with a problem), the first `ResumedAfter` valid records
 are dropped, the rest are buffered and written with `WriteBatch` and an `ImportStep` whose `Done`
-compare-and-set makes concurrent or repeated runs safe. After `Parse` returns, the rest of the content is
-drained; if the hash differs from the scan's, the file fails and is not completed; otherwise the last batch
-(possibly empty) completes it.
+compare-and-set makes concurrent or repeated runs safe. A batch is flushed at `BatchRecords` records, or when
+a record is added and the input consumed since the batch's first record reaches `BatchBytes`; dropped
+records and skips never flush. After `Parse` returns, the rest of the limited content is drained; if fewer
+than `size` bytes could be read or the hash of the `size` bytes differs from the scan's, the file fails and is
+not completed; otherwise the last batch (possibly empty) completes it. Bytes appended to a log after pass 1
+are thus ignored, not a failure: they belong to a later content with another hash (the grown-file limit
+below).
 
 **Store.** Migration step 3 creates `import_files` (0069). `BeginImport` runs on the writer pool:
 `INSERT … ON CONFLICT(sha256) DO NOTHING`, then `SELECT` in the same transaction. `WriteBatch` with `Import`
@@ -241,7 +277,9 @@ headers `g` as headers, converts `TypeRegA` to `TypeReg` or `TypeDir`, expands P
 | Empty content (0 bytes, after decompression) | listed unrecognized, "empty" |
 | Anything else (text, BOM, CR LF, NUL bytes, invalid UTF-8, binary) | head and stream passed to the parsers unchanged; no parser → listed unrecognized, "no parser recognized the file" |
 | More than `MaxFiles` (20,000) files in the input | `Run` error `ErrTooManyFiles` after the scan, nothing written |
-| Very large content (GNU sparse expansion, gzip bomb) | streamed; bounded in memory, not in time — the context (Ctrl-C, `docker stop`) stops it |
+| Very large content (GNU sparse expansion, gzip bomb) | streamed; bounded in memory, not in time — the context (SIGINT/SIGTERM: Ctrl-C under `docker exec -it`) stops it cleanly; stopping the container kills it, and the per-batch transactions keep the database consistent |
+| Content appended to a file after pass 1 hashed it | pass 2 reads only the hashed `size` bytes; the appended bytes are ignored |
+| Modification time outside the storable range (tar `mtime` before 1678 or after 2262) | detection sees it; stored as unknown, so `Parse` receives the zero time |
 
 ## Affected projects and types
 
@@ -382,6 +420,8 @@ type ImportFileStart struct {
 	SHA256     [32]byte  // of the decompressed content
 	Size       int64     // bytes of the decompressed content, >= 0
 	Name       string    // display path of the first import
+	FileName   string    // logparse.File.Name the parser gets; stored byte for byte, at most MaxImportNameBytes
+	ModTime    time.Time // logparse.File.ModTime; converted to UTC; zero or outside the storable range: unknown
 	SourceType string    // parser type, logparse.CheckType
 	StartedAt  time.Time // UTC
 }
@@ -391,6 +431,8 @@ type ImportFile struct {
 	SHA256      [32]byte
 	Size        int64
 	Name        string
+	FileName    string    // logparse.File.Name of the first import, exact
+	ModTime     time.Time // logparse.File.ModTime of the first import, UTC; zero when unknown
 	SourceType  string
 	Records     int64 // records stored for the file so far
 	Complete    bool
@@ -442,6 +484,7 @@ const (
 	DefaultBatchBytes   = 4 << 20 // input bytes per batch
 	MaxProblems         = 10      // problems kept per file
 	ProgressLines       = 100000  // lines between EventFileProgress
+	DefaultProgressBytes = 64 << 20 // decompressed bytes between EventScanProgress while a file is hashed
 )
 var ErrTooManyFiles = errors.New("importer: too many files")
 // Store is the part of the database the importer writes to.
@@ -457,6 +500,7 @@ type Options struct {
 	Progress     func(Progress)     // optional; called synchronously
 	BatchRecords int                // 0: DefaultBatchRecords; at most store.MaxBatchRecords
 	BatchBytes   int64              // 0: DefaultBatchBytes
+	ProgressBytes int64             // 0: DefaultProgressBytes
 }
 // Outcome is what happened to a file.
 type Outcome string
@@ -498,6 +542,7 @@ func (s *Summary) Count(o Outcome) int
 // Event names a progress event.
 type Event string
 const (
+	EventScanProgress Event = "scan_progress" // pass 1: Path, Bytes of a file being hashed
 	EventScanned      Event = "scanned"
 	EventFileStarted  Event = "file_started"
 	EventFileProgress Event = "file_progress"
@@ -510,6 +555,7 @@ type Progress struct {
 	Path           string
 	SourceType     string
 	Lines, Records int64
+	Bytes          int64       // EventScanProgress: decompressed bytes of the file read so far
 	Result         *FileResult // EventFileFinished
 }
 // Run imports root and returns the summary; the error reports what stopped the run (the summary covers what
@@ -610,9 +656,15 @@ Made by the Dev:
 
 - `README.md`: *Binaries* — the `import` sub-command; *Layout* — `internal/logparse/` and the importer under
   `cmd/vandoxd/internal/`; a new subsection *Import logs* under *Run the backend with Docker Compose*: put the
-  directory, archive or file into `import/`, run `docker exec vandoxd /vandoxd import /import/<name>`, what
-  is read (input forms, nothing followed or extracted), the summary and the exit codes, re-import and
-  resume, the limitation for files that grew since their import, and that the parsers arrive with #16–#20.
+  directory, archive or file into `import/`, make it readable for the container's user 65532 (e.g.
+  `sudo chmod -R a+rX import/<name>` — a copied `/var/log` holds files like `0640 root:adm` that are
+  otherwise listed as failed with "permission denied"), run `docker exec -it vandoxd /vandoxd import
+  /import/<name>` (`-it` so that Ctrl-C reaches the import; without a terminal the import keeps running
+  when the client is closed), what is read (input forms, nothing followed or extracted), the summary and
+  the exit codes, re-import and resume (Ctrl-C stops after the current batch; stopping or restarting the
+  container kills the import, which loses nothing stored and continues on the next run), the limitation for
+  files that grew since their import (and that lines appended while the import runs are left for a later
+  import), and that the parsers arrive with #16–#20.
 - `docs/ARCHITECTURE.md`: the status paragraph (the import framework exists, no parser yet); *Components* —
   `importer` under `cmd/vandoxd/internal/`, `logparse` under `internal/`, and `vandoxd import`; *Data flow* —
   one paragraph on the import path (origin `import`, never live, so never alerting, 0022); *Storage and
@@ -656,16 +708,26 @@ Made by the Dev:
   (`LineReader`); batches of at most 2,000 records and 4 MiB of input; at most 20,000 files of at most
   1024-byte paths per run (the scan's list stays below ~50 MiB in the worst case, typical inputs far less);
   `archive/tar` bounds its special headers to 1 MiB. **Time** is not bounded (a gzip bomb or a huge sparse
-  entry is read to its end); every read checks the context, so `Ctrl-C` or `docker stop` ends it, and the
-  run resumes later.
+  entry is read to its end); every read checks the context, so SIGINT or SIGTERM to the import process
+  (Ctrl-C under `docker exec -it`) ends it cleanly, and the run resumes later. The plan does **not** rely on
+  `docker stop` for a clean stop: it signals only the container's PID 1 (the service), and the import is
+  killed when the container stops. Correctness after a kill rests on the per-batch transactions (0065:
+  `synchronous = FULL`, an uncommitted batch is rolled back at the next open) and the `Done`
+  compare-and-set: a killed run leaves at most committed batches with a matching count, which the next run
+  resumes.
 - **Output injection** (area 12): the summary prints every path and reason with `%q`; progress goes through
   the JSON `slog` handler as attributes. Parser `Skip` reasons are fixed texts by contract and are quoted
   anyway. OS errors are reported without repeating the path.
 - **Idempotency under concurrency**: the `Done` compare-and-set of `ImportStep` in the batch transaction makes
   two concurrent runs of the same content, or a run racing a resumed one, fail with `ErrImportConflict`
   instead of storing twice.
-- **Integrity**: SHA-256 over the decompressed content; a content that changes between the passes fails and
-  is not completed.
+- **Integrity**: SHA-256 over the decompressed content; pass 2 reads exactly the `size` bytes pass 1 hashed,
+  so a content whose hashed part changes or shrinks between the passes fails and is not completed, while
+  bytes appended afterwards are not read. A resumed content is parsed with the `File` stored at its first
+  import, so the records of both runs come from one deterministic parse (0069, 0070).
+- **Permissions**: the import runs as the container's user 65532 and reads only what that user may read; it
+  gains no privilege. An unreadable file is listed as failed with the OS error; the README tells the
+  operator to make the input readable rather than to run the import as root.
 - No new dependency (`archive/tar`, `compress/gzip`, `crypto/sha256`, `syscall`).
 
 ## Decision records
@@ -675,6 +737,13 @@ Made by the Dev:
 - `docs/decisions/0071-log-import-reads-input-without-following-links-or-extracting.md` (Proposed)
 - `docs/decisions/0072-vandoxd-import-sub-command-output-and-exit-codes.md` (Proposed, supersedes 0058; the
   Lead sets 0058 to `Superseded by 0072` at approval)
+
+The index in `docs/decisions/README.md` lists only decided records (every row is `Accepted` or
+`Superseded by …`). In step `approve-pr` the Lead (owner: Lead, file `docs/decisions/README.md`) adds rows
+for 0069–0072 with status `Accepted`, changes the status of the 0058 row to
+`Superseded by [0072](0072-vandoxd-import-sub-command-output-and-exit-codes.md)`, and sets the status line of
+`docs/decisions/0058-vandoxd-runs-the-service-by-default-with-a-shutdown-deadline.md` to the same — the only
+edit 0058 gets. Until then the Proposed records are linked from this plan only.
 
 ## Out of scope / follow-ups
 
@@ -687,3 +756,39 @@ Made by the Dev:
   imported content (same length prefix and hash) and import only the rest, or otherwise avoid the
   duplicates. Acceptance: importing a newer copy of a grown log stores each line once; the summary says
   which files were continued."
+
+## Challenge
+
+Devil's Advocate, one round: 0 major, 6 minor objections. All six accepted; scope and tier unchanged
+(`security`).
+
+1. **Resume matched on the content hash alone, while `Parse` is deterministic only for the same content and
+   `File`** — accepted. Instead of failing a resume whose name or modification time differ (which would
+   leave a content that can never be completed once the first input is gone), the store keeps the `File`
+   of the first import — `import_files.file_name` (exact bytes) and `mod_time` (Unix nanoseconds, NULL when
+   unknown or outside the storable range) — and pass 2 always passes that stored `File` to `Parse`. A
+   resumed content is thus parsed exactly as in the interrupted run, and the records of both runs come
+   from one parse; no year can be mixed within a file. Revised: AC-S2, AC-S3, AC-I4, *Approach*, the input
+   table, `ImportFileStart`/`ImportFile`, *Integrity*; 0069 (schema, decision, consequences, option
+   rejected) and 0070 (contract wording).
+2. **Pass 2 reads to EOF, so a log still being appended fails** — accepted. Pass 2 reads the decompressed
+   content through `io.LimitReader(size)` and compares the hash of that prefix; only a change or shrinking
+   of the hashed part fails, appended bytes are ignored and left to a later import. Revised: AC-I6,
+   *Approach*, input table, *Integrity*, README text, 0069.
+3. **`docker exec` without a TTY does not pass Ctrl-C; `docker stop` signals PID 1 only; uid 65532 cannot
+   read `0640 root:adm` files** — accepted. The README documents `docker exec -it`, that closing a
+   non-terminal client leaves the import running, that stopping the container kills it without losing
+   committed data, and that the input must be readable by 65532 (`chmod -R a+rX`). The security text no
+   longer relies on `docker stop`; it rests correctness after a kill on the per-batch transactions and the
+   `Done` compare-and-set. Revised: input table, *Security considerations* (time, new *Permissions*),
+   *Documentation updates*, 0071, 0072, spec.
+4. **No progress while pass 1 hashes multi-GB files** — accepted. New `EventScanProgress` (`Path`, `Bytes`)
+   every `ProgressBytes` (default 64 MiB, `Options.ProgressBytes` for tests) of a file being hashed, logged by
+   the command as `hashing` at `info`. Revised: AC-I7 (negative bound), AC-I10, AC-C5, signatures, 0072.
+5. **The byte bound can flush an empty batch** — accepted. The byte bound counts input from the batch's first
+   buffered record and is checked only when a record is added; dropped (resumed) records and skips never
+   flush, so the only empty batch is the completing one. AC-I8 gains the two named tests (resume past more
+   than `BatchBytes` of dropped input; a parser that only skips). Revised: AC-I8, *Approach*, 0069.
+6. **The decision index lacks 0069–0072 and 0058's status** — accepted as scheduled, not done now: the index
+   lists only decided records, so rows for Proposed records would break its convention. The Lead adds them
+   (and changes 0058) in `approve-pr`, as *Decision records* now states with owner and file.

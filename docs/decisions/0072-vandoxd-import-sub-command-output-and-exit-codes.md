@@ -58,8 +58,10 @@ Changed:
   JSON lines to stderr at `log.level` (an `info` bootstrap logger before the configuration is loaded), opens
   the store with `store.Open` (a second process next to the service, 0064, 0065), and runs `importer.Run`
   with the parsers of `importParsers()` (0070). Progress is logged with `slog`: one line per file finished
-  (path, outcome, source type, reason, lines, records, skipped), one when the scan is done (files, pending),
-  one per `importer.ProgressLines` lines of a large file. Names are attributes, never part of the message.
+  (path, outcome, source type, reason, lines, records, skipped), one `hashing` line per
+  `importer.DefaultProgressBytes` (64 MiB) of a file hashed in the scan (path, bytes), one when the scan is
+  done (files, pending), one per `importer.ProgressLines` lines of a large file. Names are attributes, never
+  part of the message.
 - The summary is written to stdout as text: counts per outcome, lines read, records stored, lines skipped,
   the time range of the stored records in RFC 3339 UTC (or that none were stored), whether the run was
   interrupted, then the files not recognized and the files that failed, each with its reason, and the files
@@ -70,9 +72,13 @@ Changed:
 
 ## Consequences
 
-- `docker exec vandoxd /vandoxd import /import/<name>` imports from the mounted directory; the README
-  documents it. The import shares the container's memory limit with the service, which the bounded batches
-  of 0071 allow for.
+- `docker exec -it vandoxd /vandoxd import /import/<name>` imports from the mounted directory; the README
+  documents it. `-it` is needed for Ctrl-C to reach the import (without a terminal, `docker exec` forwards no
+  signal, and closing the client leaves the import running); stopping the container kills the import, which
+  loses nothing committed and resumes on the next run (0069, 0071). The import runs as the container's user
+  65532, so the README tells the operator to make the input readable (`chmod -R a+rX`) — a copied
+  `/var/log` holds `0640 root:adm` files. The import shares the container's memory limit with the service,
+  which the bounded batches of 0071 allow for.
 - Scripts can rely on stdout holding only the summary and on exit code 1 for any failed file.
 - The web UI (later issue) calls `importer.Run` and renders `importer.Summary` itself; the text format is the
   command's, not an API.

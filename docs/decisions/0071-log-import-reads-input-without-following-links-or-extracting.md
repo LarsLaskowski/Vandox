@@ -78,8 +78,17 @@ Options 2, b and ii; links and special files are listed, never followed or opene
   more is an error of the run); a head of `logparse.SniffBytes` = 4096 bytes; lines of at most 16 KiB
   (`logparse.LineReader`, 0070); batches of at most 2,000 records (`DefaultBatchRecords`) and the records from
   at most 4 MiB of input (`DefaultBatchBytes`), whichever comes first. No limit on the size of a file or of
-  decompressed data: every read checks the context, so the operator can stop an import (Ctrl-C,
-  `docker stop`) and resume it later (0069).
+  decompressed data: every read checks the context, so SIGINT or SIGTERM to the import process (Ctrl-C under
+  `docker exec -it`, 0072) stops it cleanly, and it resumes later (0069). `docker stop` signals only the
+  container's PID 1 (the service); the import is killed when the container stops, and the per-batch
+  transactions (0065) with the import's compare-and-set (0069) keep the database consistent and resumable
+  after such a kill — no guarantee here depends on a clean stop.
+- **Permissions**: the import runs as the container's user (65532) and reads only what that user may read;
+  an unreadable file is listed as failed with the OS error. The operator makes the input readable (README);
+  the import never asks for more rights.
+- **Modification times** are passed to `Detect` in UTC as found; one outside the range storable as Unix
+  nanoseconds (years 1678–2262, e.g. a forged tar `mtime`) is stored as unknown, so `Parse` receives the zero
+  time (0069).
 - Every file that is not imported appears in the summary with its outcome and reason; nothing is skipped
   silently.
 

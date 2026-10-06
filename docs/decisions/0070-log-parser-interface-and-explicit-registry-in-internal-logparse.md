@@ -57,7 +57,8 @@ Option 2 with b and ii.
   nil with `NoMatch`. There is no global registry; `vandoxd` lists its parsers in `importParsers()`
   (`cmd/vandoxd/import.go`), empty until #16.
 - Contract of `Parse`, documented on the interface: deterministic for the same content and `File` (resume,
-  0069); records of origin `import` with UTC capture times; memory bounded independently of the input size;
+  0069, which passes a resumed content the `File` of its first import, so `Parse` may derive data such as a
+  year from `Name` and `ModTime`); records of origin `import` with UTC capture times; memory bounded independently of the input size;
   honor the context; return the emitter's error; `Skip` reasons are fixed texts without input content.
   The importer validates every record with `store.CheckImportRecord` and counts refused ones as skipped, so a
   parser bug cannot make a whole batch fail.

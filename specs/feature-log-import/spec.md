@@ -22,7 +22,9 @@ land, `vandoxd import` recognizes no file and lists every file as not recognized
 - `vandoxd import <path>` (also `vandoxd [-config file] import [-config file] <path>`) imports the
   directory, archive or file at `<path>` into the database named by the configuration
   (`storage.directory`). In the container the compose file already mounts `./import` read-only at
-  `/import` (0060), so the operator runs `docker exec vandoxd /vandoxd import /import/<name>`.
+  `/import` (0060), so the operator runs `docker exec -it vandoxd /vandoxd import /import/<name>` (`-it`
+  so that Ctrl-C reaches the import). The import runs as the container's user 65532; files it cannot read
+  are listed as failed, and the README tells how to make a copied `/var/log` readable.
 - **Inputs:** a directory (read recursively), a `.tar`, a gzip-compressed tar (`.tar.gz`, `.tgz`), a
   single gzip file (a rotated log), or a plain file. Compression and archives are recognized by their
   content, not by the file name. Gzip-compressed files inside a directory or a tar archive are
@@ -37,10 +39,15 @@ land, `vandoxd import` recognizes no file and lists every file as not recognized
 - **Idempotent:** the SHA-256 of every imported file's (decompressed) content is stored. A file whose
   content was imported completely before is not imported again — also under another name or compressed
   differently (`syslog.1` and the later `syslog.2.gz`). An import that was interrupted (Ctrl-C, container
-  stop, a database error) continues where it stopped when the same input is imported again; no record is
-  stored twice.
-- **Progress** is logged as JSON lines on standard error (like the service's log): what was found, each
-  file started and finished, and progress every 100,000 lines of a large file.
+  stop, a database error) continues where it stopped when the same content is imported again — also under
+  another name or modification time: the rest is parsed with the name and modification time of the
+  interrupted run, so the records of both runs fit together; no record is stored twice.
+- **Files still being written:** the import reads exactly the content it hashed first; lines appended to a
+  log while the import runs are not imported in this run (a later import of the grown file picks them up,
+  see *Out of scope*).
+- **Progress** is logged as JSON lines on standard error (like the service's log): progress every 64 MiB
+  while a large file is hashed before the import, what was found, each file started and finished, and
+  progress every 100,000 lines of a large file.
 - **Summary** on standard output at the end: number of files found, imported, already imported, not
   recognized and failed; lines read, records stored and lines skipped; the time range of the stored
   records; the list of files not recognized and of files that failed, each with its reason; and lines a

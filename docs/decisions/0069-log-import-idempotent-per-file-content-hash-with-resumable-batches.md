@@ -52,19 +52,42 @@ For an interrupted file:
   the file again and drops the first *n* records. Requires deterministic parsers (0070). The compare-and-set
   also makes two concurrent runs safe.
 
+A parser is deterministic only for the same content **and** the same `logparse.File` (name and modification
+time): #16 infers the year of syslog time stamps from them. The same content may come back under another name
+or modification time (a renamed or recompressed rotation, a newer copy of `/var/log`). For a resumed content:
+
+- α. **Resume with the current `File`** — simplest; but the resumed part may be parsed with another year than
+  the stored part, mixing years within one file.
+- β. **Resume only when name and modification time match, else fail** — safe; but a content interrupted
+  before its first batch, or whose first input is gone, can never be completed (there is no way to delete an
+  import state).
+- γ. **Store the first import's `File` and always parse with it** — the resumed part is parsed exactly as the
+  interrupted run parsed it; no dead end.
+
+For a file that changes between the passes (a log still being written):
+
+- A. **Read pass 2 to the end and fail on any hash difference** — a log that is merely appended to fails.
+- B. **Read pass 2 only up to the size hashed in pass 1** — appended bytes are ignored and left to a later
+  import; only a change or shrinking of the hashed part fails.
+
 ## Decision
 
-Options 2, 5 and c.
+Options 2, 5, c, γ and B. (α was rejected because it mixes parses within a file; β because it can leave a
+content that can never be completed.)
 
 - Schema version 3 (0064, step 3) adds
   `import_files(id INTEGER PRIMARY KEY, sha256 BLOB NOT NULL UNIQUE CHECK (length(sha256) = 32),
-  size INTEGER NOT NULL CHECK (size >= 0), name TEXT NOT NULL, source_type TEXT NOT NULL,
+  size INTEGER NOT NULL CHECK (size >= 0), name TEXT NOT NULL,
+  file_name BLOB NOT NULL CHECK (length(file_name) <= 1024), mod_time INTEGER, source_type TEXT NOT NULL,
   records INTEGER NOT NULL DEFAULT 0 CHECK (records >= 0), complete INTEGER NOT NULL DEFAULT 0 CHECK (complete IN (0, 1)),
   started_at INTEGER NOT NULL, completed_at INTEGER) STRICT`. `sha256` is the SHA-256 of the decompressed
-  content; `name` (display path of the first import, invalid UTF-8 replaced, at most 1024 bytes) and
-  `source_type` (the parser's type) are informational; times are Unix nanoseconds as in 0063.
+  content; `name` (display path of the first import, invalid UTF-8 replaced, at most 1024 bytes) is
+  informational; `file_name` (the `logparse.File.Name` of the first import, byte for byte) and `mod_time`
+  (its `ModTime`; NULL when zero or outside the range storable as Unix nanoseconds) are the `File` every
+  parse of this content receives; `source_type` is the parser's type; times are Unix nanoseconds as in 0063.
 - `store.BeginImport` returns the state of a content hash, creating it (no records, not complete) when it is
-  unknown; an existing state is returned unchanged.
+  unknown; an existing state is returned unchanged. It refuses a `FileName` longer than 1024 bytes (the
+  importer lists longer paths as failed before, 0071).
 - `store.Batch` gets an optional `Import *ImportStep{FileID, Done, Complete}`. `WriteBatch` then requires
   origin `import` for every record and no agent ID, and in its transaction first runs
   `UPDATE import_files SET records = records + n, complete = …, completed_at = … WHERE id = ? AND records = Done
@@ -74,12 +97,16 @@ Options 2, 5 and c.
 - The importer (`cmd/vandoxd/internal/importer`) runs two passes. Pass 1 lists every file, detects its parser
   and, for recognized files, reads the whole decompressed content to compute SHA-256 and size; a file that
   cannot be read completely (truncated or corrupt gzip, I/O error) fails here and is not imported at all.
+  While a file is hashed, pass 1 reports progress every 64 MiB (0072).
   Pass 2 calls `BeginImport` per recognized file in input order: complete → "already imported"; stored with
-  another source type → failed; otherwise it parses the content again, drops the first `Records` valid
-  records, and writes the rest in batches with `ImportStep`, the last one `Complete`. It hashes the content
-  again while parsing (draining what the parser did not read); if the hash differs from pass 1, the file
-  fails and is not completed.
-- Batches hold at most 2,000 records and the records from at most 4 MiB of input (0071).
+  another source type → failed; otherwise it parses the content again **with the stored `File`**
+  (`file_name`, `mod_time`), drops the first `Records` valid records, and writes the rest in batches with
+  `ImportStep`, the last one `Complete`. It reads the decompressed content only up to the `size` hashed in
+  pass 1 and hashes it again while parsing (draining what the parser did not read); if fewer bytes can be
+  read or the hash differs from pass 1, the file fails and is not completed.
+- Batches hold at most 2,000 records and the records from at most 4 MiB of input (0071), counted from the
+  batch's first buffered record; the byte bound is checked only when a record is added, so dropped (resumed)
+  records and skipped input never flush, and the only batch without records is the one that completes a file.
 
 ## Consequences
 
@@ -91,12 +118,18 @@ Options 2, 5 and c.
 - **A file that grew since its import is imported again as a whole** (another hash), storing the
   overlapping lines twice — e.g. `syslog` imported once and later, with more lines, as `syslog.1` in a newer
   copy of `/var/log`. Recognizing a known prefix is split into a follow-up issue.
-- A file that changes while it is imported fails; the records written before the change stay stored, and the
-  file is not completed, so it is imported again under its new hash later. Inputs are copies, so this is
-  rare; the summary says so.
+- A file whose hashed part changes or shrinks while it is imported fails; the records written before the
+  change stay stored, and the file is not completed, so it is imported again under its new hash later. Inputs
+  are copies, so this is rare; the summary says so. A file that is only appended to while it is imported is
+  imported up to the size hashed in pass 1; the appended lines come with a later import of the grown file
+  (and fall under the grown-file limit above). A line half-written at that size is imported as a last line
+  without newline.
+- An interrupted content resumed under another name or modification time is parsed with the first run's
+  name and modification time; the records then carry what the first run would have produced (e.g. its year
+  inference), not what the new name would suggest.
 - A truncated or corrupt compressed file is not imported in part; the operator can decompress the readable
   part and import it as a plain file.
-- Resuming relies on parsers being deterministic for the same content (0070). A parser change between an
+- Resuming relies on parsers being deterministic for the same content and `File` (0070). A parser change between an
   interrupted run and its resumption may shift the count; the stored `source_type` catches a changed
   detection, not a changed parser version.
 - Records do not reference their import file; deleting or re-doing one import would need a migration that
