@@ -28,7 +28,9 @@ exist.
   name) in a time range, in capture order, with a bounded result size, served by indexes.
 - The backend can search log lines in full text: the search text is a list of words that must all occur,
   case-insensitively and ignoring diacritics. A log line is searchable as soon as its batch is committed. No
-  search text can cause a query error or invoke a search operator. A search's cost grows with the number of
+  search text can cause a query error or invoke a search operator. A word without a letter or decimal digit
+  is refused — this includes words made only of characters such as `½`, `²` or `Ⅻ`, although such lines
+  exist and could match (a known limitation, 0066). A search's cost grows with the number of
   stored lines that contain its words (not with the time range searched); the caller limits its duration
   with a context deadline, which interrupts the query.
 - Higher layers program against small storage interfaces and test with a shared fake.

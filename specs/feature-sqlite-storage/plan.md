@@ -55,7 +55,22 @@ Facts verified with the pinned driver (v1.60.1, SQLite 3.53.4) that the plan rel
   write transaction (interleaved or at the end) gives the same index as the trigger (FTS5
   `INSERT INTO log_fts(log_fts, rank) VALUES('integrity-check', 1)` passes, 200,000 of 200,000 lines found)
   at about a third of the cost. A `log_lines` row without its index entry makes that `integrity-check` fail
-  ("database disk image is malformed").
+  ("database disk image is malformed"). Messages with an embedded `\x00`, the bytes `\xff\xfe`, a lone
+  `\xc3` or a leading U+FEFF keep the index in step too (`integrity-check` clean, `log_fts_docsize` count =
+  `log_lines` count, the NUL message reads back byte-identical) — re-run by the Lead after Security's review.
+- `unicode61` (default `categories "L* N* Co"`) indexes characters that are numbers but not decimal digits
+  (`½`, `²`, `①` — category No; `Ⅻ` — Nl) and private-use characters (U+E000 — Co) as tokens: the quoted
+  term `"½"` finds a line containing `½`. The guard's rule "at least one `unicode.IsLetter ||
+  unicode.IsDigit` rune" (`IsDigit` = Nd only) refuses a term made only of such characters, so these terms
+  are refused although they would match (*Guard: search text*, 0066).
+- Cancellation (driver source, `modernc.org/sqlite@v1.60.1`): `stmt.query` (`stmt.go` l. 285–297) returns
+  `ctx.Err()` before binding or stepping when the context is already done (l. 288–294), and otherwise defers
+  `interruptOnDone` (l. 295) (`sqlite.go` l. 77–116), a goroutine that calls `sqlite3_interrupt` (`conn.go` l. 810)
+  once the context is done while the statement runs; the deferred function at `stmt.go` l. 299–304 then
+  replaces the result by `ctx.Err()`. The watch covers the first `sqlite3_step` (`stmt.go` l. 337), and for
+  the log search that first step does all the work (the `MATCH` scan, the lookups and the sort into the temp
+  B-tree), so a running search is interrupted. Only the pre-cancelled path is unit-tested (AC-S5); see
+  *Security considerations*, area 10.
 
 ## Acceptance criteria
 
@@ -131,7 +146,9 @@ All tests use a real database in `t.TempDir()`, no real clock (times are fixed v
   text of the batch (sentinel in a log message of an otherwise invalid record).
 - [ ] AC-W10: FTS5 index in step with `log_lines` (0063): after writing, in one test, a batch of log lines
   and metrics, the same batch again (all duplicates), a batch that contains one log line's seq twice, and the
-  failing batch of AC-W4, `INSERT INTO log_fts(log_fts, rank) VALUES('integrity-check', 1)` through `s.db`
+  failing batch of AC-W4 — where the first batch's log lines include hostile messages: one with an embedded
+  `\x00` (`"a\x00b oom"`), one with the bytes `\xff\xfe`, one ending in a lone `\xc3`, and one starting with
+  U+FEFF — `INSERT INTO log_fts(log_fts, rank) VALUES('integrity-check', 1)` through `s.db`
   returns nil and `SELECT count(*) FROM log_fts_docsize` equals `SELECT count(*) FROM log_lines`. Negative
   control: after inserting a `records` row and a `log_lines` row directly through `s.db` (no index entry),
   the same `integrity-check` returns an error.
@@ -156,14 +173,20 @@ All tests use a real database in `t.TempDir()`, no real clock (times are fixed v
   punctuation as a phrase (`anon-rss`); filtered by `Source` and `[From, To)`, ordered by `CapturedAt` then
   `ID`, at most `Limit`. The existing `TestStore_SupportsFTS5` stays.
 - [ ] AC-S2: `ftsQuery`, table-driven over the accepted forms (see *Guard: search text* below): each input
-  maps to the exact expected expression or to an error wrapping `ErrInvalidQuery`.
+  maps to the exact expected expression or to an error wrapping `ErrInvalidQuery`. The table includes the
+  refused No/Nl/Co-only terms `½`, `²`, `Ⅻ` and `` (each an error) and the accepted mixed terms `½x`
+  → `"½x"` and `x²` → `"x²"`.
 - [ ] AC-S3: `SearchLogs` with each FTS5 operator form as text (`OR`, `NOT`, `AND`, `NEAR(a b)`, `kill*`,
   `^start`, `message:x`, `{message}:x`, `-message:x`, `a+b`, `(a)`, `"quoted"`, `a"b`) returns no SQL error;
   where the literal words occur in a stored line it finds that line, and `kill*` does not find `killed`.
+  With a stored line containing `½` and ``, the texts `½` and `` return an error wrapping
+  `ErrInvalidQuery` (refused, not "no hits").
 - [ ] AC-S4: Rejected with `ErrInvalidQuery`: the `RecordQuery` rules of AC-R2 that apply (time range,
   limit), and the text rules; the error text never contains the search text (sentinel test).
 - [ ] AC-S5: A cancelled context → error wrapping `context.Canceled`; a closed store → error. (The context
-  is the only bound on a search's duration, 0066.)
+  is the only bound on a search's duration, 0066.) This pins only the **pre-cancelled** path (the driver
+  returns `ctx.Err()` before binding or stepping); interruption of a search already running is driver
+  behavior verified from its source (*Facts verified*, area 10), not by a unit test.
 
 ### Interfaces and fake (`repository.go`, `storetest/fake.go`, 0067)
 
@@ -297,6 +320,8 @@ terms`), never the text or a term. Behavior on every form FTS5 accepts:
 | parentheses | `(a)` | `"(a)"` | literal |
 | column filter `col:`, `{a b}:`, `-col:` | `message:x`, `{message}:x`, `-message:x` | `"message:x"` etc. | literal tokens |
 | punctuation-only term | `--`, `*`, `"` | **error** | would match nothing |
+| term of only non-digit numbers (No, Nl) or private-use characters (Co) | `½`, `²`, `Ⅻ`, `` | **error** | refused although `unicode61` indexes them as tokens (deliberate limitation, 0066) |
+| such characters next to a letter or digit | `½x`, `x²` | `"½x"`, `"x²"` | token match |
 | empty or white space only | ``, `  ` | **error** | — |
 | NUL and other C0/C1 controls (Cc) that are not white space | `a\x00b`, `a\x1bb` | **error** | NUL would end the expression ("unterminated string") |
 | format characters (Cf): BOM U+FEFF, ZWSP U+200B, bidi controls | `﻿oom` | **error** | invisible characters |
@@ -548,8 +573,17 @@ Made by the Dev:
   as in 0057: a connection opened later re-opens the path without re-checking (0065 *Consequences*).
 - **Area 10 (FTS5 query)**: the guard above; the expression is bound, never concatenated; errors never echo
   the text. The guard bounds the expression, not the work: a search's cost grows with the stored lines that
-  contain its terms. Context cancellation interrupts a running query (driver behavior, AC-S5); callers that
-  serve a user (#26, #47) must pass a deadline (0066).
+  contain its terms. A cancelled or expired context interrupts a running search: driver behavior verified
+  from `modernc.org/sqlite@v1.60.1` — `stmt.query` (`stmt.go` l. 285–297) wraps the first `sqlite3_step`
+  (l. 337) in `interruptOnDone` (deferred at l. 295; `sqlite.go` l. 77–116), which calls
+  `sqlite3_interrupt` when the context is done, and the result becomes `ctx.Err()` (l. 299–304); for this query plan (`SCAN log_fts ... USE TEMP
+  B-TREE FOR ORDER BY`) the scan, lookups and sort all happen in that first step. AC-S5 tests only the
+  pre-cancelled path (`ctx.Err()` before binding or stepping, `stmt.go` l. 288–294). A mid-query test would
+  need a real clock or a large, slow fixture to cancel during the step, which `docs/UNIT_TESTS.md` rules out;
+  no deterministic hook exists for `SearchLogs`'s own statement (a blocking registered SQL function would
+  test a different statement and still race the driver's interrupt goroutine, which has no synchronization
+  point a test could wait on). A driver upgrade must re-check this (0066). Callers that serve a user (#26,
+  #47) must pass a deadline (0066).
 - **Area 12**: store errors carry field paths and rule names only, never payload values (AC-W9, AC-S4).
   Log text is returned raw; escaping for the UI or Telegram is the display layer's job.
 - No new dependency; no change to Docker, CI or configuration.
@@ -590,6 +624,26 @@ Devil's Advocate, 2026-10-06 (1 major, 1 minor):
    measurement and the deadline requirement for #26/#47; *Security considerations* area 10 and AC-S5 say the
    same. A plan that narrows by time first is not possible with the current IDs (imports and backfills are
    not in capture order) and is left to #26 if measurements require it.
+
+Security plan review, 2026-10-06 (CHANGES_REQUIRED: 1 blocking, 2 non-blocking):
+
+1. **B1 — "interruption of a running search is tested" was false.** **Accepted.** AC-S5 covers only a
+   context cancelled before the call. The Lead re-read the driver source and confirmed Security's evidence:
+   0066 *Consequences*, *Facts verified* and *Security considerations* area 10 now cite it
+   (`stmt.go` l. 285–304 and 337, `sqlite.go` l. 77–116, `conn.go` l. 810), AC-S5 states that it pins only the
+   pre-cancelled path, and area 10 explains why a mid-query unit test is not written (real clock or large
+   slow fixture, ruled out by `docs/UNIT_TESTS.md`; no deterministic hook for `SearchLogs`'s own statement).
+   0066 adds that a driver upgrade must re-check this.
+2. **N1 — hostile messages in AC-W10.** **Accepted.** AC-W10's first batch now includes messages with an
+   embedded `\x00`, the bytes `\xff\xfe`, a lone `\xc3` and a leading U+FEFF; the Lead re-ran the experiment
+   (*Facts verified*: `integrity-check` clean, counts equal, NUL message byte-identical).
+3. **N2 — pin Co-only and No-only terms.** **Accepted.** While pinning it, the Lead found that the plan's
+   rationale was wrong for these terms: `unicode61` indexes No, Nl and Co characters, so `"½"` would match;
+   refusing them is a limitation, not "would match nothing". The behavior is kept (the guard is unchanged,
+   the case is rare in server logs, and widening the rule would change what Security reviewed); the guard
+   table, 0066 *Decision*/*Consequences* and spec.md now state the limitation, AC-S2 pins `½`, `²`, `Ⅻ`,
+   U+E000 as errors and `½x`, `x²` as accepted, and AC-S3 pins that `SearchLogs` refuses `½` and U+E000
+   even when a stored line contains them.
 
 ## Out of scope / follow-ups
 
