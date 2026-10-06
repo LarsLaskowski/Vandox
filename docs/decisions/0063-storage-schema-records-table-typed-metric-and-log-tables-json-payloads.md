@@ -60,6 +60,13 @@ about 150 bytes per transaction, 5 to 20 successive batches into the same databa
   are not indexed yet (an external-content `delete` of an unindexed row corrupts the index). It changes the
   behavior "searchable when the batch is committed".
 
+Invalid UTF-8 in strings that the store writes as JSON (payloads, metric labels):
+
+- i. **Replace it with U+FFFD on write** (what `encoding/json` does) — consistent with the wire format, which
+  accepts such strings and replaces the bytes on decode (0042), so it never happens to a record from an agent.
+- ii. **Reject the record in the store's validation** — would refuse in Go what the wire format accepts, add a
+  rule for a case no agent batch can reach, and still leave JSON payload strings to be handled differently.
+
 ## Decision
 
 Option 3, schema version 2 (0064):
@@ -88,6 +95,7 @@ Option 3, schema version 2 (0064):
   signed 64-bit nanosecond count (1677-09-21 to 2262-04-11) and sequence numbers above 2^63 − 1 are rejected
   by the store; times inside JSON payloads keep RFC 3339 and have no such limit.
 - JSON payloads use the model's own JSON encoding (the wire format's field names, `docs/WIRE_FORMAT.md`).
+  Invalid UTF-8 in their strings and in metric labels is replaced on write, not rejected (option i).
 
 ## Consequences
 
@@ -104,7 +112,13 @@ Option 3, schema version 2 (0064):
   `WriteBatch`, a repair tool, retention) must maintain `log_fts` in the same transaction; the store's tests
   check the index with FTS5 `integrity-check`. A row written without its index entry is not found by search
   and makes `integrity-check` fail.
-- Invalid UTF-8 in a JSON payload's strings is replaced by U+FFFD on write; log messages and metric fields are
-  stored byte for byte.
+- Invalid UTF-8 in a JSON payload's strings and in metric labels (both stored as JSON) is replaced by U+FFFD
+  on write, and `WriteBatch` reports the record as stored; log fields and the other metric fields are stored
+  byte for byte. Records that arrive over the wire are already valid UTF-8, because decoding replaces invalid
+  bytes (0042, `docs/WIRE_FORMAT.md`), so the replacement on write only affects callers that build records
+  in Go.
+- `WriteBatch` checks the agent ID's format but stores `Batch.BootID` as given (only `""` becomes `NULL`); the
+  caller validates it first. The ingest API (#40) passes the boot ID of a header that `wire.Header.Validate`
+  accepted, a lower-case UUID.
 - An agent counter above 2^63 − 1 or a capture time outside 1677–2262 cannot be stored; both are documented in
   `docs/WIRE_FORMAT.md` as backend limits.
