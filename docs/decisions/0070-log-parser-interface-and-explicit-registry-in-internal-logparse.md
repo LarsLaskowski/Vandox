@@ -1,6 +1,6 @@
 # 0070: Log parsers implement one interface in internal/logparse; an explicit registry picks the parser by confidence
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-06
 - **Source:** Issue #15
 - **Supersedes:** —

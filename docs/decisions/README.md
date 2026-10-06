@@ -84,7 +84,7 @@ links the record.
 | [0055](0055-stale-base-image-digests-reported-weekly-builder-go-checked-in-build.md) | Stale base image digests reported weekly as an issue; the build stage checks the builder's Go version against its tag | Accepted | 2026-10-05 |
 | [0056](0056-release-sboms-from-a-digest-pinned-syft-container.md) | Release SBOMs (SPDX 2.3) come from a digest-pinned, network-less syft container in the build job and are attested in the attest job | Accepted | 2026-10-05 |
 | [0057](0057-sqlite-driver-modernc-pure-go.md) | modernc.org/sqlite as the SQLite driver: pure Go, no cgo, FTS5 included | Superseded by [0065](0065-sqlite-connections-single-writer-query-only-readers-synchronous-full.md) | 2026-10-05 |
-| [0058](0058-vandoxd-runs-the-service-by-default-with-a-shutdown-deadline.md) | vandoxd runs the service without arguments, logs JSON with slog and stops within a 10 s deadline | Accepted | 2026-10-05 |
+| [0058](0058-vandoxd-runs-the-service-by-default-with-a-shutdown-deadline.md) | vandoxd runs the service without arguments, logs JSON with slog and stops within a 10 s deadline | Superseded by [0072](0072-vandoxd-import-sub-command-output-and-exit-codes.md) | 2026-10-05 |
 | [0059](0059-healthz-checks-the-database-and-the-binary-is-the-health-probe.md) | /healthz on the web listener checks the database; vandoxd -healthcheck is the image's health probe | Accepted | 2026-10-05 |
 | [0060](0060-compose-file-port-bindings-volumes-and-memory-limit.md) | Compose file publishes the web port on loopback and the ingest port not yet; named data volume, 512 MiB limit | Accepted | 2026-10-05 |
 | [0061](0061-backend-only-packages-under-cmd-vandoxd-internal.md) | Backend-only packages live under cmd/vandoxd/internal; internal/ stays shared | Accepted | 2026-10-05 |
@@ -95,4 +95,8 @@ links the record.
 | [0066](0066-log-search-takes-literal-terms-only.md) | Log search takes literal terms only; every term is quoted for FTS5, operators and prefixes are not offered yet | Accepted | 2026-10-06 |
 | [0067](0067-storage-repository-interfaces-and-a-scripted-fake-in-storetest.md) | The store package defines small repository interfaces; storetest.Fake is a scripted fake, the store itself is tested against real files | Accepted | 2026-10-06 |
 | [0068](0068-write-throughput-measured-by-a-benchmark-ds918-measurement-in-a-follow-up.md) | Write throughput is measured by a Go benchmark and never asserted in tests; the DS918+ measurement is a follow-up issue | Accepted | 2026-10-06 |
+| [0069](0069-log-import-idempotent-per-file-content-hash-with-resumable-batches.md) | The log import is idempotent per file content: SHA-256 of the decompressed content, two passes, batches that resume by count | Accepted | 2026-10-06 |
+| [0070](0070-log-parser-interface-and-explicit-registry-in-internal-logparse.md) | Log parsers implement one interface in internal/logparse; an explicit registry picks the parser by confidence | Accepted | 2026-10-06 |
+| [0071](0071-log-import-reads-input-without-following-links-or-extracting.md) | The log import reads its input as streams without following links or extracting anything; formats are sniffed, one gzip layer, no nested archives, fixed limits | Accepted | 2026-10-06 |
+| [0072](0072-vandoxd-import-sub-command-output-and-exit-codes.md) | vandoxd gets the sub-command import; progress as JSON on stderr, the summary as text on stdout, exit code 1 when a file failed | Accepted | 2026-10-06 |
 <!-- project:end index -->

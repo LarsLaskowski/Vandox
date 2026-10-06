@@ -1,6 +1,6 @@
 # 0072: vandoxd gets the sub-command import; progress as JSON on stderr, the summary as text on stdout, exit code 1 when a file failed
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-06
 - **Source:** Issue #15
 - **Supersedes:** 0058

@@ -1,7 +1,7 @@
 # Plan: Import framework for log archives
 
 Source: Issue #15 | [spec.md](spec.md)
-Status: Draft
+Status: Approved by Security
 Tier: security — the change adds the reading of external files and archives (security areas 9 *File writes
 and paths derived from external input*, which names the log import, and 10 *Parsing of external input*,
 which names log files) and a new database table written from that input.

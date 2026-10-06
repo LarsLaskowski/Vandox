@@ -1,6 +1,6 @@
 # 0071: The log import reads its input as streams without following links or extracting anything; formats are sniffed, one gzip layer, no nested archives, fixed limits
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-06
 - **Source:** Issue #15
 - **Supersedes:** —

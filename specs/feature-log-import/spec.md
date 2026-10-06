@@ -1,6 +1,6 @@
 # Spec: Import framework for log archives
 
-Status: Draft
+Status: Approved by Lead
 Source: Issue #15
 
 ## Problem / motivation
