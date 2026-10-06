@@ -385,9 +385,10 @@ func (s *scanner) tarEntry(arc item, index int, h *tar.Header, content io.Reader
 	return nil
 }
 
-// cleanName returns the entry name n cleaned and without a leading slash; it is a label only.
+// cleanName returns the entry name n cleaned and without a leading slash; it is a label only. The result is an
+// independent copy, so a kept name does not pin the memory of the raw header name.
 func cleanName(n string) string {
-	return strings.TrimLeft(path.Clean(n), "/")
+	return strings.Clone(strings.TrimLeft(path.Clean(n), "/"))
 }
 
 // trimGzip removes a trailing ".gz" (any case) from name.
