@@ -11,3 +11,4 @@ One line per pipeline step: date, step, member, result. Lead decisions and escal
 | 2026-10-06 | 3 Plan security review (1st) | Security | CHANGES_REQUIRED: B1 0066/plan area 10 claim mid-query interruption is "tested" but AC-S5 covers only pre-cancelled context; N1 add hostile messages to AC-W10; N2 pin Co/No-only terms in AC-S2/S3 |
 | 2026-10-06 | 3 Plan revise (after security 1) | Lead | B1 fixed (0066/plan area 10 cite driver source, AC-S5 only pre-cancelled path); N1 hostile messages in AC-W10; N2 accepted with corrected rationale (Co/No terms refused, documented limitation, AC-S2/S3 pinned) |
 | 2026-10-06 | 3 Plan security review (2nd, delta) | Security | APPROVED (B1, N1 fixed; N2 documented limitation, verified by experiment) |
+| 2026-10-06 | 3 Follow-up issue | Orchestrator | Created #129 (DS918+ measurement); PR will say Part of #14 |
