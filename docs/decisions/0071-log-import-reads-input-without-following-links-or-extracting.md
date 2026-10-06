@@ -76,7 +76,8 @@ followed or opened.
 - **Root**: resolved once with `filepath.EvalSymlinks` (the operator named it) and checked with `Lstat`; a
   directory is opened as an `os.Root` and walked recursively in lexical order; a regular file is one input
   file, opened through an `os.Root` of the directory holding it (which must be readable); anything else
-  (FIFO, socket, device, missing) is an error of the run and is never opened.
+  (FIFO, socket, device, missing) is an error of the run and is never opened (the window between `Lstat`
+  and opening is an accepted residual, see *Consequences*).
 - **Below the root nothing is followed when listing**: directories are read with `(*os.File).ReadDir`; a
   symbolic link (file or directory) is listed as "symbolic link (not followed)"; a FIFO, socket or device
   as "not a regular file"; an unreadable directory or file as failed with the OS error. Every open goes
@@ -131,9 +132,19 @@ followed or opened.
 
 ## Consequences
 
-- No input can make the import write a file, read outside the named root through a link — also not by
-  swapping a path component while the import runs —, or block on a FIFO. A swap inside the root can make
-  another input file be read under the listed name; its content is input either way.
+- No input can make the import write a file, read outside the `os.Root` through a link — also not by
+  swapping a path component below the root while the import runs —, or block on a FIFO below the root. A
+  swap inside a directory root can make another input file be read under the listed name; its content is
+  input either way.
+- Accepted residuals (security diff review), both needing write access to the root's location while the
+  import starts or runs — on the host, since `/import` is mounted read-only — and both affecting only the
+  operator's own database: (1) the root is not guarded between `Lstat` and `os.OpenRoot`, which opens
+  without `O_NONBLOCK`, `O_DIRECTORY` or `O_NOFOLLOW`; a root swapped for a FIFO in that window blocks the
+  start until a second SIGINT/SIGTERM ends the process, and one swapped for a link is followed. (2) A file
+  root is opened through an `os.Root` of the directory holding it, so the file swapped for a link can make
+  another regular file in that directory (or below it) be read under the root's name. A fix (opening the
+  root with `O_RDONLY|O_NONBLOCK|O_DIRECTORY|O_NOFOLLOW` and comparing it with `os.SameFile`, or checking the
+  file root's descriptor against the `Lstat` result) is a new decision if this ever matters.
 - Memory stays flat for any file size and any number of entries: the scan's per-file list (bounded by
   `MaxFiles`, enforced while scanning, and `MaxPathBytes`), one head, one line, one batch.
 - A gzip bomb or a huge sparse entry is not refused; it costs time and stops only by the context. Once

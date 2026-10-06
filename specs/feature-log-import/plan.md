@@ -262,8 +262,8 @@ records go through the existing write path, so `log_fts` stays in step (0063).
 **Input handling** follows the table below and 0071: the root is resolved once and opened as an `os.Root`
 (a directory root itself, a file root through the directory holding it); every directory and file below it
 is opened through that `os.Root` (`openDir`, `openRegular`: `O_NONBLOCK`, `O_DIRECTORY` for directories, and
-`Fstat` on the opened descriptor), so no path component — not only the last — can lead outside the root,
-even when the input is swapped while it is read. Listing never follows a link; nothing is extracted; names
+`Fstat` on the opened descriptor), so no path component below the root — not only the last — can lead outside the `os.Root`,
+even when the input is swapped while it is read (residuals for the root itself and a file root: 0071). Listing never follows a link; nothing is extracted; names
 from the input are labels only.
 
 **Logging input-derived text** (0072): `slog`'s JSON handler escapes only `"`, `\`, characters below U+0020
@@ -297,14 +297,15 @@ header **together with** `tar.ErrInsecurePath` for a non-local name and continue
 | Root: directory | walked recursively, entries in lexical order |
 | Root: regular file | read as one file (gzip and tar detection apply) |
 | Root: symbolic link | resolved once with `filepath.EvalSymlinks` (the operator named it); nothing below is followed |
-| Root: FIFO, socket, device; missing; unreadable (also: the directory holding a root file is not readable, since a file root is opened through it) | `Run` error; a FIFO is never opened |
+| Root: FIFO, socket, device; missing; unreadable (also: the directory holding a root file is not readable, since a file root is opened through it) | `Run` error; a FIFO is never opened (except when swapped in after `Lstat`, see below) |
 | Directory entry: regular file | read |
 | Directory entry: subdirectory | descended |
 | Directory entry: symbolic link (to file or directory) | listed unrecognized, "symbolic link (not followed)" |
 | Directory entry: FIFO, socket, device | listed unrecognized, "not a regular file"; never opened |
 | Directory entry: unreadable subdirectory or file | listed failed with the OS error (without repeating the path); walk continues |
 | Regular file or directory replaced between listing and opening by a FIFO, device, directory or regular file of the other kind | `openRegular`/`openDir` fail without blocking (`O_NONBLOCK`, `O_DIRECTORY`, `Fstat` on the descriptor) → failed |
-| Any path component replaced between listing and opening by a symbolic link | resolved by `os.Root` only when relative and inside the root, else the open fails → failed; never a read outside the root (a link to another file of the input reads that file, which is input anyway) |
+| Any path component replaced between listing and opening by a symbolic link | resolved by `os.Root` only when relative and inside the root, else the open fails → failed; never a read outside the `os.Root` (a directory root: a link to another file of the input reads that file, which is input anyway; a file root: its `os.Root` is the directory holding it, so the file swapped for a link can make another regular file in that directory or below it be read under the root's name — accepted residual, 0071) |
+| Root replaced between `Lstat` and `os.OpenRoot` (by a FIFO or a link) | not guarded: `os.OpenRoot` opens without `O_NONBLOCK`/`O_DIRECTORY`/`O_NOFOLLOW`, so a FIFO can block the start (a second SIGINT/SIGTERM ends the process) and a link is followed — accepted residual, 0071 |
 | Relative path or entry name longer than `MaxPathBytes` (1024) | listed failed, "path too long", shown cut |
 | Name with control characters, invalid UTF-8, `..`, absolute, `./`, `//` | read normally; a label only (never a file system path); cleaned with `path.Clean`, leading `/` removed; printed with `%q`; stored with U+FFFD, cut to 1024 bytes |
 | Content starting `1f 8b 08` (gzip, any file name) | decompressed, all members; one layer only; `.gz` (case-insensitive) removed from the parser name |
@@ -778,7 +779,9 @@ Made by the Dev:
   `openat(…, O_NOFOLLOW)` and resolves a link only when it is relative and stays inside the root — so a swap
   of **any** component between listing and opening cannot redirect the read outside the root (a plain
   `O_NOFOLLOW` would protect only the last component). The narrower, accurate claim: such a swap can at
-  most make another file **of the input** be read under the listed name. `openRegular` and `openDir` add
+  most make another file **of the input** be read under the listed name (for a file root: another file in the
+  directory holding it; and the root itself is not guarded between `Lstat` and `os.OpenRoot` — both accepted
+  residuals in 0071). `openRegular` and `openDir` add
   `O_NONBLOCK` (and `O_DIRECTORY`) and check the opened descriptor with `Fstat`, so a swap cannot block on a
   FIFO either.
 - **Bounded memory** (area 10): streams only; one decompression layer; head of 4 KiB; line length 16 KiB
