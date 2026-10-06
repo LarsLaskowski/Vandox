@@ -6,8 +6,13 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
+	"time"
+
+	"github.com/LarsLaskowski/Vandox/internal/model"
 )
 
 // openStore opens a store in dir and closes it when the test ends.
@@ -62,8 +67,8 @@ func TestOpen_CreatesDatabase(t *testing.T) {
 	if got := queryString(t, s.db, "PRAGMA journal_mode"); got != "wal" {
 		t.Errorf("PRAGMA journal_mode = %q, want %q", got, "wal")
 	}
-	if got := queryString(t, s.db, "SELECT value FROM meta WHERE key = 'schema_version'"); got != "1" {
-		t.Errorf("meta schema_version = %q, want %q", got, "1")
+	if got := queryString(t, s.db, "SELECT value FROM meta WHERE key = 'schema_version'"); got != strconv.Itoa(SchemaVersion) {
+		t.Errorf("meta schema_version = %q, want %q", got, strconv.Itoa(SchemaVersion))
 	}
 }
 
@@ -347,22 +352,28 @@ func TestOpen_RefusesNonDatabaseContent(t *testing.T) {
 func TestOpen_RefusesNewerSchema(t *testing.T) {
 	dir := t.TempDir()
 	first := openStore(t, dir)
-	if _, err := first.db.ExecContext(context.Background(), "UPDATE meta SET value = '2' WHERE key = 'schema_version'"); err != nil {
+	newer := strconv.Itoa(SchemaVersion + 1)
+	if _, err := first.db.ExecContext(context.Background(), "UPDATE meta SET value = ? WHERE key = 'schema_version'", newer); err != nil {
 		t.Fatalf("update error = %v, want nil", err)
 	}
 	if err := first.Close(); err != nil {
 		t.Fatalf("Close() error = %v, want nil", err)
 	}
+	path := filepath.Join(dir, FileName)
+	before := rawQueryString(t, path, masterSnapshotQuery)
 
 	s, err := Open(context.Background(), dir)
 
 	if err == nil {
 		_ = s.Close()
-		t.Fatal("Open(schema_version 2) error = nil, want an error")
+		t.Fatalf("Open(schema_version %s) error = nil, want an error", newer)
 	}
-	got := rawQueryString(t, filepath.Join(dir, FileName), "SELECT value FROM meta WHERE key = 'schema_version'")
-	if got != "2" {
-		t.Errorf("schema_version after the refused Open = %q, want %q (not modified)", got, "2")
+	got := rawQueryString(t, path, "SELECT value FROM meta WHERE key = 'schema_version'")
+	if got != newer {
+		t.Errorf("schema_version after the refused Open = %q, want %q (not modified)", got, newer)
+	}
+	if after := rawQueryString(t, path, masterSnapshotQuery); after != before {
+		t.Errorf("sqlite_master after the refused Open = %q, want unchanged %q", after, before)
 	}
 }
 
@@ -398,4 +409,130 @@ func TestStore_SupportsFTS5(t *testing.T) {
 	if got := queryString(t, s.db, "SELECT body FROM t WHERE t MATCH ?", "quick"); got != "the quick brown fox" {
 		t.Errorf("MATCH query = %q, want %q", got, "the quick brown fox")
 	}
+}
+
+// readerOf returns the reader pool of s and fails the test when the store has none.
+func readerOf(t *testing.T, s *Store) *sql.DB {
+	t.Helper()
+	if s.read == nil {
+		t.Fatal("Store.read = nil, want the query-only reader pool")
+	}
+	return s.read
+}
+
+func TestStore_Pragmas(t *testing.T) {
+	pragmas := []struct{ name, want string }{
+		{"journal_mode", "wal"},
+		{"synchronous", "2"},
+		{"busy_timeout", "5000"},
+		{"foreign_keys", "1"},
+	}
+	t.Run("writer pool", func(t *testing.T) {
+		s := openStore(t, t.TempDir())
+		for _, p := range pragmas {
+			if got := queryString(t, s.db, "PRAGMA "+p.name); got != p.want {
+				t.Errorf("writer PRAGMA %s = %q, want %q", p.name, got, p.want)
+			}
+		}
+	})
+
+	t.Run("reader pool", func(t *testing.T) {
+		s := openStore(t, t.TempDir())
+		reader := readerOf(t, s)
+		for _, p := range append(pragmas, struct{ name, want string }{"query_only", "1"}) {
+			if got := queryString(t, reader, "PRAGMA "+p.name); got != p.want {
+				t.Errorf("reader PRAGMA %s = %q, want %q", p.name, got, p.want)
+			}
+		}
+	})
+
+	t.Run("insert through the reader pool fails", func(t *testing.T) {
+		s := openStore(t, t.TempDir())
+		reader := readerOf(t, s)
+
+		_, err := reader.ExecContext(context.Background(), "INSERT INTO meta(key, value) VALUES ('reader', 'wrote')")
+
+		if err == nil {
+			t.Error("INSERT through the reader pool error = nil, want an error")
+		}
+	})
+}
+
+func TestStore_ReadsAreNotBlockedByTheWriter(t *testing.T) {
+	s := openStore(t, t.TempDir())
+	ctx := context.Background()
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("BeginTx() error = %v, want nil", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, "INSERT INTO meta(key, value) VALUES ('held', 'open')"); err != nil {
+		t.Fatalf("insert in the open write transaction error = %v, want nil", err)
+	}
+	q := RecordQuery{Kind: "metric", From: baseTime, To: baseTime.Add(time.Hour), Limit: 10}
+
+	if got, err := s.Records(ctx, q); err != nil || len(got) != 0 {
+		t.Errorf("Records() during an open write transaction = %v, %v, want no records and a nil error", got, err)
+	}
+	if err := s.Ping(ctx); err != nil {
+		t.Errorf("Ping() during an open write transaction error = %v, want nil", err)
+	}
+}
+
+func TestStore_ConcurrentWriters(t *testing.T) {
+	const writers, perWriter = 8, 25
+	s := openStore(t, t.TempDir())
+	errs := make([]error, writers)
+	var wg sync.WaitGroup
+	for w := range writers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			recs := make([]model.Record, 0, perWriter)
+			for i := range perWriter {
+				seq := uint64(w*perWriter + i + 1)
+				recs = append(recs, metricRecord("node", "cpu.load", seq, baseTime.Add(time.Duration(seq)*time.Second)))
+			}
+			_, errs[w] = s.WriteBatch(context.Background(), agentBatch(recs...))
+		}()
+	}
+	wg.Wait()
+
+	for w, err := range errs {
+		if err != nil {
+			t.Errorf("WriteBatch() of writer %d error = %v, want nil", w, err)
+		}
+	}
+	if got := countRows(t, s, "records"); got != writers*perWriter {
+		t.Errorf("stored records = %d, want %d", got, writers*perWriter)
+	}
+}
+
+func TestStore_Close(t *testing.T) {
+	t.Run("open store closes both pools", func(t *testing.T) {
+		s := openStore(t, t.TempDir())
+		if err := s.Close(); err != nil {
+			t.Fatalf("Close() error = %v, want nil", err)
+		}
+		ctx := context.Background()
+		q := RecordQuery{Kind: "metric", From: baseTime, To: baseTime.Add(time.Hour), Limit: 10}
+
+		if err := s.Ping(ctx); err == nil {
+			t.Error("Ping() after Close error = nil, want an error")
+		}
+		if _, err := s.Records(ctx, q); err == nil {
+			t.Error("Records() after Close error = nil, want an error")
+		}
+		if _, err := s.WriteBatch(ctx, agentBatch(metricRecord("node", "cpu.load", 1, baseTime))); err == nil {
+			t.Error("WriteBatch() after Close error = nil, want an error")
+		}
+		if s.read != nil {
+			if err := s.read.PingContext(ctx); err == nil {
+				t.Error("reader pool PingContext() after Close error = nil, want an error")
+			}
+		}
+		if err := s.db.PingContext(ctx); err == nil {
+			t.Error("writer pool PingContext() after Close error = nil, want an error")
+		}
+	})
 }

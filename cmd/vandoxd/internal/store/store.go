@@ -10,7 +10,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"strconv"
 
 	// Register the pure-Go SQLite driver under the name "sqlite".
 	_ "modernc.org/sqlite"
@@ -20,22 +19,30 @@ import (
 const FileName = "vandox.db"
 
 // SchemaVersion is the database schema version this build reads and writes.
-const SchemaVersion = 1
+const SchemaVersion = 2
 
 // filePerm is the mode of the database file; SQLite gives its -wal and -shm files the same mode.
 const filePerm = 0o600
 
-// dsnQuery sets, on every connection, WAL mode, a busy timeout and foreign key enforcement.
-const dsnQuery = "_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)"
+const (
+	// writerQuery sets, on the writer connection, WAL mode, a busy timeout, foreign key enforcement, full
+	// synchronization and immediate transactions.
+	writerQuery = "_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=synchronous(FULL)&_txlock=immediate"
+	// readerQuery sets the same on the reader connections, which are query-only.
+	readerQuery = "_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=query_only(1)&_pragma=synchronous(FULL)"
+	// maxReaders is the size of the reader pool.
+	maxReaders = 4
+)
 
 // Store is the backend's SQLite database.
 type Store struct {
-	db      *sql.DB
+	db      *sql.DB // writer pool, one connection
+	read    *sql.DB // query-only reader pool
 	created bool
 }
 
 // Open opens the database FileName in the existing directory dir, creating the file (mode 0600) if it does
-// not exist, in WAL mode, and checks its schema version.
+// not exist, in WAL mode, and migrates its schema to SchemaVersion.
 func Open(ctx context.Context, dir string) (*Store, error) {
 	info, err := os.Stat(dir)
 	if err != nil {
@@ -54,21 +61,42 @@ func Open(ctx context.Context, dir string) (*Store, error) {
 			return nil, err
 		}
 	}
-	db, err := sql.Open("sqlite", dsn(path))
+	db, err := sql.Open("sqlite", dsn(path, writerQuery))
 	if err != nil {
 		return nil, fmt.Errorf("store: opening database: %w", err)
 	}
+	db.SetMaxOpenConns(1)
 	if err := initialize(ctx, db); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
-	return &Store{db: db, created: created}, nil
+	read, err := openReader(ctx, path)
+	if err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	return &Store{db: db, read: read, created: created}, nil
+}
+
+// openReader opens the pool of query-only connections and checks that it reads the migrated database.
+func openReader(ctx context.Context, path string) (*sql.DB, error) {
+	read, err := sql.Open("sqlite", dsn(path, readerQuery))
+	if err != nil {
+		return nil, fmt.Errorf("store: opening database for reading: %w", err)
+	}
+	read.SetMaxOpenConns(maxReaders)
+	read.SetMaxIdleConns(maxReaders)
+	if _, err := schemaVersion(ctx, read); err != nil {
+		_ = read.Close()
+		return nil, err
+	}
+	return read, nil
 }
 
 // dsn returns the SQLite URI of the database file at path. The path goes in only through url.URL.Path, so
-// characters such as ?, # and % cannot add parameters or cut the path.
-func dsn(path string) string {
-	return (&url.URL{Scheme: "file", Path: path, RawQuery: dsnQuery}).String()
+// characters such as ?, # and % cannot add parameters or cut the path. query is the raw query string.
+func dsn(path, query string) string {
+	return (&url.URL{Scheme: "file", Path: path, RawQuery: query}).String()
 }
 
 // prepareFile creates the database file exclusively with mode 0600, or checks that an existing entry is a
@@ -112,7 +140,7 @@ func requireRegular(path string) error {
 	return nil
 }
 
-// initialize verifies WAL mode and creates or checks the meta table.
+// initialize verifies WAL mode and migrates the schema to SchemaVersion.
 func initialize(ctx context.Context, db *sql.DB) error {
 	var mode string
 	if err := db.QueryRowContext(ctx, "PRAGMA journal_mode").Scan(&mode); err != nil {
@@ -121,20 +149,7 @@ func initialize(ctx context.Context, db *sql.DB) error {
 	if mode != "wal" {
 		return fmt.Errorf("store: journal mode is %q, want wal (the file system must support shared memory)", mode)
 	}
-	if _, err := db.ExecContext(ctx, "CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL) STRICT"); err != nil {
-		return fmt.Errorf("store: creating meta table: %w", err)
-	}
-	if _, err := db.ExecContext(ctx, "INSERT OR IGNORE INTO meta(key, value) VALUES ('schema_version', ?)", strconv.Itoa(SchemaVersion)); err != nil {
-		return fmt.Errorf("store: writing schema version: %w", err)
-	}
-	version, err := schemaVersion(ctx, db)
-	if err != nil {
-		return err
-	}
-	if version != strconv.Itoa(SchemaVersion) {
-		return fmt.Errorf("store: schema version %q is not supported, this build uses %d", version, SchemaVersion)
-	}
-	return nil
+	return migrate(ctx, db, migrations)
 }
 
 // schemaVersion reads the schema version stored in the meta table.
@@ -153,13 +168,13 @@ func (s *Store) Created() bool {
 
 // Ping reads the schema version and returns an error when the database cannot be read.
 func (s *Store) Ping(ctx context.Context) error {
-	_, err := schemaVersion(ctx, s.db)
+	_, err := schemaVersion(ctx, s.read)
 	return err
 }
 
 // Close closes the database.
 func (s *Store) Close() error {
-	if err := s.db.Close(); err != nil {
+	if err := errors.Join(s.read.Close(), s.db.Close()); err != nil {
 		return fmt.Errorf("store: closing database: %w", err)
 	}
 	return nil

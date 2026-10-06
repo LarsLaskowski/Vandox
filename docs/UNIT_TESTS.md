@@ -31,6 +31,9 @@ neighboring test file before inventing a new pattern.
   path then contains the sentinel. Strip the file path from the error text before the leak check.
 - Where the plan fixes an error format, assert the exact text instead of forbidding substrings; a
   forbidden substring must not overlap text the format requires.
+- Benchmarks live in the `_test.go` file of the code they measure and never assert a duration; their
+  reference-host results go into [`BENCHMARKS.md`](BENCHMARKS.md)
+  ([0068](decisions/0068-write-throughput-measured-by-a-benchmark-ds918-measurement-in-a-follow-up.md)).
 - `t.Helper()` in helpers; `t.TempDir()` for files; no real network, no real clock (inject a clock or a
   fixture path); tests pass under `-race`. Loopback listeners, as `httptest` uses them, are the only network.
 - Timeouts of `context` and `net/http` cannot be driven by an own fake clock, so

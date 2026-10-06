@@ -14,8 +14,9 @@ files or endpoints.
    deduplication. *Goal:* only an agent holding a valid token can store data; the token is compared in
    constant time; request size, batch size and rate are bounded so a valid agent cannot exhaust the
    backend's memory or disk; a resent record (same agent ID
-   and sequence number), and so a resent batch, is stored once and never overwrites stored data. Records
-   0032, 0044, 0045.
+   and sequence number), and so a resent batch, is stored once and never overwrites stored data. The
+   deduplication is implemented by `store.WriteBatch` (partial unique index `records_agent_seq`,
+   `INSERT ... ON CONFLICT DO NOTHING`, no code path updates a record row). Records 0032, 0044, 0045, 0063.
 2. **Tailscale ACL and port binding** (deployment files under `deploy/backend/` and the documented ACL):
    *Goal:* a compromised monitored server can reach only the ingest port on the backend host's tailnet
    address and nothing else in the tailnet or home LAN; the ingest port is bound only to the tailnet
@@ -68,11 +69,13 @@ files or endpoints.
    size-bounded, files are created with restrictive permissions. The database file `vandox.db`
    (`cmd/vandoxd/internal/store`) is created with mode 0600 inside the existing `storage.directory`, which is
    never created, and a symbolic link or other non-regular file in place of `vandox.db` or its `-wal`/`-shm`
-   files is refused. Records 0045, 0057.
+   files is refused. Records 0045, 0065.
 10. **Parsing of external input** (log files: journal, syslog, MariaDB, mail, Plesk, web server; the ingest
     wire format (`internal/wire`: `NewDecoder`, `Decoder.Next`, `wire.Limits`); CLI arguments and configuration; later Telegram commands): *Goal:* malformed or hostile
     input yields an error or a skipped record, never a crash, an unbounded allocation or a hang. The
-    configuration file is read by `internal/config` (`decodeStrict`, `readFile`). Records 0048, 0049.
+    configuration file is read by `internal/config` (`decodeStrict`, `readFile`). The log search text
+    (`store.SearchLogs`, `ftsQuery`) reaches SQLite's FTS5 query parser and is reduced to quoted literal terms
+    with bounded length and term count. Records 0048, 0049, 0066.
 11. **Outbound calls** (Telegram, external checks, the optional AI service of the nightly report, the
     agent's connection to the backend): *Goal:* every call has a timeout, goes only to its configured
     destination and leaves encrypted to a verified peer. The agent's only destination is the ingest port,
@@ -182,7 +185,7 @@ double under this name and changes the status.
 | systemd D-Bus | fake systemd reader (scripted unit states and errors, and a reader that blocks until its context is cancelled, for 0029) |
 | journald | fake journal reader (scripted entries, cursors and errors, and a reader that blocks until its context is cancelled, for 0029) |
 | MariaDB socket | fake MariaDB status source (status variables, process list, errors, and a source that hangs until its context is cancelled, for 0029) |
-| database | fake `Pinger` (scripted result, call counter, blocks until released in `t.Cleanup`; `cmd/vandoxd/internal/server`); the SQLite store itself is tested against a real database file in `t.TempDir()` (implemented) |
+| database | fake `Pinger` (scripted result, call counter, blocks until released in `t.Cleanup`; `cmd/vandoxd/internal/server`); `storetest.Fake` for `store.Writer`, `RecordReader`, `LogSearcher` (scripted hooks, recorded calls, `Block`; `cmd/vandoxd/internal/store/storetest`) (implemented); the SQLite store itself is tested against a real database file in `t.TempDir()` (implemented) |
 | Telegram Bot API | fake Telegram client (records sent messages, returns scripted updates; no network) |
 | Tailscale network | none in code (0017: `vandoxd` embeds no Tailscale); the agent's sender is tested against a `net/http/httptest` server standing in for the ingest port; the ACL itself is deployment configuration, reviewed, not unit-tested |
 | time | injectable clock (spool age, live/backfill classification, deadlines) |
