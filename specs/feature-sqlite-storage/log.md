@@ -13,3 +13,4 @@ One line per pipeline step: date, step, member, result. Lead decisions and escal
 | 2026-10-06 | 3 Plan security review (2nd, delta) | Security | APPROVED (B1, N1 fixed; N2 documented limitation, verified by experiment) |
 | 2026-10-06 | 3 Follow-up issue | Orchestrator | Created #129 (DS918+ measurement); PR will say Part of #14 |
 | 2026-10-06 | 4 Skeleton | Dev | store.go (SchemaVersion 2, writer/reader DSN, read pool field), migrate.go, write.go, read.go, repository.go, storetest/fake.go; build ok |
+| 2026-10-06 | 5 Tests first | Tester | store_test (adapted), migrate_test, write_test (incl. benchmark), read_test, storetest/fake_test; verified: compile, vet clean, 48 tests fail on skeleton |
