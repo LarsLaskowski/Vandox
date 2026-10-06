@@ -83,7 +83,7 @@ public class FileProbeTests
         // Assert
         Assert.AreEqual("content", text, "content of the file");
         Assert.IsTrue(followed.CanRead, "a link is followed when asked");
-        Assert.ThrowsExactly<IOException>(() => FileProbe.OpenRegular(link, false), "a link is refused when not following");
+        Assert.ThrowsExactly<SafeIoException>(() => FileProbe.OpenRegular(link, false), "a link is refused when not following");
     }
 
     /// <summary>
@@ -97,12 +97,12 @@ public class FileProbeTests
         var fifo = Path.Combine(directory.Path, "fifo");
 
         // Act and Assert
-        Assert.ThrowsExactly<IOException>(() => FileProbe.OpenRegular("/dev/null", true), "device");
-        Assert.ThrowsExactly<IOException>(() => FileProbe.OpenRegular(Path.Combine(directory.Path, "missing"), true), "missing file");
+        Assert.ThrowsExactly<SafeIoException>(() => FileProbe.OpenRegular("/dev/null", true), "device");
+        Assert.ThrowsExactly<SafeIoException>(() => FileProbe.OpenRegular(Path.Combine(directory.Path, "missing"), true), "missing file");
 
         if (MakeFifo(fifo))
         {
-            Assert.ThrowsExactly<IOException>(() => FileProbe.OpenRegular(fifo, true), "FIFO");
+            Assert.ThrowsExactly<SafeIoException>(() => FileProbe.OpenRegular(fifo, true), "FIFO");
         }
     }
 

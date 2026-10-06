@@ -336,6 +336,44 @@ public class BatchDecoderTests
     }
 
     /// <summary>
+    /// A stream whose last bytes were cut off (the trailer) is refused, and so is one with a damaged checksum.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task BatchDecoderRefusesStreamWithMissingOrDamagedTrailer()
+    {
+        // Arrange
+        using var whole = BatchBuilder.Gzip(BatchBuilder.Header, BatchBuilder.Metric(1), BatchBuilder.Metric(2));
+        var bytes = whole.ToArray();
+        var damaged = (byte[])bytes.Clone();
+
+        damaged[^6] ^= 0xff;
+
+        using var noTrailer = new MemoryStream(bytes, 0, bytes.Length - 8);
+        using var badCrc = new MemoryStream(damaged);
+
+        // Act
+        var cut = await Assert.ThrowsExactlyAsync<WireException>(() => OpenAndReadAllAsync(noTrailer), "stream without trailer");
+        var crc = await Assert.ThrowsExactlyAsync<WireException>(() => OpenAndReadAllAsync(badCrc), "stream with a damaged checksum");
+
+        // Assert
+        Assert.AreEqual(WireErrorKind.Malformed, cut.Kind, "cut class");
+        Assert.AreEqual(WireErrorKind.Malformed, crc.Kind, "checksum class");
+    }
+
+    /// <summary>
+    /// Opens a batch and reads it to the end.
+    /// </summary>
+    /// <param name="input">The compressed stream</param>
+    /// <returns>A task that completes at the end of the batch</returns>
+    private async Task OpenAndReadAllAsync(Stream input)
+    {
+        using var decoder = await BatchDecoder.OpenAsync(input, null, TestContext.CancellationToken);
+
+        await ReadAllAsync(decoder);
+    }
+
+    /// <summary>
     /// Reads records until the end.
     /// </summary>
     /// <param name="decoder">The decoder</param>

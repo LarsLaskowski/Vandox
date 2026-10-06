@@ -1,6 +1,7 @@
 using System.IO.Compression;
 using System.Text.Json;
 
+using Vandox.Core.IO;
 using Vandox.Core.Model;
 
 namespace Vandox.Core.Wire;
@@ -14,7 +15,7 @@ public sealed class BatchDecoder : IDisposable
     #region Fields
 
     private readonly GZipStream _gzip;
-    private readonly LineReader _lines;
+    private readonly WireLineReader _lines;
     private readonly WireLimits _limits;
     private int _line;
     private int _count;
@@ -35,7 +36,7 @@ public sealed class BatchDecoder : IDisposable
     {
         _gzip = gzip;
         _limits = limits;
-        _lines = new LineReader(gzip, limits.MaxLineBytes, limits.MaxBatchBytes);
+        _lines = new WireLineReader(gzip, limits.MaxLineBytes, limits.MaxBatchBytes);
         Header = new WireHeader();
     }
 
@@ -63,6 +64,8 @@ public sealed class BatchDecoder : IDisposable
     /// <exception cref="WireException">The header is missing or invalid</exception>
     public static async Task<BatchDecoder> OpenAsync(Stream input, WireLimits? limits, CancellationToken cancellationToken)
     {
+        StrictGzip.Require();
+
         var defaults = new WireLimits();
         var effective = new WireLimits
                         {

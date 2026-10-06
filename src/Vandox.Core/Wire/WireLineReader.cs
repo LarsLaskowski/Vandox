@@ -4,7 +4,7 @@ namespace Vandox.Core.Wire;
 /// Reads lines from a stream with a bound on the line length and on the total number of bytes, so a hostile stream
 /// cannot make the reader allocate without limit.
 /// </summary>
-internal sealed class LineReader
+internal sealed class WireLineReader
 {
     #region Constants
 
@@ -29,12 +29,12 @@ internal sealed class LineReader
     #region Constructors
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="LineReader"/> class.
+    /// Initializes a new instance of the <see cref="WireLineReader"/> class.
     /// </summary>
     /// <param name="stream">The stream to read, already decompressed</param>
     /// <param name="maxLine">The longest line in bytes, without the line feed</param>
     /// <param name="maxTotal">The most bytes the stream may deliver</param>
-    internal LineReader(Stream stream, int maxLine, long maxTotal)
+    internal WireLineReader(Stream stream, int maxLine, long maxTotal)
     {
         _stream = stream;
         _maxLine = maxLine;

@@ -112,7 +112,7 @@ public static partial class FileProbe
 
             if (descriptor < 0)
             {
-                throw new IOException($"cannot open the file (errno {Marshal.GetLastPInvokeError()})");
+                throw new SafeIoException($"cannot open the file (errno {Marshal.GetLastPInvokeError()})");
             }
 
             var handle = new SafeFileHandle((IntPtr)descriptor, ownsHandle: true);
@@ -121,7 +121,7 @@ public static partial class FileProbe
             {
                 handle.Dispose();
 
-                throw new IOException("not a regular file");
+                throw new SafeIoException("not a regular file");
             }
 
             return new FileStream(handle, FileAccess.Read, 1, false);
@@ -129,7 +129,7 @@ public static partial class FileProbe
 
         if (GetKindPortable(path, followLinks) != FileKind.Regular)
         {
-            throw new IOException("not a regular file");
+            throw new SafeIoException("not a regular file");
         }
 
         return new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 1, FileOptions.SequentialScan);
