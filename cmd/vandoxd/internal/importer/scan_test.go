@@ -464,9 +464,14 @@ func writeLongNameArchive(t *testing.T, path string, count, nameBytes int) {
 	}
 }
 
+// heapBoundEntries is the number of oversized entries the heap-bound tests list. With names or headers of 1 MB each,
+// a scan that pins them grows the live heap by about 38 MiB, well above the 16 MiB bound, and the count stays small
+// because these tests are slow under the race detector.
+const heapBoundEntries = 40
+
 func TestScan_MemoryStaysBoundedForHugeEntryNames(t *testing.T) {
 	const (
-		entries   = 300
+		entries   = heapBoundEntries
 		nameBytes = 1_000_000
 		maxGrowth = 16 << 20
 	)
@@ -614,7 +619,7 @@ func TestScan_MemoryStaysBoundedForHugeNamesThatCleanToShortOnes(t *testing.T) {
 				return tarEntryOf{hdr: tar.Header{Name: fmt.Sprintf("%05d", i) + pad, Typeflag: tar.TypeReg}, content: tc.content}
 			}
 			w := shortNameWant{func(i int) string { return fmt.Sprintf("%05d", i) }, tc.wantParser, tc.wantReason}
-			checkBoundedScan(t, 300, entry, w)
+			checkBoundedScan(t, heapBoundEntries, entry, w)
 		})
 	}
 }
@@ -641,7 +646,7 @@ func TestScan_MemoryStaysBoundedForShortNamesWithHugePAXRecords(t *testing.T) {
 				return tarEntryOf{hdr: h, content: tc.content}
 			}
 			w := shortNameWant{func(i int) string { return fmt.Sprintf("é%05d.log", i) }, tc.wantParser, tc.wantReason}
-			checkBoundedScan(t, 300, entry, w)
+			checkBoundedScan(t, heapBoundEntries, entry, w)
 		})
 	}
 }
