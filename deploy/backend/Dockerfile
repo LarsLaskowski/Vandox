@@ -30,8 +30,9 @@ ARG VERSION=dev
 ARG COMMIT=unknown
 ARG DATE=unknown
 
-# Framework-dependent publish onto the chiseled ASP.NET runtime: no apphost, no debug symbols.
-RUN dotnet publish src/Vandox.Backend/Vandox.Backend.csproj -c Release --no-restore -o /out \
+# Framework-dependent publish onto the chiseled ASP.NET runtime: no apphost, no debug symbols. The build arguments are
+# unset for MSBuild, which would otherwise read VERSION as its own Version property and reject a tag such as v1.2.3.
+RUN env -u VERSION -u COMMIT -u DATE dotnet publish src/Vandox.Backend/Vandox.Backend.csproj -c Release --no-restore -o /out \
       -p:UseAppHost=false -p:DebugType=none -p:VandoxVersion="${VERSION}" -p:VandoxCommit="${COMMIT}" -p:VandoxDate="${DATE}"
 
 # Empty data directory, staged as /rootfs/data and copied into the runtime image as the seed of the data
