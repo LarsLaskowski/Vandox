@@ -5,7 +5,7 @@ Benchmarks live next to the tests of the code they measure (Go: a benchmark in t
 ([`UNIT_TESTS.md`](UNIT_TESTS.md)). Only results from the reference host count against a criterion; results
 from the development host show the order of magnitude.
 
-Reference host: a Synology DS918+ (Intel Celeron J3455, DSM, running `vandoxd` in Docker). It has an SSD volume (`/volume2`) and a slower HDD volume (`/volume1`); the measurements below ran on the SSD volume unless a row says otherwise, so they are the best case for the storage layer.
+Reference host: a Synology DS918+ (Intel Celeron J3455, DSM, running `vandoxd` in Docker). It has an SSD volume (`/volume2`) and a slower HDD volume (`/volume1`); the measurements below ran on the SSD volume unless a row says otherwise, so they are the best case for the storage layer; one run on the HDD is listed as well.
 
 ## Storage write throughput
 
@@ -56,7 +56,8 @@ VANDOX_BENCHMARK=1 dotnet test tests/Vandox.Storage.Tests --filter WriteThroughp
 | after 0082 | development host (4 vCPU) | Intel Xeon 2.10 GHz | 2026-10-07 | 285–329 | 242–368 (median 272–320) |
 | after 0082 (cached parameters, synchronous calls) | DS918+ (reference host, SSD volume) | Celeron J3455 | 2026-10-07 | **1043** | 797–1004 (median 925) |
 | after 0082 (and writer page cache of 16 MiB) | DS918+ (reference host, SSD volume) | Celeron J3455 | 2026-10-07 | **1001** | 711–783 (median 783) |
+| after 0082 (and writer page cache of 16 MiB) | DS918+ (reference host, HDD volume `/volume1`) | Celeron J3455 | 2026-10-07 | **1171** | 1079–1471 (median 1171) |
 
 The development-host rows are not the reference host. With the writer before 0082 the criterion was **not met** on the DS918+
-(1480 ms for the first batch), and with the first part of 0082 it was still just over the limit (1043 ms). With the page cache the first batch took 1001 ms (1 ms over the limit) and every later batch 711 to 783 ms; a 4 KiB write needs about 10 ms to reach the disk on that SSD volume (the HDD volume was not measured yet), so waiting for the disk is a small part and the writer is CPU-bound. `ReadyToRun` made no difference on the development host. Whether this meets the criterion, which names the first batch on a fresh database, is a decision for the Product Manager (see 0082). The next candidates are listed in 0082; the FTS5 remedy of record 0063 (option c) does not apply,
+(1480 ms for the first batch), and with the first part of 0082 it was still just over the limit (1043 ms). With the page cache the first batch took 1001 ms (1 ms over the limit) and every later batch 711 to 783 ms; a 4 KiB write needs about 10 ms to reach the disk on that SSD volume and about 122 ms on the HDD volume. On the SSD waiting for the disk is a small part and the writer is CPU-bound; on the HDD the batches take about 300 to 450 ms longer, so there the disk matters (the run on the HDD: 1171 ms for the first batch, 1079 to 1471 ms for the others). `ReadyToRun` made no difference on the development host. Whether this meets the criterion, which names the first batch on a fresh database, is a decision for the Product Manager (see 0082). The next candidates are listed in 0082; the FTS5 remedy of record 0063 (option c) does not apply,
 because this measurement writes no log lines.

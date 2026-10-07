@@ -51,7 +51,13 @@ Tried and not adopted: runtime switches (`TieredPGO` on or off, `ReadyToRun` on 
   as well, because SQLite is synchronous); cancellation is still honored between records.
 - The first NAS result is kept in `docs/BENCHMARKS.md` as the baseline.
 - Result with the page cache on the DS918+: first batch 1001 ms (the limit is 1000 ms), later batches 711 to 783 ms (median 783 ms), a
-  4 KiB write needs about 10 ms to reach the disk on the SSD volume, so the writer is CPU-bound there; the HDD volume is slower and has not been measured, so the result is the best case. `ReadyToRun` showed no difference on the development
+  4 KiB write needs about 10 ms to reach the disk on the SSD volume, so the writer is CPU-bound there; the result is the best case. `ReadyToRun` showed no difference on the development
   host. The first batch is about 250 ms slower than the others (fresh file, start-up); the criterion names exactly that batch, so
   whether 1001 ms against 1000 ms counts as met, or the criterion is restated (for example the median of five batches), needs a
   decision record of its own once the Product Manager has decided.
+- On the HDD volume (`/volume1`) the same build took 1171 ms for the first batch and 1079 to 1471 ms for the others; a 4 KiB write needs about
+  122 ms to reach that disk, against about 10 ms on the SSD. The batches take 300 to 450 ms longer than on the SSD, so on the HDD the waiting
+  for the disk is a real part of a transaction, in line with several flushes per commit. `PRAGMA synchronous=FULL` (record 0065) is the setting that
+  makes each commit wait; `NORMAL` in WAL mode would flush only at checkpoints and risks losing the last committed transactions on a power
+  failure (no corruption), so changing it is a decision for the Product Manager and needs its own record. The simplest remedy is to keep the
+  database on the SSD volume.
