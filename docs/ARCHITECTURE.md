@@ -5,9 +5,9 @@ Vandox is lean monitoring for a Plesk-managed Linux server, with analysis first:
 from logs and system metrics and warns early. `vandox-agent` runs on the monitored server; `vandoxd`, the
 backend with web UI, runs as a Docker container on any Docker host in the home network (for example a NAS such as Synology or QNAP, a mini PC or a server; called the *backend host* below).
 
-This document describes the target architecture; as of now the binaries' `--version`, the shared data model and wire format
-(`internal/model`, `internal/wire`), the configuration loading (`internal/config`, used by `vandoxd`) and the
-backend service skeleton and the log import framework exist (`vandoxd import`, without a parser yet): `vandoxd` loads its configuration, opens and migrates its SQLite database (schema, batched writes, queries and log search
+This document describes the target architecture; as of now the binaries' `--version`, the data model and wire format
+(Go: `internal/model`, `internal/wire`; backend: `src/Vandox.Core`), the configuration loading (`internal/config` for the agent,
+`Vandox.Core.Configuration` for `vandoxd`) and the backend service skeleton and the log import framework exist (`vandoxd import`, without a parser yet): `vandoxd` loads its configuration, opens and migrates its SQLite database (schema, batched writes, queries and log search
 exist as the storage layer; the service does not call it yet, `vandoxd import` writes through it), listens on the
 web and ingest ports, answers `/healthz` and shuts down gracefully, and ships as a container with a health
 check. Sections are marked as implemented as features land. The decisions behind it are recorded in
@@ -25,32 +25,38 @@ way, and agents of the hosting provider are never disabled or changed
 
 ## Components
 
-- `cmd/vandox-agent` — Go, runs as a systemd service on the monitored server. It collects metrics, process
+- `cmd/vandox-agent` — Go (the agent stays small and static, so the monitored server needs no runtime;
+  [0073](decisions/0073-backend-in-dotnet-10-with-blazor-agent-stays-go.md)), runs as a systemd service on the monitored server. It collects metrics, process
   and network snapshots (read from `/proc`), service and MariaDB state, kernel events and logs, keeps them in
   an on-disk spool and sends them to the backend. It checks the state of the mail services, not individual
   mail accounts. Each collector runs in its own goroutine under a deadline and is abandoned when the
   deadline passes, so a hanging collector or database never blocks the agent; a missed sample is recorded
   as a gap, and a collector that is still stuck is not started again.
-- `cmd/vandoxd` — Go, one container on the backend host: ingest API, SQLite storage, analysis, rules, Telegram
-  notifier, reports and web UI. Without arguments it runs the service; `-healthcheck` probes its `/healthz`;
-  `vandoxd import <path>` imports logs saved on the backend host
-  ([0072](decisions/0072-vandoxd-import-sub-command-output-and-exit-codes.md), which supersedes 0058 where
-  the command line is concerned).
-- `cmd/vandoxd/internal/` — packages used only by the backend: `server` (the web and ingest listeners, `/healthz`,
-  graceful shutdown), `store` (the SQLite database: schema, migrations, writing batches, queries and log search)
-  and `importer` (reads a directory, archive or file as streams, detects the parser per file, hashes the
+- `src/Vandox.Backend` — `vandoxd`, .NET 10 (ASP.NET Core with a Blazor Web App, Interactive Server render mode),
+  one container on the backend host: ingest API, SQLite storage, analysis, rules, Telegram notifier, reports and
+  web UI. Without arguments it runs the service; `-healthcheck` probes its `/healthz`; `vandoxd import <path>`
+  imports logs saved on the backend host
+  ([0072](decisions/0072-vandoxd-import-sub-command-output-and-exit-codes.md)). Two Kestrel listeners serve
+  the web and the ingest port; a middleware routes each request by the label of its listener, and logs are JSON
+  lines ([0081](decisions/0081-backend-host-two-listeners-json-logs-blazor-interactive-server.md)).
+- The backend's libraries, one project each with a test project under `tests/`
+  ([0073](decisions/0073-backend-in-dotnet-10-with-blazor-agent-stays-go.md)):
+  `Vandox.Core` (data model and validation, the wire decoder, configuration and secrets, safe file access, the
+  log parser interface and registry, the line reader that bounds the line length),
+  `Vandox.Storage` (the SQLite database: schema, migrations, writing batches, queries and log search) and
+  `Vandox.Import` (reads a directory, archive or file as streams, detects the parser per file, hashes the
   content, writes the parsers' records in resumable batches and builds the summary)
-  ([0061](decisions/0061-backend-only-packages-under-cmd-vandoxd-internal.md),
-  [0069](decisions/0069-log-import-idempotent-per-file-content-hash-with-resumable-batches.md),
-  [0071](decisions/0071-log-import-reads-input-without-following-links-or-extracting.md)).
-- `internal/` — packages shared by both binaries: data model and versioned wire format (see
-  [`WIRE_FORMAT.md`](WIRE_FORMAT.md)), log parsing (`internal/logparse`: the `Parser` interface, the registry
-  that picks one parser per file and a line reader that bounds the line length;
-  [0070](decisions/0070-log-parser-interface-and-explicit-registry-in-internal-logparse.md)), signatures,
-  version information, configuration loading (see *Configuration*). Command-line handling (`internal/cli`) is used by `vandox-agent` only.
+  ([0069](decisions/0069-log-import-idempotent-per-file-content-hash-with-resumable-batches.md),
+  [0077](decisions/0077-storage-on-microsoft-data-sqlite-same-schema-and-rules.md),
+  [0079](decisions/0079-log-parsing-and-import-in-the-backend-without-following-links.md)).
+- `internal/` — the agent's Go packages: data model and the versioned wire encoder (see
+  [`WIRE_FORMAT.md`](WIRE_FORMAT.md)), signatures, version information, agent configuration loading (see
+  *Configuration*) and command-line handling (`internal/cli`). The model and the wire format exist twice, in Go
+  (producer) and in C# (consumer); a golden batch produced by the Go encoder and decoded by the C# decoder keeps
+  them in step ([0075](decisions/0075-wire-contract-pinned-by-golden-fixtures.md)).
 
 Importing historical logs (including the legacy `top`/`lsof` log) and continuously shipping new log lines are
-core parts of Vandox. Both binaries are written in Go in one module.
+core parts of Vandox. The agent is written in Go, the backend in .NET; the repository holds both.
 
 ```mermaid
 flowchart LR
@@ -68,13 +74,15 @@ flowchart LR
         DB --> UI[Web UI]
     end
     SN --> IN
-    INT[internal/ shared packages] -.-> Server
-    INT -.-> NAS
+    WIRE[Wire format: Go encoder, C# decoder] -.-> SN
+    WIRE -.-> IN
 ```
 
 Records: [0004](decisions/0004-own-project-instead-of-off-the-shelf-stack.md),
-[0005](decisions/0005-go-for-agent-and-backend.md),
-[0011](decisions/0011-own-go-web-ui-without-grafana.md),
+[0005](decisions/0005-go-for-agent-and-backend.md) (superseded by 0073),
+[0011](decisions/0011-own-go-web-ui-without-grafana.md) (superseded by 0073),
+[0073](decisions/0073-backend-in-dotnet-10-with-blazor-agent-stays-go.md),
+[0074](decisions/0074-two-language-toolchain-and-combined-quality-gates.md),
 [0013](decisions/0013-mariadb-access-via-unix-socket-process-privilege.md),
 [0014](decisions/0014-log-import-is-a-core-component.md),
 [0015](decisions/0015-mail-services-checked-not-mail-accounts.md),
@@ -188,13 +196,14 @@ Records: [0022](decisions/0022-backfill-detection-and-live-only-alerts.md),
 ## Storage and retention
 
 `vandoxd` stores everything in SQLite with the FTS5 extension for log search, in WAL mode, with these
-retention tiers. The database is the file `vandox.db` in `storage.directory`, created with mode 0600; the
-pure-Go driver `modernc.org/sqlite` needs no C toolchain
-([0065](decisions/0065-sqlite-connections-single-writer-query-only-readers-synchronous-full.md), which keeps the
-driver choice of 0057). The storage directory is not created (a missing mount must not be hidden), and a
+retention tiers. The database is the file `vandox.db` in `storage.directory`, created with mode 0600, opened through
+`Microsoft.Data.Sqlite` with its bundled SQLite (FTS5 included, no system library needed): one writer connection
+with `BEGIN IMMEDIATE`, a pool of query-only readers, WAL and `synchronous=FULL`
+([0077](decisions/0077-storage-on-microsoft-data-sqlite-same-schema-and-rules.md), which carries the rules of 0065
+over). The storage directory is not created (a missing mount must not be hidden), and a
 symbolic link in place of the database or its `-wal`/`-shm` files is refused.
 
-Implemented by `cmd/vandoxd/internal/store`:
+Implemented by `src/Vandox.Storage`:
 
 - **Schema** ([0063](decisions/0063-storage-schema-records-table-typed-metric-and-log-tables-json-payloads.md)):
   one `records` table holds the metadata of every record (kind, origin, source, agent ID, sequence number,
@@ -204,7 +213,7 @@ Implemented by `cmd/vandoxd/internal/store`:
   makes a resent record a no-op that never overwrites the stored one; imported and backend records are not
   deduplicated (an import is made idempotent per file content, see below). Capture times are storable between 1677-09-21 and 2262-04-11 and sequence numbers up to
   2^63 - 1.
-- **Migrations** ([0064](decisions/0064-versioned-schema-migrations-in-go-one-transaction-per-step.md)): at
+- **Migrations** ([0064](decisions/0064-versioned-schema-migrations-in-go-one-transaction-per-step.md), rules kept by [0077](decisions/0077-storage-on-microsoft-data-sqlite-same-schema-and-rules.md)): at
   start-up every step above the stored `meta.schema_version` runs in its own transaction; a database with a
   newer version is refused. Schema version 3 adds the table `import_files`.
 - **Imports** ([0069](decisions/0069-log-import-idempotent-per-file-content-hash-with-resumable-batches.md)):
@@ -256,10 +265,13 @@ Records: [0006](decisions/0006-agent-connects-outbound-only.md),
 
 Both binaries are configured through one YAML file each (`/etc/vandox/agent.yaml`, `/etc/vandox/vandoxd.yaml`;
 commented examples under `deploy/agent/` and `deploy/backend/`) and environment variables. The shared package
-`internal/config` implements this: `LoadAgent` and `LoadBackend` read the file, validate every option and read
-the secrets. `vandoxd` calls `LoadBackend` at start-up; the agent will call `LoadAgent` with the agent feature.
+Each binary implements this in its own language: `internal/config` (Go) with `LoadAgent`, and
+`Vandox.Core.Configuration` (C#) with `BackendConfigLoader` and `SecretReader`, read the file, validate every
+option and read the secrets, by the same rules
+([0078](decisions/0078-configuration-and-secrets-in-the-backend-with-yamldotnet.md)). `vandoxd` loads its
+configuration at start-up; the agent will call `LoadAgent` with the agent feature.
 
-The file is parsed strictly. A decoder walks the YAML node tree against the option structs, so unknown and
+The file is parsed strictly. A decoder walks the YAML node tree against the option types, so unknown and
 duplicate keys, a second document, anchors, aliases, custom tags and invalid values are errors. Errors
 name file, line and key and never echo the document text, so a secret pasted into the wrong place does not
 reach a log ([0048](decisions/0048-yaml-library-go-yaml-in-yaml-v3.md),
@@ -311,13 +323,14 @@ Docker Hub as `networlddev/vandox` ([0027](decisions/0027-project-name-and-docke
 *Versioning and releases* section in [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 - The agent binary `vandox-agent-linux-amd64` and `SHA256SUMS` are GitHub release assets.
-- The image is built from `deploy/backend/Dockerfile` on a distroless static base and runs as UID 65532.
+- The image is built from `deploy/backend/Dockerfile` (the .NET SDK image publishes the application onto the
+  chiseled ASP.NET runtime image, [0080](decisions/0080-backend-image-on-the-chiseled-aspnet-runtime.md)) and runs as UID 65532.
   The builder and runtime base images are pinned by digest: each `FROM` names an image and a digest from
   build arguments, and the tag is kept in a separate build argument and in the image's OCI base-image
   labels. The release build sets none of these arguments. The digests are refreshed by hand in a pull
-  request, a weekly workflow reports a stale digest as an issue, and the build stage checks that the
-  builder's Go version matches its tag.
-- The image has a `HEALTHCHECK` that runs `vandoxd -healthcheck` (the distroless image has no shell or curl),
+  request, a weekly workflow reports a stale digest as an issue, and a script checks that the builder and runtime tags name the
+  .NET version of the target framework.
+- The image has a `HEALTHCHECK` that runs `dotnet /app/vandoxd.dll -healthcheck` (the chiseled image has no shell or curl),
   ships an empty `/data` owned by UID 65532 so that a new named volume is writable, and declares no `EXPOSE`
   ([0059](decisions/0059-healthz-checks-the-database-and-the-binary-is-the-health-probe.md)). The compose file
   `deploy/backend/docker-compose.yml` runs it with a data volume, a read-only root file system, dropped
@@ -327,7 +340,7 @@ Docker Hub as `networlddev/vandox` ([0027](decisions/0027-project-name-and-docke
 - Releases are built by `.github/workflows/release.yml` only from SemVer tags on `main`. Only the
   repository admin may create these tags (tag ruleset `release-tags`), and the workflow checks that the
   tagged commit is on `main`.
-- Release binaries are built from source without restored CI caches and only after `govulncheck` passes.
+- Release binaries are built from source without restored CI caches and only after `govulncheck` and the NuGet vulnerability check pass.
   The image that was verified is the image that is pushed, and a published version is never overwritten.
 - The binary and the image digest get SLSA build provenance attestations and SPDX SBOM attestations (GitHub
   artifact attestations) from a separate job that holds only the signing permission and no secret; the

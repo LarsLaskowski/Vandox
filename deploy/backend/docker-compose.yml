@@ -31,10 +31,9 @@ services:
     image: networlddev/vandox:latest
     container_name: vandoxd
     restart: unless-stopped
-    # The Go runtime collects before the container's memory limit is hit.
+    # The .NET runtime reads this limit and sizes its heap from it (workstation GC, no server GC).
     mem_limit: 512m
     environment:
-      GOMEMLIMIT: 400MiB
       VANDOX_AGENT_TOKEN_FILE: /run/secrets/vandox_agent_token
     # Longer than the 10 s shutdown deadline of vandoxd, so Docker's SIGKILL never cuts it short.
     stop_grace_period: 30s

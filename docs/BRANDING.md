@@ -45,8 +45,8 @@ these values, so a color change means changing the tokens and every SVG together
 - **README**: a `<picture>` element switches between the light and dark stacked logo via
   `prefers-color-scheme`.
 - **Web UI** (with #24): favicon and header logo. `docs/assets/` stays the single source. The image build
-  context currently contains only `go.mod`, `go.sum`, `cmd/`, `internal/` and `LICENSE`, so #24 decides how
-  the served files reach the binary (decision record 0051).
+  context currently contains only the solution files, `src/` and `LICENSE`, so #24 decides how the served
+  files reach the Blazor application (static web assets of `src/Vandox.Backend/wwwroot`; decision record 0051).
 - **Telegram bot** (with #60): profile picture rendered from `vandox-icon.svg` at 512×512 and set in
   BotFather.
 - **Container image**: OCI labels title, description, source and licenses. There is no logo label, because

@@ -78,8 +78,21 @@ jobs:
           go-version-file: go.mod
           cache: false
 
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+
       - name: Vulnerability scan
-        run: go tool govulncheck ./...
+        run: |
+          set -euo pipefail
+          go tool govulncheck ./...
+          dotnet restore Vandox.slnx
+          report="$(dotnet list Vandox.slnx package --vulnerable --include-transitive 2>&1)"
+          echo "$report"
+          if printf '%s' "$report" | grep -q 'has the following vulnerable packages'; then
+            echo "::error::a NuGet package has a known vulnerability"
+            exit 1
+          fi
 
       - name: Build agent
         env:
@@ -125,8 +138,8 @@ jobs:
       - name: Check base image pinning
         run: .github/scripts/check-base-image-pinning.sh
 
-      - name: Check builder Go version
-        run: .github/scripts/check-builder-go-version.sh
+      - name: Check builder .NET version
+        run: .github/scripts/check-builder-dotnet-version.sh
 
       # Plain Docker CLI, no cache of any kind (no --cache-from/--cache-to, no cache backend).
       - name: Build image

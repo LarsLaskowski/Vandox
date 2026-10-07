@@ -14,7 +14,8 @@ permissions:
   contents: read
 
 jobs:
-  build-test-lint:
+  agent:
+    name: Agent (Go)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -47,6 +48,32 @@ jobs:
         with:
           version: v2.13.1
 
+  backend:
+    name: Backend (.NET)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+
+      - name: Restore tools and packages
+        run: |
+          dotnet tool restore
+          dotnet restore Vandox.slnx
+
+      - name: Format check
+        run: dotnet tool run reihitsu-format --check src tests
+
+      # TreatWarningsAsErrors (Directory.Build.props) turns every analyzer diagnostic, info level included,
+      # into a build error (Reihitsu.Analyzer and SonarAnalyzer.CSharp).
+      - name: Build
+        run: dotnet build Vandox.slnx --no-restore --configuration Release
+
+      - name: Test
+        run: dotnet test Vandox.slnx --no-build --configuration Release --settings coverlet.runsettings --results-directory TestResults
+
   sonarqube:
     name: SonarQube
     runs-on: ubuntu-latest
@@ -63,15 +90,48 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Generate coverage
-        run: go test ./... -race -coverprofile=coverage.out
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
 
-      - name: SonarQube Scan
-        uses: SonarSource/sonarqube-scan-action@d209202bc7d53ff1cc128f7f907dac145c9d6ae9 # v8.3.0
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Restore tools
+        run: dotnet tool restore
+
+      # The settings are arguments, not a sonar-project.properties file: the scanner for .NET refuses a repository that has one.
+      # One analysis for both languages: the scanner for .NET wraps the C# build, and its bundled scanner
+      # analyses the Go agent from the same run.
+      - name: Begin analysis
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: |
+          dotnet tool run dotnet-sonarscanner begin \
+            /k:networlddev_vandox /o:networlddev \
+            /d:sonar.token="$SONAR_TOKEN" \
+            /d:sonar.host.url=https://sonarcloud.io \
+            /d:sonar.cs.opencover.reportsPaths="TestResults/**/coverage.opencover.xml" \
+            /d:sonar.go.coverage.reportPaths=coverage.out \
+            /d:sonar.test.inclusions="**/*_test.go,tests/**" \
+            /d:sonar.exclusions="**/*_test.go,tests/**,bin/**,dist/**,**/obj/**,**/bin/**,TestResults/**" \
+            /d:sonar.coverage.exclusions=".squad/**,.claude/**"
 
-  govulncheck:
+      - name: Build, test and generate coverage
+        run: |
+          set -euo pipefail
+          go test ./... -race -coverprofile=coverage.out
+          dotnet build Vandox.slnx --configuration Release
+          dotnet test Vandox.slnx --no-build --configuration Release --settings coverlet.runsettings --results-directory TestResults
+
+      - name: End analysis
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: dotnet tool run dotnet-sonarscanner end /d:sonar.token="$SONAR_TOKEN"
+
+  vulnerabilities:
     name: Vulnerability scan
     runs-on: ubuntu-latest
     steps:
@@ -82,6 +142,10 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+
       # govulncheck is a go.mod "tool" dependency (go 1.24+), so `go tool` runs
       # a go.sum-verified, checksummed version instead of an unpinned
       # `go install ...@latest` (which trips SonarCloud's S8545
@@ -91,6 +155,18 @@ jobs:
       # independent of the tool's pinned version, so scans stay current.
       - name: Run govulncheck
         run: go tool govulncheck ./...
+
+      # `dotnet list package --vulnerable` exits 0 even when it finds something, so the report is checked.
+      - name: Check NuGet packages for known vulnerabilities
+        run: |
+          set -euo pipefail
+          dotnet restore Vandox.slnx
+          report="$(dotnet list Vandox.slnx package --vulnerable --include-transitive 2>&1)"
+          echo "$report"
+          if printf '%s' "$report" | grep -q 'has the following vulnerable packages'; then
+            echo "::error::a NuGet package has a known vulnerability"
+            exit 1
+          fi
 
   # Builds the agent and the backend image the way the release does, with a fixed
   # dry-run version, and generates and checks the SBOMs (record 0056). Nothing is uploaded or pushed and
@@ -110,8 +186,8 @@ jobs:
       - name: Check base image pinning
         run: .github/scripts/check-base-image-pinning.sh
 
-      - name: Check builder Go version
-        run: .github/scripts/check-builder-go-version.sh
+      - name: Check builder .NET version
+        run: .github/scripts/check-builder-dotnet-version.sh
 
       # A stale digest or a failed registry lookup is only a warning here; pinning and pattern errors
       # (status 1) still fail (record 0055).

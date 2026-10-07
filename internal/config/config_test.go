@@ -201,45 +201,6 @@ func TestCheckDirectory(t *testing.T) {
 	}
 }
 
-func TestCheckListen(t *testing.T) {
-	lines := map[string]int{"web.listen": 2}
-	valid := []struct {
-		value string
-		port  uint16
-	}{
-		{":8080", 8080},
-		{"0.0.0.0:8080", 8080},
-		{"[::]:8081", 8081},
-		{"192.168.1.10:8080", 8080},
-		{"[::1]:80", 80},
-		{"[fe80::1%eth0]:80", 80},
-		{":1", 1},
-		{":65535", 65535},
-	}
-	for _, tt := range valid {
-		t.Run("valid "+tt.value, func(t *testing.T) {
-			got, err := checkListen("f.yaml", lines, "web.listen", tt.value)
-			if err != nil || got != tt.port {
-				t.Errorf("checkListen(%q) = %d, %v, want %d, nil", tt.value, got, err, tt.port)
-			}
-		})
-	}
-	invalid := []string{
-		"", "8080", ":0", ":65536", ":http", ":+80", "[::1]:+80", ":-1", ": 80", ":808080", ":", "localhost:8080",
-		"[::1]:x", sentinel + ":80", ":" + sentinel, "1.2.3.4.5:80", "[::1]8080",
-	}
-	for _, v := range invalid {
-		t.Run("invalid "+v, func(t *testing.T) {
-			got, err := checkListen("f.yaml", lines, "web.listen", v)
-			if got != 0 {
-				t.Errorf("checkListen(%q) port = %d, want 0 on error", v, got)
-			}
-			_ = requireKeyError(t, err, "web.listen", 2)
-			requireNoLeak(t, err, sentinel)
-		})
-	}
-}
-
 func TestCheckLogLevel(t *testing.T) {
 	lines := map[string]int{"log.level": 9}
 	for _, v := range []string{"debug", "info", "warn", "error"} {

@@ -1,6 +1,6 @@
 # 0068: Write throughput is measured by a Go benchmark and never asserted in tests; the DS918+ measurement is a follow-up issue
 
-- **Status:** Accepted
+- **Status:** Superseded by [0077](0077-storage-on-microsoft-data-sqlite-same-schema-and-rules.md)
 - **Date:** 2026-10-06
 - **Source:** Issue #14
 - **Supersedes:** —

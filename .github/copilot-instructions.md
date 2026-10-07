@@ -13,8 +13,8 @@ license to pick either one.
 
 <!-- project:begin overview -->
 Vandox is lean monitoring for a Plesk-managed Linux server, with analysis first: it reconstructs outages from
-logs and system metrics and warns early. It consists of two Go binaries: `vandox-agent` runs on the monitored
-server and collects metrics and logs, and `vandoxd` is the backend with web UI, which runs as a Docker
+logs and system metrics and warns early. It consists of two binaries in two languages: `vandox-agent` (Go) runs on the monitored
+server and collects metrics and logs, and `vandoxd` (.NET 10 with a Blazor web UI) is the backend, which runs as a Docker
 container on any Docker host in the home network (for example a NAS such as Synology or QNAP, a mini PC or a server). See [`ARCHITECTURE.md`](/docs/ARCHITECTURE.md) for how it fits together.
 <!-- project:end overview -->
 
@@ -60,13 +60,13 @@ container on any Docker host in the home network (for example a NAS such as Syno
 
 <!-- stack:begin commands -->
 ```bash
-go mod download
-gofmt -w .
-go build ./...
+go mod download && dotnet tool restore && dotnet restore Vandox.slnx
+gofmt -w . && reihitsu-format src tests                     # format (Go agent, C# backend)
+go build ./... && dotnet build Vandox.slnx
 go vet ./...
-go test ./... -race -coverprofile=coverage.out
-python3 .squad/tools/analyzer-check.py                      # analyzer gate (vet + golangci-lint)
-python3 .squad/tools/coverage-check.py                      # coverage gate
+go test ./... -race && dotnet test Vandox.slnx
+python3 .squad/tools/analyzer-check.py                      # analyzer gate (go vet, golangci-lint, dotnet build with warnings as errors)
+python3 .squad/tools/coverage-check.py                      # coverage gate (after "Test with coverage" in .squad/stack.md)
 ```
 <!-- stack:end commands -->
 
@@ -75,10 +75,11 @@ All commands, with what each one checks, are listed in [`.squad/stack.md`](/.squ
 ## Architecture
 
 <!-- project:begin architecture -->
-- `cmd/vandox-agent` — the agent for the monitored server (collectors, log shipping, local spool).
-- `cmd/vandoxd` — the backend with web UI (ingest, storage, analysis, alerting).
-- `internal/` — packages shared by both binaries (data model, log parsing, signatures, version information).
-- `deploy/agent`, `deploy/backend` — installation and container files; `docs/` — documentation; `testdata/` — test fixtures.
+- `cmd/vandox-agent` (Go) — the agent for the monitored server (collectors, log shipping, local spool).
+- `internal/` (Go) — the agent's packages: data model, wire encoder, configuration, CLI helpers, version information.
+- `src/Vandox.Backend` (.NET) — the backend `vandoxd`: host, CLI, Blazor web UI (ingest, analysis and alerting are added here).
+- `src/Vandox.Core`, `src/Vandox.Storage`, `src/Vandox.Import` (.NET) — data model, wire decoder, configuration, log parsing, SQLite storage, log import; tests in `tests/`.
+- `deploy/agent`, `deploy/backend` — installation and container files; `docs/` — documentation; `testdata/` — test fixtures shared by both languages (the golden wire batch pins the Go encoder against the C# decoder).
 <!-- project:end architecture -->
 
 ## Project configuration
@@ -88,6 +89,7 @@ All commands, with what each one checks, are listed in [`.squad/stack.md`](/.squ
 - **golangci-lint** configured in `.golangci.yml`.
 <!-- stack:end configuration -->
 <!-- project:begin configuration -->
+- **.NET** SDK from `global.json`, solution `Vandox.slnx`, packages via `Directory.Packages.props`, build settings in `Directory.Build.props` (all analyzer diagnostics are errors); local tools (`reihitsu-format`, `dotnet-sonarscanner`) in `dotnet-tools.json`.
 <!-- project:end configuration -->
 
 ## Code style
@@ -98,14 +100,17 @@ the identifier's name; errors returned and wrapped with `%w`, never ignored; no 
 `context.Context` first for anything that does I/O or blocks.
 <!-- stack:end code-style -->
 <!-- project:begin code-style -->
+C# (backend): Reihitsu layout rules (run the formatter, then build), XML documentation on every member, nullable reference types, `CancellationToken` last for anything that does I/O or blocks, logging through `[LoggerMessage]` methods, exceptions never swallowed. The analyzers forbid `!` and boolean comparisons with literals alike: write positive conditions (see `.squad/stack.md`).
 <!-- project:end code-style -->
 
 ## Testing
 
 <!-- stack:begin testing -->
-**Unit tests are mandatory for newly written code.** Standard `testing` package, colocated `_test.go`
+**Unit tests are mandatory for newly written code.** Go: standard `testing` package, colocated `_test.go`
 files, table-driven tests with `t.Run`, `t.Helper()` in helpers, `t.TempDir()` for files, failure messages
-that state got and want; no real network or clock.
+that state got and want; no real network or clock. .NET: MSTest in `tests/<Project>.Tests`, one test class per
+class under test, Arrange/Act/Assert, a temporary directory helper for files, no real network or clock
+(`TimeProvider`).
 <!-- stack:end testing -->
 Full conventions, including the project's test doubles and the checklist to run before committing a new
 test, are in [`UNIT_TESTS.md`](/docs/UNIT_TESTS.md).

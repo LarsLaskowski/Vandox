@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\Vandox.Core\Vandox.Core.csproj" />
+    <ProjectReference Include="..\Vandox.Storage\Vandox.Storage.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Vandox.Import.Tests" />
+  </ItemGroup>
+
+</Project>

@@ -5,8 +5,10 @@
 
 ### Machine setup
 
-Git, the Go toolchain from `go.mod`, `golangci-lint` (see `.squad/stack.md`, *Toolchain*) and Python 3 for
-the squad tools in `.squad/tools/`. `govulncheck` runs through `go tool govulncheck`.
+Git; for the agent the Go toolchain from `go.mod` and `golangci-lint`; for the backend the .NET SDK named in
+`global.json` (see `.squad/stack.md`, *Toolchain*); Python 3 for the squad tools in `.squad/tools/`. The local
+.NET tools (`reihitsu-format`, `dotnet-sonarscanner`) come with `dotnet tool restore`. `govulncheck` runs through
+`go tool govulncheck`. Docker is needed only to build and try the backend image.
 
 ### Cloning the repository
 
@@ -18,16 +20,23 @@ git clone https://github.com/LarsLaskowski/Vandox.git
 
 ```shell
 go mod download
+dotnet tool restore
+dotnet restore Vandox.slnx
 go build ./...
-go run ./cmd/vandoxd --version
+dotnet build Vandox.slnx
+go run ./cmd/vandox-agent --version
+dotnet run --project src/Vandox.Backend -- --version
 ```
 
-Both binaries currently only print their version; configuration is added together with the first features.
+The agent only prints its version so far; the backend loads its configuration, opens its database, serves the
+web UI shell and `/healthz`, and imports logs. Format before building:
+`gofmt -w . && reihitsu-format src tests`.
 
 ### Running tests
 
 ```shell
 go test ./... -race
+dotnet test Vandox.slnx
 ```
 
 For detailed rules on how unit tests are structured and named, see [`UNIT_TESTS.md`](UNIT_TESTS.md).
@@ -105,17 +114,18 @@ Pre-release tags look like `vX.Y.Z-rc.N`. Build metadata (`+...`) is not allowed
 ### What the release workflow does
 
 1. Checks that the tag is strict SemVer and that its commit is reachable from `origin/main`.
-2. Runs `go tool govulncheck ./...`; a finding stops the release.
-3. Builds `vandox-agent` (linux/amd64, static, `-trimpath`) and `SHA256SUMS`, and builds the image from
-   `deploy/backend/Dockerfile` with `docker build --no-cache`. Nothing is restored from a CI cache.
+2. Runs `go tool govulncheck ./...` and `dotnet list package --vulnerable --include-transitive`; a finding stops
+   the release.
+3. Builds `vandox-agent` (Go, linux/amd64, static, `-trimpath`) and `SHA256SUMS`, and builds the image from
+   `deploy/backend/Dockerfile` (the backend, published by the .NET SDK) with `docker build --no-cache`. Nothing is restored from a CI cache.
    After the image is saved, `.github/scripts/generate-sbom.sh` generates SPDX 2.3 SBOMs for the binary and
    the image with a syft container pinned by digest (*SBOM generator* below), run without network and
    without access to `dist/`.
 4. Verifies both binaries' `--version` output against the tag, the full commit SHA and the commit time, the
-   checksum, that the binary is static, that every `FROM` uses a base image build argument pinned by a sha256 digest, that the builder tag's Go
-   minor version equals `go.mod`'s, and that the image runs as `65532:65532`. The SBOM script checks its
-   own output (SPDX 2.3, the Go standard library and the main module listed, Debian packages in the image
-   SBOM, at most 16 MiB each).
+   checksum, that the binary is static, that every `FROM` uses a base image build argument pinned by a sha256 digest, that the builder and runtime tags
+   name the .NET version of the target framework, and that the image runs as `65532:65532`. The SBOM script
+   checks its own output (SPDX 2.3; for the agent the Go standard library and the main module, for the image
+   NuGet packages; at most 16 MiB each).
 5. Pushes exactly the verified image as `networlddev/vandox:X.Y.Z`, and as `latest` when the tag is the
    highest stable `v*.*.*` tag. A pre-release tag publishes only its own version. If the version already
    exists on Docker Hub, or the check cannot tell, the job fails before pushing: a published version is
@@ -145,23 +155,21 @@ that boundary.
 `deploy/backend/Dockerfile` names each base image in three build arguments: `BASE_<NAME>_IMAGE`,
 `BASE_<NAME>_TAG` and `BASE_<NAME>_DIGEST`. `FROM` uses only the image and the digest. Dependabot cannot
 read these lines, so the digests are refreshed by hand in a pull request: before every release tag, and
-whenever a Go patch release or a distroless update appears. Read the multi-arch index digest of exactly the tag in
-`BASE_<NAME>_TAG`, for example `docker buildx imagetools inspect golang:1.27-trixie` (the `Digest:`
-line), and write it to `BASE_<NAME>_DIGEST` in a pull request. A new Go minor version changes the
-`go` line in `go.mod`, `BASE_BUILD_TAG` and `BASE_BUILD_DIGEST` together. The release build passes no
+whenever a .NET patch release or a base image update appears. Read the multi-arch index digest of exactly the tag in
+`BASE_<NAME>_TAG`, for example `docker buildx imagetools inspect mcr.microsoft.com/dotnet/sdk:10.0` (the `Digest:`
+line), and write it to `BASE_<NAME>_DIGEST` in a pull request. A new .NET major version changes the
+target framework in `Directory.Build.props`, `global.json`, `BASE_BUILD_TAG`, `BASE_RUNTIME_TAG` and both
+digests together (`.github/scripts/check-builder-dotnet-version.sh` checks that they agree). The release build passes no
 `BASE_*` build argument, so the pinned defaults are what it uses.
 
 A weekly workflow, `.github/workflows/base-image-digests.yml` (Mondays, and on manual dispatch), compares
 every `BASE_<NAME>_DIGEST` with the current index digest of its tag and opens or updates the issue *Base
 image digests are stale*; the `Release build check` shows the same as a warning. The refresh pull request
-should close that issue (`Closes #n`). The issue's state column shows the Go version the `golang` tag now
-carries (`stale (Go <ver> available)`). A `golang` or distroless digest often moves without a Go change
-(Debian package updates), so a stale report is routine; refresh at least when a new Go patch is shown or
-before a release. The check can be run locally from the repository root with
-`.github/scripts/check-base-image-digests.sh` (needs `docker buildx` and `jq`). The build stage of the
-Dockerfile fails when the builder's Go version does not match `BASE_BUILD_TAG`. If GitHub disables the
+should close that issue (`Closes #n`). A base image digest often moves without a version change
+(Ubuntu package updates), so a stale report is routine; refresh at least before a release. The check can be run locally from the repository root with
+`.github/scripts/check-base-image-digests.sh` (needs `docker buildx` and `jq`). If GitHub disables the
 scheduled workflow after 60 days without repository activity, re-enable it under Actions. Record
-[0055](decisions/0055-stale-base-image-digests-reported-weekly-builder-go-checked-in-build.md).
+[0055](decisions/0055-stale-base-image-digests-reported-weekly-builder-go-checked-in-build.md), superseded for the builder check by [0080](decisions/0080-backend-image-on-the-chiseled-aspnet-runtime.md).
 
 ### SBOM generator
 
@@ -179,7 +187,7 @@ between `::stop-commands::` markers so it cannot issue workflow commands. Record
 ### Release build check on pull requests
 
 `release.yml` runs only for a version tag. Pull requests are covered by the `Release build check` job in
-`ci.yml`: it runs the base image pinning and builder Go version checks (`.github/scripts/`), builds the
+`ci.yml`: it runs the base image pinning and builder .NET version checks (`.github/scripts/`), builds the
 agent and the image with the version `v0.0.0-dryrun`, and verifies `--version`, the static binary and the
 image user, and generates and checks the SBOMs from that agent binary and image (*SBOM generator*). It
 also starts the image with `deploy/backend/docker-compose.yml`
