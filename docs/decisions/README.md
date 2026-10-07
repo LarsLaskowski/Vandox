@@ -47,20 +47,17 @@ links the record.
 | 0002 | Squad working records stay off main, and product PRs never change the squad | Accepted | 2026-10-03 |
 | 0003 | Squash-merge pull requests | Accepted | 2026-10-03 |
 | 0004 | Own project instead of an off-the-shelf monitoring stack | Accepted | 2026-10-03 |
-| 0005 | Go for agent and backend | Superseded by 0073 | 2026-10-03 |
 | 0006 | The agent connects outbound only; commands are pulled | Accepted | 2026-10-03 |
 | 0007 | SQLite with FTS5, no external database | Accepted | 2026-10-03 |
 | 0008 | Deterministic detection and alerting; AI only for the nightly report | Accepted | 2026-10-03 |
 | 0009 | Remote actions only as signed commands from a fixed local action list | Accepted | 2026-10-03 |
 | 0010 | Connection over Tailscale with a strict ACL | Accepted | 2026-10-03 |
-| 0011 | Own Go web UI with historical views, no Grafana | Superseded by 0073 | 2026-10-03 |
 | 0012 | The agent never contacts Telegram itself | Accepted | 2026-10-03 |
 | 0013 | MariaDB access through a unix_socket user with only the PROCESS privilege | Accepted | 2026-10-03 |
 | 0014 | Log import is a core component | Accepted | 2026-10-03 |
 | 0015 | Mail services are checked, mail accounts are not | Accepted | 2026-10-03 |
 | 0016 | Web UI reachable in the home LAN with a login | Accepted | 2026-10-03 |
 | 0017 | Ingest via the backend host's tailnet address and a published port, not tsnet | Accepted | 2026-10-03 |
-| 0018 | The agent spools at least 7 days and backfills gaplessly and idempotently | Superseded by 0045 | 2026-10-03 |
 | 0019 | The agent reads /proc itself instead of running top or lsof | Accepted | 2026-10-03 |
 | 0020 | Analysis before alerting — v0.1.0 is the forensics release | Accepted | 2026-10-03 |
 | 0021 | No pseudonymization of log data | Accepted | 2026-10-03 |
@@ -76,11 +73,8 @@ links the record.
 | 0031 | The Telegram bot talks only to allowlisted users in private chats | Accepted | 2026-10-04 |
 | 0032 | Secrets only from environment variables or Docker secrets | Accepted | 2026-10-04 |
 | 0033 | Pre-existing overall coverage gap accepted for a documentation-only change | Accepted | 2026-10-04 |
-| 0034 | Entry points delegate to a testable run function; main stays uncovered wiring | Superseded by 0058 | 2026-10-04 |
 | 0035 | Explicit format check step in CI; the coverage gate stays local, SonarQube measures coverage in CI | Accepted | 2026-10-04 |
-| 0036 | Dependabot watches /deploy/backend for Docker before the Dockerfile exists | Superseded by 0041 | 2026-10-04 |
 | 0037 | Release workflow built from plain go build, the Docker CLI and gh; verified once, published as built | Accepted | 2026-10-04 |
-| 0038 | Backend image on distroless static, non-root, base images pinned by digest; version tags without "v" | Superseded by 0041 | 2026-10-04 |
 | 0039 | Docker Hub token is repository-scoped and lives in a tag-only GitHub environment | Accepted | 2026-10-04 |
 | 0040 | Go 1.27 toolchain without a patch version in go.mod; govulncheck raised to v1.8.0 | Accepted | 2026-10-04 |
 | 0041 | Base images pinned by digest through build arguments, tag kept alongside; digests refreshed by hand | Accepted | 2026-10-04 |
@@ -97,23 +91,13 @@ links the record.
 | 0052 | Backend image gets a description label; no logo label | Accepted | 2026-10-05 |
 | 0053 | Releases are always created manually; the only trigger is a new vX.Y.Z tag, the PR dry run lives in ci.yml | Accepted | 2026-10-05 |
 | 0054 | Release binary and image digest get GitHub build provenance attestations from a separate, secret-free attest job; no SBOM yet | Accepted | 2026-10-05 |
-| 0055 | Stale base image digests reported weekly as an issue; the build stage checks the builder's Go version against its tag | Superseded by 0080 | 2026-10-05 |
 | 0056 | Release SBOMs (SPDX 2.3) come from a digest-pinned, network-less syft container in the build job and are attested in the attest job | Accepted | 2026-10-05 |
-| 0057 | modernc.org/sqlite as the SQLite driver: pure Go, no cgo, FTS5 included | Superseded by 0065 | 2026-10-05 |
-| 0058 | vandoxd runs the service without arguments, logs JSON with slog and stops within a 10 s deadline | Superseded by 0072 | 2026-10-05 |
 | 0059 | /healthz on the web listener checks the database; vandoxd -healthcheck is the image's health probe | Accepted | 2026-10-05 |
 | 0060 | Compose file publishes the web port on loopback and the ingest port not yet; named data volume, 512 MiB limit | Accepted | 2026-10-05 |
-| 0061 | Backend-only packages live under cmd/vandoxd/internal; internal/ stays shared | Superseded by 0073 | 2026-10-05 |
 | 0062 | Timeout tests use testing/synctest without network, and injected short durations over loopback | Accepted | 2026-10-05 |
 | 0063 | Storage schema: one records table holds every record's identity, metrics and log lines get own tables, other payloads are stored as JSON | Accepted | 2026-10-06 |
-| 0064 | Versioned schema migrations in Go, applied at start-up in one transaction per step; a newer schema is refused | Superseded by 0077 | 2026-10-06 |
-| 0065 | SQLite connections: modernc.org/sqlite kept; one writer connection with BEGIN IMMEDIATE, a query-only reader pool, synchronous FULL | Superseded by 0077 | 2026-10-06 |
 | 0066 | Log search takes literal terms only; every term is quoted for FTS5, operators and prefixes are not offered yet | Accepted | 2026-10-06 |
-| 0067 | The store package defines small repository interfaces; storetest.Fake is a scripted fake, the store itself is tested against real files | Superseded by 0077 | 2026-10-06 |
-| 0068 | Write throughput is measured by a Go benchmark and never asserted in tests; the DS918+ measurement is a follow-up issue | Superseded by 0077 | 2026-10-06 |
 | 0069 | The log import is idempotent per file content: SHA-256 of the decompressed content, two passes, batches that resume by count | Accepted | 2026-10-06 |
-| 0070 | Log parsers implement one interface in internal/logparse; an explicit registry picks the parser by confidence | Superseded by 0079 | 2026-10-06 |
-| 0071 | The log import reads its input as streams without following links or extracting anything; formats are sniffed, one gzip layer, no nested archives, fixed limits | Superseded by 0079 | 2026-10-06 |
 | 0072 | vandoxd gets the sub-command import; progress as JSON on stderr, the summary as text on stdout, exit code 1 when a file failed | Accepted | 2026-10-06 |
 | 0073 | The backend is written in .NET 10 with a Blazor web UI; the agent stays in Go | Accepted | 2026-10-06 |
 | 0074 | Two-language toolchain: Go for the agent, .NET for the backend, one set of quality gates | Accepted | 2026-10-06 |

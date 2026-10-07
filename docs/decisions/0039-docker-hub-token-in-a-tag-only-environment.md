@@ -73,7 +73,7 @@ describes creating and rotating it.
 - Branch and pull-request workflow runs, including the release dry run, cannot read the token.
 - A leaked token can push to `networlddev/vandox` only, not to other repositories of the organization.
   Within that repository it can still overwrite tags. The workflow itself never overwrites a version tag
-  (0038). Where the Docker Hub subscription offers it, the maintainer can enable immutable tags on
+  (0041). Where the Docker Hub subscription offers it, the maintainer can enable immutable tags on
   `networlddev/vandox` for the version-tag pattern only (not `latest`, which has to move); Docker Hub then
   refuses to overwrite a published version even with a leaked token. This is optional and recommended, and
   is described in `docs/CONTRIBUTING.md`.

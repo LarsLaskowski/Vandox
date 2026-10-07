@@ -7,7 +7,7 @@
 
 ## Context
 
-After the backend host was off, the agent sends current data and backfills hours of spooled data (0018). Alerting
+After the backend host was off, the agent sends current data and backfills hours of spooled data (0045). Alerting
 on backfilled values would send a burst of stale alerts for problems that are long over. The backend has
 to tell live data from backfill reliably, without trusting a flag the agent could get wrong.
 

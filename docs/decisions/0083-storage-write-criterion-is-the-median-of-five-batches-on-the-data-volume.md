@@ -8,7 +8,7 @@
 ## Context
 
 Issue #14 required that writing 10,000 records in one transaction takes under one second on the reference host, a DS918+ (record
-[0068](0068-write-throughput-measured-by-a-benchmark-ds918-measurement-in-a-follow-up.md)). It does not say which batch counts or which
+[0077](0077-storage-on-microsoft-data-sqlite-same-schema-and-rules.md)). It does not say which batch counts or which
 volume. After the writer change of [0082](0082-storage-writer-cached-parameters-and-synchronous-calls.md) the benchmark tool measured on the
 reference host: on the SSD volume a first batch of 1001 ms and later batches of 711 to 783 ms (median of five 783 ms); on the HDD volume a first batch
 of 1171 ms and a median of 1171 ms. The first batch includes start-up and the growth of a fresh file and was 1 ms over the limit, although every
@@ -21,7 +21,7 @@ other batch was far below it. The agent sends hundreds of records per minute, so
 2. **Restate the criterion as the median of five batches on the data volume** — it describes steady write capacity, which is what the stress value
    stands for, and it reports the first batch next to it.
 3. **Change `synchronous` to `NORMAL`** — would remove the wait for the disk on the HDD but gives up that a committed batch survives a power failure
-   (record [0065](0065-sqlite-connections-single-writer-query-only-readers-synchronous-full.md)).
+   (record [0077](0077-storage-on-microsoft-data-sqlite-same-schema-and-rules.md)).
 
 ## Decision
 

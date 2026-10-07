@@ -8,10 +8,10 @@
 ## Context
 
 Vandox exists to reconstruct outages, which often happen exactly when data is hardest to collect (memory
-exhaustion, a backend host switched off at night). 0018 makes collection gapless across backend downtime
+exhaustion, a backend host switched off at night). 0045 makes collection gapless across backend downtime
 through the on-disk spool and backfill, and gives every batch an identity and sequence number. Some loss
 cannot be prevented, though: the agent itself is stopped or killed by the OOM killer, the spool hits its
-size bound (0018, *Consequences*), or a single collector times out (0029). An analysis that reads a
+size bound (0045, *Consequences*), or a single collector times out (0029). An analysis that reads a
 missing interval as "nothing happened" draws the wrong conclusion.
 
 ## Options considered

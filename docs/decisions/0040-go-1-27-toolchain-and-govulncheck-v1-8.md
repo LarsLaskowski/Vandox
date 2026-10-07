@@ -12,7 +12,7 @@ when Go 1.26 shipped (February 2026). Go 1.27 shipped in August 2026, so on 2026
 releases are 1.26 (1.26.8) and 1.27 (1.27.1). Record 0037 requires a supported toolchain before the first
 stable tag, because `govulncheck` does not flag a Go version that is merely out of support.
 
-Record 0038 ties the backend builder image to `go.mod`: the builder tag's `<major>.<minor>` must equal the
+Record 0041 ties the backend builder image to `go.mod`: the builder tag's `<major>.<minor>` must equal the
 `go` directive (the release workflow checks this), and Dependabot ignores `golang` minor and major updates.
 So the `go` line, the builder tag and the builder digest have to move together, by hand.
 
@@ -63,13 +63,13 @@ Facts checked on 2026-10-04 in a scratch copy of the repository:
 `go.mod` and `go.sum` are committed together. The backend builder in `deploy/backend/Dockerfile` is
 `golang:1.27-trixie@sha256:3b77fc618ec235a1ab412de7737f120dd507c57e8d87de4cbb7994fb94275ed5`. That is the
 multi-arch index digest read from Docker Hub on 2026-10-04, and it ships Go 1.27.1. The runtime stage is
-unchanged. `.squad/stack.md` (*Toolchain*) names Go 1.27. Records 0037 and 0038 stay as they are: their
+unchanged. `.squad/stack.md` (*Toolchain*) names Go 1.27. Records 0037 and 0041 stay as they are: their
 rules still hold, and `1.24` appears there only as the value at the time.
 
 ## Consequences
 
 - The next by-hand bump is due when Go 1.27 leaves support, that is, when Go 1.29 ships. It changes the
-  `go` line, the builder tag and the builder digest together (0038).
+  `go` line, the builder tag and the builder digest together (0041).
 - Contributors need a golangci-lint built with Go 1.27 or later. The v2.13.1 release binary qualifies; a
   plain `go install …@v2.13.1` does not, because with `GOTOOLCHAIN=auto` it builds with the go1.26
   toolchain named in golangci-lint's own `go.mod`. Older builds refuse to run (*Known pitfalls* in

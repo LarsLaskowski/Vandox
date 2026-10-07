@@ -12,7 +12,7 @@ Issue #13 asks for `GET /healthz` without authentication, returning 200 when the
 is distroless static (0041): no shell, no `curl`, no `wget`. `vandoxd` has two listeners: the web listener,
 which only the reverse proxy should reach (0023), and the ingest listener on the tailnet address (0017),
 which the monitored server may reach (0010) and which the compose file does not publish yet (0060). The
-database is SQLite in the data volume (0007, 0057); a
+database is SQLite in the data volume (0007, 0077); a
 read on a hung volume can block in a system call that no context cancels.
 
 ## Options considered

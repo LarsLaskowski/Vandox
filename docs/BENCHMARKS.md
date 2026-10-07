@@ -23,7 +23,7 @@ the time of every batch and the records per second.
 
 Background: [0063](decisions/0063-storage-schema-records-table-typed-metric-and-log-tables-json-payloads.md),
 [0077](decisions/0077-storage-on-microsoft-data-sqlite-same-schema-and-rules.md) (which carries over
-[0068](decisions/0068-write-throughput-measured-by-a-benchmark-ds918-measurement-in-a-follow-up.md)),
+[0077](decisions/0077-storage-on-microsoft-data-sqlite-same-schema-and-rules.md)),
 [0082](decisions/0082-storage-writer-cached-parameters-and-synchronous-calls.md) (the writer change after the first
 reference-host result) and 0083. The earlier Go benchmark also measured log lines and a mixed batch; those variants are not ported.
 

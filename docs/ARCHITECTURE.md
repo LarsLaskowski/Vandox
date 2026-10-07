@@ -79,8 +79,6 @@ flowchart LR
 ```
 
 Records: [0004](decisions/0004-own-project-instead-of-off-the-shelf-stack.md),
-[0005](decisions/0005-go-for-agent-and-backend.md) (superseded by 0073),
-[0011](decisions/0011-own-go-web-ui-without-grafana.md) (superseded by 0073),
 [0073](decisions/0073-backend-in-dotnet-10-with-blazor-agent-stays-go.md),
 [0074](decisions/0074-two-language-toolchain-and-combined-quality-gates.md),
 [0013](decisions/0013-mariadb-access-via-unix-socket-process-privilege.md),
@@ -131,8 +129,7 @@ Records: [0006](decisions/0006-agent-connects-outbound-only.md),
 [0020](decisions/0020-analysis-before-alerting-forensics-release.md),
 [0024](decisions/0024-nightly-report-timing.md),
 [0069](decisions/0069-log-import-idempotent-per-file-content-hash-with-resumable-batches.md),
-[0070](decisions/0070-log-parser-interface-and-explicit-registry-in-internal-logparse.md),
-[0071](decisions/0071-log-import-reads-input-without-following-links-or-extracting.md),
+[0079](decisions/0079-log-parsing-and-import-in-the-backend-without-following-links.md),
 [0072](decisions/0072-vandoxd-import-sub-command-output-and-exit-codes.md).
 
 ## Network
@@ -199,8 +196,7 @@ Records: [0022](decisions/0022-backfill-detection-and-live-only-alerts.md),
 retention tiers. The database is the file `vandox.db` in `storage.directory`, created with mode 0600, opened through
 `Microsoft.Data.Sqlite` with its bundled SQLite (FTS5 included, no system library needed): one writer connection
 with `BEGIN IMMEDIATE`, a pool of query-only readers, WAL and `synchronous=FULL`
-([0077](decisions/0077-storage-on-microsoft-data-sqlite-same-schema-and-rules.md), which carries the rules of 0065
-over). The storage directory is not created (a missing mount must not be hidden), and a
+([0077](decisions/0077-storage-on-microsoft-data-sqlite-same-schema-and-rules.md), which carries the Go storage rules over). The storage directory is not created (a missing mount must not be hidden), and a
 symbolic link in place of the database or its `-wal`/`-shm` files is refused.
 
 Implemented by `src/Vandox.Storage`:
@@ -213,7 +209,7 @@ Implemented by `src/Vandox.Storage`:
   makes a resent record a no-op that never overwrites the stored one; imported and backend records are not
   deduplicated (an import is made idempotent per file content, see below). Capture times are storable between 1677-09-21 and 2262-04-11 and sequence numbers up to
   2^63 - 1.
-- **Migrations** ([0064](decisions/0064-versioned-schema-migrations-in-go-one-transaction-per-step.md), rules kept by [0077](decisions/0077-storage-on-microsoft-data-sqlite-same-schema-and-rules.md)): at
+- **Migrations** ([0077](decisions/0077-storage-on-microsoft-data-sqlite-same-schema-and-rules.md)): at
   start-up every step above the stored `meta.schema_version` runs in its own transaction; a database with a
   newer version is refused. Schema version 3 adds the table `import_files`.
 - **Imports** ([0069](decisions/0069-log-import-idempotent-per-file-content-hash-with-resumable-batches.md)):
@@ -223,17 +219,17 @@ Implemented by `src/Vandox.Storage`:
   a compare-and-set on the expected count, so an interrupted import resumes where it stopped and two runs of
   the same content never store it twice. Records do not reference their file; imports are idempotent per
   file content, not per record.
-- **Connections** (0065): one writer connection (immediate transactions, one batch per transaction) and a pool
+- **Connections** ([0077](decisions/0077-storage-on-microsoft-data-sqlite-same-schema-and-rules.md)): one writer connection (immediate transactions, one batch per transaction) and a pool
   of query-only readers, in WAL mode with `synchronous=FULL`, so a committed batch is durable and reads (and
   `/healthz`) do not wait for a write.
 - **Log search** ([0066](decisions/0066-log-search-takes-literal-terms-only.md)): the FTS5 index of the log
   messages is filled by the write path in the same transaction, so a line is searchable when it is committed.
   The search text is taken as literal terms only (no FTS5 operators, bounded length and term count). The cost
   of a search grows with the stored lines that contain its terms, so callers bound it with a context deadline.
-- **Interfaces** ([0067](decisions/0067-storage-repository-interfaces-and-a-scripted-fake-in-storetest.md)):
+- **Interfaces** ([0077](decisions/0077-storage-on-microsoft-data-sqlite-same-schema-and-rules.md)):
   `store.Writer`, `store.RecordReader`, `store.LogSearcher` and `store.ImportTracker`, with a scripted fake in
   `store/storetest`.
-- **Write throughput** ([0068](decisions/0068-write-throughput-measured-by-a-benchmark-ds918-measurement-in-a-follow-up.md)):
+- **Write throughput** ([0077](decisions/0077-storage-on-microsoft-data-sqlite-same-schema-and-rules.md)):
   measured by a benchmark, see [`BENCHMARKS.md`](BENCHMARKS.md).
 
 | Data | Retention |
@@ -335,7 +331,7 @@ Docker Hub as `networlddev/vandox` ([0027](decisions/0027-project-name-and-docke
   ([0059](decisions/0059-healthz-checks-the-database-and-the-binary-is-the-health-probe.md)). The compose file
   `deploy/backend/docker-compose.yml` runs it with a data volume, a read-only root file system, dropped
   capabilities and a memory limit; CI starts the image from it
-  ([0058](decisions/0058-vandoxd-runs-the-service-by-default-with-a-shutdown-deadline.md),
+  ([0072](decisions/0072-vandoxd-import-sub-command-output-and-exit-codes.md),
   [0060](decisions/0060-compose-file-port-bindings-volumes-and-memory-limit.md)).
 - Releases are built by `.github/workflows/release.yml` only from SemVer tags on `main`. Only the
   repository admin may create these tags (tag ruleset `release-tags`), and the workflow checks that the
@@ -351,9 +347,9 @@ Records: [0037](decisions/0037-release-workflow-with-plain-go-docker-and-gh.md),
 [0041](decisions/0041-base-images-pinned-by-digest-through-build-arguments.md),
 [0039](decisions/0039-docker-hub-token-in-a-tag-only-environment.md),
 [0054](decisions/0054-release-provenance-attestations-from-a-secret-free-job.md),
-[0055](decisions/0055-stale-base-image-digests-reported-weekly-builder-go-checked-in-build.md),
+[0080](decisions/0080-backend-image-on-the-chiseled-aspnet-runtime.md),
 [0056](decisions/0056-release-sboms-from-a-digest-pinned-syft-container.md),
-[0058](decisions/0058-vandoxd-runs-the-service-by-default-with-a-shutdown-deadline.md),
+[0072](decisions/0072-vandoxd-import-sub-command-output-and-exit-codes.md),
 [0059](decisions/0059-healthz-checks-the-database-and-the-binary-is-the-health-probe.md),
 [0060](decisions/0060-compose-file-port-bindings-volumes-and-memory-limit.md).
 <!-- project:end architecture -->

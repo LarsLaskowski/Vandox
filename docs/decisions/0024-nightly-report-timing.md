@@ -22,5 +22,5 @@ backfill has completed.
 
 ## Consequences
 
-- The backend must know when the backfill is complete (0018, 0022).
+- The backend must know when the backfill is complete (0045, 0022).
 - The report is sent by the backend via Telegram (0012); writing it may use the optional AI (0008).

@@ -26,5 +26,5 @@ pushed to it.
 ## Consequences
 
 - No inbound firewall rule and no listening service on the monitored server.
-- The agent needs a local spool and backfill for times the backend is unreachable (0018).
+- The agent needs a local spool and backfill for times the backend is unreachable (0045).
 - Commands reach the server only at the agent's next poll, so they have a delay.

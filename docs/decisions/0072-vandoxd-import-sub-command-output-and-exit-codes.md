@@ -3,14 +3,17 @@
 - **Status:** Accepted
 - **Date:** 2026-10-06
 - **Source:** Issue #15
-- **Supersedes:** 0058
+- **Supersedes:** —
 
 ## Context
 
-Record 0058 made `vandoxd` run the service without arguments, with its own flag set (`-config`,
-`-healthcheck`, `-version`), JSON logging with `slog`, a 10 s shutdown deadline, and exit code 2 for a flag
-error **or a positional argument**. Issue #15 requires the trigger "CLI sub-command (`vandoxd import
-<path>`)", which makes one positional argument meaningful and so changes 0058's decision. The image's
+Both entry points delegate to a testable `run` function behind a one-statement `main()`: the coverage gate (0001)
+needs 80 % line coverage on new code, and the old `main()` used the global `flag.CommandLine` with
+`flag.ExitOnError` and printed to `os.Stdout`, so no unit test could call it. Issue #13 gave `vandoxd` a real
+default action: it runs as a service without arguments, with its own flag set (`-config`, `-healthcheck`,
+`-version`), JSON logging with `slog`, a 10 s shutdown deadline, and exit code 2 for a flag error or a
+positional argument. Issue #15 requires the trigger "CLI sub-command (`vandoxd import <path>`)", which makes one
+positional argument meaningful. The image's
 `ENTRYPOINT` is `["/vandoxd"]`, the distroless image has no shell, and the compose file mounts the import
 directory at `/import` (0060), so the operator runs `docker exec vandoxd /vandoxd import /import/<name>`;
 the process inherits the container's environment (`VANDOX_*` secrets checked by `config.LoadBackend`) and the
@@ -19,6 +22,23 @@ files, lines, time range, errors and unrecognized files; the web UI trigger is a
 must exist as data (`importer.Summary`), not only as text.
 
 ## Options considered
+
+Entry point (decided with issues #98 and #13):
+
+- **A shared `internal/cli.Run` behind a thin per-binary `run`** — chosen over an unexported `run` copied into
+  each `main` package (about 20 duplicated lines that SonarQube Cloud counts as duplicated new code), over
+  calling `cli.Run` straight from `main()` (the `main` packages then hold only uncovered lines), over covering
+  `main()` by re-executing the test binary (needs `GOCOVERDIR` and a second coverage format for two lines of
+  wiring) and over accepting the gap again (contradicts 0033).
+- **No arguments run the service**, not a `serve` sub-command with `CMD ["serve"]` (any argument override such
+  as `--version` replaces the `CMD`, and a NAS UI that edits the command line breaks it easily; printing the
+  usage is of no use in a container), with an own flag set rather than a hook for extra flags in `cli.Run`.
+- **JSON log handler** rather than text (unambiguous, escapes control characters in every value, filterable in
+  `docker logs` and NAS log viewers), and **an own shutdown deadline** below the compose `stop_grace_period`
+  rather than Docker's default stop timeout alone (a hanging request would end in SIGKILL and an unclean
+  database close).
+
+Import (issue #15):
 
 1. **Command form**: `vandoxd import <path>` as the first positional argument (what the issue names), or a
    flag (`-import <path>`). The sub-command was chosen: the issue names it, and it leaves room for further
@@ -37,19 +57,23 @@ must exist as data (`importer.Summary`), not only as text.
 
 ## Decision
 
-Carried over from 0058 unchanged: `main()` is the single statement
+`main()` is the single statement
 `os.Exit(run(context.Background(), os.Args[1:], os.Environ(), os.Stdout, os.Stderr, (&net.ListenConfig{}).Listen))`;
 `run(ctx, args, environ, stdout, stderr, listen) int` parses its own `flag.FlagSet` (`ContinueOnError`, usage
 header `Usage of vandoxd:`) with `-config` (default `/etc/vandox/vandoxd.yaml`), `-healthcheck` and
 `-version`; `-version` wins over everything; without `-version`, `-healthcheck` (0059) or a sub-command `run`
-serves as 0058 describes (SIGTERM/SIGINT, default handling restored after the first signal, configuration,
+serves (SIGTERM/SIGINT, default handling restored after the first signal, configuration,
 JSON `slog` at `log.level` with an `info` bootstrap logger, store, listeners, 10 s shutdown deadline, store
 closed after the listeners; errors as attributes; secrets never logged); each binary has a `binaryName`
 constant, `main()` is the accepted uncovered line, and `run` is tested in `main_test.go`. `vandox-agent` keeps
 `internal/cli.Run` until #30.
 
-Changed:
+Entry point and import sub-command:
 
+- `cli.Run(name, args, stdout, stderr) int` parses with its own `flag.FlagSet` (`ContinueOnError`, output to
+  `stderr`); the usage header names the binary. Exit codes 0 for the version line, `-h` and a clean shutdown, 1
+  for a start-up or runtime failure, 2 for a flag error. In-flight requests get 10 s at shutdown, then their
+  connections are closed and the exit code is 1.
 - The first positional argument `import` starts the sub-command (`importCommand`, `cmd/vandoxd/import.go`)
   with the remaining arguments; `-healthcheck` together with `import` is a usage error. Any other positional
   argument is a usage error as before. The usage text lists `vandoxd [flags] import [-config file] <path>`.
@@ -57,8 +81,8 @@ Changed:
   requires exactly one path; `-h` prints its usage and exits 0.
 - It registers SIGINT and SIGTERM like the service, loads the configuration with `config.LoadBackend`, logs
   JSON lines to stderr at `log.level` (an `info` bootstrap logger before the configuration is loaded), opens
-  the store with `store.Open` (a second process next to the service, 0064, 0065), and runs `importer.Run`
-  with the parsers of `importParsers()` (0070). Progress is logged with `slog`: one line per file finished
+  the store with `store.Open` (a second process next to the service, 0077), and runs `importer.Run`
+  with the parsers of `importParsers()` (0079). Progress is logged with `slog`: one line per file finished
   (path, outcome, source type, reason, lines, records, skipped), one `hashing` line per
   `importer.DefaultProgressBytes` (64 MiB) of a file hashed in the scan (path, bytes), one when the scan is
   done (files, pending), one per `importer.ProgressLines` lines of a large file. Names are attributes, never
@@ -81,13 +105,18 @@ Changed:
 - `docker exec -it vandoxd /vandoxd import /import/<name>` imports from the mounted directory; the README
   documents it. `-it` is needed for Ctrl-C to reach the import (without a terminal, `docker exec` forwards no
   signal, and closing the client leaves the import running); stopping the container kills the import, which
-  loses nothing committed and resumes on the next run (0069, 0071). The import runs as the container's user
+  loses nothing committed and resumes on the next run (0069, 0079). The import runs as the container's user
   65532, so the README tells the operator to grant read access to that user only (`chown -R 65532:65532`
   plus `chmod -R u+rX`, or `setfacl -R -m u:65532:rX`, on `import/<name>`) — a copied `/var/log` holds
-  `0640 root:adm` files such as `auth.log` and `mail.log`, which must not become world-readable (0071). The
+  `0640 root:adm` files such as `auth.log` and `mail.log`, which must not become world-readable (0079). The
   import shares the container's memory limit with the service,
-  which the bounded batches of 0071 allow for.
+  which the bounded batches of 0079 allow for.
 - Scripts can rely on stdout holding only the summary and on exit code 1 for any failed file.
 - The web UI (later issue) calls `importer.Run` and renders `importer.Summary` itself; the text format is the
   command's, not an API.
+- `docker run networlddev/vandox` starts the service and `--version` still works for the release checks; without
+  a configuration file `vandoxd` fails with a configuration error instead of printing the usage. The 10 s
+  deadline and the 2 s health ping timeout are constants; making them configurable is a new option under 0049.
+  The compose file's `stop_grace_period` must stay above 10 s (0060). Shutdown and ping timeouts are tested as
+  0062 lays down. The `main()` bodies are the accepted uncovered lines; a new binary follows the same pattern.
 - A future sub-command follows the same pattern: dispatch in `run`, its own flag set, `-version` still wins.

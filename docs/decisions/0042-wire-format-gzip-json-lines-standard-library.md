@@ -7,12 +7,12 @@
 
 ## Context
 
-The agent sends its records to the backend in batches (0018, refined by 0045). The batch format has to be
+The agent sends its records to the backend in batches (0045, refined by 0045). The batch format has to be
 compact on the link and on the 2 GB server, streamable so the backend never has to hold a whole batch to
-start validating it, and easy to evolve, because 0018 makes the format a compatibility concern from v0.1.0
+start validating it, and easy to evolve, because 0045 makes the format a compatibility concern from v0.1.0
 on. The same
 record types are produced by the agent, by the log importer and by the backend itself (gap records, 0028),
-so the Go model is shared under `internal/` (0005). The ingest wire format is external input, a security
+so the Go model is shared under `internal/` (0073). The ingest wire format is external input, a security
 area (`.squad/project.md`, *Security areas* 10): the decoder must turn hostile input into an error, never a
 crash, a hang or an unbounded allocation. Every new dependency is a `security`-tier change and has to be
 watched by `govulncheck` for the life of the project.

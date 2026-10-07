@@ -93,7 +93,7 @@ workflow is `.github/workflows/release.yml`; the reasoning is in
 [0041](decisions/0041-base-images-pinned-by-digest-through-build-arguments.md),
 [0039](decisions/0039-docker-hub-token-in-a-tag-only-environment.md),
 [0054](decisions/0054-release-provenance-attestations-from-a-secret-free-job.md),
-[0055](decisions/0055-stale-base-image-digests-reported-weekly-builder-go-checked-in-build.md) and
+[0080](decisions/0080-backend-image-on-the-chiseled-aspnet-runtime.md) and
 [0056](decisions/0056-release-sboms-from-a-digest-pinned-syft-container.md).
 
 ### Cutting a release
@@ -169,7 +169,7 @@ should close that issue (`Closes #n`). A base image digest often moves without a
 (Ubuntu package updates), so a stale report is routine; refresh at least before a release. The check can be run locally from the repository root with
 `.github/scripts/check-base-image-digests.sh` (needs `docker buildx` and `jq`). If GitHub disables the
 scheduled workflow after 60 days without repository activity, re-enable it under Actions. Record
-[0055](decisions/0055-stale-base-image-digests-reported-weekly-builder-go-checked-in-build.md), superseded for the builder check by [0080](decisions/0080-backend-image-on-the-chiseled-aspnet-runtime.md).
+[0080](decisions/0080-backend-image-on-the-chiseled-aspnet-runtime.md).
 
 ### SBOM generator
 

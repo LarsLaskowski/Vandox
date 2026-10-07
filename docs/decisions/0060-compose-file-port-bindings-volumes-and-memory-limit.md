@@ -13,7 +13,7 @@ maintainer's reference host is an x86_64 NAS with 16 GB of RAM shared by more th
 records: the web UI is reachable only through a TLS reverse proxy (0016, 0023: "the UI port of the
 container must only be reachable by the reverse proxy"); the ingest port is published on the backend host's
 tailnet address (0017) and is all the monitored server may reach (0010); secrets come only from the
-environment or Docker secrets (0032, 0050); 0036 left a Dependabot `docker-compose` entry to this issue.
+environment or Docker secrets (0032, 0050); 0041 left a Dependabot `docker-compose` entry to this issue.
 
 ## Options considered
 
@@ -51,7 +51,7 @@ environment or Docker secrets (0032, 0050); 0036 left a Dependabot `docker-compo
 4. **Memory limit** — the Go runtime does not read the cgroup memory limit, so without `GOMEMLIMIT` it may
    grow to the limit before collecting. A skeleton needs a few tens of MiB; later analysis over months of
    logs needs more. Chosen: `mem_limit: 512m` and `GOMEMLIMIT=400MiB` (the margin covers the SQLite page
-   cache outside the Go heap, 0057). Raise both together when a feature needs it.
+   cache outside the Go heap, 0077). Raise both together when a feature needs it.
 5. **Image reference** — a literal version would have to be bumped in this repository for every release
    (and a Dependabot `docker-compose` entry would open those pull requests); `latest` is the highest stable
    release (0041). Chosen: `networlddev/vandox:latest` with a comment to pin `X.Y.Z` or a digest. No
@@ -66,7 +66,7 @@ environment or Docker secrets (0032, 0050); 0036 left a Dependabot `docker-compo
 
 `deploy/backend/docker-compose.yml` defines the project `vandox` with the service `vandoxd`:
 `image: networlddev/vandox:latest`, `restart: unless-stopped`, `mem_limit: 512m`,
-`stop_grace_period: 30s` (above the 10 s shutdown deadline of 0058), `environment` `GOMEMLIMIT: 400MiB` and
+`stop_grace_period: 30s` (above the 10 s shutdown deadline of 0072), `environment` `GOMEMLIMIT: 400MiB` and
 `VANDOX_AGENT_TOKEN_FILE: /run/secrets/vandox_agent_token`, the single port
 `${WEB_BIND_ADDRESS:-127.0.0.1}:8080:8080` (no ingest port; a comment names #40 and 0017), volumes
 `vandox-data:/data`, `./import:/import:ro` and

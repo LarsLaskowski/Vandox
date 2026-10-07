@@ -53,7 +53,7 @@ covers, and the rules under *Code coverage* and the checklist apply to both.
   forbidden substring must not overlap text the format requires.
 - Go: benchmarks live in the `_test.go` file of the code they measure and never assert a duration; their
   reference-host results go into [`BENCHMARKS.md`](BENCHMARKS.md)
-  ([0068](decisions/0068-write-throughput-measured-by-a-benchmark-ds918-measurement-in-a-follow-up.md)).
+  ([0077](decisions/0077-storage-on-microsoft-data-sqlite-same-schema-and-rules.md)).
 - Go: `t.Helper()` in helpers; `t.TempDir()` for files; no real network, no real clock (inject a clock or a
   fixture path); tests pass under `-race`. Loopback listeners, as `httptest` uses them, are the only network.
 - Go: timeouts of `context` and `net/http` cannot be driven by an own fake clock, so
@@ -76,7 +76,7 @@ binary's `main` therefore only calls `os.Exit(run(...))` with the process bounda
 environment, standard streams and, for `vandoxd`, the listen function) as arguments; `run` is tested in the
 package's `main_test.go`, and the `main` body is the accepted uncovered wiring
 ([decision 0072](decisions/0072-vandoxd-import-sub-command-output-and-exit-codes.md), which carries over
-0058 and supersedes [0034](decisions/0034-entry-points-delegate-to-a-testable-run-function.md) for `vandoxd`).
+the pattern for `vandoxd`).
 
 ## Checklist for new tests
 

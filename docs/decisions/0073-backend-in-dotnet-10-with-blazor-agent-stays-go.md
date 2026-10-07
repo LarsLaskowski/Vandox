@@ -3,14 +3,17 @@
 - **Status:** Accepted
 - **Date:** 2026-10-06
 - **Source:** Product Manager request: move the backend to .NET 10 with Blazor, keep the agent in Go
-- **Supersedes:** [0005](0005-go-for-agent-and-backend.md), [0011](0011-own-go-web-ui-without-grafana.md), [0061](0061-backend-only-packages-under-cmd-vandoxd-internal.md)
+- **Supersedes:** —
 
 ## Context
 
 The agent runs permanently on the monitored server (about 2 GB RAM, next to Plesk, MariaDB and mail), so it
 must stay a small static binary without a runtime to maintain there. The backend is different: it runs as one
 Docker container on a Docker host the owner controls (a NAS, a mini PC or a server), the web UI is a large
-part of its work, and the product owner works in .NET. At the time of the change the Go backend contained the
+part of its work, and the product owner works in .NET. The first decision had been Go for both binaries (static
+single binaries, low memory, one toolchain and shared packages) with an own web UI served by `vandoxd` instead
+of Grafana (one container, one login, incident views that correlate logs and snapshots, which panels cannot
+build), and with backend-only Go packages under `cmd/vandoxd/internal/` so the agent could never link backend code. At the time of the change the Go backend contained the
 data model, the wire decoder, the configuration, the SQLite storage, the log import and the service host; the
 web UI, ingest API, analysis and alerting were not yet written.
 
@@ -23,6 +26,9 @@ web UI, ingest API, analysis and alerting were not yet written.
    language, and a contract must keep them in step.
 3. **.NET for both** — one language, but the agent would need a runtime (or a large self-contained binary) on
    the server it must not burden.
+4. **Rust for both** — smallest footprint, but slower development for a one-person project.
+5. **Grafana on top of the data instead of an own UI** — powerful dashboards, but another container and a SQLite
+   data source plugin, and incident timelines are hard to build in panels; the own web UI stays, now in Blazor.
 
 ## Decision
 
@@ -31,7 +37,8 @@ configuration, CLI helpers, version). `vandoxd` is a .NET 10 ASP.NET Core applic
 using the Interactive Server render mode. The solution `Vandox.slnx` holds `src/Vandox.Core` (data model, wire
 decoder, configuration, safe file access, log parsing), `src/Vandox.Storage` (SQLite), `src/Vandox.Import`
 (log import) and `src/Vandox.Backend` (host, CLI, Blazor shell, assembly name `vandoxd`), each with a test
-project under `tests/`. Everything that was backend-only in Go (`cmd/vandoxd`, `internal/logparse`,
+project under `tests/`. The shared Go packages stay in `internal/` and are only used by the agent.
+Everything that was backend-only in Go (`cmd/vandoxd`, `internal/logparse`,
 `internal/config/backend.go`) is removed.
 
 ## Consequences
@@ -43,4 +50,5 @@ project under `tests/`. Everything that was backend-only in Go (`cmd/vandoxd`, `
   binary on distroless and the container memory limit matters more.
 - Guarantees in `.squad/project.md` and the behavior in `docs/ARCHITECTURE.md` are unchanged; only the
   implementation language of the backend is.
-- The agent decision of 0005 (Go, static binary) still stands for the agent.
+- The agent stays a Go static binary; the web UI is still an own UI without Grafana, with one login (0016), and
+  rendering external data (log lines, process names) in it remains a security area (injection).
