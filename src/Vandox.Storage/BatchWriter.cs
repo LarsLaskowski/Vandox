@@ -1,3 +1,5 @@
+using System.Buffers;
+using System.Text;
 using System.Text.Json;
 
 using Microsoft.Data.Sqlite;
@@ -9,7 +11,9 @@ namespace Vandox.Storage;
 /// <summary>
 /// Holds the commands of one write transaction and inserts the records of a batch with their typed rows and their
 /// full-text index entries. It is the only code that writes log lines, which keeps <c>log_fts</c> in step with
-/// <c>log_lines</c>.
+/// <c>log_lines</c>. The parameters are created once and set by reference, and the calls are synchronous because
+/// Microsoft.Data.Sqlite runs them synchronously anyway: per record this saves the lookups by name and the asynchronous
+/// state machines, which matters on a slow host (record 0082).
 /// </summary>
 internal sealed class BatchWriter : IDisposable
 {
@@ -19,6 +23,12 @@ internal sealed class BatchWriter : IDisposable
     private readonly SqliteCommand _metric;
     private readonly SqliteCommand _logLine;
     private readonly SqliteCommand _logFts;
+    private readonly SqliteParameter[] _recordValues;
+    private readonly SqliteParameter[] _metricValues;
+    private readonly SqliteParameter[] _logLineValues;
+    private readonly SqliteParameter[] _logFtsValues;
+    private readonly ArrayBufferWriter<byte> _labelBuffer = new();
+    private readonly Utf8JsonWriter _labelWriter;
 
     #endregion // Fields
 
@@ -42,6 +52,11 @@ internal sealed class BatchWriter : IDisposable
                           transaction,
                           "INSERT INTO log_lines(record_id, log, program, pid, priority, message, truncated) VALUES ($id, $log, $program, $pid, $priority, $message, $truncated)");
         _logFts = Create(connection, transaction, "INSERT INTO log_fts(rowid, message) VALUES ($id, $message)");
+        _recordValues = Bind(_record, "$kind", "$origin", "$source", "$agent", "$seq", "$captured", "$received", "$boot", "$offset", "$data");
+        _metricValues = Bind(_metric, "$id", "$source", "$name", "$captured", "$value", "$unit", "$labels");
+        _logLineValues = Bind(_logLine, "$id", "$log", "$program", "$pid", "$priority", "$message", "$truncated");
+        _logFtsValues = Bind(_logFts, "$id", "$message");
+        _labelWriter = new Utf8JsonWriter(_labelBuffer);
     }
 
     #endregion // Constructors
@@ -49,45 +64,86 @@ internal sealed class BatchWriter : IDisposable
     #region Methods
 
     /// <summary>
+    /// Serializes metric labels as compact JSON with the keys in ordinal order, the text that is stored in <c>metrics.labels</c>.
+    /// </summary>
+    /// <param name="labels">The labels</param>
+    /// <returns>The JSON object</returns>
+    internal static string SerializeLabels(IReadOnlyDictionary<string, string> labels)
+    {
+        var buffer = new ArrayBufferWriter<byte>();
+
+        using var writer = new Utf8JsonWriter(buffer);
+
+        return SerializeLabels(labels, buffer, writer);
+    }
+
+    /// <summary>
     /// Inserts a record and its payload rows. Nothing more is written when the record is a duplicate of a stored one.
     /// </summary>
     /// <param name="batch">The batch the record belongs to</param>
     /// <param name="record">The record</param>
     /// <param name="cancellationToken">Cancels the write</param>
-    /// <returns>A task that returns <c>true</c> when the record was stored, <c>false</c> when it was a duplicate</returns>
-    internal async Task<bool> WriteAsync(RecordBatch batch, DataRecord record, CancellationToken cancellationToken)
+    /// <returns><c>true</c> when the record was stored, <c>false</c> when it was a duplicate</returns>
+    internal bool Write(RecordBatch batch, DataRecord record, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+
         var payload = record.Data!;
         var typed = payload is MetricPoint or LogLine;
 
-        Set(_record, "$kind", record.Kind);
-        Set(_record, "$origin", record.Origin);
-        Set(_record, "$source", record.Source);
-        Set(_record, "$agent", batch.AgentId.Length == 0 ? null : batch.AgentId);
-        Set(_record, "$seq", record.Origin == RecordOrigin.Agent ? (long)record.Seq : null);
-        Set(_record, "$captured", StorageTime.ToNanoseconds(record.CapturedAt));
-        Set(_record, "$received", StorageTime.ToNanoseconds(batch.ReceivedAt));
-        Set(_record, "$boot", batch.BootId.Length == 0 ? null : batch.BootId);
-        Set(_record, "$offset", batch.ClockOffsetNs);
-        Set(_record, "$data", typed ? null : PayloadRegistry.Serialize(payload));
+        _recordValues[0].Value = record.Kind;
+        _recordValues[1].Value = record.Origin;
+        _recordValues[2].Value = record.Source;
+        _recordValues[3].Value = batch.AgentId.Length == 0 ? DBNull.Value : (object)batch.AgentId;
+        _recordValues[4].Value = record.Origin == RecordOrigin.Agent ? (object)(long)record.Seq : DBNull.Value;
+        _recordValues[5].Value = StorageTime.ToNanoseconds(record.CapturedAt);
+        _recordValues[6].Value = StorageTime.ToNanoseconds(batch.ReceivedAt);
+        _recordValues[7].Value = batch.BootId.Length == 0 ? DBNull.Value : (object)batch.BootId;
+        _recordValues[8].Value = batch.ClockOffsetNs ?? (object)DBNull.Value;
+        _recordValues[9].Value = typed ? DBNull.Value : (object)PayloadRegistry.Serialize(payload);
 
-        var id = await _record.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
-
-        if (id is not long recordId)
+        if (_record.ExecuteScalar() is not long recordId)
         {
             return false;
         }
 
         if (payload is MetricPoint metric)
         {
-            await WriteMetricAsync(recordId, record, metric, cancellationToken).ConfigureAwait(false);
+            WriteMetric(recordId, record, metric);
         }
         else if (payload is LogLine line)
         {
-            await WriteLogLineAsync(recordId, line, cancellationToken).ConfigureAwait(false);
+            WriteLogLine(recordId, line);
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// Serializes labels into a reused buffer and writer.
+    /// </summary>
+    /// <param name="labels">The labels</param>
+    /// <param name="buffer">The buffer</param>
+    /// <param name="writer">The writer, which is reset to the buffer</param>
+    /// <returns>The JSON object</returns>
+    private static string SerializeLabels(IReadOnlyDictionary<string, string> labels, ArrayBufferWriter<byte> buffer, Utf8JsonWriter writer)
+    {
+        var keys = labels.Keys.ToArray();
+
+        Array.Sort(keys, StringComparer.Ordinal);
+        buffer.ResetWrittenCount();
+        writer.Reset(buffer);
+        writer.WriteStartObject();
+
+        foreach (var key in keys)
+        {
+            writer.WriteString(key, labels[key]);
+        }
+
+        writer.WriteEndObject();
+        writer.Flush();
+
+        return Encoding.UTF8.GetString(buffer.WrittenSpan);
     }
 
     /// <summary>
@@ -108,21 +164,21 @@ internal sealed class BatchWriter : IDisposable
     }
 
     /// <summary>
-    /// Sets a parameter, creating it on first use; a <c>null</c> value is stored as NULL.
+    /// Creates the parameters of a command in the given order.
     /// </summary>
     /// <param name="command">The command</param>
-    /// <param name="name">The name of the parameter</param>
-    /// <param name="value">The value</param>
-    private static void Set(SqliteCommand command, string name, object? value)
+    /// <param name="names">The names of the parameters</param>
+    /// <returns>The parameters, in the order of <paramref name="names"/></returns>
+    private static SqliteParameter[] Bind(SqliteCommand command, params string[] names)
     {
-        if (command.Parameters.Contains(name))
+        var parameters = new SqliteParameter[names.Length];
+
+        for (var index = 0; index < names.Length; index++)
         {
-            command.Parameters[name].Value = value ?? DBNull.Value;
+            parameters[index] = command.Parameters.Add(new SqliteParameter(names[index], DBNull.Value));
         }
-        else
-        {
-            command.Parameters.AddWithValue(name, value ?? DBNull.Value);
-        }
+
+        return parameters;
     }
 
     /// <summary>
@@ -131,25 +187,16 @@ internal sealed class BatchWriter : IDisposable
     /// <param name="id">The ID of the record</param>
     /// <param name="record">The record</param>
     /// <param name="metric">The metric</param>
-    /// <param name="cancellationToken">Cancels the write</param>
-    /// <returns>A task that completes when the row is written</returns>
-    private async Task WriteMetricAsync(long id, DataRecord record, MetricPoint metric, CancellationToken cancellationToken)
+    private void WriteMetric(long id, DataRecord record, MetricPoint metric)
     {
-        string? labels = null;
-
-        if (metric.Labels is { Count: > 0 })
-        {
-            labels = JsonSerializer.Serialize(new SortedDictionary<string, string>(metric.Labels, StringComparer.Ordinal));
-        }
-
-        Set(_metric, "$id", id);
-        Set(_metric, "$source", record.Source);
-        Set(_metric, "$name", metric.Name);
-        Set(_metric, "$captured", StorageTime.ToNanoseconds(record.CapturedAt));
-        Set(_metric, "$value", metric.Value);
-        Set(_metric, "$unit", metric.Unit);
-        Set(_metric, "$labels", labels);
-        await _metric.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        _metricValues[0].Value = id;
+        _metricValues[1].Value = record.Source;
+        _metricValues[2].Value = metric.Name;
+        _metricValues[3].Value = StorageTime.ToNanoseconds(record.CapturedAt);
+        _metricValues[4].Value = metric.Value;
+        _metricValues[5].Value = metric.Unit;
+        _metricValues[6].Value = metric.Labels is { Count: > 0 } ? (object)SerializeLabels(metric.Labels, _labelBuffer, _labelWriter) : DBNull.Value;
+        _metric.ExecuteNonQuery();
     }
 
     /// <summary>
@@ -157,22 +204,20 @@ internal sealed class BatchWriter : IDisposable
     /// </summary>
     /// <param name="id">The ID of the record</param>
     /// <param name="line">The log line</param>
-    /// <param name="cancellationToken">Cancels the write</param>
-    /// <returns>A task that completes when the rows are written</returns>
-    private async Task WriteLogLineAsync(long id, LogLine line, CancellationToken cancellationToken)
+    private void WriteLogLine(long id, LogLine line)
     {
-        Set(_logLine, "$id", id);
-        Set(_logLine, "$log", line.Log);
-        Set(_logLine, "$program", line.Program);
-        Set(_logLine, "$pid", (long)line.Pid);
-        Set(_logLine, "$priority", line.Priority is null ? null : (long)line.Priority.Value);
-        Set(_logLine, "$message", line.Message);
-        Set(_logLine, "$truncated", line.Truncated ? 1L : 0L);
-        await _logLine.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        _logLineValues[0].Value = id;
+        _logLineValues[1].Value = line.Log;
+        _logLineValues[2].Value = line.Program;
+        _logLineValues[3].Value = (long)line.Pid;
+        _logLineValues[4].Value = line.Priority is null ? DBNull.Value : (object)(long)line.Priority.Value;
+        _logLineValues[5].Value = line.Message;
+        _logLineValues[6].Value = line.Truncated ? 1L : 0L;
+        _logLine.ExecuteNonQuery();
 
-        Set(_logFts, "$id", id);
-        Set(_logFts, "$message", line.Message);
-        await _logFts.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        _logFtsValues[0].Value = id;
+        _logFtsValues[1].Value = line.Message;
+        _logFts.ExecuteNonQuery();
     }
 
     #endregion // Methods
@@ -186,6 +231,7 @@ internal sealed class BatchWriter : IDisposable
         _metric.Dispose();
         _logLine.Dispose();
         _logFts.Dispose();
+        _labelWriter.Dispose();
     }
 
     #endregion // IDisposable

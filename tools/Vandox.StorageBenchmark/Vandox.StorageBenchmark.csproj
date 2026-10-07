@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>Vandox.StorageBenchmark</AssemblyName>
+    <RootNamespace>Vandox.StorageBenchmark</RootNamespace>
+    <IsPackable>false</IsPackable>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Vandox.Core\Vandox.Core.csproj" />
+    <ProjectReference Include="..\..\src\Vandox.Storage\Vandox.Storage.csproj" />
+  </ItemGroup>
+
+</Project>
