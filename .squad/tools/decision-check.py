@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Decision-record gate: the records in `docs/decisions/` must be consistent and released records frozen.
 
-Checks, without arguments (an optional argument is the repository root):
+Checks, run from anywhere inside the repository (it takes no arguments):
 
 - every `docs/decisions/NNNN-title.md` has a valid `Status` (`Proposed`, `Accepted` or `Superseded by NNNN`)
   and a `Supersedes` field naming existing records;
@@ -27,12 +27,12 @@ import sys
 
 DECISIONS_DIR = os.path.join("docs", "decisions")
 RECORD_NAME = re.compile(r"^(\d{4})-.+\.md$")
-STATUS_LINE = re.compile(r"^- \*\*Status:\*\*[ \t]*(.*)$", re.MULTILINE)
-SUPERSEDES_LINE = re.compile(r"^- \*\*Supersedes:\*\*[ \t]*(.*)$", re.MULTILINE)
+STATUS_LINE = re.compile(r"^- \*\*Status:\*\*(.*)$", re.MULTILINE)
+SUPERSEDES_LINE = re.compile(r"^- \*\*Supersedes:\*\*(.*)$", re.MULTILINE)
 SUPERSEDED_BY = re.compile(r"^Superseded by (\d{4})$")
 NUMBER = re.compile(r"\b(\d{4})\b")
 INDEX_BLOCK = re.compile(r"<!-- project:begin index -->(.*?)<!-- project:end index -->", re.DOTALL)
-INDEX_ROW = re.compile(r"^\|\s*(\d{4})\s*\|(.*)\|\s*([^|]*?)\s*\|\s*[^|]*?\s*\|\s*$")
+INDEX_NUMBER = re.compile(r"^\d{4}$")
 RELEASE_TAGS = "v*"
 
 
@@ -86,6 +86,15 @@ def check_links(records, errors):
                           f"{number} under Supersedes")
 
 
+def parse_index_row(line):
+    """(number, status) of a `| NNNN | Title | Status | Date |` row, or None for any other line. The title may
+    contain pipes, so the status and the date are taken from the end of the row."""
+    cells = [cell.strip() for cell in line.strip().split("|")]
+    if len(cells) < 6 or cells[0] or cells[-1] or not INDEX_NUMBER.match(cells[1]):
+        return None
+    return cells[1], cells[-3]
+
+
 def check_index(root, records, errors):
     path = os.path.join(root, DECISIONS_DIR, "README.md")
     if not os.path.isfile(path):
@@ -98,11 +107,15 @@ def check_index(root, records, errors):
         return
     rows = {}
     for line in block.group(1).splitlines():
-        match = INDEX_ROW.match(line.strip())
-        if match:
-            if match.group(1) in rows:
-                errors.append(f"{DECISIONS_DIR}/README.md: index lists {match.group(1)} twice")
-            rows[match.group(1)] = match.group(3)
+        row = parse_index_row(line)
+        if row:
+            if row[0] in rows:
+                errors.append(f"{DECISIONS_DIR}/README.md: index lists {row[0]} twice")
+            rows[row[0]] = row[1]
+    compare_index(rows, records, errors)
+
+
+def compare_index(rows, records, errors):
     for number, record in records.items():
         if number not in rows:
             errors.append(f"{record['rel']}: missing in the index of {DECISIONS_DIR}/README.md")
@@ -117,16 +130,9 @@ def without_status(text):
     return STATUS_LINE.sub("- **Status:**", text, count=1)
 
 
-def check_freeze(root, records, errors, warnings):
-    if git(root, "rev-parse", "--git-dir") is None:
-        warnings.append("not a Git repository - released records are not checked")
-        return
-    tags = (git(root, "tag", "--list", RELEASE_TAGS) or "").split()
-    if not tags:
-        return
-    if (git(root, "rev-parse", "--is-shallow-repository") or "").strip() == "true":
-        warnings.append("shallow clone - released records are not checked (fetch the full history and tags)")
-        return
+def find_released(root, records, errors):
+    """Number -> first release tag containing the commit that added the record. An unreleased record that is
+    `Superseded` is reported."""
     released = {}
     for number, record in records.items():
         added = (git(root, "log", "--diff-filter=A", "--format=%H", "--", record["rel"]) or "").split()
@@ -138,19 +144,24 @@ def check_freeze(root, records, errors, warnings):
         elif SUPERSEDED_BY.match(record["status"]):
             errors.append(f"{record['rel']}: is not released (no '{RELEASE_TAGS}' tag contains it) and must not "
                           f"be 'Superseded' - edit the record in place or delete it")
-    for number, tag in released.items():
-        record = records[number]
-        old = git(root, "show", f"{tag}:{record['rel']}")
-        if old is None:
-            continue
-        old = old.replace("\r\n", "\n").lstrip("﻿")
-        if without_status(old) != without_status(record["text"]):
-            errors.append(f"{record['rel']}: released in {tag} and changed since - only its status may change "
-                          f"(supersede it with a new record instead)")
-        old_status = STATUS_LINE.search(old)
-        if old_status and old_status.group(1).strip() != record["status"] \
-                and not SUPERSEDED_BY.match(record["status"]):
-            errors.append(f"{record['rel']}: released in {tag}; its status may only change to 'Superseded by NNNN'")
+    return released
+
+
+def check_released_record(root, record, tag, errors):
+    old = git(root, "show", f"{tag}:{record['rel']}")
+    if old is None:
+        return
+    old = old.replace("\r\n", "\n").lstrip("\ufeff")
+    if without_status(old) != without_status(record["text"]):
+        errors.append(f"{record['rel']}: released in {tag} and changed since - only its status may change "
+                      f"(supersede it with a new record instead)")
+    old_status = STATUS_LINE.search(old)
+    if old_status and old_status.group(1).strip() != record["status"] \
+            and not SUPERSEDED_BY.match(record["status"]):
+        errors.append(f"{record['rel']}: released in {tag}; its status may only change to 'Superseded by NNNN'")
+
+
+def check_deleted(root, tags, records, errors):
     for tag in tags:
         listing = git(root, "ls-tree", "--name-only", f"{tag}:{DECISIONS_DIR.replace(os.sep, '/')}") or ""
         for name in listing.split():
@@ -160,8 +171,23 @@ def check_freeze(root, records, errors, warnings):
                               f"is never deleted")
 
 
+def check_freeze(root, records, errors, warnings):
+    if git(root, "rev-parse", "--git-dir") is None:
+        warnings.append("not a Git repository - released records are not checked")
+        return
+    tags = (git(root, "tag", "--list", RELEASE_TAGS) or "").split()
+    if not tags:
+        return
+    if (git(root, "rev-parse", "--is-shallow-repository") or "").strip() == "true":
+        warnings.append("shallow clone - released records are not checked (fetch the full history and tags)")
+        return
+    for number, tag in find_released(root, records, errors).items():
+        check_released_record(root, records[number], tag, errors)
+    check_deleted(root, tags, records, errors)
+
+
 def main():
-    root = sys.argv[1] if len(sys.argv) > 1 else (git(".", "rev-parse", "--show-toplevel") or ".").strip()
+    root = (git(".", "rev-parse", "--show-toplevel") or ".").strip()
     errors, warnings = [], []
     records = load_records(root, errors)
     check_links(records, errors)

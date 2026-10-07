@@ -188,18 +188,21 @@ def check_project_files(errors):
             errors.append(f"{path}:{line}: template placeholder '{{{{TODO: {first}}}}}' not filled in")
 
 
+ERROR_PREFIX = "ERROR: "
+
+
 def check_decisions(errors):
     script = os.path.join(SQUAD_DIR, "tools", "decision-check.py")
     if not os.path.isfile(script):
         errors.append(f"{script} is missing (written by adopt-template)")
         return
-    result = subprocess.run([sys.executable, script, "."], capture_output=True, text=True, encoding="utf-8")
+    result = subprocess.run([sys.executable, script], capture_output=True, text=True, encoding="utf-8")
+    findings = [line[len(ERROR_PREFIX):] for line in result.stdout.splitlines() if line.startswith(ERROR_PREFIX)]
+    errors.extend(findings)
     for line in result.stdout.splitlines():
-        if line.startswith("ERROR: "):
-            errors.append(line[len("ERROR: "):])
-        elif line.startswith("WARNING: "):
+        if line.startswith("WARNING: "):
             print(line)
-    if result.returncode != 0 and not any(line.startswith("ERROR: ") for line in result.stdout.splitlines()):
+    if result.returncode != 0 and not findings:
         errors.append(f"{script} failed: {result.stderr.strip() or 'no output'}")
 
 
