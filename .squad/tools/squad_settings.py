@@ -10,7 +10,7 @@ SOLUTION = "Vandox.slnx"
 # Coverage gate (.squad/tools/coverage-check.py)
 COVERAGE_REPORTS = [
     ("cobertura", "TestResults/go/coverage.cobertura.xml"),  # Go agent, converted from coverage.out
-    ("cobertura", "TestResults/**/coverage.cobertura.xml"),  # every .NET test project (coverlet), merged
+    ("cobertura", "TestResults/*-*-*-*-*/coverage.cobertura.xml"),  # every .NET test project (coverlet), merged
 ]
 COVERAGE_PATHSPECS = ["*.go", "*.cs", "*.razor"]
 COVERAGE_EXCLUDES = ["*_test.go", "tests/*", "**/obj/*"]
