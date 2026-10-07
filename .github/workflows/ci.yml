@@ -64,7 +64,7 @@ jobs:
           dotnet restore Vandox.slnx
 
       - name: Format check
-        run: dotnet tool run reihitsu-format --check src tests
+        run: dotnet tool run reihitsu-format --check src tests tools
 
       # TreatWarningsAsErrors (Directory.Build.props) turns every analyzer diagnostic, info level included,
       # into a build error (Reihitsu.Analyzer and SonarAnalyzer.CSharp).

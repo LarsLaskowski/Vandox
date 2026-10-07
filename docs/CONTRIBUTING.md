@@ -30,7 +30,7 @@ dotnet run --project src/Vandox.Backend -- --version
 
 The agent only prints its version so far; the backend loads its configuration, opens its database, serves the
 web UI shell and `/healthz`, and imports logs. Format before building:
-`gofmt -w . && reihitsu-format src tests`.
+`gofmt -w . && reihitsu-format src tests tools`.
 
 ### Running tests
 

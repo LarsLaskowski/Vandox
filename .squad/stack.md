@@ -25,7 +25,7 @@ repository (record 0074): keep it true when the build changes.
   `foo_test.go` next to `foo.go`.
 - .NET (backend): `src/Vandox.Core` (model, wire decoder, configuration, safe file access, log parsing),
   `src/Vandox.Storage`, `src/Vandox.Import`, `src/Vandox.Backend` (host, CLI, Blazor; assembly `vandoxd`).
-  Tests in `tests/<Project>.Tests`, mirroring the namespace and file of the class under test
+  `tools/Vandox.StorageBenchmark` (console program for the storage write measurement, `docs/BENCHMARKS.md`). Tests in `tests/<Project>.Tests`, mirroring the namespace and file of the class under test
   (`Foo.cs` → `FooTests.cs`).
 - Shared by both: `testdata/` (including the golden wire batch `testdata/wire/all-kinds.jsonl`, record 0075).
 
@@ -34,8 +34,8 @@ repository (record 0074): keep it true when the build changes.
 | Name | Command |
 | ---- | ------- |
 | *Restore* | `go mod download && dotnet tool restore && dotnet restore Vandox.slnx` |
-| *Format* (Code Officer only in the squad) | `gofmt -w . && reihitsu-format src tests` (or `dotnet tool run reihitsu-format src tests`) |
-| *Format check* | `test -z "$(gofmt -l .)" && reihitsu-format --check src tests` |
+| *Format* (Code Officer only in the squad) | `gofmt -w . && reihitsu-format src tests tools` (or `dotnet tool run reihitsu-format src tests tools`) |
+| *Format check* | `test -z "$(gofmt -l .)" && reihitsu-format --check src tests tools` |
 | *Build* | `go build ./... && dotnet build Vandox.slnx` |
 | *Test* | `go test ./... -race && dotnet test Vandox.slnx` |
 | *Single test* | Go: `go test ./<package> -run '^TestName$'`; .NET: `dotnet test tests/<Project>.Tests --filter <ClassOrMethodName>` |

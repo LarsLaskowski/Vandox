@@ -68,6 +68,64 @@ public class SqliteStoreWriteTests
     }
 
     /// <summary>
+    /// Values that are absent are stored as NULL even when the previous record of the batch had a value: the writer reuses its parameters.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task SqliteStoreWriteBatchStoresAbsentValuesAsNullAfterPresentOnes()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+
+        var withoutPriority = Samples.Log(RecordOrigin.Backend, 0, 1, "second");
+
+        ((LogLine)withoutPriority.Data!).Priority = null;
+
+        await using (var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken))
+        {
+            // Act
+            var result = await store.WriteBatchAsync(Samples.Batch(Samples.Log(RecordOrigin.Backend, 0, 0, "first"), withoutPriority, Samples.Metric(RecordOrigin.Backend, 0, 2, "cpu"), Samples.Gap(3), Samples.Metric(RecordOrigin.Backend, 0, 4, "mem")), TestContext.CancellationToken);
+
+            // Assert
+            Assert.AreEqual(new WriteResult(5, 0), result, "all records stored");
+        }
+
+        await using var connection = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={Path.Combine(directory.Path, "vandox.db")};Mode=ReadOnly");
+
+        await connection.OpenAsync(TestContext.CancellationToken);
+
+        Assert.AreEqual(1L, await CountAsync(connection, "log_lines WHERE priority IS NULL"), "log line without priority");
+        Assert.AreEqual(1L, await CountAsync(connection, "log_lines WHERE priority IS NOT NULL"), "log line with priority");
+        Assert.AreEqual(5L, await CountAsync(connection, "records WHERE agent_id IS NULL AND boot_id IS NULL AND clock_offset_ns IS NULL AND seq IS NULL"), "no agent, boot, offset and sequence number");
+        Assert.AreEqual(4L, await CountAsync(connection, "records WHERE data IS NULL"), "typed records keep no JSON payload");
+        Assert.AreEqual(1L, await CountAsync(connection, "records WHERE data IS NOT NULL"), "the gap keeps its JSON payload");
+        Assert.AreEqual(1L, await CountAsync(connection, "metrics WHERE name = 'mem' AND labels IS NOT NULL"), "labels of the metric after the gap");
+    }
+
+    /// <summary>
+    /// The writer checks for cancellation before every record and writes nothing after it.
+    /// </summary>
+    [TestMethod]
+    public void BatchWriterWriteStopsOnCancellation()
+    {
+        // Arrange
+        using var connection = new Microsoft.Data.Sqlite.SqliteConnection("Data Source=:memory:");
+
+        connection.Open();
+
+        using var transaction = connection.BeginTransaction();
+        using var writer = new BatchWriter(connection, transaction);
+        using var cancelled = new CancellationTokenSource();
+
+        cancelled.Cancel();
+
+        var batch = Samples.Batch(Samples.Metric(RecordOrigin.Backend, 0, 0, "cpu"));
+
+        // Act and assert
+        Assert.ThrowsExactly<OperationCanceledException>(() => writer.Write(batch, batch.Records[0], cancelled.Token), "cancelled write");
+    }
+
+    /// <summary>
     /// A resent agent record is counted as a duplicate and never overwrites the stored one.
     /// </summary>
     /// <returns>A task that completes when the test is done</returns>
@@ -309,6 +367,23 @@ public class SqliteStoreWriteTests
                 ((MetricPoint)batch.Records[0].Data!).Name = string.Empty;
                 break;
         }
+    }
+
+    /// <summary>
+    /// Counts the rows of a table that match a condition.
+    /// </summary>
+    /// <param name="connection">The open connection</param>
+    /// <param name="fromWhere">The table and the condition, after <c>FROM</c></param>
+    /// <returns>The number of rows</returns>
+    private async Task<long> CountAsync(Microsoft.Data.Sqlite.SqliteConnection connection, string fromWhere)
+    {
+        await using var command = connection.CreateCommand();
+
+#pragma warning disable CA2100
+        command.CommandText = $"SELECT COUNT(*) FROM {fromWhere}";
+#pragma warning restore CA2100
+
+        return (long)(await command.ExecuteScalarAsync(TestContext.CancellationToken))!;
     }
 
     #endregion // Methods
