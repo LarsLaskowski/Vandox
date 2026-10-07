@@ -14,6 +14,10 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, II
     private const int MaxReaders = 4;
     private const string CommonPragmas = "PRAGMA busy_timeout=5000; PRAGMA foreign_keys=1; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;";
 
+    // The writer connection holds up to 16 MiB of pages (the default is 2 MiB), so a large transaction does not spill pages to the
+    // file system before the commit; the readers keep the default (record 0082).
+    private const string WriterPragmas = CommonPragmas + " PRAGMA cache_size=-16384;";
+
     #endregion // Constants
 
     #region Fields
@@ -100,7 +104,7 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, II
         try
         {
             await writer.OpenAsync(cancellationToken).ConfigureAwait(false);
-            await ExecuteAsync(writer, CommonPragmas, cancellationToken).ConfigureAwait(false);
+            await ExecuteAsync(writer, WriterPragmas, cancellationToken).ConfigureAwait(false);
             await RequireWalAsync(writer, cancellationToken).ConfigureAwait(false);
             await SchemaMigrator.MigrateAsync(writer, cancellationToken).ConfigureAwait(false);
 

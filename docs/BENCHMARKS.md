@@ -33,7 +33,7 @@ dotnet publish tools/Vandox.StorageBenchmark -c Release -o publish -p:DebugType=
 ```
 
 On the reference host (runtime only), with an existing folder on the data volume; the program creates its database in a
-subfolder and removes it afterwards:
+subfolder and removes it afterwards, and first prints how long a 4 KiB write takes to reach the disk on that volume:
 
 ```bash
 dotnet publish/Vandox.StorageBenchmark.dll /volume1/<folder on the data volume> [--batches N] [--size N] [--warmup]
@@ -54,9 +54,10 @@ VANDOX_BENCHMARK=1 dotnet test tests/Vandox.Storage.Tests --filter WriteThroughp
 | before [0082](decisions/0082-storage-writer-cached-parameters-and-synchronous-calls.md) | development host (4 vCPU) | Intel Xeon 2.10 GHz | 2026-10-07 | 499–679 | 277–584 (median 309–390) |
 | before 0082 | DS918+ (reference host, Linux 4.4, .NET 10.0.10, `/volume2`) | Celeron J3455 | 2026-10-07 | **1480** | 890–1119 (median 1085) |
 | after 0082 | development host (4 vCPU) | Intel Xeon 2.10 GHz | 2026-10-07 | 285–329 | 242–368 (median 272–320) |
-| after 0082 | DS918+ (reference host) | Celeron J3455 | pending, issue #129 | pending | pending |
+| after 0082 (cached parameters, synchronous calls) | DS918+ (reference host) | Celeron J3455 | 2026-10-07 | **1043** | 797–1004 (median 925) |
+| after 0082 (and writer page cache of 16 MiB) | DS918+ (reference host) | Celeron J3455 | pending, issue #129 | pending | pending |
 
 The development-host rows are not the reference host. With the writer before 0082 the criterion was **not met** on the DS918+
-(1480 ms for the first batch). The row after 0082 is pending: issue #129 stays open until it is filled in. If it still takes
+(1480 ms for the first batch), and with the first part of 0082 it was still just over the limit (1043 ms). The last row is pending: issue #129 stays open until it is filled in. If it still takes
 longer than one second there, the next candidates are listed in 0082; the FTS5 remedy of record 0063 (option c) does not apply,
 because this measurement writes no log lines.

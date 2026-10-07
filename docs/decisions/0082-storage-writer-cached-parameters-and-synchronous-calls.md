@@ -32,16 +32,21 @@ Option 1. `BatchWriter` holds its `SqliteParameter` objects and sets their value
 ordinal order, so stored rows do not change). The criterion of #14 stays as it is; the benchmark tool gets `--warmup` to show how much
 of the first batch is start-up cost.
 
-Tried and not adopted: runtime switches (`TieredPGO` on or off, `ReadyToRun` on the dev host) changed nothing measurable; a larger
-SQLite page cache (`cache_size` 16 MiB) made the fastest batch about 18 % faster on the dev host but the medians were within the noise and it
-costs memory per connection in a 512 MiB container, so it is a candidate only if the NAS measurement asks for it.
+The first measurement after this change on the DS918+ (writer without the page cache below) gave 1043 ms for the first batch and
+797 to 1004 ms for the others (median 925 ms): 30 % better, still just over the limit. The writer connection (only that one; the readers keep
+the default) therefore also gets `PRAGMA cache_size=-16384`, up to 16 MiB of pages instead of 2 MiB, so a large transaction does not spill pages
+before the commit; on the development host this made the fastest batch about 18 % faster, the medians were within the noise. The benchmark tool
+now also prints how long a 4 KiB write takes to reach the disk on the volume, to show whether waiting for the disk plays a part.
+
+Tried and not adopted: runtime switches (`TieredPGO` on or off, `ReadyToRun` on the dev host) changed nothing measurable.
 
 ## Consequences
 
-- On the development host the first batch dropped from about 500 ms to about 290 ms and the median from 310–390 ms to 270–320 ms.
-  Whether that is enough on the NAS is open: scaled by the factor of three it is around the limit, so the NAS has to be measured
-  again (`docs/BENCHMARKS.md`); if it still fails, the next candidates are the page cache, `ReadyToRun` in the image, and then a
-  recorded change of the criterion.
+- On the development host the first batch dropped from about 500 ms to about 290 ms and the median from 310–390 ms to 270–320 ms; on
+  the NAS from 1480 to 1043 ms. The NAS has to be measured again with the page cache (`docs/BENCHMARKS.md`); if it still fails, the
+  next candidates are `ReadyToRun` in the image, a look at the schema's four index entries per metric record, and then a recorded
+  change of the criterion.
+- The page cache costs up to 16 MiB of memory for the single writer connection, which fits the 512 MiB limit of the container.
 - The writer no longer awaits per statement, so a very large batch holds the writer thread for its whole duration (it did before
   as well, because SQLite is synchronous); cancellation is still honored between records.
 - The first NAS result is kept in `docs/BENCHMARKS.md` as the baseline.

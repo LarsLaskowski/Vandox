@@ -21,6 +21,7 @@ public static class Program
     private const int DefaultSize = 10000;
     private const int UsageError = 2;
     private const int WarmupSize = 1000;
+    private const int ProbeRounds = 15;
 
     #endregion // Constants
 
@@ -138,6 +139,10 @@ public static class Program
             Console.WriteLine($"{RuntimeInformation.OSDescription}; {RuntimeInformation.FrameworkDescription}; {Environment.ProcessorCount} logical CPUs");
             Console.WriteLine($"database below {directory}; {batches} batches of {size} metric points, one transaction each");
 
+            var flush = await ProbeFlushAsync(work, cancellationToken).ConfigureAwait(false);
+
+            Console.WriteLine(string.Create(CultureInfo.InvariantCulture, $"flush to disk of a 4 KiB write on this volume: median {flush:F1} ms (a transaction waits for at least one such flush)"));
+
             await using (var store = await SqliteStore.OpenAsync(work, cancellationToken).ConfigureAwait(false))
             {
                 var seq = 1UL;
@@ -174,6 +179,36 @@ public static class Program
             Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
             Directory.Delete(work, true);
         }
+    }
+
+    /// <summary>
+    /// Measures how long a 4 KiB write takes to reach the disk on the volume, which shows how much of a transaction is waiting for it.
+    /// </summary>
+    /// <param name="work">The working folder on the volume</param>
+    /// <param name="cancellationToken">Interrupts the measurement</param>
+    /// <returns>The median time in milliseconds</returns>
+    private static async Task<double> ProbeFlushAsync(string work, CancellationToken cancellationToken)
+    {
+        var path = Path.Combine(work, "flush-probe");
+        var block = new byte[4096];
+        var times = new List<double>();
+
+        await using (var file = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.None, 1, FileOptions.None))
+        {
+            for (var index = 0; index < ProbeRounds; index++)
+            {
+                var watch = Stopwatch.StartNew();
+
+                await file.WriteAsync(block, cancellationToken).ConfigureAwait(false);
+                file.Flush(true);
+                watch.Stop();
+                times.Add(watch.Elapsed.TotalMilliseconds);
+            }
+        }
+
+        File.Delete(path);
+
+        return times.Order().ElementAt(times.Count / 2);
     }
 
     /// <summary>
