@@ -22,6 +22,7 @@ public static class Program
     private const int UsageError = 2;
     private const int WarmupSize = 1000;
     private const int ProbeRounds = 15;
+    private const double CriterionMilliseconds = 1000;
 
     #endregion // Constants
 
@@ -171,8 +172,18 @@ public static class Program
 
             var sorted = times.Order().ToList();
 
-            Console.WriteLine(string.Create(CultureInfo.InvariantCulture, $"first counted batch{(warmup ? " (after the warm-up)" : " (fresh database)")}: {times[0]:F0} ms; fastest: {sorted[0]:F0} ms; median: {sorted[sorted.Count / 2]:F0} ms; slowest: {sorted[^1]:F0} ms"));
-            Console.WriteLine(times[0] < 1000 ? "criterion of issue #14 (under 1000 ms for the first counted batch): met" : "criterion of issue #14 (under 1000 ms for the first counted batch): NOT met");
+            var median = sorted[sorted.Count / 2];
+
+            Console.WriteLine(string.Create(CultureInfo.InvariantCulture, $"first counted batch{(warmup ? " (after the warm-up)" : " (fresh database)")}: {times[0]:F0} ms; fastest: {sorted[0]:F0} ms; median: {median:F0} ms; slowest: {sorted[^1]:F0} ms"));
+
+            if (batches == DefaultBatches && size == DefaultSize)
+            {
+                Console.WriteLine(median < CriterionMilliseconds ? "criterion of issue #14 (median of five batches under 1000 ms): met" : "criterion of issue #14 (median of five batches under 1000 ms): NOT met");
+            }
+            else
+            {
+                Console.WriteLine($"no verdict: the criterion is the median of {DefaultBatches} batches of {DefaultSize} records");
+            }
         }
         finally
         {

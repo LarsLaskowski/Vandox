@@ -54,7 +54,7 @@ Tried and not adopted: runtime switches (`TieredPGO` on or off, `ReadyToRun` on 
   host. The first batch is about 250 ms slower than the others (fresh file, start-up); the criterion names exactly that batch, so
   the criterion is restated in [0083](0083-storage-write-criterion-is-the-median-of-five-batches-on-the-data-volume.md).
 - On the HDD volume the same build took 1171 ms for the first batch and 1079 to 1471 ms for the others; a 4 KiB write needs about
-  122 ms to reach that disk, against about 10 ms on the SSD. The batches take 300 to 450 ms longer than on the SSD, so on the HDD the waiting
+  122 ms to reach that disk, against about 10 ms on the SSD. The median is about 390 ms higher than on the SSD (1171 against 783 ms), so on the HDD the waiting
   for the disk is a real part of a transaction, in line with several flushes per commit. `PRAGMA synchronous=FULL` (record 0065) is the setting that
   makes each commit wait; `NORMAL` in WAL mode would flush only at checkpoints and risks losing the last committed transactions on a power
   failure (no corruption), so changing it is a decision for the Product Manager and needs its own record; it was not made. The simplest remedy is to keep the

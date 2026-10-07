@@ -32,6 +32,7 @@ src/Vandox.Core/    record model, wire decoder, configuration, safe file access,
 src/Vandox.Storage/ SQLite store: schema, migrations, batched writes, queries, log search
 src/Vandox.Import/  log import: scanner, archives, resumable batches
 tests/              one test project per project under src/
+tools/              console programs for developers, e.g. the storage write benchmark (docs/BENCHMARKS.md)
 Vandox.slnx         the .NET solution
 deploy/agent/       deployment files for the agent
 deploy/backend/     deployment files for the backend

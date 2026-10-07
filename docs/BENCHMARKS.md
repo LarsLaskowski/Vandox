@@ -62,7 +62,7 @@ VANDOX_BENCHMARK=1 dotnet test tests/Vandox.Storage.Tests --filter WriteThroughp
 
 Outcome against the restated criterion on the DS918+: **met on the SSD volume** (median 783 ms, 12,800 records/s in a steady state) and **not met on the
 HDD volume** (median 1171 ms, about 8,500 records/s). A 4 KiB write needs about 10 ms to reach the disk on the SSD and about 122 ms on the HDD: on the
-SSD the writer is CPU-bound, on the HDD the batches take 300 to 450 ms longer because each commit waits for the disk. The database can be put on
+SSD the writer is CPU-bound, on the HDD the median is about 390 ms higher (1171 against 783 ms) because each commit waits for the disk. The database can be put on
 either volume; the HDD works too, with the slower writes shown here, which is far above what the agent sends (hundreds of records per minute). The
 first batch is about 250 ms slower than the later ones on the SSD (fresh file, start-up); with the unchanged writer it was 1480 ms. `ReadyToRun`
 made no difference on the development host. The FTS5 remedy of record 0063 (option c) does not apply, because this measurement writes no log lines.
