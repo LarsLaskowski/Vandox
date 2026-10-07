@@ -93,23 +93,58 @@ public class TarHeaderGuardStreamTests
     }
 
     /// <summary>
-    /// A size record of a PAX header replaces the size field, so the guard stays in step with the tar reader and still
-    /// sees a metadata header that sits where the size field would have skipped to.
+    /// A PAX header (entry or global) with a size record is refused, however the value is written, because the tar reader
+    /// and the guard could otherwise disagree about where the next header starts.
     /// </summary>
+    /// <param name="type">The type flag of the PAX header</param>
+    /// <param name="text">The records</param>
     /// <returns>A task that completes when the test is done</returns>
     [TestMethod]
-    public async Task TarHeaderGuardStreamFollowsPaxSizeRecord()
+    [DataRow('x', "10 size=0\n")]
+    [DataRow('x', "13 size= 1024\n")]
+    [DataRow('x', "13 size=+1024\n")]
+    [DataRow('x', "9 size=\n")]
+    [DataRow('g', "17 size=1000000000\n")]
+    [DataRow('x', "21 path=a\n12 size=5\n")]
+    public async Task TarHeaderGuardStreamRefusesPaxSizeRecord(char type, string text)
     {
         // Arrange
         var stream = new MemoryStream();
-        var record = Encoding.ASCII.GetBytes("10 size=0\n");
+        var record = Encoding.ASCII.GetBytes(text);
+        var padded = new byte[512];
+
+        record.CopyTo(padded, 0);
+
+        await stream.WriteAsync(Header("pax", type, OctalSize(record.Length)), TestContext.CancellationToken);
+        await stream.WriteAsync(padded, TestContext.CancellationToken);
+        await stream.WriteAsync(Header("file", '0', OctalSize(0)), TestContext.CancellationToken);
+        stream.Position = 0;
+
+        await using var guard = new TarHeaderGuardStream(stream);
+        var buffer = new byte[4096];
+
+        // Act and assert
+        await Assert.ThrowsExactlyAsync<TarSizeRecordException>(async () => await DrainAsync(guard, buffer, TestContext.CancellationToken));
+    }
+
+    /// <summary>
+    /// A PAX header without a size record passes, and the size field of the entry after it decides where the next header starts.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task TarHeaderGuardStreamPassesPaxHeaderWithoutSizeRecord()
+    {
+        // Arrange
+        var stream = new MemoryStream();
+        var record = Encoding.ASCII.GetBytes("27 path=var/log/size.log\n");
         var padded = new byte[512];
 
         record.CopyTo(padded, 0);
 
         await stream.WriteAsync(Header("pax", 'x', OctalSize(record.Length)), TestContext.CancellationToken);
         await stream.WriteAsync(padded, TestContext.CancellationToken);
-        await stream.WriteAsync(Header("file", '0', OctalSize(2048)), TestContext.CancellationToken);
+        await stream.WriteAsync(Header("file", '0', OctalSize(512)), TestContext.CancellationToken);
+        await stream.WriteAsync(new byte[512], TestContext.CancellationToken);
         await stream.WriteAsync(Header("bomb", 'x', OctalSize(1500000000)), TestContext.CancellationToken);
         stream.Position = 0;
 

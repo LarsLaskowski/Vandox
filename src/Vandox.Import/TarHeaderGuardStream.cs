@@ -5,7 +5,7 @@ namespace Vandox.Import;
 /// <summary>
 /// A forward-only view of a tar stream that follows the 512-byte block structure and refuses an extended header
 /// (PAX <c>x</c> and <c>g</c>, GNU long name <c>L</c> and long link <c>K</c>) that declares more than
-/// <see cref="ImportLimits.MaxTarMetadataBytes"/>. The tar reader allocates the size a header declares, so without
+/// <see cref="ImportLimits.MaxTarMetadataBytes"/>, and a PAX header that mentions <c>size</c>. The tar reader allocates the size a header declares, so without
 /// the check a few kilobytes of input could ask for gigabytes of memory.
 /// </summary>
 internal sealed class TarHeaderGuardStream : FilterStream
@@ -27,9 +27,6 @@ internal sealed class TarHeaderGuardStream : FilterStream
     private byte[]? _collected;
     private int _collectedFilled;
     private long _afterCollect;
-    private bool _collectsGlobal;
-    private long? _entrySize;
-    private long? _globalSize;
 
     #endregion // Fields
 
@@ -92,57 +89,6 @@ internal sealed class TarHeaderGuardStream : FilterStream
     }
 
     /// <summary>
-    /// Reads the <c>size</c> record of the data of a PAX extended header (<c>length key=value\n</c> records).
-    /// </summary>
-    /// <param name="data">The data of the extended header</param>
-    /// <returns>The size; <c>null</c> when there is no valid record</returns>
-    private static long? ReadPaxSize(ReadOnlySpan<byte> data)
-    {
-        long? size = null;
-        var position = 0;
-
-        while (position < data.Length)
-        {
-            var space = data[position..].IndexOf((byte)' ');
-            var length = 0L;
-
-            if (space <= 0 || space > 10 || ParseNumber(data.Slice(position, space), out length) is null)
-            {
-                break;
-            }
-
-            if (length <= space + 1 || position + length > data.Length)
-            {
-                break;
-            }
-
-            var record = System.Text.Encoding.UTF8.GetString(data.Slice(position + space + 1, (int)length - space - 1)).TrimEnd('\n');
-
-            if (record.StartsWith("size=", StringComparison.Ordinal))
-            {
-                size = long.TryParse(record.AsSpan(5), NumberStyles.None, CultureInfo.InvariantCulture, out var value) ? value : 0;
-            }
-
-            position += (int)length;
-        }
-
-        return size;
-    }
-
-    /// <summary>
-    /// Parses ASCII decimal digits.
-    /// </summary>
-    /// <param name="text">The digits</param>
-    /// <param name="value">The number</param>
-    /// <returns>The number, or <c>null</c> when the text is not a number</returns>
-    private static long? ParseNumber(ReadOnlySpan<byte> text, out long value)
-    {
-        var parsed = long.TryParse(System.Text.Encoding.ASCII.GetString(text), NumberStyles.None, CultureInfo.InvariantCulture, out value);
-
-        return parsed ? value : null;
-    }
-
-    /// <summary>
     /// Returns the number of bytes a data section of <paramref name="size"/> bytes occupies, padded to whole blocks.
     /// </summary>
     /// <param name="size">The size</param>
@@ -174,7 +120,6 @@ internal sealed class TarHeaderGuardStream : FilterStream
                 {
                     _collected = new byte[size];
                     _collectedFilled = 0;
-                    _collectsGlobal = type == (byte)'g';
                     _afterCollect = Padded(size) - size;
                 }
                 else
@@ -186,35 +131,29 @@ internal sealed class TarHeaderGuardStream : FilterStream
             return;
         }
 
-        // A size record of a preceding PAX header replaces the size field, as it does for the tar reader.
-        var effective = _entrySize ?? _globalSize ?? size;
-
-        _entrySize = null;
-
-        if (HasData(type) && effective > 0)
+        if (HasData(type) && size > 0)
         {
-            _skip = Padded(effective);
+            _skip = Padded(size);
         }
     }
 
     /// <summary>
-    /// Takes the size record of a collected PAX header.
+    /// Examines the data of a collected PAX header. A <c>size</c> record would replace the size field of the next entry
+    /// for the tar reader, and the two ways of reading it are easy to put out of step (leading signs and spaces, empty
+    /// values, global headers); the import does not support such archives, so the size field is the only source of truth.
     /// </summary>
+    /// <exception cref="TarSizeRecordException">The data holds a size record</exception>
     private void FinishCollecting()
     {
-        var size = ReadPaxSize(_collected ?? []);
-
-        if (_collectsGlobal)
-        {
-            _globalSize = size ?? _globalSize;
-        }
-        else
-        {
-            _entrySize = size ?? _entrySize;
-        }
+        var data = _collected ?? [];
 
         _collected = null;
         _skip = _afterCollect;
+
+        if (data.AsSpan().IndexOf(" size="u8) >= 0)
+        {
+            throw new TarSizeRecordException();
+        }
     }
 
     #endregion // Methods

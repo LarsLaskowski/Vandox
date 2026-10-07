@@ -35,3 +35,6 @@ import runs in two passes with batches that resume by count, keyed by the SHA-25
 - The NAS kernel fallback is weaker than `openat2` (the application checks the path, the kernel does not enforce it,
   and a link swapped in between check and open is not caught) and is stated openly in `.squad/project.md`; the
   tests of `SecureRoot` and of the importer run both paths (`SecureRoot.OpenWithoutKernelResolution`).
+- A tar entry with a PAX `size` record (files above 8 GiB, or a hostile archive) is refused with a reason: the tar reader
+  allocates what extended headers declare, and a guard that mirrored the reader's size handling could be put out of step
+  by crafted values, so `TarHeaderGuardStream` trusts only the size field of each header and caps extended headers at 1 MiB.
