@@ -22,6 +22,7 @@
 # the binding on this host's tailnet address (record 0017). Until then the ingest listener serves nothing.
 #
 # A bind-mounted data directory (instead of the named volume) must be owned by 65532.
+# Prefer an SSD for the data (every committed batch waits for the disk); a hard disk works, too, with slower writes.
 # The Docker image has no Tailscale prerequisite yet.
 name: vandox
 

@@ -109,4 +109,5 @@ links the record.
 | [0080](0080-backend-image-on-the-chiseled-aspnet-runtime.md) | The backend image runs on the chiseled ASP.NET runtime, built by the .NET SDK image, both pinned by digest | Accepted | 2026-10-06 |
 | [0081](0081-backend-host-two-listeners-json-logs-blazor-interactive-server.md) | The backend host: two labelled Kestrel listeners, JSON logs, Blazor Interactive Server | Accepted | 2026-10-06 |
 | [0082](0082-storage-writer-cached-parameters-and-synchronous-calls.md) | The storage writer sets cached parameters and calls SQLite synchronously after the first NAS measurement | Accepted | 2026-10-07 |
+| [0083](0083-storage-write-criterion-is-the-median-of-five-batches-on-the-data-volume.md) | The storage write criterion is the median of five batches on the volume that holds the database | Accepted | 2026-10-07 |
 <!-- project:end index -->

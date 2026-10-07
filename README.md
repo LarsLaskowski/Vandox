@@ -224,6 +224,8 @@ the access control (record 0060).
 The ingest port (8081) is not published yet: the ingest API arrives with issue #40, which adds the binding on
 the host's tailnet address. The database lives in the named volume `vandox-data` (`/data` in the container,
 owned by 65532); a bind-mounted data directory instead of the volume must be owned by 65532 as well.
+Put the data directory on fast storage, an SSD if the host has one: every committed batch waits for the disk, and on a hard disk
+writes take about 50 % longer in the measurement of 10,000 records per transaction (`docs/BENCHMARKS.md`); a hard disk works, too.
 
 ### Import logs
 
