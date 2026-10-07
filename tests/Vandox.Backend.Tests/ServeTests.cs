@@ -185,7 +185,7 @@ public class ServeTests
         var code = await run.WaitAsync(TimeSpan.FromSeconds(20), TestContext.CancellationToken);
 
         // Assert
-        Assert.AreEqual(2, addresses.Count, "two listeners");
+        Assert.HasCount(2, addresses, "two listeners");
         Assert.AreEqual(HttpStatusCode.OK, healthy.StatusCode, "healthy");
         Assert.AreEqual(0, code, "the run ends cleanly");
         Assert.IsTrue(broken.StatusCode is HttpStatusCode.OK or HttpStatusCode.ServiceUnavailable, "the check answers after the database file is gone");

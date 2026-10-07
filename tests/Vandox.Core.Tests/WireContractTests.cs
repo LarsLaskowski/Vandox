@@ -50,7 +50,7 @@ public class WireContractTests
 
         var expected = new[] { RecordKind.Metric, RecordKind.ProcessSnapshot, RecordKind.ConnectionSnapshot, RecordKind.ServiceState, RecordKind.MariaDbStatus, RecordKind.KernelEvent, RecordKind.KernelEvent, RecordKind.LogLine, RecordKind.Gap };
 
-        CollectionAssert.AreEqual(expected, kinds, "kinds in order");
+        Assert.AreSequenceEqual(expected, kinds, "kinds in order");
     }
 
     #endregion // Methods

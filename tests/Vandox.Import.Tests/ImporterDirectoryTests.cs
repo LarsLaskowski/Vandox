@@ -50,7 +50,7 @@ public class ImporterDirectoryTests
         Assert.AreEqual(LineParser.Base.AddSeconds(1), run.Summary.First, "first capture time");
         Assert.AreEqual(LineParser.Base.AddSeconds(3), run.Summary.Last, "last capture time");
         Assert.AreEqual("test", run.Summary.Files[0].SourceType, "source type");
-        Assert.AreEqual(6, harness.Store.Records.Count, "records in the store");
+        Assert.HasCount(6, harness.Store.Records, "records in the store");
         Assert.IsFalse(run.Summary.Interrupted, "not interrupted");
         Assert.AreEqual(harness.Clock.GetUtcNow(), run.Summary.Started, "start time");
     }
@@ -76,7 +76,7 @@ public class ImporterDirectoryTests
         Assert.AreEqual(1, first.Summary.Count(ImportOutcome.Imported), "the first of two identical files is imported");
         Assert.AreEqual(1, first.Summary.Count(ImportOutcome.AlreadyImported), "the copy is the same content");
         Assert.AreEqual(2, second.Summary.Count(ImportOutcome.AlreadyImported), "a second run imports nothing");
-        Assert.AreEqual(4, harness.Store.Records.Count, "records are stored once");
+        Assert.HasCount(4, harness.Store.Records, "records are stored once");
     }
 
     /// <summary>
@@ -118,7 +118,7 @@ public class ImporterDirectoryTests
         var run = await harness.RunAsync(TestContext.CancellationToken, path);
 
         // Assert
-        Assert.AreEqual(1, run.Summary.Files.Count, "one file");
+        Assert.HasCount(1, run.Summary.Files, "one file");
         Assert.AreEqual("only.log", run.Summary.Files[0].Path, "display path");
         Assert.AreEqual(2L, run.Summary.Records, "records");
     }
@@ -205,7 +205,7 @@ public class ImporterDirectoryTests
         Assert.AreEqual("symbolic link (not followed)", reasons["file-link.log"], "linked file");
         Assert.AreEqual("symbolic link (not followed)", reasons["dir-link"], "linked directory");
         Assert.AreEqual(1L, run.Summary.Records, "only the real file is imported");
-        Assert.IsFalse(run.Summary.Files.Any(file => file.Path.StartsWith("dir-link/", StringComparison.Ordinal)), "nothing below the linked directory");
+        Assert.DoesNotContain(file => file.Path.StartsWith("dir-link/", StringComparison.Ordinal), run.Summary.Files, "nothing below the linked directory");
     }
 
     /// <summary>

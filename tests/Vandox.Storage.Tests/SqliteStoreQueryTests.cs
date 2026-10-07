@@ -54,12 +54,12 @@ public class SqliteStoreQueryTests
         var limited = await store.RecordsAsync(query, TestContext.CancellationToken);
 
         // Assert
-        Assert.AreEqual(4, all.Count, "all metrics");
+        Assert.HasCount(4, all, "all metrics");
         Assert.AreEqual("mem", ((MetricPoint)all[0].Record.Data!).Name, "ordered by capture time");
         Assert.AreEqual("late", ((MetricPoint)all[3].Record.Data!).Name, "latest last");
-        Assert.AreEqual(3, host.Count, "only the source host");
+        Assert.HasCount(3, host, "only the source host");
         Assert.AreEqual("b,a", string.Join(',', window.Select(row => ((MetricPoint)row.Record.Data!).Name)), "half-open range keeps the start, drops the end, orders by ID");
-        Assert.AreEqual(1, limited.Count, "limit");
+        Assert.HasCount(1, limited, "limit");
     }
 
     /// <summary>
@@ -84,7 +84,7 @@ public class SqliteStoreQueryTests
         var rows = await store.RecordsAsync(query, TestContext.CancellationToken);
 
         // Assert
-        Assert.AreEqual(1, rows.Count, "one metric");
+        Assert.HasCount(1, rows, "one metric");
         Assert.AreEqual("mem", ((MetricPoint)rows[0].Record.Data!).Name, "name");
     }
 
@@ -230,12 +230,12 @@ public class SqliteStoreQueryTests
         var otherSource = await store.SearchLogsAsync(search, TestContext.CancellationToken);
 
         // Assert
-        Assert.AreEqual(2, memory.Count, "both lines with the word memory, case-insensitive");
-        Assert.AreEqual(1, both.Count, "only the line with both terms");
-        Assert.AreEqual(1, operators.Count, "AND and NOT are literal terms");
-        Assert.AreEqual(1, diacritics.Count, "diacritics are folded and quotes are literal");
-        Assert.AreEqual(1, bySource.Count, "the source mail");
-        Assert.AreEqual(0, otherSource.Count, "no such line in the source syslog");
+        Assert.HasCount(2, memory, "both lines with the word memory, case-insensitive");
+        Assert.HasCount(1, both, "only the line with both terms");
+        Assert.HasCount(1, operators, "AND and NOT are literal terms");
+        Assert.HasCount(1, diacritics, "diacritics are folded and quotes are literal");
+        Assert.HasCount(1, bySource, "the source mail");
+        Assert.IsEmpty(otherSource, "no such line in the source syslog");
     }
 
     /// <summary>

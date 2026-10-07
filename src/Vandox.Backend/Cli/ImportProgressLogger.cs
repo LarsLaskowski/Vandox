@@ -74,7 +74,12 @@ internal static class ImportProgressLogger
 
         var outcome = OutcomeName(result.Outcome);
 
-        logger.FileFinished(result.Path, outcome, result.SourceType, result.Lines, result.Records, result.Skipped, result.Reason);
+        logger.FileFinished(result.Path, outcome, result.SourceType, result.Lines, result.Records, result.Skipped);
+
+        if (result.Reason.Length > 0)
+        {
+            logger.FileNotImported(result.Path, result.Reason);
+        }
     }
 
     #endregion // Methods

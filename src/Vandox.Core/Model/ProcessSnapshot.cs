@@ -7,6 +7,12 @@ namespace Vandox.Core.Model;
 /// </summary>
 public sealed class ProcessSnapshot : IPayload
 {
+    #region Constants
+
+    private const string ProcessesField = "processes";
+
+    #endregion // Constants
+
     #region Properties
 
     /// <summary>
@@ -25,7 +31,7 @@ public sealed class ProcessSnapshot : IPayload
     /// <summary>
     /// Gets or sets the sampled processes.
     /// </summary>
-    [JsonPropertyName("processes")]
+    [JsonPropertyName(ProcessesField)]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public List<ProcessSample>? Processes { get; set; }
 
@@ -51,10 +57,10 @@ public sealed class ProcessSnapshot : IPayload
 
         if (processCount == 0 && programCount == 0)
         {
-            return Check.Invalid("processes", "at least one process or program required");
+            return Check.Invalid(ProcessesField, "at least one process or program required");
         }
 
-        var error = Check.Count("processes", processCount) ?? Check.Count("programs", programCount);
+        var error = Check.Count(ProcessesField, processCount) ?? Check.Count("programs", programCount);
 
         if (error is not null)
         {
@@ -67,7 +73,7 @@ public sealed class ProcessSnapshot : IPayload
         {
             var sample = Processes![index];
 
-            error = sample.Validate(Check.Indexed("processes", index));
+            error = sample.Validate(Check.Indexed(ProcessesField, index));
 
             if (error is not null)
             {
@@ -79,7 +85,7 @@ public sealed class ProcessSnapshot : IPayload
                 continue;
             }
 
-            return Check.Invalid($"{Check.Indexed("processes", index)}.pid", "duplicate pid");
+            return Check.Invalid($"{Check.Indexed(ProcessesField, index)}.pid", "duplicate pid");
         }
 
         var names = new HashSet<string>(StringComparer.Ordinal);

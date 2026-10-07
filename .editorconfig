@@ -85,3 +85,10 @@ dotnet_diagnostic.RH4124.severity = none
 dotnet_diagnostic.RH7004.severity = none
 dotnet_diagnostic.RH8027.severity = none
 dotnet_diagnostic.RH8306.severity = none
+
+# Diagnostics that the build reports only at info level but that SonarQube Cloud lists as issues: the build fails on them.
+dotnet_diagnostic.MSTEST0037.severity = error
+dotnet_diagnostic.MSTEST0068.severity = error
+dotnet_diagnostic.ASP0015.severity = error
+dotnet_diagnostic.SYSLIB1092.severity = error
+dotnet_diagnostic.IDE0028.severity = error

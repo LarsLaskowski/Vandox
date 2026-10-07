@@ -170,9 +170,17 @@ internal static partial class BackendLog
     /// <param name="lines">The lines read</param>
     /// <param name="records">The records stored</param>
     /// <param name="skipped">The lines skipped</param>
+    [LoggerMessage(EventId = 27, Level = LogLevel.Information, Message = "file finished {Path} {Outcome} {SourceType} {Lines} {Records} {Skipped}")]
+    internal static partial void FileFinished(this ILogger logger, string path, string outcome, string sourceType, long lines, long records, long skipped);
+
+    /// <summary>
+    /// Logs why a file was not imported.
+    /// </summary>
+    /// <param name="logger">The logger</param>
+    /// <param name="path">The display path</param>
     /// <param name="reason">Why the file was not imported</param>
-    [LoggerMessage(EventId = 27, Level = LogLevel.Information, Message = "file finished {Path} {Outcome} {SourceType} {Lines} {Records} {Skipped} {Reason}")]
-    internal static partial void FileFinished(this ILogger logger, string path, string outcome, string sourceType, long lines, long records, long skipped, string reason);
+    [LoggerMessage(EventId = 28, Level = LogLevel.Information, Message = "file not imported {Path} {Reason}")]
+    internal static partial void FileNotImported(this ILogger logger, string path, string reason);
 
     #endregion // Methods
 }

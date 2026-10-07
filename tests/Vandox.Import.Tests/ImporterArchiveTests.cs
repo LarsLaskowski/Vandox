@@ -47,7 +47,7 @@ public class ImporterArchiveTests
         Assert.AreEqual(ImportOutcome.Unrecognized, byPath["logs.tar:readme.txt"].Outcome, "entry no parser claims");
         Assert.AreEqual(4L, byPath["more.tar.gz:c.log"].Records, "entry of a compressed archive");
         Assert.AreEqual(9L, run.Summary.Records, "all records");
-        Assert.IsTrue(harness.Parser.Seen.Any(file => file.Name == "var/log/b.log"), "the parser gets the entry name without .gz");
+        Assert.Contains(file => file.Name == "var/log/b.log", harness.Parser.Seen, "the parser gets the entry name without .gz");
     }
 
     /// <summary>
@@ -138,7 +138,7 @@ public class ImporterArchiveTests
 
         // Assert
         Assert.IsNull(run.Error, "the run goes on");
-        Assert.IsTrue(run.Summary.Files.Any(file => file.Outcome == ImportOutcome.Failed), "the archive fails");
+        Assert.Contains(file => file.Outcome == ImportOutcome.Failed, run.Summary.Files, "the archive fails");
     }
 
     /// <summary>
@@ -164,7 +164,7 @@ public class ImporterArchiveTests
 
         // Assert
         Assert.IsNull(run.Error, "the run goes on");
-        Assert.IsTrue(run.Summary.Files.Any(file => file.Outcome == ImportOutcome.Failed && file.Reason == "tar metadata header is too large"), $"the archive fails with the reason: {string.Join(";", run.Summary.Files.Select(file => $"{file.Outcome}/{file.Reason}"))}");
+        Assert.Contains(file => file.Outcome == ImportOutcome.Failed && file.Reason == "tar metadata header is too large", run.Summary.Files, $"the archive fails with the reason: {string.Join(";", run.Summary.Files.Select(file => $"{file.Outcome}/{file.Reason}"))}");
     }
 
     /// <summary>

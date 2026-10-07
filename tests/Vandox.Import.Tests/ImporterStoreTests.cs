@@ -98,7 +98,7 @@ public class ImporterStoreTests
         Assert.AreEqual(4L, first.Summary.Files[0].Records, "two batches were stored");
         Assert.AreEqual(4L, second.Summary.Files[0].ResumedAfter, "the second run resumes after the stored records");
         Assert.AreEqual(3L, second.Summary.Files[0].Records, "the second run stores the rest");
-        Assert.AreEqual(7, harness.Store.Records.Count, "every record is stored once");
+        Assert.HasCount(7, harness.Store.Records, "every record is stored once");
         Assert.AreEqual("LOG line 5", ((LogLine)harness.Store.Records[4].Data!).Message, "the resumed run continues with the fifth line");
     }
 
@@ -123,7 +123,7 @@ public class ImporterStoreTests
         Assert.AreEqual(ImportOutcome.Imported, file.Outcome, "imported");
         Assert.AreEqual(2L, file.Records, "valid records");
         Assert.AreEqual(13L, file.Skipped, "twelve bad lines and one refused record");
-        Assert.AreEqual(ImportLimits.MaxProblems, file.Problems.Count, "problems are capped");
+        Assert.HasCount(ImportLimits.MaxProblems, file.Problems, "problems are capped");
         Assert.AreEqual(new ImportProblem(2, "bad line"), file.Problems[0], "first problem");
         Assert.AreEqual(15L, file.Lines, "lines");
         Assert.AreEqual(13L, run.Summary.Skipped, "skipped in the summary");
@@ -179,7 +179,7 @@ public class ImporterStoreTests
         // Assert
         Assert.AreEqual(ImportOutcome.Failed, file.Outcome, "outcome");
         Assert.AreEqual("the content changed while it was imported", file.Reason, "reason");
-        Assert.IsFalse(harness.Store.Batches.Any(batch => batch.Import!.Complete), "the file is never completed");
+        Assert.DoesNotContain(batch => batch.Import!.Complete, harness.Store.Batches, "the file is never completed");
     }
 
     /// <summary>
@@ -226,7 +226,7 @@ public class ImporterStoreTests
 
         // Assert
         Assert.AreEqual("the content was imported before as source type \"other\"", run.Summary.Files[0].Reason, "reason");
-        Assert.AreEqual(0, harness.Store.Records.Count, "nothing stored");
+        Assert.IsEmpty(harness.Store.Records, "nothing stored");
     }
 
     /// <summary>
@@ -262,7 +262,7 @@ public class ImporterStoreTests
         Assert.IsInstanceOfType<ImportException>(failed.Error, "a store error ends the run");
         Assert.AreEqual("importer: writing to the database failed", failed.Error?.Message, "message without store text");
         Assert.AreEqual("database error", failed.Summary.Files[0].Reason, "reason");
-        Assert.AreEqual(1, failed.Summary.Files.Count, "the second file was not started");
+        Assert.HasCount(1, failed.Summary.Files, "the second file was not started");
         Assert.IsInstanceOfType<ImportException>(refused.Error, "a failed begin ends the run");
     }
 
@@ -285,7 +285,7 @@ public class ImporterStoreTests
 
         // Assert
         Assert.IsTrue(run.Summary.Interrupted, "interrupted");
-        Assert.AreEqual(0, harness.Store.Records.Count, "nothing stored");
+        Assert.IsEmpty(harness.Store.Records, "nothing stored");
     }
 
     #endregion // Methods

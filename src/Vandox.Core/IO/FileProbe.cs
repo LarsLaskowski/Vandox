@@ -223,7 +223,7 @@ public static partial class FileProbe
     /// <param name="buffer">The result buffer of 256 bytes</param>
     /// <returns>0 on success</returns>
     [LibraryImport("libc", EntryPoint = "statx", StringMarshalling = StringMarshalling.Utf8, SetLastError = true)]
-    private static partial int Statx(int directory, string path, int flags, uint mask, byte[] buffer);
+    private static partial int Statx(int directory, string path, int flags, uint mask, [Out] byte[] buffer);
 
     /// <summary>
     /// Calls <c>statx</c> for an open descriptor.
@@ -235,7 +235,7 @@ public static partial class FileProbe
     /// <param name="buffer">The result buffer of 256 bytes</param>
     /// <returns>0 on success</returns>
     [LibraryImport("libc", EntryPoint = "statx", StringMarshalling = StringMarshalling.Utf8, SetLastError = true)]
-    private static partial int StatxHandle(SafeFileHandle descriptor, string path, int flags, uint mask, byte[] buffer);
+    private static partial int StatxHandle(SafeFileHandle descriptor, string path, int flags, uint mask, [Out] byte[] buffer);
 
     /// <summary>
     /// Calls <c>open</c>.

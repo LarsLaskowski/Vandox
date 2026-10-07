@@ -62,6 +62,9 @@ repository (record 0074): keep it true when the build changes.
 3. `dotnet build Vandox.slnx --no-incremental -warnaserror`: Reihitsu and SonarAnalyzer run inside the build on
    the whole solution with every rule, info level included, so no changed C# file may carry any diagnostic.
    Fixable style findings are the Code Officer's; findings that need a code change go to the Dev or Tester.
+   The `.editorconfig` raises the diagnostics that SonarQube Cloud lists but the compiler reports only at info level
+   (`MSTEST0037`, `MSTEST0068`, `ASP0015`, `SYSLIB1092`, `IDE0028`) to errors; add an id there when SonarQube reports a
+   new one that the build did not.
    Never trust a test result after a build that failed on analyzer errors: the test run uses the stale DLLs.
 
 Other SonarQube Cloud findings (further rules, duplication, hotspots) have no local equivalent and arrive in

@@ -28,7 +28,7 @@ public class JsonLineLoggerTests
         using var factory = BackendLogging.Create(output, "info", clock)!;
 
         // Act
-        factory.CreateLogger("test").FileFinished("a.log", "imported", "syslog", 10, 9, 1, "why");
+        factory.CreateLogger("test").FileFinished("a.log", "imported", "syslog", 10, 9, 1);
 
         var line = JsonDocument.Parse(output.ToString().TrimEnd()).RootElement;
 
@@ -57,7 +57,7 @@ public class JsonLineLoggerTests
         factory.CreateLogger("test").ImportStarted("a\nfake line\u001b[31m\u0085​");
 
         // Assert
-        Assert.AreEqual(1, output.ToString().TrimEnd().Split('\n').Length, "one line");
+        Assert.HasCount(1, output.ToString().TrimEnd().Split('\n'), "one line");
         Assert.DoesNotContain("\u001b", output.ToString(), "no escape character");
         Assert.DoesNotContain("\u0085", output.ToString(), "no C1 control");
         Assert.AreEqual("a\nfake line\u001b[31m\u0085​", JsonDocument.Parse(output.ToString()).RootElement.GetProperty("path").GetString(), "the value round-trips");
@@ -96,7 +96,7 @@ public class JsonLineLoggerTests
         var lines = output.ToString().TrimEnd().Split('\n').Select(line => JsonDocument.Parse(line).RootElement).ToList();
 
         // Assert
-        Assert.AreEqual(2, lines.Count, "the info line is filtered, the error lines are written");
+        Assert.HasCount(2, lines, "the info line is filtered, the error lines are written");
         Assert.AreEqual("ERROR", lines[0].GetProperty("level").GetString(), "level");
         Assert.AreEqual("InvalidOperationException", lines[0].GetProperty("exception").GetString(), "the exception type is written, never its message");
         Assert.DoesNotContain("secret", output.ToString(), "the exception message stays out of the log");

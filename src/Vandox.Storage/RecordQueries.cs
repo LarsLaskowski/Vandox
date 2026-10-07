@@ -209,44 +209,70 @@ internal static class RecordQueries
     {
         try
         {
-            if (kind == RecordKind.Metric)
-            {
-                return new MetricPoint
-                       {
-                           Name = reader.IsDBNull(11) ? string.Empty : reader.GetString(11),
-                           Value = reader.IsDBNull(12) ? 0 : reader.GetDouble(12),
-                           Unit = reader.IsDBNull(13) ? string.Empty : reader.GetString(13),
-                           Labels = reader.IsDBNull(14) ? null : JsonSerializer.Deserialize<Dictionary<string, string>>(reader.GetString(14))
-                       };
-            }
-
-            if (kind == RecordKind.LogLine)
-            {
-                return new LogLine
-                       {
-                           Log = reader.IsDBNull(15) ? string.Empty : reader.GetString(15),
-                           Program = reader.IsDBNull(16) ? string.Empty : reader.GetString(16),
-                           Pid = reader.IsDBNull(17) ? 0 : (int)reader.GetInt64(17),
-                           Priority = reader.IsDBNull(18) ? null : (byte)reader.GetInt64(18),
-                           Message = reader.IsDBNull(19) ? string.Empty : reader.GetString(19),
-                           Truncated = (reader.IsDBNull(20) ? 0 : reader.GetInt64(20)) != 0
-                       };
-            }
-
-            if (PayloadRegistry.TypeOf(kind) is null)
-            {
-                throw new StoreException($"store: reading records: unknown record kind {FieldError.QuoteName(kind)}");
-            }
-
-            using var document = JsonDocument.Parse(reader.IsDBNull(10) ? "null" : reader.GetString(10));
-
-            return PayloadRegistry.Deserialize(kind, document.RootElement)
-                       ?? throw new StoreException($"store: reading records: decoding {kind.ToString(CultureInfo.InvariantCulture)} payload: no data");
+            return kind switch
+                   {
+                       RecordKind.Metric => ReadMetric(reader),
+                       RecordKind.LogLine => ReadLogLine(reader),
+                       _ => ReadJson(reader, kind)
+                   };
         }
         catch (JsonException exception)
         {
             throw new StoreException($"store: reading records: decoding {kind} payload", exception);
         }
+    }
+
+    /// <summary>
+    /// Reads a metric point from the typed columns.
+    /// </summary>
+    /// <param name="reader">The reader</param>
+    /// <returns>The metric point</returns>
+    private static MetricPoint ReadMetric(SqliteDataReader reader)
+    {
+        return new MetricPoint
+               {
+                   Name = reader.IsDBNull(11) ? string.Empty : reader.GetString(11),
+                   Value = reader.IsDBNull(12) ? 0 : reader.GetDouble(12),
+                   Unit = reader.IsDBNull(13) ? string.Empty : reader.GetString(13),
+                   Labels = reader.IsDBNull(14) ? null : JsonSerializer.Deserialize<Dictionary<string, string>>(reader.GetString(14))
+               };
+    }
+
+    /// <summary>
+    /// Reads a log line from the typed columns.
+    /// </summary>
+    /// <param name="reader">The reader</param>
+    /// <returns>The log line</returns>
+    private static LogLine ReadLogLine(SqliteDataReader reader)
+    {
+        return new LogLine
+               {
+                   Log = reader.IsDBNull(15) ? string.Empty : reader.GetString(15),
+                   Program = reader.IsDBNull(16) ? string.Empty : reader.GetString(16),
+                   Pid = reader.IsDBNull(17) ? 0 : (int)reader.GetInt64(17),
+                   Priority = reader.IsDBNull(18) ? null : (byte)reader.GetInt64(18),
+                   Message = reader.IsDBNull(19) ? string.Empty : reader.GetString(19),
+                   Truncated = (reader.IsDBNull(20) ? 0 : reader.GetInt64(20)) != 0
+               };
+    }
+
+    /// <summary>
+    /// Reads the payload of any other kind from the JSON column.
+    /// </summary>
+    /// <param name="reader">The reader</param>
+    /// <param name="kind">The kind</param>
+    /// <returns>The payload</returns>
+    private static IPayload ReadJson(SqliteDataReader reader, string kind)
+    {
+        if (PayloadRegistry.TypeOf(kind) is null)
+        {
+            throw new StoreException($"store: reading records: unknown record kind {FieldError.QuoteName(kind)}");
+        }
+
+        using var document = JsonDocument.Parse(reader.IsDBNull(10) ? "null" : reader.GetString(10));
+
+        return PayloadRegistry.Deserialize(kind, document.RootElement)
+                   ?? throw new StoreException($"store: reading records: decoding {kind.ToString(CultureInfo.InvariantCulture)} payload: no data");
     }
 
     #endregion // Methods

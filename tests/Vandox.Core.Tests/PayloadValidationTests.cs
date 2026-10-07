@@ -159,7 +159,7 @@ public class PayloadValidationTests
         manyLabels.Name = "x";
         manyLabels.Labels = labels;
         longLabel.Name = "x";
-        longLabel.Labels = new Dictionary<string, string>();
+        longLabel.Labels = [];
         longLabel.Labels["a"] = tooLong;
         longName.Name = new string('a', ModelLimits.MaxNameBytes + 1);
         nanValue.Name = "x";

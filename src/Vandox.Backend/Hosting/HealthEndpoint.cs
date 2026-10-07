@@ -37,7 +37,7 @@ internal static class HealthEndpoint
 
         headers.ContentType = "text/plain; charset=utf-8";
         headers.CacheControl = "no-store";
-        headers["X-Content-Type-Options"] = "nosniff";
+        headers.XContentTypeOptions = "nosniff";
 
         try
         {
