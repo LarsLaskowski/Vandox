@@ -22,4 +22,12 @@
   path — strip the file path from the error text before a leak check. Where the plan fixes the error
   format, compare the exact text instead of forbidding substrings: a forbidden substring must never
   overlap text the plan requires (`yaml:` against the required prefix `config: test.yaml:`).
+- **Runtime budget:** no single test takes more than 10 s under the *Test* command of `stack.md` (with the
+  race detector where the stack uses one), and a package stays well under half of the CI timeout. Size
+  stress and heap-bound tests with the smallest input that still makes the failure detectable against the
+  bound — measure the runtime before handing over.
+- **Memory claims:** for every claim of bounded memory in the plan (including retention of derived values
+  such as substrings of a large buffer), add a heap-bound test in step 5 that fails when the claim is false.
+- **No `git stash`:** members have no Git write operations, and `git stash` / `git stash pop` is one. Compare
+  against a baseline in a scratch worktree (`git worktree add <dir> <ref>`, removed afterwards).
 - Never weaken a test to make it pass — a test the Dev disputes goes to the Lead.

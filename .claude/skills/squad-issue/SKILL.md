@@ -60,7 +60,11 @@ action yourself — including follow-up issues the Lead decides on.
    `specs/issue-<number>/log.md` from `specs/_template/log.md`, commit and push it; append one table row
    per step. Only you
    (the orchestrator) write `log.md`, one row per append, each row ending in the file's line ending — subagents report and
-   you record, so rows never merge or end up with mixed line endings.
+   you record, so rows never merge or end up with mixed line endings. Before each commit, check the rows
+   you wrote for characters of the Unicode categories Cc, Cf, Zl and Zp other than tab and newline (e.g. with
+   `python3 -I`); an escape such as `U+202E` stays text and is never pasted as the character. After every
+   member's report, commit and push the files it left in the work folder (the Lead's records, the Tester's
+   tests) yourself, so the next report does not list them as untracked noise.
 2. **Plan.** Launch `squad-lead` in mode `plan` with the issue text and the work folder. It returns one of:
    - `RESULT: DONE` — for tier **`docs`** (see its definition in `.squad/routing.md`), a short result (tier, the files and lines to change, acceptance
      criteria) that you record as the first plan row in `log.md`, then continue with step 6 (Dev), the
@@ -95,7 +99,8 @@ action yourself — including follow-up issues the Lead decides on.
    that the new tests compile and fail on the current code (unless the Tester justified why one cannot).
    A fix without a reproducing test is only acceptable when the bug genuinely needs a live external
    system — then the PR says so.
-6. **Implement and cover.** For a change without production or test code this is the Dev's edits alone: no
+6. **Implement and cover.** (A plan whose acceptance criteria can be verified only in CI says so, names the
+   owner of each such criterion and expects the CI loop of step 11.) For a change without production or test code this is the Dev's edits alone: no
    `squad-tester`, no *Test with coverage*, no *Coverage gate*. Launch `squad-dev` in mode `implement` with the plan and the test names; it
    also makes the documentation updates the plan lists and may adapt a test call site that no longer
    compiles only because of a signature or field change it made itself (`.squad/routing.md`, *Loop limits*). If the Dev disputes a test, launch `squad-lead`
@@ -120,14 +125,20 @@ action yourself — including follow-up issues the Lead decides on.
    (coverage) and 7 again → **a new review round on the delta is mandatory** before step 9; never go from
    a blocking finding straight to PR approval. The same holds for a non-blocking finding the Lead decides
    to fix now: any change to production code, tests or `docs/` after a review round needs a delta round. At most **2 fix rounds** after round 1; then `squad-lead`
-   in mode `decide`. Non-blocking
+   in mode `decide`. Pass each reviewer the exact commit SHA to review, and do not commit to the work branch
+   (log rows included) between launching a round and receiving its report; a reviewer reports the SHA it
+   reviewed first, and a report for another head is a stale round. A reviewer or security subagent that stops
+   on an API error (for example `529 Overloaded`) is relaunched unchanged, at most twice; after that report a
+   blocker to the user. Non-blocking
    findings: the Lead decides per finding — fix now, or you open a linked GitHub issue now.
 9. **PR approval.** Launch `squad-lead` in mode `approve-pr` with the base ref, the build/test/coverage
    output and the review outcome — including the result of the **latest** review round, which must have
    no blocking finding that is not covered by a recorded Lead decision, and must cover every change to
    production code, tests and `docs/` since it ran (only `specs/` bookkeeping and the Lead's own approval edits —
    record status, the index, a link from `docs/ARCHITECTURE.md` — may follow it; a fix for a blocking
-   finding always needs a delta round, also in a decision record). `NOT APPROVED` → back to step 6 or 8 (counting against the review loop
+   finding always needs a delta round, also in a decision record). Ask only when CI on the head has finished and
+   passes (after the PR, see step 11), and pass the finished check-run list to the Lead instead of letting it
+   wait for CI. `NOT APPROVED` → back to step 6 or 8 (counting against the review loop
    limit) or let the Lead decide/escalate. On `APPROVED`, the decision records are `Accepted` and indexed
    in `docs/decisions/README.md`.
 10. **Pull request** (Dev role, performed by you). First move the working record off the branch: post
@@ -155,7 +166,11 @@ action yourself — including follow-up issues the Lead decides on.
     - review comments (human, automated, `review-pr`) → `squad-dev`, worked in this PR, blocking or not.
 
     Each fix goes through steps 7–8 again (delta review), with at most 2 fix rounds per failure before the
-    Lead decides. The work folder is gone by now: give the Reviewer, Security and the Lead the plan (tier
+    Lead decides. A re-approval (step 9) is requested only after CI on the new head has finished and passes,
+    with the finished check-run list attached. When the plan's acceptance criteria can only be verified in CI
+    (for example a container image the sandbox cannot build), a red CI on exactly those criteria is a normal
+    outcome of this step: the plan names the owner (Dev for Dockerfile, compose and workflow files), and every
+    fix gets a delta review round. The work folder is gone by now: give the Reviewer, Security and the Lead the plan (tier
     `docs`: the first log row; features:
     also `spec.md` and `tasks.md`) from the "Squad working record" comment, or via
     `git show <commit-before-removal>:specs/<folder>/<file>`, and record each log row by editing that

@@ -19,3 +19,11 @@ one. Changed only in squad-maintenance PRs.
   supports several profiles (LarsLaskowski/Squad-Spec-Repository-Template#43). The new files
   `.squad/tools/go-coverage-to-cobertura.py` and the `squad_settings.py` globs are not touched by a refresh. The
   squad agents, skills and routing are stack-neutral and unchanged.
+- 2026-10-07 — Squad refreshed from Squad-Spec-Repository-Template (`adopt-template`), stack profiles `go` and
+  `dotnet` (the template now supports several profiles, LarsLaskowski/Squad-Spec-Repository-Template#43). The hand-made
+  extensions of 2026-10-06 are replaced by the template's own: `analyzer-check.py` dispatches to
+  `analyzer-check-go.py` and `analyzer-check-dotnet.py`, `session-start.sh` runs `session-start-go.sh` and
+  `session-start-dotnet.sh`, and the `stack:` blocks of the instruction files carry both profiles. `squad_settings.py`
+  lists one `COVERAGE_REPORTS` entry per report kind. `.squad/tools/go-coverage-to-cobertura.py` stays project-specific.
+  The seeded `sonar-project.properties` was not adopted: the scanner for .NET refuses a repository that has one, the CI
+  workflow passes the settings as arguments.

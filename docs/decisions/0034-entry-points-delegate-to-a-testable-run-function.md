@@ -1,6 +1,6 @@
 # 0034: Entry points delegate to a testable run function; main stays uncovered wiring
 
-- **Status:** Superseded by [0058](0058-vandoxd-runs-the-service-by-default-with-a-shutdown-deadline.md)
+- **Status:** Superseded by 0058
 - **Date:** 2026-10-04
 - **Source:** Issue #98
 - **Supersedes:** —

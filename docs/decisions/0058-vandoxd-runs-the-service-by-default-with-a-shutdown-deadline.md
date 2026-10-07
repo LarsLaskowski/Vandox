@@ -1,6 +1,6 @@
 # 0058: vandoxd runs the service without arguments, logs JSON with slog and stops within a 10 s deadline
 
-- **Status:** Superseded by [0072](0072-vandoxd-import-sub-command-output-and-exit-codes.md)
+- **Status:** Superseded by 0072
 - **Date:** 2026-10-05
 - **Source:** Issue #13
 - **Supersedes:** 0034

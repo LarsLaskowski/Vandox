@@ -1,6 +1,6 @@
 # 0018: The agent spools at least 7 days and backfills gaplessly and idempotently
 
-- **Status:** Superseded by [0045](0045-batch-identified-by-agent-id-and-record-sequence-numbers.md)
+- **Status:** Superseded by 0045
 - **Date:** 2026-10-03
 - **Source:** Issue #6
 - **Supersedes:** —

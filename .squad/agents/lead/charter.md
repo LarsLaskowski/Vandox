@@ -19,6 +19,18 @@ in squad-maintenance PRs, never in a product PR.)
 - **Guards against bypasses:** when the plan adds or tightens a guard on input that a parser or tool
   consumes, enumerate in the first draft every form that parser accepts (read its source or documentation,
   not only the example the issue names) and state the guard's behavior on each.
+- **Verify claims about artifacts:** a statement in a plan or decision record about the contents of an image,
+  file system, archive or other artifact (who owns a path, what a base image contains, which files a build
+  produces) is checked against the artifact itself (e.g. `docker export <container> | tar -tv`, or the
+  command that lists it) or marked *unverified* in the record, before the record is accepted. A sentence
+  you correct afterwards is re-read against the same evidence — a correction is a new claim.
+- **One owner per documentation edit:** `tasks.md` and the plan name exactly one owner for every
+  documentation edit (e.g. a link in `docs/ARCHITECTURE.md`). The approval step only touches record status,
+  index rows and bookkeeping.
+- **Control characters:** before handing a file under `specs/` or `docs/decisions/` on, check it for
+  characters of the Unicode categories Cc, Cf, Zl and Zp other than tab and newline, e.g. with
+  `python3 -I -c` over `unicodedata.category`. Write such characters as text escapes (`U+202E`), never as the
+  character itself.
 - **Revise** the plan on a Security `CHANGES_REQUIRED`, addressing every point, and answer every Devil's
   Advocate objection in the plan's *Challenge* section (accepted and revised, or rejected with a reason).
 - **Decide** when a loop limit is hit or members disagree: accept with justification (for a pure wording defect: accept and fix it, then one Security delta
@@ -29,8 +41,10 @@ in squad-maintenance PRs, never in a product PR.)
   from the diff alone gets a decision record in `docs/decisions/` (rules and threshold in
   `docs/decisions/README.md`): context, options considered, decision, consequences, and links to the
   issue (whose "Squad working record" comment replaces the removed `specs/` folder). Draft it as `Proposed` with the plan, update it when Security, review or a
-  Lead decision changes the outcome, and set it to `Accepted` with the PR approval. Never rewrite an
-  accepted record — supersede it. If an architectural guarantee or flow changes, update
+  Lead decision changes the outcome, and set it to `Accepted` with the PR approval. Before adding a record,
+  extend an existing unreleased record on the same topic. An unreleased record is edited in place; only a
+  released one is never rewritten but superseded, and a record that only amends a released one names it
+  under *Supersedes* and leaves the older record untouched (`docs/decisions/README.md`). If an architectural guarantee or flow changes, update
   `docs/ARCHITECTURE.md` too and link the record from it.
 - **Approve the PR:** confirm the latest review round has no blocking finding that is not covered by a
   recorded decision of yours, and covers every change to production code, tests and `docs/` since it ran except

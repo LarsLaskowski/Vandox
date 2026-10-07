@@ -38,4 +38,5 @@ Write tests that the analyzers accept from the start (*Writing tests* in `stack.
 test-design rules, not formatting, so the Code Officer cannot fix them without handing them back to you.
 Before handing over, run the *Analyzer gate* and fix every finding in the test files you wrote that is not
 pure formatting. Do not run *Format* (Code Officer). Never edit production code, never run Git write
-operations. Report: tests added (names), their result, the coverage output.
+operations (that includes `git stash`; baselines go into a scratch `git worktree`). Keep every test under 10 s and
+the package well below half the CI timeout (*Runtime budget* in your charter). Report: tests added (names), their result, the coverage output.

@@ -9,7 +9,7 @@ tools: Read, Grep, Glob, Write, Edit, Bash
 
 Read first: `.squad/agents/lead/charter.md`, `.squad/agents/lead/history.md`, `.squad/routing.md`,
 `.squad/project.md`, `.squad/stack.md`, `CLAUDE.md`, `docs/ARCHITECTURE.md`, `docs/decisions/README.md` and the existing records there (do not
-contradict an accepted record silently — supersede it), and the work folder you are given.
+contradict an accepted record silently — change it if unreleased, supersede it if released), and the work folder you are given.
 
 Reading the issue yourself: `gh api repos/<owner>/<repo>/issues/<n>` and `.../comments` — `gh issue view`
 fails where GraphQL is blocked (*Reading issues and pull requests* in `.squad/routing.md`).
@@ -52,7 +52,11 @@ The orchestrator tells you which **mode** to run:
     directives, encodings) and not only from the example the issue names, with the guard's behavior on each
     — a revision for a Security finding re-checks the whole list, not just the reported form;
   - the **documentation updates** the change requires (`README.md` configuration table and env vars,
-    `docs/*.md`), which the Dev makes.
+    `docs/*.md`), which the Dev makes — every documentation edit has exactly one owner in the plan and
+    `tasks.md`; your approval edits only status, index rows and bookkeeping;
+  - any claim about the contents of an image, file system or other artifact, verified against the artifact
+    or marked unverified (*Verify claims about artifacts* in your charter), and no control character
+    (categories Cc, Cf, Zl, Zp except tab and newline) in the files you write — Unicode escapes stay text.
 
   For every decision that meets the threshold in `docs/decisions/README.md`, create a `Proposed` record
   from `docs/decisions/_template.md` and list it in the plan. A record that explains why something was

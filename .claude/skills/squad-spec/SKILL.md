@@ -18,8 +18,8 @@ commit/push rules and the orchestrator role are identical to the `squad-issue` s
   behavior. `RESULT: NO CHANGE` means the feature already exists or contradicts an accepted decision; report
   that to the user instead of commenting on an issue. The plan challenge covers `spec.md`, `plan.md` and
   `tasks.md` together.
-- **Decision records:** features usually involve real design choices, so expect at least one record in
-  `docs/decisions/`; the Lead also updates `docs/ARCHITECTURE.md` when the feature changes a flow or
+- **Decision records:** features usually involve real design choices, so expect a record in
+  `docs/decisions/` (extend an existing unreleased record on the topic rather than adding a new one); the Lead also updates `docs/ARCHITECTURE.md` when the feature changes a flow or
   guarantee.
 - **Steps 4–6 and code-free changes:** a plan may declare steps 4, 5 and the *Coverage gate* not applicable
   as described in *Changes without production or test code* in `.squad/routing.md`; its *Verification without

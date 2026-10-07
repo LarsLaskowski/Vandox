@@ -1,6 +1,6 @@
 # 0071: The log import reads its input as streams without following links or extracting anything; formats are sniffed, one gzip layer, no nested archives, fixed limits
 
-- **Status:** Superseded by [0079](0079-log-parsing-and-import-in-the-backend-without-following-links.md)
+- **Status:** Superseded by 0079
 - **Date:** 2026-10-06
 - **Source:** Issue #15
 - **Supersedes:** —

@@ -70,6 +70,9 @@ repository (record 0074): keep it true when the build changes.
 Other SonarQube Cloud findings (further rules, duplication, hotspots) have no local equivalent and arrive in
 squad step 11.
 
+Changed shell scripts (`*.sh`) are checked with `shellcheck` when it is installed; the script says so when it
+skips them. Without it, SonarQube Cloud's shell rules (`shelldre:*`) only report in squad step 11.
+
 Two analyzer rules collide and are settled once (record 0074): RH3001 forbids the negation operator `!`,
 S1125 forbids comparing a boolean with a literal (`== false`, `is false`). Write positive conditions, early
 returns or a small `Require`-style helper; never a workaround such as `== default(bool)`.

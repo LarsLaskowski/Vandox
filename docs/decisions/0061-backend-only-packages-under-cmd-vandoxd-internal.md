@@ -1,6 +1,6 @@
 # 0061: Backend-only packages live under cmd/vandoxd/internal; internal/ stays shared
 
-- **Status:** Superseded by [0073](0073-backend-in-dotnet-10-with-blazor-agent-stays-go.md)
+- **Status:** Superseded by 0073
 - **Date:** 2026-10-05
 - **Source:** Issue #13
 - **Supersedes:** —

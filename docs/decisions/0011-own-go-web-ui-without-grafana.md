@@ -1,6 +1,6 @@
 # 0011: Own Go web UI with historical views, no Grafana
 
-- **Status:** Superseded by [0073](0073-backend-in-dotnet-10-with-blazor-agent-stays-go.md)
+- **Status:** Superseded by 0073
 - **Date:** 2026-10-03
 - **Source:** Issue #6
 - **Supersedes:** —

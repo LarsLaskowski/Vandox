@@ -1,6 +1,6 @@
 # 0070: Log parsers implement one interface in internal/logparse; an explicit registry picks the parser by confidence
 
-- **Status:** Superseded by [0079](0079-log-parsing-and-import-in-the-backend-without-following-links.md)
+- **Status:** Superseded by 0079
 - **Date:** 2026-10-06
 - **Source:** Issue #15
 - **Supersedes:** —
