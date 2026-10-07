@@ -279,15 +279,7 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, II
                 await ImportRepository.AdvanceAsync(_writer, transaction, batch.Import, batch.Records.Count, batch.ReceivedAt, cancellationToken).ConfigureAwait(false);
             }
 
-            var stored = 0;
-
-            foreach (var record in batch.Records)
-            {
-                if (await writer.WriteAsync(batch, record, cancellationToken).ConfigureAwait(false))
-                {
-                    stored++;
-                }
-            }
+            var stored = batch.Records.Count(record => writer.Write(batch, record, cancellationToken));
 
             await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
 
