@@ -93,6 +93,53 @@ public class TarHeaderGuardStreamTests
     }
 
     /// <summary>
+    /// A size record of a PAX header replaces the size field, so the guard stays in step with the tar reader and still
+    /// sees a metadata header that sits where the size field would have skipped to.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task TarHeaderGuardStreamFollowsPaxSizeRecord()
+    {
+        // Arrange
+        var stream = new MemoryStream();
+        var record = Encoding.ASCII.GetBytes("10 size=0\n");
+        var padded = new byte[512];
+
+        record.CopyTo(padded, 0);
+
+        await stream.WriteAsync(Header("pax", 'x', OctalSize(record.Length)), TestContext.CancellationToken);
+        await stream.WriteAsync(padded, TestContext.CancellationToken);
+        await stream.WriteAsync(Header("file", '0', OctalSize(2048)), TestContext.CancellationToken);
+        await stream.WriteAsync(Header("bomb", 'x', OctalSize(1500000000)), TestContext.CancellationToken);
+        stream.Position = 0;
+
+        await using var guard = new TarHeaderGuardStream(stream);
+        var buffer = new byte[4096];
+
+        // Act and assert
+        await Assert.ThrowsExactlyAsync<TarMetadataTooLargeException>(async () => await DrainAsync(guard, buffer, TestContext.CancellationToken));
+    }
+
+    /// <summary>
+    /// Reads a stream to its end.
+    /// </summary>
+    /// <param name="stream">The stream</param>
+    /// <param name="buffer">The read buffer</param>
+    /// <param name="cancellationToken">Cancels the read</param>
+    /// <returns>The number of bytes read</returns>
+    private static async Task<long> DrainAsync(Stream stream, byte[] buffer, CancellationToken cancellationToken)
+    {
+        var total = 0L;
+
+        for (var count = await stream.ReadAsync(buffer, cancellationToken); count > 0; count = await stream.ReadAsync(buffer, cancellationToken))
+        {
+            total += count;
+        }
+
+        return total;
+    }
+
+    /// <summary>
     /// Builds a tar header block.
     /// </summary>
     /// <param name="name">The entry name</param>

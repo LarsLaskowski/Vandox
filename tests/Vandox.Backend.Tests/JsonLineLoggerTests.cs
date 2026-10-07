@@ -109,6 +109,35 @@ public class JsonLineLoggerTests
     }
 
     /// <summary>
+    /// The framework's own categories speak from warning on, unless the level is debug.
+    /// </summary>
+    /// <param name="level">The configured level</param>
+    /// <param name="expected">The number of lines written</param>
+    [TestMethod]
+    [DataRow("info", 1)]
+    [DataRow("warn", 1)]
+    [DataRow("debug", 2)]
+    public void JsonLineLoggerSilencesFrameworkInformation(string level, int expected)
+    {
+        // Arrange
+        var output = new StringWriter();
+
+        using var factory = BackendLogging.Create(output, level, TimeProvider.System)!;
+
+        var logger = factory.CreateLogger("Microsoft.AspNetCore.Hosting");
+
+        // Act
+        logger.Log(LogLevel.Information, new EventId(1), "request", null, (text, _) => text);
+        logger.Log(LogLevel.Warning, new EventId(2), "problem", null, (text, _) => text);
+
+        var lines = output.ToString().Split('\n', StringSplitOptions.RemoveEmptyEntries);
+
+        // Assert
+        Assert.HasCount(expected, lines, "lines written");
+        Assert.Contains("problem", lines[^1], "the warning is always written");
+    }
+
+    /// <summary>
     /// The configured level names map to log levels, and an unknown one is refused.
     /// </summary>
     [TestMethod]
