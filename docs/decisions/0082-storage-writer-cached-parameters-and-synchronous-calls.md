@@ -50,3 +50,8 @@ Tried and not adopted: runtime switches (`TieredPGO` on or off, `ReadyToRun` on 
 - The writer no longer awaits per statement, so a very large batch holds the writer thread for its whole duration (it did before
   as well, because SQLite is synchronous); cancellation is still honored between records.
 - The first NAS result is kept in `docs/BENCHMARKS.md` as the baseline.
+- Result with the page cache on the DS918+: first batch 1001 ms (the limit is 1000 ms), later batches 711 to 783 ms (median 783 ms), a
+  4 KiB write needs about 10 ms to reach the disk, so the writer is CPU-bound. `ReadyToRun` showed no difference on the development
+  host. The first batch is about 250 ms slower than the others (fresh file, start-up); the criterion names exactly that batch, so
+  whether 1001 ms against 1000 ms counts as met, or the criterion is restated (for example the median of five batches), needs a
+  decision record of its own once the Product Manager has decided.
