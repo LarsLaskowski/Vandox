@@ -35,7 +35,7 @@ Option 3.
   negation operator `!`, SonarAnalyzer S1125 forbids comparing a boolean with a literal. Code uses positive
   conditions, early returns and small `Require`-style helpers instead of either form.
 - `Program.Main` and similar wiring stay thin and are the only uncovered production lines, as in
-  [0034](0034-entry-points-delegate-to-a-testable-run-function.md); the testable logic lives in classes.
+  [0072](0072-vandoxd-import-sub-command-output-and-exit-codes.md); the testable logic lives in classes.
 - CI has a Go job and a .NET job, one SonarQube Cloud analysis for both languages, `govulncheck` and a NuGet
   vulnerability check.
 

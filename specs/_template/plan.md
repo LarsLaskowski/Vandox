@@ -52,7 +52,8 @@ test is affected.
 
 ## Documentation updates
 
-`README.md` (configuration table, env vars), `docs/*.md` — or "none".
+`README.md` (configuration table, env vars), `docs/*.md` — or "none". Every documentation edit has exactly
+one owner (Dev, Tester or Lead); the Lead's approval step only touches status, index rows and bookkeeping.
 
 ## Architecture check
 

@@ -16,8 +16,10 @@ repository (record 0074): keep it true when the build changes.
   management (`Directory.Packages.props`), shared build settings in `Directory.Build.props`. Analyzers:
   `Reihitsu.Analyzer` and `SonarAnalyzer.CSharp`, every diagnostic an error (`TreatWarningsAsErrors`). Formatter:
   `reihitsu-format` (local tool, `dotnet-tools.json`). Tests: MSTest 4 with coverlet (`coverlet.runsettings`).
-- The SessionStart hook `.claude/hooks/session-start.sh` runs `go mod download`, `dotnet tool restore` and
-  `dotnet restore` in remote sessions.
+- The SessionStart hook `.claude/hooks/session-start.sh` runs the hook of each profile in remote
+  sessions: `session-start-go.sh` (`go mod download`, the pinned golangci-lint) and `session-start-dotnet.sh`
+  (installs `reihitsu-format` globally if missing, unpinned, and restores the solution). Run `dotnet tool restore`
+  to get the formatter version pinned in `dotnet-tools.json`.
 
 ## Layout
 
@@ -48,7 +50,8 @@ repository (record 0074): keep it true when the build changes.
 
 ## Analyzer gate
 
-`analyzer-check.py` runs three steps; each must pass:
+`analyzer-check.py` runs `analyzer-check-go.py` and `analyzer-check-dotnet.py`; each must pass, and both also
+run `shellcheck` on changed shell scripts when it is installed. The .NET part needs *Restore* first.
 
 1. `go vet ./...` for the whole module.
 2. `golangci-lint run --new-from-merge-base=origin/main --whole-files ./...`, which reports every issue
@@ -59,8 +62,9 @@ repository (record 0074): keep it true when the build changes.
    it can flag a function SonarQube accepts. Such a finding is fixed like any other diagnostic; a new gocognit
    exclusion — a rule in `.golangci.yml` or a `//nolint:gocognit` directive — needs a Lead decision record (two
    existing validators are excluded by name, without a complexity cap, record 0047).
-3. `dotnet build Vandox.slnx --no-incremental -warnaserror`: Reihitsu and SonarAnalyzer run inside the build on
-   the whole solution with every rule, info level included, so no changed C# file may carry any diagnostic.
+3. `analyzer-check-dotnet.py`: a Release build of `Vandox.slnx` (`--no-restore --no-incremental`) with a SARIF log
+   per project. Reihitsu and SonarAnalyzer run inside the build with every rule, info level included, and every
+   diagnostic of any severity in a changed C# file fails the gate (diagnostics in unchanged files are listed, not gating).
    Fixable style findings are the Code Officer's; findings that need a code change go to the Dev or Tester.
    The `.editorconfig` raises the diagnostics that SonarQube Cloud lists but the compiler reports only at info level
    (`MSTEST0037`, `MSTEST0068`, `ASP0015`, `SYSLIB1092`, `IDE0028`) to errors; add an id there when SonarQube reports a
@@ -69,6 +73,9 @@ repository (record 0074): keep it true when the build changes.
 
 Other SonarQube Cloud findings (further rules, duplication, hotspots) have no local equivalent and arrive in
 squad step 11.
+
+Changed shell scripts (`*.sh`) are checked with `shellcheck` when it is installed; the script says so when it
+skips them. Without it, SonarQube Cloud's shell rules (`shelldre:*`) only report in squad step 11.
 
 Two analyzer rules collide and are settled once (record 0074): RH3001 forbids the negation operator `!`,
 S1125 forbids comparing a boolean with a literal (`== false`, `is false`). Write positive conditions, early

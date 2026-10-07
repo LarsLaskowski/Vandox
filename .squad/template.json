@@ -1,8 +1,9 @@
 {
   "repository": "LarsLaskowski/Squad-Spec-Repository-Template",
-  "commit": "31d246326df9c56aead43d569daf4ccba541e19c",
+  "commit": "77065c7fc7f219b4f069cfae443468c31944d923",
   "profile": "go",
-  "additionalProfiles": [
+  "profiles": [
+    "go",
     "dotnet"
   ]
 }

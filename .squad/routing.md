@@ -138,13 +138,23 @@ the Reviewer) uses `gh api repos/<owner>/<repo>/issues/<n>` and `.../issues/<n>/
 request `.../pulls/<n>`), or the GitHub MCP `issue_read` where the member has the tool. Members never post
 to GitHub; the orchestrator does.
 
+## Reading third-party repositories
+
+The GitHub MCP tools and `gh api` are scoped to the repositories of the session and answer 403 for any
+other repository (for example a third-party action). A member that has to verify such an action's pin or
+source (the Lead, the Devil's Advocate, Security) uses plain Git over HTTPS instead:
+`git ls-remote --tags https://github.com/<owner>/<repo>` resolves a tag to its commit, and a shallow clone
+of that tag (`git clone --depth 1 --branch <tag> https://github.com/<owner>/<repo>`, into a scratch
+directory outside the working tree) lets the member read the source and compare the commit with the pin.
+
 ## Concurrency
 
 Only one member that builds or runs tests may work at a time: concurrent builds and test runs share
 build output and caches and break each other (see *Concurrency* in `.squad/stack.md` for what this stack
 shares). In step 8, `squad-reviewer` and `squad-security` may run together because
 both are read-only and the reviewer builds in a scratch copy. No member experiments (mutation tests,
-trial edits) in the repository working tree — use a scratch `git worktree` instead.
+trial edits, baseline comparisons) in the repository working tree — use a scratch `git worktree` instead;
+`git stash` is a Git write operation and forbidden.
 
 ## Outcome "no change"
 

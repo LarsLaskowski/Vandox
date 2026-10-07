@@ -10,7 +10,7 @@
 `docs/UNIT_TESTS.md` requires "no real clock (inject a clock or a fixture path)", and `.squad/project.md`
 lists an injectable clock as the planned test double for time. Issue #13 brings the first code whose
 behavior is a timeout: the `/healthz` database ping limit and its single-flight wait (0059) and the
-graceful shutdown deadline of both HTTP servers (0058). These timeouts are enforced by
+graceful shutdown deadline of both HTTP servers (0072). These timeouts are enforced by
 `context.WithTimeout` and `http.Server.Shutdown`, which read the Go runtime's timers; no clock value of the
 program is involved. The project's toolchain is Go 1.27, which has `testing/synctest`: inside its bubble
 the `time` package runs on a fake clock that advances only when every goroutine is durably blocked — but

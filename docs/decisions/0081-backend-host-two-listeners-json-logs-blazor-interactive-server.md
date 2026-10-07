@@ -7,7 +7,7 @@
 
 ## Context
 
-[0058](0058-vandoxd-runs-the-service-by-default-with-a-shutdown-deadline.md) (superseded by
+[0072](0072-vandoxd-import-sub-command-output-and-exit-codes.md) (superseded by
 [0072](0072-vandoxd-import-sub-command-output-and-exit-codes.md)) and [0059](0059-healthz-checks-the-database-and-the-binary-is-the-health-probe.md)
 describe the service: web and ingest on separate ports, JSON log lines, a 10 s shutdown deadline, `/healthz`,
 `-healthcheck`. ASP.NET Core serves both ports from one process by default as one application.

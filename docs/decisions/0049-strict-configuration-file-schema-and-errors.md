@@ -12,7 +12,7 @@ naming the key") and sensible defaults. It also asks for commented example files
 and `deploy/backend/` that a test loads. `docs/ARCHITECTURE.md` (*Configuration*) says both binaries are
 configured through a configuration file and environment variables. Secrets come only from the
 environment (0032, 0050). The backend skeleton (#13) and the agent skeleton (#30) will call the loader at
-start-up. Neither binary has a start action yet (0034).
+start-up. Neither binary has a start action yet (0072).
 
 The YAML library accepts more than a configuration file needs (0048). An option that is silently ignored,
 for example a duplicate key whose first value wins or a second document, is exactly what "strict" is meant

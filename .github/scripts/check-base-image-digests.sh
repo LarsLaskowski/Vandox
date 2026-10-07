@@ -3,7 +3,7 @@
 # tag in the registry. Run from the repository root; needs docker with buildx, and jq.
 # Prints a Markdown table to standard output and ::warning::/::error:: lines to standard error.
 # Exit status: 0 all current, 3 at least one digest is stale, 4 a registry lookup failed,
-# 1 any other error (precedence 1 > 4 > 3 > 0). Used by base-image-digests.yml and ci.yml (record 0055).
+# 1 any other error (precedence 1 > 4 > 3 > 0). Used by base-image-digests.yml and ci.yml (record 0080).
 set -euo pipefail
 export LC_ALL=C
 f=deploy/backend/Dockerfile

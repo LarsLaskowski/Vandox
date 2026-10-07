@@ -25,7 +25,7 @@ Forces:
   (#50–#52) are not designed yet.
 - SQLite's `INTEGER` is a signed 64-bit integer; the model's sequence numbers are `uint64` and its times have
   nanosecond precision.
-- #14's performance criterion: 10,000 records in one transaction in under one second on the DS918+ (0068).
+- #14's performance criterion: 10,000 records in one transaction in under one second on the DS918+ (0077).
   For log lines the FTS5 index is most of the cost, so how the index is filled decides whether the criterion
   can be met.
 
@@ -43,7 +43,7 @@ Forces:
    FTS5 index), and the payload of every other kind as the model's JSON in `records.data`.
 
 How the external-content FTS5 index of the log lines is filled (measured on 2026-10-06 on a 2.1 GHz Xeon,
-4 vCPU, `modernc.org/sqlite` v1.60.1, schema below, writer settings of 0065, 10,000 kernel OOM-kill lines of
+4 vCPU, `modernc.org/sqlite` v1.60.1, schema below, writer settings of 0077, 10,000 kernel OOM-kill lines of
 about 150 bytes per transaction, 5 to 20 successive batches into the same database):
 
 - a. **`AFTER INSERT` trigger on `log_lines`** — the usual pattern from the FTS5 documentation; 0.50 to 0.79 s
@@ -69,7 +69,7 @@ Invalid UTF-8 in strings that the store writes as JSON (payloads, metric labels)
 
 ## Decision
 
-Option 3, schema version 2 (0064):
+Option 3, schema version 2 (0077):
 
 - `records(id INTEGER PRIMARY KEY, kind, origin, source, agent_id, seq, captured_at, received_at, boot_id,
   clock_offset_ns, data) STRICT`. `agent_id`, `seq`, `boot_id`, `clock_offset_ns` and `data` are `NULL` when
@@ -90,7 +90,7 @@ Option 3, schema version 2 (0064):
   `log_lines`. A log line is searchable as soon as its batch is committed. Option a was rejected because it
   costs about three times as much for the same result, option c because it gives up search at commit and
   needs a backlog with recovery, which is not justified while option b may meet the criterion; c remains the
-  next step if the DS918+ measurement (0068) still exceeds one second.
+  next step if the DS918+ measurement (0077) still exceeds one second.
 - Times are stored as Unix nanoseconds (`INTEGER`). `captured_at` and `received_at` outside the range of a
   signed 64-bit nanosecond count (1677-09-21 to 2262-04-11) and sequence numbers above 2^63 − 1 are rejected
   by the store; times inside JSON payloads keep RFC 3339 and have no such limit.

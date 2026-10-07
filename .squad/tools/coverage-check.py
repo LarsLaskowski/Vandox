@@ -3,7 +3,9 @@
 "coverage on new code") and overall line coverage, merged from all coverage reports
 (one per test project) of the latest test run; *Test with coverage* clears the results directory first.
 
-Supported report formats (set COVERAGE_FORMAT in `.squad/tools/squad_settings.py`):
+Supported report formats (set COVERAGE_FORMAT in `.squad/tools/squad_settings.py`; a repository with
+several stack profiles lists one `(format, glob)` pair per report kind in COVERAGE_REPORTS instead, and
+the hits of all of them are merged):
 - `cobertura` — e.g. coverlet's `coverage.cobertura.xml` (.NET), or any Cobertura XML
 - `lcov`      — `lcov.info` (Node: c8, Node's test runner, Jest, Vitest, ...)
 - `go`        — a `go test -coverprofile` file
@@ -75,12 +77,24 @@ def changed_test_files():
         capture_output=True, text=True, check=True).stdout.splitlines()
 
 
-def run_reports():
+def report_sources():
+    """The (format, glob) pairs to read: COVERAGE_REPORTS when set (several stack profiles), otherwise the
+    single COVERAGE_FORMAT / COVERAGE_REPORT_GLOB."""
+    pairs = getattr(settings, "COVERAGE_REPORTS", None)
+    if pairs is None:
+        pairs = [(settings.COVERAGE_FORMAT, settings.COVERAGE_REPORT_GLOB)]
+    for report_format, _ in pairs:
+        if report_format not in LOADERS:
+            sys.exit(f"Unknown coverage format '{report_format}' in squad_settings.py")
+    return list(pairs)
+
+
+def run_reports(pattern):
     """Every report the glob matches: one per test project of the latest run. *Test with coverage* clears the
     results directory first, so no report of an earlier run can be among them."""
-    reports = sorted(glob.glob(settings.COVERAGE_REPORT_GLOB, recursive=True))
+    reports = sorted(glob.glob(pattern, recursive=True))
     if not reports:
-        sys.exit(f"No coverage report matches {settings.COVERAGE_REPORT_GLOB} - the report was never written or "
+        sys.exit(f"No coverage report matches {pattern} - the report was never written or "
                  "has been deleted; run *Test with coverage* from .squad/stack.md first, then this gate again")
     return reports
 
@@ -151,15 +165,17 @@ def load_go(report):
 LOADERS = {"cobertura": load_cobertura, "lcov": load_lcov, "go": load_go}
 
 
-def merged_hits(loader):
-    """Merge every report matching COVERAGE_REPORT_GLOB into one map of hits per file and line."""
-    hits = {}
-    reports = run_reports()
-    print(f"Coverage reports merged: {len(reports)}")
-    for report in reports:
-        for path, lines in loader(report).items():
-            for number, count in lines.items():
-                add_hit(hits, path, number, count)
+def merged_hits():
+    """Merge every report matching the globs of COVERAGE_REPORTS into one map of hits per file and line."""
+    hits, merged = {}, 0
+    for report_format, pattern in report_sources():
+        reports = run_reports(pattern)
+        merged += len(reports)
+        for report in reports:
+            for path, lines in LOADERS[report_format](report).items():
+                for number, count in lines.items():
+                    add_hit(hits, path, number, count)
+    print(f"Coverage reports merged: {merged}")
     return hits
 
 
@@ -210,11 +226,8 @@ def main():
     args = parser.parse_args()
 
     os.chdir(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
-    loader = LOADERS.get(settings.COVERAGE_FORMAT)
-    if loader is None:
-        sys.exit(f"Unknown COVERAGE_FORMAT '{settings.COVERAGE_FORMAT}' in squad_settings.py")
     warn_untracked()
-    hits = merged_hits(loader)
+    hits = merged_hits()
     overall, total_hit, total = overall_coverage(hits)
     changed = changed_lines()
     new_code, covered, coverable = new_code_coverage(hits)

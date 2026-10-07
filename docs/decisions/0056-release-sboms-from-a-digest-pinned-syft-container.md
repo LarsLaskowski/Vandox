@@ -114,7 +114,7 @@ Facts this decision rests on (checked on 2026-10-05):
    - *Dependabot*: cannot read an image reference in a script; a separate Dockerfile only to expose the
      reference would add a Dependabot `docker` entry and a build step for nothing else. Rejected.
    - *Refreshed by hand*, documented in `docs/CONTRIBUTING.md` like the base image digests (0041), with a
-     follow-up issue to add the syft pin to the weekly digest report (0055).
+     follow-up issue to add the syft pin to the weekly digest report (0080).
 
    Chosen: by hand, with the follow-up issue.
 

@@ -1,9 +1,9 @@
 # NNNN: <short title>
 
-- **Status:** Proposed | Accepted | Superseded by NNNN
+- **Status:** Proposed | Accepted | Superseded by NNNN (only for a released record; an unreleased record is edited in place)
 - **Date:** YYYY-MM-DD
 - **Source:** Issue #<number> / PR #<number>
-- **Supersedes:** — | NNNN
+- **Supersedes:** — | NNNN (a released record only; also for a record that only amends it: say what it amends; NNNN stays unedited)
 
 ## Context
 

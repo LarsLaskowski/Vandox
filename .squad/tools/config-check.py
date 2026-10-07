@@ -13,7 +13,10 @@ it. This script checks, without arguments:
 - `CLAUDE.md`, `AGENTS.md` and `.github/copilot-instructions.md` are identical from their first `## `
   heading on (only the title and introduction may differ);
 - `.squad/template.json` names the template repository (where lessons about template-managed files are
-  filed);
+  filed) and, for a repository with several stack profiles, lists them in `profiles` (the first one is
+  `profile`); then every profile has its `analyzer-check-<profile>.py` and `session-start-<profile>.sh`
+  next to the dispatchers, and `squad_settings.py` lists at least one `COVERAGE_REPORTS` entry per profile;
+- `.squad/tools/decision-check.py` passes (decision records consistent, released records frozen);
 - `.squad/stack.md`, `.squad/project.md` and `.squad/tools/squad_settings.py` exist, and no file the
   template seeded or rebuilt still contains a template placeholder (`{{TODO: …}}` — a marker that
   ordinary Go templates, `docker --format` strings or GitHub Actions expressions never contain).
@@ -27,6 +30,7 @@ import glob
 import json
 import os
 import re
+import subprocess
 import sys
 
 CLAUDE_DIR = ".claude"
@@ -132,6 +136,42 @@ def check_template_record(errors):
         return
     if not isinstance(record, dict) or not str(record.get("repository") or "").strip():
         errors.append(f"{path}: no 'repository' - refresh the squad with adopt-template")
+        return
+    check_profiles(record, errors)
+
+
+def check_profiles(record, errors):
+    path = os.path.join(SQUAD_DIR, "template.json")
+    profiles = record.get("profiles")
+    if profiles is None:
+        if record.get("additionalProfiles"):
+            errors.append(f"{path}: 'additionalProfiles' is not read - refresh the squad with adopt-template, "
+                          "which records 'profiles'")
+        return
+    if (not isinstance(profiles, list) or not profiles or len(set(profiles)) != len(profiles)
+            or not all(isinstance(p, str) and re.fullmatch(r"[\w-]+", p) for p in profiles)):
+        errors.append(f"{path}: 'profiles' must be a list of distinct profile names")
+        return
+    if record.get("profile") != profiles[0]:
+        errors.append(f"{path}: 'profile' must be the first entry of 'profiles' ({profiles[0]})")
+    if len(profiles) == 1:
+        return
+    for rel in [f for p in profiles for f in (os.path.join(SQUAD_DIR, "tools", f"analyzer-check-{p}.py"),
+                                              os.path.join(CLAUDE_DIR, "hooks", f"session-start-{p}.sh"))] + \
+            [os.path.join(SQUAD_DIR, "tools", "analyzer-check.py"), os.path.join(CLAUDE_DIR, "hooks", "session-start.sh")]:
+        if not os.path.isfile(rel):
+            errors.append(f"{rel} is missing (written by adopt-template for the profiles {', '.join(profiles)})")
+    try:
+        sys.path.insert(0, os.path.join(SQUAD_DIR, "tools"))
+        sys.dont_write_bytecode = True
+        import squad_settings
+        reports = getattr(squad_settings, "COVERAGE_REPORTS", None)
+    except Exception as error:  # noqa: BLE001  (any failure to load the settings is the finding)
+        errors.append(f"{SQUAD_DIR}/tools/squad_settings.py: {error}")
+        return
+    if not isinstance(reports, (list, tuple)) or len(reports) < len(profiles):
+        errors.append(f"{SQUAD_DIR}/tools/squad_settings.py: COVERAGE_REPORTS needs a (format, glob) entry for "
+                      f"each of the {len(profiles)} profiles")
 
 
 def check_project_files(errors):
@@ -148,6 +188,24 @@ def check_project_files(errors):
             errors.append(f"{path}:{line}: template placeholder '{{{{TODO: {first}}}}}' not filled in")
 
 
+ERROR_PREFIX = "ERROR: "
+
+
+def check_decisions(errors):
+    script = os.path.join(SQUAD_DIR, "tools", "decision-check.py")
+    if not os.path.isfile(script):
+        errors.append(f"{script} is missing (written by adopt-template)")
+        return
+    result = subprocess.run([sys.executable, script], capture_output=True, text=True, encoding="utf-8")
+    findings = [line[len(ERROR_PREFIX):] for line in result.stdout.splitlines() if line.startswith(ERROR_PREFIX)]
+    errors.extend(findings)
+    for line in result.stdout.splitlines():
+        if line.startswith("WARNING: "):
+            print(line)
+    if result.returncode != 0 and not findings:
+        errors.append(f"{script} failed: {result.stderr.strip() or 'no output'}")
+
+
 def main():
     # Resolve paths from the repository root, whatever the current directory is.
     os.chdir(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
@@ -159,6 +217,7 @@ def main():
     check_instructions(errors)
     check_template_record(errors)
     check_project_files(errors)
+    check_decisions(errors)
 
     if not agents or not skills:
         errors.append("no agents or skills found - has the squad been adopted in this repository?")

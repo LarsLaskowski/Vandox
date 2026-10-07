@@ -20,7 +20,7 @@ imported. Further forces:
   `syslog.2.gz` after the next rotation; a `.gz` file and its copy inside a `.tar.gz` have different bytes
   on disk but the same lines.
 - A forensic import can take long (a journal export of months, gigabytes); it may be interrupted by Ctrl-C,
-  `docker stop` or a database error. One transaction per file would hold SQLite's single write lock (0065)
+  `docker stop` or a database error. One transaction per file would hold SQLite's single write lock (0077)
   for minutes and starve the service, which may run at the same time; so a file is written in many batches,
   and an interruption leaves a partly imported file behind.
 - The hash of a file is known only after reading it completely, but records must not be written before it
@@ -49,7 +49,7 @@ For an interrupted file:
   with FTS5 maintenance.
 - c. **Resume by count** — the store keeps, per file, the number of records stored; each batch advances it in
   the same transaction as its records, as a compare-and-set on the expected count. A resumed import parses
-  the file again and drops the first *n* records. Requires deterministic parsers (0070). The compare-and-set
+  the file again and drops the first *n* records. Requires deterministic parsers (0079). The compare-and-set
   also makes two concurrent runs safe.
 
 A parser is deterministic only for the same content **and** the same `logparse.File` (name and modification
@@ -75,7 +75,7 @@ For a file that changes between the passes (a log still being written):
 Options 2, 5, c, γ and B. (α was rejected because it mixes parses within a file; β because it can leave a
 content that can never be completed.)
 
-- Schema version 3 (0064, step 3) adds
+- Schema version 3 (0077, step 3) adds
   `import_files(id INTEGER PRIMARY KEY, sha256 BLOB NOT NULL UNIQUE CHECK (length(sha256) = 32),
   size INTEGER NOT NULL CHECK (size >= 0), name TEXT NOT NULL,
   file_name BLOB NOT NULL CHECK (length(file_name) <= 1024), mod_time INTEGER, source_type TEXT NOT NULL,
@@ -87,7 +87,7 @@ content that can never be completed.)
   parse of this content receives; `source_type` is the parser's type; times are Unix nanoseconds as in 0063.
 - `store.BeginImport` returns the state of a content hash, creating it (no records, not complete) when it is
   unknown; an existing state is returned unchanged. It refuses a `FileName` longer than 1024 bytes (the
-  importer lists longer paths as failed before, 0071).
+  importer lists longer paths as failed before, 0079).
 - `store.Batch` gets an optional `Import *ImportStep{FileID, Done, Complete}`. `WriteBatch` then requires
   origin `import` for every record and no agent ID, and in its transaction first runs
   `UPDATE import_files SET records = records + n, complete = …, completed_at = … WHERE id = ? AND records = Done
@@ -95,7 +95,7 @@ content that can never be completed.)
   without records is valid only to complete a file. The records go through the existing write path, so
   `WriteBatch` stays the only writer of `log_lines` and `log_fts` (0063).
 - The importer (`cmd/vandoxd/internal/importer`) runs two passes. Pass 1 lists every file (stopping at the
-  entry limit of 0071 as soon as it is exceeded), detects its parser
+  entry limit of 0079 as soon as it is exceeded), detects its parser
   and, for recognized files, reads the whole decompressed content to compute SHA-256 and size; a file that
   cannot be read completely (truncated or corrupt gzip, I/O error) fails here and is not imported at all.
   While a file is hashed, pass 1 reports progress every 64 MiB (0072).
@@ -105,7 +105,7 @@ content that can never be completed.)
   `ImportStep`, the last one `Complete`. It reads the decompressed content only up to the `size` hashed in
   pass 1 and hashes it again while parsing (draining what the parser did not read); if fewer bytes can be
   read or the hash differs from pass 1, the file fails and is not completed.
-- Batches hold at most 2,000 records and the records from at most 4 MiB of input (0071), counted from the
+- Batches hold at most 2,000 records and the records from at most 4 MiB of input (0079), counted from the
   batch's first buffered record; the byte bound is checked only when a record is added, so dropped (resumed)
   records and skipped input never flush, and the only batch without records is the one that completes a file.
 
@@ -137,11 +137,11 @@ content that can never be completed.)
   inference), not what the new name would suggest.
 - A truncated or corrupt compressed file is not imported in part; the operator can decompress the readable
   part and import it as a plain file.
-- Resuming relies on parsers being deterministic for the same content and `File` (0070). A parser change between an
+- Resuming relies on parsers being deterministic for the same content and `File` (0079). A parser change between an
   interrupted run and its resumption may shift the count; the stored `source_type` catches a changed
   detection, not a changed parser version.
 - Records do not reference their import file; deleting or re-doing one import would need a migration that
   adds the link.
-- A database at version 3 is refused by older builds (0064).
-- `store.ImportTracker` (`BeginImport`) joins the repository interfaces of 0067; `storetest.Fake` scripts it
+- A database at version 3 is refused by older builds (0077).
+- `store.ImportTracker` (`BeginImport`) joins the repository interfaces of 0077; `storetest.Fake` scripts it
   like the others.
