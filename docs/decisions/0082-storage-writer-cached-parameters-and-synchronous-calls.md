@@ -9,7 +9,7 @@
 
 [0077](0077-storage-on-microsoft-data-sqlite-same-schema-and-rules.md) kept the criterion of #14: 10,000 records in one transaction
 in under one second on the reference host, a DS918+. The first measurement there (`tools/Vandox.StorageBenchmark`, .NET 10.0.10,
-Linux 4.4, data volume `/volume2`) failed it: the first batch on a fresh database took 1480 ms, the next four 890 to 1119 ms
+Linux 4.4, SSD volume `/volume2`; the HDD volume is slower and was not measured) failed it: the first batch on a fresh database took 1480 ms, the next four 890 to 1119 ms
 (6,755 to 11,241 records/s). The development host (4 vCPU Xeon) needed about 500 ms for the first and 310 to 390 ms for the later
 batches, so the NAS is about three times slower. A transaction has one `fsync`, so the time is CPU-bound, and the writer spent CPU
 where nothing was needed: per record 17 parameters were set by a name lookup, a sorted copy of the labels was serialized
@@ -51,7 +51,7 @@ Tried and not adopted: runtime switches (`TieredPGO` on or off, `ReadyToRun` on 
   as well, because SQLite is synchronous); cancellation is still honored between records.
 - The first NAS result is kept in `docs/BENCHMARKS.md` as the baseline.
 - Result with the page cache on the DS918+: first batch 1001 ms (the limit is 1000 ms), later batches 711 to 783 ms (median 783 ms), a
-  4 KiB write needs about 10 ms to reach the disk, so the writer is CPU-bound. `ReadyToRun` showed no difference on the development
+  4 KiB write needs about 10 ms to reach the disk on the SSD volume, so the writer is CPU-bound there; the HDD volume is slower and has not been measured, so the result is the best case. `ReadyToRun` showed no difference on the development
   host. The first batch is about 250 ms slower than the others (fresh file, start-up); the criterion names exactly that batch, so
   whether 1001 ms against 1000 ms counts as met, or the criterion is restated (for example the median of five batches), needs a
   decision record of its own once the Product Manager has decided.
