@@ -2,6 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-06
+- **Area:** Log import
 - **Source:** Product Manager request: move the backend to .NET 10 with Blazor, keep the agent in Go
 - **Supersedes:** —
 
@@ -64,75 +65,23 @@ Decisions of the Go version that carry over:
 
 ## Decision
 
-Option 2. `Vandox.Core.IO` (`SecureRoot`, `FileProbe`, `OpenHow`) opens everything below the import root
-through these calls; links and special files (FIFO, device, socket) are listed and never followed or opened
-as data; names and paths are labels only.
-
-Guarantees, unchanged from the Go version:
-
-- **Nothing is extracted or written.** Entry names and relative paths are cleaned and used only as labels in the
-  summary (quoted), in logs (quoted attribute values, because the JSON handler writes C1 and format characters
-  raw; 0072) and in `import_files.name` (invalid UTF-8 replaced, cut to 1,024 bytes). A path or entry name longer
-  than 1,024 bytes is listed as failed.
-- **Root:** the operator names it and it is resolved once and checked without following the last link; a
-  directory is walked recursively in lexical order, a regular file is one input file; anything else (FIFO,
-  socket, device, missing) is an error of the run and is never opened.
-- **Format by content:** gzip magic is decompressed (all members), one layer only (gzip inside is listed as
-  "compressed twice"); `ustar` at offset 257 is a tar archive; bzip2, xz, zstd, lz4, zip and 7z signatures are
-  listed as "unsupported format"; empty content is listed as "empty"; everything else goes to the parser registry,
-  and a file no parser claims is listed as "no parser recognized the file". V7 tar without a magic is not
-  supported; a `.gz` suffix is removed from the parser's `File.Name` when the file was decompressed.
-- **Tar entries:** regular files (including sparse) are read; directories and PAX global headers are not
-  listed; links, devices, FIFOs and unknown types are listed; an entry that is itself a tar archive is listed as
-  "archive inside an archive (not opened)"; a corrupt header ends the archive, which is listed as failed.
-- **Limits:** at most 20,000 entries per run (`ImportLimits.MaxFiles`; every directory entry of any kind and every
-  tar header except PAX global headers counts), enforced while scanning: the entry that brings the count over
-  the limit ends pass 1 at once, is not read, detected or hashed, and nothing has been written. A head of 4,096
-  bytes (`SniffBytes`) for detection, lines of at most 16 KiB (`LogLineReader`), batches of at most 2,000 records
-  and the records from at most 4 MiB of input, whichever comes first. No limit on the size of a file or of
-  decompressed data: every read checks the cancellation token, so SIGINT/SIGTERM to the import process stops it
-  cleanly and it resumes later (0069); a kill leaves the database consistent because each batch is one
-  transaction with the import's compare-and-set.
-- **Permissions:** the import runs as the container's user (65532) and reads only what that user may read; an
-  unreadable file is listed as failed. The README tells the operator to grant read access to 65532 only
-  (`chown`/`chmod u+rX` or `setfacl`) and never to make the copy world-readable: a copied `/var/log` holds
-  `0640 root:adm` files such as `auth.log`. Modification times are passed in UTC; one outside the range storable
-  as Unix nanoseconds (e.g. a forged tar `mtime`) is stored as unknown (0069).
-- Every file that is not imported appears in the summary with its outcome and reason; nothing is skipped
-  silently.
-
-Parsers: `ILogParser` (`Type`, `Detect(file, head)` returning a confidence `NoMatch < MatchName < MatchContent`,
-`Parse(file, stream, emitter, cancellationToken)`) and `ParserRegistry` (`Vandox.Core.LogParsing`) pick the parser
-with the highest confidence, the earlier registered one on a tie, or none. The registry refuses null parsers,
-duplicate types and types outside `^[a-z][a-z0-9._-]{0,63}$` (also used for `import_files.source_type`). `Parse` is
-deterministic for the same content and `File` (resume, 0069, passes a resumed content the `File` of its first
-import, so `Parse` may derive a year from the name and modification time), emits records of origin `import` with
-UTC capture times, keeps memory bounded independently of the input size, honors cancellation and returns the
-emitter's error; skip reasons are fixed texts without input content. The importer validates every record and counts
-refused ones as skipped, so a parser bug cannot fail a whole batch. `LogLineReader` is the shared bounded line
-reader (lines without `\n`/`\r\n`, cut at 16 KiB at a UTF-8 boundary with a `truncated` flag, the rest discarded,
-so a file without newlines cannot grow memory); a scripted test parser is production code for the coverage gate
-with its own test. The import runs in two passes with batches that resume by count, keyed by the SHA-256 of the
-decompressed content (0069).
+Option 2: everything below the import root is opened through `openat2` with beneath-root and no-symlink resolution
+(`statx` classifies entries without following links; older kernels use a weaker per-directory fallback), and
+archives are streamed, never extracted. The guarantees of the Go version carry over unchanged. Parsers are chosen
+by a confidence per parser from an explicit, ordered list. The limits, the handling of formats, archives and
+links, and the parser contract are in [Log import](../areas/log-import.md), *Input*, *Safe file access* and
+*Parsers*.
 
 ## Consequences
 
 - Linux only for the import; other platforms are not supported by the backend image anyway.
-- #16–#20 each add a parser type and one line in the explicit list; the importer does not change
-  (`.squad/project.md`, *Integration surface*). The order of that list is part of the behavior (ties), so a test
-  pins it once there are parsers. A parser that is not deterministic breaks resuming. The interface works on
-  streams of whole files; the agent's live shipping (#37) reuses the line-level logic but needs its own entry
-  point for a journal cursor.
-- The NAS kernel fallback is weaker than `openat2` (the application checks the path, the kernel does not enforce it,
-  and a link swapped in between check and open is not caught) and is stated openly in `.squad/project.md`; the
-  tests of `SecureRoot` and of the importer run both paths (`SecureRoot.OpenWithoutKernelResolution`).
-- A tar entry with a PAX `size` record (files above 8 GiB, or a hostile archive) is refused with a reason: the tar reader
-  allocates what extended headers declare, and a guard that mirrored the reader's size handling could be put out of step
-  by crafted values, so `TarHeaderGuardStream` trusts only the size field of each header and caps extended headers at 1 MiB.
-- Memory stays flat for any file size and number of entries. A gzip bomb or a huge sparse entry is not refused; it
-  costs time and stops only by cancellation, and a bomb of **valid lines** fills the storage directory until the
-  operator stops it (the README says to watch the progress lines and press Ctrl-C). A size limit can be added if
-  it ever matters.
+- Each new parser adds a type and one line in the explicit list (`.squad/project.md`, *Integration surface*); the
+  order of that list is part of the behavior, so a test pins it. A parser that is not deterministic breaks resuming.
+- The fallback for kernels without `openat2` is weaker (the application checks the path, the kernel does not enforce
+  it, and a link swapped in between check and open is not caught). It is stated openly in `.squad/project.md`, and
+  the tests run both paths.
+- Memory stays flat for any file size and number of entries. A decompression bomb or a huge sparse entry is not
+  refused; it costs time and stops only by cancellation, and a bomb of valid lines fills the storage directory until
+  the operator stops it. A size limit can be added if it ever matters.
 - Rotations compressed with xz, zstd or bzip2, zip files and nested archives are listed, not imported; adding a
-  decompressor is a new decision. Inputs with more than 20,000 entries must be split; the error says so before
-  anything is written. A symbolic link inside a saved `/var/log` is listed; the operator copies the target instead.
+  decompressor is a new decision. Inputs with more than 20,000 entries must be split.

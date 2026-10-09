@@ -2,6 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-07
+- **Area:** —
 - **Source:** Issue #14 and #129 (storage write criterion), Product Manager decision after the first DS918+ measurement
 - **Supersedes:** —
 

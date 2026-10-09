@@ -26,4 +26,6 @@ operator or another component can rely on — formats, limits, error behavior, g
 <!-- project:begin area-index -->
 | Area | Scope | Not here |
 | ---- | ----- | -------- |
+| [Configuration and secrets](configuration-and-secrets.md) | The configuration file and the secrets of the agent and the backend: strict parsing, options, defaults, secret sources and error texts. | What an option does at run time (the area of the feature). |
+| [Log import](log-import.md) | The `import` sub-command of `vandoxd`: accepted input, safe file access, repeatable import, parser contract, summary and exit codes. | Storage of records, alert suppression for imported data, the service entry point. |
 <!-- project:end area-index -->

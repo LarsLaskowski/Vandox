@@ -2,6 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-04
+- **Area:** —
 - **Source:** Issue #9
 - **Supersedes:** — (the pull-request dry run in *Trigger* is amended by [0053](0053-releases-are-manual-and-started-only-by-a-version-tag.md))
 

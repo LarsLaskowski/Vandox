@@ -112,15 +112,11 @@ flowchart LR
     R --> T[Telegram]
 ```
 
-The log import is a second path into the same database. `vandoxd import <path>` reads a directory, a tar or
-tar.gz archive, a gzip file or a plain file as streams (nothing is extracted, no link is followed, at most
-20,000 entries per run) in two passes: the first lists every file, picks a parser from the registry by name and
-first 4 KiB, and computes the SHA-256 of the decompressed content; the second writes the parser's records in
-batches of at most 2,000 records or 4 MiB of input through `store.WriteBatch`. Imported records have origin
-`import`; they are never live, so they never raise an alert ([0022](decisions/0022-backfill-detection-and-live-only-alerts.md)).
-Files no parser claims are listed with the reason in the summary on standard output; progress goes to standard
-error as JSON log lines. The import runs next to the service in the same container and shares the database's
-single writer lock in short batches.
+The log import is a second path into the same database. `vandoxd import <path>` reads a directory, an archive or a
+file as streams in two passes (list and hash, then write in bounded batches through the storage layer), next to the
+service in the same container. Imported records have origin `import`; they are never live, so they never raise an
+alert ([0022](decisions/0022-backfill-detection-and-live-only-alerts.md)). The accepted input, the limits, the
+repeatable-import rules, the parser contract and the output are in [Log import](areas/log-import.md).
 
 Records: [0006](decisions/0006-agent-connects-outbound-only.md),
 [0007](decisions/0007-sqlite-with-fts5-no-external-database.md),
@@ -259,25 +255,13 @@ Records: [0006](decisions/0006-agent-connects-outbound-only.md),
 
 ## Configuration
 
-Both binaries are configured through one YAML file each (`/etc/vandox/agent.yaml`, `/etc/vandox/vandoxd.yaml`;
-commented examples under `deploy/agent/` and `deploy/backend/`) and environment variables. The shared package
-Each binary implements this in its own language: `internal/config` (Go) with `LoadAgent`, and
-`Vandox.Core.Configuration` (C#) with `BackendConfigLoader` and `SecretReader`, read the file, validate every
-option and read the secrets, by the same rules
+Both binaries are configured through one strictly parsed YAML file each (`/etc/vandox/agent.yaml`,
+`/etc/vandox/vandoxd.yaml`; commented examples under `deploy/agent/` and `deploy/backend/`) and, for secrets only,
+`VANDOX_*` environment variables or `*_FILE` files. Each binary implements the rules in its own language:
+`internal/config` (Go) for the agent and `Vandox.Core.Configuration` (C#) for the backend
 ([0078](decisions/0078-configuration-and-secrets-in-the-backend-with-yamldotnet.md)). `vandoxd` loads its
-configuration at start-up; the agent will call `LoadAgent` with the agent feature.
-
-The file is parsed strictly. A decoder walks the YAML node tree against the option types, so unknown and
-duplicate keys, a second document, anchors, aliases, custom tags and invalid values are errors. Errors
-name file, line and key and never echo the document text, so a secret pasted into the wrong place does not
-reach a log ([0048](decisions/0048-yaml-library-go-yaml-in-yaml-v3.md),
-[0049](decisions/0049-strict-configuration-file-schema-and-errors.md)).
-
-Secrets are read only from `VANDOX_*` environment variables or from the file named by the matching `*_FILE`
-variable, never from the configuration file. An unknown `VANDOX_` variable is an error, a secret value never
-appears in an error text, and the `Secret` type prints `[redacted]` in every format, log and JSON output
-([0032](decisions/0032-secrets-only-from-environment-or-docker-secrets.md),
-[0050](decisions/0050-secret-sources-rules-and-redaction.md)).
+configuration at start-up; the agent will call `LoadAgent` with the agent feature. The rules, the options and the
+error behavior are in [Configuration and secrets](areas/configuration-and-secrets.md).
 
 ## Security model
 

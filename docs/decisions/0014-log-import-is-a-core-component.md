@@ -2,6 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-03
+- **Area:** Log import
 - **Source:** Issue #6
 - **Supersedes:** —
 
