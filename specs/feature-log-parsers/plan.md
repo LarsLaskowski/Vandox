@@ -31,7 +31,14 @@ Claims of the issue, checked against the code:
 - "Timestamps without a year ... using the file's rotation and modification time" — **confirmed possible**: `LogFile`
   carries the cleaned name (with `.gz` removed, so the rotation suffix is visible) and the UTC modification time, and a
   resumed content is parsed with the name and time of its first import (`src/Vandox.Import/ImportPass.cs:414`), so an
-  inferred year cannot change in the middle of a file.
+  inferred year cannot change in the middle of a file. The modification time is in practice always present: the scanner
+  sets it for a regular file (`src/Vandox.Import/Scanner.cs:267`) and for a tar entry (`Scanner.cs:514`); it is only
+  wrong, not missing, after a plain `cp`. A `-YYYYMMDD` rotation date in the name survives such a copy, so it is
+  preferred when present (AC-S4).
+- Failing a file from a parser (AC-S7) — **verified**: an exception of `ParseAsync` fails the file with the exception's
+  message as reason after storing the records parsed before it (`ImportPass.cs:414-470`, `SettleAsync` at line 103;
+  test `ImporterFailsFileWhenParserFails`), and a file that is not complete is resumed by count on the next run
+  (`ImportPass.cs:330`), so a re-run after setting the option completes it.
 - "Year boundary and time zones handled" — needs the server's zone, which no log line carries. **Verified constraint:**
   the pinned runtime image (`mcr.microsoft.com/dotnet/aspnet@sha256:48e51f2f...`, linux/amd64 manifest
   `sha256:8c20ba8c...`) has no `zoneinfo`/`tzdata` path in any of its five layers (listed with `tar -tzf` from the
@@ -42,6 +49,9 @@ Related observations (no defect fixed here): `README.md` (*Import logs*, last pa
 recognizes no file until #16-#20 land, which this feature makes stale (Documentation updates). Not verified against the
 production server: that Ubuntu 22.04's rsyslog writes the traditional file format (`RSYSLOG_TraditionalFileFormat`,
 the packaged `/etc/rsyslog.conf` default) and that Ubuntu 24.04 writes the RFC 3339 format; both are supported either way.
+Also from the packaged configuration, not checked on the server: Ubuntu's `/etc/rsyslog.d/50-default.conf` writes
+`kern.*` to `kern.log` and `*.*;auth,authpriv.none` to `syslog`, so every kernel line is in both files and an import
+of both stores it twice (stated in 0086 and the area document, for #21).
 
 ## Acceptance criteria
 
@@ -83,23 +93,35 @@ wherever several inputs share one behavior.
   RFC 3339 with fraction and `+01:00` / `Z`, optional `<PRI>` (priority = PRI mod 8, PRI 0-191), tags `kernel:`,
   `systemd[1]:`, `postfix/smtpd[2210]:`, `CRON[1234]:`, a line without a tag (`last message repeated 3 times`, program
   empty), a PID above 2,147,483,647 (pid 0, tag still parsed). Fields: `Host`, `Program`, `Pid`, `Priority` (`null`
-  without `<PRI>`), `Message` (after `tag:` and one optional space), `Log` = `LogFile.Name`, `Source` = `syslog`.
+  without `<PRI>`), `Message` (after `tag:` and one optional space), `Log` = `LogFile.Name` unchanged (the path as the
+  import lists it, rotation suffix included: `backup/var/log/syslog.1` stays `backup/var/log/syslog.1`), `Source` = `syslog`.
 - [ ] AC-S3 Lines that are not records: an empty line ("empty line"), a line without a valid header including an unknown
   month, hour 24, minute 60, an RFC 3339 offset beyond ±14:00 or a lower-case `t`/`z` ("not a syslog line"), Feb 29 in
   an inferred non-leap year ("invalid date"); each skipped with its 1-based line number, the parse continues.
-- [ ] AC-S4 Year (anchor = `ModTime`, else a valid `-YYYYMMDD` suffix of the base name meaning the end of that local day):
-  mtime 2026-03-02, `Mar  1` → 2026; mtime 2026-01-03 with `Dec 30 ...` then `Jan  2 ...` → 2025-12-30 then 2026-01-02;
-  a first line up to one day after the anchor stays in the anchor's year, more than one day after goes to the year before;
-  a line a few seconds earlier than its predecessor does not advance the year; a line more than 180 days before its
-  predecessor advances it; Feb 29 resolves in 2028, is skipped in 2026; without mtime, `syslog-20260103` anchors;
-  without both, every year-less line is skipped with "year unknown: the file has no modification time", RFC 3339 lines
-  of the same file are still read.
+- [ ] AC-S4 Year (anchor = a valid `-YYYYMMDD` suffix of the base name, before an optional `.gz` already removed by the
+  importer, meaning the end of that local day; else `ModTime`): mtime 2026-03-02, `Mar  1` → 2026; mtime 2026-01-03 with
+  `Dec 30 ...` then `Jan  2 ...` → 2025-12-30 then 2026-01-02; a first line up to one day after the anchor stays in the
+  anchor's year, more than one day after goes to the year before; a line a few seconds earlier than its predecessor does
+  not advance the year; a line more than 180 days before its predecessor advances it; Feb 29 resolves in 2028, is skipped
+  in 2026; `syslog-20260103` with mtime 2027-05-01 (a plain copy) and `Dec 30 ...` → 2025-12-30 (the name wins);
+  `syslog-20260230` (no such date) with mtime 2026-03-02 and `Mar  1` → 2026 (falls back to mtime); without both,
+  every year-less line is skipped with "year unknown: the file has no modification time", RFC 3339 lines of the same
+  file are still read.
 - [ ] AC-S5 Time zones: zone `UTC` keeps the wall time; `Europe/Berlin` `Jul  1 12:00:00` → 10:00Z, `Jan 15 12:00:00` →
-  11:00Z; the skipped hour `Mar 29 02:30:00` (2026) → 01:30Z (shifted forward); the repeated hour on 2026-10-25 in file
-  order `02:59:59`, `02:00:01`, `02:30:00` → 00:59:59Z, 01:00:01Z, 01:30:00Z (the earlier offset unless that is before
-  the previous line's instant); New Year in the zone: mtime 2025-12-31T23:30Z (00:30 local on Jan 1) with `Jan  1
-  00:10:00` → 2025-12-31T23:10Z; RFC 3339 lines ignore the zone.
+  11:00Z; the skipped hour `Mar 29 02:30:00` (2026) → 01:30Z (shifted forward); the repeated hour on 2026-10-25: a local
+  time in it takes the earlier offset (+02:00) unless that puts it more than `SyslogClock.BackwardTolerance` (10 minutes)
+  before the previous line's instant, then the later offset (+01:00). `[DataRow]` per file order: `02:59:59`,
+  `02:00:01`, `02:30:00` → 00:59:59Z, 01:00:01Z, 01:30:00Z; `02:59:59`, `02:59:58`, `02:00:01` → 00:59:59Z, 00:59:58Z,
+  01:00:01Z (a step back within the tolerance stays in the first pass); `02:59:59`, `02:10:00`, `02:09:58` → 00:59:59Z,
+  01:10:00Z, 01:09:58Z (a step back inside the second pass stays there); the first line of a file in the repeated hour takes the earlier
+  offset. New Year in the zone: mtime 2025-12-31T23:30Z (00:30 local on Jan 1) with `Jan  1 00:10:00` →
+  2025-12-31T23:10Z; RFC 3339 lines ignore the zone.
 - [ ] AC-S6 A line cut by `LogLineReader` (over 16 KiB) gives `Truncated = true`.
+- [ ] AC-S7 Zone not set (`new SyslogParser(null)`): a file of RFC 3339 lines is parsed completely; a file whose
+  first year-less (traditional) line comes after two RFC 3339 lines emits those two records and then `ParseAsync` throws
+  `InvalidOperationException` with the message `SyslogParser.TimeZoneNotSet` (`import.time_zone is not set`, no input
+  text); the year-less line is neither emitted nor skipped; a line that is not a syslog line before it is still skipped
+  as in AC-S3. The check comes before the anchor: a file without anchor and zone fails the same way.
 
 ### Kernel reports (both parsers)
 
@@ -111,7 +133,8 @@ wherever several inputs share one behavior.
 - [ ] AC-K2 The same report as journal export entries (`SYSLOG_IDENTIFIER=kernel`, `PRIORITY=4` for the start, `3` for
   the kill line) gives one record with `Priority` = the lowest member priority (3).
 - [ ] AC-K3 Lines of another program, and kernel lines of another host, written inside the report are emitted as their
-  own records (before the report record) and do not end the report.
+  own records (before the report record, so the emitted order is deterministic but not file order) and do not end the
+  report.
 - [ ] AC-K4 Bounds: a report whose joined message exceeds 16,384 bytes yields a message of at most 16,384 bytes that
   begins with the first member line, contains the line `[N lines omitted]` with the exact count, ends with the kill
   line, and has `Truncated = true`. A report without its end line ends, and is emitted as it is, at a new start line,
@@ -130,18 +153,26 @@ wherever several inputs share one behavior.
 
 ### Configuration and wiring
 
-- [ ] AC-C1 `import.time_zone`: default `UTC`; accepted: `UTC`, `Etc/UTC`, `Europe/Berlin`; refused with the error
-  `import.time_zone: must be a time zone of the IANA time zone database, such as UTC or Europe/Berlin` (file and line as
-  for every key, never the value): empty, `Europe/Nowhere`, `+01:00`, `W. Europe Standard Time`, `europe/berlin`
-  (IDs compared ordinally). The repository example `deploy/backend/vandoxd.yaml` sets it and `Keys()` lists it.
-- [ ] AC-C2 `BuiltInParsers.Create("UTC")` returns `journal`, then `syslog`; `new ParserRegistry(...)` accepts it;
-  an unknown zone throws `ArgumentException` without the zone text.
+- [ ] AC-C1 `import.time_zone`: no default (`null` when the key is absent, also with an `import:` section that is null
+  or only holds comments); accepted: `UTC`, `Etc/UTC`, `Europe/Berlin`; refused with the error `import.time_zone: must be
+  a time zone of the IANA time zone database, such as UTC or Europe/Berlin` (file and line as for every key, never the
+  value): empty, `Europe/Nowhere`, `+01:00`, `W. Europe Standard Time`, `europe/berlin` (IDs compared ordinally); a null
+  value (`time_zone: ~`) is refused as "has no value" like every string option. `Keys()` lists it. The repository
+  example `deploy/backend/vandoxd.yaml` holds it commented out (`  # time_zone: Europe/Berlin`), so it loads with
+  `TimeZone == null`; the existing test `BackendConfigLoaderLoadsRepositoryExample` (every key of `Keys()` set
+  explicitly) is adapted by the **Tester**: it exempts `import.time_zone`, asserts `null` for it and asserts that the
+  example text contains the commented line.
+- [ ] AC-C2 `BuiltInParsers.Create("UTC")` and `BuiltInParsers.Create(null)` return `journal`, then `syslog`;
+  `new ParserRegistry(...)` accepts them; an unknown zone throws `ArgumentException` without the zone text.
 - [ ] AC-C3 Detection matrix through the registry of the built-in list: a journal export head → `journal`, a
   traditional and an RFC 3339 syslog head → `syslog`, a binary journal head and prose → none; neither parser returns
   more than `NoMatch` for the other's sample.
 - [ ] AC-C4 `vandoxd import` without a `Parsers` hook imports a `syslog` file and a journal export (summary "imported",
   records with source types `syslog` and `journal`), and with `import.time_zone: Europe/Berlin` stores a traditional
-  `Jul  1 12:00:00` line at 10:00Z.
+  `Jul  1 12:00:00` line at 10:00Z. Without `import.time_zone`, a run over a traditional syslog file and a journal
+  export imports the export, lists the syslog file as failed with the reason `import.time_zone is not set` and exits
+  with 1; a second run over the same root with `import.time_zone: Europe/Berlin` imports the syslog file (outcome
+  imported, the line at 10:00Z) and lists the export as already imported.
 - [ ] AC-D1 Determinism: parsing the same content and `LogFile` twice with each parser yields equal record sequences
   (the import resumes by count).
 - [ ] AC-X1 Both parsers honor cancellation (`OperationCanceledException`) and pass on an exception of the emitter.
@@ -194,8 +225,11 @@ Parsing is hand-written or uses `GeneratedRegex` without nested quantifiers, lin
 1. **Record:** add `host` to `log_line` (Go model and validation, C# model and validation), regenerate the golden batch,
    add schema step 4 (`ALTER TABLE log_lines ADD COLUMN host TEXT NOT NULL DEFAULT ''`) and write/read the column. The
    wire version stays 1.0 because no version has been released (record 0084).
-2. **Time zone:** `import.time_zone` in `BackendConfig` (`ImportConfig`), validated by `SourceTimeZone.Find` against
-   NodaTime's TZDB IDs (ordinal); NodaTime 3.3.5 via central package management in `Vandox.Core` (record 0085).
+2. **Time zone:** `import.time_zone` in `BackendConfig` (`ImportConfig`), no default, validated when set by
+   `SourceTimeZone.Find` against NodaTime's TZDB IDs (ordinal); NodaTime 3.3.5 via central package management in
+   `Vandox.Core` (record 0085). Unset, the syslog parser fails a file at its first year-less line (AC-S7) instead of
+   guessing a zone: the import cannot be redone once stored, and the failure is visible (outcome failed, exit 1) and
+   repaired by a re-run after setting the option.
 3. **Syslog:** `SyslogLine.TryParse` (header), `SyslogClock` (anchor, year, zone, DST), `SyslogParser` (reads lines with
    `LogLineReader`, builds records, passes them through the grouper).
 4. **Journal:** `JournalExportReader` (bounded entry reader keeping eight fields), `JournalExportParser` (maps an entry,
@@ -222,7 +256,8 @@ Parsing is hand-written or uses `GeneratedRegex` without nested quantifiers, lin
 | Vandox.Core | `Vandox.Core.csproj`; `Directory.Packages.props` | `PackageReference Include="NodaTime"`; `PackageVersion Include="NodaTime" Version="3.3.5"` |
 | Vandox.Storage | `StorageLimits.cs`, `SchemaMigrator.cs`, `BatchWriter.cs`, `RecordQueries.cs` | schema 4, `host` column |
 | Vandox.Backend | `Cli/ImportCommand.cs`, `Hosting/ServeHooks.cs` | built-in parsers when no hook; doc comment of `Parsers` |
-| deploy | `deploy/backend/vandoxd.yaml` | `import:` / `time_zone: UTC` with a comment |
+| Vandox.Core | `LogParsing/IRecordEmitter.cs`, `LogParsing/ILogParser.cs` | doc comments: deterministic order instead of file order |
+| deploy | `deploy/backend/vandoxd.yaml` | `import:` with `# time_zone: Europe/Berlin` commented out and a comment (no default; required for traditional syslog files); header sentence "the values below are the defaults" names the exception |
 
 ## Signatures (for the Dev's skeleton)
 
@@ -252,7 +287,7 @@ public string Host { get; set; } = string.Empty;
 public sealed class ImportConfig
 {
     [ConfigKey("time_zone")]
-    public string TimeZone { get; set; } = "UTC";
+    public string? TimeZone { get; set; }                       // no default; null when the key is absent
 }
 // BackendConfig — new property; Keys() appends "import.time_zone" after "log.level"
 [ConfigKey("import")]
@@ -266,7 +301,7 @@ internal static class SourceTimeZone
 
 public static class BuiltInParsers
 {
-    public static IReadOnlyList<ILogParser> Create(string timeZone);   // ArgumentException for an unknown zone
+    public static IReadOnlyList<ILogParser> Create(string? timeZone);  // null: syslog parser without zone; ArgumentException for an unknown zone
 }
 
 public sealed class JournalExportParser : ILogParser
@@ -280,7 +315,8 @@ public sealed class JournalExportParser : ILogParser
 public sealed class SyslogParser : ILogParser
 {
     public const string ParserType = "syslog";
-    public SyslogParser(DateTimeZone timeZone);
+    public const string TimeZoneNotSet = "import.time_zone is not set";   // message of the InvalidOperationException (AC-S7)
+    public SyslogParser(DateTimeZone? timeZone);                          // null: year-less lines fail the file
     public string Type { get; }
     public Confidence Detect(LogFile file, ReadOnlySpan<byte> head);
     public Task ParseAsync(LogFile file, Stream input, IRecordEmitter output, CancellationToken cancellationToken);
@@ -321,8 +357,9 @@ internal sealed class SyslogLine
     internal static SyslogLine? TryParse(string line);   // null: not a syslog line
 }
 
-internal sealed class SyslogClock
+internal sealed class SyslogClock                       // created by SyslogParser only when a zone is set
 {
+    internal static readonly TimeSpan BackwardTolerance = TimeSpan.FromMinutes(10);   // repeated-hour rule (AC-S5)
     internal SyslogClock(DateTimeZone timeZone, LogFile file);
     internal bool HasAnchor { get; }
     internal DateTimeOffset? Resolve(SyslogTime time);   // UTC; null when the date does not exist in the inferred year or a year-less time has no anchor
@@ -340,6 +377,13 @@ internal sealed class KernelReportGrouper
 
 Existing files the skeleton rewrites: `ImportCommand.cs` keeps its logic until step 6 (the skeleton only adds types);
 `LogLine.cs`, `BackendConfig.cs` and `logline.go` get the new members in the skeleton (they compile without behavior).
+Doc comments only, changed by the Dev with the grouper (task 12): `IRecordEmitter.RecordAsync` ("Takes the next record
+in file order", `src/Vandox.Core/LogParsing/IRecordEmitter.cs:13`) becomes "Takes the next record, in the parser's
+deterministic order (file order except where the parser combines lines into one record)"; the `ParseAsync` summary in
+`ILogParser.cs:39` says "in a deterministic order" instead of "in order" (the type summary already only requires "the
+same records in the same order"). No caller depends on file order (a search for "file order" and "in order" under
+`src/` finds only these two comments and unrelated configuration and schema comments): the importer counts records
+for resume and stores them as they come.
 
 ## Test files
 
@@ -357,23 +401,37 @@ the regenerated `testdata/wire/all-kinds.jsonl`.
 Existing test code affected by a changed signature: none — every change adds members. One existing **assertion**
 changes meaning: `SqliteStoreOpenMigratesOlderSchema` (`SqliteStoreOpenTests.cs:155`) expects the literal `"3"` after
 migrating; the **Tester** changes it in step 5 to the current version (it fails once step 6 raises the schema to 4).
+A second one: `BackendConfigLoaderLoadsRepositoryExample` (`BackendConfigLoaderTests.cs:23-44`) requires every key of
+`Keys()` to be set in the example file; the **Tester** adapts it in step 5 as AC-C1 states (the option without a
+default is exempt and must appear commented out).
 
 ## Areas
 
-- `docs/areas/log-import.md` — new section *System log parsers* (the two formats, the field mapping, the accepted forms
-  in prose, year and zone rules, kernel reports and their bounds, the built-in list and its order); *Parsers*: determinism
-  "for the same content, file and configuration"; *Command*: `import.time_zone`.
-- `docs/areas/wire-format.md` — `log_line`: `host` (optional short text).
+- `docs/areas/log-import.md` — new section *System log parsers* (the two formats, the field mapping including `log` as
+  the listed path with its rotation suffix, the accepted forms in prose, year and zone rules with the name date before
+  the modification time and the 10-minute tolerance of the repeated hour, the failure "import.time_zone is not set" and
+  the re-run that completes the file, kernel reports and their bounds, the built-in list and its order, and that
+  Ubuntu's rsyslog writes kernel lines to both `syslog` and `kern.log`, so importing both stores them twice); *Parsers*:
+  determinism "for the same content, file and configuration", and records "in a deterministic order: file order, except
+  that a parser that combines lines into one record may emit records of lines written inside it first"; *Command*:
+  `import.time_zone`.
+- `docs/areas/wire-format.md` — `log_line`: `host` (optional short text); `log`: "`journal`, or the file path: the
+  absolute path for the agent, the path as the import lists it (relative to the import root or archive, rotation suffix
+  included) for imported records".
 - `docs/areas/storage.md` — schema version 4, `log_lines.host`.
-- `docs/areas/configuration-and-secrets.md` — option `import.time_zone` (default, accepted values, error text).
+- `docs/areas/configuration-and-secrets.md` — option `import.time_zone` (no default, accepted values, error text, what
+  happens when it is unset); the example-file rule becomes "set every option explicitly (an optional one at its default;
+  an option without a default commented out with an example value)".
 
 ## Documentation updates
 
 All by the **Dev** (one owner per edit):
 
-- `README.md`: *Backend options* row `import.time_zone`; *Import logs*: the supported sources (journal export, syslog and
-  kern.log with rotations), how to export a binary journal, copying with preserved times (`cp -a`, `tar`), the time zone
-  option, and the last paragraph's "until then ... recognizes no file" replaced.
+- `README.md`: *Backend options* row `import.time_zone` (default: none; required to import traditional syslog files);
+  *Import logs*: the supported sources (journal export, syslog and kern.log with rotations), how to export a binary
+  journal, copying with preserved times (`cp -a`, `tar`), the time zone option and that a syslog file fails with
+  "import.time_zone is not set" until it is set (a re-run then completes it), that `syslog` and `kern.log` hold the same
+  kernel lines, and the last paragraph's "until then ... recognizes no file" replaced.
 - The four area documents above.
 - `docs/ARCHITECTURE.md`: line 10 ("without a parser yet") and the `Vandox.Core` component entry name the parsers;
   *Storage and retention* names schema version 4; links to 0084, 0085, 0086 in the matching *Records* lists.
@@ -390,7 +448,11 @@ The Lead edits only record status and the index at approval.
   the omitted middle of an over-long report is stated in the record itself (`[N lines omitted]`, `Truncated`).
 - Repeatable import (0069): parsing depends only on content, `LogFile` (first import's name and time on resume) and
   `import.time_zone`; changing the option between an interrupted run and its resume shifts the rest of that file — stated
-  in the area document and record 0085.
+  in the area document and record 0085. Setting it after a failure "import.time_zone is not set" shifts nothing: the
+  records stored before the failure come from RFC 3339 lines, which do not use the zone, so the resume by count stays
+  exact.
+- *No data gaps unless recorded*, for the unset option: the file is listed as failed with the reason, never imported
+  with guessed times.
 - Wire versioning (0043): `host` is an additive optional field; the version stays 1.0 because nothing is released (0084).
 - Storage (0063, 0077): a new migration step, no change to deduplication or the FTS invariant.
 
@@ -400,8 +462,8 @@ The Lead edits only record status and the index at approval.
   the journal reader keeps eight fields of at most 16 KiB / 1 KiB and reads everything else in fixed chunks); a declared
   binary length never sizes an allocation; parsing is linear (no backtracking patterns); every loop reads input or ends;
   cancellation is checked per line or field read; hostile lengths end the parse with a counted skip, never an exception.
-- Area 12 (display): messages are stored unchanged, control characters included (0021); skip reasons are fixed texts; the
-  configuration error never echoes the zone value.
+- Area 12 (display): messages are stored unchanged, control characters included (0021); skip reasons and the failure
+  reason `import.time_zone is not set` are fixed texts; the configuration error never echoes the zone value.
 - Dependency: NodaTime 3.3.5 (Apache-2.0; its nuspec lists no dependency for `net8.0`, checked 2026-10-09), pinned in
   `Directory.Packages.props`, covered by the NuGet vulnerability check; it reads its embedded zone data, no file or network.
 - Wire: the C# decoder reads `host` under the short-text bound; the Go encoder's worst-case record size still fits (AC-H1).
@@ -416,3 +478,40 @@ The Lead edits only record status and the index at approval.
 
 - Event extraction from the records (OOM victim and so on): #21. The other log formats: #17-#20.
 - Binary journal files, RFC 5424 files, cross-source de-duplication: not planned; reopen as issues if needed.
+
+## Challenge
+
+Devil's Advocate, 2026-10-09: one major and five minor objections, all accepted. The tier stays `security`; the
+scope is unchanged.
+
+1. **Major — the default `UTC` mis-times year-less lines silently, and an import cannot be redone.** Accepted. Records do
+   not reference their file and imported content is never imported again (*Repeatable import* in
+   `docs/areas/log-import.md`), so a wrong zone would be permanent and unnoticed, which also contradicts AC-S4's rule of
+   skipping rather than guessing. `import.time_zone` now has no default (AC-C1); with the option unset the syslog parser
+   fails a file at its first year-less line with the fixed reason `import.time_zone is not set` (new AC-S7). The
+   mechanism exists: a parser exception fails the file after storing what was parsed before it, and the incomplete file
+   is resumed by count on the next run (verified, see *Problem / root cause*); AC-C4 now covers the failed run and the
+   completing re-run. RFC 3339 files and journal exports do not need the option. The example file holds the option
+   commented out, so `BackendConfigLoaderLoadsRepositoryExample` changes (Tester). Record 0085 lists the default `UTC`
+   as a rejected option.
+2. **Minor — the repeated-hour rule switches to the second pass on any small step back.** Accepted. The rule now keeps the
+   earlier offset unless it puts the line more than `SyslogClock.BackwardTolerance` (10 minutes) before the previous
+   line, with rows for a one-second step back in the first pass and in the second pass (AC-S5). The remaining ambiguity
+   (no line between the end of the first pass and a second-pass line within 10 minutes of it) cannot be resolved without
+   an offset in the line and is stated in the area document.
+3. **Minor — Ubuntu writes kernel lines to both `syslog` and `kern.log`.** Accepted. Stated (from the packaged rsyslog
+   configuration, not checked on the server) in 0086's consequences, the *System log parsers* section of the area
+   document and the README; the orchestrator is asked to note it on #21 (see the result). No de-duplication here: it is
+   the cross-source de-duplication already out of scope.
+4. **Minor — `log` holds the listed path with the rotation suffix, not what the agent will send.** Accepted as
+   documentation, not normalization: the import cannot know the server's absolute path (the import root may be any
+   copy, e.g. `backup/var/log/syslog.1`), and stripping prefixes or rotation suffixes by pattern would guess. AC-S2 pins
+   the value; `docs/areas/wire-format.md` defines `log` for both producers; 0086 records the choice with the rejected
+   normalization.
+5. **Minor — the `-YYYYMMDD` fallback is nearly dead code.** Accepted in the proposed form: the modification time is
+   always set by the scanner (`Scanner.cs:267`, `Scanner.cs:514`), but it is the value a plain copy destroys, while the
+   rotation date in the name survives it. A valid name date is now preferred over the modification time; an invalid one
+   falls back to it (AC-S4, record 0085).
+6. **Minor — grouped reports break "next record in file order".** Accepted. The Dev changes the doc comments of
+   `IRecordEmitter.RecordAsync` and `ILogParser.ParseAsync` to a deterministic order (*Signatures*), the area document's
+   *Parsers* contract says the same, and AC-K3 states the order.

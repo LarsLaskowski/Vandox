@@ -39,11 +39,27 @@ How a kernel report stays together:
    that fit (end of the task table, constraint and kill line), with a line naming how many lines were left out in between.
 9. **Raise the message limit** — the 16 KiB text bound is part of the wire model and storage (0044); not for one record.
 
+Where the lines written inside a report go:
+
+10. **Hold them until the report closes and emit them after it** — file order of the report's first line; needs a second
+    buffer of up to 2,000 records.
+11. **Emit them as they come, before the report record** (chosen) — no extra buffer; the emitted order is deterministic
+    but not file order, so the parser contract says "deterministic order" instead of "file order" (nothing depends on
+    file order: the importer resumes by count).
+
+What a syslog record's `log` holds:
+
+12. **A normalized path** (rotation suffix and import-root prefix stripped, so it matches the agent's `/var/log/syslog`)
+    — would guess: the import root can be any copy, and the server's absolute path is not in the input.
+13. **The path as the import lists it** (chosen) — relative to the import root or archive, rotation suffix included
+    (`backup/var/log/syslog.1`); the wire format defines `log` for both producers.
+
 ## Decision
 
-Options 2, 4 and 8: the journal export is recognized by its content, the syslog parser claims rsyslog files weakly, the
+Options 2, 4, 8, 11 and 13: the journal export is recognized by its content, the syslog parser claims rsyslog files weakly, the
 journal record time is `__REALTIME_TIMESTAMP`, and OOM and `cut here` reports become one `log_line` with head and tail,
-bounded by time span, line count and end of input. The parsers emit log lines only, no kernel events (#21). The rules
+bounded by time span, line count and end of input; lines of others inside a report are emitted before it; `log` is the
+listed path. The parsers emit log lines only, no kernel events (#21). The rules
 are in [Log import](../areas/log-import.md) (*System log parsers*).
 
 ## Consequences
@@ -52,4 +68,9 @@ are in [Log import](../areas/log-import.md) (*System log parsers*).
 - A very large report loses the middle of its task table; the record says so and is marked truncated.
 - Importing both a journal export and the syslog files of the same period stores those messages twice (sources
   `journal` and `syslog`); records are not de-duplicated across sources.
+- Ubuntu's packaged rsyslog configuration (not checked on the server) writes `kern.*` to `kern.log` and every facility
+  to `syslog`, so importing both stores each kernel line and each OOM report twice under source `syslog`, with different
+  `log` values. Signature detection (#21) must not count such a kill twice.
+- The `log` of an imported record differs from the one the agent (#37) will send for the same file (listed path versus
+  absolute path), so records of both cannot be matched by `log`.
 - Binary journal files and RFC 5424 files are not read; each would be its own parser decision.

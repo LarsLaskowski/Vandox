@@ -38,7 +38,7 @@ Every recognized line (or journal entry) becomes one `log_line` record of origin
 | PID | `_PID`, else `SYSLOG_PID` | the number in `[pid]` |
 | severity | `PRIORITY` (0-7) | the `<PRI>` prefix when the file has one, else none |
 | message | `MESSAGE` | the text after the tag |
-| log | `journal` | the file's name as the import lists it |
+| log | `journal` | the file's path as the import lists it, rotation suffix included (`backup/var/log/syslog.1`) |
 
 `host` is a new optional field of the `log_line` record, in the backend and in the agent's wire format alike, so that
 the agent (#37) and the import agree on the record's fields (golden wire fixture, record 0075).
@@ -47,12 +47,17 @@ the agent (#37) and the import agree on the record's fields (golden wire fixture
 
 - Lines in the RFC 3339 form (`2026-03-01T12:00:00.123456+01:00`) carry year and offset; they are converted to UTC.
 - Lines in the traditional form (`Mar  1 12:00:00`) have neither. They are read in the **time zone of the monitored
-  server**, set by the new backend option `import.time_zone` (an IANA name such as `Europe/Berlin`; default `UTC`).
-  Daylight saving time is applied, including the repeated and the skipped hour.
-- The year comes from the file's modification time (for a file without one, from a `-YYYYMMDD` rotation date in its
-  name): the first line gets the latest year that does not put it more than a day after the file's last change, and
-  the year advances when the dates run over New Year. A file without either anchor has its year-less lines skipped
-  with a reason, never guessed from the current date.
+  server**, set by the new backend option `import.time_zone` (an IANA name such as `Europe/Berlin`). The option has
+  **no default**: while it is unset, a syslog file fails at its first year-less line with the reason
+  "import.time_zone is not set" (the lines before it are kept), because a guessed zone would store wrong times that
+  no later run can correct. After the option is set, running the import again completes the file. Files with only
+  RFC 3339 lines and journal exports do not need the option.
+  Daylight saving time is applied, including the repeated and the skipped hour (a time in the repeated hour belongs to
+  the first pass unless that puts it more than ten minutes before the previous line).
+- The year comes from a `-YYYYMMDD` rotation date in the file's name when it has one (it survives a plain copy),
+  otherwise from the file's modification time: the first line gets the latest year that does not put it more than a day
+  after that anchor, and the year advances when the dates run over New Year. A file without either anchor has its
+  year-less lines skipped with a reason, never guessed from the current date.
 
 ### Kernel reports stay together
 
@@ -61,7 +66,10 @@ process ...", including the memory table and the task list) and the kernel warni
 `------------[ cut here ]------------` through `---[ end trace ... ]---`). The record has the time of the report's
 first line and the lines joined by line breaks. A report longer than the 16 KiB message limit keeps its beginning and
 its end (with the kill line) and states how many lines in between were left out. Lines of other programs written in
-between stay separate records.
+between stay separate records (stored before the report's record).
+
+Ubuntu's rsyslog writes every kernel line to both `syslog` and `kern.log`; importing both files stores each kernel line,
+and each report, twice under source `syslog`. Signature detection (#21) has to allow for it.
 
 ### Unreadable input
 
@@ -75,7 +83,8 @@ hostile input never crashes the import, never makes it allocate without bound an
 - [ ] AC2: Year boundary and time zones handled (December to January within one file, a file changed shortly after
   New Year, Europe/Berlin summer and winter time, the repeated and the skipped hour, RFC 3339 offsets).
 - [ ] AC3: Multi-line OOM reports kept together, from a syslog file and from a journal export.
-- [ ] AC4: `vandoxd import` uses both parsers without any test hook, with the configured time zone.
+- [ ] AC4: `vandoxd import` uses both parsers without any test hook, with the configured time zone; without it, a
+  syslog file with year-less lines fails with "import.time_zone is not set" and a later run with the option completes it.
 - [ ] AC5: The `log_line` record carries `host` in both languages and in storage; the golden wire fixture pins it.
 
 The detailed, testable criteria are in [plan.md](plan.md).
@@ -92,5 +101,5 @@ The detailed, testable criteria are in [plan.md](plan.md).
 
 ## Open questions
 
-None. The way the operator states the server's time zone (a backend option with default `UTC`) is a Lead decision,
+None. The way the operator states the server's time zone (a backend option without a default) is a Lead decision,
 recorded in [0085](../../docs/decisions/0085-syslog-time-zone-from-import-time-zone-with-embedded-tzdb.md).
