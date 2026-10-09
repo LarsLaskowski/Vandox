@@ -51,7 +51,7 @@ internal static class ImportCommand
 
         try
         {
-            registry = new ParserRegistry(hooks.Parsers ?? []);
+            registry = new ParserRegistry(hooks.Parsers ?? BuiltInParsers.Create(config.Import.TimeZone));
         }
         catch (ArgumentException exception)
         {

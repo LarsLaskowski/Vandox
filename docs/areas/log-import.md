@@ -20,6 +20,10 @@ imported data is kept apart from live data (it never raises alerts) by the detec
 - The import runs as the container's user (65532) and reads only what that user may read; an unreadable file is listed as failed. The operator grants read
   access to that user only (`chown -R 65532:65532` and `chmod -R u+rX`, or `setfacl -R -m u:65532:rX`) and never makes
   the copy world-readable: a copied `/var/log` holds files such as `auth.log` and `mail.log` with mode `0640 root:adm`.
+- The backend option `import.time_zone` (IANA time zone ID, ordinal match against NodaTime's embedded database, no
+  default) names the zone of the server the logs come from. It is used only for year-less syslog times (see *System log
+  parsers*); a value that is no zone ID is refused at start-up with the line of the key and without the value. The
+  example file holds it commented out.
 
 ## Input
 
@@ -99,8 +103,11 @@ A parser turns the lines of one file into records. The importer and every parser
 - The parsers are registered in an explicit, ordered list (the order is part of the behavior). The registry refuses
   a missing parser, a duplicate type or an invalid type name.
 - `Parse` reads a stream and emits records of origin `import` with capture times in UTC. It is **deterministic**
-  for the same content and file, keeps memory bounded independently of the input size, honors cancellation and
-  returns the error of the emitter. Skip reasons are fixed texts that never contain input content.
+  for the same content, file and configuration (the importer resumes by dropping the first *n* emitted records, so the
+  records emitted before a failure are a prefix of those a later complete parse emits), emits the records in a
+  deterministic order (file order, except that a parser that combines lines into one record may emit records of lines
+  written inside it first), keeps memory bounded independently of the input size, honors cancellation and returns the
+  error of the emitter. Skip reasons are fixed texts that never contain input content.
 - The importer validates every record; a refused record is counted as skipped, so a parser bug cannot fail a whole
   batch. Stored source type: a changed detection of a resumed content fails the file, a changed parser version is
   not noticed.
@@ -108,6 +115,93 @@ A parser turns the lines of one file into records. The importer and every parser
   truncated flag, the rest of the line discarded, so a file without line breaks cannot grow memory.
 - The file name handed to a parser has a `.gz` suffix removed when the content was decompressed.
 - A new parser is one type and one entry in the list; the importer does not change.
+
+## System log parsers
+
+`BuiltInParsers.Create(timeZone)` is the list `vandoxd import` registers when no hook replaces it: `journal`
+(`JournalExportParser`), then `syslog` (`SyslogParser`). The journal parser claims a file by content (a head that begins
+with a `__CURSOR=` or `__REALTIME_TIMESTAMP=` line and holds a `__REALTIME_TIMESTAMP=` line; the file name never
+matters); the syslog parser claims weakly (name match) a file named `syslog` or `kern.log` with an optional `.N` or
+`-YYYYMMDD` suffix, or whose first line has a syslog header. Both parsers produce `log_line` records with origin `import`
+and sequence 0.
+
+**Journal export (`journalctl -o export`).** Entries are blocks of fields separated by an empty line. Text fields are
+`NAME=value\n`, binary fields `NAME\n`, a 64-bit little-endian length, the bytes and `\n`. Mapping: `captured_at` from
+`__REALTIME_TIMESTAMP` (microseconds since the Unix epoch, UTC, 1 to 20 decimal digits, greater than 0 and at most
+9,223,372,036,854,775, bound-checked while reading), `host` from `_HOSTNAME`, `program` from `SYSLOG_IDENTIFIER`, else
+`_COMM`, `pid` from `_PID`, else `SYSLOG_PID` (1 to 2,147,483,647, else 0), `priority` from `PRIORITY` when it is one digit
+0 to 7, `message` from `MESSAGE`, `log` and `source` `journal`. A repeated field keeps its first value. Only these eight
+fields are kept; every other field, text or binary, is read through a reused buffer and discarded, and a declared
+binary length never sizes an allocation. A field name must be 1 to 64 bytes of `A-Z 0-9 _` and not start with a digit,
+otherwise the entry is skipped as "malformed field" and reading resumes after the next empty line (scanned in the
+reused buffer). An entry without a time stamp, with an invalid one or without `MESSAGE` is skipped as "entry without
+__REALTIME_TIMESTAMP", "invalid __REALTIME_TIMESTAMP" or "entry without MESSAGE"; an entry cut off by the end of input
+(a text value without `\n`, a binary length larger than the remaining input or at least 2^63) is skipped as "truncated
+entry" and ends the parse. A last entry without the closing empty line is accepted. The skip line number is 0.
+
+**Syslog (`syslog`, `kern.log`, rotations).** A line is `[<PRI>]TIMESTAMP HOST [TAG] MESSAGE` in the traditional format
+(`Mmm dd HH:MM:SS`, day space- or zero-padded) or the RFC 3339 format (`YYYY-MM-DDTHH:MM:SS[.fraction]` and `Z` or an
+offset of at most 14:00, upper-case `T` and `Z` only). `priority` is the `<PRI>` number modulo 8 (0 to 191), `null`
+without it. `TAG` is `PROGRAM[PID]:` or `PROGRAM:`; without a tag the program is empty and the pid 0; a process ID above
+2,147,483,647 gives pid 0 with the tag kept. The message follows the colon and at most one space. `log` is the file name
+as the import lists it (relative to the import root or archive, rotation suffix included, for example
+`backup/var/log/syslog.1`), `source` `syslog`. RFC 5424 lines and other text are "not a syslog line"; an empty line is
+"empty line"; the skip line number is the 1-based line number. A UTF-8 byte order mark at the start of a file is
+ignored. Parsing is hand-written and linear in the length of a line.
+
+**Limits count UTF-8 bytes of the decoded text.** Invalid bytes decode to U+FFFD (three bytes each), so every kept text
+is decoded and cut at a character boundary to its limit: `message` 16,384 bytes, `host` and `program` 1,024 bytes, with
+`truncated` set when cut; the record rules never refuse a record because of its input. The syntactic limits of a syslog
+`HOST` (1 to 255) and `PROGRAM` (1 to 128) are counted in UTF-8 bytes of the decoded line and lie below the model's
+limit, so they are never cut: a longer host makes the line "not a syslog line", a longer program means no tag. A journal
+value longer than its raw read bound (16,384 bytes for `MESSAGE`, 1,024 for the short fields) keeps the first bytes
+(a character split by the cut is dropped whole) and sets `truncated`; the rest is discarded in the reused buffer.
+
+**Storable time range.** Storage holds instants from 1677-09-21T00:12:43.1452242Z to 2262-04-11T23:47:16.8547758Z
+(`StorableTime`, also used by the storage layer). Years, days and anchors are checked as integers before any date value
+is built, so no out-of-range input throws. An instant outside the range is skipped as "time outside the storable range"
+(syslog) or "invalid __REALTIME_TIMESTAMP" (journal); a date that does not exist (31 November, 29 February in a common
+year, `2026-02-30`) is skipped as "invalid date".
+
+**Year of a year-less time.** The anchor is a valid `-YYYYMMDD` date at the end of the file's base name (the end of that
+local day), else the modification time; a name date is preferred because a plain copy replaces the modification time but
+keeps the name. An anchor outside the storable range is not usable. The year of the first year-less line is the
+anchor's year, or the year before when the line lies more than a day after the anchor. Every later line keeps the
+predecessor's year and advances it by one when it lies more than 180 days before the predecessor (a small step back
+within the same year does not advance it); the year stops advancing once it is past the storable range. The predecessor
+is the last year-less line that was resolved, whatever the outcome (a line skipped as "invalid date" or "time outside the
+storable range" counts); lines that are not syslog lines, empty lines and RFC 3339 lines never are. Without a usable
+anchor every year-less line is skipped with "year unknown: the file has no usable date" and RFC 3339 lines are still read.
+
+**Time zone.** A year-less time is local time in `import.time_zone`, mapped with NodaTime's `MapLocal` (never a call that
+throws). A time in the hour skipped at the start of daylight saving time is shifted forward by the gap. A time in the
+repeated hour takes the earlier offset unless that puts it more than ten minutes (`SyslogClock.BackwardTolerance`)
+before the last instant resolved for a year-less line (RFC 3339 lines and skipped lines do not count), then the later
+offset; without any line between the end of the first pass and a line of the second pass within ten minutes of it, the
+choice stays ambiguous and the earlier offset is taken. RFC 3339 lines ignore the zone. The option has no default:
+with it unset, the first year-less line makes `ParseAsync` throw `InvalidOperationException` with the fixed message
+"import.time_zone is not set" (before the anchor is looked at; the line is neither emitted nor skipped), the file is
+listed as failed, the records before it stay stored and the run exits with 1. Setting the option and importing again
+resumes and completes the file. Changing the option between an interrupted run and its resume shifts the rest of that
+file.
+
+**Kernel reports.** Both parsers pass their `kernel` lines through `KernelReportGrouper`. A line containing
+`invoked oom-killer:` or `------------[ cut here ]------------` opens a report; kernel lines of the same host join it; it
+ends after a line containing `Out of memory: Killed process`, `Memory cgroup out of memory: Killed process` or `Out of
+memory and no killable processes` (OOM), or `---[ end trace ` (`cut here`), or at a new start line, at a same-host kernel
+line more than 60 seconds after the first line, after 2,000 lines, or at the normal end of input. The record has
+program `kernel`, pid 0, the host, `log` and time of the first line, the member messages joined by `\n` in file order and
+the lowest member priority (a single-line report is emitted unchanged). Lines of other programs and kernel lines of
+other hosts written inside the report are emitted as their own records before the report record. The message keeps the
+first lines up to 8,192 UTF-8 bytes and the last whole lines that fit into 16,384 bytes, with the line
+`[N lines omitted]` (the exact count) between them and `truncated` set; memory is independent of the report length. An
+open report is emitted only at the normal end of input, never when the parse ends by an exception (cancellation, an
+emitter error, the missing time zone): the importer resumes by dropping the first records, so the records emitted
+before a failure must be a prefix of a complete parse.
+
+**Duplicates.** Ubuntu's rsyslog writes `kern.*` to `kern.log` and `*.*` without auth to `syslog` (from the packaged
+configuration, not checked on the server), so every kernel line is in both files and importing both stores it twice.
+There is no deduplication across sources.
 
 ## Result
 
@@ -128,6 +222,10 @@ A parser turns the lines of one file into records. The importer and every parser
 
 ## Related decisions
 
+- [0084](../decisions/0084-log-line-record-gets-an-optional-host-field.md) — why `log_line` gets an optional `host`.
+- [0085](../decisions/0085-syslog-time-zone-from-import-time-zone-with-embedded-tzdb.md) — why `import.time_zone` has no default, NodaTime and the year rules.
+- [0086](../decisions/0086-system-log-parsers-generic-syslog-claim-and-grouped-kernel-reports.md) — why the generic syslog claim and grouped kernel reports.
+
 - [0014](../decisions/0014-log-import-is-a-core-component.md) — why historical import and log shipping are core.
 - [0021](../decisions/0021-no-pseudonymization-of-log-data.md) — why log data is stored unchanged.
 - [0069](../decisions/0069-log-import-idempotent-per-file-content-hash-with-resumable-batches.md) — why content hashes, two passes and resume by count.
@@ -143,5 +241,6 @@ A parser turns the lines of one file into records. The importer and every parser
 ## Implementation
 
 `Vandox.Import` (`Importer`, `Scanner`, `ImportLimits`), `Vandox.Core.LogParsing` (`ILogParser`, `ParserRegistry`,
-`LogLineReader`), `Vandox.Core.IO` (`SecureRoot`, `FileProbe`), `Vandox.Backend/Cli` (`ImportCommand`,
+`LogLineReader`, `BuiltInParsers`, `JournalExportParser`, `JournalExportReader`, `SyslogParser`, `SyslogLine`,
+`SyslogClock`, `KernelReportGrouper`, `Utf8Text`), `Vandox.Core.Model` (`StorableTime`), `Vandox.Core.IO` (`SecureRoot`, `FileProbe`), `Vandox.Backend/Cli` (`ImportCommand`,
 `ImportSummaryWriter`). The checklist for a new parser is in `.squad/project.md` (*Integration surface*).

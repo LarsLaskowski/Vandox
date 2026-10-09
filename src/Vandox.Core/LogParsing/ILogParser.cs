@@ -36,7 +36,7 @@ public interface ILogParser
     Confidence Detect(LogFile file, ReadOnlySpan<byte> head);
 
     /// <summary>
-    /// Reads the whole decompressed content of a file and passes every record to the emitter in order. Records have origin
+    /// Reads the whole decompressed content of a file and passes every record to the emitter in a deterministic order. Records have origin
     /// import and UTC capture times.
     /// </summary>
     /// <param name="file">The file</param>

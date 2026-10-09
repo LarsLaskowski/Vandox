@@ -51,6 +51,7 @@ Backend:
 | `ingest.listen` | `:8081` | `[host]:port`, a port different from `web.listen` |
 | `storage.directory` | `/data` | absolute, clean path |
 | `log.level` | `info` | `debug`, `info`, `warn` or `error` |
+| `import.time_zone` | none (optional) | a time zone ID of the IANA time zone database, compared ordinally (`UTC`, `Etc/UTC`, `Europe/Berlin`; not `europe/berlin`, an offset or a Windows name) |
 
 - A listen address is a host and a port separated by a colon. The host is empty (all interfaces) or an IP literal
   (an IPv6 literal in brackets); a host name is rejected, because binding to a name is ambiguous. The port is one to
@@ -61,7 +62,13 @@ Backend:
   the host is a tailnet address is not checked; the network ACL is the boundary (see the network area).
 - A new option is added with its key, default, entry in the commented example file, row in the README table and
   test. The example files `deploy/agent/agent.yaml` and `deploy/backend/vandoxd.yaml` set every option explicitly
-  (an optional one at its default), and tests load them, so the examples cannot drift from the code.
+  (an optional one at its default; an option without a default commented out with an example value), and tests load
+  them, so the examples cannot drift from the code.
+- `import.time_zone` has no default: the value is `null` when the key is absent, also with an `import:` section that is
+  null or only holds comments. A value that is no zone ID is refused with the key, the line and the reason "must be a
+  time zone of the IANA time zone database, such as UTC or Europe/Berlin", never the value; an empty value is refused
+  with the same error, a null value as "has no value" like every string option. While it is unset, `vandoxd import` fails a
+  syslog file at its first line without a year (see [Log import](log-import.md)); the service itself does not use it.
 
 ## Secrets
 

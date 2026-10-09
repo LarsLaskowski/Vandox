@@ -131,8 +131,12 @@ producer read; false for a configured subset or a reduction for size). When `ava
 
 ### `log_line`
 
-`log` (required short text: `journal` or the file path), `program` (short text), `pid` (>= 0), `priority`
-(optional, 0 to 7), `message` (text, may be empty), `truncated` (the producer cut the message to 16384 bytes).
+`log` (required short text: `journal`, or the file path: the absolute path for the agent, the path as the import lists
+it for imported records, relative to the import root or archive and with its rotation suffix), `host` (optional short
+text: the host that wrote the line, empty when unknown), `program` (short text), `pid` (>= 0), `priority` (optional, 0
+to 7), `message` (text, may be empty), `truncated` (the producer cut the message to 16384 bytes). `host` is an additive
+optional field, so the wire version stays 1.0 ([0084](../decisions/0084-log-line-record-gets-an-optional-host-field.md)).
+The Go encoder omits an empty `host`; the C# decoder reads a line without it as an empty host.
 
 ### `gap`
 

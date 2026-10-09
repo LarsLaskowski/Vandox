@@ -24,7 +24,7 @@ public sealed class ServeHooks
     public Action<IReadOnlyList<string>>? Started { get; set; }
 
     /// <summary>
-    /// Gets or sets the log parsers of <c>vandoxd import</c>, in priority order; none when <c>null</c>.
+    /// Gets or sets the log parsers of <c>vandoxd import</c>, in priority order; the built-in parsers (<see cref="BuiltInParsers"/>) when <c>null</c>.
     /// </summary>
     public IReadOnlyList<ILogParser>? Parsers { get; set; }
 

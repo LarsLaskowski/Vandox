@@ -90,7 +90,11 @@ files or endpoints.
     with bounded length and term count. Log files and archives reach the log import
     (`src/Vandox.Import`: `Scanner`, `FormatSniffer`, `ImportLimits`: entries, path length and batch size) and the
     parsers through `Vandox.Core.LogParsing` (`LogLineReader` cuts lines at 16 KiB, a parser's memory is bounded
-    independently of the input size). Records 0048, 0049, 0066, 0069, 0076, 0078, 0079.
+    independently of the input size): `JournalExportParser` and `JournalExportReader` (binary-safe entry reader with
+    bounded memory), `SyslogParser`, `SyslogLine` and `SyslogClock` (hand-written line parser, years and time
+    zones of year-less times, range-checked dates), `KernelReportGrouper` (bounded multi-line reports), and the
+    backend option `import.time_zone` (`SourceTimeZone`). Records 0048, 0049, 0066, 0069, 0076, 0078, 0079, 0084,
+    0085, 0086.
 11. **Outbound calls** (Telegram, external checks, the optional AI service of the nightly report, the
     agent's connection to the backend): *Goal:* every call has a timeout, goes only to its configured
     destination and leaves encrypted to a verified peer. The agent's only destination is the ingest port,
@@ -221,7 +225,7 @@ double under this name and changes the status.
 | journald | fake journal reader (scripted entries, cursors and errors, and a reader that blocks until its context is cancelled, for 0029) |
 | MariaDB socket | fake MariaDB status source (status variables, process list, errors, and a source that hangs until its context is cancelled, for 0029) |
 | database (C#) | `FakeImportStore` for `IImportStore` (in-memory import state and records, scripted begin and write failures, `AfterBatch` hook; `tests/Vandox.Import.Tests`); a scripted ping delegate for `PingChecker` (`tests/Vandox.Backend.Tests`); the SQLite store itself is tested against a real database file in a `TempDirectory` (implemented) |
-| log parsers (C#) | `FakeParser` (scripted `Detect` and `Parse`) in `tests/Vandox.Core.Tests`, `LineParser` in `tests/Vandox.Import.Tests` (implemented) |
+| log parsers (C#) | `FakeParser` (scripted `Detect` and `Parse`) in `tests/Vandox.Core.Tests`, `LineParser` in `tests/Vandox.Import.Tests`; `RecordingEmitter` (records and skips, validates every record like the importer, optional failure and observer), `JournalExportBuilder` (text and binary fields as bytes) and `PatternStream` (lazily generated input for the heap-bound tests) in `tests/Vandox.Core.Tests` (implemented) |
 | files (C#) | `TempDirectory` helper per test project (a unique directory below the temp path, removed on dispose); `RepositoryFiles.Path` for fixtures such as `testdata/` and `deploy/` |
 | Telegram Bot API | fake Telegram client (records sent messages, returns scripted updates; no network) |
 | Tailscale network | none in code (0017: `vandoxd` embeds no Tailscale); the agent's sender is tested against a `net/http/httptest` server standing in for the ingest port; the ACL itself is deployment configuration, reviewed, not unit-tested |
