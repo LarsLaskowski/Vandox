@@ -4,7 +4,7 @@
 
 What `vandox-agent`, the program on the monitored server, must do and what it must never do: how it connects, what it reads and how,
 how it survives a stalled data source and a missing backend, how gaps are recorded and which rights it runs with. The format of what it
-sends is in the [wire format](../WIRE_FORMAT.md); its configuration file is in [Configuration and secrets](configuration-and-secrets.md).
+sends is in the [wire format](wire-format.md); its configuration file is in [Configuration and secrets](configuration-and-secrets.md).
 
 **Status.** The command line (`-version`), the configuration loader, the shared data model and the wire encoder exist. The collectors,
 the spool, the sender, gap recording and the systemd unit are **not implemented yet**; the rules below are the target the
@@ -81,7 +81,7 @@ collector timeouts and backend gap detection each emit a gap record, and each pa
 
 ## Not here
 
-- The format of batches and records: [wire format](../WIRE_FORMAT.md).
+- The format of batches and records: [wire format](wire-format.md).
 - Which options the agent reads and how secrets are supplied: [Configuration and secrets](configuration-and-secrets.md).
 - What the backend does with the data, including gap detection: the storage and detection areas.
 

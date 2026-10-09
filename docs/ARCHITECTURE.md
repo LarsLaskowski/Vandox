@@ -43,14 +43,14 @@ way, and agents of the hosting provider are never disabled or changed
   ([0073](decisions/0073-backend-in-dotnet-10-with-blazor-agent-stays-go.md)):
   `Vandox.Core` (data model and validation, the wire decoder, configuration and secrets, safe file access, the
   log parser interface and registry, the line reader that bounds the line length),
-  `Vandox.Storage` (the SQLite database: schema, migrations, writing batches, queries and log search) and
+  `Vandox.Storage` (the SQLite database, see [Storage](areas/storage.md): schema, migrations, writing batches, queries and log search) and
   `Vandox.Import` (reads a directory, archive or file as streams, detects the parser per file, hashes the
   content, writes the parsers' records in resumable batches and builds the summary)
   ([0069](decisions/0069-log-import-idempotent-per-file-content-hash-with-resumable-batches.md),
   [0077](decisions/0077-storage-on-microsoft-data-sqlite-same-schema-and-rules.md),
   [0079](decisions/0079-log-parsing-and-import-in-the-backend-without-following-links.md)).
 - `internal/` — the agent's Go packages: data model and the versioned wire encoder (see
-  [`WIRE_FORMAT.md`](WIRE_FORMAT.md)), signatures, version information, agent configuration loading (see
+  [wire format](areas/wire-format.md)), signatures, version information, agent configuration loading (see
   *Configuration*) and command-line handling (`internal/cli`). The model and the wire format exist twice, in Go
   (producer) and in C# (consumer); a golden batch produced by the Go encoder and decoded by the C# decoder keeps
   them in step ([0075](decisions/0075-wire-contract-pinned-by-golden-fixtures.md)).

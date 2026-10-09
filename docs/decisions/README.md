@@ -108,6 +108,5 @@ once in the [area document](../areas/README.md) of the record's area, and the re
 | 0078 | The backend reads its strict configuration with YamlDotNet and the same secret rules | Accepted | 2026-10-06 |
 | 0079 | Log parsing and import in the backend: statx/openat2 file access, same limits and guarantees | Accepted | 2026-10-06 |
 | 0081 | The backend host: two labelled Kestrel listeners, JSON logs, Blazor Interactive Server | Accepted | 2026-10-06 |
-| 0082 | The storage writer sets cached parameters and calls SQLite synchronously after the first NAS measurement | Accepted | 2026-10-07 |
-| 0083 | The storage write criterion is the median of five batches on the volume that holds the database | Accepted | 2026-10-07 |
+| 0083 | The storage writer is cheap, and its write criterion is the median of five batches on the volume that holds the database | Accepted | 2026-10-07 |
 <!-- project:end index -->
