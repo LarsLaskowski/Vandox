@@ -83,7 +83,7 @@ once in the [area document](../areas/README.md) of the record's area, and the re
 | 0035 | Explicit format check step in CI; the coverage gate stays local, SonarQube measures coverage in CI | Accepted | 2026-10-04 |
 | 0037 | Releases: version tag only, plain tooling, tag-only token environment, secret-free attestation job, digest-pinned SBOM generator | Accepted | 2026-10-04 |
 | 0040 | Go 1.27 toolchain without a patch version in go.mod; govulncheck raised to v1.8.0 | Accepted | 2026-10-04 |
-| 0041 | Base images pinned by digest through build arguments, tag kept alongside; digests refreshed by hand | Accepted | 2026-10-04 |
+| 0041 | Backend image on the chiseled ASP.NET runtime; base images pinned by digest through build arguments, refreshed by hand, staleness reported weekly | Accepted | 2026-10-04 |
 | 0042 | Wire format is gzip-compressed JSON Lines, built on the standard library only | Accepted | 2026-10-04 |
 | 0043 | Wire format versioned by integer major and minor; unknown majors are rejected before parsing | Accepted | 2026-10-04 |
 | 0044 | A batch is valid only as a whole, carries only agent records and is bounded by format limits | Accepted | 2026-10-04 |
@@ -109,7 +109,6 @@ once in the [area document](../areas/README.md) of the record's area, and the re
 | 0077 | Storage on Microsoft.Data.Sqlite with the unchanged schema, migrations and connection rules | Accepted | 2026-10-06 |
 | 0078 | The backend reads its strict configuration with YamlDotNet and the same secret rules | Accepted | 2026-10-06 |
 | 0079 | Log parsing and import in the backend: statx/openat2 file access, same limits and guarantees | Accepted | 2026-10-06 |
-| 0080 | The backend image runs on the chiseled ASP.NET runtime, built by the .NET SDK image, both pinned by digest | Accepted | 2026-10-06 |
 | 0081 | The backend host: two labelled Kestrel listeners, JSON logs, Blazor Interactive Server | Accepted | 2026-10-06 |
 | 0082 | The storage writer sets cached parameters and calls SQLite synchronously after the first NAS measurement | Accepted | 2026-10-07 |
 | 0083 | The storage write criterion is the median of five batches on the volume that holds the database | Accepted | 2026-10-07 |

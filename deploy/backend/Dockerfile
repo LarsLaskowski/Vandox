@@ -3,7 +3,7 @@
 # Base images are pinned by digest only; each tag is kept in its own ARG for readability and the
 # OCI base-image labels. The builder tag follows the target framework in Directory.Build.props. The release
 # workflow checks both. The digests are refreshed by hand in a pull request; a weekly workflow and the CI
-# release build check report a stale digest (docs/CONTRIBUTING.md, records 0041 and 0080).
+# release build check report a stale digest (docs/CONTRIBUTING.md, record 0041).
 # The HEALTHCHECK runs `vandoxd -healthcheck` (record 0059); the image declares no EXPOSE on purpose.
 ARG BASE_BUILD_IMAGE="mcr.microsoft.com/dotnet/sdk"
 ARG BASE_BUILD_TAG="10.0"

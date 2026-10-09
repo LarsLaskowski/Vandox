@@ -88,9 +88,8 @@ the backend Docker image. A release is always created manually, and the only tri
 such as `v0.1.0`; merging a PR, pushing to `main` or a schedule never publishes one. `release.yml`
 does not run on pull requests; `ci.yml` checks the release build there (*Release build check* below). The
 workflow is `.github/workflows/release.yml`; the reasoning is in
-[0037](decisions/0037-releases-version-tag-plain-tooling-and-attested-artifacts.md),
-[0041](decisions/0041-base-images-pinned-by-digest-through-build-arguments.md) and
-[0080](decisions/0080-backend-image-on-the-chiseled-aspnet-runtime.md).
+[0037](decisions/0037-releases-version-tag-plain-tooling-and-attested-artifacts.md) and
+[0041](decisions/0041-backend-image-chiseled-runtime-base-images-pinned-by-digest.md).
 
 ### Cutting a release
 
@@ -165,7 +164,7 @@ should close that issue (`Closes #n`). A base image digest often moves without a
 (Ubuntu package updates), so a stale report is routine; refresh at least before a release. The check can be run locally from the repository root with
 `.github/scripts/check-base-image-digests.sh` (needs `docker buildx` and `jq`). If GitHub disables the
 scheduled workflow after 60 days without repository activity, re-enable it under Actions. Record
-[0080](decisions/0080-backend-image-on-the-chiseled-aspnet-runtime.md).
+[0041](decisions/0041-backend-image-chiseled-runtime-base-images-pinned-by-digest.md).
 
 ### SBOM generator
 

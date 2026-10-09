@@ -304,7 +304,7 @@ Docker Hub as `networlddev/vandox` ([0027](decisions/0027-project-name-and-docke
 
 - The agent binary `vandox-agent-linux-amd64` and `SHA256SUMS` are GitHub release assets.
 - The image is built from `deploy/backend/Dockerfile` (the .NET SDK image publishes the application onto the
-  chiseled ASP.NET runtime image, [0080](decisions/0080-backend-image-on-the-chiseled-aspnet-runtime.md)) and runs as UID 65532.
+  chiseled ASP.NET runtime image, [0041](decisions/0041-backend-image-chiseled-runtime-base-images-pinned-by-digest.md)) and runs as UID 65532.
   The builder and runtime base images are pinned by digest: each `FROM` names an image and a digest from
   build arguments, and the tag is kept in a separate build argument and in the image's OCI base-image
   labels. The release build sets none of these arguments. The digests are refreshed by hand in a pull
@@ -328,8 +328,7 @@ Docker Hub as `networlddev/vandox` ([0027](decisions/0027-project-name-and-docke
   digest-pinned syft container that runs without network and without access to `dist/`.
 
 Records: [0037](decisions/0037-releases-version-tag-plain-tooling-and-attested-artifacts.md),
-[0041](decisions/0041-base-images-pinned-by-digest-through-build-arguments.md),
-[0080](decisions/0080-backend-image-on-the-chiseled-aspnet-runtime.md),
+[0041](decisions/0041-backend-image-chiseled-runtime-base-images-pinned-by-digest.md),
 [0072](decisions/0072-vandoxd-import-sub-command-output-and-exit-codes.md),
 [0059](decisions/0059-healthz-checks-the-database-and-the-binary-is-the-health-probe.md),
 [0060](decisions/0060-compose-file-port-bindings-volumes-and-memory-limit.md).
