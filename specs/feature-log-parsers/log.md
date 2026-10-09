@@ -12,3 +12,4 @@ One line per pipeline step: date, step, member, result. Lead decisions and escal
 | 2026-10-09 | 3 Plan revise | squad-lead | B1-B4 and N1-N3 accepted: Utf8Text limits on decoded text, StorableTime range in Core, no flush on failed parse, heap-bound ACs M1-M4; tier security |
 | 2026-10-09 | 3 Plan security review (2) | squad-security | APPROVED; non-blocking: N1 AC-S6 vs Accepted-forms contradiction (raw vs decoded host/tag limit), N2 define predecessor for year/repeated-hour rules, N3 journal resync memory row |
 | 2026-10-09 | 3 Plan nits | squad-lead | Security N1-N3 resolved (decoded-byte host/tag limits, predecessor rule, AC-M5); no further security round needed |
+| 2026-10-09 | 4 Skeleton | squad-dev | Task 1 done; go/dotnet build green; skeleton files carry '#pragma warning disable RH2003, S2325' to be removed by the Dev in tasks 8-13 |
