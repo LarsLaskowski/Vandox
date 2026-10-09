@@ -12,7 +12,7 @@ public class BatchWriterTests
 
     /// <summary>
     /// The labels are stored exactly as the serializer would write them with the keys in ordinal order, so rows written before and
-    /// after the writer was optimized (record 0082) are alike.
+    /// after the writer was optimized (record 0083) are alike.
     /// </summary>
     /// <param name="first">The first label key</param>
     /// <param name="second">The second label key</param>
