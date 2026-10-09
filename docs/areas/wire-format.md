@@ -1,21 +1,13 @@
 # Wire format
 
-The format of the batches the agent sends to the backend, and the shared record model behind it. It is
-implemented twice. The Go agent uses `internal/model` (record types and their validation) and `internal/wire`
-(header, batch, encoder and streaming decoder; standard library only) and is the reference producer. The .NET
-backend decodes and validates with `Vandox.Core.Model` and `Vandox.Core.Wire` (`BatchDecoder`, `WireLimits`),
-which implement the same rules. A golden batch with one record of every kind, `testdata/wire/all-kinds.jsonl`,
-is written by the Go encoder (`internal/wire/golden_test.go`; `VANDOX_UPDATE_GOLDEN=1` rewrites it) and decoded
-by the C# contract test (`WireContractTests`), so the two sides cannot drift apart unnoticed
-([0075](decisions/0075-wire-contract-pinned-by-golden-fixtures.md)). The C# decoder reads gzip with strict
-validation ([0076](decisions/0076-strict-gzip-validation-in-the-backend.md)). The decisions behind it are
-[0042](decisions/0042-wire-format-gzip-json-lines-standard-library.md) (encoding, compression),
-[0043](decisions/0043-wire-format-major-minor-versioning.md) (versioning),
-[0044](decisions/0044-batch-validated-as-a-whole-agent-records-only.md) (validation, trust, limits),
-[0045](decisions/0045-batch-identified-by-agent-id-and-record-sequence-numbers.md) (batch identity) and
-[0046](decisions/0046-batch-header-describes-the-capture-context.md) (capture context). The backend store
-(`src/Vandox.Storage`) validates agent IDs with the same rules as `wire.ValidateAgentID`; the codec's first consumers are
-still the agent sender (#39) and the ingest API (#40).
+## Scope
+
+The format of the batches the agent sends to the backend, and the shared record model behind it: header, record kinds and their
+fields, limits, versioning, batch validation and the duties of the consumer. The rules hold for both implementations, whatever their
+language; names such as `MaxLineBytes` or `ErrLimitExceeded` are the identifiers of the Go agent and the C# decoder for the same
+rules (see *Implementation*). A golden batch with one record of every kind, `testdata/wire/all-kinds.jsonl`, is written by the
+Go encoder and decoded by the C# contract test, so the two sides cannot drift apart unnoticed. How the backend stores the records
+is in [Storage](storage.md).
 
 ## Stream layout
 
@@ -65,7 +57,7 @@ persistent or use a new agent ID (#38, #40).
 | ----- | ---- |
 | `kind` | one of the kinds below, exact lower-case match; an unknown kind rejects the batch |
 | `source` | name pattern (collector or parser, e.g. `proc.meminfo`, `journal`) |
-| `seq` | integer > 0, strictly increasing within the batch (gaps allowed; the backend detects them, #41); the backend stores at most 2^63 - 1 ([0063](decisions/0063-storage-schema-records-table-typed-metric-and-log-tables-json-payloads.md)) |
+| `seq` | integer > 0, strictly increasing within the batch (gaps allowed; the backend detects them, #41); the backend stores at most 2^63 - 1 ([0063](../decisions/0063-storage-schema-records-table-typed-metric-and-log-tables-json-payloads.md)) |
 | `captured_at` | RFC 3339 in UTC, written with `Z`; the time the data describes (a log line: the time stamped in the line, else when it was read; a gap: when it was recorded); the backend stores instants from 1677-09-21 to 2262-04-11 (nanoseconds in an int64, 0063) |
 | `data` | the payload object of the kind; required, not `null` |
 
@@ -277,3 +269,26 @@ Decompressed content of a batch of three records (the real stream is gzip-compre
 {"kind":"service_state","source":"systemd","seq":42,"captured_at":"2026-03-01T12:00:00Z","data":{"unit":"mariadb.service","load_state":"loaded","active_state":"active","sub_state":"running","restarts":0}}
 {"kind":"gap","source":"agent","seq":43,"captured_at":"2026-03-01T12:00:05Z","data":{"from":"2026-03-01T11:58:00Z","to":"2026-03-01T12:00:00Z","cause":"collector_timeout","collector":"mariadb"}}
 ```
+
+## Related decisions
+
+- [0042](../decisions/0042-wire-format-gzip-json-lines-standard-library.md) — why gzip-compressed JSON Lines on the standard library.
+- [0043](../decisions/0043-wire-format-major-minor-versioning.md) — why integer major and minor with the major checked first.
+- [0044](../decisions/0044-batch-validated-as-a-whole-agent-records-only.md) — why a batch is valid only as a whole, carries only agent records and is bounded.
+- [0045](../decisions/0045-batch-identified-by-agent-id-and-record-sequence-numbers.md) — why per-record sequence numbers and a spool of at least 7 days.
+- [0046](../decisions/0046-batch-header-describes-the-capture-context.md) — why the header describes the capture, not the sending.
+- [0075](../decisions/0075-wire-contract-pinned-by-golden-fixtures.md) — why golden fixtures pin the contract between the two languages.
+- [0076](../decisions/0076-strict-gzip-validation-in-the-backend.md) — why the backend decodes gzip strictly.
+
+## Not here
+
+- How records are stored, deduplicated and searched: [Storage](storage.md).
+- How the agent spools, batches and sends: the agent area.
+- The ingest endpoint and its responses: the ingest and backend host area.
+
+## Implementation
+
+Agent (Go): `internal/model` (record types and validation) and `internal/wire` (header, encoder, streaming decoder; golden test
+`internal/wire/golden_test.go`, `VANDOX_UPDATE_GOLDEN=1` rewrites the fixture). Backend (C#): `Vandox.Core.Model` and `Vandox.Core.Wire`
+(`BatchDecoder`, `WireLimits`), `Vandox.Core.IO` (`StrictGzip`), contract test `WireContractTests`.
+

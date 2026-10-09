@@ -24,7 +24,7 @@ the time of every batch and the records per second.
 Background: [0063](decisions/0063-storage-schema-records-table-typed-metric-and-log-tables-json-payloads.md),
 [0077](decisions/0077-storage-on-microsoft-data-sqlite-same-schema-and-rules.md) (which carries over
 [0077](decisions/0077-storage-on-microsoft-data-sqlite-same-schema-and-rules.md)),
-[0082](decisions/0082-storage-writer-cached-parameters-and-synchronous-calls.md) (the writer change after the first
+[0083](decisions/0083-storage-write-criterion-is-the-median-of-five-batches-on-the-data-volume.md) (the writer change after the first
 reference-host result) and 0083. The earlier Go benchmark also measured log lines and a mixed batch; those variants are not ported.
 
 ### Procedure
@@ -53,12 +53,12 @@ VANDOX_BENCHMARK=1 dotnet test tests/Vandox.Storage.Tests --filter WriteThroughp
 
 | Writer | Host | CPU | Date | First batch (ms) | Later batches (ms) | Median of five (ms) |
 | ------ | ---- | --- | ---- | ---------------: | -----------------: | ------------------: |
-| before [0082](decisions/0082-storage-writer-cached-parameters-and-synchronous-calls.md) | development host (4 vCPU) | Intel Xeon 2.10 GHz | 2026-10-07 | 499–679 | 277–584 | 309–390 |
-| before 0082 | DS918+ (reference host, Linux 4.4, .NET 10.0.10, SSD volume) | Celeron J3455 | 2026-10-07 | 1480 | 890–1119 | 1085 |
-| after 0082 | development host (4 vCPU) | Intel Xeon 2.10 GHz | 2026-10-07 | 285–329 | 242–368 | 272–320 |
-| after 0082 (cached parameters, synchronous calls) | DS918+ (SSD volume) | Celeron J3455 | 2026-10-07 | 1043 | 797–1004 | 925 |
-| after 0082 (and writer page cache of 16 MiB) | DS918+ (SSD volume) | Celeron J3455 | 2026-10-07 | 1001 | 711–783 | **783** |
-| after 0082 (and writer page cache of 16 MiB) | DS918+ (HDD volume) | Celeron J3455 | 2026-10-07 | 1171 | 1079–1471 | **1171** |
+| before [0083](decisions/0083-storage-write-criterion-is-the-median-of-five-batches-on-the-data-volume.md) | development host (4 vCPU) | Intel Xeon 2.10 GHz | 2026-10-07 | 499–679 | 277–584 | 309–390 |
+| before 0083 | DS918+ (reference host, Linux 4.4, .NET 10.0.10, SSD volume) | Celeron J3455 | 2026-10-07 | 1480 | 890–1119 | 1085 |
+| after 0083 | development host (4 vCPU) | Intel Xeon 2.10 GHz | 2026-10-07 | 285–329 | 242–368 | 272–320 |
+| after 0083 (cached parameters, synchronous calls) | DS918+ (SSD volume) | Celeron J3455 | 2026-10-07 | 1043 | 797–1004 | 925 |
+| after 0083 (and writer page cache of 16 MiB) | DS918+ (SSD volume) | Celeron J3455 | 2026-10-07 | 1001 | 711–783 | **783** |
+| after 0083 (and writer page cache of 16 MiB) | DS918+ (HDD volume) | Celeron J3455 | 2026-10-07 | 1171 | 1079–1471 | **1171** |
 
 Outcome against the restated criterion on the DS918+: **met on the SSD volume** (median 783 ms, 12,800 records/s in a steady state) and **not met on the
 HDD volume** (median 1171 ms, about 8,500 records/s). A 4 KiB write needs about 10 ms to reach the disk on the SSD and about 122 ms on the HDD: on the

@@ -13,7 +13,7 @@ namespace Vandox.Storage;
 /// full-text index entries. It is the only code that writes log lines, which keeps <c>log_fts</c> in step with
 /// <c>log_lines</c>. The parameters are created once and set by reference, and the calls are synchronous because
 /// Microsoft.Data.Sqlite runs them synchronously anyway: per record this saves the lookups by name and the asynchronous
-/// state machines, which matters on a slow host (record 0082).
+/// state machines, which matters on a slow host (record 0083).
 /// </summary>
 internal sealed class BatchWriter : IDisposable
 {
