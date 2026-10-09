@@ -18,7 +18,7 @@ in the home network that is sometimes switched off at night.
 
 1. **Off-the-shelf stack** (e.g. Prometheus + node_exporter + Loki/Promtail + Grafana + Alertmanager, or a
    hosted service) — mature and feature-rich; several daemons on a 2 GB server, several containers on the
-   a Docker host, a pull model that does not fit an agent behind Tailscale with a backend that is sometimes off, and
+   Docker host, a pull model that does not fit an agent behind Tailscale with a backend that is sometimes off, and
    the correlation of logs with metrics into an outage timeline still has to be built on top.
 2. **Own, purpose-built project** — one small agent and one backend container doing exactly what this
    server needs (forensics first, gapless backfill, deterministic rules); everything must be written and

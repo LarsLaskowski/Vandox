@@ -30,7 +30,7 @@ Entry point (decided with issues #98 and #13):
   each `main` package (about 20 duplicated lines that SonarQube Cloud counts as duplicated new code), over
   calling `cli.Run` straight from `main()` (the `main` packages then hold only uncovered lines), over covering
   `main()` by re-executing the test binary (needs `GOCOVERDIR` and a second coverage format for two lines of
-  wiring) and over accepting the gap again (contradicts 0033).
+  wiring) and over accepting the gap again (0001).
 - **No arguments run the service**, not a `serve` sub-command with `CMD ["serve"]` (any argument override such
   as `--version` replaces the `CMD`, and a NAS UI that edits the command line breaks it easily; printing the
   usage is of no use in a container), with an own flag set rather than a hook for extra flags in `cli.Run`.

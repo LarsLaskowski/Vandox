@@ -50,7 +50,7 @@ once in the [area document](../areas/README.md) of the record's area, and the re
 <!-- project:begin index -->
 | #    | Title | Status | Date |
 | ---- | ----- | ------ | ---- |
-| 0001 | Quality gates before the pull request | Accepted | 2026-10-03 |
+| 0001 | Quality gates run locally before the pull request; CI builds, tests, checks the format and runs the code analysis | Accepted | 2026-10-03 |
 | 0002 | Squad working records stay off main, and product PRs never change the squad | Accepted | 2026-10-03 |
 | 0003 | Squash-merge pull requests | Accepted | 2026-10-03 |
 | 0004 | Own project instead of an off-the-shelf monitoring stack | Accepted | 2026-10-03 |
@@ -79,8 +79,6 @@ once in the [area document](../areas/README.md) of the record's area, and the re
 | 0030 | The agent runs as a dedicated user with only named rights, not as root | Accepted | 2026-10-04 |
 | 0031 | The Telegram bot talks only to allowlisted users in private chats | Accepted | 2026-10-04 |
 | 0032 | Secrets only from environment variables or Docker secrets | Accepted | 2026-10-04 |
-| 0033 | Pre-existing overall coverage gap accepted for a documentation-only change | Accepted | 2026-10-04 |
-| 0035 | Explicit format check step in CI; the coverage gate stays local, SonarQube measures coverage in CI | Accepted | 2026-10-04 |
 | 0037 | Releases: version tag only, plain tooling, tag-only token environment, secret-free attestation job, digest-pinned SBOM generator | Accepted | 2026-10-04 |
 | 0040 | Go 1.27 toolchain without a patch version in go.mod; govulncheck raised to v1.8.0 | Accepted | 2026-10-04 |
 | 0041 | Backend image on the chiseled ASP.NET runtime; base images pinned by digest through build arguments, refreshed by hand, staleness reported weekly | Accepted | 2026-10-04 |
