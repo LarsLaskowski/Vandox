@@ -122,7 +122,7 @@ deadline and the health timeout are constants, not options.
 
 - The configuration file and the secrets: [Configuration and secrets](configuration-and-secrets.md).
 - The import sub-command: [Log import](log-import.md).
-- The database: [Storage](storage.md). The batch format: the wire format area.
+- The database: the storage area. The batch format: the wire format area.
 - The Tailscale ACL and the security model of the monitored server: the network area.
 
 ## Implementation
