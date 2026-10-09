@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-03
-- **Area:** —
+- **Area:** Backend host
 - **Source:** Issue #6
 - **Supersedes:** —
 
@@ -12,14 +12,12 @@ The web UI needs TLS so the login and the data are not sent in clear text in the
 
 ## Options considered
 
-1. **TLS in `vandoxd`** — self-contained; certificate handling and renewal in the backend.
-2. **TLS terminated by a reverse proxy** — certificates managed by the proxy (e.g. the one built into a NAS, or Caddy/nginx); `vandoxd` serves plain
-   HTTP to the proxy only.
+1. **TLS in `vandoxd`** — self-contained, but certificate handling and renewal in the backend.
+2. **TLS terminated by a reverse proxy** (chosen) — certificates managed by the proxy (the NAS's own, Caddy, nginx); `vandoxd` serves plain HTTP to the proxy only.
 
 ## Decision
 
-Option 2: TLS for the web UI is terminated by a reverse proxy. The ingest path is not routed
-through the proxy; it is encrypted by Tailscale (0010, 0017).
+Option 2. The ingest path is not routed through the proxy; Tailscale encrypts it (0010, 0017). See the [Backend host](../areas/backend-host.md) area (*Exposure and trust*).
 
 ## Consequences
 

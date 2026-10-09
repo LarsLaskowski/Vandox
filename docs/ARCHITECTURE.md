@@ -26,13 +26,13 @@ way, and agents of the hosting provider are never disabled or changed
 ## Components
 
 - `cmd/vandox-agent` — Go (the agent stays small and static, so the monitored server needs no runtime;
-  [0073](decisions/0073-backend-in-dotnet-10-with-blazor-agent-stays-go.md)), runs as a systemd service on the monitored server. It collects metrics, process
+  [0073](decisions/0073-backend-in-dotnet-10-with-blazor-agent-stays-go.md)), runs as a systemd service on the monitored server (rules: [Agent](areas/agent.md)). It collects metrics, process
   and network snapshots (read from `/proc`), service and MariaDB state, kernel events and logs, keeps them in
   an on-disk spool and sends them to the backend. It checks the state of the mail services, not individual
   mail accounts. Each collector runs in its own goroutine under a deadline and is abandoned when the
   deadline passes, so a hanging collector or database never blocks the agent; a missed sample is recorded
   as a gap, and a collector that is still stuck is not started again.
-- `src/Vandox.Backend` — `vandoxd`, .NET 10 (ASP.NET Core with a Blazor Web App, Interactive Server render mode),
+- `src/Vandox.Backend` — `vandoxd` (rules: [Backend host](areas/backend-host.md)), .NET 10 (ASP.NET Core with a Blazor Web App, Interactive Server render mode),
   one container on the backend host: ingest API, SQLite storage, analysis, rules, Telegram notifier, reports and
   web UI. Without arguments it runs the service; `-healthcheck` probes its `/healthz`; `vandoxd import <path>`
   imports logs saved on the backend host
