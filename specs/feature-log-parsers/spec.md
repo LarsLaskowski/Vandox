@@ -53,10 +53,11 @@ the agent (#37) and the import agree on the record's fields (golden wire fixture
   no later run can correct. After the option is set, running the import again completes the file. Files with only
   RFC 3339 lines and journal exports do not need the option.
   Daylight saving time is applied, including the repeated and the skipped hour (a time in the repeated hour belongs to
-  the first pass unless that puts it more than ten minutes before the previous line).
+  the first pass unless that puts it more than ten minutes before the previous year-less line that has a time).
 - The year comes from a `-YYYYMMDD` rotation date in the file's name when it has one (it survives a plain copy),
   otherwise from the file's modification time: the first line gets the latest year that does not put it more than a day
-  after that anchor, and the year advances when the dates run over New Year. A file without either anchor has its
+  after that anchor, and the year advances when the dates run over New Year (compared with the previous year-less
+  line, also one that was skipped, so skipped lines cannot hold the year back). A file without either anchor has its
   year-less lines skipped with a reason, never guessed from the current date.
 
 ### Kernel reports stay together

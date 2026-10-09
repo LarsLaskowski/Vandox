@@ -53,7 +53,9 @@ The year:
     time is what a plain `cp` replaces and the name date survives it.
 11. **A valid `-YYYYMMDD` rotation date in the name (the end of that local day), else the modification time** (chosen) —
     the latest year that puts the first line no more than a day after the anchor, advancing at New Year; without either
-    anchor the lines are skipped, never guessed.
+    anchor the lines are skipped, never guessed. A line is compared with the last year-less line before it, also one
+    skipped as "invalid date" or "time outside the storable range" (RFC 3339 lines and unparsable lines are no
+    predecessors), so a run of skipped lines cannot hold the year back.
 
 The repeated hour at the end of daylight saving time:
 
@@ -62,6 +64,7 @@ The repeated hour at the end of daylight saving time:
 13. **The earlier offset unless it lies more than 10 minutes before the previous line** (chosen) — tolerates the small
     steps back that syslog files contain; a second pass whose first line comes within 10 minutes of the first pass's
     last line, with nothing logged in between, stays in the first pass, which no rule can tell apart without an offset.
+    The previous line is the last year-less line that resolved to an instant; skipped and RFC 3339 lines do not count.
 
 Dates outside the range storage can hold (int64 nanoseconds: 1677-09-21 to 2262-04-11), from a hostile or broken name
 date, modification time, RFC 3339 time or a year advanced line after line:

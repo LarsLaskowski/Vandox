@@ -650,7 +650,7 @@ The Lead edits only record status and the index at approval.
 
 - Area 10 (parsing): memory per parse is bounded by constants (one line of 16 KiB plus a head/tail report buffer of 16 KiB;
   the journal reader keeps eight fields of at most 16 KiB / 1 KiB and reads everything else in a reused buffer), each
-  claim pinned by a heap-bound test (AC-M1-M4); a declared binary length never sizes an allocation; text limits count
+  claim pinned by a heap-bound test (AC-M1-M5); a declared binary length never sizes an allocation; text limits count
   UTF-8 bytes of the decoded text, so hostile bytes are cut, not refused (*Text limits and time range*); dates are
   range-checked as integers before any time value is built and NodaTime is used only through non-throwing calls, so
   no unexpected exception text becomes a failure reason; parsing is linear (hand-written, or `RegexOptions.NonBacktracking`
@@ -745,3 +745,18 @@ tier stays `security`; the scope grows by two small shared helpers (`Utf8Text`, 
 - **N1** Accepted: hand-written parsing, or `RegexOptions.NonBacktracking` only (*Accepted forms*).
 - **N2** Accepted: AC-J5 rows for `99999999999999999999` and the other overflow forms, with a bound-checked digit loop.
 - **N3** Accepted: noted under *Out of scope / follow-ups* for #37; the orchestrator files it (see the result).
+
+Security (plan review, second round), 2026-10-09, `APPROVED` with three non-blocking points, all accepted; tier and
+scope unchanged.
+
+- **N1 — AC-S6 contradicted the syntactic limits of `HOST` and `PROGRAM`.** Accepted: one rule, the decoded-byte limits
+  of *Accepted forms* (1-255 and 1-128 UTF-8 bytes of the decoded line, an invalid byte counting three). They lie below
+  the model's 1,024, so a syslog host or program is never cut. AC-S6 now expects "not a syslog line" or no tag beyond
+  the limits, with rows at the exact limit for ASCII and `0xFF` input; *Text limits and time range* states the same.
+- **N2 — "predecessor" undefined.** Accepted: *Text limits and time range* defines it (the last year-less line that
+  reached `SyslogClock.Resolve`, skipped ones included, for the year; the last resolved instant for the repeated hour;
+  RFC 3339, empty and unparsable lines never count). AC-S4 explains why the 472/528 counts depend on it and gains
+  predecessor rows (RFC 3339 line in between, skipped `Nov 31`); AC-S5 gains two rows; task 16 and record 0085 state
+  the rule.
+- **N3 — unbounded resync not pinned.** Accepted: AC-M5 (64 MiB without an empty line after a malformed field, with and
+  without line breaks, under 8 MiB allocated), in tasks 2 and 10; the *Accepted forms* row names the bounded resync.
