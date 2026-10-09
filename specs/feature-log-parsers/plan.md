@@ -207,7 +207,9 @@ wherever several inputs share one behavior.
   invalid table rows in `internal/model/logline_test.go`; the worst-case size test still fits with `Host` at maximum.
 - [ ] AC-H2 The golden batch's `log_line` record carries `"host":"web-1"`; `internal/wire/golden_test.go` passes with the
   regenerated fixture and `WireContractTests` asserts every `log_line` field including `Host`.
-- [ ] AC-H3 C#: `LogLine.Host` (JSON `host`, omitted when empty) validated as short text (`PayloadValidationTests`).
+- [ ] AC-H3 C#: `LogLine.Host` (JSON `host`) validated as short text (`PayloadValidationTests`); the decoder accepts a
+  `log_line` without `host` (empty host). Whether the C# serializer writes an empty `host` is not specified, the same as
+  for `program` today (Lead decision 2026-10-09: the C# side only decodes the wire format; the Go encoder omits it).
 - [ ] AC-H4 Storage: schema version 4; `Host` is written and read back; a database at version 3 is migrated (its log
   lines get an empty host); the existing migration test from version 2 ends at the current version.
 
@@ -248,6 +250,16 @@ Allocation is measured with `GC.GetTotalAllocatedBytes(precise: true)` before an
 `GC.GetTotalMemory(forceFullCollection: true)`; the test assemblies run without parallelization (no `Parallelize`
 attribute in `tests/`, checked 2026-10-09), so the process-wide counters are not disturbed by other tests. Each test
 stays under the 10 s runtime budget.
+
+Lead decisions 2026-10-09 (after tests-first):
+
+- The retention measurement needs a full collection, which Sonar S1215 flags. It stays in one private helper
+  (`KernelReportGrouperTests.RetainedBytes()`) with `#pragma warning disable S1215` / `restore` around the single call,
+  as `SqliteStoreWriteTests` does for CA2100. The dotnet analyzer gate counts only non-suppressed SARIF results, so the
+  changed file stays free of diagnostics; no other suppression is allowed in this change.
+- The 64 MiB inputs stay: they separate the 8 MiB bound from a buffering implementation by a wide margin. The binding
+  budget is 10 s per test, checked in the green run of step 6 (test durations from the TRX/console output); only a test
+  over that budget may be reduced, by the Tester, to an input of at least 32 MiB with the 8 MiB bound unchanged.
 
 - [ ] AC-M1 `JournalExportReader` over one entry with a 64 MiB binary field of an unkept name, then `MESSAGE` and
   `__REALTIME_TIMESTAMP`: the entry is read, and the parse allocates less than 8 MiB (a reader that buffers the field
@@ -511,6 +523,11 @@ internal sealed class JournalExportReader
     internal JournalExportReader(Stream input);
     internal ValueTask<JournalEntry?> ReadAsync(CancellationToken cancellationToken);   // null after the last entry
 }
+// Reader contract (Lead decision 2026-10-09): a skipped entry is returned as a JournalEntry with Problem set to
+// "malformed field" or "truncated entry" (other fields unspecified); after "truncated entry" the next call returns
+// null; after "malformed field" reading resumes after the next empty line (null if the input ends first). The checks
+// for a missing/invalid __REALTIME_TIMESTAMP and a missing MESSAGE belong to the parser, not the reader. An empty
+// `MESSAGE=` is a present, valid MESSAGE (empty message).
 
 internal readonly record struct SyslogTime(int Year, int Month, int Day, int Hour, int Minute, int Second, int FractionTicks, int? OffsetMinutes)
 {
