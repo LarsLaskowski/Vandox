@@ -282,9 +282,9 @@ accepts updates only from allowlisted users in their private chats
 ([0031](decisions/0031-telegram-user-allowlist.md)). Secrets come only from environment variables or Docker
 secrets ([0032](decisions/0032-secrets-only-from-environment-or-docker-secrets.md)). The only release
 credential, the Docker Hub token, is readable only by the tag-triggered publish job and limited to pushing
-`networlddev/vandox` ([0039](decisions/0039-docker-hub-token-in-a-tag-only-environment.md)). The OIDC
+`networlddev/vandox` ([0037](decisions/0037-releases-version-tag-plain-tooling-and-attested-artifacts.md)). The OIDC
 signing permission exists only in the secret-free `attest` job
-([0054](decisions/0054-release-provenance-attestations-from-a-secret-free-job.md)). Kept
+([0037](decisions/0037-releases-version-tag-plain-tooling-and-attested-artifacts.md)). Kept
 in sync with `SECURITY.md` and the *Security areas* in `.squad/project.md`.
 
 Records: [0006](decisions/0006-agent-connects-outbound-only.md),
@@ -294,7 +294,7 @@ Records: [0006](decisions/0006-agent-connects-outbound-only.md),
 [0030](decisions/0030-agent-runs-unprivileged-with-named-capabilities.md),
 [0031](decisions/0031-telegram-user-allowlist.md),
 [0032](decisions/0032-secrets-only-from-environment-or-docker-secrets.md),
-[0039](decisions/0039-docker-hub-token-in-a-tag-only-environment.md).
+[0037](decisions/0037-releases-version-tag-plain-tooling-and-attested-artifacts.md).
 
 ## Deployment
 
@@ -327,11 +327,8 @@ Docker Hub as `networlddev/vandox` ([0027](decisions/0027-project-name-and-docke
   workflow verifies them before it creates the GitHub release. The SBOMs are generated in the build job by a
   digest-pinned syft container that runs without network and without access to `dist/`.
 
-Records: [0037](decisions/0037-release-workflow-with-plain-go-docker-and-gh.md),
+Records: [0037](decisions/0037-releases-version-tag-plain-tooling-and-attested-artifacts.md),
 [0041](decisions/0041-backend-image-chiseled-runtime-base-images-pinned-by-digest.md),
-[0039](decisions/0039-docker-hub-token-in-a-tag-only-environment.md),
-[0054](decisions/0054-release-provenance-attestations-from-a-secret-free-job.md),
-[0056](decisions/0056-release-sboms-from-a-digest-pinned-syft-container.md),
 [0072](decisions/0072-vandoxd-import-sub-command-output-and-exit-codes.md),
 [0059](decisions/0059-healthz-checks-the-database-and-the-binary-is-the-health-probe.md),
 [0060](decisions/0060-compose-file-port-bindings-volumes-and-memory-limit.md).

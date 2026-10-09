@@ -88,12 +88,8 @@ the backend Docker image. A release is always created manually, and the only tri
 such as `v0.1.0`; merging a PR, pushing to `main` or a schedule never publishes one. `release.yml`
 does not run on pull requests; `ci.yml` checks the release build there (*Release build check* below). The
 workflow is `.github/workflows/release.yml`; the reasoning is in
-[0053](decisions/0053-releases-are-manual-and-started-only-by-a-version-tag.md),
-[0037](decisions/0037-release-workflow-with-plain-go-docker-and-gh.md),
-[0041](decisions/0041-backend-image-chiseled-runtime-base-images-pinned-by-digest.md),
-[0039](decisions/0039-docker-hub-token-in-a-tag-only-environment.md),
-[0054](decisions/0054-release-provenance-attestations-from-a-secret-free-job.md),
-[0056](decisions/0056-release-sboms-from-a-digest-pinned-syft-container.md).
+[0037](decisions/0037-releases-version-tag-plain-tooling-and-attested-artifacts.md) and
+[0041](decisions/0041-backend-image-chiseled-runtime-base-images-pinned-by-digest.md).
 
 ### Cutting a release
 
@@ -181,7 +177,7 @@ line, the multi-arch index digest) and write both into the constant. `ghcr.io` i
 runs the image without network, with a read-only root file system, no capabilities and the runner's UID, the
 inputs mounted read-only and only a fresh empty directory writable, and prints the generator's output only
 between `::stop-commands::` markers so it cannot issue workflow commands. Record
-[0056](decisions/0056-release-sboms-from-a-digest-pinned-syft-container.md).
+[0037](decisions/0037-releases-version-tag-plain-tooling-and-attested-artifacts.md).
 
 ### Release build check on pull requests
 
@@ -207,7 +203,7 @@ nothing and reads no secret.
 2. **Environment.** Create the GitHub environment `release` with deployment branches and tags set to
    *Selected branches and tags*: the tag rule `v*.*.*` and no branch. Store the secret `DOCKERHUB_TOKEN`
    and the variable `DOCKERHUB_USERNAME` there. A required reviewer is optional; it is worth adding once
-   more than one person has write access (0039).
+   more than one person has write access (0037).
 3. **Immutable tags (optional, recommended where the Docker Hub subscription offers it).** Enable immutable
    tags on `networlddev/vandox` for version tags only, for example the rule
    `^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$`, never for `latest`, which has to move.

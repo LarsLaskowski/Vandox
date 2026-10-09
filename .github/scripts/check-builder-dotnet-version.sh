@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Checks that the builder image SDK version in deploy/backend/Dockerfile equals the target framework in
 # Directory.Build.props, and that the runtime image tag carries the same version.
-# Used by ci.yml and release.yml (records 0041, 0053).
+# Used by ci.yml and release.yml (records 0037, 0041).
 set -euo pipefail
 f=deploy/backend/Dockerfile
 tfm="$(sed -nE 's|^[[:space:]]*<TargetFramework>net([0-9]+\.[0-9]+)</TargetFramework>[[:space:]]*$|\1|p' Directory.Build.props)"

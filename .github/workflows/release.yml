@@ -3,7 +3,7 @@ name: Release
 # A SemVer tag (v*.*.*) builds, verifies and publishes the agent binary and the
 # backend image. This is the only trigger: a release is always created manually by
 # pushing a tag. Pull requests are checked by ci.yml, never by this workflow.
-# See docs/CONTRIBUTING.md (Versioning and releases) and records 0037, 0039, 0041, 0053, 0054 and 0056.
+# See docs/CONTRIBUTING.md (Versioning and releases) and records 0037 and 0041.
 
 on:
   push:
@@ -176,7 +176,7 @@ jobs:
         run: docker save vandox:local -o dist/vandox-image.tar
 
       # SPDX SBOMs for the binary and the image, from a digest-pinned syft container that runs without
-      # network and without access to dist/ (record 0056). They travel in the release artifact and are
+      # network and without access to dist/ (record 0037). They travel in the release artifact and are
       # attested in the attest job; they are not release assets.
       - name: Generate SBOMs
         env:
@@ -254,8 +254,7 @@ jobs:
         if: always()
         run: docker logout docker.io
 
-  # Signs build provenance and SBOM attestations for the published binary and image (records 0054 and
-  # 0056). Holds the OIDC signing permission and nothing else: no environment, no secret, no checkout.
+  # Signs build provenance and SBOM attestations for the published binary and image (record 0037). Holds the OIDC signing permission and nothing else: no environment, no secret, no checkout.
   attest:
     needs: [build, publish-image]
     runs-on: ubuntu-latest
