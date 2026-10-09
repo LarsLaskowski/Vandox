@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-03
-- **Area:** —
+- **Area:** Network and security model
 - **Source:** Issue #6
 - **Supersedes:** —
 
@@ -24,6 +24,8 @@ rest of the home network.
 
 Option 3: agent and backend communicate over Tailscale. The tailnet ACL allows the monitored server to
 reach only the ingest port on the backend host and nothing else.
+
+The resulting rules are in the [Network and security model](../areas/network-and-security-model.md) area.
 
 ## Consequences
 

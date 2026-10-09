@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-03
-- **Area:** —
+- **Area:** Detection, alerts and reports
 - **Source:** Issue #6
 - **Supersedes:** —
 
@@ -23,6 +23,8 @@ patterns are known.
 Option 2: v0.1.0 is the forensics release — collection, log import, spool and backfill, storage and the
 historical views needed to reconstruct outages. Alerting, the nightly report and remote actions build on
 it in later releases.
+
+The resulting rules are in the [Detection, alerts and reports](../areas/detection-and-reports.md) area.
 
 ## Consequences
 

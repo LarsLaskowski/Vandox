@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-03
-- **Area:** —
+- **Area:** Notification and remote actions
 - **Source:** Issue #6
 - **Supersedes:** —
 
@@ -24,6 +24,8 @@ able to run arbitrary commands on the server.
 Option 2: remote actions exist only as signed commands that reference an action from a fixed list
 configured locally on the monitored server, and only after the user has confirmed them. The agent pulls
 them (0006) and verifies the signature before executing. Not part of v0.1.0 (0020).
+
+The resulting rules are in the [Notification and remote actions](../areas/notification-and-remote-actions.md) area.
 
 ## Consequences
 
