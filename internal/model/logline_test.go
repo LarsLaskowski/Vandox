@@ -10,6 +10,7 @@ import (
 func validLogLine() *model.LogLine {
 	return &model.LogLine{
 		Log:       "journal",
+		Host:      "web-1",
 		Program:   "sshd",
 		PID:       5120,
 		Priority:  ptr(uint8(3)),
@@ -35,6 +36,8 @@ func TestLogLine_Validate_Valid(t *testing.T) {
 		{"priority upper bound", &model.LogLine{Log: "journal", Priority: ptr(uint8(7))}},
 		{"priority zero", &model.LogLine{Log: "journal", Priority: ptr(uint8(0))}},
 		{"message of max text", &model.LogLine{Log: "journal", Message: strings.Repeat("m", model.MaxTextBytes)}},
+		{"no host", &model.LogLine{Log: "journal", Message: "x"}},
+		{"host of max short text", &model.LogLine{Log: "journal", Host: strings.Repeat("h", model.MaxShortTextBytes)}},
 		{"log of max short text", &model.LogLine{Log: strings.Repeat("l", model.MaxShortTextBytes)}},
 		{"message with control characters", &model.LogLine{Log: "journal", Message: "a\x00b\nc\x01"}},
 	}
@@ -47,6 +50,7 @@ func TestLogLine_Validate_Invalid(t *testing.T) {
 	cases := []invalidCase[*model.LogLine]{
 		{"log empty", func(p *model.LogLine) { p.Log = "" }, "log"},
 		{"log too long", func(p *model.LogLine) { p.Log = strings.Repeat("l", model.MaxShortTextBytes+1) }, "log"},
+		{"host too long", func(p *model.LogLine) { p.Host = strings.Repeat("h", model.MaxShortTextBytes+1) }, "host"},
 		{"program too long", func(p *model.LogLine) { p.Program = strings.Repeat("p", model.MaxShortTextBytes+1) }, "program"},
 		{"pid negative", func(p *model.LogLine) { p.PID = -1 }, "pid"},
 		{"priority too high", func(p *model.LogLine) { p.Priority = ptr(uint8(8)) }, "priority"},

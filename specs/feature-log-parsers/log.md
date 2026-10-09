@@ -13,3 +13,4 @@ One line per pipeline step: date, step, member, result. Lead decisions and escal
 | 2026-10-09 | 3 Plan security review (2) | squad-security | APPROVED; non-blocking: N1 AC-S6 vs Accepted-forms contradiction (raw vs decoded host/tag limit), N2 define predecessor for year/repeated-hour rules, N3 journal resync memory row |
 | 2026-10-09 | 3 Plan nits | squad-lead | Security N1-N3 resolved (decoded-byte host/tag limits, predecessor rule, AC-M5); no further security round needed |
 | 2026-10-09 | 4 Skeleton | squad-dev | Task 1 done; go/dotnet build green; skeleton files carry '#pragma warning disable RH2003, S2325' to be removed by the Dev in tasks 8-13 |
+| 2026-10-09 | 5 Tests first | squad-tester | Tasks 2-7 done; 503 .NET tests + 1 Go row fail on skeleton (NotImplementedException or missing behavior); open points: AC-H3 omit-empty host, S1215 GC.GetTotalMemory pragma, assumed journal reader contract |

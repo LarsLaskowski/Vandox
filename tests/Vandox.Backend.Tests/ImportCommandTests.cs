@@ -1,3 +1,6 @@
+using Vandox.Core.Model;
+using Vandox.Storage;
+
 namespace Vandox.Backend.Tests;
 
 /// <summary>
@@ -59,6 +62,82 @@ public class ImportCommandTests
         Assert.AreEqual(0, second, "exit code of the second run");
         Assert.Contains("  already imported:  1", fixture.Out.ToString(), "the second run imports nothing");
         Assert.Contains("Time range:          no records were stored", fixture.Out.ToString(), "no records in the second run");
+    }
+
+    /// <summary>
+    /// <c>vandoxd import</c> reads a syslog file and a journal export with the built-in parsers, with no hook, in the configured time zone.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task ImportCommandImportsSyslogFileAndJournalExportWithBuiltInParsersInTheConfiguredZone()
+    {
+        // Arrange
+        using var fixture = new BackendFixture();
+        var logs = Path.Combine(fixture.Folder.Path, "logs");
+
+        Directory.CreateDirectory(logs);
+        await WriteLogsAsync(logs, TestContext.CancellationToken);
+        await File.AppendAllTextAsync(fixture.ConfigPath, "import:\n  time_zone: Europe/Berlin\n", TestContext.CancellationToken);
+
+        // Act
+        var code = await fixture.RunAsync(["import", logs], null, TestContext.CancellationToken);
+        var output = fixture.Out.ToString();
+        var syslog = await ReadLogLinesAsync(fixture.Storage, "syslog", TestContext.CancellationToken);
+        var journal = await ReadLogLinesAsync(fixture.Storage, "journal", TestContext.CancellationToken);
+
+        // Assert
+        Assert.AreEqual(0, code, "exit code");
+        Assert.Contains("  imported:          2", output, "both files are imported");
+        Assert.Contains("  not recognized:    0", output, "every file is recognized");
+        Assert.HasCount(1, syslog, "one syslog record");
+        Assert.AreEqual(new DateTimeOffset(2026, 7, 1, 10, 0, 0, TimeSpan.Zero), syslog[0].Record.CapturedAt, "12:00:00 in Berlin summer time is 10:00:00 UTC");
+        Assert.AreEqual("hello from syslog", ((LogLine)syslog[0].Record.Data!).Message, "syslog message");
+        Assert.AreEqual("syslog", ((LogLine)syslog[0].Record.Data!).Log, "log is the path as the import lists it");
+        Assert.HasCount(1, journal, "one journal record");
+        Assert.AreEqual("hello from journal", ((LogLine)journal[0].Record.Data!).Message, "journal message");
+        Assert.AreEqual("web-1", ((LogLine)journal[0].Record.Data!).Host, "journal host");
+    }
+
+    /// <summary>
+    /// Without <c>import.time_zone</c> the journal export is imported and the syslog file fails with a fixed reason; a second run with the option completes the file.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task ImportCommandFailsSyslogFileWithoutTimeZoneAndASecondRunWithItCompletesTheFile()
+    {
+        // Arrange
+        using var fixture = new BackendFixture();
+        var logs = Path.Combine(fixture.Folder.Path, "logs");
+
+        Directory.CreateDirectory(logs);
+        await WriteLogsAsync(logs, TestContext.CancellationToken);
+
+        // Act
+        var first = await fixture.RunAsync(["import", logs], null, TestContext.CancellationToken);
+        var firstOutput = fixture.Out.ToString();
+        var afterFirst = await ReadLogLinesAsync(fixture.Storage, "syslog", TestContext.CancellationToken);
+
+        fixture.Out.GetStringBuilder().Clear();
+        await File.AppendAllTextAsync(fixture.ConfigPath, "import:\n  time_zone: Europe/Berlin\n", TestContext.CancellationToken);
+
+        var second = await fixture.RunAsync(["import", logs], null, TestContext.CancellationToken);
+        var secondOutput = fixture.Out.ToString();
+        var syslog = await ReadLogLinesAsync(fixture.Storage, "syslog", TestContext.CancellationToken);
+        var journal = await ReadLogLinesAsync(fixture.Storage, "journal", TestContext.CancellationToken);
+
+        // Assert
+        Assert.AreEqual(1, first, "exit code of the run without the option");
+        Assert.Contains("  imported:          1", firstOutput, "the journal export is imported");
+        Assert.Contains("  failed:            1", firstOutput, "the syslog file failed");
+        Assert.Contains("Files that failed:", firstOutput, "failed files are listed");
+        Assert.Contains("\"syslog\": \"import.time_zone is not set\"", firstOutput, "the reason is the fixed text");
+        Assert.IsEmpty(afterFirst, "no guessed times are stored");
+        Assert.AreEqual(0, second, "exit code of the run with the option");
+        Assert.Contains("  imported:          1", secondOutput, "the syslog file is imported");
+        Assert.Contains("  already imported:  1", secondOutput, "the journal export is already imported");
+        Assert.HasCount(1, syslog, "the syslog line is stored once");
+        Assert.AreEqual(new DateTimeOffset(2026, 7, 1, 10, 0, 0, TimeSpan.Zero), syslog[0].Record.CapturedAt, "12:00:00 in Berlin summer time is 10:00:00 UTC");
+        Assert.HasCount(1, journal, "the journal record is stored once");
     }
 
     /// <summary>
@@ -232,6 +311,43 @@ public class ImportCommandTests
         Assert.AreEqual(2, bad, "unknown flag exit code");
         Assert.Contains("flag provided but not defined: -nope", fixture.Error.ToString(), "unknown flag message");
         Assert.AreEqual(2, extra, "missing path exit code");
+    }
+
+    /// <summary>
+    /// Writes a syslog file with a year-less line and a journal export into a directory.
+    /// </summary>
+    /// <param name="directory">The directory</param>
+    /// <param name="cancellationToken">The token</param>
+    /// <returns>A task that completes when the files are written</returns>
+    private static async Task WriteLogsAsync(string directory, CancellationToken cancellationToken)
+    {
+        var syslog = Path.Combine(directory, "syslog");
+
+        await File.WriteAllTextAsync(syslog, "Jul  1 12:00:00 web-1 sshd[1]: hello from syslog\n", cancellationToken);
+        File.SetLastWriteTimeUtc(syslog, new DateTime(2026, 7, 2, 0, 0, 0, DateTimeKind.Utc));
+        await File.WriteAllTextAsync(Path.Combine(directory, "journal.export"), "__CURSOR=s=1;i=1\n__REALTIME_TIMESTAMP=1772368215123456\n_HOSTNAME=web-1\nSYSLOG_IDENTIFIER=sshd\nMESSAGE=hello from journal\n\n", cancellationToken);
+    }
+
+    /// <summary>
+    /// Reads the log lines of one source from the database of the backend.
+    /// </summary>
+    /// <param name="storage">The storage directory</param>
+    /// <param name="source">The source</param>
+    /// <param name="cancellationToken">The token</param>
+    /// <returns>A task that returns the stored records</returns>
+    private static async Task<IReadOnlyList<StoredRecord>> ReadLogLinesAsync(string storage, string source, CancellationToken cancellationToken)
+    {
+        await using var store = await SqliteStore.OpenAsync(storage, cancellationToken);
+
+        return await store.RecordsAsync(new RecordQuery
+                                        {
+                                            Kind = RecordKind.LogLine,
+                                            Source = source,
+                                            From = new DateTimeOffset(2000, 1, 1, 0, 0, 0, TimeSpan.Zero),
+                                            To = new DateTimeOffset(2100, 1, 1, 0, 0, 0, TimeSpan.Zero),
+                                            Limit = 100
+                                        },
+                                        cancellationToken);
     }
 
     #endregion // Methods

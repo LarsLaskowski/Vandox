@@ -17,7 +17,7 @@ public class BackendConfigLoaderTests
     #region Methods
 
     /// <summary>
-    /// The example file of the repository loads with the defaults, sets every option explicitly and no secret.
+    /// The example file of the repository loads with the defaults, sets every option that has a default explicitly, holds the option without a default commented out and sets no secret.
     /// </summary>
     [TestMethod]
     public void BackendConfigLoaderLoadsRepositoryExample()
@@ -37,10 +37,117 @@ public class BackendConfigLoaderTests
         Assert.AreEqual("info", config.Log.Level, "log.level");
         Assert.IsFalse(config.Secrets.AgentToken.IsSet || config.Secrets.WebPasswordHash.IsSet || config.Secrets.TelegramBotToken.IsSet, "no secret is set");
 
-        foreach (var key in BackendConfig.Keys())
+        foreach (var key in BackendConfig.Keys().Where(key => key != "import.time_zone"))
         {
             Assert.IsGreaterThan(0, lines.GetValueOrDefault(key), $"the example sets {key} explicitly");
         }
+
+        Assert.IsNull(config.Import.TimeZone, "import.time_zone has no default and the example leaves it unset");
+        Assert.AreEqual(0, lines.GetValueOrDefault("import.time_zone"), "the example does not set import.time_zone");
+        Assert.Contains("\n  # time_zone: Europe/Berlin\n", File.ReadAllText(path).Replace("\r\n", "\n", StringComparison.Ordinal), "the example holds the option commented out");
+    }
+
+    /// <summary>
+    /// The time zone has no default; the key is absent, or its section is empty or holds only comments.
+    /// </summary>
+    /// <param name="document">The document</param>
+    [TestMethod]
+    [DataRow("")]
+    [DataRow("web:\n  listen: :9000\n")]
+    [DataRow("import:\n")]
+    [DataRow("import: ~\n")]
+    [DataRow("import:\n  # time_zone: Europe/Berlin\n")]
+    [DataRow("import: {}\n")]
+    public void BackendConfigLoaderLeavesTimeZoneUnsetWithoutDefault(string document)
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        var path = directory.Write("vandoxd.yaml", document);
+
+        // Act
+        var config = BackendConfigLoader.Load(path, []);
+
+        // Assert
+        Assert.IsNull(config.Import.TimeZone, "import.time_zone is null");
+    }
+
+    /// <summary>
+    /// Names of the IANA time zone database are accepted.
+    /// </summary>
+    /// <param name="zone">The zone</param>
+    [TestMethod]
+    [DataRow("UTC")]
+    [DataRow("Etc/UTC")]
+    [DataRow("Europe/Berlin")]
+    [DataRow("\"Europe/Berlin\"")]
+    public void BackendConfigLoaderReadsTimeZone(string zone)
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        var path = directory.Write("vandoxd.yaml", $"import:\n  time_zone: {zone}\n");
+
+        // Act
+        var config = BackendConfigLoader.Load(path, []);
+
+        // Assert
+        Assert.AreEqual(zone.Trim('"'), config.Import.TimeZone, "import.time_zone");
+    }
+
+    /// <summary>
+    /// A value that is no time zone of the database is refused at its line and never shown.
+    /// </summary>
+    /// <param name="value">The raw YAML value</param>
+    [TestMethod]
+    [DataRow("\"\"")]
+    [DataRow("Europe/Nowhere")]
+    [DataRow("\"+01:00\"")]
+    [DataRow("W. Europe Standard Time")]
+    [DataRow("europe/berlin")]
+    public void BackendConfigLoaderRefusesInvalidTimeZoneWithoutShowingIt(string value)
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        var path = directory.Write("vandoxd.yaml", $"import:\n  time_zone: {value}\n");
+
+        // Act
+        var exception = Assert.ThrowsExactly<ConfigException>(() => BackendConfigLoader.Load(path, []), "invalid time zone");
+
+        // Assert
+        Assert.AreEqual($"config: {path}:2: import.time_zone: must be a time zone of the IANA time zone database, such as UTC or Europe/Berlin", exception.Message, "message");
+    }
+
+    /// <summary>
+    /// A time zone without a value is refused like every string option.
+    /// </summary>
+    /// <param name="value">The raw YAML value</param>
+    [TestMethod]
+    [DataRow("~")]
+    [DataRow("")]
+    public void BackendConfigLoaderRefusesTimeZoneWithoutValue(string value)
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        var path = directory.Write("vandoxd.yaml", $"import:\n  time_zone: {value}\n");
+
+        // Act
+        var exception = Assert.ThrowsExactly<ConfigException>(() => BackendConfigLoader.Load(path, []), "no value");
+
+        // Assert
+        Assert.AreEqual($"config: {path}:2: import.time_zone: has no value", exception.Message, "message");
+    }
+
+    /// <summary>
+    /// The list of keys names the time zone after the other options.
+    /// </summary>
+    [TestMethod]
+    public void BackendConfigKeysListTimeZone()
+    {
+        // Act
+        var keys = BackendConfig.Keys();
+
+        // Assert
+        Assert.AreEqual("import.time_zone", keys[^1], "the time zone is the last key");
+        Assert.Contains("log.level", keys, "the other keys stay");
     }
 
     /// <summary>
