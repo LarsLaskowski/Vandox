@@ -74,7 +74,11 @@ and each report, twice under source `syslog`. Signature detection (#21) has to a
 ### Unreadable input
 
 A line or entry that cannot be read is skipped and counted with a fixed reason (never quoting the input); malformed or
-hostile input never crashes the import, never makes it allocate without bound and never makes it hang.
+hostile input never crashes the import, never makes it allocate without bound and never makes it hang. A text that is too
+long, also one that only becomes too long because invalid bytes are replaced by U+FFFD, is cut and marked truncated,
+never refused. A time stamp outside the range storage can hold (1677-09-21 to 2262-04-11) is skipped with a fixed
+reason. A file that fails part-way (for example because `import.time_zone` is not set) stores only records that a later,
+complete run emits first in the same order, so the resume continues exactly where it stopped.
 
 ## Acceptance criteria
 

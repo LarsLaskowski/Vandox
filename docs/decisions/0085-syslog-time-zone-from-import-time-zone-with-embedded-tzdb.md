@@ -63,12 +63,25 @@ The repeated hour at the end of daylight saving time:
     steps back that syslog files contain; a second pass whose first line comes within 10 minutes of the first pass's
     last line, with nothing logged in between, stays in the first pass, which no rule can tell apart without an offset.
 
+Dates outside the range storage can hold (int64 nanoseconds: 1677-09-21 to 2262-04-11), from a hostile or broken name
+date, modification time, RFC 3339 time or a year advanced line after line:
+
+14. **Build the time value and let the record rules refuse it** — no extra code; but `DateTimeOffset`, `LocalDate` and
+    NodaTime's strict zone mapping throw near year 1 and 9999 and for a gap, and the importer reports an unexpected
+    exception's own message as the file's failure reason, which is neither a fixed text nor a skip of one line.
+15. **Check years and days as integers before building any value, check the instant against the storable range, map
+    local times only with `MapLocal`** (chosen) — an anchor outside the range is not used (the name date falls back to
+    the modification time), a line outside it is skipped with "time outside the storable range", and the inferred year
+    stops advancing once it has left the range; the range is defined once in `Vandox.Core` (`StorableTime`) and storage
+    uses the same definition.
+
 ## Decision
 
-Options 4, 8, 11 and 13: year-less times are read in the zone of `import.time_zone` (an IANA name from NodaTime's TZDB,
+Options 4, 8, 11, 13 and 15: year-less times are read in the zone of `import.time_zone` (an IANA name from NodaTime's TZDB,
 without a default; unset, a file with year-less lines fails with "import.time_zone is not set"), the year comes from the
 dateext rotation date or else the modification time, and daylight saving is resolved deterministically in file order
-with a 10-minute tolerance in the repeated hour. The rules are in [Log import](../areas/log-import.md) (*System log parsers*) and the option in
+with a 10-minute tolerance in the repeated hour; no time outside the storable range is ever built, it is skipped with a
+fixed reason. The rules are in [Log import](../areas/log-import.md) (*System log parsers*) and the option in
 [Configuration and secrets](../areas/configuration-and-secrets.md).
 
 ## Consequences
@@ -82,4 +95,6 @@ with a 10-minute tolerance in the repeated hour. The rules are in [Log import](.
 - A copy that lost the modification time (plain `cp`) more than a year after the log was written dates a file without a
   rotation date in its name (`syslog`, `syslog.1`) a year late; the README asks for `cp -a` or `tar`.
 - A file spanning more than a year of year-less lines is dated wrong for its older part.
+- A file without a usable anchor (no valid name date and a modification time outside the storable range) has its
+  year-less lines skipped with "year unknown: the file has no usable date".
 - Zone rule updates arrive with NodaTime updates (Dependabot), not with the host.

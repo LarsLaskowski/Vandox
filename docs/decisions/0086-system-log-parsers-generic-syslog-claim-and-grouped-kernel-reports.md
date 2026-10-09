@@ -54,11 +54,28 @@ What a syslog record's `log` holds:
 13. **The path as the import lists it** (chosen) — relative to the import root or archive, rotation suffix included
     (`backup/var/log/syslog.1`); the wire format defines `log` for both producers.
 
+When an open report (no end line yet) is emitted:
+
+14. **At every end of the parse, also when it ends by an exception** — nothing that was read is lost from this run;
+    but the importer resumes a failed file by dropping as many emitted records as it stored, so a report flushed at the
+    failure (cancellation, an emitter error, "import.time_zone is not set") would make the stored records differ from
+    the start of what the completing run emits, and the resume would drop or duplicate records.
+15. **Only at the normal end of input** (chosen) — the records stored before a failure are always a prefix of a later
+    complete parse; the open report is rebuilt by that parse.
+
+How the 16 KiB bounds are measured:
+
+16. **On the raw bytes of the input** — cheap; but each invalid byte decodes to U+FFFD (three UTF-8 bytes) and the record
+    rules count UTF-8 bytes, so hostile input yields records that are refused instead of cut.
+17. **On the UTF-8 bytes of the decoded text, cut at a character boundary** (chosen) — the parsers and the grouper keep the
+    raw read bounds for memory and cut the decoded text to the record limits, so no record is refused for its length.
+
 ## Decision
 
-Options 2, 4, 8, 11 and 13: the journal export is recognized by its content, the syslog parser claims rsyslog files weakly, the
+Options 2, 4, 8, 11, 13, 15 and 17: the journal export is recognized by its content, the syslog parser claims rsyslog files weakly, the
 journal record time is `__REALTIME_TIMESTAMP`, and OOM and `cut here` reports become one `log_line` with head and tail,
-bounded by time span, line count and end of input; lines of others inside a report are emitted before it; `log` is the
+bounded by time span, line count and the normal end of input (never flushed when a parse fails), with every byte bound
+counted in UTF-8 bytes of the decoded text; lines of others inside a report are emitted before it; `log` is the
 listed path. The parsers emit log lines only, no kernel events (#21). The rules
 are in [Log import](../areas/log-import.md) (*System log parsers*).
 
