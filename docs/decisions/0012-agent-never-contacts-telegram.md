@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-03
-- **Area:** —
+- **Area:** Notification and remote actions
 - **Source:** Issue #6
 - **Supersedes:** —
 
@@ -22,6 +22,8 @@ destination of the agent widens what the monitored server talks to.
 
 Option 2: only `vandoxd` sends Telegram messages. The agent talks to the backend's ingest port and nothing
 else.
+
+The resulting rules are in the [Notification and remote actions](../areas/notification-and-remote-actions.md) area.
 
 ## Consequences
 

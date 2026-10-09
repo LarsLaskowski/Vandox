@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-03
-- **Area:** —
+- **Area:** Network and security model
 - **Source:** Issue #6
 - **Supersedes:** —
 
@@ -21,6 +21,8 @@ to open it from the internet.
 
 Option 3: the web UI is reachable in the home LAN only and requires a login. It is not exposed to the
 internet, and it is not offered on the tailnet to the monitored server (0010).
+
+The resulting rules are in the [Network and security model](../areas/network-and-security-model.md) area.
 
 ## Consequences
 

@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-03
-- **Area:** —
+- **Area:** Detection, alerts and reports
 - **Source:** Issue #6
 - **Supersedes:** —
 
@@ -23,6 +23,8 @@ to tell live data from backfill reliably, without trusting a flag the agent coul
 Option 2: `vandoxd` classifies every record as live or backfilled from its capture time, its receive time
 and gaps in the sequence numbers. Alert rules are evaluated on live data only; backfilled data is stored
 and analyzed but never alerts.
+
+The resulting rules are in the [Detection, alerts and reports](../areas/detection-and-reports.md) area.
 
 ## Consequences
 

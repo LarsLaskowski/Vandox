@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-03
-- **Area:** —
+- **Area:** Detection, alerts and reports
 - **Source:** Issue #6
 - **Supersedes:** —
 
@@ -20,6 +20,8 @@ A daily summary of the night tells the operator whether anything happened. If th
 
 Option 2: the nightly report is sent at 06:00; if the backend host was off at that time, it is sent as soon as the
 backfill has completed.
+
+The resulting rules are in the [Detection, alerts and reports](../areas/detection-and-reports.md) area.
 
 ## Consequences
 

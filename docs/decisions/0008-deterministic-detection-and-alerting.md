@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-03
-- **Area:** —
+- **Area:** Detection, alerts and reports
 - **Source:** Issue #6
 - **Supersedes:** —
 
@@ -23,6 +23,8 @@ can be wrong in ways that are hard to test.
 
 Option 2: detection, incident reconstruction and alerting are deterministic (rules, thresholds, log
 signatures). AI is optional and only used to write the nightly report (0024).
+
+The resulting rules are in the [Detection, alerts and reports](../areas/detection-and-reports.md) area.
 
 ## Consequences
 
