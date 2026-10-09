@@ -4,7 +4,7 @@
 
 Importing historical logs into the backend: the `import` sub-command of `vandoxd`, what it accepts, how it reads
 untrusted input, how it stays repeatable, what it reports and the contract the log parsers fulfill. What a parsed
-record is and how it is stored is described by the storage area and the [wire format](../WIRE_FORMAT.md); how
+record is and how it is stored is described by the storage area and the [wire format](wire-format.md); how
 imported data is kept apart from live data (it never raises alerts) by the detection area.
 
 ## Command

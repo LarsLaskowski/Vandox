@@ -26,13 +26,13 @@ way, and agents of the hosting provider are never disabled or changed
 ## Components
 
 - `cmd/vandox-agent` — Go (the agent stays small and static, so the monitored server needs no runtime;
-  [0073](decisions/0073-backend-in-dotnet-10-with-blazor-agent-stays-go.md)), runs as a systemd service on the monitored server. It collects metrics, process
+  [0073](decisions/0073-backend-in-dotnet-10-with-blazor-agent-stays-go.md)), runs as a systemd service on the monitored server (rules: [Agent](areas/agent.md)). It collects metrics, process
   and network snapshots (read from `/proc`), service and MariaDB state, kernel events and logs, keeps them in
   an on-disk spool and sends them to the backend. It checks the state of the mail services, not individual
   mail accounts. Each collector runs in its own goroutine under a deadline and is abandoned when the
   deadline passes, so a hanging collector or database never blocks the agent; a missed sample is recorded
   as a gap, and a collector that is still stuck is not started again.
-- `src/Vandox.Backend` — `vandoxd`, .NET 10 (ASP.NET Core with a Blazor Web App, Interactive Server render mode),
+- `src/Vandox.Backend` — `vandoxd` (rules: [Backend host](areas/backend-host.md)), .NET 10 (ASP.NET Core with a Blazor Web App, Interactive Server render mode),
   one container on the backend host: ingest API, SQLite storage, analysis, rules, Telegram notifier, reports and
   web UI. Without arguments it runs the service; `-healthcheck` probes its `/healthz`; `vandoxd import <path>`
   imports logs saved on the backend host
@@ -43,14 +43,14 @@ way, and agents of the hosting provider are never disabled or changed
   ([0073](decisions/0073-backend-in-dotnet-10-with-blazor-agent-stays-go.md)):
   `Vandox.Core` (data model and validation, the wire decoder, configuration and secrets, safe file access, the
   log parser interface and registry, the line reader that bounds the line length),
-  `Vandox.Storage` (the SQLite database: schema, migrations, writing batches, queries and log search) and
+  `Vandox.Storage` (the SQLite database, see [Storage](areas/storage.md): schema, migrations, writing batches, queries and log search) and
   `Vandox.Import` (reads a directory, archive or file as streams, detects the parser per file, hashes the
   content, writes the parsers' records in resumable batches and builds the summary)
   ([0069](decisions/0069-log-import-idempotent-per-file-content-hash-with-resumable-batches.md),
   [0077](decisions/0077-storage-on-microsoft-data-sqlite-same-schema-and-rules.md),
   [0079](decisions/0079-log-parsing-and-import-in-the-backend-without-following-links.md)).
 - `internal/` — the agent's Go packages: data model and the versioned wire encoder (see
-  [`WIRE_FORMAT.md`](WIRE_FORMAT.md)), signatures, version information, agent configuration loading (see
+  [wire format](areas/wire-format.md)), signatures, version information, agent configuration loading (see
   *Configuration*) and command-line handling (`internal/cli`). The model and the wire format exist twice, in Go
   (producer) and in C# (consumer); a golden batch produced by the Go encoder and decoded by the C# decoder keeps
   them in step ([0075](decisions/0075-wire-contract-pinned-by-golden-fixtures.md)).

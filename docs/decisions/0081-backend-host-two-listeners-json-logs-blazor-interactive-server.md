@@ -2,36 +2,24 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-06
-- **Area:** —
+- **Area:** Backend host
 - **Source:** Product Manager request: move the backend to .NET 10 with Blazor, keep the agent in Go
 - **Supersedes:** —
 
 ## Context
 
-[0072](0072-vandoxd-import-sub-command-output-and-exit-codes.md) (superseded by
-[0072](0072-vandoxd-import-sub-command-output-and-exit-codes.md)) and [0059](0059-healthz-checks-the-database-and-the-binary-is-the-health-probe.md)
-describe the service: web and ingest on separate ports, JSON log lines, a 10 s shutdown deadline, `/healthz`,
-`-healthcheck`. ASP.NET Core serves both ports from one process by default as one application.
+Web and ingest are served on separate ports from one process, with JSON log lines, a shutdown deadline, `/healthz` and `-healthcheck` (0059, 0072). ASP.NET Core serves several ports as one application by default.
 
 ## Options considered
 
 1. **Two hosts in one process** — isolation, but doubled configuration and lifecycle.
-2. **One host, two Kestrel listeners, a middleware that routes by listener** — each connection carries a label
-   and a request only reaches the endpoints of its port.
+2. **One host, two Kestrel listeners, a middleware that routes by listener** (chosen) — each connection carries a label and a request only reaches the endpoints of its port.
 
 ## Decision
 
-Option 2. `ListenerRoutes` labels each listener (`web`, `ingest`); `PortRoutingMiddleware` answers 404 for a
-request whose connection has no label or whose label does not match the endpoint (fail closed). `/healthz`
-exists only on the web port and never returns an error text. Logs are JSON lines through a custom
-`ILoggerProvider` with the keys of the former `slog` output (`time`, `level`, `msg`, attributes; control
-characters escaped, the exception type name in `exception`, never its text); application messages use `[LoggerMessage]` methods, and the framework's own categories (`Microsoft.*`) log from warning on unless the level is debug, so the health probe does not fill the log. The
-UI is a Blazor Web App with the Interactive Server render mode; HTML escaping is the Razor default. Shutdown keeps
-the 10 s deadline and logs `vandoxd stopped`.
+Option 2 and fail closed: an unlabelled connection or a request for an endpoint of the other port gets `404`. Logs are JSON lines through a custom logger provider with the keys of the former Go output. The UI is a Blazor Web App with the Interactive Server render mode. Details are in the [Backend host](../areas/backend-host.md) area (*Listeners and routing*, *Logging*).
 
 ## Consequences
 
-- The ingest endpoints and the login (issues #40 and #25) are added to this host; the port routing is where
-  their reachability is enforced next to the network binding (0017).
-- Interactive Server keeps a SignalR connection per open page; the number of concurrent circuits is bounded
-  by the single-user home-LAN use stated in 0016.
+- The ingest endpoint and the login are added to this host; the port routing is where their reachability is enforced next to the network binding (0017).
+- Interactive Server keeps one live connection per open page; the number of concurrent pages is bounded by the single-user home-LAN use stated in 0016.

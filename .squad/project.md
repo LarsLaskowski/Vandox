@@ -192,7 +192,7 @@ change with it.
   (`src/Vandox.Core/Model`, `src/Vandox.Core/Wire`)
 - the golden batch `testdata/wire/all-kinds.jsonl` (regenerate with `VANDOX_UPDATE_GOLDEN=1 go test ./internal/wire`)
   and both tests that read it (`internal/wire/golden_test.go`, `WireContractTests`)
-- `docs/WIRE_FORMAT.md` and, for a version change, the major/minor rules (0043)
+- `docs/areas/wire-format.md` and, for a version change, the major/minor rules (0043)
 
 **A new external API call or DTO** touches:
 - the client and its types — the external shape must not leak past it

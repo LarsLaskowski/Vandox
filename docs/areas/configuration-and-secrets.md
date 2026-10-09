@@ -38,7 +38,7 @@ Agent:
 
 | Key | Default | Rule |
 | --- | ------- | ---- |
-| `agent_id` | none, required | 1 to 64 characters of `A-Z a-z 0-9 . _ -`, starting with a letter or digit (the rule of the [wire format](../WIRE_FORMAT.md) for agent IDs) |
+| `agent_id` | none, required | 1 to 64 characters of `A-Z a-z 0-9 . _ -`, starting with a letter or digit (the rule of the [wire format](wire-format.md) for agent IDs) |
 | `backend.url` | none, required | URL with scheme `http` or `https`; a host that is an IP address or a name of letters, digits, `.` and `-` (checked after percent-decoding); an optional port from 1 to 65535; no user info, query, fragment or path other than `/` |
 | `spool.directory` | `/var/lib/vandox/spool` | absolute, clean path |
 | `log.level` | `info` | `debug`, `info`, `warn` or `error` |
@@ -120,7 +120,7 @@ Backend:
 ## Not here
 
 - What an option does at run time: the area that owns the feature (ingest and backend host, storage, agent, import).
-- The wire format of what the agent sends: [`WIRE_FORMAT.md`](../WIRE_FORMAT.md).
+- The wire format of what the agent sends: [wire format](wire-format.md).
 
 ## Implementation
 
