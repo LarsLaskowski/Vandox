@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Checks that every FROM in deploy/backend/Dockerfile uses a base image build argument pinned by digest.
-# Used by ci.yml and release.yml (records 0041, 0053).
+# Used by ci.yml and release.yml (records 0037, 0041).
 set -euo pipefail
 f=deploy/backend/Dockerfile
 if grep -nEi '^[[:space:]]*(from|arg)([[:space:]]|$)' "$f" | grep -vE '^[0-9]+:(FROM|ARG)[[:space:]]'; then

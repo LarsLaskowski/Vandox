@@ -127,7 +127,7 @@ files or endpoints.
     Release binaries are built without restored CI caches (`setup-go` `cache: false`, plain
     `docker build --no-cache`, no cache backend) and only after `govulncheck` and the NuGet vulnerability check
     (`dotnet list package --vulnerable --include-transitive`) pass. The builder image's .NET version must equal the
-    target framework (`check-builder-dotnet-version.sh`, record 0080). The registry token is
+    target framework (`check-builder-dotnet-version.sh`, record 0041). The registry token is
     readable only by the tag-triggered publish job, enters `docker login` only via stdin, and is limited to
     pushing `networlddev/vandox`. No `${{ }}` expression of any kind appears inside a `run:` script; every
     value goes through `env:`, and checkout does not persist the job token. The published image runs as a
@@ -139,7 +139,7 @@ files or endpoints.
     index digest (form-checked in `.github/scripts/generate-sbom.sh`), run without network, capabilities,
     token or writable access to `dist/`. The scheduled digest check holds only `contents: read` and
     `issues: write`, writes only regex-checked image, tag and digest values into the issue, and never writes
-    to the repository. Records 0027, 0037, 0039, 0041, 0054, 0056, 0080.
+    to the repository. Records 0027, 0037, 0041.
 
 ## Guarantees
 

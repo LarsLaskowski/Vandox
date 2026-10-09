@@ -169,9 +169,9 @@ jobs:
           fi
 
   # Builds the agent and the backend image the way the release does, with a fixed
-  # dry-run version, and generates and checks the SBOMs (record 0056). Nothing is uploaded or pushed and
+  # dry-run version, and generates and checks the SBOMs (record 0037). Nothing is uploaded or pushed and
   # no secret is read. The real
-  # release runs only on a version tag (release.yml, record 0053).
+  # release runs only on a version tag (release.yml, record 0037).
   release-build:
     name: Release build check
     runs-on: ubuntu-latest
@@ -190,7 +190,7 @@ jobs:
         run: .github/scripts/check-builder-dotnet-version.sh
 
       # A stale digest or a failed registry lookup is only a warning here; pinning and pattern errors
-      # (status 1) still fail (record 0080).
+      # (status 1) still fail (record 0041).
       - name: Check base image digests
         run: |
           set -uo pipefail
@@ -198,7 +198,7 @@ jobs:
           .github/scripts/check-base-image-digests.sh || rc=$?
           case "$rc" in
             0|3) exit 0 ;;
-            4) echo "::warning::base image digest lookup failed; freshness not checked (record 0080)"; exit 0 ;;
+            4) echo "::warning::base image digest lookup failed; freshness not checked (record 0041)"; exit 0 ;;
             *) exit "$rc" ;;
           esac
 
@@ -254,7 +254,7 @@ jobs:
         run: .github/scripts/smoke-test-backend.sh vandox:local
 
       # The release's SBOM step on the dry-run build; the image tar stays outside the checkout. Nothing is
-      # uploaded (record 0056).
+      # uploaded (record 0037).
       - name: Generate and check SBOMs
         run: |
           set -euo pipefail
