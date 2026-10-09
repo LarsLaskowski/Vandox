@@ -134,21 +134,40 @@ wherever several inputs share one behavior.
   no usable date". Year advance at the upper bound: with zone `UTC`, mtime 2026-07-02 and 1,000 lines alternating
   `Jul  1 00:00:00` and `Jan  1 00:00:00` (starting with `Jul  1`), the year advances at every `Jan  1` line, lines 1-472
   are records (the last one 2262-01-01T00:00:00Z), lines 473-1,000 are skipped with "time outside the storable range",
-  and nothing throws; the inferred year stops advancing once it is past the storable range.
+  and nothing throws; the inferred year stops advancing once it is past the storable range. These counts hold only
+  under the predecessor rule (*Text limits and time range*): line 473 (`Jul  1` 2262, skipped) is the predecessor of
+  line 474, which therefore advances to 2263; if skipped lines did not count, every later `Jan  1` line would compare
+  with line 472, stay in 2262 and be emitted. Predecessor rows (zone `UTC`, mtime 2026-07-02): `Jul  1 ...`, an RFC
+  3339 line `2026-12-31T00:00:00Z`, `Jun  1 ...` → 2026-07-01, 2026-12-31, 2026-06-01 (the RFC 3339 line is no
+  predecessor; compared with it, `Jun  1` would advance to 2027); `Jul  1 ...`, `Nov 31 ...`, `May  1 ...` →
+  2026-07-01, skip "invalid date", 2027-05-01 (the skipped `Nov 31` is the predecessor, and `May  1` is more than 180
+  days before it); `Jul  1 ...`, a line that is not a syslog line, an empty line, `Jun  1 ...` → 2026-07-01, two
+  skips, 2026-06-01.
 - [ ] AC-S5 Time zones: zone `UTC` keeps the wall time; `Europe/Berlin` `Jul  1 12:00:00` → 10:00Z, `Jan 15 12:00:00` →
   11:00Z; the skipped hour `Mar 29 02:30:00` (2026) → 01:30Z (shifted forward); the repeated hour on 2026-10-25: a local
   time in it takes the earlier offset (+02:00) unless that puts it more than `SyslogClock.BackwardTolerance` (10 minutes)
   before the previous line's instant, then the later offset (+01:00). `[DataRow]` per file order: `02:59:59`,
   `02:00:01`, `02:30:00` → 00:59:59Z, 01:00:01Z, 01:30:00Z; `02:59:59`, `02:59:58`, `02:00:01` → 00:59:59Z, 00:59:58Z,
   01:00:01Z (a step back within the tolerance stays in the first pass); `02:59:59`, `02:10:00`, `02:09:58` → 00:59:59Z,
-  01:10:00Z, 01:09:58Z (a step back inside the second pass stays there); the first line of a file in the repeated hour takes the earlier
-  offset. New Year in the zone: mtime 2025-12-31T23:30Z (00:30 local on Jan 1) with `Jan  1 00:10:00` →
+  01:10:00Z, 01:09:58Z (a step back inside the second pass stays there); `Oct 25 02:59:59`, the RFC 3339 line
+  `2026-10-25T00:55:00Z`, `Oct 25 02:49:00` → 00:59:59Z, 00:55:00Z, 01:49:00Z (the "previous line" is the last
+  year-less line that got an instant, not the RFC 3339 line: 00:49Z would be 10:59 before 00:59:59Z, but only 6 minutes
+  before 00:55:00Z); `Oct 25 02:59:59`, `Sep 31 12:00:00` (skipped, "invalid date", no instant), `Oct 25 02:49:00` →
+  00:59:59Z, skip, 01:49:00Z (a skipped line leaves the previous instant unchanged); the first line of a file in the
+  repeated hour takes the earlier offset. New Year in the zone: mtime 2025-12-31T23:30Z (00:30 local on Jan 1) with `Jan  1 00:10:00` →
   2025-12-31T23:10Z; RFC 3339 lines ignore the zone.
 - [ ] AC-S6 A line cut by `LogLineReader` (over 16 KiB) gives `Truncated = true`. Limits count UTF-8 bytes of the decoded
   text: a valid traditional header followed by `0xFF` bytes up to a line of exactly 16,384 bytes (not cut by the
   reader; the decoded message is about 49,000 UTF-8 bytes) gives a message of at most 16,384 UTF-8 bytes, `Truncated =
-  true`, and no "record refused" skip through the validating `RecordingEmitter`; the same with an RFC 3339 header; a
-  host of 255 bytes `0xFF` and a tag of 128 bytes `0xFF` give `Host` and `Program` of at most 1,024 UTF-8 bytes.
+  true`, and no "record refused" skip through the validating `RecordingEmitter`; the same with an RFC 3339 header.
+  `HOST` and `PROGRAM` are limited syntactically, in UTF-8 bytes of the decoded line (*Accepted forms*: 1-255 and
+  1-128), which is below the model's 1,024, so they are never cut: `[DataRow]` per form, each followed by a valid line
+  that is emitted — host of 255 `a` → `Host` of 255 bytes; host of 256 `a` → "not a syslog line"; host of 85 bytes
+  `0xFF` (decoded: 85 U+FFFD, exactly 255 UTF-8 bytes) → `Host` of 85 U+FFFD; host of 86 bytes `0xFF` (258 UTF-8 bytes)
+  → "not a syslog line"; host of 255 bytes `0xFF` (765 UTF-8 bytes) → "not a syslog line"; tag `PROGRAM:` with 128 `a`
+  → `Program` of 128 bytes; with 129 `a` → no tag (program empty, pid 0, message = the rest after the host); with 42
+  bytes `0xFF` and `ab` (exactly 128 UTF-8 bytes) → `Program` of 42 U+FFFD and `ab`; with 43 bytes `0xFF` (129 UTF-8
+  bytes) → no tag; with 128 bytes `0xFF` → no tag. Every emitted record passes the validating `RecordingEmitter`.
 - [ ] AC-S7 Zone not set (`new SyslogParser(null)`): a file of RFC 3339 lines is parsed completely; a file whose
   first year-less (traditional) line comes after two RFC 3339 lines emits those two records and then `ParseAsync` throws
   `InvalidOperationException` with the message `SyslogParser.TimeZoneNotSet` (`import.time_zone is not set`, no input
@@ -238,6 +257,11 @@ stays under the 10 s runtime budget.
 - [ ] AC-M3 `JournalExportReader` over an entry whose binary `MESSAGE` declares the length 2^62 and is followed by 100
   bytes: the entry is skipped with "truncated entry", the parse ends without an exception, and it allocates less than
   8 MiB (the declared length never sizes an allocation).
+- [ ] AC-M5 `JournalExportReader` resynchronizing after a malformed field (header `bad-name=x\n`, then 64 MiB without an
+  empty line, `[DataRow]` per pattern: 1,023 bytes `a` and `\n` repeated, so many lines but no empty one; and `a` only,
+  without any `\n`): the entry is skipped with "malformed field" exactly once, no record and no other skip follow, the
+  parse ends at the end of input without an exception, and it allocates less than 8 MiB (the resync scans in the reused
+  buffer and never collects the skipped bytes).
 - [ ] AC-M4 `KernelReportGrouper` fed a report of 2,000 kernel lines of 16 KiB each (a start line, then lines without an
   end line; each record built per line and dropped by the test, `ready` cleared after each `Add`): the retained memory
   measured after line 1,999, with the grouper kept alive, grows by less than 1 MiB over the value before the first
@@ -267,7 +291,7 @@ The parsers' behavior on every input form (Security reviews this list).
 | Binary field `NAME\n` + uint64 LE length + bytes + `\n` | value = the bytes; a byte other than `\n` after them → "malformed field" |
 | Length ≥ 2^63, or more than the remaining input | "truncated entry", parse ends |
 | Field name: 1-64 bytes of `A-Z 0-9 _`, not starting with a digit | accepted (address fields `__*` included) |
-| Any other field name (lower case, `-`, space, empty, over 64 bytes, non-ASCII) | "malformed field"; resynchronize after the next empty line |
+| Any other field name (lower case, `-`, space, empty, over 64 bytes, non-ASCII) | "malformed field"; resynchronize after the next empty line, scanning in the reused buffer (bounded memory, AC-M5); the end of input while resynchronizing ends the parse with no further skip |
 | A value longer than its raw keep bound (16,384 bytes for `MESSAGE`, 1,024 for the short fields, 32 for the numeric ones) | the first bytes up to the bound (at a UTF-8 boundary) are kept, the rest read in a reused buffer and discarded; `Truncated` for `MESSAGE` and the short fields; an over-long numeric value is invalid |
 | A kept text whose decoded form exceeds its limit in UTF-8 bytes (invalid bytes grow to three bytes each) | cut at a character boundary to the limit (*Text limits and time range*), `Truncated` |
 | Text value ended by the end of input instead of `\n` | "truncated entry", parse ends |
@@ -292,8 +316,8 @@ The parsers' behavior on every input form (Security reviews this list).
 | RFC 3339 time | `YYYY-MM-DDTHH:MM:SS`, optional `.` and 1-9 digits (kept to 100 ns), then `Z` or `±HH:MM` up to ±14:00; upper-case `T`/`Z` only | "not a syslog line" |
 | RFC 3339 instant outside the storable range (year 0000 included) | — | "time outside the storable range" |
 | Separator | exactly one space after the time and after the host | "not a syslog line" |
-| `HOST` | 1-255 UTF-8 bytes of the decoded line, without space | "not a syslog line" |
-| `TAG` | next token matching `PROGRAM[PID]:` or `PROGRAM:`, `PROGRAM` 1-128 UTF-8 bytes of the decoded line without space, `[`, `]`, `:`; `PID` 1-10 digits (over 2^31-1 → 0) | no tag: program empty, pid 0, message = rest after host |
+| `HOST` | 1-255 UTF-8 bytes of the decoded line (an invalid byte counts as the three bytes of its U+FFFD), without space; never cut, the limit is below the model's 1,024 | "not a syslog line" |
+| `TAG` | next token matching `PROGRAM[PID]:` or `PROGRAM:`, `PROGRAM` 1-128 UTF-8 bytes of the decoded line (counted as for `HOST`, never cut) without space, `[`, `]`, `:`; `PID` 1-10 digits (over 2^31-1 → 0) | no tag: program empty, pid 0, message = rest after host |
 | `MESSAGE` | rest of the line after `:` and at most one space; may be empty; invalid UTF-8 → U+FFFD; control characters kept; cut to 16,384 UTF-8 bytes (`Truncated`) | — |
 | Feb 29 / day beyond the month in the resolved (or RFC 3339) year | — | "invalid date" |
 | Year-less time whose inferred year or instant is outside the storable range | — | "time outside the storable range" |
@@ -315,7 +339,9 @@ These rules hold for both parsers and the grouper, so a record they build never 
   raw bound alone lets 16,384 bytes `0xFF` grow to 49,152. Every kept text is decoded with replacement and then cut at
   a character (rune) boundary to its limit with `Utf8Text` (the same algorithm as `PathText.Cut`,
   `src/Vandox.Import/PathText.cs:49-70`, which lives in `Vandox.Import` and is not reused from `Vandox.Core`): `Message`
-  16,384 (`ModelLimits.MaxTextBytes`), `Host` and `Program` 1,024 (`ModelLimits.MaxShortTextBytes`). A cut sets
+  16,384 (`ModelLimits.MaxTextBytes`), `Host` and `Program` 1,024 (`ModelLimits.MaxShortTextBytes`; the syslog parser's
+  syntactic limits of 255 and 128 UTF-8 bytes lie below it, so a syslog `Host` or `Program` is accepted whole or the
+  line is "not a syslog line" / has no tag, never cut). A cut sets
   `Truncated`. The raw read bounds stay as well (the line reader's 16 KiB, the journal reader's keep bounds), so a
   decoded string never holds more characters than the raw bound. The grouper measures `HeadBytes`, the total and the
   marker line in UTF-8 bytes of the decoded member messages.
@@ -326,7 +352,14 @@ These rules hold for both parsers and the grouper, so a record they build never 
   and its day against the days of that month; the built instant is then checked with `StorableTime.Contains`. Outside:
   the line is skipped with "time outside the storable range" (syslog) or "invalid __REALTIME_TIMESTAMP" (journal).
   An anchor (name date or modification time) outside the range is not usable. The inferred year stops advancing once it
-  has left the range. No parser path throws for an out-of-range date: `ImportPass.JudgeAsync`
+  has left the range.
+- **Predecessor (year advance and repeated hour).** The year-advance rule compares a year-less line with the last
+  year-less line before it in the file that reached `SyslogClock.Resolve`, whatever its outcome — a line skipped as
+  "invalid date" or "time outside the storable range" counts, with its inferred year and its month, day and time as
+  written — while lines that are not syslog lines, empty lines and RFC 3339 lines are never predecessors and leave it
+  unchanged; the repeated-hour rule compares with the last instant `Resolve` returned successfully (a skipped line has
+  none and leaves it unchanged), likewise ignoring RFC 3339 lines. Rows in AC-S4 and AC-S5.
+- **No exceptions for out-of-range dates.** No parser path throws for an out-of-range date: `ImportPass.JudgeAsync`
   (`src/Vandox.Import/ImportPass.cs:470`) would otherwise report the exception's own message, which is not a fixed text.
 - **NodaTime only through non-throwing calls:** local times are mapped with `DateTimeZone.MapLocal` and the mapping's
   `Count` (0: skipped hour, shifted forward by the gap; 1; 2: repeated hour, AC-S5 rule) handled in code; never
@@ -538,7 +571,7 @@ New (`tests/Vandox.Core.Tests/`): `JournalExportParserTests.cs`, `JournalExportR
 (records and skips, call count; optional exception on the n-th record; validates every record with
 `DataRecord.Validate()` and `StorableTime.Contains`, recording a failure as the skip "record refused: ..." like the
 importer), `JournalExportBuilder.cs` (text and binary fields as bytes) and `PatternStream.cs` (lazily generated input
-for the heap-bound tests). The heap-bound tests (AC-M1-M3) go into `JournalExportReaderTests.cs`, AC-M4 into
+for the heap-bound tests). The heap-bound tests (AC-M1-M3, AC-M5) go into `JournalExportReaderTests.cs`, AC-M4 into
 `KernelReportGrouperTests.cs`. Fixture: `testdata/logs/kern.log-oom`.
 
 New (`tests/Vandox.Storage.Tests/`): `StorageTimeTests.cs` (AC-T1, the delegation).
