@@ -139,7 +139,7 @@ files or endpoints.
     index digest (form-checked in `.github/scripts/generate-sbom.sh`), run without network, capabilities,
     token or writable access to `dist/`. The scheduled digest check holds only `contents: read` and
     `issues: write`, writes only regex-checked image, tag and digest values into the issue, and never writes
-    to the repository. Records 0027, 0037, 0039, 0041, 0054, 0056, 0080.
+    to the repository. Records 0027, 0037, 0041, 0080.
 
 ## Guarantees
 

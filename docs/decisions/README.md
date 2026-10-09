@@ -81,8 +81,7 @@ once in the [area document](../areas/README.md) of the record's area, and the re
 | 0032 | Secrets only from environment variables or Docker secrets | Accepted | 2026-10-04 |
 | 0033 | Pre-existing overall coverage gap accepted for a documentation-only change | Accepted | 2026-10-04 |
 | 0035 | Explicit format check step in CI; the coverage gate stays local, SonarQube measures coverage in CI | Accepted | 2026-10-04 |
-| 0037 | Release workflow built from plain go build, the Docker CLI and gh; verified once, published as built | Accepted | 2026-10-04 |
-| 0039 | Docker Hub token is repository-scoped and lives in a tag-only GitHub environment | Accepted | 2026-10-04 |
+| 0037 | Releases: version tag only, plain tooling, tag-only token environment, secret-free attestation job, digest-pinned SBOM generator | Accepted | 2026-10-04 |
 | 0040 | Go 1.27 toolchain without a patch version in go.mod; govulncheck raised to v1.8.0 | Accepted | 2026-10-04 |
 | 0041 | Base images pinned by digest through build arguments, tag kept alongside; digests refreshed by hand | Accepted | 2026-10-04 |
 | 0042 | Wire format is gzip-compressed JSON Lines, built on the standard library only | Accepted | 2026-10-04 |
@@ -96,9 +95,6 @@ once in the [area document](../areas/README.md) of the record's area, and the re
 | 0050 | Secrets from VANDOX_* variables or *_FILE files, strict value rules, unknown VANDOX_ variables rejected, redacted type | Accepted | 2026-10-04 |
 | 0051 | Brand assets live in docs/assets; the web UI and the Telegram bot adopt them with their own issues | Accepted | 2026-10-05 |
 | 0052 | Backend image gets a description label; no logo label | Accepted | 2026-10-05 |
-| 0053 | Releases are always created manually; the only trigger is a new vX.Y.Z tag, the PR dry run lives in ci.yml | Accepted | 2026-10-05 |
-| 0054 | Release binary and image digest get GitHub build provenance attestations from a separate, secret-free attest job; no SBOM yet | Accepted | 2026-10-05 |
-| 0056 | Release SBOMs (SPDX 2.3) come from a digest-pinned, network-less syft container in the build job and are attested in the attest job | Accepted | 2026-10-05 |
 | 0059 | /healthz on the web listener checks the database; vandoxd -healthcheck is the image's health probe | Accepted | 2026-10-05 |
 | 0060 | Compose file publishes the web port on loopback and the ingest port not yet; named data volume, 512 MiB limit | Accepted | 2026-10-05 |
 | 0062 | Timeout tests use testing/synctest without network, and injected short durations over loopback | Accepted | 2026-10-05 |
