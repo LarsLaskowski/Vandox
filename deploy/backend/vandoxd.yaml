@@ -2,7 +2,8 @@
 #
 # The file is parsed strictly: an unknown key, a duplicate key, a second YAML document, an anchor, a
 # custom tag or an invalid value stops the backend at start-up, and the error names the file, the line and
-# the key. Every key is optional; the values below are the defaults.
+# the key. Every key is optional; the values below are the defaults, except import.time_zone, which has no
+# default and is commented out.
 #
 # Secrets NEVER go into this file. They are read from the environment of the container (or, for a Docker
 # secret, from a file whose absolute path is given in the variable with the _FILE suffix). Set either the
@@ -32,3 +33,9 @@ storage:
 log:
   # Log level: debug, info, warn or error. Default: info
   level: info
+
+import:
+  # IANA time zone of the server the log files come from, for example Europe/Berlin or UTC. Needed to import
+  # syslog and kern.log files in the traditional format, whose time stamps carry neither year nor offset; such a
+  # file fails with "import.time_zone is not set" until this is set (a re-run then completes it). No default.
+  # time_zone: Europe/Berlin

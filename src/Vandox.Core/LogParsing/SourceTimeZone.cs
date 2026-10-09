@@ -1,5 +1,3 @@
-#pragma warning disable RH2003, S2325 // Skeleton: bodies are replaced by the implementation tasks
-
 using NodaTime;
 
 namespace Vandox.Core.LogParsing;
@@ -9,6 +7,12 @@ namespace Vandox.Core.LogParsing;
 /// </summary>
 internal static class SourceTimeZone
 {
+    #region Fields
+
+    private static readonly HashSet<string> _ids = new(DateTimeZoneProviders.Tzdb.Ids, StringComparer.Ordinal);
+
+    #endregion // Fields
+
     #region Methods
 
     /// <summary>
@@ -18,7 +22,7 @@ internal static class SourceTimeZone
     /// <returns>The zone, or <c>null</c> when the ID is unknown</returns>
     internal static DateTimeZone? Find(string name)
     {
-        throw new NotImplementedException();
+        return _ids.Contains(name) ? DateTimeZoneProviders.Tzdb.GetZoneOrNull(name) : null;
     }
 
     #endregion // Methods

@@ -22,6 +22,9 @@ func (l *LogLine) Validate() error {
 	if err := checkRequiredShort("log", l.Log); err != nil {
 		return err
 	}
+	if err := checkShort("host", l.Host); err != nil {
+		return err
+	}
 	if err := checkShort("program", l.Program); err != nil {
 		return err
 	}

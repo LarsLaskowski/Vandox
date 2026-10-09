@@ -79,7 +79,8 @@ internal static class SchemaMigrator
                                                                 completed_at INTEGER
                                                               ) STRICT
                                                               """
-                                                          ])
+                                                          ]),
+                                                      new(4, ["ALTER TABLE log_lines ADD COLUMN host TEXT NOT NULL DEFAULT ''"])
                                                   ];
 
     #endregion // Fields

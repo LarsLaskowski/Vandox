@@ -66,7 +66,7 @@ public sealed class LogLine : IPayload
     /// <inheritdoc />
     public FieldError? Validate()
     {
-        var error = Check.RequiredShort("log", Log) ?? Check.Short("program", Program);
+        var error = Check.RequiredShort("log", Log) ?? Check.Short("host", Host) ?? Check.Short("program", Program);
 
         if (error is not null)
         {

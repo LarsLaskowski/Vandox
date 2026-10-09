@@ -1,4 +1,4 @@
-#pragma warning disable RH2003, S2325 // Skeleton: bodies are replaced by the implementation tasks
+using System.Text;
 
 namespace Vandox.Core.LogParsing;
 
@@ -7,6 +7,18 @@ namespace Vandox.Core.LogParsing;
 /// </summary>
 internal static class Utf8Text
 {
+    #region Constants
+
+    private const int MaxBytesPerChar = 3;
+
+    #endregion // Constants
+
+    #region Fields
+
+    private static readonly UTF8Encoding _utf8 = new(false, false);
+
+    #endregion // Fields
+
     #region Methods
 
     /// <summary>
@@ -18,7 +30,7 @@ internal static class Utf8Text
     /// <returns>The text</returns>
     internal static string Decode(ReadOnlySpan<byte> bytes, int limit, out bool truncated)
     {
-        throw new NotImplementedException();
+        return Cut(_utf8.GetString(bytes), limit, out truncated);
     }
 
     /// <summary>
@@ -30,7 +42,32 @@ internal static class Utf8Text
     /// <returns>The text</returns>
     internal static string Cut(string text, int limit, out bool truncated)
     {
-        throw new NotImplementedException();
+        truncated = false;
+
+        // A text of at most limit / 3 chars cannot exceed the limit: every char takes at most three bytes (a surrogate pair takes four for two chars).
+        if (text.Length <= limit / MaxBytesPerChar || _utf8.GetByteCount(text) <= limit)
+        {
+            return text;
+        }
+
+        truncated = true;
+
+        var bytes = 0;
+        var end = 0;
+
+        foreach (var rune in text.EnumerateRunes())
+        {
+            bytes += rune.Utf8SequenceLength;
+
+            if (bytes > limit)
+            {
+                break;
+            }
+
+            end += rune.Utf16SequenceLength;
+        }
+
+        return text[..end];
     }
 
     #endregion // Methods

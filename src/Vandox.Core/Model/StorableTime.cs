@@ -1,5 +1,3 @@
-#pragma warning disable RH2003, S2325 // Skeleton: bodies are replaced by the implementation tasks
-
 namespace Vandox.Core.Model;
 
 /// <summary>
@@ -30,7 +28,7 @@ public static class StorableTime
     /// <returns><c>true</c> when <see cref="Min"/> &lt;= <paramref name="instant"/> &lt;= <see cref="Max"/></returns>
     public static bool Contains(DateTimeOffset instant)
     {
-        throw new NotImplementedException();
+        return instant.UtcTicks >= Min.UtcTicks && instant.UtcTicks <= Max.UtcTicks;
     }
 
     #endregion // Methods
