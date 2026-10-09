@@ -138,7 +138,9 @@ repository names this thing, and is that statement still true?**
   blocking.
 - **Documentation truth**: does every sentence the diff adds or leaves
   standing still describe what the code does? Check the claims, don't read
-  past them.
+  past them. A change in behavior (format, limit, default, error, guarantee)
+  needs the matching section of its area document in `docs/areas/` in the same
+  diff, and a decision record repeats no rules the area document states.
 - **Language**: all new code, comments, documentation and commit messages in
   English.
 - **Scope**: unrelated changes bundled in, accidental file inclusions, debug

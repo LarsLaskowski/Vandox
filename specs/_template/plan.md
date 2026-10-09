@@ -50,9 +50,15 @@ the Dev in step 4 (skeleton) when the old signature goes away, so the suite keep
 step 5 when old and new signature coexist (`.squad/routing.md`, *Loop limits*). "None" if no existing
 test is affected.
 
+## Areas
+
+The area documents in `docs/areas/` this change touches (`docs/areas/README.md` lists them), and what changes in
+each — or "none" (no change in behavior). A new area: name and scope for the index, a Lead decision. A change
+in behavior updates its area document in this pull request.
+
 ## Documentation updates
 
-`README.md` (configuration table, env vars), `docs/*.md` — or "none". Every documentation edit has exactly
+`README.md` (configuration table, env vars), `docs/*.md` including the area documents — or "none". Every documentation edit has exactly
 one owner (Dev, Tester or Lead); the Lead's approval step only touches status, index rows and bookkeeping.
 
 ## Architecture check

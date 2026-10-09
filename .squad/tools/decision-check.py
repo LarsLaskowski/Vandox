@@ -7,6 +7,9 @@ Checks, run from anywhere inside the repository (it takes no arguments):
   and a `Supersedes` field naming existing records;
 - the index in `docs/decisions/README.md` has exactly one row per record, with the same status;
 - `Superseded by NNNN` names an existing record that lists this one under `Supersedes`;
+- once `docs/areas/README.md` lists areas, every area links an existing document in `docs/areas/` and every
+  record has an `Area:` field naming a listed area, or `—` for a record about no area (a repository without
+  areas is not checked for this);
 - a record is *released* once the commit that added it is contained in a release tag (`v*`). A released
   record is never deleted and never changed except for its status becoming `Superseded by NNNN`; an
   unreleased record is never `Superseded` (it is edited in place or deleted instead).
@@ -26,9 +29,14 @@ import subprocess
 import sys
 
 DECISIONS_DIR = os.path.join("docs", "decisions")
+AREAS_DIR = os.path.join("docs", "areas")
+NO_AREA = "\u2014"
 RECORD_NAME = re.compile(r"^(\d{4})-.+\.md$")
 STATUS_LINE = re.compile(r"^- \*\*Status:\*\*(.*)$", re.MULTILINE)
 SUPERSEDES_LINE = re.compile(r"^- \*\*Supersedes:\*\*(.*)$", re.MULTILINE)
+AREA_LINE = re.compile(r"^- \*\*Area:\*\*(.*)$", re.MULTILINE)
+AREA_INDEX_BLOCK = re.compile(r"<!-- project:begin area-index -->(.*?)<!-- project:end area-index -->", re.DOTALL)
+AREA_LINK = re.compile(r"^\[([^\]]+)\]\(([^)]+\.md)\)$")
 SUPERSEDED_BY = re.compile(r"^Superseded by (\d{4})$")
 NUMBER = re.compile(r"\b(\d{4})\b")
 INDEX_BLOCK = re.compile(r"<!-- project:begin index -->(.*?)<!-- project:end index -->", re.DOTALL)
@@ -57,6 +65,7 @@ def load_records(root, errors):
         rel = f"{DECISIONS_DIR}/{name}".replace(os.sep, "/")
         status = STATUS_LINE.search(text)
         supersedes = SUPERSEDES_LINE.search(text)
+        area = AREA_LINE.search(text)
         if not status:
             errors.append(f"{rel}: no '- **Status:**' line")
             continue
@@ -66,6 +75,7 @@ def load_records(root, errors):
         if number in records:
             errors.append(f"{rel}: number {number} is used twice")
         records[number] = {"rel": rel, "status": status, "text": text,
+                           "area": area.group(1).strip() if area else None,
                            "supersedes": NUMBER.findall(supersedes.group(1)) if supersedes else []}
     return records
 
@@ -124,6 +134,48 @@ def compare_index(rows, records, errors):
     for number in rows:
         if number not in records:
             errors.append(f"{DECISIONS_DIR}/README.md: index row {number} has no record file")
+
+
+def parse_area_row(line):
+    """(name, document) of a `| [Name](slug.md) | Scope | Not here |` row, (name, None) when the first cell is
+    no link to a Markdown file, or None for the header, the separator and any other line."""
+    cells = [cell.strip() for cell in line.strip().split("|")]
+    if len(cells) < 5 or cells[0] or cells[-1] or not cells[1] or set(cells[1]) <= set("-: ") \
+            or cells[1] == "Area":
+        return None
+    link = AREA_LINK.match(cells[1])
+    return (link.group(1), link.group(2)) if link else (cells[1], None)
+
+
+def load_areas(root, errors):
+    """Area name -> document for the areas `docs/areas/README.md` lists; empty without a list."""
+    path = os.path.join(root, AREAS_DIR, "README.md")
+    block = AREA_INDEX_BLOCK.search(read_text(path)) if os.path.isfile(path) else None
+    areas = {}
+    for line in block.group(1).splitlines() if block else []:
+        row = parse_area_row(line)
+        if row is None:
+            continue
+        name, document = row
+        if document is None:
+            errors.append(f"{AREAS_DIR}/README.md: area '{name}' must link its document, [name](slug.md)")
+        elif not os.path.isfile(os.path.join(root, AREAS_DIR, document)):
+            errors.append(f"{AREAS_DIR}/README.md: area '{name}' links {document}, which does not exist")
+        areas[name] = document
+    return areas
+
+
+def check_areas(root, records, errors):
+    areas = load_areas(root, errors)
+    if not areas:
+        return
+    for record in records.values():
+        area = record["area"]
+        if area is None:
+            errors.append(f"{record['rel']}: no '- **Area:**' line (an area from {AREAS_DIR}/README.md, or "
+                          f"{NO_AREA} for a record about no area)")
+        elif area != NO_AREA and area not in areas:
+            errors.append(f"{record['rel']}: area '{area}' is not listed in {AREAS_DIR}/README.md")
 
 
 def without_status(text):
@@ -192,6 +244,7 @@ def main():
     records = load_records(root, errors)
     check_links(records, errors)
     check_index(root, records, errors)
+    check_areas(root, records, errors)
     check_freeze(root, records, errors, warnings)
     for warning in warnings:
         print(f"WARNING: {warning}")

@@ -25,7 +25,7 @@ in squad-maintenance PRs, never in a product PR.)
   command that lists it) or marked *unverified* in the record, before the record is accepted. A sentence
   you correct afterwards is re-read against the same evidence — a correction is a new claim.
 - **One owner per documentation edit:** `tasks.md` and the plan name exactly one owner for every
-  documentation edit (e.g. a link in `docs/ARCHITECTURE.md`). The approval step only touches record status,
+  documentation edit (e.g. a link in `docs/ARCHITECTURE.md`, a section of an area document). The approval step only touches record status,
   index rows and bookkeeping.
 - **Control characters:** before handing a file under `specs/` or `docs/decisions/` on, check it for
   characters of the Unicode categories Cc, Cf, Zl and Zp other than tab and newline, e.g. with
@@ -44,8 +44,10 @@ in squad-maintenance PRs, never in a product PR.)
   Lead decision changes the outcome, and set it to `Accepted` with the PR approval. Before adding a record,
   extend an existing unreleased record on the same topic. An unreleased record is edited in place; only a
   released one is never rewritten but superseded, and a record that only amends a released one names it
-  under *Supersedes* and leaves the older record untouched (`docs/decisions/README.md`). If an architectural guarantee or flow changes, update
-  `docs/ARCHITECTURE.md` too and link the record from it.
+  under *Supersedes* and leaves the older record untouched (`docs/decisions/README.md`). Keep each record to the why: the behavior it leads to
+  is written once in the area document (`docs/areas/`), which the plan names under *Areas* and the same pull
+  request updates; the record links it and carries an `Area:`. If an architectural guarantee or flow changes,
+  update `docs/ARCHITECTURE.md` too and link the record from it.
 - **Approve the PR:** confirm the latest review round has no blocking finding that is not covered by a
   recorded decision of yours, and covers every change to production code, tests and `docs/` since it ran except
   `specs/` bookkeeping and your own approval edits (record status, the index, a link from
