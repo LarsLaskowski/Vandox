@@ -4,7 +4,7 @@
 # Usage: generate-sbom.sh <agent-binary> <image-tar> <version> <dest-dir>
 # Writes <dest-dir>/vandox-agent-linux-amd64.spdx.json and <dest-dir>/vandox-image.spdx.json.
 # Exit status: 0 both SBOMs written and checked, 1 any argument, pin, generator, file or content error.
-# Needs docker and jq. Used by release.yml (job build) and ci.yml (Release build check), record 0056.
+# Needs docker and jq. Used by release.yml (job build) and ci.yml (Release build check), record 0037.
 set -euo pipefail
 export LC_ALL=C
 
