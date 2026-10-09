@@ -10,7 +10,7 @@ repository (record 0074): keep it true when the build changes.
 
 - Go `1.27` (module `github.com/LarsLaskowski/Vandox`; agent only); `go.mod` names the minor version without a
   patch, so `setup-go` uses the newest 1.27.x available on the runner. `gofmt` as the formatter, `go vet` and
-  **golangci-lint** `v2.13.1` (`.golangci.yml`) as the analyzers, `govulncheck` (a `tool` dependency in
+  **golangci-lint** `v2.14.0` (`.golangci.yml`) as the analyzers, `govulncheck` (a `tool` dependency in
   `go.mod`) for known vulnerabilities.
 - .NET SDK `10.0` (`global.json`, `rollForward: latestFeature`), solution `Vandox.slnx`, central package
   management (`Directory.Packages.props`), shared build settings in `Directory.Build.props`. Analyzers:
