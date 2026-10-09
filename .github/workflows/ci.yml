@@ -190,7 +190,7 @@ jobs:
         run: .github/scripts/check-builder-dotnet-version.sh
 
       # A stale digest or a failed registry lookup is only a warning here; pinning and pattern errors
-      # (status 1) still fail (record 0080).
+      # (status 1) still fail (record 0041).
       - name: Check base image digests
         run: |
           set -uo pipefail
@@ -198,7 +198,7 @@ jobs:
           .github/scripts/check-base-image-digests.sh || rc=$?
           case "$rc" in
             0|3) exit 0 ;;
-            4) echo "::warning::base image digest lookup failed; freshness not checked (record 0080)"; exit 0 ;;
+            4) echo "::warning::base image digest lookup failed; freshness not checked (record 0041)"; exit 0 ;;
             *) exit "$rc" ;;
           esac
 

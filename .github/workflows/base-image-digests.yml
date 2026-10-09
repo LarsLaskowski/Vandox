@@ -1,6 +1,6 @@
 name: Base image digests
 
-# Reports a stale base image digest of deploy/backend/Dockerfile as an issue (record 0080).
+# Reports a stale base image digest of deploy/backend/Dockerfile as an issue (record 0041).
 # Writes nothing to the repository, opens no pull request, closes no issue.
 on:
   schedule:

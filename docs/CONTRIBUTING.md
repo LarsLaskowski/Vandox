@@ -90,10 +90,9 @@ does not run on pull requests; `ci.yml` checks the release build there (*Release
 workflow is `.github/workflows/release.yml`; the reasoning is in
 [0053](decisions/0053-releases-are-manual-and-started-only-by-a-version-tag.md),
 [0037](decisions/0037-release-workflow-with-plain-go-docker-and-gh.md),
-[0041](decisions/0041-base-images-pinned-by-digest-through-build-arguments.md),
+[0041](decisions/0041-backend-image-chiseled-runtime-base-images-pinned-by-digest.md),
 [0039](decisions/0039-docker-hub-token-in-a-tag-only-environment.md),
 [0054](decisions/0054-release-provenance-attestations-from-a-secret-free-job.md),
-[0080](decisions/0080-backend-image-on-the-chiseled-aspnet-runtime.md) and
 [0056](decisions/0056-release-sboms-from-a-digest-pinned-syft-container.md).
 
 ### Cutting a release
@@ -169,7 +168,7 @@ should close that issue (`Closes #n`). A base image digest often moves without a
 (Ubuntu package updates), so a stale report is routine; refresh at least before a release. The check can be run locally from the repository root with
 `.github/scripts/check-base-image-digests.sh` (needs `docker buildx` and `jq`). If GitHub disables the
 scheduled workflow after 60 days without repository activity, re-enable it under Actions. Record
-[0080](decisions/0080-backend-image-on-the-chiseled-aspnet-runtime.md).
+[0041](decisions/0041-backend-image-chiseled-runtime-base-images-pinned-by-digest.md).
 
 ### SBOM generator
 
