@@ -4,14 +4,21 @@ Why the code is the way it is. Each file records one decision — its context, t
 was chosen and the consequences — so that months later the reasoning is still available without the
 pull request, the issue thread or the session that produced it.
 
-`docs/ARCHITECTURE.md` describes *how* the system works today; these records explain *why* individual
-choices were made. When a decision changes the architecture, `ARCHITECTURE.md` is updated as well and
-links the record.
+A record explains the *why*. What holds today — formats, limits, error behavior, guarantees — is written down
+once in the [area document](../areas/README.md) of the record's area, and the record links to it.
+`docs/ARCHITECTURE.md` describes how the parts fit together. When a decision changes the architecture,
+`ARCHITECTURE.md` is updated as well and links the record.
 
 ## Rules
 
 - One decision per file: `NNNN-short-title.md` (four digits, next free number), created from
   [`_template.md`](_template.md).
+- **The record states the decision in one to three sentences and does not restate behavior.** Context,
+  *Options considered* and *Consequences* carry the reasoning; the rules of the resulting behavior (values,
+  formats, limits, error texts) belong in the area document and are linked from the record.
+- The `Area:` field names the record's area as listed in [`docs/areas/README.md`](../areas/README.md), or `—`
+  for a record about the process or about no area. Once areas are defined, every record needs the field. For a
+  released record it is part of the content: it changes only through a new record.
 - Written by the squad Lead (see [`.squad/agents/lead/charter.md`](../../.squad/agents/lead/charter.md));
   anyone may add one for a change made outside the squad.
 - Committed together with the change it explains.

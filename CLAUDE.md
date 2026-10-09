@@ -189,7 +189,8 @@ Project-specific workflow skills live under `.claude/skills/`, mirrored identica
 - `squad-spec` — the same squad pipeline for a new feature, planned as `spec.md`, `plan.md` and
   `tasks.md` in a working folder under `specs/`.
 - `decision-consolidate` — merge unreleased decision records (Superseded chains, records on one topic) into
-  one record each, delete the obsolete ones and fix links and index; released records stay untouched.
+  one record each, delete the obsolete ones, lift behavior that sits in records into the area documents and fix
+  links and index; released records stay untouched.
 - `review-pr` — review an open pull request against this project's stack, analyzer, security and
   unit-test conventions, and post the findings with an explicit verdict.
 
@@ -222,8 +223,10 @@ PR title and description reach `main`.
 
 The reasoning behind code decisions — why something was built the way it was — is recorded by the Lead
 as one decision record per decision in [`docs/decisions/`](/docs/decisions/README.md) (unreleased records are
-edited in place, released ones are append-only and superseded), not in `ARCHITECTURE.md`. Read the relevant
-records before changing code they cover, and do not contradict an accepted record without changing it
+edited in place, released ones are append-only and superseded), not in `ARCHITECTURE.md`. What holds today —
+formats, limits, error behavior, guarantees — is written once in the area document of the change in
+[`docs/areas/`](/docs/areas/README.md), which the same pull request updates. Read the relevant records and area
+documents before changing code they cover, and do not contradict an accepted record without changing it
 (unreleased) or superseding it (released).
 
 Two rules these skills enforce that are easy to get wrong:

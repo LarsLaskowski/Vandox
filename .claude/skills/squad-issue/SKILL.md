@@ -71,7 +71,7 @@ action yourself — including follow-up issues the Lead decides on.
      read-only check from the `docs` row in `.squad/routing.md`, one review round in step 8, and step 10
      directly — no Security, skeleton, tests, coverage, Code Officer or Lead approval. Otherwise:
      `plan.md` with the **tier** (`trivial` / `standard` / `security`), acceptance
-     criteria, the signatures of new or changed API, required documentation updates (`README.md`,
+     criteria, the signatures of new or changed API, the affected area documents (`docs/areas/`), required documentation updates (`README.md`,
      `docs/`), and `Proposed` decision records. Continue with the steps the tier requires.
    - `RESULT: NO CHANGE` — show the proposed issue comment to the user, post it only after confirmation
      (append the log as a collapsed "Squad working record" block), remove the work folder with a commit
