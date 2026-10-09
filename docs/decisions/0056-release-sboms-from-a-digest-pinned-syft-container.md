@@ -2,6 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-05
+- **Area:** —
 - **Source:** Issue #119
 - **Supersedes:** — (amends [0054](0054-release-provenance-attestations-from-a-secret-free-job.md), option 4 and
   the last sentence of its *Decision*, "No SBOM is published"; the rest of 0054 stands)

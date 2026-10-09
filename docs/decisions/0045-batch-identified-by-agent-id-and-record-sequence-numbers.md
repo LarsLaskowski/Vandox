@@ -2,6 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-04
+- **Area:** —
 - **Source:** Issue #10
 - **Supersedes:** —
 

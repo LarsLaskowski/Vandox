@@ -2,6 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-06
+- **Area:** Configuration and secrets
 - **Source:** Product Manager request: move the backend to .NET 10 with Blazor, keep the agent in Go
 - **Supersedes:** —
 
@@ -20,11 +21,9 @@ and [0050](0050-secret-sources-rules-and-redaction.md) define how the configurat
 
 ## Decision
 
-Option 2. `BackendConfigLoader` (`Vandox.Core.Configuration`) parses the file with YamlDotNet's parser
-events and rejects unknown and duplicate keys, anchors, aliases, custom tags, a second document, deep nesting and
-files over 1 MiB; errors name the file, line and key, never the value. Secrets come only from `VANDOX_*`
-variables or `*_FILE` files with the value rules of 0050, unknown `VANDOX_` variables are rejected, and a
-`Secret` type redacts itself in every string conversion and log. The agent configuration (Go) is unchanged.
+Option 2: the backend parses the file with YamlDotNet's parser events and enforces the strict schema and the error
+rules itself, and reads secrets with the same rules as the agent. The agent configuration (Go) is unchanged. The
+rules are in [Configuration and secrets](../areas/configuration-and-secrets.md).
 
 ## Consequences
 

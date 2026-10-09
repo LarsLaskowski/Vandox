@@ -2,6 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-06
+- **Area:** Log import
 - **Source:** Issue #15
 - **Supersedes:** —
 
@@ -57,66 +58,24 @@ Import (issue #15):
 
 ## Decision
 
-`main()` is the single statement
-`os.Exit(run(context.Background(), os.Args[1:], os.Environ(), os.Stdout, os.Stderr, (&net.ListenConfig{}).Listen))`;
-`run(ctx, args, environ, stdout, stderr, listen) int` parses its own `flag.FlagSet` (`ContinueOnError`, usage
-header `Usage of vandoxd:`) with `-config` (default `/etc/vandox/vandoxd.yaml`), `-healthcheck` and
-`-version`; `-version` wins over everything; without `-version`, `-healthcheck` (0059) or a sub-command `run`
-serves (SIGTERM/SIGINT, default handling restored after the first signal, configuration,
-JSON `slog` at `log.level` with an `info` bootstrap logger, store, listeners, 10 s shutdown deadline, store
-closed after the listeners; errors as attributes; secrets never logged); each binary has a `binaryName`
-constant, `main()` is the accepted uncovered line, and `run` is tested in `main_test.go`. `vandox-agent` keeps
-`internal/cli.Run` until #30.
+Entry point: `vandoxd` without arguments runs the service, with its own flag set (`-config`, `-healthcheck`,
+`-version`; `-version` wins) and exit codes 0, 1 and 2, behind a thin function that tests can call. This part
+moves to the ingest and backend host area when that area is written.
 
-Entry point and import sub-command:
-
-- `cli.Run(name, args, stdout, stderr) int` parses with its own `flag.FlagSet` (`ContinueOnError`, output to
-  `stderr`); the usage header names the binary. Exit codes 0 for the version line, `-h` and a clean shutdown, 1
-  for a start-up or runtime failure, 2 for a flag error. In-flight requests get 10 s at shutdown, then their
-  connections are closed and the exit code is 1.
-- The first positional argument `import` starts the sub-command (`importCommand`, `cmd/vandoxd/import.go`)
-  with the remaining arguments; `-healthcheck` together with `import` is a usage error. Any other positional
-  argument is a usage error as before. The usage text lists `vandoxd [flags] import [-config file] <path>`.
-- `vandoxd import` has its own flag set with `-config` (default: the value of the global `-config`) and
-  requires exactly one path; `-h` prints its usage and exits 0.
-- It registers SIGINT and SIGTERM like the service, loads the configuration with `config.LoadBackend`, logs
-  JSON lines to stderr at `log.level` (an `info` bootstrap logger before the configuration is loaded), opens
-  the store with `store.Open` (a second process next to the service, 0077), and runs `importer.Run`
-  with the parsers of `importParsers()` (0079). Progress is logged with `slog`: one line per file finished
-  (path, outcome, source type, reason, lines, records, skipped), one `hashing` line per
-  `importer.DefaultProgressBytes` (64 MiB) of a file hashed in the scan (path, bytes), one when the scan is
-  done (files, pending), one per `importer.ProgressLines` lines of a large file. Names are attributes, never
-  part of the message. The JSON handler alone does not make them safe for a terminal: it escapes `"`, `\`,
-  characters below U+0020 and U+2028/U+2029, but writes C1 controls (U+009B is a CSI that terminals act on),
-  DEL and format characters such as U+202E raw. Every attribute derived from the input or the command line —
-  `path`, `reason` and the text of a run-level error — is therefore logged as `strconv.Quote(value)`, which
-  escapes every rune of categories Cc, Cf, Zl and Zp and invalid UTF-8; the other attributes are fixed
-  texts, validated source types or numbers.
-- The summary is written to stdout as text: counts per outcome, lines read, records stored, lines skipped,
-  the time range of the stored records in RFC 3339 UTC (or that none were stored), whether the run was
-  interrupted, then the files not recognized and the files that failed, each with its reason, and the files
-  with skipped lines with their first problems. Every path and reason is quoted with `%q`.
-- Exit codes: 0 when every file was imported, already imported or not recognized; 1 when a file failed, the
-  run was interrupted or stopped by an error (the summary is still printed), or the configuration, the
-  database or the root could not be opened (an error line on stderr); 2 for a usage error.
+Import: the first positional argument `import` starts the sub-command (option 1). Progress goes as JSON lines to
+standard error through the service's log handler and the summary as text to standard output (option 2). The exit
+code is 1 whenever a file failed or the run was interrupted, while "not recognized" alone stays 0 (option 3).
+Input-derived values are quoted before they are logged, because the JSON handler writes some control and format
+characters raw. The command, its output and its exit codes are described in [Log import](../areas/log-import.md),
+*Command* and *Result*.
 
 ## Consequences
 
-- `docker exec -it vandoxd /vandoxd import /import/<name>` imports from the mounted directory; the README
-  documents it. `-it` is needed for Ctrl-C to reach the import (without a terminal, `docker exec` forwards no
-  signal, and closing the client leaves the import running); stopping the container kills the import, which
-  loses nothing committed and resumes on the next run (0069, 0079). The import runs as the container's user
-  65532, so the README tells the operator to grant read access to that user only (`chown -R 65532:65532`
-  plus `chmod -R u+rX`, or `setfacl -R -m u:65532:rX`, on `import/<name>`) — a copied `/var/log` holds
-  `0640 root:adm` files such as `auth.log` and `mail.log`, which must not become world-readable (0079). The
-  import shares the container's memory limit with the service,
-  which the bounded batches of 0079 allow for.
 - Scripts can rely on stdout holding only the summary and on exit code 1 for any failed file.
-- The web UI (later issue) calls `importer.Run` and renders `importer.Summary` itself; the text format is the
+- The web UI (a later issue) runs the import itself and renders the summary on its own; the text format is the
   command's, not an API.
-- `docker run networlddev/vandox` starts the service and `--version` still works for the release checks; without
-  a configuration file `vandoxd` fails with a configuration error instead of printing the usage. The 10 s
-  deadline and the 2 s health ping timeout are constants; making them configurable is a new option under 0049.
-  The compose file's `stop_grace_period` must stay above 10 s (0060). Shutdown and ping timeouts are tested as
-  0062 lays down. The `main()` bodies are the accepted uncovered lines; a new binary follows the same pattern.
-- A future sub-command follows the same pattern: dispatch in `run`, its own flag set, `-version` still wins.
+- `docker run networlddev/vandox` starts the service and `--version` still works for the release checks; without a
+  configuration file `vandoxd` fails with a configuration error instead of printing the usage.
+- The 10 s shutdown deadline and the 2 s health ping timeout are constants; making them configurable is a new
+  option under 0049. The compose file's `stop_grace_period` must stay above 10 s (0060).
+- A future sub-command follows the same pattern: dispatch in the entry point, its own flag set, `-version` still wins.

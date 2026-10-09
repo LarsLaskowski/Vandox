@@ -2,6 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-05
+- **Area:** —
 - **Source:** Issue #104
 - **Supersedes:** — (adds the signing and provenance that record 0037, *Consequences*, left to a new record)
 

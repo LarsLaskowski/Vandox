@@ -2,6 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-04
+- **Area:** Configuration and secrets
 - **Source:** Issue #7
 - **Supersedes:** —
 
@@ -24,10 +25,8 @@ committed to backups; command-line arguments are visible to every local user in 
 ## Decision
 
 Option 3: secrets are read only from environment variables or Docker secrets, never from the configuration
-file or the command line. They are never logged, never shown in the web UI, and never written to the spool
-or into error messages. A secret that is checked against input (the ingest token presented by the agent,
-later a TOTP code) is compared in constant time; the web UI password is checked through its hash function's
-own comparison.
+file or the command line, and they are never logged or shown. The rules are in
+[Configuration and secrets](../areas/configuration-and-secrets.md), *Secrets*.
 
 ## Consequences
 

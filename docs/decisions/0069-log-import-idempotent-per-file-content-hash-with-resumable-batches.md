@@ -2,6 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-06
+- **Area:** Log import
 - **Source:** Issue #15
 - **Supersedes:** —
 
@@ -72,76 +73,27 @@ For a file that changes between the passes (a log still being written):
 
 ## Decision
 
-Options 2, 5, c, γ and B. (α was rejected because it mixes parses within a file; β because it can leave a
-content that can never be completed.)
-
-- Schema version 3 (0077, step 3) adds
-  `import_files(id INTEGER PRIMARY KEY, sha256 BLOB NOT NULL UNIQUE CHECK (length(sha256) = 32),
-  size INTEGER NOT NULL CHECK (size >= 0), name TEXT NOT NULL,
-  file_name BLOB NOT NULL CHECK (length(file_name) <= 1024), mod_time INTEGER, source_type TEXT NOT NULL,
-  records INTEGER NOT NULL DEFAULT 0 CHECK (records >= 0), complete INTEGER NOT NULL DEFAULT 0 CHECK (complete IN (0, 1)),
-  started_at INTEGER NOT NULL, completed_at INTEGER) STRICT`. `sha256` is the SHA-256 of the decompressed
-  content; `name` (display path of the first import, invalid UTF-8 replaced, at most 1024 bytes) is
-  informational; `file_name` (the `logparse.File.Name` of the first import, byte for byte) and `mod_time`
-  (its `ModTime`; NULL when zero or outside the range storable as Unix nanoseconds) are the `File` every
-  parse of this content receives; `source_type` is the parser's type; times are Unix nanoseconds as in 0063.
-- `store.BeginImport` returns the state of a content hash, creating it (no records, not complete) when it is
-  unknown; an existing state is returned unchanged. It refuses a `FileName` longer than 1024 bytes (the
-  importer lists longer paths as failed before, 0079).
-- `store.Batch` gets an optional `Import *ImportStep{FileID, Done, Complete}`. `WriteBatch` then requires
-  origin `import` for every record and no agent ID, and in its transaction first runs
-  `UPDATE import_files SET records = records + n, complete = …, completed_at = … WHERE id = ? AND records = Done
-  AND complete = 0`; unless exactly one row changed, it returns `ErrImportConflict` and writes nothing. A batch
-  without records is valid only to complete a file. The records go through the existing write path, so
-  `WriteBatch` stays the only writer of `log_lines` and `log_fts` (0063).
-- The importer (`cmd/vandoxd/internal/importer`) runs two passes. Pass 1 lists every file (stopping at the
-  entry limit of 0079 as soon as it is exceeded), detects its parser
-  and, for recognized files, reads the whole decompressed content to compute SHA-256 and size; a file that
-  cannot be read completely (truncated or corrupt gzip, I/O error) fails here and is not imported at all.
-  While a file is hashed, pass 1 reports progress every 64 MiB (0072).
-  Pass 2 calls `BeginImport` per recognized file in input order: complete → "already imported"; stored with
-  another source type → failed; otherwise it parses the content again **with the stored `File`**
-  (`file_name`, `mod_time`), drops the first `Records` valid records, and writes the rest in batches with
-  `ImportStep`, the last one `Complete`. It reads the decompressed content only up to the `size` hashed in
-  pass 1 and hashes it again while parsing (draining what the parser did not read); if fewer bytes can be
-  read or the hash differs from pass 1, the file fails and is not completed.
-- Batches hold at most 2,000 records and the records from at most 4 MiB of input (0079), counted from the
-  batch's first buffered record; the byte bound is checked only when a record is added, so dropped (resumed)
-  records and skipped input never flush, and the only batch without records is the one that completes a file.
+Options 2, 5, c, γ and B (α was rejected because it mixes parses within a file; β because it can leave a content
+that can never be completed). A file is identified by the SHA-256 of its decompressed content; the import reads
+every recognized file twice, hashing first and importing second; a file is written in bounded batches, and the store
+counts the records per file in the same transaction as each batch, as a compare-and-set, so an interrupted import
+resumes and two concurrent imports cannot store a file twice. A resumed content is parsed with the file name and
+modification time of its first import, and the second pass reads only up to the size hashed in the first. The
+rules and their limits are in [Log import](../areas/log-import.md), *Repeatable import*; the table that tracks
+the files is part of schema version 3 (0077).
 
 ## Consequences
 
-- Re-importing a directory or archive stores nothing new; a rotated file seen again under another name or
-  compression is "already imported"; two identical files in one run are stored once; an interrupted import
-  continues where it stopped, and two concurrent runs never store a file twice (the loser fails with
-  `ErrImportConflict`).
+- Re-importing a directory or archive stores nothing new, and an interrupted import continues where it stopped.
 - Every recognized file is read and decompressed twice. For a forensic, one-off import this is accepted.
-- **A file that grew since its import is imported again as a whole** (another hash), storing the
-  overlapping lines twice — e.g. `syslog` imported once and later, with more lines, as `syslog.1` in a newer
-  copy of `/var/log`. Recognizing a known prefix is split into a follow-up issue.
-- A file whose hashed part changes or shrinks while it is imported fails; the records written before the
-  change stay stored, and the file is not completed, so it is imported again under its new hash later. Inputs
-  are copies, so this is rare; the summary says so. The change is detected only when pass 2 has read the
-  whole hashed size, so **the records written before that come from the changed content but stay counted
-  under the original hash** (`import_files.records` of that content). Should the original content be
-  imported later, it resumes after that count, dropping as many of its own records as the changed content
-  produced — the stored records of that file then mix both contents. Detecting the change before writing
-  would need the hash before parsing, i.e. a third pass or a temporary copy (options 5 and 6). Removing such
-  records needs the record-to-file link below and falls under deleting or re-doing an import, which is out
-  of scope. A file that is only appended to while it is imported is
-  imported up to the size hashed in pass 1; the appended lines come with a later import of the grown file
-  (and fall under the grown-file limit above). A line half-written at that size is imported as a last line
-  without newline.
-- An interrupted content resumed under another name or modification time is parsed with the first run's
-  name and modification time; the records then carry what the first run would have produced (e.g. its year
-  inference), not what the new name would suggest.
-- A truncated or corrupt compressed file is not imported in part; the operator can decompress the readable
-  part and import it as a plain file.
-- Resuming relies on parsers being deterministic for the same content and `File` (0079). A parser change between an
-  interrupted run and its resumption may shift the count; the stored `source_type` catches a changed
-  detection, not a changed parser version.
-- Records do not reference their import file; deleting or re-doing one import would need a migration that
-  adds the link.
+- **A file that grew since its import is imported again as a whole** (another hash), storing the overlapping
+  lines twice. Recognizing a known prefix is split into a follow-up issue.
+- A file that changes while it is imported is detected only when the second pass has read the whole hashed size,
+  so the records written before that stay counted under the original hash and a later import of the original
+  content resumes after that count. Detecting the change earlier would need a third pass or a temporary copy
+  (options 5 and 6). Inputs are copies, so this is rare; the summary says so.
+- Resuming relies on parsers being deterministic for the same content and file (0079); the stored source type
+  catches a changed detection, not a changed parser version.
+- Records do not reference their import file; deleting or re-doing one import would need a migration that adds the
+  link.
 - A database at version 3 is refused by older builds (0077).
-- `store.ImportTracker` (`BeginImport`) joins the repository interfaces of 0077; `storetest.Fake` scripts it
-  like the others.

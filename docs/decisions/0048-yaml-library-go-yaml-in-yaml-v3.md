@@ -2,6 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-04
+- **Area:** Configuration and secrets
 - **Source:** Issue #11
 - **Supersedes:** —
 
@@ -39,13 +40,10 @@ Measured with the candidate library (v3.0.5) in a scratch module:
 
 ## Decision
 
-Option 1, `go.yaml.in/yaml/v3` v3.0.5, used only in `internal/config` and only to parse into a
-`yaml.Node`. The loader walks the node tree against the option structs itself (`decodeStrict`, record
-0049). It rejects duplicate keys, extra documents, anchors and aliases, merge keys and tags outside the
-core schema (checked on the tag the library resolved for each node, which already reflects `%TAG`
-directives and verbatim tags). It never passes a `yaml.v3` error text through, neither a value-decoding nor a syntax error:
-syntax messages can quote document text (`unknown anchor 'x' referenced`), so a parser error is reported
-with a fixed reason and only the line number taken from the library's `yaml: line N: ` prefix.
+Option 1, `go.yaml.in/yaml/v3` v3.0.5, used only to parse into a node tree that the loader walks itself, so
+strictness does not depend on the library's own strict mode and none of its error texts is passed on, because they
+can quote the document. The behavior is in [Configuration and secrets](../areas/configuration-and-secrets.md),
+*Configuration file* and *Limits and errors*.
 
 ## Consequences
 
