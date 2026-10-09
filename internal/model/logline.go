@@ -3,6 +3,7 @@ package model
 // LogLine is one line of a log.
 type LogLine struct {
 	Log       string `json:"log"`
+	Host      string `json:"host,omitempty"`
 	Program   string `json:"program,omitempty"`
 	PID       int32  `json:"pid,omitempty"`
 	Priority  *uint8 `json:"priority,omitempty"`

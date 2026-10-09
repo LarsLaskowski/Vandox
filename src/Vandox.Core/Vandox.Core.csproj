@@ -6,6 +6,7 @@
 
   <ItemGroup>
     <PackageReference Include="YamlDotNet" />
+    <PackageReference Include="NodaTime" />
   </ItemGroup>
 
   <ItemGroup>
