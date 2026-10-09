@@ -10,8 +10,8 @@ changes a wire format record (area 10: ingest wire format) and adds a dependency
 Summary of [spec.md](spec.md): `vandoxd import` has a parser framework but no parser. This feature adds a parser for
 `journalctl -o export` and a generic parser for rsyslog files (`syslog`, `kern.log`, rotations), registers both as the
 built-in parser list, adds the optional `host` field to the `log_line` record in Go, C#, the golden fixture and storage,
-adds the backend option `import.time_zone` for year-less local time stamps, and keeps multi-line kernel reports (OOM,
-`cut here`) in one record.
+adds the backend option `import.time_zone` (no default) for year-less local time stamps, and keeps multi-line kernel
+reports (OOM, `cut here`) in one record.
 
 Claims of the issue, checked against the code:
 
