@@ -130,6 +130,8 @@ Records: [0006](decisions/0006-agent-connects-outbound-only.md),
 
 ## Network
 
+The rules for the transport, the web UI exposure and the MariaDB access are in [Network and security model](areas/network-and-security-model.md).
+
 The agent connects outbound only and never listens on a port. It sends to the ingest port published on the
 backend host's tailnet address; `vandoxd` does not embed Tailscale. The Tailscale ACL allows the monitored server to
 reach only that port and nothing else. The web UI is reachable in the home LAN only and requires a login;
@@ -167,6 +169,8 @@ Records: [0010](decisions/0010-tailscale-with-strict-acl.md),
 [0023](decisions/0023-tls-through-a-reverse-proxy.md).
 
 ## Offline behavior and backfill
+
+The rules for live data, alerts and the nightly report are in [Detection, alerts and reports](areas/detection-and-reports.md).
 
 The backend host runs 24/7 but is sometimes switched off at night (typically 22:00–09:00) a few times a year. While
 the backend is unreachable the agent keeps collecting and spools at least 7 days on disk. When the backend
@@ -244,6 +248,8 @@ Records: [0007](decisions/0007-sqlite-with-fts5-no-external-database.md),
 [0021](decisions/0021-no-pseudonymization-of-log-data.md).
 
 ## Remote actions (later)
+
+The rules for the Telegram bot and for remote actions are in [Notification and remote actions](areas/notification-and-remote-actions.md).
 
 Remote actions are not part of v0.1.0. They exist only as signed commands that reference an action from a
 fixed list configured locally on the monitored server, and only after the user has confirmed them. The agent
