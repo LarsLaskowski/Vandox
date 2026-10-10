@@ -8,6 +8,7 @@ namespace Vandox.Core.Tests;
 /// Tests for <see cref="FileProbe"/>
 /// </summary>
 [TestClass]
+[OSCondition(OperatingSystems.Linux)]
 public class FileProbeTests
 {
     #region Methods

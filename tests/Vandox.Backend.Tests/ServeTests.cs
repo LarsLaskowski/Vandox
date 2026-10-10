@@ -9,6 +9,7 @@ namespace Vandox.Backend.Tests;
 /// Tests that run the real service with <see cref="BackendApp"/>
 /// </summary>
 [TestClass]
+[OSCondition(OperatingSystems.Linux)]
 public class ServeTests
 {
     #region Properties

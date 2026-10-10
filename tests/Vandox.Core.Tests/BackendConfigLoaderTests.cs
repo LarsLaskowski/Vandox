@@ -324,6 +324,7 @@ public class BackendConfigLoaderTests
     /// A missing file, a directory, a device and an oversized file are refused with a message that holds only the path.
     /// </summary>
     [TestMethod]
+    [OSCondition(OperatingSystems.Linux)]
     public void BackendConfigLoaderRefusesUnreadableFiles()
     {
         // Arrange
@@ -365,6 +366,7 @@ public class BackendConfigLoaderTests
     /// Secrets are read from the environment and stay hidden in every format.
     /// </summary>
     [TestMethod]
+    [OSCondition(OperatingSystems.Linux)]
     public void BackendConfigLoaderReadsSecretsFromEnvironment()
     {
         // Arrange
@@ -405,7 +407,6 @@ public class BackendConfigLoaderTests
     [DataRow("VANDOX_WEB_PASSWORD_HASH", "has space", "config: VANDOX_WEB_PASSWORD_HASH: must consist of printable ASCII characters without spaces")]
     [DataRow("VANDOX_TELEGRAM_BOT_TOKEN", "äbc", "config: VANDOX_TELEGRAM_BOT_TOKEN: must consist of printable ASCII characters without spaces")]
     [DataRow("VANDOX_TELEGRAM_BOT_TOKEN_FILE", "relative/path", "config: VANDOX_TELEGRAM_BOT_TOKEN_FILE: must be an absolute path")]
-    [DataRow("VANDOX_TELEGRAM_BOT_TOKEN_FILE", "/dev/null", "config: VANDOX_TELEGRAM_BOT_TOKEN_FILE: must name a regular file")]
     [DataRow("VANDOX_TELEGRAM_BOT_TOKEN_FILE", "/nonexistent/secret", "config: VANDOX_TELEGRAM_BOT_TOKEN_FILE: cannot read the file: no such file or directory")]
     [DataRow("VANDOX_OTHER", "x", "config: VANDOX_OTHER: unknown VANDOX_ variable")]
     [DataRow("vandox_agent_token", "x", "config: vandox_agent_token: unknown VANDOX_ variable")]
@@ -429,9 +430,32 @@ public class BackendConfigLoaderTests
     }
 
     /// <summary>
+    /// A secret file that names a device is refused with a message that never shows the path.
+    /// </summary>
+    [TestMethod]
+    [OSCondition(OperatingSystems.Linux)]
+    public void BackendConfigLoaderRefusesSecretFileThatIsADevice()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        var path = directory.Write("vandoxd.yaml", string.Empty);
+        var environment = new Dictionary<string, string>
+                          {
+                              ["VANDOX_TELEGRAM_BOT_TOKEN_FILE"] = "/dev/null"
+                          };
+
+        // Act
+        var exception = Assert.ThrowsExactly<ConfigException>(() => BackendConfigLoader.Load(path, environment), "device as secret file");
+
+        // Assert
+        Assert.AreEqual("config: VANDOX_TELEGRAM_BOT_TOKEN_FILE: must name a regular file", exception.Message, "message");
+    }
+
+    /// <summary>
     /// A secret given directly and through a file, a duplicate variable and an oversized secret file are refused.
     /// </summary>
     [TestMethod]
+    [OSCondition(OperatingSystems.Linux)]
     public void BackendConfigLoaderRefusesConflictingAndOversizedSecrets()
     {
         // Arrange

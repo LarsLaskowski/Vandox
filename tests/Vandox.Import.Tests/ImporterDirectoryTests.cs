@@ -128,6 +128,7 @@ public class ImporterDirectoryTests
     /// </summary>
     /// <returns>A task that completes when the test is done</returns>
     [TestMethod]
+    [OSCondition(OperatingSystems.Linux)]
     public async Task ImporterResolvesSymbolicLinkRoot()
     {
         // Arrange
@@ -185,6 +186,7 @@ public class ImporterDirectoryTests
     [TestMethod]
     [DataRow(false)]
     [DataRow(true)]
+    [OSCondition(OperatingSystems.Linux)]
     public async Task ImporterNeverFollowsLinksOrOpensSpecialFiles(bool fallback)
     {
         // Arrange
@@ -261,6 +263,7 @@ public class ImporterDirectoryTests
     /// </summary>
     /// <returns>A task that completes when the test is done</returns>
     [TestMethod]
+    [OSCondition(OperatingSystems.Linux)]
     public async Task ImporterRefusesBadRoots()
     {
         // Arrange
