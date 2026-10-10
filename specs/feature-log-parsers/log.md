@@ -22,3 +22,4 @@ One line per pipeline step: date, step, member, result. Lead decisions and escal
 | 2026-10-09 | 8 Lead decide | squad-lead | Fix all: BOM rows + multi-byte cut rows (Tester), project.md example-file rule + area-doc sentence on fake kernel program (Dev); N1 documented only (record 0086 option 19), note for #21 to be posted by orchestrator |
 | 2026-10-09 | 8 Fixes round 1 | tester/dev/code-officer | BOM + multi-byte cut rows, project.md and area-doc edits, record 0086 option 19; verified: tests green (Core 792), coverage new 99.1% overall 95.6%, format 0/235, analyzer PASS |
 | 2026-10-09 | 8 Review round 2 (f340ab8) | squad-reviewer + squad-security | Reviewer APPROVE (3 findings fixed; 1 non-blocking: record 0086 option 19 wording 'not lost' contradicts middle cut); Security APPROVED, N1 documentation accepted |
+| 2026-10-09 | 8 Record wording | squad-lead | Option 19 wording of 0086 corrected exactly as the reviewer proposed (Proposed record, docs only) |

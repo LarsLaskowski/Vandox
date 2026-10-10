@@ -78,8 +78,9 @@ Which lines count as kernel lines for grouping:
     spoofing stays open for `syslog` and `kern.log`, and the two parsers would group the same messages differently.
 19. **Program `kernel` in both parsers, the limit documented** (chosen) — one rule for both sources. A local process
     that logs as `kernel` can open a fake report that takes in the real kernel lines of the same host for up to 60 seconds
-    or 2,000 lines; those lines are not lost but sit inside the fake record (its middle cut and marked truncated if it
-    grows past 16 KiB), and a real start line closes the fake report. Forging needs local access to the monitored
+    or 2,000 lines; those lines are not emitted as their own records but go into the fake record, and past 16 KiB its
+    middle is cut (marked truncated), so some of them survive only in the omitted-lines count. A real start line closes
+    the fake report. Forging needs local access to the monitored
     server, and the forged text could just as well imitate a whole OOM report; the import never treated a program name
     as proof of origin.
 
@@ -106,6 +107,7 @@ parsers; the transport is not checked.
   absolute path), so records of both cannot be matched by `log`.
 - Binary journal files and RFC 5424 files are not read; each would be its own parser decision.
 - A local process logging as `kernel` can forge kernel lines and open a report that absorbs the real kernel lines of the
-  same host for up to 60 seconds or 2,000 lines (option 19). Signature detection (#21) must not treat program `kernel` as
+  same host for up to 60 seconds or 2,000 lines (option 19); those lines are not emitted as their own records, and past
+  16 KiB some of them survive only in the omitted-lines count. Signature detection (#21) must not treat program `kernel` as
   proof that a line came from the kernel; if the journal reader is to tell them apart, it has to keep `_TRANSPORT` first,
   which is #21's decision.
