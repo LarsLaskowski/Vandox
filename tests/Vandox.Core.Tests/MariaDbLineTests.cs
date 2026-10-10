@@ -105,7 +105,7 @@ public class MariaDbLineTests
         Assert.IsNotNull(header, "the line is a header");
         Assert.AreEqual("Note", header.Level, "level");
         Assert.AreEqual(12, header.Time.Hour, "hour");
-        Assert.AreEqual("a�b", header.Message, "the invalid byte is replaced");
+        Assert.AreEqual("a\uFFFDb", header.Message, "the invalid byte is replaced");
     }
 
     /// <summary>
@@ -156,7 +156,7 @@ public class MariaDbLineTests
     [DataRow("2026-03-01 12:00:00 123456789012345678901 [Note] x")]
     [DataRow("2026-03-01 12:00:00 0x7f3a2c1fe640")]
     [DataRow("260301 12:00:00 mysqld_safeX y")]
-    [DataRow("٠026-03-01 12:00:00 0 [Note] x")]
+    [DataRow("\u0660026-03-01 12:00:00 0 [Note] x")]
     [DataRow("2026-03-01 1:00:00 0 [Note] x")]
     public void MariaDbLineTryParseReturnsNullForAContinuationLine(string line)
     {

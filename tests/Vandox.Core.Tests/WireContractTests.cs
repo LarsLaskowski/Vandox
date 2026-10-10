@@ -54,7 +54,7 @@ public class WireContractTests
     }
 
     /// <summary>
-    /// The log line of the Go encoder's golden batch carries every field, the host included.
+    /// The log line of the Go encoder's golden batch carries every field, the host and the event included.
     /// </summary>
     /// <returns>A task that completes when the test is done</returns>
     [TestMethod]
@@ -94,6 +94,7 @@ public class WireContractTests
         Assert.AreEqual((byte)3, line.Priority, "priority");
         Assert.AreEqual("Failed password", line.Message, "message");
         Assert.IsTrue(line.Truncated, "truncated");
+        Assert.AreEqual("auth.failure", line.Event, "event");
     }
 
     #endregion // Methods

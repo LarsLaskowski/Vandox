@@ -240,6 +240,155 @@ public class SyslogClockTests
     }
 
     /// <summary>
+    /// A local time with a year is resolved in the zone, with daylight saving time and the repeated hour applied against the previous instant.
+    /// </summary>
+    /// <param name="zone">The zone</param>
+    /// <param name="inputs">The local times as <c>yyyy-MM-dd HH:mm:ss</c>, separated by a bar</param>
+    /// <param name="expected">The expected instants or reasons, separated by a bar</param>
+    [TestMethod]
+    [DataRow("UTC", "2026-03-01 12:00:00", "2026-03-01T12:00:00Z")]
+    [DataRow("Europe/Berlin", "2026-07-01 12:00:00", "2026-07-01T10:00:00Z")]
+    [DataRow("Europe/Berlin", "2026-01-15 12:00:00", "2026-01-15T11:00:00Z")]
+    [DataRow("Asia/Kolkata", "2026-03-01 12:00:00", "2026-03-01T06:30:00Z")]
+    [DataRow("Europe/Berlin", "2026-03-29 01:59:59|2026-03-29 03:00:00", "2026-03-29T00:59:59Z|2026-03-29T01:00:00Z")]
+    [DataRow("Europe/Berlin", "2026-03-29 02:30:00", "2026-03-29T01:30:00Z")]
+    [DataRow("Europe/Berlin", "2026-10-25 02:30:00", "2026-10-25T00:30:00Z")]
+    [DataRow("Europe/Berlin", "2026-10-25 02:59:59|2026-10-25 02:00:01|2026-10-25 02:30:00", "2026-10-25T00:59:59Z|2026-10-25T01:00:01Z|2026-10-25T01:30:00Z")]
+    [DataRow("Europe/Berlin", "2026-10-25 02:59:59|2026-10-25 02:59:58|2026-10-25 02:00:01", "2026-10-25T00:59:59Z|2026-10-25T00:59:58Z|2026-10-25T01:00:01Z")]
+    [DataRow("Europe/Berlin", "2026-10-25 02:59:59|2026-10-25 02:10:00|2026-10-25 02:09:58", "2026-10-25T00:59:59Z|2026-10-25T01:10:00Z|2026-10-25T01:09:58Z")]
+    [DataRow("Europe/Berlin", "2026-10-25 02:59:59|2026-10-25 02:49:59", "2026-10-25T00:59:59Z|2026-10-25T00:49:59Z")]
+    [DataRow("Europe/Berlin", "2026-10-25 02:59:59|2026-10-25 02:49:58", "2026-10-25T00:59:59Z|2026-10-25T01:49:58Z")]
+    [DataRow("Europe/Berlin", "2026-10-25 02:59:59|2026-09-31 12:00:00|2026-10-25 02:49:00", "2026-10-25T00:59:59Z|invalid date|2026-10-25T01:49:00Z")]
+    public void SyslogClockResolveLocalAppliesZoneDaylightSavingTimeAndThePreviousInstant(string zone, string inputs, string expected)
+    {
+        // Act
+        var results = ResolveLocal(zone, inputs);
+
+        // Assert
+        Assert.AreEqual(expected, results, "instants in UTC or reasons");
+    }
+
+    /// <summary>
+    /// A time that cannot be stored gives a reason and no instant, and nothing throws.
+    /// </summary>
+    /// <param name="input">The local time as <c>yyyy-MM-dd HH:mm:ss</c></param>
+    /// <param name="expected">The expected reason, or an empty text for a stored time</param>
+    [TestMethod]
+    [DataRow("2026-13-01 12:00:00", "invalid date")]
+    [DataRow("2026-00-10 12:00:00", "invalid date")]
+    [DataRow("2026-01-32 12:00:00", "invalid date")]
+    [DataRow("2026-01-00 12:00:00", "invalid date")]
+    [DataRow("2026-01-10 24:00:00", "invalid date")]
+    [DataRow("2026-01-10 12:60:00", "invalid date")]
+    [DataRow("2026-01-10 12:00:60", "invalid date")]
+    [DataRow("2026-02-29 12:00:00", "invalid date")]
+    [DataRow("2026-04-31 12:00:00", "invalid date")]
+    [DataRow("2028-02-29 12:00:00", "")]
+    [DataRow("0000-01-01 00:00:00", Outside)]
+    [DataRow("1676-12-31 23:59:59", Outside)]
+    [DataRow("1677-09-21 00:12:43", Outside)]
+    [DataRow("2262-04-11 23:47:17", Outside)]
+    [DataRow("2263-01-01 00:00:00", Outside)]
+    [DataRow("9999-12-31 23:59:59", Outside)]
+    [DataRow("1677-09-21 00:12:44", "")]
+    [DataRow("2262-04-11 23:47:16", "")]
+    public void SyslogClockResolveLocalGivesTheReasonOfATimeThatCannotBeStored(string input, string expected)
+    {
+        // Arrange
+        var time = ParseLocal(input);
+
+        // Act
+        var reason = SyslogClock.ResolveLocal(DateTimeZone.Utc, time, null, out var instant);
+
+        // Assert
+        Assert.AreEqual(expected.Length == 0 ? null : expected, reason, "reason");
+        Assert.AreEqual(expected.Length == 0, instant != default, "the instant is set on success only");
+    }
+
+    /// <summary>
+    /// An offset in the time is ignored: only the year and the clock digits count.
+    /// </summary>
+    [TestMethod]
+    public void SyslogClockResolveLocalIgnoresTheOffsetOfTheTime()
+    {
+        // Arrange
+        var time = new SyslogTime(2026, 7, 1, 12, 0, 0, 0, 600);
+
+        // Act
+        var reason = SyslogClock.ResolveLocal(DateTimeZoneProviders.Tzdb["Europe/Berlin"], time, null, out var instant);
+
+        // Assert
+        Assert.IsNull(reason, "reason");
+        Assert.AreEqual(new DateTimeOffset(2026, 7, 1, 10, 0, 0, TimeSpan.Zero), instant, "the zone decides the offset");
+    }
+
+    /// <summary>
+    /// Values far outside any range never throw, whatever combination they come in.
+    /// </summary>
+    /// <param name="year">The year</param>
+    /// <param name="month">The month</param>
+    /// <param name="day">The day</param>
+    /// <param name="hour">The hour</param>
+    [TestMethod]
+    [DataRow(int.MaxValue, int.MaxValue, int.MaxValue, int.MaxValue)]
+    [DataRow(int.MinValue, int.MinValue, int.MinValue, int.MinValue)]
+    [DataRow(-1, 0, 0, -1)]
+    [DataRow(2026, 99, 1, 1)]
+    [DataRow(2026, 1, 99, 1)]
+    [DataRow(2026, 1, 1, 99)]
+    public void SyslogClockResolveLocalNeverThrows(int year, int month, int day, int hour)
+    {
+        // Arrange
+        var time = new SyslogTime(year, month, day, hour, 0, 0, 0, null);
+
+        // Act
+        var reason = SyslogClock.ResolveLocal(DateTimeZoneProviders.Tzdb["Europe/Berlin"], time, null, out var instant);
+
+        // Assert
+        Assert.IsNotNull(reason, "a reason");
+        Assert.AreEqual(default, instant, "no instant");
+    }
+
+    /// <summary>
+    /// Resolves a series of local times with a year, each against the instant of the last one that was resolved.
+    /// </summary>
+    /// <param name="zone">The IANA name of the zone</param>
+    /// <param name="inputs">The local times as <c>yyyy-MM-dd HH:mm:ss</c>, separated by a bar</param>
+    /// <returns>The instants in UTC (to the second) or the reasons, separated by a bar</returns>
+    private static string ResolveLocal(string zone, string inputs)
+    {
+        var timeZone = DateTimeZoneProviders.Tzdb[zone];
+        var results = new List<string>();
+        DateTimeOffset? previous = null;
+
+        foreach (var input in inputs.Split('|'))
+        {
+            var reason = SyslogClock.ResolveLocal(timeZone, ParseLocal(input), previous, out var instant);
+
+            if (reason is null)
+            {
+                previous = instant;
+            }
+
+            results.Add(reason ?? instant.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture));
+        }
+
+        return string.Join('|', results);
+    }
+
+    /// <summary>
+    /// Reads a local time such as <c>2026-10-25 02:59:59</c> without checking its ranges.
+    /// </summary>
+    /// <param name="text">The text</param>
+    /// <returns>The time, with a year and without an offset</returns>
+    private static SyslogTime ParseLocal(string text)
+    {
+        var parts = text.Split(' ', ':', '-');
+
+        return new SyslogTime(int.Parse(parts[0], CultureInfo.InvariantCulture), int.Parse(parts[1], CultureInfo.InvariantCulture), int.Parse(parts[2], CultureInfo.InvariantCulture), int.Parse(parts[3], CultureInfo.InvariantCulture), int.Parse(parts[4], CultureInfo.InvariantCulture), int.Parse(parts[5], CultureInfo.InvariantCulture), 0, null);
+    }
+
+    /// <summary>
     /// Resolves a series of year-less times and describes the results.
     /// </summary>
     /// <param name="zone">The IANA name of the zone</param>
