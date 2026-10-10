@@ -30,7 +30,7 @@ from urllib.parse import unquote, urlparse
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import squad_settings as settings  # noqa: E402  (per-repository settings next to this script)
-from analyzer_common import git, merge_base, shell_check  # noqa: E402  (shared helpers next to this script)
+from analyzer_common import git, merge_base, lint_check  # noqa: E402  (shared helpers next to this script)
 
 SARIF_NAME = os.path.join("obj", "roslyn.sarif")
 LOCK_FILE = os.path.join("obj", "analyzer-check.lock")
@@ -106,7 +106,7 @@ def run_check():
         print(f"{path}({line}): {level} {rule}: {message}")
     print(f"\nDiagnostics in changed files: {len(in_changed)}")
     print(f"Diagnostics in unchanged files (not gating): {elsewhere}")
-    ok = shell_check() and not in_changed
+    ok = lint_check() and not in_changed
     print("PASS" if ok else "FAIL")
     return 0 if ok else 1
 
