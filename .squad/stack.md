@@ -48,6 +48,11 @@ repository (record 0074): keep it true when the build changes.
 `reihitsu-format` needs `DOTNET_ROOT` when it runs as a global tool outside the SDK's directory (for example
 `DOTNET_ROOT=/usr/lib/dotnet`).
 
+Test time limits: CI runs `go test` without `-timeout`, so Go's default of 10 minutes per package binary applies,
+under `-race` as locally. A package whose tests take more than a minute locally is a warning sign; size the inputs
+down (the smallest input that still detects the failure) before it nears the limit. The .NET tests have no limit of
+their own beyond GitHub's job timeout.
+
 ## Analyzer gate
 
 `analyzer-check.py` runs `analyzer-check-go.py` and `analyzer-check-dotnet.py`; each must pass, and both also
@@ -68,7 +73,9 @@ run `shellcheck` on changed shell scripts when it is installed. The .NET part ne
    Fixable style findings are the Code Officer's; findings that need a code change go to the Dev or Tester.
    The `.editorconfig` raises the diagnostics that SonarQube Cloud lists but the compiler reports only at info level
    (`MSTEST0037`, `MSTEST0068`, `ASP0015`, `SYSLIB1092`, `IDE0028`) to errors; add an id there when SonarQube reports a
-   new one that the build did not.
+   new one that the build did not. It also switches on SonarQube Cloud's cognitive-complexity rule `S3776` (threshold
+   15, the same as SonarQube Cloud), which the SonarAnalyzer package does not run by default: keep methods below it
+   while writing them instead of splitting them after the gate fails.
    Never trust a test result after a build that failed on analyzer errors: the test run uses the stale DLLs.
 
 Other SonarQube Cloud findings (further rules, duplication, hotspots) have no local equivalent and arrive in
@@ -76,6 +83,23 @@ squad step 11.
 
 Changed shell scripts (`*.sh`) are checked with `shellcheck` when it is installed; the script says so when it
 skips them. Without it, SonarQube Cloud's shell rules (`shelldre:*`) only report in squad step 11.
+
+### Not checkable in a cloud session
+
+The cloud sessions lack some tools and network access, so these checks cannot run locally. The check in the last
+column, on the pull request head, is then the gate; the member who would run the check writes "not verified
+locally, <authoritative check>" once in `log.md` and does not repeat it as an open point in every round.
+
+| Change | Missing locally | Local substitute | Authoritative check |
+| ------ | --------------- | ---------------- | ------------------- |
+| shell scripts (`.github/scripts/*.sh`, `deploy/**/*.sh`) | `shellcheck` (the gate skips it), `shfmt` | `bash -n <script>` and the shell pitfalls below | SonarQube Cloud (`shelldre:*`, step 11) and the CI step that runs the script |
+| workflows (`.github/workflows/*.yml`) | `actionlint` | a YAML parse (`python3 -c 'import sys, yaml; yaml.safe_load(open(sys.argv[1]))' <file>`) | the workflow's own run on the pull request |
+| `deploy/backend/Dockerfile`, `docker-compose.yml`, `.dockerignore`, image contents | `hadolint`, a Docker daemon | `.github/scripts/check-base-image-pinning.sh`, `.github/scripts/check-builder-dotnet-version.sh`, `bash -n` on the smoke script | CI job *Release build check*, steps "Build and verify image" and "Smoke test backend container" |
+| known vulnerabilities (Go) | `govulncheck` (the proxy blocks `vuln.go.dev`, HTTP 403) | none | CI job *Vulnerability scan* |
+
+Shell pitfalls that SonarQube Cloud reports and nothing local catches: use `[[ … ]]`, never `[ … ]`
+(`shelldre:S7688`), and assign every positional parameter to a named `local` variable before using it inside a
+function (`shelldre:S7679`).
 
 Two analyzer rules collide and are settled once (record 0074): RH3001 forbids the negation operator `!`,
 S1125 forbids comparing a boolean with a literal (`== false`, `is false`). Write positive conditions, early
@@ -117,6 +141,10 @@ See `docs/UNIT_TESTS.md`. Go: the standard `testing` package, table-driven tests
 helpers, `t.TempDir()` for files, failure messages that state got and want. .NET: MSTest, one test class per
 class under test, Arrange/Act/Assert comments, helper classes for temporary directories and fakes.
 
+Heap-bound tests (.NET) measure retention with `GC.GetTotalMemory(true)`, which Sonar `S1215` flags. The accepted
+form is one private helper in the test class that wraps exactly that call in `#pragma warning disable S1215` /
+`#pragma warning restore S1215` (as `KernelReportGrouperTests.RetainedBytes`); no other suppression of `S1215`.
+
 Pitfalls of leak and error-text tests (Go): never put a leak sentinel into a subtest name or any other name
 that becomes a path (a `t.TempDir()` directory) when the error under test prints that path — strip the path
 from the error text before the leak check. Where the plan fixes the error format, compare the exact text
@@ -131,6 +159,9 @@ return a zero value or an error (`errors.New("not implemented")`) where the sign
 `panic("not implemented")` only where it does not (a `panic` aborts the whole test binary), so the module
 builds and the tests compile and fail. C#: new types and members with their full signature and XML
 documentation, bodies `throw new NotImplementedException();`, so the solution builds and the tests compile and fail.
+Reihitsu `RH2003` forbids `NotImplementedException` and Sonar `S2325` flags instance members that do not use `this`,
+so every skeleton file carries `#pragma warning disable RH2003, S2325` before its type and the Dev
+removes the line when implementing the file; no skeleton pragma may remain when the *Analyzer gate* runs in step 7.
 
 ## Dependencies
 

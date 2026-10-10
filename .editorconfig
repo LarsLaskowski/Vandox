@@ -270,3 +270,6 @@ dotnet_diagnostic.MSTEST0068.severity = error
 dotnet_diagnostic.ASP0015.severity = error
 dotnet_diagnostic.SYSLIB1092.severity = error
 dotnet_diagnostic.IDE0028.severity = error
+
+# SonarQube Cloud's cognitive-complexity rule (threshold 15), which the SonarAnalyzer package does not run by default.
+dotnet_diagnostic.S3776.severity = error
