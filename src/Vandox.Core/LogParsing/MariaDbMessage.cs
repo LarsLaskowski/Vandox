@@ -135,14 +135,14 @@ internal sealed class MariaDbMessage
     }
 
     /// <summary>
-    /// Tells whether the held-back empty lines and a line of the given size do not fit: the whole message may take
-    /// <see cref="ModelLimits.MaxTextBytes"/> bytes, but empty lines are only kept within <see cref="KeptBytes"/>.
+    /// Tells whether the held-back empty lines and a line of the given size do not fit: a message of at most
+    /// <see cref="ModelLimits.MaxTextBytes"/> bytes is kept whole, empty lines included.
     /// </summary>
     /// <param name="size">The UTF-8 bytes of the line</param>
     /// <returns><c>true</c> when the empty lines and the line are not kept</returns>
     private bool Exceeds(int size)
     {
-        return _bytes + _pendingEmpty + 1 + size > ModelLimits.MaxTextBytes || (_pendingEmpty > 0 && _bytes + _pendingEmpty > KeptBytes);
+        return _bytes + _pendingEmpty + 1 + size > ModelLimits.MaxTextBytes;
     }
 
     /// <summary>
@@ -177,7 +177,8 @@ internal sealed class MariaDbMessage
     }
 
     /// <summary>
-    /// Appends empty lines to the text; the caller guarantees that they stay within <see cref="KeptBytes"/>.
+    /// Appends empty lines to the text; the caller guarantees that they stay within <see cref="ModelLimits.MaxTextBytes"/>.
+    /// The end of the kept prefix moves over the empty lines that fit within <see cref="KeptBytes"/>, even when the whole run does not.
     /// </summary>
     /// <param name="count">The number of empty lines</param>
     private void AppendEmpty(long count)
@@ -187,10 +188,17 @@ internal sealed class MariaDbMessage
             return;
         }
 
+        var fitting = _bytes <= KeptBytes ? Math.Min(count, KeptBytes - _bytes) : 0;
+
         _text.Append('\n', (int)count);
         _bytes += count;
         _lines += count;
-        UpdateMark();
+
+        if (fitting > 0)
+        {
+            _markChars = _text.Length - (int)(count - fitting);
+            _markLines = _lines - (count - fitting);
+        }
     }
 
     /// <summary>

@@ -240,8 +240,10 @@ before the first header are skipped: "empty line" for an empty one, "line before
 bytes count three) is kept whole. A longer entry with at least one continuation line keeps its first line (cut at a
 character boundary to 16,320 bytes if longer) and the following whole lines while the text stays within 16,320 bytes,
 then `\n[N lines omitted]` with the exact number of lines left out (trailing empty lines not counted), and `truncated`. A
-long header line alone is cut to 16,384 bytes without a marker. Empty lines are only kept while the text stays within
-16,320 bytes; the others are counted, never stored, so millions of empty lines cost a counter. A continuation line is
+long header line alone is cut to 16,384 bytes without a marker. Empty lines count like any other line: a message that fits in 16,384 bytes keeps
+them. When an entry is cut, the kept part is the longest run of whole lines, empty ones included, that fits in 16,320
+bytes, so the cut can fall inside a run of empty lines; empty lines beyond are counted, never stored, so millions of
+empty lines cost a counter. A continuation line is
 decoded only when it is kept, so memory does not depend on the input size. An entry that is cut or whose line was cut by
 the reader has `truncated` set.
 
