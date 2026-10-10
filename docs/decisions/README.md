@@ -12,7 +12,8 @@ once in the [area document](../areas/README.md) of the record's area, and the re
 ## Rules
 
 - One decision per file: `NNNN-short-title.md` (four digits, next free number), created from
-  [`_template.md`](_template.md).
+  [`_template.md`](_template.md). In the index row and in a `Superseded by NNNN` status the number may be
+  written as a link, `[NNNN](NNNN-short-title.md)`.
 - **The record states the decision in one to three sentences and does not restate behavior.** Context,
   *Options considered* and *Consequences* carry the reasoning; the rules of the resulting behavior (values,
   formats, limits, error texts) belong in the area document and are linked from the record.
