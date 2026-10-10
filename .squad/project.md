@@ -171,7 +171,7 @@ change with it.
 
 **A new or changed configuration option** touches:
 - the configuration type and its loading: for the agent `internal/config` (`Agent`, `LoadAgent`, `AgentKeys`), for the backend `src/Vandox.Core/Configuration` (`BackendConfig` and its option classes with `ConfigKey` attributes, `BackendConfigLoader`)
-- the commented example file `deploy/agent/agent.yaml` or `deploy/backend/vandoxd.yaml`, which must set the option explicitly (an optional one at its default): `TestLoadAgent_Example` and `BackendConfigLoaderLoadsRepositoryExample` load these files and fail when a key is missing (0049)
+- the commented example file `deploy/agent/agent.yaml` or `deploy/backend/vandoxd.yaml`: the example file sets the option explicitly (an optional one at its default; one without a default commented out with an example value, which the test checks): `TestLoadAgent_Example` and `BackendConfigLoaderLoadsRepositoryExample` load these files and fail when a key is missing, except `import.time_zone`, which has no default and must stay commented out (0049)
 - the *Agent options* or *Backend options* table in `README.md` (key, default, description); a non-secret option has no environment variable (0049), a secret is added as **a new secret** below instead
 - the tests that pin the configuration loading: `internal/config/agent_test.go` and `tests/Vandox.Core.Tests/BackendConfigLoaderTests.cs`
 
