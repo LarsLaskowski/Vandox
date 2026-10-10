@@ -159,6 +159,9 @@ ss -ltn | grep -E ':(25|80|443|465|587|993|8443)\b'
 free -m; cat /proc/pressure/memory
 ```
 
+`units` is the array from step 2: run this in the same root shell, or paste the `units=(...)` lines of step 2
+first when you are in a new SSH session.
+
 Done when every unit says `active`, MariaDB answers, the panel responds, the mail queue is shrinking and the
 memory values are inside the limits. Watch for another ten minutes; memory pressure often returns when the
 mail filters start working through the backlog.
