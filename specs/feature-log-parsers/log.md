@@ -19,3 +19,4 @@ One line per pipeline step: date, step, member, result. Lead decisions and escal
 | 2026-10-09 | 7 Code check | squad-code-officer | No edits needed; format check 0/235, analyzer gate PASS (verified), tests green |
 | 2026-10-09 | 8 Review round 1 (9ff4779) | squad-reviewer | BLOCKING 2 (no test for BOM removal on line 1 in SyslogParser; .squad/project.md:174 example-file rule outdated), NON-BLOCKING 1 (AC-J4 multi-byte cut rows) |
 | 2026-10-09 | 8 Security diff (9ff4779) | squad-security | APPROVED; non-blocking N1: grouping keys on Program==kernel only, journal reader drops _TRANSPORT, so a local process can open a fake kernel report |
+| 2026-10-09 | 8 Lead decide | squad-lead | Fix all: BOM rows + multi-byte cut rows (Tester), project.md example-file rule + area-doc sentence on fake kernel program (Dev); N1 documented only (record 0086 option 19), note for #21 to be posted by orchestrator |

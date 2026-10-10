@@ -70,14 +70,28 @@ How the 16 KiB bounds are measured:
 17. **On the UTF-8 bytes of the decoded text, cut at a character boundary** (chosen) — the parsers and the grouper keep the
     raw read bounds for memory and cut the decoded text to the record limits, so no record is refused for its length.
 
+Which lines count as kernel lines for grouping:
+
+18. **Journal entries only with the trusted `_TRANSPORT=kernel`** — closes the spoofing in the journal (an unprivileged
+    local process can set `SYSLOG_IDENTIFIER=kernel`, but not the underscore fields journald assigns); but the syslog
+    files carry no such field (`logger -t kernel` writes a line that looks exactly like a kernel line), so the same
+    spoofing stays open for `syslog` and `kern.log`, and the two parsers would group the same messages differently.
+19. **Program `kernel` in both parsers, the limit documented** (chosen) — one rule for both sources. A local process
+    that logs as `kernel` can open a fake report that takes in the real kernel lines of the same host for up to 60 seconds
+    or 2,000 lines; those lines are not lost but sit inside the fake record (its middle cut and marked truncated if it
+    grows past 16 KiB), and a real start line closes the fake report. Forging needs local access to the monitored
+    server, and the forged text could just as well imitate a whole OOM report; the import never treated a program name
+    as proof of origin.
+
 ## Decision
 
-Options 2, 4, 8, 11, 13, 15 and 17: the journal export is recognized by its content, the syslog parser claims rsyslog files weakly, the
+Options 2, 4, 8, 11, 13, 15, 17 and 19: the journal export is recognized by its content, the syslog parser claims rsyslog files weakly, the
 journal record time is `__REALTIME_TIMESTAMP`, and OOM and `cut here` reports become one `log_line` with head and tail,
 bounded by time span, line count and the normal end of input (never flushed when a parse fails), with every byte bound
 counted in UTF-8 bytes of the decoded text; lines of others inside a report are emitted before it; `log` is the
 listed path. The parsers emit log lines only, no kernel events (#21). The rules
-are in [Log import](../areas/log-import.md) (*System log parsers*).
+are in [Log import](../areas/log-import.md) (*System log parsers*). Kernel lines are recognized by the program `kernel` in both
+parsers; the transport is not checked.
 
 ## Consequences
 
@@ -91,3 +105,7 @@ are in [Log import](../areas/log-import.md) (*System log parsers*).
 - The `log` of an imported record differs from the one the agent (#37) will send for the same file (listed path versus
   absolute path), so records of both cannot be matched by `log`.
 - Binary journal files and RFC 5424 files are not read; each would be its own parser decision.
+- A local process logging as `kernel` can forge kernel lines and open a report that absorbs the real kernel lines of the
+  same host for up to 60 seconds or 2,000 lines (option 19). Signature detection (#21) must not treat program `kernel` as
+  proof that a line came from the kernel; if the journal reader is to tell them apart, it has to keep `_TRANSPORT` first,
+  which is #21's decision.
