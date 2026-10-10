@@ -67,7 +67,7 @@ one is invalid, and the decoder sets the origin of every decoded record to `agen
 ### Common rules
 
 - **Name pattern**: `^[A-Za-z0-9][A-Za-z0-9._:/@+-]*$`, 1 to 128 bytes (`MaxNameBytes`). Used for `source`,
-  metric names and units, label keys and `gap.collector`.
+  metric names and units, label keys, `gap.collector` and `log_line.event`.
 - **Short text** at most 1024 bytes (`MaxShortTextBytes`), **text** at most 16384 bytes (`MaxTextBytes`); lengths are in
   bytes, no character restriction. Invalid UTF-8 is replaced by U+FFFD when decoded.
 - **Lists and maps** hold at most 4096 entries (`MaxItems`); metric labels at most 32 (`MaxLabels`).
@@ -135,8 +135,7 @@ producer read; false for a configured subset or a reduction for size). When `ava
 it for imported records, relative to the import root or archive and with its rotation suffix), `host` (optional short
 text: the host that wrote the line, empty when unknown), `program` (short text), `pid` (>= 0), `priority` (optional, 0
 to 7), `message` (text, may be empty), `truncated` (the producer cut the message to 16384 bytes), `event` (optional name,
-at most 128 bytes of letters, digits and `._-` as for other names: the event a producer recognized in the line, such as
-`mariadb.start`; empty for none). `host` and `event` are additive optional fields, so the wire version stays 1.0
+see *Name pattern*: the event a producer recognized in the line, such as `mariadb.start`; empty for none). `host` and `event` are additive optional fields, so the wire version stays 1.0
 ([0084](../decisions/0084-log-line-record-gets-an-optional-host-field.md),
 [0088](../decisions/0088-mariadb-error-log-entries-by-content-and-lifecycle-events-in-log-line.md)). The Go encoder omits an
 empty `host` and an empty `event`; the C# decoder reads a line without them as empty.

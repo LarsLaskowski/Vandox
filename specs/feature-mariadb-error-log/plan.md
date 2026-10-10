@@ -796,8 +796,8 @@ Every edit has one owner, the **Dev** (as the area documents above); the Lead's 
   controls, which no content rule can tell apart (*Forged lines* below).
 - Memory: bounded by the line reader (16 KiB plus its buffer) and one open entry (the first line at most 16,384 UTF-8
   bytes plus kept lines at most 16,384; omitted and held-back empty lines only counted in a `long`, materialized only
-  within the 16,384-byte message limit and, once the entry overflows, only within the kept 16,320 bytes, at the end of
-  the entry as well — decision B in *Lead decisions*), independent of the input size (AC-M1, AC-M2, AC-M3).
+  within the 16,384-byte message limit and, once the entry overflows, only within the kept 16,320 bytes; trailing ones
+  never stored — decision B in *Lead decisions*), independent of the input size (AC-M1, AC-M2, AC-M3).
   Time: linear in the input; matching uses ordinal string operations on the first line only.
 - Display: messages are stored as read (control characters kept, as for syslog); skip reasons and events are fixed texts;
   the importer never logs a message. Showing messages escaped is the web UI's job (area 12, Razor encodes HTML).

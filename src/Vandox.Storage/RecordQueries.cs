@@ -18,7 +18,7 @@ internal static class RecordQueries
     private const string MetricColumns = "m.name, m.value, m.unit, m.labels, ";
     private const string LogColumns = "l.log, l.program, l.pid, l.priority, l.message, l.truncated, l.host, l.event";
     private const string NoMetric = "NULL, NULL, NULL, NULL, ";
-    private const string NoLog = "NULL, NULL, NULL, NULL, NULL, NULL, NULL";
+    private const string NoLog = "NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL";
 
     #endregion // Constants
 
