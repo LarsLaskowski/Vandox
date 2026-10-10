@@ -14,7 +14,7 @@ The backend image `networlddev/vandox` must run as non-root on a minimal base an
 pattern of the maintainer's other repositories: build arguments for image, tag and digest, a digest-only `FROM`, and the
 tag kept alongside for readability. Dependabot's `docker` parser reads neither `ARG` lines nor `${…}` references (its
 `FROM` pattern needs an image name that starts with a lower-case letter or a digit; dependabot-core,
-`docker/lib/dependabot/docker/file_parser.rb`, checked on 2026-10-04 and again on 2026-10-10), so for such a `FROM` it
+`docker/lib/dependabot/docker/file_parser.rb`, checked on 2026-10-10), so for such a `FROM` it
 proposes nothing and the digests have to be refreshed by hand. Since the backend moved to .NET (0073),
 the builder is the .NET SDK image and the runtime the ASP.NET image.
 
@@ -69,9 +69,12 @@ one issue. The exact checks are in `.github/scripts/` and the workflows.
 - Nobody checks that a tag and its digest belong together beyond the .NET version check: a digest of another version than
   its tag fails the image build, a different build of the same version passes.
 - Dependabot does not cover `docker`, and `.github/dependabot.yml` has no `docker` entry: one that is present finds no
-  dependency, runs green and suggests coverage that does not exist. Only if Dependabot learns to resolve `ARG` defaults in
-  `FROM` lines can the entry return and the weekly workflow's job `check` go. The weekly workflow holds a write permission (`issues: write`, security area 13) and GitHub disables
-  scheduled workflows after 60 days without repository activity.
+  dependency, runs green and suggests coverage that does not exist. Resolving `ARG` defaults in `FROM` lines would not be
+  enough: with a digest-only `FROM` the digest would be read as the version, and a refresh must change tag and digest
+  together (`docs/CONTRIBUTING.md`, *Base image digests*). The entry may be reconsidered only if Dependabot learns to
+  resolve and update these `ARG` values, tag and digest together, and only then is the weekly workflow's job `check`, the
+  current guard against a stale digest, redundant. The weekly workflow holds a write permission (`issues: write`,
+  security area 13) and GitHub disables scheduled workflows after 60 days without repository activity.
 - The image is larger and starts slower than a static binary on distroless, and the memory limit matters more (0060); the
   health check's start period covers the start. Volumes mounted into the container must be writable by 65532, and without
   a shell the `HEALTHCHECK` is built into `vandoxd` (0059).

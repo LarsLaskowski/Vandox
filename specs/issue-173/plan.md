@@ -62,8 +62,10 @@ Related findings on the way:
 - [ ] AC3: No file outside `.github/dependabot.yml`, `docs/decisions/0041-backend-image-chiseled-runtime-base-images-pinned-by-digest.md`
   and `specs/issue-173/` changes; in particular `deploy/backend/Dockerfile`, `.github/workflows/base-image-digests.yml`
   (job `check` stays), `.github/scripts/` and `docs/CONTRIBUTING.md` are untouched.
-- [ ] AC4: Record 0041 matches the configuration: it states that `.github/dependabot.yml` has no `docker` entry and
-  under which condition the entry may return and the job `check` go; its status and index row stay `Accepted`.
+- [ ] AC4: Record 0041 matches the configuration: it states that `.github/dependabot.yml` has no `docker` entry, that
+  resolving `ARG` defaults alone would not suffice, and that the entry may be reconsidered (and the job `check` becomes
+  redundant) only if Dependabot resolves and updates the `BASE_*` `ARG` values, tag and digest together; its *Context*
+  names only the parser check of 2026-10-10; its status and index row stay `Accepted`.
 
 ## Verification without tests
 
@@ -144,10 +146,32 @@ Manager is not needed.
 
 - `docs/decisions/0041-backend-image-chiseled-runtime-base-images-pinned-by-digest.md` (Accepted, unreleased, edited
   in place by the Lead in this step; decision unchanged): *Source* names #173; *Context* names the parser file and
-  the re-check on 2026-10-10; the fourth *Consequences* bullet now says the file has no `docker` entry, why a present
-  one is harmful (green runs, no dependency, false impression of coverage) and that only Dependabot resolving `ARG`
-  defaults lets the entry return and the job `check` go. Index row unchanged (title and status still fit). No new
+  the parser check on 2026-10-10 (the only one evidenced); the fourth *Consequences* bullet now says the file has no
+  `docker` entry, why a present one is harmful (green runs, no dependency, false impression of coverage), why resolving
+  `ARG` defaults alone would not suffice (a digest-only `FROM` makes the digest the version; tag and digest must change
+  together), and that the entry may be reconsidered only if Dependabot resolves and updates these `ARG` values, tag and
+  digest together, and only then is the job `check` (the current guard) redundant. Index row unchanged (title and status still fit). No new
   record: no new choice between alternatives is made, the change restores what 0041 decided.
+
+## Challenge
+
+Devil's Advocate, 2026-10-10: OBJECTIONS, 0 major, 2 minor. Both accepted.
+
+1. *0041: the condition for the entry's return is too narrow.* Accepted. The pinning form is a digest-only `FROM`
+   with the tag in its own `BASE_*_TAG` argument (`deploy/backend/Dockerfile`, lines 8-13). Even with `ARG`
+   resolution, Dependabot would take the digest as the version: `version_from` in
+   `docker/lib/dependabot/shared/shared_file_parser.rb` (lines 35-36, dependabot-core `main`, read 2026-10-10)
+   returns `parsed_line.fetch("tag") || parsed_line.fetch("digest")`. It would also have to update tag and digest
+   arguments together, which `docs/CONTRIBUTING.md` (*Base image digests*) requires. Changed: the fourth
+   *Consequences* bullet of 0041 now says resolving `ARG` defaults would not be enough. The entry may be
+   reconsidered only if Dependabot learns to resolve and update these `ARG` values, tag and digest together, and only
+   then is the job `check`, the current guard against a stale digest, redundant. AC4 and *Decision records* are
+   revised to match.
+2. *0041: the 2026-10-04 parser check is unsupported.* Accepted. The only evidence is the check of 2026-10-10
+   (*Problem / root cause*); 2026-10-04 is the record's date, not a check date. Changed: 0041 *Context* now says
+   "checked on 2026-10-10".
+
+Scope, tier (`security`) and the change to `.github/dependabot.yml` are unchanged.
 
 ## Out of scope / follow-ups
 
