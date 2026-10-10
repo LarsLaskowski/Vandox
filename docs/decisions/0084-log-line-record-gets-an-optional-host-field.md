@@ -1,6 +1,6 @@
 # 0084: The log_line record gets an optional host field in both languages and in storage
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-09
 - **Area:** Wire format
 - **Source:** Issue #16

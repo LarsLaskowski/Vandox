@@ -1,6 +1,6 @@
 # 0086: System log parsers: journal export by content, a generic weak syslog parser, kernel reports grouped with head and tail
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-09
 - **Area:** Log import
 - **Source:** Issue #16
