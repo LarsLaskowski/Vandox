@@ -66,10 +66,19 @@ How the file is recognized:
 
 7. **By the path `mysql/error.log`, with an option for other paths (as the issue asks)** — the import reads copies and
    archives of any layout, a name says nothing about the content, and a default server does not write this file at all.
-8. **By content: a line of the file head is a MariaDB entry header; the name never matters; no option** (chosen) — finds
-   the log wherever it was copied (`error.log`, `<host>.err`, inside a tar), also when the head starts inside a multi-line
-   entry. The header forms are specific enough that no other log of a saved `/var/log` matches (dpkg, the general and slow
-   query logs, nginx, fail2ban and MySQL 8 lines were compared).
+8. **By content: the first non-empty line of the file head is a MariaDB entry header, and the name is not one the syslog
+   parser claims; no option** (chosen) — finds the log wherever it was copied (`error.log`, `<host>.err`, inside a tar).
+   The header forms are specific enough that no other log of a saved `/var/log` begins with one (dpkg, the general and
+   slow query logs, nginx, fail2ban and MySQL 8 lines were compared). A content claim outranks the syslog parser's weak
+   claim ([0086](0086-system-log-parsers-generic-syslog-claim-and-grouped-kernel-reports.md)), so the rule must not let a
+   syslog file become a MariaDB file: the first-line grammars are disjoint (a syslog line starts with `<`, a month name or
+   `DDDD-DD-DDT`, a header with `DDDD-DD-DD ` or `DDDDDD `), so a file the syslog parser claims by its first line is
+   never claimed here, and a syslog name (`syslog`, `kern.log`, with `.N` or `-YYYYMMDD`, the syslog parser's own name
+   rule) is refused whatever the content. A variant that accepted a header on **any** line of the head (to find a copy
+   that starts inside an entry) was rejected in the security review: one header-shaped line that anyone with a raw line
+   feed gets into the first 4 KiB of a syslog file, or of any other file, would move the whole file to this parser, its
+   lines before skipped and those after read as continuation lines of one forged entry. The price of the chosen rule is
+   that a copy starting inside an entry (`tail` output) is not recognized.
 
 How multi-line output stays together:
 
@@ -115,11 +124,15 @@ Forged lines:
     whenever `log_warnings` is above 1, the default being 2. The handshake's user name is cut to 128 characters but not
     filtered, so any client that reaches the port, a local web application included, can forge an entry without
     credentials and without crashing anything. No escaping exists in the format to tell such lines apart; as in 0086
-    option 19, an event is a classification of text, not proof of origin.
+    option 19, an event is a classification of text, not proof of origin. The same holds for the file: the source type
+    `mariadb` says which parser read it, not that MariaDB wrote it. Any file of the imported tree whose first non-empty
+    line has a header's shape is read as a MariaDB error log with events, such as a file a web-space user wrote under a
+    saved `/var/www` or an application log whose first line is client text; `log` keeps its real path.
 
 ## Decision
 
-Options 3, 6, 8, 10, 12, 14, 16, 18 and 19: the parser `mariadb` recognizes the error log by content, turns every entry (a
+Options 3, 6, 8, 10, 12, 14, 16, 18 and 19: the parser `mariadb` recognizes the error log by content (its first non-empty
+line is an entry header; a file with a syslog name is never claimed), turns every entry (a
 header line and its continuation lines) into one `log_line` record with its local time resolved in `import.time_zone`, keeps
 the head of a long entry with an omitted-lines marker, and classifies lifecycle entries into the new optional `log_line`
 field `event` (name rule, stored in `log_lines.event`); no path option is added. The rules are in
@@ -134,8 +147,12 @@ field `event` (name rule, stored in `log_lines.event`); no path option is added.
 - The issue's default path and path option are not built (option 8 instead of 7); a path for live shipping belongs to #37.
 - `event` is stored, not indexed; a query by event needs its own change (#21, #23).
 - The 16 KiB text limit stays; a crash report with a long query loses its tail and says so.
-- A file whose head holds no entry header (it starts with more than 4 KiB of crash report) is listed as not recognized.
+- A file whose first non-empty line is not an entry header (a copy that starts inside an entry, a log whose first line
+  a library wrote without a header) is listed as not recognized, and so is a MariaDB error log under a syslog name.
+- A syslog file keeps its parser whatever lines it holds; a line that looks like a MariaDB entry inside it stays a
+  syslog line.
 - Lines of a time zone change between an interrupted import and its resume are shifted, as for syslog files (0085).
 - The agent's live shipping (#37) may send `event` or leave it empty; the backend accepts both.
 - Signature detection (#21) and outage reconstruction (#23) must not treat an `event` as proof that MariaDB wrote the line
-  (option 19): any client that reaches the database port can forge one through a failed login.
+  (option 19): any client that reaches the database port can forge one through a failed login. Nor may they treat the
+  source type `mariadb` as proof that the file was a MariaDB error log (option 19).

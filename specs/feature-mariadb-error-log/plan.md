@@ -9,7 +9,8 @@ is `security`.
 ## Problem / root cause
 
 Summary of [spec.md](spec.md): `vandoxd import` gets a third built-in parser, `mariadb`, for the MariaDB error log. It
-recognizes the log by content, turns every entry (a header line and the lines without a header after it) into one
+recognizes the log by content (its first non-empty line is an entry header; a file with a syslog name is never claimed),
+turns every entry (a header line and the lines without a header after it) into one
 `log_line` record with its local time resolved in `import.time_zone`, maps the level to the priority, and classifies
 lifecycle entries into a new optional `log_line` field `event`, added in Go, C#, the golden wire batch and storage (schema
 version 5). Record [0088](../../docs/decisions/0088-mariadb-error-log-entries-by-content-and-lifecycle-events-in-log-line.md).
@@ -34,7 +35,8 @@ because the Ubuntu archive is not reachable from the session — the parser acce
   by follow-up #165.
 - "path configurable" — **requirement dropped, not applicable to the import**: the scanner hands parsers a cleaned
   relative name of an arbitrary copy or archive entry (`LogFile.Name`), so a configured server path matches nothing;
-  detection by content finds the file under any name. No option is added. Configured log paths belong to the agent's
+  detection by content finds the file under any name except the syslog parser's names (`syslog`, `kern.log` and their
+  rotations). No option is added. Configured log paths belong to the agent's
   shipping (#37, "configured log files"). The spec names both deviations from the issue's wording (*Deviations from the
   issue*).
 - "Classify start, normal shutdown, abort by signal, crash recovery start/end" — **gap confirmed**: `log_line` has no field
@@ -257,20 +259,37 @@ the file `testdata/logs/mariadb-error.log` given in full under *Fixture*.
 
 ### Detection and registration
 
-- [ ] AC-D1 `MariaDbErrorLogParser.Detect` returns `MatchContent` when any line of the head (split at `\n`, a `\r` before
-  `\n` removed, a UTF-8 BOM at the start of the head removed, the last line possibly cut by the end of the head) is a
-  header of AC-H1; the file name never matters (`notes.txt`, `mysql/error.log`, `web-1.err` give the same result).
-  `[DataRow]` for `MatchContent`: a form A, B, C and D line as the first line; two continuation lines (`InnoDB: ...`,
-  `??:0(abort)[0x7f3a3c4287f3]`) and then a form A line; an empty first line and then a header; a head of 4,096 bytes whose
-  last, cut line is a complete form A prefix. `NoMatch`: an empty head; every line of AC-H2 alone; a journal export head;
-  `Mar  1 12:30:15 web-1 sshd[1234]: Accepted publickey for root`; `2026-03-01T12:30:15.123456+01:00 web-1 sshd[1234]: Accepted publickey for root`;
-  prose.
+- [ ] AC-D1 `MariaDbErrorLogParser.Detect` returns `MatchContent` exactly when both hold, else `NoMatch` (*Accepted
+  forms*, *Detection*): the file name is not one the syslog parser claims by name (`SyslogParser.HasSyslogName`), and the
+  **first non-empty line** of the head is a header of AC-H1 (head split at `\n`; a `\r` directly before `\n` removed; a
+  UTF-8 BOM at the start of the head removed; empty lines before it passed over; the line may be cut by the end of the
+  head). No later line of the head is looked at. `[DataRow]` per head and name:
+  - `MatchContent`: a form A, B, C and D line as the first line (name `notes.txt`); a form A head under the names
+    `mysql/error.log`, `web-1.err`, `error.log.1`, `syslog.err`, `mysql-syslog`, `backup/syslog/error.log` (a directory
+    named `syslog` does not count); `EF BB BF` and then a form A line; `\n` + `\r\n` + a form A line (two empty lines
+    first); a head of exactly 4,096 bytes that is one form A line with a long message and no `\n` (the first line cut by
+    the end of the head, its prefix complete).
+  - `NoMatch`: an empty head; a head of only `\n` and `\r\n`; every line of AC-H2 alone as the first line; two continuation
+    lines (`InnoDB: Failing assertion: page_is_leaf(block->page.frame)`, `??:0(abort)[0x7f3a3c4287f3]`) and then a form A
+    line (a copy that starts inside an entry); `Mar  1 12:30:15 web-1 sshd[1234]: Accepted publickey for root` and then
+    `2026-03-02 10:20:01 0 [Note] /usr/sbin/mariadbd: ready for connections.` on line 2; the same with the first line
+    `2026-03-01T12:30:15.123456+01:00 web-1 sshd[1234]: Accepted publickey for root`; the same with the first line
+    `<13>Mar  1 12:30:15 web-1 sshd[1234]: Accepted publickey for root`; prose and then a form A line; a journal export
+    head; a form A head (every line a header) under the names `syslog`, `syslog.1`, `kern.log`, `kern.log.2`,
+    `syslog-20260301`, `backup/var/log/syslog.1`.
 - [ ] AC-D2 `BuiltInParsers.Create("UTC")` and `Create(null)` return `journal`, `mariadb`, `syslog` in this order
   (`JournalExportParser`, `MariaDbErrorLogParser`, `SyslogParser`); the registry accepts them; an unknown zone still throws
-  `ArgumentException` without the zone text. Through the registry: the existing `mariadb.err` row now gives `mariadb` with
-  `MatchContent`; a journal export head stays `journal`, the traditional and RFC 3339 syslog heads stay `syslog`;
-  `JournalExportParser` and `SyslogParser` return `NoMatch` for a form A, B, C and D head, and `MariaDbErrorLogParser`
-  returns `NoMatch` for the journal and syslog heads.
+  `ArgumentException` without the zone text. Through the registry (`BuiltInParsersRegistryDetectsFilesByContentAndName`,
+  name, head → parser type and confidence):
+  - the existing `mariadb.err` row now gives `mariadb` with `MatchContent`; every existing row keeps its result;
+  - `logs/other`, `Mar  1 12:30:15 web-1 sshd[1234]: Accepted publickey for root` + `\n` +
+    `2026-03-02 10:20:01 0 [Note] /usr/sbin/mariadbd: ready for connections.` + `\n` → `syslog`, `MatchName`;
+  - `logs/other`, the same with the RFC 3339 first line of `Rfc3339Head` → `syslog`, `MatchName`;
+  - `syslog.1` and `kern.log`, a form A head whose first line is not a syslog line → `syslog`, `MatchName`;
+  - `notes.txt`, `InnoDB: Failing assertion: page_is_leaf(block->page.frame)` + `\n` + a form A line → no parser;
+  - `notes.txt`, prose + `\n` + a form A line → no parser.
+  `JournalExportParser` and `SyslogParser` return `NoMatch` for a form A, B, C and D head under a neutral name, and
+  `MariaDbErrorLogParser` returns `NoMatch` for the journal and syslog heads.
 
 ### Cross-cutting
 
@@ -283,18 +302,44 @@ the file `testdata/logs/mariadb-error.log` given in full under *Fixture*.
 
 ### Bounded memory (heap-bound tests)
 
-Input is produced lazily by `PatternStream` (a header, then a repeated pattern); allocation is measured with
-`GC.GetTotalAllocatedBytes(true)`, retention with one private `RetainedBytes()` helper per test class that wraps
-`GC.GetTotalMemory(true)` in `#pragma warning disable S1215` / `restore` (`.squad/stack.md`, *Writing tests*).
+Input is produced lazily by `PatternStream` (a header, then a repeated pattern, then a trailer); retention is measured
+with one private `RetainedBytes()` helper per test class that wraps `GC.GetTotalMemory(true)` in
+`#pragma warning disable S1215` / `restore` (`.squad/stack.md`, *Writing tests*).
+
+**Allocation through the parser is measured beyond the line reader's own.** `GC.GetTotalAllocatedBytes(true)` is read around
+the parse and around a plain loop of `LogLineReader.ReadAsync` over an equal `PatternStream` in the same test (one
+private helper, e.g. `ReaderAllocation(...)`), and the bound applies to the difference. The reason, measured in a scratch
+program with a copy of `LogLineReader` over a header, 64 MiB of `\n` and `x` (67,108,866 lines): a Release build
+allocates 33 KB in 1.1-1.4 s, a Debug build 6,979,357,224 bytes (104 bytes per `ReadAsync`, the async state machine a
+Debug build allocates on every call) in 8.6-9.3 s. *Test* and *Test with coverage* in `.squad/stack.md` build Debug, CI
+builds Release, so a bound on the whole parse would fail every implementation locally (and AC-M2's 65,537 lines alone
+take 6.8 MB of the 8 MiB in Debug). Consequence for the Dev: the parser's per-line path calls no async method other than
+`LogLineReader.ReadAsync` (records are emitted only when a header arrives and at the end).
 
 - [ ] AC-M1 `MariaDbMessage` started with a header message and fed 100,000 continuation lines of 1,000 bytes `a` (one
   reused byte array): retained memory, measured with the builder alive after the last `Add`, grows by less than 1 MiB over
   the value before the first `Add` (keeping the lines would be about 200 MB of UTF-16); `Build` then gives a message of at
-  most 16,384 UTF-8 bytes ending in `[N lines omitted]` with the exact N.
+  most 16,384 UTF-8 bytes ending in `[N lines omitted]` with the exact N. Two more rows for held-back empty lines, started
+  with `h`: 4,000,000 empty lines (`Add` of an empty span) and then `x` → retention grows by less than 1 MiB (a reference,
+  a UTF-16 character or a byte per empty line would be 32 MB, 8 MB or 4 MB), `Build` gives `h`, 16,319 `\n` and
+  `\n[3983682 lines omitted]` (16,344 bytes), truncated true; 4,000,000 empty lines and no `x` → the same retention bound,
+  `Build` gives `h`, truncated false.
 - [ ] AC-M2 `MariaDbErrorLogParser` over a header line followed by 64 MiB of continuation lines (1,023 `a` and `\n`,
   repeated): one record, message at most 16,384 UTF-8 bytes ending in `[N lines omitted]` with N = the number of
-  continuation lines minus those kept, `Truncated` true; the parse allocates less than 8 MiB (a parser that decodes every
-  line allocates more than 128 MiB). The test stays under 10 s.
+  continuation lines minus those kept, `Truncated` true; the parse allocates less than 8 MiB beyond the line reader's own
+  allocation on the same input (a parser that decodes every line allocates more than 128 MiB). No time assertion.
+- [ ] AC-M3 Held-back empty lines through the parser, `PatternStream` with the header
+  `2026-03-01 12:00:00 0 [Note] h` + `\n`, the pattern `\n` repeated for 16 MiB (16,777,216 empty lines), zone `UTC`, the
+  validating `RecordingEmitter`, one test per row:
+  - trailer `x` (one more continuation line, no line ending) → exactly one record, no skip; message `h`, then 16,319
+    `\n`, then `\n[16760898 lines omitted]` (16,777,217 continuation lines minus the 16,319 kept; 16,345 UTF-8 bytes in
+    total), `Truncated` true;
+  - no trailer (the empty lines are trailing) → exactly one record, no skip; message `h`, `Truncated` false;
+  - in both, the parse allocates less than 8 MiB beyond the line reader's own allocation on the same input (turning the
+    held-back count into one reference or one UTF-16 `\n` per line costs 128 MiB or 32 MiB, kept or built at the end).
+  16 MiB is the smallest round size at which each of these representations exceeds the bound at least fourfold; with the
+  reader baseline each row takes about 0.7 s in Release and 5 s in Debug (scaled from the measurement above), where
+  64 MiB would take about 20 s per row in Debug. No time assertion.
 
 ### Record field, wire and storage
 
@@ -325,6 +370,29 @@ Input is produced lazily by `PatternStream` (a header, then a repeated pattern);
 ## Accepted forms
 
 What the parser does with every input form (Security reviews this list).
+
+### Detection
+
+`Detect` receives the cleaned file name (`.gz` removed) and the first 4,096 bytes of the decompressed content. It returns
+`MatchContent` only when the name is not a syslog name **and** the first non-empty line of the head is an entry header
+(*Lines*); it returns `NoMatch` for every other input. A header-shaped line anywhere else in the head never claims a
+file, so one injected line cannot take a file away from another parser.
+
+| Input | Result |
+| ----- | ------ |
+| base name (after the last `/`) `syslog` or `kern.log`, alone or with `.N` (digits) or `-YYYYMMDD` (`SyslogParser.HasSyslogName`, the same function the syslog parser uses) | `NoMatch`, whatever the content: the syslog parser claims such a file by name and keeps it |
+| any other name, including `syslog.err`, `mysql-syslog`, a directory named `syslog` | the name does not matter |
+| UTF-8 BOM `EF BB BF` at the start of the head | removed; other BOMs (UTF-16) stay, so the first line is no header |
+| line separator | `\n`; a `\r` directly before `\n` is removed; any other `\r` stays part of the line (as in `LogLineReader`) |
+| empty lines (`\n` or `\r\n` alone) before the first non-empty line | passed over, any number within the head |
+| first non-empty line is a header of form A, B, C or D | `MatchContent` |
+| first non-empty line is a syslog line (traditional, RFC 3339, with `<PRI>`) | `NoMatch`: the two grammars are disjoint (a syslog line starts with `<`, a month name, or `DDDD-DD-DDT`; a header with `DDDD-DD-DD SP` or `DDDDDD SP`), so a file the syslog parser claims by its first line is never claimed here |
+| first non-empty line is anything else (a continuation line, white space only, NUL bytes, prose, a journal export field) | `NoMatch`, even when a later line of the head is a header (a copy starting inside an entry is not recognized) |
+| first non-empty line cut by the end of the head | a header when its prefix is complete (form A and C up to `]`, form B up to the space after the thread, form D up to the space after `mysqld_safe`), else `NoMatch` |
+| head empty or only empty lines | `NoMatch` |
+
+Cost: one pass over at most 4,096 bytes and one `TryParse` on raw bytes; nothing is decoded but the message of the one
+header line.
 
 ### Lines
 
@@ -476,7 +544,9 @@ spaces in `revision  as`; L20 has two spaces before `InnoDB:`.
 6. **Parser.** `MariaDbErrorLogParser.ParseAsync` reads lines with `LogLineReader`, removes a BOM from line 1, skips lines
    before the first header, resolves each header (throwing for the unset zone first), emits the previous entry's record when
    a header arrives, feeds continuation lines to the open entry (or drops them for a skipped entry), checks the token per
-   line, and emits the open entry only at the normal end of input. `Detect` applies `TryParse` to every line of the head.
+   line, and emits the open entry only at the normal end of input. `Detect` returns `NoMatch` for a name for which
+   `SyslogParser.HasSyslogName` is true, else applies `TryParse` to the first non-empty line of the head only (*Accepted
+   forms*, *Detection*); `SyslogParser.HasSyslogName` becomes `internal` for this, its body unchanged.
 7. **Registration.** `BuiltInParsers.Create` returns `[new JournalExportParser(), new MariaDbErrorLogParser(zone), new SyslogParser(zone)]`
    (specific before generic; a tie with the journal parser, both `MatchContent`, goes to the journal parser registered
    first). `ImportCommand`, `ParserRegistry` and the importer do not change.
@@ -490,6 +560,7 @@ spaces in `revision  as`; L20 has two spaces before `InnoDB:`.
 | Vandox.Core | `Model/LogLine.cs` | `Event` property and validation |
 | Vandox.Core | `LogParsing/MariaDbErrorLogParser.cs`, `MariaDbLine.cs`, `MariaDbMessage.cs`, `MariaDbEventClassifier.cs`, `MariaDbEvents.cs` (all new) | the parser |
 | Vandox.Core | `LogParsing/SyslogClock.cs` | new static `ResolveLocal`; behavior of the rest unchanged |
+| Vandox.Core | `LogParsing/SyslogParser.cs` | `HasSyslogName` from `private` to `internal` (used by `MariaDbErrorLogParser.Detect`); body and behavior unchanged |
 | Vandox.Core | `LogParsing/BuiltInParsers.cs` | list `journal`, `mariadb`, `syslog`; XML doc comment |
 | Vandox.Storage | `StorageLimits.cs`, `SchemaMigrator.cs`, `BatchWriter.cs`, `RecordQueries.cs` | schema 5, `log_lines.event` |
 
@@ -538,7 +609,7 @@ public sealed class MariaDbErrorLogParser : ILogParser
     public const string ParserType = "mariadb";
     public MariaDbErrorLogParser(DateTimeZone? timeZone);   // null: the first header fails the file with SyslogParser.TimeZoneNotSet
     public string Type { get; }                             // ParserType
-    public Confidence Detect(LogFile file, ReadOnlySpan<byte> head);   // MatchContent or NoMatch; the name is ignored
+    public Confidence Detect(LogFile file, ReadOnlySpan<byte> head);   // MatchContent or NoMatch: NoMatch for a syslog name, else the first non-empty line decides
     public Task ParseAsync(LogFile file, Stream input, IRecordEmitter output, CancellationToken cancellationToken);
 }
 
@@ -575,6 +646,9 @@ internal static string? ResolveLocal(DateTimeZone timeZone, SyslogTime time, Dat
 // SyslogTime.OutsideRange ("time outside the storable range"); never throws; instant is default unless null is returned.
 // Repeated hour: the earlier offset unless it lies more than BackwardTolerance before previous; skipped hour: shifted forward.
 
+// Vandox.Core.LogParsing.SyslogParser — visibility only (was private static); body, XML doc and behavior unchanged
+internal static bool HasSyslogName(string name);
+
 // Vandox.Core.LogParsing.BuiltInParsers.Create — signature unchanged, returns journal, mariadb, syslog
 ```
 
@@ -589,7 +663,7 @@ New (Tester):
 - `tests/Vandox.Core.Tests/MariaDbMessageTests.cs` — AC-E3 (builder rows), AC-E5 (builder rows), AC-M1
 - `tests/Vandox.Core.Tests/MariaDbEventClassifierTests.cs` — AC-C1, AC-C2
 - `tests/Vandox.Core.Tests/MariaDbErrorLogParserTests.cs` — AC-E1-E7, AC-T1-T3 (through the parser), AC-C2 (skipped
-  header), AC-C3, AC-D1, AC-X1-X3, AC-M2
+  header), AC-C3, AC-D1, AC-X1-X3, AC-M2, AC-M3 (the reader-allocation baseline as one private helper of the class)
 - `tests/Vandox.Core.Tests/LogLineTests.cs` — AC-W3
 - `testdata/logs/mariadb-error.log` — the fixture
 - `tests/Vandox.Backend.Tests/RepositoryFiles.cs` — the helper of `Vandox.Core.Tests` (`RepositoryFiles.Path`), so the
@@ -606,12 +680,14 @@ Existing (Tester):
 
 `MariaDbEvents` holds constants only (no executable line); its values are pinned by `MariaDbEventClassifierTests`.
 
-Existing test code that calls a changed signature: **none** (every changed signature is additive). Existing tests whose
+Existing test code that calls a changed signature: **none** (every changed signature is additive; `HasSyslogName` only
+widens its visibility and no test calls it). Existing tests whose
 expected behavior changes, adapted by the **Tester** in step 5:
 
 - `BuiltInParsersTests.BuiltInParsersCreateReturnsJournalThenSyslog` (three parsers; rename to name the new order),
   `BuiltInParsersCreateListIsAcceptedByTheRegistry` (types `journal`, `mariadb`, `syslog`),
-  `BuiltInParsersRegistryDetectsFilesByContentAndName` (row `mariadb.err` expects `mariadb`).
+  `BuiltInParsersRegistryDetectsFilesByContentAndName` (row `mariadb.err` expects `mariadb`; the new rows of AC-D2 are
+  added there; its assertion on the confidence is extended to the expected `Confidence` per row).
 - `SqliteStoreOpenTests.SqliteStoreOpenMigratesOlderSchema` (also drops `log_lines.event` before setting version 2) and
   `SqliteStoreOpenMigratesVersionThreeAndAddsHost` (also drops `event`, asserts the current version instead of the literal
   `4`, summary text updated); otherwise step 5 of the migration would fail on the existing column.
@@ -621,13 +697,20 @@ expected behavior changes, adapted by the **Tester** in step 5:
 
 - **Log import** (`docs/areas/log-import.md`): *Command* — `import.time_zone` is used for year-less syslog times and for
   MariaDB error log times; *System log parsers* first paragraph — the built-in list is `journal`, `mariadb`, `syslog`; new
-  section *MariaDB error log* — recognition by content (no path option), the header forms, entries and continuation lines,
-  the message bounds and marker, the fields (program, pid, host, priority), the events table (both wordings of the start
+  section *MariaDB error log* — recognition (no path option): the rule of *Accepted forms*, *Detection*, in full — the
+  first non-empty line of the head must be an entry header, no later line counts, files with a syslog name are never
+  claimed, so a syslog file stays with the syslog parser whatever lines it holds, and a copy that starts inside an entry
+  is not recognized; the header forms, entries and continuation lines,
+  the message bounds and marker (including held-back empty lines: only counted, trailing ones dropped), the fields
+  (program, pid, host, priority), the events table (both wordings of the start
   line, with the versions that write them) and the recovery rule, the time rules (local time, `import.time_zone`, the
   unset-zone failure, skip reasons), the forged-line limitation (0088 option 19: the query of a crash report and the user
   name of a failed login are written raw, so any client that reaches the port can forge an entry; an event is a
-  classification of text, not proof that MariaDB wrote it); the MariaDB versions whose formats were checked; that a server
-  with the packaged default logs to the journal, where its lines are classified only by #165;
+  classification of text, not proof that MariaDB wrote it; and neither the source type `mariadb` nor an event proves that
+  the file was a MariaDB error log: any file of the imported tree whose first non-empty line has a header's shape, such as
+  a file a web-space user wrote under a saved `/var/www`, is read as one, and `log` keeps its real path); the MariaDB
+  versions whose formats were checked; that a server with the packaged default logs to the journal, where its lines are
+  classified only by #165;
   *Related decisions* — 0088; *Implementation* — the new types.
 - **Wire format** (`docs/areas/wire-format.md`): `log_line` gains `event` (optional name, the event a producer recognized,
   empty for none; additive, version stays 1.0; link 0088); as for `host`: the Go encoder omits an empty `event`, the C#
@@ -686,9 +769,17 @@ Every edit has one owner, the **Dev** (as the area documents above); the Lead's 
   No other exception can come from input: no date or time value is built before the integer checks
   (`SyslogClock.ResolveLocal`), NodaTime is used only through `MapLocal`, no `int.Parse`/`DateTime.Parse` on input, no
   regular expression.
+- Detection (*Accepted forms*, *Detection*): a file is claimed only when its first non-empty line is an entry header and
+  its name is not a syslog name. One header-shaped line that someone gets into a file (a raw line feed in a syslog message,
+  client text in an application log) cannot move the file to this parser unless it is the file's first non-empty line;
+  a file the syslog parser claims, by its first line or by its name, is never claimed here (the first-line grammars are
+  disjoint, the name rule is the syslog parser's own function), so the syslog parser's evidence (sshd, kernel, OOM lines)
+  is never re-read as one forged MariaDB entry (AC-D1, AC-D2). What remains is a file whose first line its writer
+  controls, which no content rule can tell apart (*Forged lines* below).
 - Memory: bounded by the line reader (16 KiB plus its buffer) and one open entry (the first line at most 16,384 UTF-8
-  bytes plus kept lines at most 16,384; omitted and held-back empty lines only counted), independent of the input size
-  (AC-M1, AC-M2). Time: linear in the input; matching uses ordinal string operations on the first line only.
+  bytes plus kept lines at most 16,384; omitted and held-back empty lines only counted in a `long`, never materialized
+  beyond the kept 16,320 bytes, at the end of the entry as well), independent of the input size (AC-M1, AC-M2, AC-M3).
+  Time: linear in the input; matching uses ordinal string operations on the first line only.
 - Display: messages are stored as read (control characters kept, as for syslog); skip reasons and events are fixed texts;
   the importer never logs a message. Showing messages escaped is the web UI's job (area 12, Razor encodes HTML).
 - Forged lines: client text that MariaDB copies into its log can contain a line break and a fake header with a forged
@@ -702,15 +793,22 @@ Every edit has one owner, the **Dev** (as the area documents above); the Lead's 
   included, can insert an entry with any event, time and level, without crashing anything. Accepted and documented (record
   0088, option 19; the area document): there is no escaping in the format to tell such a line apart. Signature detection
   (#21) and outage reconstruction (#23) must not treat an `event` as proof that MariaDB wrote the line.
-- No file access, no path handling in the parser.
+- Origin of the file (Security, N1): the source type `mariadb` says which parser read the file, not that MariaDB wrote it.
+  Any file of the imported tree whose first non-empty line has a header's shape is read as a MariaDB error log with
+  events, for example a file a web-space user wrote under a saved `/var/www`, or an application log whose first line is
+  client text; its `log` field keeps the real path. Record 0088 option 19 and the area document say so, and #21 and #23
+  must treat neither `source` nor `event` as proof of origin.
+- No file access in the parser; the only path handling is the syslog-name check on the base name (`HasSyslogName`, the
+  syslog parser's own function on the cleaned name).
 
 ## Decision records
 
 - [`docs/decisions/0088-mariadb-error-log-entries-by-content-and-lifecycle-events-in-log-line.md`](../../docs/decisions/0088-mariadb-error-log-entries-by-content-and-lifecycle-events-in-log-line.md)
   (Proposed, indexed): where the classification lives (`log_line.event`, in Go and C# and why both), the value rule,
-  detection by content without a path option, entries with continuation lines, head-with-marker bounds,
-  `import.time_zone` for MariaDB times, the recovery end rule, the field mapping, forged lines (crash-report query and
-  failed-login user name).
+  detection by the first non-empty line without a path option and never for a syslog name (the any-line variant
+  rejected), entries with continuation lines, head-with-marker bounds, `import.time_zone` for MariaDB times, the recovery
+  end rule, the field mapping, forged lines (crash-report query and failed-login user name) and that neither `source` nor
+  `event` proves the file's origin.
 
 ## Challenge
 
@@ -752,6 +850,56 @@ re-checked at the tags named in *Problem / root cause*.
   check and record 0088 (*Consequences*) reference #165. Not escalated: the content-based detection meets the intent of
   "path configurable" (the file is found wherever it lies) and a path has no meaning for an import of copies; the PR
   description repeats the deviation for the Product Manager.
+
+## Security review (plan)
+
+Security, round 1: `CHANGES_REQUIRED` (B1, B2 blocking; N1 non-blocking). Every finding answered below; the code claims
+were re-checked at head `cd883b5`.
+
+- **B1 — content detection takes syslog files away from the syslog parser.** Accepted. Confirmed in the code:
+  `SyslogParser.Detect` (`src/Vandox.Core/LogParsing/SyslogParser.cs:170-197`) returns at most `MatchName`, and
+  `ParserRegistry.Detect` (`ParserRegistry.cs:53-70`) takes the strictly highest confidence, so under the earlier AC-D1
+  one header-shaped line anywhere in the first 4 KiB of a syslog file made it a MariaDB file: the syslog lines before it
+  skipped, all after it continuation lines of one forged entry cut at 16 KiB. Fix chosen (both of the reviewer's
+  mechanisms, the stricter one plus the name rule): `Detect` looks at the **first non-empty line only** and returns
+  `NoMatch` for every name `SyslogParser.HasSyslogName` accepts (made `internal`, body unchanged). The first-line grammars
+  are disjoint, checked in `SyslogLine.TryParse`: a syslog line starts with `<`, a month name (`ParseTraditional`) or
+  `DDDD-DD-DDT` (`ParseRfc3339` requires `T` at index 10), a header with `DDDD-DD-DD SP` or `DDDDDD SP` (index 4 a digit,
+  where RFC 3339 requires `-`), so a file the syslog parser claims by its first line is never claimed here, and a file it
+  claims by name never either. The stricter rule also narrows N1: an injected line elsewhere in any file (a PHP or
+  web-server error log, an application log) no longer makes it a MariaDB file. Cost, accepted: a copy that starts inside
+  an entry (the output of `tail`) and a MariaDB log whose first line has no header are listed as not recognized, which is
+  what happens to them before this change. Real error logs normally start with a header: MariaDB's lines go through
+  `sql_print_*` or `mysqld_safe`, and the Debian logrotate rule (`debian/mariadb-server-10.6.mysql-server.logrotate` at
+  `mariadb-10.6.12`: `create`, `compress`, no `copytruncate`, `postrotate` runs `mysqladmin ... flush-error-log`) renames
+  the file and has the server reopen it, so a rotated file ends and the new one begins between two writes; the server's
+  own logrotate configuration is *unverified*. The whole list of
+  detection inputs was enumerated, not only the reported one (*Accepted forms*, *Detection*: names, BOMs, `\r`, empty
+  lines, the forms of the first line, a cut first line, an empty head). AC-D1 now has the reviewer's rows (traditional,
+  RFC 3339 and `<PRI>` first line with a header on line 2; the syslog names with a header head) and the continuation-first
+  row turned to `NoMatch`; AC-D2 has the same through the registry (`syslog`, `MatchName`; `syslog.1` and `kern.log` with
+  a header head → `syslog`). Record 0088 option 8 states the rule and the rejected any-line variant, *Consequences* the
+  cost; the area document gets the rule (task 20); spec AC1 and *Behavior* name it.
+- **B2 — the bound on held-back empty lines is not tested.** Accepted, with one change to the requested form. New AC-M3
+  (through the parser): a header, then the pattern `\n` and the trailer `x` → one record `h` + 16,319 `\n` +
+  `\n[16760898 lines omitted]` (16,345 bytes), `Truncated` true; without the trailer → message `h`, `Truncated` false;
+  allocation below 8 MiB. AC-M1 gains the same two rows on `MariaDbMessage` with a retention bound (4,000,000 empty lines).
+  The change: the requested "allocation < 8 MiB over 64 MiB of `\n`" cannot pass for any implementation in the squad's
+  *Test* run, which builds Debug: measured in a scratch program with a copy of `LogLineReader`, the reader alone allocates
+  6.98 GB over 64 MiB of `\n` in Debug (104 bytes per `ReadAsync` state machine) and 33 KB in Release. So the bound
+  applies to the allocation beyond a plain `LogLineReader` loop over the same input, in the same test, for AC-M2 too
+  (whose 65,537 lines already take 6.8 MB of its 8 MiB in Debug, a latent defect of the earlier plan). The size is 16 MiB
+  of `\n`, not 64 MiB: with the reader baseline, 64 MiB would take about 20 s per row in Debug (estimated from the
+  measurement), while 16 MiB still puts each faulty representation the finding names at least four times over the bound
+  (one reference per line 128 MiB, one UTF-16 `\n` per line 32 MiB, whether held or built at the end), following the
+  *Test time limits* paragraph of `.squad/stack.md` (the smallest input that still detects the failure). The plan states
+  the consequence for the Dev: no async call per line other than `LogLineReader.ReadAsync`.
+- **N1 — `source` `mariadb` is no proof that the file was a MariaDB error log.** Accepted. Record 0088 option 19 and
+  *Consequences*, the area document's forged-line paragraph (task 20), *Security considerations* (*Origin of the file*)
+  and the spec say that neither the source type nor an event proves the file's origin, that any file of the imported tree
+  whose first non-empty line has a header's shape is read as one (a file a web-space user wrote under a saved `/var/www`,
+  an application log whose first line is client text), and that `log` keeps the real path. After B1 the case needs the
+  file's first non-empty line, not any line of its head.
 
 ## Out of scope / follow-ups
 
