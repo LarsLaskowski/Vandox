@@ -16,7 +16,7 @@ import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from analyzer_common import BASE_REF, merge_base, shell_check  # noqa: E402  (shared helpers next to this script)
+from analyzer_common import BASE_REF, merge_base, lint_check  # noqa: E402  (shared helpers next to this script)
 
 STEPS = [
     ("go vet", ["go", "vet", "./..."]),
@@ -36,7 +36,7 @@ def main():
             print(output[-6000:])
         print(f"{name}: {'PASS' if result.returncode == 0 else 'FAIL'}\n")
         failed = failed or result.returncode != 0
-    failed = not shell_check() or failed
+    failed = not lint_check() or failed
     print("PASS" if not failed else "FAIL")
     return 0 if not failed else 1
 

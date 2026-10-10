@@ -51,7 +51,8 @@ repository (record 0074): keep it true when the build changes.
 ## Analyzer gate
 
 `analyzer-check.py` runs `analyzer-check-go.py` and `analyzer-check-dotnet.py`; each must pass, and both also
-run `shellcheck` on changed shell scripts when it is installed. The .NET part needs *Restore* first.
+run the lint pass over changed shell scripts, workflows and Dockerfiles described below. The .NET part needs
+*Restore* first.
 
 1. `go vet ./...` for the whole module.
 2. `golangci-lint run --new-from-merge-base=origin/main --whole-files ./...`, which reports every issue
@@ -74,8 +75,13 @@ run `shellcheck` on changed shell scripts when it is installed. The .NET part ne
 Other SonarQube Cloud findings (further rules, duplication, hotspots) have no local equivalent and arrive in
 squad step 11.
 
-Changed shell scripts (`*.sh`) are checked with `shellcheck` when it is installed; the script says so when it
-skips them. Without it, SonarQube Cloud's shell rules (`shelldre:*`) only report in squad step 11.
+Changed shell scripts (`*.sh`), GitHub workflows (`.github/workflows/*.yml`) and Dockerfiles are checked with
+`shellcheck`, `actionlint` and `hadolint`; the SessionStart hook installs the three as pinned, checksum-verified
+binaries (`.claude/hooks/install-linters.sh`), and the gate reports NOT RUN for one that is missing (a refused
+download, for example). The gate itself checks two SonarQube Cloud shell rules shellcheck does not report:
+`shelldre:S7679` (a positional parameter `$1`…`$9` used as a word of its own inside a function — assign it to a
+local variable first) and `shelldre:S7688` (`[ … ]` instead of `[[ … ]]`). Other `shelldre:*` findings only report
+in squad step 11.
 
 Two analyzer rules collide and are settled once (record 0074): RH3001 forbids the negation operator `!`,
 S1125 forbids comparing a boolean with a literal (`== false`, `is false`). Write positive conditions, early

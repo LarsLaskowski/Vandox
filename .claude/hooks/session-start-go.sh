@@ -7,6 +7,9 @@ if [[ "${CLAUDE_CODE_REMOTE:-}" != "true" ]]; then
   exit 0
 fi
 
+# Linters for the analyzer gate (shellcheck, actionlint, hadolint), pinned and checksum-verified; never fails the session.
+bash "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/install-linters.sh"
+
 cd "${CLAUDE_PROJECT_DIR:-$(pwd)}"
 
 go mod download
