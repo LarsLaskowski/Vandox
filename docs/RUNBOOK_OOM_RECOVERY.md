@@ -44,9 +44,12 @@ free -m
 cat /proc/pressure/memory
 swapon --show
 grep -E 'oom_kill|pswpin|pswpout' /proc/vmstat
-journalctl -k -S -2h -g 'Out of memory|Killed process' --no-pager | tail -n 20
+journalctl _TRANSPORT=kernel -S -2h -g 'Out of memory|Killed process' --no-pager | tail -n 20
 systemctl --failed --no-legend
 ```
+
+`_TRANSPORT=kernel` instead of `-k` also finds kills from before a reboot (`-k` shows only the current
+boot); that needs a persistent journal (`ls /var/log/journal`).
 
 Check that swap is active. The swap file is `/swapfile` and has an entry in `/etc/fstab`, so it comes back
 after a reboot; if `swapon --show` is empty anyway, run `swapon -a`. The `oom_kill` counter shows how many
@@ -56,10 +59,11 @@ kills happened since boot.
 
 Plesk's backup manager `backupmng` is started by cron every 15 minutes
 (`/etc/cron.d/plesk-backup-manager-task`) and catches up missed backups, which is what happened on 2 Oct.
-Move the cron file aside so no backup starts while you work; step 3 moves it back:
+Move the cron file aside so no backup starts while you work; step 4 moves it back:
 
 ```bash
-mv /etc/cron.d/plesk-backup-manager-task /root/plesk-backup-manager-task.held
+f=/etc/cron.d/plesk-backup-manager-task
+[ -e "$f" ] && mv "$f" /root/plesk-backup-manager-task.held
 ```
 
 List the largest consumers and what is running right now:
@@ -74,7 +78,8 @@ pgrep -a -f 'pzstd|pmm' || echo "no backup process running"
 
 Check again with `free -m` and `cat /proc/pressure/memory`. Continue only when both are inside the limits of
 the table above. If memory stays low with no backup running, the consumer is something else in the `ps`
-list: note it (step 5) and stop that service reversibly (`systemctl stop`), never kill `mariadbd`.
+list: note it (step 5) and stop that service reversibly (`systemctl stop`). Never kill `mariadbd`, and never
+touch `nydus-ex`, `nydus-ex-api` or `qemu-guest-agent`.
 
 ## Step 2: start services one at a time
 
@@ -100,12 +105,14 @@ without closing the shell.
 ```bash
 # mem_gate [MIN_AVAILABLE_MIB] [MAX_WAIT_SECONDS]
 mem_gate() {
-  local min=${1:-400} max=${2:-300} waited=0 avail psi
+  local min=${1:-400} max=${2:-300} waited=0 avail psi psi_ok
   while :; do
     avail=$(awk '/^MemAvailable:/ {print int($2/1024)}' /proc/meminfo)
     psi=$(awk '/^some/ {split($2, a, "="); print a[2]}' /proc/pressure/memory 2>/dev/null)
-    psi=${psi:-0}
-    if [ "$avail" -ge "$min" ] && [ "${psi%.*}" -lt 10 ]; then
+    psi_ok=1
+    # without PSI (n/a) only MemAvailable is checked
+    if [ -n "$psi" ]; then [ "${psi%.*}" -lt 10 ] || psi_ok=0; else psi="n/a"; fi
+    if [ "$avail" -ge "$min" ] && [ "$psi_ok" -eq 1 ]; then
       echo "ok: MemAvailable=${avail} MiB, PSI some avg10=${psi}"
       return 0
     fi
@@ -141,21 +148,10 @@ vandox_recover
 
 If it stops, go back to step 1. Start the remaining units later in the same order; do not skip ahead.
 
-## Step 3: release the backup manager
-
-When step 4 passed, the system has been stable for at least 15 minutes and `mem_gate 600 60` passes, move
-the cron file back. The missed backup then runs at the next cron tick as a normal backup:
+## Step 3: verify
 
 ```bash
-mv /root/plesk-backup-manager-task.held /etc/cron.d/plesk-backup-manager-task
-```
-
-Do not forget this: while the file is held, no scheduled backup runs at all.
-
-## Step 4: verify
-
-```bash
-systemctl is-active mariadb sw-cp-server sw-engine psa apache2 nginx postfix dovecot amavis spamassassin
+systemctl is-active "${units[@]}"   # all 15 units from step 2; every line must say active
 plesk db "SELECT 1"
 curl -sk -o /dev/null -w '%{http_code}\n' https://127.0.0.1:8443/    # 200 or 302
 postqueue -p | tail -n 1
@@ -167,14 +163,26 @@ Done when every unit says `active`, MariaDB answers, the panel responds, the mai
 memory values are inside the limits. Watch for another ten minutes; memory pressure often returns when the
 mail filters start working through the backlog.
 
+## Step 4: release the backup manager
+
+When step 3 passed, the system has been stable for at least 15 minutes and `mem_gate 600 60` passes, move
+the cron file back. The missed backup then runs at the next cron tick as a normal backup:
+
+```bash
+mv /root/plesk-backup-manager-task.held /etc/cron.d/plesk-backup-manager-task
+```
+
+Do not forget this: while the file is held, no scheduled backup runs at all.
+
 ## Step 5: record what happened
 
 Vandox imports logs and explains outages afterwards, so keep the evidence:
 
 ```bash
-journalctl -k -S -6h > /var/tmp/oom-$(date +%F-%H%M).kernel.log
-grep -E 'oom_kill|pswpin|pswpout' /proc/vmstat >> /var/tmp/oom-$(date +%F-%H%M).kernel.log
-ls -l /etc/cron.d/plesk-backup-manager-task   # must exist; if not, do step 3
+f=/var/tmp/oom-$(date +%F-%H%M).kernel.log
+journalctl _TRANSPORT=kernel -S -6h > "$f"
+grep -E 'oom_kill|pswpin|pswpout' /proc/vmstat >> "$f"
+ls -l /etc/cron.d/plesk-backup-manager-task   # must exist; if not, do step 4
 ```
 
 Note the time of the first kill, the victim, what was running (backup?), and the time each step finished. If
@@ -182,6 +190,6 @@ a step needed a change to this runbook, change the runbook.
 
 ## Limits
 
-- This runbook does not change memory settings, `OOMScoreAdjust` or services; those belong to the tuning
-  work and the service inventory ([0026](decisions/0026-services-disabled-reversibly-only.md)).
+- This runbook does not change memory settings, `OOMScoreAdjust` or service configuration; those belong to the
+  tuning work and the service inventory ([0026](decisions/0026-services-disabled-reversibly-only.md)).
 - Hosting-provider agents (`nydus-ex`, `nydus-ex-api`, `qemu-guest-agent`) are never touched.
