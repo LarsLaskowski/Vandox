@@ -29,8 +29,9 @@ Use it when one or more of these is true:
 1. **Free memory before starting anything.** A service started into full memory is killed again.
 2. **Start services one at a time, in the fixed order of step 2,** and check available memory after each
    one. Never `systemctl restart` everything at once.
-3. **Do not reboot as a first reaction.** A reboot triggers the catch-up backup (step 3) while services
-   start. Reboot only if the server is otherwise unusable, and then follow step 3 first.
+3. **Hold the backup manager before anything else, and do not reboot as a first reaction.** After a reboot
+   Plesk catches up a missed backup while services start (step 3). Reboot only if the server is otherwise
+   unusable, and hold the backup manager first (step 1): the hold survives the reboot.
 4. **Stop when the memory check fails.** Do not push the next service in; find the consumer (step 1).
 
 ## Thresholds (proposal)
@@ -56,9 +57,18 @@ Check that swap is active. The swap file is `/swapfile` and has an entry in `/et
 2026-10-10), so it comes back after a reboot; if `swapon --show` is empty anyway, run `swapon -a`. The
 `oom_kill` counter shows how many kills happened since boot.
 
-## Step 1: free memory first
+## Step 1: hold the backup manager, then free memory
 
-List the largest consumers and what is running right now:
+First stop Plesk from starting a backup while you work. Plesk's backup manager `backupmng` is started by cron
+every 15 minutes (at :06, :21, :36 and :51) from `/etc/cron.d/plesk-backup-manager-task` and runs due and
+missed scheduled backups. Moving the cron file aside needs no database and is undone by moving it back
+(step 3):
+
+```bash
+mv /etc/cron.d/plesk-backup-manager-task /root/plesk-backup-manager-task.held
+```
+
+Then list the largest consumers and what is running right now:
 
 ```bash
 ps -eo pid,ppid,user,rss,etime,args --sort=-rss | head -n 15
@@ -68,11 +78,12 @@ pgrep -a -f 'pzstd|pmm' || echo "no backup process running"
 `rss` is in KiB. A running Plesk backup (`pzstd`, about 200 MiB) is the usual cause: stop it before
 anything else.
 
-- **OPEN:** the Plesk-native way to cancel a running backup. The CLI utilities `plesk bin pleskbackup`,
-  `plesk bin scheduled-backup` and `plesk bin backup-storage` exist on the server; which one lists or
-  cancels a running task is to be found in their `--help` output and in the Backup Manager of the panel.
-- If it cannot be cancelled that way: `pkill -TERM pzstd`. Plesk marks that backup as failed; it is run
-  again later (step 3).
+- Stop it with `pkill -TERM pzstd`. Plesk marks that backup as failed; it is run again later (step 3).
+- **OPEN:** whether killing `pzstd` alone ends the whole backup cleanly, or whether the parent processes
+  must be stopped too (and whether temporary files remain). `plesk bin scheduled-backup` and
+  `plesk bin pleskbackup` only create and run backups; neither showed a cancel command. To find out, run
+  `ps -eo pid,ppid,etime,args --forest | grep -B6 -A4 '[p]zstd'` during the next backup (about 00:20–00:50)
+  and write the process chain down here.
 
 Check again with `free -m` and `cat /proc/pressure/memory`. Continue only when both are below the limits of
 the table above. If memory stays low with no backup running, the consumer is something else in the `ps`
@@ -143,23 +154,40 @@ vandox_recover
 
 If the loop stops, go back to step 1. Start the remaining units later in the same order; do not skip ahead.
 
-After `psa` and `sw-engine` are up, do step 3 **at once**: on 2 Oct the catch-up backup began about eight
-minutes after the reboot.
+Leave the backup manager held while you do this. Do not wait for `psa`: `backupmng` most likely reads the
+schedule from the Plesk database, so the first cron tick after `mariadb` is up is the one that can start
+the backup. On
+2 Oct the reboot was at 06:51 and MariaDB was killed at 06:59, which fits a catch-up backup started by the
+06:51 tick.
 
-## Step 3: the catch-up backup after a reboot
+## Step 3: release the backup manager
 
-Plesk starts a backup it missed. Do not let it run while services start or while memory is below the
-limits.
+The held backup is not lost: after the release, the next cron tick (within 15 minutes) runs the missed
+scheduled backup as a normal backup.
 
-- **Decision (proposal):** postpone. No backup runs until all units of step 2 are active for at least
-  15 minutes and `mem_gate 600 60` passes. Then start it by hand outside business hours, or let the next
-  scheduled run take it.
-- **OPEN:** how to pause it. In the panel: Tools & Settings → Backup Manager → Scheduled Backup Settings.
-  The CLI counterpart is probably `plesk bin scheduled-backup`. The catch-up run is most likely started by
-  `/etc/cron.d/plesk-backup-manager-task` (the only backup-related entry in `/etc/cron.d`; root's crontab
-  has none). Still to confirm, then write down with the exact commands: what that cron file runs, and which
-  switch in the panel or in `scheduled-backup` stops the catch-up run without losing the schedule.
-- If a backup started anyway, go to step 1 and stop it.
+Release it only when all of this is true:
+
+- every unit of step 2 is active and step 4 passed,
+- the system has been stable for at least 15 minutes,
+- `mem_gate 600 60` passes.
+
+```bash
+mv /root/plesk-backup-manager-task.held /etc/cron.d/plesk-backup-manager-task
+ls -l /etc/cron.d/plesk-backup-manager-task
+```
+
+If you would rather have the backup at night, release the hold in the evening instead. A normal backup night
+is survivable now: the full backup in the night to 2026-10-10 raised the CPU to 95 % but caused no OOM kill.
+
+**Never forget the release:** while the file is held, no scheduled backup runs at all. Step 5 checks it.
+
+Alternative with the Plesk CLI, only once MariaDB is up: `plesk bin scheduled-backup --list -all` shows the
+tasks; `--disable <hourly|daily|weekly|monthly>` and later `--enable` switch one off and on. Save the
+`--list` output before disabling, because it is not known whether `--enable` restores every setting. The
+cron hold above stays the first choice because it also works while the database is down.
+
+- **OPEN:** confirm the hold works. In a quiet minute move the file away, check that no `backupmng` starts at
+  the next tick (`pgrep -a backupmng`), and move it back. Also check that Plesk does not recreate the file.
 
 ## Step 4: verify
 
@@ -187,6 +215,13 @@ grep -E 'oom_kill|pswpin|pswpout' /proc/vmstat >> /var/tmp/oom-$(date +%F-%H%M).
 
 Note the time of the first kill, the victim, what was running (backup?), and the time each step finished. If
 a step needed a change to this runbook, change the runbook.
+
+Last check, so no backup is silently skipped from now on:
+
+```bash
+ls -l /etc/cron.d/plesk-backup-manager-task   # must exist; if not, step 3
+ls /root/plesk-backup-manager-task.held 2>&1  # must say "No such file"
+```
 
 ## Limits
 
