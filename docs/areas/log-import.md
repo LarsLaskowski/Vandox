@@ -21,8 +21,8 @@ imported data is kept apart from live data (it never raises alerts) by the detec
   access to that user only (`chown -R 65532:65532` and `chmod -R u+rX`, or `setfacl -R -m u:65532:rX`) and never makes
   the copy world-readable: a copied `/var/log` holds files such as `auth.log` and `mail.log` with mode `0640 root:adm`.
 - The backend option `import.time_zone` (IANA time zone ID, ordinal match against NodaTime's embedded database, no
-  default) names the zone of the server the logs come from. It is used only for year-less syslog times (see *System log
-  parsers*); a value that is no zone ID is refused at start-up with the line of the key and without the value. The
+  default) names the zone of the server the logs come from. It is used for year-less syslog times (see *System log
+  parsers*) and for the local times of the MariaDB error log (see *MariaDB error log*); a value that is no zone ID is refused at start-up with the line of the key and without the value. The
   example file holds it commented out.
 
 ## Input
@@ -119,7 +119,8 @@ A parser turns the lines of one file into records. The importer and every parser
 ## System log parsers
 
 `BuiltInParsers.Create(timeZone)` is the list `vandoxd import` registers when no hook replaces it: `journal`
-(`JournalExportParser`), then `syslog` (`SyslogParser`). The journal parser claims a file by content (a head that begins
+(`JournalExportParser`), then `mariadb` (`MariaDbErrorLogParser`, see *MariaDB error log*), then `syslog`
+(`SyslogParser`). The journal parser claims a file by content (a head that begins
 with a `__CURSOR=` or `__REALTIME_TIMESTAMP=` line and holds a `__REALTIME_TIMESTAMP=` line; the file name never
 matters); the syslog parser claims weakly (name match) a file named `syslog` or `kern.log` with an optional `.N` or
 `-YYYYMMDD` suffix, or whose first line has a syslog header. Both parsers produce `log_line` records with origin `import`
@@ -205,6 +206,87 @@ before a failure must be a prefix of a complete parse.
 configuration, not checked on the server), so every kernel line is in both files and importing both stores it twice.
 There is no deduplication across sources.
 
+## MariaDB error log
+
+**Recognition.** The parser `mariadb` has no path option: `vandoxd import` reads copies and archives under any layout, so a
+server path would match nothing, and the file is found by its content. `Detect` returns a content match only when the
+file's name is not a syslog name (`syslog` or `kern.log`, alone or with `.N` or `-YYYYMMDD`, the function the syslog parser
+uses; `syslog.err`, `mysql-syslog` and a directory named `syslog` do not count) **and** the **first non-empty line** of the
+first 4,096 bytes is an entry header (see below). A UTF-8 byte order mark at the start of the head is removed, a `\r`
+directly before `\n` is removed, empty lines before the first non-empty line are passed over, and a header cut by the end
+of the head counts when its prefix is complete. No later line of the head is looked at, so one header-shaped line that
+someone gets into another file cannot take it away from its parser: a syslog file stays with the syslog parser whatever
+lines it holds, and a file the syslog parser claims by its first line is never claimed here (a syslog line starts with
+`<`, a month name or `DDDD-DD-DDT`, a header with `DDDD-DD-DD ` or `DDDDDD `). The price: a copy that starts inside an
+entry (the output of `tail`), a MariaDB log whose first line has no header and a MariaDB error log under a syslog name are
+listed as not recognized. Neither the source type `mariadb` nor an event proves that the file was a MariaDB error log: any
+imported file whose first non-empty line has a header's shape, such as one a web-space user wrote under a saved
+`/var/www`, is read as one, and `log` keeps its real path.
+
+**Entries.** A line is an **entry header** when its bytes begin with one of four ASCII forms, checked on the raw line
+before any decoding (the hour is two digits or a space and one digit): `YYYY-MM-DD HH:MM:SS <thread> [ERROR|Warning|Note] `
+(the server line; the thread is 1 to 20 digits, not stored), `YYYY-MM-DD HH:MM:SS 0x<1 to 16 lower-case hex digits>` and
+one or more spaces (an InnoDB time stamp, no level), `YYMMDD HH:MM:SS [ERROR|Warning|Note] ` (the signal handler, year
+2000 + YY) and `YYMMDD HH:MM:SS mysqld_safe ` (the start script, program `mysqld_safe`). Digits of month, day, hour,
+minute and second are not range-checked by the grammar. Every other line, an empty one included, is a continuation line.
+A header and the continuation lines after it up to the next header or the end of input are **one record**:
+`source` `mariadb`, origin `import`, sequence 0, `log` the file name as listed, `host` empty, `pid` 0, `program` empty
+(`mysqld_safe` for the start script), `priority` 3 for `ERROR`, 4 for `Warning`, 6 for `Note` and none without a level, the
+message the header's message and the continuation lines joined by `\n`. Inner empty lines are kept, trailing ones are
+dropped. A UTF-8 byte order mark is removed from line 1 only; on any other line it is part of the text. Continuation lines
+before the first header are skipped: "empty line" for an empty one, "line before the first entry" for any other.
+
+**Bounds.** The line reader cuts a line at 16 KiB (`truncated`). A message of at most 16,384 UTF-8 bytes (decoded; invalid
+bytes count three) is kept whole. A longer entry with at least one continuation line keeps its first line (cut at a
+character boundary to 16,320 bytes if longer) and the following whole lines while the text stays within 16,320 bytes,
+then `\n[N lines omitted]` with the exact number of lines left out (trailing empty lines not counted), and `truncated`. A
+long header line alone is cut to 16,384 bytes without a marker. Empty lines are only kept while the text stays within
+16,320 bytes; the others are counted, never stored, so millions of empty lines cost a counter. A continuation line is
+decoded only when it is kept, so memory does not depend on the input size. An entry that is cut or whose line was cut by
+the reader has `truncated` set.
+
+**Events.** The record field `event` (see [Wire format](wire-format.md)) is set from the level and the header's first
+line, with ordinal, case-sensitive string operations and no regular expression:
+
+| Event | Level | Header message |
+| ----- | ----- | -------------- |
+| `mariadb.start` | `Note` | starts with `Starting MariaDB ` and contains ` as process ` (10.6.12 and later, also 10.3.39 and 10.5.22); or a non-empty text, ` (server `, later `) starting as process ` and ends with ` ...` (10.6.7 to 10.6.11) |
+| `mariadb.ready` | `Note` | ends with `: ready for connections.` |
+| `mariadb.shutdown` | `Note` | ends with `: Normal shutdown` |
+| `mariadb.shutdown_complete` | `Note` | ends with `: Shutdown complete` |
+| `mariadb.abort` | `ERROR` | a non-empty text, ` got signal `, 1 to 3 digits, ` ;` at the end |
+| `mariadb.recovery_start` | `Note` | starts with `InnoDB: Starting crash recovery`, or is exactly `Starting table crash recovery...` |
+| `mariadb.recovery_end` | `Note` | is exactly `Crash table recovery finished.`, or starts with `InnoDB: ` and contains ` started; log sequence number ` while a recovery is open |
+
+Anything else, and every entry without a level, has no event. A recovery is open from a `mariadb.recovery_start` entry until
+the next `mariadb.recovery_end` or `mariadb.start` entry in file order; an entry skipped for its time is not classified and
+does not change that. Only the header's first line counts. The formats were checked in the MariaDB source at 10.3.39,
+10.5.22, 10.6.7, 10.6.11, 10.6.12, 10.6.22, 10.6.28 and 10.11.9; a lifecycle line that another version words differently
+gets no event and the entry is still imported. The `mysqld_safe` "ended" line is not classified.
+
+**Time.** MariaDB writes the server's local time without a zone. It is read in `import.time_zone` with the rules of
+*Time zone* above (the skipped hour is shifted forward, the repeated hour takes the earlier offset unless that lies more
+than ten minutes before the previous resolved header), through `SyslogClock.ResolveLocal`. The year is part of the header.
+The digits are checked as integers before any date is built, and the file is skipped entry by entry: an entry whose time
+does not exist (month 13, `2026-02-30`, hour 24, minute or second 60) is skipped once with the header's line number as
+"invalid date", and one outside 1677-09-21 to 2262-04-11 as "time outside the storable range"; its continuation lines are
+neither records nor skips of their own, and a skipped header leaves the previous instant unchanged. With `import.time_zone`
+unset, the first header makes `ParseAsync` throw `InvalidOperationException` with "import.time_zone is not set" before its
+time is looked at; the file is listed as failed, setting the option and importing again completes it. As for every parser, the
+open entry is emitted only at the normal end of input, never when the parse ends by an exception.
+
+**Forged lines (limitation).** MariaDB writes some client text raw into its log: the query of a crash report (up to 64 KiB,
+`my_safe_print_str`) and, without any credentials, the user name of a failed login (`Access denied for user '<name>'@...`
+at the default `log_warnings` of 2, cut to 128 characters but not filtered). A line break in that text followed by a fake
+header splits the entry there and creates an entry of its own with any time, level and event. The format has no escaping
+that would tell such a line apart, so this is documented, not prevented: an event is a classification of text and no proof
+that MariaDB wrote the line, and later analysis (signature detection, outage reconstruction) must not treat it as one.
+
+**Default installations.** Under systemd the packaged MariaDB sends its error log to the journal (the Debian packaging leaves
+`log_error` commented out), so a server with the packaged default has no error log file and this parser imports nothing; the
+lines in the journal arrive through the journal and syslog parsers as plain lines of program `mariadbd` without events.
+Classifying them is issue #165.
+
 ## Result
 
 - **Outcomes per file:** imported, already imported, not recognized (with the reason), failed (with the reason).
@@ -227,6 +309,7 @@ There is no deduplication across sources.
 - [0084](../decisions/0084-log-line-record-gets-an-optional-host-field.md) — why `log_line` gets an optional `host`.
 - [0085](../decisions/0085-syslog-time-zone-from-import-time-zone-with-embedded-tzdb.md) — why `import.time_zone` has no default, NodaTime and the year rules.
 - [0086](../decisions/0086-system-log-parsers-generic-syslog-claim-and-grouped-kernel-reports.md) — why the generic syslog claim and grouped kernel reports.
+- [0088](../decisions/0088-mariadb-error-log-entries-by-content-and-lifecycle-events-in-log-line.md) — why the MariaDB error log is detected by content, kept as entries and classified into an `event` field.
 
 - [0014](../decisions/0014-log-import-is-a-core-component.md) — why historical import and log shipping are core.
 - [0021](../decisions/0021-no-pseudonymization-of-log-data.md) — why log data is stored unchanged.
@@ -244,5 +327,6 @@ There is no deduplication across sources.
 
 `Vandox.Import` (`Importer`, `Scanner`, `ImportLimits`), `Vandox.Core.LogParsing` (`ILogParser`, `ParserRegistry`,
 `LogLineReader`, `BuiltInParsers`, `JournalExportParser`, `JournalExportReader`, `SyslogParser`, `SyslogLine`,
-`SyslogClock`, `KernelReportGrouper`, `Utf8Text`), `Vandox.Core.Model` (`StorableTime`), `Vandox.Core.IO` (`SecureRoot`, `FileProbe`), `Vandox.Backend/Cli` (`ImportCommand`,
+`SyslogClock`, `KernelReportGrouper`, `MariaDbErrorLogParser`, `MariaDbParseSession`, `MariaDbLine`, `MariaDbMessage`,
+`MariaDbEventClassifier`, `MariaDbEvents`, `Utf8Text`), `Vandox.Core.Model` (`StorableTime`), `Vandox.Core.IO` (`SecureRoot`, `FileProbe`), `Vandox.Backend/Cli` (`ImportCommand`,
 `ImportSummaryWriter`). The checklist for a new parser is in `.squad/project.md` (*Integration surface*).

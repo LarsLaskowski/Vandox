@@ -264,7 +264,7 @@ internal sealed class MariaDbLine
     /// <returns>The header, or <c>null</c></returns>
     private static MariaDbLine? ParseShort(SyslogTime time, ReadOnlySpan<byte> rest)
     {
-        ReadOnlySpan<byte> safe = "mysqld_safe "u8;
+        var safe = "mysqld_safe "u8;
 
         if (rest.StartsWith(safe))
         {

@@ -134,9 +134,12 @@ producer read; false for a configured subset or a reduction for size). When `ava
 `log` (required short text: `journal`, or the file path: the absolute path for the agent, the path as the import lists
 it for imported records, relative to the import root or archive and with its rotation suffix), `host` (optional short
 text: the host that wrote the line, empty when unknown), `program` (short text), `pid` (>= 0), `priority` (optional, 0
-to 7), `message` (text, may be empty), `truncated` (the producer cut the message to 16384 bytes). `host` is an additive
-optional field, so the wire version stays 1.0 ([0084](../decisions/0084-log-line-record-gets-an-optional-host-field.md)).
-The Go encoder omits an empty `host`; the C# decoder reads a line without it as an empty host.
+to 7), `message` (text, may be empty), `truncated` (the producer cut the message to 16384 bytes), `event` (optional name,
+at most 128 bytes of letters, digits and `._-` as for other names: the event a producer recognized in the line, such as
+`mariadb.start`; empty for none). `host` and `event` are additive optional fields, so the wire version stays 1.0
+([0084](../decisions/0084-log-line-record-gets-an-optional-host-field.md),
+[0088](../decisions/0088-mariadb-error-log-entries-by-content-and-lifecycle-events-in-log-line.md)). The Go encoder omits an
+empty `host` and an empty `event`; the C# decoder reads a line without them as empty.
 
 ### `gap`
 
@@ -281,6 +284,7 @@ Decompressed content of a batch of three records (the real stream is gzip-compre
 - [0044](../decisions/0044-batch-validated-as-a-whole-agent-records-only.md) — why a batch is valid only as a whole, carries only agent records and is bounded.
 - [0045](../decisions/0045-batch-identified-by-agent-id-and-record-sequence-numbers.md) — why per-record sequence numbers and a spool of at least 7 days.
 - [0046](../decisions/0046-batch-header-describes-the-capture-context.md) — why the header describes the capture, not the sending.
+- [0088](../decisions/0088-mariadb-error-log-entries-by-content-and-lifecycle-events-in-log-line.md) — why `log_line` gets an optional `event`.
 - [0075](../decisions/0075-wire-contract-pinned-by-golden-fixtures.md) — why golden fixtures pin the contract between the two languages.
 - [0076](../decisions/0076-strict-gzip-validation-in-the-backend.md) — why the backend decodes gzip strictly.
 

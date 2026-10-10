@@ -73,7 +73,7 @@ the value.
 | `ingest.listen` | `:8081` | Address of the ingest endpoint, on a port other than `web.listen`. |
 | `storage.directory` | `/data` | Directory of the backend's data, an absolute and clean path. |
 | `log.level` | `info` | `debug`, `info`, `warn` or `error`. |
-| `import.time_zone` | none | IANA time zone of the server the imported logs come from, e.g. `Europe/Berlin` or `UTC`. Required to import traditional syslog files (see *Import logs*). |
+| `import.time_zone` | none | IANA time zone of the server the imported logs come from, e.g. `Europe/Berlin` or `UTC`. Required to import traditional syslog files and MariaDB error logs (see *Import logs*). |
 
 **Secrets**
 
@@ -291,6 +291,16 @@ Supported sources:
   `kern.log-20260301`), in the traditional format (`Mar  1 12:00:00 host program[pid]: message`) and in the RFC
   3339 format (`2026-03-01T12:00:00.123456+01:00 host program[pid]: message`), with or without `<PRI>`. The
   detection also claims any other file whose first line has such a header. RFC 5424 files are not read.
+- The MariaDB error log (source type `mariadb`), recognized by its content under any name (`mysql/error.log`,
+  `error.log.1`, `<host>.err`, inside an archive): the first non-empty line of the file is an entry header such as
+  `2026-03-01 12:30:15 0 [Note] ...`, and the file is not named `syslog` or `kern.log` (these stay with the syslog
+  parser). Every entry, a header line with the lines without a header after it (a crash report with its stack trace),
+  becomes one record; a very long entry keeps its beginning and says how many lines were left out. Warnings and errors
+  get the priorities 4 and 3 and notes 6, and the lifecycle entries (start, ready for connections, normal shutdown,
+  shutdown complete, abort by a signal, crash recovery start and end) get an event such as `mariadb.start` in the
+  record field `event`. The formats of MariaDB 10.x are read. A copy that starts in the middle of an entry (the
+  output of `tail`) is not recognized. MariaDB sends its error log to the journal by default under systemd; those
+  lines arrive through the journal and syslog parsers as plain lines without events.
 
 The file name of a rotated log must stay as the server wrote it (`syslog.1`, `kern.log-20260301`), and the
 modification time of the files matters: the traditional format has no year, and the backend takes it from a
@@ -303,7 +313,8 @@ server the logs come from (for example `Europe/Berlin`); there is no default, be
 time stamp and an import cannot be redone. Without the option a file with year-less lines fails with
 "import.time_zone is not set" (the lines before the first year-less line are stored, and the run exits with 1).
 Set the option and run the import again: the file is completed. RFC 3339 files and journal exports carry their
-offset and need no option.
+offset and need no option. MariaDB error logs also write local time without a zone and are read in the same zone;
+without the option such a file fails at its first entry with the same reason.
 
 Times outside 1677-09-21 to 2262-04-11 and dates that do not exist (31 November, 29 February in a year that is not a
 leap year) are skipped with a reason, as is a year-less line in a file without a usable date. A multi-line kernel

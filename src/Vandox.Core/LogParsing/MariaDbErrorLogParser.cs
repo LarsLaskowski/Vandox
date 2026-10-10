@@ -1,11 +1,12 @@
 using NodaTime;
 
+using Vandox.Core.Model;
+
 namespace Vandox.Core.LogParsing;
 
-#pragma warning disable RH2003, S2325, S4487
-
 /// <summary>
-/// Reads the error log of MariaDB.
+/// Reads the error log of MariaDB: every entry (a header line and the lines without a header after it) becomes one log line
+/// record with its local time resolved in the configured zone and, for lifecycle entries, an event.
 /// </summary>
 public sealed class MariaDbErrorLogParser : ILogParser
 {
@@ -19,6 +20,8 @@ public sealed class MariaDbErrorLogParser : ILogParser
     #endregion // Constants
 
     #region Fields
+
+    private static readonly byte[] _bom = [0xEF, 0xBB, 0xBF];
 
     private readonly DateTimeZone? _timeZone;
 
@@ -46,13 +49,59 @@ public sealed class MariaDbErrorLogParser : ILogParser
     public Confidence Detect(LogFile file, ReadOnlySpan<byte> head)
     {
         // The first-line rule relies on the syslog grammar never accepting a line starting "DDDD-DD-DD " or "DDDDDD " (SyslogLine.TryParse), so the two detectors cannot overlap.
-        throw new NotImplementedException();
+        if (SyslogParser.HasSyslogName(file.Name))
+        {
+            return Confidence.NoMatch;
+        }
+
+        var rest = head.StartsWith(_bom) ? head[_bom.Length..] : head;
+
+        while (rest.Length > 0)
+        {
+            var end = rest.IndexOf((byte)'\n');
+            var line = end >= 0 ? rest[..end] : rest;
+
+            if (line.Length > 0 && line[^1] == (byte)'\r')
+            {
+                line = line[..^1];
+            }
+
+            if (line.Length > 0)
+            {
+                return MariaDbLine.TryParse(line) is null ? Confidence.NoMatch : Confidence.MatchContent;
+            }
+
+            rest = end >= 0 ? rest[(end + 1)..] : [];
+        }
+
+        return Confidence.NoMatch;
     }
 
     /// <inheritdoc />
-    public Task ParseAsync(LogFile file, Stream input, IRecordEmitter output, CancellationToken cancellationToken)
+    public async Task ParseAsync(LogFile file, Stream input, IRecordEmitter output, CancellationToken cancellationToken)
     {
-        throw new NotImplementedException();
+        var reader = new LogLineReader(input);
+        var session = new MariaDbParseSession(file, _timeZone, output);
+
+        // The per-line path calls no async method other than ReadAsync; a record is awaited only when an entry ends.
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var completed = session.Consume(reader);
+
+            if (completed is not null)
+            {
+                await output.RecordAsync(completed, cancellationToken).ConfigureAwait(false);
+            }
+        }
+
+        var last = session.Finish();
+
+        if (last is not null)
+        {
+            await output.RecordAsync(last, cancellationToken).ConfigureAwait(false);
+        }
     }
 
     #endregion // ILogParser
