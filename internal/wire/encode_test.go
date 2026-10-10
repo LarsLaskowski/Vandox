@@ -94,7 +94,7 @@ func allKindRecords(loc *time.Location) []model.Record {
 			Boot: &model.Boot{BootID: testBootID, PreviousBootID: "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d", BootedAt: atLoc(loc, 6, 0), PreviousUptime: ptr(36 * time.Hour)},
 		}},
 		{Meta: agentMeta(8, "journal", loc), Data: &model.LogLine{
-			Log: "journal", Program: "sshd", PID: 5120, Priority: ptr(uint8(3)), Message: "Failed password", Truncated: true,
+			Log: "journal", Host: "web-1", Program: "sshd", PID: 5120, Priority: ptr(uint8(3)), Message: "Failed password", Truncated: true,
 		}},
 		gapAll(9, loc),
 	}
@@ -476,7 +476,7 @@ func worstCaseRecords() map[string]model.Record {
 		},
 		"log line": {
 			Meta: meta,
-			Data: &model.LogLine{Log: worstText(model.MaxShortTextBytes), Program: worstText(model.MaxShortTextBytes), PID: 1, Priority: ptr(uint8(7)), Message: worstText(model.MaxTextBytes), Truncated: true},
+			Data: &model.LogLine{Log: worstText(model.MaxShortTextBytes), Host: worstText(model.MaxShortTextBytes), Program: worstText(model.MaxShortTextBytes), PID: 1, Priority: ptr(uint8(7)), Message: worstText(model.MaxTextBytes), Truncated: true},
 		},
 		"kernel event": {
 			Meta: meta,

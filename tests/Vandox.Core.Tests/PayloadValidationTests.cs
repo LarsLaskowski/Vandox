@@ -20,6 +20,7 @@ public class PayloadValidationTests
     [TestMethod]
     [DataRow("metric", """{"name":"cpu.load","value":1.5,"unit":"percent","labels":{"cpu":"0"}}""")]
     [DataRow("log_line", """{"log":"syslog","program":"sshd","pid":12,"priority":3,"message":"hello"}""")]
+    [DataRow("log_line", """{"log":"journal","host":"web-1","program":"sshd","pid":12,"priority":3,"message":"hello"}""")]
     [DataRow("gap", """{"from":"2026-10-01T10:00:00Z","to":"2026-10-01T10:05:00Z","cause":"collector_timeout","collector":"proc"}""")]
     [DataRow("gap", """{"from":"2026-10-01T10:00:00Z","to":"2026-10-01T10:05:00Z","cause":"spool_dropped","first_seq":3,"last_seq":9}""")]
     [DataRow("service_state", """{"unit":"mariadb.service","load_state":"loaded","active_state":"active","sub_state":"running","active_enter_at":"2026-10-01T10:00:00Z","restarts":1}""")]
@@ -145,6 +146,7 @@ public class PayloadValidationTests
         var processes = Enumerable.Range(1, ModelLimits.MaxItems + 1).Select(pid => Sample(pid)).ToList();
         var status = Enumerable.Range(0, ModelLimits.MaxItems + 1).ToDictionary(index => $"S{index}", _ => 1UL);
         var longLog = new LogLine();
+        var longHost = new LogLine();
         var longMessage = new LogLine();
         var manyLabels = new MetricPoint();
         var longLabel = new MetricPoint();
@@ -154,6 +156,8 @@ public class PayloadValidationTests
         var manyStatus = new MariaDbStatus();
 
         longLog.Log = tooLong;
+        longHost.Log = "x";
+        longHost.Host = tooLong;
         longMessage.Log = "x";
         longMessage.Message = new string('a', ModelLimits.MaxTextBytes + 1);
         manyLabels.Name = "x";
@@ -170,6 +174,7 @@ public class PayloadValidationTests
 
         // Act
         var logError = longLog.Validate();
+        var hostError = longHost.Validate();
         var textError = longMessage.Validate();
         var labelError = manyLabels.Validate();
         var labelValueError = longLabel.Validate();
@@ -179,6 +184,8 @@ public class PayloadValidationTests
         var nanError = nanValue.Validate();
 
         // Assert
+        Assert.AreEqual("host", hostError?.Field, "host too long");
+        Assert.AreEqual("too long", hostError?.Reason, "host reason");
         Assert.AreEqual("log", logError?.Field, "log too long");
         Assert.AreEqual("too long", logError?.Reason, "log reason");
         Assert.AreEqual("message", textError?.Field, "message too long");
@@ -188,6 +195,30 @@ public class PayloadValidationTests
         Assert.AreEqual("status", statusError?.Field, "too many status entries");
         Assert.AreEqual("too long", nameError?.Reason, "name too long");
         Assert.AreEqual("must be finite", nanError?.Reason, "NaN is refused");
+    }
+
+    /// <summary>
+    /// The host of a log line is written with the line and survives a round trip.
+    /// </summary>
+    [TestMethod]
+    public void PayloadLogLineHostSurvivesARoundTrip()
+    {
+        // Arrange
+        var line = new LogLine
+                   {
+                       Log = "journal",
+                       Host = "web-1",
+                       Message = "x"
+                   };
+
+        // Act
+        var json = PayloadRegistry.Serialize(line);
+        var again = (LogLine)PayloadRegistry.Deserialize(RecordKind.LogLine, JsonDocument.Parse(json).RootElement)!;
+
+        // Assert
+        Assert.Contains("\"host\":\"web-1\"", json, "host is written when set");
+        Assert.AreEqual("web-1", again.Host, "host after a round trip");
+        Assert.IsNull(again.Validate(), "the line is still valid");
     }
 
     /// <summary>

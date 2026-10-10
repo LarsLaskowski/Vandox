@@ -16,6 +16,13 @@ public sealed class LogLine : IPayload
     public string Log { get; set; } = string.Empty;
 
     /// <summary>
+    /// Gets or sets the host that wrote the line.
+    /// </summary>
+    [JsonPropertyName("host")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public string Host { get; set; } = string.Empty;
+
+    /// <summary>
     /// Gets or sets the program that wrote the line.
     /// </summary>
     [JsonPropertyName("program")]
@@ -59,7 +66,7 @@ public sealed class LogLine : IPayload
     /// <inheritdoc />
     public FieldError? Validate()
     {
-        var error = Check.RequiredShort("log", Log) ?? Check.Short("program", Program);
+        var error = Check.RequiredShort("log", Log) ?? Check.Short("host", Host) ?? Check.Short("program", Program);
 
         if (error is not null)
         {

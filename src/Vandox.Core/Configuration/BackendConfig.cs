@@ -38,6 +38,12 @@ public sealed class BackendConfig
     public LogConfig Log { get; } = new();
 
     /// <summary>
+    /// Gets the import options.
+    /// </summary>
+    [ConfigKey("import")]
+    public ImportConfig Import { get; } = new();
+
+    /// <summary>
     /// Gets or sets the secrets of the backend.
     /// </summary>
     public BackendSecrets Secrets { get; set; } = new();
@@ -52,7 +58,7 @@ public sealed class BackendConfig
     /// <returns>The key paths</returns>
     public static IReadOnlyList<string> Keys()
     {
-        return ["web.listen", "ingest.listen", "storage.directory", "log.level"];
+        return ["web.listen", "ingest.listen", "storage.directory", "log.level", "import.time_zone"];
     }
 
     #endregion // Methods

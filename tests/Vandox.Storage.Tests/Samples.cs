@@ -67,6 +67,7 @@ internal static class Samples
                    Data = new LogLine
                           {
                               Log = "syslog",
+                              Host = "web-1",
                               Program = "sshd",
                               Pid = 12,
                               Priority = 3,

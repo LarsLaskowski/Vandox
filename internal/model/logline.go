@@ -3,6 +3,7 @@ package model
 // LogLine is one line of a log.
 type LogLine struct {
 	Log       string `json:"log"`
+	Host      string `json:"host,omitempty"`
 	Program   string `json:"program,omitempty"`
 	PID       int32  `json:"pid,omitempty"`
 	Priority  *uint8 `json:"priority,omitempty"`
@@ -19,6 +20,9 @@ func (l *LogLine) Validate() error {
 		return nilReceiver()
 	}
 	if err := checkRequiredShort("log", l.Log); err != nil {
+		return err
+	}
+	if err := checkShort("host", l.Host); err != nil {
 		return err
 	}
 	if err := checkShort("program", l.Program); err != nil {

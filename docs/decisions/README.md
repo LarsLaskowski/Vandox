@@ -109,4 +109,7 @@ once in the [area document](../areas/README.md) of the record's area, and the re
 | 0079 | Log parsing and import in the backend: statx/openat2 file access, same limits and guarantees | Accepted | 2026-10-06 |
 | 0081 | The backend host: two labelled Kestrel listeners, JSON logs, Blazor Interactive Server | Accepted | 2026-10-06 |
 | 0083 | The storage writer is cheap, and its write criterion is the median of five batches on the volume that holds the database | Accepted | 2026-10-07 |
+| 0084 | The log_line record gets an optional host field in both languages and in storage | Accepted | 2026-10-09 |
+| 0085 | Year-less syslog times need the option import.time_zone, without a default, resolved with NodaTime's embedded zone database, and take the year from the file's rotation date or modification time | Accepted | 2026-10-09 |
+| 0086 | System log parsers: journal export by content, a generic weak syslog parser, kernel reports grouped with head and tail | Accepted | 2026-10-09 |
 <!-- project:end index -->

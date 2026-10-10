@@ -1,0 +1,753 @@
+using System.Globalization;
+using System.Text;
+
+using Vandox.Core.LogParsing;
+using Vandox.Core.Model;
+
+namespace Vandox.Core.Tests;
+
+/// <summary>
+/// Tests for <see cref="JournalExportParser"/>
+/// </summary>
+[TestClass]
+public class JournalExportParserTests
+{
+    #region Constants
+
+    private const string Sshd = "__CURSOR=s=0123456789abcdef0123456789abcdef;i=1b2c;b=0b6f9b0c2d1e4c439a4e7f1b2c3d4e5f;m=1d5e3a;t=64a1;x=9f8e\n__REALTIME_TIMESTAMP=1772368215123456\n__MONOTONIC_TIMESTAMP=123456789\n_BOOT_ID=0b6f9b0c2d1e4c439a4e7f1b2c3d4e5f\n_TRANSPORT=syslog\nPRIORITY=6\nSYSLOG_FACILITY=4\nSYSLOG_IDENTIFIER=sshd\n_UID=0\n_GID=0\n_COMM=sshd\n_EXE=/usr/sbin/sshd\n_PID=1234\n_HOSTNAME=web-1\nMESSAGE=Accepted publickey for root from 192.0.2.7 port 51234 ssh2: ED25519 SHA256:abc\nSYSLOG_PID=1234\n\n";
+    private const string Systemd = "__CURSOR=s=0123456789abcdef0123456789abcdef;i=1b2d\n__REALTIME_TIMESTAMP=1772368216000001\n__MONOTONIC_TIMESTAMP=123456790\n_BOOT_ID=0b6f9b0c2d1e4c439a4e7f1b2c3d4e5f\nPRIORITY=6\nSYSLOG_FACILITY=3\nCODE_FILE=src/core/job.c\nCODE_LINE=861\nCODE_FUNC=job_log_done_message\nSYSLOG_IDENTIFIER=systemd\n_TRANSPORT=journal\n_PID=1\n_UID=0\n_GID=0\n_COMM=systemd\n_EXE=/usr/lib/systemd/systemd\n_HOSTNAME=web-1\nMESSAGE=Started Daily apt download activities.\n\n";
+    private const string Cron = "__CURSOR=s=0123456789abcdef0123456789abcdef;i=1b2e\n__REALTIME_TIMESTAMP=1772368217500000\n_BOOT_ID=0b6f9b0c2d1e4c439a4e7f1b2c3d4e5f\n_TRANSPORT=syslog\nPRIORITY=6\nSYSLOG_FACILITY=9\nSYSLOG_IDENTIFIER=CRON\n_COMM=cron\n_PID=2201\n_HOSTNAME=web-1\nMESSAGE=(root) CMD (command -v debian-sa1 > /dev/null && debian-sa1 1 1)\nSYSLOG_PID=2201\n\n";
+    private const string Kernel = "__CURSOR=s=0123456789abcdef0123456789abcdef;i=1b2f\n__REALTIME_TIMESTAMP=1772368218000000\n_BOOT_ID=0b6f9b0c2d1e4c439a4e7f1b2c3d4e5f\n_TRANSPORT=kernel\nPRIORITY=6\nSYSLOG_FACILITY=0\nSYSLOG_IDENTIFIER=kernel\n_SOURCE_MONOTONIC_TIMESTAMP=123456000\n_HOSTNAME=web-1\nMESSAGE=TCP: request_sock_TCP: Possible SYN flooding on port 80. Sending cookies.\n\n";
+    private const string Base = "__REALTIME_TIMESTAMP=1772368215123456\n";
+    private const string Truncated = "truncated entry";
+    private const string Malformed = "malformed field";
+    private const string NoTimestamp = "entry without __REALTIME_TIMESTAMP";
+    private const string BadTimestamp = "invalid __REALTIME_TIMESTAMP";
+    private const string NoMessage = "entry without MESSAGE";
+
+    #endregion // Constants
+
+    #region Fields
+
+    private static readonly LogFile _file = new("journal.export", null);
+
+    #endregion // Fields
+
+    #region Properties
+
+    /// <summary>
+    /// Gets or sets the context of the running test.
+    /// </summary>
+    public TestContext TestContext { get; set; } = null!;
+
+    #endregion // Properties
+
+    #region Methods
+
+    /// <summary>
+    /// The type of the parser is <c>journal</c>.
+    /// </summary>
+    [TestMethod]
+    public void JournalExportParserTypeIsJournal()
+    {
+        // Act
+        var parser = new JournalExportParser();
+
+        // Assert
+        Assert.AreEqual("journal", parser.Type, "type");
+    }
+
+    /// <summary>
+    /// A journal export is recognized by its content, whatever the file is called; anything else is not.
+    /// </summary>
+    /// <param name="name">The file name</param>
+    /// <param name="head">The head</param>
+    /// <param name="expected">The expected confidence</param>
+    [TestMethod]
+    [DataRow("journal.export", "__CURSOR=s=1;i=1\n__REALTIME_TIMESTAMP=1772368215123456\nMESSAGE=hello\n\n", Confidence.MatchContent)]
+    [DataRow("syslog", "__CURSOR=s=1;i=1\n__REALTIME_TIMESTAMP=1772368215123456\nMESSAGE=hello\n\n", Confidence.MatchContent)]
+    [DataRow("a.txt", "__CURSOR=s=1;i=1\nPRIORITY=6\n__REALTIME_TIMESTAMP=1772368215123456\n", Confidence.MatchContent)]
+    [DataRow("a.txt", "__REALTIME_TIMESTAMP=1772368215123456\nMESSAGE=hello\n", Confidence.MatchContent)]
+    [DataRow("a.txt", "__CURSOR=s=1;i=1\n__REALTIME_TIMESTAMP=1772368215123456", Confidence.MatchContent)]
+    [DataRow("a.txt", "", Confidence.NoMatch)]
+    [DataRow("a.txt", "Mar  1 12:00:00 web-1 sshd[1]: hello\n", Confidence.NoMatch)]
+    [DataRow("a.txt", "2026-03-01T12:00:00Z web-1 sshd[1]: hello\n", Confidence.NoMatch)]
+    [DataRow("a.txt", "LPKSHHRH\u0001\u0000\u0000\u0000", Confidence.NoMatch)]
+    [DataRow("a.txt", "LPKSHHRH__CURSOR=s=1\n__REALTIME_TIMESTAMP=1\n", Confidence.NoMatch)]
+    [DataRow("a.txt", "x\n__CURSOR=s=1;i=1\n__REALTIME_TIMESTAMP=1772368215123456\n", Confidence.NoMatch)]
+    [DataRow("a.txt", " __CURSOR=s=1;i=1\n__REALTIME_TIMESTAMP=1772368215123456\n", Confidence.NoMatch)]
+    [DataRow("a.txt", "__CURSOR=s=1;i=1\nMESSAGE=hello\n\n", Confidence.NoMatch)]
+    [DataRow("a.txt", "﻿__CURSOR=s=1;i=1\n__REALTIME_TIMESTAMP=1772368215123456\n", Confidence.NoMatch)]
+    public void JournalExportParserDetectRecognizesTheExportByContent(string name, string head, Confidence expected)
+    {
+        // Arrange
+        var parser = new JournalExportParser();
+
+        // Act
+        var confidence = parser.Detect(new LogFile(name, null), Encoding.UTF8.GetBytes(head));
+
+        // Assert
+        Assert.AreEqual(expected, confidence, "confidence");
+    }
+
+    /// <summary>
+    /// A real entry becomes a record with the time, host, program, process ID, priority and message of the entry.
+    /// </summary>
+    /// <param name="entry">The entry</param>
+    /// <param name="microseconds">The expected time as microseconds since the Unix epoch</param>
+    /// <param name="host">The expected host</param>
+    /// <param name="program">The expected program</param>
+    /// <param name="pid">The expected process ID</param>
+    /// <param name="priority">The expected priority</param>
+    /// <param name="message">The expected message</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [DataRow(Sshd, 1772368215123456, "web-1", "sshd", 1234, 6, "Accepted publickey for root from 192.0.2.7 port 51234 ssh2: ED25519 SHA256:abc")]
+    [DataRow(Systemd, 1772368216000001, "web-1", "systemd", 1, 6, "Started Daily apt download activities.")]
+    [DataRow(Cron, 1772368217500000, "web-1", "CRON", 2201, 6, "(root) CMD (command -v debian-sa1 > /dev/null && debian-sa1 1 1)")]
+    [DataRow(Kernel, 1772368218000000, "web-1", "kernel", 0, 6, "TCP: request_sock_TCP: Possible SYN flooding on port 80. Sending cookies.")]
+    public async Task JournalExportParserParseAsyncMapsTheEntryToARecord(string entry, long microseconds, string host, string program, int pid, int priority, string message)
+    {
+        // Arrange
+        var parser = new JournalExportParser();
+        var file = new LogFile("exports/journal.export", null);
+
+        // Act
+        var emitter = await RecordingEmitter.ParseAsync(parser, file, entry, TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsEmpty(emitter.Skips, "nothing is skipped");
+        Assert.HasCount(1, emitter.Records, "one record");
+
+        var record = emitter.Records[0];
+        var payload = RecordingEmitter.Line(record);
+
+        Assert.AreEqual(RecordOrigin.Import, record.Origin, "origin");
+        Assert.AreEqual("journal", record.Source, "source");
+        Assert.AreEqual(0UL, record.Seq, "sequence number");
+        Assert.AreEqual(DateTimeOffset.UnixEpoch.AddTicks(microseconds * 10), record.CapturedAt, "time");
+        Assert.AreEqual(TimeSpan.Zero, record.CapturedAt.Offset, "UTC");
+        Assert.AreEqual("journal", payload.Log, "log");
+        Assert.AreEqual(host, payload.Host, "host");
+        Assert.AreEqual(program, payload.Program, "program");
+        Assert.AreEqual(pid, payload.Pid, "process ID");
+        Assert.AreEqual((byte)priority, payload.Priority, "priority");
+        Assert.AreEqual(message, payload.Message, "message");
+        Assert.IsFalse(payload.Truncated, "not truncated");
+    }
+
+    /// <summary>
+    /// The program is the syslog identifier, else the command, else empty.
+    /// </summary>
+    /// <param name="fields">Extra fields</param>
+    /// <param name="expected">The expected program</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [DataRow("SYSLOG_IDENTIFIER=a\n_COMM=b\n", "a")]
+    [DataRow("_COMM=b\n", "b")]
+    [DataRow("", "")]
+    public async Task JournalExportParserParseAsyncChoosesTheProgram(string fields, string expected)
+    {
+        // Act
+        var emitter = await RecordingEmitter.ParseAsync(new JournalExportParser(), _file, $"{Base}{fields}MESSAGE=m\n\n", TestContext.CancellationToken);
+
+        // Assert
+        Assert.HasCount(1, emitter.Records, "one record");
+        Assert.AreEqual(expected, RecordingEmitter.Line(emitter.Records[0]).Program, "program");
+    }
+
+    /// <summary>
+    /// The process ID is <c>_PID</c>, else <c>SYSLOG_PID</c>, else 0; values that are no process ID are ignored.
+    /// </summary>
+    /// <param name="fields">Extra fields</param>
+    /// <param name="expected">The expected process ID</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [DataRow("_PID=5\nSYSLOG_PID=6\n", 5)]
+    [DataRow("SYSLOG_PID=6\n", 6)]
+    [DataRow("_PID=0\nSYSLOG_PID=6\n", 6)]
+    [DataRow("_PID=abc\nSYSLOG_PID=6\n", 6)]
+    [DataRow("_PID=2147483648\nSYSLOG_PID=6\n", 6)]
+    [DataRow("_PID=2147483647\n", 2147483647)]
+    [DataRow("_PID=12345678901\nSYSLOG_PID=6\n", 6)]
+    [DataRow("_PID=12345678901\n", 0)]
+    [DataRow("_PID=-1\n", 0)]
+    [DataRow("", 0)]
+    public async Task JournalExportParserParseAsyncChoosesTheProcessId(string fields, int expected)
+    {
+        // Act
+        var emitter = await RecordingEmitter.ParseAsync(new JournalExportParser(), _file, $"{Base}{fields}MESSAGE=m\n\n", TestContext.CancellationToken);
+
+        // Assert
+        Assert.HasCount(1, emitter.Records, "one record");
+        Assert.AreEqual(expected, RecordingEmitter.Line(emitter.Records[0]).Pid, "process ID");
+    }
+
+    /// <summary>
+    /// The priority is the one digit 0 to 7 of <c>PRIORITY</c>, else none.
+    /// </summary>
+    /// <param name="fields">Extra fields</param>
+    /// <param name="expected">The expected priority, or -1 for none</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [DataRow("PRIORITY=0\n", 0)]
+    [DataRow("PRIORITY=3\n", 3)]
+    [DataRow("PRIORITY=7\n", 7)]
+    [DataRow("PRIORITY=8\n", -1)]
+    [DataRow("PRIORITY=10\n", -1)]
+    [DataRow("PRIORITY=-1\n", -1)]
+    [DataRow("PRIORITY=x\n", -1)]
+    [DataRow("PRIORITY= 3\n", -1)]
+    [DataRow("PRIORITY=\n", -1)]
+    [DataRow("", -1)]
+    public async Task JournalExportParserParseAsyncReadsThePriority(string fields, int expected)
+    {
+        // Act
+        var emitter = await RecordingEmitter.ParseAsync(new JournalExportParser(), _file, $"{Base}{fields}MESSAGE=m\n\n", TestContext.CancellationToken);
+
+        // Assert
+        Assert.HasCount(1, emitter.Records, "one record");
+        Assert.AreEqual(expected < 0 ? null : (byte)expected, RecordingEmitter.Line(emitter.Records[0]).Priority, "priority");
+    }
+
+    /// <summary>
+    /// A binary message with a line feed, NUL and invalid UTF-8 is kept, and a binary field that is not kept is skipped.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task JournalExportParserParseAsyncKeepsBinaryMessage()
+    {
+        // Arrange
+        byte[] message = [.. "line1\nline2"u8, 0, .. "end"u8, 0xFF, (byte)'x'];
+        var input = new JournalExportBuilder().Text("__REALTIME_TIMESTAMP", "1772368215123456")
+                                              .Binary("COREDUMP_DUMP", [1, 2, 3, 10, 0, 255])
+                                              .Binary("MESSAGE", message)
+                                              .Binary("_HOSTNAME", "web-1"u8.ToArray())
+                                              .Text("SYSLOG_IDENTIFIER", "app")
+                                              .End()
+                                              .ToArray();
+
+        // Act
+        var emitter = await RecordingEmitter.ParseAsync(new JournalExportParser(), _file, input, TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsEmpty(emitter.Skips, "nothing is skipped");
+        Assert.HasCount(1, emitter.Records, "one record");
+        Assert.AreEqual("line1\nline2\0end�x", RecordingEmitter.Line(emitter.Records[0]).Message, "message");
+        Assert.AreEqual("web-1", RecordingEmitter.Line(emitter.Records[0]).Host, "host from the binary field");
+        Assert.AreEqual("app", RecordingEmitter.Line(emitter.Records[0]).Program, "program after the skipped field");
+    }
+
+    /// <summary>
+    /// A text and a binary message keep a carriage return and the spaces around the text.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task JournalExportParserParseAsyncKeepsTheMessageUnchanged()
+    {
+        // Act
+        var emitter = await RecordingEmitter.ParseAsync(new JournalExportParser(), _file, $"{Base}MESSAGE=  padded \r\n\n", TestContext.CancellationToken);
+
+        // Assert
+        Assert.HasCount(1, emitter.Records, "one record");
+        Assert.AreEqual("  padded \r", RecordingEmitter.Line(emitter.Records[0]).Message, "message");
+    }
+
+    /// <summary>
+    /// A kept text over its limit is cut to the limit in UTF-8 bytes at a character boundary and marked as truncated; invalid bytes do not make the record refused.
+    /// </summary>
+    /// <param name="field">The field</param>
+    /// <param name="binary">Whether the field is written as a binary field</param>
+    /// <param name="invalid">Whether the bytes are invalid UTF-8 instead of ASCII</param>
+    /// <param name="length">The number of bytes</param>
+    /// <param name="limit">The limit in UTF-8 bytes</param>
+    /// <param name="truncated">Whether the record is expected to be truncated</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [DataRow("MESSAGE", false, false, 16384, 16384, false)]
+    [DataRow("MESSAGE", false, false, 16385, 16384, true)]
+    [DataRow("MESSAGE", true, false, 16385, 16384, true)]
+    [DataRow("MESSAGE", false, false, 70000, 16384, true)]
+    [DataRow("MESSAGE", true, false, 70000, 16384, true)]
+    [DataRow("MESSAGE", false, true, 16384, 16384, true)]
+    [DataRow("MESSAGE", true, true, 16384, 16384, true)]
+    [DataRow("MESSAGE", true, true, 20000, 16384, true)]
+    [DataRow("_HOSTNAME", false, false, 1024, 1024, false)]
+    [DataRow("_HOSTNAME", false, false, 1025, 1024, true)]
+    [DataRow("SYSLOG_IDENTIFIER", false, false, 1025, 1024, true)]
+    [DataRow("_COMM", false, false, 1025, 1024, true)]
+    [DataRow("_HOSTNAME", false, true, 1024, 1024, true)]
+    [DataRow("SYSLOG_IDENTIFIER", false, true, 1024, 1024, true)]
+    [DataRow("_COMM", false, true, 1024, 1024, true)]
+    [DataRow("_HOSTNAME", true, true, 1024, 1024, true)]
+    public async Task JournalExportParserParseAsyncCutsTextsToTheirLimitInUtf8Bytes(string field, bool binary, bool invalid, int length, int limit, bool truncated)
+    {
+        // Arrange
+        var value = Enumerable.Repeat(invalid ? (byte)0xFF : (byte)'a', length).ToArray();
+        var builder = new JournalExportBuilder().Text("__REALTIME_TIMESTAMP", "1772368215123456");
+
+        _ = binary ? builder.Binary(field, value) : builder.Text(field, value);
+        _ = field == "MESSAGE" ? builder : builder.Text("MESSAGE", "m");
+
+        // Act
+        var emitter = await RecordingEmitter.ParseAsync(new JournalExportParser(), _file, builder.End().ToArray(), TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsEmpty(emitter.Skips, "no skip and no refusal");
+        Assert.HasCount(1, emitter.Records, "one record");
+
+        var payload = RecordingEmitter.Line(emitter.Records[0]);
+        var text = field switch
+                   {
+                       "MESSAGE" => payload.Message,
+                       "_HOSTNAME" => payload.Host,
+                       _ => payload.Program
+                   };
+
+        Assert.IsLessThanOrEqualTo(limit, Encoding.UTF8.GetByteCount(text), "at most the limit in UTF-8 bytes");
+        Assert.AreEqual(truncated, payload.Truncated, "truncated flag");
+
+        if (invalid || truncated)
+        {
+            return;
+        }
+
+        Assert.AreEqual(length, text.Length, "the text is kept whole");
+    }
+
+    /// <summary>
+    /// A valid multi-byte character that the raw cut splits is dropped whole, with no replacement character in its place.
+    /// </summary>
+    /// <param name="binary">Whether the message is a binary field</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public async Task JournalExportParserParseAsyncDropsACharacterSplitByTheCut(bool binary)
+    {
+        // Arrange
+        byte[] value = [.. Enumerable.Repeat((byte)'a', 16383), .. "ézzz"u8];
+        var builder = new JournalExportBuilder().Text("__REALTIME_TIMESTAMP", "1772368215123456");
+
+        _ = binary ? builder.Binary("MESSAGE", value) : builder.Text("MESSAGE", value);
+
+        // Act
+        var emitter = await RecordingEmitter.ParseAsync(new JournalExportParser(), _file, builder.End().ToArray(), TestContext.CancellationToken);
+
+        // Assert
+        Assert.HasCount(1, emitter.Records, "one record");
+        Assert.AreEqual(new string('a', 16383), RecordingEmitter.Line(emitter.Records[0]).Message, "the split character is gone and no replacement character was added");
+        Assert.IsTrue(RecordingEmitter.Line(emitter.Records[0]).Truncated, "truncated");
+    }
+
+    /// <summary>
+    /// A 64 MiB binary field of a name that is not kept is skipped and the next entry is read.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task JournalExportParserParseAsyncSkipsHugeBinaryFieldAndReadsTheNextEntry()
+    {
+        // Arrange
+        const long size = 64 * 1024 * 1024;
+        var header = new JournalExportBuilder().Text("__REALTIME_TIMESTAMP", "1772368215123456").BinaryHeader("HUGE_FIELD", size).ToArray();
+        var trailer = Encoding.UTF8.GetBytes($"\nMESSAGE=first\n\n{Base}MESSAGE=second\n\n");
+        using var input = new PatternStream(header, "x"u8.ToArray(), size, trailer);
+        var emitter = new RecordingEmitter();
+
+        // Act
+        await new JournalExportParser().ParseAsync(_file, input, emitter, TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsEmpty(emitter.Skips, "nothing is skipped");
+        Assert.AreSequenceEqual(["first", "second"], emitter.Records.Select(record => RecordingEmitter.Line(record).Message).ToList(), "both entries are read");
+    }
+
+    /// <summary>
+    /// A binary length beyond the remaining input, or of 2^63 or more, skips the entry as cut off and ends the parse without an exception; entries before it are kept.
+    /// </summary>
+    /// <param name="declared">The declared length</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [DataRow(1000UL)]
+    [DataRow(1UL << 62)]
+    [DataRow(1UL << 63)]
+    [DataRow(ulong.MaxValue)]
+    public async Task JournalExportParserParseAsyncEndsAtABinaryLengthBeyondTheInput(ulong declared)
+    {
+        // Arrange
+        var input = new JournalExportBuilder().Raw($"{Base}MESSAGE=before\n\n")
+                                              .Text("__REALTIME_TIMESTAMP", "1772368215123457")
+                                              .Binary("MESSAGE", declared, new byte[100])
+                                              .Raw($"\n{Base}MESSAGE=after\n\n")
+                                              .ToArray();
+
+        // Act
+        var emitter = await RecordingEmitter.ParseAsync(new JournalExportParser(), _file, input, TestContext.CancellationToken);
+
+        // Assert
+        Assert.AreSequenceEqual<(long, string)>([(0, Truncated)], emitter.Skips, "the entry is skipped as cut off");
+        Assert.AreSequenceEqual(["before"], emitter.Records.Select(record => RecordingEmitter.Line(record).Message).ToList(), "only the entry before it");
+    }
+
+    /// <summary>
+    /// A text value ended by the end of the input instead of a line feed skips its entry as cut off.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task JournalExportParserParseAsyncSkipsTextValueEndedByTheEndOfTheInput()
+    {
+        // Act
+        var emitter = await RecordingEmitter.ParseAsync(new JournalExportParser(), _file, $"{Base}MESSAGE=complete\n\n{Base}MESSAGE=cut off", TestContext.CancellationToken);
+
+        // Assert
+        Assert.AreSequenceEqual<(long, string)>([(0, Truncated)], emitter.Skips, "the second entry is cut off");
+        Assert.HasCount(1, emitter.Records, "the first entry is read");
+    }
+
+    /// <summary>
+    /// An entry with a malformed field name is skipped and parsing resumes after the next empty line.
+    /// </summary>
+    /// <param name="name">The field name</param>
+    /// <param name="accepted">Whether the name is accepted</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [DataRow("", false)]
+    [DataRow("abc", false)]
+    [DataRow("A-B", false)]
+    [DataRow("A B", false)]
+    [DataRow("1ABC", false)]
+    [DataRow("Ä", false)]
+    [DataRow("A_1", true)]
+    [DataRow("__ADDRESS", true)]
+    public async Task JournalExportParserParseAsyncSkipsEntryWithMalformedFieldName(string name, bool accepted)
+    {
+        // Arrange
+        var input = $"{Base}{name}=x\nMESSAGE=first\n\n{Base}MESSAGE=second\n\n";
+
+        // Act
+        var emitter = await RecordingEmitter.ParseAsync(new JournalExportParser(), _file, input, TestContext.CancellationToken);
+
+        // Assert
+        Assert.AreSequenceEqual(accepted ? ["first", "second"] : ["second"], emitter.Records.Select(record => RecordingEmitter.Line(record).Message).ToList(), "records");
+        Assert.HasCount(accepted ? 0 : 1, emitter.Skips, "skips");
+
+        if (accepted)
+        {
+            Assert.IsEmpty(emitter.Skips, "nothing is skipped");
+        }
+        else
+        {
+            Assert.AreEqual((0L, Malformed), emitter.Skips[0], "the skip reason is fixed");
+        }
+    }
+
+    /// <summary>
+    /// A field name of 65 bytes makes the entry malformed and one of 64 bytes does not.
+    /// </summary>
+    /// <param name="length">The length of the name</param>
+    /// <param name="skips">The expected number of skips</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [DataRow(64, 0)]
+    [DataRow(65, 1)]
+    public async Task JournalExportParserParseAsyncLimitsTheFieldNameTo64Bytes(int length, int skips)
+    {
+        // Act
+        var emitter = await RecordingEmitter.ParseAsync(new JournalExportParser(), _file, $"{Base}{new string('A', length)}=x\nMESSAGE=m\n\n{Base}MESSAGE=next\n\n", TestContext.CancellationToken);
+
+        // Assert
+        Assert.HasCount(skips, emitter.Skips, "skips");
+        Assert.HasCount(2 - skips, emitter.Records, "records");
+    }
+
+    /// <summary>
+    /// An entry without a time stamp, without a message or with an invalid time stamp is skipped with a fixed reason and never throws.
+    /// </summary>
+    /// <param name="entry">The entry</param>
+    /// <param name="reason">The expected reason</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [DataRow("MESSAGE=no time\n", NoTimestamp)]
+    [DataRow("__REALTIME_TIMESTAMP=1772368215123456\nPRIORITY=6\n", NoMessage)]
+    [DataRow("__REALTIME_TIMESTAMP=0\nMESSAGE=m\n", BadTimestamp)]
+    [DataRow("__REALTIME_TIMESTAMP=12a4\nMESSAGE=m\n", BadTimestamp)]
+    [DataRow("__REALTIME_TIMESTAMP=-1\nMESSAGE=m\n", BadTimestamp)]
+    [DataRow("__REALTIME_TIMESTAMP=+1\nMESSAGE=m\n", BadTimestamp)]
+    [DataRow("__REALTIME_TIMESTAMP= 1\nMESSAGE=m\n", BadTimestamp)]
+    [DataRow("__REALTIME_TIMESTAMP=\nMESSAGE=m\n", BadTimestamp)]
+    [DataRow("__REALTIME_TIMESTAMP=100000000000000000000\nMESSAGE=m\n", BadTimestamp)]
+    [DataRow("__REALTIME_TIMESTAMP=99999999999999999999\nMESSAGE=m\n", BadTimestamp)]
+    [DataRow("__REALTIME_TIMESTAMP=18446744073709551615\nMESSAGE=m\n", BadTimestamp)]
+    [DataRow("__REALTIME_TIMESTAMP=9223372036854776\nMESSAGE=m\n", BadTimestamp)]
+    public async Task JournalExportParserParseAsyncSkipsIncompleteEntryWithAFixedReason(string entry, string reason)
+    {
+        // Act
+        var emitter = await RecordingEmitter.ParseAsync(new JournalExportParser(), _file, $"{entry}\n{Base}MESSAGE=next\n\n", TestContext.CancellationToken);
+
+        // Assert
+        Assert.AreSequenceEqual<(long, string)>([(0, reason)], emitter.Skips, "skip with line 0 and a fixed reason");
+        Assert.AreSequenceEqual(["next"], emitter.Records.Select(record => RecordingEmitter.Line(record).Message).ToList(), "the next entry is read");
+    }
+
+    /// <summary>
+    /// The latest storable time stamp is accepted and the first microsecond is a valid time.
+    /// </summary>
+    /// <param name="microseconds">The time stamp</param>
+    /// <param name="expected">The expected time in UTC</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [DataRow("9223372036854775", "2262-04-11T23:47:16.8547750Z")]
+    [DataRow("1", "1970-01-01T00:00:00.0000010Z")]
+    [DataRow("00000000000000000001", "1970-01-01T00:00:00.0000010Z")]
+    public async Task JournalExportParserParseAsyncAcceptsTheStorableTimeStamps(string microseconds, string expected)
+    {
+        // Act
+        var emitter = await RecordingEmitter.ParseAsync(new JournalExportParser(), _file, $"__REALTIME_TIMESTAMP={microseconds}\nMESSAGE=m\n\n", TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsEmpty(emitter.Skips, "nothing is skipped");
+        Assert.HasCount(1, emitter.Records, "one record");
+        Assert.AreEqual(expected, emitter.Records[0].CapturedAt.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fffffff'Z'", CultureInfo.InvariantCulture), "time");
+    }
+
+    /// <summary>
+    /// The first value of a repeated field wins, several empty lines are accepted and the last entry needs no closing empty line.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task JournalExportParserParseAsyncKeepsFirstValueAndAcceptsEmptyLines()
+    {
+        // Arrange
+        var input = $"\n\n{Base}MESSAGE=first\nMESSAGE=second\n__REALTIME_TIMESTAMP=1\n\n\n\n{Base}MESSAGE=last\n";
+
+        // Act
+        var emitter = await RecordingEmitter.ParseAsync(new JournalExportParser(), _file, input, TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsEmpty(emitter.Skips, "nothing is skipped");
+        Assert.AreSequenceEqual(["first", "last"], emitter.Records.Select(record => RecordingEmitter.Line(record).Message).ToList(), "messages");
+        Assert.AreEqual(DateTimeOffset.UnixEpoch.AddTicks(17723682151234560), emitter.Records[0].CapturedAt, "the first time stamp wins");
+    }
+
+    /// <summary>
+    /// Every skip reason is one of the fixed texts, reported with line 0.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task JournalExportParserParseAsyncReportsOnlyFixedReasons()
+    {
+        // Arrange
+        var input = $"MESSAGE=secret-one\n\n{Base}\n\n__REALTIME_TIMESTAMP=secret-two\nMESSAGE=m\n\n{Base}bad name=secret-three\n\n{Base}OTHER=cut off";
+
+        // Act
+        var emitter = await RecordingEmitter.ParseAsync(new JournalExportParser(), _file, input, TestContext.CancellationToken);
+
+        // Assert
+        string[] allowed = [Malformed, Truncated, NoTimestamp, BadTimestamp, NoMessage];
+
+        Assert.IsNotEmpty(emitter.Skips, "there are skips");
+        Assert.IsTrue(emitter.Skips.All(skip => skip.Line == 0), "line 0");
+        Assert.IsTrue(emitter.Skips.All(skip => allowed.Contains(skip.Reason)), "every reason is one of the fixed texts");
+    }
+
+    /// <summary>
+    /// The entries of an OOM report are one record with the lowest priority of its members, between the entries before and after it.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task JournalExportParserParseAsyncKeepsTheOomReportTogether()
+    {
+        // Arrange
+        var input = KernelEntries([KernelReportSamples.Before, .. KernelReportSamples.Oom, KernelReportSamples.After], 1772368200000000);
+
+        // Act
+        var emitter = await RecordingEmitter.ParseAsync(new JournalExportParser(), _file, input, TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsEmpty(emitter.Skips, "nothing is skipped");
+        Assert.HasCount(3, emitter.Records, "the entry before, the report and the entry after");
+        Assert.AreEqual(KernelReportSamples.Before, RecordingEmitter.Line(emitter.Records[0]).Message, "the entry before");
+
+        var report = RecordingEmitter.Line(emitter.Records[1]);
+
+        Assert.AreEqual("kernel", report.Program, "program");
+        Assert.AreEqual(0, report.Pid, "process ID");
+        Assert.AreEqual("web-1", report.Host, "host");
+        Assert.AreEqual("journal", report.Log, "log");
+        Assert.AreEqual(string.Join('\n', KernelReportSamples.Oom), report.Message, "the member messages joined by line feeds");
+        Assert.AreEqual((byte)3, report.Priority, "the lowest priority of the members");
+        Assert.IsFalse(report.Truncated, "not truncated");
+        Assert.AreEqual(DateTimeOffset.UnixEpoch.AddTicks((1772368200000000 + 1000000) * 10), emitter.Records[1].CapturedAt, "the time of the first entry of the report");
+        Assert.AreEqual(KernelReportSamples.After, RecordingEmitter.Line(emitter.Records[2]).Message, "the entry after");
+    }
+
+    /// <summary>
+    /// A report whose members hold invalid bytes is cut to the limit in UTF-8 bytes and not refused.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task JournalExportParserParseAsyncCutsReportWithInvalidBytesToTheLimitInUtf8Bytes()
+    {
+        // Arrange
+        var builder = new JournalExportBuilder();
+        var micros = 1772368215000000;
+
+        builder.Entry(micros.ToString(CultureInfo.InvariantCulture), "web-1", "kernel", 0, 4, "[1.0] mariadbd invoked oom-killer: gfp_mask=0x100cca");
+
+        for (var index = 1; index <= 100; index++)
+        {
+            builder.Text("__REALTIME_TIMESTAMP", (micros + index).ToString(CultureInfo.InvariantCulture))
+                   .Text("SYSLOG_IDENTIFIER", "kernel")
+                   .Text("_HOSTNAME", "web-1")
+                   .Text("MESSAGE", Enumerable.Repeat((byte)0xFF, 200).ToArray())
+                   .End();
+        }
+
+        builder.Entry((micros + 200).ToString(CultureInfo.InvariantCulture), "web-1", "kernel", 0, 3, "[1.1] Out of memory: Killed process 4242 (mariadbd)");
+
+        // Act
+        var emitter = await RecordingEmitter.ParseAsync(new JournalExportParser(), _file, builder.ToArray(), TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsEmpty(emitter.Skips, "no record is refused");
+        Assert.HasCount(1, emitter.Records, "one report record");
+
+        var report = RecordingEmitter.Line(emitter.Records[0]);
+
+        Assert.IsLessThanOrEqualTo(ModelLimits.MaxTextBytes, Encoding.UTF8.GetByteCount(report.Message), "message within the limit in UTF-8 bytes");
+        Assert.IsTrue(report.Truncated, "truncated");
+        Assert.AreEqual((byte)3, report.Priority, "lowest priority");
+    }
+
+    /// <summary>
+    /// Parsing the same content twice gives the same records in the same order.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task JournalExportParserParseAsyncIsDeterministic()
+    {
+        // Arrange
+        var input = Encoding.UTF8.GetBytes($"{Sshd}{Systemd}{Encoding.UTF8.GetString(KernelEntries(KernelReportSamples.Oom, 1772368300000000))}{Cron}{Kernel}");
+        var parser = new JournalExportParser();
+
+        // Act
+        var first = await RecordingEmitter.ParseAsync(parser, _file, input, TestContext.CancellationToken);
+        var second = await RecordingEmitter.ParseAsync(parser, _file, input, TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsNotEmpty(first.Records, "records were emitted");
+        Assert.AreSequenceEqual(first.Records.Select(RecordingEmitter.Describe).ToList(), second.Records.Select(RecordingEmitter.Describe).ToList(), "same records in the same order");
+        Assert.AreSequenceEqual(first.Skips, second.Skips, "same skips");
+    }
+
+    /// <summary>
+    /// A cancelled token ends the parse with an operation canceled exception before anything is emitted.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task JournalExportParserParseAsyncHonorsACancelledToken()
+    {
+        // Arrange
+        var emitter = new RecordingEmitter();
+        using var cancelled = new CancellationTokenSource();
+        using var input = new MemoryStream(Encoding.UTF8.GetBytes(Sshd));
+
+        await cancelled.CancelAsync();
+
+        // Act and Assert
+        await Assert.ThrowsAsync<OperationCanceledException>(() => new JournalExportParser().ParseAsync(_file, input, emitter, cancelled.Token), "cancelled parse");
+        Assert.AreEqual(0, emitter.Calls, "nothing was emitted");
+    }
+
+    /// <summary>
+    /// Cancelling while a report is open ends the parse without flushing the report and without another call of the emitter.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task JournalExportParserParseAsyncDoesNotFlushAnOpenReportWhenCancelled()
+    {
+        // Arrange
+        using var cancel = new CancellationTokenSource();
+        var emitter = new RecordingEmitter
+                      {
+                          Observed = _ => cancel.Cancel()
+                      };
+        using var input = new MemoryStream(OpenReport());
+
+        // Act
+        await Assert.ThrowsAsync<OperationCanceledException>(() => new JournalExportParser().ParseAsync(_file, input, emitter, cancel.Token), "cancelled parse");
+
+        // Assert
+        Assert.AreEqual(1, emitter.Calls, "the emitter is not called again");
+        Assert.HasCount(1, emitter.Records, "only the entry written inside the report");
+    }
+
+    /// <summary>
+    /// An exception of the emitter ends the parse with that exception, without flushing an open report and without another call.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task JournalExportParserParseAsyncPassesOnTheExceptionOfTheEmitter()
+    {
+        // Arrange
+        var failure = new InvalidOperationException("store is full");
+        var emitter = new RecordingEmitter
+                      {
+                          Failure = (_, _) => failure
+                      };
+        using var input = new MemoryStream(OpenReport());
+
+        // Act
+        var thrown = await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => new JournalExportParser().ParseAsync(_file, input, emitter, TestContext.CancellationToken), "the emitter fails");
+
+        // Assert
+        Assert.AreSame(failure, thrown, "the exception of the emitter");
+        Assert.AreEqual(1, emitter.Calls, "the emitter is not called again");
+    }
+
+    /// <summary>
+    /// Builds journal entries of the kernel with consecutive time stamps; the first message gets priority 4 when it starts a report, the kill line priority 3, all others 6.
+    /// </summary>
+    /// <param name="messages">The messages</param>
+    /// <param name="start">The time stamp of the first entry in microseconds</param>
+    /// <returns>The bytes</returns>
+    private static byte[] KernelEntries(IEnumerable<string> messages, long start)
+    {
+        var builder = new JournalExportBuilder();
+        var index = 0;
+
+        foreach (var message in messages)
+        {
+            var priority = 6;
+
+            if (message.Contains("invoked oom-killer", StringComparison.Ordinal))
+            {
+                priority = 4;
+            }
+            else if (message.Contains("Killed process", StringComparison.Ordinal))
+            {
+                priority = 3;
+            }
+
+            builder.Entry((start + (index * 1000000)).ToString(CultureInfo.InvariantCulture), "web-1", "kernel", 0, priority, message);
+            index++;
+        }
+
+        return builder.ToArray();
+    }
+
+    /// <summary>
+    /// Returns a journal export that has an open OOM report with an entry of another program written inside it.
+    /// </summary>
+    /// <returns>The bytes</returns>
+    private static byte[] OpenReport()
+    {
+        return new JournalExportBuilder().Entry("1772368215000000", "web-1", "kernel", 0, 4, "[1.0] mariadbd invoked oom-killer: gfp_mask=0x100cca")
+                                         .Entry("1772368216000000", "web-1", "sshd", 5, 6, "Accepted publickey for root")
+                                         .Entry("1772368217000000", "web-1", "kernel", 0, 6, "[1.1] CPU: 1 PID: 4242 Comm: mariadbd")
+                                         .Entry("1772368218000000", "web-1", "kernel", 0, 6, "[1.2] Call Trace:")
+                                         .ToArray();
+    }
+
+    #endregion // Methods
+}

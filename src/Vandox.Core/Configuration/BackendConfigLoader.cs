@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text;
 
 using Vandox.Core.IO;
+using Vandox.Core.LogParsing;
 using Vandox.Core.Model;
 
 namespace Vandox.Core.Configuration;
@@ -167,6 +168,11 @@ public static class BackendConfigLoader
         Require(webPort != ingestPort, file, lines, KeyIngestListen, "must not use the same port as web.listen");
         Require(IsCleanAbsolutePath(config.Storage.Directory), file, lines, "storage.directory", "must be an absolute, clean path (no trailing slash, no . or .. elements)");
         Require(config.Log.Level is "debug" or "info" or "warn" or "error", file, lines, "log.level", "must be one of debug, info, warn, error");
+        Require(config.Import.TimeZone is null || SourceTimeZone.Find(config.Import.TimeZone) is not null,
+                file,
+                lines,
+                "import.time_zone",
+                "must be a time zone of the IANA time zone database, such as UTC or Europe/Berlin");
     }
 
     /// <summary>

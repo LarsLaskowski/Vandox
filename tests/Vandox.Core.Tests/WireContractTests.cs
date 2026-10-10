@@ -53,5 +53,48 @@ public class WireContractTests
         Assert.AreSequenceEqual(expected, kinds, "kinds in order");
     }
 
+    /// <summary>
+    /// The log line of the Go encoder's golden batch carries every field, the host included.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task DecodeGoldenBatchReadsEveryLogLineField()
+    {
+        // Arrange
+        var plain = await File.ReadAllBytesAsync(RepositoryFiles.Path("testdata/wire/all-kinds.jsonl"), CancellationToken.None);
+        using var compressed = new MemoryStream();
+
+        await using (var gzip = new GZipStream(compressed, CompressionLevel.Optimal, true))
+        {
+            await gzip.WriteAsync(plain, CancellationToken.None);
+        }
+
+        compressed.Position = 0;
+
+        // Act
+        LogLine? line = null;
+
+        using (var decoder = await BatchDecoder.OpenAsync(compressed, null, CancellationToken.None))
+        {
+            for (var record = await decoder.NextAsync(CancellationToken.None); record is not null; record = await decoder.NextAsync(CancellationToken.None))
+            {
+                if (record.Data is LogLine found)
+                {
+                    line = found;
+                }
+            }
+        }
+
+        // Assert
+        Assert.IsNotNull(line, "the golden batch holds a log line");
+        Assert.AreEqual("journal", line.Log, "log");
+        Assert.AreEqual("web-1", line.Host, "host");
+        Assert.AreEqual("sshd", line.Program, "program");
+        Assert.AreEqual(5120, line.Pid, "pid");
+        Assert.AreEqual((byte)3, line.Priority, "priority");
+        Assert.AreEqual("Failed password", line.Message, "message");
+        Assert.IsTrue(line.Truncated, "truncated");
+    }
+
     #endregion // Methods
 }

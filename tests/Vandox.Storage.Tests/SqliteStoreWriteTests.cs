@@ -59,6 +59,7 @@ public class SqliteStoreWriteTests
         var line = (LogLine)logs[0].Record.Data!;
 
         Assert.AreEqual("hello world", line.Message, "log message");
+        Assert.AreEqual("web-1", line.Host, "log host");
         Assert.AreEqual((byte)3, line.Priority, "log priority");
         Assert.AreEqual(12, line.Pid, "log pid");
         Assert.IsTrue(line.Truncated, "log truncated");
@@ -96,6 +97,7 @@ public class SqliteStoreWriteTests
 
         Assert.AreEqual(1L, await CountAsync(connection, "log_lines WHERE priority IS NULL"), "log line without priority");
         Assert.AreEqual(1L, await CountAsync(connection, "log_lines WHERE priority IS NOT NULL"), "log line with priority");
+        Assert.AreEqual(2L, await CountAsync(connection, "log_lines WHERE host = 'web-1'"), "the host is stored with every log line");
         Assert.AreEqual(5L, await CountAsync(connection, "records WHERE agent_id IS NULL AND boot_id IS NULL AND clock_offset_ns IS NULL AND seq IS NULL"), "no agent, boot, offset and sequence number");
         Assert.AreEqual(4L, await CountAsync(connection, "records WHERE data IS NULL"), "typed records keep no JSON payload");
         Assert.AreEqual(1L, await CountAsync(connection, "records WHERE data IS NOT NULL"), "the gap keeps its JSON payload");

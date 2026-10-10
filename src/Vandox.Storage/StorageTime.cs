@@ -1,3 +1,5 @@
+using Vandox.Core.Model;
+
 namespace Vandox.Storage;
 
 /// <summary>
@@ -9,8 +11,6 @@ internal static class StorageTime
 
     private const long TicksPerNanosecondInverse = 100;
     private const long UnixEpochTicks = 621355968000000000;
-    private const long MaxTickOffset = long.MaxValue / TicksPerNanosecondInverse;
-    private const long MinTickOffset = long.MinValue / TicksPerNanosecondInverse;
 
     #endregion // Constants
 
@@ -23,9 +23,7 @@ internal static class StorageTime
     /// <returns><c>true</c> when the instant can be stored</returns>
     internal static bool InStorableRange(DateTimeOffset instant)
     {
-        var offset = instant.UtcTicks - UnixEpochTicks;
-
-        return offset is >= MinTickOffset and <= MaxTickOffset;
+        return StorableTime.Contains(instant);
     }
 
     /// <summary>
@@ -35,9 +33,12 @@ internal static class StorageTime
     /// <returns><c>true</c> when the instant is outside the storable range</returns>
     internal static bool IsOutsideStorableRange(DateTimeOffset instant)
     {
-        var offset = instant.UtcTicks - UnixEpochTicks;
+        if (StorableTime.Contains(instant))
+        {
+            return false;
+        }
 
-        return offset < MinTickOffset || offset > MaxTickOffset;
+        return true;
     }
 
     /// <summary>

@@ -10,7 +10,7 @@ public interface IRecordEmitter
     #region Methods
 
     /// <summary>
-    /// Takes the next record in file order. An exception stops the import; the parser lets it pass.
+    /// Takes the next record, in the parser's deterministic order (file order except where the parser combines lines into one record). An exception stops the import; the parser lets it pass.
     /// </summary>
     /// <param name="record">The record</param>
     /// <param name="cancellationToken">Cancels the call</param>

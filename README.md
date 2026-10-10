@@ -73,6 +73,7 @@ the value.
 | `ingest.listen` | `:8081` | Address of the ingest endpoint, on a port other than `web.listen`. |
 | `storage.directory` | `/data` | Directory of the backend's data, an absolute and clean path. |
 | `log.level` | `info` | `debug`, `info`, `warn` or `error`. |
+| `import.time_zone` | none | IANA time zone of the server the imported logs come from, e.g. `Europe/Berlin` or `UTC`. Required to import traditional syslog files (see *Import logs*). |
 
 **Secrets**
 
@@ -260,7 +261,7 @@ extracted to disk, and symbolic links, FIFOs, sockets and devices are never foll
 read as streams, so memory use does not grow with the file size; lines longer than 16 KiB are cut. A run
 handles at most 20,000 entries (files, subdirectories and archive entries); a larger input is refused before
 anything is stored and has to be split. There is no size limit: a gzip bomb of valid lines is decompressed
-and, once parsers exist, its records fill `storage.directory` until the import is stopped, so watch the
+and its records fill `storage.directory` until the import is stopped, so watch the
 progress lines and press Ctrl-C.
 
 Every file is read twice, first to detect its type and compute the SHA-256 of its decompressed content, then
@@ -279,5 +280,32 @@ another name or compressed differently (`syslog.1` and the later `syslog.2.gz`).
 is stored twice. Stopping or restarting the container kills a running import; nothing committed is lost, and
 the next import resumes. Limits: a file that grew since it was imported (the same log with more lines, as in
 a newer copy of `/var/log`) has another content hash and is imported as a whole, and lines appended to a log
-while it is imported are left for a later import. The parsers for the log formats arrive with the issues
-#16 to #20; until then `vandoxd import` recognizes no file and lists every file as not recognized.
+while it is imported are left for a later import.
+
+Supported sources:
+
+- `journalctl -o export` (the text export of the systemd journal, source type `journal`). Export a binary
+  journal on the server with `journalctl -o export > journal.export` (add `--since`, `--until` or `-u` to limit
+  it); the binary journal files themselves are not read.
+- rsyslog files (source type `syslog`): `syslog`, `kern.log` and their rotations (`syslog.1`, `syslog.2.gz`,
+  `kern.log-20260301`), in the traditional format (`Mar  1 12:00:00 host program[pid]: message`) and in the RFC
+  3339 format (`2026-03-01T12:00:00.123456+01:00 host program[pid]: message`), with or without `<PRI>`. The
+  detection also claims any other file whose first line has such a header. RFC 5424 files are not read.
+
+The file name of a rotated log must stay as the server wrote it (`syslog.1`, `kern.log-20260301`), and the
+modification time of the files matters: the traditional format has no year, and the backend takes it from a
+`-YYYYMMDD` date in the file name, else from the modification time of the file, and follows the order of the lines
+from there. Copy the logs with their times preserved (`cp -a`, `rsync -a` or `tar`); after a plain `cp` the
+modification time is the time of the copy, and the years of the lines are wrong.
+
+The traditional format also has no time zone. Set `import.time_zone` in `vandoxd.yaml` to the IANA time zone of the
+server the logs come from (for example `Europe/Berlin`); there is no default, because a wrong zone would shift every
+time stamp and an import cannot be redone. Without the option a file with year-less lines fails with
+"import.time_zone is not set" (the lines before the first year-less line are stored, and the run exits with 1).
+Set the option and run the import again: the file is completed. RFC 3339 files and journal exports carry their
+offset and need no option.
+
+Times outside 1677-09-21 to 2262-04-11 and dates that do not exist (31 November, 29 February in a year that is not a
+leap year) are skipped with a reason, as is a year-less line in a file without a usable date. A multi-line kernel
+report (an OOM kill, a `cut here` warning) becomes one record. Ubuntu's rsyslog writes every kernel line to both
+`syslog` and `kern.log`, so importing both stores the kernel lines twice.
