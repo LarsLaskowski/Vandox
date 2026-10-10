@@ -25,7 +25,8 @@ NOT_BEFORE_WORD = "=$"
 WORD_END = " \t;|&)<>"
 # `[ … ]` as a command word: at the start of a command, followed by a space, and not the `[[` keyword.
 SINGLE_BRACKET = re.compile(r"(?<![^\s;(!&|])\[\s")
-FUNCTION_HEAD = re.compile(r"^\s*(?:function\s+)?[\w.-]+\s*\(\)\s*\{|^\s*function\s+[\w.-]+\s*\{")
+# `name() {`, `function name {` and `function name() {`; a bare `name {` is not bash, so matching it costs nothing.
+FUNCTION_HEAD = re.compile(r"^\s*(?:function\s+)?[\w.-]+\s*(?:\(\)\s*)?\{")
 RULES = {"S7679": "assign this positional parameter to a local variable (shelldre:S7679)",
          "S7688": "use [[ … ]] instead of [ … ] (shelldre:S7688)"}
 
