@@ -18,6 +18,7 @@ indent_style = tab
 indent_size = 2
 
 [*.md]
+end_of_line = crlf
 trim_trailing_whitespace = false
 
 [*.{cs,razor}]
@@ -27,10 +28,13 @@ insert_final_newline = false
 
 #### Core EditorConfig Options ####
 
-# Indentation and spacing (line endings stay LF, see [*] and .gitattributes)
+# Indentation and spacing
 indent_size = 4
 indent_style = space
 tab_width = 4
+
+# New line preferences (CRLF, matching .gitattributes)
+end_of_line = crlf
 
 #### .NET Coding Conventions ####
 
@@ -187,20 +191,24 @@ csharp_preserve_single_line_statements = false
 
 #### Naming styles ####
 
-# Naming rules
-dotnet_naming_rule.interface_should_be_begins_with_i.severity = suggestion
+# Naming rules (IDE1006)
+dotnet_naming_rule.interface_should_be_begins_with_i.severity = error
 dotnet_naming_rule.interface_should_be_begins_with_i.symbols = interface
 dotnet_naming_rule.interface_should_be_begins_with_i.style = begins_with_i
 
-dotnet_naming_rule.types_should_be_pascal_case.severity = suggestion
+dotnet_naming_rule.types_should_be_pascal_case.severity = error
 dotnet_naming_rule.types_should_be_pascal_case.symbols = types
 dotnet_naming_rule.types_should_be_pascal_case.style = pascal_case
 
-dotnet_naming_rule.non_field_members_should_be_pascal_case.severity = suggestion
+dotnet_naming_rule.non_field_members_should_be_pascal_case.severity = error
 dotnet_naming_rule.non_field_members_should_be_pascal_case.symbols = non_field_members
 dotnet_naming_rule.non_field_members_should_be_pascal_case.style = pascal_case
 
-dotnet_naming_rule.private_fields_underscore.severity = warning
+dotnet_naming_rule.constants_should_be_pascal_case.severity = error
+dotnet_naming_rule.constants_should_be_pascal_case.symbols = constants
+dotnet_naming_rule.constants_should_be_pascal_case.style = pascal_case
+
+dotnet_naming_rule.private_fields_underscore.severity = error
 dotnet_naming_rule.private_fields_underscore.symbols = private_fields
 dotnet_naming_rule.private_fields_underscore.style = underscore_camel_case
 
@@ -213,6 +221,10 @@ dotnet_naming_symbols.types.applicable_accessibilities = public, internal, priva
 
 dotnet_naming_symbols.non_field_members.applicable_kinds = property, event, method
 dotnet_naming_symbols.non_field_members.applicable_accessibilities = public, internal, private, protected, protected_internal, private_protected
+
+dotnet_naming_symbols.constants.applicable_kinds = field
+dotnet_naming_symbols.constants.applicable_accessibilities = *
+dotnet_naming_symbols.constants.required_modifiers = const
 
 dotnet_naming_symbols.private_fields.applicable_kinds = field
 dotnet_naming_symbols.private_fields.applicable_accessibilities = private
@@ -227,6 +239,9 @@ dotnet_naming_style.underscore_camel_case.required_prefix = _
 dotnet_naming_style.underscore_camel_case.capitalization = camel_case
 
 #### Diagnostics ####
+
+# Naming rule violations
+dotnet_diagnostic.IDE1006.severity = error
 
 # Logging goes through [LoggerMessage] methods; an argument that is evaluated although logging is off is a defect (CA1873)
 dotnet_diagnostic.CA1873.severity = warning
@@ -246,6 +261,7 @@ dotnet_diagnostic.MSTEST0038.severity = error
 dotnet_diagnostic.MSTEST0039.severity = error
 dotnet_diagnostic.MSTEST0049.severity = error
 dotnet_diagnostic.MSTEST0065.severity = error
+dotnet_diagnostic.MSTEST0084.severity = error
 
 # Diagnostics that the build reports only at info level but that SonarQube Cloud lists as issues: the build fails on them.
 dotnet_diagnostic.MSTEST0037.severity = error
