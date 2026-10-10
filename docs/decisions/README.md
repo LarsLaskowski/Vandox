@@ -115,4 +115,5 @@ once in the [area document](../areas/README.md) of the record's area, and the re
 | 0086 | System log parsers: journal export by content, a generic weak syslog parser, kernel reports grouped with head and tail | Accepted | 2026-10-09 |
 | 0087 | C# style rules follow the standard settings, adapted to Vandox's analyzers and Linux tooling | Accepted | 2026-10-10 |
 | 0088 | MariaDB error log: entries detected by content and kept with their continuation lines, lifecycle events in an optional log_line field; the same rules for MariaDB lines of the journal and syslog | Accepted | 2026-10-10 |
+| 0089 | A JSON null in a batch reads as an absent key in both decoders | Proposed | 2026-10-10 |
 <!-- project:end index -->
