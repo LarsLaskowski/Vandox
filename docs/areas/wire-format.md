@@ -78,6 +78,11 @@ one is invalid, and the decoder sets the origin of every decoded record to `agen
 - **Field paths** in errors use the JSON names, list indexes in brackets and map keys in brackets rendered
   with `model.QuoteName` / `FieldError.QuoteName` (cut to 128 bytes, quoted with Go escaping, `...` appended when cut), e.g.
   `data.processes[3].pid`, `data.labels["mount"]`.
+- **Null**: for a key given once, a JSON `null` reads as if the key were absent, in the header, the record line and the payload at any
+  depth. A `null` list element reads as an element with every field at its zero value, a `null` map value as the zero value of the map's
+  value type (`""` for `labels` and `variables`, `0` for `status`), and a record line that is `null` as an object without keys. The record's
+  validation then decides, so a missing required field is a field error, never `ErrMalformed`. The Go encoder never writes `null`.
+  See [0089](../decisions/0089-json-null-reads-as-an-absent-key-in-both-decoders.md).
 
 ### `metric`
 
@@ -225,6 +230,9 @@ What the decoder does with unusual input; each row is a test case.
 | Keys that are Unicode case-fold equivalents (`"Kind"` with U+212A KELVIN SIGN, `"ſeq"` with U+017F) | accepted as the field; the last of several spellings wins |
 | Duplicate keys | the last one wins |
 | Unknown keys at any depth | ignored |
+| `null` as the value of a field (header, record or payload) | read as absent: accepted where the field is optional (`"host":null`, `"format_minor":null`; `"value":null` reads 0), rejected with the field error of the missing field where it is required (`"log":null` gives `data.log: required`, `"seq":null` gives `seq: must be greater than 0 for origin agent`, `"addr":null` gives `invalid address`) |
+| `null` as a list element | an element with every field at its zero value: `"threads":[null]` accepted, `"processes":[null]` gives `data.processes[0].pid: must be greater than 0` |
+| `null` as a map value | the zero value of the value type: `"labels":{"a":null}` accepted with an empty value, `"status":{"Uptime":null}` reads 0 |
 | `format_major` missing, `null`, 0, negative, not 1 | rejected, `ErrUnsupportedVersion`, line 1 |
 | `format_major` as `1.0`, `1e0`, `"1"` | rejected, `ErrMalformed` |
 | `kind` unknown, wrong case, empty or missing | rejected, `ErrUnknownKind` |
@@ -286,6 +294,7 @@ Decompressed content of a batch of three records (the real stream is gzip-compre
 - [0088](../decisions/0088-mariadb-error-log-entries-by-content-and-lifecycle-events-in-log-line.md) — why `log_line` gets an optional `event`.
 - [0075](../decisions/0075-wire-contract-pinned-by-golden-fixtures.md) — why golden fixtures pin the contract between the two languages.
 - [0076](../decisions/0076-strict-gzip-validation-in-the-backend.md) — why the backend decodes gzip strictly.
+- [0089](../decisions/0089-json-null-reads-as-an-absent-key-in-both-decoders.md) — why a JSON `null` reads as an absent key in both decoders.
 
 ## Not here
 
@@ -297,5 +306,5 @@ Decompressed content of a batch of three records (the real stream is gzip-compre
 
 Agent (Go): `internal/model` (record types and validation) and `internal/wire` (header, encoder, streaming decoder; golden test
 `internal/wire/golden_test.go`, `VANDOX_UPDATE_GOLDEN=1` rewrites the fixture). Backend (C#): `Vandox.Core.Model` and `Vandox.Core.Wire`
-(`BatchDecoder`, `WireLimits`), `Vandox.Core.IO` (`StrictGzip`), contract test `WireContractTests`.
+(`BatchDecoder`, `WireLimits`; `NullAsAbsentConverterFactory` with its two converters is the C# side of the null rule), `Vandox.Core.IO` (`StrictGzip`), contract test `WireContractTests`.
 
