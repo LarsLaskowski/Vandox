@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -908,4 +910,388 @@ func TestDecoder_GzipHeaderFields(t *testing.T) {
 			want{is: wire.ErrMalformed, line: 1}.check(t, err)
 		}
 	})
+}
+
+// pathStep is one step of a path into a JSON document: an object key (string) or an array index (int).
+type pathStep = any
+
+// parseJSON parses text into a generic tree; numbers stay json.Number, so they are written back unchanged.
+func parseJSON(t *testing.T, text string) any {
+	t.Helper()
+	dec := json.NewDecoder(strings.NewReader(text))
+	dec.UseNumber()
+	var v any
+	if err := dec.Decode(&v); err != nil {
+		t.Fatalf("test setup: parsing %q = %v, want nil", text, err)
+	}
+	return v
+}
+
+// goldenLines returns the header and the nine records of the golden batch.
+func goldenLines(t *testing.T) []string {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join("..", "..", "testdata", "wire", "all-kinds.jsonl"))
+	if err != nil {
+		t.Fatalf("reading golden file = %v, want nil", err)
+	}
+	return strings.Split(strings.TrimRight(string(raw), "\n"), "\n")
+}
+
+// collectPaths adds the path of every object member below node to members and the path of the first element of
+// every array of objects to elements.
+func collectPaths(node any, path []pathStep, members, elements *[][]pathStep) {
+	switch n := node.(type) {
+	case map[string]any:
+		for key, child := range n {
+			childPath := append(append([]pathStep{}, path...), key)
+			*members = append(*members, childPath)
+			collectPaths(child, childPath, members, elements)
+		}
+	case []any:
+		for i, child := range n {
+			childPath := append(append([]pathStep{}, path...), i)
+			if _, isObject := child.(map[string]any); isObject && i == 0 {
+				*elements = append(*elements, childPath)
+			}
+			collectPaths(child, childPath, members, elements)
+		}
+	}
+}
+
+// applyAt replaces the value at path of the JSON line with the JSON text repl, or removes the key when repl is nil.
+func applyAt(t *testing.T, line string, path []pathStep, repl *string) string {
+	t.Helper()
+	root := parseJSON(t, line)
+	container := root
+	for _, step := range path[:len(path)-1] {
+		switch s := step.(type) {
+		case string:
+			container = container.(map[string]any)[s]
+		case int:
+			container = container.([]any)[s]
+		}
+	}
+	var value any
+	if repl != nil {
+		value = parseJSON(t, *repl)
+	}
+	switch last := path[len(path)-1].(type) {
+	case string:
+		if repl == nil {
+			delete(container.(map[string]any), last)
+		} else {
+			container.(map[string]any)[last] = value
+		}
+	case int:
+		container.([]any)[last] = value
+	}
+	out, err := json.Marshal(root)
+	if err != nil {
+		t.Fatalf("test setup: writing the changed line = %v, want nil", err)
+	}
+	return string(out)
+}
+
+// goldenVariant names a position in the golden batch: the line (0 is the header) and the path of a key or element.
+type goldenVariant struct {
+	line int
+	path []pathStep
+}
+
+func (v goldenVariant) String() string {
+	parts := make([]string, len(v.path))
+	for i, step := range v.path {
+		parts[i] = fmt.Sprint(step)
+	}
+	return fmt.Sprintf("line %d %s", v.line+1, strings.Join(parts, "."))
+}
+
+// goldenVariants lists every object member at any depth of the golden batch, plus the model keys the batch lacks
+// (the header's clock_offset_ns, the first process's ppid, the OOM kill's boot and the boot's oom_kill), and
+// the first element of every array of objects.
+func goldenVariants(t *testing.T, lines []string) (members, elements []goldenVariant) {
+	t.Helper()
+	for i, line := range lines {
+		var m, e [][]pathStep
+		collectPaths(parseJSON(t, line), nil, &m, &e)
+		for _, p := range m {
+			members = append(members, goldenVariant{i, p})
+		}
+		for _, p := range e {
+			elements = append(elements, goldenVariant{i, p})
+		}
+	}
+	members = append(members,
+		goldenVariant{0, []pathStep{"clock_offset_ns"}},
+		goldenVariant{2, []pathStep{"data", "processes", 0, "ppid"}},
+		goldenVariant{6, []pathStep{"data", "boot"}},
+		goldenVariant{7, []pathStep{"data", "oom_kill"}},
+	)
+	return members, elements
+}
+
+// isMapEntry reports whether the path names an entry of labels, status or variables.
+func isMapEntry(path []pathStep) bool {
+	if len(path) != 3 || path[0] != "data" {
+		return false
+	}
+	return path[1] == "labels" || path[1] == "status" || path[1] == "variables"
+}
+
+// errorClass names the sentinel an error wraps.
+func errorClass(err error) string {
+	classes := []struct {
+		name string
+		is   error
+	}{
+		{"invalid", model.ErrInvalid},
+		{"malformed", wire.ErrMalformed},
+		{"unknown kind", wire.ErrUnknownKind},
+		{"unsupported version", wire.ErrUnsupportedVersion},
+		{"sequence", wire.ErrSequence},
+		{"empty batch", wire.ErrEmptyBatch},
+		{"limit", wire.ErrLimitExceeded},
+	}
+	for _, c := range classes {
+		if errors.Is(err, c.is) {
+			return c.name
+		}
+	}
+	return "other"
+}
+
+// describeError describes the class, the line and the field error of a decode error.
+func describeError(err error) string {
+	desc := "fail " + errorClass(err)
+	var de *wire.DecodeError
+	if errors.As(err, &de) {
+		desc += fmt.Sprintf(" line %d", de.Line)
+	}
+	var fe *model.FieldError
+	if errors.As(err, &fe) {
+		desc += fmt.Sprintf(" field %q reason %q", fe.Field, fe.Reason)
+	}
+	return desc
+}
+
+// decodeOutcome decodes a header line (line 0) or a record line behind a valid header and describes the result.
+func decodeOutcome(t *testing.T, line int, text string) string {
+	t.Helper()
+	data := withHeader(t, text)
+	if line == 0 {
+		data = stream(t, text, metricLine(1))
+	}
+	d, err := wire.NewDecoder(bytes.NewReader(data), wire.DefaultLimits())
+	if err != nil {
+		return describeError(err)
+	}
+	t.Cleanup(func() { _ = d.Close() })
+	if line == 0 {
+		header, _ := json.Marshal(d.Header())
+		return "header " + string(header)
+	}
+	rec, err := d.Next()
+	if err != nil {
+		return describeError(err)
+	}
+	payload, _ := json.Marshal(rec.Data)
+	return fmt.Sprintf("record %s %d %s %s %s", rec.Source, rec.Seq, rec.CapturedAt.Format(time.RFC3339Nano), rec.Kind(), payload)
+}
+
+// requireSameOutcome fails the test unless both texts decode to the same outcome.
+func requireSameOutcome(t *testing.T, v goldenVariant, lines []string, other string, repl, otherRepl *string) {
+	t.Helper()
+	got := decodeOutcome(t, v.line, applyAt(t, lines[v.line], v.path, repl))
+	want := decodeOutcome(t, v.line, applyAt(t, lines[v.line], v.path, otherRepl))
+	if got != want {
+		t.Errorf("%v: null decodes to [%s], %s decodes to [%s], want equal", v, got, other, want)
+	}
+}
+
+func TestDecoder_NullReadsAsAbsentKey(t *testing.T) {
+	lines := goldenLines(t)
+	members, _ := goldenVariants(t, lines)
+	checked := 0
+	for _, v := range members {
+		if isMapEntry(v.path) {
+			continue
+		}
+		checked++
+		requireSameOutcome(t, v, lines, "an absent key", ptr("null"), nil)
+	}
+	if checked < 100 {
+		t.Errorf("checked %d keys, want at least 100", checked)
+	}
+}
+
+func TestDecoder_NullListElementReadsAsEmptyObject(t *testing.T) {
+	lines := goldenLines(t)
+	_, elements := goldenVariants(t, lines)
+	if len(elements) != 8 {
+		t.Fatalf("golden batch has %d lists of objects, want 8", len(elements))
+	}
+	for _, v := range elements {
+		requireSameOutcome(t, v, lines, "{}", ptr("null"), ptr("{}"))
+	}
+}
+
+func TestDecoder_NullMapValueReadsAsZeroValue(t *testing.T) {
+	lines := goldenLines(t)
+	members, _ := goldenVariants(t, lines)
+	checked := 0
+	for _, v := range members {
+		if !isMapEntry(v.path) {
+			continue
+		}
+		checked++
+		zero := ptr(`""`)
+		if v.path[1] == "status" {
+			zero = ptr("0")
+		}
+		requireSameOutcome(t, v, lines, *zero, ptr("null"), zero)
+	}
+	if checked != 5 {
+		t.Errorf("golden batch has %d map entries, want 5", checked)
+	}
+}
+
+func TestDecoder_NullHeaderFields(t *testing.T) {
+	cases := []struct {
+		key string
+		w   want
+	}{
+		{"agent_id", want{is: model.ErrInvalid, field: "agent_id", reason: "must be 1 to 64 characters of [A-Za-z0-9._-], starting with a letter or digit", line: 1}},
+		{"boot_id", want{is: model.ErrInvalid, field: "boot_id", reason: "must be a lower-case UUID", line: 1}},
+		{"mode", want{is: model.ErrInvalid, field: "mode", reason: "must be live or backfill", line: 1}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.key, func(t *testing.T) {
+			header := applyAt(t, headerJSON, []pathStep{tc.key}, ptr("null"))
+			_, err := decodeAll(t, stream(t, header, metricLine(1)), wire.DefaultLimits())
+			tc.w.check(t, err)
+		})
+	}
+	t.Run("optional fields read as absent", func(t *testing.T) {
+		header := applyAt(t, applyAt(t, headerJSON, []pathStep{"format_minor"}, ptr("3")), []pathStep{"clock_offset_ns"}, ptr("5"))
+		nulled := applyAt(t, applyAt(t, header, []pathStep{"format_minor"}, ptr("null")), []pathStep{"clock_offset_ns"}, ptr("null"))
+		d := newTestDecoder(t, stream(t, nulled, metricLine(1)))
+		if got := d.Header(); got.FormatMinor != 0 || got.ClockOffset != nil {
+			t.Errorf("Header() = %+v, want format_minor 0 and no clock offset", got)
+		}
+	})
+	t.Run("line is null", func(t *testing.T) {
+		_, err := decodeAll(t, stream(t, "null", metricLine(1)), wire.DefaultLimits())
+		want{is: wire.ErrUnsupportedVersion, line: 1}.check(t, err)
+	})
+}
+
+func TestDecoder_NullEnvelopeFields(t *testing.T) {
+	cases := []struct {
+		key string
+		w   want
+	}{
+		{"kind", want{is: wire.ErrUnknownKind, line: 2}},
+		{"source", want{is: model.ErrInvalid, field: "source", reason: "required", line: 2}},
+		{"seq", want{is: model.ErrInvalid, field: "seq", reason: "must be greater than 0 for origin agent", line: 2}},
+		{"captured_at", want{is: model.ErrInvalid, field: "captured_at", reason: "required", line: 2}},
+		{"data", want{is: model.ErrInvalid, field: "data", reason: "required", line: 2}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.key, func(t *testing.T) {
+			line := applyAt(t, metricLine(1), []pathStep{tc.key}, ptr("null"))
+			_, err := decodeAll(t, withHeader(t, line), wire.DefaultLimits())
+			tc.w.check(t, err)
+		})
+	}
+	t.Run("line is null", func(t *testing.T) {
+		_, err := decodeAll(t, withHeader(t, "null"), wire.DefaultLimits())
+		want{is: wire.ErrUnknownKind, line: 2}.check(t, err)
+	})
+}
+
+func TestDecoder_NullPayloadFieldIsAFieldError(t *testing.T) {
+	cases := []struct {
+		name  string
+		kind  string
+		data  string
+		field string
+		why   string
+	}{
+		{"metric name", "metric", `{"name":null,"value":1}`, "data.name", "required"},
+		{"log line log", "log_line", `{"log":null,"message":"m"}`, "data.log", "required"},
+		{"null process", "process_snapshot", `{"complete":true,"processes":[null]}`, "data.processes[0].pid", "must be greater than 0"},
+		{"null program", "process_snapshot", `{"complete":true,"programs":[null]}`, "data.programs[0].program", "required"},
+		{"process command", "process_snapshot", `{"complete":true,"processes":[{"pid":1,"command":null}]}`, "data.processes[0].command", "required"},
+		{"state proto", "connection_snapshot", `{"complete":true,"states":[{"proto":null,"count":1}]}`, "data.states[0].proto", "unknown value"},
+		{"connection process command", "connection_snapshot", `{"complete":true,"processes":[{"pid":1,"command":null,"count":1}]}`, "data.processes[0].command", "required"},
+		{"remote addr", "connection_snapshot", `{"complete":true,"remotes":[{"addr":null,"count":1}]}`, "data.remotes[0].addr", "invalid address"},
+		{"service unit", "service_state", `{"unit":null,"load_state":"loaded","active_state":"active"}`, "data.unit", "required"},
+		{"null status entry of a down database", "mariadb_status", `{"availability":"down","status":{"A":null},"complete":true}`, "data.availability", "status, variables and threads must be empty unless up"},
+		{"oom victim command", "kernel_event", `{"type":"oom_kill","oom_kill":{"victim_pid":1,"victim_command":null}}`, "data.oom_kill.victim_command", "required"},
+		{"boot id", "kernel_event", `{"type":"boot","boot":{"boot_id":null}}`, "data.boot.boot_id", "required"},
+		{"gap from", "gap", `{"from":null,"to":"2026-03-01T10:00:00Z","cause":"unknown"}`, "data.from", "required"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := decodeAll(t, withHeader(t, kindLine(tc.kind, tc.data)), wire.DefaultLimits())
+			want{is: model.ErrInvalid, field: tc.field, reason: tc.why, line: 2}.check(t, err)
+		})
+	}
+}
+
+func TestDecoder_NullOfOptionalPayloadFieldIsAccepted(t *testing.T) {
+	cases := []struct {
+		name string
+		kind string
+		data string
+		want string // the decoded payload, written as JSON
+	}{
+		{"metric value", "metric", `{"name":"cpu","value":null}`, `{"name":"cpu","value":0}`},
+		{"metric unit", "metric", `{"name":"cpu","value":1,"unit":null}`, `{"name":"cpu","value":1}`},
+		{"metric label", "metric", `{"name":"cpu","value":1,"labels":{"device":null,"mount":"/var"}}`, `{"name":"cpu","value":1,"labels":{"device":"","mount":"/var"}}`},
+		{"log line texts", "log_line", `{"log":"l","host":null,"program":null,"event":null,"message":null}`, `{"log":"l","message":""}`},
+		{"log line numbers", "log_line", `{"log":"l","message":"m","pid":null,"truncated":null,"priority":null}`, `{"log":"l","message":"m"}`},
+		{"process fields", "process_snapshot", `{"complete":true,"processes":[{"pid":1,"command":"c","user":null,"cmdline":null,"state":null,"started_at":null}]}`, `{"complete":true,"processes":[{"pid":1,"command":"c","cpu_percent":0,"rss_bytes":0}]}`},
+		{"process ppid", "process_snapshot", `{"complete":true,"processes":[{"pid":1,"command":"c","ppid":null}]}`, `{"complete":true,"processes":[{"pid":1,"command":"c","cpu_percent":0,"rss_bytes":0}]}`},
+		{"state", "connection_snapshot", `{"complete":true,"states":[{"proto":"udp","state":null,"count":1}]}`, `{"complete":true,"states":[{"proto":"udp","count":1}]}`},
+		{"listener command", "connection_snapshot", `{"complete":true,"listeners":[{"proto":"tcp","local":"1.2.3.4:1","command":null}]}`, `{"complete":true,"listeners":[{"proto":"tcp","local":"1.2.3.4:1"}]}`},
+		{"service fields", "service_state", `{"unit":"nginx.service","load_state":"loaded","active_state":"active","sub_state":null,"active_enter_at":null,"restarts":null}`, `{"unit":"nginx.service","load_state":"loaded","active_state":"active","restarts":0}`},
+		{"null thread", "mariadb_status", `{"availability":"up","threads":[null],"complete":true}`, `{"availability":"up","threads":[{"id":0,"time_seconds":0}],"complete":true}`},
+		{"null variable", "mariadb_status", `{"availability":"up","variables":{"A":null},"complete":true}`, `{"availability":"up","variables":{"A":""},"complete":true}`},
+		{"null status entry", "mariadb_status", `{"availability":"up","status":{"A":null},"complete":true}`, `{"availability":"up","status":{"A":0},"complete":true}`},
+		{"kernel message", "kernel_event", `{"type":"oom_kill","oom_kill":{"victim_pid":1,"victim_command":"c"},"message":null}`, `{"type":"oom_kill","oom_kill":{"victim_pid":1,"victim_command":"c"}}`},
+		{"gap collector", "gap", `{"from":"2026-03-01T09:00:00Z","to":"2026-03-01T10:00:00Z","cause":"unknown","collector":null}`, `{"from":"2026-03-01T09:00:00Z","to":"2026-03-01T10:00:00Z","cause":"unknown"}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			recs, err := decodeAll(t, withHeader(t, kindLine(tc.kind, tc.data)), wire.DefaultLimits())
+			requireDecoded(t, "", recs, err, 1)
+			got, _ := json.Marshal(recs[0].Data)
+			if string(got) != tc.want {
+				t.Errorf("decoded payload = %s, want %s", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestDecoder_WrongTypeStaysMalformed(t *testing.T) {
+	cases := []struct {
+		name string
+		kind string
+		data string
+	}{
+		{"number as name", "metric", `{"name":5}`},
+		{"string as pid", "log_line", `{"log":"l","message":"m","pid":"1"}`},
+		{"object as list", "process_snapshot", `{"complete":true,"processes":{}}`},
+		{"number as element", "process_snapshot", `{"complete":true,"processes":[5]}`},
+		{"number as label", "metric", `{"name":"cpu","value":1,"labels":{"a":5}}`},
+		{"string as status", "mariadb_status", `{"availability":"up","status":{"A":"x"},"complete":true}`},
+		{"quoted null as address", "connection_snapshot", `{"complete":true,"remotes":[{"addr":"null","count":1}]}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := decodeAll(t, withHeader(t, kindLine(tc.kind, tc.data)), wire.DefaultLimits())
+			malformed(2).check(t, err)
+		})
+	}
 }
