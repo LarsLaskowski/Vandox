@@ -23,8 +23,9 @@ journal and syslog*. In short:
 
 - A line of program `mariadbd` or `mysqld` whose message begins with one of MariaDB's four entry header forms (*Entries* in
   the area document) opens an entry. The following lines of the same host, program and process ID that have no header
-  belong to it, as a crash report belongs to its `got signal` line. An entry ends at the next MariaDB header line or at the
-  end of the input. Only one entry is open at a time.
+  and are logged within 60 seconds of the header line belong to it, as a crash report belongs to its `got signal` line.
+  An entry ends at the next MariaDB header line, at a line of its host, program and process ID more than 60 seconds from
+  the header line, or at the end of the input. Only one entry is open at a time.
 - An entry becomes one record. Its message is the header's message (without the time stamp, thread and level) and the
   following lines, joined by line feeds and bounded as in the error log: the whole entry up to 16,384 UTF-8 bytes,
   otherwise its beginning and `[N lines omitted]`. Its priority comes from the MariaDB level (`ERROR` 3, `Warning` 4,
@@ -32,9 +33,12 @@ journal and syslog*. In short:
   crash recovery start and end).
 - Time, host, program, process ID, `log` and source type stay those of the journal entry or syslog line. The MariaDB time
   stamp is only used to recognize the header, so a journal export still needs no `import.time_zone`.
+- journald stores no entry for an empty line of standard error, so an entry from a real journal, or from a syslog file
+  that journald feeds, has no empty lines: a crash report's message lacks the inner empty lines the error log keeps.
 - Lines of other programs, and lines of `mariadbd` that belong to no open entry, are stored unchanged. A line written
   while an entry is open is stored before the entry's record.
-- Crash recovery is tracked per host.
+- Crash recovery is tracked as in the error log, in input order. In an input with several hosts, another host's line can
+  end a recovery it did not start (a documented limitation; Vandox reads one server).
 - Forged lines are possible, and this is documented rather than prevented: any local process can log under the name
   `mariadbd`. In the journal its lines without a header cannot join the server's entry, because the process ID is
   journald's own.
@@ -52,13 +56,14 @@ The criteria are listed with test-level detail in [plan.md](plan.md), *Acceptanc
   unchanged (AC3, AC4).
 - [ ] A crash report is one record, with the bounds of the error log (AC5, AC7).
 - [ ] Interleaved lines of other programs, hosts and processes are emitted unchanged before the entry and do not break it
-  (AC6). Only one entry is open (AC6).
+  (AC6). Only one entry is open, and a line more than 60 seconds from its header does not join it (AC6).
 - [ ] No time zone is needed for a journal export, and the MariaDB time stamp is never read (AC8).
-- [ ] Recovery is tracked per host. The error log keeps its behavior (AC9).
+- [ ] Recovery is tracked in input order as in the error log, which keeps its behavior (AC9).
 - [ ] Skipped lines are not seen (AC10). The open entry is emitted only at the normal end, and the output is deterministic
   (AC11). Memory is bounded (AC12).
 - [ ] The MariaDB error log fixture gives the same messages and events through the journal, the syslog file and the error
-  log parser (AC13).
+  log parser when the input carries its empty lines; without them, as journald stores the output, the messages differ by
+  the empty lines only (AC13).
 - [ ] Kernel reports and MariaDB entries are grouped side by side in a fixed stage order (AC14).
 - [ ] The README, the area document, record 0088 and `.squad/project.md` describe the behavior (AC15).
 
@@ -75,4 +80,5 @@ The criteria are listed with test-level detail in [plan.md](plan.md), *Acceptanc
 
 ## Open questions
 
-None. The time source, the program names and the process-ID key are decided in record 0088, options 20 to 36.
+None. The time source, the program names, the process-ID key, the time bound and the recovery state are decided in
+record 0088, options 20 to 36.

@@ -263,8 +263,9 @@ line, with ordinal, case-sensitive string operations and no regular expression:
 | `mariadb.recovery_end` | `Note` | is exactly `Crash table recovery finished.`, or starts with `InnoDB: ` and contains ` started; log sequence number ` while a recovery is open |
 
 Anything else, and every entry without a level, has no event. A recovery is open from a `mariadb.recovery_start` entry until
-the next `mariadb.recovery_end` or `mariadb.start` entry in file order (in the journal and syslog, of the same host, see
-*Lines from the journal and syslog*); an entry skipped for its time is not classified and does not change that. Only the header's first line counts. The formats were checked in the MariaDB source at 10.3.39,
+the next `mariadb.recovery_end` or `mariadb.start` entry in file order (in the journal and syslog, in input order over the
+entries of every host, see *Lines from the journal and syslog*); an entry skipped for its time is not classified and does
+not change that. Only the header's first line counts. The formats were checked in the MariaDB source at 10.3.39,
 10.5.22, 10.6.7, 10.6.11, 10.6.12, 10.6.22, 10.6.28 and 10.11.9; a lifecycle line that another version words differently
 gets no event and the entry is still imported. The `mysqld_safe` "ended" line is not classified.
 
@@ -296,10 +297,14 @@ syslog file. The journal and syslog parsers apply these rules to the records the
   holds no line feed. A line the parser skips (see *System log parsers*) is not seen by these rules: it neither opens nor
   ends an entry.
 - A MariaDB line whose message begins with an entry header (one of the four forms of *Entries*, checked on the UTF-8 bytes
-  of the decoded message) opens an **entry**. The following MariaDB lines that are no header and have the same `host`,
-  `program` and `pid` as the header line are its continuation lines. One entry is open at a time: it ends at the next
-  MariaDB header line, of any host, program or pid, or at the normal end of input.
-- Every other record, a MariaDB line that is no header and does not belong to the open entry included, is emitted
+  of the decoded message) opens an **entry**. The following MariaDB lines that are no header, have the same `host`,
+  `program` and `pid` as the header line (its **key**) and whose time is at most 60 seconds before or after the header
+  line's are its continuation lines. One entry is open at a time: it ends at the next MariaDB header line, of any key, at a
+  MariaDB line of its key that is no header and more than 60 seconds before or after the header line (that line is then
+  emitted unchanged after the entry's record), or at the normal end of input. The bound counts from the header line, not
+  from the previous member, so no member of an entry lies more than 60 seconds from the record's `captured_at`; a crash
+  report whose lines arrive later than that is split, its later lines emitted as plain lines.
+- Every other record, a MariaDB line that is no header and of another key or without an open entry included, is emitted
   unchanged as it comes, before the record of the open entry.
 - The record of an entry is the header line's record with four fields replaced: `message` is the header's message (the
   text after the header prefix, as in *Entries*) and the messages of the continuation lines joined by `\n`, bounded as in
@@ -314,10 +319,17 @@ syslog file. The journal and syslog parsers apply these rules to the records the
   before (see *Time zone*).
 - The journal's `PRIORITY` of a service's standard error is the unit's `SyslogLevel=`, the same for every line (`info`,
   6, by systemd's default; not checked on the server); the level of a header replaces it.
-- The crash recovery of *Events* is tracked per host: a recovery is closed only by a `mariadb.recovery_end` or
-  `mariadb.start` entry of the host whose `mariadb.recovery_start` entry opened it, and an `InnoDB: ... started; log
-  sequence number` entry of another host is no `mariadb.recovery_end`. One recovery is tracked at a time: a
-  `mariadb.recovery_start` entry of another host replaces it.
+- journald stores no entry for an empty line of standard error and forwards none to syslog (`stdout_stream_log` in
+  systemd's `src/journal/journald-stream.c`, checked in systemd 249 and the current source). An entry from a real journal
+  export, or from a syslog file that journald feeds, therefore has no empty lines, and its message lacks the inner empty
+  lines that the error log keeps (a crash report has several); otherwise the same output gives the same message as the
+  error log. An empty message that does arrive (an entry with an empty `MESSAGE`, a syslog line that ends after
+  `mariadbd[<pid>]:`) is a line that is no header, with the empty-line rules of *Bounds*.
+- The crash recovery of *Events* is tracked as in the error log: one state per parse, in input order over the MariaDB
+  entries of every host, program and pid. Vandox reads one server, whose journal export carries one host. In an input with
+  several hosts (a merged journal, a central syslog), another host's `InnoDB: ... started; log sequence number` entry can
+  end a recovery it did not start and get `mariadb.recovery_end`, and another host's `mariadb.start` entry closes a
+  recovery without an end (limitation).
 - As for kernel reports, the open entry is emitted only at the normal end of input, never when the parse ends by an
   exception. The memory these rules hold is the kept part of the open entry, independently of the number and length of
   its lines.
@@ -328,7 +340,8 @@ syslog file. The journal and syslog parsers apply these rules to the records the
   event, and end the server's open entry with a forged header line, after which the rest of that entry's lines are emitted
   as plain lines. In the journal, `pid` comes from `_PID` when the entry has it, which journald sets from the sender's
   credentials, so a forger's lines without a header never join the server's entry; in a syslog file the pid is what the
-  line says. A program name, like an event, is a classification of text and no proof of origin.
+  line says, so such lines join the server's open entry within its 60 seconds. A program name, like an event, is a
+  classification of text and no proof of origin.
 
 ## Result
 
@@ -352,7 +365,7 @@ syslog file. The journal and syslog parsers apply these rules to the records the
 - [0084](../decisions/0084-log-line-record-gets-an-optional-host-field.md) — why `log_line` gets an optional `host`.
 - [0085](../decisions/0085-syslog-time-zone-from-import-time-zone-with-embedded-tzdb.md) — why `import.time_zone` has no default, NodaTime and the year rules.
 - [0086](../decisions/0086-system-log-parsers-generic-syslog-claim-and-grouped-kernel-reports.md) — why the generic syslog claim and grouped kernel reports.
-- [0088](../decisions/0088-mariadb-error-log-entries-by-content-and-lifecycle-events-in-log-line.md) — why the MariaDB error log is detected by content, kept as entries and classified into an `event` field, and why MariaDB lines of the journal and syslog are joined by program, host and pid and keep the time of their line.
+- [0088](../decisions/0088-mariadb-error-log-entries-by-content-and-lifecycle-events-in-log-line.md) — why the MariaDB error log is detected by content, kept as entries and classified into an `event` field, and why MariaDB lines of the journal and syslog are joined by program, host and pid within 60 seconds of their header and keep the time of their line.
 
 - [0014](../decisions/0014-log-import-is-a-core-component.md) — why historical import and log shipping are core.
 - [0021](../decisions/0021-no-pseudonymization-of-log-data.md) — why log data is stored unchanged.
