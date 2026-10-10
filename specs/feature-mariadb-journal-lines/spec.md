@@ -24,11 +24,14 @@ journal and syslog*. In short:
 - A line of program `mariadbd` or `mysqld` whose message begins with one of MariaDB's four entry header forms (*Entries* in
   the area document) opens an entry. The following lines of the same host, program and process ID that have no header
   and are logged within 60 seconds of the header line belong to it, as a crash report belongs to its `got signal` line.
-  An entry ends at the next MariaDB header line, at a line of its host, program and process ID more than 60 seconds from
-  the header line, or at the end of the input. Only one entry is open at a time.
+  An entry ends at the next MariaDB header line, or at the end of the input. It also ends at a line of its host, program
+  and process ID that lies more than 60 seconds from the header line, or that would make the entry longer than 16,384
+  UTF-8 bytes. Such a line, and the following lines of that process until the next header, are stored as plain lines.
+  Only one entry is open at a time.
 - An entry becomes one record. Its message is the header's message (without the time stamp, thread and level) and the
-  following lines, joined by line feeds and bounded as in the error log: the whole entry up to 16,384 UTF-8 bytes,
-  otherwise its beginning and `[N lines omitted]`. Its priority comes from the MariaDB level (`ERROR` 3, `Warning` 4,
+  following lines, joined by line feeds, at most 16,384 UTF-8 bytes: the size bound of the error log. A longer entry is
+  split, not cut, so no line is counted away. The error log cannot store a continuation line on its own, so there the
+  same entry keeps its beginning and `[N lines omitted]`. Its priority comes from the MariaDB level (`ERROR` 3, `Warning` 4,
   `Note` 6), and its `event` comes from the event rules of the error log (start, ready, shutdown, shutdown complete, abort,
   crash recovery start and end).
 - Time, host, program, process ID, `log` and source type stay those of the journal entry or syslog line. The MariaDB time
@@ -40,8 +43,11 @@ journal and syslog*. In short:
 - Crash recovery is tracked as in the error log, in input order. In an input with several hosts, another host's line can
   end a recovery it did not start (a documented limitation; Vandox reads one server).
 - Forged lines are possible, and this is documented rather than prevented: any local process can log under the name
-  `mariadbd`. In the journal its lines without a header cannot join the server's entry, because the process ID is
-  journald's own.
+  `mariadbd`. In the journal its lines cannot join the server's entry, because the process ID is journald's own. In a
+  syslog file it can write the server's process ID, which allows two more things, each within 60 seconds. Its lines can
+  fill the server's entry, which then ends, and the server's following lines are stored as plain lines. Its own header
+  can take in the server's following lines under a forged level and event. Either way every server line is stored with
+  its whole text.
 
 What does not change: which parser claims a file, the source types, the error log parser, the wire format and storage
 (`event` exists since #17), and the handling of kernel reports.
@@ -54,13 +60,16 @@ The criteria are listed with test-level detail in [plan.md](plan.md), *Acceptanc
   and event, and keep the time, host, program, process ID, `log` and source type of their line (AC1, AC2).
 - [ ] Other programs, `mariadbd` lines with a line feed in the message, and lines that belong to no open entry stay
   unchanged (AC3, AC4).
-- [ ] A crash report is one record, with the bounds of the error log (AC5, AC7).
+- [ ] A crash report is one record within the error log's 16,384-byte bound; a longer entry is split, never cut (AC5,
+  AC7).
+- [ ] Lines that another process injects under the server's name and process ID can split the server's entry but never
+  reduce one of its lines to a count (AC16).
 - [ ] Interleaved lines of other programs, hosts and processes are emitted unchanged before the entry and do not break it
   (AC6). Only one entry is open, and a line more than 60 seconds from its header does not join it (AC6).
 - [ ] No time zone is needed for a journal export, and the MariaDB time stamp is never read (AC8).
 - [ ] Recovery is tracked in input order as in the error log, which keeps its behavior (AC9).
 - [ ] Skipped lines are not seen (AC10). The open entry is emitted only at the normal end, and the output is deterministic
-  (AC11). Memory is bounded (AC12).
+  (AC11). Memory is bounded, through both stages (AC12).
 - [ ] The MariaDB error log fixture gives the same messages and events through the journal, the syslog file and the error
   log parser when the input carries its empty lines; without them, as journald stores the output, the messages differ by
   the empty lines only (AC13).
@@ -80,5 +89,5 @@ The criteria are listed with test-level detail in [plan.md](plan.md), *Acceptanc
 
 ## Open questions
 
-None. The time source, the program names, the process-ID key, the time bound and the recovery state are decided in
-record 0088, options 20 to 36.
+None. The time source, the program names, the process-ID key, the time bound, the recovery state and the split at the
+size bound are decided in record 0088, options 20 to 38.

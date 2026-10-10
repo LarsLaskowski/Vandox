@@ -1,7 +1,7 @@
 # Plan: Classify MariaDB lines from the journal and syslog
 
 Source: issue #165 | [spec.md](spec.md)
-Status: Revised (1)
+Status: Revised (2)
 Tier: security. The change adds a bounded multi-line grouping of hostile input to the journal and syslog parsers, which
 is security area 10, *Parsing of external input* (`.squad/project.md`).
 
@@ -21,7 +21,7 @@ Claims of the issue, checked against the code and the MariaDB source (10.6.22, s
 | Without `event` | **Confirmed** (see above). |
 | Each crash report line becomes a record of its own | **Confirmed.** `KernelReportGrouper.cs:81` groups only program `kernel`. The signal handler writes each line separately to fd 2 (`sql/signal_handler.cc:181-277`). Empty lines of the report do **not** reach the journal: systemd's `stdout_stream_log` (`src/journal/journald-stream.c`, v249 line 284 and main c673d99) returns on an empty line before it stores or forwards it (checked in a sparse clone of `systemd/systemd`). |
 | The message starts with MariaDB's own time stamp | **Confirmed** for server lines: `sql/log.cc:9387` writes `"%d-%02d-%02d %2d:%02d:%02d %lu [%s] ..."` to stderr. **Confirmed** for the signal header: `signal_handler.cc:181,196` write `YYMMDD HH:MM:SS [ERROR] <prog> got signal N ;`. Crash report lines have no time stamp, which makes them continuation lines. |
-| "Keep a crash report together ... with the bounds of the error log parser" | **Feasible as stated.** `MariaDbMessage` provides the bounds (16,384 / 16,320 bytes plus `[N lines omitted]`). It gets an overload for decoded text. |
+| "Keep a crash report together ... with the bounds of the error log parser" | **Feasible, with the size bound kept and the cut replaced by a split.** A record holds at most 16,384 UTF-8 bytes, as in the error log, and memory does not depend on the input. A line that would exceed the bound ends the entry and is stored as a plain line, instead of being counted in `[N lines omitted]` (0088 option 38, chosen after the plan security review, see *Security review (plan)*). `MariaDbMessage` gets `TryAdd` for decoded text. |
 | Implied: journal priority | Not stated in the issue. The upstream unit sets no `SyslogLevel=`, so by systemd's default every line of the service's stderr has `PRIORITY=6`. This is **unverified on the server**, which is why a MariaDB level replaces the line's priority (record 0088, option 33). |
 
 Related defect found on the way: a consequence in record 0086 said "The built-in list is journal, then syslog", which has
@@ -85,15 +85,30 @@ message, priority, program and empty `event`. The **key** of a line is its host,
     joined, a line at header + 61 s ends the entry, although it is 2 s after the previous member.
 
   (e) is also tested end to end through both parsers.
-- [ ] AC7 — **Bounds.** Sizes are counted in UTF-8 bytes of the decoded text; an invalid byte becomes U+FFFD and counts
-  3.
-  - An entry of exactly 16,384 bytes is kept whole.
-  - A longer entry is cut to its head within 16,320 bytes, then `\n[N lines omitted]` with the exact N. It is at most
-    16,384 bytes and `truncated` is set.
-  - A header or continuation record that already has `truncated` set makes the entry `truncated`.
-  - At unit level, `MariaDbMessage.Add(string, bool)` gives the same `Build` result as `Add(ReadOnlySpan<byte>, bool)`
-    for the same lines: empty lines held back, inner ones kept, trailing ones dropped, the limit exactly, overflow, and
-    the truncated flag.
+- [ ] AC7 — **Bounds: split, never cut.** Sizes are counted in UTF-8 bytes of the decoded text; an invalid byte becomes
+  U+FFFD and counts 3. The size of an entry is its message: the header's message, then per joined line `\n` and its
+  text, with the held-back empty lines before a line counted as one byte each.
+  - An entry of exactly 16,384 bytes is one record, whole.
+  - (a) A non-empty line of the key within the time bound that would make the message 16,385 bytes or more ends the
+    entry. The entry's record is emitted first, whole, at most 16,384 bytes. Its message contains no `lines omitted`,
+    and its `truncated` flag comes only from its own lines. Then the line is emitted unchanged, then a following short
+    line of the key, unchanged too (no entry is open).
+  - (b) The same with two empty lines held back before the line that does not fit: the record's message does not end in
+    `\n`, and the two empty lines are not emitted (trailing empty lines of the entry).
+  - (c) A first continuation line of 16,000 characters after a short header joins. A second one ends the entry as in (a).
+  - (d) A header or continuation record that already has `truncated` set makes the entry `truncated`. A line that does
+    not fit leaves the entry's flag unchanged and keeps its own.
+  - (e) No text is lost. The input is one key: a header, continuation lines of mixed sizes (1 to 16,000 characters,
+    with empty lines between them), a second header and more continuation lines. Take the emitted records in order,
+    split each entry's message at `\n` and drop the empty parts. The result is the input's non-empty messages in input
+    order, each exactly once, where a header's message is its text after the header prefix.
+  - At unit level, `MariaDbMessage.TryAdd(string, bool)` behaves like the raw overload while lines fit. As long as it
+    returns `true`, `Build` gives the same result as `Add(ReadOnlySpan<byte>, bool)` for the same lines: empty lines held
+    back, inner ones kept, trailing ones dropped, the limit exactly, and the truncated flag. It returns `false` for the
+    first non-empty line for which the raw `Add` would call `Overflow`, that is, when the held-back empty lines, the line
+    feed and the line would make the text longer than 16,384 bytes. After `false`, `Build` returns the same text and
+    flag as before the call. An empty line always returns `true`. After the constructor has cut a header longer than
+    16,384 bytes, every non-empty line returns `false`.
 - [ ] AC8 — **Time.** A journal export with MariaDB lines parses without exception with the journal parser of
   `BuiltInParsers.Create(null)`.
   - `captured_at` is the header entry's `__REALTIME_TIMESTAMP`, not the time in the message. For example, message
@@ -120,13 +135,22 @@ message, priority, program and empty `event`. The **key** of a line is its host,
 - [ ] AC11 — **Emission and determinism.** The open entry is emitted only at the normal end of input. Cancellation or an
   emitter exception while an entry is open does not emit it, so the records emitted so far are a prefix of a complete
   parse. Two parses of the same input emit equal records in the same order, in both parsers.
-- [ ] AC12 — **Memory.** `MariaDbLineGrouper` gets one header and then continuation records with the same key and the
-  header's time.
-  - After 2,000 continuation records of 16,000 characters each, it retains less than 1 MiB. This is measured as in
-    `KernelReportGrouperTests.RetainedBytes` with `GC.GetTotalMemory(true)` before and after; retaining the lines would
-    take at least 32 MiB.
-  - After 100,000 empty continuation records, it also retains less than 1 MiB.
-  - The record that `Finish` emits is at most 16,384 UTF-8 bytes and carries the exact omitted count.
+- [ ] AC12 — **Memory.** Retained bytes are measured as in `KernelReportGrouperTests.RetainedBytes`, with
+  `GC.GetTotalMemory(true)` before and after. `ready` is cleared after every call, as the parsers' `EmitAsync` does. The
+  continuation records have the same key and the header's time.
+  - (a) `MariaDbLineGrouper`, one header whose message is under 384 bytes, then 2,000 continuation records of 16,000
+    characters each: it retains less
+    than 1 MiB, where retaining the lines would take at least 32 MiB. The records it emits are the entry (the header and
+    the first line) and the other 1,999 lines unchanged, each at most 16,384 UTF-8 bytes.
+  - (b) `MariaDbLineGrouper`, one header, then 100,000 empty continuation records: less than 1 MiB. `Finish` emits the
+    header's message alone.
+  - (c) `MariaDbLineGrouper`, one header, then 100,000 continuation records of 100 characters: less than 1 MiB. No
+    emitted record is over 16,384 bytes, and no line is lost, as in AC7 (e).
+  - (d) **Through `SystemLogGrouper`** (security review, finding 2): 100,000 records that cycle through `sshd` lines,
+    `kernel` lines (an OOM start, members and its `Killed process` end) and `mariadbd` header lines are followed by 100,000
+    `mariadbd` continuation records of 100 characters. These have the key and time of the last header. Together they
+    retain less than 1 MiB. Each record is built with its own message string, so a staging list that kept what it
+    forwarded would retain at least 15 MB.
 - [ ] AC13 — **Parity with the error log.** The lines of `testdata/logs/mariadb-error.log` are fed in three ways:
   - as journal entries: host `web-1`, identifier `mariadbd`, pid 1001 for lines 1 to 6, 2345 for lines 7 to 10, 3456 for
     lines 11 to 52 and 4567 for lines 53 to 57. A header line gets its own time; a continuation line gets the time of its
@@ -146,6 +170,9 @@ message, priority, program and empty `event`. The **key** of a line is its host,
   - An entry that ends while a kernel report is open is emitted before the report record.
   - A kernel report that ends while an entry is open is emitted before the entry record.
   - `Finish` emits the open entry before the open report.
+  - Every record is emitted exactly once. Five `sshd` lines through `SystemLogGrouper`, one call each, leave exactly
+    those five records in `ready`, in order. The same holds for a `mariadbd` entry ended by a header: the entry's record
+    appears once.
 
   Every existing kernel-report test of `JournalExportParserTests`, `SyslogParserTests` and `KernelReportGrouperTests`
   stays green unchanged.
@@ -154,6 +181,23 @@ message, priority, program and empty `event`. The **key** of a line is its host,
   - Still to come (Dev): README *Supported sources* and `.squad/project.md` security area 10.
 
   The Reviewer verifies this; it has no test.
+- [ ] AC16 — **Injected lines (security review, finding 1).** The server's header is line 24 of the fixture
+  (`260302 10:10:10 [ERROR] mysqld got signal 6 ;`, message `mysqld got signal 6 ;`, 21 bytes). It is at
+  T = 2026-03-02T10:10:10Z, host `web-1`, program `mariadbd`, pid 2345. Injected lines are lines without a header of
+  1,000 `A` characters.
+  - (a) Syslog. After the header at T come 20 injected lines at T + 1 s with tag `mariadbd[2345]:`, then at T + 2 s the
+    server lines `Query (0x7f3a2c0d9e10): SELECT 1` and `Connection ID (thread ID): 42`. The first record is the entry
+    with event `mariadb.abort`. Its message is the header's message and the first 16 injected lines (16,037 bytes; a
+    17th would make 17,038). Then come, unchanged and in input order, injected lines 17 to 20 and the `Query` and
+    `Connection ID` lines. No emitted message contains `lines omitted`. Each input message appears exactly once, in the
+    entry or as a plain record.
+  - (b) Journal. The same lines arrive as journal entries. The injected entries carry `_PID` 9999 and `SYSLOG_PID` 2345.
+    They are emitted unchanged, before the entry. The entry holds the header, `Query` and `Connection ID` lines, because
+    `_PID` decides the key, not `SYSLOG_PID`.
+  - (c) Syslog. Right after the server's header comes a forged header at T + 1 s with tag `mariadbd[2345]:` and message
+    `2026-03-02 10:10:11 0 [Note] /usr/sbin/mariadbd: ready for connections.`. The `Query` and `Connection ID` lines
+    follow at T + 2 s. They join the forged entry, which gets event `mariadb.ready`, and the server's entry holds its
+    header alone. This pins the documented limitation (0088 option 36), so a change to it is deliberate.
 
 No content was supplied verbatim by the issue. The error log fixture is the repository's own and was read.
 
@@ -171,11 +215,14 @@ No content was supplied verbatim by the issue. The error log fixture is the repo
      `MariaDbLine`, `_classifier.Classify(header)` (the existing method, unchanged) and
      `new MariaDbMessage(header.Message, line.Truncated)`.
    - **Not a header.** If an entry is open and host, program and pid are all equal (ordinal and int):
-     - when `(record.CapturedAt - header.CapturedAt).Duration() <= MaxSpan`, the line goes to
-       `_message.Add(line.Message, line.Truncated)`;
-     - otherwise the open entry is flushed to `ready`, then the record passes to `ready`.
+     - when `(record.CapturedAt - header.CapturedAt).Duration() <= MaxSpan` and
+       `_message.TryAdd(line.Message, line.Truncated)` returns `true`, the line has joined;
+     - otherwise (beyond the time bound, or the line does not fit) the open entry is flushed to `ready`, then the record
+       passes to `ready`. There is no open entry afterwards, so the following lines of the key pass through until the
+       next header.
 
-     Without an open entry, or with another key, the record passes to `ready` and the open entry stays open.
+     Without an open entry, or with another key, the record passes to `ready` and the open entry stays open. The time
+     check comes first, so a line beyond the bound never touches the message.
    - **Flush.** Flush builds a new `DataRecord`:
      - from the header record: `Origin`, `Source`, `Seq` and `CapturedAt`;
      - a new `LogLine` with `Log`, `Host`, `Program` and `Pid` from the header line;
@@ -184,16 +231,28 @@ No content was supplied verbatim by the issue. The error log fixture is the repo
      - `Event = _event`.
 
      It then resets the open entry. `Finish` flushes.
-2. **`SystemLogGrouper`** (new) owns a `MariaDbLineGrouper`, a `KernelReportGrouper` and a staging list.
-   - `Add` passes the record to the MariaDB stage and forwards everything that stage emits, in order, to the kernel stage,
-     which appends to `ready`.
-   - `Finish` first finishes the MariaDB stage, forwards its output to the kernel stage, then finishes the kernel stage.
+2. **`SystemLogGrouper`** (new) owns a `MariaDbLineGrouper`, a `KernelReportGrouper` and one reused staging list
+   `_staged` (a `List<DataRecord>` field, never handed out).
+   - `Add(record, ready)` calls `_mariaDb.Add(record, _staged)`, then `_kernel.Add(staged, ready)` for each staged record
+     in order, then `_staged.Clear()`.
+   - `Finish(ready)` calls `_mariaDb.Finish(_staged)`, forwards the staged records the same way, calls `_staged.Clear()`,
+     then `_kernel.Finish(ready)`.
+   - The staging list is empty whenever `Add` or `Finish` returns. During a call it holds at most two records: the
+     entry that the record ends and the record itself. No stage receives a record twice (AC12 (d), AC14). After an
+     exception the grouper is discarded with its parse.
 3. **`MariaDbEventClassifier`** is not changed. The grouper owns one instance, so the recovery state lives as long as one
    parse, in input order over all MariaDB entries, as in `MariaDbParseSession`.
-4. **`MariaDbMessage`** gets `Add(string line, bool truncated)`, with the same bounds as the raw overload. Empty text is a
-   held-back empty line. After an overflow, the line only counts as omitted. Otherwise its size is the UTF-8 byte count,
-   then the `Exceeds` / `Overflow` / append path runs. The shared tail of both overloads is factored into one private
-   method.
+4. **`MariaDbMessage`** gets `bool TryAdd(string line, bool truncated)`, the decoded counterpart of the raw `Add`
+   without its overflow path.
+   - Empty text is a held-back empty line (`_pendingEmpty++`, the flag or-ed in) and returns `true`.
+   - Otherwise its size is `Encoding.UTF8.GetByteCount(line)`. When `_overflow` is set (only after the constructor cut a
+     header) or `Exceeds(size)` holds, it returns `false` and changes nothing, the flag included.
+   - Otherwise the held-back empty lines and the line are appended as in `Add`, the flag is or-ed in, and it returns
+     `true`.
+   - `TryAdd` never sets `_overflow` or `_omitted`, so a message built only through it never has a marker. The append
+     tail shared with the raw overload (`AppendEmpty`, the line feed and text, `_bytes`, `_lines`, `UpdateMark`) is
+     factored into one private method.
+   - `Add(ReadOnlySpan<byte>, bool)` keeps its behavior, and the error log is unchanged.
 5. **`JournalExportParser.ParseAsync`** and **`SyslogParser.ParseAsync`** use `new SystemLogGrouper()` in place of
    `new KernelReportGrouper()`, created inside `ParseAsync` as today (never a field of the parser, AC9 (c)).
    `KernelReportGrouper.EmitAsync` stays as it is. This happens in step 6, not in the skeleton (see *Signatures*).
@@ -210,7 +269,7 @@ Analyzer notes for the Dev:
 | ------- | ----------- | ------ |
 | Vandox.Core | `LogParsing/MariaDbLineGrouper.cs` | new |
 | Vandox.Core | `LogParsing/SystemLogGrouper.cs` | new |
-| Vandox.Core | `LogParsing/MariaDbMessage.cs` | new overload `Add(string, bool)` |
+| Vandox.Core | `LogParsing/MariaDbMessage.cs` | new method `TryAdd(string, bool)`; shared append tail factored out |
 | Vandox.Core | `LogParsing/JournalExportParser.cs`, `LogParsing/SyslogParser.cs` | `ParseAsync` uses `SystemLogGrouper` (bodies only) |
 | docs | `docs/areas/log-import.md`, `docs/decisions/0088-...md`, `docs/decisions/0086-...md`, `docs/decisions/README.md` | done by the Lead in step 2, revised in this round |
 | repo | `README.md`, `.squad/project.md` | Dev, step 6 |
@@ -225,8 +284,9 @@ unchanged.
 /// <summary>
 /// Joins the MariaDB lines that the journal and syslog parsers read (program <c>mariadbd</c> or <c>mysqld</c>) into entries: a
 /// header line and the following lines without a header of the same host, program and process within <see cref="MaxSpan"/> of
-/// the header line, with the header, bounds and event rules of the MariaDB error log. One entry is open at a time, so memory
-/// does not depend on the input.
+/// the header line, as long as the message stays within the text limit, with the header and event rules of the MariaDB error
+/// log. A line that does not join is passed on unchanged, so no text is dropped. One entry is open at a time, so memory does
+/// not depend on the input.
 /// </summary>
 internal sealed class MariaDbLineGrouper
 {
@@ -270,17 +330,19 @@ internal sealed class SystemLogGrouper
     internal void Finish(List<DataRecord> ready);
 }
 
-// src/Vandox.Core/LogParsing/MariaDbMessage.cs (new overload; Add(ReadOnlySpan<byte>, bool) stays)
+// src/Vandox.Core/LogParsing/MariaDbMessage.cs (new method; Add(ReadOnlySpan<byte>, bool) stays)
 /// <summary>
-/// Adds a continuation line that is already decoded, with the bounds of a raw line.
+/// Adds a continuation line that is already decoded when the message with it, and with the empty lines held back before it,
+/// stays within <see cref="ModelLimits.MaxTextBytes"/> UTF-8 bytes; an empty line is held back and always taken.
 /// </summary>
 /// <param name="line">The text of the line</param>
 /// <param name="truncated"><c>true</c> when the line was cut before</param>
-internal void Add(string line, bool truncated);
+/// <returns><c>true</c> when the line was taken; <c>false</c> when it does not fit, and the message is unchanged</returns>
+internal bool TryAdd(string line, bool truncated);
 ```
 
-The skeleton adds the two new files, with `MaxSpan` as written above (a value, not behavior), and the new overload
-`MariaDbMessage.Add(string, bool)`, each method body `throw new NotImplementedException();`, plus
+The skeleton adds the two new files, with `MaxSpan` as written above (a value, not behavior), and the new method
+`MariaDbMessage.TryAdd(string, bool)`, each method body `throw new NotImplementedException();`, plus
 `#pragma warning disable RH2003, S2325` as *Skeleton* in `.squad/stack.md` describes. It does **not** touch the existing
 members. `Add(ReadOnlySpan<byte>, bool)` keeps its body, and `JournalExportParser` and `SyslogParser` are not rewired in
 step 4. That way every existing test stays green, and the new tests fail on assertions or `NotImplementedException`. In
@@ -289,14 +351,14 @@ is final as it stands: `MariaDbMessage.cs`, `JournalExportParser.cs` and `Syslog
 
 ## Test files
 
-- `tests/Vandox.Core.Tests/MariaDbLineGrouperTests.cs` (new): AC1 to AC7 (AC6 with the time bound (e) to (g)), AC9 (a)
-  and (b), AC12.
-- `tests/Vandox.Core.Tests/SystemLogGrouperTests.cs` (new): AC14.
-- `tests/Vandox.Core.Tests/MariaDbMessageTests.cs` (extend): AC7 at unit level, `Add(string, bool)`.
+- `tests/Vandox.Core.Tests/MariaDbLineGrouperTests.cs` (new): AC1 to AC7 (AC6 with the time bound (e) to (g), AC7 (a)
+  to (e) with the size end), AC9 (a) and (b), AC12 (a) to (c).
+- `tests/Vandox.Core.Tests/SystemLogGrouperTests.cs` (new): AC12 (d) and AC14, with its own private `RetainedBytes`.
+- `tests/Vandox.Core.Tests/MariaDbMessageTests.cs` (extend): AC7 at unit level, `TryAdd(string, bool)`.
 - `tests/Vandox.Core.Tests/JournalExportParserTests.cs` (extend): AC1, AC3 (binary `MESSAGE` with a line feed), AC6 (e),
-  AC8, AC9 (c), AC10, AC11 and AC13 (the first and third feed) end to end through the parser.
+  AC8, AC9 (c), AC10, AC11, AC13 (the first and third feed) and AC16 (b) end to end through the parser.
 - `tests/Vandox.Core.Tests/SyslogParserTests.cs` (extend): AC2, AC6 (e), AC8 (RFC 3339 and year-less), AC9 (c), AC10,
-  AC11 and AC13 (the second feed) end to end.
+  AC11, AC13 (the second feed) and AC16 (a) and (c) end to end.
 
 `MariaDbEventClassifierTests.cs` is not extended: the classifier does not change.
 
@@ -310,8 +372,8 @@ How heap bounds are measured (lesson from #17): the tests build Debug (`dotnet t
 - Any allocation bound the Tester adds is measured beyond a baseline loop over the same records, for example through
   `KernelReportGrouper` alone. It is never an absolute number.
 
-Existing test code that calls a changed signature: **none**. Only an overload and a new field are added; no existing
-signature changes or disappears.
+Existing test code that calls a changed signature: **none**. Only a method (`TryAdd`), two types and a field are added;
+no existing signature changes or disappears.
 
 ## Areas
 
@@ -321,8 +383,9 @@ signature changes or disappears.
   - *Events*: the recovery state in input order over the entries of every host.
   - *Forged lines*: a pointer to the new section.
   - *Lines from the journal and syslog*: a new subsection under *MariaDB error log*, which replaces *Default
-    installations*. It holds the key and the 60-second bound, the empty lines journald drops, and the multi-host
-    recovery limitation.
+    installations*. It holds the key, the 60-second bound, the size end (a line that does not fit ends the entry, no
+    marker), the empty lines journald drops, the multi-host recovery limitation, and the forging cases of a syslog file
+    (revised after the plan security review).
   - *Related decisions* (0088 line) and *Implementation* (the two new types).
 - Wire format and Storage: none. `event` exists, its name rule and its column are unchanged.
 
@@ -331,26 +394,32 @@ signature changes or disappears.
 | File | Edit | Owner |
 | ---- | ---- | ----- |
 | `docs/areas/log-import.md` | as in *Areas* | Lead (done, step 2 and this revision) |
-| `docs/decisions/0088-mariadb-error-log-entries-by-content-and-lifecycle-events-in-log-line.md` | extended (context, options 20 to 36, decision, consequences), status `Proposed`; this revision chose options 31 (time bound) and 34 (one recovery state) and added the journald empty-line fact | Lead (done, step 2 and this revision) |
+| `docs/decisions/0088-mariadb-error-log-entries-by-content-and-lifecycle-events-in-log-line.md` | extended (context, options 20 to 38, decision, consequences), status `Proposed`; revision 1 chose options 31 (time bound) and 34 (one recovery state) and added the journald empty-line fact; revision 2 (plan security review) rejected option 37, chose option 38 (split at the text limit) and completed option 36 and the consequences with the syslog forging cases | Lead (done, step 2 and both revisions) |
 | `docs/decisions/README.md` | row 0088: title extended, status `Proposed` | Lead (done, step 2) |
 | `docs/decisions/0086-system-log-parsers-generic-syslog-claim-and-grouped-kernel-reports.md` | stale consequence about the built-in list corrected (related defect) | Lead (done, step 2) |
-| `README.md`, *Import logs*, MariaDB bullet | Replace the last sentence ("MariaDB sends its error log to the journal by default under systemd; those lines arrive through the journal and syslog parsers as plain lines without events."). The new text says that in a journal export or a syslog file, lines of `mariadbd` and `mysqld` that start with MariaDB's time stamp are read with the same rules. An entry with its crash report becomes one record with the priority and event of its header. Time, host and process ID come from the journal or syslog line, and the source type stays `journal` or `syslog`. A journal export needs no `import.time_zone`. | Dev |
-| `.squad/project.md`, *Security areas* 10 | add `SystemLogGrouper` and `MariaDbLineGrouper` (MariaDB lines of the journal and syslog joined per host, program and pid, within 60 seconds of the header line, into one bounded open entry) next to `KernelReportGrouper`; the record list already names 0088 | Dev |
+| `README.md`, *Import logs*, MariaDB bullet | Replace the last sentence ("MariaDB sends its error log to the journal by default under systemd; those lines arrive through the journal and syslog parsers as plain lines without events."). The new text says that in a journal export or a syslog file, lines of `mariadbd` and `mysqld` that start with MariaDB's time stamp are read with the same rules. An entry with its crash report becomes one record of at most 16,384 bytes with the priority and event of its header; lines beyond that are stored as plain lines, not cut. Time, host and process ID come from the journal or syslog line, and the source type stays `journal` or `syslog`. A journal export needs no `import.time_zone`. | Dev |
+| `.squad/project.md`, *Security areas* 10 | add `SystemLogGrouper` and `MariaDbLineGrouper` next to `KernelReportGrouper`. The text says: MariaDB lines of the journal and syslog are joined per host, program and pid, within 60 seconds of the header line and 16,384 bytes, into one open entry; a line that does not fit ends it and is kept as a plain line. Following finding 4 of the plan security review, it also says that the program filter (`mariadbd`, `mysqld`) is a classification, not a trust boundary, and that local processes can forge entries and events and, in a syslog file, join or split the server's entry (record 0088, option 36). The record list already names 0088. | Dev |
 | `.squad/project.md`, *Test doubles*, row *log parsers (C#)* | only if the Tester adds a shared helper | Tester |
 | `docs/ARCHITECTURE.md` | none. No guarantee or flow changes, and the component list stays true. | n/a |
 
 ## Architecture check
 
-- **No data gaps unless explicitly recorded.** Not touched: this is the import path, not collection. No input line is
-  dropped. Every mapped record is either emitted unchanged or becomes part of an entry, apart from trailing empty lines,
-  which belong to an entry as in the error log. A line beyond the time bound is emitted unchanged, not dropped.
+- **No data gaps unless explicitly recorded.** Not touched: this is the import path, not collection. The text of an
+  input line is never dropped or reduced to a count. Every mapped record is either emitted unchanged or joins exactly
+  one entry, whose message holds its whole text. The one exception holds no text: empty lines held back at the end of an
+  entry (trailing empty lines) are dropped, as in the error log, also when a line that does not fit ends the entry
+  after them. Two kinds of line end the entry and are emitted unchanged, as are the following lines of the key: a line
+  beyond the time bound, and one that would make the entry longer than 16,384 bytes. The revision-1 sentence ("No input
+  line is dropped") was wrong for the cut of an oversized entry, which the error log's `[N lines omitted]` rule would
+  have caused. Option 38 removes that cut (*Security review (plan)*, finding 1).
 - **A hanging collector never blocks the agent.** Not touched (agent).
 - **Backfilled data never alerts by itself.** Not touched: imported records stay origin `import`.
 - **Parser contract** (*Parsers* in the area document):
   - The output stays deterministic.
   - Records written inside a combined record are emitted first.
   - The open entry is emitted only at the normal end, so the importer's resume by count keeps working.
-  - Memory stays bounded independently of the input.
+  - Memory stays bounded independently of the input: the open entry's message is at most 16,384 bytes, and the staging
+    list of `SystemLogGrouper` is emptied by every call (AC12).
   - There are no new skip reasons.
 - No new parser, source type, configuration option, wire field or schema change, so the *Integration surface* entries
   for a parser, an option or a wire field do not apply.
@@ -363,7 +432,8 @@ signature changes or disappears.
   header grammar is checked on the UTF-8 encoding of the decoded message. It is ASCII, so U+FFFD (`EF BF BD`) never
   matches a digit, space or bracket of a header. The encode buffer is 16,384 bytes. A message that does not fit is no
   header and is never cut or thrown on. The time bound is no size limit: it compares two instants that the parsers
-  already validated.
+  already validated. Reaching the size limit ends the entry instead of cutting it (0088 option 38). The line that does
+  not fit is passed on unchanged, so the limit bounds memory without dropping text.
 - [x] **Exceptions that reach a user-visible reason.** No new ones.
   - The grouper does not throw on input: `MariaDbLine.TryParse` never throws, `TryGetBytes` does not throw, and
     `MariaDbMessage` counts in `long`. `TimeSpan.Duration()` throws only for `TimeSpan.MinValue`; the difference of two
@@ -383,22 +453,50 @@ signature changes or disappears.
     It only decides whether a line joins; a line beyond the bound is emitted unchanged, so the time cannot drop a line.
   - A message with a line feed is excluded.
 
-  Consequence: the program filter is a classification and no trust boundary. Every way to forge an entry or event is
-  documented as accepted: a header under the name ends the open entry, and in syslog continuation lines can be injected
-  with a known pid within 60 seconds of the server's header. This follows 0086 option 19 and 0088 options 19 and 36. The
-  `_PID` key closes only the injection of continuation lines into the real server's entry in a live journal. The single
-  recovery state lets a forged `started` or start line end a recovery, which option 36 already accepts for any event.
-- **Cost.** The work per line is linear in the message (one encode, ordinal string operations, no regular expression).
-  Memory is the open entry's kept text, at most 16 KiB, plus one reused 16 KiB buffer and counters.
+  Consequence: the program filter is a classification and no trust boundary. Each effect a forger can have is listed
+  below with where it is documented (area document *Forged lines* under *Lines from the journal and syslog*, 0088
+  option 36 and *Consequences*) and the AC that pins it:
+  1. **Forge an entry** with any level and event, in the journal and syslog. Accepted (0088 options 19 and 36, 0086
+     option 19).
+  2. **End the server's open entry** with a forged header of any key. The server's later continuation lines are then
+     emitted as plain lines: in the journal always, in syslog when the forged pid differs. Nothing is lost (AC6 (d)).
+  3. **Syslog only: join the server's open entry** with lines without a header under the server's pid, within 60
+     seconds of its header. They can fill the entry to 16,384 bytes. The server's next line then ends the entry and it,
+     like the server's lines after it, is emitted as a plain line, never counted away (AC16 (a)). Revision 1 missed this
+     suppression path (finding 1). Under the error log's cut rule the server's lines would have been reduced to
+     `[N lines omitted]`.
+  4. **Syslog only: take in the server's lines** with a forged header under the server's pid. The header opens an entry
+     of the server's key, and the server's following continuation lines join it, within 60 seconds of the forged header
+     and 16,384 bytes, under the forged level and event. They are stored, but under a forged classification (AC16 (c)).
+     Revision 1 did not state this either; it is now documented.
+  5. **End a recovery** with a forged `started` or start line. This is accepted with any event (option 36, AC9).
+  6. **A file shaped like a journal export** (for example one a web-space user wrote under a saved `/var/www`) carries
+     any `_PID` its writer chose. The grouping and recovery state belong to one parse of one file, so such a file cannot
+     reach the lines of another file (AC9 (c) shows that no state crosses parses).
+
+  The `_PID` key closes effects 3 and 4 in a journal that journald wrote (AC16 (b) pins `_PID` over `SYSLOG_PID`). In
+  every case a server line is stored with its whole text, in an entry or as a plain line. In a syslog file the lines
+  joined in one message can come from different writers, which #21 and #23 must not read as the server's (0088
+  *Consequences*).
+- **Cost.** The work per line is linear in the message (one encode, one UTF-8 byte count, ordinal string operations, no
+  regular expression). Memory is the open entry's text, at most 16 KiB, plus one reused 16 KiB buffer and counters. The
+  staging list of `SystemLogGrouper` adds at most two records, and every call empties it.
 - **Display.** Messages are stored as before. Escaping in logs and the web UI is unchanged (security area 12).
 
 ## Decision records
 
 - `docs/decisions/0088-mariadb-error-log-entries-by-content-and-lifecycle-events-in-log-line.md`: extended in place,
   because it is unreleased (no `v*` tag) and on the same topic. Its status and index row are set to **Proposed** for
-  this run, and step 9 sets them back to `Accepted`. This revision chose option 31 (a 60-second bound from the header)
+  this run, and step 9 sets them back to `Accepted`. Revision 1 chose option 31 (a 60-second bound from the header)
   and option 34 (one recovery state, as in the error log), rejected option 35 and the variants of 31 with their reasons,
-  and recorded that journald drops empty lines (context, option 33, consequences).
+  and recorded that journald drops empty lines (context, option 33, consequences). Revision 2, after the plan security
+  review, made these changes:
+  - It added options 37 (the error log's cut, rejected, with the variant "keep the marker and emit the omitted lines")
+    and 38 (a line that does not fit ends the entry, chosen).
+  - It extended option 30 (the size end), option 33 (the parity holds within the limit) and option 36 (the syslog
+    forging cases and the per-file state).
+  - It updated the decision paragraph and the consequences (forging, the split of an oversized entry, the line feeds
+    that #21 and #23 must not trust).
 - `docs/decisions/0086-...md`: one stale consequence corrected. The decision is unchanged and the status stays
   `Accepted`.
 
@@ -449,11 +547,72 @@ Devil's Advocate, round 1: 0 major, 3 minor objections. All three are answered b
      empty entries synthetic. The spec, the area document (a new bullet in *Lines from the journal and syslog*) and
      0088 (*Context*, option 33, a consequence) say that a real journal loses these lines.
 
+## Security review (plan)
+
+Security, rejection 1 of 2: CHANGES_REQUIRED, 2 blocking and 2 non-blocking findings. All four are answered below.
+
+1. **Blocking: a new data-suppression path is missing from the forging analysis, so "no line dropped" is wrong.**
+   Confirmed, and resolved with option (b), mitigation. Confirmed in `MariaDbMessage.cs`: after `Overflow()` (line 152)
+   every later non-empty line only runs `Omit()` (lines 85-90, 173-177). In a syslog file a forger can use the server's
+   pid (`SyslogParser.cs:136-137`, the tag as written; the journal prefers `_PID`, `JournalExportParser.cs:84`). Its lines would fill the entry, and the server's own later crash
+   report lines would survive only in `[N lines omitted]`. A genuine crash report with a long query would lose its query
+   and tail the same way. Before #165 each of these lines was a record of its own.
+   - **Why (b) over (a).** The product exists to reconstruct outages from these lines. The guarantee is "No data gaps
+     unless explicitly recorded", and recording a gap that the change itself creates is the weaker answer when it can be
+     avoided at no cost in memory. The error log has to cut because a continuation line there has no time or key of its
+     own. A journal entry or syslog line has both, so it can be stored on its own.
+   - **The form of (b).** The reviewer's sketch emits the lines after the overflow as plain records but keeps the
+     entry open with its marker. That variant was rejected (0088 option 37). The lines between 16,320 and 16,384 bytes
+     are joined before the overflow is known and would still be cut away, and the marker would call stored lines
+     "omitted". Chosen instead (0088 option 38): a line that does not fit ends the entry, exactly like a line beyond
+     the time bound. The record holds the whole entry so far, without a marker, at most 16,384 bytes. The line and the
+     following lines of its key are emitted unchanged.
+   - **Changes.** *Approach* steps 1 and 4 (`MariaDbMessage.TryAdd` replaces the planned `Add(string, bool)`),
+     *Signatures*, AC7 (rewritten: (a) to (e) and the unit level), AC12 (a) to (c), the new AC16 (the injection
+     scenario in syslog and journal, and the forged header under the server's pid), and *Test files*. The
+     *Architecture check* sentence is corrected, and *Security considerations* now lists each forging effect with its
+     AC.
+   - **Related gap found while answering.** In a syslog file a forged *header* under the server's pid takes in the
+     server's following continuation lines under the forged level and event. The area document said the rest of the
+     entry was "emitted as plain lines", which holds only in the journal. This is now documented as effect 4 and pinned
+     by AC16 (c).
+   - **Documents.** In the area document: *Lines from the journal and syslog* (the end rules, the record bullet with
+     no marker, the parity within 16,384 bytes, memory), *Forged lines* (rewritten) and *Related decisions*. In 0088:
+     options 30, 33, 36, 37 and 38, the decision and the consequences. Also the spec, README text and `.squad/project.md`
+     text (Dev).
+   - **Parity.** It holds for every entry within 16,384 bytes. The fixture has 3,692 bytes in all, so AC5 and AC13 are
+     unchanged.
+   - **User-visible behavior.** An oversized MariaDB entry from the journal or syslog is split, not cut. This is settled
+     here, without the Product Manager. The issue's "bounds of the error log parser" are kept as the size of a record
+     and as memory that does not depend on the input. Compared with `main`, which stores every line, more is grouped
+     and nothing is lost. The same split already exists for the time bound (option 31, revision 1).
+2. **Blocking: the memory bound of `SystemLogGrouper` is claimed but neither specified nor tested.** Accepted.
+   *Approach* step 2 now names the staging list `_staged`. It is emptied with `Clear()` after the forward in both `Add`
+   and `Finish`, and holds at most two records during a call. New AC12 (d) measures retained bytes through
+   `SystemLogGrouper`: 100,000 mixed records and 100,000 `mariadbd` continuation records must retain less than 1 MiB,
+   where a kept staging list would retain at least 15 MB. AC14 gains an exactly-once check, which fails if the list is
+   forwarded again. *Architecture check* and *Cost* name the staging list.
+3. **Non-blocking: the line-feed rule (option 26) is a definition, not a guard.** Agreed; option 26 stays as it is.
+   Only the start of a message is checked for a header, so `\r`, NEL (U+0085), U+2028 or U+2029 inside a message create
+   no header and no new line for these rules. The actionable part is now a consequence of 0088 and a sentence in the
+   area document's *Forged lines*: in a syslog file the `\n`-joined lines of an entry can come from different writers,
+   so #21 and #23 must treat them as untrusted when they split a message. It is also listed under *Out of scope /
+   follow-ups*.
+4. **Non-blocking: the `.squad/project.md` area-10 text should keep the forging limitation and call the program filter
+   a classification.** Accepted. The *Documentation updates* row for `.squad/project.md` (Dev) now prescribes both,
+   with a reference to 0088 option 36, and so does task 13.
+
 ## Out of scope / follow-ups
 
 - #166: a JSON `null` in a string field of the C# decoder, tracked separately.
 - #21 and #23: queries by `event`, counting an entry stored from both journal and syslog once, and whether to keep
-  `_TRANSPORT` to tell the server apart from a forger (0088 option 25).
+  `_TRANSPORT` to tell the server apart from a forger (0088 option 25). If they split a stored message at its line
+  feeds, the lines are untrusted: in a syslog file they can come from different writers (0088 *Consequences*, security
+  review finding 3).
+- Kernel reports keep their documented equivalent: a forger logging as `kernel` can push real kernel lines into the
+  omitted-lines count of a fake report (0086 option 19, accepted). This change does not touch `KernelReportGrouper`. If
+  the split rule of 0088 option 38 should apply there too, that needs its own issue. None is proposed, because the
+  kernel report's head-and-tail cut keeps the end line by design.
 - #37: whether the agent fills `event` when it ships lines live.
 - Binary journal files and MySQL 8's format: not read or not classified, unchanged.
 - A recovery state per host for inputs with several hosts: not planned (0088 option 35). It would need a new issue if a

@@ -299,17 +299,25 @@ syslog file. The journal and syslog parsers apply these rules to the records the
 - A MariaDB line whose message begins with an entry header (one of the four forms of *Entries*, checked on the UTF-8 bytes
   of the decoded message) opens an **entry**. The following MariaDB lines that are no header, have the same `host`,
   `program` and `pid` as the header line (its **key**) and whose time is at most 60 seconds before or after the header
-  line's are its continuation lines. One entry is open at a time: it ends at the next MariaDB header line, of any key, at a
-  MariaDB line of its key that is no header and more than 60 seconds before or after the header line (that line is then
-  emitted unchanged after the entry's record), or at the normal end of input. The bound counts from the header line, not
-  from the previous member, so no member of an entry lies more than 60 seconds from the record's `captured_at`; a crash
-  report whose lines arrive later than that is split, its later lines emitted as plain lines.
+  line's are its continuation lines, as long as the entry's message with them stays within 16,384 UTF-8 bytes. One entry
+  is open at a time. It ends at the next MariaDB header line, of any key, or at the normal end of input. It also ends at a
+  MariaDB line of its key that is no header and either lies more than 60 seconds before or after the header line or would
+  make the message longer than 16,384 bytes. That last case counts the line feed and the empty lines held back before
+  the line. A line that ends the entry without being a header is emitted unchanged after the entry's record. Each
+  following line of the key is then emitted unchanged too, since no entry is open until the next header. The empty lines
+  held back before such a line are trailing lines of the entry and are dropped, as in *Bounds*. The time bound counts
+  from the header line, not from the previous member, so no member of an entry lies more than 60 seconds from the
+  record's `captured_at`. A crash report whose lines arrive later than that, or that is longer than 16,384 bytes, is
+  split, and its later lines are emitted as plain lines. Unlike in the error log, where a continuation line has no time
+  of its own and a longer entry is cut to its head and `[N lines omitted]`, no line's text is dropped or reduced to a
+  count.
 - Every other record, a MariaDB line that is no header and of another key or without an open entry included, is emitted
   unchanged as it comes, before the record of the open entry.
 - The record of an entry is the header line's record with four fields replaced: `message` is the header's message (the
-  text after the header prefix, as in *Entries*) and the messages of the continuation lines joined by `\n`, bounded as in
-  *Bounds* (whole up to 16,384 UTF-8 bytes with inner empty lines kept and trailing ones dropped; beyond that the head
-  within 16,320 bytes and `[N lines omitted]`); `truncated` is set when a member line was truncated or the entry was cut;
+  text after the header prefix, as in *Entries*) and the messages of the continuation lines joined by `\n`, at most 16,384
+  UTF-8 bytes (decoded, invalid bytes count three) with inner empty lines kept and trailing ones dropped, as in *Bounds*.
+  The message is never cut and carries no `[N lines omitted]` marker, because a line that does not fit ends the entry
+  (see above). `truncated` is set when the header line or a member line was truncated;
   `priority` is 3 for `ERROR`, 4 for `Warning` and 6 for `Note`, and the header line's own priority for a header without
   a level; `event` is set as in *Events*. `captured_at`, `log`, `source`, `origin`, the sequence, `host`, `program` and
   `pid` stay those of the header line, also for the `mysqld_safe` form.
@@ -323,7 +331,7 @@ syslog file. The journal and syslog parsers apply these rules to the records the
   systemd's `src/journal/journald-stream.c`, checked in systemd 249 and the current source). An entry from a real journal
   export, or from a syslog file that journald feeds, therefore has no empty lines, and its message lacks the inner empty
   lines that the error log keeps (a crash report has several); otherwise the same output gives the same message as the
-  error log. An empty message that does arrive (an entry with an empty `MESSAGE`, a syslog line that ends after
+  error log, for every entry within 16,384 bytes. An empty message that does arrive (an entry with an empty `MESSAGE`, a syslog line that ends after
   `mariadbd[<pid>]:`) is a line that is no header, with the empty-line rules of *Bounds*.
 - The crash recovery of *Events* is tracked as in the error log: one state per parse, in input order over the MariaDB
   entries of every host, program and pid. Vandox reads one server, whose journal export carries one host. In an input with
@@ -331,17 +339,25 @@ syslog file. The journal and syslog parsers apply these rules to the records the
   end a recovery it did not start and get `mariadb.recovery_end`, and another host's `mariadb.start` entry closes a
   recovery without an end (limitation).
 - As for kernel reports, the open entry is emitted only at the normal end of input, never when the parse ends by an
-  exception. The memory these rules hold is the kept part of the open entry, independently of the number and length of
-  its lines.
+  exception. The memory these rules hold is the open entry's message, at most 16,384 bytes, and at most two records
+  passed from the MariaDB stage to the kernel stage per line, independently of the number and length of the lines.
 - The records keep the source type `journal` or `syslog` (not `mariadb`); see *Duplicates* for a journal export and
   syslog files of the same period.
 - **Forged lines (limitation).** Any local process can log under the name `mariadbd` or `mysqld` (`logger -t mariadbd`,
   `systemd-cat -t mariadbd`, `openlog()` in a PHP script of a web-space user) and so create entries with any level and
-  event, and end the server's open entry with a forged header line, after which the rest of that entry's lines are emitted
-  as plain lines. In the journal, `pid` comes from `_PID` when the entry has it, which journald sets from the sender's
-  credentials, so a forger's lines without a header never join the server's entry; in a syslog file the pid is what the
-  line says, so such lines join the server's open entry within its 60 seconds. A program name, like an event, is a
-  classification of text and no proof of origin.
+  event, and end the server's open entry with a forged header line. In the journal, `pid` comes from `_PID` when the entry
+  has it, which journald sets from the sender's credentials. A forger's header there opens an entry of its own key, so
+  the rest of the server's entry is emitted as plain lines, and a forger's lines without a header never join the
+  server's entry. In a syslog file the pid is what the line says, so a forger can use the server's pid. Its lines without
+  a header, written within 60 seconds of the server's header line, join the server's open entry and can fill it until the
+  server's next line no longer fits. That line ends the entry, and it and the server's following lines are emitted as
+  plain lines. Its header line opens an entry of the server's key, which takes in the server's following lines without a
+  header within 60 seconds of the forged header, under the forged level and event. A server line is therefore always stored, in an entry or as a plain line, and
+  never reduced to a count. In a syslog file, though, it is not necessarily in its own entry, and the lines joined in one
+  message can come from different writers. Later analysis that splits a message at its line feeds must not take any line
+  of it as the server's. A program name, like an event, is a classification of text and no proof of origin. A separate
+  file shaped like a journal export (one a web-space user wrote under a saved `/var/www`) carries any `_PID` its writer
+  chose. But the grouping state belongs to one parse of one file, so such a file cannot reach the lines of another file.
 
 ## Result
 
@@ -365,7 +381,7 @@ syslog file. The journal and syslog parsers apply these rules to the records the
 - [0084](../decisions/0084-log-line-record-gets-an-optional-host-field.md) — why `log_line` gets an optional `host`.
 - [0085](../decisions/0085-syslog-time-zone-from-import-time-zone-with-embedded-tzdb.md) — why `import.time_zone` has no default, NodaTime and the year rules.
 - [0086](../decisions/0086-system-log-parsers-generic-syslog-claim-and-grouped-kernel-reports.md) — why the generic syslog claim and grouped kernel reports.
-- [0088](../decisions/0088-mariadb-error-log-entries-by-content-and-lifecycle-events-in-log-line.md) — why the MariaDB error log is detected by content, kept as entries and classified into an `event` field, and why MariaDB lines of the journal and syslog are joined by program, host and pid within 60 seconds of their header and keep the time of their line.
+- [0088](../decisions/0088-mariadb-error-log-entries-by-content-and-lifecycle-events-in-log-line.md) — why the MariaDB error log is detected by content, kept as entries and classified into an `event` field, and why MariaDB lines of the journal and syslog are joined by program, host and pid within 60 seconds of their header and 16,384 bytes, split rather than cut, and keep the time of their line.
 
 - [0014](../decisions/0014-log-import-is-a-core-component.md) — why historical import and log shipping are core.
 - [0021](../decisions/0021-no-pseudonymization-of-log-data.md) — why log data is stored unchanged.
