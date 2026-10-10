@@ -184,7 +184,9 @@ connection collector #33 and the legacy `lsof -ni` parser #20):
 | `MaxBatchBytes` | 16 MiB | decompressed bytes of the whole stream |
 | `MaxRecords` | 20 000 | records per batch |
 
-The nesting depth of a line is fixed at 64 (`MaxDepth`, see *Common rules*) and is not part of the limits.
+The nesting depth of a line is fixed at 64 (`MaxDepth`, see *Common rules*) and is not part of the limits. In both decoders the line
+rules cost time and memory in proportion to the line's length: the work for one object never depends on the size of another object
+([0090](../decisions/0090-wire-keys-matched-ignoring-ascii-case-duplicates-rejected-header-shape-malformed.md)).
 `wire.DefaultLimits()` returns them; `NewDecoder` takes a `Limits` where a zero or negative field means that
 field's default. The encoder always uses the defaults. A line over the limit, a stream that decompresses to
 more than the limit and one record too many are rejected with `wire.ErrLimitExceeded`.

@@ -80,7 +80,8 @@ texts, allocation, model rules).
 - [ ] AC4 **Duplicate keys are `ErrMalformed`** at their line: exact repeat of a scalar, an object, a map, a list; a scalar repeated with
   `null`; keys that differ only in ASCII case; a key and its escaped spelling; a repeated map key; map keys `Mount`/`mount`; a repeated
   unknown key; a repeat inside a nested unknown value; in the header (`format_major` twice, with `null`, `format_major`/`Format_Major`)
-  (fixture cases D1-D17). The same key in sibling objects or at another depth is accepted (D18, D19).
+  (fixture cases D1-D17); a repeat as the 8th, 9th and 10th key of an object, so the short array, the set seeded from it and a set
+  already built all see it (D20-D22). The same key in sibling objects or at another depth is accepted (D18, D19, D23).
 - [ ] AC5 **Header shape.** Fixture cases H1-H31: a header `[1]`, `[]`, `5`, `"x"`, `true` is `Malformed`; `null` and `{}` are
   `UnsupportedVersion`; `format_major` `"1"`, `"2"`, `1.0`, `1e0`, `1E0`, `10e-1`, `2.5`, `true`, `{}`, `[1]`, `9223372036854775808`,
   `-9223372036854775809`, `1e400` is `Malformed`; `null`, missing, `0`, `-0`, `-1`, `2`, `3000000000`, `9223372036854775807`,
@@ -117,13 +118,26 @@ texts, allocation, model rules).
 - [ ] AC13 **C# binding ignores ASCII case everywhere it binds wire data** (`PayloadRegistry.Options`), and a reflection test in
   `BatchDecoderTests.cs` asserts for `WireHeader`, `Envelope` and every payload type with the types reachable from it: each public
   settable property has a `[JsonPropertyName]` (or `[JsonIgnore]`), and no two JSON names of one type are equal ignoring ASCII case.
-- [ ] AC14 **Memory, C#.** For a batch whose record line is about 1 MiB of one of four shapes in an unknown key — a list of `{"a":0}`, one
-  object of distinct short keys, a list of `[]`, a list of `0` — `OpenAsync` plus `NextAsync` allocate at most 20 times the line's length
-  (`GC.GetTotalAllocatedBytes(true)`, in Debug and Release; measured today: 6.5 to 11.9 times; a prototype of the check added at most 4
-  times). Also a line of 1 MiB of distinct keys with a duplicate at the end is `Malformed`. In `BatchDecoderTests.cs`.
-- [ ] AC15 **Memory, Go.** For the same four shapes, `NewDecoder` plus `Next` allocate at most 64 times the line's length
-  (`runtime.MemStats.TotalAlloc`; measured today 2 times, a `Decoder.Token` prototype of the check added at most 37 times). In
-  `decode_test.go`.
+- [ ] AC14 **Memory and time, C#.** For a batch whose record line is about 1 MiB of one of five shapes in an unknown key — a list of
+  `{"a":0}`, one object of distinct short keys, a list of `[]`, a list of `0`, and (shape 5) one object of distinct short keys filling half
+  the line followed in the same list by `{"a":0}` objects (`{"x":[{<distinct keys>},{"a":0},{"a":0},...]}`) — `OpenAsync` plus
+  `NextAsync` allocate at most 20 times the line's length (`GC.GetTotalAllocatedBytes(true)`, in Debug and Release; measured today: 6.5 to
+  11.9 times; a prototype of the planned shape, see *Cost of the duplicate test*: 9.9 to 16.8 times in total). For shape 5, in addition,
+  `OpenAsync` plus `NextAsync` take at most **20 times** a `JsonDocument.Parse` of the same line bytes with the same `JsonDocumentOptions`,
+  both measured in the same test with `Stopwatch` after one warm-up run of each, as the best of three runs each (prototype: 4.1 to 4.3
+  times; a cleared, reused set: 42 to 54 times). Also a line of 1 MiB of distinct keys with a duplicate at the end is `Malformed`. In
+  `BatchDecoderTests.cs`.
+- [ ] AC15 **Memory and time, Go.** For the same five shapes, `NewDecoder` plus `Next` allocate at most 64 times the line's length
+  (`runtime.MemStats.TotalAlloc`; measured today 2 times, a `Decoder.Token` prototype of the check added at most 37 times, the planned
+  shape on shape 5: 9.8 times). For shape 5, in addition, `NewDecoder` plus `Next` take at most **10 times** a `json.Unmarshal` of the same
+  line into a `var v any`, both measured in the same test after one warm-up run of each, as the best of three runs each; the test runs
+  under *Test* (`-race`) and must hold there (prototype check walk: 0.3 to 0.6 times, with and without `-race`; Security's cleared, reused
+  map under a `go 1.24.7` module: about 250 times). In `decode_test.go`.
+- The time bounds of AC14 and AC15 compare two durations measured in one test and never assert an absolute duration; this is the one
+  exception to "no real clock" in `docs/UNIT_TESTS.md`, which the Tester records there (see *Documentation updates*). Each bound is at
+  least four times the ratio measured for the planned shape (Go: the check walk's 0.6 plus at most one more plain parse for the envelope,
+  so about 1.6), so a loaded CI host or coverage instrumentation does not make it flaky, and at least two times below the ratio measured
+  where a cleared, reused set is quadratic (C# 42 to 54; Go under a `go 1.24.7` module about 250).
 - [ ] AC16 **Existing rows move to the new rule** (see *Test files*); every other existing test in both languages stays green unchanged.
 
 ### Fixture format
@@ -206,6 +220,10 @@ texts, allocation, model rules).
 | D17 | header `"format_major":2,"Format_Major":1` | Malformed, 1 |
 | D18 | unknown key `"x":[{"a":1},{"a":2}]` | accepted, metric 1 |
 | D19 | unknown key `"a":{"a":{"A":1}}` | accepted, metric 1 |
+| D20 | unknown key `"x":{"k1":1,"k2":2,"k3":3,"k4":4,"k5":5,"k6":6,"k7":7,"K1":8}` (8 keys, the 8th repeats the 1st) | Malformed, 2 |
+| D21 | unknown key `"x":{"k1":1,"k2":2,"k3":3,"k4":4,"k5":5,"k6":6,"k7":7,"k8":8,"K1":9}` (the 9th repeats the 1st) | Malformed, 2 |
+| D22 | unknown key `"x":{"k1":1,"k2":2,"k3":3,"k4":4,"k5":5,"k6":6,"k7":7,"k8":8,"k9":9,"K9":10}` (the 10th repeats the 9th) | Malformed, 2 |
+| D23 | unknown key `"x":[{"k1":1,"k2":2,"k3":3,"k4":4,"k5":5,"k6":6,"k7":7,"k8":8,"k9":9},{"k1":1,"k9":9}]` | accepted, metric 1 |
 | H1-H5 | header `[1]`, `[]`, `5`, `"x"`, `true` | Malformed, 1 |
 | H6-H7 | header `null`, `{}` | UnsupportedVersion, 1 |
 | H8-H20 | `format_major` `"1"`, `"2"`, `1.0`, `1e0`, `1E0`, `10e-1`, `2.5`, `true`, `{}`, `[1]`, `9223372036854775808`, `-9223372036854775809`, `1e400`, each followed by `T` | Malformed, 1 |
@@ -257,7 +275,8 @@ duplicate), so both runners assert that the line under test of K4, K5, N4 and D9
 **Go (`internal/wire/decode.go`).** A new `checkLine(line []byte) error` runs first in `readHeader` (before the version struct is
 unmarshalled) and in `decodeRecord` (before the envelope). Suggested shape, standard library only (0042): walk the line with
 `json.NewDecoder(bytes.NewReader(line))`, `UseNumber()` and `Token()`, keeping a stack of frames (object or array; for an object, whether a
-key is expected and the set of keys seen, lower-cased in ASCII, allocated on the first key and reusable). A `json.Delim` `{` or `[` that makes
+key is expected and the keys seen, lower-cased in ASCII, held as *Cost of the duplicate test* below prescribes: the first 8 in an inline
+array of the frame, a fresh map from the 9th key on). A `json.Delim` `{` or `[` that makes
 the stack deeper than `MaxDepth` fails; a key with any byte >= 0x80 fails — `Token` has already unescaped it and turned invalid UTF-8 and
 unpaired surrogates into U+FFFD, so every non-ASCII form is caught by this one test; a key whose ASCII lower case is already in the frame's
 set fails. The walk stops after the first complete value; a syntax error from `Token` is returned wrapped as `ErrMalformed` (the later
@@ -279,8 +298,10 @@ case was seen before.
 - `WireKeyCheck.FindViolation` walks objects and arrays (recursion is bounded by `MaxDepth`, which the parse enforced; an explicit stack is
   fine too). For each property it reads `JsonProperty.Name` inside a `try` that catches only `InvalidOperationException` (thrown for an
   unpaired surrogate escape or invalid UTF-8 in a key) and returns `key not ASCII`; a name that fails `System.Text.Ascii.IsValid` returns
-  `key not ASCII`; then it adds the name to a per-object `HashSet<string>(StringComparer.OrdinalIgnoreCase)` (exact ASCII case folding, since
-  the name is ASCII by then) and returns `duplicate key` when the add fails. Sets may be pooled per call to stay inside AC14.
+  `key not ASCII`; then it compares the name with the keys seen before in the same object, ignoring ASCII case (`StringComparison.OrdinalIgnoreCase`
+  and `StringComparer.OrdinalIgnoreCase` are exact ASCII case folding, since the name is ASCII by then), and returns `duplicate key` on a
+  match. The keys seen are held as *Cost of the duplicate test* below prescribes: the first 8 in a short array reused per depth, a fresh
+  `HashSet<string>(StringComparer.OrdinalIgnoreCase)` from the 9th key on. No set is pooled, cleared or reused.
 - `ReadMajor` is rewritten: root `null` → missing (`UnsupportedVersion`, `format_major missing`); root not an object → `Malformed`,
   `header is not a JSON object`; the property whose name equals `format_major` ignoring ASCII case (at most one, after the check) missing or
   `null` → `UnsupportedVersion`; a `Number` for which `TryGetInt64` succeeds → that value; any other value → `Malformed`,
@@ -291,6 +312,38 @@ case was seen before.
 **C# (`src/Vandox.Core/Model/PayloadRegistry.cs`).** `Options` gets `PropertyNameCaseInsensitive = true`. In a scratch copy this alone
 broke none of the 1,383 `Vandox.Core.Tests` and 74 `Vandox.Storage.Tests` tests; the storage read path (`RecordQueries.ReadJson`) reads the
 store's own canonical rows, which do not change meaning.
+
+### Cost of the duplicate test (both languages)
+
+**Rule:** the work to reset or reuse the keys seen of an object is bounded by the number of keys that object holds, never by the capacity a
+container once reached for another object; in total the line check costs time and memory in proportion to the line. A set or map is never
+pooled, cleared and reused across objects. Reason (Security, plan review round 1): clearing costs the capacity, not the content (Go
+`clear(m)` walks the whole table; .NET `HashSet.Clear()` wipes the whole bucket array whenever the set is non-empty), so one object with
+about 58,700 keys followed in the same list by about 65,500 objects `{"a":0}` (1 MiB) makes a cleared, reused set quadratic.
+
+**Planned shape (binding for the Dev unless another shape keeps the rule and AC14/AC15):**
+
+- An object's first 8 keys (an unexported / private constant, for example Go `inlineKeys`, C# `InlineKeyCount`) are kept in a short
+  array and compared linearly: Go an inline `[8]string` in the object's frame (the frame stack's backing slice is reused, a new frame
+  starts with count 0); C# a `string[8]` per depth, created at most once per `FindViolation` call and reset by setting its count to 0 —
+  stale entries beyond the count are overwritten, never cleared. Reset is constant time.
+- The 9th key of an object creates a fresh set (Go `map[string]struct{}` of the lower-cased keys, C#
+  `HashSet<string>(StringComparer.OrdinalIgnoreCase)`) seeded with the 8; it belongs to that object and is dropped when the object ends.
+  Every set is therefore built for, and sized by, the keys of one object, and all sets of a line together hold at most the line's keys.
+
+Measured in scratch prototypes on 1 MiB lines (both decoders' check walk as above; best of three):
+
+| Variant | C# allocation (x line) | C# time / `JsonDocument.Parse` | Go allocation (x line) |
+| ------- | ---------------------- | ------------------------------ | ---------------------- |
+| planned shape, five shapes of AC14 (decoder plus check) | 9.9 to 16.8 | 2.7 to 4.5 (shape 5: 4.1 to 4.3) | shape 5: 9.8 |
+| fresh set for every object | 25.4 (shape 5) and 34.9 (list of `{"a":0}`) | up to 8.4 | shape 5: 25.9 |
+| one set per depth, cleared and reused | 14.4 | shape 5: 42 to 54 | — |
+
+A fresh set per object breaks AC14 on memory, which is what pushed towards pooling; the planned shape stays under both bounds. In Go the
+Token walk with the planned shape takes 0.3 to 0.6 times a plain `json.Unmarshal` into `any` of the same line, with and without `-race`.
+Security's Go prototype with a cleared, reused map took 12.0 s against 136 ms fresh (reproduced) when its module says `go 1.24.7`, but
+66 ms when the module says `go 1.27` (this repository's `go.mod`): whether Go's `clear` is quadratic depends on the toolchain and language
+version, which is one more reason the rule forbids the pattern instead of relying on the runtime.
 
 ### Forms the parsers accept for a key, and the guard's behavior
 
@@ -376,16 +429,20 @@ internal static class WireKeyCheck
 }
 ```
 
-`BatchDecoder.ReadMajor` (private) changes its behavior and may change its signature (Dev's choice). `PayloadRegistry.Options` keeps its
+The constant for the 8 keys held in a short array (*Cost of the duplicate test*) is unexported in Go (`decode.go`) and private in
+`WireKeyCheck`; its name and any private helper of the walk are the Dev's choice. `BatchDecoder.ReadMajor` (private) changes its behavior
+and may change its signature (Dev's choice). `PayloadRegistry.Options` keeps its
 signature. Files the skeleton rewrites: none beyond the files above; `WireKeyCheck.cs` is new (skeleton pragma as *Skeleton* in
 `.squad/stack.md`).
 
 ## Test files
 
-- Go: `internal/wire/decode_test.go` (shared cases runner `TestDecoder_SharedCases`, raw-byte keys, error texts, `MaxDepth`, allocation),
+- Go: `internal/wire/decode_test.go` (shared cases runner `TestDecoder_SharedCases`, raw-byte keys, error texts, `MaxDepth`, allocation
+  and the shape-5 time ratio of AC15),
   `internal/wire/encode_test.go` (`CheckRecord`, `EncodeBatch`), `internal/model/metric_test.go`, `internal/model/mariadb_test.go`.
 - C#: `tests/Vandox.Core.Tests/WireKeyCheckTests.cs` (new, for `WireKeyCheck`), `tests/Vandox.Core.Tests/BatchDecoderTests.cs` (raw-byte keys,
-  no foreign exception, error texts, header shape, `FormatMinor`, `MaxDepth`, reflection test, allocation),
+  no foreign exception, error texts, header shape, `FormatMinor`, `MaxDepth`, reflection test, allocation and the shape-5 time ratio of
+  AC14; both containers of *Cost of the duplicate test* are exercised by fixture cases D20-D23),
   `tests/Vandox.Core.Tests/WireContractTests.cs` (shared cases runner `DecodeSharedCaseGivesExpectedResult`).
 - Shared: `testdata/wire/decoder-cases.json` (Tester).
 
@@ -409,7 +466,8 @@ compares an untyped constant or formats with `%d` (`wire.go:91`, `:103`; `wire_t
   misshapen header is malformed; *Accepted forms* rows for key case, non-ASCII keys, duplicate keys, sibling keys, nesting, `format_major`,
   `format_minor` and the non-object line; the `jq` note; *Related decisions* 0090; *Implementation*. After the challenge: *Common rules*
   and the *Accepted forms* row on invalid UTF-8 state that C# still rejects such string values (open, F1); *Producer size contract*
-  makes a collector record a gap for a refused record; *Duties of the ingest API* names F1 as a blocker of #40.
+  makes a collector record a gap for a refused record; *Duties of the ingest API* names F1 as a blocker of #40. After the Security plan
+  review: *Limits* states that the line rules cost time and memory in proportion to the line in both decoders.
 
 ## Documentation updates
 
@@ -418,7 +476,10 @@ compares an untyped constant or formats with `%d` (`wire.go:91`, `:103`; `wire_t
   sentence), 0043 (line rules bind every major), 0075 (second shared fixture) and 0089 (the duplicate-key bullet) — Lead, done.
 - `docs/UNIT_TESTS.md`, the bullet on `WireContractTests` (line 43): add that both decoders run the shared decoder cases in
   `testdata/wire/decoder-cases.json` (`TestDecoder_SharedCases`, `WireContractTests`), and that a new JSON-level decoding rule gets a case
-  there — **Tester**.
+  there — **Tester**. In the same file, next to the Go and .NET "no real clock" rules (lines 57 and 89), the Tester adds the one
+  exception of AC14/AC15: a test guarding against a quadratic cost may compare two durations measured in the same test (warm-up, best of
+  three each, a bound at least four times the measured ratio), never an absolute duration, linking
+  [0090](decisions/0090-wire-keys-matched-ignoring-ascii-case-duplicates-rejected-header-shape-malformed.md).
 - `.squad/project.md`, `docs/ARCHITECTURE.md`, `README.md`: none (no entry becomes untrue; area 10 still names `BatchDecoder` and
   `internal/wire`).
 
@@ -433,9 +494,15 @@ version writes. Area 10's goal is strengthened (fewer readings of one line, fail
 ## Security considerations
 
 - [x] Limits: `MaxDepth` applies to the parsed structure of the decompressed line, after the existing `MaxLineBytes` cut; the ASCII and
-  duplicate tests apply to keys after unescaping, so no escape spelling bypasses them (table above). The key sets hold at most the keys of one
-  object of one line (<= `MaxLineBytes`); both runtimes seed string hashing per process (Marvin in .NET, Go's map seed), so crafted keys cannot
-  force collisions. Recursion in C# is bounded by `MaxDepth`. Extra allocation is bounded by AC14 / AC15.
+  duplicate tests apply to keys after unescaping, so no escape spelling bypasses them (table above). The cost of clearing or reusing the
+  keys seen of an object is bounded by the keys that object held, never by the capacity a container once reached: an object's first 8
+  keys sit in a short array reset in constant time, a set is created fresh only for an object with more keys and dropped with it, and no
+  set is pooled, cleared and reused (*Cost of the duplicate test*); so the check costs time and memory in proportion to the line. A set
+  holds at most the keys of one object of one line (<= `MaxLineBytes`). Hash flooding: Go seeds the hash of every map randomly; a .NET
+  `HashSet<string>` with `StringComparer.OrdinalIgnoreCase` hashes non-randomized until one insert walks a chain of more than 100 entries
+  and then rehashes with the per-process randomized (Marvin) hash, so crafted keys buy at most about 100 comparisons per insert before the
+  switch. Recursion in C# is bounded by `MaxDepth`. Extra allocation is bounded by AC14 / AC15, and the time of the hostile shape 5 (one
+  large object followed by many small ones) by their ratio bounds.
 - [x] Exceptions reaching a user-visible text: System.Text.Json's `InvalidOperationException` on a key with an unpaired surrogate or invalid
   UTF-8 is caught in `WireKeyCheck` only around `JsonProperty.Name` and becomes `WireException` (`Malformed`, `key not ASCII`); no other new
   exception type can leave the decoder (AC8). Error texts are fixed and never contain a key (AC11); Go's wrapped `encoding/json` syntax
@@ -470,6 +537,31 @@ Devil's Advocate, 0 major, 4 minor objections; all accepted.
 4. **AC12 can refuse a whole record in the producer** — accepted. The area document's *Producer size contract* now says a collector records
    a `gap` (cause `unknown`, `collector` set) for a record `CheckRecord` refuses, so the loss is recorded (0028); 0090 and the architecture
    check say so. No collector exists yet, so the rule is tested in each collector's issue.
+
+### Security plan review, round 1
+
+CHANGES_REQUIRED, one blocking finding and one note; both accepted.
+
+- **B1 Reused key sets make the duplicate test quadratic** — accepted. Reproduced: Security's Go prototype took 12.0 s with a cleared,
+  reused map against 136 ms with a fresh one (with its module at `go 1.24.7`; 66 ms at this repository's `go 1.27`, so the effect depends
+  on the toolchain), and a C# prototype of the decoder plus check took 42 to 54 times a plain `JsonDocument.Parse` with a cleared, reused
+  `HashSet` per depth. The cause was the plan's own wording ("reusable", "may be pooled"), and AC14 pushed towards it: a fresh
+  `HashSet` per `{"a":0}` allocates 34.9 times the line, beyond AC14's 20. Revised: (1) a new *Cost of the duplicate test* section
+  with the rule — the cost of resetting or reusing the keys seen is bounded by the keys the object held, never by a capacity once reached;
+  no set is pooled, cleared and reused — and a binding shape for both languages (the first 8 keys in a short array reset in constant time,
+  a fresh set from the 9th key on, dropped with its object), measured at 9.9 to 16.8 times the line in allocation and 4.1 to 4.3 times a
+  plain parse on the hostile shape in C#, 9.8 times in allocation in Go; the Go and C# Approach bullets point to it. (2) AC14 and AC15 have
+  the fifth shape (one object of distinct keys filling half the line, then `{"a":0}` objects in the same list) with the allocation bound
+  and a time bound as a ratio to a plain parse of the same line in the same test: C# 20 times `JsonDocument.Parse` (Security suggested 10;
+  the planned shape already measures 4.1 to 4.3 in C#, so 10 leaves too little room for coverlet instrumentation and a loaded host, while
+  20 is still at least twice below the 42 to 54 of a reused set), Go 10 times `json.Unmarshal` into `any`, under `-race`. Because both
+  tests read the real clock, the Tester adds that narrow exception to `docs/UNIT_TESTS.md`. New fixture cases D20-D23 put a duplicate at
+  the 8th, 9th and 10th key and a sibling after a 9-key object, so both containers and their reset are exercised in both languages.
+  (3) The same rule is in *Security considerations* (Limits), in 0090 (*Consequences*, and the rejected pooled and per-object sets under
+  *Options considered*) and as one sentence in the area document's *Limits*.
+- **N1 "Marvin in .NET" imprecise** — accepted. *Security considerations* now says that an `OrdinalIgnoreCase` `HashSet<string>` hashes
+  non-randomized until an insert walks a chain of more than 100 entries and then rehashes with the randomized (Marvin) hash, and that Go
+  seeds every map; 0090 no longer claims the hashing is seeded per process.
 
 ## Out of scope / follow-ups
 

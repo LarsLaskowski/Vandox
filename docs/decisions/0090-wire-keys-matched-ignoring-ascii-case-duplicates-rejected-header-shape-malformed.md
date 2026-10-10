@@ -63,11 +63,26 @@ Nesting depth:
 9. **At most 64 in both** (chosen) — C#'s parser default, made explicit; Go counts while checking keys.
 10. **10,000 in both** — C# would have to raise its parser limit for nesting no producer writes.
 
+Keys seen by the duplicate test:
+
+11. **A short array for an object's first 8 keys, reset in constant time, and a fresh set from the 9th key on, dropped with its object**
+    (chosen) — no reset ever costs more than the keys its object held, so the check stays linear in the line, and the many small objects a
+    hostile line can hold allocate nothing per object.
+12. **A set per depth, pooled, cleared and reused** — clearing costs the capacity the set once reached (Go `clear`, depending on the
+    toolchain; .NET `HashSet.Clear` whenever non-empty), so one large object followed by many small ones in the same list makes the check
+    quadratic: measured up to 54 times a plain parse in C# and about 250 times in Go under an older language version.
+13. **A fresh set for every object** — linear, but a list of `{"a":0}` then allocates about 35 times the line in C#, beyond the decoder's
+    memory bound in the area's tests.
+
+The time bound on the hostile shape is tested as the ratio of two durations measured in one test, the one exception to the rule that tests
+read no real clock: an operation count would test the implementation's own report, not its cost.
+
 ## Decision
 
-Options 1, 4, 7 and 9: before binding, both decoders check every line, the header included: no key outside ASCII after unescaping, no two keys
-in one object equal ignoring ASCII case, no nesting deeper than 64 — otherwise `ErrMalformed`. Keys then match fields ignoring ASCII case, and
-a header that is not an object or whose `format_major` is not a 64-bit JSON integer is `ErrMalformed`. The rules are in the
+Options 1, 4, 7, 9 and 11: before binding, both decoders check every line, the header included: no key outside ASCII after unescaping, no two
+keys in one object equal ignoring ASCII case, no nesting deeper than 64 — otherwise `ErrMalformed`, at a cost in proportion to the line. Keys
+then match fields ignoring ASCII case, and a header that is not an object or whose `format_major` is not a 64-bit JSON integer is
+`ErrMalformed`. The rules are in the
 [Wire format](../areas/wire-format.md) area (*Common rules*, *Versioning*, *Accepted forms*), and a shared fixture of decoder cases that both
 decoders run pins them.
 
@@ -86,8 +101,10 @@ decoders run pins them.
   header rules hold on every Go target, not only where `int` has 64 bits.
 - Case-insensitive binding lives in the shared `PayloadRegistry.Options`, so the storage read path matches keys ignoring case too; that
   changes nothing for the rows the store writes, whose keys come from the same model.
-- The check costs one pass over the parsed line and one set of keys per object, bounded by the line; hashing of both runtimes is seeded per
-  process, so crafted keys cannot degrade the sets.
+- The check costs one pass over the parsed line. The cost of clearing or reusing the keys seen of an object is bounded by the keys that
+  object held, never by the capacity a container once reached for another object; a set exists only for an object with more than 8 keys
+  and holds only that object's keys. Go seeds the hash of every map, and .NET switches a string set to its randomized hash once one insert
+  walks a chain of more than 100 entries, so crafted keys cannot degrade the sets beyond that.
 - `jq` and the decoder can still read one spelling differently (`.kind` misses `"Kind"`), but never two values for one field.
 - Not settled here: C# rejects invalid UTF-8 and unpaired surrogate escapes in string values, where Go and 0042 replace them with U+FFFD
   (follow-up issue); keys are covered, since such a key is not ASCII. The follow-up blocks the ingest API (#40): until it is settled the
