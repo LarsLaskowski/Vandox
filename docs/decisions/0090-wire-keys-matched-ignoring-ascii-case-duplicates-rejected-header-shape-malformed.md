@@ -65,22 +65,38 @@ Nesting depth:
 
 Keys seen by the duplicate test:
 
-11. **A short array for an object's first 8 keys, reset in constant time, and a fresh set from the 9th key on, dropped with its object**
-    (chosen) — no reset ever costs more than the keys its object held, so the check stays linear in the line, and the many small objects a
-    hostile line can hold allocate nothing per object.
+11. **The walk's state per decoder; per depth one set and the list of keys the open object added, emptied by removing exactly those keys;
+    an object of more than 64 keys drops its depth's set instead** (chosen) — emptying costs the object's own keys, never a capacity
+    another object reached, so the check stays linear in the line; nothing is created again per line or per small object, so neither a
+    list of small objects nor a batch of many short, deeply nested lines multiplies a fixed cost; and a decoder keeps, from one line to the
+    next, at most one set per depth of at most 64 keys. In C# an object reserves room for its own property count first, so its set grows once. Measured with
+    the check in copies of both decoders on the hostile shapes of the area's tests: C# at most 17.3 times the line or batch allocated
+    (today up to 13.4), Go at most 33.7 (today up to 2.0). A decoder is used by one caller at a time already, so the shared state needs
+    no lock.
 12. **A set per depth, pooled, cleared and reused** — clearing costs the capacity the set once reached (Go `clear`, depending on the
     toolchain; .NET `HashSet.Clear` whenever non-empty), so one large object followed by many small ones in the same list makes the check
-    quadratic: measured up to 54 times a plain parse in C# and about 250 times in Go under an older language version.
+    quadratic: measured 36 to 59 times a plain parse in C# for a 1 MiB line and 218 to 254 times for a 4 MiB line, and about 250 times
+    in Go under an older language version.
 13. **A fresh set for every object** — linear, but a list of `{"a":0}` then allocates about 35 times the line in C#, beyond the decoder's
     memory bound in the area's tests.
+14. **An object's first 8 keys in a short array, a fresh set from the 9th key on, the walk's state created per line** — what this record
+    first chose; it pays a set per object of more than 8 keys and the frame stack or key arrays once per line: a list of objects of 12
+    to 48 one-character keys allocated 23.9 to 26.0 times the line in C#, and a batch of short lines nested 63 arrays deep 95.7 times in
+    Go.
+15. **Option 11 without dropping large sets** — slightly less allocation (no new set after an object of more than 64 keys), but a
+    hostile batch would keep, per depth, a set as large as the
+    largest object seen at that depth until the batch ends.
 
 The time bound on the hostile shape is tested as the ratio of two durations measured in one test, the one exception to the rule that tests
-read no real clock: an operation count would test the implementation's own report, not its cost.
+read no real clock: an operation count would test the implementation's own report, not its cost. In C# it uses a 4 MiB line, because
+under coverage instrumentation the chosen check came within a factor of about 2.3 of the quadratic one at 1 MiB. Go's `clear` is not
+quadratic under this module's `go 1.27`, so no Go time bound can catch a cleared set; review does.
 
 ## Decision
 
 Options 1, 4, 7, 9 and 11: before binding, both decoders check every line, the header included: no key outside ASCII after unescaping, no two
-keys in one object equal ignoring ASCII case, no nesting deeper than 64 — otherwise `ErrMalformed`, at a cost in proportion to the line. Keys
+keys in one object equal ignoring ASCII case, no nesting deeper than 64 — otherwise `ErrMalformed`, at a cost in proportion to the line
+and with the check's state kept per decoder. Keys
 then match fields ignoring ASCII case, and a header that is not an object or whose `format_major` is not a 64-bit JSON integer is
 `ErrMalformed`. The rules are in the
 [Wire format](../areas/wire-format.md) area (*Common rules*, *Versioning*, *Accepted forms*), and a shared fixture of decoder cases that both
@@ -101,10 +117,10 @@ decoders run pins them.
   header rules hold on every Go target, not only where `int` has 64 bits.
 - Case-insensitive binding lives in the shared `PayloadRegistry.Options`, so the storage read path matches keys ignoring case too; that
   changes nothing for the rows the store writes, whose keys come from the same model.
-- The check costs one pass over the parsed line. The cost of clearing or reusing the keys seen of an object is bounded by the keys that
-  object held, never by the capacity a container once reached for another object; a set exists only for an object with more than 8 keys
-  and holds only that object's keys. Go seeds the hash of every map, and .NET switches a string set to its randomized hash once one insert
-  walks a chain of more than 100 entries, so crafted keys cannot degrade the sets beyond that.
+- The check costs one pass over the parsed line. The cost of emptying or reusing the keys seen of an object is bounded by the keys that
+  object held, never by the capacity a container once reached for another object, and no key set is ever cleared; the state lives in
+  the decoder, which is why a decoder must stay with one caller at a time. Go seeds the hash of every map, and .NET switches a string
+  set to its randomized hash once one insert walks a chain of more than 100 entries, so crafted keys cannot degrade the sets beyond that.
 - `jq` and the decoder can still read one spelling differently (`.kind` misses `"Kind"`), but never two values for one field.
 - Not settled here: C# rejects invalid UTF-8 and unpaired surrogate escapes in string values, where Go and 0042 replace them with U+FFFD
   (follow-up issue); keys are covered, since such a key is not ASCII. The follow-up blocks the ingest API (#40): until it is settled the

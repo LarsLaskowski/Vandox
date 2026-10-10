@@ -80,8 +80,9 @@ texts, allocation, model rules).
 - [ ] AC4 **Duplicate keys are `ErrMalformed`** at their line: exact repeat of a scalar, an object, a map, a list; a scalar repeated with
   `null`; keys that differ only in ASCII case; a key and its escaped spelling; a repeated map key; map keys `Mount`/`mount`; a repeated
   unknown key; a repeat inside a nested unknown value; in the header (`format_major` twice, with `null`, `format_major`/`Format_Major`)
-  (fixture cases D1-D17); a repeat as the 8th, 9th and 10th key of an object, so the short array, the set seeded from it and a set
-  already built all see it (D20-D22). The same key in sibling objects or at another depth is accepted (D18, D19, D23).
+  (fixture cases D1-D17); a repeat as the 8th, 9th and 10th key of an object (D20-D22) and as the 66th key of an object of more than 64
+  keys (D26). The same key in sibling objects, in nested siblings, at another depth or in the next line is accepted (D18, D19, D23, D24,
+  D25, D27).
 - [ ] AC5 **Header shape.** Fixture cases H1-H31: a header `[1]`, `[]`, `5`, `"x"`, `true` is `Malformed`; `null` and `{}` are
   `UnsupportedVersion`; `format_major` `"1"`, `"2"`, `1.0`, `1e0`, `1E0`, `10e-1`, `2.5`, `true`, `{}`, `[1]`, `9223372036854775808`,
   `-9223372036854775809`, `1e400` is `Malformed`; `null`, missing, `0`, `-0`, `-1`, `2`, `3000000000`, `9223372036854775807`,
@@ -118,27 +119,45 @@ texts, allocation, model rules).
 - [ ] AC13 **C# binding ignores ASCII case everywhere it binds wire data** (`PayloadRegistry.Options`), and a reflection test in
   `BatchDecoderTests.cs` asserts for `WireHeader`, `Envelope` and every payload type with the types reachable from it: each public
   settable property has a `[JsonPropertyName]` (or `[JsonIgnore]`), and no two JSON names of one type are equal ignoring ASCII case.
-- [ ] AC14 **Memory and time, C#.** For a batch whose record line is about 1 MiB of one of five shapes in an unknown key — a list of
-  `{"a":0}`, one object of distinct short keys, a list of `[]`, a list of `0`, and (shape 5) one object of distinct short keys filling half
-  the line followed in the same list by `{"a":0}` objects (`{"x":[{<distinct keys>},{"a":0},{"a":0},...]}`) — `OpenAsync` plus
-  `NextAsync` allocate at most 20 times the line's length (`GC.GetTotalAllocatedBytes(true)`, in Debug and Release; measured today: 6.5 to
-  11.9 times; a prototype of the planned shape, see *Cost of the duplicate test*: 9.9 to 16.8 times in total). For shape 5, in addition,
-  `OpenAsync` plus `NextAsync` take at most **20 times** a `JsonDocument.Parse` of the same line bytes with the same `JsonDocumentOptions`,
-  both measured in the same test with `Stopwatch` after one warm-up run of each, as the best of three runs each (prototype: 4.1 to 4.3
-  times; a cleared, reused set: 42 to 54 times). Also a line of 1 MiB of distinct keys with a duplicate at the end is `Malformed`. In
-  `BatchDecoderTests.cs`.
-- [ ] AC15 **Memory and time, Go.** For the same five shapes, `NewDecoder` plus `Next` allocate at most 64 times the line's length
-  (`runtime.MemStats.TotalAlloc`; measured today 2 times, a `Decoder.Token` prototype of the check added at most 37 times, the planned
-  shape on shape 5: 9.8 times). For shape 5, in addition, `NewDecoder` plus `Next` take at most **10 times** a `json.Unmarshal` of the same
-  line into a `var v any`, both measured in the same test after one warm-up run of each, as the best of three runs each; the test runs
-  under *Test* (`-race`) and must hold there (prototype check walk: 0.3 to 0.6 times, with and without `-race`; Security's cleared, reused
-  map under a `go 1.24.7` module: about 250 times). In `decode_test.go`.
+- [ ] AC14 **Memory and time, C#.** *Shapes* (all in an unknown envelope key `x` of a valid `metric` record):
+  (1) a list of `{"a":0}`; (2) one object of distinct keys that are as short as possible — the printable ASCII characters other than `"`
+  and `\`, first single characters, then pairs, then triples, skipping a key equal to an earlier one ignoring ASCII case; (3) a list of
+  `[]`; (4) a list of `0`; (5) one object of distinct short keys filling half the line followed in the same list by `{"a":0}` objects
+  (`{"x":[{<distinct keys>},{"a":0},{"a":0},...]}`); (6) a list of objects of k distinct keys taken from the start of the sequence of
+  shape 2 (single characters up to k = 67), for each k in {9, 12, 24, 48, 65, 1025}; (7) a batch of about 1 MiB decompressed of short
+  valid records with increasing `seq`, each with an unknown key nested 63 arrays deep (depth 64), and the same with 61 objects deep
+  `{"":{"":...0}}`, and with 61 objects deep of which each has 8 more keys `"a"` to `"h"` before `""`. Shapes 1 to 6 fill a record line
+  of about 1 MiB. **Memory:** `OpenAsync` plus `NextAsync` up to the end allocate at most **20 times** the record line's length for shapes
+  1 to 6 and at most 20 times the decompressed batch length for shape 7 (`GC.GetTotalAllocatedBytes(true)`, in Debug and Release;
+  measured today 6.5 to 13.4 times, the planned shape 9.9 to 17.3 times, see *Cost of the duplicate test*). **Time:** for shape 5 with a
+  record line of about **4 MiB** (the test raises `WireLimits.MaxLineBytes` to 8 MiB for this measurement only), `OpenAsync` plus
+  `NextAsync` take at most **50 times** a `JsonDocument.Parse` of the same line bytes with the same `JsonDocumentOptions`, both measured
+  in the same test with `Stopwatch` after one warm-up run of each, as the best of three runs each (planned shape 5.7 to 11.2 times, under
+  coverlet 13.4 to 15.2; a cleared, reused set 218 to 254). Also a line of 1 MiB of distinct keys with a duplicate at the end is
+  `Malformed`. The Tester reports the shape-5 time ratio its test measured in the plain *Test* run and in the *Test with coverage* run
+  (coverlet). In `BatchDecoderTests.cs`.
+- [ ] AC15 **Memory and time, Go.** For the same shapes, 1 MiB record lines for shapes 1 to 6, `NewDecoder` plus `Next` up to the end
+  allocate at most **64 times** the record line's length (shape 7: the decompressed batch length) (`runtime.MemStats.TotalAlloc`;
+  measured today 0.2 to 2.0 times, the planned shape 2.0 to 31.7 times, with `-race` 33.7 on shape 2). For shape 5 with a 1 MiB line, in
+  addition, `NewDecoder` plus `Next` take at most **10 times** a `json.Unmarshal` of the same line into a `var v any`, both measured in
+  the same test after one warm-up run of each, as the best of three runs each; the test runs under *Test* (`-race`) and must hold there
+  (planned shape 0.34 to 0.97 times, with `-race` at most 1.23). In `decode_test.go`.
 - The time bounds of AC14 and AC15 compare two durations measured in one test and never assert an absolute duration; this is the one
   exception to "no real clock" in `docs/UNIT_TESTS.md`, which the Tester records there (see *Documentation updates*). Each bound is at
-  least four times the ratio measured for the planned shape (Go: the check walk's 0.6 plus at most one more plain parse for the envelope,
-  so about 1.6), so a loaded CI host or coverage instrumentation does not make it flaky, and at least two times below the ratio measured
-  where a cleared, reused set is quadratic (C# 42 to 54; Go under a `go 1.24.7` module about 250).
+  least three times the highest ratio measured for the planned shape, including coverage instrumentation (C#: 50 against 15.2 under
+  coverlet; Go: 10 against 1.23 with `-race`), so a loaded CI host does not make it flaky; the C# bound is more than four times below the
+  ratio of a cleared, reused set (218 to 254). Go's cleared, reused map is not quadratic under this module's `go 1.27`, so no Go time
+  bound can catch it; AC17 covers it by review.
 - [ ] AC16 **Existing rows move to the new rule** (see *Test files*); every other existing test in both languages stays green unchanged.
+- [ ] AC17 **The check's state lives in the decoder and is left empty.** (a) C# `WireKeyCheckTests`: on one `WireKeyCheck` instance, after
+  `FindViolation` returned `duplicate key` for a duplicate at depth 3 and `key not ASCII` for a key with an unpaired surrogate escape at
+  depth 3 (both inside an object of more than 64 keys and inside one of fewer), a following call with the same keys at the same depths
+  once each returns `null`; two `BatchDecoder`s that read two batches with the same nested keys alternately (`NextAsync` on one, then on
+  the other) both return every record (`BatchDecoderTests.cs`). (b) Both languages through the fixture: cases D23-D27 (a sibling, a
+  nested sibling and the next line reuse keys an earlier object had; a duplicate in an object of more than 64 keys; a sibling after an
+  object of more than 64 keys). (c) The Reviewer checks the diff: the walk's frame stack and per-depth containers are created per
+  decoder, not per line or per `checkLine` / `FindViolation` call; no key set or map is emptied with `clear(...)` or `.Clear()`; a set
+  is created only the first time a depth is reached or after an object of more than 64 keys dropped it.
 
 ### Fixture format
 
@@ -224,6 +243,10 @@ texts, allocation, model rules).
 | D21 | unknown key `"x":{"k1":1,"k2":2,"k3":3,"k4":4,"k5":5,"k6":6,"k7":7,"k8":8,"K1":9}` (the 9th repeats the 1st) | Malformed, 2 |
 | D22 | unknown key `"x":{"k1":1,"k2":2,"k3":3,"k4":4,"k5":5,"k6":6,"k7":7,"k8":8,"k9":9,"K9":10}` (the 10th repeats the 9th) | Malformed, 2 |
 | D23 | unknown key `"x":[{"k1":1,"k2":2,"k3":3,"k4":4,"k5":5,"k6":6,"k7":7,"k8":8,"k9":9},{"k1":1,"k9":9}]` | accepted, metric 1 |
+| D24 | unknown key `"x":[{"a":{"b":1,"c":2}},{"a":{"c":1,"b":2}}]` | accepted, metric 1 |
+| D25 | `H`, `M(1)` and `M(2)`, both records with the unknown key `"x":{"a":1,"b":2}` | accepted, metric 1, metric 2 |
+| D26 | unknown key `"x":{"k1":1,"k2":2,...,"k65":65,"K65":66}` (66 keys `k1` to `k65` written out, the 66th repeats the 65th) | Malformed, 2 |
+| D27 | unknown key `"x":[{"k1":1,"k2":2,...,"k65":65},{"k1":1,"k65":2}]` (the first object's 65 keys written out) | accepted, metric 1 |
 | H1-H5 | header `[1]`, `[]`, `5`, `"x"`, `true` | Malformed, 1 |
 | H6-H7 | header `null`, `{}` | UnsupportedVersion, 1 |
 | H8-H20 | `format_major` `"1"`, `"2"`, `1.0`, `1e0`, `1E0`, `10e-1`, `2.5`, `true`, `{}`, `[1]`, `9223372036854775808`, `-9223372036854775809`, `1e400`, each followed by `T` | Malformed, 1 |
@@ -272,13 +295,15 @@ duplicate), so both runners assert that the line under test of K4, K5, N4 and D9
 
 ## Approach
 
-**Go (`internal/wire/decode.go`).** A new `checkLine(line []byte) error` runs first in `readHeader` (before the version struct is
-unmarshalled) and in `decodeRecord` (before the envelope). Suggested shape, standard library only (0042): walk the line with
-`json.NewDecoder(bytes.NewReader(line))`, `UseNumber()` and `Token()`, keeping a stack of frames (object or array; for an object, whether a
-key is expected and the keys seen, lower-cased in ASCII, held as *Cost of the duplicate test* below prescribes: the first 8 in an inline
-array of the frame, a fresh map from the 9th key on). A `json.Delim` `{` or `[` that makes
+**Go (`internal/wire/decode.go`).** A new unexported type `keyCheck` holds the state of the line check; the `Decoder` holds one value of
+it, and its method `checkLine(line []byte) error` runs first in `readHeader` (before the version struct is unmarshalled) and in
+`decodeRecord` (before the envelope), for every line with the same state. Suggested shape, standard library only (0042): walk the line
+with `json.NewDecoder(bytes.NewReader(line))`, `UseNumber()` and `Token()`, keeping a stack of frames (object or array; for an object,
+whether a key is expected) whose backing slice is created once per decoder with capacity `MaxDepth` and reset to length 0 per line; the
+keys seen, lower-cased in ASCII, are held as *Cost of the duplicate test* below prescribes (per depth one map and the list of keys the
+open object added; no frame holds keys). A `json.Delim` `{` or `[` that makes
 the stack deeper than `MaxDepth` fails; a key with any byte >= 0x80 fails — `Token` has already unescaped it and turned invalid UTF-8 and
-unpaired surrogates into U+FFFD, so every non-ASCII form is caught by this one test; a key whose ASCII lower case is already in the frame's
+unpaired surrogates into U+FFFD, so every non-ASCII form is caught by this one test; a key whose ASCII lower case is already in its depth's
 set fails. The walk stops after the first complete value; a syntax error from `Token` is returned wrapped as `ErrMalformed` (the later
 `json.Unmarshal` would report the same class). The functions stay under gocognit 15 (split the frame handling). `MaxDepth` is a new
 exported constant in `wire.go`. The header-shape behavior of Go is already the target on a 64-bit `int`; to make it hold on every
@@ -293,15 +318,17 @@ test would notice) would report `3000000000` or 2^63 - 1 as `ErrMalformed` inste
 case was seen before.
 
 **C# (`src/Vandox.Core/Wire`).**
-- `BatchDecoder` parses both header and record lines with `new JsonDocumentOptions { MaxDepth = WireFormat.MaxDepth }`, then calls
-  `WireKeyCheck.FindViolation(document.RootElement)`; a non-null result throws `Fail(WireErrorKind.Malformed, <result>, null, line)`.
+- `BatchDecoder` creates one `WireKeyCheck` per instance (a `private readonly` field) and parses both header and record lines with
+  `new JsonDocumentOptions { MaxDepth = WireFormat.MaxDepth }`, then calls `FindViolation(document.RootElement)` on that instance, before
+  `Clone()`; a non-null result throws `Fail(WireErrorKind.Malformed, <result>, null, line)`.
 - `WireKeyCheck.FindViolation` walks objects and arrays (recursion is bounded by `MaxDepth`, which the parse enforced; an explicit stack is
   fine too). For each property it reads `JsonProperty.Name` inside a `try` that catches only `InvalidOperationException` (thrown for an
   unpaired surrogate escape or invalid UTF-8 in a key) and returns `key not ASCII`; a name that fails `System.Text.Ascii.IsValid` returns
   `key not ASCII`; then it compares the name with the keys seen before in the same object, ignoring ASCII case (`StringComparison.OrdinalIgnoreCase`
   and `StringComparer.OrdinalIgnoreCase` are exact ASCII case folding, since the name is ASCII by then), and returns `duplicate key` on a
-  match. The keys seen are held as *Cost of the duplicate test* below prescribes: the first 8 in a short array reused per depth, a fresh
-  `HashSet<string>(StringComparer.OrdinalIgnoreCase)` from the 9th key on. No set is pooled, cleared or reused.
+  match. The keys seen are held as *Cost of the duplicate test* below prescribes: per depth one
+  `HashSet<string>(StringComparer.OrdinalIgnoreCase)` and one `List<string>` of the keys the open object added, both owned by the instance
+  and emptied by removing exactly those keys. No set is ever emptied with `Clear()`. `WireKeyCheck` has no static mutable state.
 - `ReadMajor` is rewritten: root `null` → missing (`UnsupportedVersion`, `format_major missing`); root not an object → `Malformed`,
   `header is not a JSON object`; the property whose name equals `format_major` ignoring ASCII case (at most one, after the check) missing or
   `null` → `UnsupportedVersion`; a `Number` for which `TryGetInt64` succeeds → that value; any other value → `Malformed`,
@@ -316,34 +343,57 @@ store's own canonical rows, which do not change meaning.
 ### Cost of the duplicate test (both languages)
 
 **Rule:** the work to reset or reuse the keys seen of an object is bounded by the number of keys that object holds, never by the capacity a
-container once reached for another object; in total the line check costs time and memory in proportion to the line. A set or map is never
-pooled, cleared and reused across objects. Reason (Security, plan review round 1): clearing costs the capacity, not the content (Go
-`clear(m)` walks the whole table; .NET `HashSet.Clear()` wipes the whole bucket array whenever the set is non-empty), so one object with
-about 58,700 keys followed in the same list by about 65,500 objects `{"a":0}` (1 MiB) makes a cleared, reused set quadratic.
+container once reached for another object; in total the line check costs time and memory in proportion to the line, and the state a
+decoder keeps from one line to the next is bounded by a constant. No set or map is ever emptied with `clear(...)` / `Clear()`. Reason
+(Security, plan review round 1): clearing costs the capacity, not the content (Go `clear(m)` walks the whole table, depending on the
+toolchain; .NET `HashSet.Clear()` wipes the whole bucket array whenever the set is non-empty), so one object with about 58,700 keys followed
+in the same list by about 65,500 objects `{"a":0}` (1 MiB) makes a cleared, reused set quadratic. And (Security, plan review round 2): state
+created per line or per small object is paid once per line or per object, so a batch of many short lines or a list of many small objects
+multiplies it; the state of the walk therefore lives in the decoder.
 
 **Planned shape (binding for the Dev unless another shape keeps the rule and AC14/AC15):**
 
-- An object's first 8 keys (an unexported / private constant, for example Go `inlineKeys`, C# `InlineKeyCount`) are kept in a short
-  array and compared linearly: Go an inline `[8]string` in the object's frame (the frame stack's backing slice is reused, a new frame
-  starts with count 0); C# a `string[8]` per depth, created at most once per `FindViolation` call and reset by setting its count to 0 —
-  stale entries beyond the count are overwritten, never cleared. Reset is constant time.
-- The 9th key of an object creates a fresh set (Go `map[string]struct{}` of the lower-cased keys, C#
-  `HashSet<string>(StringComparer.OrdinalIgnoreCase)`) seeded with the 8; it belongs to that object and is dropped when the object ends.
-  Every set is therefore built for, and sized by, the keys of one object, and all sets of a line together hold at most the line's keys.
+- **Per decoder.** The walk's state belongs to the decoder and is reused for every line of it, the header included: Go a `keyCheck`
+  value in `Decoder`, C# one `WireKeyCheck` instance in `BatchDecoder`. Go's frame stack is created once with capacity `MaxDepth` and
+  reset to length 0 per line; a frame holds only its kind (object or array) and whether a key is expected, no keys. C# recurses (bounded
+  by `MaxDepth`). The per-depth containers below are created the first time a line reaches that depth. A decoder is used by one caller at
+  a time (it already keeps the line number, count and last `seq` from call to call), so the shared state needs no lock; `WireKeyCheck`
+  has no static mutable state.
+- **Per depth, one set and one list.** Each nesting depth has one set (Go `map[string]struct{}` of the ASCII-lower-cased keys, C#
+  `HashSet<string>(StringComparer.OrdinalIgnoreCase)`) and one list of the keys the object open at that depth added (Go `[]string`, C#
+  `List<string>`). A key is looked up in and added to its depth's set and appended to the list. In C# an object first reserves room for
+  its own properties (`set.EnsureCapacity(element.GetPropertyCount())`, the same for the list; `GetPropertyCount` is constant time,
+  checked), so a set grows at most once per object instead of doubling; Go has no count up front and lets the map grow.
+- **Emptied by removing the object's own keys.** When an object ends — normally or because the walk stops at a violation — every key in
+  its depth's list is removed from that depth's set (Go `delete`, C# `Remove`) and the list's length is set to 0, so a sibling or the next
+  line finds the set empty. The cost is the object's own key count. After `checkLine` / `FindViolation` returns, every set is empty.
+- **No large set is kept.** An object with more than 64 keys (C#: whose property count, Go: whose added keys exceed 64; an unexported /
+  private constant whose name is the Dev's choice) drops its depth's set and list when it ends (set to `nil` / `null`) instead of removing
+  its keys; the next object at that depth creates new ones. So a decoder keeps, from line to line, at most `MaxDepth` sets and lists of
+  at most 64 keys each, and a large object pays for its own set, which is in proportion to its own keys.
 
-Measured in scratch prototypes on 1 MiB lines (both decoders' check walk as above; best of three):
+Measured in scratch prototypes that put this check into copies of both decoders (C#: `OpenAsync` and `NextAsync` to the end,
+`GC.GetTotalAllocatedBytes(true)`, Release and Debug; Go: `NewDecoder` and `Next` to the end, `runtime.MemStats.TotalAlloc`, with and
+without `-race`; allocation per byte of the record line, or per decompressed batch byte for shape 7; the shapes are those of AC14/AC15):
 
-| Variant | C# allocation (x line) | C# time / `JsonDocument.Parse` | Go allocation (x line) |
-| ------- | ---------------------- | ------------------------------ | ---------------------- |
-| planned shape, five shapes of AC14 (decoder plus check) | 9.9 to 16.8 | 2.7 to 4.5 (shape 5: 4.1 to 4.3) | shape 5: 9.8 |
-| fresh set for every object | 25.4 (shape 5) and 34.9 (list of `{"a":0}`) | up to 8.4 | shape 5: 25.9 |
-| one set per depth, cleared and reused | 14.4 | shape 5: 42 to 54 | — |
+| Variant | C# allocation (x line) | C# time / `JsonDocument.Parse`, shape 5 | Go allocation (x line) |
+| ------- | ---------------------- | --------------------------------------- | ---------------------- |
+| decoder today, no check | 6.5 to 12.4 (Debug 13.4) | — | 0.2 to 2.0 |
+| planned shape | 9.9 to 17.3 (shape 6 with 65 keys 17.3; shape 2 15.0; shape 7 10.1 to 13.5, Debug 14.5) | 1 MiB: 4.0 to 6.2, under coverlet 9.1 to 15.8; 4 MiB: 5.7 to 11.2, under coverlet 13.4 to 15.2 | 2.0 to 31.7 (shape 2 31.7, with `-race` 33.7; shape 6 with 65 keys 30.6) |
+| round-2 plan: 8 keys in a short array, a fresh set from the 9th, state per line | 18.5 to 26.0 (shape 6, 9 to 48 keys) | — | 95.7 (Security, shape 7, 63 arrays deep) |
+| fresh set for every object | 25.4 (shape 5) and 34.9 (shape 1) | — | shape 5: 25.9 |
+| one set per depth, cleared and reused | 14.4 | 1 MiB: 36 to 59 (with and without coverlet); 4 MiB: 218 to 254 | — |
 
-A fresh set per object breaks AC14 on memory, which is what pushed towards pooling; the planned shape stays under both bounds. In Go the
-Token walk with the planned shape takes 0.3 to 0.6 times a plain `json.Unmarshal` into `any` of the same line, with and without `-race`.
-Security's Go prototype with a cleared, reused map took 12.0 s against 136 ms fresh (reproduced) when its module says `go 1.24.7`, but
-66 ms when the module says `go 1.27` (this repository's `go.mod`): whether Go's `clear` is quadratic depends on the toolchain and language
-version, which is one more reason the rule forbids the pattern instead of relying on the runtime.
+The Go check walk with the planned shape takes 0.34 to 0.97 times a plain `json.Unmarshal` into `any` of the same line for the shapes of
+AC15, at most 1.23 with `-race`. Security's Go prototype with a cleared, reused map took 12.0 s against 136 ms fresh (reproduced) when its
+module says `go 1.24.7`, but 66 ms when the module says `go 1.27` (this repository's `go.mod`): whether Go's `clear` is quadratic depends on
+the toolchain and language version, which is one more reason the rule forbids the pattern instead of relying on the runtime — and why the
+Go time bound cannot catch it, so the Reviewer checks the diff for it (AC17).
+
+Why a 4 MiB line for the C# time bound: under coverlet the planned shape measured up to 15.8 times a plain parse at 1 MiB, too close to a
+bound of 20 and only about 2.3 times below the 36 of the cleared set; at 4 MiB the quadratic variant grows to 218 to 254 while the planned
+shape stays at 5.7 to 15.2, so a bound of 50 sits more than three times above the planned shape and more than four times below the
+quadratic one, with or without coverage instrumentation.
 
 ### Forms the parsers accept for a key, and the guard's behavior
 
@@ -365,10 +415,10 @@ Nesting: objects and arrays both count, scalars do not, the outermost value is 1
 | Project | Type / file | Change |
 | ------- | ----------- | ------ |
 | Go `internal/wire` | `wire.go` | new `const MaxDepth = 64`; `Header.FormatMinor` becomes `int64` |
-| Go `internal/wire` | `decode.go` | new `checkLine`; called first in `readHeader` and `decodeRecord`; `readHeader` reads the major as `*int64` |
+| Go `internal/wire` | `decode.go` | new type `keyCheck` with method `checkLine`, a `keyCheck` field in `Decoder`; called first in `readHeader` and `decodeRecord`; `readHeader` reads the major as `*int64`; the `Decoder` doc comment says it is not safe for concurrent use |
 | Go `internal/model` | `model.go`, `metric.go`, `mariadb.go` | new `checkFoldUnique`; called for labels, status, variables |
-| `Vandox.Core` | `Wire/WireKeyCheck.cs` (new) | the C# line check |
-| `Vandox.Core` | `Wire/BatchDecoder.cs` | parse options with `MaxDepth`, call `WireKeyCheck`, rewritten `ReadMajor` |
+| `Vandox.Core` | `Wire/WireKeyCheck.cs` (new) | the C# line check, one instance per decoder |
+| `Vandox.Core` | `Wire/BatchDecoder.cs` | a `WireKeyCheck` field, parse options with `MaxDepth`, call `FindViolation`, rewritten `ReadMajor`; the class summary says an instance is used by one caller at a time |
 | `Vandox.Core` | `Wire/WireFormat.cs` | new `MaxDepth` constant |
 | `Vandox.Core` | `Wire/WireHeader.cs` | `FormatMinor` becomes `long` |
 | `Vandox.Core` | `Model/PayloadRegistry.cs` | `PropertyNameCaseInsensitive = true` |
@@ -387,10 +437,19 @@ const MaxDepth = 64
 FormatMinor int64 `json:"format_minor"`
 
 // internal/wire/decode.go
+// keyCheck holds the state of the line check, reused for every line of one Decoder: the frame stack and, per
+// depth, the keys seen in the open object. Every set is empty between two calls of checkLine.
+type keyCheck struct {
+	// unexported fields: Dev's choice (frame stack, per-depth sets and key lists)
+}
+
 // checkLine checks the JSON-level rules of one line before it is bound: no key outside ASCII after unescaping,
 // no two keys of one object equal ignoring ASCII case, no nesting deeper than MaxDepth. It returns nil or an
 // error wrapping ErrMalformed whose text names the broken rule but never the key.
-func checkLine(line []byte) error
+func (c *keyCheck) checkLine(line []byte) error
+
+// internal/wire/decode.go, new field of Decoder (name: Dev's choice)
+keys keyCheck
 
 // internal/model/model.go
 // checkFoldUnique requires the keys of m to differ from each other ignoring ASCII case; the error names the
@@ -416,21 +475,27 @@ public long FormatMinor { get; set; }
 
 // src/Vandox.Core/Wire/WireKeyCheck.cs (new file)
 /// <summary>
-/// Checks the keys of a parsed wire line before it is bound.
+/// Checks the keys of a parsed wire line before it is bound. One instance belongs to one decoder and keeps its state from line to
+/// line; it is used by one caller at a time.
 /// </summary>
-internal static class WireKeyCheck
+internal sealed class WireKeyCheck
 {
     /// <summary>
     /// Finds the first key, at any depth, that is not ASCII after unescaping or that repeats another key of its object ignoring ASCII case.
+    /// Every key set of the instance is empty again when the method returns.
     /// </summary>
     /// <param name="root">The parsed line, nested at most <see cref="WireFormat.MaxDepth"/> deep</param>
     /// <returns><c>null</c> when every key is fine, otherwise the reason: <c>key not ASCII</c> or <c>duplicate key</c></returns>
-    internal static string? FindViolation(JsonElement root);
+    internal string? FindViolation(JsonElement root);
 }
+
+// src/Vandox.Core/Wire/BatchDecoder.cs, new field (name: Dev's choice)
+private readonly WireKeyCheck _keyCheck = new();
 ```
 
-The constant for the 8 keys held in a short array (*Cost of the duplicate test*) is unexported in Go (`decode.go`) and private in
-`WireKeyCheck`; its name and any private helper of the walk are the Dev's choice. `BatchDecoder.ReadMajor` (private) changes its behavior
+The constant 64 for the largest object whose set is kept (*Cost of the duplicate test*) is unexported in Go (`decode.go`) and private in
+`WireKeyCheck`; its name, the fields of `keyCheck` / `WireKeyCheck` and any private helper of the walk are the Dev's choice. `WireKeyCheck`
+gets the implicit parameterless constructor (or an explicit one, Dev's choice). `BatchDecoder.ReadMajor` (private) changes its behavior
 and may change its signature (Dev's choice). `PayloadRegistry.Options` keeps its
 signature. Files the skeleton rewrites: none beyond the files above; `WireKeyCheck.cs` is new (skeleton pragma as *Skeleton* in
 `.squad/stack.md`).
@@ -440,9 +505,10 @@ signature. Files the skeleton rewrites: none beyond the files above; `WireKeyChe
 - Go: `internal/wire/decode_test.go` (shared cases runner `TestDecoder_SharedCases`, raw-byte keys, error texts, `MaxDepth`, allocation
   and the shape-5 time ratio of AC15),
   `internal/wire/encode_test.go` (`CheckRecord`, `EncodeBatch`), `internal/model/metric_test.go`, `internal/model/mariadb_test.go`.
-- C#: `tests/Vandox.Core.Tests/WireKeyCheckTests.cs` (new, for `WireKeyCheck`), `tests/Vandox.Core.Tests/BatchDecoderTests.cs` (raw-byte keys,
-  no foreign exception, error texts, header shape, `FormatMinor`, `MaxDepth`, reflection test, allocation and the shape-5 time ratio of
-  AC14; both containers of *Cost of the duplicate test* are exercised by fixture cases D20-D23),
+- C#: `tests/Vandox.Core.Tests/WireKeyCheckTests.cs` (new, for `WireKeyCheck`, including the instance reuse after a violation of AC17 (a)),
+  `tests/Vandox.Core.Tests/BatchDecoderTests.cs` (raw-byte keys, no foreign exception, error texts, header shape, `FormatMinor`,
+  `MaxDepth`, reflection test, allocation and the shape-5 time ratio of AC14, the two interleaved decoders of AC17; the reuse and the
+  dropping of the per-depth sets of *Cost of the duplicate test* are exercised in both languages by fixture cases D23-D27),
   `tests/Vandox.Core.Tests/WireContractTests.cs` (shared cases runner `DecodeSharedCaseGivesExpectedResult`).
 - Shared: `testdata/wire/decoder-cases.json` (Tester).
 
@@ -467,7 +533,9 @@ compares an untyped constant or formats with `%d` (`wire.go:91`, `:103`; `wire_t
   `format_minor` and the non-object line; the `jq` note; *Related decisions* 0090; *Implementation*. After the challenge: *Common rules*
   and the *Accepted forms* row on invalid UTF-8 state that C# still rejects such string values (open, F1); *Producer size contract*
   makes a collector record a gap for a refused record; *Duties of the ingest API* names F1 as a blocker of #40. After the Security plan
-  review: *Limits* states that the line rules cost time and memory in proportion to the line in both decoders.
+  review: *Limits* states that the line rules cost time and memory in proportion to the line in both decoders; after round 2 also that a
+  decoder keeps the check's state from line to line, keeps no set of more than 64 keys after its object, and is used by one caller at a
+  time.
 
 ## Documentation updates
 
@@ -478,7 +546,8 @@ compares an untyped constant or formats with `%d` (`wire.go:91`, `:103`; `wire_t
   `testdata/wire/decoder-cases.json` (`TestDecoder_SharedCases`, `WireContractTests`), and that a new JSON-level decoding rule gets a case
   there — **Tester**. In the same file, next to the Go and .NET "no real clock" rules (lines 57 and 89), the Tester adds the one
   exception of AC14/AC15: a test guarding against a quadratic cost may compare two durations measured in the same test (warm-up, best of
-  three each, a bound at least four times the measured ratio), never an absolute duration, linking
+  three each, a bound at least three times the highest ratio measured for the correct code, coverage instrumentation included), never an
+  absolute duration, linking
   [0090](decisions/0090-wire-keys-matched-ignoring-ascii-case-duplicates-rejected-header-shape-malformed.md).
 - `.squad/project.md`, `docs/ARCHITECTURE.md`, `README.md`: none (no entry becomes untrue; area 10 still names `BatchDecoder` and
   `internal/wire`).
@@ -494,15 +563,22 @@ version writes. Area 10's goal is strengthened (fewer readings of one line, fail
 ## Security considerations
 
 - [x] Limits: `MaxDepth` applies to the parsed structure of the decompressed line, after the existing `MaxLineBytes` cut; the ASCII and
-  duplicate tests apply to keys after unescaping, so no escape spelling bypasses them (table above). The cost of clearing or reusing the
-  keys seen of an object is bounded by the keys that object held, never by the capacity a container once reached: an object's first 8
-  keys sit in a short array reset in constant time, a set is created fresh only for an object with more keys and dropped with it, and no
-  set is pooled, cleared and reused (*Cost of the duplicate test*); so the check costs time and memory in proportion to the line. A set
-  holds at most the keys of one object of one line (<= `MaxLineBytes`). Hash flooding: Go seeds the hash of every map randomly; a .NET
-  `HashSet<string>` with `StringComparer.OrdinalIgnoreCase` hashes non-randomized until one insert walks a chain of more than 100 entries
-  and then rehashes with the per-process randomized (Marvin) hash, so crafted keys buy at most about 100 comparisons per insert before the
-  switch. Recursion in C# is bounded by `MaxDepth`. Extra allocation is bounded by AC14 / AC15, and the time of the hostile shape 5 (one
-  large object followed by many small ones) by their ratio bounds.
+  duplicate tests apply to keys after unescaping, so no escape spelling bypasses them (table above). The cost of emptying or reusing the
+  keys seen of an object is bounded by the keys that object held, never by the capacity a container once reached: the walk's state
+  belongs to the decoder (a frame stack of capacity `MaxDepth`; per depth one set and the list of keys the open object added), each
+  object removes exactly its own keys when it ends, also when the walk stops at a violation, an object of more than 64 keys drops its
+  depth's set instead, and no set is ever emptied with `clear` / `Clear()` (*Cost of the duplicate test*). So the check costs time and
+  memory in proportion to the line, nothing is paid again per line or per small object, and what a decoder keeps from one line to the
+  next is at most `MaxDepth` sets and lists of at most 64 keys. A set holds at most the keys of one object of one line (<=
+  `MaxLineBytes`). Sharing the state is safe because a decoder is used by one caller at a time, as it already keeps its line number,
+  count and last `seq` from call to call; `WireKeyCheck` has no static mutable state, and two interleaved decoders are tested (AC17).
+  Hash flooding: Go seeds the hash of every map randomly when it is created (a reused map keeps its seed, which the input cannot
+  observe); a .NET `HashSet<string>` with `StringComparer.OrdinalIgnoreCase` hashes non-randomized until one insert walks a chain of more
+  than 100 entries and then rehashes with the per-process randomized (Marvin) hash, and keeps it, so crafted keys buy at most about 100
+  comparisons per insert before the switch. Recursion in C# is bounded by `MaxDepth`. Extra allocation is bounded by AC14 / AC15 on the
+  seven shapes, among them many small objects of 9 to 1,025 keys and a batch of many short, deeply nested lines (measured: C# at most
+  17.3, Go at most 33.7 times the line or batch), and the time of the hostile shape 5 (one large object followed by many small ones) by
+  their ratio bounds; the Reviewer checks for a cleared set, which the Go time bound cannot detect under `go 1.27` (AC17).
 - [x] Exceptions reaching a user-visible text: System.Text.Json's `InvalidOperationException` on a key with an unpaired surrogate or invalid
   UTF-8 is caught in `WireKeyCheck` only around `JsonProperty.Name` and becomes `WireException` (`Malformed`, `key not ASCII`); no other new
   exception type can leave the decoder (AC8). Error texts are fixed and never contain a key (AC11); Go's wrapped `encoding/json` syntax
@@ -540,7 +616,8 @@ Devil's Advocate, 0 major, 4 minor objections; all accepted.
 
 ### Security plan review, round 1
 
-CHANGES_REQUIRED, one blocking finding and one note; both accepted.
+CHANGES_REQUIRED, one blocking finding and one note; both accepted. (The shape described under (1) — 8 keys in a short array, a fresh set
+from the 9th — was replaced after round 2, see below.)
 
 - **B1 Reused key sets make the duplicate test quadratic** — accepted. Reproduced: Security's Go prototype took 12.0 s with a cleared,
   reused map against 136 ms with a fresh one (with its module at `go 1.24.7`; 66 ms at this repository's `go 1.27`, so the effect depends
@@ -563,6 +640,55 @@ CHANGES_REQUIRED, one blocking finding and one note; both accepted.
   non-randomized until an insert walks a chain of more than 100 entries and then rehashes with the randomized (Marvin) hash, and that Go
   seeds every map; 0090 no longer claims the hashing is seeded per process.
 
+### Security plan review, round 2
+
+CHANGES_REQUIRED (the second rejection), one blocking finding and two notes. B1 closed.
+
+- **B2 The planned shape broke the memory bounds of AC14 and AC15 on shapes the AC did not have** — accepted, reproduced to the decimal
+  (C#: lists of objects of 9, 12, 24 and 48 one-character keys 18.5, 23.9, 24.8 and 26.0 times the line against 20; Go: the frame stack
+  re-grown per line, measured by Security at 95.7 times a batch of short lines nested 63 arrays deep against 64). Cause: state paid per
+  line (the C# `string[8]` per depth per `FindViolation` call, the Go frame stack per `checkLine` call) and per object of more than 8
+  keys (a fresh set). The claims "the planned shape stays under both bounds", "Extra allocation is bounded by AC14 / AC15" and 0090's
+  "small objects allocate nothing per object" were false and are replaced. Revised, as Security required: (1) the walk's state belongs
+  to the decoder — Go a `keyCheck` in `Decoder` with a frame stack of capacity `MaxDepth` reset per line, frames without keys; C# one
+  `WireKeyCheck` instance per `BatchDecoder` (signatures changed); (2) per depth one set and the list of keys the open object added,
+  emptied by removing exactly those keys (Security's suggested strategy), with two additions measured in prototypes: C# reserves the
+  object's property count before adding (`EnsureCapacity(GetPropertyCount())`, constant time), which takes the densest single object
+  from 20.7 to 15.0 times; and an object of more than 64 keys drops its depth's set instead of emptying it, so a decoder never keeps
+  more than 64 small sets from line to line (without it, a hostile batch would keep per depth a set as large as the largest object seen
+  there until the batch ends); (3) AC14/AC15 now have seven shapes, among them Security's (6) with k in {9, 12, 24, 48} plus 65 and
+  1,025 (the first sizes above the drop threshold), the densest single object as shape 2, and Security's (7) per batch byte, plus a
+  variant with 9 keys per level. Measured with the check in copies of both decoders: C# 9.9 to 17.3 times (Release and Debug) against
+  20, Go 2.0 to 31.7 (33.7 with `-race`) against 64; the cost table, *Security considerations*, 0090 and the area document's *Limits*
+  carry these numbers. New AC17 and fixture cases D24-D27 pin the reuse, the emptying after a violation, the drop above 64 keys and two
+  interleaved decoders. Thread safety: unchanged — `BatchDecoder` and `Decoder` already keep per-instance state between calls and are
+  used by one caller at a time; the docs now say so.
+- **N2 The Go time bound cannot catch a cleared reused map under `go 1.27`** — accepted: AC17 (c) makes the Reviewer check the diff for
+  `clear(...)` / `.Clear()` on key sets and for state created per line in both languages.
+- **N3 C# shape-5 ratio under coverlet** — accepted and measured: at 1 MiB the planned shape reached 9.1 to 15.8 times a plain parse under
+  coverlet (4.0 to 6.2 without), too close to the bound of 20, while a cleared set reached 36 to 59. AC14 therefore measures the time
+  on a 4 MiB line (the test raises `MaxLineBytes`), where the planned shape stays at 5.7 to 15.2 and the cleared set reaches 218 to 254,
+  with a bound of 50. The Tester reports the ratio measured with and without coverlet.
+
+### Lead decision after the second Security rejection
+
+Options weighed (`.squad/routing.md`, *Loop limits*):
+
+- **Narrow the scope** (drop the duplicate rejection, or the whole pre-pass) — rejected. The duplicate rejection is the core of the issue
+  (claim 3: the two decoders read one batch as different records). The ASCII and depth rules need the same walk, and the Go part of B2
+  (95.7 times) comes from that walk's frame stack, not from the key sets, so a narrower plan still needs the same fix; a follow-up for
+  the duplicates would face the same design question with less context.
+- **Split into separate issues** — rejected for the same reason.
+- **Change the bounds** — rejected for memory: the planned shape holds C# 20 and Go 64 with room (17.3, 33.7), and a higher C# bound would
+  stop catching a fresh set per object (25.4 to 34.9) or one from the 9th key on (up to 26.0). Changed for the C# time bound only
+  (4 MiB, 50 times), on the coverlet measurement Security asked for (N3).
+- **Abort** — rejected: the fix is known, measured and cheap.
+- **Accept and fix** — chosen as the content of this revision. It is not a pure wording defect: the planned data structure, two
+  signatures (`WireKeyCheck` becomes an instance class, Go gets a `keyCheck` type) and the C# time measurement change. The loop limits
+  allow the Lead the "accept, fix, exactly one Security delta confirmation" route only for a pure wording defect, so the Lead escalates
+  the route to the Product Manager, recommending exactly one Security delta confirmation of this revision (a further rejection returns
+  to the Product Manager).
+
 ## Out of scope / follow-ups
 
 Follow-up issues for the orchestrator to open:
@@ -582,5 +708,5 @@ Follow-up issues for the orchestrator to open:
   (`BatchWriter.cs:103`; `BatchDecoderTests.cs:680-681` pin it). Decide whether the stored payload should match the wire payload, and fix
   the attribute or the expectation." Labels: `type: bug`.
 - Note for #40: the per-decoder memory figures under *Duties of the ingest API* in the area document (about 270 MiB allocated, a heap peak of
-  160-170 MB for a 1 MiB line) were measured on the Go decoder; for C# this plan measured 6.5 to 11.9 times the line length allocated for four
-  hostile shapes. Re-measure the C# peak when sizing the ingest concurrency.
+  160-170 MB for a 1 MiB line) were measured on the Go decoder; for C# this plan measured 6.5 to 13.4 times the line length allocated today
+  and at most 17.3 times with the check, for the shapes of AC14. Re-measure the C# peak when sizing the ingest concurrency.
