@@ -52,9 +52,9 @@ journalctl -k -S -2h -g 'Out of memory|Killed process' --no-pager | tail -n 20
 systemctl --failed --no-legend
 ```
 
-Check that swap is active. After a reboot an empty `swapon --show` means the swap file is not in use; run
-`swapon -a` and confirm the swap entry exists in `/etc/fstab`. The `oom_kill` counter shows how many kills
-happened since boot.
+Check that swap is active. The swap file is `/swapfile` and has an entry in `/etc/fstab` (checked
+2026-10-10), so it comes back after a reboot; if `swapon --show` is empty anyway, run `swapon -a`. The
+`oom_kill` counter shows how many kills happened since boot.
 
 ## Step 1: free memory first
 
@@ -68,8 +68,9 @@ pgrep -a -f 'pzstd|pmm' || echo "no backup process running"
 `rss` is in KiB. A running Plesk backup (`pzstd`, about 200 MiB) is the usual cause: stop it before
 anything else.
 
-- **OPEN:** the Plesk-native way to cancel a running backup (check `ls /opt/psa/bin | grep -i -E 'backup|pmm'`
-  and the Backup Manager in the panel).
+- **OPEN:** the Plesk-native way to cancel a running backup. The CLI utilities `plesk bin pleskbackup`,
+  `plesk bin scheduled-backup` and `plesk bin backup-storage` exist on the server; which one lists or
+  cancels a running task is to be found in their `--help` output and in the Backup Manager of the panel.
 - If it cannot be cancelled that way: `pkill -TERM pzstd`. Plesk marks that backup as failed; it is run
   again later (step 3).
 
@@ -91,7 +92,8 @@ Order (each unit is started on its own, a memory check follows each one):
 | 6 | `fail2ban` | protection |
 | 7 | `amavis`, `spamassassin`, `pc-remote` | mail filters last: they are large (about 490 MiB together) |
 
-While the filters are down, Postfix defers mail; it is not lost.
+All 15 units exist on the server (`systemctl cat`, checked 2026-10-10). While the filters are down,
+Postfix defers mail; it is not lost.
 
 Paste both functions into the root shell, then run `vandox_recover`. Units that are already running or do
 not exist are skipped; it stops at the first failed start or memory check, prints what is left and returns
@@ -153,9 +155,10 @@ limits.
   15 minutes and `mem_gate 600 60` passes. Then start it by hand outside business hours, or let the next
   scheduled run take it.
 - **OPEN:** how to pause it. In the panel: Tools & Settings → Backup Manager → Scheduled Backup Settings.
-  Which CLI utility does the same (`ls /opt/psa/bin | grep -i -E 'backup|pmm'`) and which cron entry or
-  daemon starts the catch-up run (`ls /etc/cron.d`, `crontab -l`) still has to be found out, then written
-  here with the exact commands.
+  The CLI counterpart is probably `plesk bin scheduled-backup`. The catch-up run is most likely started by
+  `/etc/cron.d/plesk-backup-manager-task` (the only backup-related entry in `/etc/cron.d`; root's crontab
+  has none). Still to confirm, then write down with the exact commands: what that cron file runs, and which
+  switch in the panel or in `scheduled-backup` stops the catch-up run without losing the schedule.
 - If a backup started anyway, go to step 1 and stop it.
 
 ## Step 4: verify
