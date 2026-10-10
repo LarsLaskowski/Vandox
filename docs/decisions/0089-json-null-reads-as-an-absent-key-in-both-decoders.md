@@ -45,5 +45,10 @@ this from converters in `PayloadRegistry.Options`; the rules are in the [Wire fo
   encoder, which always writes them.
 - Duplicate keys combined with `null` are not covered: Go keeps the earlier value of a scalar when a later occurrence is `null` and merges
   repeated objects, C# replaces. Duplicate keys, key case and the header's shape are settled in a separate issue.
+- The rule lives in the shared `PayloadRegistry.Options`, so the storage read path (`RecordQueries.ReadJson`) applies it too. That changes
+  nothing for the rows the store writes, which are validated and serialized without `null` members; a `null` in a hand-edited stored
+  payload reads as an empty value instead of a null reference.
+- A model property whose type the converters do not claim would bypass the rule; a reflection test over the model types fails for it, so
+  a new property type extends the converters in the same change.
 - A `null` list element allocates one empty element, which is no more per byte than an empty object `{}` already allocates, so the decoder's
   memory bound does not change.

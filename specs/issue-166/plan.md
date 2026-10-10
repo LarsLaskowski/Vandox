@@ -61,7 +61,9 @@ record's validation then decides.
 
 - [ ] AC1 (no escape): for every line of `testdata/wire/all-kinds.jsonl` (header and nine records) and every key at any depth of that line,
   the line with that one key's value replaced by `null` makes `BatchDecoder.OpenAsync` (header) or `NextAsync` (record) either succeed or
-  throw `WireException` — never another exception. The same for `"clock_offset_ns":null` in the header (not in the fixture).
+  throw `WireException` — never another exception. The same for the three model keys the fixture lacks (checked per model type against
+  the fixture's objects): `"clock_offset_ns":null` in the header, `"ppid":null` in `data.processes[0]` of the `process_snapshot` line and
+  `"boot":null` in the `kernel_event` line. AC11 covers keys a future model change adds without a fixture change.
 - [ ] AC2 (null equals absent): for each line of AC1 whose key is an object member outside a map, the outcome equals the outcome of the same
   line with that key removed: both succeed with an equal result (header fields equal; record `Source`, `Seq`, `CapturedAt`, `Kind` equal
   and `PayloadRegistry.Serialize(Data)` equal), or both throw `WireException` with equal `Kind`, `Line`, `FieldError?.Field` and
@@ -95,6 +97,13 @@ record's validation then decides.
 - [ ] AC10 (Go parity, pinning): `internal/wire/decode_test.go` gets the AC2/AC3/AC4 equivalences over the same fixture lines and the rows
   of the table below, with the same field paths and reasons. Go production code does not change, so these tests pass on the current code;
   they pin the rule for the Go side (AC1-AC9 are the failing C# tests of step 5).
+- [ ] AC11 (every model type is claimed, by reflection): a test walks the JSON-bound public properties of `WireHeader`, `Envelope`, every
+  payload type `PayloadRegistry.TypeOf` returns for the eight `RecordKind` constants, and recursively every class reached through them,
+  and asserts per property: `string` and every non-nullable value type → `CanConvert` true; `Nullable<T>` → `CanConvert(T)` true;
+  `List<T>` → `CanConvert(List<T>)` true and `T` walked; `Dictionary<string, V>` → `CanConvert(V)` true; a property with a
+  `[JsonConverter]` attribute (`IPAddress?`, `IPEndPoint?`) and `JsonElement?` → skipped; any other class (`OomKill`, `Boot`) → walked. A
+  property type that fits none of these fails the test with the type and property name, so a future `float`, `Guid`, enum or
+  `List<string>` property fails until the factory and this plan's rule are extended.
 
 ### Expected outcomes (AC5)
 
@@ -121,6 +130,7 @@ Verified once with the Go decoder; the C# prototype in a scratch copy gave the s
 | process_snapshot `"programs":[null]` | `Invalid`, `data.programs[0].program`: `required` |
 | process `"command":null` | `Invalid`, `data.processes[0].command`: `required` |
 | process `"user":null`, `"cmdline":null`, `"state":null`, `"started_at":null` | accepted |
+| process `"ppid":null` | accepted, `Ppid` 0 (row added in revise: the Go result was verified with a probe in a scratch copy and equals the key omitted; the C# prototype was not rerun for it) |
 | connection_snapshot `"states":[{"proto":null,"count":1}]` | `Invalid`, `data.states[0].proto`: `unknown value` |
 | connection_snapshot `"states":[{"proto":"udp","state":null,"count":1}]` | accepted |
 | connection_snapshot `"processes":[{"pid":1,"command":null,"count":1}]` | `Invalid`, `data.processes[0].command`: `required` |
@@ -174,6 +184,7 @@ Go: no production change; the rule is pinned by tests (AC10).
 | `src/Vandox.Core` | `Model/NullElementListConverter.cs` | new |
 | `src/Vandox.Core` | `Model/PayloadRegistry.cs` | `Options` adds the factory to `Converters` (step 6, not in the skeleton) |
 | `src/Vandox.Core` | `Wire/BatchDecoder.cs` | `DecodeRecord`: `null` root as empty envelope, `record is empty` branch removed (step 6) |
+| `src/Vandox.Storage` | `RecordQueries.cs` (`ReadJson`, line 276) | no code change; reads stored payloads through `PayloadRegistry.Deserialize`, so it gets the null rule too (see below) |
 | `tests/Vandox.Core.Tests` | `BatchDecoderTests.cs`, three new test files | see *Test files* |
 | Go `internal/wire` | `decode_test.go` | pinning tests (AC10) |
 | docs | `docs/areas/wire-format.md` | see *Areas* |
@@ -214,12 +225,22 @@ internal sealed class NullElementListConverter<TItem> : JsonConverter<List<TItem
 
 `PayloadRegistry.Options` and `BatchDecoder` keep their signatures. Existing files the skeleton rewrites: none.
 
+Other users of `PayloadRegistry.Options` (checked with a search over `src/`): only `BatchDecoder` (header, envelope, payload) and the
+storage read path `RecordQueries.ReadJson` (`src/Vandox.Storage/RecordQueries.cs:276`). For storage the change is behavior-neutral on
+every row it writes: a stored payload comes from `PayloadRegistry.Serialize` after validation, `WhenWritingNull` omits null members,
+and no validated record holds a null string, list element or map value (before the change validation threw on them, after it the
+decoder no longer produces them). A `null` that does appear in a stored payload (a hand-edited database) now reads as an empty value
+instead of a null reference; a SQL `NULL` column still reads as the document `null`, which the factory does not claim (it claims no
+payload class), so `Deserialize` still returns `null` and `ReadJson` still throws `StoreException` (`no data`). No storage test changes;
+the existing `Vandox.Storage.Tests` stay green (AC8).
+
 ## Test files
 
 - `tests/Vandox.Core.Tests/BatchDecoderTests.cs` (extend): AC1-AC7 — the fixture-driven equivalences (read `testdata/wire/all-kinds.jsonl`
   through `RepositoryFiles.Path`, edit lines with `System.Text.Json.Nodes`, compress with `BatchBuilder.Gzip`), the `DataRow`s of the table,
   the changed `null` row.
-- `tests/Vandox.Core.Tests/NullAsAbsentConverterFactoryTests.cs` (new): AC8, AC9 (`CanConvert`, `CreateConverter`).
+- `tests/Vandox.Core.Tests/NullAsAbsentConverterFactoryTests.cs` (new): AC8, AC9 (`CanConvert`, `CreateConverter`), AC11 (reflection
+  over the model types).
 - `tests/Vandox.Core.Tests/NullAsAbsentConverterTests.cs` (new): AC9 (`null` token, non-null token, property names, `Write`).
 - `tests/Vandox.Core.Tests/NullElementListConverterTests.cs` (new): AC9 (`null` element, mixed list, not an array, `Write`).
 - `internal/wire/decode_test.go` (extend): AC10.
@@ -231,7 +252,8 @@ Existing test code that calls a changed signature: none. One existing assertion 
 
 `docs/areas/wire-format.md` (owner: **Dev**, step 6):
 
-- *Common rules*: a new bullet **Null** with the rule of the acceptance criteria (absent at any depth; list element = all fields zero;
+- *Common rules*: a new bullet **Null** with the rule of the acceptance criteria, stated for a key given once, since a repeated key is left
+  to the duplicate-key rule and the follow-up issue (absent at any depth; list element = all fields zero;
   map value = zero value of the value type, `""` for `labels` and `variables`, `0` for `status`; a record line `null` = an object without
   keys; validation decides, so a missing required field is a field error, never `ErrMalformed`; the Go encoder never writes `null`), linking
   0089 as `../decisions/0089-json-null-reads-as-an-absent-key-in-both-decoders.md`.
@@ -277,13 +299,33 @@ golden contract (0075; the fixture has no `null`) are unchanged.
   element → empty element (a list of objects) — the model has no list of scalars; `null` as a dictionary value → zero value; `null` as the
   whole line → header `UnsupportedVersion`, record `UnknownKind`; `null` inside unknown keys → ignored, as today; a key that is
   `null` is not JSON. A quoted `"null"` is a string, not a null: it stays a string (`"kind":"null"` → `UnknownKind`, `"addr":"null"` →
-  `Malformed`), as in Go. Escaped forms (`null`) exist only inside strings. AC1 covers every key of every kind; AC3 every list; AC4
-  every map.
+  `Malformed`), as in Go. Escaped forms (`null`) exist only inside strings. AC1 covers every key of every kind (the fixture's keys
+  plus the three it lacks); AC11 every property type of the model, including ones added later; AC3 every list; AC4 every map.
 
 ## Decision records
 
 - `docs/decisions/0089-json-null-reads-as-an-absent-key-in-both-decoders.md` (Proposed) — why `null` reads as absent rather than malformed,
   and why the C# side is a converter, not a catch-all.
+
+## Challenge
+
+Devil's Advocate: 0 major, 2 minor objections, plus one note.
+
+1. *AC1/AC2 are fixture-driven and the fixture lacks `ppid` (`ProcessSample.Ppid`, non-nullable `int`,
+   `src/Vandox.Core/Model/ProcessSample.cs:21-23`); `"ppid":null` is covered by no criterion.* — **Accepted.** Confirmed, and the check was
+   widened: comparing every model type's JSON keys with the fixture's objects finds exactly three keys missing — `ppid`, the header's
+   `clock_offset_ns` (already named) and `kernel_event`'s `boot`. AC1 (and with it AC2) now names all three; the AC5 table gets the row
+   `"ppid":null` → accepted, `Ppid` 0 (Go result verified with a probe). Both suggested remedies are taken: the reflection test is the new
+   AC11 in `NullAsAbsentConverterFactoryTests`, so a property type the factory does not claim (a future `float`, `Guid`, enum or
+   `List<string>`) fails a test even when the fixture is not extended. AC1 stays fixture-driven, since it checks the decoder's outcome,
+   which reflection cannot.
+2. *The storage read path (`src/Vandox.Storage/RecordQueries.cs:276`) also goes through `PayloadRegistry.Options`; a stored `null` now
+   reads as an empty value.* — **Accepted.** *Affected projects* now lists `Vandox.Storage` (no code change), the *Signatures* section explains
+   why it is behavior-neutral for every row the store writes and what happens to a SQL `NULL` column (unchanged `StoreException`), and
+   record 0089's consequences state it.
+
+Note: *the area document's Null bullet should say it holds for a key given once.* — **Taken**: the *Areas* entry for the bullet now says so,
+matching record 0089's first consequence and *Out of scope*.
 
 ## Out of scope / follow-ups
 
