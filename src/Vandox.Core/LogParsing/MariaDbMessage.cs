@@ -4,6 +4,8 @@ using Vandox.Core.Model;
 
 namespace Vandox.Core.LogParsing;
 
+#pragma warning disable RH2003, S2325
+
 /// <summary>
 /// The message of one entry: the header message and the kept continuation lines, bounded in size.
 /// </summary>
@@ -113,6 +115,18 @@ internal sealed class MariaDbMessage
         _bytes += 1 + size;
         _lines++;
         UpdateMark();
+    }
+
+    /// <summary>
+    /// Adds a continuation line that is already decoded when the message with it, and with the empty lines held back before it,
+    /// stays within <see cref="ModelLimits.MaxTextBytes"/> UTF-8 bytes; an empty line is held back and always taken.
+    /// </summary>
+    /// <param name="line">The text of the line</param>
+    /// <param name="truncated"><c>true</c> when the line was cut before</param>
+    /// <returns><c>true</c> when the line was taken; <c>false</c> when it does not fit, and the message is unchanged</returns>
+    internal bool TryAdd(string line, bool truncated)
+    {
+        throw new NotImplementedException();
     }
 
     /// <summary>
