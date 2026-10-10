@@ -27,6 +27,7 @@ public class SyslogParserTests
     #region Fields
 
     private static readonly LogFile _file = new("syslog", new DateTimeOffset(2026, 3, 2, 0, 0, 0, TimeSpan.Zero));
+    private static readonly DateTimeOffset _start = new(2026, 3, 1, 22, 0, 5, TimeSpan.Zero);
 
     #endregion // Fields
 
@@ -740,6 +741,388 @@ public class SyslogParserTests
         // Assert
         Assert.AreSame(failure, thrown, "the exception of the emitter");
         Assert.AreEqual(1, emitter.Calls, "the emitter is not called again");
+    }
+
+    /// <summary>
+    /// Two lines of <c>mariadbd</c> with the same process form one record with the message after the header prefix, the event and the priority of the level; <c>log</c> is the file name and the source is <c>syslog</c>.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task SyslogParserParseAsyncJoinsAMariaDbHeaderAndItsContinuationLineIntoOneRecord()
+    {
+        // Arrange
+        var file = new LogFile("backup/var/log/syslog.1", null);
+        var input = MariaDbSamples.SyslogFile(MariaDbSamples.SyslogLine(_start, 2345, "2026-03-01 23:00:05 0 [Note] /usr/sbin/mariadbd: ready for connections."),
+                                              MariaDbSamples.SyslogLine(_start, 2345, "Version: '10.6.12-MariaDB-0ubuntu0.22.04.1'  socket: '/run/mysqld/mysqld.sock'  port: 3306  Ubuntu 22.04"));
+
+        // Act
+        var emitter = await RecordingEmitter.ParseAsync(new SyslogParser(DateTimeZone.Utc), file, input, TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsEmpty(emitter.Skips, "no skip");
+        Assert.HasCount(1, emitter.Records, "one record");
+
+        var record = emitter.Records[0];
+        var line = RecordingEmitter.Line(record);
+
+        Assert.AreEqual("/usr/sbin/mariadbd: ready for connections.\nVersion: '10.6.12-MariaDB-0ubuntu0.22.04.1'  socket: '/run/mysqld/mysqld.sock'  port: 3306  Ubuntu 22.04", line.Message, "message");
+        Assert.AreEqual(MariaDbEvents.Ready, line.Event, "event");
+        Assert.AreEqual((byte?)6, line.Priority, "priority of the level");
+        Assert.AreEqual(_start, record.CapturedAt, "the time of the header line");
+        Assert.AreEqual("web-1", line.Host, "host");
+        Assert.AreEqual("mariadbd", line.Program, "program");
+        Assert.AreEqual(2345, line.Pid, "process ID");
+        Assert.AreEqual("backup/var/log/syslog.1", line.Log, "log is the file name as listed");
+        Assert.AreEqual("syslog", record.Source, "source");
+        Assert.AreEqual(RecordOrigin.Import, record.Origin, "origin");
+        Assert.AreEqual(0UL, record.Seq, "sequence");
+        Assert.IsFalse(line.Truncated, "not truncated");
+    }
+
+    /// <summary>
+    /// A header without a level keeps the priority of the line (the priority value modulo 8, or none); a header with a level takes the level's.
+    /// </summary>
+    /// <param name="prefix">The text before the time</param>
+    /// <param name="message">The message</param>
+    /// <param name="expected">The expected priority, or -1 for none</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [DataRow("<30>", "2026-03-02 10:10:10 0x7f3a2c1fe640  InnoDB: Assertion failure", 6)]
+    [DataRow("<29>", "2026-03-02 10:10:10 0x7f3a2c1fe640  InnoDB: Assertion failure", 5)]
+    [DataRow("", "2026-03-02 10:10:10 0x7f3a2c1fe640  InnoDB: Assertion failure", -1)]
+    [DataRow("<29>", "260301 12:00:00 mysqld_safe Starting mariadbd daemon with databases from /var/lib/mysql", 5)]
+    [DataRow("<30>", "2026-03-01 23:00:05 0 [ERROR] x", 3)]
+    [DataRow("", "2026-03-01 23:00:05 0 [Warning] x", 4)]
+    public async Task SyslogParserParseAsyncTakesThePriorityOfAMariaDbLineFromTheLevelOrTheLine(string prefix, string message, int expected)
+    {
+        // Arrange
+        var input = MariaDbSamples.SyslogFile(MariaDbSamples.SyslogLine(_start, 2345, message, prefix: prefix));
+
+        // Act
+        var emitter = await RecordingEmitter.ParseAsync(new SyslogParser(DateTimeZone.Utc), _file, input, TestContext.CancellationToken);
+
+        // Assert
+        Assert.HasCount(1, emitter.Records, "one record");
+        Assert.AreEqual(expected < 0 ? null : (byte?)expected, RecordingEmitter.Line(emitter.Records[0]).Priority, "priority");
+        Assert.AreEqual("mariadbd", RecordingEmitter.Line(emitter.Records[0]).Program, "program");
+    }
+
+    /// <summary>
+    /// The program <c>mysqld</c> is read like <c>mariadbd</c>, and a header-shaped message of another program is stored unchanged.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task SyslogParserParseAsyncReadsMysqldAndLeavesOtherProgramsAlone()
+    {
+        // Arrange
+        var input = MariaDbSamples.SyslogFile(MariaDbSamples.SyslogLine(_start, 5, "2026-03-01 23:00:05 0 [Note] /usr/sbin/mariadbd: ready for connections.", "sshd"),
+                                              MariaDbSamples.SyslogLine(_start, 7, "2026-03-01 23:00:05 0 [Note] /usr/sbin/mysqld: ready for connections.", "mysqld"),
+                                              MariaDbSamples.SyslogLine(_start, 7, "second line", "mysqld"));
+
+        // Act
+        var emitter = await RecordingEmitter.ParseAsync(new SyslogParser(DateTimeZone.Utc), _file, input, TestContext.CancellationToken);
+
+        // Assert
+        Assert.HasCount(2, emitter.Records, "two records");
+        Assert.AreEqual("2026-03-01 23:00:05 0 [Note] /usr/sbin/mariadbd: ready for connections.", RecordingEmitter.Line(emitter.Records[0]).Message, "the line of sshd is unchanged");
+        Assert.AreEqual("/usr/sbin/mysqld: ready for connections.\nsecond line", RecordingEmitter.Line(emitter.Records[1]).Message, "the entry of mysqld");
+        Assert.AreEqual(MariaDbEvents.Ready, RecordingEmitter.Line(emitter.Records[1]).Event, "event");
+    }
+
+    /// <summary>
+    /// A line of the process without a header joins up to 60 seconds after the header; a line 61 seconds after ends the entry.
+    /// </summary>
+    /// <param name="seconds">The time of the line after the header, in seconds</param>
+    /// <param name="joins">Whether the line joins</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [DataRow(60, true)]
+    [DataRow(61, false)]
+    public async Task SyslogParserParseAsyncJoinsALineWithinSixtySecondsOnly(int seconds, bool joins)
+    {
+        // Arrange
+        var input = MariaDbSamples.SyslogFile(MariaDbSamples.SyslogLine(_start, 2345, MariaDbSamples.Note("header")),
+                                              MariaDbSamples.SyslogLine(_start.AddSeconds(seconds), 2345, "line"),
+                                              MariaDbSamples.SyslogLine(_start.AddSeconds(1), 2345, "following"));
+
+        // Act
+        var emitter = await RecordingEmitter.ParseAsync(new SyslogParser(DateTimeZone.Utc), _file, input, TestContext.CancellationToken);
+
+        // Assert
+        var messages = emitter.Records.Select(record => RecordingEmitter.Line(record).Message).ToList();
+        List<string> expected = joins ? ["header\nline\nfollowing"] : ["header", "line", "following"];
+
+        Assert.AreSequenceEqual(expected, messages, "the records");
+    }
+
+    /// <summary>
+    /// An RFC 3339 file with MariaDB lines needs no time zone.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task SyslogParserParseAsyncNeedsNoTimeZoneForRfc3339MariaDbLines()
+    {
+        // Arrange
+        var parser = BuiltInParsers.Create(null)[2];
+        var input = MariaDbSamples.SyslogFile(MariaDbSamples.SyslogLine(_start, 2345, MariaDbSamples.Note("/usr/sbin/mariadbd: ready for connections.")));
+
+        // Act
+        var emitter = await RecordingEmitter.ParseAsync(parser, _file, input, TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsEmpty(emitter.Skips, "no skip");
+        Assert.HasCount(1, emitter.Records, "one record");
+        Assert.AreEqual(_start, emitter.Records[0].CapturedAt, "the time of the line, not the time of the message");
+        Assert.AreEqual(MariaDbEvents.Ready, RecordingEmitter.Line(emitter.Records[0]).Event, "event");
+    }
+
+    /// <summary>
+    /// A year-less file without a time zone still fails at its first year-less line.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task SyslogParserParseAsyncStillFailsAtAYearLessLineWithoutATimeZone()
+    {
+        // Arrange
+        var parser = new SyslogParser(null);
+        var input = MariaDbSamples.SyslogFile(MariaDbSamples.SyslogLine(_start, 2345, MariaDbSamples.Note("header")),
+                                              "Mar  1 12:00:00 web-1 mariadbd[2345]: 2026-03-01 23:00:05 0 [Note] x");
+
+        // Act and Assert
+        var thrown = await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => RecordingEmitter.ParseAsync(parser, _file, input, TestContext.CancellationToken), "the year-less line");
+
+        Assert.AreEqual(SyslogParser.TimeZoneNotSet, thrown.Message, "message");
+    }
+
+    /// <summary>
+    /// The recovery state belongs to one parse: a started line at the start of the second parse of the same parser has no event.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task SyslogParserParseAsyncSharesNoRecoveryStateBetweenParses()
+    {
+        // Arrange
+        var parser = new SyslogParser(DateTimeZone.Utc);
+        var first = MariaDbSamples.SyslogFile(MariaDbSamples.SyslogLine(_start, 2345, MariaDbSamples.Note("InnoDB: Starting crash recovery from checkpoint LSN=8401234,8401234")));
+        var second = MariaDbSamples.SyslogFile(MariaDbSamples.SyslogLine(_start, 2345, MariaDbSamples.Note("InnoDB: 10.6.12 started; log sequence number 8409876; transaction id 5678")));
+
+        // Act
+        var firstEmitter = await RecordingEmitter.ParseAsync(parser, _file, first, TestContext.CancellationToken);
+        var secondEmitter = await RecordingEmitter.ParseAsync(parser, _file, second, TestContext.CancellationToken);
+
+        // Assert
+        Assert.AreEqual(MariaDbEvents.RecoveryStart, RecordingEmitter.Line(firstEmitter.Records[0]).Event, "the first parse ends with an open recovery");
+        Assert.AreEqual(string.Empty, RecordingEmitter.Line(secondEmitter.Records[0]).Event, "the second parse does not know it");
+    }
+
+    /// <summary>
+    /// A line that is skipped as "invalid date" is not seen: the continuation line after it joins the entry the header opened.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task SyslogParserParseAsyncDoesNotSeeASkippedLineInsideAnEntry()
+    {
+        // Arrange
+        var input = MariaDbSamples.SyslogFile(MariaDbSamples.SyslogLine(_start, 2345, MariaDbSamples.Note("header")),
+                                              "Feb 30 12:00:00 web-1 mariadbd[2345]: skipped\n"
+                    + MariaDbSamples.SyslogLine(_start.AddSeconds(2), 2345, "continued"));
+
+        // Act
+        var emitter = await RecordingEmitter.ParseAsync(new SyslogParser(DateTimeZone.Utc), _file, input, TestContext.CancellationToken);
+
+        // Assert
+        Assert.HasCount(1, emitter.Records, "one record");
+        Assert.AreEqual("header\ncontinued", RecordingEmitter.Line(emitter.Records[0]).Message, "the continuation line joined");
+        Assert.HasCount(1, emitter.Skips, "one skip");
+        Assert.AreEqual(2L, emitter.Skips[0].Line, "the line number of the skipped line");
+        Assert.AreEqual("invalid date", emitter.Skips[0].Reason, "the reason");
+    }
+
+    /// <summary>
+    /// Cancelling while an entry is open does not emit the entry; the records emitted so far are a prefix of a complete parse.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task SyslogParserParseAsyncDoesNotEmitAnOpenMariaDbEntryWhenCancelled()
+    {
+        // Arrange
+        var parser = new SyslogParser(DateTimeZone.Utc);
+        var input = OpenEntry();
+        var complete = await RecordingEmitter.ParseAsync(parser, _file, input, TestContext.CancellationToken);
+        using var cancel = new CancellationTokenSource();
+        var emitter = new RecordingEmitter
+                      {
+                          Observed = _ => cancel.Cancel()
+                      };
+        using var stream = new MemoryStream(Encoding.UTF8.GetBytes(input));
+
+        // Act
+        await Assert.ThrowsAsync<OperationCanceledException>(() => parser.ParseAsync(_file, stream, emitter, cancel.Token), "cancelled parse");
+
+        // Assert
+        Assert.AreEqual(1, emitter.Calls, "the emitter is not called again");
+        Assert.AreSequenceEqual(complete.Records.Take(1).Select(RecordingEmitter.Describe).ToList(), emitter.Records.Select(RecordingEmitter.Describe).ToList(), "a prefix of the complete parse");
+        Assert.HasCount(2, complete.Records, "the complete parse has the line of sshd and the entry");
+    }
+
+    /// <summary>
+    /// An exception of the emitter ends the parse with that exception, without emitting the open entry.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task SyslogParserParseAsyncPassesOnTheExceptionOfTheEmitterWithAnOpenMariaDbEntry()
+    {
+        // Arrange
+        var failure = new InvalidOperationException("store is full");
+        var emitter = new RecordingEmitter
+                      {
+                          Failure = (_, _) => failure
+                      };
+        using var stream = new MemoryStream(Encoding.UTF8.GetBytes(OpenEntry()));
+
+        // Act
+        var thrown = await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => new SyslogParser(DateTimeZone.Utc).ParseAsync(_file, stream, emitter, TestContext.CancellationToken), "the emitter fails");
+
+        // Assert
+        Assert.AreSame(failure, thrown, "the exception of the emitter");
+        Assert.AreEqual(1, emitter.Calls, "the open entry is not emitted");
+    }
+
+    /// <summary>
+    /// Two parses of the same input give equal records in the same order.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task SyslogParserParseAsyncIsDeterministicForMariaDbLines()
+    {
+        // Arrange
+        var parser = new SyslogParser(DateTimeZone.Utc);
+        var input = MariaDbSamples.FixtureSyslog();
+
+        // Act
+        var first = await RecordingEmitter.ParseAsync(parser, _file, input, TestContext.CancellationToken);
+        var second = await RecordingEmitter.ParseAsync(parser, _file, input, TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsNotEmpty(first.Records, "records were emitted");
+        Assert.AreSequenceEqual(first.Records.Select(RecordingEmitter.Describe).ToList(), second.Records.Select(RecordingEmitter.Describe).ToList(), "same records in the same order");
+    }
+
+    /// <summary>
+    /// The fixture of the error log, fed as a syslog file, gives the messages, events, times and priorities of the error log parser.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task SyslogParserParseAsyncGivesTheEntriesOfTheErrorLogFixture()
+    {
+        // Arrange
+        var content = await File.ReadAllBytesAsync(RepositoryFiles.Path(MariaDbSamples.FixturePath), TestContext.CancellationToken);
+        var expected = await RecordingEmitter.ParseAsync(new MariaDbErrorLogParser(DateTimeZone.Utc), new LogFile("mysql/error.log", null), content, TestContext.CancellationToken);
+
+        // Act
+        var emitter = await RecordingEmitter.ParseAsync(new SyslogParser(null), _file, MariaDbSamples.FixtureSyslog(), TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsEmpty(emitter.Skips, "no skip");
+        Assert.HasCount(22, expected.Records, "the error log parser reads 22 entries");
+        Assert.HasCount(22, emitter.Records, "22 entries");
+
+        for (var index = 0; index < expected.Records.Count; index++)
+        {
+            var want = RecordingEmitter.Line(expected.Records[index]);
+            var got = RecordingEmitter.Line(emitter.Records[index]);
+
+            Assert.AreEqual(want.Message, got.Message, $"message of entry {index}");
+            Assert.AreEqual(want.Event, got.Event, $"event of entry {index}");
+            Assert.AreEqual(want.Priority, got.Priority, $"priority of entry {index}, none for a header without a level");
+            Assert.AreEqual(expected.Records[index].CapturedAt, emitter.Records[index].CapturedAt, $"time of entry {index}");
+        }
+    }
+
+    /// <summary>
+    /// Lines under the server's process ID fill the server's entry, which then ends; the injected lines that did not fit and the server's later lines are stored unchanged and in order, none is counted away.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task SyslogParserParseAsyncSplitsTheEntryAndLosesNoLineOfInjectedLines()
+    {
+        // Arrange
+        var at = new DateTimeOffset(2026, 3, 2, 10, 10, 10, TimeSpan.Zero);
+        var injected = new string('A', 1000);
+        var input = new StringBuilder().Append(MariaDbSamples.SyslogLine(at, 2345, "260302 10:10:10 [ERROR] mysqld got signal 6 ;")).Append('\n');
+
+        for (var index = 0; index < 20; index++)
+        {
+            input.Append(MariaDbSamples.SyslogLine(at.AddSeconds(1), 2345, injected)).Append('\n');
+        }
+
+        input.Append(MariaDbSamples.SyslogLine(at.AddSeconds(2), 2345, "Query (0x7f3a2c0d9e10): SELECT 1")).Append('\n');
+        input.Append(MariaDbSamples.SyslogLine(at.AddSeconds(2), 2345, "Connection ID (thread ID): 42")).Append('\n');
+
+        // Act
+        var emitter = await RecordingEmitter.ParseAsync(new SyslogParser(DateTimeZone.Utc), _file, input.ToString(), TestContext.CancellationToken);
+
+        // Assert
+        Assert.HasCount(7, emitter.Records, "the entry, four injected lines, and the two server lines");
+
+        var entry = RecordingEmitter.Line(emitter.Records[0]);
+
+        Assert.AreEqual(MariaDbEvents.Abort, entry.Event, "event of the entry");
+        Assert.AreEqual("mysqld got signal 6 ;" + string.Concat(Enumerable.Repeat("\n" + injected, 16)), entry.Message, "the header and the first 16 injected lines");
+        Assert.AreEqual(16037, Encoding.UTF8.GetByteCount(entry.Message), "a 17th line would make 17,038 bytes");
+
+        for (var index = 1; index <= 4; index++)
+        {
+            Assert.AreEqual(injected, RecordingEmitter.Line(emitter.Records[index]).Message, $"injected line {16 + index} unchanged");
+            Assert.AreEqual(string.Empty, RecordingEmitter.Line(emitter.Records[index]).Event, $"injected line {16 + index} has no event");
+        }
+
+        Assert.AreEqual("Query (0x7f3a2c0d9e10): SELECT 1", RecordingEmitter.Line(emitter.Records[5]).Message, "the server's Query line");
+        Assert.AreEqual("Connection ID (thread ID): 42", RecordingEmitter.Line(emitter.Records[6]).Message, "the server's Connection ID line");
+        Assert.DoesNotContain(record => RecordingEmitter.Line(record).Message.Contains("lines omitted", StringComparison.Ordinal), emitter.Records, "no marker");
+
+        var parts = emitter.Records.SelectMany(record => RecordingEmitter.Line(record).Message.Split('\n')).ToList();
+
+        Assert.HasCount(23, parts, "each of the 23 input messages exactly once");
+        Assert.AreEqual(20, parts.Count(part => part == injected), "all injected lines");
+    }
+
+    /// <summary>
+    /// A forged header under the server's process ID takes in the server's following lines under the forged event; the server's entry holds its header alone.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task SyslogParserParseAsyncLetsAForgedHeaderTakeInTheFollowingLines()
+    {
+        // Arrange
+        var at = new DateTimeOffset(2026, 3, 2, 10, 10, 10, TimeSpan.Zero);
+        var input = MariaDbSamples.SyslogFile(MariaDbSamples.SyslogLine(at, 2345, "260302 10:10:10 [ERROR] mysqld got signal 6 ;"),
+                                              MariaDbSamples.SyslogLine(at.AddSeconds(1), 2345, "2026-03-02 10:10:11 0 [Note] /usr/sbin/mariadbd: ready for connections."),
+                                              MariaDbSamples.SyslogLine(at.AddSeconds(2), 2345, "Query (0x7f3a2c0d9e10): SELECT 1"),
+                                              MariaDbSamples.SyslogLine(at.AddSeconds(2), 2345, "Connection ID (thread ID): 42"));
+
+        // Act
+        var emitter = await RecordingEmitter.ParseAsync(new SyslogParser(DateTimeZone.Utc), _file, input, TestContext.CancellationToken);
+
+        // Assert
+        Assert.HasCount(2, emitter.Records, "the server's entry and the forged entry");
+        Assert.AreEqual("mysqld got signal 6 ;", RecordingEmitter.Line(emitter.Records[0]).Message, "the server's entry holds its header alone");
+        Assert.AreEqual(MariaDbEvents.Abort, RecordingEmitter.Line(emitter.Records[0]).Event, "its event");
+        Assert.AreEqual("/usr/sbin/mariadbd: ready for connections.\nQuery (0x7f3a2c0d9e10): SELECT 1\nConnection ID (thread ID): 42", RecordingEmitter.Line(emitter.Records[1]).Message, "the forged entry took in the server's lines");
+        Assert.AreEqual(MariaDbEvents.Ready, RecordingEmitter.Line(emitter.Records[1]).Event, "the forged event");
+    }
+
+    /// <summary>
+    /// Returns a syslog file with an open MariaDB entry, a line of sshd written inside it, and more lines of the entry's process.
+    /// </summary>
+    /// <returns>The text</returns>
+    private static string OpenEntry()
+    {
+        return MariaDbSamples.SyslogFile(MariaDbSamples.SyslogLine(_start, 2345, MariaDbSamples.Note("header")),
+                                         MariaDbSamples.SyslogLine(_start.AddSeconds(1), 5, "Accepted publickey for root", "sshd"),
+                                         MariaDbSamples.SyslogLine(_start.AddSeconds(2), 2345, "continued"),
+                                         MariaDbSamples.SyslogLine(_start.AddSeconds(3), 2345, "continued again"),
+                                         MariaDbSamples.SyslogLine(_start.AddSeconds(4), 2345, "and again"));
     }
 
     /// <summary>
