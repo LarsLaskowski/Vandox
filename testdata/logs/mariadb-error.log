@@ -1,0 +1,57 @@
+2026-03-01 23:00:01 0 [Note] /usr/sbin/mariadbd (initiated by: unknown): Normal shutdown
+2026-03-01 23:00:01 0 [Note] InnoDB: FTS optimize thread exiting.
+2026-03-01 23:00:01 0 [Note] InnoDB: Starting shutdown...
+2026-03-01 23:00:02 0 [Note] InnoDB: Shutdown completed; log sequence number 8394829; transaction id 5600
+2026-03-01 23:00:02 0 [Note] /usr/sbin/mariadbd: Shutdown complete
+
+2026-03-01 23:00:05 0 [Note] Starting MariaDB 10.6.12-MariaDB-0ubuntu0.22.04.1 source revision  as process 2345
+2026-03-01 23:00:05 0 [Note] InnoDB: 10.6.12 started; log sequence number 8394829; transaction id 5601
+2026-03-01 23:00:05 0 [Note] /usr/sbin/mariadbd: ready for connections.
+Version: '10.6.12-MariaDB-0ubuntu0.22.04.1'  socket: '/run/mysqld/mysqld.sock'  port: 3306  Ubuntu 22.04
+2026-03-02  3:12:40 0 [Note] Starting MariaDB 10.6.12-MariaDB-0ubuntu0.22.04.1 source revision  as process 3456
+2026-03-02  3:12:40 0 [Note] InnoDB: Completed initialization of buffer pool
+2026-03-02  3:12:40 0 [Note] InnoDB: Starting crash recovery from checkpoint LSN=8401234,8401234
+2026-03-02  3:12:41 0 [Note] InnoDB: Starting final batch to recover 210 pages from redo log.
+2026-03-02  3:12:41 0 [Note] InnoDB: 128 rollback segments are active.
+2026-03-02  3:12:41 0 [Note] InnoDB: 10.6.12 started; log sequence number 8409876; transaction id 5678
+2026-03-02  3:12:41 0 [Note] /usr/sbin/mariadbd: ready for connections.
+Version: '10.6.12-MariaDB-0ubuntu0.22.04.1'  socket: '/run/mysqld/mysqld.sock'  port: 3306  Ubuntu 22.04
+2026-03-02  3:15:02 5 [Warning] Aborted connection 5 to db: 'wp' user: 'wp' host: 'localhost' (Got an error reading communication packets)
+2026-03-02 10:10:10 0x7f3a2c1fe640  InnoDB: Assertion failure in file ./storage/innobase/btr/btr0cur.cc line 836
+InnoDB: Failing assertion: page_is_leaf(block->page.frame)
+InnoDB: We intentionally generate a memory trap.
+InnoDB: Submit a detailed bug report to https://jira.mariadb.org/
+260302 10:10:10 [ERROR] mysqld got signal 6 ;
+This could be because you hit a bug. It is also possible that this binary
+or one of the libraries it was linked against is corrupt, improperly built,
+or misconfigured. This error can also be caused by malfunctioning hardware.
+
+To report this bug, see https://mariadb.com/kb/en/reporting-bugs
+
+Server version: 10.6.12-MariaDB-0ubuntu0.22.04.1
+key_buffer_size=134217728
+read_buffer_size=131072
+max_used_connections=12
+Thread pointer: 0x0
+Attempting backtrace. You can use the following information to find out
+where mysqld died. If you see no messages after this, something went
+terribly wrong...
+stack_bottom = 0x0 thread_stack 0x49000
+??:0(my_print_stacktrace)[0x55d0b1c1d2a2]
+??:0(handle_fatal_signal)[0x55d0b17a4b05]
+libc_sigaction.c:0(__restore_rt)[0x7f3a3c442520]
+??:0(abort)[0x7f3a3c4287f3]
+Writing a core file...
+Working directory at /var/lib/mysql
+Resource Limits:
+Limit                     Soft Limit           Hard Limit           Units
+Max open files            32768                32768                files
+Core pattern: |/usr/share/apport/apport -p%p -s%s -c%c -d%d -P%P -u%u -g%g -- %E
+
+Kernel version: Linux version 5.15.0-91-generic (buildd@lcy02-amd64-010) #101-Ubuntu SMP Tue Nov 14 13:30:08 UTC 2023
+
+2026-03-02 10:10:15 0 [Note] Starting MariaDB 10.6.12-MariaDB-0ubuntu0.22.04.1 source revision  as process 4567
+2026-03-02 10:10:15 0 [Note] InnoDB: Starting crash recovery from checkpoint LSN=8410000,8410000
+2026-03-02 10:10:16 0 [Note] InnoDB: 10.6.12 started; log sequence number 8410100; transaction id 5690
+2026-03-02 10:10:16 0 [Note] /usr/sbin/mariadbd: ready for connections.
+Version: '10.6.12-MariaDB-0ubuntu0.22.04.1'  socket: '/run/mysqld/mysqld.sock'  port: 3306  Ubuntu 22.04
