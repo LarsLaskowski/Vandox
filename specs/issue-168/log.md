@@ -13,5 +13,5 @@ One line per pipeline step: date, step, member, result. Lead decisions and escal
 | 2026-10-10 | 6 Implement | squad-dev | Edits 1-3 applied to .squad/stack.md; config-check, scope-check, format check pass (sonnet/medium · 67,543 tokens · 7 tool uses · 44 s) |
 | 2026-10-10 | 7 Code check | squad-code-officer | live run of the new Format non-interactively: exit 0, Formatted 0 of 258, no file changed; all gates pass (haiku/medium · 52,888 tokens · 4 tool uses · 35 s) |
 | 2026-10-10 | 8 Review security | squad-security | diff APPROVED at e20c458, no findings (opus/medium · 21,035 tokens · 5 tool uses · 19 s) |
-| 2026-10-10 | 8 Review round 1 | squad-reviewer | APPROVE at e20c458; optional: CLAUDE.md template Commands also differ on -c Release (template follow-up) |
+| 2026-10-10 | 8 Review round 1 | squad-reviewer | APPROVE at e20c458; optional: CLAUDE.md template Commands also differ on -c Release (template follow-up) (opus/medium · 40,484 tokens · 10 tool uses · 141 s) |
 | 2026-10-10 | 9 PR approval | Orchestrator | approved by checklist: round 1 clean, gates pass on e20c458, no decision records or area documents involved |
