@@ -197,7 +197,7 @@ public sealed class JournalExportParser : ILogParser
     public async Task ParseAsync(LogFile file, Stream input, IRecordEmitter output, CancellationToken cancellationToken)
     {
         var reader = new JournalExportReader(input);
-        var grouper = new KernelReportGrouper();
+        var grouper = new SystemLogGrouper();
         var ready = new List<DataRecord>();
 
         for (var entry = await reader.ReadAsync(cancellationToken).ConfigureAwait(false); entry is not null; entry = await reader.ReadAsync(cancellationToken).ConfigureAwait(false))

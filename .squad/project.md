@@ -92,7 +92,12 @@ files or endpoints.
     parsers through `Vandox.Core.LogParsing` (`LogLineReader` cuts lines at 16 KiB, a parser's memory is bounded
     independently of the input size): `JournalExportParser` and `JournalExportReader` (binary-safe entry reader with
     bounded memory), `SyslogParser`, `SyslogLine` and `SyslogClock` (hand-written line parser, years and time
-    zones of year-less times, range-checked dates), `KernelReportGrouper` (bounded multi-line reports),
+    zones of year-less times, range-checked dates), `SystemLogGrouper`, `MariaDbLineGrouper` and `KernelReportGrouper` (bounded multi-line
+    reports; MariaDB lines of the journal and syslog are joined per host, program and pid, within 60 seconds of the
+    header line and 16,384 bytes, into one open entry, and a line that does not fit ends it and is kept as a plain
+    line; the program filter `mariadbd`/`mysqld` is a classification, not a trust boundary: local processes can
+    forge entries and events and, in a syslog file, join or split the server's entry, and a journal entry without
+    `_PID` takes the sender-chosen `SYSLOG_PID` and so behaves like a syslog line for forging, record 0088 option 36),
     `MariaDbErrorLogParser`, `MariaDbParseSession`, `MariaDbLine` and `MariaDbMessage` (hand-written header parser on raw
     bytes, entries bounded to 16 KiB, claimed by the first non-empty line only and never for a syslog name),
     and the backend option `import.time_zone` (`SourceTimeZone`). Records 0048, 0049, 0066, 0069, 0076, 0078, 0079, 0084,
