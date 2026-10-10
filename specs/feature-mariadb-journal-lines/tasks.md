@@ -21,4 +21,4 @@ bookkeeping.
 | 12 | README *Import logs*, MariaDB bullet: replace the sentence about plain journal lines (text in plan, *Documentation updates*) | `README.md` | AC15 | Dev (step 6) | [x] |
 | 13 | *Security areas* 10: add `SystemLogGrouper` and `MariaDbLineGrouper`, with the forging limitation and the program filter named a classification, not a trust boundary (text in plan, *Documentation updates*) | `.squad/project.md` | AC15 | Dev (step 6) | [x] |
 | 14 | *Test doubles*, row *log parsers (C#)*: name a new shared helper, only if one is added | `.squad/project.md` | n/a | Tester (step 5/6) | [x] |
-| 15 | Coverage gate: 80 % on new or changed lines and overall | n/a | all | Tester (step 6) | [ ] |
+| 15 | Coverage gate: 80 % on new or changed lines and overall | n/a | all | Tester (step 6) | [x] |
