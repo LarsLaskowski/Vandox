@@ -2,6 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-03
+- **Area:** Detection, alerts and reports
 - **Source:** Issue #6
 - **Supersedes:** —
 
@@ -20,6 +21,8 @@ services or log in to individual mailboxes.
 ## Decision
 
 Option 2: Vandox checks the state of the mail services, never individual mail accounts.
+
+The resulting rules are in the [Detection, alerts and reports](../areas/detection-and-reports.md) area.
 
 ## Consequences
 

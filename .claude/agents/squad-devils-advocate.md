@@ -11,6 +11,9 @@ Read first: `.squad/agents/devils-advocate/charter.md`, `.squad/agents/devils-ad
 `.squad/routing.md`, `.squad/project.md`, `docs/ARCHITECTURE.md`, `docs/decisions/README.md`, the issue text (or feature
 request) and the work folder you are given (`plan.md`; features also `spec.md` and `tasks.md`).
 
+Reading the issue yourself: `gh api repos/<owner>/<repo>/issues/<n>` and `.../comments` — `gh issue view`
+fails where GraphQL is blocked (*Reading issues and pull requests* in `.squad/routing.md`).
+
 You run once per change, in step 2, after the Lead's plan and before Security — only for the tiers
 `standard` and `security`. Your job is to find what the plan got wrong **before** it is built, not to
 review code style or security (Security and the Reviewer do that later). Question the plan on:

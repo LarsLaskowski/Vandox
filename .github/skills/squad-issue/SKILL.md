@@ -38,7 +38,7 @@ action yourself — including follow-up issues the Lead decides on.
   untracked files, and after every further completed step. PRs are merged with *Squash and merge*, so only
   the PR title and description reach `main`; intermediate commit messages may name the step, but never
   contain secrets. Interim work-in-progress commits — e.g. demanded by a stop hook while a member is still
-  working — are fine for the same reason. Stage with plain `git add -A`: ignored paths such as `TestResults/`
+  working — are fine for the same reason; the commit that closes the round gets a final subject. Stage with plain `git add -A`: ignored paths such as `TestResults/`
   are skipped anyway, and an exclusion pathspec for an ignored path makes `git add` fail and stage
   nothing. Never commit to `main`.
 - **GitHub access:** use the GitHub MCP tools (`mcp__github__*`) for issues, comments, labels and pull
@@ -60,14 +60,18 @@ action yourself — including follow-up issues the Lead decides on.
    `specs/issue-<number>/log.md` from `specs/_template/log.md`, commit and push it; append one table row
    per step. Only you
    (the orchestrator) write `log.md`, one row per append, each row ending in the file's line ending — subagents report and
-   you record, so rows never merge or end up with mixed line endings.
+   you record, so rows never merge or end up with mixed line endings. Before each commit, check the rows
+   you wrote for characters of the Unicode categories Cc, Cf, Zl and Zp other than tab and newline (e.g. with
+   `python3 -I`); an escape such as `U+202E` stays text and is never pasted as the character. After every
+   member's report, commit and push the files it left in the work folder (the Lead's records, the Tester's
+   tests) yourself, so the next report does not list them as untracked noise.
 2. **Plan.** Launch `squad-lead` in mode `plan` with the issue text and the work folder. It returns one of:
    - `RESULT: DONE` — for tier **`docs`** (see its definition in `.squad/routing.md`), a short result (tier, the files and lines to change, acceptance
      criteria) that you record as the first plan row in `log.md`, then continue with step 6 (Dev), the
      read-only check from the `docs` row in `.squad/routing.md`, one review round in step 8, and step 10
      directly — no Security, skeleton, tests, coverage, Code Officer or Lead approval. Otherwise:
      `plan.md` with the **tier** (`trivial` / `standard` / `security`), acceptance
-     criteria, the signatures of new or changed API, required documentation updates (`README.md`,
+     criteria, the signatures of new or changed API, the affected area documents (`docs/areas/`), required documentation updates (`README.md`,
      `docs/`), and `Proposed` decision records. Continue with the steps the tier requires.
    - `RESULT: NO CHANGE` — show the proposed issue comment to the user, post it only after confirmation
      (append the log as a collapsed "Squad working record" block), remove the work folder with a commit
@@ -83,8 +87,11 @@ action yourself — including follow-up issues the Lead decides on.
    `NO OBJECTIONS`) and the Lead's answer in `log.md`.
 3. **Plan security review** (`security` tier only). Launch `squad-security` in mode `plan`. On
    `CHANGES_REQUIRED`, launch `squad-lead` in mode `revise` and repeat. After the **2nd** rejection launch
-   `squad-lead` in mode `decide` (scope down, split into issues, abort, or escalate).
-4. **Skeleton** (only if the plan adds or changes API). Launch `squad-dev` in mode `skeleton`: the planned
+   `squad-lead` in mode `decide` (scope down, split into issues, abort, escalate, or — for a pure wording defect — accept and fix it followed by exactly one `squad-security` delta confirmation).
+4. **Skeleton** (only if the plan adds or changes API; not applicable when the plan declares the change free of
+   production and test code — see *Changes without production or test code* in `.squad/routing.md`, which also
+   skips step 5 and the *Coverage gate* in step 6 and requires the plan's *Verification without tests* section;
+   log the skipped steps and run the verification named there instead). Launch `squad-dev` in mode `skeleton`: the planned
    signatures built as *Skeleton* in `.squad/stack.md` describes (bodies fail when called), plus the existing
    test call sites the plan assigns to the Dev for an incompatible signature change, so the tests of step 5
    compile.
@@ -92,17 +99,21 @@ action yourself — including follow-up issues the Lead decides on.
    that the new tests compile and fail on the current code (unless the Tester justified why one cannot).
    A fix without a reproducing test is only acceptable when the bug genuinely needs a live external
    system — then the PR says so.
-6. **Implement and cover.** Launch `squad-dev` in mode `implement` with the plan and the test names; it
-   also makes the documentation updates the plan lists. If the Dev disputes a test, launch `squad-lead`
-   in mode `decide`; the Tester changes a test only if the Lead says so. Then launch `squad-tester` in
-   mode `coverage`; repeat Dev/Tester until the *Coverage gate* (after *Test with coverage*, both in
-   `.squad/stack.md`) passes (≥ 80 % on new/changed production code and overall). Lines reported as not unit-testable go to
+6. **Implement and cover.** (A plan whose acceptance criteria can be verified only in CI says so, names the
+   owner of each such criterion and expects the CI loop of step 11.) For a change without production or test code this is the Dev's edits alone: no
+   `squad-tester`, no *Test with coverage*, no *Coverage gate*. Launch `squad-dev` in mode `implement` with the plan and the test names; it
+   also makes the documentation updates the plan lists and may adapt a test call site that no longer
+   compiles only because of a signature or field change it made itself (`.squad/routing.md`, *Loop limits*). If the Dev disputes a test, launch `squad-lead`
+   in mode `decide`; the Tester changes a test only if the Lead says so. Then run *Test with coverage* and
+   the *Coverage gate* yourself (both in `.squad/stack.md`). Launch `squad-tester` in mode `coverage` only
+   when the gate fails or the Dev reports uncovered new lines; if the gate already passes and the only
+   uncovered lines are accepted gaps, skip the pass and log why in `log.md`. Repeat Dev/Tester until the gate passes (≥ 80 % on new/changed production code and overall). Lines reported as not unit-testable go to
    `squad-lead` in mode `decide`; an accepted gap is recorded in `log.md`.
 7. **Code check.** Launch `squad-code-officer` with the base ref — the only member that runs
    the formatter and clears analyzer diagnostics. Then verify yourself, without formatting, with the
    commands from `.squad/stack.md`: *Format check* exits 0, the *Analyzer gate* passes (no diagnostic of
    any severity in a changed file), *Test* is green with the same tests, and the *Coverage gate* still
-   passes. Record status and index are the Lead's in step 9: treat any status claim in the
+   passes (not run for a change without production or test code). Record status and index are the Lead's in step 9: treat any status claim in the
    Code Officer's report as unverified until you have read the file. Structural items handed back go to `squad-dev` (or
    `squad-tester`), followed by another code check. This is the gate before the PR; CI is not meant to find anything here.
 8. **Review.** Launch `squad-reviewer` (round 1, full) and — for `standard` and `security` —
@@ -114,19 +125,28 @@ action yourself — including follow-up issues the Lead decides on.
    (coverage) and 7 again → **a new review round on the delta is mandatory** before step 9; never go from
    a blocking finding straight to PR approval. The same holds for a non-blocking finding the Lead decides
    to fix now: any change to production code, tests or `docs/` after a review round needs a delta round. At most **2 fix rounds** after round 1; then `squad-lead`
-   in mode `decide`. Non-blocking
+   in mode `decide`. Pass each reviewer the exact commit SHA to review, and do not commit to the work branch
+   (log rows included) between launching a round and receiving its report; a reviewer reports the SHA it
+   reviewed first, and a report for another head is a stale round. A reviewer or security subagent that stops
+   on an API error (for example `529 Overloaded`) is relaunched unchanged, at most twice; after that report a
+   blocker to the user. Non-blocking
    findings: the Lead decides per finding — fix now, or you open a linked GitHub issue now.
 9. **PR approval.** Launch `squad-lead` in mode `approve-pr` with the base ref, the build/test/coverage
    output and the review outcome — including the result of the **latest** review round, which must have
    no blocking finding that is not covered by a recorded Lead decision, and must cover every change to
    production code, tests and `docs/` since it ran (only `specs/` bookkeeping and the Lead's own approval edits —
    record status, the index, a link from `docs/ARCHITECTURE.md` — may follow it; a fix for a blocking
-   finding always needs a delta round, also in a decision record). `NOT APPROVED` → back to step 6 or 8 (counting against the review loop
+   finding always needs a delta round, also in a decision record). Ask only when CI on the head has finished and
+   passes (after the PR, see step 11), and pass the finished check-run list to the Lead instead of letting it
+   wait for CI. `NOT APPROVED` → back to step 6 or 8 (counting against the review loop
    limit) or let the Lead decide/escalate. On `APPROVED`, the decision records are `Accepted` and indexed
    in `docs/decisions/README.md`.
 10. **Pull request** (Dev role, performed by you). First move the working record off the branch: post
     `plan.md` (none for tier `docs`) and `log.md` as one comment on the issue (each inside a collapsed `<details>` block, headed
-    "Squad working record"), then `git rm -r specs/issue-<number>/`, commit ("Remove squad working
+    "Squad working record"). When `plan.md` is so long that re-typing it through a tool call is impractical,
+    post a permalink to the last commit that contains it (`https://github.com/<owner>/<repo>/blob/<sha>/specs/issue-<number>/plan.md`)
+    plus a summary of the tier, acceptance criteria, decisions and challenge outcome instead; that commit
+    stays reachable through the PR's history. Then `git rm -r specs/issue-<number>/`, commit ("Remove squad working
     record"), and push. Later log rows (steps 11–12) are appended by editing that comment. Then open the
     PR from
     [`.github/pull_request_template.md`](../../../.github/pull_request_template.md): title per
@@ -146,11 +166,17 @@ action yourself — including follow-up issues the Lead decides on.
     - review comments (human, automated, `review-pr`) → `squad-dev`, worked in this PR, blocking or not.
 
     Each fix goes through steps 7–8 again (delta review), with at most 2 fix rounds per failure before the
-    Lead decides. The work folder is gone by now: give the Reviewer, Security and the Lead the plan (tier
+    Lead decides. A re-approval (step 9) is requested only after CI on the new head has finished and passes,
+    with the finished check-run list attached. When the plan's acceptance criteria can only be verified in CI
+    (for example a container image the sandbox cannot build), a red CI on exactly those criteria is a normal
+    outcome of this step: the plan names the owner (Dev for Dockerfile, compose and workflow files), and every
+    fix gets a delta review round. The work folder is gone by now: give the Reviewer, Security and the Lead the plan (tier
     `docs`: the first log row; features:
     also `spec.md` and `tasks.md`) from the "Squad working record" comment, or via
     `git show <commit-before-removal>:specs/<folder>/<file>`, and record each log row by editing that
-    comment. Never skip, disable or weaken a test to get green.
+    comment. Edit a restored working record in one batch: interim commits that a stop hook demands while it
+    is half edited each re-trigger the code analysis on the open PR. Never skip, disable or weaken a test to
+    get green.
 12. **Wrap-up (mandatory).** Collect what this run taught about the squad itself (a rule that was
     unclear or contradictory, a tool that misbehaved, an agent that could not be launched, a step that
     had to be improvised), each with the role it concerns and a concrete proposal, and file them as

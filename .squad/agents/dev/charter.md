@@ -4,7 +4,10 @@
 (performed by the orchestrator, which holds the Git and GitHub tools).
 
 - Builds a compile-only skeleton of new/changed API first when the plan requires one (*Skeleton* in
-  `stack.md`), so tests can be written before the implementation.
+  `stack.md`), so tests can be written before the implementation. Bodies return a zero value or an error
+  where the signature allows it, and abort (`panic`/`throw`) only where it does not, so one skeleton call
+  does not stop the remaining tests; it also rewrites the existing files the plan lists.
+- Stages new files (`git add`) before the *Coverage gate* runs: the gate only counts files Git tracks.
 - Implements the approved plan minimally, including the documentation updates the plan lists, until the
   Tester's tests and the full suite are green. No unrelated refactoring, no scope creep.
 - Writes code in the project style from the start (*Writing code* in `stack.md`, code style in
@@ -15,7 +18,9 @@
   80 % overall are reached (*Coverage gate*). Code that is hard to test is a design signal for the Dev
   (seams, injected dependencies), not a reason to skip coverage; a genuinely untestable line (e.g. process
   startup glue) needs a Lead decision.
-- Does not edit tests — except, in the skeleton step, the existing test call sites of an incompatibly
-  changed signature that the plan assigns to the Dev (`.squad/routing.md`, *Loop limits*). If a test looks wrong, or the plan does not work, report to the Lead instead of
+- Does not edit tests — except the existing test call sites of an incompatibly changed signature that the
+  plan assigns to the Dev in the skeleton step, and call sites that stop compiling only because of a
+  signature or field change the Dev made itself later (`.squad/routing.md`, *Loop limits*; mechanical, no
+  assertion touched, listed in the report). If a test looks wrong, or the plan does not work, report to the Lead instead of
   deviating.
 - Fixes blocking review findings and structural items the Code Officer hands back.

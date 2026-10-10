@@ -5,8 +5,10 @@
 
 ### Machine setup
 
-Git, the Go toolchain from `go.mod`, `golangci-lint` (see `.squad/stack.md`, *Toolchain*) and Python 3 for
-the squad tools in `.squad/tools/`. `govulncheck` runs through `go tool govulncheck`.
+Git; for the agent the Go toolchain from `go.mod` and `golangci-lint`; for the backend the .NET SDK named in
+`global.json` (see `.squad/stack.md`, *Toolchain*); Python 3 for the squad tools in `.squad/tools/`. The local
+.NET tools (`reihitsu-format`, `dotnet-sonarscanner`) come with `dotnet tool restore`. `govulncheck` runs through
+`go tool govulncheck`. Docker is needed only to build and try the backend image.
 
 ### Cloning the repository
 
@@ -18,16 +20,23 @@ git clone https://github.com/LarsLaskowski/Vandox.git
 
 ```shell
 go mod download
+dotnet tool restore
+dotnet restore Vandox.slnx
 go build ./...
-go run ./cmd/vandoxd --version
+dotnet build Vandox.slnx
+go run ./cmd/vandox-agent --version
+dotnet run --project src/Vandox.Backend -- --version
 ```
 
-Both binaries currently only print their version; configuration is added together with the first features.
+The agent only prints its version so far; the backend loads its configuration, opens its database, serves the
+web UI shell and `/healthz`, and imports logs. Format before building:
+`gofmt -w . && reihitsu-format src tests tools`.
 
 ### Running tests
 
 ```shell
 go test ./... -race
+dotnet test Vandox.slnx
 ```
 
 For detailed rules on how unit tests are structured and named, see [`UNIT_TESTS.md`](UNIT_TESTS.md).
@@ -75,7 +84,159 @@ expected to arrive clean (see the decision record on quality gates in [`decision
 ## Versioning and releases
 
 A release is a `v<major>.<minor>.<patch>` tag created manually on `main`; it publishes the agent binary and
-the backend Docker image. Merging a PR by itself never publishes a release.
+the backend Docker image. A release is always created manually, and the only trigger is pushing a new tag
+such as `v0.1.0`; merging a PR, pushing to `main` or a schedule never publishes one. `release.yml`
+does not run on pull requests; `ci.yml` checks the release build there (*Release build check* below). The
+workflow is `.github/workflows/release.yml`; the reasoning is in
+[0037](decisions/0037-releases-version-tag-plain-tooling-and-attested-artifacts.md) and
+[0041](decisions/0041-backend-image-chiseled-runtime-base-images-pinned-by-digest.md).
+
+### Cutting a release
+
+Before tagging, check that the base image digests are current (*Base image digests* below): run the
+*Base image digests* workflow (Actions, *Run workflow*) or check that the latest `Release build check` on
+`main` has no stale-digest warning, and that no issue *Base image digests are stale* is open.
+
+On an up-to-date `main`:
+
+```bash
+git tag -a vX.Y.Z -m "vX.Y.Z"
+git push origin vX.Y.Z
+```
+
+Pre-release tags look like `vX.Y.Z-rc.N`. Build metadata (`+...`) is not allowed.
+
+### What the release workflow does
+
+1. Checks that the tag is strict SemVer and that its commit is reachable from `origin/main`.
+2. Runs `go tool govulncheck ./...` and `dotnet list package --vulnerable --include-transitive`; a finding stops
+   the release.
+3. Builds `vandox-agent` (Go, linux/amd64, static, `-trimpath`) and `SHA256SUMS`, and builds the image from
+   `deploy/backend/Dockerfile` (the backend, published by the .NET SDK) with `docker build --no-cache`. Nothing is restored from a CI cache.
+   After the image is saved, `.github/scripts/generate-sbom.sh` generates SPDX 2.3 SBOMs for the binary and
+   the image with a syft container pinned by digest (*SBOM generator* below), run without network and
+   without access to `dist/`.
+4. Verifies both binaries' `--version` output against the tag, the full commit SHA and the commit time, the
+   checksum, that the binary is static, that every `FROM` uses a base image build argument pinned by a sha256 digest, that the builder and runtime tags
+   name the .NET version of the target framework, and that the image runs as `65532:65532`. The SBOM script
+   checks its own output (SPDX 2.3; for the agent the Go standard library and the main module, for the image
+   NuGet packages; at most 16 MiB each).
+5. Pushes exactly the verified image as `networlddev/vandox:X.Y.Z`, and as `latest` when the tag is the
+   highest stable `v*.*.*` tag. A pre-release tag publishes only its own version. If the version already
+   exists on Docker Hub, or the check cannot tell, the job fails before pushing: a published version is
+   never overwritten.
+6. Creates SLSA build provenance attestations and SBOM attestations (`sbom-path`, SPDX) for the binary and
+   the image digest (GitHub artifact attestations, stored on GitHub, not in Docker Hub) in the `attest` job,
+   which holds only `id-token: write` and `attestations: write`, has no environment and reads no secret, and
+   verifies all of them with the README's flags, the SBOM ones with `--predicate-type
+   https://spdx.dev/Document/v2.3` (the image by its published tag, see *Verifying a release*).
+7. Creates the GitHub release, only after the attestations exist and verify, with generated notes, the image
+   digest, `vandox-agent-linux-amd64` and `SHA256SUMS`; a pre-release is marked as such.
+
+### Verifying a release
+
+The README (*Install*) has the commands: `gh attestation verify` for the binary and, by digest, for the
+image (`oci://docker.io/networlddev/vandox@sha256:<digest>`, the digest from the release notes), followed by
+pulling that same digest, and the same commands with `--predicate-type https://spdx.dev/Document/v2.3`
+(and `--format json --jq` to save the SBOM) for the SBOM attestations. `--source-ref` pins the tag, `--signer-workflow` pins `release.yml`, and
+`--deny-self-hosted-runners` requires a GitHub-hosted runner. The image is verified and pulled by digest
+because a tag can be re-pointed (immutable tags are optional, see *One-time setup (maintainer)*, item 3). The
+workflow's own check uses the tag on purpose, to catch a tag that does not resolve to the attested digest.
+An attestation does not prove that the tagged commit is on `main`; the tag ruleset `release-tags` stays
+that boundary.
+
+### Base image digests
+
+`deploy/backend/Dockerfile` names each base image in three build arguments: `BASE_<NAME>_IMAGE`,
+`BASE_<NAME>_TAG` and `BASE_<NAME>_DIGEST`. `FROM` uses only the image and the digest. Dependabot cannot
+read these lines, so the digests are refreshed by hand in a pull request: before every release tag, and
+whenever a .NET patch release or a base image update appears. Read the multi-arch index digest of exactly the tag in
+`BASE_<NAME>_TAG`, for example `docker buildx imagetools inspect mcr.microsoft.com/dotnet/sdk:10.0` (the `Digest:`
+line), and write it to `BASE_<NAME>_DIGEST` in a pull request. A new .NET major version changes the
+target framework in `Directory.Build.props`, `global.json`, `BASE_BUILD_TAG`, `BASE_RUNTIME_TAG` and both
+digests together (`.github/scripts/check-builder-dotnet-version.sh` checks that they agree). The release build passes no
+`BASE_*` build argument, so the pinned defaults are what it uses.
+
+A weekly workflow, `.github/workflows/base-image-digests.yml` (Mondays, and on manual dispatch), compares
+every `BASE_<NAME>_DIGEST` with the current index digest of its tag and opens or updates the issue *Base
+image digests are stale*; the `Release build check` shows the same as a warning. The refresh pull request
+should close that issue (`Closes #n`). A base image digest often moves without a version change
+(Ubuntu package updates), so a stale report is routine; refresh at least before a release. The check can be run locally from the repository root with
+`.github/scripts/check-base-image-digests.sh` (needs `docker buildx` and `jq`). If GitHub disables the
+scheduled workflow after 60 days without repository activity, re-enable it under Actions. Record
+[0041](decisions/0041-backend-image-chiseled-runtime-base-images-pinned-by-digest.md).
+
+### SBOM generator
+
+`.github/scripts/generate-sbom.sh` holds the only reference to the SBOM generator, the constant
+`syft_image='ghcr.io/anchore/syft:vX.Y.Z@sha256:<index digest>'`; the script refuses any other form before it
+calls Docker. Dependabot cannot read it, so it is refreshed by hand in a pull request, whose
+`Release build check` proves the new pin works: take the newest syft release tag (never `latest`), read the
+digest of exactly that tag with `docker buildx imagetools inspect ghcr.io/anchore/syft:vX.Y.Z` (the `Digest:`
+line, the multi-arch index digest) and write both into the constant. `ghcr.io` is the only source. The script
+runs the image without network, with a read-only root file system, no capabilities and the runner's UID, the
+inputs mounted read-only and only a fresh empty directory writable, and prints the generator's output only
+between `::stop-commands::` markers so it cannot issue workflow commands. Record
+[0037](decisions/0037-releases-version-tag-plain-tooling-and-attested-artifacts.md).
+
+### Release build check on pull requests
+
+`release.yml` runs only for a version tag. Pull requests are covered by the `Release build check` job in
+`ci.yml`: it runs the base image pinning and builder .NET version checks (`.github/scripts/`), builds the
+agent and the image with the version `v0.0.0-dryrun`, and verifies `--version`, the static binary and the
+image user, and generates and checks the SBOMs from that agent binary and image (*SBOM generator*). It
+also starts the image with `deploy/backend/docker-compose.yml`
+(`.github/scripts/smoke-test-backend.sh`) and checks the health check, the port bindings, a graceful stop
+and that the database survives re-creating the container (record
+[0060](decisions/0060-compose-file-port-bindings-volumes-and-memory-limit.md)). It also
+compares the base image digests with the registry (*Base image digests*); a stale
+digest or a failed registry lookup is only a warning there, not a failure. It uploads, pushes and releases
+nothing and reads no secret.
+
+### One-time setup (maintainer)
+
+1. **Tag ruleset.** Create the ruleset `release-tags` (Settings, Rules, Rulesets, new tag ruleset) with the
+   target `refs/tags/v*`, enforcement *Active*, the rules *Restrict creations*, *Restrict updates* and
+   *Restrict deletions*, and *Repository admin* as the only bypass. A tag push runs the workflow file of
+   the tagged commit, so whoever can create the tag controls what runs with the Docker Hub token. Create
+   the ruleset before storing the token.
+2. **Environment.** Create the GitHub environment `release` with deployment branches and tags set to
+   *Selected branches and tags*: the tag rule `v*.*.*` and no branch. Store the secret `DOCKERHUB_TOKEN`
+   and the variable `DOCKERHUB_USERNAME` there. A required reviewer is optional; it is worth adding once
+   more than one person has write access (0037).
+3. **Immutable tags (optional, recommended where the Docker Hub subscription offers it).** Enable immutable
+   tags on `networlddev/vandox` for version tags only, for example the rule
+   `^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$`, never for `latest`, which has to move.
+
+### Creating the Docker Hub token
+
+Create an organization access token limited to the repository `networlddev/vandox` with push and pull, and
+set `DOCKERHUB_USERNAME` to `networlddev`. If the plan offers no organization access tokens, use a dedicated
+Docker Hub user that is a member of a team with *Read & Write* on `networlddev/vandox` only, plus a personal
+access token of that user with the scope *Read & Write*. A personal access token of the maintainer's own
+account is not acceptable, because it is not limited to one repository. To rotate the token, create the new
+one, replace the environment secret, then delete the old token on Docker Hub.
+
+### Re-running a failed release
+
+If a job fails before the image is pushed, nothing was published: fix the cause and use "Re-run all jobs"
+(or, if the tag itself was wrong, ask the repository admin to delete and recreate it).
+
+If only `github-release` failed, use "Re-run failed jobs". It reruns just that job and works while the run's
+release artifact exists, that is 7 days after the tag run.
+
+If `attest` failed, the image is already published and no GitHub release exists. "Re-run failed jobs" reruns
+`attest` and `github-release` within the 7-day artifact window; a second provenance or SBOM attestation for
+the same digest is harmless. After that window, cut a new patch version. If the "Verify attestations" step reports a digest
+mismatch (the version tag does not resolve to the attested digest), do not re-run it; investigate and cut a
+new patch version.
+
+If `publish-image` failed after `networlddev/vandox:<version>` was pushed (it failed while pushing `latest`
+or reading the digest), a re-run stops at the never-overwrite check. Do not push by hand; cut a new patch
+version. The orphaned version tag stays on Docker Hub without a GitHub release. The same applies once the
+7-day window has passed.
+
+A published image version is never replaced; a faulty release gets a new patch version.
 <!-- project:end releases -->
 
 <!-- project:begin stability -->

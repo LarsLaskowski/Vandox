@@ -2,12 +2,13 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-03
+- **Area:** Detection, alerts and reports
 - **Source:** Issue #6
 - **Supersedes:** —
 
 ## Context
 
-After the NAS was off, the agent sends current data and backfills hours of spooled data (0018). Alerting
+After the backend host was off, the agent sends current data and backfills hours of spooled data (0045). Alerting
 on backfilled values would send a burst of stale alerts for problems that are long over. The backend has
 to tell live data from backfill reliably, without trusting a flag the agent could get wrong.
 
@@ -23,9 +24,11 @@ Option 2: `vandoxd` classifies every record as live or backfilled from its captu
 and gaps in the sequence numbers. Alert rules are evaluated on live data only; backfilled data is stored
 and analyzed but never alerts.
 
+The resulting rules are in the [Detection, alerts and reports](../areas/detection-and-reports.md) area.
+
 ## Consequences
 
-- No alert storm after a NAS downtime; incidents during the downtime still appear in the analysis and in
+- No alert storm after a backend host downtime; incidents during the downtime still appear in the analysis and in
   the report (0024).
 - The classification depends on the agent's clock being reasonably correct; the threshold between live
   and backfilled has to be chosen and tested.

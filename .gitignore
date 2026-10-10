@@ -10,3 +10,14 @@
 # Coverage
 coverage.*
 *.coverprofile
+
+# Operator files of the backend compose setup (secrets, environment)
+deploy/backend/secrets/
+deploy/backend/.env
+
+# .NET build output and test results
+**/bin/
+**/obj/
+TestResults/
+*.user
+.vs/

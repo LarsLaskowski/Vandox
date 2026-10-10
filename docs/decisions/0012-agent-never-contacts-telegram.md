@@ -2,6 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-03
+- **Area:** Notification and remote actions
 - **Source:** Issue #6
 - **Supersedes:** —
 
@@ -12,7 +13,7 @@ destination of the agent widens what the monitored server talks to.
 
 ## Options considered
 
-1. **Agent sends alerts directly to Telegram** — works while the NAS is off; the bot token lives on an
+1. **Agent sends alerts directly to Telegram** — works while the backend host is off; the bot token lives on an
    internet-facing server, and alerting logic is split across two binaries.
 2. **Only the backend talks to Telegram** — one place for the token and the alert rules; no alerts while
    the backend is off.
@@ -22,9 +23,11 @@ destination of the agent widens what the monitored server talks to.
 Option 2: only `vandoxd` sends Telegram messages. The agent talks to the backend's ingest port and nothing
 else.
 
+The resulting rules are in the [Notification and remote actions](../areas/notification-and-remote-actions.md) area.
+
 ## Consequences
 
-- The bot token never leaves the NAS; the agent's only outbound destination is the ingest port (0006,
+- The bot token never leaves the backend host; the agent's only outbound destination is the ingest port (0006,
   0010).
-- While the NAS is off there are no alerts; the data is spooled and analyzed after backfill, and alerts
+- While the backend host is off there are no alerts; the data is spooled and analyzed after backfill, and alerts
   are raised for live data only (0022).

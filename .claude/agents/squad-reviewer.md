@@ -40,13 +40,22 @@ round number, and — from round 2 on — the previous round's findings and the
 commits that were supposed to fix them. If no round number is given, assume
 round 1.
 
+To read an issue or pull request yourself use `gh api repos/<owner>/<repo>/issues/<n>` (`.../comments`,
+`.../pulls/<n>`); `gh issue view` and `gh pr view` fail where GraphQL is blocked (*Reading issues and pull
+requests* in `.squad/routing.md`).
+
 When invoked by the squad (`squad-issue` / `squad-spec`), the calling session
 also gives you the work folder (`specs/<folder>/`). Then additionally read
 `.squad/agents/reviewer/charter.md` and the folder's `plan.md` (and `spec.md`
 for features), and report as findings:
 
 - an acceptance criterion from the plan that the diff does not fulfil or that
-  no test pins down (blocking);
+  no test pins down (blocking) — except in a plan that declares steps 4, 5 and the *Coverage gate* not
+  applicable: there a criterion needs no test, but must be covered by the *Verification without tests*
+  section (next bullet);
+- a plan that declares steps 4, 5 and the *Coverage gate* not applicable without a *Verification without
+  tests* section covering every acceptance criterion, or a diff that contains production or test code despite
+  that declaration (blocking; *Changes without production or test code* in `.squad/routing.md`);
 - a tier in `plan.md` that is too low for what the diff touches, per the tier
   table in `.squad/routing.md` and the security areas in `.squad/project.md`
   (blocking — the change must go through the higher tier's steps). For tier
@@ -129,7 +138,9 @@ repository names this thing, and is that statement still true?**
   blocking.
 - **Documentation truth**: does every sentence the diff adds or leaves
   standing still describe what the code does? Check the claims, don't read
-  past them.
+  past them. A change in behavior (format, limit, default, error, guarantee)
+  needs the matching section of its area document in `docs/areas/` in the same
+  diff, and a decision record repeats no rules the area document states.
 - **Language**: all new code, comments, documentation and commit messages in
   English.
 - **Scope**: unrelated changes bundled in, accidental file inclusions, debug

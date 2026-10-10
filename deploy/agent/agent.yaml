@@ -1,0 +1,32 @@
+# Configuration of vandox-agent. Default location: /etc/vandox/agent.yaml
+#
+# The file is parsed strictly: an unknown key, a duplicate key, a second YAML document, an anchor, a
+# custom tag or an invalid value stops the agent at start-up, and the error names the file, the line and
+# the key.
+#
+# Secrets NEVER go into this file. They are read from the environment of the process (or, for a systemd
+# unit or a Docker secret, from a file whose absolute path is given in the variable with the _FILE suffix):
+#
+#   VANDOX_AGENT_TOKEN       the token the backend expects from this agent (required, at least 32
+#   VANDOX_AGENT_TOKEN_FILE  characters, printable ASCII without spaces; for example `openssl rand -hex 32`)
+#
+# Set either the variable or its _FILE form, not both.
+
+# Name of this server, shown in the backend and sent with every batch (required).
+# 1 to 64 characters of A-Z a-z 0-9 . _ -, starting with a letter or digit. No default.
+agent_id: web-1
+
+backend:
+  # Base URL of the vandoxd ingest endpoint (required). Scheme http or https, a host (IP address or
+  # name) and an optional port; no user info, path, query or fragment. Plain http is fine inside the
+  # tailnet. No default.
+  url: http://100.64.0.1:8081
+
+spool:
+  # Directory of the local spool where the agent keeps data until the backend has received it. An
+  # absolute, clean path (no trailing slash). Default: /var/lib/vandox/spool
+  directory: /var/lib/vandox/spool
+
+log:
+  # Log level: debug, info, warn or error. Default: info
+  level: info

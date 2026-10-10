@@ -2,6 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-03
+- **Area:** Log import
 - **Source:** Issue #6
 - **Supersedes:** —
 
@@ -9,7 +10,7 @@
 
 The server's logs contain IP addresses, mail addresses, domain names and user names. Pseudonymizing them
 would protect that data but makes forensics harder (correlating an attacker IP or a mailbox across logs).
-The server belongs to the operator, and the data is stored only on the NAS in the home network.
+The server belongs to the operator, and the data is stored only on the backend host in the home network.
 
 ## Options considered
 

@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <AssemblyName>vandoxd</AssemblyName>
+    <RootNamespace>Vandox.Backend</RootNamespace>
+    <VandoxVersion Condition="'$(VandoxVersion)' == ''">dev</VandoxVersion>
+    <VandoxCommit Condition="'$(VandoxCommit)' == ''">unknown</VandoxCommit>
+    <VandoxDate Condition="'$(VandoxDate)' == ''">unknown</VandoxDate>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+    <InformationalVersion>$(VandoxVersion)</InformationalVersion>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <ServerGarbageCollector>false</ServerGarbageCollector>
+    <ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
+    <IsTransformWebConfigDisabled>true</IsTransformWebConfigDisabled>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>Commit</_Parameter1>
+      <_Parameter2>$(VandoxCommit)</_Parameter2>
+    </AssemblyAttribute>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>BuildDate</_Parameter1>
+      <_Parameter2>$(VandoxDate)</_Parameter2>
+    </AssemblyAttribute>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Vandox.Core\Vandox.Core.csproj" />
+    <ProjectReference Include="..\Vandox.Storage\Vandox.Storage.csproj" />
+    <ProjectReference Include="..\Vandox.Import\Vandox.Import.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Vandox.Backend.Tests" />
+  </ItemGroup>
+
+</Project>

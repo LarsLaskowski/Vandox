@@ -2,6 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-03
+- **Area:** —
 - **Source:** Issue #6
 - **Supersedes:** —
 
@@ -10,14 +11,14 @@
 The goal is to understand why a single Plesk server (Ubuntu 22.04, about 2 GB RAM) goes down — typically
 memory exhaustion, the OOM killer, then MariaDB, Plesk and mail failing — and to warn early. Answering that
 needs metrics, process and connection snapshots, kernel events and logs from the same minutes, correlated
-into one incident. The monitored server has little memory to spare, and the backend runs on a Synology NAS
+into one incident. The monitored server has little memory to spare, and the backend runs on a Docker host
 in the home network that is sometimes switched off at night.
 
 ## Options considered
 
 1. **Off-the-shelf stack** (e.g. Prometheus + node_exporter + Loki/Promtail + Grafana + Alertmanager, or a
    hosted service) — mature and feature-rich; several daemons on a 2 GB server, several containers on the
-   NAS, a pull model that does not fit an agent behind Tailscale with a backend that is sometimes off, and
+   Docker host, a pull model that does not fit an agent behind Tailscale with a backend that is sometimes off, and
    the correlation of logs with metrics into an outage timeline still has to be built on top.
 2. **Own, purpose-built project** — one small agent and one backend container doing exactly what this
    server needs (forensics first, gapless backfill, deterministic rules); everything must be written and

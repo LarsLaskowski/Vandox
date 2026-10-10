@@ -2,18 +2,19 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-03
+- **Area:** —
 - **Source:** Issue #6
 - **Supersedes:** —
 
 ## Context
 
 The project needs a name for the repository, the binaries and the backend image, and a registry from
-which the NAS pulls the image.
+which the backend host pulls the image.
 
 ## Options considered
 
-1. **GitHub Container Registry** — next to the code; a second account context on the NAS.
-2. **Docker Hub under the existing `networlddev` organization** — the Synology container manager pulls
+1. **GitHub Container Registry** — next to the code; a second account context on the backend host.
+2. **Docker Hub under the existing `networlddev` organization** — common NAS container managers pull
    from Docker Hub by default; the organization is already used (e.g. for SonarQube Cloud,
    `sonar-project.properties`).
 
@@ -25,4 +26,4 @@ Docker Hub as `networlddev/vandox`.
 ## Consequences
 
 - The release workflow publishes to Docker Hub and needs Docker Hub credentials as CI secrets.
-- Changing the registry later means a new record and new pull instructions for the NAS.
+- Changing the registry later means a new record and new pull instructions for the backend host.

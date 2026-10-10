@@ -1,0 +1,27 @@
+<Project>
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <AnalysisLevel>latest-recommended</AnalysisLevel>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <Deterministic>true</Deterministic>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <RepositoryUrl>https://github.com/LarsLaskowski/Vandox</RepositoryUrl>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The default of GZipStream ends a truncated stream silently and passes it on as complete: strict validation makes it throw (ADR 0076). -->
+    <RuntimeHostConfigurationOption Include="System.IO.Compression.UseStrictValidation" Value="true" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Reihitsu.Analyzer" PrivateAssets="all" />
+    <PackageReference Include="SonarAnalyzer.CSharp" PrivateAssets="all" />
+  </ItemGroup>
+
+</Project>

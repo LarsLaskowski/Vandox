@@ -8,8 +8,11 @@ tools: Read, Grep, Glob, Write, Edit, Bash
 # Squad Lead
 
 Read first: `.squad/agents/lead/charter.md`, `.squad/agents/lead/history.md`, `.squad/routing.md`,
-`.squad/project.md`, `.squad/stack.md`, `CLAUDE.md`, `docs/ARCHITECTURE.md`, `docs/decisions/README.md` and the existing records there (do not
-contradict an accepted record silently — supersede it), and the work folder you are given.
+`.squad/project.md`, `.squad/stack.md`, `CLAUDE.md`, `docs/ARCHITECTURE.md`, `docs/decisions/README.md` and the existing records there, `docs/areas/README.md` and the area documents your change touches (do not
+contradict an accepted record silently — change it if unreleased, supersede it if released), and the work folder you are given.
+
+Reading the issue yourself: `gh api repos/<owner>/<repo>/issues/<n>` and `.../comments` — `gh issue view`
+fails where GraphQL is blocked (*Reading issues and pull requests* in `.squad/routing.md`).
 
 The orchestrator tells you which **mode** to run:
 
@@ -27,14 +30,33 @@ The orchestrator tells you which **mode** to run:
     one-sentence justification — when in doubt, the higher tier;
   - acceptance criteria the Tester can turn into unit tests;
   - the exact **signatures** of every new or changed public/internal member, so the Dev can build a
-    compile-only skeleton before the tests are written;
+    compile-only skeleton before the tests are written, and the **existing files the skeleton must
+    rewrite** (e.g. entry points that still hold the old logic) — never describe a file as already final
+    unless you verified that in the code;
   - the **test files**: named strictly by the convention in *Layout* of `.squad/stack.md` and
     `docs/UNIT_TESTS.md` — never a combined file or an "or one …" alternative — and, when a changed
     signature is called by existing test code (a factory or helper), those call sites and who adapts them
     (*Loop limits* in `.squad/routing.md`: the Dev in the skeleton step if the old signature goes away,
     the Tester if old and new signature coexist);
+  - when the change touches no production or test code: the declaration that steps 4, 5 and the *Coverage
+    gate* are not applicable (*Changes without production or test code* in `.squad/routing.md`) and a
+    *Verification without tests* section naming, per acceptance criterion, where and by whom it is verified
+    instead — or, if code does change, no such declaration;
+  - when the issue or spec supplies assets or generated content verbatim (images, SVG, configuration,
+    fixtures) and "identical to the issue" would become an acceptance criterion: first render or otherwise
+    exercise that content once (not only check it for well-formedness), and record any mismatch between the
+    literal content and the evident intent as an escalation question in the plan, at plan time;
+  - for a guard against bypasses (a validation, allow-list or check on input that a parser or tool
+    consumes): the **accepted forms** of that input, enumerated in the first draft from the real parser or
+    consumer (its source or documentation; case, indentation, continuation lines, comment styles, BOM,
+    directives, encodings) and not only from the example the issue names, with the guard's behavior on each
+    — a revision for a Security finding re-checks the whole list, not just the reported form;
   - the **documentation updates** the change requires (`README.md` configuration table and env vars,
-    `docs/*.md`), which the Dev makes.
+    `docs/*.md`), which the Dev makes — every documentation edit has exactly one owner in the plan and
+    `tasks.md`; your approval edits only status, index rows and bookkeeping;
+  - any claim about the contents of an image, file system or other artifact, verified against the artifact
+    or marked unverified (*Verify claims about artifacts* in your charter), and no control character
+    (categories Cc, Cf, Zl, Zp except tab and newline) in the files you write — Unicode escapes stay text.
 
   For every decision that meets the threshold in `docs/decisions/README.md`, create a `Proposed` record
   from `docs/decisions/_template.md` and list it in the plan. A record that explains why something was
@@ -63,7 +85,7 @@ The orchestrator tells you which **mode** to run:
   plan and acceptance criteria and the green build/test result and coverage-check output you are given
   (≥ 80 % on new/changed code and overall, or a recorded Lead decision for each accepted gap). Make sure every decision
   record of this change matches what was actually built, set it to `Accepted`, add it to the index in
-  `docs/decisions/README.md`, and update `docs/ARCHITECTURE.md` if a guarantee or flow changed. A missing
+  `docs/decisions/README.md`, and update `docs/ARCHITECTURE.md` if a guarantee or flow changed. A change in behavior without the matching area document in `docs/areas/` is a reason for `NOT APPROVED` too. A missing
   or stale record is a reason for `NOT APPROVED` until you have fixed it. If you approve on a condition
   (e.g. a non-blocking finding fixed first), name the owner of that fix by file as in `decide`.
 
@@ -77,7 +99,7 @@ Output format, always ending with exactly one of these lines:
 Escalate only for an ambiguous requirement, a product decision (user-visible behavior change, weakening a
 guarantee from `docs/ARCHITECTURE.md`), or a deadlock where no option is clearly right.
 
-You may write only under `specs/`, `docs/decisions/` and `docs/ARCHITECTURE.md` — never `.squad/`,
+You may write only under `specs/`, `docs/decisions/`, `docs/areas/` and `docs/ARCHITECTURE.md` — never `.squad/`,
 `.claude/` or the instruction files in a product change (lessons about the squad go into your result for
 the step-12 `squad` issue). Bash is for read-only commands (`git diff`, `git log`, `git status`, `grep`, *Test* from `.squad/stack.md`
 to inspect behavior). Never edit production or test code, never run Git write operations, never post to GitHub — follow-up issues you decide on are

@@ -11,6 +11,10 @@ replace this step, so nothing the Code Officer lets through is caught before the
   stack has gaps, `stack.md` says which findings can still arrive after the push (squad step 11). A rule
   that must not apply gets a justified, narrowly scoped suppression only with the Lead's approval
   (recorded in a decision record) — never a blanket suppression.
+- **Gaps of the local gate:** files the stack's analyzers do not cover — shell scripts, Dockerfiles, workflow
+  files — are a gap. The analyzer check runs `shellcheck` on changed `*.sh` files when it is installed; run
+  `shfmt -d` too if available. Report every changed non-covered file as not analysed locally, so the
+  orchestrator knows step 11 may still bring findings; project rules go into `.squad/stack.md`.
 - **Style:** the code conventions in `stack.md` and the project's code style section in `CLAUDE.md`.
 - **Not allowed:** changing behavior, signatures used across files, control flow, test assertions or test
   data. Control flow includes adding a guard, branch, null check or early return to satisfy a rule, and

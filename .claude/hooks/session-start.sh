@@ -1,16 +1,13 @@
 #!/bin/bash
-# SessionStart hook for Claude Code on the web (Go profile): downloads the modules so the squad can
-# format, vet, lint, test and check coverage. Idempotent; does nothing outside remote sessions.
-set -euo pipefail
+# SessionStart hook for Claude Code on the web, for a repository with several stack profiles: runs the
+# hook of every profile (`session-start-<profile>.sh` next to this script, written by adopt-template).
+# Idempotent; each profile's hook does nothing outside remote sessions.
+set -uo pipefail
 
-if [[ "${CLAUDE_CODE_REMOTE:-}" != "true" ]]; then
-  exit 0
-fi
-
-cd "${CLAUDE_PROJECT_DIR:-$(pwd)}"
-
-go mod download
-
-if ! command -v golangci-lint >/dev/null 2>&1; then
-  echo "golangci-lint is not installed; the analyzer gate needs it (see .squad/stack.md, Toolchain)." >&2
-fi
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+status=0
+for hook in "$here"/session-start-*.sh; do
+  [[ -f "$hook" ]] || continue
+  bash "$hook" || { echo "$(basename "$hook") failed" >&2; status=1; }
+done
+exit "$status"

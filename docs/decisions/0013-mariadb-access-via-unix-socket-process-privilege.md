@@ -2,6 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-03
+- **Area:** Network and security model
 - **Source:** Issue #6
 - **Supersedes:** —
 
@@ -23,6 +24,8 @@ and without access to customer data.
 
 Option 3: the agent connects over the local socket as MariaDB user `vandox-agent`, identified via
 `unix_socket` and granted only `PROCESS`.
+
+The resulting rules are in the [Network and security model](../areas/network-and-security-model.md) area.
 
 ## Consequences
 

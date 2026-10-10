@@ -2,6 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-03
+- **Area:** Detection, alerts and reports
 - **Source:** Issue #6
 - **Supersedes:** —
 
@@ -20,6 +21,8 @@ break Plesk or the hosting provider's management and support access.
 
 Option 2: services are only disabled in a reversible, documented way. Agents of the hosting provider are
 never disabled or changed.
+
+The resulting rules are in the [Detection, alerts and reports](../areas/detection-and-reports.md) area.
 
 ## Consequences
 

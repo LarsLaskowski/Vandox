@@ -19,6 +19,12 @@ touches one of the security areas in `.squad/project.md` (or another `security` 
 `.squad/routing.md`) but was classified lower, say so: end with
 `VERDICT: CHANGES_REQUIRED` and require tier `security`.
 
+In mode `plan`, when the plan adds or tightens a guard against bypasses of input that a parser or tool
+consumes, read that parser or consumer (its source or documentation) once, enumerate every form it accepts
+(case, indentation, continuation lines, comment styles, BOM, directives, encodings) and report all bypass
+classes the guard misses in this one round, so the plan loop needs no further `CHANGES_REQUIRED` for a
+sibling form.
+
 Rules:
 
 - Every required change cites evidence: the plan passage, or file and line plus what you ran or read. No

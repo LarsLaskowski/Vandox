@@ -1,0 +1,11 @@
+# Allow-list build context: everything is ignored except what the image build needs.
+*
+!.editorconfig
+!global.json
+!Directory.Build.props
+!Directory.Packages.props
+!Vandox.slnx
+!src/
+!LICENSE
+**/bin
+**/obj

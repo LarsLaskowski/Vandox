@@ -11,7 +11,23 @@ Each factual claim of the issue, checked against the code: confirmed or refuted.
 
 ## Acceptance criteria
 
-- [ ] AC1: ... (the Tester turns each one into at least one unit test)
+- [ ] AC1: ... (the Tester turns each one into at least one unit test; in a plan without production or test
+  code, *Verification without tests* below says how it is verified instead)
+
+When the issue or spec supplies assets or generated content verbatim (images, SVG, configuration,
+fixtures) and "identical to the issue" is an acceptance criterion: render or otherwise exercise that
+content once before fixing the criterion, and record here what you did and any mismatch between the literal
+content and the evident intent as an escalation question — at plan time, not at approval time.
+
+When an acceptance criterion requires a file path (or another environment-dependent value) in an error
+message, state how the tests strip it from leak checks.
+
+## Verification without tests
+
+Only when the change touches no production or test code, in any tier: steps 4, 5 and the *Coverage gate*
+are not applicable (*Changes without production or test code* in `.squad/routing.md`). Every acceptance
+criterion is then verified here instead of by a test: where and by whom (workflow step, PR dry run,
+read-only check). Otherwise delete this section.
 
 ## Approach
 
@@ -34,9 +50,16 @@ the Dev in step 4 (skeleton) when the old signature goes away, so the suite keep
 step 5 when old and new signature coexist (`.squad/routing.md`, *Loop limits*). "None" if no existing
 test is affected.
 
+## Areas
+
+The area documents in `docs/areas/` this change touches (`docs/areas/README.md` lists them), and what changes in
+each — or "none" (no change in behavior). A new area: name and scope for the index, a Lead decision. A change
+in behavior updates its area document in this pull request.
+
 ## Documentation updates
 
-`README.md` (configuration table, env vars), `docs/*.md` — or "none".
+`README.md` (configuration table, env vars), `docs/*.md` including the area documents — or "none". Every documentation edit has exactly
+one owner (Dev, Tester or Lead); the Lead's approval step only touches status, index rows and bookkeeping.
 
 ## Architecture check
 

@@ -2,6 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-03
+- **Area:** Network and security model
 - **Source:** Issue #6
 - **Supersedes:** —
 
@@ -20,6 +21,8 @@ the OOM killer, and MariaDB, Plesk and mail going down. More RAM would be the ob
 
 Option 2: the RAM stays at 2 GB. Relief comes from swap, tuning the backups, and an inventory of running
 services (with reversible disabling, 0026).
+
+The resulting rules are in the [Network and security model](../areas/network-and-security-model.md) area.
 
 ## Consequences
 
