@@ -32,7 +32,9 @@ public static class PayloadRegistry
     public static JsonSerializerOptions Options { get; } = new()
                                                            {
                                                                DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-                                                               Converters = { new NullAsAbsentConverterFactory() }
+                                                               Converters = {
+                                                                                new NullAsAbsentConverterFactory()
+                                                                            }
                                                            };
 
     #endregion // Properties

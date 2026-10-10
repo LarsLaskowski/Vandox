@@ -101,7 +101,9 @@ public class NullAsAbsentConverterFactoryTests
         // Arrange
         var options = new JsonSerializerOptions
                       {
-                          Converters = { new NullAsAbsentConverterFactory() }
+                          Converters = {
+                                           new NullAsAbsentConverterFactory()
+                                       }
                       };
 
         // Act
@@ -134,7 +136,9 @@ public class NullAsAbsentConverterFactoryTests
         // Arrange
         var options = new JsonSerializerOptions
                       {
-                          Converters = { new NullAsAbsentConverterFactory() }
+                          Converters = {
+                                           new NullAsAbsentConverterFactory()
+                                       }
                       };
 
         // Act

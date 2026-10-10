@@ -184,7 +184,9 @@ public class NullAsAbsentConverterTests
     {
         return new JsonSerializerOptions
                {
-                   Converters = { converter }
+                   Converters = {
+                                    converter
+                                }
                };
     }
 

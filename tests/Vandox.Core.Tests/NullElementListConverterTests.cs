@@ -167,7 +167,9 @@ public class NullElementListConverterTests
     {
         return new JsonSerializerOptions
                {
-                   Converters = { new NullElementListConverter<ProcessConnections>() }
+                   Converters = {
+                                    new NullElementListConverter<ProcessConnections>()
+                                }
                };
     }
 
