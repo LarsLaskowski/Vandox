@@ -65,8 +65,10 @@ covers, and the rules under *Code coverage* and the checklist apply to both.
 ## Code coverage
 
 **Threshold: at least 80 % line coverage on new or changed production code, and at least 80 % overall** —
-the same measure as SonarQube's "coverage on new code". Check it locally before a push with *Test with
-coverage* and the *Coverage gate* from [`.squad/stack.md`](../.squad/stack.md). Lines that genuinely
+the same measure as SonarQube's "coverage on new code". Both values are set in `.squad/tools/squad_settings.py`
+(`COVERAGE_THRESHOLD`, `COVERAGE_OVERALL_THRESHOLD`); the overall one may start lower in a repository adopted
+with a coverage debt and is only ever raised. Check it locally before a push with *Test with coverage* and the
+*Coverage gate* from [`.squad/stack.md`](../.squad/stack.md). Lines that genuinely
 cannot be covered by a unit test (for example `main` wiring) need an explicit, recorded decision. The
 measure covers Go and C# together (`*.go`, `*.cs`, `*.razor`; `.squad/tools/squad_settings.py`). In C#,
 `Program.cs` only hands the process boundaries (arguments, environment, standard streams, cancellation) to a

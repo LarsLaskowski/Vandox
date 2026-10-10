@@ -30,7 +30,7 @@ from urllib.parse import unquote, urlparse
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import squad_settings as settings  # noqa: E402  (per-repository settings next to this script)
-from analyzer_common import BASE_REF, git, shell_check  # noqa: E402  (shared helpers next to this script)
+from analyzer_common import git, merge_base, shell_check  # noqa: E402  (shared helpers next to this script)
 
 SARIF_NAME = os.path.join("obj", "roslyn.sarif")
 LOCK_FILE = os.path.join("obj", "analyzer-check.lock")
@@ -39,8 +39,8 @@ BUILD = ["dotnet", "build", settings.SOLUTION, "-c", "Release", "--no-restore", 
 
 
 def changed_files():
-    merge_base = git("merge-base", BASE_REF, "HEAD").strip()
-    names = git("diff", "--name-only", merge_base).splitlines()
+    base = merge_base()
+    names = git("diff", "--name-only", base).splitlines()
     names += git("ls-files", "--others", "--exclude-standard").splitlines()
     return {name.strip() for name in names if name.strip()}
 

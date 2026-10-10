@@ -3,8 +3,8 @@
 no issue anywhere in a file changed since the merge base with origin/main (`--whole-files`; working tree
 and untracked files included). The per-linter caps are switched off so one run prints every finding.
 
-The base (origin/main) and the commands are fixed here: the script takes no arguments, so nothing
-user-supplied reaches the shell, git or the filesystem.
+The base (BASE_REF in `.squad/tools/squad_settings.py`, default origin/main) and the commands are fixed
+here: the script takes no arguments, so nothing user-supplied reaches the shell, git or the filesystem.
 
 Usage, from the repository root:
     python3 .squad/tools/analyzer-check.py
@@ -16,7 +16,7 @@ import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from analyzer_common import BASE_REF, shell_check  # noqa: E402  (shared helpers next to this script)
+from analyzer_common import BASE_REF, merge_base, shell_check  # noqa: E402  (shared helpers next to this script)
 
 STEPS = [
     ("go vet", ["go", "vet", "./..."]),
@@ -27,6 +27,7 @@ STEPS = [
 
 def main():
     os.chdir(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
+    merge_base()  # a clear error when the base ref is missing, before golangci-lint reports a confusing one
     failed = False
     for name, command in STEPS:
         result = subprocess.run(command, capture_output=True, text=True, check=False)

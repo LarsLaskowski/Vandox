@@ -19,7 +19,7 @@ once in the [area document](../areas/README.md) of the record's area, and the re
 - The `Area:` field names the record's area as listed in [`docs/areas/README.md`](../areas/README.md), or `—`
   for a record about the process or about no area. Once areas are defined, every record needs the field. For a
   released record it is part of the content: it changes only through a new record.
-- Written by the squad Lead (see [`.squad/agents/lead/charter.md`](../../.squad/agents/lead/charter.md));
+- Written by the squad Lead (see [`.claude/agents/squad-lead.md`](../../.claude/agents/squad-lead.md));
   anyone may add one for a change made outside the squad.
 - Committed together with the change it explains.
 - **Released or not decides how a record changes.** A record is *released* once the commit that added it is
