@@ -5,7 +5,8 @@ Checks, run from anywhere inside the repository (it takes no arguments):
 
 - every `docs/decisions/NNNN-title.md` has a valid `Status` (`Proposed`, `Accepted` or `Superseded by NNNN`)
   and a `Supersedes` field naming existing records;
-- the index in `docs/decisions/README.md` has exactly one row per record, with the same status;
+- the index in `docs/decisions/README.md` has exactly one row per record, with the same status (the number
+  in a row, and the record in a `Superseded by` status, may be written as a link, `[NNNN](NNNN-title.md)`);
 - `Superseded by NNNN` names an existing record that lists this one under `Supersedes`;
 - once `docs/areas/README.md` lists areas, every area links an existing document in `docs/areas/` and every
   record has an `Area:` field naming a listed area, or `—` for a record about no area (a repository without
@@ -41,7 +42,13 @@ SUPERSEDED_BY = re.compile(r"^Superseded by (\d{4})$")
 NUMBER = re.compile(r"\b(\d{4})\b")
 INDEX_BLOCK = re.compile(r"<!-- project:begin index -->(.*?)<!-- project:end index -->", re.DOTALL)
 INDEX_NUMBER = re.compile(r"^\d{4}$")
+RECORD_LINK = re.compile(r"\[(\d{4})\]\([^)]*\)")
 RELEASE_TAGS = "v*"
+
+
+def plain(text):
+    """`[NNNN](NNNN-title.md)` written as `NNNN`, so a linked number or status compares like a bare one."""
+    return RECORD_LINK.sub(r"\1", text).strip()
 
 
 def read_text(path):
@@ -69,14 +76,15 @@ def load_records(root, errors):
         if not status:
             errors.append(f"{rel}: no '- **Status:**' line")
             continue
-        status = status.group(1).strip()
+        status = plain(status.group(1))
         if status not in ("Proposed", "Accepted") and not SUPERSEDED_BY.match(status):
             errors.append(f"{rel}: status '{status}' must be Proposed, Accepted or Superseded by NNNN")
         if number in records:
             errors.append(f"{rel}: number {number} is used twice")
         records[number] = {"rel": rel, "status": status, "text": text,
                            "area": area.group(1).strip() if area else None,
-                           "supersedes": NUMBER.findall(supersedes.group(1)) if supersedes else []}
+                           "supersedes": list(dict.fromkeys(NUMBER.findall(plain(supersedes.group(1)))))
+                           if supersedes else []}
     return records
 
 
@@ -99,7 +107,7 @@ def check_links(records, errors):
 def parse_index_row(line):
     """(number, status) of a `| NNNN | Title | Status | Date |` row, or None for any other line. The title may
     contain pipes, so the status and the date are taken from the end of the row."""
-    cells = [cell.strip() for cell in line.strip().split("|")]
+    cells = [plain(cell) for cell in line.strip().split("|")]
     if len(cells) < 6 or cells[0] or cells[-1] or not INDEX_NUMBER.match(cells[1]):
         return None
     return cells[1], cells[-3]
