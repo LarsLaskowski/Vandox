@@ -204,12 +204,7 @@ public sealed class BatchDecoder : IDisposable
             throw Fail(WireErrorKind.Malformed, "header is not valid JSON", null, 1);
         }
 
-        var major = ReadMajor(root);
-
-        if (major is null)
-        {
-            throw Fail(WireErrorKind.UnsupportedVersion, "format_major missing", null, 1);
-        }
+        var major = ReadMajor(root) ?? throw Fail(WireErrorKind.UnsupportedVersion, "format_major missing", null, 1);
 
         if (major != WireFormat.MajorVersion)
         {

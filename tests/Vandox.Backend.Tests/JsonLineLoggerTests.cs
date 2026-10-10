@@ -3,6 +3,7 @@ using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Time.Testing;
 
+using Vandox.Backend.Hosting;
 using Vandox.Backend.Logging;
 
 namespace Vandox.Backend.Tests;

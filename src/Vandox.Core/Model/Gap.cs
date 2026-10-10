@@ -83,7 +83,10 @@ public sealed class Gap : IPayload
             return Check.Invalid("collector", "required for cause collector_timeout");
         }
 
-        if ((FirstSeq == 0) != (LastSeq == 0) || FirstSeq > LastSeq)
+        var firstSet = FirstSeq != 0;
+        var lastSet = LastSeq != 0;
+
+        if (firstSet != lastSet || FirstSeq > LastSeq)
         {
             return Check.Invalid("last_seq", "first_seq and last_seq must both be set, first_seq not after last_seq");
         }

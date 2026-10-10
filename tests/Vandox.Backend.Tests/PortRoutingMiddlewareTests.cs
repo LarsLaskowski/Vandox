@@ -1,6 +1,8 @@
 using Microsoft.AspNetCore.Connections.Features;
 using Microsoft.AspNetCore.Http;
 
+using Vandox.Backend.Hosting;
+
 namespace Vandox.Backend.Tests;
 
 /// <summary>

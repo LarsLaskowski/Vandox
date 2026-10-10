@@ -1,6 +1,6 @@
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 
-namespace Vandox.Backend;
+namespace Vandox.Backend.Hosting;
 
 /// <summary>
 /// Opens listeners of the web UI and of the ingest API: every connection of a listener is labelled, so the pipeline serves

@@ -2,7 +2,7 @@ using Microsoft.Extensions.Logging;
 
 using Vandox.Backend.Logging;
 
-namespace Vandox.Backend;
+namespace Vandox.Backend.Hosting;
 
 /// <summary>
 /// Creates the loggers of vandoxd: JSON lines on standard error.

@@ -2,7 +2,7 @@ using Microsoft.AspNetCore.Server.Kestrel.Core;
 
 using Vandox.Core.LogParsing;
 
-namespace Vandox.Backend;
+namespace Vandox.Backend.Hosting;
 
 /// <summary>
 /// Lets a caller (a test) replace the listeners of the service and the log parsers of the import, and learn when the service is serving. A default instance changes

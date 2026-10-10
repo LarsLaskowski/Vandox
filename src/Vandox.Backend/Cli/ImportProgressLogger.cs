@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging;
 
+using Vandox.Backend.Hosting;
 using Vandox.Import;
 
 namespace Vandox.Backend.Cli;

@@ -95,7 +95,14 @@ internal sealed class TarHeaderGuardStream : FilterStream
     /// <returns>The padded size</returns>
     private static long Padded(long size)
     {
-        return size > long.MaxValue - BlockSize ? long.MaxValue : ((size + BlockSize - 1) / BlockSize) * BlockSize;
+        if (size > long.MaxValue - BlockSize)
+        {
+            return long.MaxValue;
+        }
+
+        var blocks = (size + BlockSize - 1) / BlockSize;
+
+        return blocks * BlockSize;
     }
 
     /// <summary>

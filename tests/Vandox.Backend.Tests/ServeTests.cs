@@ -3,6 +3,8 @@ using System.Net.Sockets;
 
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 
+using Vandox.Backend.Hosting;
+
 namespace Vandox.Backend.Tests;
 
 /// <summary>

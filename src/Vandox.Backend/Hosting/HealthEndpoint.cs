@@ -3,7 +3,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Logging;
 
-namespace Vandox.Backend;
+namespace Vandox.Backend.Hosting;
 
 /// <summary>
 /// The health endpoint of the web listener: GET and HEAD <c>/healthz</c>, 200 when the database answers in time, 503

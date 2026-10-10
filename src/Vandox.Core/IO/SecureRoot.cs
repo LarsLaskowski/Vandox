@@ -33,7 +33,6 @@ public sealed partial class SecureRoot : IDisposable
 
     private readonly string _path;
     private readonly SafeFileHandle? _root;
-    private bool _kernelResolves;
 
     #endregion // Fields
 
@@ -48,7 +47,7 @@ public sealed partial class SecureRoot : IDisposable
     {
         _path = path;
         _root = root;
-        _kernelResolves = root is not null;
+        KernelResolves = root is not null;
     }
 
     #endregion // Constructors
@@ -59,7 +58,7 @@ public sealed partial class SecureRoot : IDisposable
     /// Gets a value indicating whether the kernel resolves every path beneath the root without symbolic links. It is known
     /// after the first open and turns <c>false</c> when the kernel does not support it.
     /// </summary>
-    public bool KernelResolves => _kernelResolves;
+    public bool KernelResolves { get; private set; }
 
     #endregion // Properties
 
@@ -112,7 +111,7 @@ public sealed partial class SecureRoot : IDisposable
         {
             using var check = OpenBeneath(relative, PathFlag);
 
-            if (check is null && _kernelResolves)
+            if (check is null && KernelResolves)
             {
                 throw new SafeIoException("the directory cannot be opened beneath the root");
             }
@@ -164,7 +163,7 @@ public sealed partial class SecureRoot : IDisposable
     {
         var root = Open(path);
 
-        root._kernelResolves = false;
+        root.KernelResolves = false;
 
         return root;
     }
@@ -239,7 +238,7 @@ public sealed partial class SecureRoot : IDisposable
     /// <returns>The handle, or <c>null</c> when <c>openat2</c> is not available</returns>
     private SafeFileHandle? OpenBeneath(string relative, int flags)
     {
-        if (_root is not null && _kernelResolves)
+        if (_root is not null && KernelResolves)
         {
             return CallOpenat2(_root, relative, flags);
         }
@@ -273,7 +272,7 @@ public sealed partial class SecureRoot : IDisposable
 
         if (errno is ErrnoNoSys or ErrnoPermission or ErrnoInvalid)
         {
-            _kernelResolves = false;
+            KernelResolves = false;
 
             return null;
         }

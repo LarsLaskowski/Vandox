@@ -1,6 +1,6 @@
 using Microsoft.Extensions.Logging;
 
-namespace Vandox.Backend;
+namespace Vandox.Backend.Hosting;
 
 /// <summary>
 /// The log events of vandoxd. A message holds only fixed text and attribute placeholders: the JSON logger writes the text

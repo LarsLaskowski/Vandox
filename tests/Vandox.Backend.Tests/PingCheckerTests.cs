@@ -1,3 +1,5 @@
+using Vandox.Backend.Hosting;
+
 namespace Vandox.Backend.Tests;
 
 /// <summary>

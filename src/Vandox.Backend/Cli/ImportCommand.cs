@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging;
 
+using Vandox.Backend.Hosting;
 using Vandox.Backend.Logging;
 using Vandox.Core.Configuration;
 using Vandox.Core.LogParsing;

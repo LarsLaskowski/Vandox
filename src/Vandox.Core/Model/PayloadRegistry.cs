@@ -22,11 +22,6 @@ public static class PayloadRegistry
                                                                   [RecordKind.Gap] = typeof(Gap)
                                                               };
 
-    private static readonly JsonSerializerOptions _options = new()
-                                                             {
-                                                                 DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
-                                                             };
-
     #endregion // Fields
 
     #region Properties
@@ -34,7 +29,10 @@ public static class PayloadRegistry
     /// <summary>
     /// Gets the options every payload is read and written with.
     /// </summary>
-    public static JsonSerializerOptions Options => _options;
+    public static JsonSerializerOptions Options { get; } = new()
+                                                           {
+                                                               DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+                                                           };
 
     #endregion // Properties
 
@@ -59,7 +57,7 @@ public static class PayloadRegistry
     /// <exception cref="JsonException">The document does not fit the payload type</exception>
     public static IPayload? Deserialize(string kind, JsonElement json)
     {
-        return (IPayload?)json.Deserialize(_types[kind], _options);
+        return (IPayload?)json.Deserialize(_types[kind], Options);
     }
 
     /// <summary>
@@ -69,7 +67,7 @@ public static class PayloadRegistry
     /// <returns>The JSON text</returns>
     public static string Serialize(IPayload payload)
     {
-        return JsonSerializer.Serialize(payload, payload.GetType(), _options);
+        return JsonSerializer.Serialize(payload, payload.GetType(), Options);
     }
 
     #endregion // Methods

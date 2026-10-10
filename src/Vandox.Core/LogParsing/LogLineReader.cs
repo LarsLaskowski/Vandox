@@ -29,7 +29,6 @@ public sealed class LogLineReader
     private int _position;
     private int _length;
     private int _lineLength;
-    private bool _truncated;
 
     #endregion // Fields
 
@@ -56,7 +55,7 @@ public sealed class LogLineReader
     /// <summary>
     /// Gets a value indicating whether the last line was cut to <see cref="MaxLineBytes"/>.
     /// </summary>
-    public bool Truncated => _truncated;
+    public bool Truncated { get; private set; }
 
     /// <summary>
     /// Gets the 1-based number of the line <see cref="ReadAsync"/> returned last; 0 before the first.
@@ -142,8 +141,8 @@ public sealed class LogLineReader
             }
         }
 
-        _truncated = length > MaxLineBytes;
-        _lineLength = _truncated ? CutAt(length) : length;
+        Truncated = length > MaxLineBytes;
+        _lineLength = Truncated ? CutAt(length) : length;
     }
 
     /// <summary>

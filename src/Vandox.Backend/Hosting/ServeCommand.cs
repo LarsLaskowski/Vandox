@@ -13,7 +13,7 @@ using Vandox.Backend.Logging;
 using Vandox.Core.Configuration;
 using Vandox.Storage;
 
-namespace Vandox.Backend;
+namespace Vandox.Backend.Hosting;
 
 /// <summary>
 /// Runs the backend service: opens the database and the two listeners, serves until it is told to stop and shuts down

@@ -233,11 +233,14 @@ public class PayloadValidationTests
                          Name = "cpu\n",
                          Value = 1
                      };
-        var kernel = new KernelEvent();
-
-        kernel.Type = KernelEvent.TypeBoot;
-        kernel.Boot = new Boot();
-        kernel.Boot.BootId = "0123abcd-0123-0123-0123-0123456789a\n";
+        var kernel = new KernelEvent
+                     {
+                         Type = KernelEvent.TypeBoot,
+                         Boot = new Boot
+                                {
+                                    BootId = "0123abcd-0123-0123-0123-0123456789a\n"
+                                }
+                     };
 
         // Act
         var metricError = metric.Validate();
@@ -255,10 +258,11 @@ public class PayloadValidationTests
     /// <returns>The sample</returns>
     private static ProcessSample Sample(int pid)
     {
-        var sample = new ProcessSample();
-
-        sample.Pid = pid;
-        sample.Command = "x";
+        var sample = new ProcessSample
+                     {
+                         Pid = pid,
+                         Command = "x"
+                     };
 
         return sample;
     }
