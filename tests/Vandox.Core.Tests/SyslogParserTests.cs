@@ -161,7 +161,7 @@ public class SyslogParserTests
         // Arrange
         var parser = new SyslogParser(DateTimeZone.Utc);
         byte[] bom = [0xEF, 0xBB, 0xBF];
-        byte[] line = "2026-03-01T12:00:00Z web-1 sshd[1]: hello\n"u8.ToArray();
+        var line = "2026-03-01T12:00:00Z web-1 sshd[1]: hello\n"u8.ToArray();
         byte[] content = markOnFirstLine ? [.. bom, .. line] : [.. "\n"u8, .. bom, .. line];
 
         // Act
