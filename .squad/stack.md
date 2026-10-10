@@ -98,14 +98,18 @@ locally, <authoritative check>" once in `log.md` and does not repeat it as an op
 
 | Change | Missing locally | Local substitute | Authoritative check |
 | ------ | --------------- | ---------------- | ------------------- |
-| shell scripts (`.github/scripts/*.sh`, `deploy/**/*.sh`) | `shellcheck` (the gate skips it), `shfmt` | `bash -n <script>` and the shell pitfalls below | SonarQube Cloud (`shelldre:*`, step 11) and the CI step that runs the script |
-| workflows (`.github/workflows/*.yml`) | `actionlint` | a YAML parse (`python3 -c 'import sys, yaml; yaml.safe_load(open(sys.argv[1]))' <file>`) | the workflow's own run on the pull request |
-| `deploy/backend/Dockerfile`, `docker-compose.yml`, `.dockerignore`, image contents | `hadolint`, a Docker daemon | `.github/scripts/check-base-image-pinning.sh`, `.github/scripts/check-builder-dotnet-version.sh`, `bash -n` on the smoke script | CI job *Release build check*, steps "Build and verify image" and "Smoke test backend container" |
+| shell scripts (`.github/scripts/*.sh`, `deploy/**/*.sh`) | `shfmt` (`shellcheck` runs in the *Analyzer gate*) | `bash -n <script>`; the *Analyzer gate* runs shellcheck and checks the shell pitfalls below | SonarQube Cloud (`shelldre:*`, step 11) and the CI step that runs the script |
+| workflows (`.github/workflows/*.yml`) | a GitHub Actions runner (`actionlint` runs in the *Analyzer gate*) | the *Analyzer gate* (actionlint) | the workflow's own run on the pull request |
+| `deploy/backend/Dockerfile`, `docker-compose.yml`, `.dockerignore`, image contents | a Docker daemon (`hadolint` runs in the *Analyzer gate* on the Dockerfile) | `.github/scripts/check-base-image-pinning.sh`, `.github/scripts/check-builder-dotnet-version.sh`, `bash -n` on the smoke script | CI job *Release build check*, steps "Build and verify image" and "Smoke test backend container" |
 | known vulnerabilities (Go) | `govulncheck` (the proxy blocks `vuln.go.dev`, HTTP 403) | none | CI job *Vulnerability scan* |
 
-Shell pitfalls that SonarQube Cloud reports and nothing local catches: use `[[ … ]]`, never `[ … ]`
-(`shelldre:S7688`), and assign every positional parameter to a named `local` variable before using it inside a
-function (`shelldre:S7679`).
+When the *Analyzer gate* reports shellcheck, actionlint or hadolint as NOT RUN (a refused download), that tool is
+missing locally for the session: note it in `log.md` as above, and parse a changed workflow as YAML instead
+(`python3 -c 'import sys, yaml; yaml.safe_load(open(sys.argv[1]))' <file>`).
+
+Shell pitfalls that shellcheck does not report and the *Analyzer gate* checks itself (SonarQube Cloud reports
+them too): use `[[ … ]]`, never `[ … ]` (`shelldre:S7688`), and assign every positional parameter to a named
+`local` variable before using it inside a function (`shelldre:S7679`).
 
 Two analyzer rules collide and are settled once (record 0074): RH3001 forbids the negation operator `!`,
 S1125 forbids comparing a boolean with a literal (`== false`, `is false`). Write positive conditions, early
