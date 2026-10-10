@@ -200,7 +200,7 @@ public sealed class SyslogParser : ILogParser
     public async Task ParseAsync(LogFile file, Stream input, IRecordEmitter output, CancellationToken cancellationToken)
     {
         var reader = new LogLineReader(input);
-        var grouper = new KernelReportGrouper();
+        var grouper = new SystemLogGrouper();
         var ready = new List<DataRecord>();
         var clock = _timeZone is null ? null : new SyslogClock(_timeZone, file);
 

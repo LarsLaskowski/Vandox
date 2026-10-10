@@ -114,5 +114,5 @@ once in the [area document](../areas/README.md) of the record's area, and the re
 | 0085 | Year-less syslog times need the option import.time_zone, without a default, resolved with NodaTime's embedded zone database, and take the year from the file's rotation date or modification time | Accepted | 2026-10-09 |
 | 0086 | System log parsers: journal export by content, a generic weak syslog parser, kernel reports grouped with head and tail | Accepted | 2026-10-09 |
 | 0087 | C# style rules follow the standard settings, adapted to Vandox's analyzers and Linux tooling | Accepted | 2026-10-10 |
-| 0088 | MariaDB error log: entries detected by content and kept with their continuation lines, lifecycle events in an optional log_line field | Accepted | 2026-10-10 |
+| 0088 | MariaDB error log: entries detected by content and kept with their continuation lines, lifecycle events in an optional log_line field; the same rules for MariaDB lines of the journal and syslog | Accepted | 2026-10-10 |
 <!-- project:end index -->

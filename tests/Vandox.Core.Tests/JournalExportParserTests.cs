@@ -1,6 +1,8 @@
 using System.Globalization;
 using System.Text;
 
+using NodaTime;
+
 using Vandox.Core.LogParsing;
 using Vandox.Core.Model;
 
@@ -706,6 +708,431 @@ public class JournalExportParserTests
     }
 
     /// <summary>
+    /// Two entries of <c>mariadbd</c> with the same process form one record with the message after the header prefix, the event, the priority of the level and the fields of the first entry.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task JournalExportParserParseAsyncJoinsAMariaDbHeaderAndItsContinuationEntryIntoOneRecord()
+    {
+        // Arrange
+        var input = new JournalExportBuilder().Entry(MariaDbSamples.Micros(MariaDbSamples.Start), "web-1", "mariadbd", 2345, 6, MariaDbSamples.Note("/usr/sbin/mariadbd: ready for connections."))
+                                              .Entry(MariaDbSamples.Micros(MariaDbSamples.Start.AddSeconds(1)), "web-1", "mariadbd", 2345, 6, "Version: '10.6.12-MariaDB-0ubuntu0.22.04.1'  socket: '/run/mysqld/mysqld.sock'  port: 3306  Ubuntu 22.04")
+                                              .ToArray();
+
+        // Act
+        var emitter = await RecordingEmitter.ParseAsync(new JournalExportParser(), _file, input, TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsEmpty(emitter.Skips, "no skip");
+        Assert.HasCount(1, emitter.Records, "one record");
+
+        var record = emitter.Records[0];
+        var line = RecordingEmitter.Line(record);
+
+        Assert.AreEqual("/usr/sbin/mariadbd: ready for connections.\nVersion: '10.6.12-MariaDB-0ubuntu0.22.04.1'  socket: '/run/mysqld/mysqld.sock'  port: 3306  Ubuntu 22.04", line.Message, "message");
+        Assert.AreEqual(MariaDbEvents.Ready, line.Event, "event");
+        Assert.AreEqual((byte?)6, line.Priority, "priority");
+        Assert.AreEqual(MariaDbSamples.Start, record.CapturedAt, "the time of the first entry");
+        Assert.AreEqual("web-1", line.Host, "host");
+        Assert.AreEqual("mariadbd", line.Program, "program");
+        Assert.AreEqual(2345, line.Pid, "process ID");
+        Assert.AreEqual("journal", line.Log, "log");
+        Assert.AreEqual("journal", record.Source, "source");
+        Assert.AreEqual(RecordOrigin.Import, record.Origin, "origin");
+        Assert.AreEqual(0UL, record.Seq, "sequence");
+        Assert.IsFalse(line.Truncated, "not truncated");
+    }
+
+    /// <summary>
+    /// The level of the header decides the priority, whatever <c>PRIORITY</c> says; a form without a level keeps the entry's priority and has no event.
+    /// </summary>
+    /// <param name="message">The message</param>
+    /// <param name="priority">The <c>PRIORITY</c> of the entry</param>
+    /// <param name="expectedPriority">The expected priority</param>
+    /// <param name="expectedMessage">The expected message</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [DataRow("2026-03-01 23:00:05 0 [ERROR] x", 6, 3, "x")]
+    [DataRow("2026-03-01 23:00:05 0 [Warning] x", 6, 4, "x")]
+    [DataRow("2026-03-01 23:00:05 0 [Note] x", 3, 6, "x")]
+    [DataRow("2026-03-02 10:10:10 0x7f3a2c1fe640  InnoDB: Assertion failure", 5, 5, "InnoDB: Assertion failure")]
+    [DataRow("260301 12:00:00 mysqld_safe Starting mariadbd daemon with databases from /var/lib/mysql", 5, 5, "Starting mariadbd daemon with databases from /var/lib/mysql")]
+    public async Task JournalExportParserParseAsyncTakesThePriorityOfAMariaDbEntryFromTheLevel(string message, int priority, int expectedPriority, string expectedMessage)
+    {
+        // Arrange
+        var input = new JournalExportBuilder().Entry(MariaDbSamples.Micros(MariaDbSamples.Start), "web-1", "mariadbd", 2345, priority, message).ToArray();
+
+        // Act
+        var emitter = await RecordingEmitter.ParseAsync(new JournalExportParser(), _file, input, TestContext.CancellationToken);
+
+        // Assert
+        Assert.HasCount(1, emitter.Records, "one record");
+        Assert.AreEqual((byte?)expectedPriority, RecordingEmitter.Line(emitter.Records[0]).Priority, "priority");
+        Assert.AreEqual(expectedMessage, RecordingEmitter.Line(emitter.Records[0]).Message, "the text after the header prefix");
+        Assert.AreEqual("mariadbd", RecordingEmitter.Line(emitter.Records[0]).Program, "program");
+    }
+
+    /// <summary>
+    /// A header-shaped message of another program is stored unchanged, and so is a line of <c>mysqld</c> that is no header; a header of <c>mysqld</c> is read.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task JournalExportParserParseAsyncReadsMysqldAndLeavesOtherProgramsAlone()
+    {
+        // Arrange
+        var input = new JournalExportBuilder().Entry(MariaDbSamples.Micros(MariaDbSamples.Start), "web-1", "sshd", 5, 6, MariaDbSamples.Note("/usr/sbin/mariadbd: ready for connections."))
+                                              .Entry(MariaDbSamples.Micros(MariaDbSamples.Start), "web-1", "mysqld", 7, 6, MariaDbSamples.Note("/usr/sbin/mysqld: ready for connections."))
+                                              .Entry(MariaDbSamples.Micros(MariaDbSamples.Start), "web-1", "mysqld", 7, 6, "second line")
+                                              .ToArray();
+
+        // Act
+        var emitter = await RecordingEmitter.ParseAsync(new JournalExportParser(), _file, input, TestContext.CancellationToken);
+
+        // Assert
+        Assert.HasCount(2, emitter.Records, "two records");
+        Assert.AreEqual(MariaDbSamples.Note("/usr/sbin/mariadbd: ready for connections."), RecordingEmitter.Line(emitter.Records[0]).Message, "the line of sshd is unchanged");
+        Assert.AreEqual(string.Empty, RecordingEmitter.Line(emitter.Records[0]).Event, "no event for sshd");
+        Assert.AreEqual("/usr/sbin/mysqld: ready for connections.\nsecond line", RecordingEmitter.Line(emitter.Records[1]).Message, "the entry of mysqld");
+        Assert.AreEqual(MariaDbEvents.Ready, RecordingEmitter.Line(emitter.Records[1]).Event, "event of mysqld");
+    }
+
+    /// <summary>
+    /// A binary <c>MESSAGE</c> with a line feed of <c>mariadbd</c> is stored unchanged even when it begins with a header; it neither joins nor ends the open entry.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task JournalExportParserParseAsyncStoresABinaryMessageWithALineFeedUnchanged()
+    {
+        // Arrange
+        var builder = new JournalExportBuilder().Entry(MariaDbSamples.Micros(MariaDbSamples.Start), "web-1", "mariadbd", 2345, 6, MariaDbSamples.Note("/usr/sbin/mariadbd: ready for connections."));
+
+        builder.Text("__REALTIME_TIMESTAMP", MariaDbSamples.Micros(MariaDbSamples.Start.AddSeconds(1)))
+               .Text("SYSLOG_IDENTIFIER", "mariadbd")
+               .Text("_PID", "2345")
+               .Text("_HOSTNAME", "web-1")
+               .Binary("MESSAGE", Encoding.UTF8.GetBytes("2026-03-01 23:00:06 0 [ERROR] first\nsecond"))
+               .End();
+        builder.Entry(MariaDbSamples.Micros(MariaDbSamples.Start.AddSeconds(2)), "web-1", "mariadbd", 2345, 6, "Version: x");
+
+        // Act
+        var emitter = await RecordingEmitter.ParseAsync(new JournalExportParser(), _file, builder.ToArray(), TestContext.CancellationToken);
+
+        // Assert
+        Assert.HasCount(2, emitter.Records, "the binary entry and the entry");
+        Assert.AreEqual("2026-03-01 23:00:06 0 [ERROR] first\nsecond", RecordingEmitter.Line(emitter.Records[0]).Message, "the binary entry is unchanged");
+        Assert.AreEqual(string.Empty, RecordingEmitter.Line(emitter.Records[0]).Event, "no event");
+        Assert.IsNull(RecordingEmitter.Line(emitter.Records[0]).Priority, "its own priority, which is none");
+        Assert.AreEqual("/usr/sbin/mariadbd: ready for connections.\nVersion: x", RecordingEmitter.Line(emitter.Records[1]).Message, "the continuation line after it still joins the entry");
+    }
+
+    /// <summary>
+    /// A line of the process without a header joins up to 60 seconds after the header; one microsecond more ends the entry.
+    /// </summary>
+    /// <param name="offsetMicroseconds">The time of the line after the header, in microseconds</param>
+    /// <param name="joins">Whether the line joins</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [DataRow(60000000L, true)]
+    [DataRow(60000001L, false)]
+    public async Task JournalExportParserParseAsyncJoinsALineWithinSixtySecondsOnly(long offsetMicroseconds, bool joins)
+    {
+        // Arrange
+        var input = new JournalExportBuilder().Entry(MariaDbSamples.Micros(MariaDbSamples.Start), "web-1", "mariadbd", 2345, 6, MariaDbSamples.Note("header"))
+                                              .Entry(MariaDbSamples.Micros(MariaDbSamples.Start.AddTicks(offsetMicroseconds * 10)), "web-1", "mariadbd", 2345, 6, "line")
+                                              .Entry(MariaDbSamples.Micros(MariaDbSamples.Start.AddSeconds(1)), "web-1", "mariadbd", 2345, 6, "following")
+                                              .ToArray();
+
+        // Act
+        var emitter = await RecordingEmitter.ParseAsync(new JournalExportParser(), _file, input, TestContext.CancellationToken);
+
+        // Assert
+        var messages = emitter.Records.Select(record => RecordingEmitter.Line(record).Message).ToList();
+
+        List<string> expected = joins ? ["header\nline\nfollowing"] : ["header", "line", "following"];
+
+        Assert.AreSequenceEqual(expected, messages, "the records");
+    }
+
+    /// <summary>
+    /// A journal export with MariaDB lines parses with the journal parser of the built-in list without a time zone, and the time is the real-time stamp of the header entry.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task JournalExportParserParseAsyncNeedsNoTimeZoneForMariaDbLines()
+    {
+        // Arrange
+        var parser = BuiltInParsers.Create(null)[0];
+        var input = new JournalExportBuilder().Entry(MariaDbSamples.Micros(MariaDbSamples.Start), "web-1", "mariadbd", 2345, 6, "2026-03-01 23:00:05 0 [Note] /usr/sbin/mariadbd: ready for connections.").ToArray();
+
+        // Act
+        var emitter = await RecordingEmitter.ParseAsync(parser, _file, input, TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsEmpty(emitter.Skips, "no skip");
+        Assert.HasCount(1, emitter.Records, "one record");
+        Assert.AreEqual(new DateTimeOffset(2026, 3, 1, 22, 0, 5, TimeSpan.Zero).AddTicks(1234560), emitter.Records[0].CapturedAt, "22:00:05.123456Z, not the 23:00:05 of the message");
+    }
+
+    /// <summary>
+    /// A header whose date does not exist opens an entry and is classified.
+    /// </summary>
+    /// <param name="message">The message</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [DataRow("2026-02-30 12:00:00 0 [Warning] x")]
+    [DataRow("2026-03-01 24:00:00 0 [Warning] x")]
+    public async Task JournalExportParserParseAsyncOpensAnEntryAtAHeaderWithAnImpossibleDate(string message)
+    {
+        // Arrange
+        var parser = BuiltInParsers.Create(null)[0];
+        var input = new JournalExportBuilder().Entry(MariaDbSamples.Micros(MariaDbSamples.Start), "web-1", "mariadbd", 2345, 6, message)
+                                              .Entry(MariaDbSamples.Micros(MariaDbSamples.Start), "web-1", "mariadbd", 2345, 6, "continued")
+                                              .ToArray();
+
+        // Act
+        var emitter = await RecordingEmitter.ParseAsync(parser, _file, input, TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsEmpty(emitter.Skips, "no skip");
+        Assert.HasCount(1, emitter.Records, "one record");
+        Assert.AreEqual("x\ncontinued", RecordingEmitter.Line(emitter.Records[0]).Message, "classified as a header");
+        Assert.AreEqual((byte?)4, RecordingEmitter.Line(emitter.Records[0]).Priority, "the priority of the level");
+    }
+
+    /// <summary>
+    /// The recovery state belongs to one parse: a started line at the start of the second parse of the same parser has no event.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task JournalExportParserParseAsyncSharesNoRecoveryStateBetweenParses()
+    {
+        // Arrange
+        var parser = new JournalExportParser();
+        var first = new JournalExportBuilder().Entry(MariaDbSamples.Micros(MariaDbSamples.Start), "web-1", "mariadbd", 2345, 6, MariaDbSamples.Note("InnoDB: Starting crash recovery from checkpoint LSN=8401234,8401234")).ToArray();
+        var second = new JournalExportBuilder().Entry(MariaDbSamples.Micros(MariaDbSamples.Start), "web-1", "mariadbd", 2345, 6, MariaDbSamples.Note("InnoDB: 10.6.12 started; log sequence number 8409876; transaction id 5678")).ToArray();
+
+        // Act
+        var firstEmitter = await RecordingEmitter.ParseAsync(parser, _file, first, TestContext.CancellationToken);
+        var secondEmitter = await RecordingEmitter.ParseAsync(parser, _file, second, TestContext.CancellationToken);
+
+        // Assert
+        Assert.AreEqual(MariaDbEvents.RecoveryStart, RecordingEmitter.Line(firstEmitter.Records[0]).Event, "the first parse ends with an open recovery");
+        Assert.AreEqual(string.Empty, RecordingEmitter.Line(secondEmitter.Records[0]).Event, "the second parse does not know it");
+    }
+
+    /// <summary>
+    /// An entry without <c>MESSAGE</c> is skipped and neither opens nor ends an entry.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task JournalExportParserParseAsyncDoesNotSeeASkippedEntryInsideAnEntry()
+    {
+        // Arrange
+        var builder = new JournalExportBuilder().Entry(MariaDbSamples.Micros(MariaDbSamples.Start), "web-1", "mariadbd", 2345, 6, MariaDbSamples.Note("header"));
+
+        builder.Text("__REALTIME_TIMESTAMP", MariaDbSamples.Micros(MariaDbSamples.Start.AddSeconds(1)))
+               .Text("SYSLOG_IDENTIFIER", "mariadbd")
+               .Text("_PID", "9999")
+               .Text("_HOSTNAME", "web-1")
+               .End();
+        builder.Entry(MariaDbSamples.Micros(MariaDbSamples.Start.AddSeconds(2)), "web-1", "mariadbd", 2345, 6, "continued");
+
+        // Act
+        var emitter = await RecordingEmitter.ParseAsync(new JournalExportParser(), _file, builder.ToArray(), TestContext.CancellationToken);
+
+        // Assert
+        Assert.HasCount(1, emitter.Records, "one record");
+        Assert.AreEqual("header\ncontinued", RecordingEmitter.Line(emitter.Records[0]).Message, "the continuation line joined");
+        Assert.HasCount(1, emitter.Skips, "one skip");
+        Assert.AreEqual(NoMessage, emitter.Skips[0].Reason, "the skipped entry");
+    }
+
+    /// <summary>
+    /// Cancelling while an entry is open does not emit the entry; the records emitted so far are a prefix of a complete parse.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task JournalExportParserParseAsyncDoesNotEmitAnOpenMariaDbEntryWhenCancelled()
+    {
+        // Arrange
+        var input = OpenEntry();
+        var complete = await RecordingEmitter.ParseAsync(new JournalExportParser(), _file, input, TestContext.CancellationToken);
+        using var cancel = new CancellationTokenSource();
+        var emitter = new RecordingEmitter
+                      {
+                          Observed = _ => cancel.Cancel()
+                      };
+        using var stream = new MemoryStream(input);
+
+        // Act
+        await Assert.ThrowsAsync<OperationCanceledException>(() => new JournalExportParser().ParseAsync(_file, stream, emitter, cancel.Token), "cancelled parse");
+
+        // Assert
+        Assert.AreEqual(1, emitter.Calls, "the emitter is not called again");
+        Assert.HasCount(1, emitter.Records, "only the line of sshd");
+        Assert.AreSequenceEqual(complete.Records.Take(1).Select(RecordingEmitter.Describe).ToList(), emitter.Records.Select(RecordingEmitter.Describe).ToList(), "a prefix of the complete parse");
+        Assert.HasCount(2, complete.Records, "the complete parse has the line of sshd and the entry");
+    }
+
+    /// <summary>
+    /// An exception of the emitter ends the parse with that exception, without emitting the open entry.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task JournalExportParserParseAsyncPassesOnTheExceptionOfTheEmitterWithAnOpenMariaDbEntry()
+    {
+        // Arrange
+        var failure = new InvalidOperationException("store is full");
+        var emitter = new RecordingEmitter
+                      {
+                          Failure = (_, _) => failure
+                      };
+        using var stream = new MemoryStream(OpenEntry());
+
+        // Act
+        var thrown = await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => new JournalExportParser().ParseAsync(_file, stream, emitter, TestContext.CancellationToken), "the emitter fails");
+
+        // Assert
+        Assert.AreSame(failure, thrown, "the exception of the emitter");
+        Assert.AreEqual(1, emitter.Calls, "the open entry is not emitted");
+    }
+
+    /// <summary>
+    /// Two parses of the same input give equal records in the same order.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task JournalExportParserParseAsyncIsDeterministicForMariaDbLines()
+    {
+        // Arrange
+        var input = MariaDbSamples.FixtureJournal(false);
+        var parser = new JournalExportParser();
+
+        // Act
+        var first = await RecordingEmitter.ParseAsync(parser, _file, input, TestContext.CancellationToken);
+        var second = await RecordingEmitter.ParseAsync(parser, _file, input, TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsNotEmpty(first.Records, "records were emitted");
+        Assert.AreSequenceEqual(first.Records.Select(RecordingEmitter.Describe).ToList(), second.Records.Select(RecordingEmitter.Describe).ToList(), "same records in the same order");
+    }
+
+    /// <summary>
+    /// The fixture of the error log, fed as journal entries with its empty lines, gives the messages, events and times of the error log parser, and the priority of the entry for a header without a level.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task JournalExportParserParseAsyncGivesTheEntriesOfTheErrorLogFixture()
+    {
+        // Arrange
+        var expected = await ParseErrorLogFixtureAsync();
+
+        // Act
+        var emitter = await RecordingEmitter.ParseAsync(new JournalExportParser(), _file, MariaDbSamples.FixtureJournal(false), TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsEmpty(emitter.Skips, "no skip");
+        Assert.HasCount(22, emitter.Records, "22 entries");
+        Assert.HasCount(22, expected.Records, "the error log parser reads 22 entries");
+
+        for (var index = 0; index < expected.Records.Count; index++)
+        {
+            var want = RecordingEmitter.Line(expected.Records[index]);
+            var got = RecordingEmitter.Line(emitter.Records[index]);
+
+            Assert.AreEqual(want.Message, got.Message, $"message of entry {index}");
+            Assert.AreEqual(want.Event, got.Event, $"event of entry {index}");
+            Assert.AreEqual(expected.Records[index].CapturedAt, emitter.Records[index].CapturedAt, $"time of entry {index}");
+            Assert.AreEqual((byte?)(want.Priority ?? (byte)6), got.Priority, $"priority of entry {index}: the level, else the priority of the entry");
+        }
+    }
+
+    /// <summary>
+    /// The fixture without its empty lines, as journald stores the output, gives the same entries and events, and each message equals the error log's without its empty lines.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task JournalExportParserParseAsyncGivesTheEntriesOfTheErrorLogFixtureWithoutEmptyLines()
+    {
+        // Arrange
+        var expected = await ParseErrorLogFixtureAsync();
+
+        // Act
+        var emitter = await RecordingEmitter.ParseAsync(new JournalExportParser(), _file, MariaDbSamples.FixtureJournal(true), TestContext.CancellationToken);
+
+        // Assert
+        Assert.HasCount(22, emitter.Records, "22 entries");
+
+        for (var index = 0; index < expected.Records.Count; index++)
+        {
+            var want = RecordingEmitter.Line(expected.Records[index]);
+            var got = RecordingEmitter.Line(emitter.Records[index]);
+
+            Assert.AreEqual(MariaDbSamples.WithoutEmptyLines(want.Message), got.Message, $"message of entry {index}");
+            Assert.AreEqual(want.Event, got.Event, $"event of entry {index}");
+        }
+
+        Assert.IsFalse(RecordingEmitter.Line(emitter.Records[17]).Message.Contains("\n\n", StringComparison.Ordinal), "the crash report lacks the lines 28, 30 and 50");
+    }
+
+    /// <summary>
+    /// Entries that carry the process ID of the server in <c>SYSLOG_PID</c> only and their own <c>_PID</c> are stored unchanged before the server's entry, and the entry holds the server's lines.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task JournalExportParserParseAsyncKeysEntriesByPidNotBySyslogPid()
+    {
+        // Arrange
+        var at = new DateTimeOffset(2026, 3, 2, 10, 10, 10, TimeSpan.Zero);
+        var builder = new JournalExportBuilder().Entry(MariaDbSamples.Micros(at), "web-1", "mariadbd", 2345, 6, "260302 10:10:10 [ERROR] mysqld got signal 6 ;");
+        var injected = new string('A', 1000);
+
+        for (var index = 0; index < 20; index++)
+        {
+            MariaDbSamples.EntryWithSyslogPid(builder, at.AddSeconds(1), 9999, 2345, injected);
+        }
+
+        builder.Entry(MariaDbSamples.Micros(at.AddSeconds(2)), "web-1", "mariadbd", 2345, 6, "Query (0x7f3a2c0d9e10): SELECT 1")
+               .Entry(MariaDbSamples.Micros(at.AddSeconds(2)), "web-1", "mariadbd", 2345, 6, "Connection ID (thread ID): 42");
+
+        // Act
+        var emitter = await RecordingEmitter.ParseAsync(new JournalExportParser(), _file, builder.ToArray(), TestContext.CancellationToken);
+
+        // Assert
+        Assert.HasCount(21, emitter.Records, "20 injected entries and the server's entry");
+
+        for (var index = 0; index < 20; index++)
+        {
+            var line = RecordingEmitter.Line(emitter.Records[index]);
+
+            Assert.AreEqual(injected, line.Message, $"injected entry {index} is unchanged");
+            Assert.AreEqual(9999, line.Pid, $"injected entry {index} has the _PID");
+            Assert.AreEqual(string.Empty, line.Event, $"injected entry {index} has no event");
+        }
+
+        var entry = RecordingEmitter.Line(emitter.Records[20]);
+
+        Assert.AreEqual("mysqld got signal 6 ;\nQuery (0x7f3a2c0d9e10): SELECT 1\nConnection ID (thread ID): 42", entry.Message, "the entry holds the server's lines only");
+        Assert.AreEqual(MariaDbEvents.Abort, entry.Event, "event");
+        Assert.AreEqual(2345, entry.Pid, "process ID");
+        Assert.AreEqual((byte?)3, entry.Priority, "priority");
+    }
+
+    /// <summary>
+    /// Returns a journal export with an open MariaDB entry, a line of sshd written inside it, and more lines of the entry's process.
+    /// </summary>
+    /// <returns>The bytes</returns>
+    private static byte[] OpenEntry()
+    {
+        return new JournalExportBuilder().Entry(MariaDbSamples.Micros(MariaDbSamples.Start), "web-1", "mariadbd", 2345, 6, MariaDbSamples.Note("header"))
+                                         .Entry(MariaDbSamples.Micros(MariaDbSamples.Start.AddSeconds(1)), "web-1", "sshd", 5, 6, "Accepted publickey for root")
+                                         .Entry(MariaDbSamples.Micros(MariaDbSamples.Start.AddSeconds(2)), "web-1", "mariadbd", 2345, 6, "continued")
+                                         .Entry(MariaDbSamples.Micros(MariaDbSamples.Start.AddSeconds(3)), "web-1", "mariadbd", 2345, 6, "continued again")
+                                         .Entry(MariaDbSamples.Micros(MariaDbSamples.Start.AddSeconds(4)), "web-1", "mariadbd", 2345, 6, "and again")
+                                         .ToArray();
+    }
+
+    /// <summary>
     /// Builds journal entries of the kernel with consecutive time stamps; the first message gets priority 4 when it starts a report, the kill line priority 3, all others 6.
     /// </summary>
     /// <param name="messages">The messages</param>
@@ -747,6 +1174,17 @@ public class JournalExportParserTests
                                          .Entry("1772368217000000", "web-1", "kernel", 0, 6, "[1.1] CPU: 1 PID: 4242 Comm: mariadbd")
                                          .Entry("1772368218000000", "web-1", "kernel", 0, 6, "[1.2] Call Trace:")
                                          .ToArray();
+    }
+
+    /// <summary>
+    /// Parses the error log fixture with the error log parser in UTC.
+    /// </summary>
+    /// <returns>A task that returns the emitter</returns>
+    private async Task<RecordingEmitter> ParseErrorLogFixtureAsync()
+    {
+        var content = await File.ReadAllBytesAsync(RepositoryFiles.Path(MariaDbSamples.FixturePath), TestContext.CancellationToken);
+
+        return await RecordingEmitter.ParseAsync(new MariaDbErrorLogParser(DateTimeZone.Utc), new LogFile("mysql/error.log", null), content, TestContext.CancellationToken);
     }
 
     #endregion // Methods

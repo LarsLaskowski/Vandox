@@ -443,6 +443,246 @@ public class MariaDbMessageTests
     }
 
     /// <summary>
+    /// While the lines fit, <c>TryAdd</c> gives the same message and flag as the raw <c>Add</c>: empty lines held back, inner ones kept, trailing ones dropped.
+    /// </summary>
+    /// <param name="lines">The continuation lines, separated by a bar</param>
+    /// <param name="expected">The expected message, with a bar for a line break</param>
+    [TestMethod]
+    [DataRow("|x||", "h||x")]
+    [DataRow("x", "h|x")]
+    [DataRow("|x", "h||x")]
+    [DataRow("x|||y", "h|x|||y")]
+    [DataRow("x|", "h|x")]
+    [DataRow("|", "h")]
+    [DataRow("||||", "h")]
+    public void MariaDbMessageTryAddBuildsTheSameMessageAsTheRawAddWhileLinesFit(string lines, string expected)
+    {
+        // Arrange
+        var raw = new MariaDbMessage("h", false);
+        var decoded = new MariaDbMessage("h", false);
+        var taken = new List<bool>();
+
+        foreach (var line in lines.Split('|'))
+        {
+            raw.Add(Encoding.UTF8.GetBytes(line), false);
+        }
+
+        // Act
+        foreach (var line in lines.Split('|'))
+        {
+            taken.Add(decoded.TryAdd(line, false));
+        }
+
+        var built = decoded.Build(out var truncated);
+        var rawBuilt = raw.Build(out var rawTruncated);
+
+        // Assert
+        Assert.IsTrue(taken.All(value => value), "every line fits");
+        Assert.AreEqual(expected.Replace('|', '\n'), built, "message");
+        Assert.AreEqual(rawBuilt, built, "the same message as the raw overload");
+        Assert.AreEqual(rawTruncated, truncated, "the same flag as the raw overload");
+        Assert.IsFalse(truncated, "nothing was cut");
+    }
+
+    /// <summary>
+    /// The limit is exact: a message of 16,384 bytes is taken whole, one of 16,385 is refused and the message stays as it was.
+    /// </summary>
+    /// <param name="length">The characters of the line</param>
+    /// <param name="expected">Whether the line is taken</param>
+    [TestMethod]
+    [DataRow(16381, true)]
+    [DataRow(16382, true)]
+    [DataRow(16383, false)]
+    [DataRow(16384, false)]
+    public void MariaDbMessageTryAddTakesALineOnlyWhileTheMessageStaysWithinTheLimit(int length, bool expected)
+    {
+        // Arrange
+        var message = new MariaDbMessage("h", false);
+        var line = new string('a', length);
+
+        // Act
+        var taken = message.TryAdd(line, false);
+        var built = message.Build(out var truncated);
+
+        // Assert
+        Assert.AreEqual(expected, taken, "taken");
+        Assert.AreEqual(expected ? $"h\n{line}" : "h", built, "the message");
+        Assert.IsLessThanOrEqualTo(ModelLimits.MaxTextBytes, Encoding.UTF8.GetByteCount(built), "at most 16,384 bytes");
+        Assert.IsFalse(truncated, "the message has no marker and no flag");
+    }
+
+    /// <summary>
+    /// The size is counted in UTF-8 bytes of the text; an invalid byte that became U+FFFD counts 3.
+    /// </summary>
+    /// <param name="character">The character of the line</param>
+    /// <param name="count">The number of characters</param>
+    /// <param name="expected">Whether the line is taken</param>
+    [TestMethod]
+    [DataRow('é', 8191, true)]
+    [DataRow('é', 8192, false)]
+    [DataRow('�', 5460, true)]
+    [DataRow('�', 5461, false)]
+    public void MariaDbMessageTryAddCountsUtf8Bytes(char character, int count, bool expected)
+    {
+        // Arrange
+        var message = new MariaDbMessage("h", false);
+
+        // Act
+        var taken = message.TryAdd(new string(character, count), false);
+
+        // Assert
+        Assert.AreEqual(expected, taken, "1 + 1 + 2 or 3 bytes per character against 16,384");
+    }
+
+    /// <summary>
+    /// The held-back empty lines count: a line that fits alone is refused after two empty lines, and then the message is unchanged, the empty lines still held back.
+    /// </summary>
+    [TestMethod]
+    public void MariaDbMessageTryAddCountsTheHeldBackEmptyLinesAndChangesNothingWhenRefusing()
+    {
+        // Arrange
+        var message = new MariaDbMessage("h", false);
+        var first = new string('a', 16000);
+
+        message.TryAdd(first, false);
+        message.TryAdd(string.Empty, false);
+        message.TryAdd(string.Empty, false);
+
+        // Act
+        var refused = message.TryAdd(new string('b', 380), true);
+        var afterRefusal = message.Build(out var truncated);
+        var fits = message.TryAdd(new string('c', 379), false);
+        var built = message.Build(out _);
+
+        // Assert
+        Assert.IsFalse(refused, "16,002 + 2 + 1 + 380 is 16,385");
+        Assert.AreEqual($"h\n{first}", afterRefusal, "the text is as before the call, without the empty lines");
+        Assert.IsFalse(truncated, "the flag of the refused line is not taken over");
+        Assert.IsTrue(fits, "16,002 + 2 + 1 + 379 is 16,384, so the held-back empty lines are still counted");
+        Assert.AreEqual($"h\n{first}\n\n\n{new string('c', 379)}", built, "both empty lines are kept before the line");
+        Assert.AreEqual(16384, Encoding.UTF8.GetByteCount(built), "exactly the limit");
+    }
+
+    /// <summary>
+    /// An empty line is always taken, also when the message is full, and trailing empty lines are not built.
+    /// </summary>
+    [TestMethod]
+    public void MariaDbMessageTryAddAlwaysTakesAnEmptyLine()
+    {
+        // Arrange
+        var message = new MariaDbMessage("h", false);
+        var full = new string('a', 16382);
+
+        message.TryAdd(full, false);
+
+        // Act
+        var first = message.TryAdd(string.Empty, false);
+        var second = message.TryAdd(string.Empty, false);
+        var built = message.Build(out var truncated);
+
+        // Assert
+        Assert.IsTrue(first, "an empty line of a full message");
+        Assert.IsTrue(second, "another one");
+        Assert.AreEqual($"h\n{full}", built, "the trailing empty lines are dropped");
+        Assert.IsFalse(truncated, "nothing was cut");
+    }
+
+    /// <summary>
+    /// The flag of a taken line is or-ed in, also the flag of an empty line.
+    /// </summary>
+    /// <param name="headerTruncated">The flag of the header</param>
+    /// <param name="line">The text of the line</param>
+    /// <param name="lineTruncated">The flag of the line</param>
+    /// <param name="expected">The expected flag</param>
+    [TestMethod]
+    [DataRow(false, "x", false, false)]
+    [DataRow(false, "x", true, true)]
+    [DataRow(true, "x", false, true)]
+    [DataRow(false, "", true, true)]
+    [DataRow(true, "", false, true)]
+    public void MariaDbMessageTryAddOrsTheTruncatedFlagIn(bool headerTruncated, string line, bool lineTruncated, bool expected)
+    {
+        // Arrange
+        var message = new MariaDbMessage("h", headerTruncated);
+
+        // Act
+        var taken = message.TryAdd(line, lineTruncated);
+
+        message.Build(out var truncated);
+
+        // Assert
+        Assert.IsTrue(taken, "the line is taken");
+        Assert.AreEqual(expected, truncated, "truncated");
+    }
+
+    /// <summary>
+    /// After the constructor cut a header longer than 16,384 bytes, every non-empty line is refused and an empty line is taken.
+    /// </summary>
+    [TestMethod]
+    public void MariaDbMessageTryAddRefusesEveryLineAfterTheConstructorCutTheHeader()
+    {
+        // Arrange
+        var message = new MariaDbMessage(new string('a', 20000), false);
+
+        // Act
+        var shortLine = message.TryAdd("x", false);
+        var empty = message.TryAdd(string.Empty, false);
+        var built = message.Build(out var truncated);
+
+        // Assert
+        Assert.IsFalse(shortLine, "even a short line does not fit after the cut");
+        Assert.IsTrue(empty, "an empty line is always taken");
+        Assert.AreEqual(new string('a', 16384), built, "the cut header");
+        Assert.IsTrue(truncated, "the header was cut");
+    }
+
+    /// <summary>
+    /// A header cut to 16,382 bytes at a character boundary stays below the limit by itself, but the cut still refuses every non-empty line and changes nothing.
+    /// </summary>
+    [TestMethod]
+    public void MariaDbMessageTryAddAfterHeaderCutBelowLimitReturnsFalse()
+    {
+        // Arrange
+        var message = new MariaDbMessage($"{new string('a', 16382)}\u20ACmore text", false);
+        var before = message.Build(out var truncatedBefore);
+
+        // Act
+        var taken = message.TryAdd("x", false);
+        var after = message.Build(out var truncatedAfter);
+
+        // Assert
+        Assert.AreEqual(16382, Encoding.UTF8.GetByteCount(before), "the header is cut before the euro sign");
+        Assert.IsTrue(truncatedBefore, "the header was cut");
+        Assert.IsFalse(taken, "a line that would fit by size is refused after the cut");
+        Assert.AreEqual(before, after, "the message is unchanged");
+        Assert.AreEqual(truncatedBefore, truncatedAfter, "the flag is unchanged");
+    }
+
+    /// <summary>
+    /// A message that is built only through <c>TryAdd</c> never has a marker, however many lines are refused.
+    /// </summary>
+    [TestMethod]
+    public void MariaDbMessageTryAddNeverProducesAMarker()
+    {
+        // Arrange
+        var message = new MariaDbMessage("h", false);
+
+        // Act
+        for (var index = 0; index < 100; index++)
+        {
+            message.TryAdd(new string('a', 1000), false);
+        }
+
+        var built = message.Build(out var truncated);
+
+        // Assert
+        Assert.DoesNotContain("omitted", built, "no marker");
+        Assert.IsLessThanOrEqualTo(ModelLimits.MaxTextBytes, Encoding.UTF8.GetByteCount(built), "at most 16,384 bytes");
+        Assert.AreEqual(1 + (16 * 1001), built.Length, "16 lines of 1,000 characters fit after the header");
+        Assert.IsFalse(truncated, "the refused lines do not set the flag");
+    }
+
+    /// <summary>
     /// Builds a message of the header <c>h</c>, a line of 16,300 <c>a</c>, 30 empty lines and a last line.
     /// </summary>
     /// <param name="last">The bytes of the last line</param>

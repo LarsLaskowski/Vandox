@@ -96,7 +96,8 @@ parsers; the transport is not checked.
 
 ## Consequences
 
-- The built-in list is journal, then syslog; a new specific parser for an rsyslog file (#18) goes before syslog.
+- The built-in list begins with journal and ends with syslog; a specific parser (the MariaDB error log of #17, a parser for
+  an rsyslog file such as #18) goes between them.
 - A very large report loses the middle of its task table; the record says so and is marked truncated.
 - Importing both a journal export and the syslog files of the same period stores those messages twice (sources
   `journal` and `syslog`); records are not de-duplicated across sources.

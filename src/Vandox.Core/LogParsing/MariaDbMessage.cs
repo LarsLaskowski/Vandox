@@ -107,12 +107,37 @@ internal sealed class MariaDbMessage
             return;
         }
 
-        AppendEmpty(_pendingEmpty);
-        _pendingEmpty = 0;
-        _text.Append('\n').Append(text);
-        _bytes += 1 + size;
-        _lines++;
-        UpdateMark();
+        Append(text, size);
+    }
+
+    /// <summary>
+    /// Adds a continuation line that is already decoded when the message with it, and with the empty lines held back before it,
+    /// stays within <see cref="ModelLimits.MaxTextBytes"/> UTF-8 bytes; an empty line is held back and always taken.
+    /// </summary>
+    /// <param name="line">The text of the line</param>
+    /// <param name="truncated"><c>true</c> when the line was cut before</param>
+    /// <returns><c>true</c> when the line was taken; <c>false</c> when it does not fit, and the message is unchanged</returns>
+    internal bool TryAdd(string line, bool truncated)
+    {
+        if (line.Length == 0)
+        {
+            _truncated |= truncated;
+            _pendingEmpty++;
+
+            return true;
+        }
+
+        var size = Encoding.UTF8.GetByteCount(line);
+
+        if (_overflow || Exceeds(size))
+        {
+            return false;
+        }
+
+        _truncated |= truncated;
+        Append(line, size);
+
+        return true;
     }
 
     /// <summary>
@@ -165,6 +190,21 @@ internal sealed class MariaDbMessage
         _omitted = _lines - _markLines;
         _lines = _markLines;
         Omit();
+    }
+
+    /// <summary>
+    /// Appends the held-back empty lines and a line that fits; the caller checked the size.
+    /// </summary>
+    /// <param name="text">The text of the line</param>
+    /// <param name="size">The UTF-8 bytes of the line</param>
+    private void Append(string text, int size)
+    {
+        AppendEmpty(_pendingEmpty);
+        _pendingEmpty = 0;
+        _text.Append('\n').Append(text);
+        _bytes += 1 + size;
+        _lines++;
+        UpdateMark();
     }
 
     /// <summary>

@@ -299,8 +299,11 @@ Supported sources:
   get the priorities 4 and 3 and notes 6, and the lifecycle entries (start, ready for connections, normal shutdown,
   shutdown complete, abort by a signal, crash recovery start and end) get an event such as `mariadb.start` in the
   record field `event`. The formats of MariaDB 10.x are read. A copy that starts in the middle of an entry (the
-  output of `tail`) is not recognized. MariaDB sends its error log to the journal by default under systemd; those
-  lines arrive through the journal and syslog parsers as plain lines without events.
+  output of `tail`) is not recognized. MariaDB sends its error log to the journal by default under systemd. In a journal export or a syslog file,
+  lines of `mariadbd` and `mysqld` that start with MariaDB's time stamp are read with the same rules. An entry with
+  its crash report becomes one record of at most 16,384 bytes with the priority and event of its header; lines beyond
+  that are stored as plain lines, not cut. Time, host and process ID come from the journal or syslog line, and the
+  source type stays `journal` or `syslog`. A journal export needs no `import.time_zone`.
 
 The file name of a rotated log must stay as the server wrote it (`syslog.1`, `kern.log-20260301`), and the
 modification time of the files matters: the traditional format has no year, and the backend takes it from a

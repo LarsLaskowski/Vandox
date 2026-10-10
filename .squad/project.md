@@ -92,7 +92,12 @@ files or endpoints.
     parsers through `Vandox.Core.LogParsing` (`LogLineReader` cuts lines at 16 KiB, a parser's memory is bounded
     independently of the input size): `JournalExportParser` and `JournalExportReader` (binary-safe entry reader with
     bounded memory), `SyslogParser`, `SyslogLine` and `SyslogClock` (hand-written line parser, years and time
-    zones of year-less times, range-checked dates), `KernelReportGrouper` (bounded multi-line reports),
+    zones of year-less times, range-checked dates), `SystemLogGrouper`, `MariaDbLineGrouper` and `KernelReportGrouper` (bounded multi-line
+    reports; MariaDB lines of the journal and syslog are joined per host, program and pid, within 60 seconds of the
+    header line and 16,384 bytes, into one open entry, and a line that does not fit ends it and is kept as a plain
+    line; the program filter `mariadbd`/`mysqld` is a classification, not a trust boundary: local processes can
+    forge entries and events and, in a syslog file, join or split the server's entry, and a journal entry without
+    `_PID` takes the sender-chosen `SYSLOG_PID` and so behaves like a syslog line for forging, record 0088 option 36),
     `MariaDbErrorLogParser`, `MariaDbParseSession`, `MariaDbLine` and `MariaDbMessage` (hand-written header parser on raw
     bytes, entries bounded to 16 KiB, claimed by the first non-empty line only and never for a syslog name),
     and the backend option `import.time_zone` (`SourceTimeZone`). Records 0048, 0049, 0066, 0069, 0076, 0078, 0079, 0084,
@@ -230,7 +235,7 @@ double under this name and changes the status.
 | journald | fake journal reader (scripted entries, cursors and errors, and a reader that blocks until its context is cancelled, for 0029) |
 | MariaDB socket | fake MariaDB status source (status variables, process list, errors, and a source that hangs until its context is cancelled, for 0029) |
 | database (C#) | `FakeImportStore` for `IImportStore` (in-memory import state and records, scripted begin and write failures, `AfterBatch` hook; `tests/Vandox.Import.Tests`); a scripted ping delegate for `PingChecker` (`tests/Vandox.Backend.Tests`); the SQLite store itself is tested against a real database file in a `TempDirectory` (implemented) |
-| log parsers (C#) | `FakeParser` (scripted `Detect` and `Parse`) in `tests/Vandox.Core.Tests`, `LineParser` in `tests/Vandox.Import.Tests`; `RecordingEmitter` (records and skips, validates every record like the importer, optional failure and observer), `JournalExportBuilder` (text and binary fields as bytes) and `PatternStream` (lazily generated input for the heap-bound tests) in `tests/Vandox.Core.Tests` (implemented) |
+| log parsers (C#) | `FakeParser` (scripted `Detect` and `Parse`) in `tests/Vandox.Core.Tests`, `LineParser` in `tests/Vandox.Import.Tests`; `RecordingEmitter` (records and skips, validates every record like the importer, optional failure and observer), `JournalExportBuilder` (text and binary fields as bytes), `MariaDbSamples` (records, journal entries, syslog lines and the feeds of the error log fixture for the MariaDB line tests) and `PatternStream` (lazily generated input for the heap-bound tests) in `tests/Vandox.Core.Tests` (implemented) |
 | files (C#) | `TempDirectory` helper per test project (a unique directory below the temp path, removed on dispose); `RepositoryFiles.Path` for fixtures such as `testdata/` and `deploy/` |
 | Telegram Bot API | fake Telegram client (records sent messages, returns scripted updates; no network) |
 | Tailscale network | none in code (0017: `vandoxd` embeds no Tailscale); the agent's sender is tested against a `net/http/httptest` server standing in for the ingest port; the ACL itself is deployment configuration, reviewed, not unit-tested |
