@@ -33,8 +33,9 @@ Related defects found on the way (all confirmed in the scratch run):
 - **`format_minor` range:** `3000000000` is accepted by Go and `Malformed` in C# (`int`) — included here (AC10).
 - **Invalid UTF-8 and unpaired surrogate escapes in string values:** C# reports `Malformed` (`"message":"a\xffb"`, `"unit":"\ud800"`,
   `"kind":"\ud800"`, `"agent_id":"\ud800"`), Go replaces them with U+FFFD, and record 0042 plus the area row "Strings with invalid UTF-8 ...
-  replaced by U+FFFD" say replace. Not included: it touches 0042 and the storage rule of 0063; follow-up issue F1. Keys are covered here,
-  because such a key is not ASCII.
+  replaced by U+FFFD" say replace. Not included: it touches 0042 and the storage rule of 0063; follow-up issue F1, an explicit blocker of
+  the ingest API #40 (the area document says so under *Duties of the ingest API* and marks the C# behavior in *Common rules* and
+  *Accepted forms*, so it is no longer false for C#). Keys are covered here, because such a key is not ASCII.
 - **`Kind` in stored payloads:** `[JsonIgnore]` on `IPayload.Kind` is not inherited by the implementing properties, so
   `PayloadRegistry.Serialize` writes `"Kind":"<kind>"` into every JSON payload the store writes (`BatchWriter.cs:103`; pinned by
   `BatchDecoderTests.cs:680-681`). Not part of the wire; follow-up issue F2.
@@ -66,12 +67,14 @@ texts, allocation, model rules).
 - [ ] AC1 **Shared decoder cases.** A new fixture `testdata/wire/decoder-cases.json` (format below) holds at least every case listed under
   *Fixture cases*. Go `TestDecoder_SharedCases` (`internal/wire/decode_test.go`) and C# `WireContractTests.DecodeSharedCaseGivesExpectedResult`
   (one data row per case) gzip each case, decode it to the end and pass every case. Both fail on a case whose `want.error` is not one of the
-  seven names, and on duplicate case names.
+  seven names, on duplicate case names, and when the line under test of K4, K5, N4 or D9 holds no backslash after the fixture is read
+  (the escaped spelling was lost; see *Fixture spellings*).
 - [ ] AC2 **Keys in other ASCII case are the field** in the header, the record line and the payload at any depth, also escaped
-  (`"Kind"`), in both decoders (fixture cases K1-K6).
+  (fixture spellings `\\u006bind` and `\\u004BIND`), in both decoders (fixture cases K1-K6).
 - [ ] AC3 **A non-ASCII key is `ErrMalformed`** at its line, whatever the object (header, record, payload, list element, map, unknown key):
-  raw U+212A, U+017F, U+0131, U+00E9, escaped `K`, an escaped surrogate pair, an unpaired surrogate escape `\ud800` / `\udc00`
-  (fixture cases N1-N10). In addition, per language (raw bytes cannot be written into the JSON fixture): a key with the raw byte `0xFF`, and
+  raw U+212A, U+017F, U+0131, U+00E9, and the escapes (fixture spellings) `\\u212aind`, the surrogate pair
+  `\\ud83d\\ude00`, the unpaired surrogates `\\ud800` and `a\\udc00`, a high surrogate followed by a non-surrogate `\\ud800\\u0041`
+  (fixture cases N1-N11). In addition, per language (raw bytes cannot be written into the JSON fixture): a key with the raw byte `0xFF`, and
   one with an overlong encoding (`0xC0 0xAF`), in a record and in the header, is `ErrMalformed` — Go in `decode_test.go`, C# in
   `BatchDecoderTests.cs`.
 - [ ] AC4 **Duplicate keys are `ErrMalformed`** at their line: exact repeat of a scalar, an object, a map, a list; a scalar repeated with
@@ -92,9 +95,11 @@ texts, allocation, model rules).
   to `Malformed` (C#, `BatchDecoderTests.cs`; the fixture runner asserts `WireException`).
 - [ ] AC9 **Nesting:** a record line and a header nested exactly 64 deep are accepted, 65 deep `Malformed`, also when the depth sits in an
   unknown key (fixture cases X1-X4). Go `wire.MaxDepth` and C# `WireFormat.MaxDepth` are 64 (a test asserts the constant in each language).
-- [ ] AC10 **`format_minor`:** `3000000000` and `9223372036854775807` are accepted and read back exactly (`Header().FormatMinor` /
-  `Header.FormatMinor`); `9223372036854775808` and `"0"` are `Malformed`; `-1` is `Invalid`, field `format_minor`, reason
-  `must not be negative` (fixture cases M1-M5).
+- [ ] AC10 **`format_minor`:** `3000000000` and `9223372036854775807` are accepted and read back exactly (Go `Header().FormatMinor`, an
+  `int64`; C# `Header.FormatMinor`, a `long`); `9223372036854775808` and `"0"` are `Malformed`; `-1` is `Invalid`, field `format_minor`,
+  reason `must not be negative` (fixture cases M1-M5). These cases and the major cases H27-H29 hold on every Go target, not only where
+  `int` has 64 bits: because CI runs only `amd64`, the Tester also runs `GOARCH=386 go test ./internal/wire/ -count=1` (no `-race`; it
+  runs natively on this x86-64 host, checked) in its coverage step and reports that it passes.
 - [ ] AC11 **Error texts carry no key.** Exact texts: Go `wire: line <n>: malformed batch: duplicate key`,
   `wire: line <n>: malformed batch: key not ASCII`, `wire: line <n>: malformed batch: nesting deeper than 64`; C#
   `WireException.Reason` `duplicate key`, `key not ASCII`, `header is not a JSON object`, `format_major is not an integer` (a line nested
@@ -106,7 +111,9 @@ texts, allocation, model rules).
   `variables["max_connections"]` for `{"MAX_CONNECTIONS":"1","max_connections":"2"}`, reason `duplicate key ignoring case`; keys that
   differ in more than case stay valid (`internal/model/metric_test.go`, `internal/model/mariadb_test.go`). `wire.CheckRecord` returns that
   error and `wire.EncodeBatch` returns it and writes nothing (`internal/wire/encode_test.go`). The golden batch is unchanged and still
-  decodes in both languages.
+  decodes in both languages. A refused record must not vanish silently: the area document (*Producer size contract*) makes the collector
+  record a `gap` (cause `unknown`, `collector` set) for it. No collector exists yet, so this change has no code for it; the rule is checked
+  by the Reviewer in the area document and becomes a test in each collector's own issue.
 - [ ] AC13 **C# binding ignores ASCII case everywhere it binds wire data** (`PayloadRegistry.Options`), and a reflection test in
   `BatchDecoderTests.cs` asserts for `WireHeader`, `Envelope` and every payload type with the types reachable from it: each public
   settable property has a `[JsonPropertyName]` (or `[JsonIgnore]`), and no two JSON names of one type are equal ignoring ASCII case.
@@ -141,8 +148,13 @@ texts, allocation, model rules).
 ```
 
 - `lines`: JSON strings; each is encoded as UTF-8, the lines are joined with `\n`, a final `\n` is added, and the result is compressed as one
-  gzip member. A JSON escape in the fixture string is resolved by the fixture reader (`"K"` puts the raw character into the batch); a
-  line that must contain a JSON escape writes it doubled (`"\\u212a"`).
+  gzip member. A JSON escape in the fixture string is resolved by the fixture reader, so a line that must contain a JSON escape writes it
+  with a doubled backslash: `\\u212a` in the fixture is a single backslash followed by `u212a` in the batch line. A raw non-ASCII
+  character of a line is written into the fixture as the raw UTF-8 character. An unpaired surrogate is only ever written doubled
+  (`\\ud800`): with a single backslash the fixture readers would replace it (Go) or throw (C#) before the decoder sees the line. The exact
+  fixture spelling of every case with an escaped key is given under *Fixture spellings*; the Tester copies it verbatim. The Write and
+  Edit tools turn a single-backslash u-escape in the text they are given into the character, while doubled backslashes survive; check
+  the written bytes, for example with `grep -c 'u006b' testdata/wire/decoder-cases.json`.
 - `want.error`: one of `UnsupportedVersion`, `Malformed`, `UnknownKind`, `Sequence`, `EmptyBatch`, `LimitExceeded`, `Invalid` (the names of
   `WireErrorKind`; Go maps them to `wire.ErrUnsupportedVersion`, `wire.ErrMalformed`, `wire.ErrUnknownKind`, `wire.ErrSequence`,
   `wire.ErrEmptyBatch`, `wire.ErrLimitExceeded`, `model.ErrInvalid`), `want.line` the line of the error (`DecodeError.Line` /
@@ -161,19 +173,20 @@ texts, allocation, model rules).
 | K1 | header with every key upper or mixed case (`FORMAT_MAJOR`, `Format_Minor`, `AGENT_ID`, `Boot_ID`, `MODE`) | accepted, metric 1 |
 | K2 | record `{"KIND":"metric","Source":"host","SEQ":4,"Captured_At":...,"DATA":{"NAME":"cpu","Value":1}}` | accepted, metric 4 |
 | K3 | `process_snapshot` with `"Processes":[{"PID":7,"Command":"x"}]` | accepted, process_snapshot 1 |
-| K4 | record key written `"kind"` (escape in the line) | accepted, metric 1 |
-| K5 | record key written `"KIND"` | accepted, metric 1 |
+| K4 | record key `kind` with its `k` escaped, fixture spelling `\\u006bind` | accepted, metric 1 |
+| K5 | record key `KIND` with its `K` escaped in upper-case hex, fixture spelling `\\u004BIND` | accepted, metric 1 |
 | K6 | metric payload with an extra key `"kind":"gap"` | accepted, metric 1 |
 | N1 | record key `Kind` with raw U+212A | Malformed, 2 |
 | N2 | record key `ſeq` (raw U+017F) | Malformed, 2 |
 | N3 | header key `agent_ıd` (raw U+0131) | Malformed, 1 |
-| N4 | record key written `"Kind"` (escape in the line) | Malformed, 2 |
+| N4 | record key U+212A KELVIN SIGN followed by `ind`, the sign escaped, fixture spelling `\\u212aind` | Malformed, 2 |
 | N5 | unknown payload key `"é":1` | Malformed, 2 |
 | N6 | label key that is the raw U+212A KELVIN SIGN alone (`"labels":{"K":"x"}`) | Malformed, 2 |
-| N7 | unknown envelope key written `"\ud800"` | Malformed, 2 |
-| N8 | label key written `"a\udc00"` | Malformed, 2 |
-| N9 | unknown key written `"😀"` (a valid pair) | Malformed, 2 |
-| N10 | header unknown key written `"\ud800"` | Malformed, 1 |
+| N7 | unknown envelope key, an unpaired high surrogate escape, fixture spelling `\\ud800` | Malformed, 2 |
+| N8 | label key, `a` and an unpaired low surrogate escape, fixture spelling `a\\udc00` | Malformed, 2 |
+| N9 | unknown envelope key, a valid escaped surrogate pair (U+1F600), fixture spelling `\\ud83d\\ude00` | Malformed, 2 |
+| N10 | header unknown key, an unpaired high surrogate escape, fixture spelling `\\ud800` | Malformed, 1 |
+| N11 | unknown payload key, a high surrogate escape followed by a non-surrogate escape, fixture spelling `\\ud800\\u0041` | Malformed, 2 |
 | D1 | `"seq":9,"seq":3` | Malformed, 2 |
 | D2 | `"data"` twice | Malformed, 2 |
 | D3 | `kernel_event` with `"oom_kill"` twice | Malformed, 2 |
@@ -182,7 +195,7 @@ texts, allocation, model rules).
 | D6 | `"name":"cpu","name":null` | Malformed, 2 |
 | D7 | `"kind":"metric","kind":null` | Malformed, 2 |
 | D8 | `"kind":"gap","Kind":"metric"` | Malformed, 2 |
-| D9 | `"kind":"gap","kind":"metric"` (escape in the line) | Malformed, 2 |
+| D9 | `"kind":"gap"`, then the key `kind` with its `k` escaped, fixture spelling `\"kind\":\"gap\",\"\\u006bind\":\"metric\"` | Malformed, 2 |
 | D10 | `"labels":{"a":"1","a":"2"}` | Malformed, 2 |
 | D11 | `"labels":{"Mount":"a","mount":"b"}` | Malformed, 2 |
 | D12 | `mariadb_status` with `"status":{"Uptime":1,"Uptime":2}` | Malformed, 2 |
@@ -215,6 +228,30 @@ texts, allocation, model rules).
 | U1 | record `"kind":"Metric"` | UnknownKind, 2 |
 | U2 | record line `null` | UnknownKind, 2 |
 
+Notation: a code span holding a backslash in this table is the fixture spelling (backslash doubled, see *Fixture format*); every other
+code span shows the line as JSON text. Cases N1-N3, N5, N6 and O2 hold the raw UTF-8 character named in the row (U+212A is the bytes
+`E2 84 AA`, U+017F `C5 BF`, U+0131 `C4 B1`, U+00E9 `C3 A9`).
+
+### Fixture spellings
+
+The line under test of each case with an escaped key, exactly as the JSON string in `decoder-cases.json` (`H` and `M(1)` as above):
+
+```text
+K4   "{\"\\u006bind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}"
+K5   "{\"\\u004BIND\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}"
+N4   "{\"\\u212aind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}"
+N7   "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"\\ud800\":1,\"data\":{\"name\":\"cpu\",\"value\":1}}"
+N8   "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1,\"labels\":{\"a\\udc00\":\"x\"}}}"
+N9   "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"\\ud83d\\ude00\":1,\"data\":{\"name\":\"cpu\",\"value\":1}}"
+N10  "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\",\"\\ud800\":1}"
+N11  "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1,\"\\ud800\\u0041\":1}}"
+D9   "{\"kind\":\"gap\",\"\\u006bind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}"
+```
+
+After the fixture reader resolves these strings, each line holds the single-backslash escape (six characters, or twelve for a pair) at
+the key's place, which the decoders under test then unescape. K4 and D9 would also pass with the escape resolved too early (an ordinary key, an exact
+duplicate), so both runners assert that the line under test of K4, K5, N4 and D9 contains a backslash after the fixture is read (AC1).
+
 ## Approach
 
 **Go (`internal/wire/decode.go`).** A new `checkLine(line []byte) error` runs first in `readHeader` (before the version struct is
@@ -225,7 +262,12 @@ the stack deeper than `MaxDepth` fails; a key with any byte >= 0x80 fails — `T
 unpaired surrogates into U+FFFD, so every non-ASCII form is caught by this one test; a key whose ASCII lower case is already in the frame's
 set fails. The walk stops after the first complete value; a syntax error from `Token` is returned wrapped as `ErrMalformed` (the later
 `json.Unmarshal` would report the same class). The functions stay under gocognit 15 (split the frame handling). `MaxDepth` is a new
-exported constant in `wire.go`. The header-shape behavior of Go is already the target; no change there.
+exported constant in `wire.go`. The header-shape behavior of Go is already the target on a 64-bit `int`; to make it hold on every
+`GOARCH`, `readHeader` reads the major into a `*int64` (today `*int`, `decode.go:132`) and `Header.FormatMinor` becomes `int64` (today
+`int`, `wire.go:43`). Otherwise a 32-bit build (CI and release build only `amd64`, `.github/workflows/ci.yml:213`, `release.yml:106`, so no
+test would notice) would report `3000000000` or 2^63 - 1 as `ErrMalformed` instead of `ErrUnsupportedVersion` (major) or accepted
+(minor). `Header.FormatMajor` stays `int`: it is bound only after the major was read as exactly 1, and the encoder sets it from
+`MajorVersion` — the same split as C# (`FormatMajor` `int`, `FormatMinor` `long`).
 
 **Go (`internal/model`).** A generic helper `checkFoldUnique` in `model.go`, called from `MetricPoint.Validate` (labels) and
 `MariaDBStatus.Validate` (status, variables) after the existing key checks, walks the sorted keys and fails on the first key whose ASCII lower
@@ -255,7 +297,7 @@ store's own canonical rows, which do not change meaning.
 | Form of a key in the line | Go (`Token`, then byte test) | C# (`JsonProperty.Name`, then `Ascii.IsValid`) | Rule |
 | ------------------------- | ---------------------------- | ---------------------------------------------- | ---- |
 | raw ASCII, any case | ASCII | ASCII | allowed; matched and compared ignoring ASCII case |
-| short escapes `\" \\ \/ \b \f \n \r \t`, `\u0000`-`\u007f` (hex in either case) | unescaped to ASCII | unescaped to ASCII | allowed; compared after unescaping (`kind` = `kind` = `KIND`) |
+| short escapes `\" \\ \/ \b \f \n \r \t`, `\u0000`-`\u007f` (hex in either case) | unescaped to ASCII | unescaped to ASCII | allowed; compared after unescaping (`kind`, `KIND` and the escaped spellings of fixture cases K4, K5 and D9 are one key) |
 | raw multi-byte UTF-8 (U+0080 and up, U+212A, U+017F, U+0131) | non-ASCII | non-ASCII | `Malformed` |
 | `\u0080` and up, surrogate pair escape | non-ASCII | non-ASCII | `Malformed` |
 | unpaired surrogate escape (`\ud800`, `\udc00`, high followed by non-low) | U+FFFD | `InvalidOperationException` | `Malformed` |
@@ -269,8 +311,8 @@ Nesting: objects and arrays both count, scalars do not, the outermost value is 1
 
 | Project | Type / file | Change |
 | ------- | ----------- | ------ |
-| Go `internal/wire` | `wire.go` | new `const MaxDepth = 64` |
-| Go `internal/wire` | `decode.go` | new `checkLine`; called first in `readHeader` and `decodeRecord` |
+| Go `internal/wire` | `wire.go` | new `const MaxDepth = 64`; `Header.FormatMinor` becomes `int64` |
+| Go `internal/wire` | `decode.go` | new `checkLine`; called first in `readHeader` and `decodeRecord`; `readHeader` reads the major as `*int64` |
 | Go `internal/model` | `model.go`, `metric.go`, `mariadb.go` | new `checkFoldUnique`; called for labels, status, variables |
 | `Vandox.Core` | `Wire/WireKeyCheck.cs` (new) | the C# line check |
 | `Vandox.Core` | `Wire/BatchDecoder.cs` | parse options with `MaxDepth`, call `WireKeyCheck`, rewritten `ReadMajor` |
@@ -287,6 +329,9 @@ Go:
 // internal/wire/wire.go
 // MaxDepth is the deepest nesting of objects and arrays a line may have; the line's outermost value counts as 1.
 const MaxDepth = 64
+
+// internal/wire/wire.go, field of Header (was int; FormatMajor stays int)
+FormatMinor int64 `json:"format_minor"`
 
 // internal/wire/decode.go
 // checkLine checks the JSON-level rules of one line before it is bound: no key outside ASCII after unescaping,
@@ -352,7 +397,9 @@ Existing tests whose expected result changes with the new rules (Tester, step 5;
 
 Existing call sites of a changed signature: `WireHeader.FormatMinor` (`int` → `long`) at `BatchDecoderTests.cs:590`, `:592` and `:899`. They
 compile unchanged (`Assert.AreEqual` infers `long`, the interpolation formats either); if the build or an analyzer objects, the **Dev** adapts
-them mechanically in step 4 (`3L`, `0L`), no assertion changed. No Go signature changes.
+them mechanically in step 4 (`3L`, `0L`), no assertion changed. Go `Header.FormatMinor` (`int` → `int64`): every existing use assigns or
+compares an untyped constant or formats with `%d` (`wire.go:91`, `:103`; `wire_test.go:104-105`, `:134`, `:176`; `decode_test.go:201`,
+`:837`, `:1178`) and compiles unchanged; if one does not, the **Dev** adapts it mechanically in step 4. No other Go signature changes.
 
 ## Areas
 
@@ -360,7 +407,9 @@ them mechanically in step 4 (`3L`, `0L`), no assertion changed. No Go signature 
   (`format_major`, `format_minor` ranges); new *Common rules* entry **Keys**; *Null* no longer says "for a key given once"; `metric` labels and
   `mariadb_status` keys unique ignoring ASCII case; *Limits* names `MaxDepth`; *Versioning* states the line rules come first and a
   misshapen header is malformed; *Accepted forms* rows for key case, non-ASCII keys, duplicate keys, sibling keys, nesting, `format_major`,
-  `format_minor` and the non-object line; the `jq` note; *Related decisions* 0090; *Implementation*.
+  `format_minor` and the non-object line; the `jq` note; *Related decisions* 0090; *Implementation*. After the challenge: *Common rules*
+  and the *Accepted forms* row on invalid UTF-8 state that C# still rejects such string values (open, F1); *Producer size contract*
+  makes a collector record a gap for a refused record; *Duties of the ingest API* names F1 as a blocker of #40.
 
 ## Documentation updates
 
@@ -377,7 +426,8 @@ them mechanically in step 4 (`3L`, `0L`), no assertion changed. No Go signature 
 
 No guarantee of `docs/ARCHITECTURE.md` / `.squad/project.md` is touched: gapless collection, the non-blocking agent and live-only alerting
 do not depend on decoding details. The producer contract holds: the Go encoder writes nothing the new rules reject (golden batch checked; the
-model now also refuses case-equal map keys, AC12), so no batch can get stuck in a spool. The wire stays 1.0: the rules only reject input no
+model now also refuses case-equal map keys, AC12), so no batch can get stuck in a spool. The record such a refusal costs is recorded as a
+gap by its collector (area document, *Producer size contract*; 0028), so "no data gaps unless explicitly recorded" holds. The wire stays 1.0: the rules only reject input no
 version writes. Area 10's goal is strengthened (fewer readings of one line, fail closed on ambiguity, bounded extra memory).
 
 ## Security considerations
@@ -396,6 +446,31 @@ version writes. Area 10's goal is strengthened (fewer readings of one line, fail
 - `docs/decisions/0090-wire-keys-matched-ignoring-ascii-case-duplicates-rejected-header-shape-malformed.md` (Proposed, indexed).
 - 0042, 0043, 0075, 0089 edited in place (unreleased: no `v*` tag exists).
 
+## Challenge
+
+Devil's Advocate, 0 major, 4 minor objections; all accepted.
+
+1. **The fixture case table lost its JSON escapes** — accepted. Cause: the Write and Edit tools turn a single-backslash u-escape into its
+   character, so K4 and D9 read as plain `kind`, N4 as a raw U+212A and N9 as a raw emoji. Revised: K4, K5, N4, N7-N10 and D9 name the
+   exact fixture spelling with the backslash doubled (`\\u006bind`, `\\u004BIND`, `\\u212aind`, `\\ud800`, `a\\udc00`,
+   `\\ud83d\\ude00`), a new section *Fixture spellings* gives the complete JSON string of each such line, *Fixture format* states the rule
+   (doubled backslash for an escape, raw UTF-8 for a raw character, never a single-escaped unpaired surrogate) and warns about the tool
+   behavior; AC2, AC3 and the guard table name the escapes the same way. Because K4 and D9 would pass vacuously with the escape resolved,
+   AC1 now makes both runners fail when the line under test of K4, K5, N4 or D9 holds no backslash. New case N11 (`\\ud800\\u0041`, a high
+   surrogate followed by a non-surrogate escape) covers the guard-table form that had no case.
+2. **Go `Header.FormatMajor` / `FormatMinor` are `int`** — accepted with the type change rather than a stated assumption: an assumption
+   no CI job checks is the kind of difference this issue removes. `readHeader` reads the major as `*int64`, `Header.FormatMinor` becomes
+   `int64` (signature, *Approach*, affected types; call sites compile unchanged, Dev adapts if not); `Header.FormatMajor` stays `int`
+   (bound only after the major is 1), matching C#. AC10 adds a `GOARCH=386` run of `internal/wire` by the Tester. Record 0090 names the
+   rejected assumption under *Options considered*.
+3. **F1 leaves the decoders divergent on string values** — accepted. F1's body now says it blocks #40, and the orchestrator comments
+   "Blocked by" on #40 after opening it; the area document lists it as the first duty of the ingest API and states the C# behavior in
+   *Common rules* and the *Accepted forms* row, so it is no longer false for C#; 0090 names the blocker. Settling it here stays out of
+   scope (it touches 0042 and 0063's storage rule).
+4. **AC12 can refuse a whole record in the producer** — accepted. The area document's *Producer size contract* now says a collector records
+   a `gap` (cause `unknown`, `collector` set) for a record `CheckRecord` refuses, so the loss is recorded (0028); 0090 and the architecture
+   check say so. No collector exists yet, so the rule is tested in each collector's issue.
+
 ## Out of scope / follow-ups
 
 Follow-up issues for the orchestrator to open:
@@ -405,8 +480,11 @@ Follow-up issues for the orchestrator to open:
   surrogate escapes (`\ud800`) in string values with U+FFFD; the C# decoder reports `Malformed` (`"message":"a\xffb"`, `"unit":"\ud800"`),
   and for `"kind":"\ud800"` or `"agent_id":"\ud800"` it reports `Malformed` where Go reports `UnknownKind` or a field error. Keys are
   settled by #175 (a non-ASCII key is malformed in both). Decide one rule (replace in C#, matching Go's per-byte replacement, or reject in
-  both and amend 0042/0063), add the cases to `testdata/wire/decoder-cases.json`. Should be settled before the ingest API (#40) calls
-  `BatchDecoder`." Labels: `type: bug`.
+  both and amend 0042/0063), add the cases to `testdata/wire/decoder-cases.json`, and remove the C# caveat from the *Common rules* and
+  *Accepted forms* of `docs/areas/wire-format.md`. **Blocks #40**: the ingest API must not pass agent input to `BatchDecoder` before this
+  is settled, because until then the two decoders read such a batch differently (the area document lists it under *Duties of the ingest
+  API*)." Labels: `type: bug`. After opening it, the orchestrator comments on #40: "Blocked by #<F1>: the wire decoders must agree on
+  invalid UTF-8 and unpaired surrogate escapes in string values before the ingest API calls `BatchDecoder` (found in #175)."
 - **F2** — title `[Storage] Stored JSON payloads carry a redundant "Kind" member`; body: "`[JsonIgnore]` on `IPayload.Kind` is not
   inherited by the implementing properties, so `PayloadRegistry.Serialize` writes `"Kind":"<kind>"` into every JSON payload
   (`BatchWriter.cs:103`; `BatchDecoderTests.cs:680-681` pin it). Decide whether the stored payload should match the wire payload, and fix

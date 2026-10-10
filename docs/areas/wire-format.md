@@ -76,7 +76,9 @@ one is invalid, and the decoder sets the origin of every decoded record to `agen
 - **Name pattern**: `^[A-Za-z0-9][A-Za-z0-9._:/@+-]*$`, 1 to 128 bytes (`MaxNameBytes`). Used for `source`,
   metric names and units, label keys, `gap.collector` and `log_line.event`.
 - **Short text** at most 1024 bytes (`MaxShortTextBytes`), **text** at most 16384 bytes (`MaxTextBytes`); lengths are in
-  bytes, no character restriction. Invalid UTF-8 is replaced by U+FFFD when decoded.
+  bytes, no character restriction. Invalid UTF-8 is replaced by U+FFFD when decoded by the Go decoder; the C# decoder still rejects a
+  string value with invalid UTF-8 or an unpaired surrogate escape as `ErrMalformed`. That difference is open (follow-up of #175) and
+  blocks the ingest API (#40, see *Error text and consumer duties*).
 - **Lists and maps** hold at most 4096 entries (`MaxItems`); metric labels at most 32 (`MaxLabels`).
 - **Times** are UTC (offset 0) and non-zero; optional times are checked only when present.
 - **Floats** are finite; percentages and rates are also >= 0.
@@ -198,6 +200,12 @@ that error the producer shortens `cmdline` / `info` and sets `truncated`, then l
 field sizes with every byte escaped as `\uXXXX` the largest, a metric with 32 labels, stays near 200 KiB.
 `EncodeBatch` reports the same error with the record's index and writes nothing.
 
+A record that `wire.CheckRecord` refuses with a validation error (a `*model.FieldError`, for example metric
+labels or MariaDB `status` / `variables` keys that are equal ignoring ASCII case, see *Common rules*) is not
+spooled. The collector that produced it records a `gap` instead (cause `unknown`, `collector` set to its name,
+`from` / `to` covering the sample), so the loss is recorded, never silent
+([0028](../decisions/0028-data-gaps-are-always-recorded.md)).
+
 ## Versioning (0043)
 
 The header carries an integer major and minor. A decoder checks line 1 against the line rules (*Common rules*, *Keys*),
@@ -254,7 +262,7 @@ What the decoder does with unusual input; each row is a test case.
 | Time with `Z`, `+00:00`, `-00:00`, fractions | accepted |
 | Time with another offset (`+02:00`); the zero time | rejected, field error |
 | Time with a space for `T`, lower-case `t`/`z`, not RFC 3339 | rejected, `ErrMalformed` |
-| Strings with invalid UTF-8 | accepted, bytes replaced by U+FFFD |
+| Strings with invalid UTF-8 | Go: accepted, bytes replaced by U+FFFD; C#: rejected, `ErrMalformed` (open, see *Common rules*) |
 | Escaped control characters in a string | accepted in text fields, rejected where a name pattern applies |
 | Address with a zone (`fe80::1%eth0`, `[fe80::1%eth0]:80`, `::ffff:1.2.3.4%eth0`), also with `\n`, `]:` or 5000 bytes in the zone | rejected, field error, reason `zone not allowed` |
 | Empty address, hostname, missing port, empty zone (`fe80::1%`), zone on IPv4 | rejected (field error or `ErrMalformed`) |
@@ -274,6 +282,8 @@ displays decode errors only through the display sanitization of the project's ar
 
 Duties of the ingest API (#40), which this package cannot take over:
 
+- do not pass agent input to `BatchDecoder` before the two decoders agree on invalid UTF-8 and unpaired
+  surrogate escapes in string values (*Common rules*, follow-up of #175); that issue blocks #40;
 - wrap the request body in `http.MaxBytesReader` on the **compressed** bytes before `NewDecoder` (the decoder
   bounds only the decompressed bytes);
 - set the server's read, read-header, write and idle timeouts, so a slow reader cannot block;

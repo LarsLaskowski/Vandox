@@ -52,7 +52,9 @@ Duplicate keys:
 Header shape:
 
 7. **`ErrMalformed`** (chosen) — what Go and the area document already do; 0043 fixes `format_major` as a JSON integer for every major, so a
-   header that breaks that is not a batch of any version. A `format_minor` up to 2^63 - 1 is accepted, as in Go.
+   header that breaks that is not a batch of any version. A `format_minor` up to 2^63 - 1 is accepted, as in Go. Both numbers are read
+   as 64-bit integers; keeping Go's `int` and stating a 64-bit platform as an assumption was rejected, because the result would change on
+   a 32-bit target that no CI job builds.
 8. **`UnsupportedVersion` for anything but the integer 1** — what C# does; it would tell an operator to upgrade for input that no version
    writes.
 
@@ -78,10 +80,15 @@ decoders run pins them.
 - A `null` always stands for a key given once (0089): a key repeated with `null` is a duplicate.
 - The Go model refuses map keys (metric labels, MariaDB status and variables) that are equal ignoring ASCII case, so `CheckRecord` and
   `EncodeBatch` never produce a line the decoders reject; the C# model needs no such rule, because only the decoders read wire input there.
+  A record refused that way is lost to the batch, so its collector records a gap instead (0028); the area document states this as part of
+  the producer contract.
+- The header's `format_minor` is a 64-bit integer in both languages (Go `int64`, C# `long`) and Go reads the major as `int64`, so the
+  header rules hold on every Go target, not only where `int` has 64 bits.
 - Case-insensitive binding lives in the shared `PayloadRegistry.Options`, so the storage read path matches keys ignoring case too; that
   changes nothing for the rows the store writes, whose keys come from the same model.
 - The check costs one pass over the parsed line and one set of keys per object, bounded by the line; hashing of both runtimes is seeded per
   process, so crafted keys cannot degrade the sets.
 - `jq` and the decoder can still read one spelling differently (`.kind` misses `"Kind"`), but never two values for one field.
 - Not settled here: C# rejects invalid UTF-8 and unpaired surrogate escapes in string values, where Go and 0042 replace them with U+FFFD
-  (follow-up issue); keys are covered, since such a key is not ASCII.
+  (follow-up issue); keys are covered, since such a key is not ASCII. The follow-up blocks the ingest API (#40): until it is settled the
+  two decoders read such a batch differently.
