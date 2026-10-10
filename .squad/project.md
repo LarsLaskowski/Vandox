@@ -144,6 +144,9 @@ files or endpoints.
     token or writable access to `dist/`. The scheduled digest check holds only `contents: read` and
     `issues: write`, writes only regex-checked image, tag and digest values into the issue, and never writes
     to the repository. Records 0027, 0037, 0041.
+    The cloud sessions have no Docker daemon: a change to the Dockerfile, compose file, `.dockerignore` or the smoke
+    script is verified by the CI job *Release build check* on the pull request head, not locally (the local
+    substitutes are listed in `.squad/stack.md`, *Not checkable in a cloud session*).
 
 ## Guarantees
 
