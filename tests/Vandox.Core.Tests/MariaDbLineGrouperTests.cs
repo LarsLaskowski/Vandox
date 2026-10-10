@@ -345,6 +345,7 @@ public class MariaDbLineGrouperTests
     /// <param name="host">The host of the intruding line</param>
     [TestMethod]
     [DataRow("sshd", 2345, "web-1")]
+    [DataRow("mysqld", 2345, "web-1")]
     [DataRow("mariadbd", 9999, "web-1")]
     [DataRow("mariadbd", 2345, "web-2")]
     public void MariaDbLineGrouperAddEmitsInterleavedLinesBeforeTheEntry(string program, int pid, string host)

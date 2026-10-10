@@ -188,7 +188,7 @@ How lines join an entry:
 30. **The lines of the same host, program and pid; one open entry, ended by the next MariaDB header of any key, by a line
     of its key beyond the bound of option 31 or beyond the text limit (option 38), or by the end of input** (chosen) — in the journal the pid is journald's
     `_PID`, which the sender cannot choose, so another process logging as `mariadbd` cannot add lines to the server's
-    entry; a single open entry bounds memory like the single open kernel report; the lines of others are emitted as they
+    entry (an entry without `_PID` falls back to the sender-chosen `SYSLOG_PID`, see option 36); a single open entry bounds memory like the single open kernel report; the lines of others are emitted as they
     come, before the entry (0086 option 11).
 31. **A time bound: a line joins only when its time is at most 60 seconds before or after the header line's** (chosen) —
     unlike a continuation line of the error log, every journal entry and syslog line has a time of its own, and without a bound a
@@ -227,7 +227,8 @@ Forged lines in the journal and syslog:
 36. **Accept and document** (chosen) — any local process can log under the name `mariadbd` (`logger -t`, `systemd-cat -t`,
     `openlog()` in a web-space user's PHP script) and so create entries with any level and event, or end the server's open
     entry with a forged header. Option 30 keeps such a process's lines out of the server's entry in the journal, where the
-    pid is journald's. In a syslog file the pid is what the line says, so a forger using the server's pid can do two
+    pid is journald's `_PID`. A journal entry without `_PID` takes the `SYSLOG_PID` its sender chose and is open to the
+    same forging as a syslog line. In a syslog file the pid is what the line says, so a forger using the server's pid can do two
     more things, each within the 60 seconds of option 31. Its lines without a header join the server's open entry and can
     fill it until the server's next line no longer fits, which ends the entry (option 38). Its header opens an entry of
     the server's key, which takes in the server's following lines without a header under the forged level and event. Either

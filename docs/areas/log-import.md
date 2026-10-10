@@ -348,7 +348,8 @@ syslog file. The journal and syslog parsers apply these rules to the records the
   event, and end the server's open entry with a forged header line. In the journal, `pid` comes from `_PID` when the entry
   has it, which journald sets from the sender's credentials. A forger's header there opens an entry of its own key, so
   the rest of the server's entry is emitted as plain lines, and a forger's lines without a header never join the
-  server's entry. In a syslog file the pid is what the line says, so a forger can use the server's pid. Its lines without
+  server's entry. That holds only while the forger's entries carry `_PID`: an entry without it takes `SYSLOG_PID`, which
+  the sender chooses, so such entries can be forged as in a syslog file. In a syslog file the pid is what the line says, so a forger can use the server's pid. Its lines without
   a header, written within 60 seconds of the server's header line, join the server's open entry and can fill it until the
   server's next line no longer fits. That line ends the entry, and it and the server's following lines are emitted as
   plain lines. Its header line opens an entry of the server's key, which takes in the server's following lines without a

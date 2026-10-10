@@ -637,6 +637,28 @@ public class MariaDbMessageTests
     }
 
     /// <summary>
+    /// A header cut to 16,382 bytes at a character boundary stays below the limit by itself, but the cut still refuses every non-empty line and changes nothing.
+    /// </summary>
+    [TestMethod]
+    public void MariaDbMessageTryAddAfterHeaderCutBelowLimitReturnsFalse()
+    {
+        // Arrange
+        var message = new MariaDbMessage($"{new string('a', 16382)}\u20ACmore text", false);
+        var before = message.Build(out var truncatedBefore);
+
+        // Act
+        var taken = message.TryAdd("x", false);
+        var after = message.Build(out var truncatedAfter);
+
+        // Assert
+        Assert.AreEqual(16382, Encoding.UTF8.GetByteCount(before), "the header is cut before the euro sign");
+        Assert.IsTrue(truncatedBefore, "the header was cut");
+        Assert.IsFalse(taken, "a line that would fit by size is refused after the cut");
+        Assert.AreEqual(before, after, "the message is unchanged");
+        Assert.AreEqual(truncatedBefore, truncatedAfter, "the flag is unchanged");
+    }
+
+    /// <summary>
     /// A message that is built only through <c>TryAdd</c> never has a marker, however many lines are refused.
     /// </summary>
     [TestMethod]
