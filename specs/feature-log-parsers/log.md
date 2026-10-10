@@ -17,3 +17,5 @@ One line per pipeline step: date, step, member, result. Lead decisions and escal
 | 2026-10-09 | 5 Lead decide | squad-lead | AC-H3 omission dropped (decoder accepts absent host); S1215 pragma accepted, scoped to RetainedBytes(); reader contract confirmed; 64 MiB inputs kept within 10 s/test budget |
 | 2026-10-09 | 6 Implement | squad-dev | Tasks 8-13, 15-21 done; Go + .NET green (Core 784, Storage 71+1 skipped, Import 55, Backend 65); coverage gate PASS (new 98.4%, overall 95.5%, verified); 17 defensive lines uncovered, accepted |
 | 2026-10-09 | 7 Code check | squad-code-officer | No edits needed; format check 0/235, analyzer gate PASS (verified), tests green |
+| 2026-10-09 | 8 Review round 1 (9ff4779) | squad-reviewer | BLOCKING 2 (no test for BOM removal on line 1 in SyslogParser; .squad/project.md:174 example-file rule outdated), NON-BLOCKING 1 (AC-J4 multi-byte cut rows) |
+| 2026-10-09 | 8 Security diff (9ff4779) | squad-security | APPROVED; non-blocking N1: grouping keys on Program==kernel only, journal reader drops _TRANSPORT, so a local process can open a fake kernel report |
