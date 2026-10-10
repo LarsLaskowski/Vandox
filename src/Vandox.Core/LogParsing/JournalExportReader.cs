@@ -103,35 +103,21 @@ internal sealed class JournalExportReader
                 return started ? entry : null;
             }
 
+            if (kind == JournalFieldKind.EmptyLine && started)
+            {
+                return entry;
+            }
+
             if (kind == JournalFieldKind.EmptyLine)
             {
-                if (started)
-                {
-                    return entry;
-                }
-
                 continue;
             }
 
             started = true;
+            kind = await ReadKeptFieldAsync(entry, kind, cancellationToken).ConfigureAwait(false);
 
-            if (kind is JournalFieldKind.Text or JournalFieldKind.Binary)
+            if (MarkProblem(entry, kind))
             {
-                kind = await ReadFieldAsync(entry, kind == JournalFieldKind.Binary, cancellationToken).ConfigureAwait(false);
-            }
-
-            if (kind == JournalFieldKind.Malformed)
-            {
-                entry.Problem = MalformedField;
-
-                return entry;
-            }
-
-            if (kind == JournalFieldKind.Cut)
-            {
-                entry.Problem = TruncatedEntry;
-                _ended = true;
-
                 return entry;
             }
         }
@@ -214,6 +200,49 @@ internal sealed class JournalExportReader
         }
 
         return 0;
+    }
+
+    /// <summary>
+    /// Reads the value of a field whose name was found; any other kind is passed through.
+    /// </summary>
+    /// <param name="entry">The entry</param>
+    /// <param name="kind">What the field start returned</param>
+    /// <param name="cancellationToken">Cancels the read</param>
+    /// <returns>A task that returns the result of the value read for a text or binary field, otherwise <paramref name="kind"/></returns>
+    private async ValueTask<JournalFieldKind> ReadKeptFieldAsync(JournalEntry entry, JournalFieldKind kind, CancellationToken cancellationToken)
+    {
+        if (kind is JournalFieldKind.Text or JournalFieldKind.Binary)
+        {
+            return await ReadFieldAsync(entry, kind == JournalFieldKind.Binary, cancellationToken).ConfigureAwait(false);
+        }
+
+        return kind;
+    }
+
+    /// <summary>
+    /// Records the problem of a malformed or cut-off field on the entry; a cut-off field also ends the input.
+    /// </summary>
+    /// <param name="entry">The entry</param>
+    /// <param name="kind">What the field read returned</param>
+    /// <returns><c>true</c> when the entry is complete with a problem</returns>
+    private bool MarkProblem(JournalEntry entry, JournalFieldKind kind)
+    {
+        if (kind == JournalFieldKind.Malformed)
+        {
+            entry.Problem = MalformedField;
+
+            return true;
+        }
+
+        if (kind == JournalFieldKind.Cut)
+        {
+            entry.Problem = TruncatedEntry;
+            _ended = true;
+
+            return true;
+        }
+
+        return false;
     }
 
     /// <summary>
