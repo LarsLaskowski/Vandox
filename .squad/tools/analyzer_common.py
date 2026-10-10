@@ -17,11 +17,14 @@ import squad_settings as settings  # noqa: E402  (per-repository settings next t
 
 BASE_REF = getattr(settings, "BASE_REF", "origin/main")
 WORKFLOW_DIR = ".github/workflows/"
-# A positional parameter used as a word of its own: `$1`, `"$1"`, `${1}`, `"${1}"` — not inside a longer string
-# (`"::error::$1"`) and not the right-hand side of an assignment (`local path=$1`), which is the fix.
-POSITIONAL = re.compile(r'(?<![\w$=])(?:"\$(?:[1-9]|\{[1-9]\d*\})"|\$(?:[1-9]|\{[1-9]\d*\}))(?=$|[\s;|&)<>])')
+# A positional parameter, with the quotes it may carry: `$1`, `"$1"`, `${1}`, `"${1}"`. positional_words()
+# keeps the ones used as a word of their own — not inside a longer string (`"::error::$1"`) and not the
+# right-hand side of an assignment (`local path=$1`), which is the fix.
+PARAMETER = re.compile(r'"?\$(?:[1-9]|\{[1-9]\d*\})"?')
+NOT_BEFORE_WORD = "=$"
+WORD_END = " \t;|&)<>"
 # `[ … ]` as a command word: at the start of a command, followed by a space, and not the `[[` keyword.
-SINGLE_BRACKET = re.compile(r"(?:^|(?<=[\s;(!&|]))\[(?=\s)")
+SINGLE_BRACKET = re.compile(r"(?<![^\s;(!&|])\[\s")
 FUNCTION_HEAD = re.compile(r"^\s*(?:function\s+)?[\w.-]+\s*\(\)\s*\{|^\s*function\s+[\w.-]+\s*\{")
 RULES = {"S7679": "assign this positional parameter to a local variable (shelldre:S7679)",
          "S7688": "use [[ … ]] instead of [ … ] (shelldre:S7688)"}
@@ -91,6 +94,21 @@ def strip_comment(line):
     return line[:match.start()] if match else line
 
 
+def positional_words(line):
+    """The positional parameters in a line that stand as a word of their own (see PARAMETER)."""
+    for match in PARAMETER.finditer(line):
+        token = match.group()
+        before = line[match.start() - 1] if match.start() else ""
+        after = line[match.end()] if match.end() < len(line) else ""
+        if token.startswith('"') != token.endswith('"'):
+            continue  # one quote belongs to a longer string
+        if before and (before in NOT_BEFORE_WORD or before.isalnum() or before == "_"):
+            continue
+        if after and after not in WORD_END:
+            continue
+        yield token
+
+
 def sonar_shell_findings(path, text):
     """`path(line): rule` for every use of S7679 and S7688 in a shell script, found without external tools."""
     findings = []
@@ -100,7 +118,7 @@ def sonar_shell_findings(path, text):
         if SINGLE_BRACKET.search(line):
             findings.append(f"{path}({number}): {RULES['S7688']}")
         in_function = depth > 0 or FUNCTION_HEAD.match(line) is not None
-        if in_function and POSITIONAL.search(line):
+        if in_function and any(positional_words(line)):
             findings.append(f"{path}({number}): {RULES['S7679']}")
         depth = max(0, depth + line.count("{") - line.count("}"))
     return findings

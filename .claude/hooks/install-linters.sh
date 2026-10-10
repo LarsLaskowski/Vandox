@@ -36,9 +36,18 @@ case ":${PATH}:" in
     ;;
 esac
 
+# One checksum per tool for this machine; the release asset names differ per project (uname, Go and hadolint style).
 case "$(uname -m)" in
-  x86_64) arch="x86_64"; go_arch="amd64" ;;
-  aarch64|arm64) arch="aarch64"; go_arch="arm64" ;;
+  x86_64)
+    arch="x86_64"; go_arch="amd64"; hadolint_arch="$arch"
+    shellcheck_sha256="$SHELLCHECK_SHA256_X86_64"; actionlint_sha256="$ACTIONLINT_SHA256_X86_64"
+    hadolint_sha256="$HADOLINT_SHA256_X86_64"
+    ;;
+  aarch64|arm64)
+    arch="aarch64"; go_arch="arm64"; hadolint_arch="$go_arch"
+    shellcheck_sha256="$SHELLCHECK_SHA256_AARCH64"; actionlint_sha256="$ACTIONLINT_SHA256_AARCH64"
+    hadolint_sha256="$HADOLINT_SHA256_AARCH64"
+    ;;
   *)
     echo "install-linters: unsupported architecture $(uname -m); shellcheck, actionlint and hadolint are not installed." >&2
     exit 0
@@ -48,7 +57,10 @@ esac
 # have <tool> <version-substring>: the installed binary already reports the pinned version.
 have() {
   local tool="$1" wanted="$2"
-  command -v "$tool" >/dev/null 2>&1 && "$tool" --version 2>/dev/null | head -n 3 | grep -qF "$wanted"
+  if command -v "$tool" >/dev/null 2>&1 && "$tool" --version 2>/dev/null | head -n 3 | grep -qF "$wanted"; then
+    return 0
+  fi
+  return 1
 }
 
 # fetch <url> <sha256> <destination>: download to a temporary file, keep it only when the checksum matches.
@@ -65,15 +77,15 @@ fetch() {
     rm -f "$tmp"
     return 1
   fi
-  mv -f "$tmp" "$destination"
+  mv -f "$tmp" "$destination" || return 1
+  return 0
 }
 
 status=0
 
 if ! have shellcheck "${SHELLCHECK_VERSION#v}"; then
-  sha256="$([[ "$arch" == "x86_64" ]] && echo "$SHELLCHECK_SHA256_X86_64" || echo "$SHELLCHECK_SHA256_AARCH64")"
   archive="${bin_dir}/shellcheck.tar.xz"
-  if fetch "https://github.com/koalaman/shellcheck/releases/download/${SHELLCHECK_VERSION}/shellcheck-${SHELLCHECK_VERSION}.linux.${arch}.tar.xz" "$sha256" "$archive"; then
+  if fetch "https://github.com/koalaman/shellcheck/releases/download/${SHELLCHECK_VERSION}/shellcheck-${SHELLCHECK_VERSION}.linux.${arch}.tar.xz" "$shellcheck_sha256" "$archive"; then
     tar -xJf "$archive" -C "$bin_dir" --strip-components=1 "shellcheck-${SHELLCHECK_VERSION}/shellcheck" \
       && chmod 0755 "${bin_dir}/shellcheck" || status=1
     rm -f "$archive"
@@ -83,9 +95,8 @@ if ! have shellcheck "${SHELLCHECK_VERSION#v}"; then
 fi
 
 if ! have actionlint "$ACTIONLINT_VERSION"; then
-  sha256="$([[ "$arch" == "x86_64" ]] && echo "$ACTIONLINT_SHA256_X86_64" || echo "$ACTIONLINT_SHA256_AARCH64")"
   archive="${bin_dir}/actionlint.tar.gz"
-  if fetch "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_${go_arch}.tar.gz" "$sha256" "$archive"; then
+  if fetch "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_${go_arch}.tar.gz" "$actionlint_sha256" "$archive"; then
     tar -xzf "$archive" -C "$bin_dir" actionlint && chmod 0755 "${bin_dir}/actionlint" || status=1
     rm -f "$archive"
   else
@@ -94,9 +105,7 @@ if ! have actionlint "$ACTIONLINT_VERSION"; then
 fi
 
 if ! have hadolint "${HADOLINT_VERSION#v}"; then
-  sha256="$([[ "$arch" == "x86_64" ]] && echo "$HADOLINT_SHA256_X86_64" || echo "$HADOLINT_SHA256_AARCH64")"
-  hadolint_arch="$([[ "$arch" == "x86_64" ]] && echo "x86_64" || echo "arm64")"
-  if fetch "https://github.com/hadolint/hadolint/releases/download/${HADOLINT_VERSION}/hadolint-Linux-${hadolint_arch}" "$sha256" "${bin_dir}/hadolint"; then
+  if fetch "https://github.com/hadolint/hadolint/releases/download/${HADOLINT_VERSION}/hadolint-Linux-${hadolint_arch}" "$hadolint_sha256" "${bin_dir}/hadolint"; then
     chmod 0755 "${bin_dir}/hadolint"
   else
     status=1
