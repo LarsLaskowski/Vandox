@@ -1,9 +1,9 @@
-# 0088: MariaDB error log: entries detected by content and kept with their continuation lines, lifecycle events in an optional log_line field
+# 0088: MariaDB error log: entries detected by content and kept with their continuation lines, lifecycle events in an optional log_line field; the same rules for MariaDB lines of the journal and syslog
 
-- **Status:** Accepted
+- **Status:** Proposed
 - **Date:** 2026-10-10
 - **Area:** Log import
-- **Source:** Issue #17
+- **Source:** Issue #17, issue #165
 - **Supersedes:** —
 
 ## Context
@@ -36,6 +36,19 @@ The `log_line` record had no field for a classification ([0063](0063-storage-sch
 [0084](0084-log-line-record-gets-an-optional-host-field.md)), and the system log parsers emit log lines only
 ([0086](0086-system-log-parsers-generic-syslog-claim-and-grouped-kernel-reports.md)). No version of the wire format or
 the schema has been released (no `v*` tag).
+
+Issue #165 asks to apply these rules where a default server actually writes MariaDB's output, and to keep a crash report
+together across journal entries with the bounds of the error log. Checked in the MariaDB source (10.6.22):
+`print_buffer_to_file` (`sql/log.cc`) writes every server line with its header to standard error, the fatal signal handler
+writes its header and the crash report to the same descriptor (`sql/signal_handler.cc`), and `sql/mysqld.cc` redirects
+standard error to a file only when `log_error` is set, which the Debian `50-server.cnf` leaves commented out ("When running
+under systemd, error logging goes via stdout/stderr to journald"). The upstream `mariadb.service` starts
+`/usr/sbin/mariadbd` and sets neither `SyslogIdentifier=` nor `SyslogLevel=`, so by systemd's defaults (not checked on the
+server) every line becomes a journal entry of its own with the identifier `mariadbd`, the server's `_PID` and the priority
+`info` for every line, and rsyslog writes it to `syslog` as `mariadbd[<pid>]: <line>`. MariaDB's `50-mysqld_safe.cnf`
+suggests a drop-in with `SyslogIdentifier = mysqld` and `SyslogLevel = err`, and servers before 10.5 run as `mysqld`. The
+journal and syslog parsers stored each of these lines as a record of its own, with the header in the message and no event:
+only program `kernel` lines were grouped.
 
 ## Options considered
 
@@ -133,28 +146,109 @@ Forged lines:
     line has a header's shape is read as a MariaDB error log with events, such as a file a web-space user wrote under a
     saved `/var/www` or an application log whose first line is client text; `log` keeps its real path.
 
+Where the rules apply to MariaDB's output in the journal and syslog (#165):
+
+20. **A parser of its own** — a journal export or a syslog file holds every program's lines, so no file can be claimed for
+    MariaDB.
+21. **A stage in the journal and syslog parsers, before kernel reports are grouped** (chosen) — the place of the kernel
+    report grouping ([0086](0086-system-log-parsers-generic-syslog-claim-and-grouped-kernel-reports.md) option 8); the two
+    stages see disjoint programs.
+
+Which lines are MariaDB lines:
+
+22. **Program `mariadbd` only, as the issue names it** — misses servers before 10.5 and the drop-in MariaDB itself suggests.
+23. **Program `mariadbd` or `mysqld`** (chosen) — MySQL 8's `mysqld` writes another header (`YYYY-MM-DDTHH:MM:SS.ffffffZ`),
+    which is no entry header, so its lines stay plain; MySQL 5.5 and 5.6 write MariaDB's header forms and would get
+    MariaDB's events, accepted because no supported Ubuntu ships them.
+24. **Every line whose message has a header's shape, whatever its program** — any program's text that starts with a date
+    would lose it and could get an event.
+25. **Only journal entries with the trusted `_TRANSPORT=stdout` and `_SYSTEMD_UNIT`** — closes forging by name in the
+    journal, but syslog files carry no such field, so the two parsers would classify the same lines differently (the reason
+    of 0086 option 18), and the journal parser would have to keep more fields.
+26. **A message that holds a line feed is never a MariaDB line** (chosen, with 23) — standard error arrives one line per
+    journal entry and per syslog line; only a native journal client writes such a message, and the header and event rules
+    are defined per line.
+
+Which time:
+
+27. **MariaDB's local time stamp, read in `import.time_zone`** (the rule of the error log) — a journal export, which carries
+    UTC microseconds and needs no option today, would fail with "import.time_zone is not set" at its first MariaDB line, and
+    an exact time would be replaced by a local one to the second.
+28. **The time of the journal entry or syslog line** (chosen) — exact in the journal, resolved by the syslog rules in a
+    syslog file; MariaDB's time stamp only marks the header and is neither read nor checked, so a header whose date does
+    not exist still opens an entry.
+
+How lines join an entry:
+
+29. **Every following MariaDB line up to the next header**, as in the file — a journal holds other writers under the same
+    name, and the lines of two processes can interleave.
+30. **The lines of the same host, program and pid; one open entry, ended by the next MariaDB header of any key or the end
+    of input** (chosen) — in the journal the pid is journald's `_PID`, which the sender cannot choose, so another process
+    logging as `mariadbd` cannot add lines to the server's entry; a single open entry bounds memory like the single open
+    kernel report; the lines of others are emitted as they come, before the entry (0086 option 11).
+31. **A time or line bound as for kernel reports** — the error log has none and a crash report has no end line; the text
+    bound of option 12 already bounds memory, which is what the issue asks for.
+
+Which fields:
+
+32. **The fields of the error log** (program empty, the time from the header, a priority only from the level) — the journal
+    and syslog know the program, the host, the pid and an exact time.
+33. **Message, level and event from the header, every other field from the line** (chosen) — the priority is the level's
+    where there is one, because the journal's priority of a service's standard error is the unit's `SyslogLevel=`, the
+    same for every line, and the line's own otherwise; the message loses the header prefix as in the error log, so the same
+    output gives the same message from the file, the journal and syslog.
+
+Crash recovery when an input holds several hosts (a merged journal, a central syslog):
+
+34. **One recovery state for the whole input**, as in the error log — another host's `InnoDB: ... started` line would end
+    a recovery it did not start.
+35. **The recovery belongs to the host of its start entry; one recovery is tracked at a time** (chosen) — the state stays
+    one value; a recovery start of another host replaces it.
+
+Forged lines in the journal and syslog:
+
+36. **Accept and document** (chosen) — any local process can log under the name `mariadbd` (`logger -t`, `systemd-cat -t`,
+    `openlog()` in a web-space user's PHP script) and so create entries with any level and event, or end the server's open
+    entry with a forged header. Option 30 keeps such a process's lines without a header out of the server's entry in the
+    journal; in a syslog file the pid is what the line says. As in option 19 and 0086 option 19, a program name and an
+    event classify text and prove no origin.
+
 ## Decision
 
 Options 3, 6, 8, 10, 12, 14, 16, 18 and 19: the parser `mariadb` recognizes the error log by content (its first non-empty
 line is an entry header; a file with a syslog name is never claimed), turns every entry (a
 header line and its continuation lines) into one `log_line` record with its local time resolved in `import.time_zone`, keeps
 the head of a long entry with an omitted-lines marker, and classifies lifecycle entries into the new optional `log_line`
-field `event` (name rule, stored in `log_lines.event`); no path option is added. The rules are in
-[Log import](../areas/log-import.md) (*MariaDB error log*), the field in [Wire format](../areas/wire-format.md) and
-[Storage](../areas/storage.md).
+field `event` (name rule, stored in `log_lines.event`); no path option is added. For MariaDB's output in the journal and
+syslog (#165), options 21, 23, 26, 28, 30, 33, 35 and 36: the journal and syslog parsers apply the header, bounds and event
+rules to the lines of program `mariadbd` or `mysqld` before kernel reports are grouped, join a header line and the
+following lines without a header of the same host, program and pid into one record that keeps the time, host, program and
+pid of its header line, and track a crash recovery per host. The rules are in
+[Log import](../areas/log-import.md) (*MariaDB error log*, with *Lines from the journal and syslog*), the field in
+[Wire format](../areas/wire-format.md) and [Storage](../areas/storage.md).
 
 ## Consequences
 
-- On a server where MariaDB logs to the journal (the packaged default under systemd), there is no error log file, this
-  parser imports nothing, and MariaDB's lines arrive through the journal and syslog parsers as plain log lines with
-  program `mariadbd`, without `event` and with each crash report line a record of its own; classifying those is #165.
+- On a server where MariaDB logs to the journal (the packaged default under systemd) there is no error log file and this
+  parser imports nothing; MariaDB's entries come from a journal export or a syslog file, classified like the error log but
+  with the source type `journal` or `syslog`, so a query for them selects by `event` or program, not by source type
+  `mariadb`.
+- A journal export with MariaDB lines still needs no `import.time_zone` (option 28).
+- Importing a journal export and the syslog file of the same period stores each MariaDB entry twice, as every line
+  (0086); signature detection (#21) must not count such an event twice.
+- Content imported before #165 keeps its plain MariaDB lines (an import is idempotent per content). A journal or syslog
+  file whose interrupted import is resumed by a version with #165 can lose or repeat records near the resume point, because
+  the grouping changes the record count and a changed parser version is not noticed (the import's existing limit).
+- A local process that logs as `mariadbd` or `mysqld` can forge MariaDB entries and events in the journal and syslog, and
+  end the server's open entry with a forged header, after which the rest of that entry is stored as plain lines (option 36).
+- A MySQL 5.5 or 5.6 server logging as `mysqld` would get MariaDB's events (option 23).
 - The issue's default path and path option are not built (option 8 instead of 7); a path for live shipping belongs to #37.
 - `event` is stored, not indexed; a query by event needs its own change (#21, #23).
 - The 16 KiB text limit stays; a crash report with a long query loses its tail and says so.
 - A file whose first non-empty line is not an entry header (a copy that starts inside an entry, a log whose first line
   a library wrote without a header) is listed as not recognized, and so is a MariaDB error log under a syslog name.
-- A syslog file keeps its parser whatever lines it holds; a line that looks like a MariaDB entry inside it stays a
-  syslog line.
+- A syslog file keeps its parser whatever lines it holds: a raw line in it with the shape of an entry header is no syslog
+  line, and only the messages of `mariadbd` and `mysqld` syslog lines are read with the MariaDB rules (option 23).
 - Lines of a time zone change between an interrupted import and its resume are shifted, as for syslog files (0085).
 - The agent's live shipping (#37) may send `event` or leave it empty; the backend accepts both.
 - Signature detection (#21) and outage reconstruction (#23) must not treat an `event` as proof that MariaDB wrote the line
