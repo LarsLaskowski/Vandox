@@ -253,25 +253,20 @@ public sealed class BatchDecoder : IDisposable
             throw Fail(WireErrorKind.Malformed, "record is not valid JSON", null, _line);
         }
 
-        if (root.ValueKind != JsonValueKind.Object)
+        if (root.ValueKind != JsonValueKind.Object && root.ValueKind != JsonValueKind.Null)
         {
             throw Fail(WireErrorKind.Malformed, "record is not a JSON object", null, _line);
         }
 
-        Envelope? envelope;
+        Envelope envelope;
 
         try
         {
-            envelope = root.Deserialize<Envelope>(PayloadRegistry.Options);
+            envelope = root.Deserialize<Envelope>(PayloadRegistry.Options) ?? new Envelope();
         }
         catch (JsonException)
         {
             throw Fail(WireErrorKind.Malformed, "record does not fit the format", null, _line);
-        }
-
-        if (envelope is null)
-        {
-            throw Fail(WireErrorKind.Malformed, "record is empty", null, _line);
         }
 
         if (PayloadRegistry.TypeOf(envelope.Kind) is null)
