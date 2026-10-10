@@ -86,9 +86,9 @@ skips them. Without it, SonarQube Cloud's shell rules (`shelldre:*`) only report
 
 ### Not checkable in a cloud session
 
-The cloud sessions lack some tools and network access, so these checks cannot run locally. The CI run on the
-pull request head is then the gate; the member who would run the check writes "not verified locally, CI job
-<name>" once in `log.md` and does not repeat it as an open point in every round.
+The cloud sessions lack some tools and network access, so these checks cannot run locally. The check in the last
+column, on the pull request head, is then the gate; the member who would run the check writes "not verified
+locally, <authoritative check>" once in `log.md` and does not repeat it as an open point in every round.
 
 | Change | Missing locally | Local substitute | Authoritative check |
 | ------ | --------------- | ---------------- | ------------------- |
