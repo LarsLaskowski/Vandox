@@ -20,7 +20,9 @@ Usage, from anywhere inside the repository:
         --tokens 37445 --tool-uses 6 --seconds 57]
     python3 .squad/tools/squad-log.py <work folder> --summary
 
-`<work folder>` is `specs/issue-12`, `issue-12` or a path to the folder; `<result>` may contain line breaks.
+`<work folder>` is the folder's name under `specs/` (`issue-12`, or `specs/issue-12`); it is matched against the
+folders that exist there, never used as a path, so no argument reaches the file system. `<result>` may
+contain line breaks.
 `--summary` prints a Markdown table per member (launches, tokens, tool uses, seconds) with a total row, for
 the "Squad working record" comment and the wrap-up report. Exit code 0 when the row was written or the
 summary printed, 1 when the folder has no `log.md`.
@@ -56,10 +58,17 @@ def trailer(launch, tokens, tool_uses, seconds):
 
 
 def resolve_log(root, folder):
-    for candidate in (folder, os.path.join("specs", folder)):
-        path = os.path.join(root, candidate, "log.md")
-        if os.path.isfile(path):
-            return path
+    """The `log.md` of the named work folder under `specs/`, or None. The name is compared with the folders
+    that exist there and the path is built from the directory listing, so the argument never becomes a path."""
+    wanted = folder.strip().replace("\\", "/").rstrip("/")
+    wanted = wanted[len("specs/"):] if wanted.startswith("specs/") else wanted
+    specs = os.path.join(root, "specs")
+    if not os.path.isdir(specs):
+        return None
+    for name in sorted(os.listdir(specs)):
+        if name == wanted and name not in (".", "..") and os.path.isdir(os.path.join(specs, name)):
+            path = os.path.join(specs, name, "log.md")
+            return path if os.path.isfile(path) else None
     return None
 
 
