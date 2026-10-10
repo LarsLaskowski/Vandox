@@ -36,7 +36,7 @@ repository (record 0074): keep it true when the build changes.
 | Name | Command |
 | ---- | ------- |
 | *Restore* | `go mod download && dotnet tool restore && dotnet restore Vandox.slnx` |
-| *Format* (Code Officer only in the squad) | `gofmt -w . && reihitsu-format src tests tools` (or `dotnet tool run reihitsu-format src tests tools`) |
+| *Format* (Code Officer only in the squad) | `gofmt -w . && reihitsu-format src tests tools --force` (or `dotnet tool run reihitsu-format src tests tools --force`) |
 | *Format check* | `test -z "$(gofmt -l .)" && reihitsu-format --check src tests tools` |
 | *Build* | `go build ./... && dotnet build Vandox.slnx` |
 | *Test* | `go test ./... -race && dotnet test Vandox.slnx` |
@@ -46,7 +46,18 @@ repository (record 0074): keep it true when the build changes.
 | *Analyzer gate* | `python3 .squad/tools/analyzer-check.py` |
 
 `reihitsu-format` needs `DOTNET_ROOT` when it runs as a global tool outside the SDK's directory (for example
-`DOTNET_ROOT=/usr/lib/dotnet`).
+`DOTNET_ROOT=/usr/lib/dotnet`), for *Format* and *Format check* alike. Without `--force` it asks for confirmation
+when a run covers more than 25 files (the count is every `.cs` file under the given paths outside `bin/` and `obj/`,
+not only those that need formatting, so the prompt also fires on a clean tree); in a non-interactive session it
+cannot ask, so it formats nothing and exits with code 2. `--force` only skips that prompt: the run still rewrites
+just the files that need formatting and leaves every other file untouched.
+
+*Test* and *Test with coverage* build and run the .NET tests in the Debug configuration (no `-c`); CI
+(`.github/workflows/ci.yml`) builds and runs them in Release. The *Analyzer gate* builds Release but runs no test,
+so a test that fails only in Release shows first in CI on the pull request. Write tests that hold in both
+configurations, and check one in Release locally with `-c Release` (for example
+`dotnet test tests/<Project>.Tests -c Release --filter <ClassOrMethodName>`); *Writing tests* has the consequence
+for allocation bounds.
 
 Test time limits: CI runs `go test` without `-timeout`, so Go's default of 10 minutes per package binary applies,
 under `-race` as locally. A package whose tests take more than a minute locally is a warning sign; size the inputs
@@ -154,6 +165,16 @@ class under test, Arrange/Act/Assert comments, helper classes for temporary dire
 Heap-bound tests (.NET) measure retention with `GC.GetTotalMemory(true)`, which Sonar `S1215` flags. The accepted
 form is one private helper in the test class that wraps exactly that call in `#pragma warning disable S1215` /
 `#pragma warning restore S1215` (as `KernelReportGrouperTests.RetainedBytes`); no other suppression of `S1215`.
+
+Allocation-bound tests (.NET) measure with `GC.GetTotalAllocatedBytes(true)` and should hold in Debug, where *Test*
+runs them, as well as in Release, where CI runs them. In Debug the compiler emits every async state machine as a
+class, so each call of an async method allocates even when it completes synchronously: `LogLineReader.ReadAsync`
+allocates about 104 bytes per call there and essentially nothing in Release. An absolute bound smaller than that
+per-call allocation times the number of such calls the input causes therefore fails in Debug for every
+implementation (64 MiB of empty lines are about 67 million calls, about 7 GB). Either size an absolute bound for
+the number of calls the input causes (as `JournalExportReaderTests.AllocationBound`), or measure the allocation
+beyond a baseline loop that reads the same input through that method alone and bound the difference (as
+`MariaDbErrorLogParserTests.ReaderAllocationAsync`).
 
 Pitfalls of leak and error-text tests (Go): never put a leak sentinel into a subtest name or any other name
 that becomes a path (a `t.TempDir()` directory) when the error under test prints that path — strip the path
