@@ -60,13 +60,19 @@ and, from the repository root, covers more than `src tests tools`. That is a les
   check*, that without `--force` the formatter prompts when a run covers more than 25 files (counted over every
   file given), formats nothing and exits with code 2 in a non-interactive session, and that `--force` only skips
   the prompt and still rewrites just the files that need formatting.
-- [ ] AC3: A paragraph below the *Commands* table states that *Test* and *Test with coverage* build the .NET
-  tests Debug, that CI and the *Analyzer gate* build Release, and that a test must pass in both.
+- [ ] AC3: A paragraph below the *Commands* table states that *Test* and *Test with coverage* build and run the
+  .NET tests in Debug, that CI builds and runs them in Release, and that the *Analyzer gate* builds Release but
+  runs no test, so a failure that occurs only in Release shows first in CI on the pull request. It words "hold
+  in both configurations" as guidance, not as something a squad gate enforces, and names
+  `dotnet test ... -c Release` as the way to check a test in Release locally.
 - [ ] AC4: *Writing tests* has a paragraph on .NET allocation-bound tests: measured with
-  `GC.GetTotalAllocatedBytes(true)`, valid in Debug and Release; Debug allocates per async call (state machine as
-  a class, `LogLineReader.ReadAsync` about 104 bytes per line, essentially nothing in Release); an absolute bound
-  on code that calls such a method per line or record fails in Debug; measure beyond a baseline loop over the
-  same input and bound the difference, naming `MariaDbErrorLogParserTests.ReaderAllocationAsync`.
+  `GC.GetTotalAllocatedBytes(true)`, meant to hold in Debug and Release; Debug allocates per async call (state
+  machine as a class, `LogLineReader.ReadAsync` about 104 bytes per call, essentially nothing in Release); an
+  absolute bound fails in Debug for every implementation only when it is smaller than the per-call allocation
+  times the number of such calls the input causes; so either size an absolute bound for that number (naming
+  `JournalExportReaderTests.AllocationBound`) or bound the difference to a baseline loop over the same input
+  (naming `MariaDbErrorLogParserTests.ReaderAllocationAsync`). The paragraph does not claim that every absolute
+  bound fails in Debug.
 - [ ] AC5: The diff changes `.squad/stack.md` only (besides `specs/issue-168/`); `python3 .squad/tools/config-check.py`,
   `python3 .squad/tools/scope-check.py --tier security` and *Format check* pass.
 
@@ -79,8 +85,8 @@ gate* of step 6 are not applicable (*Changes without production or test code* in
 | -- | ----- | --- |
 | AC1 | Read-only check of the diff against the exact text in *Approach*; live check: in step 7 the Code Officer runs the new *Format* (non-interactive) and reports exit code 0, "Formatted 0 of N file(s)" and no changed file in `git status`, then *Format check* exit 0 | Reviewer (step 8), Code Officer (step 7) |
 | AC2 | Read-only check of the diff against *Approach*; the facts were verified in this plan (*Problem / root cause*) and can be re-run on a scratch copy | Reviewer (step 8), Security (diff review) |
-| AC3 | Read-only check of the diff against *Approach* and `.github/workflows/ci.yml` lines 72–75 and 126–127 | Reviewer (step 8) |
-| AC4 | Read-only check of the diff against *Approach* and `tests/Vandox.Core.Tests/MariaDbErrorLogParserTests.cs` lines 956–1029 and 1115 | Reviewer (step 8) |
+| AC3 | Read-only check of the diff against *Approach*, `.github/workflows/ci.yml` lines 72–75 and 126–127, and `.squad/tools/analyzer-check-dotnet.py` line 37 (a Release build, no test run); the Release run of the tests themselves happens in CI on the pull request (step 11), no squad gate before it runs them | Reviewer (step 8) |
+| AC4 | Read-only check of the diff against *Approach*, `tests/Vandox.Core.Tests/MariaDbErrorLogParserTests.cs` lines 956–1029 and 1115, and `tests/Vandox.Core.Tests/JournalExportReaderTests.cs` lines 18 and 364–454 | Reviewer (step 8) |
 | AC5 | `git diff --stat origin/main...HEAD`; `python3 .squad/tools/config-check.py`; `python3 .squad/tools/scope-check.py --tier security`; *Format check* | Orchestrator / Code Officer (step 7), Reviewer (step 8) |
 
 ## Approach
@@ -103,21 +109,26 @@ when a run covers more than 25 files (it counts every file it is given, not only
 non-interactive session it cannot ask, so it formats nothing and exits with code 2. `--force` only skips that
 prompt: the run still rewrites just the files that need formatting and leaves every other file untouched.
 
-*Test* and *Test with coverage* build the .NET tests in the Debug configuration (no `-c`); CI
-(`.github/workflows/ci.yml`) and the *Analyzer gate* build Release. A test must pass in both (*Writing tests* has
-the consequence for allocation bounds).
+*Test* and *Test with coverage* build and run the .NET tests in the Debug configuration (no `-c`); CI
+(`.github/workflows/ci.yml`) builds and runs them in Release. The *Analyzer gate* builds Release but runs no test,
+so a test that fails only in Release shows first in CI on the pull request. Write tests that hold in both
+configurations, and check one in Release locally with `-c Release` (for example
+`dotnet test tests/<Project>.Tests -c Release --filter <ClassOrMethodName>`); *Writing tests* has the consequence
+for allocation bounds.
 ```
 
 Edit 3 — in *Writing tests*, a new paragraph directly after the paragraph that ends "no other suppression of
 `S1215`." (line 156), separated by one blank line on each side:
 
 ```
-Allocation-bound tests (.NET) measure with `GC.GetTotalAllocatedBytes(true)` and must hold in Debug, where *Test*
+Allocation-bound tests (.NET) measure with `GC.GetTotalAllocatedBytes(true)` and should hold in Debug, where *Test*
 runs them, as well as in Release, where CI runs them. In Debug the compiler emits every async state machine as a
 class, so each call of an async method allocates even when it completes synchronously: `LogLineReader.ReadAsync`
-allocates about 104 bytes per line there and essentially nothing in Release. An absolute bound on code that calls
-such a method per line or per record therefore fails in Debug for every implementation. Measure the allocation
-beyond a baseline loop that reads the same input through that method alone, and bound the difference (as
+allocates about 104 bytes per call there and essentially nothing in Release. An absolute bound smaller than that
+per-call allocation times the number of such calls the input causes therefore fails in Debug for every
+implementation (64 MiB of empty lines are about 67 million calls, about 7 GB). Either size an absolute bound for
+the number of calls the input causes (as `JournalExportReaderTests.AllocationBound`), or measure the allocation
+beyond a baseline loop that reads the same input through that method alone and bound the difference (as
 `MariaDbErrorLogParserTests.ReaderAllocationAsync`).
 ```
 
@@ -172,6 +183,29 @@ unchanged, so nothing the squad or CI enforces is weakened.
 None: a flag that makes a documented command non-interactive and a test-writing note are routine; no choice
 between real alternatives of lasting weight and no guarantee is touched (record 0074 already makes
 `stack.md` the repository's own toolchain description).
+
+## Challenge
+
+Devil's Advocate: 0 major, 2 minor objections.
+
+1. *Edit 3 and AC4 overstate the Debug claim* — **accepted.** Checked:
+   `tests/Vandox.Core.Tests/JournalExportReaderTests.cs` line 18 defines an absolute
+   `AllocationBound = 8 * Mebibyte`, used at lines 364, 395, 423 and 454 around `ReadAsync` loops, and *Test*
+   runs those tests in Debug. The Debug overhead scales with the number of async calls (about 104 bytes per
+   `LogLineReader.ReadAsync` call), so an absolute bound fails for every implementation only when it is smaller
+   than that overhead times the number of calls the input causes. Edit 3 now states that condition with a worked
+   figure, offers two valid patterns (an absolute bound sized for the number of calls, naming
+   `JournalExportReaderTests.AllocationBound`, or the baseline difference, naming
+   `MariaDbErrorLogParserTests.ReaderAllocationAsync`), says "per call" instead of "per line", and uses "should
+   hold" instead of "must hold". AC4 and the AC4 row of *Verification without tests* follow.
+2. *Edit 2 and AC3 present "must pass in both" as enforced without a check* — **accepted.** Checked: *Test*
+   (`.squad/stack.md` line 42) runs Debug; the dotnet analyzer gate (`.squad/tools/analyzer-check-dotnet.py`
+   line 37) builds Release and runs no test; the first Release test run is CI on the pull request (step 11 in
+   `.squad/routing.md`, line 116). Edit 2 now says CI builds and runs Release, that the *Analyzer gate* builds
+   Release without running tests so a Release-only failure shows first in CI, words "hold in both" as guidance,
+   and names `dotnet test tests/<Project>.Tests -c Release --filter <ClassOrMethodName>` for a local check. AC3
+   and the AC3 row of *Verification without tests* follow. Making Release testing part of a squad gate stays
+   out of scope (it would change commands the pipeline runs, see *Not chosen* under *Approach*).
 
 ## Out of scope / follow-ups
 
