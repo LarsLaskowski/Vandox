@@ -6,3 +6,4 @@ One line per pipeline step: date, step, member, result. Lead decisions and escal
 | ---- | ---- | ------ | ------ |
 | 2026-10-10 | 1 Intake | Orchestrator | issue read, branch fix-issue-166-wire-null-string |
 | 2026-10-10 | 2 Plan | squad-lead | tier security; record 0089 Proposed; plan.md written (opus/high · 222,981 tokens · 53 tool uses · 841 s) |
+| 2026-10-10 | 2 Plan challenge | squad-devils-advocate | OBJECTIONS 0 major, 2 minor (ppid not covered by fixture; storage read path not named) (sonnet/high · 58,630 tokens · 22 tool uses · 118 s) |
