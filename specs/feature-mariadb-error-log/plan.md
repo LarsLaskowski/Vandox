@@ -15,7 +15,9 @@ lifecycle entries into a new optional `log_line` field `event`, added in Go, C#,
 version 5). Record [0088](../../docs/decisions/0088-mariadb-error-log-entries-by-content-and-lifecycle-events-in-log-line.md).
 
 Claims of the issue, checked against the code and the MariaDB source (read with plain Git from
-`https://github.com/MariaDB/server`, tags `mariadb-10.3.39`, `-10.6.12`, `-10.6.22`, `-10.6.28`, `-10.11.9`):
+`https://github.com/MariaDB/server`, tags `mariadb-10.3.39`, `-10.5.22`, `-10.6.7`, `-10.6.11`, `-10.6.12`, `-10.6.22`,
+`-10.6.28`, `-10.11.9`; that Ubuntu 22.04 released with 10.6.7 is the Devil's Advocate's statement, *unverified* here
+because the Ubuntu archive is not reachable from the session — the parser accepts both start wordings either way):
 
 - "Depends on #15" — **confirmed done**: #15 was closed on 2026-10-06 (PR #132), and #16 (journal and syslog parsers,
   PR #152) is on `main` too. The framework this parser plugs into exists: `ILogParser`, `ParserRegistry`, `LogLineReader`,
@@ -26,15 +28,27 @@ Claims of the issue, checked against the code and the MariaDB source (read with 
 - "Ubuntu default path `/var/log/mysql/error.log`" — **refuted as a default**: MariaDB's Debian packaging
   (`debian/additions/mariadb.conf.d/50-server.cnf` at 10.6.12 and 10.6.28) has `#log_error = /var/log/mysql/error.log`
   commented out with "When running under systemd, error logging goes via stdout/stderr to journald". Ubuntu 22.04's own
-  package and the server's Plesk configuration were **not checked**; the file exists where `log_error` is set. Consequence:
-  the parser is content-based, and journal lines of `mariadbd` are a follow-up (*Out of scope*).
-- "path configurable" — **not applicable to the import**: the scanner hands parsers a cleaned relative name of an
-  arbitrary copy or archive entry (`LogFile.Name`), so a configured server path matches nothing; detection by content finds
-  the file under any name. No option is added. Configured log paths belong to the agent's shipping (#37, "configured log
-  files").
+  package and the server's Plesk configuration were **not checked** (Launchpad is not reachable from the session); the
+  file exists where `log_error` is set. Consequence: the parser is content-based and looks for no path; on a server with
+  the packaged default it finds no error log and imports nothing, and MariaDB's lines in the journal are classified only
+  by follow-up #165.
+- "path configurable" — **requirement dropped, not applicable to the import**: the scanner hands parsers a cleaned
+  relative name of an arbitrary copy or archive entry (`LogFile.Name`), so a configured server path matches nothing;
+  detection by content finds the file under any name. No option is added. Configured log paths belong to the agent's
+  shipping (#37, "configured log files"). The spec names both deviations from the issue's wording (*Deviations from the
+  issue*).
 - "Classify start, normal shutdown, abort by signal, crash recovery start/end" — **gap confirmed**: `log_line` has no field
   for a classification (`src/Vandox.Core/Model/LogLine.cs`, `internal/model/logline.go`: log, host, program, pid,
-  priority, message, truncated). The plan adds `event` (record 0088, options 1-4).
+  priority, message, truncated). The plan adds `event` (record 0088, options 1-4). The **start line has two wordings**:
+  10.6.12 and later (also 10.3.39, 10.5.22) write `Starting MariaDB %s source revision %s as process %lu`
+  (`sql/mysqld.cc:4874` at 10.6.12; 10.6.22 and later add `server_uid %s`); 10.6.7 to 10.6.11 write
+  `%s (server %s) starting as process %lu ...` or, with `--version` set, `%s (server %s as %s) starting as process %lu ...`
+  (`sql/mysqld.cc:3955-3961` at 10.6.7, `:4018-4024` at 10.6.11, in `init_common_variables`, before InnoDB starts), for
+  example `/usr/sbin/mariadbd (server 10.6.7-MariaDB-2ubuntu1.1) starting as process 1234 ...`. Both are `mariadb.start`.
+  The other lifecycle texts are the same in 10.6.7 and 10.6.12 (`ER_STARTUP`, `ER_NORMAL_SHUTDOWN`, `ER_SHUTDOWN_COMPLETE`
+  in `sql/share/errmsg-utf8.txt`, `[ERROR] mysqld got signal %d ;` in `sql/signal_handler.cc`, `Starting crash recovery
+  from checkpoint LSN=` in `log0recv.cc`, `<version> started; log sequence number` in `srv0start.cc`, the table crash
+  recovery lines in `sql/handler.cc`), and so is the header format of `print_buffer_to_file` (`sql/log.cc`).
 - "warnings and errors" — **confirmed** as the level tags `Warning` and `ERROR` (`sql/log.cc:9388`,
   `print_buffer_to_file`, format `"%d-%02d-%02d %2d:%02d:%02d %lu [%s] %.*s%.*s\n"`); mapped to priorities 4 and 3.
 - "Keep multi-line stack traces as one record" — **confirmed format**: `handle_fatal_signal` (`sql/signal_handler.cc`)
@@ -47,13 +61,26 @@ Claims of the issue, checked against the code and the MariaDB source (read with 
   LSN=...` (`storage/innobase/log/log0recv.cc`). InnoDB 10.6 writes no "recovery finished" line; its redo recovery ends
   before `InnoDB: <version> started; log sequence number ...` (`srv0start.cc`), which the plan uses (record 0088, option 16).
 - "Tests with shortened real samples" — the production server's log is **not available** to the squad; the samples below
-  are built line by line from the MariaDB 10.6 source format strings (the series Ubuntu 22.04 ships) and shortened. Marked
-  as such in the spec.
+  are built line by line from the MariaDB 10.6 source format strings (the series Ubuntu 22.04 ships: the fixture from
+  10.6.12, AC-E7 from 10.6.7) and shortened. Marked as such in the spec.
 
-Related observation (not fixed, not part of this change): by the documented syslog header rules, a MySQL 8 error log line
-(`2026-03-01T12:00:00.123456Z 0 [System] [MY-010116] ...`) reads as an RFC 3339 syslog line with host `0` and no tag, so
-the generic syslog parser claims MySQL 8 error logs weakly. Not run, inferred from `docs/areas/log-import.md`; no MySQL 8
-runs on the monitored server.
+Related observations (not fixed, not part of this change):
+
+- By the documented syslog header rules, a MySQL 8 error log line (`2026-03-01T12:00:00.123456Z 0 [System] [MY-010116] ...`)
+  reads as an RFC 3339 syslog line with host `0` and no tag, so the generic syslog parser claims MySQL 8 error logs weakly.
+  Not run, inferred from `docs/areas/log-import.md`; no MySQL 8 runs on the monitored server.
+- **Defect in the C# wire decoder, found while checking AC-W3:** a JSON `null` for a string field of a payload is assigned
+  as `null` (`PayloadRegistry.Options` sets no `RespectNullableAnnotations`; checked in a scratch program with the same
+  options: `{"host":null}` gives `Host == null`), and validation then throws instead of returning a field error:
+  `Check.Short` → `Encoding.UTF8.GetByteCount(null)` throws `ArgumentNullException` (`"host":null`, `"program":null`),
+  `Check.RequiredShort` and `Check.OptionalName` read `value.Length` (`"log":null`, and `"event":null` once this change
+  adds the field). `BatchDecoder.DecodeRecord` (`src/Vandox.Core/Wire/BatchDecoder.cs:241-310`) catches only
+  `JsonException`, so the exception leaves `NextAsync`, whose contract is `WireException`. The Go decoder ignores such a
+  `null` (`encoding/json` leaves a string unchanged). Inferred from the code and the scratch program, not run through
+  `BatchDecoder`. `BatchDecoder` has no production caller yet (the ingest API, #40, is not built), so nothing is exposed
+  today. The general fix needs every non-nullable property of every kind checked against what the Go encoder writes (a nil
+  slice without `omitempty` encodes as `null`), so it is a follow-up of its own (*Out of scope / follow-ups*), not part of
+  this change; `event` behaves like `host` until then.
 
 ## Acceptance criteria
 
@@ -141,6 +168,16 @@ the file `testdata/logs/mariadb-error.log` given in full under *Fixture*.
 - [ ] AC-E6 An entry whose header has a time that cannot be stored is skipped once, with the header's line number and the
   reason of AC-T2; its continuation lines are neither records nor separate skips; the record of the entry before it and
   of the next header are emitted.
+- [ ] AC-E7 The start sequence of MariaDB 10.6.7 to 10.6.11 (built from the 10.6.7 format strings; the version suffix is
+  illustrative), parsed with zone `UTC`, inline in the test, five lines:
+  `2026-02-14  8:01:12 0 [Note] /usr/sbin/mariadbd (server 10.6.7-MariaDB-2ubuntu1.1) starting as process 812 ...`;
+  `2026-02-14  8:01:12 0 [Note] InnoDB: Starting crash recovery from checkpoint LSN=42540,42540`;
+  `2026-02-14  8:01:13 0 [Note] InnoDB: 10.6.7 started; log sequence number 42564; transaction id 14`;
+  `2026-02-14  8:01:13 0 [Note] /usr/sbin/mariadbd: ready for connections.`;
+  `Version: '10.6.7-MariaDB-2ubuntu1.1'  socket: '/run/mysqld/mysqld.sock'  port: 3306  Ubuntu 22.04` → four records with
+  the events `mariadb.start`, `mariadb.recovery_start`, `mariadb.recovery_end`, `mariadb.ready`, priority 6 each, the
+  first `CapturedAt` 2026-02-14T08:01:12Z, the last message `/usr/sbin/mariadbd: ready for connections.` + `\n` + the
+  `Version:` line; no skip.
 
 ### Time (`SyslogClock.ResolveLocal`, through the parser)
 
@@ -169,6 +206,11 @@ the file `testdata/logs/mariadb-error.log` given in full under *Fixture*.
   - `Note`, `Starting MariaDB 10.6.12-MariaDB-0ubuntu0.22.04.1 source revision  as process 2345` → `mariadb.start`
   - `Note`, `Starting MariaDB 10.6.22-MariaDB-0ubuntu0.22.04.1 source revision 3d0a5b1c server_uid 7mT4hXc0QvG2kz9pW8sYbN1eJ+U= as process 2345`
     → `mariadb.start`
+  - `Note`, `/usr/sbin/mariadbd (server 10.6.7-MariaDB-2ubuntu1.1) starting as process 1234 ...` → `mariadb.start`
+    (10.6.7 to 10.6.11)
+  - `Note`, `/usr/sbin/mariadbd (server 10.6.11-MariaDB-0ubuntu0.22.04.1 as 10.6.11-custom) starting as process 1234 ...`
+    → `mariadb.start` (the form with `--version` set)
+  - `Note`, `/usr/sbin/mysqld (server 10.6.7-MariaDB) starting as process 1 ...` → `mariadb.start`
   - `Note`, `/usr/sbin/mariadbd: ready for connections.` → `mariadb.ready`
   - `Note`, `/usr/sbin/mariadbd (initiated by: unknown): Normal shutdown` → `mariadb.shutdown`
   - `Note`, `/usr/sbin/mariadbd (initiated by: root[root] @ localhost []): Normal shutdown` → `mariadb.shutdown`
@@ -184,19 +226,34 @@ the file `testdata/logs/mariadb-error.log` given in full under *Fixture*.
     `ERROR`, `mysqld got signal 6`; `ERROR`, `mysqld got signal 6 ; x`; `ERROR`, `mysqld got signal 1234 ;`;
     `ERROR`, ` got signal 6 ;` (nothing before ` got signal `); `Note`, `mysqld did an expected abort`;
     `Note`, `starting MariaDB 10.6.12 as process 1`; `Note`, `Starting MariaDB 10.6.12`;
+    `Note`, `/usr/sbin/mariadbd (server 10.6.7-MariaDB-2ubuntu1.1) starting as process 1234` (no ` ...` at the end);
+    `Note`, `/usr/sbin/mariadbd starting as process 1234 ...` (no ` (server `); `Note`,
+    ` (server 10.6.7) starting as process 1 ...` (nothing before ` (server `); `Note`,
+    `/usr/sbin/mariadbd (server 10.6.7) starting as process 1 ... x` (text after ` ...`); `Note`,
+    `/usr/sbin/mysqld (mysqld 5.7.44) starting as process 1 ...` (MySQL's wording); `Warning`,
+    `/usr/sbin/mariadbd (server 10.6.7-MariaDB-2ubuntu1.1) starting as process 1234 ...`;
     `Note`, `InnoDB: Starting final batch to recover 210 pages from redo log.`; level empty (form D),
     `Starting mariadbd daemon with databases from /var/lib/mysql`; level empty (form B),
     `InnoDB: Assertion failure in file ./storage/innobase/btr/btr0cur.cc line 836`;
     `Note`, `InnoDB: 10.6.12 started; log sequence number 8401234; transaction id 5678` with no recovery open.
 - [ ] AC-C2 Recovery end, in order on one classifier: recovery start, then `InnoDB: 10.6.12 started; log sequence number 1; transaction id 2`
   → `mariadb.recovery_end`, then the same `started` line again → none; recovery start, then `Starting MariaDB ... as process 1`
-  (`mariadb.start`, closes the recovery), then a `started` line → none; recovery start, `started` (end), `Starting table
+  (`mariadb.start`, closes the recovery), then a `started` line → none; recovery start, then
+  `/usr/sbin/mariadbd (server 10.6.7-MariaDB-2ubuntu1.1) starting as process 1 ...` (`mariadb.start`, closes the
+  recovery), then a `started` line → none; recovery start, `started` (end), `Starting table
   crash recovery...` (start), `Crash table recovery finished.` (end); a `started` line at level `Warning` while a recovery is
   open → none. A header skipped for its time (AC-E6) is not classified and does not change the state.
 - [ ] AC-C3 Only the header's first line counts: an entry whose continuation line reads `/usr/sbin/mariadbd: ready for connections.`
-  has the event of its header. A line break in client text (documented limitation, record 0088 option 19): a crash report
-  whose continuation line is `2026-03-02 10:10:11 0 [Note] /usr/sbin/mariadbd: ready for connections.` (as a forged query
-  would produce) is split there, and that line becomes an entry of its own with `mariadb.ready`.
+  has the event of its header. A line break in client text (documented limitation, record 0088 option 19), through the
+  parser with zone `UTC`, one test per case:
+  - a crash report whose continuation line is `2026-03-02 10:10:11 0 [Note] /usr/sbin/mariadbd: ready for connections.`
+    (as a forged query would produce) is split there, and that line becomes an entry of its own with `mariadb.ready`;
+  - an access-denied warning whose user name holds two line breaks (any client that reaches the port can send one, without
+    credentials), three lines: `2026-03-02 10:20:00 7 [Warning] Access denied for user 'x`;
+    `2026-03-02 10:20:01 0 [Note] /usr/sbin/mariadbd: ready for connections.`; `'@'203.0.113.5' (using password: NO)` →
+    two records: `Warning`, message `Access denied for user 'x`, no event; then `Note`, `mariadb.ready`, `CapturedAt`
+    2026-03-02T10:20:01Z, message `/usr/sbin/mariadbd: ready for connections.` + `\n` +
+    `'@'203.0.113.5' (using password: NO)`.
 
 ### Detection and registration
 
@@ -250,8 +307,13 @@ Input is produced lazily by `PatternStream` (a header, then a repeated pattern);
   `internal/wire/encode_test.go`, fixture regenerated with `VANDOX_UPDATE_GOLDEN=1`); `TestEncodeBatchGolden` passes, and
   `WireContractTests.DecodeGoldenBatchReadsEveryLogLineField` asserts `Event` = `auth.failure`.
 - [ ] AC-W3 C#: `LogLine.Event` (JSON `event`) with the same validation rows (`LogLine.Validate`, field `event`; through
-  `DataRecord.Validate` the field is `data.event`); serialized as `"event"` when set and omitted when empty; a `log_line`
-  JSON without `event` deserializes with an empty `Event`.
+  `DataRecord.Validate` the field is `data.event`); `PayloadRegistry.Serialize` writes `"event":"mariadb.start"` when set
+  and `"event":""` when empty, as it writes `host` and `program` today (`WhenWritingDefault` omits a string only when it
+  is `null`); `PayloadRegistry.Deserialize` of a `log_line` JSON without `event`, and of one with `"event":""`, gives an
+  empty `Event` that validates; a round trip keeps `mariadb.start`. Only the Go encoder writes batches, and it omits an
+  empty `event` (AC-W1, `omitempty`); C# serialization of a log line is not on the wire (`BatchWriter` serializes
+  payloads only for kinds without a typed table). `"event":null` is not part of this criterion (*Related observations*,
+  follow-up).
 - [ ] AC-W4 Storage: schema version 5; a log line's `Event` (`mariadb.abort`, and empty) is written and read back; a
   database at version 4 is migrated (its log lines get an empty event, new ones keep theirs); the existing migration tests
   from versions 2 and 3 end at the current version.
@@ -311,7 +373,7 @@ length of the header's message (its first line only); no regular expression.
 
 | Event | Level | Header message |
 | ----- | ----- | -------------- |
-| `mariadb.start` | `Note` | starts with `Starting MariaDB ` and contains ` as process ` |
+| `mariadb.start` | `Note` | starts with `Starting MariaDB ` and contains ` as process ` (10.6.12 and later); or a non-empty text, then ` (server `, then later `) starting as process `, and ends with ` ...` (10.6.7 to 10.6.11) |
 | `mariadb.ready` | `Note` | ends with `: ready for connections.` |
 | `mariadb.shutdown` | `Note` | ends with `: Normal shutdown` |
 | `mariadb.shutdown_complete` | `Note` | ends with `: Shutdown complete` |
@@ -326,7 +388,9 @@ file order; skipped entries are not classified and do not change it.
 ## Fixture
 
 `testdata/logs/mariadb-error.log`, 57 lines, every line ending in `\n`, no trailing spaces, no tab. `(empty)` is an empty
-line. Shortened from the MariaDB 10.6.12 formats (Ubuntu 22.04 package version string).
+line. Shortened from the MariaDB 10.6.12 formats (Ubuntu 22.04 package version string). The start line of 10.6.7 to
+10.6.11 is covered by AC-E7 (inline) and AC-C1/AC-C2, so the fixture and every line number that refers to it stay as
+they are.
 
 ```
 L1  2026-03-01 23:00:01 0 [Note] /usr/sbin/mariadbd (initiated by: unknown): Normal shutdown
@@ -524,7 +588,7 @@ New (Tester):
 - `tests/Vandox.Core.Tests/MariaDbLineTests.cs` — AC-H1, AC-H2
 - `tests/Vandox.Core.Tests/MariaDbMessageTests.cs` — AC-E3 (builder rows), AC-E5 (builder rows), AC-M1
 - `tests/Vandox.Core.Tests/MariaDbEventClassifierTests.cs` — AC-C1, AC-C2
-- `tests/Vandox.Core.Tests/MariaDbErrorLogParserTests.cs` — AC-E1-E6, AC-T1-T3 (through the parser), AC-C2 (skipped
+- `tests/Vandox.Core.Tests/MariaDbErrorLogParserTests.cs` — AC-E1-E7, AC-T1-T3 (through the parser), AC-C2 (skipped
   header), AC-C3, AC-D1, AC-X1-X3, AC-M2
 - `tests/Vandox.Core.Tests/LogLineTests.cs` — AC-W3
 - `testdata/logs/mariadb-error.log` — the fixture
@@ -558,11 +622,16 @@ expected behavior changes, adapted by the **Tester** in step 5:
 - **Log import** (`docs/areas/log-import.md`): *Command* — `import.time_zone` is used for year-less syslog times and for
   MariaDB error log times; *System log parsers* first paragraph — the built-in list is `journal`, `mariadb`, `syslog`; new
   section *MariaDB error log* — recognition by content (no path option), the header forms, entries and continuation lines,
-  the message bounds and marker, the fields (program, pid, host, priority), the events table and the recovery rule, the time
-  rules (local time, `import.time_zone`, the unset-zone failure, skip reasons), the forged-line limitation (0088 option 19);
+  the message bounds and marker, the fields (program, pid, host, priority), the events table (both wordings of the start
+  line, with the versions that write them) and the recovery rule, the time rules (local time, `import.time_zone`, the
+  unset-zone failure, skip reasons), the forged-line limitation (0088 option 19: the query of a crash report and the user
+  name of a failed login are written raw, so any client that reaches the port can forge an entry; an event is a
+  classification of text, not proof that MariaDB wrote it); the MariaDB versions whose formats were checked; that a server
+  with the packaged default logs to the journal, where its lines are classified only by #165;
   *Related decisions* — 0088; *Implementation* — the new types.
 - **Wire format** (`docs/areas/wire-format.md`): `log_line` gains `event` (optional name, the event a producer recognized,
-  empty for none; additive, version stays 1.0; link 0088).
+  empty for none; additive, version stays 1.0; link 0088); as for `host`: the Go encoder omits an empty `event`, the C#
+  decoder reads a line without it as an empty event.
 - **Storage** (`docs/areas/storage.md`): schema version 5 adds `log_lines.event` (`TEXT NOT NULL DEFAULT ''`); the
   `log_lines` row of the table lists it.
 - **Configuration and secrets** (`docs/areas/configuration-and-secrets.md`): while `import.time_zone` is unset,
@@ -622,27 +691,81 @@ Every edit has one owner, the **Dev** (as the area documents above); the Lead's 
   (AC-M1, AC-M2). Time: linear in the input; matching uses ordinal string operations on the first line only.
 - Display: messages are stored as read (control characters kept, as for syslog); skip reasons and events are fixed texts;
   the importer never logs a message. Showing messages escaped is the web UI's job (area 12, Razor encodes HTML).
-- Forged lines: client text that MariaDB copies into its log (the query of a crash report, written raw) can contain a line
-  break and a fake header with a forged time, level and event (AC-C3). Accepted and documented (record 0088, option 19; the
-  area document); #21 must not take an event as proof of origin.
+- Forged lines: client text that MariaDB copies into its log can contain a line break and a fake header with a forged
+  time, level and event (AC-C3). Two paths, both verified in the source: the query of a crash report, written raw
+  (`my_safe_print_str`), which needs a client that can crash the server; and, without any credentials, the user name of a
+  failed login: `login_failed_error` (`sql/sql_acl.cc:12979-13001` at 10.6.7, `:13213-13235` at 10.6.28) logs
+  `Access denied for user '%s'@'%s' ...` with `sql_print_warning` whenever `log_warnings > 1`, which is the default (2,
+  `sql/sys_vars.cc:1505-1511` at 10.6.7); the handshake's user name is converted and cut to 128 characters but not
+  filtered (`parse_client_handshake_packet`), and the message is formatted into a 1,024-byte buffer (`vprint_msg_to_log`),
+  enough for a fake header and a lifecycle message. So any client that reaches the port, a local web application
+  included, can insert an entry with any event, time and level, without crashing anything. Accepted and documented (record
+  0088, option 19; the area document): there is no escaping in the format to tell such a line apart. Signature detection
+  (#21) and outage reconstruction (#23) must not treat an `event` as proof that MariaDB wrote the line.
 - No file access, no path handling in the parser.
 
 ## Decision records
 
 - [`docs/decisions/0088-mariadb-error-log-entries-by-content-and-lifecycle-events-in-log-line.md`](../../docs/decisions/0088-mariadb-error-log-entries-by-content-and-lifecycle-events-in-log-line.md)
-  (Proposed, indexed): where the classification lives (`log_line.event`), the value rule, detection by content without a
-  path option, entries with continuation lines, head-with-marker bounds, `import.time_zone` for MariaDB times, the recovery
-  end rule, the field mapping, forged lines.
+  (Proposed, indexed): where the classification lives (`log_line.event`, in Go and C# and why both), the value rule,
+  detection by content without a path option, entries with continuation lines, head-with-marker bounds,
+  `import.time_zone` for MariaDB times, the recovery end rule, the field mapping, forged lines (crash-report query and
+  failed-login user name).
+
+## Challenge
+
+Devil's Advocate, one round (2 major, 3 minor). Every objection accepted or rejected below; the MariaDB source claims were
+re-checked at the tags named in *Problem / root cause*.
+
+- **M1 — the start line of 10.6.7 to 10.6.11 is missed.** Accepted. Confirmed at `mariadb-10.6.7` (`sql/mysqld.cc:3955-3961`)
+  and `mariadb-10.6.11` (`:4018-4024`); `Starting MariaDB` first appears at 10.6.12 (`:4874`); 10.3.39 and 10.5.22 have
+  the new wording. The other lifecycle texts and the header format are identical in 10.6.7 (checked, *Problem / root
+  cause*). Revised: the `mariadb.start` rule accepts the old wording too (`Note`; a non-empty text, ` (server `, later
+  `) starting as process `, ending with ` ...`), both `(server %s)` and `(server %s as %s)`; AC-C1 has three positive and
+  six negative rows for it, AC-C2 a recovery closed by the old start line, the new AC-E7 runs a 10.6.7 restart with crash
+  recovery through the parser (inline, so the 57-line fixture and its line numbers stay); the events table, the area
+  document content, the spec (formats checked, by minor version) and record 0088 (*Context*) name both wordings.
+- **M2 — AC-W3 "omitted when empty" cannot be met with the prescribed signature.** Accepted. Confirmed in a scratch program
+  with the options of `PayloadRegistry`: `{"event":""}`; `host` and `program` behave the same today. Revised: AC-W3 now
+  states what the prescribed signature does (`"event":""` when empty, read back as empty) and keeps the signature, the
+  same attribute as `host` and `program`. A nullable property or a converter was not chosen: C# never writes a log line
+  to the wire (only the Go encoder writes batches, and it omits an empty `event`, AC-W1), `BatchWriter` serializes no
+  `log_line` payload (typed table), and a nullable `Event` would need a null rule in validation and storage that `host`
+  does not have. `WireContractTests` is unaffected: it only decodes the Go golden batch. While checking this, the plan
+  found the C# decoder's handling of a JSON `null` in string fields to be a defect for every field (*Related
+  observations*); it is a follow-up, not this change.
+- **m1 — the forged-line threat is understated.** Accepted. Confirmed: `login_failed_error` logs the handshake's user name
+  with `sql_print_warning` at the default `log_warnings` of 2, the name is not filtered for line breaks, and no
+  authentication or crash is needed. Revised: *Security considerations* names this path with its sources, AC-C3 has an
+  access-denied row with two line breaks in the user name, record 0088 option 19 and *Consequences* cite it and state that
+  #21 and #23 must not treat an `event` as proof of origin, and the area document's forged-line paragraph names both paths.
+- **m2 — the Go side of `event` is not needed by #17.** Rejected. Record 0075 decides that the C# decoder keeps the
+  validation rules of the Go decoder and that the Go encoder's golden batch pins the contract; a field only in C# could
+  not be in the golden batch (AC-W2), the Go decoder (`internal/wire/decode.go`) would drop it silently as an unknown key,
+  and the wire area document would describe a `log_line` the reference implementation does not have. Record 0084 added
+  `host` to both languages for the same reason. The Go part is one field, one validation call and table rows. Record 0088
+  option 3 now says why Go is included.
+- **m3 — the issue's default path and "path configurable" are dropped silently.** Accepted. Revised: the spec has a section
+  *Deviations from the issue* that states both dropped requirements with the reason, and *Open questions* no longer reads
+  "none" but names, as information for the Product Manager, that a server with the packaged default may hold no error
+  log, so this parser imports nothing there and #165 is the change that classifies MariaDB's lines; the plan's claim
+  check and record 0088 (*Consequences*) reference #165. Not escalated: the content-based detection meets the intent of
+  "path configurable" (the file is found wherever it lies) and a path has no meaning for an import of copies; the PR
+  description repeats the deviation for the Product Manager.
 
 ## Out of scope / follow-ups
 
-- **Follow-up issue (proposed, the orchestrator opens it):** title `[Logs] Classify MariaDB lines from the journal and
-  syslog`; body: "MariaDB's Debian/Ubuntu packaging sends the error log to the journal under systemd
-  (`#log_error = /var/log/mysql/error.log` is commented out in `50-server.cnf`), so on a default server its lines arrive
-  through the `journal` and `syslog` parsers as plain `log_line` records of program `mariadbd`, without `event`, and each
-  crash report line as a record of its own. Apply the MariaDB header and event rules of #17 (record 0088) to those lines
-  (the message starts with MariaDB's own time stamp) and keep a crash report together across journal entries, with the
-  bounds of the error log parser. Depends on #17."
+- **#165** `[Logs] Classify MariaDB lines from the journal and syslog` (opened): MariaDB's lines that the packaged default
+  sends to the journal, with the header and event rules of this change.
+- **Follow-up issue (proposed, the orchestrator opens it):** title `[Wire] C# decoder: a JSON null in a string field
+  throws instead of failing the record`; body: "`PayloadRegistry.Options` assigns a JSON `null` to non-nullable string
+  properties, and validation then throws `ArgumentNullException` (`Check.Short`, e.g. `"host":null` in a `log_line`) or
+  `NullReferenceException` (`Check.RequiredShort`, `Check.OptionalName`, e.g. `"log":null`, `"event":null`).
+  `BatchDecoder.DecodeRecord` catches only `JsonException`, so the exception leaves `NextAsync`, whose contract is
+  `WireException`; the Go decoder ignores such a `null`. Decide one rule for both decoders (reject as malformed, or read
+  as absent like Go), check every non-nullable property of every kind against what the Go encoder writes (a nil slice
+  without `omitempty` encodes as `null`), add the rows to the wire-format area's *Accepted forms* and to
+  `BatchDecoderTests`. Must be fixed before the ingest API (#40) calls `BatchDecoder`. Found while planning #17."
 - A path option for the error log (agent: #37).
 - Slow and general query logs, MySQL 5.7/8 error logs, the `mysqld_safe ... ended` line as an event.
 - Queries by `event`, cross-source events and incidents (#21, #23).

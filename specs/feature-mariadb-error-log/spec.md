@@ -25,7 +25,12 @@ these facts cannot be imported, and nothing marks a line as a start, a shutdown,
 - The record holds the time of the entry in UTC, the severity (`ERROR`, `Warning`, `Note` as syslog priorities 3, 4 and 6;
   none for lines without a level), the message and, for lifecycle entries, an **event**:
   `mariadb.start`, `mariadb.ready`, `mariadb.shutdown`, `mariadb.shutdown_complete`, `mariadb.abort`,
-  `mariadb.recovery_start`, `mariadb.recovery_end`. Other entries have no event.
+  `mariadb.recovery_start`, `mariadb.recovery_end`. Other entries have no event. The start line changed its wording in
+  10.6.12 (`Starting MariaDB ... as process N`; before: `<program> (server <version>) starting as process N ...`); both
+  are a start.
+- An event is a classification of the text, not proof that MariaDB wrote the line: MariaDB writes some client text raw
+  into its log (the query of a crash report, the user name of a failed login), so a client can forge an entry with a line
+  break. This is documented, not prevented; the format has no escaping that would tell such a line apart.
 - MariaDB writes local time without a zone. The import reads it in the zone of the existing option `import.time_zone`,
   exactly as for traditional syslog files: without the option the file is listed as failed with "import.time_zone is not
   set" and the run exits with 1; setting the option and importing again completes the file.
@@ -46,15 +51,32 @@ these facts cannot be imported, and nothing marks a line as a start, a shutdown,
 - [ ] AC5: Times are converted from `import.time_zone` to UTC, including daylight saving changes; without the option the
   file fails with "import.time_zone is not set" and a later run with the option completes it.
 - [ ] AC6: Tests use shortened samples in the exact formats MariaDB 10.6 writes, including a start after a crash with
-  recovery, a normal shutdown and a crash report.
+  recovery, a normal shutdown and a crash report, and the start line of 10.6.7 to 10.6.11 as well as of 10.6.12 and later.
 - [ ] AC7: Memory stays bounded for any input: a file with one entry followed by 64 MiB of continuation lines is parsed
   into one record of at most 16 KiB.
 - [ ] AC8: The `event` field round-trips through the wire format (Go encoder, C# decoder) and the database.
 
+## Formats checked
+
+The formats come from the MariaDB source, read at the tags 10.3.39, 10.5.22, 10.6.7, 10.6.11, 10.6.12, 10.6.22, 10.6.28
+and 10.11.9. Within these, the lifecycle lines differ only in the start line (see *Behavior*); a lifecycle line that a
+version outside this list words differently gets no event, and the entry is still imported.
+
+## Deviations from the issue
+
+Issue #17 asks to "parse the MariaDB error log format (Ubuntu default path `/var/log/mysql/error.log`, path
+configurable)". Two parts of that are not done, decided by the Lead (record 0088):
+
+- **No default path.** The parser does not look for `/var/log/mysql/error.log` or any other name; it recognizes the file
+  by its content. MariaDB's Debian packaging, which Ubuntu follows, does not write that file by default under systemd: the
+  line is commented out and the error log goes to the journal.
+- **No path option.** `vandoxd import` reads copies and archives in any layout, so a server path matches nothing there,
+  while detection by content finds the file under any name. A configured path belongs to the agent's log shipping (#37).
+
 ## Out of scope
 
 - MariaDB lines in the journal or in `syslog` (the packaged default under systemd sends the error log there): they stay
-  plain log lines of program `mariadbd` without an event; classifying them is a follow-up issue.
+  plain log lines of program `mariadbd` without an event; classifying them is #165.
 - A configuration option for the path of the error log (the agent's configured log files are #37).
 - The MariaDB slow query log and general query log (different formats, not recognized).
 - MySQL 5.7 and 8 error logs (ISO 8601 time stamps; not recognized).
@@ -63,12 +85,14 @@ these facts cannot be imported, and nothing marks a line as a start, a shutdown,
 
 ## Open questions
 
-None for the Product Manager. Two notes for information, not decisions:
+No question blocks the work. For the Product Manager, as information (repeated in the pull request):
 
-- The Debian packaging of MariaDB 10.6 (followed by Ubuntu 22.04's package; neither the Ubuntu package nor the server was
-  checked) does not write `/var/log/mysql/error.log` by default but sends the error log to the journal. If the saved
-  `/var/log` of the server holds no MariaDB error log, this parser imports nothing from it, and the follow-up issue becomes
-  the one that matters.
+- **This parser may import nothing from the production server.** The Debian packaging of MariaDB 10.6 (followed by
+  Ubuntu 22.04's package; neither the Ubuntu package nor the server's Plesk configuration was checked) does not write
+  `/var/log/mysql/error.log` by default but sends the error log to the journal. If the saved `/var/log` of the server holds
+  no MariaDB error log, the outage evidence of MariaDB is in the journal, and #165 is the change that classifies it.
+  Whether `/var/log/mysql/error.log` exists on the server can be checked with `ls -l /var/log/mysql/`.
+- The two deviations from the issue's wording above (no default path, no path option).
 - The samples in the tests are built from MariaDB's own source format strings, not taken from the production server's log,
   which the squad does not have. A shortened excerpt of the server's real `error.log`, if one exists, can be added as a test
   fixture.

@@ -14,9 +14,11 @@ frequent victim of the OOM killer on the monitored server; a SIGKILL leaves no l
 recovery and the time until the server is ready again are the evidence in this log. Signature detection (#21) and outage
 reconstruction (#23) build on the stored records.
 
-What the format is, from the MariaDB source (10.3.39, 10.6.12, 10.6.22, 10.6.28, 10.11.9; Ubuntu 22.04 ships the 10.6
-series, the version on the server was not checked): a server line is `YYYY-MM-DD HH:MM:SS <thread> [ERROR|Warning|Note] <message>` with a space-padded hour
-(`sql/log.cc`, `print_buffer_to_file`); the fatal signal handler writes `YYMMDD HH:MM:SS [ERROR] <program> got signal N ;`
+What the format is, from the MariaDB source (10.3.39, 10.5.22, 10.6.7, 10.6.11, 10.6.12, 10.6.22, 10.6.28, 10.11.9; Ubuntu
+22.04 ships the 10.6 series, the version on the server was not checked): a server line is `YYYY-MM-DD HH:MM:SS <thread> [ERROR|Warning|Note] <message>` with a space-padded hour
+(`sql/log.cc`, `print_buffer_to_file`); the start line reads `Starting MariaDB <version> source revision <rev> as process N`
+from 10.6.12 on (also in 10.3.39 and 10.5.22), and `<program> (server <version>) starting as process N ...` in 10.6.7 to
+10.6.11, while the other lifecycle lines are the same in all of them; the fatal signal handler writes `YYMMDD HH:MM:SS [ERROR] <program> got signal N ;`
 in the older two-digit form and then a crash report of dozens of lines without a time stamp, including the stack trace and
 the query of the crashing connection, written raw up to 64 KiB (`sql/signal_handler.cc`, `my_safe_print_str`); InnoDB
 assertions are prefixed with a hexadecimal thread ID and no level; messages with a line break (`ready for connections.` is
@@ -47,7 +49,11 @@ Where the classification lives:
    before they are stored), and it anticipates the cross-source events #21 builds.
 3. **An optional `event` field on `log_line`** (chosen) — the line stays one record and carries its classification; an
    additive field in Go, C#, the golden batch and a new `log_lines.event` column, like `host` in 0084, so the wire version
-   stays 1.0; the agent may leave it empty; #21 can match on it instead of on message text.
+   stays 1.0; the agent may leave it empty; #21 can match on it instead of on message text. Go gets the field although
+   only the backend fills it for now: the C# decoder keeps the rules of the Go decoder and the Go encoder's golden batch
+   pins the contract ([0075](0075-wire-contract-pinned-by-golden-fixtures.md)), so a field only in C# could not be pinned,
+   the Go decoder would drop it as an unknown key, and the wire format would describe a record its reference
+   implementation does not have; a variant with the field in C# and storage only was rejected for these reasons.
 4. **The classification in `program` or in the message** — no model change; overloads fields that mean something else.
 
 What `event` may hold:
@@ -102,10 +108,14 @@ Fields that the format does not carry:
 
 Forged lines:
 
-19. **Accept and document** (chosen) — MariaDB copies client text into its log (verified for the query in a crash report,
-    written raw), so a client that can crash the server, or make it log its text, can insert a line break and a fake header,
-    which becomes an entry of its own with a forged time, level and event. No escaping exists in the format to tell them
-    apart; as in 0086 option 19, an event is a classification of text, not proof of origin.
+19. **Accept and document** (chosen) — MariaDB copies client text into its log unescaped, so a line break in it followed
+    by a fake header becomes an entry of its own with a forged time, level and event. Two paths were verified in the
+    source: the query of a crash report, written raw, which needs a client that can crash the server; and the user name of
+    a failed login, which `login_failed_error` (`sql/sql_acl.cc`) logs as `Access denied for user '<name>'@'<host>' ...`
+    whenever `log_warnings` is above 1, the default being 2. The handshake's user name is cut to 128 characters but not
+    filtered, so any client that reaches the port, a local web application included, can forge an entry without
+    credentials and without crashing anything. No escaping exists in the format to tell such lines apart; as in 0086
+    option 19, an event is a classification of text, not proof of origin.
 
 ## Decision
 
@@ -118,12 +128,14 @@ field `event` (name rule, stored in `log_lines.event`); no path option is added.
 
 ## Consequences
 
-- On a server where MariaDB logs to the journal (the packaged default under systemd), its lines arrive through the journal
-  and syslog parsers as plain log lines with program `mariadbd`, without `event` and with each crash report line a record
-  of its own; classifying those is a follow-up.
+- On a server where MariaDB logs to the journal (the packaged default under systemd), there is no error log file, this
+  parser imports nothing, and MariaDB's lines arrive through the journal and syslog parsers as plain log lines with
+  program `mariadbd`, without `event` and with each crash report line a record of its own; classifying those is #165.
+- The issue's default path and path option are not built (option 8 instead of 7); a path for live shipping belongs to #37.
 - `event` is stored, not indexed; a query by event needs its own change (#21, #23).
 - The 16 KiB text limit stays; a crash report with a long query loses its tail and says so.
 - A file whose head holds no entry header (it starts with more than 4 KiB of crash report) is listed as not recognized.
 - Lines of a time zone change between an interrupted import and its resume are shifted, as for syslog files (0085).
 - The agent's live shipping (#37) may send `event` or leave it empty; the backend accepts both.
-- Signature detection (#21) must not treat an `event` as proof that MariaDB wrote the line (option 19).
+- Signature detection (#21) and outage reconstruction (#23) must not treat an `event` as proof that MariaDB wrote the line
+  (option 19): any client that reaches the database port can forge one through a failed login.
