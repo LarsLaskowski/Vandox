@@ -9,6 +9,8 @@ type LogLine struct {
 	Priority  *uint8 `json:"priority,omitempty"`
 	Message   string `json:"message"`
 	Truncated bool   `json:"truncated,omitempty"`
+	// Event is the event a producer recognized in the line, e.g. mariadb.start; empty for none.
+	Event string `json:"event,omitempty"`
 }
 
 // Kind returns KindLogLine.

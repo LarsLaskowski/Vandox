@@ -6,6 +6,8 @@ using Vandox.Core.Model;
 
 namespace Vandox.Core.LogParsing;
 
+#pragma warning disable RH2003, S2325
+
 /// <summary>
 /// Turns year-less local times of one file into UTC instants. The year follows the date of the file (the name date, else the
 /// modification time) and the order of the lines; every number is checked as an integer before a date is built, and the zone
@@ -67,6 +69,21 @@ internal sealed class SyslogClock
     #endregion // Properties
 
     #region Methods
+
+    /// <summary>
+    /// Resolves a local time that carries its year (<see cref="SyslogTime.Year"/>; the offset is ignored) to a UTC instant; never throws.
+    /// A time in the repeated hour takes the earlier offset unless that lies more than <see cref="BackwardTolerance"/> before
+    /// <paramref name="previous"/>, and a time in the skipped hour is shifted forward.
+    /// </summary>
+    /// <param name="timeZone">The zone of the time</param>
+    /// <param name="time">The time</param>
+    /// <param name="previous">The last instant that was resolved; <c>null</c> for none</param>
+    /// <param name="instant">The instant on success, else the default value</param>
+    /// <returns><c>null</c> on success, else "invalid date" or "time outside the storable range"</returns>
+    internal static string? ResolveLocal(DateTimeZone timeZone, SyslogTime time, DateTimeOffset? previous, out DateTimeOffset instant)
+    {
+        throw new NotImplementedException();
+    }
 
     /// <summary>
     /// Resolves a year-less time to a UTC instant; never throws.
