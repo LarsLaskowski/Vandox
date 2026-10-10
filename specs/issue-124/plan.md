@@ -49,17 +49,17 @@ New script `.github/scripts/check-sbom-generator-pin.sh` (*the script*):
 - [ ] AC1 — **Pin read fail-closed, before any network access.** The script reads the pin from
   `.github/scripts/generate-sbom.sh` and continues only when all of these hold; otherwise it prints one
   `::error::` line to standard error and exits 1 without calling `git` or `docker`:
-  1. exactly one line of the file starts with `syft_image=`;
+  1. exactly one line of the file starts with `syft_image=` (none or two or more fail);
   2. that line is, as a whole, `syft_image='<value>'` (regex `^syft_image='([^']*)'$`: single quotes, nothing
      before or after, no trailing space);
-  3. the line before it does not end in a backslash;
-  4. every other line that contains the text `syft_image` contains it only inside the expansions `$syft_image`
-     or `${syft_image}` (after deleting those, no `syft_image` remains);
-  5. `<value>` matches `^ghcr\.io/anchore/syft:v[0-9]+\.[0-9]+\.[0-9]+@sha256:[0-9a-f]{64}$` (the `syft_re` of
+  3. `<value>` matches `^ghcr\.io/anchore/syft:v[0-9]+\.[0-9]+\.[0-9]+@sha256:[0-9a-f]{64}$` (the `syft_re` of
      `generate-sbom.sh`, verbatim), and its tag also matches the strict
      `^v(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})$` (no leading zero, at most 9 digits per
      part, so that bash arithmetic neither reads octal nor overflows).
-  The forms bash accepts and the guard's answer to each are in *Security considerations*.
+  Every other line is ignored: a comment, an error message or an expansion naming `syft_image` does not affect the
+  check. A reassignment in another form (indented, `readonly`/`export`/`declare`, `+=`, `${syft_image:=…}`,
+  `printf -v`, a continued line) is not detected — accepted residual risk, see *Security considerations* and
+  record 0037.
 - [ ] AC2 — **Newest release without credentials.** The newest release is the highest tag of
   `https://github.com/anchore/syft.git` whose ref matches, as a whole string,
   `^refs/tags/(v(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8}))$`, read with
@@ -75,20 +75,25 @@ New script `.github/scripts/check-sbom-generator-pin.sh` (*the script*):
   differs from the pinned digest, the pinned row's state is `stale` and the script prints
   `::warning::the syft pin's digest is stale: ghcr.io/anchore/syft:<tag> is now <current>, pinned <pinned>`.
 - [ ] AC4 — **Newer release.** When the newest release is greater than the pinned tag, the script reads that tag's
-  index digest the same way (a failure is a lookup failure), adds the newest-release row with state `newer` and
-  prints `::warning::a newer syft release exists: <newest>, pinned <pinned tag>`. A newest release equal to or
-  lower than the pinned tag adds no row.
+  index digest the same way, adds the newest-release row with state `newer` and prints
+  `::warning::a newer syft release exists: <newest>, pinned <pinned tag>`. If that digest lookup fails (or its
+  answer does not match `^sha256:[0-9a-f]{64}$`), the row is still added with `-` as its current digest, the
+  script prints `::warning::digest lookup failed for ghcr.io/anchore/syft:<newest>`, and this failure does **not**
+  count as a lookup failure for the exit status (a Git tag can exist before its image is on `ghcr.io`; the
+  newer release and the pinned row's state are still reported). A newest release equal to or lower than the
+  pinned tag adds no row.
 - [ ] AC5 — **Output and exit status.** Standard output carries only this table (no other line; the output of
   `git`, `docker` and `jq` is captured in variables, their standard error goes to the job log):
   ```
   | Image | Tag | Role | Pinned digest | Current digest | State |
   | ----- | --- | ---- | ------------- | -------------- | ----- |
   | ghcr.io/anchore/syft | <pinned tag> | pinned | <pinned digest> | <current digest> | current or stale |
-  | ghcr.io/anchore/syft | <newest tag> | newest release | - | <its digest> | newer |
+  | ghcr.io/anchore/syft | <newest tag> | newest release | - | <its digest or -> | newer |
   ```
   (the second row only under AC4; the pinned row is left out when its own lookup failed). Every cell is a
   constant or a value that passed one of the regular expressions above. Exit status: 0 the pin is the newest
-  release and its digest is current; 3 a newer release or a moved digest; 4 a lookup failed; 1 any other error,
+  release and its digest is current; 3 a newer release or a moved digest; 4 the tag lookup (AC2) or the pinned
+  tag's digest lookup (AC3) failed — not the newest tag's digest lookup (AC4); 1 any other error,
   including a missing `git`, `docker` or `jq` and any argument (the script takes none); precedence 1 > 4 > 3 > 0,
   as in `check-base-image-digests.sh`.
 - [ ] AC6 — **Weekly report in a sibling issue.** `base-image-digests.yml` gets a second job `sbom-generator`
@@ -109,7 +114,9 @@ New script `.github/scripts/check-sbom-generator-pin.sh` (*the script*):
   title and labels byte for byte apart from the workflow's header comment, which names both reports and records
   0041 and 0037. The two jobs have no `needs:`, so a failure of one does not skip the other. Workflow-level
   `permissions: {}`, the triggers and the concurrency group stay as they are. No `${{ }}` appears inside any `run:`
-  script.
+  script. The issue lookup and create-or-update logic of the new report step is a copy of the one in job `check`
+  with its own title, labels and report file; the duplication (about 25 lines) is accepted, and neither a shared
+  script nor a composite action is introduced, so job `check` stays unchanged.
 - [ ] AC8 — **Scope.** `generate-sbom.sh`, `check-base-image-digests.sh`, `ci.yml` and `release.yml` are not
   changed; the pin itself is not refreshed in this change.
 - [ ] AC9 — **Documentation** matches the built behavior: `docs/CONTRIBUTING.md` (*SBOM generator*, *Base image
@@ -122,42 +129,55 @@ The change touches no production or test code (a shell script under `.github/scr
 documentation). Steps 4 (*Skeleton*), 5 (*Tests first*) and the *Coverage gate* of step 6 are **not applicable**.
 Each criterion is verified instead as follows.
 
-Scenario runs (S1–S6) are made by the **Dev** in step 6 in a scratch `git worktree` (never in the working tree),
+Scenario runs (S1–S7) are made by the **Dev** in step 6 in a scratch `git worktree` (never in the working tree),
 from the worktree's root, with the exit status and the complete standard output and standard error pasted into
-the Dev's report. The **Reviewer** (and Security) re-run at least S1, S3, S4 (two variants of their choice) and S5
-in step 8 in their own scratch copy. Docker `buildx imagetools` and anonymous `git ls-remote` work in this session
-(checked while planning).
+the Dev's report. The **Reviewer** (and Security) re-run at least S1, S3, S4 (two variants of their choice), S5 and
+S6 in step 8 in their own scratch copy. Docker `buildx imagetools` and anonymous `git ls-remote` work in this
+session (checked while planning).
 
-- S1 — unchanged pin `v1.54.0`: exit 3, pinned row `current` with digest `sha256:0356562f…ca7c`, newest-release
-  row `v1.54.1` `newer` with `sha256:3eb5379b…49b1aa` (or a higher tag if syft releases in the meantime).
-- S2 — scratch pin `ghcr.io/anchore/syft:v1.54.1@sha256:3eb5379ba7b409c3f4069b686110527af0c47df993fa5c10d13e7cf34f49b1aa`:
-  exit 0, one row `current` (exit 3 with a newer row if syft has released again — then note the tag).
-- S3 — scratch pin `v1.54.1` with the digest of `v1.54.0`: exit 3, pinned row `stale`, AC3's warning.
+S1–S3 and S6 do not depend on syft's release history: the tag list comes from a local bare repository with a
+fixed tag set, substituted for the syft URL only through the environment (`GIT_CONFIG_COUNT=1`,
+`GIT_CONFIG_KEY_0=url.<bare repo path>.insteadOf`, `GIT_CONFIG_VALUE_0=https://github.com/anchore/syft.git`;
+checked while planning: `git ls-remote --tags --refs` with the five settings of AC2 lists the bare repository's
+tags). Only the index digests of the published tags `v1.54.0` (`sha256:0356562f…ca7c`) and `v1.54.1`
+(`sha256:3eb5379b…49b1aa`) are read live from `ghcr.io`; if one of them has moved, the run shows it as `stale` —
+note it, it is not a failure of the script.
+
+- Bare repository R1: tags `v1.53.0`, `v1.54.0`, `v1.54.1`. Bare repository R2: tags `v1.54.0`, `v1.58.10`,
+  `v1.999.0`, `v1.1000.0`, `v1.1001.0-rc.1`, `v01.2000.0`, `v9999999999.0.0`, `release-2.0.0`.
+- S1 — R1, unchanged pin `v1.54.0`: exit 3, pinned row `current` with `sha256:0356562f…ca7c`, newest-release row
+  `v1.54.1` `newer` with `sha256:3eb5379b…49b1aa`, AC4's warning.
+- S2 — R1, scratch pin `ghcr.io/anchore/syft:v1.54.1@sha256:3eb5379ba7b409c3f4069b686110527af0c47df993fa5c10d13e7cf34f49b1aa`:
+  exit 0, one row `current`, no warning.
+- S3 — R1, scratch pin `v1.54.1` with the digest of `v1.54.0`: exit 3, pinned row `stale`, AC3's warning, no
+  newest-release row.
 - S4 — each of these scratch edits of `generate-sbom.sh` gives exit 1, one `::error::` line and no table, and runs
   no network call (run with `HTTPS_PROXY=http://127.0.0.1:9 https_proxy=http://127.0.0.1:9` so a network call
-  would show as exit 4 instead): double-quoted value; unquoted value; trailing space after the closing quote;
-  `readonly syft_image='…'`; `export syft_image='…'`; a second `syft_image='…'` line further down; an indented
-  `  syft_image='…'` inside a function; `syft_image+='x'`; `: "${syft_image:=x}"`; `printf -v syft_image '%s' x`;
-  `read -r syft_image < /dev/null`; `declare -n alias=syft_image`; a comment line naming `syft_image`; the line
-  before the assignment ending in `\`; the tag `v01.54.0`; the tag `v1.54.0000000000`; the tag `latest`; an
-  upper-case hex digit in the digest; another registry (`docker.io/anchore/syft:…`). Plus: the script called with
-  one argument; `jq` hidden from `PATH`.
-- S5 — lookup failure: the unchanged pin with `HTTPS_PROXY`/`https_proxy` pointing to `http://127.0.0.1:9`:
-  exit 4, warnings naming the failed lookups, no data row.
-- S6 — tag parsing against crafted tags: a local bare repository with the tags `v1.54.0`, `v1.60.0-rc.1`,
-  `v01.70.0`, `v1.59.0`, `v9999999999.0.0`, `release-2.0.0` and `v1.58.10`, substituted for the syft URL only
-  through the environment (`GIT_CONFIG_COUNT=1`, `GIT_CONFIG_KEY_0=url.<bare repo path>.insteadOf`,
-  `GIT_CONFIG_VALUE_0=https://github.com/anchore/syft.git`): exit 4 with the warning naming
-  `ghcr.io/anchore/syft:v1.59.0` as the failed lookup, which shows that `v1.59.0` was chosen as the newest release.
+  would show as exit 4 instead): double-quoted value; unquoted value; `syft_image=$'…'`; trailing space after the
+  closing quote; `; true` after the closing quote; a second `syft_image='…'` line at column 0 further down; the
+  line replaced by `readonly syft_image='…'` (no line starts with `syft_image=`); the tag `v01.54.0`; the tag
+  `v1.54.0000000000`; the tag `latest`; an upper-case hex digit in the digest; another registry
+  (`docker.io/anchore/syft:…`). Plus: the script called with one argument; `jq` hidden from `PATH`. And one
+  counter-check: a comment line `# syft_image is checked weekly` added above the assignment gives the same result as
+  S1 (with R1).
+- S5 — lookup failure: the unchanged pin with `HTTPS_PROXY`/`https_proxy` pointing to `http://127.0.0.1:9` and
+  no URL substitution: exit 4, warnings naming the failed lookups, no data row.
+- S6 — tag parsing and a newest release without an image: R2, unchanged pin: exit 3, pinned row `current`,
+  newest-release row `v1.1000.0` `newer` with `-` as its digest, AC4's two warnings (newer release; digest lookup
+  failed for `ghcr.io/anchore/syft:v1.1000.0`). This shows the numeric comparison (`v1.1000.0` over `v1.999.0`),
+  that pre-release, leading-zero, over-long and non-`v` tags are ignored, and that a missing newest image does not
+  turn exit 3 into 4.
+- S7 — live, no substitution, unchanged pin: the exit status and table are recorded, not asserted (on
+  2026-10-10: exit 3 with a `v1.54.1` row). It shows that the real URL and the real `ghcr.io` lookups work.
 
 | Criterion | Verified by | Who, when |
 | --------- | ----------- | --------- |
 | AC1 | S4, S1 (a valid pin passes) | Dev step 6; Reviewer/Security step 8 |
-| AC2 | S1, S6; reading the `git` call for the five settings | Dev step 6; Reviewer/Security step 8 |
+| AC2 | S1, S6, S7; reading the `git` call for the five settings | Dev step 6; Reviewer/Security step 8 |
 | AC3 | S3, S1 | Dev step 6; Reviewer step 8 |
-| AC4 | S1, S2 | Dev step 6; Reviewer step 8 |
-| AC5 | S1–S6 output and exit statuses; reading the script for stray output | Dev step 6; Reviewer/Security step 8 |
-| AC6 | `actionlint` in the *Analyzer gate*; reading the diff; a `workflow_dispatch` run of the branch's workflow (`gh workflow run base-image-digests.yml --ref <branch>`) after the PR is open, which with today's data opens the issue *SBOM generator pin is stale* with the S1 table and leaves the job `check` as before — the orchestrator triggers it only with the Product Manager's go-ahead, because it writes real issues; without it, the maintainer's first dispatch after the merge, its result recorded on the pull request | Orchestrator step 7 (gate), Reviewer/Security step 8, orchestrator step 11 |
+| AC4 | S1, S2, S6 | Dev step 6; Reviewer step 8 |
+| AC5 | S1–S7 output and exit statuses; reading the script for stray output | Dev step 6; Reviewer/Security step 8 |
+| AC6 | `actionlint` in the *Analyzer gate*; reading the diff; a `workflow_dispatch` run of the branch's workflow (`gh workflow run base-image-digests.yml --ref <branch>`) after the PR is open, which with today's data opens the issue *SBOM generator pin is stale* with the S7 table and leaves the job `check` as before — the orchestrator triggers it only with the Product Manager's go-ahead, because it writes real issues; without it, the maintainer's first dispatch after the merge, its result recorded on the pull request | Orchestrator step 7 (gate), Reviewer/Security step 8, orchestrator step 11 |
 | AC7 | `git diff origin/main -- .github/workflows/base-image-digests.yml` shows the job `check` unchanged except the header comment; `actionlint`; a `grep` for `${{` inside `run:` blocks | Reviewer/Security step 8 |
 | AC8 | `git diff --stat origin/main...HEAD` | Orchestrator step 9, Reviewer step 8 |
 | AC9 | reading the documentation against the script and the workflow | Reviewer step 8, Lead if launched in step 9 |
@@ -180,7 +200,7 @@ own `shelldre:S7688`/`S7679` checks, actionlint on the workflow), `bash -n` on t
 3. The report is a second job in the same workflow with its own sibling issue *SBOM generator pin is stale*, so
    its refresh pull request can close it with `Closes #n` independently of the routinely stale base image issue,
    and a failure of one check never hides the other. The report step copies the existing one with its own title and
-   labels; the check step holds no token.
+   labels (accepted duplication, AC7); the check step holds no token.
 4. Documentation: the *what* of the release process lives in `docs/CONTRIBUTING.md` (the release process is not an
    area, `docs/areas/README.md`); the *why* is added to record 0037.
 
@@ -224,10 +244,12 @@ written once in `docs/CONTRIBUTING.md`.
 
 - `docs/CONTRIBUTING.md` — owner **Dev**:
   - *SBOM generator*: a paragraph on the weekly check: the job of the *Base image digests* workflow (Mondays and on
-    manual dispatch); that it reads the constant and fails unless it is the only assignment of `syft_image` in the
-    script and every other mention is an expansion; that "newest" is the highest `vX.Y.Z` tag of
+    manual dispatch); that it reads the constant from the one line starting with `syft_image=` in the literal form
+    `syft_image='…'` and fails if there is no such line or more than one, so the pin is changed only on that line
+    and never reassigned elsewhere; that "newest" is the highest `vX.Y.Z` tag of
     `https://github.com/anchore/syft` read with `git ls-remote` without credentials (pre-releases ignored); that it
-    compares the pinned tag's index digest on `ghcr.io`; that it opens or updates the issue *SBOM generator pin is
+    compares the pinned tag's index digest on `ghcr.io` (a newer release whose image is not yet there is reported
+    with `-` as its digest); that it opens or updates the issue *SBOM generator pin is
     stale*, which the refresh pull request should close (`Closes #n`); and the local command
     `.github/scripts/check-sbom-generator-pin.sh` (needs `git`, `docker buildx` and `jq`).
   - *Base image digests*: one clause that the same workflow also checks the SBOM generator pin (*SBOM generator*).
@@ -267,22 +289,20 @@ regex-checked values reach the issue; the job token is used only by the report s
   adds nothing. Git configuration from the environment (`GIT_CONFIG_COUNT`, `GIT_CONFIG_PARAMETERS`) is still read;
   the workflow sets none, and S6 uses exactly that to test the tag parser.
 - [ ] **Forms of the guarded input.** Two inputs are guarded.
-  - *The pin in `generate-sbom.sh`*, as bash reads it. What the check reads must be what bash assigns. Forms bash
+  - *The pin in `generate-sbom.sh`*, as bash reads it. The check reads the literal assignment line; it does not try
+    to prove that bash assigns nothing else (rejected after the challenge as brittle, see *Challenge*). Forms bash
     accepts and the guard's answer:
     | Form | Guard |
     | ---- | ----- |
     | `syft_image='v'` at column 0, alone on its line | accepted (the only accepted form) |
     | `syft_image="v"`, `syft_image=v`, `syft_image=$'v'`, trailing text, `; cmd` after it | rejected by rule 2 |
-    | `declare`/`typeset`/`local`/`readonly`/`export syft_image=v` | rejected by rule 4 |
-    | a second assignment anywhere, also indented or inside a function or condition | rejected by rule 1 or 4 |
-    | `syft_image+=x` (append), also at column 0 (it does not start with `syft_image=`) | rejected by rule 4 |
-    | `${syft_image:=x}`, `${syft_image=x}`, `${syft_image:-x}` | rejected by rule 4 |
-    | `printf -v syft_image`, `read syft_image`, `mapfile`/`readarray`, `for syft_image in`, `getopts … syft_image`, `unset syft_image`, `declare -n x=syft_image`, `eval 'syft_image=…'`, a comment naming it | rejected by rule 4 |
-    | the line continued from the previous line (`\` at its end), so it is an argument or a second assignment of one command | rejected by rule 3 |
+    | no line starting with `syft_image=` (e.g. only `readonly syft_image='v'` or `export syft_image=v`) | rejected by rule 1 |
+    | a second assignment at column 0 (`syft_image=…` in any quoting) | rejected by rule 1 |
+    | a comment, a message or an expansion naming `syft_image` | ignored: no effect on the check |
     | an environment variable `syft_image` | no effect: the unconditional top-level assignment overrides it |
-    | a name built at run time (`printf -v "$name"`, `declare "$a$b=…"`, `eval "$x"`), or the assignment line inside a here-document or a multi-line string | not detected — residual risk: at most a wrong "current"; `generate-sbom.sh:71` checks the reference it really runs against `syft_re`, so no unpinned image can run. Recorded in 0037 |
-    The value itself then passes `syft_re` (verbatim from `generate-sbom.sh`) and the strict tag regex (rule 5)
-    before it reaches `docker` or the table.
+    | a reassignment in any other form: indented or inside a function, `declare`/`typeset`/`local`/`readonly`/`export`, `syft_image+=x`, `${syft_image:=x}`/`${syft_image=x}`, `printf -v`, `read`, `mapfile`, `for … in`, `getopts`, `unset`, `declare -n`, `eval`, a name built at run time, the line continued from the previous one (`\`), or the line inside a here-document or multi-line string | not detected — accepted residual risk: at most a wrong "current" (a stale pin not reported); `generate-sbom.sh:71` checks the reference it really runs against `syft_re`, so no unpinned image can run, and any such edit is a reviewed change of a release script. Recorded in 0037 |
+    The value itself then passes `syft_re` (verbatim from `generate-sbom.sh`) and the strict tag regex (rule 3)
+    before it reaches `docker` or the table, so the guard that protects the commands and the issue is unchanged.
   - *Tags from `git ls-remote --tags --refs`*. The output is lines `<object id><TAB>refs/tags/<name>`; without
     `--refs` also `<name>^{}` peeled lines (excluded by `--refs` and in any case by the regex). Git's ref-name rules
     allow almost any printable name (`v1.0.0-rc.1`, `v1.0.0+meta`, `V1.0.0`, `1.0.0`, `v01.0.0`, very long numbers,
@@ -298,11 +318,38 @@ regex-checked values reach the issue; the job token is used only by the report s
   (unreleased: no `v*` tag exists; status stays `Accepted`, index row unchanged): issue #124 under *Source*; the
   options for noticing a stale syft pin (same issue as the base digests, GitHub REST API, `ghcr.io` tag list, a
   `Release build check` warning — rejected; `git ls-remote` + `ghcr.io` digests in a sibling issue of a second job
-  — chosen) under *Options considered*; one sentence in *Decision*; the follow-up line in *Consequences* replaced by
-  the accepted limits (newest = highest Git tag; a tag without a published image fails the check until it appears;
-  a back-ported patch on an older line is not reported; the literal-form reader and its residual risk). No new
-  record: 0037 is the unreleased record on this topic and names this follow-up. Record 0041 stays as it is (its
-  base image report is unchanged).
+  — chosen; after the challenge also: a reader that rejects every other mention of the variable, and failing the
+  check when the newest tag's image is missing — both rejected) under *Options considered*; one sentence in
+  *Decision*; the follow-up line in *Consequences* replaced by the accepted limits (newest = highest Git tag; a tag
+  without a published image is reported with `-` as its digest; a back-ported patch on an older line is not
+  reported; the literal-line reader and its residual risk). No new record: 0037 is the unreleased record on this
+  topic and names this follow-up. Record 0041 stays as it is (its base image report is unchanged).
+  `docs/ARCHITECTURE.md` needs no change from the revision (its sentence names only "a newer syft release or a
+  moved digest").
+
+## Challenge
+
+Devil's Advocate, 2026-10-10: no major, four minor objections. All four accepted.
+
+1. *AC1 rules 3 and 4 are brittle (a comment or message naming `syft_image` would turn the weekly run red without
+   an issue) and cost about 18 manual scenarios.* — **Accepted.** Rules 3 (continued line) and 4 (every other
+   mention must be an expansion) are dropped. AC1 now requires exactly one line starting with `syft_image=`, that
+   line in the whole-line literal form, and the two value regexes; every other line is ignored. Reassignments in
+   other forms are an accepted residual risk (at most a wrong "current"; `generate-sbom.sh:71` still validates the
+   reference that runs, and the value regexes still guard every command and the issue). S4 shrinks to the forms
+   rules 1–3 reject plus a counter-check that a comment naming the variable changes nothing. Security table, the
+   *SBOM generator* paragraph and record 0037 (*Options considered*, *Consequences*) are updated.
+2. *A failed digest lookup of the newest tag gives exit 4 and hides the pinned row's known `stale` state; a Git tag
+   can precede its `ghcr.io` image.* — **Accepted.** AC4 now adds the newest-release row with `-` as its digest and
+   a warning, and that failure does not count toward exit 4; exit 4 remains for the tag lookup and the pinned
+   tag's digest lookup. AC5, S6 and record 0037 (*Consequences*: "is reported with `-` as its digest" instead of
+   "makes the weekly check fail") are updated.
+3. *S1/S2 depend on live syft release data.* — **Accepted.** S1–S3 and S6 take the tag list from local bare
+   repositories R1/R2 with fixed tag sets through the environment-only URL substitution (checked while planning).
+   Only the digests of the published tags `v1.54.0` and `v1.54.1` are read live. A new S7 records the live run
+   without asserting it. Reviewer/Security re-run S6 as well.
+4. *The report step duplicates about 25 lines of job `check`.* — **Accepted as stated:** AC7 now says the
+   duplication is deliberate; no shared script or composite action, so job `check` stays byte for byte unchanged.
 
 ## Out of scope / follow-ups
 

@@ -83,6 +83,13 @@ Noticing a stale syft pin (issue #124):
   index digests from `ghcr.io` as for the base images, reported by a second job of the weekly workflow in a sibling
   issue** — chosen: no token and no new tool in the lookup, the same output rules as the base image check, and an
   issue its own refresh pull request can close.
+- **A pin reader that also rejects every other mention of the variable** (any line naming `syft_image` outside an
+  expansion, a continued line before the assignment) — rejected: a later comment or error message naming the
+  variable would turn the weekly run red without opening an issue, while all it protects against is a wrong
+  "current". The reader takes the one line that starts with `syft_image=` in its literal form — chosen.
+- **Failing the check when the newest tag's image is not yet on `ghcr.io`** — rejected: the failure would hide a
+  newer release and a moved pinned digest that are already known. The newer release is reported with `-` as its
+  digest — chosen.
 
 ## Decision
 
@@ -119,10 +126,11 @@ release exists or the pinned tag's index digest has moved. The step-by-step beha
   `github-release` works within that time; a second SBOM attestation for the same subject is harmless.
 - The syft pin ages until refreshed by hand (a stale syft gives a less complete SBOM, not a weaker release); the weekly
   workflow reports it, so a refresh is a reviewed pull request whose `Release build check` proves the new pin. "Newest"
-  means the highest release tag in syft's Git repository: a tag whose image is not yet on `ghcr.io` makes the weekly
-  check fail until the image appears, and a back-ported patch of an older line is not reported.
-- The weekly check reads the pin only in its literal form and fails on any other mention of the variable it can see;
-  a name built at run time is invisible to it. That costs at most a wrong "current", because `generate-sbom.sh` checks
-  the form of the reference it actually runs.
+  means the highest release tag in syft's Git repository: a tag whose image is not yet on `ghcr.io` is still reported,
+  with `-` as its digest, and a back-ported patch of an older line is not reported.
+- The weekly check reads the pin only from the one line that starts with `syft_image=` in its literal form and fails
+  if there is none or more than one; comments and messages naming the variable do not affect it. A reassignment in any
+  other form (indented, `readonly`, `+=`, a name built at run time) is invisible to it. That costs at most a wrong
+  "current", because `generate-sbom.sh` checks the form of the reference it actually runs.
 - Release notes follow the PR titles. More platforms, `push-to-registry`, other release triggers, or an account-wide
   token (if Docker Hub offers neither organization tokens nor teams) each need a new record.
