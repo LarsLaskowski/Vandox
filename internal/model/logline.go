@@ -30,6 +30,9 @@ func (l *LogLine) Validate() error {
 	if err := checkShort("program", l.Program); err != nil {
 		return err
 	}
+	if err := checkOptionalName("event", l.Event); err != nil {
+		return err
+	}
 	if l.PID < 0 {
 		return invalid("pid", "must not be negative")
 	}

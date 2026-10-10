@@ -80,7 +80,8 @@ internal static class SchemaMigrator
                                                               ) STRICT
                                                               """
                                                           ]),
-                                                      new(4, ["ALTER TABLE log_lines ADD COLUMN host TEXT NOT NULL DEFAULT ''"])
+                                                      new(4, ["ALTER TABLE log_lines ADD COLUMN host TEXT NOT NULL DEFAULT ''"]),
+                                                      new(5, ["ALTER TABLE log_lines ADD COLUMN event TEXT NOT NULL DEFAULT ''"])
                                                   ];
 
     #endregion // Fields

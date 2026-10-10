@@ -16,7 +16,7 @@ internal static class RecordQueries
 
     private const string RecordColumns = "SELECT r.id, r.kind, r.origin, r.source, r.agent_id, r.seq, r.captured_at, r.received_at, r.boot_id, r.clock_offset_ns, r.data, ";
     private const string MetricColumns = "m.name, m.value, m.unit, m.labels, ";
-    private const string LogColumns = "l.log, l.program, l.pid, l.priority, l.message, l.truncated, l.host";
+    private const string LogColumns = "l.log, l.program, l.pid, l.priority, l.message, l.truncated, l.host, l.event";
     private const string NoMetric = "NULL, NULL, NULL, NULL, ";
     private const string NoLog = "NULL, NULL, NULL, NULL, NULL, NULL, NULL";
 
@@ -253,7 +253,8 @@ internal static class RecordQueries
                    Priority = reader.IsDBNull(18) ? null : (byte)reader.GetInt64(18),
                    Message = reader.IsDBNull(19) ? string.Empty : reader.GetString(19),
                    Truncated = (reader.IsDBNull(20) ? 0 : reader.GetInt64(20)) != 0,
-                   Host = reader.IsDBNull(21) ? string.Empty : reader.GetString(21)
+                   Host = reader.IsDBNull(21) ? string.Empty : reader.GetString(21),
+                   Event = reader.IsDBNull(22) ? string.Empty : reader.GetString(22)
                };
     }
 
