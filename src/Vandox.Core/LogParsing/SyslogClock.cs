@@ -213,7 +213,13 @@ internal sealed class SyslogClock
     /// <returns><c>null</c> on success, else the reason</returns>
     private string? ResolveInYear(SyslogTime time, int year, out DateTimeOffset instant)
     {
-        var reason = ResolveLocal(_timeZone, time with { Year = year }, _previous, out instant);
+        var reason = ResolveLocal(_timeZone,
+                                  time with
+                                       {
+                                           Year = year
+                                       },
+                                  _previous,
+                                  out instant);
 
         if (reason is null)
         {
