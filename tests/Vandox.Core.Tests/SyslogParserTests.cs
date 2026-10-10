@@ -925,7 +925,7 @@ public class SyslogParserTests
         // Arrange
         var input = MariaDbSamples.SyslogFile(MariaDbSamples.SyslogLine(_start, 2345, MariaDbSamples.Note("header")),
                                               "Feb 30 12:00:00 web-1 mariadbd[2345]: skipped\n"
-                    + MariaDbSamples.SyslogLine(_start.AddSeconds(2), 2345, "continued"));
+                                              + MariaDbSamples.SyslogLine(_start.AddSeconds(2), 2345, "continued"));
 
         // Act
         var emitter = await RecordingEmitter.ParseAsync(new SyslogParser(DateTimeZone.Utc), _file, input, TestContext.CancellationToken);
