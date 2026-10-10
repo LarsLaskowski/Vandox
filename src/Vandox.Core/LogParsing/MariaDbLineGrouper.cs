@@ -135,7 +135,7 @@ internal sealed class MariaDbLineGrouper
         _header = payload;
         _line = header;
         _event = _classifier.Classify(header);
-        _message = new MariaDbMessage(payload.Message, payload.Truncated);
+        _message = new MariaDbMessage(header.Message, payload.Truncated);
     }
 
     /// <summary>
@@ -185,7 +185,7 @@ internal sealed class MariaDbLineGrouper
                                  Host = _header.Host,
                                  Program = _header.Program,
                                  Pid = _header.Pid,
-                                 Priority = _header.Priority ?? _line.Priority,
+                                 Priority = _line.Priority ?? _header.Priority,
                                  Message = message,
                                  Truncated = truncated,
                                  Event = _event
