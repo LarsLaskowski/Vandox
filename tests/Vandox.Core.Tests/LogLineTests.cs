@@ -130,7 +130,7 @@ public class LogLineTests
         var programFirst = new LogLine
                            {
                                Log = "x",
-                               Program = new string('p', 300),
+                               Program = new string('p', ModelLimits.MaxShortTextBytes + 1),
                                Event = "bad event",
                                Pid = -1
                            };

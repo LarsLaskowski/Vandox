@@ -158,6 +158,10 @@ public class MariaDbLineTests
     [DataRow("260301 12:00:00 mysqld_safeX y")]
     [DataRow("\u0660026-03-01 12:00:00 0 [Note] x")]
     [DataRow("2026-03-01 1:00:00 0 [Note] x")]
+    [DataRow("2026-03-01 12:0x:00 0 [Note] x")]
+    [DataRow("2026-03-01 12:00:0x 0 [Note] x")]
+    [DataRow("2026-03-01 x1:00:00 0 [Note] x")]
+    [DataRow("2026-03-01 1x:00:00 0 [Note] x")]
     public void MariaDbLineTryParseReturnsNullForAContinuationLine(string line)
     {
         // Arrange

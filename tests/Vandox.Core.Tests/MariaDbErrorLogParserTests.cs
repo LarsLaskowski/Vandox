@@ -90,15 +90,16 @@ public class MariaDbErrorLogParserTests
     /// <param name="time">The expected time in UTC</param>
     /// <param name="program">The expected program</param>
     /// <param name="priority">The expected priority, or -1 for none</param>
+    /// <param name="expectedEvent">The expected event, or empty for none</param>
     /// <returns>A task that completes when the test is done</returns>
     [TestMethod]
-    [DataRow(FormA, "2026-03-01T12:30:15Z", "", 6)]
-    [DataRow("2026-03-01 12:30:15 3 [Warning] Aborted connection", "2026-03-01T12:30:15Z", "", 4)]
-    [DataRow("2026-03-01 12:30:15 3 [ERROR] Master 'backup': Slave I/O: error connecting to master", "2026-03-01T12:30:15Z", "", 3)]
-    [DataRow(FormB, "2026-03-02T10:10:10Z", "", -1)]
-    [DataRow(FormC, "2026-03-02T10:10:10Z", "", 3)]
-    [DataRow(FormD, "2026-03-01T12:00:00Z", "mysqld_safe", -1)]
-    public async Task MariaDbErrorLogParserParseAsyncFillsTheFieldsOfARecord(string line, string time, string program, int priority)
+    [DataRow(FormA, "2026-03-01T12:30:15Z", "", 6, "")]
+    [DataRow("2026-03-01 12:30:15 3 [Warning] Aborted connection", "2026-03-01T12:30:15Z", "", 4, "")]
+    [DataRow("2026-03-01 12:30:15 3 [ERROR] Master 'backup': Slave I/O: error connecting to master", "2026-03-01T12:30:15Z", "", 3, "")]
+    [DataRow(FormB, "2026-03-02T10:10:10Z", "", -1, "")]
+    [DataRow(FormC, "2026-03-02T10:10:10Z", "", 3, MariaDbEvents.Abort)]
+    [DataRow(FormD, "2026-03-01T12:00:00Z", "mysqld_safe", -1, "")]
+    public async Task MariaDbErrorLogParserParseAsyncFillsTheFieldsOfARecord(string line, string time, string program, int priority, string expectedEvent)
     {
         // Arrange
         var parser = new MariaDbErrorLogParser(DateTimeZone.Utc);
@@ -123,7 +124,7 @@ public class MariaDbErrorLogParserTests
         Assert.AreEqual(program, logLine.Program, "program");
         Assert.AreEqual(0, logLine.Pid, "pid");
         Assert.AreEqual(priority < 0 ? null : (byte?)priority, logLine.Priority, "priority");
-        Assert.AreEqual(string.Empty, logLine.Event, "no event for these messages");
+        Assert.AreEqual(expectedEvent, logLine.Event, "event");
         Assert.IsFalse(logLine.Truncated, "not truncated");
     }
 

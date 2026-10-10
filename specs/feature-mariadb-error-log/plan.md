@@ -149,8 +149,8 @@ the file `testdata/logs/mariadb-error.log` given in full under *Fixture*.
   `mariadb.recovery_start`; 21 (L55) `mariadb.recovery_end`; 22 (L56) `mariadb.ready` with L57. Every record passes the
   validating `RecordingEmitter`.
 - [ ] AC-E3 Empty lines: inner empty lines of an entry are kept, trailing ones dropped: header message `h` followed by the
-  lines empty, `x`, empty, empty → message `h` + `\n\n` + `x`; a header followed only by empty lines → the header message
-  alone.
+  lines empty, `x`, empty, empty → message `h` + `\n\n` + `x`; `x`, empty, empty, `y` → `h` + `\n` + `x` + `\n\n\n` + `y`
+  (decision D3); a header followed only by empty lines → the header message alone.
 - [ ] AC-E4 Lines before the first entry: an empty line is skipped with "empty line", any other line with "line before
   the first entry", each with its 1-based line number; the first header then opens an entry. A UTF-8 BOM is removed from
   line 1 only: `EF BB BF` + a form A header on line 1 is a header; the same bytes at the start of line 2 make line 2 a
@@ -166,7 +166,14 @@ the file `testdata/logs/mariadb-error.log` given in full under *Fixture*.
     → the message cut at a character boundary to at most 16,384 bytes, no marker, `Truncated` true;
   - the same header followed by one continuation line `x` → the first line cut to at most 16,320 bytes, then
     `[1 lines omitted]`, `Truncated` true;
-  - a header line longer than 16,384 bytes (cut by `LogLineReader`) → `Truncated` true.
+  - a header line longer than 16,384 bytes (cut by `LogLineReader`) → `Truncated` true;
+  - (decision B) header message `h`, a line of 16,300 `a`, 30 empty lines, `x` (16,334 bytes joined) → kept whole:
+    `h` + `\n` + 16,300 `a` + 31 `\n` + `x`, `Truncated` false;
+  - (decision B) the same followed by a line of 100 `b` (the entry now exceeds 16,384 bytes) → `h` + `\n` + 16,300 `a` +
+    18 `\n` (the prefix within 16,320 bytes ends inside the run of empty lines) + `\n[14 lines omitted]` (12 empty lines,
+    `x` and the `b` line), `Truncated` true;
+  - (decision B) the same as the first row but with the 100 `b` line in place of `x` → `h` + `\n` + 16,300 `a` + 18 `\n` +
+    `\n[13 lines omitted]`, `Truncated` true.
 - [ ] AC-E6 An entry whose header has a time that cannot be stored is skipped once, with the header's line number and the
   reason of AC-T2; its continuation lines are neither records nor separate skips; the record of the entry before it and
   of the next header are emitted.
@@ -424,8 +431,9 @@ with one of these prefixes, checked byte by byte on the raw line before any deco
 | Input | Result |
 | ----- | ------ |
 | header + following continuation lines up to the next header or the end of input | one record; message = header message and continuation lines joined by `\n`, trailing empty lines removed, inner empty lines kept |
-| joined message at most 16,384 UTF-8 bytes (decoded) | kept whole |
-| more, with at least one continuation line | the first line (cut at a character boundary to 16,320 bytes if longer), then the following whole lines while the text stays within 16,320 bytes, then `\n[N lines omitted]` (N the exact number of lines left out, trailing empty lines not counted); `Truncated` |
+| joined message at most 16,384 UTF-8 bytes (decoded) | kept whole, inner empty lines included (decision B in *Lead decisions*) |
+| more, with at least one continuation line | the first line (cut at a character boundary to 16,320 bytes if longer), then the following whole lines, an empty line counting as a line of 0 bytes, while the text stays within 16,320 bytes, then `\n[N lines omitted]` (N the exact number of lines left out, trailing empty lines not counted); `Truncated` |
+| empty continuation lines | held back as a count (a `long`) until a non-empty line follows; materialized only as part of a text of at most 16,384 bytes (kept whole) or of the kept prefix of at most 16,320 bytes; trailing ones never |
 | more, header line alone | cut at a character boundary to 16,384 bytes, no marker; `Truncated` |
 | any line cut by the line reader | `Truncated` |
 | continuation lines before the first header | skipped: "empty line" for an empty one, "line before the first entry" for any other; 1-based line number |
@@ -539,7 +547,9 @@ spaces in `revision  as`; L20 has two spaces before `InnoDB:`.
    every method below the cognitive complexity of 15 (Sonar S3776): one helper per form or per field.
 4. **Message.** `MariaDbMessage` holds the header message and the kept continuation lines (at most 16,384 UTF-8 bytes in
    total, the first line at most 16,384), counts held-back empty lines and omitted lines (a `long`), takes continuation
-   lines as raw bytes and decodes a line only when it is kept, and builds the message by the *Entries* rules.
+   lines as raw bytes and decodes a line only when it is kept, and builds the message by the *Entries* rules. The kept
+   prefix for the marker ends at the last line boundary within 16,320 bytes, also inside a run of empty lines that was
+   materialized because the text still fitted 16,384 bytes then (decision B).
 5. **Events.** `MariaDbEventClassifier` applies the *Events* table and holds the open-recovery flag.
 6. **Parser.** `MariaDbErrorLogParser.ParseAsync` reads lines with `LogLineReader`, removes a BOM from line 1, skips lines
    before the first header, resolves each header (throwing for the unset zone first), emits the previous entry's record when
@@ -558,7 +568,7 @@ spaces in `revision  as`; L20 has two spaces before `InnoDB:`.
 | Go | `internal/model/logline.go` | `Event` field and validation |
 | Go (test data) | `testdata/wire/all-kinds.jsonl`, `testdata/logs/mariadb-error.log` | regenerated golden batch; new fixture (Tester) |
 | Vandox.Core | `Model/LogLine.cs` | `Event` property and validation |
-| Vandox.Core | `LogParsing/MariaDbErrorLogParser.cs`, `MariaDbLine.cs`, `MariaDbMessage.cs`, `MariaDbEventClassifier.cs`, `MariaDbEvents.cs` (all new) | the parser |
+| Vandox.Core | `LogParsing/MariaDbErrorLogParser.cs`, `MariaDbParseSession.cs`, `MariaDbLine.cs`, `MariaDbMessage.cs`, `MariaDbEventClassifier.cs`, `MariaDbEvents.cs` (all new) | the parser (`MariaDbParseSession`: decision A in *Lead decisions*) |
 | Vandox.Core | `LogParsing/SyslogClock.cs` | new static `ResolveLocal`; behavior of the rest unchanged |
 | Vandox.Core | `LogParsing/SyslogParser.cs` | `HasSyslogName` from `private` to `internal` (used by `MariaDbErrorLogParser.Detect`); body and behavior unchanged |
 | Vandox.Core | `LogParsing/BuiltInParsers.cs` | list `journal`, `mariadb`, `syslog`; XML doc comment |
@@ -638,6 +648,14 @@ internal sealed class MariaDbMessage
 internal sealed class MariaDbEventClassifier
 {
     internal string Classify(MariaDbLine line);             // a MariaDbEvents value or string.Empty; tracks an open recovery in call order
+}
+
+// added in step 6 (decision A): the per-parse state of MariaDbErrorLogParser.ParseAsync (RH2101 forbids a nested class)
+internal sealed class MariaDbParseSession
+{
+    internal MariaDbParseSession(LogFile file, DateTimeZone? timeZone, IRecordEmitter output);
+    internal DataRecord? Consume(LogLineReader reader);     // the line read last; the record of the entry it ended, or null; skips go to output; throws for the unset zone at a header
+    internal DataRecord? Finish();                          // the record of the open entry at the normal end of input, or null
 }
 
 // Vandox.Core.LogParsing.SyslogClock — new static member; everything else unchanged
@@ -777,8 +795,9 @@ Every edit has one owner, the **Dev** (as the area documents above); the Lead's 
   is never re-read as one forged MariaDB entry (AC-D1, AC-D2). What remains is a file whose first line its writer
   controls, which no content rule can tell apart (*Forged lines* below).
 - Memory: bounded by the line reader (16 KiB plus its buffer) and one open entry (the first line at most 16,384 UTF-8
-  bytes plus kept lines at most 16,384; omitted and held-back empty lines only counted in a `long`, never materialized
-  beyond the kept 16,320 bytes, at the end of the entry as well), independent of the input size (AC-M1, AC-M2, AC-M3).
+  bytes plus kept lines at most 16,384; omitted and held-back empty lines only counted in a `long`, materialized only
+  within the 16,384-byte message limit and, once the entry overflows, only within the kept 16,320 bytes, at the end of
+  the entry as well — decision B in *Lead decisions*), independent of the input size (AC-M1, AC-M2, AC-M3).
   Time: linear in the input; matching uses ordinal string operations on the first line only.
 - Display: messages are stored as read (control characters kept, as for syslog); skip reasons and events are fixed texts;
   the importer never logs a message. Showing messages escaped is the web UI's job (area 12, Razor encodes HTML).
@@ -900,6 +919,57 @@ were re-checked at head `cd883b5`.
   whose first non-empty line has a header's shape is read as one (a file a web-space user wrote under a saved `/var/www`,
   an application log whose first line is client text), and that `log` keeps the real path. After B1 the case needs the
   file's first non-empty line, not any line of its head.
+
+## Lead decisions
+
+Step 6, `decide` at head `8997e72`: the Dev disputed three tests as test defects (Core 1144 passed, 3 failed, confirmed by
+running the three classes) and reported two deviations from this plan.
+
+- **D1 — `LogLineValidateChecksTheEventAfterTheProgram` (test defect; Tester).** `Program = new string('p', 300)` is valid in
+  C#: `ModelLimits.MaxShortTextBytes` is 1,024 (`src/Vandox.Core/Model/ModelLimits.cs:18`), so `event` is the first error.
+  The Tester sets the program to `ModelLimits.MaxShortTextBytes + 1` characters, as the Go twin does
+  (`internal/model/logline_test.go:57`, `:96`). Implementation unchanged.
+- **D2 — `MariaDbErrorLogParserParseAsyncFillsTheFieldsOfARecord`, row `FormC` (test defect; Tester).** AC-E1 says `Event`
+  per AC-C1, and AC-C1 makes `ERROR` + `mysqld got signal 6 ;` `mariadb.abort`; the implementation is right. The Tester
+  adds a parameter for the expected event to the method (`mariadb.abort` for the `FormC` row, empty for the other five)
+  and asserts it instead of the fixed empty event, so form C keeps its field row and AC-E1's event part is checked
+  through the parser. Implementation unchanged.
+- **D3 — `MariaDbMessageBuildKeepsInnerEmptyLinesAndDropsTrailingOnes`, row `("x||y", "h|x|||y")` (test defect; Tester).**
+  `"x||y".Split('|')` is `x`, empty, `y`, so the message is `h\nx\n\ny`; the row's input does not match its expected
+  text. The Tester changes the **input** to `"x|||y"` and keeps the expected `"h|x|||y"`: the row then covers a run of
+  two inner empty lines between two text lines, which no other row of the method covers. Implementation unchanged.
+- **A — new file `src/Vandox.Core/LogParsing/MariaDbParseSession.cs` (accepted).** Reihitsu RH2101 forbids the nested
+  class the per-parse state would otherwise need; the type is `internal sealed`, adds no public surface, holds exactly the
+  state step 6 of *Approach* describes, and is covered through `MariaDbErrorLogParserTests` (no test file of its own:
+  every behavior it carries is an acceptance criterion of the parser). The plan now lists it in *Affected projects and
+  types* and *Signatures*, `tasks.md` in task 16. The names the Dev added to `.squad/project.md` (*Security areas* 10,
+  task 25, a project-knowledge file a product change may edit) and to `docs/areas/log-import.md` (*Implementation*) stay.
+  Security sees the file in its diff review (it belongs to security area 10).
+- **B — empty lines at the 16,320/16,384 edge (the stricter reading rejected; Dev, Tester, Dev for the area document).**
+  The *Entries* rule "a message of at most 16,384 bytes is kept whole" holds for empty lines too; the sentence "never
+  materialized beyond the kept 16,320 bytes" was written for the overflow case and is corrected. Reasons: under the
+  stricter reading the Tester's case (16,334 bytes joined) becomes `... 18 \n` + `\n[13 lines omitted]`, 16,339 bytes, so
+  the "truncated" message is longer than the whole one and replaces real content by a marker; an empty line of 1 byte
+  would cut a message that a non-empty line of 1 byte does not; and AC-E5's first row promises that a message within the
+  limit is kept whole. The memory bound Security asked for (B2: held-back empty lines cost a counter, independent of the
+  input size) is unchanged: materialized text never exceeds the 16,384-byte message limit, and AC-M1/AC-M3 (millions of
+  empty lines) give the same results under both readings. The rule, now in *Accepted forms* (*Entries*), *Approach* step
+  4 and *Security considerations*: held-back empty lines are materialized when they and the non-empty line that follows
+  them still fit the 16,384-byte limit; when the entry overflows, the kept prefix is the longest prefix of whole lines,
+  empty lines included, within 16,320 bytes — also when that boundary lies inside a run of empty lines materialized
+  earlier. AC-E5 has three new rows that pin both halves. Owners:
+  - **Dev:** `src/Vandox.Core/LogParsing/MariaDbMessage.cs` — `Exceeds` checks only the 16,384-byte limit (the
+    `KeptBytes` clause for pending empty lines goes); the mark for the kept prefix advances over the empty lines of a run
+    that fit within `KeptBytes` even when the whole run does not (`AppendEmpty`/`UpdateMark`), and the XML comments say so.
+    `docs/areas/log-import.md`, *Bounds*: replace "Empty lines are only kept while the text stays within 16,320 bytes; the
+    others are counted, never stored" by the rule above (empty lines are held back as a count and materialized only within
+    the message limit, or within the 16,320 bytes of the kept prefix once the entry is cut; trailing ones never).
+  - **Tester:** `tests/Vandox.Core.Tests/MariaDbMessageTests.cs` — `MariaDbMessageBuildCountsEmptyLinesBeyondTheKeptRoomAsOmitted`
+    becomes the first new AC-E5 row (kept whole, renamed to say so, e.g. `MariaDbMessageBuildKeepsEmptyLinesBeyondTheKeptRoomWhenTheMessageFits`);
+    the second and third rows are added (the third keeps today's expected text with a 100-byte `b` line instead of `x`).
+  - **Security:** confirms the corrected memory sentence in its diff review (a sentence of the plan it approved changed;
+    the bound itself did not).
+  - **Lead (done here):** this plan, `tasks.md` (tasks 14, 16, 20 and the new task 28), record 0088 option 12.
 
 ## Out of scope / follow-ups
 

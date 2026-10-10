@@ -28,7 +28,7 @@ public class MariaDbMessageTests
     [DataRow("|x||", "h||x")]
     [DataRow("x", "h|x")]
     [DataRow("|x", "h||x")]
-    [DataRow("x||y", "h|x|||y")]
+    [DataRow("x|||y", "h|x|||y")]
     [DataRow("x|", "h|x")]
     [DataRow("|", "h")]
     [DataRow("||||", "h")]
@@ -226,30 +226,55 @@ public class MariaDbMessageTests
     }
 
     /// <summary>
-    /// Empty lines are lines like the others: those within the kept room stay, the rest count as omitted with the line after them.
+    /// A message of at most 16,384 bytes is kept whole, empty lines included, also beyond the room of the kept prefix.
     /// </summary>
     [TestMethod]
-    public void MariaDbMessageBuildCountsEmptyLinesBeyondTheKeptRoomAsOmitted()
+    public void MariaDbMessageBuildKeepsEmptyLinesBeyondTheKeptRoomWhenTheMessageFits()
     {
         // Arrange
-        var message = new MariaDbMessage("h", false);
-        var raw = new byte[16300];
-
-        Array.Fill(raw, (byte)'a');
-        message.Add(raw, false);
-
-        for (var index = 0; index < 30; index++)
-        {
-            message.Add([], false);
-        }
-
-        message.Add("x"u8, false);
+        var message = BuildWithEmptyLinesAndLast("x"u8.ToArray());
 
         // Act
         var built = message.Build(out var truncated);
 
         // Assert
-        Assert.AreEqual($"h\n{new string('a', 16300)}{new string('\n', 18)}\n[13 lines omitted]", built, "18 empty lines fit up to 16,320 bytes, 12 empty lines and the last line are omitted");
+        Assert.AreEqual($"h\n{new string('a', 16300)}{new string('\n', 31)}x", built, "16,334 bytes joined are kept whole");
+        Assert.IsFalse(truncated, "nothing was cut");
+    }
+
+    /// <summary>
+    /// When the entry exceeds the limit, the kept prefix ends inside the run of empty lines and the rest is counted.
+    /// </summary>
+    [TestMethod]
+    public void MariaDbMessageBuildCutsInsideARunOfEmptyLinesWhenTheEntryExceedsTheLimit()
+    {
+        // Arrange
+        var message = BuildWithEmptyLinesAndLast("x"u8.ToArray());
+
+        message.Add(Encoding.UTF8.GetBytes(new string('b', 100)), false);
+
+        // Act
+        var built = message.Build(out var truncated);
+
+        // Assert
+        Assert.AreEqual($"h\n{new string('a', 16300)}{new string('\n', 18)}\n[14 lines omitted]", built, "18 empty lines fit up to 16,320 bytes, 12 empty lines, x and the b line are omitted");
+        Assert.IsTrue(truncated, "truncated");
+    }
+
+    /// <summary>
+    /// A last line that overflows the limit after a run of empty lines is counted with the empty lines beyond the kept prefix.
+    /// </summary>
+    [TestMethod]
+    public void MariaDbMessageBuildCountsEmptyLinesBeyondTheKeptRoomWhenTheLastLineOverflows()
+    {
+        // Arrange
+        var message = BuildWithEmptyLinesAndLast(Encoding.UTF8.GetBytes(new string('b', 100)));
+
+        // Act
+        var built = message.Build(out var truncated);
+
+        // Assert
+        Assert.AreEqual($"h\n{new string('a', 16300)}{new string('\n', 18)}\n[13 lines omitted]", built, "18 empty lines fit up to 16,320 bytes, 12 empty lines and the b line are omitted");
         Assert.IsTrue(truncated, "truncated");
     }
 
@@ -415,6 +440,29 @@ public class MariaDbMessageTests
         Assert.IsLessThan(Mebibyte, retained, "retained bytes, a reference, a character or a byte per line would be 32 MB, 8 MB or 4 MB");
         Assert.AreEqual("h", built, "the trailing empty lines are dropped");
         Assert.IsFalse(truncated, "nothing was cut");
+    }
+
+    /// <summary>
+    /// Builds a message of the header <c>h</c>, a line of 16,300 <c>a</c>, 30 empty lines and a last line.
+    /// </summary>
+    /// <param name="last">The bytes of the last line</param>
+    /// <returns>The message</returns>
+    private static MariaDbMessage BuildWithEmptyLinesAndLast(byte[] last)
+    {
+        var message = new MariaDbMessage("h", false);
+        var raw = new byte[16300];
+
+        Array.Fill(raw, (byte)'a');
+        message.Add(raw, false);
+
+        for (var index = 0; index < 30; index++)
+        {
+            message.Add([], false);
+        }
+
+        message.Add(last, false);
+
+        return message;
     }
 
     /// <summary>

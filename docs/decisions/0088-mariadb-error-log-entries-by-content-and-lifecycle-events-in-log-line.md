@@ -91,7 +91,11 @@ How a long entry is cut (a crash report with a long query exceeds the 16 KiB tex
 11. **Head and tail, as kernel reports** (0086 option 8) — the tail of a crash report (resource limits, kernel version)
     matters less than its head (signal, server version, stack trace).
 12. **The head with a line naming how many lines were left out** (chosen) — memory is bounded by the kept head; the marker
-    is the same as for kernel reports.
+    is the same as for kernel reports. Only an entry beyond the text limit is cut: an entry within it is kept whole, its
+    empty lines included, because a marker that replaces lines of a message that fits would lose content and could make
+    the message longer than the whole one. Empty lines are held back as a count until a line follows them, so a run of
+    them costs memory only within the text limit, not per line. Rejected with it: keeping empty lines only within the
+    marker's room (16,320 bytes) even when the whole entry fits.
 
 The time zone:
 
