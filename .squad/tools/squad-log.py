@@ -17,12 +17,20 @@ mechanics out of the orchestrator's hands:
   uses · 57 s)` the summary can read back;
 - the usage block often arrives only after the member's hand-back: `--amend-last MEMBER` with the same
   options adds the trailer to the last row of that member afterwards, so the row can be written as soon as
-  the report is in. A row gets its trailer once; a second amend is refused.
+  the report is in. A row gets its trailer once; a second amend is refused;
+- a row whose trailer is wrong (a launch logged with made-up numbers before its notification arrived) is
+  corrected with `--replace-last MEMBER` and the same options: the trailer of that member's last row is
+  replaced, so the launch is still counted once;
+- the metrics are what a launch really cost: `--tokens 0` (a launch always uses tokens) and negative numbers
+  are refused, so a placeholder cannot be logged by accident. A row for a launch whose notification has not
+  arrived yet is written without any metric option and completed with `--amend-last`.
 
 Usage, from anywhere inside the repository:
     python3 .squad/tools/squad-log.py <work folder> <step> <member> <result> [--agent squad-lead
         --tokens 37445 --tool-uses 6 --seconds 57]
     python3 .squad/tools/squad-log.py <work folder> --amend-last Lead --agent squad-lead --tokens 37445
+        --tool-uses 6 --seconds 57
+    python3 .squad/tools/squad-log.py <work folder> --replace-last Lead --agent squad-lead --tokens 37445
         --tool-uses 6 --seconds 57
     python3 .squad/tools/squad-log.py <work folder> --summary
 
@@ -31,7 +39,8 @@ folders that exist there, never used as a path, so no argument reaches the file 
 against the files under `.claude/agents/` the same way. `<result>` may contain line breaks.
 `--summary` prints a Markdown table per member (launches, tokens, tool uses, seconds) with a total row, for
 the "Squad working record" comment and the wrap-up report. Exit code 0 when the row was written, amended or
-the summary printed, 1 when the folder has no `log.md`, the agent file is unknown or no row can be amended.
+the summary printed, 1 when the folder has no `log.md`, the agent file is unknown or no row can be amended or
+replaced.
 """
 import argparse
 import datetime
@@ -105,9 +114,10 @@ def agent_launch(root, agent):
     return f"{found['model']}/{found['effort']}" if "model" in found and "effort" in found else None
 
 
-def amend_last(path, member, launch):
-    """Add the launch trailer to the last row of `member` that has none; the amended row, or None when no row
-    of that member exists or its last row already carries a trailer."""
+def amend_last(path, member, launch, replace=False):
+    """Add the launch trailer to the last row of `member`; the amended row, or None when no row of that member
+    exists or its last row already carries a trailer. With `replace`, that trailer is replaced instead and a
+    row without one is left alone (None)."""
     with open(path, "rb") as handle:
         data = handle.read()
     eol = b"\r\n" if b"\r\n" in data else b"\n"
@@ -117,9 +127,12 @@ def amend_last(path, member, launch):
         match = ROW.match(lines[index])
         if not match or match.group("member") != wanted:
             continue
-        if TRAILER.search(match.group("result")):
+        old = TRAILER.search(match.group("result"))
+        if bool(old) != replace:
             return None
-        lines[index] = f"{lines[index].rstrip()[:-1].rstrip()} {trailer(*launch)} |"
+        result = match.group("result")[:old.start()] if old else match.group("result")
+        lines[index] = f"| {match.group('date')} | {match.group('step')} | {match.group('member')} | " \
+                       f"{result.rstrip()} {trailer(*launch)} |"
         with open(path, "wb") as handle:
             handle.write(eol.decode().join(lines).encode())
         return lines[index]
@@ -183,6 +196,8 @@ def build_parser():
     parser.add_argument("result", nargs="?")
     parser.add_argument("--summary", action="store_true", help="print the per-member launch table instead of a row")
     parser.add_argument("--amend-last", metavar="MEMBER", help="add the launch trailer to the last row of this member")
+    parser.add_argument("--replace-last", metavar="MEMBER", help="replace the launch trailer of the last row of "
+                                                                 "this member (to correct wrong metrics)")
     parser.add_argument("--agent", metavar="squad-ROLE", help="the launched agent; model and effort come from its file")
     parser.add_argument("--launch", metavar="MODEL/EFFORT", help="the launched subagent's model and effort (when "
                                                                "the launch overrode the agent file)")
@@ -202,15 +217,20 @@ def launch_metrics(parser, root, args):
         sys.exit(f"No .claude/agents/{args.agent}.md with a model and an effort")
     if not model or None in (args.tokens, args.tool_uses, args.seconds):
         parser.error("--agent (or --launch), --tokens, --tool-uses and --seconds go together")
+    if args.tokens < 1 or args.tool_uses < 0 or args.seconds < 0:
+        parser.error("--tokens must be at least 1 and --tool-uses and --seconds not negative; a launch whose "
+                     "notification has not arrived yet is logged without metrics and completed with --amend-last")
     return (model, args.tokens, args.tool_uses, args.seconds)
 
 
-def amend_command(parser, path, folder, member, launch):
+def amend_command(parser, path, folder, member, launch, replace):
+    option = "--replace-last" if replace else "--amend-last"
     if launch is None:
-        parser.error("--amend-last needs --agent (or --launch), --tokens, --tool-uses and --seconds")
-    row = amend_last(path, member, launch)
+        parser.error(f"{option} needs --agent (or --launch), --tokens, --tool-uses and --seconds")
+    row = amend_last(path, member, launch, replace=replace)
     if row is None:
-        print(f"No row of {member} without a launch trailer in {folder}")
+        state = "with" if replace else "without"
+        print(f"No row of {member} {state} a launch trailer in {folder}")
         return 1
     print(row)
     return 0
@@ -229,10 +249,13 @@ def main():
         print(summary(path))
         return 0
     launch = launch_metrics(parser, root, args)
-    if args.amend_last:
-        return amend_command(parser, path, args.folder, args.amend_last, launch)
+    if args.amend_last and args.replace_last:
+        parser.error("--amend-last and --replace-last exclude each other")
+    if args.amend_last or args.replace_last:
+        return amend_command(parser, path, args.folder, args.amend_last or args.replace_last, launch,
+                             replace=bool(args.replace_last))
     if args.step is None or args.member is None or args.result is None:
-        parser.error("a row needs <step> <member> <result> (or --summary, or --amend-last)")
+        parser.error("a row needs <step> <member> <result> (or --summary, --amend-last or --replace-last)")
     print(append_row(path, args.step, args.member, args.result, launch=launch))
     return 0
 
