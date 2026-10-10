@@ -1,7 +1,8 @@
 * text=auto eol=lf
 
-# C# and Markdown are checked out with CRLF (as in the F1-Telemetry reference); everything else stays LF
+# C#, Razor and Markdown are checked out with CRLF (as in the F1-Telemetry reference); everything else stays LF
 *.cs text eol=crlf
+*.razor text eol=crlf
 *.md text eol=crlf
 
 # Binary assets

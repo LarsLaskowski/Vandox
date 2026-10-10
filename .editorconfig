@@ -22,6 +22,7 @@ end_of_line = crlf
 trim_trailing_whitespace = false
 
 [*.{cs,razor}]
+end_of_line = crlf
 insert_final_newline = false
 
 [*.cs]

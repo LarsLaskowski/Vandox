@@ -29,8 +29,8 @@ container files that must keep LF.
 
 The C# section of `.editorconfig` follows the F1-Telemetry reference, with IDE0046 set to `silent`: where it and S3358
 collide, an `if` with an early return is the accepted form. Naming rules are enforced in the build through IDE1006 as
-errors, with a constants rule (PascalCase) next to the `_camelCase` rule for private fields; MSTEST0084 is an error. C# and
-Markdown files are checked out with CRLF through `.gitattributes` (the repository stores LF), every other file stays LF;
+errors, with a constants rule (PascalCase) next to the `_camelCase` rule for private fields; MSTEST0084 is an error. C#, Razor
+and Markdown files are checked out with CRLF through `.gitattributes` (the repository stores LF), every other file stays LF;
 the F1-specific suppressions are not taken over, and settings that were already stricter in Vandox stay.
 
 ## Consequences
