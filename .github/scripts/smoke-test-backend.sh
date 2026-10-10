@@ -102,9 +102,9 @@ esac
 # The owner is matched on its own column, so a file name containing 65532 cannot match.
 check_image_owners() {
   local listing="$1"
-  local mode owner size date time name uid gid path
+  local mode owner name uid gid path
   local dataentry="" offenders=""
-  while read -r mode owner size date time name; do
+  while read -r mode owner _ _ _ name; do
     [[ -n "$mode" ]] || continue
     path="${name%% -> *}"
     path="${path%% link to *}"

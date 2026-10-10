@@ -23,7 +23,7 @@ if ! printf '%s' "$tfm" | grep -Eq '^[0-9]+\.[0-9]+$' || ! printf '%s' "$build" 
   echo "::error::could not read .NET versions (framework: '$tfm', BASE_BUILD_TAG: '$build_tag', BASE_RUNTIME_TAG: '$run_tag')" >&2
   exit 1
 fi
-if [[ "$tfm" != "$build" || "$tfm" != "$run" ]]; then
+if ! [[ "$tfm" == "$build" && "$tfm" == "$run" ]]; then
   echo "::error::target framework net$tfm, builder tag '$build_tag' and runtime tag '$run_tag' must name the same .NET version" >&2
   exit 1
 fi
