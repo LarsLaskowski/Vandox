@@ -71,10 +71,13 @@ action yourself — including follow-up issues the Lead decides on.
    (`--agent` reads the model and effort from the agent file; `--launch <model>/<effort>` only when the launch
    overrode them). The three numbers come from the usage block of the launch's **task notification**, not
    from the member's hand-back message, and that notification may arrive after you have already read the
-   report: write the row as soon as the report is in and add the metrics when the notification arrives with
+   report: write the row as soon as the report is in, **without any metric option** (no `--agent`,
+   `--tokens`, `--tool-uses` or `--seconds`), and add the metrics when the notification arrives with
    `python3 .squad/tools/squad-log.py issue-<number> --amend-last "<member>" --agent squad-<role> --tokens …
-   --tool-uses … --seconds …` — never by editing `log.md` by hand or with placeholder numbers. The wrap-up
-   sums the trailers per role. After every member's report, commit and push the files it left in the work
+   --tool-uses … --seconds …` — never by editing `log.md` by hand or with placeholder numbers (the script
+   refuses `--tokens 0`). A trailer with wrong numbers is corrected with `--replace-last "<member>"` and the
+   same options, never with an extra row, which would count the launch twice. The wrap-up sums the trailers
+   per role. After every member's report, commit and push the files it left in the work
    folder (the Lead's records, the Tester's tests) yourself, so the next report does not list them as
    untracked noise.
 2. **Plan.** Launch `squad-lead` in mode `plan` with the issue text and the work folder. It returns one of:

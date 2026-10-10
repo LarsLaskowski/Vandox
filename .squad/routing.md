@@ -6,7 +6,7 @@ the skill — launches the members, passes documents between them (subagents can
 directly), performs every Git and GitHub action (including follow-up issues the Lead decides on) and
 records every step in the work folder's `log.md` with `python3 .squad/tools/squad-log.py` — each subagent
 launch with its model and effort (`--agent`) and the usage its task notification reports, added later with
-`--amend-last` when the notification follows the hand-back — (after step 10, in the "Squad working record"
+`--amend-last` when the notification follows the hand-back and corrected with `--replace-last` — (after step 10, in the "Squad working record"
 comment that replaces it). Step numbers below are the ones the skills use.
 
 ## Work folder
