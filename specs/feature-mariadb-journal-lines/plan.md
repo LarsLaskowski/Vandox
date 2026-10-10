@@ -1,7 +1,7 @@
 # Plan: Classify MariaDB lines from the journal and syslog
 
 Source: issue #165 | [spec.md](spec.md)
-Status: Revised (2)
+Status: Approved (step 9, see *Approval*)
 Tier: security. The change adds a bounded multi-line grouping of hostile input to the journal and syslog parsers, which
 is security area 10, *Parsing of external input* (`.squad/project.md`).
 
@@ -617,3 +617,20 @@ Security, rejection 1 of 2: CHANGES_REQUIRED, 2 blocking and 2 non-blocking find
 - Binary journal files and MySQL 8's format: not read or not classified, unchanged.
 - A recovery state per host for inputs with several hosts: not planned (0088 option 35). It would need a new issue if a
   multi-host import becomes a goal.
+
+## Approval
+
+Lead, step 9 (approve-pr), on head 99d21ba (code as reviewed on 7c87b0e). Deviations from the plan text, all accepted:
+
+- **Priority.** *Approach* step 1 wrote `Priority = header.Priority ?? line.Priority`, which reads inverted against AC1.
+  The build takes the MariaDB level first and the line's priority for a header without a level
+  (`_line.Priority ?? _header.Priority`), as AC1, AC2, the spec, the area document and 0088 option 33 require. The ACs
+  are binding; the formula in *Approach* was a wording defect.
+- **Message.** The entry starts from the parsed `MariaDbLine.Message` (the text after the header prefix), as AC1 and
+  *Entries* require; the plan text named the header record's message.
+- **`MariaDbLineGrouper.IsServer`** is an `internal static` helper added for the Reihitsu member order (RH7103/RH7110);
+  no behavior beyond the plan's program filter.
+
+Step 8 decisions confirmed against the build: N1 (pin the `_overflow` guard of `TryAdd`) fixed by the Tester; N2 (the
+`SYSLOG_PID` exception in the area document and 0088 options 30/36) fixed by the Lead and covered by delta round 2. The
+`.squad/project.md` edits (security area 10, *Test doubles* row) describe the change and weaken no guarantee.
