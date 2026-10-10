@@ -1,6 +1,6 @@
 # 0088: MariaDB error log: entries detected by content and kept with their continuation lines, lifecycle events in an optional log_line field
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-10
 - **Area:** Log import
 - **Source:** Issue #17
