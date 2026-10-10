@@ -37,3 +37,5 @@ helpers instead of either form. `Program.Main` and similar wiring stay thin and 
 - Both coverage values (new code and overall) are measured over Go and C# together; the thresholds stay at 80 %.
 - The .NET build is the analyzer run, and a stale build can hide diagnostics, so the gate builds with `--no-incremental`.
 - The Go-to-Cobertura converter (`.squad/tools/go-coverage-to-cobertura.py`) is repository-owned, not part of the template.
+- The template's seeded `sonar-project.properties` is not adopted: the SonarScanner for .NET refuses a repository that has one,
+  so the CI workflow passes the Sonar settings as scanner arguments.

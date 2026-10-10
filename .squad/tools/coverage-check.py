@@ -10,14 +10,15 @@ the hits of all of them are merged):
 - `lcov`      — `lcov.info` (Node: c8, Node's test runner, Jest, Vitest, ...)
 - `go`        — a `go test -coverprofile` file
 
-The base (origin/main), the report location and the production-code paths are fixed in
-`squad_settings.py`, not taken from the command line, so nothing user-supplied reaches git or the
-filesystem.
+The base (BASE_REF, default origin/main), the report location, the production-code paths and the thresholds
+(COVERAGE_THRESHOLD for new/changed lines, COVERAGE_OVERALL_THRESHOLD for the whole code base, both default
+80) are fixed in `squad_settings.py`, not taken from the command line, so nothing user-supplied reaches git
+or the filesystem.
 
 Usage, from the repository root, after *Test with coverage* from `.squad/stack.md`:
-    python3 .squad/tools/coverage-check.py [--threshold 80]
+    python3 .squad/tools/coverage-check.py
 
-Exit code 0 when both values reach the threshold, 1 otherwise. When the diff contains neither production
+Exit code 0 when both values reach their threshold, 1 otherwise. When the diff contains neither production
 nor test code, the overall value is only reported: such a change cannot make coverage worse, so a gap that
 already exists on the base does not fail it. A diff that only changes or deletes tests is gated, because
 it can lower overall coverage.
@@ -33,7 +34,16 @@ import xml.etree.ElementTree as ET
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import squad_settings as settings  # noqa: E402  (per-repository settings next to this script)
 
-BASE_REF = "origin/main"
+BASE_REF = getattr(settings, "BASE_REF", "origin/main")
+
+
+def merge_base():
+    """The merge base of BASE_REF and HEAD; a missing base ref is a clear error, not a traceback."""
+    result = subprocess.run(["git", "merge-base", BASE_REF, "HEAD"], capture_output=True, text=True, check=False)
+    if result.returncode != 0:
+        sys.exit(f"Cannot find the merge base with {BASE_REF}: fetch it (git fetch origin <branch>) or set BASE_REF "
+                 "in .squad/tools/squad_settings.py to the base branch of this repository")
+    return result.stdout.strip()
 
 
 def repo_path(path):
@@ -44,11 +54,9 @@ def repo_path(path):
 def changed_lines():
     """Return {repo-relative path: set(line numbers)} of lines added or changed since the merge base with
     origin/main (working tree included) in the production paths from squad_settings."""
-    merge_base = subprocess.run(
-        ["git", "merge-base", BASE_REF, "HEAD"], capture_output=True, text=True, check=True).stdout.strip()
     pathspecs = list(settings.COVERAGE_PATHSPECS) + [f":(exclude){p}" for p in settings.COVERAGE_EXCLUDES]
     diff = subprocess.run(
-        ["git", "diff", "-U0", merge_base, "--", *pathspecs],
+        ["git", "diff", "-U0", merge_base(), "--", *pathspecs],
         capture_output=True, text=True, check=True).stdout
     result, current = {}, None
     for line in diff.splitlines():
@@ -67,13 +75,11 @@ def changed_lines():
 def changed_test_files():
     """Return the repo-relative test files changed since the merge base with origin/main (working tree
     included): the paths in COVERAGE_TEST_PATHSPECS, by default the COVERAGE_EXCLUDES of squad_settings."""
-    merge_base = subprocess.run(
-        ["git", "merge-base", BASE_REF, "HEAD"], capture_output=True, text=True, check=True).stdout.strip()
     pathspecs = getattr(settings, "COVERAGE_TEST_PATHSPECS", settings.COVERAGE_EXCLUDES)
     if not pathspecs:
         return []
     return subprocess.run(
-        ["git", "diff", "--name-only", merge_base, "--", *pathspecs],
+        ["git", "diff", "--name-only", merge_base(), "--", *pathspecs],
         capture_output=True, text=True, check=True).stdout.splitlines()
 
 
@@ -221,9 +227,9 @@ def warn_untracked():
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--threshold", type=float, default=80.0)
-    args = parser.parse_args()
+    argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter).parse_args()
+    threshold = float(getattr(settings, "COVERAGE_THRESHOLD", 80))
+    overall_threshold = float(getattr(settings, "COVERAGE_OVERALL_THRESHOLD", threshold))
 
     os.chdir(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
     warn_untracked()
@@ -237,8 +243,8 @@ def main():
     gated = bool(changed) or bool(changed_test_files())
     if not gated:
         print("No production or test code changed: overall coverage is reported, not gated (the change cannot lower it).")
-    ok = not gated or (new_code >= args.threshold and overall >= args.threshold)
-    print(f"Threshold {args.threshold:.0f}%: {'PASS' if ok else 'FAIL'}")
+    ok = not gated or (new_code >= threshold and overall >= overall_threshold)
+    print(f"Thresholds {threshold:.0f}% on new/changed code, {overall_threshold:.0f}% overall: {'PASS' if ok else 'FAIL'}")
     return 0 if ok else 1
 
 if __name__ == "__main__":

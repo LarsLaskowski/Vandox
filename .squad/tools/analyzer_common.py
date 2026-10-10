@@ -4,19 +4,31 @@ user-supplied reaches the shell, git or the filesystem."""
 import os
 import shutil
 import subprocess
+import sys
 
-BASE_REF = "origin/main"
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import squad_settings as settings  # noqa: E402  (per-repository settings next to this script)
+
+BASE_REF = getattr(settings, "BASE_REF", "origin/main")
 
 
 def git(*args):
     return subprocess.run(["git", *args], capture_output=True, text=True, check=True).stdout
 
 
+def merge_base():
+    """The merge base of BASE_REF and HEAD; a missing base ref is a clear error, not a traceback."""
+    result = subprocess.run(["git", "merge-base", BASE_REF, "HEAD"], capture_output=True, text=True, check=False)
+    if result.returncode != 0:
+        sys.exit(f"Cannot find the merge base with {BASE_REF}: fetch it (git fetch origin <branch>) or set BASE_REF "
+                 "in .squad/tools/squad_settings.py to the base branch of this repository")
+    return result.stdout.strip()
+
+
 def shell_check():
     """shellcheck on changed shell scripts when it is installed; says so when files are skipped (the gate
     does not analyse shell otherwise). Returns True when nothing failed."""
-    merge_base = git("merge-base", BASE_REF, "HEAD").strip()
-    names = git("diff", "--name-only", "--diff-filter=d", merge_base).splitlines()
+    names = git("diff", "--name-only", "--diff-filter=d", merge_base()).splitlines()
     names += git("ls-files", "--others", "--exclude-standard").splitlines()
     files = sorted({n.strip() for n in names if n.strip().endswith(".sh") and os.path.isfile(n.strip())})
     if not files:
