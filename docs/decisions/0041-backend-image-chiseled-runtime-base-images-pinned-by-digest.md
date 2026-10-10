@@ -67,7 +67,7 @@ one issue. The exact checks are in `.github/scripts/` and the workflows.
 - Nobody checks that a tag and its digest belong together beyond the .NET version check: a digest of another version than
   its tag fails the image build, a different build of the same version passes.
 - Dependabot no longer covers `docker`; if it learns to resolve `ARG` defaults in `FROM` lines, the entry and the weekly
-  workflow can go. The weekly workflow holds a write permission (`issues: write`, security area 13) and GitHub disables
+  workflow's job `check` can go. The weekly workflow holds a write permission (`issues: write`, security area 13) and GitHub disables
   scheduled workflows after 60 days without repository activity.
 - The image is larger and starts slower than a static binary on distroless, and the memory limit matters more (0060); the
   health check's start period covers the start. Volumes mounted into the container must be writable by 65532, and without

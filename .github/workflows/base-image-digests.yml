@@ -1,6 +1,8 @@
 name: Base image digests
 
-# Reports a stale base image digest of deploy/backend/Dockerfile as an issue (record 0041).
+# Reports a stale base image digest of deploy/backend/Dockerfile (job check, record 0041) and a stale syft
+# pin of the SBOM generator in .github/scripts/generate-sbom.sh (job sbom-generator, record 0037), each as an
+# issue of its own.
 # Writes nothing to the repository, opens no pull request, closes no issue.
 on:
   schedule:
@@ -64,4 +66,57 @@ jobs:
           else
             gh api "repos/$GH_REPO/issues" -f title="$title" -f body="$body" \
               -f 'labels[]=dependencies' -f 'labels[]=area: docker' > /dev/null
+          fi
+
+  sbom-generator:
+    name: Check SBOM generator pin
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # No token in this step's environment: it runs git ls-remote against github.com and docker buildx and jq
+      # against ghcr.io.
+      - name: Check SBOM generator pin
+        id: pin
+        run: |
+          set -euo pipefail
+          rc=0
+          report="$(.github/scripts/check-sbom-generator-pin.sh)" || rc=$?
+          case "$rc" in
+            0) echo "SBOM generator pin is current"; exit 0 ;;
+            3) ;;
+            *) echo "::error::SBOM generator pin check failed with status $rc" >&2; exit 1 ;;
+          esac
+          printf '%s\n\n%s\n\n%s\n' \
+            "The syft image pinned in .github/scripts/generate-sbom.sh is not the newest syft release, or the index digest of its tag has moved." \
+            "$report" \
+            "Refresh the pin as described in docs/CONTRIBUTING.md, section SBOM generator." \
+            > "$RUNNER_TEMP/sbom-generator-pin.md"
+          echo "stale=true" >> "$GITHUB_OUTPUT"
+
+      - name: Report stale SBOM generator pin
+        if: steps.pin.outputs.stale == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          title="SBOM generator pin is stale"
+          body="$(< "$RUNNER_TEMP/sbom-generator-pin.md")"
+          if ! numbers="$(gh api --paginate "repos/$GH_REPO/issues?state=open&per_page=100" \
+              --jq '.[] | select(.pull_request == null and .user.login == "github-actions[bot]" and .title == "SBOM generator pin is stale") | .number')"; then
+            echo "::error::looking up the open issue failed; nothing written" >&2
+            exit 1
+          fi
+          number="${numbers%%$'\n'*}"
+          if [ -n "$number" ]; then
+            gh api -X PATCH "repos/$GH_REPO/issues/$number" -f body="$body" > /dev/null
+          else
+            gh api "repos/$GH_REPO/issues" -f title="$title" -f body="$body" \
+              -f 'labels[]=dependencies' -f 'labels[]=release' > /dev/null
           fi

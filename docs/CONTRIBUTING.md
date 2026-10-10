@@ -95,6 +95,8 @@ workflow is `.github/workflows/release.yml`; the reasoning is in
 Before tagging, check that the base image digests are current (*Base image digests* below): run the
 *Base image digests* workflow (Actions, *Run workflow*) or check that the latest `Release build check` on
 `main` has no stale-digest warning, and that no issue *Base image digests are stale* is open.
+If the issue *SBOM generator pin is stale* is open, refresh the pin first (*SBOM generator* below); a stale pin
+gives a less complete SBOM, it does not stop the release.
 
 On an up-to-date `main`:
 
@@ -156,7 +158,7 @@ target framework in `Directory.Build.props`, `global.json`, `BASE_BUILD_TAG`, `B
 digests together (`.github/scripts/check-builder-dotnet-version.sh` checks that they agree). The release build passes no
 `BASE_*` build argument, so the pinned defaults are what it uses.
 
-A weekly workflow, `.github/workflows/base-image-digests.yml` (Mondays, and on manual dispatch), compares
+A weekly workflow, `.github/workflows/base-image-digests.yml` (Mondays, and on manual dispatch; it also checks the SBOM generator pin, see *SBOM generator*), compares
 every `BASE_<NAME>_DIGEST` with the current index digest of its tag and opens or updates the issue *Base
 image digests are stale*; the `Release build check` shows the same as a warning. The refresh pull request
 should close that issue (`Closes #n`). A base image digest often moves without a version change
@@ -177,6 +179,16 @@ runs the image without network, with a read-only root file system, no capabiliti
 inputs mounted read-only and only a fresh empty directory writable, and prints the generator's output only
 between `::stop-commands::` markers so it cannot issue workflow commands. Record
 [0037](decisions/0037-releases-version-tag-plain-tooling-and-attested-artifacts.md).
+
+A weekly job of the *Base image digests* workflow (`.github/workflows/base-image-digests.yml`, Mondays and on
+manual dispatch) checks the pin. It reads the constant from the one line starting with `syft_image=` in the
+literal form `syft_image='...'` and fails if there is no such line or more than one, so change the pin only on
+that line and never reassign it elsewhere. The newest release is the highest `vX.Y.Z` tag of
+`https://github.com/anchore/syft`, read with `git ls-remote` without credentials (pre-releases are ignored).
+The job also compares the pinned tag's index digest on `ghcr.io` with the pinned digest; a newer release whose
+image is not yet on `ghcr.io` is reported with `-` as its digest. It opens or updates the issue *SBOM generator
+pin is stale*; the refresh pull request should close it (`Closes #n`). The check can be run locally from the
+repository root with `.github/scripts/check-sbom-generator-pin.sh` (needs `git`, `docker buildx` and `jq`).
 
 ### Release build check on pull requests
 
