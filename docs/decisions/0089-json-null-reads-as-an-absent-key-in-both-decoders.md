@@ -1,6 +1,6 @@
 # 0089: A JSON null in a batch reads as an absent key in both decoders
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-10
 - **Area:** Wire format
 - **Source:** Issue #166
