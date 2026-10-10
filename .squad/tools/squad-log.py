@@ -81,24 +81,28 @@ def resolve_log(root, folder):
     return None
 
 
-def agent_launch(root, agent):
-    """`model/effort` of `.claude/agents/<agent>.md`, or None when there is no such agent file or it names no
-    model or effort. The name is compared with the directory listing, never used as a path."""
-    wanted = agent.strip()
-    wanted = wanted[:-3] if wanted.endswith(".md") else wanted
+def agent_file(root, agent):
+    """`.claude/agents/<agent>.md` when it exists; found through the directory listing, so the argument never
+    becomes a path."""
+    wanted = agent.strip().removesuffix(".md") + ".md"
     agents = os.path.join(root, ".claude", "agents")
     if not os.path.isdir(agents):
         return None
-    for name in sorted(os.listdir(agents)):
-        if name == wanted + ".md" and os.path.isfile(os.path.join(agents, name)):
-            with open(os.path.join(agents, name), encoding="utf-8-sig") as handle:
-                text = handle.read().replace("\r\n", "\n")
-            end = text.find("\n---", 4) if text.startswith("---\n") else -1
-            found = dict(FRONT_MATTER_KEY.findall(text[4:end])) if end > 0 else {}
-            if "model" in found and "effort" in found:
-                return f"{found['model']}/{found['effort']}"
-            return None
-    return None
+    names = [n for n in os.listdir(agents) if n == wanted and os.path.isfile(os.path.join(agents, n))]
+    return os.path.join(agents, names[0]) if names else None
+
+
+def agent_launch(root, agent):
+    """`model/effort` from the front matter of `.claude/agents/<agent>.md`, or None when there is no such file or
+    it names no model or effort."""
+    path = agent_file(root, agent)
+    if path is None:
+        return None
+    with open(path, encoding="utf-8-sig") as handle:
+        text = handle.read().replace("\r\n", "\n")
+    end = text.find("\n---", 4) if text.startswith("---\n") else -1
+    found = dict(FRONT_MATTER_KEY.findall(text[4:end])) if end > 0 else {}
+    return f"{found['model']}/{found['effort']}" if "model" in found and "effort" in found else None
 
 
 def amend_last(path, member, launch):
@@ -171,7 +175,7 @@ def summary(path):
     return "\n".join(lines)
 
 
-def main():
+def build_parser():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("folder")
     parser.add_argument("step", nargs="?")
@@ -185,6 +189,35 @@ def main():
     parser.add_argument("--tokens", type=int, help="subagent_tokens from the usage block of the task notification")
     parser.add_argument("--tool-uses", type=int, help="tool_uses from the usage block of the task notification")
     parser.add_argument("--seconds", type=int, help="duration of the launch in seconds (duration_ms / 1000)")
+    return parser
+
+
+def launch_metrics(parser, root, args):
+    """(model/effort, tokens, tool uses, seconds) from the options, or None when no metric option is given; an
+    incomplete set is a usage error, an unknown agent file ends the run with exit code 1."""
+    if not (args.agent or args.launch or args.tokens is not None):
+        return None
+    model = args.launch or (agent_launch(root, args.agent) if args.agent else None)
+    if args.agent and not args.launch and model is None:
+        sys.exit(f"No .claude/agents/{args.agent}.md with a model and an effort")
+    if not model or None in (args.tokens, args.tool_uses, args.seconds):
+        parser.error("--agent (or --launch), --tokens, --tool-uses and --seconds go together")
+    return (model, args.tokens, args.tool_uses, args.seconds)
+
+
+def amend_command(parser, path, folder, member, launch):
+    if launch is None:
+        parser.error("--amend-last needs --agent (or --launch), --tokens, --tool-uses and --seconds")
+    row = amend_last(path, member, launch)
+    if row is None:
+        print(f"No row of {member} without a launch trailer in {folder}")
+        return 1
+    print(row)
+    return 0
+
+
+def main():
+    parser = build_parser()
     args = parser.parse_args()
     toplevel = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True, check=False)
     root = toplevel.stdout.strip() if toplevel.returncode == 0 else os.getcwd()
@@ -195,24 +228,9 @@ def main():
     if args.summary:
         print(summary(path))
         return 0
-    launch = None
-    if args.agent or args.launch or args.tokens is not None:
-        model = args.launch or (agent_launch(root, args.agent) if args.agent else None)
-        if args.agent and not args.launch and model is None:
-            print(f"No .claude/agents/{args.agent}.md with a model and an effort")
-            return 1
-        if not model or None in (args.tokens, args.tool_uses, args.seconds):
-            parser.error("--agent (or --launch), --tokens, --tool-uses and --seconds go together")
-        launch = (model, args.tokens, args.tool_uses, args.seconds)
+    launch = launch_metrics(parser, root, args)
     if args.amend_last:
-        if launch is None:
-            parser.error("--amend-last needs --agent (or --launch), --tokens, --tool-uses and --seconds")
-        row = amend_last(path, args.amend_last, launch)
-        if row is None:
-            print(f"No row of {args.amend_last} without a launch trailer in {args.folder}")
-            return 1
-        print(row)
-        return 0
+        return amend_command(parser, path, args.folder, args.amend_last, launch)
     if args.step is None or args.member is None or args.result is None:
         parser.error("a row needs <step> <member> <result> (or --summary, or --amend-last)")
     print(append_row(path, args.step, args.member, args.result, launch=launch))
