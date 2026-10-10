@@ -92,23 +92,32 @@ def control_characters(path):
                    and ch not in KEEP})
 
 
+def control_character_error(path):
+    if not path.endswith(".md") or not os.path.isfile(path):
+        return None
+    found = control_characters(path)
+    return f"{path}: control characters {', '.join(found)} (write them as text escapes)" if found else None
+
+
+def file_errors(path, base, tier, no_specs):
+    """Every scope finding for one changed file."""
+    findings = [
+        (is_squad_file(path), f"{path}: squad or instruction file changed in a product change "
+                              "(file a squad issue instead, .squad/routing.md *Squad lessons*)"),
+        (path in MARKED and marked_file_changed_outside_blocks(path, base),
+         f"{path}: changed outside its <!-- project:… --> blocks (the rest is template-managed)"),
+        (no_specs and is_working_record(path),
+         f"{path}: working record still in the diff (squad step 10 removes specs/<folder>/)"),
+        (tier == "docs" and not is_docs_tier(path),
+         f"{path}: not product documentation - tier docs allows no such file (raise the tier)"),
+    ]
+    errors = [message for applies, message in findings if applies]
+    control = control_character_error(path)
+    return errors + ([control] if control else [])
+
+
 def check(files, base, tier, no_specs):
-    errors = []
-    for path in files:
-        if is_squad_file(path):
-            errors.append(f"{path}: squad or instruction file changed in a product change "
-                          "(file a squad issue instead, .squad/routing.md *Squad lessons*)")
-        if path in MARKED and marked_file_changed_outside_blocks(path, base):
-            errors.append(f"{path}: changed outside its <!-- project:… --> blocks (the rest is template-managed)")
-        if path.endswith(".md") and os.path.isfile(path):
-            found = control_characters(path)
-            if found:
-                errors.append(f"{path}: control characters {', '.join(found)} (write them as text escapes)")
-        if no_specs and is_working_record(path):
-            errors.append(f"{path}: working record still in the diff (squad step 10 removes specs/<folder>/)")
-        if tier == "docs" and not is_docs_tier(path):
-            errors.append(f"{path}: not product documentation - tier docs allows no such file (raise the tier)")
-    return errors
+    return [error for path in files for error in file_errors(path, base, tier, no_specs)]
 
 
 def main():

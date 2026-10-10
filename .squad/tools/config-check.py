@@ -89,13 +89,18 @@ def check(path, expected_name, errors, agent=False):
     if data.get("name") and data["name"] != expected_name:
         errors.append(f"{path}: name '{data['name']}' does not match '{expected_name}'")
     if agent and expected_name.startswith("squad-"):
-        if not declares_git_guard(data):
-            errors.append(f"{path}: no PreToolUse hook for Bash running {GIT_GUARD} (squad members never run Git writes)")
-        if str(data.get("model") or "") not in MODELS:
-            errors.append(f"{path}: 'model' must be one of {', '.join(MODELS)} (an alias, so a model change rolls out "
-                          "with the template)")
-        if str(data.get("effort") or "") not in EFFORTS:
-            errors.append(f"{path}: 'effort' must be set to one of {', '.join(EFFORTS)}")
+        check_squad_agent(path, data, errors)
+
+
+def check_squad_agent(path, data, errors):
+    """A squad member declares the git-guard hook, an alias as model and an explicit effort."""
+    if not declares_git_guard(data):
+        errors.append(f"{path}: no PreToolUse hook for Bash running {GIT_GUARD} (squad members never run Git writes)")
+    if str(data.get("model") or "") not in MODELS:
+        errors.append(f"{path}: 'model' must be one of {', '.join(MODELS)} (an alias, so a model change rolls out "
+                      "with the template)")
+    if str(data.get("effort") or "") not in EFFORTS:
+        errors.append(f"{path}: 'effort' must be set to one of {', '.join(EFFORTS)}")
 
 
 def declares_git_guard(data):

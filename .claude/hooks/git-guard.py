@@ -41,7 +41,13 @@ GH_WRITE_SUBCOMMANDS = {
     "label": {"create", "delete", "edit", "clone"},
 }
 GH_API_WRITE_FLAGS = {"-f", "-F", "--field", "--raw-field", "--input"}
-SEGMENT_SPLIT = re.compile(r"\s*(?:&&|\|\||[;|()`\n]|\$\()\s*")
+SEGMENT_SPLIT = re.compile(r"&&|\|\||[;|()`\n]|\$\(")
+TAG_READ = {"-l", "--list", "--contains", "--points-at", "--merged", "--no-merged"}
+BRANCH_WRITE = {"-d", "-D", "-m", "-M", "-c", "-C", "-f", "--delete", "--move", "--copy", "--force",
+                "--set-upstream-to", "-u", "--unset-upstream", "--edit-description"}
+BRANCH_READ = {"-l", "--list", "-a", "-r", "--all", "--remotes", "--show-current", "--contains", "--merged",
+               "--no-merged", "-v", "-vv", "--verbose"}
+CONFIG_READ = {"-l", "--list", "--show-origin", "--show-scope"}
 
 
 def git_subcommand(tokens):
@@ -58,28 +64,63 @@ def git_subcommand(tokens):
     return None, []
 
 
+def tag_verdict(args):
+    """`git tag <name>` creates a tag; the listing and query forms are reads."""
+    if args and not any(a in TAG_READ or a.startswith("--list=") for a in args):
+        return "git tag <name>"
+    return None
+
+
+def branch_verdict(args):
+    if any(a in BRANCH_WRITE for a in args):
+        return "git branch (delete/move/copy/upstream)"
+    if args and not any(a in BRANCH_READ or a.startswith("--") for a in args):
+        return "git branch <name>"
+    return None
+
+
+def worktree_verdict(args):
+    if args and args[0] in WORKTREE_ALLOWED:
+        return None
+    return "git worktree " + (args[0] if args else "")
+
+
+def config_verdict(args):
+    if any(a.startswith("--get") or a in CONFIG_READ for a in args):
+        return None
+    return "git config (write)"
+
+
+GIT_CHECKS = {"tag": tag_verdict, "branch": branch_verdict, "worktree": worktree_verdict, "config": config_verdict}
+
+
 def git_verdict(tokens):
     sub, args = git_subcommand(tokens)
     if sub is None:
         return None
     if sub in GIT_DENIED:
         return f"git {sub}"
-    if sub == "tag" and args and not any(a in ("-l", "--list", "--contains", "--points-at", "--merged", "--no-merged")
-                                         or a.startswith("--list=") for a in args):
-        return "git tag <name>"
-    if sub == "branch" and any(a in ("-d", "-D", "-m", "-M", "-c", "-C", "-f", "--delete", "--move", "--copy",
-                                     "--force", "--set-upstream-to", "-u", "--unset-upstream", "--edit-description")
-                               for a in args):
-        return "git branch (delete/move/copy/upstream)"
-    if sub == "branch" and args and not any(a in ("-l", "--list", "-a", "-r", "--all", "--remotes", "--show-current",
-                                                  "--contains", "--merged", "--no-merged", "-v", "-vv", "--verbose")
-                                            or a.startswith("--") for a in args):
-        return "git branch <name>"
-    if sub == "worktree" and (not args or args[0] not in WORKTREE_ALLOWED):
-        return "git worktree " + (args[0] if args else "")
-    if sub == "config" and not any(a.startswith("--get") or a in ("-l", "--list", "--show-origin", "--show-scope")
-                                   for a in args):
-        return "git config (write)"
+    check = GIT_CHECKS.get(sub)
+    return check(args) if check else None
+
+
+def api_method(args, i):
+    """The HTTP method `gh api` is given at position i (`-X POST`, `--method POST`, `--method=POST`), or None."""
+    option = args[i]
+    if option in ("-X", "--method"):
+        return args[i + 1] if i + 1 < len(args) else None
+    if option.startswith("--method="):
+        return option.split("=", 1)[1]
+    return None
+
+
+def gh_api_verdict(args):
+    for i, option in enumerate(args):
+        if option in GH_API_WRITE_FLAGS or option.startswith(("--field=", "--raw-field=", "--input=")):
+            return "gh api with a field or input (a write)"
+        method = api_method(args, i)
+        if method and method.upper() != "GET":
+            return f"gh api {option} {method}"
     return None
 
 
@@ -88,18 +129,9 @@ def gh_verdict(tokens):
         return None
     group, rest = tokens[0], tokens[1:]
     if group == "api":
-        for i, a in enumerate(rest):
-            if a in GH_API_WRITE_FLAGS or a.startswith(("--field=", "--raw-field=", "--input=")):
-                return "gh api with a field or input (a write)"
-            if a in ("-X", "--method") and i + 1 < len(rest) and rest[i + 1].upper() != "GET":
-                return f"gh api {a} {rest[i + 1]}"
-            if a.startswith("--method=") and a.split("=", 1)[1].upper() != "GET":
-                return f"gh api {a}"
-        return None
+        return gh_api_verdict(rest)
     writes = GH_WRITE_SUBCOMMANDS.get(group)
-    if writes and rest[0] in writes:
-        return f"gh {group} {rest[0]}"
-    return None
+    return f"gh {group} {rest[0]}" if writes and rest[0] in writes else None
 
 
 def basename(token):
@@ -127,27 +159,31 @@ def check_command(command):
     return None
 
 
+def deny_reason(data):
+    """The reason to deny the Bash call described by the hook input, or None when it may run."""
+    if not isinstance(data, dict) or data.get("tool_name") != "Bash":
+        return None
+    command = (data.get("tool_input") or {}).get("command")
+    found = check_command(command) if isinstance(command, str) else None
+    if found is None:
+        return None
+    agent = data.get("agent_type") or "a squad member"
+    return (f"{found} is a Git or GitHub write operation, which {agent} never runs: subagents report, the "
+            "orchestrator commits, pushes and posts (.squad/team.md, Shared rules). Scratch worktrees "
+            "(git worktree add/remove) and git add stay allowed.")
+
+
 def main():
+    """Exit code 0 either way: a denial is the JSON decision on stdout, not an error."""
     try:
         data = json.load(sys.stdin)
     except ValueError:
-        return 0
-    if not isinstance(data, dict) or data.get("tool_name") != "Bash":
-        return 0
-    command = (data.get("tool_input") or {}).get("command")
-    if not isinstance(command, str):
-        return 0
-    found = check_command(command)
-    if found is None:
-        return 0
-    agent = data.get("agent_type") or "a squad member"
-    reason = (f"{found} is a Git or GitHub write operation, which {agent} never runs: subagents report, the "
-              "orchestrator commits, pushes and posts (.squad/team.md, Shared rules). Scratch worktrees "
-              "(git worktree add/remove) and git add stay allowed.")
-    print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
-                                             "permissionDecisionReason": reason}}))
-    return 0
+        return
+    reason = deny_reason(data)
+    if reason is not None:
+        print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
+                                                 "permissionDecisionReason": reason}}))
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    main()
