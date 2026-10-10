@@ -36,6 +36,7 @@ log:
 
 import:
   # IANA time zone of the server the log files come from, for example Europe/Berlin or UTC. Needed to import
-  # syslog and kern.log files in the traditional format, whose time stamps carry neither year nor offset; such a
-  # file fails with "import.time_zone is not set" until this is set (a re-run then completes it). No default.
+  # syslog and kern.log files in the traditional format, whose time stamps carry neither year nor offset, and
+  # MariaDB error logs, whose time stamps are local time without an offset; such a file fails with
+  # "import.time_zone is not set" until this is set (a re-run then completes it). No default.
   # time_zone: Europe/Berlin

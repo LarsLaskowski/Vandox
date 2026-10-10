@@ -98,7 +98,7 @@ internal sealed class RecordingEmitter : IRecordEmitter
         var line = Line(record);
         var priority = line.Priority is { } value ? value.ToString(System.Globalization.CultureInfo.InvariantCulture) : "-";
 
-        return $"{record.Origin}|{record.Source}|{record.Seq}|{record.CapturedAt.UtcTicks}|{line.Log}|{line.Host}|{line.Program}|{line.Pid}|{priority}|{line.Truncated}|{line.Message}";
+        return $"{record.Origin}|{record.Source}|{record.Seq}|{record.CapturedAt.UtcTicks}|{line.Log}|{line.Host}|{line.Program}|{line.Pid}|{priority}|{line.Truncated}|{line.Event}|{line.Message}";
     }
 
     #endregion // Methods

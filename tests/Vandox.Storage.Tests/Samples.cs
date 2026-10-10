@@ -58,6 +58,20 @@ internal static class Samples
     /// <returns>The record</returns>
     internal static DataRecord Log(string origin, ulong seq, int seconds, string message)
     {
+        return LogWithEvent(origin, seq, seconds, message, string.Empty);
+    }
+
+    /// <summary>
+    /// Creates a log line record that carries an event.
+    /// </summary>
+    /// <param name="origin">The origin</param>
+    /// <param name="seq">The sequence number; 0 unless the origin is agent</param>
+    /// <param name="seconds">Seconds after <see cref="Base"/></param>
+    /// <param name="message">The message</param>
+    /// <param name="eventName">The event, or an empty text for none</param>
+    /// <returns>The record</returns>
+    internal static DataRecord LogWithEvent(string origin, ulong seq, int seconds, string message, string eventName)
+    {
         return new DataRecord
                {
                    Origin = origin,
@@ -72,7 +86,8 @@ internal static class Samples
                               Pid = 12,
                               Priority = 3,
                               Message = message,
-                              Truncated = true
+                              Truncated = true,
+                              Event = eventName
                           }
                };
     }

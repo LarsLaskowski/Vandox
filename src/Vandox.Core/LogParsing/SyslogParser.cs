@@ -56,7 +56,7 @@ public sealed class SyslogParser : ILogParser
     /// </summary>
     /// <param name="name">The name of the file</param>
     /// <returns><c>true</c> for <c>syslog</c>, <c>kern.log</c>, <c>*.N</c> and <c>*-YYYYMMDD</c> of them</returns>
-    private static bool HasSyslogName(string name)
+    internal static bool HasSyslogName(string name)
     {
         var baseName = name[(name.LastIndexOf('/') + 1)..];
         string rest;

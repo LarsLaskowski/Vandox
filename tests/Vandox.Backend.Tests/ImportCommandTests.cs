@@ -143,6 +143,63 @@ public class ImportCommandTests
     }
 
     /// <summary>
+    /// <c>vandoxd import</c> reads the MariaDB error log fixture with the built-in parsers, with no hook, in the configured time zone, and stores its events.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task ImportCommandImportsTheMariaDbErrorLogWithBuiltInParsersInTheConfiguredZone()
+    {
+        // Arrange
+        using var fixture = new BackendFixture();
+        var logs = Path.Combine(fixture.Folder.Path, "logs");
+
+        Directory.CreateDirectory(Path.Combine(logs, "mysql"));
+        File.Copy(RepositoryFiles.Path("testdata/logs/mariadb-error.log"), Path.Combine(logs, "mysql", "error.log"));
+        await File.AppendAllTextAsync(fixture.ConfigPath, "import:\n  time_zone: Europe/Berlin\n", TestContext.CancellationToken);
+
+        // Act
+        var code = await fixture.RunAsync(["import", logs], null, TestContext.CancellationToken);
+        var output = fixture.Out.ToString();
+        var records = await ReadLogLinesAsync(fixture.Storage, "mariadb", TestContext.CancellationToken);
+
+        // Assert
+        Assert.AreEqual(0, code, "exit code");
+        Assert.Contains("  imported:          1", output, "the file is imported");
+        Assert.Contains("  not recognized:    0", output, "the file is recognized");
+        Assert.Contains("Records stored:      22", output, "records");
+        Assert.HasCount(22, records, "22 records of source mariadb");
+        Assert.AreEqual(new DateTimeOffset(2026, 3, 1, 22, 0, 1, TimeSpan.Zero), records[0].Record.CapturedAt, "23:00:01 in Berlin winter time is 22:00:01 UTC");
+        Assert.AreEqual("mysql/error.log", ((LogLine)records[0].Record.Data!).Log, "log is the path as the import lists it");
+        Assert.AreEqual("mariadb.shutdown|-|-|-|mariadb.shutdown_complete|mariadb.start|-|mariadb.ready|mariadb.start|-|mariadb.recovery_start|-|-|mariadb.recovery_end|mariadb.ready|-|-|mariadb.abort|mariadb.start|mariadb.recovery_start|mariadb.recovery_end|mariadb.ready", string.Join('|', records.Select(record => ((LogLine)record.Record.Data!).Event is { Length: > 0 } name ? name : "-")), "events in fixture order");
+    }
+
+    /// <summary>
+    /// Without <c>import.time_zone</c> the MariaDB error log fails with the fixed reason, nothing of it is stored and the exit code is 1.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task ImportCommandFailsTheMariaDbErrorLogWithoutTimeZone()
+    {
+        // Arrange
+        using var fixture = new BackendFixture();
+        var logs = Path.Combine(fixture.Folder.Path, "logs");
+
+        Directory.CreateDirectory(Path.Combine(logs, "mysql"));
+        File.Copy(RepositoryFiles.Path("testdata/logs/mariadb-error.log"), Path.Combine(logs, "mysql", "error.log"));
+
+        // Act
+        var code = await fixture.RunAsync(["import", logs], null, TestContext.CancellationToken);
+        var output = fixture.Out.ToString();
+        var records = await ReadLogLinesAsync(fixture.Storage, "mariadb", TestContext.CancellationToken);
+
+        // Assert
+        Assert.AreEqual(1, code, "exit code");
+        Assert.Contains("  failed:            1", output, "the file failed");
+        Assert.Contains("\"mysql/error.log\": \"import.time_zone is not set\"", output, "the reason is the fixed text");
+        Assert.IsEmpty(records, "nothing of the file is stored");
+    }
+
+    /// <summary>
     /// A file that fails makes the exit code 1, and paths in the summary are quoted.
     /// </summary>
     /// <returns>A task that completes when the test is done</returns>

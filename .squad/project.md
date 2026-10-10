@@ -92,9 +92,11 @@ files or endpoints.
     parsers through `Vandox.Core.LogParsing` (`LogLineReader` cuts lines at 16 KiB, a parser's memory is bounded
     independently of the input size): `JournalExportParser` and `JournalExportReader` (binary-safe entry reader with
     bounded memory), `SyslogParser`, `SyslogLine` and `SyslogClock` (hand-written line parser, years and time
-    zones of year-less times, range-checked dates), `KernelReportGrouper` (bounded multi-line reports), and the
-    backend option `import.time_zone` (`SourceTimeZone`). Records 0048, 0049, 0066, 0069, 0076, 0078, 0079, 0084,
-    0085, 0086.
+    zones of year-less times, range-checked dates), `KernelReportGrouper` (bounded multi-line reports),
+    `MariaDbErrorLogParser`, `MariaDbParseSession`, `MariaDbLine` and `MariaDbMessage` (hand-written header parser on raw
+    bytes, entries bounded to 16 KiB, claimed by the first non-empty line only and never for a syslog name),
+    and the backend option `import.time_zone` (`SourceTimeZone`). Records 0048, 0049, 0066, 0069, 0076, 0078, 0079, 0084,
+    0085, 0086, 0088.
 11. **Outbound calls** (Telegram, external checks, the optional AI service of the nightly report, the
     agent's connection to the backend): *Goal:* every call has a timeout, goes only to its configured
     destination and leaves encrypted to a verified peer. The agent's only destination is the ingest port,

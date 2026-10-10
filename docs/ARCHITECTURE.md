@@ -7,7 +7,7 @@ backend with web UI, runs as a Docker container on any Docker host in the home n
 
 This document describes the target architecture; as of now the binaries' `--version`, the data model and wire format
 (Go: `internal/model`, `internal/wire`; backend: `src/Vandox.Core`), the configuration loading (`internal/config` for the agent,
-`Vandox.Core.Configuration` for `vandoxd`) and the backend service skeleton and the log import framework exist (`vandoxd import`, with the parsers for the journal export, `syslog` and `kern.log`): `vandoxd` loads its configuration, opens and migrates its SQLite database (schema, batched writes, queries and log search
+`Vandox.Core.Configuration` for `vandoxd`) and the backend service skeleton and the log import framework exist (`vandoxd import`, with the parsers for the journal export, the MariaDB error log, `syslog` and `kern.log`): `vandoxd` loads its configuration, opens and migrates its SQLite database (schema, batched writes, queries and log search
 exist as the storage layer; the service does not call it yet, `vandoxd import` writes through it), listens on the
 web and ingest ports, answers `/healthz` and shuts down gracefully, and ships as a container with a health
 check. Sections are marked as implemented as features land. The decisions behind it are recorded in
@@ -43,8 +43,8 @@ way, and agents of the hosting provider are never disabled or changed
   ([0073](decisions/0073-backend-in-dotnet-10-with-blazor-agent-stays-go.md)):
   `Vandox.Core` (data model and validation, the wire decoder, configuration and secrets, safe file access, the
   log parser interface and registry, the line reader that bounds the line length, and the built-in parsers: the
-  journal export, `syslog` and `kern.log` with their kernel report grouper and the time zone rules of year-less
-  times),
+  journal export, the MariaDB error log with its events, `syslog` and `kern.log` with their kernel report grouper and
+  the time zone rules of year-less times),
   `Vandox.Storage` (the SQLite database, see [Storage](areas/storage.md): schema, migrations, writing batches, queries and log search) and
   `Vandox.Import` (reads a directory, archive or file as streams, detects the parser per file, hashes the
   content, writes the parsers' records in resumable batches and builds the summary)
@@ -131,7 +131,8 @@ Records: [0006](decisions/0006-agent-connects-outbound-only.md),
 [0079](decisions/0079-log-parsing-and-import-in-the-backend-without-following-links.md),
 [0072](decisions/0072-vandoxd-import-sub-command-output-and-exit-codes.md),
 [0085](decisions/0085-syslog-time-zone-from-import-time-zone-with-embedded-tzdb.md),
-[0086](decisions/0086-system-log-parsers-generic-syslog-claim-and-grouped-kernel-reports.md).
+[0086](decisions/0086-system-log-parsers-generic-syslog-claim-and-grouped-kernel-reports.md),
+[0088](decisions/0088-mariadb-error-log-entries-by-content-and-lifecycle-events-in-log-line.md).
 
 ## Network
 
@@ -216,7 +217,7 @@ Implemented by `src/Vandox.Storage`:
   2^63 - 1.
 - **Migrations** ([0077](decisions/0077-storage-on-microsoft-data-sqlite-same-schema-and-rules.md)): at
   start-up every step above the stored `meta.schema_version` runs in its own transaction; a database with a
-  newer version is refused. Schema version 3 adds the table `import_files`, version 4 the column `log_lines.host`.
+  newer version is refused. Schema version 3 adds the table `import_files`, version 4 the column `log_lines.host`, version 5 the column `log_lines.event`.
 - **Imports** ([0069](decisions/0069-log-import-idempotent-per-file-content-hash-with-resumable-batches.md)):
   `import_files` holds one row per imported file content (SHA-256 of the decompressed content, size, the name
   and modification time the parser got, the source type, the number of records stored so far and whether the

@@ -56,6 +56,13 @@ public sealed class LogLine : IPayload
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public bool Truncated { get; set; }
 
+    /// <summary>
+    /// Gets or sets the event a producer recognized in the line, e.g. <c>mariadb.start</c>; empty for none.
+    /// </summary>
+    [JsonPropertyName("event")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public string Event { get; set; } = string.Empty;
+
     #endregion // Properties
 
     #region IPayload
@@ -66,7 +73,7 @@ public sealed class LogLine : IPayload
     /// <inheritdoc />
     public FieldError? Validate()
     {
-        var error = Check.RequiredShort("log", Log) ?? Check.Short("host", Host) ?? Check.Short("program", Program);
+        var error = Check.RequiredShort("log", Log) ?? Check.Short("host", Host) ?? Check.Short("program", Program) ?? Check.OptionalName("event", Event);
 
         if (error is not null)
         {

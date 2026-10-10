@@ -69,6 +69,28 @@ internal sealed class SyslogClock
     #region Methods
 
     /// <summary>
+    /// Resolves a local time that carries its year (<see cref="SyslogTime.Year"/>; the offset is ignored) to a UTC instant; never throws.
+    /// A time in the repeated hour takes the earlier offset unless that lies more than <see cref="BackwardTolerance"/> before
+    /// <paramref name="previous"/>, and a time in the skipped hour is shifted forward.
+    /// </summary>
+    /// <param name="timeZone">The zone of the time</param>
+    /// <param name="time">The time</param>
+    /// <param name="previous">The last instant that was resolved; <c>null</c> for none</param>
+    /// <param name="instant">The instant on success, else the default value</param>
+    /// <returns><c>null</c> on success, else "invalid date" or "time outside the storable range"</returns>
+    internal static string? ResolveLocal(DateTimeZone timeZone, SyslogTime time, DateTimeOffset? previous, out DateTimeOffset instant)
+    {
+        instant = default;
+
+        if (time.HasValidClock() && time.Day <= SyslogTime.DaysInMonth(time.Year, time.Month))
+        {
+            return ResolveInRange(timeZone, time, previous, out instant);
+        }
+
+        return SyslogTime.InvalidDate;
+    }
+
+    /// <summary>
     /// Resolves a year-less time to a UTC instant; never throws.
     /// </summary>
     /// <param name="time">The time</param>
@@ -128,6 +150,61 @@ internal sealed class SyslogClock
     }
 
     /// <summary>
+    /// Resolves a time whose digits are a valid date: the year is checked as a number before any date is built.
+    /// </summary>
+    /// <param name="timeZone">The zone</param>
+    /// <param name="time">The time</param>
+    /// <param name="previous">The last instant that was resolved</param>
+    /// <param name="instant">The instant on success</param>
+    /// <returns><c>null</c> on success, else "time outside the storable range"</returns>
+    private static string? ResolveInRange(DateTimeZone timeZone, SyslogTime time, DateTimeOffset? previous, out DateTimeOffset instant)
+    {
+        instant = default;
+
+        if (time.Year is >= FirstStorableYear and <= LastStorableYear)
+        {
+            var resolved = ToInstant(timeZone, new DateTime(time.Year, time.Month, time.Day, time.Hour, time.Minute, time.Second, DateTimeKind.Unspecified), previous);
+
+            if (StorableTime.Contains(resolved))
+            {
+                instant = resolved;
+
+                return null;
+            }
+        }
+
+        return SyslogTime.OutsideRange;
+    }
+
+    /// <summary>
+    /// Maps a local time of the zone to an instant: a time in the repeated hour takes the earlier offset unless that puts it
+    /// more than <see cref="BackwardTolerance"/> before the previous instant, and a time in the skipped hour is shifted forward
+    /// by the gap.
+    /// </summary>
+    /// <param name="timeZone">The zone</param>
+    /// <param name="local">The local time</param>
+    /// <param name="previous">The last instant that was resolved; <c>null</c> for none</param>
+    /// <returns>The instant in UTC</returns>
+    private static DateTimeOffset ToInstant(DateTimeZone timeZone, DateTime local, DateTimeOffset? previous)
+    {
+        var mapping = timeZone.MapLocal(new LocalDateTime(local.Year, local.Month, local.Day, local.Hour, local.Minute, local.Second));
+
+        if (mapping.Count == 0)
+        {
+            return Utc(local, mapping.EarlyInterval.WallOffset);
+        }
+
+        var early = Utc(local, mapping.First().Offset);
+
+        if (mapping.Count == 1 || previous is not { } last || early >= last - BackwardTolerance)
+        {
+            return early;
+        }
+
+        return Utc(local, mapping.Last().Offset);
+    }
+
+    /// <summary>
     /// Builds the instant of a time in an inferred year.
     /// </summary>
     /// <param name="time">The time</param>
@@ -136,27 +213,20 @@ internal sealed class SyslogClock
     /// <returns><c>null</c> on success, else the reason</returns>
     private string? ResolveInYear(SyslogTime time, int year, out DateTimeOffset instant)
     {
-        instant = default;
+        var reason = ResolveLocal(_timeZone,
+                                  time with
+                                       {
+                                           Year = year
+                                       },
+                                  _previous,
+                                  out instant);
 
-        if (time.Day > SyslogTime.DaysInMonth(year, time.Month))
+        if (reason is null)
         {
-            return SyslogTime.InvalidDate;
+            _previous = instant;
         }
 
-        if (year is >= FirstStorableYear and <= LastStorableYear)
-        {
-            var resolved = ToInstant(new DateTime(year, time.Month, time.Day, time.Hour, time.Minute, time.Second, DateTimeKind.Unspecified), _previous);
-
-            if (StorableTime.Contains(resolved))
-            {
-                instant = resolved;
-                _previous = resolved;
-
-                return null;
-            }
-        }
-
-        return SyslogTime.OutsideRange;
+        return reason;
     }
 
     /// <summary>
@@ -189,7 +259,7 @@ internal sealed class SyslogClock
 
         var end = new DateTime(year, month, day, 0, 0, 0, DateTimeKind.Unspecified).AddDays(1);
 
-        return StorableTime.Contains(ToInstant(end, null)) ? end : null;
+        return StorableTime.Contains(ToInstant(_timeZone, end, null)) ? end : null;
     }
 
     /// <summary>
@@ -239,33 +309,6 @@ internal sealed class SyslogClock
         _predecessorSeconds = seconds;
 
         return year;
-    }
-
-    /// <summary>
-    /// Maps a local time of the zone to an instant: a time in the repeated hour takes the earlier offset unless that puts it
-    /// more than <see cref="BackwardTolerance"/> before the previous instant, and a time in the skipped hour is shifted forward
-    /// by the gap.
-    /// </summary>
-    /// <param name="local">The local time</param>
-    /// <param name="previous">The last instant that was resolved; <c>null</c> for none</param>
-    /// <returns>The instant in UTC</returns>
-    private DateTimeOffset ToInstant(DateTime local, DateTimeOffset? previous)
-    {
-        var mapping = _timeZone.MapLocal(new LocalDateTime(local.Year, local.Month, local.Day, local.Hour, local.Minute, local.Second));
-
-        if (mapping.Count == 0)
-        {
-            return Utc(local, mapping.EarlyInterval.WallOffset);
-        }
-
-        var early = Utc(local, mapping.First().Offset);
-
-        if (mapping.Count == 1 || previous is not { } last || early >= last - BackwardTolerance)
-        {
-            return early;
-        }
-
-        return Utc(local, mapping.Last().Offset);
     }
 
     #endregion // Methods

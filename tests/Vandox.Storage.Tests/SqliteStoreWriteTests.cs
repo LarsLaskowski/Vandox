@@ -69,6 +69,35 @@ public class SqliteStoreWriteTests
     }
 
     /// <summary>
+    /// The event of a log line is stored with it and read back, and a line without an event reads back with an empty one.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task SqliteStoreWriteBatchStoresTheEventOfALogLine()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+
+        await using (var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken))
+        {
+            // Act
+            var result = await store.WriteBatchAsync(Samples.Batch(Samples.LogWithEvent(RecordOrigin.Backend, 0, 0, "aborted", "mariadb.abort"), Samples.Log(RecordOrigin.Backend, 0, 1, "plain"), Samples.LogWithEvent(RecordOrigin.Backend, 0, 2, "started", "mariadb.start")), TestContext.CancellationToken);
+            var lines = await store.RecordsAsync(Samples.Query(RecordKind.LogLine), TestContext.CancellationToken);
+
+            // Assert
+            Assert.AreEqual(new WriteResult(3, 0), result, "all records stored");
+            Assert.AreSequenceEqual(["mariadb.abort", string.Empty, "mariadb.start"], lines.Select(line => ((LogLine)line.Record.Data!).Event), "events read back in order");
+        }
+
+        await using var connection = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={Path.Combine(directory.Path, "vandox.db")};Mode=ReadOnly");
+
+        await connection.OpenAsync(TestContext.CancellationToken);
+
+        Assert.AreEqual(1L, await CountAsync(connection, "log_lines WHERE event = 'mariadb.abort'"), "the abort is stored");
+        Assert.AreEqual(1L, await CountAsync(connection, "log_lines WHERE event = ''"), "a line without an event stores an empty text, not NULL");
+    }
+
+    /// <summary>
     /// Values that are absent are stored as NULL even when the previous record of the batch had a value: the writer reuses its parameters.
     /// </summary>
     /// <returns>A task that completes when the test is done</returns>

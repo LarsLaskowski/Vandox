@@ -68,7 +68,7 @@ Backend:
   null or only holds comments. A value that is no zone ID is refused with the key, the line and the reason "must be a
   time zone of the IANA time zone database, such as UTC or Europe/Berlin", never the value; an empty value is refused
   with the same error, a null value as "has no value" like every string option. While it is unset, `vandoxd import` fails a
-  syslog file at its first line without a year (see [Log import](log-import.md)); the service itself does not use it.
+  syslog file at its first line without a year and a MariaDB error log at its first entry (see [Log import](log-import.md)); the service itself does not use it.
 
 ## Secrets
 

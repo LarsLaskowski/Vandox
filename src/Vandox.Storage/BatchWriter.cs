@@ -50,11 +50,11 @@ internal sealed class BatchWriter : IDisposable
                          "INSERT INTO metrics(record_id, source, name, captured_at, value, unit, labels) VALUES ($id, $source, $name, $captured, $value, $unit, $labels)");
         _logLine = Create(connection,
                           transaction,
-                          "INSERT INTO log_lines(record_id, log, program, pid, priority, message, truncated, host) VALUES ($id, $log, $program, $pid, $priority, $message, $truncated, $host)");
+                          "INSERT INTO log_lines(record_id, log, program, pid, priority, message, truncated, host, event) VALUES ($id, $log, $program, $pid, $priority, $message, $truncated, $host, $event)");
         _logFts = Create(connection, transaction, "INSERT INTO log_fts(rowid, message) VALUES ($id, $message)");
         _recordValues = Bind(_record, "$kind", "$origin", "$source", "$agent", "$seq", "$captured", "$received", "$boot", "$offset", "$data");
         _metricValues = Bind(_metric, "$id", "$source", "$name", "$captured", "$value", "$unit", "$labels");
-        _logLineValues = Bind(_logLine, "$id", "$log", "$program", "$pid", "$priority", "$message", "$truncated", "$host");
+        _logLineValues = Bind(_logLine, "$id", "$log", "$program", "$pid", "$priority", "$message", "$truncated", "$host", "$event");
         _logFtsValues = Bind(_logFts, "$id", "$message");
         _labelWriter = new Utf8JsonWriter(_labelBuffer);
     }
@@ -214,6 +214,7 @@ internal sealed class BatchWriter : IDisposable
         _logLineValues[5].Value = line.Message;
         _logLineValues[6].Value = line.Truncated ? 1L : 0L;
         _logLineValues[7].Value = line.Host;
+        _logLineValues[8].Value = line.Event;
         _logLine.ExecuteNonQuery();
 
         _logFtsValues[0].Value = id;

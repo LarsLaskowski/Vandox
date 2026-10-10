@@ -9,6 +9,8 @@ type LogLine struct {
 	Priority  *uint8 `json:"priority,omitempty"`
 	Message   string `json:"message"`
 	Truncated bool   `json:"truncated,omitempty"`
+	// Event is the event a producer recognized in the line, e.g. mariadb.start; empty for none.
+	Event string `json:"event,omitempty"`
 }
 
 // Kind returns KindLogLine.
@@ -26,6 +28,9 @@ func (l *LogLine) Validate() error {
 		return err
 	}
 	if err := checkShort("program", l.Program); err != nil {
+		return err
+	}
+	if err := checkOptionalName("event", l.Event); err != nil {
 		return err
 	}
 	if l.PID < 0 {
