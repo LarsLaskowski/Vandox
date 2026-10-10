@@ -11,21 +11,27 @@ mechanics out of the orchestrator's hands:
 - a `|` in a cell is written as `\\|`, a line break in the result as `<br>` (a Markdown table cell has one line);
 - a control character (Unicode categories Cc, Cf, Zl, Zp other than tab and line break) is written as its
   escape (`U+202E`), never as the character itself; a tab becomes a space;
-- for a subagent launch, `--launch MODEL/EFFORT --tokens N --tool-uses N --seconds N` (from the usage block
-  at the end of the launch result) appends a trailer `(opus/high · 37,445 tokens · 6 tool uses · 57 s)` the
-  summary can read back.
+- for a subagent launch, `--agent squad-<role>` (model and effort read from `.claude/agents/squad-<role>.md`,
+  so nothing is typed from memory) or `--launch MODEL/EFFORT`, with `--tokens N --tool-uses N --seconds N` from
+  the usage block of the launch's task notification, appends a trailer `(opus/high · 37,445 tokens · 6 tool
+  uses · 57 s)` the summary can read back;
+- the usage block often arrives only after the member's hand-back: `--amend-last MEMBER` with the same
+  options adds the trailer to the last row of that member afterwards, so the row can be written as soon as
+  the report is in. A row gets its trailer once; a second amend is refused.
 
 Usage, from anywhere inside the repository:
-    python3 .squad/tools/squad-log.py <work folder> <step> <member> <result> [--launch opus/high
+    python3 .squad/tools/squad-log.py <work folder> <step> <member> <result> [--agent squad-lead
         --tokens 37445 --tool-uses 6 --seconds 57]
+    python3 .squad/tools/squad-log.py <work folder> --amend-last Lead --agent squad-lead --tokens 37445
+        --tool-uses 6 --seconds 57
     python3 .squad/tools/squad-log.py <work folder> --summary
 
 `<work folder>` is the folder's name under `specs/` (`issue-12`, or `specs/issue-12`); it is matched against the
-folders that exist there, never used as a path, so no argument reaches the file system. `<result>` may
-contain line breaks.
+folders that exist there, never used as a path, so no argument reaches the file system; `--agent` is matched
+against the files under `.claude/agents/` the same way. `<result>` may contain line breaks.
 `--summary` prints a Markdown table per member (launches, tokens, tool uses, seconds) with a total row, for
-the "Squad working record" comment and the wrap-up report. Exit code 0 when the row was written or the
-summary printed, 1 when the folder has no `log.md`.
+the "Squad working record" comment and the wrap-up report. Exit code 0 when the row was written, amended or
+the summary printed, 1 when the folder has no `log.md`, the agent file is unknown or no row can be amended.
 """
 import argparse
 import datetime
@@ -39,6 +45,9 @@ CONTROL_CATEGORIES = {"Cc", "Cf", "Zl", "Zp"}
 KEEP = {"\t", "\n", "\r"}
 TRAILER = re.compile(r"\((?P<launch>[\w.-]+/[\w-]+) · (?P<tokens>[\d,]+) tokens · (?P<tools>\d+) tool uses · "
                      r"(?P<seconds>\d+) s\)\s*$")
+ROW = re.compile(r"^\| (?P<date>\d{4}-\d{2}-\d{2}) \| (?P<step>(?:[^|\\]|\\\|)*) \| (?P<member>(?:[^|\\]|\\\|)*) \| "
+                 r"(?P<result>.*) \|\s*$")
+FRONT_MATTER_KEY = re.compile(r"^(model|effort):\s*(\S+)\s*$", re.M)
 
 
 def escape_controls(text):
@@ -69,6 +78,47 @@ def resolve_log(root, folder):
         if name == wanted and name not in (".", "..") and os.path.isdir(os.path.join(specs, name)):
             path = os.path.join(specs, name, "log.md")
             return path if os.path.isfile(path) else None
+    return None
+
+
+def agent_launch(root, agent):
+    """`model/effort` of `.claude/agents/<agent>.md`, or None when there is no such agent file or it names no
+    model or effort. The name is compared with the directory listing, never used as a path."""
+    wanted = agent.strip()
+    wanted = wanted[:-3] if wanted.endswith(".md") else wanted
+    agents = os.path.join(root, ".claude", "agents")
+    if not os.path.isdir(agents):
+        return None
+    for name in sorted(os.listdir(agents)):
+        if name == wanted + ".md" and os.path.isfile(os.path.join(agents, name)):
+            with open(os.path.join(agents, name), encoding="utf-8-sig") as handle:
+                text = handle.read().replace("\r\n", "\n")
+            end = text.find("\n---", 4) if text.startswith("---\n") else -1
+            found = dict(FRONT_MATTER_KEY.findall(text[4:end])) if end > 0 else {}
+            if "model" in found and "effort" in found:
+                return f"{found['model']}/{found['effort']}"
+            return None
+    return None
+
+
+def amend_last(path, member, launch):
+    """Add the launch trailer to the last row of `member` that has none; the amended row, or None when no row
+    of that member exists or its last row already carries a trailer."""
+    with open(path, "rb") as handle:
+        data = handle.read()
+    eol = b"\r\n" if b"\r\n" in data else b"\n"
+    lines = data.decode("utf-8-sig").split(eol.decode())
+    wanted = cell(member)
+    for index in range(len(lines) - 1, -1, -1):
+        match = ROW.match(lines[index])
+        if not match or match.group("member") != wanted:
+            continue
+        if TRAILER.search(match.group("result")):
+            return None
+        lines[index] = f"{lines[index].rstrip()[:-1].rstrip()} {trailer(*launch)} |"
+        with open(path, "wb") as handle:
+            handle.write(eol.decode().join(lines).encode())
+        return lines[index]
     return None
 
 
@@ -128,9 +178,12 @@ def main():
     parser.add_argument("member", nargs="?")
     parser.add_argument("result", nargs="?")
     parser.add_argument("--summary", action="store_true", help="print the per-member launch table instead of a row")
-    parser.add_argument("--launch", metavar="MODEL/EFFORT", help="the launched subagent's model and effort")
-    parser.add_argument("--tokens", type=int, help="subagent_tokens from the launch result's usage block")
-    parser.add_argument("--tool-uses", type=int, help="tool_uses from the launch result's usage block")
+    parser.add_argument("--amend-last", metavar="MEMBER", help="add the launch trailer to the last row of this member")
+    parser.add_argument("--agent", metavar="squad-ROLE", help="the launched agent; model and effort come from its file")
+    parser.add_argument("--launch", metavar="MODEL/EFFORT", help="the launched subagent's model and effort (when "
+                                                               "the launch overrode the agent file)")
+    parser.add_argument("--tokens", type=int, help="subagent_tokens from the usage block of the task notification")
+    parser.add_argument("--tool-uses", type=int, help="tool_uses from the usage block of the task notification")
     parser.add_argument("--seconds", type=int, help="duration of the launch in seconds (duration_ms / 1000)")
     args = parser.parse_args()
     toplevel = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True, check=False)
@@ -142,13 +195,26 @@ def main():
     if args.summary:
         print(summary(path))
         return 0
-    if args.step is None or args.member is None or args.result is None:
-        parser.error("a row needs <step> <member> <result> (or --summary)")
     launch = None
-    if args.launch or args.tokens is not None:
-        if not args.launch or None in (args.tokens, args.tool_uses, args.seconds):
-            parser.error("--launch, --tokens, --tool-uses and --seconds go together")
-        launch = (args.launch, args.tokens, args.tool_uses, args.seconds)
+    if args.agent or args.launch or args.tokens is not None:
+        model = args.launch or (agent_launch(root, args.agent) if args.agent else None)
+        if args.agent and not args.launch and model is None:
+            print(f"No .claude/agents/{args.agent}.md with a model and an effort")
+            return 1
+        if not model or None in (args.tokens, args.tool_uses, args.seconds):
+            parser.error("--agent (or --launch), --tokens, --tool-uses and --seconds go together")
+        launch = (model, args.tokens, args.tool_uses, args.seconds)
+    if args.amend_last:
+        if launch is None:
+            parser.error("--amend-last needs --agent (or --launch), --tokens, --tool-uses and --seconds")
+        row = amend_last(path, args.amend_last, launch)
+        if row is None:
+            print(f"No row of {args.amend_last} without a launch trailer in {args.folder}")
+            return 1
+        print(row)
+        return 0
+    if args.step is None or args.member is None or args.result is None:
+        parser.error("a row needs <step> <member> <result> (or --summary, or --amend-last)")
     print(append_row(path, args.step, args.member, args.result, launch=launch))
     return 0
 

@@ -5,8 +5,9 @@ The pipeline is the same for issues and features; only the input differs (a GitH
 the skill — launches the members, passes documents between them (subagents cannot talk to each other
 directly), performs every Git and GitHub action (including follow-up issues the Lead decides on) and
 records every step in the work folder's `log.md` with `python3 .squad/tools/squad-log.py` — each subagent
-launch with its model, effort and the usage the launch result reports — (after step 10, in the "Squad
-working record" comment that replaces it). Step numbers below are the ones the skills use.
+launch with its model and effort (`--agent`) and the usage its task notification reports, added later with
+`--amend-last` when the notification follows the hand-back — (after step 10, in the "Squad working record"
+comment that replaces it). Step numbers below are the ones the skills use.
 
 ## Work folder
 

@@ -66,12 +66,17 @@ action yourself — including follow-up issues the Lead decides on.
    `specs/issue-<number>/log.md` from `specs/_template/log.md`, commit and push it. Only you (the
    orchestrator) write `log.md`, one row per step, always with
    `python3 .squad/tools/squad-log.py issue-<number> "<step>" "<member>" "<result>"` — it keeps the line
-   ending, escapes pipes and control characters, and dates the row. For a subagent launch add what the usage
-   block at the end of the launch result reports: `--launch <model>/<effort> --tokens <subagent_tokens>
-   --tool-uses <tool_uses> --seconds <duration_ms / 1000>`, with the model and effort from the agent file (or
-   the launch's own override); the wrap-up sums it per role. After every member's report, commit and
-   push the files it left in the work folder (the Lead's records, the Tester's tests) yourself, so the next
-   report does not list them as untracked noise.
+   ending, escapes pipes and control characters, and dates the row. For a subagent launch add the metrics:
+   `--agent squad-<role> --tokens <subagent_tokens> --tool-uses <tool_uses> --seconds <duration_ms / 1000>`
+   (`--agent` reads the model and effort from the agent file; `--launch <model>/<effort>` only when the launch
+   overrode them). The three numbers come from the usage block of the launch's **task notification**, not
+   from the member's hand-back message, and that notification may arrive after you have already read the
+   report: write the row as soon as the report is in and add the metrics when the notification arrives with
+   `python3 .squad/tools/squad-log.py issue-<number> --amend-last "<member>" --agent squad-<role> --tokens …
+   --tool-uses … --seconds …` — never by editing `log.md` by hand or with placeholder numbers. The wrap-up
+   sums the trailers per role. After every member's report, commit and push the files it left in the work
+   folder (the Lead's records, the Tester's tests) yourself, so the next report does not list them as
+   untracked noise.
 2. **Plan.** Launch `squad-lead` in mode `plan` with the issue text and the work folder. It returns one of:
    - `RESULT: DONE` — for tier **`docs`** (definition in `.squad/routing.md`), a short result (tier, the
      exact edits, acceptance criteria) that you record as the first plan row in `log.md`; apply the edits
