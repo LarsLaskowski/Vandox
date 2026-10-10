@@ -93,6 +93,35 @@ public class TarHeaderGuardStreamTests
     }
 
     /// <summary>
+    /// A data section whose size does not fit when padded to whole blocks skips the rest of the stream, so a header inside
+    /// it is passed on without being examined.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task TarHeaderGuardStreamSkipsRestAfterSaturatedDataSize()
+    {
+        // Arrange
+        var size = new byte[12];
+
+        size.AsSpan().Fill(0xFF);
+
+        var stream = new MemoryStream();
+
+        await stream.WriteAsync(Header("huge", '0', size), TestContext.CancellationToken);
+        await stream.WriteAsync(Header("bomb", 'x', OctalSize(ImportLimits.MaxTarMetadataBytes + 1)), TestContext.CancellationToken);
+        stream.Position = 0;
+
+        await using var guard = new TarHeaderGuardStream(stream);
+        var buffer = new byte[4096];
+
+        // Act
+        var read = await DrainAsync(guard, buffer, TestContext.CancellationToken);
+
+        // Assert
+        Assert.AreEqual(stream.Length, read, "the header inside the data section is skipped, not examined");
+    }
+
+    /// <summary>
     /// A PAX header (entry or global) with a size record is refused, however the value is written, because the tar reader
     /// and the guard could otherwise disagree about where the next header starts.
     /// </summary>

@@ -1,6 +1,8 @@
 using System.Net;
 using System.Net.Sockets;
 
+using Vandox.Backend.Hosting;
+
 namespace Vandox.Backend.Tests;
 
 /// <summary>

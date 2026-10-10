@@ -3,7 +3,7 @@ using Microsoft.Extensions.Logging;
 using Vandox.Backend.Cli;
 using Vandox.Core.Configuration;
 
-namespace Vandox.Backend;
+namespace Vandox.Backend.Hosting;
 
 /// <summary>
 /// The logic of vandoxd behind the entry point: it takes the process boundaries as arguments, so every path is tested without

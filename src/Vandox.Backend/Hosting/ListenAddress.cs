@@ -3,7 +3,7 @@ using System.Net;
 using Vandox.Core.Configuration;
 using Vandox.Core.Model;
 
-namespace Vandox.Backend;
+namespace Vandox.Backend.Hosting;
 
 /// <summary>
 /// A listen address of the configuration: <c>[host]:port</c> with an empty host (all interfaces) or an IP address.

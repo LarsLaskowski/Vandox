@@ -1,4 +1,4 @@
-namespace Vandox.Backend;
+namespace Vandox.Backend.Hosting;
 
 /// <summary>
 /// Runs at most one database ping at a time. A request that arrives while a ping runs waits for that ping's result; a ping
@@ -51,10 +51,7 @@ internal sealed class PingChecker
     {
         lock (_gate)
         {
-            if (_inflight is null)
-            {
-                _inflight = PingAsync();
-            }
+            _inflight ??= PingAsync();
 
             return _inflight;
         }

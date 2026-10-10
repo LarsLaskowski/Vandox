@@ -1,6 +1,8 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.InteropServices;
 
+using Vandox.Backend.Hosting;
+
 namespace Vandox.Backend;
 
 /// <summary>

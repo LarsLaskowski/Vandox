@@ -1,5 +1,10 @@
 * text=auto eol=lf
 
+# C#, Razor and Markdown are checked out with CRLF (standard settings); everything else stays LF
+*.cs text eol=crlf
+*.razor text eol=crlf
+*.md text eol=crlf
+
 # Binary assets
 *.png binary
 *.jpg binary

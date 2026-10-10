@@ -1,7 +1,7 @@
 using Microsoft.AspNetCore.Connections.Features;
 using Microsoft.AspNetCore.Http;
 
-namespace Vandox.Backend;
+namespace Vandox.Backend.Hosting;
 
 /// <summary>
 /// Keeps the two listeners apart: a request on the ingest listener never reaches the web UI. The ingest API does not exist yet, so

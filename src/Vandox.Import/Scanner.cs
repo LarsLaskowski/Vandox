@@ -29,7 +29,6 @@ internal sealed class Scanner
     private readonly SourceRoot _source;
     private readonly ImportOptions _options;
     private readonly long _progressBytes;
-    private readonly List<FoundFile> _found = [];
     private int _entries;
 
     #endregion // Fields
@@ -55,7 +54,7 @@ internal sealed class Scanner
     /// <summary>
     /// Gets the files found so far, in input order.
     /// </summary>
-    internal List<FoundFile> Found => _found;
+    internal List<FoundFile> Found { get; } = [];
 
     #endregion // Properties
 
@@ -293,7 +292,7 @@ internal sealed class Scanner
                         Location = item.Location
                     };
 
-        _found.Add(found);
+        Found.Add(found);
         Report(new ImportProgress
                {
                    Event = ProgressEvent.FileFinished,
@@ -432,19 +431,19 @@ internal sealed class Scanner
 
         await hashing.CopyToAsync(Stream.Null, cancellationToken).ConfigureAwait(false);
 
-        _found.Add(new FoundFile
-                   {
-                       Result = new FileResult
-                                {
-                                    Path = item.Display,
-                                    SourceType = parser.Type
-                                },
-                       File = file,
-                       Location = item.Location,
-                       Parser = parser,
-                       Size = hashing.BytesRead,
-                       Sum = hashing.GetHash()
-                   });
+        Found.Add(new FoundFile
+                  {
+                      Result = new FileResult
+                               {
+                                   Path = item.Display,
+                                   SourceType = parser.Type
+                               },
+                      File = file,
+                      Location = item.Location,
+                      Parser = parser,
+                      Size = hashing.BytesRead,
+                      Sum = hashing.GetHash()
+                  });
     }
 
     /// <summary>
