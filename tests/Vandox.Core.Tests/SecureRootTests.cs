@@ -51,6 +51,7 @@ public class SecureRootTests
     [TestMethod]
     [DataRow(false)]
     [DataRow(true)]
+    [OSCondition(OperatingSystems.Linux)]
     public void SecureRootRefusesLinks(bool fallback)
     {
         // Arrange
@@ -102,6 +103,7 @@ public class SecureRootTests
     [TestMethod]
     [DataRow(false)]
     [DataRow(true)]
+    [OSCondition(OperatingSystems.Linux)]
     public void SecureRootRefusesNonRegularFiles(bool fallback)
     {
         // Arrange

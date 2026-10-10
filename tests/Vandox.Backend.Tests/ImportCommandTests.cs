@@ -7,6 +7,7 @@ namespace Vandox.Backend.Tests;
 /// Tests for <c>vandoxd import</c> and the other command-line paths of <see cref="BackendApp"/>
 /// </summary>
 [TestClass]
+[OSCondition(OperatingSystems.Linux)]
 public class ImportCommandTests
 {
     #region Properties

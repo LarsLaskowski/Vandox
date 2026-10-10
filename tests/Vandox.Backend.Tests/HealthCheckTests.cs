@@ -47,6 +47,7 @@ public class HealthCheckTests
     /// </summary>
     /// <returns>A task that completes when the test is done</returns>
     [TestMethod]
+    [OSCondition(OperatingSystems.Linux)]
     public async Task HealthCheckReportsStatusAndErrors()
     {
         // Arrange
