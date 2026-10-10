@@ -149,6 +149,44 @@ public class SyslogParserTests
     }
 
     /// <summary>
+    /// A byte order mark is removed from the first line only: there the line is a record, on a later line the mark stays and the line is skipped.
+    /// </summary>
+    /// <param name="markOnFirstLine">Whether the mark starts the first line; otherwise it starts the second</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [DataRow(true)]
+    [DataRow(false)]
+    public async Task SyslogParserParseAsyncRemovesTheByteOrderMarkOnlyFromTheFirstLine(bool markOnFirstLine)
+    {
+        // Arrange
+        var parser = new SyslogParser(DateTimeZone.Utc);
+        byte[] bom = [0xEF, 0xBB, 0xBF];
+        byte[] line = "2026-03-01T12:00:00Z web-1 sshd[1]: hello\n"u8.ToArray();
+        byte[] content = markOnFirstLine ? [.. bom, .. line] : [.. "\n"u8, .. bom, .. line];
+
+        // Act
+        var emitter = await RecordingEmitter.ParseAsync(parser, _file, content, TestContext.CancellationToken);
+
+        // Assert
+        if (markOnFirstLine)
+        {
+            Assert.IsEmpty(emitter.Skips, "nothing is skipped");
+            Assert.HasCount(1, emitter.Records, "one record");
+
+            var payload = RecordingEmitter.Line(emitter.Records[0]);
+
+            Assert.AreEqual("sshd", payload.Program, "program");
+            Assert.AreEqual(1, payload.Pid, "process ID");
+            Assert.AreEqual("hello", payload.Message, "message");
+        }
+        else
+        {
+            Assert.IsEmpty(emitter.Records, "no record");
+            Assert.AreSequenceEqual<(long, string)>([(1, "empty line"), (2, NotSyslog)], emitter.Skips, "the mark on line 2 is kept and the line is skipped");
+        }
+    }
+
+    /// <summary>
     /// Lines that are not records are skipped with their line number and the parse continues.
     /// </summary>
     /// <returns>A task that completes when the test is done</returns>

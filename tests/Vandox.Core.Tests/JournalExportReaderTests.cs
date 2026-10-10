@@ -200,6 +200,43 @@ public class JournalExportReaderTests
     }
 
     /// <summary>
+    /// A message cut by the bound inside a multi-byte character ends at the last whole character, without a replacement character, and is marked as truncated.
+    /// </summary>
+    /// <param name="binary">Whether the message is a binary field</param>
+    /// <param name="character">The character the bound cuts</param>
+    /// <param name="keptBytes">How many bytes of the character are within the bound</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [DataRow(false, "\u20AC", 1)]
+    [DataRow(false, "\u20AC", 2)]
+    [DataRow(false, "\uD83D\uDE00", 3)]
+    [DataRow(true, "\u20AC", 1)]
+    [DataRow(true, "\u20AC", 2)]
+    [DataRow(true, "\uD83D\uDE00", 3)]
+    public async Task JournalExportReaderReadAsyncEndsCutMessageAtTheLastWholeCharacter(bool binary, string character, int keptBytes)
+    {
+        // Arrange
+        var prefix = new string('a', 16384 - keptBytes);
+        var value = Encoding.UTF8.GetBytes($"{prefix}{character}tail");
+        var builder = new JournalExportBuilder().Text("__REALTIME_TIMESTAMP", "1772368215123456");
+
+        _ = binary ? builder.Binary("MESSAGE", value) : builder.Text("MESSAGE", value);
+
+        using var stream = new MemoryStream(builder.End().ToArray());
+        var reader = new JournalExportReader(stream);
+
+        // Act
+        var entry = await reader.ReadAsync(TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsNotNull(entry, "an entry");
+        Assert.IsNull(entry.Problem, "no problem");
+        Assert.AreEqual(prefix, entry.Message, "the message ends before the cut character");
+        Assert.IsFalse(entry.Message!.Contains('\uFFFD'), "no replacement character");
+        Assert.IsTrue(entry.Truncated, "truncated flag");
+    }
+
+    /// <summary>
     /// A field name that is empty, too long, starts with a digit or holds other characters than <c>A-Z 0-9 _</c> makes the entry malformed, and the next entry is read.
     /// </summary>
     /// <param name="name">The field name</param>
