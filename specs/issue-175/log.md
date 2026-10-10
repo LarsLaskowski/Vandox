@@ -5,3 +5,4 @@ One line per pipeline step: date, step, member, result. Lead decisions and escal
 | Date | Step | Member | Result |
 | ---- | ---- | ------ | ------ |
 | 2026-10-10 | 1 Intake | Orchestrator | issue read, branch fix-issue-175 |
+| 2026-10-10 | 2 Plan | squad-lead | tier security; record 0090 Proposed (ASCII case-insensitive keys, duplicates and non-ASCII keys Malformed, header shape Malformed, depth 64 in both); 0042/0043/0075/0089 edited in place; plan.md written; follow-ups F1, F2 proposed |

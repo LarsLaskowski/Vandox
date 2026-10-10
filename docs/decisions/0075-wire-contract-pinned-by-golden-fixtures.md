@@ -25,5 +25,7 @@ decoder, and the [Wire format](../areas/wire-format.md) area stays the specifica
 ## Consequences
 
 - An encoder change that is not mirrored in the decoder fails the C# test, and a decoder change that rejects the encoder's output fails it as well.
-- The fixture covers well-formed batches; the rejection rules are tested in each language's own unit tests.
+- The fixture covers well-formed batches; the rejection rules are tested in each language's own unit tests, except the JSON-level rules
+  where the two JSON libraries differ (key case, duplicate keys, header shape, nesting depth), which a second shared fixture of decoder cases
+  pins for both decoders ([0090](0090-wire-keys-matched-ignoring-ascii-case-duplicates-rejected-header-shape-malformed.md)).
 - A wire change is an integration-surface change: Go encoder, fixture, C# decoder and the area document move together (`.squad/project.md`).

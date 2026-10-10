@@ -6,7 +6,8 @@ The format of the batches the agent sends to the backend, and the shared record 
 fields, limits, versioning, batch validation and the duties of the consumer. The rules hold for both implementations, whatever their
 language; names such as `MaxLineBytes` or `ErrLimitExceeded` are the identifiers of the Go agent and the C# decoder for the same
 rules (see *Implementation*). A golden batch with one record of every kind, `testdata/wire/all-kinds.jsonl`, is written by the
-Go encoder and decoded by the C# contract test, so the two sides cannot drift apart unnoticed. How the backend stores the records
+Go encoder and decoded by the C# contract test, so the two sides cannot drift apart unnoticed; a shared fixture of decoder cases,
+`testdata/wire/decoder-cases.json`, is run by both decoders and pins the JSON-level rules below. How the backend stores the records
 is in [Storage](storage.md).
 
 ## Stream layout
@@ -25,8 +26,8 @@ added by the backend and cannot be supplied by the agent.
 
 | Field | Type | Rule |
 | ----- | ---- | ---- |
-| `format_major` | integer | must be 1; anything else (also missing, `null`, 0, negative) is rejected as an unsupported version |
-| `format_minor` | integer | >= 0; a newer minor is accepted (see *Versioning*) |
+| `format_major` | integer | must be 1; a missing key, `null` or another integer from -2^63 to 2^63 - 1 is rejected as an unsupported version, any other JSON value as malformed |
+| `format_minor` | integer | 0 to 2^63 - 1; a newer minor is accepted (see *Versioning*) |
 | `agent_id` | string | `^[A-Za-z0-9][A-Za-z0-9._-]*$`, 1 to 64 bytes |
 | `boot_id` | string | lower-case UUID, `^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$` |
 | `clock_offset_ns` | integer, optional | agent clock minus the reference time of its time synchronization, in nanoseconds; positive means the agent is ahead; omitted means unknown |
@@ -66,6 +67,12 @@ one is invalid, and the decoder sets the origin of every decoded record to `agen
 
 ### Common rules
 
+- **Keys**: every key of every object, at any depth and in maps and unknown keys too, is ASCII after unescaping, and no two keys of one
+  object are equal ignoring ASCII case; a line that breaks this, or nests objects and arrays deeper than 64 (`MaxDepth`; the line's
+  outermost value counts as 1), is `ErrMalformed`. These line rules are checked before anything else is read from the line. A key then
+  matches a field when the two are equal ignoring ASCII case. Map keys (metric `labels`, MariaDB `status` and `variables`) that are equal
+  ignoring ASCII case are refused by the model's validation, so a producer never writes them. See
+  [0090](../decisions/0090-wire-keys-matched-ignoring-ascii-case-duplicates-rejected-header-shape-malformed.md).
 - **Name pattern**: `^[A-Za-z0-9][A-Za-z0-9._:/@+-]*$`, 1 to 128 bytes (`MaxNameBytes`). Used for `source`,
   metric names and units, label keys, `gap.collector` and `log_line.event`.
 - **Short text** at most 1024 bytes (`MaxShortTextBytes`), **text** at most 16384 bytes (`MaxTextBytes`); lengths are in
@@ -78,7 +85,7 @@ one is invalid, and the decoder sets the origin of every decoded record to `agen
 - **Field paths** in errors use the JSON names, list indexes in brackets and map keys in brackets rendered
   with `model.QuoteName` / `FieldError.QuoteName` (cut to 128 bytes, quoted with Go escaping, `...` appended when cut), e.g.
   `data.processes[3].pid`, `data.labels["mount"]`.
-- **Null**: for a key given once, a JSON `null` reads as if the key were absent, in the header, the record line and the payload at any
+- **Null**: a JSON `null` reads as if the key were absent (a key is never given twice, see *Keys*), in the header, the record line and the payload at any
   depth. A `null` list element reads as an element with every field at its zero value, a `null` map value as the zero value of the map's
   value type (`""` for `labels` and `variables`, `0` for `status`), and a record line that is `null` as an object without keys. The record's
   validation then decides, so a missing required field is a field error, never `ErrMalformed`. The Go encoder never writes `null`.
@@ -87,7 +94,7 @@ one is invalid, and the decoder sets the origin of every decoded record to `agen
 ### `metric`
 
 `name` (name pattern, required), `value` (finite number), `unit` (optional name pattern), `labels` (optional
-map of name-pattern key to short text, at most 32). Counters are named with the suffix `_total` (convention,
+map of name-pattern key to short text, at most 32, keys unique ignoring ASCII case). Counters are named with the suffix `_total` (convention,
 not validated).
 
 ### `process_snapshot`
@@ -121,7 +128,7 @@ maintenance refreshing`), `sub_state` (optional, `^[a-z0-9-]+$`, at most 64 byte
 ### `mariadb_status`
 
 `availability` (`up`, `down`, `not_answering`), `ping_latency_ns` (optional, >= 0), `status` (map of
-`^[A-Za-z][A-Za-z0-9_]*$` key, at most 128 bytes, to unsigned integer), `variables` (same keys, short text
+`^[A-Za-z][A-Za-z0-9_]*$` key, at most 128 bytes, unique ignoring ASCII case, to unsigned integer), `variables` (same keys, short text
 values), `threads`, `complete` (true only if `status`, `variables` and `threads` hold every entry the
 producer read; false for a configured subset or a reduction for size). When `availability` is not `up`,
 `status`, `variables` and `threads` must be empty. A thread: `id`, `user`, `host`, `db`, `command`, `state`
@@ -175,6 +182,7 @@ connection collector #33 and the legacy `lsof -ni` parser #20):
 | `MaxBatchBytes` | 16 MiB | decompressed bytes of the whole stream |
 | `MaxRecords` | 20 000 | records per batch |
 
+The nesting depth of a line is fixed at 64 (`MaxDepth`, see *Common rules*) and is not part of the limits.
 `wire.DefaultLimits()` returns them; `NewDecoder` takes a `Limits` where a zero or negative field means that
 field's default. The encoder always uses the defaults. A line over the limit, a stream that decompresses to
 more than the limit and one record too many are rejected with `wire.ErrLimitExceeded`.
@@ -192,9 +200,10 @@ field sizes with every byte escaped as `\uXXXX` the largest, a metric with 32 la
 
 ## Versioning (0043)
 
-The header carries an integer major and minor. A decoder reads the major from line 1 before anything else and
-rejects any major it does not know with `wire.ErrUnsupportedVersion`, even if the rest of that header has an
-incompatible shape. A minor change is additive: new optional fields and new kinds; a decoder ignores unknown
+The header carries an integer major and minor. A decoder checks line 1 against the line rules (*Common rules*, *Keys*),
+then reads the major before anything else and rejects any major it does not know with `wire.ErrUnsupportedVersion`, even
+if the rest of that header has an incompatible shape. A header that is not a JSON object or `null`, or whose major is not
+a JSON integer, is `wire.ErrMalformed`: the major is an integer in every version (0043). A minor change is additive: new optional fields and new kinds; a decoder ignores unknown
 keys at any depth and so accepts a newer minor of its major. An unknown record kind is rejected. Until the
 upgrade rules are settled (#85), upgrade the backend before the agents.
 
@@ -225,16 +234,20 @@ What the decoder does with unusual input; each row is a test case.
 | Spaces or tabs around the object | accepted |
 | Two values on a line, comments, trailing comma, `NaN`, single quotes | rejected, `ErrMalformed` |
 | Line is `null` | header: `ErrUnsupportedVersion`; record: `ErrUnknownKind` |
-| Line is an array, string or number | rejected, `ErrMalformed` |
-| Keys in other case (`FORMAT_MAJOR`, `Kind`) | accepted as the field |
-| Keys that are Unicode case-fold equivalents (`"Kind"` with U+212A KELVIN SIGN, `"ſeq"` with U+017F) | accepted as the field; the last of several spellings wins |
-| Duplicate keys | the last one wins |
+| Line is an array, string, number, `true` or `false` (header or record) | rejected, `ErrMalformed` |
+| Keys in other ASCII case (`FORMAT_MAJOR`, `Kind`, `DATA`, `PID`), also escaped (`"\u004bind"`) | accepted as the field |
+| A key with a character outside ASCII after unescaping, at any depth, also a map key or an unknown key (`"Kind"` with U+212A KELVIN SIGN, `"ſeq"` with U+017F, `"agent_ıd"` with U+0131, `"\u212aind"`, a surrogate pair, an unpaired surrogate escape such as `"\ud800"`, invalid UTF-8) | rejected, `ErrMalformed` |
+| Two keys in one object equal ignoring ASCII case after unescaping, at any depth, also in a map or an unknown key (`seq` twice, `kind` and `Kind`, `kind` and `"\u006bind"`, `format_major` then `null`, labels `Mount` and `mount`) | rejected, `ErrMalformed`; in the header before the major is read |
+| The same key in sibling or nested objects (`[{"a":1},{"a":2}]`, `{"a":{"a":1}}`) | accepted |
+| Nesting of objects and arrays deeper than 64, the outermost value counting as 1, also inside an unknown key | rejected, `ErrMalformed`; 64 accepted |
 | Unknown keys at any depth | ignored |
 | `null` as the value of a field (header, record or payload) | read as absent: accepted where the field is optional (`"host":null`, `"format_minor":null`; `"value":null` reads 0), rejected with the field error of the missing field where it is required (`"log":null` gives `data.log: required`, `"seq":null` gives `seq: must be greater than 0 for origin agent`, `"addr":null` gives `invalid address`) |
 | `null` as a list element | an element with every field at its zero value: `"threads":[null]` accepted, `"processes":[null]` gives `data.processes[0].pid: must be greater than 0` |
 | `null` as a map value | the zero value of the value type: `"labels":{"a":null}` accepted with an empty value, `"status":{"Uptime":null}` reads 0 |
-| `format_major` missing, `null`, 0, negative, not 1 | rejected, `ErrUnsupportedVersion`, line 1 |
-| `format_major` as `1.0`, `1e0`, `"1"` | rejected, `ErrMalformed` |
+| `format_major` missing, `null`, or an integer other than 1 (0, `-0`, negative, 2, 3000000000, -2^63, 2^63 - 1) | rejected, `ErrUnsupportedVersion`, line 1 |
+| `format_major` as `1.0`, `1e0`, `2.5`, `"1"`, `true`, an object or array, an integer outside -2^63 to 2^63 - 1, `1e400` | rejected, `ErrMalformed`, line 1 |
+| `format_minor` 3000000000 or 2^63 - 1 | accepted |
+| `format_minor` 2^63 or more | rejected, `ErrMalformed` |
 | `kind` unknown, wrong case, empty or missing | rejected, `ErrUnknownKind` |
 | `data` missing or `null` | rejected, field `data` |
 | `data` not an object; integers out of range; fractions into integer fields; `1e400` | rejected, `ErrMalformed` |
@@ -248,8 +261,8 @@ What the decoder does with unusual input; each row is a test case.
 | IPv4-mapped IPv6 without zone (`::ffff:1.2.3.4`) | accepted |
 | IDs and names in other forms (upper-case UUID, braces, `urn:uuid:`, trailing newline) | rejected, field error |
 
-Because keys are matched with Unicode case folding, `zcat batch | jq` can show a key that the decoder reads
-under another name (`"Kind"` counts as `kind`).
+Because keys are matched ignoring ASCII case, `zcat batch | jq .kind` misses a key spelled `"Kind"`, which the decoder
+reads as `kind`; a line never holds both spellings, since they would be duplicates.
 
 ## Error text and consumer duties
 
@@ -295,6 +308,8 @@ Decompressed content of a batch of three records (the real stream is gzip-compre
 - [0075](../decisions/0075-wire-contract-pinned-by-golden-fixtures.md) — why golden fixtures pin the contract between the two languages.
 - [0076](../decisions/0076-strict-gzip-validation-in-the-backend.md) — why the backend decodes gzip strictly.
 - [0089](../decisions/0089-json-null-reads-as-an-absent-key-in-both-decoders.md) — why a JSON `null` reads as an absent key in both decoders.
+- [0090](../decisions/0090-wire-keys-matched-ignoring-ascii-case-duplicates-rejected-header-shape-malformed.md) — why both decoders check
+  keys and nesting before binding, match keys ignoring ASCII case and report a misshapen header as malformed.
 
 ## Not here
 
@@ -304,7 +319,9 @@ Decompressed content of a batch of three records (the real stream is gzip-compre
 
 ## Implementation
 
-Agent (Go): `internal/model` (record types and validation) and `internal/wire` (header, encoder, streaming decoder; golden test
-`internal/wire/golden_test.go`, `VANDOX_UPDATE_GOLDEN=1` rewrites the fixture). Backend (C#): `Vandox.Core.Model` and `Vandox.Core.Wire`
-(`BatchDecoder`, `WireLimits`; `NullAsAbsentConverterFactory` with its two converters is the C# side of the null rule), `Vandox.Core.IO` (`StrictGzip`), contract test `WireContractTests`.
+Agent (Go): `internal/model` (record types and validation) and `internal/wire` (header, encoder, streaming decoder with the line check
+in `decode.go`; golden test `internal/wire/golden_test.go`, `VANDOX_UPDATE_GOLDEN=1` rewrites the fixture; the shared decoder cases run in
+`internal/wire/decode_test.go`). Backend (C#): `Vandox.Core.Model` and `Vandox.Core.Wire` (`BatchDecoder`, `WireLimits`, `WireKeyCheck` for the
+line check; `NullAsAbsentConverterFactory` with its two converters is the C# side of the null rule), `Vandox.Core.IO` (`StrictGzip`),
+contract test `WireContractTests` (golden batch and shared decoder cases).
 

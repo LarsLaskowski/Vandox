@@ -29,3 +29,4 @@ does not know is rejected rather than dropped. The rules are in the [Wire format
 - New optional fields can be rolled out agent-first without breaking an older backend.
 - A new record kind is not readable by an older backend: the batch is rejected and stays in the agent's spool. Until the upgrade rules are settled (#85), the backend is upgraded before the agent.
 - A misspelled optional field in the agent is silently dropped; the unit tests pin every field name and the area document is the reference.
+- The JSON-level line rules of [0090](0090-wire-keys-matched-ignoring-ascii-case-duplicates-rejected-header-shape-malformed.md) (ASCII keys, unique ignoring case, nesting depth) are checked before the major is read, so they bind every future major as well.

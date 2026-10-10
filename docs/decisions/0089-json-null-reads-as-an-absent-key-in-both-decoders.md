@@ -43,8 +43,9 @@ this from converters in `PayloadRegistry.Options`; the rules are in the [Wire fo
 - A `null` in a required number or flag (`value`, `restarts`, `complete`) is accepted as 0 or false, as an omitted key already is. Making
   required numbers detectably present would be a separate change to both decoders; it is not needed while the only producer is the Go
   encoder, which always writes them.
-- Duplicate keys combined with `null` are not covered: Go keeps the earlier value of a scalar when a later occurrence is `null` and merges
-  repeated objects, C# replaces. Duplicate keys, key case and the header's shape are settled in a separate issue.
+- A key repeated with `null` is a duplicate and rejects the line before this rule applies
+  ([0090](0090-wire-keys-matched-ignoring-ascii-case-duplicates-rejected-header-shape-malformed.md)), so a `null` always stands for a key
+  given once.
 - The rule lives in the shared `PayloadRegistry.Options`, so the storage read path (`RecordQueries.ReadJson`) applies it too. That changes
   nothing for the rows the store writes, which are validated and serialized without `null` members; a `null` in a hand-edited stored
   payload reads as an empty value instead of a null reference.
