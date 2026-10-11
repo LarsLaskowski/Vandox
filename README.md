@@ -312,6 +312,13 @@ Supported sources:
   its crash report becomes one record of at most 16,384 bytes with the priority and event of its header; lines beyond
   that are stored as plain lines, not cut. Time, host and process ID come from the journal or syslog line, and the
   source type stays `journal` or `syslog`. A journal export needs no `import.time_zone`.
+- Dovecot's own log file (source type `dovecot`), when `log_path` (or `info_log_path`, `debug_log_path`) points to a
+  file: recognized by its first line (`Oct 09 03:12:13 imap-login: Info: Login: ...`, Dovecot's default
+  `log_timestamp`) under any name except `syslog` and `kern.log`, including their rotation suffixes (`.N`,
+  `-YYYYMMDD`), which stay with the syslog parser. Lines get the priority of their label (`Debug:` 7, `Info:` 6,
+  `Warning:` 4, `Error:` 3, `Fatal:` and `Panic:` 2) and the events `dovecot.fatal`, `dovecot.panic` and
+  `dovecot.database_unavailable` as above; host and program are empty. Times are read in `import.time_zone` like the
+  traditional syslog format. Lines without a time stamp and a Dovecot label are skipped.
 
 The file name of a rotated log must stay as the server wrote it (`syslog.1`, `kern.log-20260301`), and the
 modification time of the files matters: the traditional format has no year, and the backend takes it from a
@@ -324,7 +331,7 @@ server the logs come from (for example `Europe/Berlin`); there is no default, be
 time stamp and an import cannot be redone. Without the option a file with year-less lines fails with
 "import.time_zone is not set" (the lines before the first year-less line are stored, and the run exits with 1).
 Set the option and run the import again: the file is completed. RFC 3339 files and journal exports carry their
-offset and need no option. MariaDB error logs also write local time without a zone and are read in the same zone;
+offset and need no option. MariaDB error logs and Dovecot's log file also write local time without a zone and are read in the same zone;
 without the option such a file fails at its first entry with the same reason.
 
 Times outside 1677-09-21 to 2262-04-11 and dates that do not exist (31 November, 29 February in a year that is not a

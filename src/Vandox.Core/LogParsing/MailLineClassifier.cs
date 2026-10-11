@@ -2,8 +2,6 @@ using Vandox.Core.Model;
 
 namespace Vandox.Core.LogParsing;
 
-#pragma warning disable RH2003, S1144
-
 /// <summary>
 /// Classifies the lines of Postfix and Dovecot that the journal and syslog parsers read: the severity marker sets the
 /// priority, fatal and panic lines and failed or lost MySQL connections get an event.
@@ -133,7 +131,7 @@ internal static class MailLineClassifier
     /// <returns><c>true</c> when it begins with a marker or has one after its first segment</returns>
     internal static bool HasDovecotFileMarker(string message)
     {
-        throw new NotImplementedException();
+        return FindDovecotMarker(message, _dovecotFileMarkers, out _);
     }
 
     /// <summary>
@@ -142,7 +140,10 @@ internal static class MailLineClassifier
     /// <param name="payload">The line</param>
     internal static void ClassifyDovecotFileLine(LogLine payload)
     {
-        throw new NotImplementedException();
+        if (FindDovecotMarker(payload.Message, _dovecotFileMarkers, out var marker))
+        {
+            ApplyMarker(payload, marker, false);
+        }
     }
 
     /// <summary>

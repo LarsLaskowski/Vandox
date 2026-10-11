@@ -1,7 +1,5 @@
 namespace Vandox.Core.LogParsing;
 
-#pragma warning disable RH2003, S2325
-
 /// <summary>
 /// A line of Dovecot's own log file: the traditional time stamp and the message with its severity marker.
 /// </summary>
@@ -30,7 +28,28 @@ internal sealed class DovecotLine
     /// <returns>The line, or <c>null</c> when it is no Dovecot line</returns>
     internal static DovecotLine? TryParse(string line)
     {
-        throw new NotImplementedException();
+        var position = 0;
+        var time = SyslogLine.ParseTraditional(line, ref position);
+
+        if (time is null || position >= line.Length || line[position] != ' ')
+        {
+            return null;
+        }
+
+        position++;
+
+        var message = line[position..];
+
+        if (MailLineClassifier.HasDovecotFileMarker(message))
+        {
+            return new DovecotLine
+                   {
+                       Time = time.Value,
+                       Message = message
+                   };
+        }
+
+        return null;
     }
 
     #endregion // Methods

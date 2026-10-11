@@ -4,8 +4,6 @@ using Vandox.Core.Model;
 
 namespace Vandox.Core.LogParsing;
 
-#pragma warning disable RH2003, S2325, S1144, S4487
-
 /// <summary>
 /// Reads Dovecot's own log file (<c>log_path</c> set to a file): one log line record per line, priority and event from the marker.
 /// </summary>
@@ -57,7 +55,54 @@ public sealed class DovecotLogParser : ILogParser
     /// <exception cref="InvalidOperationException">The line has no year and no time zone is set</exception>
     private static DataRecord? Map(LogFile file, LogLineReader reader, SyslogClock? clock, IRecordEmitter output)
     {
-        throw new NotImplementedException();
+        var bytes = reader.Line.Span;
+
+        if (reader.LineNumber == 1 && bytes.StartsWith(_bom))
+        {
+            bytes = bytes[_bom.Length..];
+        }
+
+        if (bytes.Length == 0)
+        {
+            output.Skip(reader.LineNumber, EmptyLine);
+
+            return null;
+        }
+
+        var line = DovecotLine.TryParse(Utf8Text.Decode(bytes, int.MaxValue, out _));
+
+        if (line is null)
+        {
+            output.Skip(reader.LineNumber, NotDovecotLine);
+
+            return null;
+        }
+
+        var reason = line.Time.HasYear ? line.Time.TryGetInstant(out var instant) : SyslogParser.Resolve(line.Time, clock, out instant);
+
+        if (reason is not null)
+        {
+            output.Skip(reader.LineNumber, reason);
+
+            return null;
+        }
+
+        var payload = new LogLine
+                      {
+                          Log = file.Name,
+                          Message = Utf8Text.Cut(line.Message, ModelLimits.MaxTextBytes, out var cut),
+                          Truncated = reader.Truncated || cut
+                      };
+
+        MailLineClassifier.ClassifyDovecotFileLine(payload);
+
+        return new DataRecord
+               {
+                   Origin = RecordOrigin.Import,
+                   Source = ParserType,
+                   CapturedAt = instant,
+                   Data = payload
+               };
     }
 
     #endregion // Methods
@@ -73,13 +118,50 @@ public sealed class DovecotLogParser : ILogParser
     /// <inheritdoc />
     public Confidence Detect(LogFile file, ReadOnlySpan<byte> head)
     {
-        throw new NotImplementedException();
+        if (SyslogParser.HasSyslogName(file.Name))
+        {
+            return Confidence.NoMatch;
+        }
+
+        var first = head;
+
+        if (first.StartsWith(_bom))
+        {
+            first = first[_bom.Length..];
+        }
+
+        var lineEnd = first.IndexOf((byte)'\n');
+
+        if (lineEnd >= 0)
+        {
+            first = first[..lineEnd];
+        }
+
+        if (first.Length > 0 && first[^1] == (byte)'\r')
+        {
+            first = first[..^1];
+        }
+
+        return DovecotLine.TryParse(Utf8Text.Decode(first, int.MaxValue, out _)) is null ? Confidence.NoMatch : Confidence.MatchContent;
     }
 
     /// <inheritdoc />
-    public Task ParseAsync(LogFile file, Stream input, IRecordEmitter output, CancellationToken cancellationToken)
+    public async Task ParseAsync(LogFile file, Stream input, IRecordEmitter output, CancellationToken cancellationToken)
     {
-        throw new NotImplementedException();
+        var reader = new LogLineReader(input);
+        var clock = _timeZone is null ? null : new SyslogClock(_timeZone, file);
+
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var record = Map(file, reader, clock, output);
+
+            if (record is not null)
+            {
+                await output.RecordAsync(record, cancellationToken).ConfigureAwait(false);
+            }
+        }
     }
 
     #endregion // ILogParser

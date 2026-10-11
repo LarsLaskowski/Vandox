@@ -8,7 +8,7 @@ public static class BuiltInParsers
     #region Methods
 
     /// <summary>
-    /// Creates the built-in parsers in registry order: the journal export, the MariaDB error log, then the generic syslog parser.
+    /// Creates the built-in parsers in registry order: the journal export, the MariaDB error log, Dovecot's own log file, then the generic syslog parser.
     /// </summary>
     /// <param name="timeZone">The IANA time zone for year-less log lines and the local times of the MariaDB error log; <c>null</c> when not set</param>
     /// <returns>The parsers</returns>
@@ -22,7 +22,7 @@ public static class BuiltInParsers
             throw new ArgumentException("logparse: the time zone is not a time zone of the IANA time zone database", nameof(timeZone));
         }
 
-        return [new JournalExportParser(), new MariaDbErrorLogParser(zone), new SyslogParser(zone)];
+        return [new JournalExportParser(), new MariaDbErrorLogParser(zone), new DovecotLogParser(zone), new SyslogParser(zone)];
     }
 
     #endregion // Methods
