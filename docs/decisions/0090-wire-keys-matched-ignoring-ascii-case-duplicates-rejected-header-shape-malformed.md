@@ -1,6 +1,6 @@
 # 0090: Both wire decoders check every line for ASCII, unique keys and bounded nesting, match keys ignoring ASCII case, and report a misshapen header as malformed
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-10
 - **Area:** Wire format
 - **Source:** Issue #175
