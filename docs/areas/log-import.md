@@ -185,8 +185,9 @@ A parser turns the lines of one file into records. The importer and every parser
 with a `__CURSOR=` or `__REALTIME_TIMESTAMP=` line and holds a `__REALTIME_TIMESTAMP=` line; the file name never
 matters); the syslog parser claims weakly (name match) a file named `syslog` or `kern.log` with an optional `.N` or
 `-YYYYMMDD` suffix, or whose first line has a syslog header. Both parsers produce `log_line` records with origin `import`
-and sequence 0 and pass them through two stages in this order: MariaDB entries (see *Lines from the journal and syslog*
-under *MariaDB error log*), then kernel reports (see *Kernel reports* below).
+and sequence 0 and pass them through three stages in this order: the classification of mail lines (see *Mail lines
+(Postfix and Dovecot)* below), MariaDB entries (see *Lines from the journal and syslog* under *MariaDB error log*), then
+kernel reports (see *Kernel reports* below).
 
 **Journal export (`journalctl -o export`).** Entries are blocks of fields separated by an empty line. Text fields are
 `NAME=value\n`, binary fields `NAME\n`, a 64-bit little-endian length, the bytes and `\n`. Mapping: `captured_at` from
@@ -264,10 +265,77 @@ open report is emitted only at the normal end of input, never when the parse end
 emitter error, the missing time zone): the importer resumes by dropping the first records, so the records emitted
 before a failure must be a prefix of a complete parse.
 
+**Mail lines (Postfix and Dovecot).** Both parsers pass every `log_line` record through `MailLineClassifier` before the
+MariaDB stage. The classification sets only the priority and the event, never adds, drops or reorders a record, and
+holds no state; it is hand-written, uses ordinal and case-sensitive text operations only and is linear in the length of
+a message. `mail.log` and the other rsyslog files keep the source type `syslog`; a journal export keeps `journal`.
+`mail.log`, `mail.err`, `maillog` and their rotations are claimed by their first line, like `auth.log`; they are no
+syslog names, so a copy whose first line is cut is not recognized.
+
+*Programs.* `IsPostfix` is true for a program that begins with `postfix/` or `postfix-`, contains a `/` and has at least
+one character after the last `/` (`postfix/smtpd`, `postfix/submission/smtpd`, `postfix-out/smtp`); `IsDovecot` is true
+for `dovecot` only. Any other program is left unchanged, whatever its message carries.
+
+*Severity markers.* The marker sets the priority of the record; a line without a marker keeps the priority and the event
+it has, and the message, program, pid, host, `truncated` and `log` are never changed.
+
+| Family | Position | Marker, priority (event) |
+| ------ | -------- | ------------------------ |
+| Postfix | the message begins with it | `warning: ` 4, `error: ` 3, `fatal: ` 2 (`postfix.fatal`), `panic: ` 2 (`postfix.panic`) |
+| Dovecot | the message begins with it, or the message is `S: ` + marker + text where `S`, the text before the first `: `, is non-empty and holds no space | `Debug: ` 7, `Warning: ` 4, `Error: ` 3, `Fatal: ` 2 (`dovecot.fatal`), `Panic: ` 2 (`dovecot.panic`) |
+
+The markers include their trailing space. For Dovecot the start of the message is checked first. Dovecot's syslog
+format has no `Info: ` marker, so such a line keeps its priority.
+
+*Unavailable database.* A warning or error line gets `postfix.database_unavailable` or `dovecot.database_unavailable`
+when the text *T* after the marker carries a client error *C* at an anchored position. *C* starts with one of eight
+phrases (ASCII apostrophe, case-sensitive): `Can't connect to local MySQL server`, `Can't connect to MySQL server`,
+`MySQL server has gone away`, `Lost connection to MySQL server` (libmysqlclient) and `Can't connect to local server`,
+`Can't connect to server`, `Server has gone away`, `Lost connection to server` (Connector/C).
+
+| Family | Anchor in *T* | *C* |
+| ------ | ------------- | --- |
+| Postfix | *T* is `connect to mysql server ` + *H* + `: ` + *C*, where *H* is the text up to the first `: ` after the anchor, non-empty and without a space | as written; no `: ` after the anchor means no event |
+| Postfix | *T* is `mysql:` + *N* + `: query failed: ` + *C*, where *N* is the text up to the first `: ` after `mysql:`, non-empty and without a space | as written |
+| Dovecot | the message begins with `auth-worker(` + one or more ASCII digits + `): ` + marker, and *T* is one to three driver segments + `Connect failed to database (` + ... | the text after the first `): ` that follows the anchor; none means no event |
+| Dovecot | as above, with `Query failed, retrying: ` + *C* after the segments | as written |
+
+A driver segment is exactly `mysql: `, or `mysql(` + *P* + `): `, or `sqlpool(` + *P* + `): `, where *P* is the text up to
+the first `)` after the opening parenthesis, non-empty and without a space; anything else (another name, another case,
+an empty or spaced *P*, a `)` not followed by `: `) ends the walk without an event. The walk reads at most three
+segments, each by a prefix comparison; zero segments and a fourth segment give no event. Only the `auth-worker` process
+is read, which holds Dovecot's MySQL connections; lines of `lmtp`, `imap` and the other processes, which log remote text
+after the marker, are never matched. The text of Postfix's table and host contains no space, while the remote lookup
+key of `mysql:<table> lookup error for "<key>"` follows a space before any `: `, so it never reaches the anchor.
+Fatal and panic win: a `fatal:` or `Panic:` line gets only its fatal or panic event.
+
+*Forged lines (limitation).* The classification is a reading of text, not a trust boundary. (a) Any local process can
+log under `postfix/<x>` or `dovecot` with any marker and any database message. (b) A marker's priority replaces the
+priority the transport gave the line (a journal `PRIORITY`, a `<PRI>`), also a more severe one, so a classified priority
+is the daemon's class read from the text, not the priority the line was sent with. (c) Remote text reaches a marker
+position only through a user name in Dovecot's first segment (`imap(<user>)...`): the default `auth_username_chars` keeps
+spaces and colons out of it, and a configuration whose `auth_username_chars` allows a space and a colon lets a remote
+user forge a Dovecot marker, and with it the priority and `dovecot.fatal` or `dovecot.panic` (not
+`dovecot.database_unavailable`: such a first segment begins with the logging process, e.g. `imap(`, never with
+`auth-worker(<digits>)`). A user name reaches the database rule in one configuration only: an `auth-worker` line of a
+passdb or userdb whose `name` setting is `mysql` or `sqlpool` carries the auth prefix `<name>(<user>,<ip>): ` where the
+rule reads a driver segment, so with an `auth_username_chars` that allows a space (and the colon and parentheses of such
+a name) a remote user name such as `a): Connect failed to database (d): Server has gone away` yields
+`auth-worker(1): Error: mysql(a): Connect failed to database (d): Server has gone away,1.2.3.4): ...` and
+`dovecot.database_unavailable`. (d) Apart from that configuration the database rules read remote text nowhere: a
+sender's address, lookup key or Message-ID cannot produce a database event. (e) An event or priority is a
+classification, not proof of origin.
+
+*Earlier imports.* Contents imported by a version without the classification keep their records unclassified: an import
+is idempotent per content and a changed parser version is not noticed. A file whose interrupted import is resumed by a
+version with the classification has unclassified records before the resume point; `vandoxd import` offers no way to read
+such a content again.
+
 **Duplicates.** Ubuntu's rsyslog writes `kern.*` to `kern.log` and `*.*` without auth to `syslog` (from the packaged
 configuration, not checked on the server), so every kernel line is in both files and importing both stores it twice.
 There is no deduplication across sources. Importing a journal export and the syslog files of the same period stores
-every message twice as well (sources `journal` and `syslog`), MariaDB entries included.
+every message twice as well (sources `journal` and `syslog`), MariaDB entries included. `mail.log`, `syslog` and a journal
+export of the same period store each mail line up to three times with the same classification.
 
 ## MariaDB error log
 
@@ -456,6 +524,8 @@ syslog file. The journal and syslog parsers apply these rules to the records the
 - [0086](../decisions/0086-system-log-parsers-generic-syslog-claim-and-grouped-kernel-reports.md) — why the generic syslog claim and grouped kernel reports.
 - [0088](../decisions/0088-mariadb-error-log-entries-by-content-and-lifecycle-events-in-log-line.md) — why the MariaDB error log is detected by content, kept as entries and classified into an `event` field, and why MariaDB lines of the journal and syslog are joined by program, host and pid within 60 seconds of their header and 16,384 bytes, split rather than cut, and keep the time of their line.
 
+- [0091](../decisions/0091-mail-lines-classified-in-the-syslog-and-journal-parsers.md) — why Postfix and Dovecot lines are classified inside the syslog and journal parsers by their severity marker, and which lines count as an unavailable database.
+
 - [0014](../decisions/0014-log-import-is-a-core-component.md) — why historical import and log shipping are core.
 - [0021](../decisions/0021-no-pseudonymization-of-log-data.md) — why log data is stored unchanged.
 - [0069](../decisions/0069-log-import-idempotent-per-file-content-hash-with-resumable-batches.md) — why content hashes, two passes, resume by count and the continuation of a grown file.
@@ -472,6 +542,6 @@ syslog file. The journal and syslog parsers apply these rules to the records the
 
 `Vandox.Import` (`Importer`, `Scanner`, `ImportLimits`), `Vandox.Core.LogParsing` (`ILogParser`, `ParserRegistry`,
 `LogLineReader`, `BuiltInParsers`, `JournalExportParser`, `JournalExportReader`, `SyslogParser`, `SyslogLine`,
-`SyslogClock`, `KernelReportGrouper`, `SystemLogGrouper`, `MariaDbLineGrouper`, `MariaDbErrorLogParser`,
+`SyslogClock`, `KernelReportGrouper`, `SystemLogGrouper`, `MailLineClassifier`, `MailEvents`, `MariaDbLineGrouper`, `MariaDbErrorLogParser`,
 `MariaDbParseSession`, `MariaDbLine`, `MariaDbMessage`, `MariaDbEventClassifier`, `MariaDbEvents`, `Utf8Text`), `Vandox.Core.Model` (`StorableTime`), `Vandox.Core.IO` (`SecureRoot`, `FileProbe`), `Vandox.Backend/Cli` (`ImportCommand`,
 `ImportSummaryWriter`). The checklist for a new parser is in `.squad/project.md` (*Integration surface*).

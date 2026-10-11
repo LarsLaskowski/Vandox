@@ -7,7 +7,7 @@ using Vandox.Core.Model;
 namespace Vandox.Core.LogParsing;
 
 /// <summary>
-/// Reads rsyslog files such as <c>syslog</c> and <c>kern.log</c>.
+/// Reads rsyslog files such as <c>syslog</c>, <c>kern.log</c> and <c>mail.log</c>.
 /// </summary>
 public sealed class SyslogParser : ILogParser
 {

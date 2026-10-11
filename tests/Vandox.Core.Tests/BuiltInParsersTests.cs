@@ -15,6 +15,9 @@ public class BuiltInParsersTests
     private const string JournalHead = "__CURSOR=s=0123456789abcdef;i=1;b=0b6f9b0c2d1e4c439a4e7f1b2c3d4e5f;m=1;t=1;x=1\n__REALTIME_TIMESTAMP=1772368215123456\nMESSAGE=hello\n\n";
     private const string TraditionalHead = "Mar  1 12:30:15 web-1 sshd[1234]: Accepted publickey for root\n";
     private const string Rfc3339Head = "2026-03-01T12:30:15.123456+01:00 web-1 sshd[1234]: Accepted publickey for root\n";
+    private const string MailHead = "Oct  9 03:12:01 mail-1 postfix/master[812]: daemon started -- version 3.6.4, configuration /etc/postfix\n";
+    private const string MailRfc3339Head = "2026-10-09T03:12:01.123456+02:00 mail-1 postfix/master[812]: daemon started -- version 3.6.4, configuration /etc/postfix\n";
+    private const string MailCutHead = "ail-1 postfix/smtpd[2210]: connect from unknown[192.0.2.9]\n";
     private const string MariaDbHead = "2026-03-01 12:30:15 0 [Note] InnoDB: Buffer pool(s) load completed\n";
     private const string MariaDbReady = "2026-03-02 10:20:01 0 [Note] /usr/sbin/mariadbd: ready for connections.\n";
 
@@ -110,6 +113,16 @@ public class BuiltInParsersTests
     [DataRow("kern.log", MariaDbHead + MariaDbReady, "syslog", Confidence.MatchName)]
     [DataRow("notes.txt", "InnoDB: Failing assertion: page_is_leaf(block->page.frame)\n" + MariaDbHead, "", Confidence.NoMatch)]
     [DataRow("notes.txt", "This is just some prose about a server.\n" + MariaDbHead, "", Confidence.NoMatch)]
+    [DataRow("mail.log", MailHead, "syslog", Confidence.MatchName)]
+    [DataRow("mail.log", MailRfc3339Head, "syslog", Confidence.MatchName)]
+    [DataRow("mail.log.1", MailHead, "syslog", Confidence.MatchName)]
+    [DataRow("mail.log.1", MailRfc3339Head, "syslog", Confidence.MatchName)]
+    [DataRow("maillog", MailHead, "syslog", Confidence.MatchName)]
+    [DataRow("maillog", MailRfc3339Head, "syslog", Confidence.MatchName)]
+    [DataRow("mail.err", MailHead, "syslog", Confidence.MatchName)]
+    [DataRow("mail.err", MailRfc3339Head, "syslog", Confidence.MatchName)]
+    [DataRow("mail.log", MailCutHead, "", Confidence.NoMatch)]
+    [DataRow("auth.log", MailCutHead, "", Confidence.NoMatch)]
     public void BuiltInParsersRegistryDetectsFilesByContentAndName(string name, string head, string expected, Confidence expectedConfidence)
     {
         // Arrange

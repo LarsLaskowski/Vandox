@@ -100,6 +100,14 @@ public class SyslogParserTests
     [DataRow("kern.log.x", "some prose\n", Confidence.NoMatch)]
     [DataRow("syslog-2026", "some prose\n", Confidence.NoMatch)]
     [DataRow("auth.log", "some prose\n", Confidence.NoMatch)]
+    [DataRow("mail.log", "Oct  9 03:12:01 mail-1 postfix/master[812]: daemon started -- version 3.6.4, configuration /etc/postfix\n", Confidence.MatchName)]
+    [DataRow("mail.log.1", "2026-10-09T03:12:01.123456+02:00 mail-1 postfix/master[812]: daemon started\n", Confidence.MatchName)]
+    [DataRow("maillog", "Oct  9 03:12:01 mail-1 dovecot: master: Dovecot v2.3.16 starting up\n", Confidence.MatchName)]
+    [DataRow("mail.err", "Oct  9 03:12:01 mail-1 postfix/master[812]: fatal: x\n", Confidence.MatchName)]
+    [DataRow("mail.log", "ail-1 postfix/smtpd[2210]: connect from unknown[192.0.2.9]\n", Confidence.NoMatch)]
+    [DataRow("mail.log", "some prose\n", Confidence.NoMatch)]
+    [DataRow("maillog", "", Confidence.NoMatch)]
+    [DataRow("mail.err", "", Confidence.NoMatch)]
     public void SyslogParserDetectClaimsFilesWeakly(string name, string head, Confidence expected)
     {
         // Arrange
@@ -1126,6 +1134,136 @@ public class SyslogParserTests
     }
 
     /// <summary>
+    /// The mail log fixture gives one record per line in file order, with program, process ID and message as written, and the classification of each line.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task SyslogParserParseAsyncClassifiesTheLinesOfTheMailLogFixture()
+    {
+        // Arrange
+        var parser = new SyslogParser(DateTimeZone.Utc);
+        var lines = MailLogFixture.Lines();
+        var content = await File.ReadAllBytesAsync(RepositoryFiles.Path(MailLogFixture.RelativePath), TestContext.CancellationToken);
+        var file = new LogFile("mail.log", new DateTimeOffset(2026, 10, 11, 0, 0, 0, TimeSpan.Zero));
+
+        // Act
+        var emitter = await RecordingEmitter.ParseAsync(parser, file, content, TestContext.CancellationToken);
+
+        // Assert
+        Assert.HasCount(20, lines, "the fixture has 20 lines");
+        Assert.IsEmpty(emitter.Skips, "nothing is skipped");
+        Assert.HasCount(20, emitter.Records, "one record per line");
+
+        for (var index = 0; index < lines.Length; index++)
+        {
+            var (program, pid, message) = MailLogFixture.Split(lines[index]);
+
+            var (priority, eventName) = MailLogFixture.Expected[index];
+
+            var record = emitter.Records[index];
+            var line = RecordingEmitter.Line(record);
+            var context = $"line {index + 1}";
+
+            Assert.AreEqual("syslog", record.Source, $"source of {context}");
+            Assert.AreEqual("mail.log", line.Log, $"log of {context}");
+            Assert.AreEqual(MailLogFixture.Host, line.Host, $"host of {context}");
+            Assert.AreEqual(program, line.Program, $"program of {context}");
+            Assert.AreEqual(pid, line.Pid, $"pid of {context}");
+            Assert.AreEqual(message, line.Message, $"message of {context}");
+            Assert.AreEqual(priority < 0 ? null : (byte?)priority, line.Priority, $"priority of {context}");
+            Assert.AreEqual(eventName, line.Event, $"event of {context}");
+            Assert.IsFalse(line.Truncated, $"truncated of {context}");
+        }
+
+        Assert.AreEqual("postfix/submission/smtpd", RecordingEmitter.Line(emitter.Records[3]).Program, "program of the submission line");
+        Assert.AreEqual(2214, RecordingEmitter.Line(emitter.Records[3]).Pid, "pid of the submission line");
+        Assert.AreEqual("dovecot", RecordingEmitter.Line(emitter.Records[10]).Program, "program of the Dovecot line");
+        Assert.AreEqual(0, RecordingEmitter.Line(emitter.Records[10]).Pid, "Dovecot has no pid in its tag");
+        Assert.AreEqual(new DateTimeOffset(2026, 10, 9, 3, 12, 1, TimeSpan.Zero), emitter.Records[0].CapturedAt, "time of the first line");
+    }
+
+    /// <summary>
+    /// The names of mail logs are no syslog names, with or without a directory.
+    /// </summary>
+    /// <param name="name">The file name</param>
+    [TestMethod]
+    [DataRow("mail.log")]
+    [DataRow("mail.log.1")]
+    [DataRow("mail.err")]
+    [DataRow("maillog")]
+    [DataRow("var/log/mail.log")]
+    [DataRow("var/log/mail.log-20261009")]
+    public void SyslogParserHasSyslogNameRefusesTheNamesOfMailLogs(string name)
+    {
+        // Act
+        var actual = SyslogParser.HasSyslogName(name);
+
+        // Assert
+        Assert.IsFalse(actual, $"\"{name}\" is no syslog name");
+    }
+
+    /// <summary>
+    /// A mail log of 16 MiB is read and classified line by line: counts per event and priority are exact, and the memory retained at the last record is within 4 MiB of that at the 1,000th.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task SyslogParserParseAsyncClassifiesALargeMailLogInBoundedMemory()
+    {
+        // Arrange
+        const long size = 16L * 1024 * 1024;
+        const long fourMebibytes = 4L * 1024 * 1024;
+        var fixture = MailLogFixture.Lines();
+        var indexes = Enumerable.Range(0, fixture.Length).Where(index => fixture[index].IndexOf("psa-pc-remote", StringComparison.Ordinal) < 0).ToList();
+        var block = Encoding.UTF8.GetBytes(string.Concat(indexes.Select(index => fixture[index] + "\n")));
+        var blocks = size / block.Length;
+        var total = blocks * indexes.Count;
+        var emitter = new CountingEmitter();
+        var atFirst = -1L;
+        var atLast = -1L;
+
+        emitter.Observed = _ =>
+                           {
+                               if (emitter.Records == 1000)
+                               {
+                                   atFirst = RetainedBytes();
+                               }
+                               else if (emitter.Records == total)
+                               {
+                                   atLast = RetainedBytes();
+                               }
+                           };
+
+        using var input = new PatternStream([], block, blocks * block.Length, []);
+        var file = new LogFile("mail.log", new DateTimeOffset(2026, 10, 11, 0, 0, 0, TimeSpan.Zero));
+
+        // Act
+        await new SyslogParser(DateTimeZone.Utc).ParseAsync(file, input, emitter, TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsGreaterThan(50000L, total, "the log holds many records");
+        Assert.AreEqual(0L, emitter.Skips, $"no skip: {emitter.FirstSkip}");
+        Assert.AreEqual(total, emitter.Records, "record count");
+
+        foreach (var eventName in indexes.Select(index => MailLogFixture.Expected[index].Event).Distinct())
+        {
+            var perBlock = indexes.Count(index => MailLogFixture.Expected[index].Event == eventName);
+
+            Assert.AreEqual(perBlock * blocks, emitter.CountOf(eventName), $"records with the event \"{eventName}\"");
+        }
+
+        foreach (var priority in indexes.Select(index => MailLogFixture.Expected[index].Priority).Distinct())
+        {
+            var perBlock = indexes.Count(index => MailLogFixture.Expected[index].Priority == priority);
+
+            Assert.AreEqual(perBlock * blocks, emitter.CountOfPriority(priority), $"records with the priority {priority}");
+        }
+
+        Assert.IsGreaterThanOrEqualTo(0L, atFirst, "the memory was taken at the 1,000th record");
+        Assert.IsGreaterThanOrEqualTo(0L, atLast, "the memory was taken at the last record");
+        Assert.IsLessThan(fourMebibytes, atLast - atFirst, "retained bytes beyond the 1,000th record; a parser that kept every record would retain more than 19 MiB");
+    }
+
+    /// <summary>
     /// Returns a syslog file with an open MariaDB entry, a line of sshd written inside it, and more lines of the entry's process.
     /// </summary>
     /// <returns>The text</returns>
@@ -1181,6 +1319,17 @@ public class SyslogParserTests
                + "2026-03-01T12:00:01Z web-1 sshd[5]: Accepted publickey for root\n"
                + "2026-03-01T12:00:02Z web-1 kernel: [1.1] CPU: 1 PID: 4242 Comm: mariadbd\n"
                + "2026-03-01T12:00:03Z web-1 kernel: [1.2] Call Trace:\n";
+    }
+
+    /// <summary>
+    /// Returns the bytes the process retains after a full collection, which is how the heap-bound claims are measured.
+    /// </summary>
+    /// <returns>The number of bytes</returns>
+    private static long RetainedBytes()
+    {
+#pragma warning disable S1215
+        return GC.GetTotalMemory(true);
+#pragma warning restore S1215
     }
 
     #endregion // Methods

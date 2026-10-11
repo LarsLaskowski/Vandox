@@ -1,0 +1,20 @@
+Oct  9 03:12:01 mail-1 postfix/master[812]: daemon started -- version 3.6.4, configuration /etc/postfix
+Oct  9 03:12:05 mail-1 postfix/smtpd[2210]: connect from unknown[192.0.2.9]
+Oct  9 03:12:05 mail-1 postfix/smtpd[2210]: warning: hostname mx.example.net does not resolve to address 192.0.2.9: Name or service not known
+Oct  9 03:12:06 mail-1 postfix/submission/smtpd[2214]: connect from client.example.org[198.51.100.7]
+Oct  9 03:12:07 mail-1 postfix/qmgr[815]: 4F2A11C0123: from=<alice@example.org>, size=1520, nrcpt=1 (queue active)
+Oct  9 03:12:08 mail-1 postfix/proxymap[2230]: warning: connect to mysql server localhost: Can't connect to local MySQL server through socket '/var/run/mysqld/mysqld.sock' (2)
+Oct  9 03:12:08 mail-1 postfix/proxymap[2230]: warning: mysql:/etc/postfix/mysql-virtual.cf: query failed: Lost connection to MySQL server during query
+Oct  9 03:12:09 mail-1 postfix/postfix-script[3001]: fatal: the Postfix mail system is not running
+Oct  9 03:12:10 mail-1 postfix/master[812]: warning: process /usr/lib/postfix/sbin/smtpd pid 2210 killed by signal 9
+Oct  9 03:12:11 mail-1 postfix/cleanup[2240]: panic: myfree: corrupt or unallocated memory block
+Oct  9 03:12:12 mail-1 dovecot: master: Dovecot v2.3.16 (7e2e900c1a) starting up for imap, pop3 (core dumps disabled)
+Oct  9 03:12:13 mail-1 dovecot: imap-login: Login: user=<alice@example.org>, method=PLAIN, rip=198.51.100.7, lip=192.0.2.1, mpid=2301, TLS, session=<AbCdEfGh>
+Oct  9 03:12:14 mail-1 dovecot: auth-worker(2290): Error: mysql(localhost): Connect failed to database (mail): Can't connect to local server through socket '/run/mysqld/mysqld.sock' (2) - waiting for 1 seconds before retry
+Oct  9 03:12:15 mail-1 dovecot: auth-worker(2290): Warning: sqlpool(mysql): Query failed, retrying: MySQL server has gone away
+Oct  9 03:12:16 mail-1 dovecot: master: Error: service(imap): child 2301 killed with signal 9
+Oct  9 03:12:17 mail-1 dovecot: imap(alice@example.org)<2301><AbCdEfGh>: Panic: file mail-index.c: line 42 (mail_index_open): assertion failed: (index != NULL)
+Oct  9 03:12:18 mail-1 dovecot: auth: Fatal: master: service(auth): child 2290 returned error 89
+Oct  9 03:12:19 mail-1 psa-pc-remote[1102]: Error: connect to database failed
+Oct  9 03:12:20 mail-1 postfix/smtpd[2210]: warning: Illegal address syntax from unknown[192.0.2.9] in MAIL command: <MySQL server has gone away>
+Oct  9 03:12:21 mail-1 dovecot: imap-login: Disconnected (auth failed, 1 attempts in 2 secs): user=<x: Panic: y>, method=PLAIN, rip=192.0.2.9

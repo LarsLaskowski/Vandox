@@ -44,7 +44,7 @@ way, and agents of the hosting provider are never disabled or changed
   `Vandox.Core` (data model and validation, the wire decoder, configuration and secrets, safe file access, the
   log parser interface and registry, the line reader that bounds the line length, and the built-in parsers: the
   journal export, the MariaDB error log with its events, `syslog` and `kern.log` with their kernel report grouper and
-  the time zone rules of year-less times),
+  the time zone rules of year-less times, and the classification of Postfix and Dovecot lines),
   `Vandox.Storage` (the SQLite database, see [Storage](areas/storage.md): schema, migrations, writing batches, queries and log search) and
   `Vandox.Import` (reads a directory, archive or file as streams, detects the parser per file, hashes the
   content, writes the parsers' records in resumable batches and builds the summary)
@@ -132,7 +132,8 @@ Records: [0006](decisions/0006-agent-connects-outbound-only.md),
 [0072](decisions/0072-vandoxd-import-sub-command-output-and-exit-codes.md),
 [0085](decisions/0085-syslog-time-zone-from-import-time-zone-with-embedded-tzdb.md),
 [0086](decisions/0086-system-log-parsers-generic-syslog-claim-and-grouped-kernel-reports.md),
-[0088](decisions/0088-mariadb-error-log-entries-by-content-and-lifecycle-events-in-log-line.md).
+[0088](decisions/0088-mariadb-error-log-entries-by-content-and-lifecycle-events-in-log-line.md),
+[0091](decisions/0091-mail-lines-classified-in-the-syslog-and-journal-parsers.md).
 
 ## Network
 

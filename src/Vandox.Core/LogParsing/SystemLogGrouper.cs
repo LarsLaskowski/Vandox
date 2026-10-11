@@ -3,7 +3,8 @@ using Vandox.Core.Model;
 namespace Vandox.Core.LogParsing;
 
 /// <summary>
-/// The stages the journal and syslog parsers pass their records through, in this order: MariaDB entries, then kernel reports.
+/// The stages the journal and syslog parsers pass their records through, in this order: the classification of mail lines,
+/// MariaDB entries, then kernel reports.
 /// </summary>
 internal sealed class SystemLogGrouper
 {
@@ -24,6 +25,11 @@ internal sealed class SystemLogGrouper
     /// <param name="ready">Receives the records to emit</param>
     internal void Add(DataRecord record, List<DataRecord> ready)
     {
+        if (record.Data is LogLine payload)
+        {
+            MailLineClassifier.Classify(payload);
+        }
+
         _mariaDb.Add(record, _staged);
         Forward(ready);
     }

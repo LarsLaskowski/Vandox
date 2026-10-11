@@ -187,6 +187,96 @@ public class SystemLogGrouperTests
     }
 
     /// <summary>
+    /// Mail records are classified when they are added, and a line of another program with the same text is not.
+    /// </summary>
+    [TestMethod]
+    public void SystemLogGrouperAddClassifiesMailRecords()
+    {
+        // Arrange
+        var grouper = new SystemLogGrouper();
+        var ready = new List<DataRecord>();
+        var at = MariaDbSamples.Start;
+        var postfix = Mail("fatal: the Postfix mail system is not running", "postfix/postfix-script", at);
+        var dovecot = Mail("auth-worker(2290): Error: mysql(localhost): Connect failed to database (mail): Server has gone away", "dovecot", at);
+        var plain = Mail("imap-login: Login: user=<a>", "dovecot", at);
+        var other = Mail("fatal: the Postfix mail system is not running", "spamd", at);
+
+        // Act
+        grouper.Add(postfix, ready);
+        grouper.Add(dovecot, ready);
+        grouper.Add(plain, ready);
+        grouper.Add(other, ready);
+        grouper.Finish(ready);
+
+        // Assert
+        Assert.HasCount(4, ready, "one record out per record in");
+        Assert.AreEqual((byte)2, RecordingEmitter.Line(postfix).Priority, "priority of the fatal line");
+        Assert.AreEqual(MailEvents.PostfixFatal, RecordingEmitter.Line(postfix).Event, "event of the fatal line");
+        Assert.AreEqual((byte)3, RecordingEmitter.Line(dovecot).Priority, "priority of the database line");
+        Assert.AreEqual(MailEvents.DovecotDatabaseUnavailable, RecordingEmitter.Line(dovecot).Event, "event of the database line");
+        Assert.IsNull(RecordingEmitter.Line(plain).Priority, "a Dovecot line without a marker keeps no priority");
+        Assert.AreEqual(string.Empty, RecordingEmitter.Line(plain).Event, "a Dovecot line without a marker has no event");
+        Assert.IsNull(RecordingEmitter.Line(other).Priority, "a line of another program keeps no priority");
+        Assert.AreEqual(string.Empty, RecordingEmitter.Line(other).Event, "a line of another program has no event");
+    }
+
+    /// <summary>
+    /// Mail records pass through in input order, one out per one in, while a MariaDB entry and a kernel report of the same host are open.
+    /// </summary>
+    [TestMethod]
+    public void SystemLogGrouperAddPassesMailRecordsThroughInOrderBetweenAnOpenEntryAndAnOpenReport()
+    {
+        // Arrange
+        var grouper = new SystemLogGrouper();
+        var ready = new List<DataRecord>();
+        var at = MariaDbSamples.Start;
+        var mail = new[]
+                   {
+                       Mail("fatal: the Postfix mail system is not running", "postfix/postfix-script", at),
+                       Mail("auth-worker(2290): Error: mysql(localhost): Connect failed to database (mail): Server has gone away", "dovecot", at),
+                       Mail("warning: connect to mysql server localhost: Lost connection to MySQL server during query", "postfix/proxymap", at),
+                       Mail("imap(alice@example.org)<2301><AbCdEfGh>: Panic: file mail-index.c: line 42", "dovecot", at)
+                   };
+
+        // Act
+        grouper.Add(Kernel(OomStart, at), ready);
+        grouper.Add(MariaDbSamples.Record(MariaDbSamples.Note("entry"), at), ready);
+        grouper.Add(mail[0], ready);
+
+        var afterFirst = ready.ToList();
+
+        grouper.Add(Kernel(OomMember, at), ready);
+        grouper.Add(mail[1], ready);
+        grouper.Add(mail[2], ready);
+
+        var afterThird = ready.ToList();
+
+        grouper.Add(Kernel(OomKill, at), ready);
+
+        var afterReport = ready.ToList();
+
+        grouper.Add(mail[3], ready);
+        grouper.Finish(ready);
+
+        // Assert
+        Assert.HasCount(1, afterFirst, "the first mail record is out at once");
+        Assert.AreSame(mail[0], afterFirst[0], "the first mail record");
+        Assert.HasCount(3, afterThird, "three mail records out, entry and report still open");
+        Assert.AreSame(mail[1], afterThird[1], "the second mail record");
+        Assert.AreSame(mail[2], afterThird[2], "the third mail record");
+        Assert.HasCount(4, afterReport, "the report ended and is out");
+        Assert.AreEqual("kernel", RecordingEmitter.Line(afterReport[3]).Program, "the report");
+        Assert.HasCount(6, ready, "four mail records, the report and the entry");
+        Assert.AreSame(mail[3], ready[4], "the last mail record");
+        Assert.AreEqual("entry", RecordingEmitter.Line(ready[5]).Message, "the entry at the end");
+        Assert.AreEqual(MailEvents.PostfixFatal, RecordingEmitter.Line(mail[0]).Event, "event of the first");
+        Assert.AreEqual(MailEvents.DovecotDatabaseUnavailable, RecordingEmitter.Line(mail[1]).Event, "event of the second");
+        Assert.AreEqual(MailEvents.PostfixDatabaseUnavailable, RecordingEmitter.Line(mail[2]).Event, "event of the third");
+        Assert.AreEqual(MailEvents.DovecotPanic, RecordingEmitter.Line(mail[3]).Event, "event of the last");
+        Assert.AreEqual($"{OomStart}\n{OomMember}\n{OomKill}", RecordingEmitter.Line(ready[3]).Message, "the report is unchanged");
+    }
+
+    /// <summary>
     /// 100,000 mixed records and then 100,000 continuation lines retain less than 1 MiB through both stages, and every record is emitted once.
     /// </summary>
     [TestMethod]
@@ -254,6 +344,18 @@ public class SystemLogGrouperTests
     private static DataRecord Kernel(string message, DateTimeOffset at)
     {
         return MariaDbSamples.Record(message, at, pid: 0, program: "kernel", priority: null, source: "syslog", log: "syslog");
+    }
+
+    /// <summary>
+    /// Builds a record of a mail line as the syslog parser maps it: no priority and no event.
+    /// </summary>
+    /// <param name="message">The message</param>
+    /// <param name="program">The program</param>
+    /// <param name="at">The time</param>
+    /// <returns>The record</returns>
+    private static DataRecord Mail(string message, string program, DateTimeOffset at)
+    {
+        return MariaDbSamples.Record(message, at, pid: 2210, program: program, priority: null, source: "syslog", log: "mail.log");
     }
 
     /// <summary>

@@ -23,7 +23,8 @@ Which files the syslog parser claims:
    `/var/log` stays "not recognized", and misnamed copies too.
 2. **Every file whose first line is a syslog header, weakly** (chosen) — the lowest confidence (name match) for a
    matching name or first line, so any specific parser (content signature, or name match registered earlier) wins; `auth.log` and `daemon.log` are
-   imported now. A `mail.log` imported before #18 stays stored as `syslog` (the content counts as imported).
+   imported now. `mail.log` stays with this parser; #18 classifies its Postfix and Dovecot lines without a parser of
+   its own ([0091](0091-mail-lines-classified-in-the-syslog-and-journal-parsers.md)).
 
 Which journal time stamp:
 
@@ -96,8 +97,9 @@ parsers; the transport is not checked.
 
 ## Consequences
 
-- The built-in list begins with journal and ends with syslog; a specific parser (the MariaDB error log of #17, a parser for
-  an rsyslog file such as #18) goes between them.
+- The built-in list begins with journal and ends with syslog; a specific parser (the MariaDB error log of #17) goes between
+  them. The mail log of #18 has no parser of its own: its Postfix and Dovecot lines are classified in the syslog and
+  journal parsers ([0091](0091-mail-lines-classified-in-the-syslog-and-journal-parsers.md)).
 - A very large report loses the middle of its task table; the record says so and is marked truncated.
 - Importing both a journal export and the syslog files of the same period stores those messages twice (sources
   `journal` and `syslog`); records are not de-duplicated across sources.
