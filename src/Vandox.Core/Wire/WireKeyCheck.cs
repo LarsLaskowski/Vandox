@@ -85,21 +85,27 @@ internal sealed class WireKeyCheck
         switch (element.ValueKind)
         {
             case JsonValueKind.Object:
-                return WalkObject(element, depth);
-            case JsonValueKind.Array:
-                foreach (var item in element.EnumerateArray())
                 {
-                    var violation = Walk(item, depth + 1);
-
-                    if (violation is not null)
-                    {
-                        return violation;
-                    }
+                    return WalkObject(element, depth);
                 }
+            case JsonValueKind.Array:
+                {
+                    foreach (var item in element.EnumerateArray())
+                    {
+                        var violation = Walk(item, depth + 1);
 
-                return null;
+                        if (violation is not null)
+                        {
+                            return violation;
+                        }
+                    }
+
+                    return null;
+                }
             default:
-                return null;
+                {
+                    return null;
+                }
         }
     }
 
