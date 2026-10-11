@@ -19,4 +19,5 @@ are quoted in full.
 | 2026-10-11 19:02 | 8 Review (security diff) | squad-security | APPROVED on 1efc675: ModTime fallback, no file access, bounds, output quoting all hold (opus/medium · 71,620 tokens · 14 tool uses · 61 s) |
 | 2026-10-11 19:06 | 8 Review round 1 | squad-reviewer | BLOCKING 0, NON-BLOCKING 1 (stale MariaDB 'no path option' sentence in log-import.md); applied verbatim by orchestrator (opus/medium · 137,666 tokens · 38 tool uses · 279 s) |
 | 2026-10-11 19:06 | 8 Review delta | squad-reviewer | APPROVE on b87386f (doc fix only), continued (opus/medium · 139,230 tokens · 40 tool uses · 300 s) |
-| 2026-10-11 19:07 | 9 PR approval | squad-lead | APPROVED (plan deviations accepted: ErrorLogParseSession.cs, early GetErrorLogPaths/yaml keys) |
+| 2026-10-11 19:07 | 9 PR approval | squad-lead | APPROVED (plan deviations accepted: ErrorLogParseSession.cs, early GetErrorLogPaths/yaml keys) (opus/medium · 32,771 tokens · 5 tool uses · 26 s) |
+| 2026-10-11 19:07 | 10 Pull request | Orchestrator | Working record posted to issue #19 (plan/spec/tasks as permalink to f717050), folder removed, PR opened |
