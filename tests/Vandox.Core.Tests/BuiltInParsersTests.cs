@@ -351,5 +351,27 @@ public class BuiltInParsersTests
         Assert.IsTrue(confidences.All(confidence => confidence == Confidence.NoMatch), "no error log parser claims the head");
     }
 
+    /// <summary>
+    /// None of the four system parsers claims the head of a Plesk panel log, an nginx error log or an Apache error log.
+    /// </summary>
+    /// <param name="head">A head</param>
+    [TestMethod]
+    [DataRow(PleskHead)]
+    [DataRow(NginxHead)]
+    [DataRow(ApacheHead)]
+    [DataRow(Apache22Head)]
+    public void BuiltInParsersSystemParsersIgnoreErrorLogHeads(string head)
+    {
+        // Arrange
+        var parsers = BuiltInParsers.Create("UTC", ErrorLogPaths.Default).Take(4).ToList();
+
+        // Act
+        var confidences = parsers.Select(parser => parser.Detect(new LogFile("export.txt", null), Encoding.UTF8.GetBytes(head))).ToList();
+
+        // Assert
+        Assert.HasCount(4, parsers, "the four system parsers");
+        Assert.IsTrue(confidences.All(confidence => confidence == Confidence.NoMatch), "no system parser claims the head");
+    }
+
     #endregion // Methods
 }

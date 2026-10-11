@@ -101,5 +101,33 @@ public class ImportProgressLoggerTests
         Assert.AreEqual(29, logger.Entries[1].EventId.Id, "event ID of the warning");
     }
 
+    /// <summary>
+    /// A finished file without raw lines logs no warning about them.
+    /// </summary>
+    [TestMethod]
+    public void ImportProgressLoggerDoesNotWarnWithoutRawLines()
+    {
+        // Arrange
+        var logger = new ListLogger();
+        var progress = new ImportProgress
+                       {
+                           Event = ProgressEvent.FileFinished,
+                           Result = new FileResult
+                                    {
+                                        Path = "nginx/error.log",
+                                        SourceType = "nginx-error",
+                                        Outcome = ImportOutcome.Imported,
+                                        Lines = 6,
+                                        Records = 6
+                                    }
+                       };
+
+        // Act
+        ImportProgressLogger.Log(logger, progress);
+
+        // Assert
+        Assert.AreEqual("file finished nginx/error.log imported nginx-error 6 6 0", logger.Messages.Single(), "only the file finished message is logged");
+    }
+
     #endregion // Methods
 }

@@ -94,5 +94,24 @@ public class ParserRegistryTests
         Assert.IsFalse(tooLong, "65 characters");
     }
 
+    /// <summary>
+    /// A path match beats a content match whatever the order of registration.
+    /// </summary>
+    [TestMethod]
+    public void ParserRegistryPrefersAPathMatchOverAContentMatch()
+    {
+        // Arrange
+        var content = new FakeParser("content", Confidence.MatchContent);
+        var path = new FakeParser("path", Confidence.MatchPath);
+        var registry = new ParserRegistry([content, path]);
+
+        // Act
+        var result = registry.Detect(new LogFile("path-content", null), []);
+
+        // Assert
+        Assert.AreSame(path, result.Parser, "the path match wins although it is registered later");
+        Assert.AreEqual(Confidence.MatchPath, result.Confidence, "path confidence");
+    }
+
     #endregion // Methods
 }

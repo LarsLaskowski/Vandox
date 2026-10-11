@@ -828,6 +828,71 @@ public class ErrorLogParserTests
     }
 
     /// <summary>
+    /// Parsing the same content twice gives the same records, skips and warnings in the same order.
+    /// </summary>
+    /// <param name="path">The fixture</param>
+    /// <param name="type">The source type of the parser</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [DataRow("testdata/logs/plesk-panel.log", ErrorLogParser.PleskPanelType)]
+    [DataRow("testdata/logs/nginx-error.log", ErrorLogParser.NginxType)]
+    [DataRow("testdata/logs/apache-error.log", ErrorLogParser.ApacheType)]
+    [DataRow("testdata/logs/apache-error.log", ErrorLogParser.NginxType)]
+    public async Task ErrorLogParserParseAsyncIsDeterministic(string path, string type)
+    {
+        // Arrange
+        var content = await File.ReadAllBytesAsync(RepositoryFiles.Path(path), TestContext.CancellationToken);
+        var parser = Create(type, BerlinZone());
+        var file = new LogFile("logs/sample", _modTime);
+
+        // Act
+        var first = await RecordingEmitter.ParseAsync(parser, file, content, TestContext.CancellationToken);
+        var second = await RecordingEmitter.ParseAsync(parser, file, content, TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsNotEmpty(first.Records, "records were emitted");
+        Assert.AreSequenceEqual(first.Records.Select(RecordingEmitter.Describe).ToList(), second.Records.Select(RecordingEmitter.Describe).ToList(), "same records in the same order");
+        Assert.AreSequenceEqual(first.Skips, second.Skips, "same skips");
+        Assert.AreSequenceEqual(first.Warnings, second.Warnings, "same warnings");
+    }
+
+    /// <summary>
+    /// Many raw lines are emitted one by one: the memory the parse retains does not grow with their number.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task ErrorLogParserParseAsyncRetainsBoundedMemoryForManyRawLines()
+    {
+        // Arrange
+        const int lineBytes = 16;
+        const long totalBytes = 8L * 1024 * 1024;
+        var parser = Create(ErrorLogParser.NginxType, DateTimeZone.Utc);
+        var emitter = new CountingEmitter();
+        var before = 0L;
+        var middle = 0L;
+
+        emitter.Observed = _ =>
+                           {
+                               if (emitter.Records == totalBytes / lineBytes / 2)
+                               {
+                                   middle = RetainedBytes();
+                               }
+                           };
+        before = RetainedBytes();
+
+        using var input = new PatternStream([], "raw garbage lne\n"u8.ToArray(), totalBytes, []);
+
+        // Act
+        await parser.ParseAsync(new LogFile("nginx/error.log", _modTime), input, emitter, TestContext.CancellationToken);
+
+        // Assert
+        Assert.AreEqual(totalBytes / lineBytes, emitter.Records, "every line is a record");
+        Assert.AreEqual(totalBytes / lineBytes, emitter.Warnings, "every line is warned about");
+        Assert.IsGreaterThan(0L, middle, "the memory was measured in the middle of the parse");
+        Assert.IsLessThan(1024 * 1024, middle - before, "retained bytes after half of the lines, keeping them would take more than 8 MiB");
+    }
+
+    /// <summary>
     /// Returns the modification time a test names.
     /// </summary>
     /// <param name="kind">The kind</param>
@@ -882,6 +947,17 @@ public class ErrorLogParserTests
                    ErrorLogParser.NginxType => new ErrorLogParser(type, ErrorLogFormat.Nginx, path ?? ErrorLogPaths.DefaultNginx, true, zone),
                    _ => new ErrorLogParser(type, ErrorLogFormat.Apache, path ?? ErrorLogPaths.DefaultApache, true, zone)
                };
+    }
+
+    /// <summary>
+    /// Returns the bytes the process retains after a full collection, which is how the heap-bound claims are measured.
+    /// </summary>
+    /// <returns>The number of bytes</returns>
+    private static long RetainedBytes()
+    {
+#pragma warning disable S1215
+        return GC.GetTotalMemory(true);
+#pragma warning restore S1215
     }
 
     #endregion // Methods

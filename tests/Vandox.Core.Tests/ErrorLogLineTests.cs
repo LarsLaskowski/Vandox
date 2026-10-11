@@ -286,6 +286,9 @@ public class ErrorLogLineTests
     [DataRow("[Fri Oct 09 03:12:12 2026] [a:b:error] x")]
     [DataRow("[Fri Oct 09 03:12:12 2026] [" + Module64 + "x:error] x")]
     [DataRow("[Fri Oct 09 03:12:12 2026]")]
+    [DataRow("[")]
+    [DataRow("[Fr")]
+    [DataRow("[Fri Oc")]
     [DataRow("AH00558: apache2: Could not reliably determine the server's fully qualified domain name")]
     [DataRow("[2026-10-09 03:12:12] INFO x")]
     [DataRow("2026/10/09 03:12:12 [error] 1021#1021: x")]
@@ -296,6 +299,19 @@ public class ErrorLogLineTests
 
         // Assert
         Assert.IsNull(parsed, $"\"{line}\" is no Apache line");
+    }
+
+    /// <summary>
+    /// A format value outside the enumeration is no format of any line.
+    /// </summary>
+    [TestMethod]
+    public void ErrorLogLineTryParseRefusesAnUnknownFormat()
+    {
+        // Act
+        var parsed = ErrorLogLine.TryParse((ErrorLogFormat)99, "2026/10/09 03:12:12 [error] x");
+
+        // Assert
+        Assert.IsNull(parsed, "no line is of an unknown format");
     }
 
     #endregion // Methods

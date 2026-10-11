@@ -12,7 +12,7 @@ Every documentation edit appears in exactly one row; the Lead's approval only to
 | 4 | `ErrorLogLine`, `LogPath`, `ErrorLogParser` (raw-line fallback time only from a storable `file.ModTime`), `BuiltInParsers` | `src/Vandox.Core/LogParsing/*` | AC1–AC10 | Dev | [x] |
 | 5 | Options: defaults, loading, validation, `Keys`, example file (comments: RHEL Apache path, Plesk paths not verified) | `src/Vandox.Core/Configuration/*`, `deploy/backend/vandoxd.yaml` | AC11 | Dev | [x] |
 | 6 | Importer `Warn`, totals, snapshot; summary, warning log line; `ImportCommand` wiring | `src/Vandox.Import/*`, `src/Vandox.Backend/Cli/*`, `src/Vandox.Backend/Hosting/BackendLog.cs` | AC12–AC14 | Dev | [x] |
-| 7 | Step-6 tests (determinism, heap bound, registry path level) and coverage | `tests/Vandox.Core.Tests/{ErrorLogParserTests,ParserRegistryTests}.cs` | AC7, AC10 | Tester | [ ] |
+| 7 | Step-6 tests (determinism, heap bound, registry path level) and coverage | `tests/Vandox.Core.Tests/{ErrorLogParserTests,ParserRegistryTests}.cs` | AC7, AC10 | Tester | [x] |
 | 8 | README: backend options rows (Apache row names `/var/log/httpd/error_log` for RHEL-family servers), *Import logs* (sources, summary, limits, time zone); Plesk panel format and time zone, `sw-cp-server` format and Plesk paths worded as not verified | `README.md` | — | Dev | [x] |
 | 9 | ARCHITECTURE: parser lists (lines 10, 46), line-framed list (228), record link 0092 | `docs/ARCHITECTURE.md` | — | Dev | [x] |
 | 10 | Project knowledge: *Security areas* 10 and *Test doubles* | `.squad/project.md` | — | Dev | [x] |
