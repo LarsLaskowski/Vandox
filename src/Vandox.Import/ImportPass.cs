@@ -150,7 +150,7 @@ internal sealed class ImportPass
 
             return new ContentChangedException();
         }
-        catch (Exception exception) when (exception is IOException or InvalidDataException or EndOfStreamException)
+        catch (Exception exception) when (exception is IOException or InvalidDataException or EndOfStreamException || (exception is OperationCanceledException && cancellationToken.IsCancellationRequested))
         {
             return exception;
         }
@@ -248,6 +248,10 @@ internal sealed class ImportPass
         catch (Exception exception) when (IsFileFailure(exception))
         {
             reason = ImportReasons.Of(exception);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            _fatal = new OperationCanceledException(cancellationToken);
         }
 
         if (_fatal is not null)
