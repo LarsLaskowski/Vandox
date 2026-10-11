@@ -107,6 +107,7 @@ imported data is kept apart from live data (it never raises alerts) by the detec
     anchored on the continued file's name date or modification time. The continuation point is stored with the state,
     so a resume continues at the same place, with the records already stored dropped as for any resume.
   - Skip line numbers of the new part count in the whole file.
+  - A parse that starts at the continuation point treats the first new line as the file's first line: a UTF-8 byte order mark (EF BB BF) at its start is removed, as it is at the start of a file, while a whole-file parse keeps it in that line's message. Framing and the stored lines are otherwise the same.
 - Limits of the guarantee: an older copy imported **after** a newer one (or later in the same input) is not recognized
   and is imported as a whole; contents imported before schema version 6 are never a base. At the continuation point a
   grouped entry is split: continuation lines of a MariaDB error log entry after the point are skipped as "line before

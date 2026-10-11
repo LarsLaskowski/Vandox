@@ -25,7 +25,7 @@ internal static class ImportRepository
     private const string SelectBase = "SELECT id FROM import_files WHERE sha256 = $sha AND size = $size AND source_type = $type AND complete = 1";
 
     private const string SelectBases = "SELECT sha256, size FROM import_files WHERE head_sha256 = $head AND source_type = $type AND complete = 1 "
-                                       + "ORDER BY size DESC LIMIT 64";
+                                       + "ORDER BY size DESC LIMIT $limit";
 
     private const int Sha256Bytes = 32;
 
@@ -86,6 +86,7 @@ internal static class ImportRepository
         command.CommandText = SelectBases;
         command.Parameters.AddWithValue("$head", headSha256);
         command.Parameters.AddWithValue("$type", sourceType);
+        command.Parameters.AddWithValue("$limit", StorageLimits.MaxImportBases);
 
         using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
         var bases = new List<ImportBase>();
