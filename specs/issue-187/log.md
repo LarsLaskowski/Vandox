@@ -18,3 +18,4 @@ One line per pipeline step: date, step, member, result. Lead decisions and escal
 | 2026-10-11 | 8 Review (security diff) | Security | APPROVED on 843c798 (opus/medium · 74,372 tokens · 14 tool uses · 110 s) |
 | 2026-10-11 | 8 Review round 1 | Reviewer | BLOCKING 2 (LIMIT 64 caps joined rows not candidates; README exception list incomplete), NON-BLOCKING 2 (storage.md wording; RecordEmitter guard test) (opus/medium · 115,547 tokens · 27 tool uses · 218 s) |
 | 2026-10-11 | 8 Fix round 1: tests | Tester | Test for candidate limit fails on current code; guard test for sticky emitter error added (sonnet/medium · 95,000 tokens · 24 tool uses · 94 s) |
+| 2026-10-11 | 8 Fix round 1: implement | Dev | Candidate limit moved before join; README and storage.md fixed; gates pass (coverage new 100%) (sonnet/medium · 71,675 tokens · 9 tool uses · 223 s) |
