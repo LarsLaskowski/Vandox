@@ -40,7 +40,8 @@ the pull request says so and a follow-up issue closes the gap.
 
 ## Consequences
 
-- Findings appear while coding; the Code Officer clears them before the review.
+- Findings appear while coding; the member that changed the files formats them, and the Code Officer clears
+  remaining analyzer findings before the review.
 - A push that skips the local gates is only caught by what CI still checks: the PR template checklist and the `create-pr` skill
   require the local gates, and SonarQube's new-code coverage condition catches missing coverage. If unchecked code starts
   reaching `main`, the remedy is a new record that supersedes this one and adds the script to CI.

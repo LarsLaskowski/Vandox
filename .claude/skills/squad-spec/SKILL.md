@@ -15,7 +15,7 @@ commit/push rules and the orchestrator role are identical to the `squad-issue` s
 - **Step 2 — plan:** `squad-lead` in mode `plan` writes `spec.md` (behavior, acceptance criteria, out of
   scope), `plan.md` and `tasks.md`; launch this one call with effort `high` (log it with `--launch opus/high`),
   every later Lead launch (`revise`, `decide`, `approve-pr`) with the agent file's effort — those are short
-  decisions, and a plan written at `high` has already done the design work. A feature is never `docs` and rarely `trivial`. It is more likely than a bug
+  decisions, and a plan written at `high` has already done the design work. A feature is never `docs` or `patch` and rarely `trivial`. It is more likely than a bug
   fix to need a product decision — the Lead escalates whenever the request does not settle user-visible
   behavior. `RESULT: NO CHANGE` means the feature already exists or contradicts an accepted decision; report
   that to the user instead of commenting on an issue. The plan challenge covers `spec.md`, `plan.md` and
@@ -29,7 +29,9 @@ commit/push rules and the orchestrator role are identical to the `squad-issue` s
   tests* section then says where each acceptance criterion is verified, and you log the skipped steps.
 - **Step 3** reviews `spec.md` and `plan.md` together.
 - **Steps 4–6** run per task or group of tasks from `tasks.md`; tick tasks off as they are done. Run
-  Tester and Dev one after another, never in parallel (see *Concurrency* in `.squad/routing.md`).
+  Tester and Dev one after another, never in parallel (see *Concurrency* in `.squad/routing.md`). Continue
+  a member for the fix and delta rounds of its task group (*Continue a member* in `squad-issue`); the next
+  task group starts with a fresh launch, so a member's context does not grow over the whole feature.
 - **Step 10 — pull request:** the working record (`spec.md`, `plan.md`, `tasks.md`, `log.md`) is posted
   to the feature request issue if one exists (`Closes #<n>` in the PR), otherwise as the first comment on
   the PR right after opening it; the folder is removed before the PR as in `squad-issue`. Behavior that

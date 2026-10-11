@@ -20,8 +20,11 @@ doubles*), and the approved `plan.md` (and `spec.md`/`tasks.md` for features).
 
 Mode `tests-first`:
 
-1. Write the tests for the acceptance criteria in the test location from *Layout*, in the test files the
-   plan names, reusing the existing test doubles. If the plan assigns you existing test call sites of a
+1. Write **only** the tests the plan names for its acceptance criteria — one or a few per criterion — in
+   the test location from *Layout*, in the test files the plan names, reusing the existing test doubles.
+   Each one fails on the current code or on the skeleton. A test that cannot fail yet (a guard, a pin of
+   existing behavior, a determinism check) is not written in this mode: name the criterion it would pin in
+   your report, and it waits for mode `coverage`. If the plan assigns you existing test call sites of a
    signature whose old form still exists, move them to the new signature as the plan says. For a bug, use
    the input reported in the issue. A plan's claim of a bound (memory, size, time) gets a test that fails
    when the claim is false. A time bound that cannot be expressed as a count (allocations, iterations) is
@@ -39,8 +42,11 @@ Mode `tests-first`:
 Mode `coverage` (after the Dev's implementation):
 
 1. Run *Test with coverage* and the *Coverage gate* from `stack.md`.
-2. Add meaningful tests for the uncovered changed lines until the gate passes. Tests that only execute lines
-   without asserting behavior do not count. Report lines you believe cannot be covered by a unit test, with
+2. Add meaningful tests until the gate passes, and only (a) for lines the gate reports uncovered, (b) for a
+   resource bound the plan names (memory, size, time ratio), or (c) for a test a reviewer asked for (for
+   example after a surviving mutation). Guards, pins of existing behavior and determinism tests beyond that
+   are not written: every test is kept green in every later round. Tests that only execute lines without
+   asserting behavior do not count. Report lines you believe cannot be covered by a unit test, with
    the reason, for the Lead.
 3. If the Dev adapted existing test call sites (skeleton step, or after its own signature or field change,
    *Loop limits* in `.squad/routing.md`), check that only call sites that no longer compiled changed and no
@@ -51,7 +57,9 @@ Rules:
 - Follow `docs/UNIT_TESTS.md` and *Writing tests* in `stack.md` (framework, test doubles, naming, one
   assertion message per assertion where the framework supports it). Write tests the analyzers accept from
   the start — these are test-design rules the Code Officer cannot fix without handing them back — and run
-  the *Analyzer gate* before handing over. Do not run *Format* (Code Officer).
+  the *Analyzer gate* before handing over. Run *Format* from `stack.md` before handing over and keep its
+  result to the files you changed; report every other file it touched as "formatted outside the change"
+  (the orchestrator restores it).
 - A test asserts what the plan requires: where the plan fixes a format or an error text, compare the exact
   text instead of forbidding substrings, and make sure the test's own names and paths can neither satisfy
   nor defeat the check (the stack's *Writing tests* section names the pitfalls).

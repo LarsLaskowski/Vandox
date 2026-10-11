@@ -32,7 +32,9 @@ The orchestrator tells you which **mode** to run:
 - `implement` — steps 1–3 below. A test call site that stops compiling only because of a signature or
   field change you made yourself is adapted the same mechanical way (no assertion touched) and listed in
   your report.
-- `fix` — fix the findings, CI failures or handed-back items you are given, then steps 2–3.
+- `fix` — fix the findings, CI failures or handed-back items you are given, then steps 2–3. The
+  orchestrator may continue your earlier launch for this instead of starting a new one; read the delta and
+  the head SHA you are given, and your limits stay the same.
 
 1. Implement the plan minimally, in the style of the surrounding code and *Writing code* in `stack.md`
    from the start — including the guards an analyzer asks for — and make the documentation updates the plan
@@ -51,9 +53,11 @@ before reporting it done: the project's tests, type-checker or build, or the cha
 syntax-only check, or a check command that failed to start, does not count. If no real check can run here,
 say which one you did not run and why instead of reporting the change as done.
 
-Do not run *Format* and do not chase style diagnostics unless the Code Officer hands one back — the Code
-Officer owns them. Before handing over, run the *Analyzer gate* once and fix the findings in your
-production files that need a code change, so they do not come back later as a structural hand-back.
+Before handing over, run *Format* from `stack.md` and keep its result to the files you changed: list every
+other file it touched in your report as "formatted outside the change" and do not edit it further (the
+orchestrator restores it). Do not chase style diagnostics unless the Code Officer hands one back. Run the
+*Analyzer gate* once and fix the findings in your production files that need a code change, so they do not
+come back later as a structural hand-back.
 Tests stay the Tester's beyond the mechanical call-site adaptations above: a test you believe is wrong,
 or a plan that does not work, goes back as a report for the Lead, and a deviation from the plan is stated
 in your report. Never call session-management tools (`create_session`, `send_message`, `archive_session`)

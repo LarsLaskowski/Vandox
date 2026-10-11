@@ -7,6 +7,9 @@ project, `go-coverage-to-cobertura.py` converts the Go profile, and all of them 
 # Base branch the gates diff against (merge base with HEAD); fetch it before running the gates.
 BASE_REF = "origin/main"
 
+# Tier `patch` (.squad/routing.md, *Tiers*; scope-check.py --tier patch): changed lines outside specs/ at most.
+PATCH_MAX_LINES = 30
+
 # Solution the analyzer gate builds.
 SOLUTION = "Vandox.slnx"
 

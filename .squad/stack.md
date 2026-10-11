@@ -36,7 +36,7 @@ repository (record 0074): keep it true when the build changes.
 | Name | Command |
 | ---- | ------- |
 | *Restore* | `go mod download && dotnet tool restore && dotnet restore Vandox.slnx` |
-| *Format* (Code Officer only in the squad) | `gofmt -w . && reihitsu-format src tests tools --force` (or `dotnet tool run reihitsu-format src tests tools --force`) |
+| *Format* (in the squad: by the member that changed the files, `.squad/team.md`) | `gofmt -w . && reihitsu-format src tests tools --force` (or `dotnet tool run reihitsu-format src tests tools --force`) |
 | *Format check* | `test -z "$(gofmt -l .)" && reihitsu-format --check src tests tools` |
 | *Build* | `go build ./... && dotnet build Vandox.slnx` |
 | *Test* | `go test ./... -race && dotnet test Vandox.slnx` |
