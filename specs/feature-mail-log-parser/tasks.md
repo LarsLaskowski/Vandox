@@ -6,11 +6,11 @@ Every documentation edit appears in exactly one row; the Lead's approval only to
 
 | # | Task | Files | Tests (AC) | Owner | Done |
 | - | ---- | ----- | ---------- | ----- | ---- |
-| 1 | Decision record, index row, in-place edit of the unreleased 0086 (option 2, first consequence); revised after the challenge (no `Info` marker, option 16) | `docs/decisions/0091-mail-lines-classified-in-the-syslog-and-journal-parsers.md`, `docs/decisions/README.md`, `docs/decisions/0086-system-log-parsers-generic-syslog-claim-and-grouped-kernel-reports.md` | — | Lead | [x] |
+| 1 | Decision record, index row, in-place edit of the unreleased 0086 (option 2, first consequence); revised after the challenge (no `Info` marker, option 16) and after security review round 1 (database anchors narrowed, options 19 and 20) | `docs/decisions/0091-mail-lines-classified-in-the-syslog-and-journal-parsers.md`, `docs/decisions/README.md`, `docs/decisions/0086-system-log-parsers-generic-syslog-claim-and-grouped-kernel-reports.md` | — | Lead | [x] |
 | 2 | Skeleton: `MailEvents` (real constants) and `MailLineClassifier` (three members throwing under the skeleton pragma); *Build* passes | `src/Vandox.Core/LogParsing/MailEvents.cs`, `src/Vandox.Core/LogParsing/MailLineClassifier.cs` | — | Dev | [ ] |
 | 3 | Fixture of 20 lines exactly as in the plan | `testdata/logs/mail.log` | AC1.3, AC5.2 | Tester | [ ] |
 | 4 | Counting emitter test double | `tests/Vandox.Core.Tests/CountingEmitter.cs` | AC4 | Tester | [ ] |
-| 5 | Classifier tests: program rules, marker tables, database rule, fatal/panic precedence, payload unchanged apart from priority and event | `tests/Vandox.Core.Tests/MailLineClassifierTests.cs` | AC1.1, AC1.2, AC1.4, AC2, AC3 | Tester | [ ] |
+| 5 | Classifier tests: program rules, marker tables, database rule (incl. the remote-text and segment rows of AC3.2), fatal/panic precedence, payload unchanged apart from priority and event | `tests/Vandox.Core.Tests/MailLineClassifierTests.cs` | AC1.1, AC1.2, AC1.4, AC2, AC3 | Tester | [ ] |
 | 6 | Stage order and pass-through tests | `tests/Vandox.Core.Tests/SystemLogGrouperTests.cs` | AC5.3 | Tester | [ ] |
 | 7 | Syslog parser tests: fixture, mail names are no syslog names, heap-bound large mail log | `tests/Vandox.Core.Tests/SyslogParserTests.cs` | AC1.3, AC1.6, AC4, AC5.2 | Tester | [ ] |
 | 8 | Journal parser tests: mail entries, parity with the fixture | `tests/Vandox.Core.Tests/JournalExportParserTests.cs` | AC5.1, AC5.2 | Tester | [ ] |

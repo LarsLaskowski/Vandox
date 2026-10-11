@@ -30,8 +30,10 @@ Signature detection (#21, "Postfix/Dovecot fatal errors") and outage reconstruct
     neither daemon writes a marker for info lines to syslog, so an info line keeps the priority its source gave it;
   - `fatal` and `panic` lines get the event `postfix.fatal`, `postfix.panic`, `dovecot.fatal` or `dovecot.panic`;
   - a warning or error about a database connection that failed or was lost (Postfix's MySQL lookup table, Dovecot's
-    MySQL driver, with the client error texts of libmysqlclient and MariaDB Connector/C) gets the event
-    `postfix.database_unavailable` or `dovecot.database_unavailable`.
+    MySQL driver in its `auth-worker` processes, with the client error texts of libmysqlclient and MariaDB Connector/C)
+    gets the event `postfix.database_unavailable` or `dovecot.database_unavailable`; the messages are recognized only
+    in the exact form the daemons write them, so text a remote sender controls (an address, a lookup key, a Message-ID)
+    cannot produce the event.
 - The program, host, pid, time and message of a line stay exactly as read. Lines of other programs in a mail log (Plesk's
   `psa-pc-remote`, `spamd`, `opendkim`, ...) are stored as before without classification.
 - The classification is per line: no lines are joined, none are dropped or added, and memory stays flat for any size of
@@ -55,7 +57,7 @@ Signature detection (#21, "Postfix/Dovecot fatal errors") and outage reconstruct
 - Lifecycle events (Postfix `daemon started`, `terminating on signal`, Dovecot `starting up`) and the OOM victims among
   mail processes (`process ... killed by signal 9`, `service(imap): child N killed with signal 9`): signature detection
   (#21) matches them; here they get the priority of their class only.
-- PostgreSQL and other SQL drivers; Postfix with a syslog name that does not begin with `postfix`, Dovecot with another
+- PostgreSQL and other SQL drivers; Dovecot's SQL errors outside `auth-worker` (the dict process); Postfix with a syslog name that does not begin with `postfix`, Dovecot with another
   `instance_name` or with a `mail_log_prefix` of more than one segment.
 - Parsing the message further (queue IDs, recipients, client addresses, Dovecot user names).
 

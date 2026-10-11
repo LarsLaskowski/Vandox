@@ -34,6 +34,29 @@ Claims of the issue, checked:
   the client error texts in `libmysql/errmsg.cc` (MySQL 8.0.28) and `libmariadb/ma_errmsg.c` (Connector/C 3.3.1).
   *Unverified:* whether the server's Postfix or Dovecot uses an SQL lookup at all (Plesk's configuration is not in the
   repository), and which client library its packages link (both are covered).
+- *Prefixes before the database messages (checked after the security review, Dovecot 2.3.16).* An event's own prefix is
+  **replaced**, not extended, when it is set again (`event_set_log_prefix`, `lib/lib-event.c:510-528`): the MySQL
+  connection's event gets `mysql: ` at creation (`driver-mysql.c:294`) and `mysql(<host>): ` instead once a `host=` is
+  configured (`:116`). A pooled connection's event has the pool's *parent* as parent, not the pool's event
+  (`driver-sqlpool.c:290-293`), and the parent in the auth process, `auth_event`, has no prefix (`auth/auth.c:381`,
+  `auth/db-sql.c:113`). So Dovecot writes `Connect failed to database (` after exactly `mysql(<host>): ` or `mysql: `,
+  and `Query failed, retrying: ` (on the pool's event, `driver-sqlpool.c:694`) after exactly `sqlpool(mysql): `
+  (`:527`). **The security review's chains `mysql: mysql(localhost): ` and `sqlpool(mysql): mysql: mysql(localhost): `
+  are refuted** for this version; the plan's former fixture line `Warning: mysql(localhost): Query failed, retrying`
+  was wrong too and now reads `Warning: sqlpool(mysql): Query failed, retrying`. MySQL is a blocking driver
+  (`driver-mysql.c:766`), so its connections live in the `auth-worker` processes only (`auth/passdb-sql.c:282-285`),
+  whose process prefix is `auth-worker(<pid>): ` (`lib-master/master-service.c:528-531`, set before the databases are
+  initialized, `auth/main.c:382`). The dict process logs SQL errors under its connection's prefix `conn ...: `
+  (`lib/connection.c:355-363`), which the rule does not read (*Out of scope*).
+- *Remote text near the anchors (security review round 1, checked).* Postfix logs a remote lookup key right after
+  `mysql:<table>`: `"%s:%s lookup error for \"%s\""` (`global/maps.c:210`, `:275`) and `"%s:%s 'domain' pattern match
+  failed for '%s'"` (`global/dict_mysql.c:362`); its own query failure is `"%s:%s: query failed: %s"` (`:568`), the
+  connect failure `"connect to mysql server %s: %s"` (`:699`) with a host from `hosts`, which is split at commas and
+  spaces (`:793`) and may read `unix:<path>` or `inet:<host>:<port>` (`:880-888`). Dovecot applies
+  `deliver_log_format`, default `msgid=%m: %$` (`lib-lda/lda-settings.c:42`), to Sieve result messages, so a
+  sender-chosen Message-ID (sanitized to 200 bytes, spaces kept, `lib-lda/mail-deliver.c:124`) follows the marker of an
+  `lmtp(...)` line behind `sieve: msgid=<`. Both confirmed by reading; the Pigeonhole lines were not re-read (source
+  not at hand), they only add a second path of the same kind.
 - *"Streaming; mail logs can be large."* — **Confirmed for the existing path:** `SyslogParser.ParseAsync` reads through
   `LogLineReader` (16 KiB line bound) and keeps only the grouper state; the new stage holds no state. AC4 pins it.
 - *"Mail delivery stopped during the outages. mail.log shows the effect on Postfix and Dovecot."* — *unverified*: no log of
@@ -120,10 +143,19 @@ classification `null`, and once more `6` for the replacement case).**
   `warning: mysql:/etc/postfix/mysql-virtual.cf: query failed: Lost connection to MySQL server during query` → 4, same;
   `auth-worker(2290): Error: mysql(localhost): Connect failed to database (mail): Can't connect to local server through
   socket '/run/mysqld/mysqld.sock' (2) - waiting for 1 seconds before retry` → 3, `dovecot.database_unavailable`;
-  `auth-worker(2290): Warning: mysql(localhost): Query failed, retrying: MySQL server has gone away` → 4, same. Also
-  with `error: ` for Postfix (3) and with no segment between the Dovecot marker and the anchor
-  (`auth-worker(1): Error: Connect failed to database (mail): Server has gone away`) and with two segments
-  (`auth-worker(1): Error: sqlpool(mysql): mysql(localhost): Connect failed to database (mail): Server has gone away`).
+  `auth-worker(2290): Warning: sqlpool(mysql): Query failed, retrying: MySQL server has gone away` → 4, same. Further
+  rows, one case each:
+
+  | Program | Message | Priority | Event |
+  | ------- | ------- | -------- | ----- |
+  | `postfix/proxymap` | `error: connect to mysql server localhost: Lost connection to MySQL server at 'reading initial communication packet'` | 3 | `postfix.database_unavailable` |
+  | `postfix/proxymap` | `warning: connect to mysql server unix:/var/run/mysqld/mysqld.sock: Can't connect to local MySQL server through socket '/var/run/mysqld/mysqld.sock' (2)` | 4 | `postfix.database_unavailable` |
+  | `postfix/proxymap` | `warning: connect to mysql server inet:db.example.org:3306: Can't connect to MySQL server on 'db.example.org' (111)` | 4 | `postfix.database_unavailable` |
+  | `dovecot` | `auth-worker(2290): Error: mysql: Connect failed to database (mail): Can't connect to local server through socket '/run/mysqld/mysqld.sock' (2) - waiting for 1 seconds before retry` (no `host=`) | 3 | `dovecot.database_unavailable` |
+  | `dovecot` | `auth-worker(2290): Error: mysql(/run/mysqld/mysqld.sock): Connect failed to database (mail): Server has gone away` | 3 | `dovecot.database_unavailable` |
+  | `dovecot` | `auth-worker(2290): Error: sqlpool(mysql): mysql(localhost): Connect failed to database (mail): Server has gone away` (two segments) | 3 | `dovecot.database_unavailable` |
+  | `dovecot` | `auth-worker(2290): Error: sqlpool(mysql): mysql: mysql(localhost): Connect failed to database (mail): Server has gone away` (three segments) | 3 | `dovecot.database_unavailable` |
+  | `dovecot` | `auth-worker(2290): Warning: mysql(localhost): Query failed, retrying: MySQL server has gone away` (another accepted segment) | 4 | `dovecot.database_unavailable` |
 - [ ] AC3.2 No database event (the marker's priority still set):
 
   | Program | Message | Priority |
@@ -142,9 +174,27 @@ classification `null`, and once more `6` for the replacement case).**
   | `dovecot` | `auth-worker(1): Error: Query failed, aborting: SELECT password FROM users` | 3 |
   | `dovecot` | `auth-worker(1): mysql(localhost): Connect failed to database (mail): Server has gone away` (no marker) | unchanged |
   | `dovecot` | `auth-worker(1): Debug: mysql(localhost): Query failed, retrying: Server has gone away` (debug) | 7 |
+  | `postfix/smtpd` | `warning: mysql:/etc/postfix/x.cf lookup error for "a: query failed: MySQL server has gone away@x"` (remote key, `maps.c:210`) | 4 |
+  | `postfix/trivial-rewrite` | `warning: mysql:/etc/postfix/x.cf 'domain' pattern match failed for 'a: query failed: MySQL server has gone away@x'` (remote key, `dict_mysql.c:362`) | 4 |
+  | `postfix/smtpd` | `warning: mysql:/etc/postfix/x.cf lookup error for ""a: query failed: MySQL server has gone away"@x"` (key with its quotes) | 4 |
+  | `postfix/proxymap` | `warning: mysql:: query failed: MySQL server has gone away` (empty table name) | 4 |
+  | `postfix/proxymap` | `warning: mysql:/etc/postfix/x.cf: query failed:MySQL server has gone away` (no space after the anchor) | 4 |
+  | `postfix/proxymap` | `warning: connect to mysql server : MySQL server has gone away` (empty host) | 4 |
+  | `postfix/proxymap` | `warning: connect to mysql server a b: Can't connect to MySQL server on 'h' (111)` (host with a space) | 4 |
+  | `dovecot` | `lmtp(alice@example.org)<2301><AbCdEfGh>: Error: sieve: msgid=<a: Query failed, retrying: MySQL server has gone away@x>: failed to store into mailbox 'INBOX': Quota exceeded (mailbox for user is full)` (sender's Message-ID) | 3 |
+  | `dovecot` | `lmtp(alice@example.org)<2301><AbCdEfGh>: Error: sieve: msgid=<a@x>: Connect failed to database (x): Server has gone away` | 3 |
+  | `dovecot` | `auth-worker(1): Error: sieve: msgid=<a@x>: Connect failed to database (x): Server has gone away` (right process, foreign segments) | 3 |
+  | `dovecot` | `auth: Error: sql(a,1.2.3.4): Connect failed to database (mail): Server has gone away` | 3 |
+  | `dovecot` | `auth-worker(1): Error: sql(a,1.2.3.4): Connect failed to database (mail): Server has gone away` | 3 |
+  | `dovecot` | `imap(alice@example.org)<2301><AbCdEfGh>: Error: mysql(localhost): Connect failed to database (mail): Server has gone away` (not an `auth-worker` process) | 3 |
+  | `dovecot` | `Error: mysql(localhost): Connect failed to database (mail): Server has gone away` (marker at the start, no process) | 3 |
+  | `dovecot` | `auth-worker: Error: mysql(localhost): ...`, `auth-worker(): Error: ...`, `auth-worker(12a): Error: ...`, `xauth-worker(1): Error: ...`, each continued with `mysql(localhost): Connect failed to database (mail): Server has gone away` | 3 |
+  | `dovecot` | `auth-worker(1): Error: Connect failed to database (mail): Server has gone away` (zero segments) | 3 |
+  | `dovecot` | `auth-worker(1): Error: sqlpool(mysql): mysql: mysql: mysql(localhost): Connect failed to database (mail): Server has gone away` (four segments) | 3 |
+  | `dovecot` | `auth-worker(1): Error: mysql(): Connect failed ...`, `mysql(local host): ...`, `mysql(a)b): ...`, `sqlpool(): ...`, `pgsql(localhost): ...`, `Mysql(localhost): ...`, `mysql : ...`, each continued with `Connect failed to database (mail): Server has gone away` | 3 |
 
 - [ ] AC3.3 Fatal and panic win: `fatal: connect to mysql server localhost: Can't connect to MySQL server on 'h' (111)` →
-  2, `postfix.fatal`; `auth-worker(1): Panic: mysql(localhost): Query failed, retrying: MySQL server has gone away` → 2,
+  2, `postfix.fatal`; `auth-worker(1): Panic: sqlpool(mysql): Query failed, retrying: MySQL server has gone away` → 2,
   `dovecot.panic`.
 
 **AC4 — streaming (heap-bound test, `SyslogParserTests`).**
@@ -214,20 +264,40 @@ priority (record 0091 options 15 and 16; Dovecot's own log file, where `Info: ` 
 
 | Family | Anchor in *T* | *C* |
 | ------ | ------------- | --- |
-| Postfix | *T* begins with `connect to mysql server ` | the text after the first `: ` that follows the anchor; none → no event |
-| Postfix | *T* begins with `mysql:` and contains `: query failed: ` | the text after the first `: query failed: ` |
-| Dovecot | after zero or more segments (each a non-empty text without a space and without `: `, followed by `: `), *T* continues with `Connect failed to database (` | the text after the first `): ` that follows the anchor; none → no event |
-| Dovecot | as above, continuing with `Query failed, retrying: ` | the text after the anchor |
+| Postfix | *T* is `connect to mysql server ` + *H* + `: ` + *C*, where *H* is the text up to the first `: ` after the anchor, non-empty and without a space (U+0020) | as written; no `: ` after the anchor → no event |
+| Postfix | *T* is `mysql:` + *N* + `: query failed: ` + *C*, where *N* is the text up to the first `: ` after `mysql:`, non-empty and without a space | as written |
+| Dovecot | the message begins with `auth-worker(` + one or more ASCII digits + `): ` + marker, and *T* is one to three driver segments + `Connect failed to database (` + … | the text after the first `): ` that follows the anchor; none → no event |
+| Dovecot | as above, with `Query failed, retrying: ` + *C* after the segments | as written |
 
-The Dovecot segment walk advances at every step and stops at the first segment that holds a space or is empty, so it is
-linear in the message length.
+A **driver segment** is exactly `mysql: `, or `mysql(` + *P* + `): `, or `sqlpool(` + *P* + `): `, where *P* is the text up
+to the first `)` after the opening parenthesis, non-empty and without a space; anything else (another name, another
+case, an empty or spaced *P*, a `)` not followed by `: `) ends the walk without an event. The walk reads at most three
+segments, each consumed by a prefix comparison, so it is linear in the message length; zero segments and a fourth
+segment give no event. Dovecot 2.3.16 writes exactly one segment (`mysql(<host>): ` or `mysql: ` before `Connect failed`,
+`sqlpool(mysql): ` before `Query failed`, see the claim check); up to three are accepted because each is a fixed driver
+text with a configured host or driver name in it, never remote text, so a version that nests them is still read. The
+`auth-worker(<pid>)` condition is the process that holds Dovecot's MySQL connections; it keeps lines of `lmtp`, `imap`
+and the other processes that log remote text after the marker (Sieve's `msgid=<...>`, a non-default
+`deliver_log_format`) out of the rule altogether. *H* and *N* come from Postfix's configuration (`hosts` is split at
+spaces; the table is a file name), while the remote lookup key of `mysql:<table> lookup error for "<key>"` and
+`'domain' pattern match failed for '<key>'` follows a space before any `: `, so neither form reaches the anchor.
 
-**Area document text** (the Dev transcribes it into `docs/areas/log-import.md`, see *Areas*): the two tables above, the
+**Area document text** (the Dev transcribes it into `docs/areas/log-import.md`, see *Areas*): the tables above with the
+driver-segment paragraph (the rule, not the source citations), the
 program rules of `IsPostfix`/`IsDovecot`, "the classification sets only the priority and the event, never adds, drops or
 reorders a record, and holds no state", "`mail.log` and the other rsyslog files keep the source type `syslog`", and the
-forged-lines limitation of record 0091 option 14 in the style of the MariaDB section (a local process can log under
-`postfix/<x>` or `dovecot`; remote text reaches the anchored positions only through a Dovecot user name, which the default
-`auth_username_chars` keeps free of spaces and colons; an event or priority is a classification, not proof of origin),
+forged-lines paragraph of record 0091 options 14, 19 and 20 in the style of the MariaDB section, with these statements:
+(a) any local process can log under `postfix/<x>` or `dovecot` with any marker and any database message; (b) a marker's
+priority replaces the priority the transport gave the line (a journal `PRIORITY`, a `<PRI>`), also a more severe one, so a
+classified priority is the daemon's class read from the text, not the priority the line was sent with; (c) remote text
+reaches a marker position only through a user name in Dovecot's first segment (`imap(<user>)...`): the default
+`auth_username_chars` keeps spaces and colons out of it, and a configuration whose `auth_username_chars` allows a space
+and a colon lets a remote user forge a Dovecot marker, and with it the priority and `dovecot.fatal` or `dovecot.panic`
+(not `dovecot.database_unavailable`: such a first segment begins with the logging process, e.g. `imap(`, never with
+`auth-worker(<digits>)`); (d) the database
+rules themselves read remote text nowhere: Postfix's table and host contain no space, Dovecot's rule takes only
+`auth-worker` lines and only the driver's fixed segments, so a sender's address, lookup key or Message-ID cannot produce
+a database event; (e) an event or priority is a classification, not proof of origin),
 the claim of a mail log ("`mail.log`, `mail.err`, `maillog` and their rotations are claimed by their first line, like
 `auth.log`; they are no syslog names, so a copy whose first line is cut is not recognized"), and the limit for earlier
 imports in the style of the *Stored source type* sentence of *Parser contract* ("contents imported by a version without
@@ -307,7 +377,7 @@ in step 6. No existing file is rewritten by the skeleton.
   Oct  9 03:12:12 mail-1 dovecot: master: Dovecot v2.3.16 (7e2e900c1a) starting up for imap, pop3 (core dumps disabled)
   Oct  9 03:12:13 mail-1 dovecot: imap-login: Login: user=<alice@example.org>, method=PLAIN, rip=198.51.100.7, lip=192.0.2.1, mpid=2301, TLS, session=<AbCdEfGh>
   Oct  9 03:12:14 mail-1 dovecot: auth-worker(2290): Error: mysql(localhost): Connect failed to database (mail): Can't connect to local server through socket '/run/mysqld/mysqld.sock' (2) - waiting for 1 seconds before retry
-  Oct  9 03:12:15 mail-1 dovecot: auth-worker(2290): Warning: mysql(localhost): Query failed, retrying: MySQL server has gone away
+  Oct  9 03:12:15 mail-1 dovecot: auth-worker(2290): Warning: sqlpool(mysql): Query failed, retrying: MySQL server has gone away
   Oct  9 03:12:16 mail-1 dovecot: master: Error: service(imap): child 2301 killed with signal 9
   Oct  9 03:12:17 mail-1 dovecot: imap(alice@example.org)<2301><AbCdEfGh>: Panic: file mail-index.c: line 42 (mail_index_open): assertion failed: (index != NULL)
   Oct  9 03:12:18 mail-1 dovecot: auth: Fatal: master: service(auth): child 2290 returned error 89
@@ -360,15 +430,32 @@ stays bounded independently of the input (0079): the stage holds no state. The w
   end of a long message still matches when the phrase itself is kept. All scans are ordinal, case-sensitive and linear in
   the message length; no regular expression, so no backtracking.
 - [x] No exception: the classifier parses no number and builds no value; nothing new reaches a user-visible reason.
-- Forging (record 0091 options 10 to 14): remote text cannot reach the anchored positions except through a Dovecot user
-  name (default `auth_username_chars` excludes space and colon); the AC2.1, AC2.2 and AC3.2 rows with client text pin
-  that. Local processes can forge any mail line, as for kernel and MariaDB lines; documented, not prevented.
+- Forging (record 0091 options 10 to 14, 19 and 20). Markers: remote text reaches a marker position only through a
+  Dovecot user name in the first segment; the default `auth_username_chars` excludes space and colon, a non-default value
+  that allows both lets a remote user forge a Dovecot marker (documented in the area document, statement (c)). Database
+  events: no remote text reaches the anchors under any `auth_username_chars`. Postfix's anchors require a table name or
+  host without a space before the first `: `, and Postfix's remote lookup keys (`maps.c:210`, `:275`,
+  `dict_mysql.c:362`) always follow a space; Dovecot's rule reads only `auth-worker(<digits>)` lines and one to three
+  fixed driver segments, so a sender's Message-ID behind `sieve: msgid=<` (any process) and a user name in `sql(...)`
+  (in `auth-worker`) end the walk. The former rule, "zero or more segments without a space" and "`mysql:` … contains
+  `: query failed: `", let a remote sender forge both database events (security review round 1, B1 and B2); the AC3.2
+  rows with remote text pin the fix, per accepted form. Local processes can forge any mail line, as for kernel and
+  MariaDB lines; documented, not prevented.
+- Accepted forms of the database guard, enumerated: Postfix `connect to mysql server <H>: <C>` with *H* a
+  configured host (`localhost`, `unix:<path>`, `inet:<host>:<port>`, a name or address; never a space, `dict_mysql.c:793`)
+  and `mysql:<N>: query failed: <C>` with *N* the table's file name; Dovecot `auth-worker(<pid>): Error: <segments>Connect
+  failed to database (<db>): <C> - waiting for <n> seconds before retry` and `auth-worker(<pid>): Warning:
+  <segments>Query failed, retrying: <C>`, segments as in *Database rule*. Rejected on purpose: everything else,
+  including the dict process's SQL lines (`conn ...: ` prefix) and a `mail_log_prefix` or `deliver_log_format` that puts
+  any text first.
 - The program check is a classification, not a guard: no access decision depends on it.
 
 ## Decision records
 
 - `docs/decisions/0091-mail-lines-classified-in-the-syslog-and-journal-parsers.md` (Proposed, indexed; revised after the
-  challenge: options 15 to 18, decision and earlier-imports consequence).
+  challenge: options 15 to 18, decision and earlier-imports consequence; revised after the security review: context on
+  the prefixes and on remote text near the anchors, options 11 and 13 corrected, options 19 and 20 rejected, a forging
+  consequence).
 - `docs/decisions/0086-system-log-parsers-generic-syslog-claim-and-grouped-kernel-reports.md` (Accepted, unreleased:
   edited in place, option 2 and the first consequence now point to 0091 instead of announcing a mail parser).
 
@@ -399,6 +486,46 @@ Devil's Advocate: 0 major, 3 minor objections.
    rely on file names that were not checked on the server (`maillog`). Changing the claim rule is a change to 0086 for
    every rsyslog file, not for this issue.
 
+Security, plan review round 1 (CHANGES_REQUIRED, 2 blocking, 3 non-blocking):
+
+- **B1** (Dovecot segment walk steerable by a sender's Message-ID; the general walk re-opens the user-name path) —
+  **Accepted, and narrowed beyond the request.** Confirmed by reading `lib-lda/lda-settings.c:42` and
+  `lib-lda/mail-deliver.c:124`. The walk now accepts only the driver segments `mysql: `, `mysql(<P>): `,
+  `sqlpool(<P>): ` (*P* non-empty, no space, ended by the first `)`, which must be followed by `: `), at most three
+  (*Database rule*). Not taken: "plus zero segments" — Dovecot 2.3.16 never writes a database message without a driver
+  segment (the mysql event has `mysql: ` from its creation, `driver-mysql.c:294`; the pool has `sqlpool(mysql): `,
+  `driver-sqlpool.c:527`), so zero segments would accept a form no Dovecot writes. Added on re-checking every accepted
+  form: the rule reads only lines whose first segment is `auth-worker(<digits>)`, the one process with MySQL
+  connections (blocking driver, `auth/passdb-sql.c:282-285`). Without it a non-default `deliver_log_format` that puts a
+  sender's address first (e.g. `%f`) would bring remote text right after an `lmtp` marker, where `mysql(` + text could
+  begin. The AC3.2 rows Security named are added (the msgid line, `sieve: msgid=<a@x>: Connect failed to database
+  (x): Server has gone away`, `auth: Error: sql(a,1.2.3.4): ...`), each also with the `auth-worker` process so the
+  segment rule is tested apart from the process rule, plus zero, four, empty, spaced and foreign segments and the
+  process forms. *Security considerations*, the area-document text (statement (d)) and record 0091 (context, options 11
+  and 13, new option 19) are corrected.
+- **B2** (Postfix `mysql:` anchor reachable through a remote lookup key) — **Accepted.** Confirmed at `maps.c:210`,
+  `:275` and `dict_mysql.c:362`. *T* must now be `mysql:` + *N* + `: query failed: ` + *C* with *N*, the text up to
+  the first `: `, non-empty and free of spaces (the real format, `dict_mysql.c:568`). The re-check of the other Postfix
+  anchor tightened it the same way: the host before the first `: ` must be non-empty and free of spaces (Postfix splits
+  `hosts` at spaces, `dict_mysql.c:793`; `unix:<path>` and `inet:<host>:<port>` stay accepted, AC3.1 rows). AC3.2 rows
+  for both remote-key forms (the key once unquoted, once with its quotes; written without backslashes because Postfix
+  writes the key as is), an empty table name, a missing space after the anchor, an empty and a spaced host. Record
+  0091 option 20 records the rejected "contains" anchor.
+- **N1** (double prefixes `mysql: mysql(<host>): `, `sqlpool(mysql): mysql: ...`) — **Refuted as to the actual chain,
+  accepted as test rows.** `event_set_append_log_prefix` replaces the event's own prefix (`lib/lib-event.c:510-528`), so
+  `mysql(<host>): ` replaces `mysql: `; a pooled connection's event is parented to the pool's parent, not to the pool
+  (`driver-sqlpool.c:290-293`). Dovecot 2.3.16 writes `mysql(<host>): ` or `mysql: ` before `Connect failed` and
+  `sqlpool(mysql): ` before `Query failed, retrying` (claim check). The finding uncovered a plan error: the fixture and
+  AC3.1 had `mysql(localhost): Query failed, retrying`; they now read `sqlpool(mysql): `. The nested forms stay accepted
+  (up to three fixed segments) and are AC3.1 rows, with `mysql: ` alone as a real form.
+- **N2** (marker forging depends on `auth_username_chars`) — **Accepted, wording corrected.** The area document states
+  that a non-default `auth_username_chars` allowing space and colon lets a remote user forge a Dovecot marker
+  (statement (c)) and no longer ties the database rule to it (statement (d)). The database event cannot be forged that
+  way either, because a forged first segment begins with the logging process (`imap(`), never `auth-worker(<digits>)`.
+- **N3** (a marker replaces a more severe transport priority) — **Accepted.** Statement (b) of the area document text:
+  a classified priority is the daemon's class read from the text, not the priority the line was sent with. AC2.3
+  is unchanged.
+
 Additional point (orchestrator): the issue title says "Parser for mail.log", so the PR description must state the choice;
 see *Pull request text*.
 
@@ -419,4 +546,6 @@ imports`.
   (`SyslogLine.TryParse`/`ParseTag`). Recognize the format (by content, never for a syslog name) and read it with the
   marker rules of record 0091 plus `Info: ` (priority 6), which Dovecot writes only to its own log file, or refuse it." Labels `area: logs`, `type: bug`, milestone v0.1.0.
 - Lifecycle events and OOM victims among mail processes, Postfix queue analysis: #21.
-- PostgreSQL and other drivers; non-default `syslog_name`, `instance_name` or `mail_log_prefix`.
+- PostgreSQL and other drivers; non-default `syslog_name`, `instance_name` or `mail_log_prefix`; Dovecot's SQL errors
+  outside `auth-worker` (the dict process's `conn ...: ` prefix, used by SQL quota and dict lookups), which stay with the
+  marker's priority only.

@@ -35,15 +35,24 @@ the configuration on the server were not checked):
   no `<PRI>` at all: today every line of it is stored without a priority.
 - A failed or lost connection to MySQL or MariaDB is logged by Postfix's lookup table as `warning: connect to mysql server
   <host>: <client error>` and `warning: mysql:<file>: query failed: <client error>` (`global/dict_mysql.c`) and by
-  Dovecot's SQL driver as `Error: ...Connect failed to database (<db>): <client error> - waiting for N seconds before
-  retry` and `Warning: ...Query failed, retrying: <client error>` (`lib-sql/driver-mysql.c`, `driver-sqlpool.c`). The
+  Dovecot's SQL driver as `Error: mysql(<host>): Connect failed to database (<db>): <client error> - waiting for N
+  seconds before retry` (`mysql: ` without a configured host) and `Warning: sqlpool(mysql): Query failed, retrying:
+  <client error>` (`lib-sql/driver-mysql.c`, `driver-sqlpool.c`). An event's own prefix is replaced when set again and a
+  pooled connection's event hangs off the pool's parent (`lib/lib-event.c`, `driver-sqlpool.c`), so exactly one driver
+  prefix precedes these messages; MySQL is a blocking driver, so its connections and messages live in the
+  `auth-worker(<pid>)` processes (`auth/passdb-sql.c`). The
   client error is the text of the client library: `Can't connect to local MySQL server through socket ...`, `Can't
   connect to MySQL server on ...`, `MySQL server has gone away`, `Lost connection to MySQL server ...` in libmysqlclient
   8.0 (`libmysql/errmsg.cc`, 8.0.28), and the same with `server` for `MySQL server` in MariaDB Connector/C 3.3
   (`libmariadb/ma_errmsg.c`, 3.3.1). Whether the server's Postfix or Dovecot uses an SQL lookup at all was not checked.
 - Remote text reaches mail log lines: Postfix logs an SMTP client's address syntax in warnings (`Illegal address syntax
-  from ... in MAIL command: <...>`), Dovecot logs login user names. Dovecot's default `auth_username_chars` (letters,
-  digits, `.-_@`) keeps spaces and colons out of a user name.
+  from ... in MAIL command: <...>`) and a remote lookup key right after a MySQL table's name (`mysql:<table> lookup
+  error for "<key>"`, `global/maps.c`; `mysql:<table> 'domain' pattern match failed for '<key>'`, `dict_mysql.c`);
+  Dovecot logs login user names, user names in auth prefixes (`sql(<user>,<ip>): `) and, through the default
+  `deliver_log_format` `msgid=%m: %$` (`lib-lda/lda-settings.c`), a sender's Message-ID after the marker of Sieve
+  results (`sieve: msgid=<...>: `), whose quoted local part keeps spaces and colons (`lib-lda/mail-deliver.c`). Dovecot's
+  default `auth_username_chars` (letters, digits, `.-_@`) keeps spaces and colons out of a user name; an administrator
+  can widen it.
 
 ## Options considered
 
@@ -94,7 +103,7 @@ Where the marker is looked for:
 11. **Where the daemon writes it** (chosen) — Postfix at the start of the message, Dovecot at the start or right after the
     first segment (the text before the first `: `, non-empty and without a space). Remote text reaches that position only
     through a Dovecot user name in the first segment, and the default `auth_username_chars` keeps the `: ` of a marker out
-    of it. A `mail_log_prefix` with more than one segment, or a Postfix `syslog_name` that does not begin with `postfix`,
+    of it; a value that allows a space and a colon lets a remote user forge a Dovecot marker (documented, option 14). A `mail_log_prefix` with more than one segment, or a Postfix `syslog_name` that does not begin with `postfix`,
     leaves lines unclassified.
 
 Which errors count as a lost database connection:
@@ -102,9 +111,16 @@ Which errors count as a lost database connection:
 12. **Any warning or error that contains a client error text** — Postfix logs the client's text in warnings, so a remote
     SMTP client could forge the event.
 13. **The four messages of Postfix's and Dovecot's MySQL code, with a client error that begins with a connection text of
-    libmysqlclient or MariaDB Connector/C** (chosen) — anchored like the markers, covers both client libraries whichever
-    the packages link, and leaves access and syntax errors without the event; PostgreSQL and other drivers are not read
-    (the server runs MariaDB).
+    libmysqlclient or MariaDB Connector/C** (chosen) — anchored like the markers and read only in the exact form the
+    daemons write: Postfix's `connect to mysql server <host>: ` and `mysql:<table>: query failed: ` with a host or table
+    name that holds no space before the first `: `; Dovecot's `Connect failed to database (` and `Query failed,
+    retrying: ` only on `auth-worker(<pid>)` lines and only after one to three of the driver's fixed segments
+    (`mysql: `, `mysql(<host>): `, `sqlpool(<driver>): `). No remote text reaches these positions under any
+    `auth_username_chars`: Postfix's remote keys follow a space, and a Message-ID or user name is no driver segment and
+    a forged first segment begins with the logging process, never `auth-worker(<pid>)`. Covers both client libraries
+    whichever the packages link, and leaves access and syntax errors without the event; PostgreSQL, other drivers and the
+    dict process's SQL lines (`conn ...: ` prefix) are not read (the server runs MariaDB; auth is where a lost database
+    stops mail).
 
 Forged lines:
 
@@ -132,6 +148,18 @@ How a mail log is claimed:
 18. **By the first line, as every rsyslog file** (chosen) — no change to the claim; a mail log whose first line is cut is
     listed as not recognized instead of being read.
 
+How the database messages are anchored (added after the security review of the plan):
+
+19. **Dovecot: zero or more segments of any non-empty text without a space before the anchor** — tolerant of any prefix
+    chain, but steerable from the internet: a sender's Message-ID `<"a: Query failed, retrying: MySQL server has gone
+    away"@x>` yields `lmtp(...): Error: sieve: msgid=<a: Query failed, retrying: MySQL server has gone away@x>: ...`, the
+    walk accepts `sieve` and `msgid=<a` and forges `dovecot.database_unavailable` on any Sieve error or warning; a
+    widened `auth_username_chars` re-opens the same path through `sql(<user>,<ip>): `. Zero segments was also rejected:
+    no Dovecot 2.3.16 database message lacks a driver segment.
+20. **Postfix: `mysql:` at the start and `: query failed: ` anywhere after it** — matches the real line, but also
+    `mysql:<table> lookup error for "<key>"` with a remote key such as `a: query failed: MySQL server has gone away@x`,
+    forging `postfix.database_unavailable` from an SMTP recipient.
+
 ## Decision
 
 Options 2, 5, 9, 11, 13, 14, 16 and 18: the journal and syslog parsers classify the lines of Postfix and Dovecot in a stage before
@@ -156,4 +184,7 @@ position (only the markers the daemons write to syslog, so no Dovecot `Info: `) 
 - Dovecot's own log file (`log_path` set to a file) is not read correctly: its lines have no host, so the syslog grammar
   takes the process prefix for the host and the marker for the program. A follow-up issue covers it.
 - Signature detection and outage reconstruction must not treat a mail event or priority as proof that Postfix or Dovecot
-  wrote the line (option 14).
+  wrote the line (option 14). A marker's priority replaces the transport's (a journal `PRIORITY`, a `<PRI>`), also a
+  more severe one; the stored priority is the daemon's class read from the text.
+- Database failures logged by Dovecot outside `auth-worker` (SQL quota or dict over the dict process) and lines whose
+  `mail_log_prefix` or `deliver_log_format` puts other text first get no database event (options 13, 19).
