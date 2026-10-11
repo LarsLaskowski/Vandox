@@ -21,3 +21,4 @@ are quoted in full.
 | 2026-10-11 20:49 | 8 Review round 1 | squad-reviewer | BLOCKING 1 (log-import.md:726 says 4,096 held skips, Bounds says 4,097; code is 4,097); NON-BLOCKING 3 (repeated vmstat counter emits duplicate points, lsof 1,024-byte bound counted on decoded text not raw, README Detect clause omits rotation suffixes) (opus/medium · 165,006 tokens · 38 tool uses · 319 s) |
 | 2026-10-11 20:51 | 8 Fix round 1 | squad-dev | Blocking doc cap fixed (4,097); repeated vmstat counter skipped; lsof bound wording in plan; README clause; project.md comma; TryScaleBinary doc. Test for vmstat repeat goes to Tester |
 | 2026-10-11 20:59 | 6-7 Tester coverage + code check | squad-tester | vmstat repeat test + 4 defensive-line tests; gates on d37d94d PASS (tests 3087/171/145/92, coverage new 99.9% overall 97.5%, analyzer, format, scope) (sonnet/medium · 99,783 tokens · 20 tool uses · 208 s) |
+| 2026-10-11 20:59 | 8 Security delta | squad-security | APPROVED at d37d94d |
