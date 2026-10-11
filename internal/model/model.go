@@ -307,3 +307,9 @@ func nilReceiver() error { return invalid("", "required") }
 func sortedKeys[V any](m map[string]V) []string {
 	return slices.Sorted(maps.Keys(m))
 }
+
+// checkFoldUnique requires the keys of m to differ from each other ignoring ASCII case; the error names the
+// later of two such keys in byte order, as field[<quoted key>].
+func checkFoldUnique[V any](field string, m map[string]V) error {
+	return errors.New("not implemented")
+}

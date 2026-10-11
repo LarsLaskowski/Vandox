@@ -60,6 +60,17 @@ func (g *guardReader) Read(p []byte) (int, error) {
 	return n, err
 }
 
+// keyCheck holds the state of the line check, reused for every line of one Decoder: the frame stack and, per
+// depth, the keys seen in the open object. Every set is empty between two calls of checkLine.
+type keyCheck struct{}
+
+// checkLine checks the JSON-level rules of one line before it is bound: no key outside ASCII after unescaping,
+// no two keys of one object equal ignoring ASCII case, no nesting deeper than MaxDepth. It returns nil or an
+// error wrapping ErrMalformed whose text names the broken rule but never the key.
+func (c *keyCheck) checkLine(line []byte) error {
+	return errors.New("not implemented")
+}
+
 // Decoder reads a batch record by record.
 type Decoder struct {
 	zr     *gzip.Reader
@@ -71,6 +82,7 @@ type Decoder struct {
 	count  int
 	last   uint64
 	err    error
+	keys   keyCheck
 }
 
 // NewDecoder reads and validates the header of the batch in r.

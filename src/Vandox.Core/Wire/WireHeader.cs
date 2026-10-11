@@ -21,7 +21,7 @@ public sealed class WireHeader
     /// Gets or sets the minor version of the format.
     /// </summary>
     [JsonPropertyName("format_minor")]
-    public int FormatMinor { get; set; }
+    public long FormatMinor { get; set; }
 
     /// <summary>
     /// Gets or sets the ID of the agent that sent the batch.

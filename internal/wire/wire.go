@@ -26,6 +26,9 @@ const (
 	ModeBackfill Mode = "backfill"
 )
 
+// MaxDepth is the deepest nesting of objects and arrays a line may have; the line's outermost value counts as 1.
+const MaxDepth = 64
+
 // Errors returned by the codec.
 var (
 	ErrUnsupportedVersion = errors.New("unsupported format version")
@@ -40,7 +43,7 @@ var (
 // Header is the first line of a batch.
 type Header struct {
 	FormatMajor int    `json:"format_major"`
-	FormatMinor int    `json:"format_minor"`
+	FormatMinor int64  `json:"format_minor"`
 	AgentID     string `json:"agent_id"`
 	// BootID is the boot in which every record of the batch was captured.
 	BootID string `json:"boot_id"`
