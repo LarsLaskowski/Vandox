@@ -275,7 +275,8 @@ case, an empty or spaced *P*, a `)` not followed by `: `) ends the walk without 
 segments, each consumed by a prefix comparison, so it is linear in the message length; zero segments and a fourth
 segment give no event. Dovecot 2.3.16 writes exactly one segment (`mysql(<host>): ` or `mysql: ` before `Connect failed`,
 `sqlpool(mysql): ` before `Query failed`, see the claim check); up to three are accepted because each is a fixed driver
-text with a configured host or driver name in it, never remote text, so a version that nests them is still read. The
+text with a configured host or driver name in it (remote text only in the one configuration statement (c) of the area
+document text names), so a version that nests them is still read. The
 `auth-worker(<pid>)` condition is the process that holds Dovecot's MySQL connections; it keeps lines of `lmtp`, `imap`
 and the other processes that log remote text after the marker (Sieve's `msgid=<...>`, a non-default
 `deliver_log_format`) out of the rule altogether. *H* and *N* come from Postfix's configuration (`hosts` is split at
@@ -294,10 +295,15 @@ reaches a marker position only through a user name in Dovecot's first segment (`
 `auth_username_chars` keeps spaces and colons out of it, and a configuration whose `auth_username_chars` allows a space
 and a colon lets a remote user forge a Dovecot marker, and with it the priority and `dovecot.fatal` or `dovecot.panic`
 (not `dovecot.database_unavailable`: such a first segment begins with the logging process, e.g. `imap(`, never with
-`auth-worker(<digits>)`); (d) the database
-rules themselves read remote text nowhere: Postfix's table and host contain no space, Dovecot's rule takes only
-`auth-worker` lines and only the driver's fixed segments, so a sender's address, lookup key or Message-ID cannot produce
-a database event; (e) an event or priority is a classification, not proof of origin),
+`auth-worker(<digits>)`); a user name reaches the database rule in one configuration only: an `auth-worker` line of a
+passdb or userdb whose `name` setting is `mysql` or `sqlpool` carries the auth prefix `<name>(<user>,<ip>): `
+(`auth/auth-request.c:2435-2443`) where the rule reads a driver segment, so with an `auth_username_chars` that allows a
+space (and the colon and parentheses of such a name) a remote user name such as
+`a): Connect failed to database (d): Server has gone away` yields `auth-worker(1): Error: mysql(a): Connect failed to
+database (d): Server has gone away,1.2.3.4): ...` and `dovecot.database_unavailable`; (d) apart from that
+configuration the database rules read remote text nowhere: Postfix's table and host contain no space, Dovecot's rule
+takes only `auth-worker` lines and only the driver's fixed segments, so a sender's address, lookup key or Message-ID
+cannot produce a database event; (e) an event or priority is a classification, not proof of origin),
 the claim of a mail log ("`mail.log`, `mail.err`, `maillog` and their rotations are claimed by their first line, like
 `auth.log`; they are no syslog names, so a copy whose first line is cut is not recognized"), and the limit for earlier
 imports in the style of the *Stored source type* sentence of *Parser contract* ("contents imported by a version without
@@ -433,11 +439,14 @@ stays bounded independently of the input (0079): the stage holds no state. The w
 - Forging (record 0091 options 10 to 14, 19 and 20). Markers: remote text reaches a marker position only through a
   Dovecot user name in the first segment; the default `auth_username_chars` excludes space and colon, a non-default value
   that allows both lets a remote user forge a Dovecot marker (documented in the area document, statement (c)). Database
-  events: no remote text reaches the anchors under any `auth_username_chars`. Postfix's anchors require a table name or
+  events: no remote text reaches the anchors under the default `auth_username_chars`; the one exception, a passdb or
+  userdb named `mysql` or `sqlpool` together with an `auth_username_chars` that allows a space, puts a remote user name
+  in a driver-segment position (`auth/auth-request.c:2435-2443`) and is documented (statement (c)), not prevented
+  (security review round 2, N4). Postfix's anchors require a table name or
   host without a space before the first `: `, and Postfix's remote lookup keys (`maps.c:210`, `:275`,
   `dict_mysql.c:362`) always follow a space; Dovecot's rule reads only `auth-worker(<digits>)` lines and one to three
   fixed driver segments, so a sender's Message-ID behind `sieve: msgid=<` (any process) and a user name in `sql(...)`
-  (in `auth-worker`) end the walk. The former rule, "zero or more segments without a space" and "`mysql:` … contains
+  (in `auth-worker`, the default passdb/userdb name) end the walk. The former rule, "zero or more segments without a space" and "`mysql:` … contains
   `: query failed: `", let a remote sender forge both database events (security review round 1, B1 and B2); the AC3.2
   rows with remote text pin the fix, per accepted form. Local processes can forge any mail line, as for kernel and
   MariaDB lines; documented, not prevented.
@@ -521,10 +530,24 @@ Security, plan review round 1 (CHANGES_REQUIRED, 2 blocking, 3 non-blocking):
 - **N2** (marker forging depends on `auth_username_chars`) — **Accepted, wording corrected.** The area document states
   that a non-default `auth_username_chars` allowing space and colon lets a remote user forge a Dovecot marker
   (statement (c)) and no longer ties the database rule to it (statement (d)). The database event cannot be forged that
-  way either, because a forged first segment begins with the logging process (`imap(`), never `auth-worker(<digits>)`.
+  way either, because a forged first segment begins with the logging process (`imap(`), never `auth-worker(<digits>)`
+  (round 2, N4, adds the one configuration in which a user name reaches the database rule after the first segment).
 - **N3** (a marker replaces a more severe transport priority) — **Accepted.** Statement (b) of the area document text:
   a classified priority is the daemon's class read from the text, not the priority the line was sent with. AC2.3
   is unchanged.
+
+Security, plan review round 2 (APPROVED, 1 non-blocking):
+
+- **N4** ("no remote text" too strong in one configuration) — **Accepted, wording corrected, no code change.** The
+  auth prefix is `<name>(<user>,<ip>): ` with *name* the passdb/userdb `name` setting when set
+  (`auth/auth-request.c:2435-2443`). A passdb or userdb named `mysql` or `sqlpool` plus an `auth_username_chars` that
+  allows a space lets a remote user name such as `a): Connect failed to database (d): Server has gone away` produce
+  `auth-worker(1): Error: mysql(a): Connect failed to database (d): Server has gone away,1.2.3.4): ...`, which meets the
+  segment and anchor rules and gets `dovecot.database_unavailable`; the default `auth_username_chars` rules it out.
+  Accepted as a documented limit like the marker case of N2: statement (c) of the area document text names it,
+  statement (d), the driver-segment paragraph and *Security considerations* are softened, record 0091 options 13, 14
+  and 19 say the same. No AC row: AC3.2 lists lines without an event, and pinning this forged event as an AC3.1 row
+  would make an accepted limit look like intended behavior.
 
 Additional point (orchestrator): the issue title says "Parser for mail.log", so the PR description must state the choice;
 see *Pull request text*.
