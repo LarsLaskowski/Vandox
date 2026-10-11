@@ -46,7 +46,10 @@ imported data is kept apart from live data (it never raises alerts) by the detec
 - A path or entry name longer than 1,024 bytes is listed as failed.
 - There is no limit on the size of a file or of decompressed data. Memory stays flat for any size and number of
   entries; a decompression bomb costs time and stops only by cancellation, and one of valid lines fills the storage
-  directory until the operator presses Ctrl-C.
+  directory until the operator presses Ctrl-C. Any decompressed content with line feeds fills the storage directory at
+  16 bytes per line end, even when no record is stored (a small `.gz` of nothing but `\n` suffices), until the operator
+  presses Ctrl-C. A content that fails keeps the line hashes of its latest attempt only, and the next import of it
+  deletes them.
 
 ## Safe file access
 
@@ -108,8 +111,35 @@ imported data is kept apart from live data (it never raises alerts) by the detec
     so a resume continues at the same place, with the records already stored dropped as for any resume.
   - Skip line numbers of the new part count in the whole file.
   - A parse that starts at the continuation point treats the first new line as the file's first line: a UTF-8 byte order mark (EF BB BF) at its start is removed, as it is at the start of a file, while a whole-file parse keeps it in that line's message. Framing and the stored lines are otherwise the same.
-- Limits of the guarantee: an older copy imported **after** a newer one (or later in the same input) is not recognized
-  and is imported as a whole; contents imported before schema version 6 are never a base. At the continuation point a
+- **An older copy is recognized.** A content that is the start of a content imported completely before (the same log
+  with fewer lines at its end, imported later or later in the same input) stores nothing and is reported as
+  "contained". The rules:
+  - **Line hashes.** In pass 2, every content that is imported or continued (any parser) stores, for every line end, the
+    first 16 bytes of the SHA-256 of the decompressed bytes up to that line end, in rows of at most 4,096 hashes (the
+    part before a continuation point included). The rows are written while the content is read and before the file is
+    completed.
+  - **Attempts.** Every `BeginImportAsync` of an incomplete content raises its attempt by one and deletes the line
+    hashes of its earlier attempts. Line-hash writes and batches carry the attempt, and a run whose attempt was
+    superseded gets a conflict on its next write. Completing the file keeps the rows of the completing attempt only.
+    A content completed without line hashes (a store from schema version 6) is never a container.
+  - **Containment.** A content without a state of its own is checked before the forward continuation: it is contained
+    when a **complete** content of the same source type and head key, larger than it, holds the hash of the whole
+    content at one of its line ends. At most the 64 largest such contents are compared, largest first. Containment wins
+    over a forward base. A content that equals a stored content is not checked (already imported, or resumed).
+  - **Nothing is parsed or stored** for a contained content, whatever its parser, and no state is kept: importing it
+    again gives "contained" again. The summary names the container.
+- Limits of the guarantee: an older copy that ends inside a line (no line feed at its end), one whose container was
+  imported before schema version 7, and one whose container is not among the 64 largest candidates are not recognized
+  and are imported as a whole. The lines of a contained older copy are present as the container's parse stored them
+  (the container's file name and modification time, its grouped entries). The grouping is the container's: the older
+  copy is cut at a line end, which for a parser that is not framed by lines (`LineFramed` false, the journal export) or
+  that groups lines into entries (MariaDB error log, kernel reports) can lie inside an entry of the container, or inside
+  a binary field of a journal entry. Nothing of the older copy is lost, because the container's parse stored that
+  entry whole; its lines are found only inside the container's records, framed and grouped as the container's parse
+  made them, and an entry that the older copy holds only in part is not stored as such a part. A file that starts with
+  the exact bytes of a real log and is imported before it becomes that log's container, and the log's lines are then
+  found only under that file's name. Lines are left out on a 128-bit match of the truncated SHA-256. Contents imported
+  before schema version 6 are never a base. At the continuation point a
   grouped entry is split: continuation lines of a MariaDB error log entry after the point are skipped as "line before
   the first entry" (the summary counts them), and MariaDB entries and kernel reports of syslog become the stored entry
   plus lines of their own. A line the earlier copy cut (no final line feed) is stored again, complete: the one case in
@@ -393,20 +423,22 @@ syslog file. The journal and syslog parsers apply these rules to the records the
 
 ## Result
 
-- **Outcomes per file:** imported, continued (the new part of a file that grew was stored), already imported, not
+- **Outcomes per file:** imported, continued (the new part of a file that grew was stored), already imported,
+  contained (the content is the start of a content imported before; nothing was stored), not
   recognized (with the reason), failed (with the reason).
   Every file that is not imported appears with its outcome and reason; nothing is skipped silently.
-- **Progress** goes as JSON log lines to standard error: one line per finished file (path, outcome including `continued`, source type,
+- **Progress** goes as JSON log lines to standard error: one line per finished file (path, outcome including `continued` and `contained`, source type,
   reason, lines, records, skipped), one per 64 MiB hashed, one when the scan is done (files, pending) and one per
   100,000 lines of a large file. Names are attributes, never part of the message.
 - **The summary** goes as text to standard output and holds nothing else: the root; files found and counts per
   outcome; lines read (for a continued file only from the continuation point), records stored and lines skipped; the time range of the stored records (RFC 3339, UTC) or that
   none were stored; whether the run was interrupted; then the files continued (path, the name of the content continued,
   the line after which the new part starts and, when there are any, the lines the parser skipped before its first
-  record), the files not recognized and the files that failed with
+  record), the files contained in an imported file (path and the name of the content they are the start of), the files
+  not recognized and the files that failed with
   their reasons, and the files with skipped lines with their first problems (at most ten per file). The text
   format belongs to the command and is not an interface.
-- **Exit code:** 0 when every file was imported, continued, already imported or not recognized (a saved `/var/log` always holds
+- **Exit code:** 0 when every file was imported, continued, contained, already imported or not recognized (a saved `/var/log` always holds
   files no parser claims, such as `wtmp` and `lastlog`); 1 when a file failed, the run was interrupted or ended with
   an error, or the configuration or the database could not be opened (the summary is still printed when there is one);
   2 for a usage error.

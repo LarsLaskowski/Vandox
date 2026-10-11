@@ -584,6 +584,142 @@ public class ImportCommandTests
     }
 
     /// <summary>
+    /// An older copy of a file that was imported before is recognized in a later run: nothing is stored for it, the summary lists it as contained, the exit code is 0, and the store holds each line once. The older copy may be gzip-compressed, and a third run gives the same result.
+    /// </summary>
+    /// <param name="gzip">Whether the older copy is gzip-compressed</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public async Task ImportCommandRecognizesAnOlderCopyImportedAfterTheNewerOne(bool gzip)
+    {
+        // Arrange
+        using var fixture = new BackendFixture();
+        var logs = Path.Combine(fixture.Folder.Path, "logs");
+        var hooks = new ServeHooks
+                    {
+                        Parsers = [new LineParser("test")]
+                    };
+
+        Directory.CreateDirectory(Path.Combine(logs, "a"));
+        Directory.CreateDirectory(Path.Combine(logs, "b"));
+        await File.WriteAllTextAsync(Path.Combine(logs, "a", "syslog"), Log(8), TestContext.CancellationToken);
+
+        // Act
+        var run1 = await fixture.RunAsync(["import", logs], hooks, TestContext.CancellationToken);
+
+        File.Delete(Path.Combine(logs, "a", "syslog"));
+
+        if (gzip)
+        {
+            await File.WriteAllBytesAsync(Path.Combine(logs, "b", "syslog.gz"), Gzip(Log(5)), TestContext.CancellationToken);
+        }
+        else
+        {
+            await File.WriteAllTextAsync(Path.Combine(logs, "b", "syslog"), Log(5), TestContext.CancellationToken);
+        }
+
+        fixture.Out.GetStringBuilder().Clear();
+
+        var run2 = await fixture.RunAsync(["import", logs], hooks, TestContext.CancellationToken);
+        var secondOutput = fixture.Out.ToString();
+
+        fixture.Out.GetStringBuilder().Clear();
+
+        var run3 = await fixture.RunAsync(["import", logs], hooks, TestContext.CancellationToken);
+        var thirdOutput = fixture.Out.ToString();
+        var records = (await ReadLogLinesAsync(fixture.Storage, "import", TestContext.CancellationToken)).OrderBy(record => record.Record.CapturedAt).ToList();
+        var name = gzip ? "b/syslog.gz" : "b/syslog";
+
+        // Assert
+        Assert.AreEqual(0, run1, "exit code of the first run");
+        Assert.AreEqual(0, run2, "exit code of the run that finds the older copy");
+        Assert.Contains("  imported:          0\n  continued:         0\n  already imported:  0\n  contained:         1\n", secondOutput, "the file is counted as contained");
+        Assert.Contains($"\nFiles contained in an imported file:\n  \"{name}\": start of \"a/syslog\"\n", secondOutput, "the summary lists the contained file with its container");
+        Assert.Contains("Records stored:      0", secondOutput, "nothing is stored");
+        Assert.AreEqual(0, run3, "exit code of the third run");
+        Assert.Contains("  contained:         1", thirdOutput, "the third run gives the same result");
+        Assert.AreEqual(string.Join('|', Enumerable.Range(1, 8).Select(number => $"LOG line {number}")), string.Join('|', records.Select(record => ((LogLine)record.Record.Data!).Message)), "every line is stored once");
+        Assert.AreEqual(1L, await CountAsync(fixture.Storage, "SELECT count(*) FROM import_files"), "the older copy has no state");
+    }
+
+    /// <summary>
+    /// An older copy that comes later in the same input is recognized, the exit code is 0, and files that are imported, contained, already imported or not recognized do not fail the run.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task ImportCommandRecognizesAnOlderCopyLaterInTheSameRunAndExitsWithZero()
+    {
+        // Arrange
+        using var fixture = new BackendFixture();
+        var logs = Path.Combine(fixture.Folder.Path, "logs");
+        var hooks = new ServeHooks
+                    {
+                        Parsers = [new LineParser("test")]
+                    };
+
+        Directory.CreateDirectory(Path.Combine(logs, "a"));
+        Directory.CreateDirectory(Path.Combine(logs, "b"));
+        await File.WriteAllTextAsync(Path.Combine(logs, "a", "syslog"), Log(8), TestContext.CancellationToken);
+        await File.WriteAllTextAsync(Path.Combine(logs, "b", "syslog"), Log(5), TestContext.CancellationToken);
+        await File.WriteAllTextAsync(Path.Combine(logs, "note.txt"), "no parser\n", TestContext.CancellationToken);
+
+        // Act
+        var first = await fixture.RunAsync(["import", logs], hooks, TestContext.CancellationToken);
+        var firstOutput = fixture.Out.ToString();
+
+        fixture.Out.GetStringBuilder().Clear();
+
+        var second = await fixture.RunAsync(["import", logs], hooks, TestContext.CancellationToken);
+        var secondOutput = fixture.Out.ToString();
+        var records = await ReadLogLinesAsync(fixture.Storage, "import", TestContext.CancellationToken);
+
+        // Assert
+        Assert.AreEqual(0, first, "exit code of the first run");
+        Assert.Contains("  imported:          1\n  continued:         0\n  already imported:  0\n  contained:         1\n  not recognized:    1\n", firstOutput, "imported, contained and not recognized");
+        Assert.Contains("\nFiles contained in an imported file:\n  \"b/syslog\": start of \"a/syslog\"\n", firstOutput, "the older copy is listed");
+        Assert.AreEqual(0, second, "exit code of the second run");
+        Assert.Contains("  already imported:  1\n  contained:         1\n", secondOutput, "the second run imports nothing");
+        Assert.HasCount(8, records, "each line is stored once");
+    }
+
+    /// <summary>
+    /// An older copy of a journal export, whose parser is not framed by lines, is recognized as well.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task ImportCommandRecognizesAnOlderCopyOfAJournalExport()
+    {
+        // Arrange
+        using var fixture = new BackendFixture();
+        var logs = Path.Combine(fixture.Folder.Path, "logs");
+        var full = string.Concat(Enumerable.Range(1, 3).Select(JournalEntry));
+        var older = string.Concat(Enumerable.Range(1, 2).Select(JournalEntry));
+
+        Directory.CreateDirectory(Path.Combine(logs, "a"));
+        Directory.CreateDirectory(Path.Combine(logs, "b"));
+        await File.WriteAllTextAsync(Path.Combine(logs, "a", "journal.export"), full, TestContext.CancellationToken);
+
+        // Act
+        var run1 = await fixture.RunAsync(["import", logs], null, TestContext.CancellationToken);
+
+        File.Delete(Path.Combine(logs, "a", "journal.export"));
+        await File.WriteAllTextAsync(Path.Combine(logs, "b", "journal.export"), older, TestContext.CancellationToken);
+        fixture.Out.GetStringBuilder().Clear();
+
+        var run2 = await fixture.RunAsync(["import", logs], null, TestContext.CancellationToken);
+        var output = fixture.Out.ToString();
+        var records = (await ReadLogLinesAsync(fixture.Storage, "journal", TestContext.CancellationToken)).OrderBy(record => record.Record.CapturedAt).ToList();
+
+        // Assert
+        Assert.AreEqual(0, run1, "exit code of the first run");
+        Assert.AreEqual(0, run2, "exit code of the second run");
+        Assert.Contains("  contained:         1\n", output, "the older copy is contained");
+        Assert.Contains("\"b/journal.export\": start of \"a/journal.export\"", output, "listed with its container");
+        Assert.AreEqual("entry 1|entry 2|entry 3", string.Join('|', records.Select(record => ((LogLine)record.Record.Data!).Message)), "each entry is stored once");
+    }
+
+    /// <summary>
     /// Writes a syslog file with a year-less line and a journal export into a directory.
     /// </summary>
     /// <param name="directory">The directory</param>
@@ -646,6 +782,62 @@ public class ImportCommandTests
         }
 
         return output.ToArray();
+    }
+
+    /// <summary>
+    /// Returns log content for the test parser.
+    /// </summary>
+    /// <param name="lines">The number of lines</param>
+    /// <returns>The text, starting with <c>LOG</c></returns>
+    private static string Log(int lines)
+    {
+        return string.Concat(Enumerable.Range(1, lines).Select(number => $"LOG line {number}\n"));
+    }
+
+    /// <summary>
+    /// Compresses a text with gzip.
+    /// </summary>
+    /// <param name="text">The text</param>
+    /// <returns>The compressed bytes</returns>
+    private static byte[] Gzip(string text)
+    {
+        using var output = new MemoryStream();
+
+        using (var zip = new System.IO.Compression.GZipStream(output, System.IO.Compression.CompressionMode.Compress, leaveOpen: true))
+        {
+            zip.Write(Encoding.UTF8.GetBytes(text));
+        }
+
+        return output.ToArray();
+    }
+
+    /// <summary>
+    /// Builds an entry of a journal export.
+    /// </summary>
+    /// <param name="number">The number of the entry</param>
+    /// <returns>The entry, ended by an empty line</returns>
+    private static string JournalEntry(int number)
+    {
+        return $"__CURSOR=s=1;i={number}\n__REALTIME_TIMESTAMP={1772368215123456 + (number * 1000000L)}\n_HOSTNAME=web-1\nSYSLOG_IDENTIFIER=sshd\nMESSAGE=entry {number}\n\n";
+    }
+
+    /// <summary>
+    /// Counts the rows a query returns in the database of the backend.
+    /// </summary>
+    /// <param name="storage">The storage directory</param>
+    /// <param name="sql">The query: <c>SELECT count(*) ...</c></param>
+    /// <returns>A task that returns the count</returns>
+    private async Task<long> CountAsync(string storage, string sql)
+    {
+        await using var connection = new SqliteConnection($"Data Source={Path.Combine(storage, StorageLimits.FileName)};Pooling=False");
+
+        await connection.OpenAsync(TestContext.CancellationToken);
+
+        using var command = connection.CreateCommand();
+
+        command.CommandText = sql;
+
+        return (long)(await command.ExecuteScalarAsync(TestContext.CancellationToken))!;
     }
 
     #endregion // Methods

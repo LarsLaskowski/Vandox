@@ -53,6 +53,11 @@ public sealed class FileResult
     public string ContinuedFrom { get; set; } = string.Empty;
 
     /// <summary>
+    /// Gets or sets the display name of the first import of the content this file is the start of; empty when it is not contained.
+    /// </summary>
+    public string ContainedIn { get; set; } = string.Empty;
+
+    /// <summary>
     /// Gets or sets the number of lines of the content before the continuation point.
     /// </summary>
     public long ContinuedAfter { get; set; }
@@ -98,6 +103,7 @@ public sealed class FileResult
                        Skipped = Skipped,
                        ResumedAfter = ResumedAfter,
                        ContinuedFrom = ContinuedFrom,
+                       ContainedIn = ContainedIn,
                        ContinuedAfter = ContinuedAfter,
                        SkippedAtStart = SkippedAtStart,
                        First = First,

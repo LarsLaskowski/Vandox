@@ -25,7 +25,7 @@ readable by the next, whichever language implements it, so the schema below is p
 
 ## Schema
 
-The schema version is stored in `meta.schema_version`; the current version is 6 (step 6 adds `import_files.head_sha256`, `continues_id` and `start_offset` and the index `import_files_head`; step 4 adds `log_lines.host`, `TEXT NOT NULL DEFAULT ''`, so lines stored before it get an empty host; step 5 adds `log_lines.event`, `TEXT NOT NULL DEFAULT ''`, so lines stored before it get an empty event). Times are Unix nanoseconds in `INTEGER` columns.
+The schema version is stored in `meta.schema_version`; the current version is 7 (step 7 adds `import_files.attempt`, `INTEGER NOT NULL DEFAULT 0`, and `import_files.hashes_attempt`, `INTEGER`, and the table `import_line_hashes`, so existing rows get attempt 0 and no line hashes; step 6 adds `import_files.head_sha256`, `continues_id` and `start_offset` and the index `import_files_head`; step 4 adds `log_lines.host`, `TEXT NOT NULL DEFAULT ''`, so lines stored before it get an empty host; step 5 adds `log_lines.event`, `TEXT NOT NULL DEFAULT ''`, so lines stored before it get an empty event). Times are Unix nanoseconds in `INTEGER` columns.
 All tables are `STRICT`.
 
 | Table | Content |
@@ -35,7 +35,8 @@ All tables are `STRICT`.
 | `metrics` | typed rows for metric records: `record_id`, `source`, `name`, `captured_at`, `value`, `unit`, `labels` (JSON object or `NULL`) |
 | `log_lines` | typed rows for log lines: `record_id`, `log`, `program`, `pid`, `priority`, `message`, `truncated`, `host`, `event` |
 | `log_fts` | FTS5 index over `log_lines.message` (external content, tokenizer `unicode61 remove_diacritics 2`) |
-| `import_files` | one row per imported file content: SHA-256 of the decompressed content (unique), size, display name, file name and modification time of the first import, source type, number of records stored, complete flag, start and completion times, the head key (SHA-256 of the first line; `NULL` for rows of versions before 6), the id of the content it continues (no foreign key) and the continuation point in bytes (0 when it is not continued) |
+| `import_files` | one row per imported file content: SHA-256 of the decompressed content (unique), size, display name, file name and modification time of the first import, source type, number of records stored, complete flag, start and completion times, the head key (SHA-256 of the first line; `NULL` for rows of versions before 6), the id of the content it continues (no foreign key) and the continuation point in bytes (0 when it is not continued), the attempt (the number of times an incomplete content was begun; 0 for rows of versions before 7) and the attempt whose line hashes are kept (`hashes_attempt`, `NULL` when the content was completed without line hashes) |
+| `import_line_hashes` | rows of line hashes of an imported content: `file_id`, `attempt`, `first_offset`, `last_offset` and `hashes` (a blob of 16-byte entries, 1 to 4,096, in ascending order of their line ends); the primary key `(file_id, attempt, last_offset)` is its index |
 
 Indexes: a unique index on `records(agent_id, seq)` for origin `agent`; `records(kind, source, captured_at)`;
 `records(kind, captured_at)`; `metrics(source, name, captured_at)`; `import_files(head_sha256, source_type, size)` for complete rows with a head key (`import_files_head`).
@@ -69,11 +70,21 @@ Indexes: a unique index on `records(agent_id, seq)` for origin `agent`; `records
   committed. Any code that writes or deletes `log_lines` (a repair tool, retention) must maintain `log_fts` in the same transaction.
 - **Import batches** carry the import state: in the same transaction as its records, a batch advances the file's `records` counter with
   a compare-and-set on the expected count (and sets the complete flag with the last batch). If the counter does not match, nothing is
-  written and the caller gets a conflict.
+  written and the caller gets a conflict. A batch with an attempt above 0 also requires the file's current attempt; a batch with
+  attempt 0 means no line hashes. Completing a file sets `hashes_attempt` to the batch's attempt (`NULL` for attempt 0) and, in the
+  same transaction, deletes the line-hash rows of every other attempt (all rows for attempt 0).
+- **Line hashes:** adding a row validates it (offsets, 1 to 4,096 hashes of 16 bytes, no more hashes than bytes covered) and inserts it
+  in its own transaction only while the file is incomplete and its current attempt is the row's, otherwise the caller gets a conflict.
+  Beginning an import of an incomplete content raises its attempt by one and deletes, in the same transaction, the line-hash rows of
+  every other attempt of that file, so an incomplete file keeps the rows of one attempt at most.
 - **Import bases:** beginning an import with prefixes (at most 64) picks, in the same transaction, the largest prefix whose content
   is stored complete with the same size and source type, and keeps it as the new row's continued content and continuation point; an
-  existing row is returned unchanged. The lookup of complete contents by head key and source type returns the SHA-256 and size,
+  existing row keeps its continuation. The lookup of complete contents by head key and source type returns the SHA-256 and size,
   largest first, at most 64; rows without a head key are never returned.
+- **Import containment:** beginning an import of a content that has no row first looks for a complete row of the same head key and
+  source type that is larger, using the 64 largest, largest first (the limit applies to the candidates, whether or not they have line hashes). A candidate is joined to its one line-hash row of `hashes_attempt`
+  that spans the content's size; the candidate contains the content when that row holds the first 16 bytes of its SHA-256. Then no
+  row is created and the caller gets the candidate's display name. The lookup runs before the choice of a base.
 
 ## Reading
 

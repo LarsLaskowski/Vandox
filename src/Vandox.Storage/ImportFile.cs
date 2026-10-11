@@ -77,5 +77,16 @@ public sealed class ImportFile
     /// </summary>
     public string ContinuedFrom { get; set; } = string.Empty;
 
+    /// <summary>
+    /// Gets or sets the number of times the import of the content was begun; 0 for a row of an older schema.
+    /// </summary>
+    public long Attempt { get; set; }
+
+    /// <summary>
+    /// Gets or sets the display name of the complete content this content is the start of; empty unless the content is
+    /// contained, in which case no state exists and no other member is set.
+    /// </summary>
+    public string ContainedIn { get; set; } = string.Empty;
+
     #endregion // Properties
 }

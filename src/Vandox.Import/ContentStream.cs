@@ -1,5 +1,7 @@
 using System.Security.Cryptography;
 
+using Vandox.Storage;
+
 namespace Vandox.Import;
 
 /// <summary>
@@ -13,12 +15,18 @@ internal sealed class ContentStream : FilterStream
     private readonly IncrementalHash _hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
     private readonly long _limit;
     private readonly Action<long> _report;
+    private readonly Queue<ImportLineHashes> _queue = new();
     private long _next = ImportLimits.ProgressLines;
     private long _newlines;
     private long _counted;
     private long _skippedNewlines;
     private bool _skipping;
     private byte _last;
+    private byte[] _row = [];
+    private int _rowCount;
+    private int _queuedHashes;
+    private long _rowFirst;
+    private long _rowLast;
 
     #endregion // Fields
 
@@ -51,9 +59,38 @@ internal sealed class ContentStream : FilterStream
     /// </summary>
     internal long Lines => _counted > 0 && _last != (byte)'\n' ? _newlines + 1 : _newlines;
 
+    /// <summary>
+    /// Gets or sets the writer that receives every complete row of line hashes (with <c>FileId</c> and <c>Attempt</c> 0); <c>null</c> keeps no line hashes.
+    /// </summary>
+    internal Func<ImportLineHashes, CancellationToken, Task>? LineHashWriter { get; set; }
+
+    /// <summary>
+    /// Gets the number of line hashes computed and not yet passed to the writer.
+    /// </summary>
+    internal int PendingLineHashes => _queuedHashes + _rowCount;
+
     #endregion // Properties
 
     #region Methods
+
+    /// <summary>
+    /// Passes the queued rows and the partial row of line hashes to the writer, in order.
+    /// </summary>
+    /// <param name="cancellationToken">Cancels the call</param>
+    /// <returns>A task that completes when the rows are written</returns>
+    internal async Task FlushLineHashesAsync(CancellationToken cancellationToken)
+    {
+        await WriteQueuedAsync(cancellationToken).ConfigureAwait(false);
+
+        if (_rowCount == 0 || LineHashWriter is null)
+        {
+            return;
+        }
+
+        var row = TakeRow();
+
+        await LineHashWriter(row, cancellationToken).ConfigureAwait(false);
+    }
 
     /// <summary>
     /// Returns the SHA-256 of what was read.
@@ -102,12 +139,104 @@ internal sealed class ContentStream : FilterStream
 
     #endregion // Methods
 
+    #region Private
+
+    /// <summary>
+    /// Passes the queued complete rows to the writer, in order.
+    /// </summary>
+    /// <param name="cancellationToken">Cancels the call</param>
+    /// <returns>A task that completes when the rows are written</returns>
+    private async Task WriteQueuedAsync(CancellationToken cancellationToken)
+    {
+        while (_queue.Count > 0 && LineHashWriter is { } writer)
+        {
+            var row = _queue.Peek();
+
+            await writer(row, cancellationToken).ConfigureAwait(false);
+            _queue.Dequeue();
+            _queuedHashes -= row.Hashes.Length / StorageLimits.LineHashBytes;
+        }
+    }
+
+    /// <summary>
+    /// Turns the row being filled into a row to write and starts the next one at its last line end.
+    /// </summary>
+    /// <returns>The row, without <c>FileId</c> and <c>Attempt</c></returns>
+    private ImportLineHashes TakeRow()
+    {
+        var row = new ImportLineHashes
+                  {
+                      FirstOffset = _rowFirst,
+                      LastOffset = _rowLast,
+                      Hashes = _row.AsSpan(0, _rowCount * StorageLimits.LineHashBytes).ToArray()
+                  };
+
+        _rowFirst = _rowLast;
+        _rowCount = 0;
+
+        return row;
+    }
+
+    /// <summary>
+    /// Hashes the bytes and keeps the hash after every line feed.
+    /// </summary>
+    /// <param name="data">The bytes read</param>
+    private void HashLines(ReadOnlySpan<byte> data)
+    {
+        var position = 0;
+        Span<byte> current = stackalloc byte[32];
+
+        while (position < data.Length)
+        {
+            var feed = data[position..].IndexOf((byte)'\n');
+
+            if (feed < 0)
+            {
+                _hash.AppendData(data[position..]);
+
+                return;
+            }
+
+            var end = position + feed + 1;
+
+            _hash.AppendData(data[position..end]);
+            _hash.GetCurrentHash(current);
+
+            if (_row.Length == 0)
+            {
+                _row = new byte[StorageLimits.MaxLineHashes * StorageLimits.LineHashBytes];
+            }
+
+            current[..StorageLimits.LineHashBytes].CopyTo(_row.AsSpan(_rowCount * StorageLimits.LineHashBytes));
+            _rowCount++;
+            _rowLast = BytesRead + end;
+
+            if (_rowCount == StorageLimits.MaxLineHashes)
+            {
+                _queue.Enqueue(TakeRow());
+                _queuedHashes += StorageLimits.MaxLineHashes;
+            }
+
+            position = end;
+        }
+    }
+
+    #endregion // Private
+
     #region FilterStream
 
     /// <inheritdoc />
     protected override void Observe(ReadOnlySpan<byte> data)
     {
-        _hash.AppendData(data);
+        if (LineHashWriter is null)
+        {
+            _hash.AppendData(data);
+        }
+        else
+        {
+            HashLines(data);
+        }
+
         BytesRead += data.Length;
 
         if (_skipping)
@@ -135,17 +264,24 @@ internal sealed class ContentStream : FilterStream
     /// <inheritdoc />
     public override int Read(Span<byte> buffer)
     {
+        if (LineHashWriter is not null)
+        {
+            throw new NotSupportedException("the content is read asynchronously while line hashes are kept");
+        }
+
         var allowed = (int)Math.Min(buffer.Length, Math.Max(0, _limit - BytesRead));
 
         return allowed == 0 ? 0 : base.Read(buffer[..allowed]);
     }
 
     /// <inheritdoc />
-    public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+    public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
     {
+        await WriteQueuedAsync(cancellationToken).ConfigureAwait(false);
+
         var allowed = (int)Math.Min(buffer.Length, Math.Max(0, _limit - BytesRead));
 
-        return allowed == 0 ? ValueTask.FromResult(0) : base.ReadAsync(buffer[..allowed], cancellationToken);
+        return allowed == 0 ? 0 : await base.ReadAsync(buffer[..allowed], cancellationToken).ConfigureAwait(false);
     }
 
     /// <inheritdoc />

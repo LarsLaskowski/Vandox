@@ -32,8 +32,7 @@ internal sealed class RecordEmitter : IRecordEmitter
     /// <param name="item">The file being imported</param>
     /// <param name="content">The content the parser reads</param>
     /// <param name="state">The stored import state of the content</param>
-    /// <param name="lineOffset">The lines before the continuation point, added to the line numbers of skipped lines</param>
-    internal RecordEmitter(ImportOptions options, FoundFile item, ContentStream content, ImportFile state, long lineOffset)
+    internal RecordEmitter(ImportOptions options, FoundFile item, ContentStream content, ImportFile state)
     {
         _options = options;
         _store = options.Store!;
@@ -42,10 +41,10 @@ internal sealed class RecordEmitter : IRecordEmitter
         _step = new ImportStep
                 {
                     FileId = state.Id,
-                    Done = state.Records
+                    Done = state.Records,
+                    Attempt = state.Attempt
                 };
         _drop = state.Records;
-        LineOffset = lineOffset;
         _atStart = state.Offset > 0;
     }
 
@@ -61,11 +60,39 @@ internal sealed class RecordEmitter : IRecordEmitter
     /// <summary>
     /// Gets the lines before the continuation point, added to the line numbers of skipped lines.
     /// </summary>
-    internal long LineOffset { get; }
+    internal long LineOffset { get; set; }
 
     #endregion // Properties
 
     #region Methods
+
+    /// <summary>
+    /// Stores one row of line hashes for the file, with the file ID and the attempt of its import state.
+    /// </summary>
+    /// <param name="hashes">The row, with <c>FileId</c> and <c>Attempt</c> not set</param>
+    /// <param name="cancellationToken">Cancels the call</param>
+    /// <returns>A task that completes when the row is stored</returns>
+    internal async Task WriteLineHashesAsync(ImportLineHashes hashes, CancellationToken cancellationToken)
+    {
+        if (Error is not null)
+        {
+            throw Error;
+        }
+
+        hashes.FileId = _step.FileId;
+        hashes.Attempt = _step.Attempt;
+
+        try
+        {
+            await _store.AddLineHashesAsync(hashes, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            Error = exception;
+
+            throw;
+        }
+    }
 
     /// <summary>
     /// Writes the buffered records, completing the file when <paramref name="complete"/> is set. It writes nothing when there
@@ -116,7 +143,8 @@ internal sealed class RecordEmitter : IRecordEmitter
                                  {
                                      FileId = _step.FileId,
                                      Done = _step.Done,
-                                     Complete = complete
+                                     Complete = complete,
+                                     Attempt = _step.Attempt
                                  }
                     };
 

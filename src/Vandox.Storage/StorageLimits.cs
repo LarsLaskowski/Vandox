@@ -15,12 +15,27 @@ public static class StorageLimits
     /// <summary>
     /// The database schema version this build reads and writes.
     /// </summary>
-    public const int SchemaVersion = 6;
+    public const int SchemaVersion = 7;
 
     /// <summary>
     /// The largest number of bases of one content.
     /// </summary>
     public const int MaxImportBases = 64;
+
+    /// <summary>
+    /// The largest number of line hashes one row holds.
+    /// </summary>
+    public const int MaxLineHashes = 4096;
+
+    /// <summary>
+    /// The number of bytes of one line hash.
+    /// </summary>
+    public const int LineHashBytes = 16;
+
+    /// <summary>
+    /// The largest number of complete contents compared when a content is checked for being the start of one.
+    /// </summary>
+    public const int MaxImportContainers = 64;
 
     /// <summary>
     /// The largest number of records a batch holds.

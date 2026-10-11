@@ -58,6 +58,7 @@ internal static class ImportProgressLogger
                    ImportOutcome.Unrecognized => "unrecognized",
                    ImportOutcome.Failed => "failed",
                    ImportOutcome.Continued => "continued",
+                   ImportOutcome.Contained => "contained",
                    _ => "none"
                };
     }

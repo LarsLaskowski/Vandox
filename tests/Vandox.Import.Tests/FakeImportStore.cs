@@ -14,6 +14,7 @@ internal sealed class FakeImportStore : IImportStore
 
     private readonly Dictionary<string, ImportFile> _files = [];
     private readonly Dictionary<string, byte[]> _heads = [];
+    private readonly Dictionary<long, long> _hashesAttempts = [];
     private long _nextId = 1;
 
     #endregion // Fields
@@ -91,6 +92,51 @@ internal sealed class FakeImportStore : IImportStore
     internal List<byte[]> Heads { get; } = [];
 
     /// <summary>
+    /// Gets the rows of line hashes the store holds: those it accepted, less those it deleted when a content was begun again or completed.
+    /// </summary>
+    internal List<ImportLineHashes> LineHashes { get; } = [];
+
+    /// <summary>
+    /// Gets every row of line hashes the store accepted, in order, whether or not it was deleted later.
+    /// </summary>
+    internal List<ImportLineHashes> LineHashWrites { get; } = [];
+
+    /// <summary>
+    /// Gets the number of calls of <see cref="AddLineHashesAsync"/>.
+    /// </summary>
+    internal int LineHashCalls { get; private set; }
+
+    /// <summary>
+    /// Gets or sets the exception <see cref="AddLineHashesAsync"/> throws, starting with the call at <see cref="FailFromLineHashCall"/>.
+    /// </summary>
+    internal Exception? LineHashFailure { get; set; }
+
+    /// <summary>
+    /// Gets or sets the number of the first call (from 1) of <see cref="AddLineHashesAsync"/> that fails with <see cref="LineHashFailure"/>.
+    /// </summary>
+    internal int FailFromLineHashCall { get; set; } = 1;
+
+    /// <summary>
+    /// Gets or sets a value indicating whether <see cref="LineHashFailure"/> is thrown once and then cleared.
+    /// </summary>
+    internal bool LineHashFailOnce { get; set; }
+
+    /// <summary>
+    /// Gets or sets an action that runs at the start of every <see cref="AddLineHashesAsync"/> call, with the number of calls so far.
+    /// </summary>
+    internal Action<int>? OnLineHashes { get; set; }
+
+    /// <summary>
+    /// Gets or sets the object <see cref="BeginImportAsync"/> returns instead of the state, after it recorded the call.
+    /// </summary>
+    internal ImportFile? ScriptedBeginResult { get; set; }
+
+    /// <summary>
+    /// Gets the file ID of every call that carried one (batches and line hashes), in order, whether or not the call was accepted.
+    /// </summary>
+    internal List<long> FileIdCalls { get; } = [];
+
+    /// <summary>
     /// Gets the states in the order they were created.
     /// </summary>
     internal IEnumerable<ImportFile> States => _files.Values.OrderBy(file => file.Id);
@@ -124,6 +170,25 @@ internal sealed class FakeImportStore : IImportStore
         _heads[key] = head;
 
         return state;
+    }
+
+    /// <summary>
+    /// Tells whether a row of line hashes holds the first 16 bytes of a SHA-256 at a position that is a multiple of 16.
+    /// </summary>
+    /// <param name="hashes">The hashes of the row</param>
+    /// <param name="sha256">The SHA-256</param>
+    /// <returns><c>true</c> when one hash equals the first 16 bytes of the SHA-256</returns>
+    private static bool Holds(byte[] hashes, byte[] sha256)
+    {
+        for (var offset = 0; offset + StorageLimits.LineHashBytes <= hashes.Length; offset += StorageLimits.LineHashBytes)
+        {
+            if (hashes.AsSpan(offset, StorageLimits.LineHashBytes).SequenceEqual(sha256.AsSpan(0, StorageLimits.LineHashBytes)))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -185,6 +250,57 @@ internal sealed class FakeImportStore : IImportStore
         return created;
     }
 
+    /// <summary>
+    /// Returns the state as <see cref="BeginImportAsync"/> reports it.
+    /// </summary>
+    /// <param name="existing">The stored state</param>
+    /// <returns>A copy of the state</returns>
+    private ImportFile Copy(ImportFile existing)
+    {
+        return new ImportFile
+               {
+                   Id = existing.Id,
+                   Sha256 = existing.Sha256,
+                   Size = existing.Size,
+                   Name = existing.Name,
+                   FileName = existing.FileName,
+                   ModTime = existing.ModTime,
+                   SourceType = ReportedSourceType ?? existing.SourceType,
+                   Records = existing.Records,
+                   Complete = existing.Complete,
+                   ContinuesId = existing.ContinuesId,
+                   Offset = existing.Offset,
+                   ContinuedFrom = existing.ContinuedFrom,
+                   Attempt = existing.Attempt
+               };
+    }
+
+    /// <summary>
+    /// Applies the store's containment rule: the largest of at most 64 complete states of the head key and source type that are larger than the content, whose line hashes of the completing attempt hold the SHA-256 of the content.
+    /// </summary>
+    /// <param name="start">The import start</param>
+    /// <returns>The state of the container, or <c>null</c> when the content is not the start of one</returns>
+    private ImportFile? FindContainer(ImportFileStart start)
+    {
+        var candidates = _files.Where(pair => pair.Value.Complete && pair.Value.SourceType == start.SourceType && pair.Value.Size > start.Size && _heads.TryGetValue(pair.Key, out var head) && head.AsSpan().SequenceEqual(start.HeadSha256))
+                               .Select(pair => pair.Value)
+                               .OrderByDescending(file => file.Size)
+                               .ThenBy(file => file.Id)
+                               .Take(StorageLimits.MaxImportContainers);
+
+        foreach (var candidate in candidates)
+        {
+            if (_hashesAttempts.TryGetValue(candidate.Id, out var attempt)
+                && LineHashes.FirstOrDefault(row => row.FileId == candidate.Id && row.Attempt == attempt && row.FirstOffset < start.Size && row.LastOffset >= start.Size) is { } spanning
+                && Holds(spanning.Hashes, start.Sha256))
+            {
+                return candidate;
+            }
+        }
+
+        return null;
+    }
+
     #endregion // Methods
 
     #region IRecordWriter
@@ -196,6 +312,11 @@ internal sealed class FakeImportStore : IImportStore
         if (cancellationToken.IsCancellationRequested)
         {
             return Task.FromCanceled<WriteResult>(cancellationToken);
+        }
+
+        if (batch.Import is not null)
+        {
+            FileIdCalls.Add(batch.Import.FileId);
         }
 
         if (WriteFailure is not null && Batches.Count + 1 >= FailFromBatch)
@@ -212,13 +333,26 @@ internal sealed class FakeImportStore : IImportStore
 
         var file = _files.Values.First(candidate => candidate.Id == batch.Import!.FileId);
 
-        if (file.Records != batch.Import!.Done || file.Complete)
+        if (file.Records != batch.Import!.Done || file.Complete || (batch.Import.Attempt > 0 && batch.Import.Attempt != file.Attempt))
         {
-            return Task.FromException<WriteResult>(new ImportConflictException("store: import state changed"));
+            return Task.FromException<WriteResult>(new ImportConflictException($"store: import state changed: file {file.Id} does not have {batch.Import.Done} records stored, is complete or was begun again"));
         }
 
         file.Records += batch.Records.Count;
         file.Complete = batch.Import.Complete;
+
+        if (batch.Import.Complete)
+        {
+            _hashesAttempts.Remove(file.Id);
+
+            if (batch.Import.Attempt > 0)
+            {
+                _hashesAttempts[file.Id] = batch.Import.Attempt;
+            }
+
+            LineHashes.RemoveAll(row => row.FileId == file.Id && row.Attempt != batch.Import.Attempt);
+        }
+
         Batches.Add(batch);
         Records.AddRange(batch.Records);
         AfterBatch?.Invoke(Batches.Count);
@@ -247,23 +381,79 @@ internal sealed class FakeImportStore : IImportStore
         Prefixes.Add(start.Prefixes);
         Heads.Add(start.HeadSha256);
 
+        if (ScriptedBeginResult is not null)
+        {
+            return Task.FromResult(ScriptedBeginResult);
+        }
+
+        var known = _files.ContainsKey(Convert.ToHexString(start.Sha256));
+        var container = known ? null : FindContainer(start);
+
+        if (container is not null)
+        {
+            return Task.FromResult(new ImportFile
+                                   {
+                                       ContainedIn = container.Name
+                                   });
+        }
+
         var existing = GetOrCreate(start);
 
-        return Task.FromResult(new ImportFile
-                               {
-                                   Id = existing.Id,
-                                   Sha256 = existing.Sha256,
-                                   Size = existing.Size,
-                                   Name = existing.Name,
-                                   FileName = existing.FileName,
-                                   ModTime = existing.ModTime,
-                                   SourceType = ReportedSourceType ?? existing.SourceType,
-                                   Records = existing.Records,
-                                   Complete = existing.Complete,
-                                   ContinuesId = existing.ContinuesId,
-                                   Offset = existing.Offset,
-                                   ContinuedFrom = existing.ContinuedFrom
-                               });
+        if (existing.Complete)
+        {
+            return Task.FromResult(Copy(existing));
+        }
+
+        existing.Attempt++;
+        LineHashes.RemoveAll(row => row.FileId == existing.Id && row.Attempt != existing.Attempt);
+
+        return Task.FromResult(Copy(existing));
+    }
+
+    /// <inheritdoc />
+    public Task AddLineHashesAsync(ImportLineHashes hashes, CancellationToken cancellationToken)
+    {
+        LineHashCalls++;
+        FileIdCalls.Add(hashes.FileId);
+        OnLineHashes?.Invoke(LineHashCalls);
+
+        if (cancellationToken.IsCancellationRequested)
+        {
+            return Task.FromCanceled(cancellationToken);
+        }
+
+        if (LineHashFailure is not null && LineHashCalls >= FailFromLineHashCall)
+        {
+            var failure = LineHashFailure;
+
+            if (LineHashFailOnce)
+            {
+                LineHashFailure = null;
+            }
+
+            return Task.FromException(failure);
+        }
+
+        var file = _files.Values.FirstOrDefault(candidate => candidate.Id == hashes.FileId);
+
+        if (file is null || file.Complete || file.Attempt != hashes.Attempt)
+        {
+            return Task.FromException(new ImportConflictException($"store: import state changed: file {hashes.FileId} is complete, unknown or was begun again"));
+        }
+
+        var row = new ImportLineHashes
+                  {
+                      FileId = hashes.FileId,
+                      Attempt = hashes.Attempt,
+                      FirstOffset = hashes.FirstOffset,
+                      LastOffset = hashes.LastOffset,
+                      Hashes = [.. hashes.Hashes]
+                  };
+
+        LineHashes.Add(row);
+        LineHashWrites.Add(row);
+
+        return Task.CompletedTask;
     }
 
     /// <inheritdoc />

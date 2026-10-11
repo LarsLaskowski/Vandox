@@ -369,6 +369,27 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, II
         }
     }
 
+    /// <inheritdoc />
+    public async Task AddLineHashesAsync(ImportLineHashes hashes, CancellationToken cancellationToken)
+    {
+        ImportRepository.ValidateLineHashes(hashes);
+
+        await _writeLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+
+        try
+        {
+            await ImportRepository.AddLineHashesAsync(_writer, hashes, cancellationToken).ConfigureAwait(false);
+        }
+        catch (SqliteException exception)
+        {
+            throw new StoreException($"store: adding line hashes: {exception.Message}", exception);
+        }
+        finally
+        {
+            _writeLock.Release();
+        }
+    }
+
     #endregion // IImportTracker
 
     #region IAsyncDisposable

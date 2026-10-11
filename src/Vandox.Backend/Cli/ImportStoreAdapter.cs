@@ -51,5 +51,11 @@ internal sealed class ImportStoreAdapter : IImportStore
         return _store.FindImportBasesAsync(headSha256, sourceType, cancellationToken);
     }
 
+    /// <inheritdoc />
+    public Task AddLineHashesAsync(ImportLineHashes hashes, CancellationToken cancellationToken)
+    {
+        return _store.AddLineHashesAsync(hashes, cancellationToken);
+    }
+
     #endregion // IImportTracker
 }

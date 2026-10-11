@@ -357,11 +357,11 @@ public class ImporterDirectoryTests
     }
 
     /// <summary>
-    /// With the longer file first in input order both files are imported as a whole, which is the documented limit.
+    /// With the longer file first in input order the shorter file is recognized as the start of the longer one: it is contained, and the shared lines are stored once.
     /// </summary>
     /// <returns>A task that completes when the test is done</returns>
     [TestMethod]
-    public async Task ImporterImportsBothFilesAsAWholeWhenTheLongerFileComesFirst()
+    public async Task ImporterRecognizesTheShorterFileWhenTheLongerFileComesFirst()
     {
         // Arrange
         using var harness = new ImportHarness();
@@ -373,8 +373,10 @@ public class ImporterDirectoryTests
         var run = await harness.RunAsync(TestContext.CancellationToken);
 
         // Assert
-        Assert.AreEqual(2, run.Summary.Count(ImportOutcome.Imported), "both files are imported as a whole");
-        Assert.HasCount(8, harness.Store.Records, "the shared lines are stored twice");
+        Assert.AreEqual(1, run.Summary.Count(ImportOutcome.Imported), "the longer file is imported");
+        Assert.AreEqual(1, run.Summary.Count(ImportOutcome.Contained), "the shorter file is contained");
+        Assert.AreEqual("2026-09/syslog", run.Summary.Files[1].ContainedIn, "in the longer file");
+        Assert.HasCount(5, harness.Store.Records, "the shared lines are stored once");
     }
 
     /// <summary>

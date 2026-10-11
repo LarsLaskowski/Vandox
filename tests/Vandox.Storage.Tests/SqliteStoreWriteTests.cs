@@ -244,6 +244,7 @@ public class SqliteStoreWriteTests
     [DataRow("import with agent", "store: invalid batch: an import batch has no agent ID")]
     [DataRow("import file ID", "store: invalid batch: import file ID must be positive")]
     [DataRow("import done negative", "store: invalid batch: import done must not be negative")]
+    [DataRow("import attempt negative", "store: invalid batch: import attempt must not be negative")]
     [DataRow("import record from agent", "store: invalid batch: records[0]: origin must be import")]
     [DataRow("import record invalid", "store: invalid batch: records[0]: model: data.name: required")]
     public async Task SqliteStoreWriteBatchRefusesInvalidBatch(string what, string message)
@@ -388,6 +389,10 @@ public class SqliteStoreWriteTests
 
             case "import done negative":
                 batch.Import.Done = -1;
+                break;
+
+            case "import attempt negative":
+                batch.Import.Attempt = -1;
                 break;
 
             case "import record from agent":

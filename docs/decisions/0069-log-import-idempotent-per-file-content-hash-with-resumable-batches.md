@@ -1,9 +1,9 @@
-# 0069: The log import is idempotent per file content: SHA-256 of the decompressed content, two passes, batches that resume by count, a grown file continued after its imported start
+# 0069: The log import is idempotent per file content: SHA-256 of the decompressed content, two passes, batches that resume by count, a grown file continued after its imported start, an older copy recognized by the line-end hashes of the imported one
 
 - **Status:** Accepted
 - **Date:** 2026-10-11
 - **Area:** Log import
-- **Source:** Issue #15, issue #131
+- **Source:** Issue #15, issue #131, issue #187
 - **Supersedes:** —
 
 ## Context
@@ -116,8 +116,42 @@ whole-file parse may never have had; verified bytes are not enough):
   while written ends in a cut entry, exactly the ambiguous region. A raw search for an empty line is not enough.
 
 The earlier content can also be a file of the same run, earlier in input order (two copies of `/var/log` in one
-input). And the older copy may come after the newer one (in a later run or later in the input); recognizing that a
-content is the start of one imported before would need prefix hashes of every stored content at arbitrary sizes.
+input). And the older copy may come after the newer one, in a later run or later in the input (issue #187). Pass 1
+compares a content only with smaller ones, so the older copy gets its own hash and all its lines are stored a second
+time. To recognize that a content is the start of one imported before, the store needs the hash of that stored
+content at the older copy's size. That size can be any line end, and the stored content's bytes are gone by then. The
+hashes have to be written while the content is imported, and memory must stay flat. A content can also change between
+the two passes (it is then not completed), and two runs can import the same content at once.
+
+How an older copy imported after a newer one is recognized:
+
+- H1. **Checkpoint hashes at intervals, and import the older copy's rest after the last checkpoint it reaches** —
+  32 bytes per interval; but the lines between that checkpoint and the end of the older copy are stored twice and
+  never compared.
+- H2. **One indexed table row per line end with the prefix hash** — one lookup by hash, no candidate limit; but table
+  and index cost about as much per line as the stored line itself.
+- H3. **The first 16 bytes of the SHA-256 of the content up to every line end, in rows of 4,096 per stored content,
+  written in pass 2; a lookup by head key, source type and the row that spans the older copy's size** — 16 bytes
+  per line and one hash finalization per line, exact up to the 128-bit truncation; an older copy that ends inside a
+  line is not recognized.
+- H4. **Read the newer copy again** — possible only within one run, and a third read.
+
+Which line hashes count for a content (its pass 2 can read changed bytes, fail, or race another run):
+
+- W1. **Keep the first rows written** — a content that changed between the passes leaves rows of other bytes, and a
+  later complete import would keep them, so an older copy could be recognized in a content that does not hold its
+  lines.
+- W2. **Tag every row with the import attempt that wrote it**; beginning a new attempt and the completing batch both
+  delete the rows of every other attempt, and rows and batches are accepted only from the content's current attempt
+  while it is incomplete. Deleting only on completion was rejected: a content that fails in pass 2 on every run never
+  completes and would gain one set of rows per run.
+
+What the recognized older copy leaves in the store:
+
+- S1. **A complete state without records** — reported as "already imported" from the next run on, and a base for
+  later contents; but it needs a marker of its container and a flag to report the recognition once.
+- S2. **No state** — recognized again, and reported as contained, on every run; no state can disagree with its
+  container, and its container serves as the base for anything that starts with it.
 
 ## Decision
 
@@ -133,9 +167,12 @@ complexity and its weak point at a cut entry): only the part from the beginning 
 content ends is parsed and stored, the whole content is still hashed in both passes, and the continuation point is
 stored with the content's state, so a resume uses the same one. The new part is parsed with the file name and
 modification time of the continued content's own first import (γ applied to that content), not those of the earlier
-content: the year of its year-less times is anchored on the file it comes from. The rules and their limits are in
+content: the year of its year-less times is anchored on the file it comes from. A file whose content is the start of a completely imported content of the same source type and
+head key, ending at one of its line ends, is recognized as contained (H3, W2, S2), for every parser: nothing of it is
+parsed or stored and the summary names its container. The rules and their limits are in
 [Log import](../areas/log-import.md), *Repeatable import*; the table that tracks the files is part of schema
-version 3 (0077), the head key and the continuation point of version 6 ([Storage](../areas/storage.md)).
+version 3 (0077), the head key and the continuation point of version 6, the line hashes and attempts of version 7
+([Storage](../areas/storage.md)).
 
 ## Consequences
 
@@ -144,10 +181,28 @@ version 3 (0077), the head key and the continuation point of version 6 ([Storage
 - A file that grew since its import stores only its new lines; the summary lists it as continued, naming the
   earlier import and the line after which it continued. Every recognized file costs one more indexed query in pass 1
   and up to 64 hash snapshots.
-- Only the newer-after-older order is recognized. An older copy imported after a newer one (in a later run, or later
-  in the same input) is imported as a whole, storing its lines twice; so are contents imported before schema
-  version 6 (they have no head key) and an earlier content that ends without any line feed. A follow-up issue covers
-  the older-after-newer order.
+- Contents imported before schema version 6 (they have no head key) and an earlier content that ends without any
+  line feed are never continued.
+- An older copy imported after a newer one stores nothing (H3). It is not recognized, and is imported as a whole,
+  when it ends inside a line, when its container was imported before schema version 7 (no line hashes, which a
+  re-import cannot add), or when the container is not among the 64 largest complete contents with its head key.
+  H1 was rejected because it stores lines twice, H2 for its size, H4 because it covers only one run.
+- Every imported content costs 16 bytes per line in `import_line_hashes`, plus one row per 4,096 lines, and pass 2
+  computes one hash per line. Pass 1 is unchanged. The cost arises even for lines that store no record, so a
+  decompression bomb of nothing but line feeds fills the storage directory too, until the operator stops it. A
+  content that never completes keeps the rows of its latest attempt only.
+- The decision to leave a file out rests on 128 bits of SHA-256 over its whole content. Someone who controls both
+  contents completely needs about 2^64 work for a false match; against a given content it is 2^128.
+- A contained file is not parsed, so F1 does not apply and a journal export is recognized too. Its lines are present
+  as its container's parse stored them, with the container's file name, modification time and `log` name, and with
+  an entry that was open at the older copy's end stored with its later lines. This is the same as for a content
+  already imported under another name. A file planted before a real log with exactly that log's bytes would hold the
+  real lines under its own name, as in the continuation case.
+- A contained file keeps no state (S2, rejecting S1's extra marker), so every run looks it up again. W1 was rejected
+  because a content that changed in pass 2 could leave hashes of bytes it does not hold. Under W2 a line-hash write
+  or batch of a run whose attempt was superseded by a later run, or after another run completed the content, fails
+  with a conflict: of two concurrent imports of one content, the one that began earlier fails and the later one
+  carries on.
 - A journal export that grew is imported as a whole, its earlier entries stored again (F1). Every parser, including
   one a hook supplies, must declare whether it is framed by lines only; declaring it for a format with
   length-framed fields would let input be read as forged records, and the second pass refuses a stored continuation

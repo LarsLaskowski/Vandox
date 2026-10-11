@@ -88,6 +88,21 @@ internal static class SchemaMigrator
                                                               "ALTER TABLE import_files ADD COLUMN continues_id INTEGER",
                                                               "ALTER TABLE import_files ADD COLUMN start_offset INTEGER NOT NULL DEFAULT 0 CHECK (start_offset >= 0)",
                                                               "CREATE INDEX import_files_head ON import_files(head_sha256, source_type, size) WHERE complete = 1 AND head_sha256 IS NOT NULL"
+                                                          ]),
+                                                      new(7,
+                                                          [
+                                                              "ALTER TABLE import_files ADD COLUMN attempt INTEGER NOT NULL DEFAULT 0 CHECK (attempt >= 0)",
+                                                              "ALTER TABLE import_files ADD COLUMN hashes_attempt INTEGER",
+                                                              """
+                                                              CREATE TABLE import_line_hashes (
+                                                                file_id INTEGER NOT NULL,
+                                                                attempt INTEGER NOT NULL CHECK (attempt > 0),
+                                                                first_offset INTEGER NOT NULL CHECK (first_offset >= 0),
+                                                                last_offset INTEGER NOT NULL CHECK (last_offset > first_offset),
+                                                                hashes BLOB NOT NULL CHECK (length(hashes) BETWEEN 16 AND 65536 AND length(hashes) % 16 = 0),
+                                                                PRIMARY KEY (file_id, attempt, last_offset)
+                                                              ) STRICT
+                                                              """
                                                           ])
                                                   ];
 
