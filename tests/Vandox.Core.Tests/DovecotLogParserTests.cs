@@ -44,6 +44,32 @@ public class DovecotLogParserTests
     #region Methods
 
     /// <summary>
+    /// The Dovecot log file is framed by lines only, so an import may continue it at the start of a line.
+    /// </summary>
+    [TestMethod]
+    public void DovecotLogParserIsLineFramed()
+    {
+        // Act
+        var parser = new DovecotLogParser(DateTimeZone.Utc);
+
+        // Assert
+        Assert.IsTrue(parser.LineFramed, "line framed");
+    }
+
+    /// <summary>
+    /// The type of the parser is <c>dovecot</c>.
+    /// </summary>
+    [TestMethod]
+    public void DovecotLogParserTypeIsDovecot()
+    {
+        // Act
+        var parser = new DovecotLogParser(DateTimeZone.Utc);
+
+        // Assert
+        Assert.AreEqual("dovecot", parser.Type, "type");
+    }
+
+    /// <summary>
     /// A file is claimed by content when its first line is a Dovecot line, under any name that is no syslog name, also when the head ends inside that line after the marker.
     /// </summary>
     /// <param name="name">The file name</param>
