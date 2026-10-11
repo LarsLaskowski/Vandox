@@ -2,6 +2,8 @@ using Vandox.Core.Model;
 
 namespace Vandox.Core.LogParsing;
 
+#pragma warning disable RH2003, S1144
+
 /// <summary>
 /// Classifies the lines of Postfix and Dovecot that the journal and syslog parsers read: the severity marker sets the
 /// priority, fatal and panic lines and failed or lost MySQL connections get an event.
@@ -25,6 +27,7 @@ internal static class MailLineClassifier
     private const string DriverSqlPoolOpen = "sqlpool(";
     private const int MaxDriverSegments = 3;
     private const byte PriorityDebug = 7;
+    private const byte PriorityInfo = 6;
     private const byte PriorityWarning = 4;
     private const byte PriorityError = 3;
     private const byte PriorityCritical = 2;
@@ -50,6 +53,15 @@ internal static class MailLineClassifier
                                                                                                ("Fatal: ", PriorityCritical, SeverityFatal),
                                                                                                ("Panic: ", PriorityCritical, SeverityPanic)
                                                                                            ];
+
+    private static readonly (string Text, byte Priority, int Severity)[] _dovecotFileMarkers = [
+                                                                                                   ("Debug: ", PriorityDebug, SeverityOther),
+                                                                                                   ("Info: ", PriorityInfo, SeverityOther),
+                                                                                                   ("Warning: ", PriorityWarning, SeverityOther),
+                                                                                                   ("Error: ", PriorityError, SeverityOther),
+                                                                                                   ("Fatal: ", PriorityCritical, SeverityFatal),
+                                                                                                   ("Panic: ", PriorityCritical, SeverityPanic)
+                                                                                               ];
 
     private static readonly string[] _clientErrors = [
                                                          "Can't connect to local MySQL server",
@@ -105,13 +117,32 @@ internal static class MailLineClassifier
         {
             var found = postfix
                             ? FindPostfixMarker(payload.Message, out var marker)
-                            : FindDovecotMarker(payload.Message, out marker);
+                            : FindDovecotMarker(payload.Message, _dovecotMarkers, out marker);
 
             if (found)
             {
                 ApplyMarker(payload, marker, postfix);
             }
         }
+    }
+
+    /// <summary>
+    /// Determines whether a message of Dovecot's own log file begins with a severity marker at Dovecot's position.
+    /// </summary>
+    /// <param name="message">The message</param>
+    /// <returns><c>true</c> when it begins with a marker or has one after its first segment</returns>
+    internal static bool HasDovecotFileMarker(string message)
+    {
+        throw new NotImplementedException();
+    }
+
+    /// <summary>
+    /// Sets priority and event of a line of Dovecot's own log file from its severity marker; other lines stay unchanged.
+    /// </summary>
+    /// <param name="payload">The line</param>
+    internal static void ClassifyDovecotFileLine(LogLine payload)
+    {
+        throw new NotImplementedException();
     }
 
     /// <summary>
@@ -160,11 +191,12 @@ internal static class MailLineClassifier
     /// Finds the Dovecot severity marker at the start of a message or after its first segment.
     /// </summary>
     /// <param name="message">The message</param>
+    /// <param name="markers">The markers of the family</param>
     /// <param name="marker">Receives the marker</param>
     /// <returns><c>true</c> when the message carries a marker at one of the two positions</returns>
-    private static bool FindDovecotMarker(string message, out (byte Priority, int Severity, int TextStart, int SegmentEnd) marker)
+    private static bool FindDovecotMarker(string message, (string Text, byte Priority, int Severity)[] markers, out (byte Priority, int Severity, int TextStart, int SegmentEnd) marker)
     {
-        if (TryMarker(message, 0, -1, _dovecotMarkers, out marker))
+        if (TryMarker(message, 0, -1, markers, out marker))
         {
             return true;
         }
@@ -173,7 +205,7 @@ internal static class MailLineClassifier
 
         if (end > 0 && message.AsSpan(0, end).IndexOf(' ') < 0)
         {
-            return TryMarker(message, end + Separator.Length, end, _dovecotMarkers, out marker);
+            return TryMarker(message, end + Separator.Length, end, markers, out marker);
         }
 
         return false;
