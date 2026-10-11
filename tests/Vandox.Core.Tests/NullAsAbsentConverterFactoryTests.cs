@@ -216,9 +216,9 @@ public class NullAsAbsentConverterFactoryTests
         var processJson = PayloadRegistry.Serialize(process);
 
         // Assert
-        Assert.AreEqual("""{"name":"cpu","value":1.5,"unit":"","labels":{"device":"sda1","mount":""},"Kind":"metric"}""", metricJson, "metric");
-        Assert.AreEqual("""{"complete":true,"states":[{"proto":"tcp","state":"","count":3}],"remotes":[{"addr":"2001:db8::1","count":4}],"listeners":[{"proto":"tcp","local":"10.0.0.1:80","command":""}],"Kind":"connection_snapshot"}""", snapshotJson, "connection snapshot");
-        Assert.AreEqual("""{"complete":true,"total":7,"processes":[{"pid":1,"user":"","command":"init","cmdline":"","state":"","started_at":"2026-03-01T08:00:00+00:00","cpu_percent":0,"rss_bytes":0,"pss_bytes":5,"oom_score_adj":-3}],"Kind":"process_snapshot"}""", processJson, "process snapshot");
+        Assert.AreEqual("""{"name":"cpu","value":1.5,"unit":"","labels":{"device":"sda1","mount":""}}""", metricJson, "metric");
+        Assert.AreEqual("""{"complete":true,"states":[{"proto":"tcp","state":"","count":3}],"remotes":[{"addr":"2001:db8::1","count":4}],"listeners":[{"proto":"tcp","local":"10.0.0.1:80","command":""}]}""", snapshotJson, "connection snapshot");
+        Assert.AreEqual("""{"complete":true,"total":7,"processes":[{"pid":1,"user":"","command":"init","cmdline":"","state":"","started_at":"2026-03-01T08:00:00+00:00","cpu_percent":0,"rss_bytes":0,"pss_bytes":5,"oom_score_adj":-3}]}""", processJson, "process snapshot");
     }
 
     /// <summary>
