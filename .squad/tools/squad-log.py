@@ -5,8 +5,9 @@ each role cost over the run.
 The orchestrator is the only writer of `log.md`; it records what the members report. This script keeps the
 mechanics out of the orchestrator's hands:
 
-- the row is `| <date> | <step> | <member> | <result> |`, appended after the last line, which gets its line
-  ending first if it lacks one;
+- the row is `| <date> <time> | <step> | <member> | <result> |` (`2026-10-11 13:05`, UTC), appended after the
+  last line, which gets its line ending first if it lacks one; rows of older records that carry only the date
+  are still read;
 - the line ending follows the file (CRLF when the file uses it), so rows never end up with mixed endings;
 - a `|` in a cell is written as `\\|`, a line break in the result as `<br>` (a Markdown table cell has one line);
 - a control character (Unicode categories Cc, Cf, Zl, Zp other than tab and line break) is written as its
@@ -21,9 +22,11 @@ mechanics out of the orchestrator's hands:
 - a row whose trailer is wrong (a launch logged with made-up numbers before its notification arrived) is
   corrected with `--replace-last MEMBER` and the same options: the trailer of that member's last row is
   replaced, so the launch is still counted once;
-- the metrics are what a launch really cost: `--tokens 0` (a launch always uses tokens) and negative numbers
-  are refused, so a placeholder cannot be logged by accident. A row for a launch whose notification has not
-  arrived yet is written without any metric option and completed with `--amend-last`.
+- the metrics are what a launch really cost: fewer than 1,000 tokens (every launch loads its agent file and
+  instructions first, so `--tokens 0` or `--tokens 1` can only be a placeholder) and negative numbers are
+  refused, so a placeholder cannot be logged by accident. A row for a launch whose notification has not
+  arrived yet is written without any metric option and completed with `--amend-last` — the only way to add
+  the numbers later.
 
 Usage, from anywhere inside the repository:
     python3 .squad/tools/squad-log.py <work folder> <step> <member> <result> [--agent squad-lead
@@ -38,7 +41,10 @@ Usage, from anywhere inside the repository:
 folders that exist there, never used as a path, so no argument reaches the file system; `--agent` is matched
 against the files under `.claude/agents/` the same way. `<result>` may contain line breaks.
 `--summary` prints a Markdown table per member (launches, tokens, tool uses, seconds) with a total row, for
-the "Squad working record" comment and the wrap-up report. Exit code 0 when the row was written, amended or
+the "Squad working record" comment and the wrap-up report, followed by an **Orchestrator** table once two rows
+carry a time of day: the wall time from the first to the last such row, the part of it no launch trailer
+covers (an upper bound for the orchestrator's own work and the waiting between launches) and the number of
+gate runs (Orchestrator rows of step 7). Exit code 0 when the row was written, amended or
 the summary printed, 1 when the folder has no `log.md`, the agent file is unknown or no row can be amended or
 replaced.
 """
@@ -54,8 +60,10 @@ CONTROL_CATEGORIES = {"Cc", "Cf", "Zl", "Zp"}
 KEEP = {"\t", "\n", "\r"}
 TRAILER = re.compile(r"\((?P<launch>[\w.-]+/[\w-]+) · (?P<tokens>[\d,]+) tokens · (?P<tools>\d+) tool uses · "
                      r"(?P<seconds>\d+) s\)\s*$")
-ROW = re.compile(r"^\| (?P<date>\d{4}-\d{2}-\d{2}) \| (?P<step>(?:[^|\\]|\\\|)*) \| (?P<member>(?:[^|\\]|\\\|)*) \| "
+STAMP = r"\d{4}-\d{2}-\d{2}(?: \d{2}:\d{2})?"
+ROW = re.compile(rf"^\| (?P<date>{STAMP}) \| (?P<step>(?:[^|\\]|\\\|)*) \| (?P<member>(?:[^|\\]|\\\|)*) \| "
                  r"(?P<result>.*) \|\s*$")
+MIN_TOKENS = 1000
 FRONT_MATTER_KEY = re.compile(r"^(model|effort):\s*(\S+)\s*$", re.M)
 
 
@@ -143,7 +151,7 @@ def append_row(path, step, member, result, today=None, launch=None):
     with open(path, "rb") as handle:
         data = handle.read()
     eol = b"\r\n" if b"\r\n" in data else b"\n"
-    date = today or datetime.date.today().isoformat()
+    date = today or datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%d %H:%M")
     text = result if launch is None else f"{result} {trailer(*launch)}"
     row = f"| {date} | {cell(step)} | {cell(member)} | {cell(text)} |".encode()
     if data and not data.endswith((b"\n", b"\r\n")):
@@ -154,21 +162,37 @@ def append_row(path, step, member, result, today=None, launch=None):
 
 
 def parse_rows(text):
-    """(member, result) of every `| date | step | member | result |` row; the title may contain escaped pipes."""
+    """(stamp, step, member, result) of every `| date [time] | step | member | result |` row; the title may contain
+    escaped pipes."""
     rows = []
     for line in text.splitlines():
         cells = [c.strip() for c in re.split(r"(?<!\\)\|", line.strip())]
-        if len(cells) >= 6 and not cells[0] and not cells[-1] and re.fullmatch(r"\d{4}-\d{2}-\d{2}", cells[1]):
-            rows.append((cells[3], "|".join(cells[4:-1])))
+        if len(cells) >= 6 and not cells[0] and not cells[-1] and re.fullmatch(STAMP, cells[1]):
+            rows.append((cells[1], cells[2], cells[3], "|".join(cells[4:-1])))
     return rows
 
 
+def orchestrator(rows):
+    """Markdown table: wall time from the first to the last row with a time of day, the part of it the launch
+    trailers do not cover, and the gate runs (Orchestrator rows of step 7); None with fewer than two timed rows."""
+    times = [datetime.datetime.strptime(stamp, "%Y-%m-%d %H:%M") for stamp, _, _, _ in rows if " " in stamp]
+    if len(times) < 2:
+        return None
+    wall = int((max(times) - min(times)).total_seconds())
+    launched = sum(int(match.group("seconds")) for _, _, _, result in rows if (match := TRAILER.search(result)))
+    gates = sum(1 for _, step, member, _ in rows if member == "Orchestrator" and re.match(r"7\b", step))
+    return "\n".join(["| Member | Wall time (s) | Not covered by launches (s) | Gate runs |",
+                      "| ------ | ------------- | --------------------------- | --------- |",
+                      f"| Orchestrator | {wall:,} | {max(wall - launched, 0):,} | {gates} |"])
+
+
 def summary(path):
-    """Markdown table: launches, tokens, tool uses and seconds per member (and model/effort), with a total."""
+    """Markdown table: launches, tokens, tool uses and seconds per member (and model/effort), with a total; then
+    the orchestrator's table when the rows carry a time of day."""
     with open(path, encoding="utf-8-sig") as handle:
         rows = parse_rows(handle.read())
     per_member = {}
-    for member, result in rows:
+    for _, _, member, result in rows:
         match = TRAILER.search(result)
         if not match:
             continue
@@ -185,7 +209,8 @@ def summary(path):
         lines.append(f"| {member} | {launch} | {launches} | {tokens:,} | {tools} | {seconds} |")
         total = [a + b for a, b in zip(total, (launches, tokens, tools, seconds), strict=True)]
     lines.append(f"| **Total** | | {total[0]} | {total[1]:,} | {total[2]} | {total[3]} |")
-    return "\n".join(lines)
+    own = orchestrator(rows)
+    return "\n".join(lines) + (f"\n\n{own}" if own else "")
 
 
 def build_parser():
@@ -217,9 +242,10 @@ def launch_metrics(parser, root, args):
         sys.exit(f"No .claude/agents/{args.agent}.md with a model and an effort")
     if not model or None in (args.tokens, args.tool_uses, args.seconds):
         parser.error("--agent (or --launch), --tokens, --tool-uses and --seconds go together")
-    if args.tokens < 1 or args.tool_uses < 0 or args.seconds < 0:
-        parser.error("--tokens must be at least 1 and --tool-uses and --seconds not negative; a launch whose "
-                     "notification has not arrived yet is logged without metrics and completed with --amend-last")
+    if args.tokens < MIN_TOKENS or args.tool_uses < 0 or args.seconds < 0:
+        parser.error(f"--tokens must be at least {MIN_TOKENS:,} and --tool-uses and --seconds not negative; a launch "
+                     "whose notification has not arrived yet is logged without any metric option and completed with "
+                     "--amend-last")
     return (model, args.tokens, args.tool_uses, args.seconds)
 
 

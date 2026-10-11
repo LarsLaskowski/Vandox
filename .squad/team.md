@@ -47,8 +47,12 @@ Lead cannot resolve.
 `CLAUDE.md`, `docs/ARCHITECTURE.md`, `docs/CONTRIBUTING.md`, `docs/UNIT_TESTS.md`, `.squad/stack.md` and
 `.squad/project.md` are binding: unit tests for all new code until the *Coverage gate* passes, the code
 conventions from `stack.md` while writing, English for everything
-that ends up in the repository or on GitHub. Inside the squad, only the Code Officer runs the formatter
-(*Format* in `stack.md`) and owns a clean analyzer gate. Subagents never run Git write operations or post
+that ends up in the repository or on GitHub. Inside the squad, the member that changed files — Dev,
+Tester, or the orchestrator for its own edits — runs *Format* from `stack.md` before handing back and keeps
+its result to those files: every other file the formatter touched is reported, not edited, and the
+orchestrator restores it. *Format* is a deterministic command, not a judgment; an older `stack.md` that
+labels it "Code Officer only" is superseded by this rule. The Code Officer owns a clean analyzer gate and is
+launched only for analyzer diagnostics or style findings that need reading. Subagents never run Git write operations or post
 to GitHub — the `PreToolUse` hook `.claude/hooks/git-guard.py`, declared in every `squad-*.md`, denies them
 (`git add` and a scratch `git worktree` for experiments stay allowed, `.squad/routing.md`, *Concurrency*);
 the orchestrator commits and pushes to the work branch at any time (see `CLAUDE.md`, golden rules) and
@@ -57,6 +61,11 @@ opens the pull request only after the Lead's approval.
 Session-management tools (`create_session`, `send_message`, `archive_session` and the other remote-session
 tools) belong to the orchestrator alone: a member never calls them, also not to "hand over" work — it
 reports the need in its result instead.
+
+**Continued members.** For a fix or delta round the orchestrator may continue a member's earlier launch of
+the same run instead of starting a fresh one (`.squad/routing.md`, *Pipeline*). A continued member keeps
+its role and its limits: the Dev still does not edit tests, the Reviewer and Security still review only the
+commit SHA they are given, and nothing it remembers from an earlier round replaces reading the delta.
 
 **Escapes in files.** The Write and Edit tools turn a single-backslash escape such as `\u0041` into the
 character it names, so a plan table or a test fixture whose cases are about escapes silently loses them. Write

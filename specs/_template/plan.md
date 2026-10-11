@@ -2,7 +2,7 @@
 
 Source: Issue #<number> | [spec.md](spec.md)
 Status: Draft | Revised (n) | Approved by Security
-Tier: trivial | standard | security  (tier `docs` uses no plan.md) — <one-sentence justification>
+Tier: trivial | standard | security  (tiers `docs` and `patch` use no plan.md) — <one-sentence justification>
 
 ## Problem / root cause
 
@@ -26,6 +26,12 @@ criterion is then verified here instead of by a test: where and by whom (workflo
 read-only check). Otherwise delete this section.
 
 ## Approach
+
+## Options considered
+
+Each alternative weighed and why it lost — or "one option: <why the fix is the only reasonable one>". The
+orchestrator launches the Devil's Advocate only for a plan that weighs options, adds or extends a decision
+record, or is `security` (*Plan challenge* in `.squad/routing.md`).
 
 ## Affected projects and types
 
@@ -72,8 +78,15 @@ Which guarantees from `docs/ARCHITECTURE.md` are touched and how they are preser
 
 ## Challenge
 
-Left out when the plan is written. The Lead adds it in mode `revise` only after Devil's Advocate
-objections: each objection and the answer (accepted — what changed; or rejected — why). A clean challenge
+Left out when the plan is written. The Lead adds it in mode `revise` only after a major Devil's Advocate
+objection: each objection and the answer (accepted — what changed; or rejected — why). When the challenge
+returns only minor objections, the orchestrator appends them verbatim as a *Challenge notes* section instead,
+which Dev and Tester follow (or report a deviation) and the Reviewer checks. A clean challenge
 (`NO OBJECTIONS`) is recorded only in `log.md`.
+
+## Security review
+
+`security` tier only, left out when the plan is written: each `CHANGES_REQUIRED` finding and how the
+revision resolves it.
 
 ## Out of scope / follow-ups

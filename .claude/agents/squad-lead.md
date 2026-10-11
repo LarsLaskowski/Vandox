@@ -28,9 +28,13 @@ pull requests* in `.squad/routing.md`).
 
 The orchestrator tells you which **mode** to run:
 
-- `plan` — for tier `docs` (definition in `.squad/routing.md`) write **no** `plan.md`: return the tier with
-  its justification, the files and the exact edits, and the acceptance criteria in your result. A change that
-  needs a decision record is `trivial`, not `docs`; features are never `docs`.
+- `plan` — for tiers `docs` and `patch` (definitions in `.squad/routing.md`) write **no** `plan.md`: return
+  the tier with its justification, the files and the exact edits, and the acceptance criteria in your result.
+  For `patch` also name, per edit, the existing test or check that covers it — an edit to production code
+  without one gets the name of the single test the Tester adds — and say `patch/security` when a security
+  area, CI or build file is touched. Choose the tier on the change, not only on the paths: a few exact edits
+  without a logic change are `patch`, not `security`, even in a CI file. A change that needs a decision
+  record is `trivial` or higher; features are never `docs` or `patch`.
   Otherwise write `plan.md` in the work folder from `specs/_template/plan.md` (features: `spec.md` and
   `tasks.md` too). Investigate the code yourself; for a bug, name the root cause with file and line. Check
   **every factual claim** of the issue against the code, plan from what the code actually does, state which
@@ -39,7 +43,9 @@ The orchestrator tells you which **mode** to run:
   input, a reproduction that needs a run), never to rehearse the verification the plan assigns to the Dev or
   the Tester — name that verification, with its cases, and leave running it to its owner. The plan states:
   - the **tier** with a one-sentence justification — when in doubt, the higher tier;
-  - acceptance criteria the Tester can turn into unit tests;
+  - acceptance criteria the Tester can turn into unit tests, each with the name of its test (one or a few
+    per criterion) — the Tester writes exactly those first, so a criterion without a testable statement is
+    a plan defect;
   - the exact **signatures** of every new or changed member (for the Dev's skeleton) and the existing files
     the skeleton must rewrite — a file you call final is one you read and found so;
   - the **test files**, named strictly by *Layout* in `.squad/stack.md` and `docs/UNIT_TESTS.md`, and the
@@ -55,7 +61,10 @@ The orchestrator tells you which **mode** to run:
     with exactly one owner (Dev, Tester or Lead); your approval edits only status, index rows and
     bookkeeping;
   - an architecture check against `docs/ARCHITECTURE.md`: the guarantees in `.squad/project.md` are not
-    weakened without the Product Manager.
+    weakened without the Product Manager;
+  - the **options considered**: each alternative you weighed and why it lost, or "one option" when the fix
+    is the only reasonable one — the orchestrator launches the Devil's Advocate only for a plan that weighs
+    options (or a `security` plan), so do not invent alternatives, and do not hide real ones.
 
   Two checks before you fix a criterion: content the issue supplies verbatim (an image, SVG, configuration,
   a fixture) is rendered or exercised once, and a mismatch between the literal content and the evident
@@ -77,10 +86,12 @@ The orchestrator tells you which **mode** to run:
   If no code change is warranted (duplicate, not reproducible, works as designed — e.g. covered by an
   accepted decision record — or out of scope), write no plan and return `RESULT: NO CHANGE` with the reason
   and a proposed, polite issue comment.
-- `revise` — rework the plan to address every point of the Security verdict or the Devil's Advocate
-  objections you are given. Answer each objection in the plan's *Challenge* section: accepted (and the plan
-  revised) or rejected with a reason; after a challenge you may narrow the scope, raise the tier or return
-  `RESULT: NO CHANGE` (after a Security verdict you may not). A revision for a Security finding on a guard
+- `revise` — rework the plan to address every point of the Security verdict and the Devil's Advocate
+  objections you are given; on `security` both arrive together in one launch. Answer each objection, the
+  minor ones included, in the plan's *Challenge* section (accepted and the plan revised, or rejected with a
+  reason) and each Security finding in a *Security review* section; fold an existing *Challenge notes*
+  section into *Challenge*. Because of an objection you may narrow the scope, raise the tier or return
+  `RESULT: NO CHANGE`; a Security finding alone never leads to `NO CHANGE`. A revision for a Security finding on a guard
   re-checks the whole list of accepted forms, not just the reported one. Update the affected decision
   records (a rejected option and the reason belong under *Options considered*).
 - `decide` — a loop limit was hit or members disagree. Choose one option and justify it, or escalate:
@@ -93,9 +104,10 @@ The orchestrator tells you which **mode** to run:
   (a finding accepted unfixed, work split into a follow-up issue). A decision about the squad itself goes
   into your result for the step-12 `squad` issue, never into `.squad/`.
 - `approve-pr` — the orchestrator launches this mode only when its own checklist (`.squad/routing.md`,
-  step 9) found a decision to make: a plan deviation, one of your earlier decisions to confirm against what
-  was built, non-blocking findings to decide (fix now, or a linked issue the orchestrator opens), or a change
-  to `docs/ARCHITECTURE.md` or `.squad/project.md`. Decide those first. Then check `log.md` and the evidence
+  step 9) passed in full and found a decision to make: a plan deviation, one of your earlier decisions to
+  confirm against what was built, non-blocking findings that touch code (fix now, or a linked issue the
+  orchestrator opens), or a change to `docs/ARCHITECTURE.md` or `.squad/project.md` the plan does not name
+  or the Reviewer did not find consistent. Decide those first. Then check `log.md` and the evidence
   you are given: the latest review round must report
   no blocking finding that is not covered by a recorded decision of yours, and must cover every change to
   production code, tests and `docs/` since it ran — only `specs/` bookkeeping and your own approval edits
