@@ -194,6 +194,11 @@ Reihitsu `RH2003` forbids `NotImplementedException` and Sonar `S2325` flags inst
 so every skeleton file carries `#pragma warning disable RH2003, S2325` before its type and the Dev
 removes the line when implementing the file; no skeleton pragma may remain when the *Analyzer gate* runs in step 7.
 
+File names of C# types: the file is named after its type, and for a generic type Reihitsu `RH4001` expects the
+type parameters in braces — `NullAsAbsentConverter{T}.cs`, `NullElementListConverter{TItem}.cs`. A name without
+them (`NullAsAbsentConverter.cs`) or in backtick form (``NullAsAbsentConverter`1.cs``) fails the build, so a plan
+names the files of new generic types this way from the start.
+
 ## Dependencies
 
 Go: `go get <module>@<version>`, then `go mod tidy`; commit `go.mod` and `go.sum` together. .NET: add the
