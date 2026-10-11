@@ -25,6 +25,7 @@ public class BuiltInParsersTests
     private const string NginxHead = "2026/10/09 03:12:12 [error] 1021#1021: *15 connect() failed\n";
     private const string ApacheHead = "[Fri Oct 09 03:12:12.123456 2026] [core:error] [pid 1] x\n";
     private const string Apache22Head = "[Fri Oct 09 03:12:12 2026] [error] [client 198.51.100.8] x\n";
+    private const string LegacyHead = "===== Fri Oct  2 09:15:01 CEST 2026 =====\ntop - 09:15:01 up 10 days,  3:02,  1 user,  load average: 0.52, 0.48, 0.45\n";
     private const string MariaDbReady = "2026-03-02 10:20:01 0 [Note] /usr/sbin/mariadbd: ready for connections.\n";
 
     #endregion // Constants
@@ -32,7 +33,7 @@ public class BuiltInParsersTests
     #region Methods
 
     /// <summary>
-    /// The list holds the journal export parser, the MariaDB error log parser, the Dovecot log parser and the syslog parser, then the Plesk panel, sw-cp-server, nginx and Apache error log parsers, with or without a time zone.
+    /// The list holds the journal export parser, the MariaDB error log parser, the Dovecot log parser and the syslog parser, then the Plesk panel, sw-cp-server, nginx and Apache error log parsers and the legacy monitoring log parser, with or without a time zone.
     /// </summary>
     /// <param name="timeZone">The time zone, or <c>null</c></param>
     [TestMethod]
@@ -45,7 +46,7 @@ public class BuiltInParsersTests
         var parsers = BuiltInParsers.Create(timeZone, ErrorLogPaths.Default);
 
         // Assert
-        Assert.HasCount(8, parsers, "eight parsers");
+        Assert.HasCount(9, parsers, "nine parsers");
         Assert.IsInstanceOfType<JournalExportParser>(parsers[0], "first parser");
         Assert.IsInstanceOfType<MariaDbErrorLogParser>(parsers[1], "second parser");
         Assert.IsInstanceOfType<DovecotLogParser>(parsers[2], "third parser");
@@ -54,7 +55,8 @@ public class BuiltInParsersTests
         Assert.IsInstanceOfType<ErrorLogParser>(parsers[5], "sixth parser");
         Assert.IsInstanceOfType<ErrorLogParser>(parsers[6], "seventh parser");
         Assert.IsInstanceOfType<ErrorLogParser>(parsers[7], "eighth parser");
-        Assert.AreSequenceEqual(["journal", "mariadb", "dovecot", "syslog", "plesk-panel", "sw-cp-server-error", "nginx-error", "apache-error"], parsers.Select(parser => parser.Type).ToList(), "types in order");
+        Assert.IsInstanceOfType<LegacyMonitorParser>(parsers[8], "ninth parser");
+        Assert.AreSequenceEqual(["journal", "mariadb", "dovecot", "syslog", "plesk-panel", "sw-cp-server-error", "nginx-error", "apache-error", "legacy-monitor"], parsers.Select(parser => parser.Type).ToList(), "types in order");
     }
 
     /// <summary>
@@ -70,7 +72,7 @@ public class BuiltInParsersTests
         var registry = new ParserRegistry(parsers);
 
         // Assert
-        Assert.AreSequenceEqual(["journal", "mariadb", "dovecot", "syslog", "plesk-panel", "sw-cp-server-error", "nginx-error", "apache-error"], registry.GetTypes(), "registered types in order");
+        Assert.AreSequenceEqual(["journal", "mariadb", "dovecot", "syslog", "plesk-panel", "sw-cp-server-error", "nginx-error", "apache-error", "legacy-monitor"], registry.GetTypes(), "registered types in order");
     }
 
     /// <summary>
@@ -162,6 +164,8 @@ public class BuiltInParsersTests
     [DataRow("kern.log", ApacheHead, "syslog", Confidence.MatchName)]
     [DataRow("syslog.1", PleskHead, "syslog", Confidence.MatchName)]
     [DataRow("kern.log-20261010", Apache22Head, "syslog", Confidence.MatchName)]
+    [DataRow("monitor.log", LegacyHead, "legacy-monitor", Confidence.MatchContent)]
+    [DataRow("logs/top.log", LegacyHead, "legacy-monitor", Confidence.MatchContent)]
     public void BuiltInParsersRegistryDetectsFilesByContentAndName(string name, string head, string expected, Confidence expectedConfidence)
     {
         // Arrange
@@ -371,6 +375,26 @@ public class BuiltInParsersTests
         // Assert
         Assert.HasCount(4, parsers, "the four system parsers");
         Assert.IsTrue(confidences.All(confidence => confidence == Confidence.NoMatch), "no system parser claims the head");
+    }
+
+    /// <summary>
+    /// None of the other eight parsers claims the head of a legacy monitoring log.
+    /// </summary>
+    [TestMethod]
+    public void BuiltInParsersOtherParsersIgnoreLegacyMonitorHead()
+    {
+        // Arrange
+        var parsers = BuiltInParsers.Create("UTC", ErrorLogPaths.Default);
+        var legacy = parsers.OfType<LegacyMonitorParser>().Single();
+        var others = parsers.Where(parser => parser is not LegacyMonitorParser).ToList();
+
+        // Act
+        var confidences = others.Select(parser => parser.Detect(new LogFile("monitor.log", null), Encoding.UTF8.GetBytes(LegacyHead))).ToList();
+
+        // Assert
+        Assert.AreEqual(LegacyMonitorParser.ParserType, legacy.Type, "the legacy parser");
+        Assert.HasCount(8, others, "the eight other parsers");
+        Assert.IsTrue(confidences.All(confidence => confidence == Confidence.NoMatch), "no other parser claims the head");
     }
 
     #endregion // Methods
