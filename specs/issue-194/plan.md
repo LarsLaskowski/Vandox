@@ -287,3 +287,12 @@ parser in its lists.
   its first line selects, and the other format's lines are skipped (Dovecot) or misread (syslog). No follow-up issue
   unless such a file is seen.
 - `log_path = /dev/stderr` under systemd (Dovecot's file format inside journal messages): not handled.
+
+## Challenge notes
+
+Minor objections from the plan challenge (verbatim), plus Security's non-blocking notes:
+
+1. **AC3, "head ends inside that line after its marker":** `DovecotLine.TryParse` needs the marker's trailing space. The Tester must pick the cut-point rows precisely. A head cut right after `Info:` (no space) is `NoMatch`. A cut after `Info: ` is `MatchContent`. Test both rows so the boundary is pinned.
+2. **AC3 and AC4, `syslog` name versus Dovecot first line:** Detect is purely first-line, so a Dovecot file that the user names `syslog*` or `kern.log*` is deliberately not claimed. The README sentence "under any name except `syslog` and `kern.log`" should also say that rotation suffixes (`.N`, `-YYYYMMDD`) are excluded the same way, matching `HasSyslogName`.
+3. (Security, non-blocking) The claim "no line of the file continues another" rests only on `internal_send_split`; a logged text containing a line feed may be written as two lines, the second with the sender's prefix and an `Error:` label. A sender cannot choose the label, so no forged `Fatal:`/`Panic:` results. The Dev may add one sentence to *Forged lines* in `docs/areas/log-import.md` only if verified; otherwise leave as is.
+4. (Security, non-blocking) If a grouper or buffer is ever added to `DovecotLogParser`, it needs a memory-bound test.
