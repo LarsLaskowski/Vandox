@@ -25,6 +25,7 @@ internal static class ImportSummaryWriter
         text.Append(CultureInfo.InvariantCulture, $"Import of {Terminal.Quote(summary.Root)}\n");
         text.Append(CultureInfo.InvariantCulture, $"Files found:         {summary.Files.Count}\n");
         text.Append(CultureInfo.InvariantCulture, $"  imported:          {summary.Count(ImportOutcome.Imported)}\n");
+        text.Append(CultureInfo.InvariantCulture, $"  continued:         {summary.Count(ImportOutcome.Continued)}\n");
         text.Append(CultureInfo.InvariantCulture, $"  already imported:  {summary.Count(ImportOutcome.AlreadyImported)}\n");
         text.Append(CultureInfo.InvariantCulture, $"  not recognized:    {summary.Count(ImportOutcome.Unrecognized)}\n");
         text.Append(CultureInfo.InvariantCulture, $"  failed:            {summary.Count(ImportOutcome.Failed)}\n");
@@ -46,6 +47,7 @@ internal static class ImportSummaryWriter
             text.Append("The import was interrupted; run it again to continue.\n");
         }
 
+        WriteContinued(text, summary.Files);
         WriteListed(text, "Files not recognized", summary.Files, ImportOutcome.Unrecognized);
         WriteListed(text, "Files that failed", summary.Files, ImportOutcome.Failed);
         WriteSkipped(text, summary.Files);
@@ -84,6 +86,30 @@ internal static class ImportSummaryWriter
         foreach (var file in listed)
         {
             text.Append(CultureInfo.InvariantCulture, $"  {Terminal.Quote(file.Path)}: {Terminal.Quote(file.Reason)}\n");
+        }
+    }
+
+    /// <summary>
+    /// Lists the continued files with the content they continue.
+    /// </summary>
+    /// <param name="text">The text so far</param>
+    /// <param name="files">The files</param>
+    private static void WriteContinued(StringBuilder text, List<FileResult> files)
+    {
+        var continued = files.Where(file => file.Outcome == ImportOutcome.Continued).ToList();
+
+        if (continued.Count == 0)
+        {
+            return;
+        }
+
+        text.Append("\nFiles continued:\n");
+
+        foreach (var file in continued)
+        {
+            var skipped = file.SkippedAtStart > 0 ? $", skipped {file.SkippedAtStart.ToString(CultureInfo.InvariantCulture)} lines before its first record" : string.Empty;
+
+            text.Append(CultureInfo.InvariantCulture, $"  {Terminal.Quote(file.Path)}: continues {Terminal.Quote(file.ContinuedFrom)} after line {file.ContinuedAfter}{skipped}\n");
         }
     }
 

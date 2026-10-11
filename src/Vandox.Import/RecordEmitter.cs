@@ -156,6 +156,8 @@ internal sealed class RecordEmitter : IRecordEmitter
             throw Error;
         }
 
+        _atStart = false;
+
         var refusal = RecordRules.CheckImportRecord(record);
 
         if (refusal is not null)

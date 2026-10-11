@@ -93,6 +93,29 @@ internal sealed class ImportPass
     }
 
     /// <summary>
+    /// Runs the parser of a file on the content, positioned at the continuation point if there is one.
+    /// </summary>
+    /// <param name="item">The file</param>
+    /// <param name="state">The stored import state; its file name and modification time are the parser's</param>
+    /// <param name="counted">The content</param>
+    /// <param name="emitter">The emitter</param>
+    /// <param name="cancellationToken">Cancels the parse</param>
+    /// <returns>A task that returns the exception of the parser, if any</returns>
+    private static async Task<Exception?> ParseAsync(FoundFile item, ImportFile state, ContentStream counted, RecordEmitter emitter, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await item.Parser!.ParseAsync(new LogFile(state.FileName, state.ModTime), counted, emitter, cancellationToken).ConfigureAwait(false);
+
+            return null;
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException || cancellationToken.IsCancellationRequested)
+        {
+            return exception;
+        }
+    }
+
+    /// <summary>
     /// Stores what the emitter still holds: after a parser error what was parsed before it, otherwise, once the whole hashed
     /// content was read again unchanged, the last batch that completes the file.
     /// </summary>
@@ -344,14 +367,14 @@ internal sealed class ImportPass
             return null;
         }
 
-        if (state.Offset > 0 && item.Parser.LineFramed is false)
+        if (item.Parser.LineFramed || state.Offset == 0)
         {
-            FailFile(item, "the import state continues the content, which its parser does not allow");
-
-            return null;
+            return state;
         }
 
-        return state;
+        FailFile(item, "the import state continues the content, which its parser does not allow");
+
+        return null;
     }
 
     /// <summary>
@@ -454,29 +477,6 @@ internal sealed class ImportPass
         }
 
         Finished(item);
-    }
-
-    /// <summary>
-    /// Runs the parser of a file on the content, positioned at the continuation point if there is one.
-    /// </summary>
-    /// <param name="item">The file</param>
-    /// <param name="state">The stored import state; its file name and modification time are the parser's</param>
-    /// <param name="counted">The content</param>
-    /// <param name="emitter">The emitter</param>
-    /// <param name="cancellationToken">Cancels the parse</param>
-    /// <returns>A task that returns the exception of the parser, if any</returns>
-    private static async Task<Exception?> ParseAsync(FoundFile item, ImportFile state, ContentStream counted, RecordEmitter emitter, CancellationToken cancellationToken)
-    {
-        try
-        {
-            await item.Parser!.ParseAsync(new LogFile(state.FileName, state.ModTime), counted, emitter, cancellationToken).ConfigureAwait(false);
-
-            return null;
-        }
-        catch (Exception exception) when (exception is not OperationCanceledException || cancellationToken.IsCancellationRequested)
-        {
-            return exception;
-        }
     }
 
     /// <summary>
