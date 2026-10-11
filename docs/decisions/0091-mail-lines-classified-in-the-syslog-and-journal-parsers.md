@@ -1,6 +1,6 @@
 # 0091: Postfix and Dovecot lines are classified in the syslog and journal parsers: priority from the daemon's severity marker, events for fatal, panic and an unavailable database; no parser of its own
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-11
 - **Area:** Log import
 - **Source:** Issue #18

@@ -20,3 +20,4 @@ One line per pipeline step: date, step, member, result. Lead decisions and escal
 | 2026-10-11 | 7 Code check (final) | Orchestrator | Format check 0/287, Analyzer gate PASS, Test all green (Core 2012), Coverage gate PASS new/changed 100% (184/184), overall 96.9%, scope-check PASS; head 5274bff |
 | 2026-10-11 | 8 Security diff | Security | APPROVED, no findings (SHA 2b38139) (opus/medium · 60,271 tokens · 11 tool uses · 73 s) |
 | 2026-10-11 | 8 Review round 1 | Reviewer | APPROVE, no blocking; 1 non-blocking: README.md:297 marker case wording (Postfix lower case, Dovecot capitalised); mutation spot checks caught 6/6 (opus/medium · 111,307 tokens · 32 tool uses · 213 s) |
+| 2026-10-11 | 8 Fix non-blocking | Dev | README marker wording fixed (Postfix lower case, Dovecot capitalised); prose only (sonnet/medium · 53,106 tokens · 4 tool uses · 9 s) |
