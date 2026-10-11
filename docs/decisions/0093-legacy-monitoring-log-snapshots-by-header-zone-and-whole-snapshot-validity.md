@@ -51,32 +51,46 @@ A header whose abbreviation is not a name of the zone at that time:
 
 A snapshot that is not well-formed:
 
-7. **Skip the whole snapshot when its `top` part is incomplete or out of order; read every later section on its own;
-   leave out single unreadable socket and section lines** (chosen) — records are emitted only for a snapshot whose
-   process table and summary were read in full order, so a cut or mixed snapshot never yields a partial process
-   snapshot that looks complete.
-8. **Read every line that parses, wherever it is** — keeps more data, but rows of one run would land in another run's
+7. **Skip the whole snapshot when the structure of its `top` part is broken (a summary line missing or out of order,
+   no table header, a summary line or table header among the rows); leave out a single unreadable or duplicate row and
+   mark the process snapshot incomplete; read every later section on its own and leave out single unreadable socket
+   and section lines** (chosen) — records are emitted only for a snapshot whose summary and table were read in order,
+   so a cut or mixed snapshot never yields a partial process snapshot that looks complete, while one wrong guess about
+   a row of a format checked without the real sample costs a row, not every snapshot.
+8. **Skip the whole snapshot on any bad row as well** — strictest, but the row format is unverified against the
+   sample: one wrong assumption would skip every snapshot of the file, and an import cannot be repeated once its
+   content completed.
+9. **Read every line that parses, wherever it is** — keeps more data, but rows of one run would land in another run's
    snapshot under the wrong time.
+
+A snapshot ended by the end of the input rather than by the next header (the log is copied while it grows):
+
+10. **Emit it, with `complete` false on the list that was still open** (chosen) — the log has no end marker, so a list
+    open at the end may be short; what was read is kept.
+11. **Emit nothing until a following header is read** — never claims too much, but the last snapshot of every file
+    would be lost for good, because a continued import starts at the line in which the earlier content ends, not at
+    its last header.
 
 Further choices:
 
-9. **Connections**: the snapshot also carries the full `connections` list (chosen) rather than the counts the issue
-   names alone, so `complete` keeps its meaning (true only when nothing was left out) and the forensics see which
-   remote address talked to which process; its size is that of the `lsof` section it comes from.
-10. **Port names** (`lsof -ni` without `-P` prints service names): a built-in table of the names of Ubuntu's
+12. **Connections**: the snapshot also carries the full `connections` list (chosen) rather than the counts the issue
+    names alone, so `complete` keeps its meaning (true only when nothing was left out) and the forensics see which
+    remote address talked to which process; its size is that of the `lsof` section it comes from.
+13. **Port names** (`lsof -ni` without `-P` prints service names): a built-in table of the names of Ubuntu's
     `/etc/services` (chosen) rather than a short hand-picked list, which would drop every socket on a port it forgot,
     or a lookup on the backend host, which the wire format forbids.
-11. **Truncated command names** (`sw-engi+`): the `+` is removed and the process flagged as truncated (chosen); a
+14. **Truncated command names** (`sw-engi+`): the `+` is removed and the process flagged as truncated (chosen); a
     table of full names would be guessed, and learning names from other snapshots would make the result depend on
     where a continued parse starts.
-12. **Metric names** are fixed here for the import and named in the wire format area for the agent to reuse (chosen),
+15. **Metric names** are fixed here for the import and named in the wire format area for the agent to reuse (chosen),
     rather than left to each producer.
 
 ## Decision
 
-Options 1, 6, 7, 9, 10, 11 and 12: a parser `legacy-monitor`, claimed by the header grammar of its first line, reads
+Options 1, 6, 7, 10, 12, 13, 14 and 15: a parser `legacy-monitor`, claimed by the header grammar of its first line, reads
 the log snapshot by snapshot, times each snapshot by its header in `import.time_zone` with the offset the abbreviation
-names, and emits a snapshot's records only after its `top` part was read completely and in order. The rules are in
+names, and emits a snapshot's records only after its `top` part was read in order; a snapshot that ends with the
+input is emitted with its open list marked incomplete. The rules are in
 [Log import](../areas/log-import.md) (*Legacy monitoring log*) and the metric names in
 [Wire format](../areas/wire-format.md) (*Metric names*).
 
@@ -84,8 +98,12 @@ names, and emits a snapshot's records only after its `top` part was read complet
 
 - Imported process snapshots and metrics use the names the agent's collectors must reuse; a collector that needs
   another name changes this record and the wire format area.
-- A snapshot cut inside its `top` part, or mixed with another run's lines there, is lost as a whole and reported as
-  skipped; one cut in its sections keeps what was read, with `complete` false where a list may be short.
+- A snapshot cut before its table header, or with another run's summary lines in its `top` part, is lost as a whole
+  and reported as skipped; a bad row costs that row and the process snapshot's `complete`; a snapshot cut later keeps
+  what was read, with `complete` false where a list may be short. The last snapshot of a file is always marked so,
+  and the rest of a snapshot cut by a copy boundary is skipped in the continued import.
+- The rate of a vmstat counter needs the previous snapshot of the same parse, so the first snapshot of every parse,
+  each continuation included, has none; the raw counter is complete.
 - An old-format command (`comm`, cut by `top`) and a new-format command (taken from the command line) of the same
   program can differ (`sw-engi` and `sw-engine-fpm`); program sums are per name as written.
 - A snapshot of the new format cut before its first section is read as the old format.

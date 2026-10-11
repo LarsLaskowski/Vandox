@@ -21,7 +21,7 @@ Claims of the issue, checked:
   (`src/Vandox.Core/LogParsing`, `src/Vandox.Import`); `ImportCommand.cs:55` registers `BuiltInParsers.Create(...)`.
 - *"Same model the agent will use"* — confirmed for the payloads (Go `internal/model/process.go`, `connection.go`,
   `metric.go` mirror the C# types). Refuted for metric names: no metric name is defined anywhere yet (the agent
-  collectors #31 to #33 are open). This plan defines them (record 0093, option 12).
+  collectors #31 to #33 are open). This plan defines them (record 0093, option 15).
 - *Header format `===== Fri Oct  2 09:15:01 CEST 2026 =====`, CEST/CET* — format taken from the issue; Oct 2, 2026 is a
   Friday (consistent). That NodaTime's TZDB names the `Europe/Berlin` intervals `CEST` (+02) and `CET` (+01), that
   `MapLocal` of 2026-10-25 02:30 has two mappings (early `CEST`, late `CET`) and of 2026-03-29 02:30 none — **confirmed**
@@ -103,11 +103,23 @@ Every test lives in the file named under *Test files*; names are `{Class}{Scenar
   `mem_buff_cache_bytes`, `mem_available_bytes`, `swap_total_bytes`, `swap_free_bytes`, `swap_used_bytes` (unit
   `bytes`; the value times 1024^n for `KiB`=1 .. `EiB`=6, rounded half away from zero; `mem_available_bytes` from `avail
   Mem` of the swap line). The memory and swap pairs are read by label in any order, each label exactly once.
+  **Tokenizing:** the text after the line's label (`load average:`, `Tasks:`, `%Cpu(s):`, `<unit> Mem :`, `<unit> Swap:`)
+  is split at `,` (and, in the swap line, at the `.` directly after the label `used`); each piece, with leading and
+  trailing spaces removed, is `NUMBER`, one or more spaces, `LABEL` — so a piece needs no space after the comma or the
+  colon (`0.0 us,100.0 id`, `KiB Mem :131926528 total,` where the number fills `top`'s 9-character column).
+  **Numbers** (summary, %CPU of rows, pressure averages): an integer part of 1 to 15 ASCII digits and an optional `.`
+  with 1 to 6 ASCII digits — nothing else (no sign, exponent, comma); every value read is therefore finite and below
+  10^15. A memory or swap value times 1024^n is computed exactly (decimal) and rounded; a result above `ulong.MaxValue`
+  makes the line unreadable (a summary line that is not read makes the snapshot "malformed snapshot", AC8).
   Tests: `LegacyTopLineTests.LegacyTopLineTryParseLoadReadsThreeValues`, `LegacyTopLineTryParseTasksReadsTotal`,
-  `LegacyTopLineTryParseCpuReadsEightModes`, `LegacyTopLineTryParseMemoryReadsUnitsAndLabels` (DataRows `KiB Mem :`,
-  `MiB Mem :`, `GiB Mem :`, order `total, used, free, buff/cache`), `LegacyTopLineTryParseSwapReadsAvailMem`,
+  `LegacyTopLineTryParseCpuReadsEightModes` (DataRows: the issue's line, `0.0 us,100.0 id` without a space after the
+  comma), `LegacyTopLineTryParseMemoryReadsUnitsAndLabels` (DataRows `KiB Mem :`, `MiB Mem :`, `GiB Mem :`, order
+  `total, used, free, buff/cache`, `KiB Mem :131926528 total,  1234567 free,...` with no space after the colon and the
+  comma), `LegacyTopLineTryParseSwapReadsAvailMem`,
   `LegacyTopLineTryParseRefusesMalformedSummaryLines` (DataRows: missing label, label twice, `NaN`, `1e3`, `1,5`
-  decimal comma, `٣` Arabic-Indic digit, a ninth CPU pair), `LegacyMonitorParserTests.LegacyMonitorParserParseEmitsSummaryMetricsInOrder`.
+  decimal comma, `٣` Arabic-Indic digit, a ninth CPU pair, a load value of 16 integer digits, a fraction of 7 digits,
+  `-0.1`, `EiB Mem : 16.0 total` and `GiB Mem : 999999999999999.0 total` (above `ulong.MaxValue` bytes)),
+  `LegacyMonitorParserTests.LegacyMonitorParserParseEmitsSummaryMetricsInOrder`.
 - [ ] **AC6 Process table → process snapshot, RES suffixes, truncated names.** A row is `PID USER PR NI VIRT RES SHR S
   %CPU %MEM TIME+ COMMAND` (tokens separated by spaces; COMMAND is the rest after the eleventh token and its spaces).
   `rss_bytes` from RES: digits (1 to 20) with an optional fraction (1 to 3 digits) and an optional suffix `k`/none
@@ -117,9 +129,13 @@ Every test lives in the file named under *Test files*; names are `{Class}{Scenar
   format (no section in the snapshot): `command` is the normalized COMMAND (cut to 1,024 bytes), `cmdline` empty. New
   format (at least one section marker in the snapshot): `cmdline` is the normalized COMMAND cut to 2,048 UTF-8 bytes
   (cut sets `truncated`), `command` is the text inside `[...]` for a bracketed COMMAND, else the part after the last `/`
-  of the first space-separated word with one trailing `:` removed, cut to 1,024 bytes. `total` = `Tasks: N total`;
-  `complete` true only when the row count equals `total` and no row was left out. A table with no row emits no process
-  snapshot.
+  of the first space-separated word with one trailing `:` removed, cut to 1,024 bytes. **Never empty** (the model
+  refuses an empty `command` and `program`, `ProcessSample.cs:121`, `ProgramAggregate.cs:61`, which would refuse the
+  whole snapshot record): when the derived name is empty, `command` is the normalized COMMAND; when that is empty too,
+  the COMMAND as printed (a non-empty token, e.g. `+`), each cut to 1,024 bytes. The program name (AC7) is likewise the
+  command itself when its first word is empty. `total` = `Tasks: N total`;
+  `complete` true only when the row count equals `total`, no row was left out (AC8, AC12) and the table was not ended
+  by the end of input (AC8). A table with no row emits no process snapshot.
   Tests: `LegacyTopLineTests.LegacyTopLineTryParseMemoryValueConvertsSuffixes` (DataRows: `0`→0, `1234`→1,263,616,
   `123.4m`→129,394,278, `1.234g`→1,324,997,411, `2.000t`→2,199,023,255,552, `1.5p`→1,688,849,860,263,936,
   `1.000e`→1,152,921,504,606,846,976, `0.001m`→1,049 (1,048.576 rounded)),
@@ -127,9 +143,15 @@ Every test lives in the file named under *Test files*; names are `{Class}{Scenar
   `16.000e` overflow), `LegacyTopLineTryParseRowReadsColumns` (PR `rt`, NI `-20`, COMMAND with spaces),
   `LegacyTopLineTryParseRowRefusesMalformedRows`, `LegacyProcessNamesTests.LegacyProcessNamesNormalizeRemovesTrailingPlus`,
   `LegacyProcessNamesCommandOfDerivesNameFromCommandLine` (DataRows: `/usr/sbin/apache2 -k start`→`apache2`,
-  `php-fpm: pool www`→`php-fpm`, `[kworker/0:1-events]`→`kworker/0:1-events`, `spamd child`→`spamd`, `/`→`/`),
+  `php-fpm: pool www`→`php-fpm`, `[kworker/0:1-events]`→`kworker/0:1-events`, `spamd child`→`spamd`),
+  `LegacyProcessNamesCommandOfNeverReturnsEmpty` (DataRows, command line and column: `/opt/x/`→`/opt/x/`, `:`→`:`,
+  `[]`→`[]`, `/`→`/`, column `+` with an empty command line→`+`),
+  `LegacyProcessNamesOldCommandOfNeverReturnsEmpty` (DataRows: `+`→`+` truncated, `sw-engi+`→`sw-engi` truncated),
+  `LegacyProcessNamesProgramOfNeverReturnsEmpty` (DataRows: ` x`→` x`, `apache2 -k`→`apache2`),
   `LegacyMonitorParserTests.LegacyMonitorParserParseReadsOldFormatProcessSnapshot`,
-  `LegacyMonitorParserParseReadsNewFormatProcessSnapshot`, `LegacyMonitorParserParseMarksSnapshotIncompleteWhenRowsMissing`.
+  `LegacyMonitorParserParseReadsNewFormatProcessSnapshot`, `LegacyMonitorParserParseMarksSnapshotIncompleteWhenRowsMissing`,
+  `LegacyMonitorParserParseKeepsSnapshotWithEmptyDerivedNames` (old-format COMMAND `+`, new-format COMMANDs `/opt/x/`,
+  `:`, `[]`: the process snapshot record is emitted and passes `RecordingEmitter`'s validation).
 - [ ] **AC7 Per-program aggregates.** Each process snapshot carries `programs`: one entry per program name (the first
   space-separated word of the process's `command`), in order of first appearance, with `count`, the sums of
   `cpu_percent` and `rss_bytes`, no `pss_bytes`, and `rss_overcounted` true exactly when `count` > 1.
@@ -138,45 +160,78 @@ Every test lives in the file named under *Test files*; names are `{Class}{Scenar
   `spamd child` row → `apache2` count 3 overcounted, `spamd` count 2 overcounted, a single program not overcounted).
 - [ ] **AC8 Robustness: truncated and interleaved snapshots.** A snapshot is skipped whole, with one skip at its
   header's line number and no record, when: the header line is no valid header ("invalid snapshot header"); the
-  snapshot ends (next header line or end of input) before its table header ("truncated snapshot"); a non-empty line of
-  the top part is not the next expected one (summary lines in the order `top -`, `Tasks:`, `%Cpu(s):`, `Mem`, `Swap`,
-  then the table header, then rows), a row does not parse, two rows have the same PID, or a known section appears twice
-  ("malformed snapshot"). Lines before the first header line are skipped one by one as "line before the first
-  snapshot". The parse never throws for input (only for the time zone, AC4, cancellation and the emitter's errors), and
-  the snapshots before and after a skipped one are emitted.
+  snapshot ends (next header line or end of input) before its table header ("truncated snapshot"); a non-empty line
+  before the table header is not the next expected summary line (order `top -`, `Tasks:`, `%Cpu(s):`, `Mem`, `Swap`,
+  then the table header), a summary line is not read (AC5), a section marker comes before the table header, or a line
+  after the table header begins like a summary line (`top - `, `Tasks:`, `%Cpu(s):`, `<unit> Mem `, `<unit> Swap:`) or
+  is the table header again ("malformed snapshot" — the signs of another run's output mixed in). A **single bad row**
+  does not skip the snapshot: a row that does not parse is left out with the skip "process row not read", a row whose
+  PID an earlier row of the snapshot has is left out with "duplicate process id", both at the row's line, and the
+  process snapshot gets `complete` false. The top part is **accepted** at the first section marker after the table
+  header, or at the end of the snapshot; only then are its records emitted and its row skips reported (step 5). A
+  snapshot **closed by the end of input** instead of a following header line may be cut (the log is copied while it
+  grows): an `lsof` section still open then emits its connection snapshot with `complete` false, and a process table
+  still open (old format) its process snapshot with `complete` false; meminfo, pressure and vmstat metrics of a cut
+  section are emitted as read. The last snapshot of a whole file is therefore always marked so — the log has no end
+  marker. Lines before the first header line are skipped one by one as "line before the first snapshot" (so the rest
+  of a cut snapshot at the start of a continued parse is lost, *Areas*). The parse never throws for input (only for the
+  time zone, AC4, cancellation and the emitter's errors), and the snapshots before and after a skipped one are emitted.
   Tests: `LegacyMonitorParserTests.LegacyMonitorParserParseSkipsTruncatedLastSnapshot` (file cut inside the table
   header line and inside the summary),
-  `LegacyMonitorParserParseSkipsInterleavedSnapshot` (rows of snapshot A after the header of B, B emitted only if its own
-  part is in order — the test's input makes B malformed and checks A's and C's records),
-  `LegacyMonitorParserParseSkipsSnapshotWithInvalidHeader`, `LegacyMonitorParserParseSkipsSnapshotWithDuplicatePid`,
+  `LegacyMonitorParserParseSkipsInterleavedSnapshot` (a `top - ` line and a table header among the rows of B: B is
+  skipped whole, A's and C's records are emitted),
+  `LegacyMonitorParserParseSkipsSnapshotWithInvalidHeader`, `LegacyMonitorParserParseDropsDuplicatePidRow` (second row
+  left out with "duplicate process id", the first kept, `complete` false),
+  `LegacyMonitorParserParseDropsUnparsableRow` (one row with a non-numeric PID among three: two rows kept, one skip
+  "process row not read" at that line, `complete` false, the summary metrics and sections emitted),
+  `LegacyMonitorParserParseMarksSnapshotCutAtEndOfInputIncomplete` (DataRows: new format cut inside `lsof` → connection
+  snapshot `complete` false; new format cut inside `vmstat` after a closed `lsof` → that connection snapshot `complete`
+  true; old format cut inside the rows → process snapshot `complete` false; the same file with one more header line
+  appended → `complete` true), `LegacyMonitorParserParseSkipsRestOfCutSnapshotAtContinuation` (the lines after the cut,
+  parsed alone, give one "line before the first snapshot" skip each and the records of the next snapshot),
   `LegacyMonitorParserParseSkipsLinesBeforeFirstSnapshot`, `LegacyMonitorParserParseSurvivesHostileInput`
   (DataRows: 20,000 bytes without line feed, a header followed by 10,000 `top - ` lines, invalid UTF-8 in every field,
-  a row of 16 KiB — no exception, bounded skips).
+  a row of 16 KiB, 100,000 `lsof` lines with no header line before them — no exception; with `CountingEmitter` the
+  skips never exceed the input's line count and a snapshot's skips never exceed its caps (AC12) plus its marker and
+  cap skips).
 - [ ] **AC9 New-format sections.** `meminfo`: `Name: N kB` → `meminfo_bytes` (unit `bytes`, N×1024, label `field` =
-  Name), `Name: N` → `meminfo` (no unit, label `field`); Name 1 to 64 characters of `A-Z a-z 0-9 _ ( )`. `pressure`: a
+  Name), `Name: N` → `meminfo` (no unit, label `field`); Name 1 to 64 characters of `A-Z a-z 0-9 _ ( )`; N is 1 to 20
+  ASCII digits within `ulong`, and N×1024 above `ulong.MaxValue` makes the line unreadable. Pressure `total=N` and
+  vmstat `N` are 1 to 20 ASCII digits within `ulong`; averages follow AC5's number rule. `pressure`: a
   line `<res>: some avg10=F avg60=F avg300=F total=N[ full avg10=F avg60=F avg300=F total=N]` with res `memory`, `cpu`
   or `io`, or a line `full avg10=F avg60=F avg300=F total=N` directly after a resource line that had only `some` →
   `pressure_avg10`, `pressure_avg60`, `pressure_avg300` (unit `percent`) and `pressure_stall_microseconds_total` (unit
   `microseconds`), labels `resource` and `kind`; a line `n/a` or `<res>: n/a` gives no metric and no skip. `vmstat`: a
   line `<counter> N` for `pswpin`, `pswpout`, `pgmajfault`, `oom_kill` → `vmstat_total` (no unit, label `counter`) and,
-  when the previous emitted snapshot of this parse had the counter at an earlier instant and a value not above N,
+  when the previous accepted snapshot of this parse had the counter at an earlier instant and a value not above N,
   `vmstat_per_second` (unit `per_second`, label `counter`) = (N − previous) / seconds between the two headers; other
-  well-formed `<name> N` lines are ignored. An unreadable line of these sections is skipped with "meminfo line not
+  well-formed `<name> N` lines are ignored. The rate **depends on where a parse starts**: the first snapshot of a parse
+  has no rate, and a continued import starts with an empty history, so its first snapshot has none either (a gap of one
+  rate per continuation; the raw `vmstat_total` is complete, and a rate can be derived from it later; area
+  limitation). An unreadable line of these sections is skipped with "meminfo line not
   read", "pressure line not read" or "vmstat line not read" and the rest of the section is read; a repeated meminfo
   field or pressure resource and kind is skipped the same way; an unknown section `----- <name> -----` is skipped with one
-  skip "unknown section" at its marker and its lines are not read. Empty lines in sections are ignored.
+  skip "unknown section" at its marker, a known section that appears a second time in the snapshot with one skip
+  "repeated section"; the lines of both are not read and give no skip. Empty lines in sections are ignored. Section
+  metrics are emitted as their line is read (the top part is accepted by then), skips reported at once.
   Tests: `LegacyProcLineTests.LegacyProcLineTryParseMeminfoReadsKilobytesAndCounts`,
-  `LegacyProcLineTryParseMeminfoRefusesOtherForms`, `LegacyProcLineTryParsePressureReadsOneAndTwoLineForms`,
+  `LegacyProcLineTryParseMeminfoRefusesOtherForms` (DataRows include 21 digits and `MemTotal: 18014398509481984 kB`,
+  whose bytes are 2^64; `18014398509481983 kB` is read in `...ReadsKilobytesAndCounts`),
+  `LegacyProcLineTryParsePressureReadsOneAndTwoLineForms`,
   `LegacyProcLineTryParsePressureAcceptsNotAvailable`, `LegacyProcLineTryParsePressureRefusesOtherForms`,
   `LegacyProcLineTryParseVmstatReadsCounters`, `LegacyMonitorParserTests.LegacyMonitorParserParseEmitsSectionMetrics`,
   `LegacyMonitorParserParseConvertsVmstatCountersToRates` (three snapshots one minute apart; a counter that falls, as
-  after a reboot, gives no rate for that snapshot; a skipped snapshot is not a predecessor).
+  after a reboot, gives no rate for that snapshot; a skipped snapshot is not a predecessor; the first snapshot has no
+  rate, and parsing the file from its second header line on gives no rate for that snapshot either — the start
+  dependence pinned), `LegacyMonitorParserParseSkipsRepeatedSection`.
 - [ ] **AC10 lsof → connection snapshot.** See *Approach*, step 6 for the line grammar and the address guard. Per
   snapshot one `connection_snapshot`: `states` (per protocol and state over unique sockets, ordinal order by protocol then
   state), `processes` (per PID and decoded command over every socket line, order of first appearance), `remotes` (per
   remote address over unique connected sockets, by count descending then address text ordinal), `listeners` (unique
   sockets without a remote endpoint), `connections` (unique sockets with one); a socket is unique by the text of its
-  line from the TYPE field on, and its owner is that of its first line. `complete` is false when a line was left out.
+  line from the TYPE field on, and its owner is that of its first line. `complete` is false when a line was left out
+  (unread, unmapped, too long or beyond the cap) or the section was closed by the end of input (AC8). The connection
+  snapshot is emitted when the section ends (next section marker, next header line or end of input).
   An `lsof` section without lines emits no record; one with only the header emits an empty, complete snapshot. Unmapped
   lines are skipped with "lsof line not read" (shape) or "socket address not mapped" (address, port or state).
   Tests: `LegacyLsofLineTests.LegacyLsofLineTryParseReadsTcpAndUdp`, `LegacyLsofLineTryParseMapsWildcardsAndServiceNames`
@@ -186,7 +241,9 @@ Every test lives in the file named under *Test files*; names are `{Class}{Scenar
   `LegacyLsofLineTryParseRefusesLenientAddressForms` (DataRows, each must be refused — they are what
   `IPAddress.TryParse` would accept: `127.1:22`, `1:22`, `0x7f.0.0.1:22`, `010.0.0.1:22`, `2130706433:22`,
   `1.2.3.256:22`, `[1.2.3.4]:22`, `[::1]:80` as IPv4 TYPE, `1.2.3.4:22` as IPv6 TYPE, `[::1]:22]`, `[ ::1]:22`,
-  port `65536`, port `0x16`, unknown service `nosuchservice`, TCP without state, TCP state `UNKNOWN`),
+  port `65536`, port `0x16`, unknown service `nosuchservice`, TCP without state, TCP state `UNKNOWN`,
+  `[::ffff:1.2.3.04]:22`, `[::1.2.3.077]:22`, `[::ffff:1.2.3.256]:22`, `[::ffff:1.2.3]:22`),
+  `LegacyLsofLineTryParseReadsIpv6WithEmbeddedIpv4` (`[::ffff:192.0.2.1]:https` → ::ffff:192.0.2.1),
   `LegacyLsofLineIsHeaderMatchesColumnNames`, `LegacyServiceNamesTests.LegacyServiceNamesTryGetPortMapsUbuntuNames`
   (`ssh`/tcp 22, `domain`/udp 53, `imap2`/tcp 143, `submissions`/tcp 465, `mysql`/tcp 3306, `fsp`/udp 21 but not tcp),
   `LegacyServiceNamesTryGetPortRefusesUnknownNames`, `LegacyMonitorParserTests.LegacyMonitorParserParseBuildsConnectionSnapshot`,
@@ -195,20 +252,32 @@ Every test lives in the file named under *Test files*; names are `{Class}{Scenar
   validation (the importer's `RecordRules.CheckImportRecord` rules), and the records of a snapshot are emitted in the
   order: summary metrics, process snapshot, then per section in file order (meminfo, pressure and vmstat metrics in
   line order, the connection snapshot). Parsing the same content twice gives the same records; a parse cancelled or
-  stopped by an emitter error emits a prefix of the complete parse (the snapshot open at that moment is not emitted).
+  stopped by an emitter error emits a prefix of the complete parse (records of the open snapshot's accepted top part
+  and read section lines may be part of that prefix; a record is never emitted that the complete parse would not
+  emit at that position).
   Tests: `LegacyMonitorParserTests.LegacyMonitorParserParseFixturesEmitValidRecords` (DataRows: both fixtures),
   `LegacyMonitorParserParseIsDeterministic`, `LegacyMonitorParserParseEmitsPrefixWhenEmitterFails`,
   `LegacyMonitorParserParseHonorsCancellation`.
-- [ ] **AC12 Bounds.** A snapshot keeps at most 4,096 process rows (one skip "too many processes in a snapshot" at the
-  4,097th, `complete` false, aggregates over the kept rows) and reads at most 4,096 socket lines (one skip "too many
-  sockets in a snapshot", `complete` false); meminfo reads at most 128 lines and pressure at most 16 per snapshot (one
-  skip "too many lines in a section"); an `lsof` line longer than 1,024 bytes (raw, before decoding) is "lsof line not
-  read"; row tokens before COMMAND longer than 64 bytes make the row malformed. Memory does not grow with the number of
-  snapshots.
-  Tests: `LegacyMonitorParserTests.LegacyMonitorParserParseCapsProcessRows`, `LegacyMonitorParserParseCapsSocketLines`,
-  `LegacyMonitorParserParseCapsSectionLines`, `LegacyMonitorParserParseRetainsBoundedMemory` (retained heap measured
-  with the S1215 helper pattern of `KernelReportGrouperTests.RetainedBytes` at the last record of 2,000 generated
-  snapshots minus at the last record of 20 stays below 1 MiB, with `CountingEmitter`).
+- [ ] **AC12 Bounds.** Every cap counts **every non-empty line** of its part, read or not (parsed, unparsable,
+  duplicate, unmapped, too long, an `lsof` header line); at the first line beyond a cap one skip is reported, and every
+  later line of that part is dropped without a skip and without being examined. A snapshot reads at most 4,096 row
+  lines (skip "too many processes in a snapshot" at the 4,097th, `complete` false, aggregates over the kept rows), at
+  most 4,096 `lsof` lines (skip "too many sockets in a snapshot", `complete` false), and per section at most 128
+  meminfo, 16 pressure and 64 vmstat lines (skip "too many lines in a section"). An `lsof` line longer than 1,024 bytes
+  (raw, before decoding) is "lsof line not read"; row tokens before COMMAND longer than 64 bytes make the row
+  unparsable. Skips are never collected beyond these caps: the only skips held back are the row skips of a top part
+  not yet accepted (at most 4,096, step 5); every section skip is reported at once. Memory does not grow with the
+  number of snapshots or with the number of lines in a snapshot.
+  Tests: `LegacyMonitorParserTests.LegacyMonitorParserParseCapsProcessRows` (4,097 unparsable rows count to the cap
+  too), `LegacyMonitorParserParseCapsSocketLines` (unmapped and too long lines count, lines after the cap give no
+  skip), `LegacyMonitorParserParseCapsSectionLines` (DataRows: meminfo 129, pressure 17, vmstat 65 lines),
+  `LegacyMonitorParserParseRetainsBoundedMemory` (retained heap measured with the S1215 helper pattern of
+  `KernelReportGrouperTests.RetainedBytes` at the last record of 2,000 generated snapshots minus at the last record of
+  20 stays below 1 MiB, with `CountingEmitter`),
+  `LegacyMonitorParserParseRetainsBoundedMemoryForSectionLines` (one snapshot with 200,000 malformed `vmstat` lines and
+  200,000 unmapped `lsof` lines minus the same with 2,000 each, measured the same way when `CountingEmitter.Observed`
+  sees that snapshot's connection snapshot: below 1 MiB; and `Skips` equals the cap skips plus at most 64 + 4,096 line
+  skips).
 - [ ] **AC13 Anonymized fixtures of both formats; the real file is not in the repository.** `testdata/logs/legacy-monitor-old.log`
   (old format, at least three snapshots five minutes apart, truncated names) and `testdata/logs/legacy-monitor-new.log`
   (new format with all four sections, across the repeated hour of 2026-10-25 in `Europe/Berlin`, one snapshot cut at the
@@ -226,7 +295,8 @@ All new code is in `src/Vandox.Core/LogParsing`; the importer, storage and model
    before the first snapshot". Lines are decoded with `Utf8Text.Decode` (invalid bytes → U+FFFD); every grammar below is
    checked on ASCII characters with ordinal comparisons, and numbers are validated as ASCII digit strings before any
    conversion (never `char.IsDigit`, never `double.Parse` on unchecked text; conversion with
-   `CultureInfo.InvariantCulture` and `NumberStyles.AllowDecimalPoint` only).
+   `CultureInfo.InvariantCulture` and `NumberStyles.AllowDecimalPoint` only), with the digit bounds of AC5, AC6 and
+   AC9, so no conversion can give an infinite value or overflow unchecked.
 2. **Header and time.** `LegacyMonitorHeader.TryParse` (AC2); `Resolve` (AC3): year range checked as an integer first,
    then day against `SyslogTime.DaysInMonth`, then `LocalDateTime` → `zone.MapLocal`; candidates are `EarlyInterval`
    (count ≥ 1) and `LateInterval` (count 2); the first candidate whose `Name` equals the zone text wins; count 0 →
@@ -237,14 +307,23 @@ All new code is in `src/Vandox.Core/LogParsing`; the importer, storage and model
    table header, rows; empty lines are ignored throughout. A line `----- <name> -----` (name 1 to 32 lower-case ASCII
    letters) is a section marker and ends the top part; known names are `meminfo`, `pressure`, `vmstat`, `lsof`. The
    snapshot is new-format when any marker (known or not) occurs. Row parsing by `LegacyTopLine.TryParseRow`; command
-   normalization by `LegacyProcessNames` (AC6, AC7).
+   normalization by `LegacyProcessNames` (AC6, AC7). An unparsable or duplicate-PID row is left out and its skip held
+   back (line number and fixed reason; at most 4,096, because every row line counts toward the row cap); the PID set
+   holds at most 4,096 entries.
 4. **Sections.** `LegacyProcLine` reads meminfo, pressure and vmstat lines (AC9); the snapshot keeps the resource of the
-   last pressure resource line for a following `full` line. vmstat values are passed to the parser's counter history
-   (one `LegacyCounter` per counter name, four at most) when the snapshot is emitted.
-5. **Finishing.** At the next header line or the normal end of input the snapshot either reports its single skip
-   (AC8) or reports its collected line skips and returns its records (AC11 order), which the parser emits. The open
-   snapshot is never emitted when the parse ends by an exception (cancellation, emitter error, AC4 throw), so a failed
-   parse emits a prefix of the complete one.
+   last pressure resource line for a following `full` line. A vmstat value updates the parser's counter history (one
+   `LegacyCounter` per counter name, four at most) as its line is read, and its records are handed out at once.
+5. **Acceptance and finishing.** The top part is accepted at the first section marker after the table header, or when
+   the snapshot ends after the table header. At acceptance the snapshot hands out its summary metrics and its process
+   snapshot and reports its held-back row skips; it holds no skip after that: every section line skip is reported to
+   the emitter when the line is read, and every section record is handed out when its line is read (a connection
+   snapshot when its section ends). The parser emits handed-out records after each call, so it never holds more than
+   one snapshot's top part, one `lsof` section's sockets and the handful of records of one line. A snapshot that fails
+   AC8 before acceptance reports its single skip and drops what it held; it can no longer fail after acceptance.
+   `Finish(endOfInput: true)` sets `complete` false as AC8 states. The open snapshot is never finished when the parse
+   ends by an exception (cancellation, emitter error, AC4 throw), so a failed parse emits a prefix of the complete one.
+   An invalid or unresolvable header makes the parser skip the snapshot's lines without examining them (no snapshot
+   object, no skips).
 6. **lsof lines** (`LegacyLsofLine.TryParse`). The header (tokens exactly `COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE
    NAME`) is ignored wherever it appears. A socket line is split at runs of spaces: token 0 COMMAND, token 1 PID (1 to
    10 ASCII digits, 1..2,147,483,647), TYPE the first token from index 3 on that is `IPv4` or `IPv6`; from the end: an
@@ -257,8 +336,10 @@ All new code is in `src/Vandox.Core/LogParsing`; the importer, storage and model
      after the last `:`.
    - TYPE `IPv6`: `*` (→ ::) or `[` + text + `]` followed by `:PORT`; a `%` and the text after it up to `]` (a zone) is
      removed first (wire format rule: the zone is stripped, the address kept); the remaining text is 2 to 45 characters
-     of `0-9 A-F a-f : .` and contains `:`; then `IPAddress.TryParse` on that text alone, and the result must be
-     `InterNetworkV6` with `ScopeId` 0.
+     of `0-9 A-F a-f : .` and contains `:`; when it contains `.`, the text after its last `:` must be a dotted quad by
+     the IPv4 octet rule above (four octets, 1 to 3 digits, ≤ 255, no leading zero) and no `.` may occur before that
+     `:` — so `::ffff:1.2.3.04` and `::1.2.3.077`, which `IPAddress.TryParse` reads as decimal, are refused rather than
+     read; then `IPAddress.TryParse` on that text alone, and the result must be `InterNetworkV6` with `ScopeId` 0.
    - Every other form — the IPv4 shortcuts, hex and octal forms and single numbers that `IPAddress.TryParse` accepts
      (`127.1`, `1`, `0x7f.0.0.1`, `010.0.0.1`, `2130706433`), brackets on an IPv4 TYPE, no brackets on an IPv6 TYPE,
      brackets with port inside, spaces, a zone that would be resolved on the host — is "socket address not mapped".
@@ -286,16 +367,23 @@ The weighed options are recorded in [0093](../../docs/decisions/0093-legacy-moni
 - Zone mismatch: always fail (one odd header blocks the file forever) vs. always skip (a wrong option completes the
   content with nothing, unrecoverable because imports are idempotent per content) vs. fail before the first match,
   skip after (chosen).
-- Broken snapshot: skip whole when the top part is broken, sections read on their own (chosen) vs. read every
-  parsable line (rows of one run under another run's time).
+- Broken snapshot: skip whole when the top part's structure is broken (missing or out-of-order summary line, missing
+  table header, a summary line or table header among the rows), leave out a single bad or duplicate row with
+  `complete` false, sections read on their own (chosen, revised after the challenge) vs. skip whole on any bad row (one
+  wrong assumption about an unverified format would drop every snapshot) vs. read every parsable line (rows of one run
+  under another run's time).
+- Snapshot closed by the end of input: emit it with `complete` false on its open list (chosen) vs. emit nothing
+  without a following header (the last snapshot of every file would be lost for good, because a continuation starts
+  at the line in which the earlier content ends, not at its last header).
 - Connections list included (chosen) vs. only the counts the issue names (`complete` would always be false).
 - Port names: Ubuntu's full `/etc/services` table (chosen) vs. a short hand-picked list (drops sockets on forgotten
   ports) vs. a host lookup (forbidden by the wire format area).
 - Truncated names: remove `+` and flag (chosen) vs. an alias table of guessed full names vs. names learned from other
   snapshots (results would depend on where a continued parse starts).
 - `LineFramed` true (chosen): the log grows every minute and copies are taken while it grows; with `false` every later
-  copy would store all earlier snapshots again. The price (documented): a snapshot cut by the copy boundary is skipped
-  in the earlier import and its rest is skipped as lines before the first snapshot in the continuation.
+  copy would store all earlier snapshots again. The price (documented): a snapshot cut by the copy boundary keeps in
+  the earlier import what was read (skipped whole if cut before its table header, else marked incomplete, AC8), and
+  its rest is skipped line by line as lines before the first snapshot in the continuation; the vmstat rate restarts.
 - vmstat: raw counter and rate (chosen) vs. rate only (the issue's wording; the raw counter keeps an `oom_kill` step
   readable as a count and is what the agent will read).
 
@@ -347,9 +435,9 @@ internal sealed record LegacyCounter(DateTimeOffset At, ulong Value);
 
 internal sealed class LegacyMonitorSnapshot
 {
-    internal LegacyMonitorSnapshot(long headerLine, DateTimeOffset capturedAt);
-    internal void Add(long lineNumber, string line, bool cut);
-    internal IReadOnlyList<DataRecord> Finish(IRecordEmitter output, Dictionary<string, LegacyCounter> counters);   // reports skips; empty list when skipped
+    internal LegacyMonitorSnapshot(long headerLine, DateTimeOffset capturedAt, Dictionary<string, LegacyCounter> counters);
+    internal void Add(long lineNumber, string line, bool cut, IRecordEmitter output, List<DataRecord> ready);   // reports skips via output.Skip at once (row skips at acceptance); appends records to emit
+    internal void Finish(bool endOfInput, IRecordEmitter output, List<DataRecord> ready);                     // the single AC8 skip, or acceptance and the open lists (complete false when endOfInput)
 }
 
 internal sealed record LegacyTopRow(int Pid, string User, string State, double CpuPercent, ulong ResBytes, string Command);
@@ -368,9 +456,10 @@ internal static class LegacyTopLine
 
 internal static class LegacyProcessNames
 {
-    internal static string Normalize(string column, out bool truncated);
-    internal static string CommandOf(string commandLine);
-    internal static string ProgramOf(string command);
+    internal static string Normalize(string column, out bool truncated);           // may be empty ("+")
+    internal static string OldCommandOf(string column, out bool truncated);        // never empty: Normalize, else the column as printed; ≤ 1,024 bytes
+    internal static string CommandOf(string commandLine, string column);           // never empty: derived name, else commandLine, else column; ≤ 1,024 bytes
+    internal static string ProgramOf(string command);                              // never empty for a non-empty command: first word, else command
 }
 
 internal sealed record LegacyPressure(string Resource, string Kind, double Avg10, double Avg60, double Avg300, ulong Total);
@@ -430,10 +519,14 @@ extends them to nine in step 5 (they fail on the skeleton, which registers nothi
 
 - [Log import](../../docs/areas/log-import.md) — new section *Legacy monitoring log* (after *Plesk and web server error
   logs*): recognition, snapshot and header grammar, time and zone rules (AC3, AC4), top part, process snapshot and
-  programs, sections, lsof mapping and the address guard, skips and their reasons, bounds, the limitations (old/new
-  command names differ, a new-format snapshot cut before its first section reads as old, a snapshot cut by a copy
-  boundary is lost in a continued import, `top`'s first frame may show since-boot CPU averages — unverified, values are
-  as `top` printed them with its rounding). *System log parsers* list: add `legacy-monitor` after `apache-error`;
+  programs (the never-empty name rule), sections, lsof mapping and the address guard (with the embedded-IPv4 rule),
+  skips and their reasons, bounds (every line counts toward its cap; worst-case memory as in *Security considerations*),
+  the limitations (old/new command names differ, a new-format snapshot cut before its first section reads as old, the
+  last snapshot of a file is marked incomplete in its open list because the log has no end marker, the rest of a
+  snapshot cut by a copy boundary is skipped line by line in a continued import and lost, `vmstat_per_second` is
+  missing for the first snapshot of every parse including each continuation, `top`'s first frame may show since-boot
+  CPU averages — unverified, values are as `top` printed them with its rounding, and the formats were built from the
+  issue's description without the real sample). *System log parsers* list: add `legacy-monitor` after `apache-error`;
   *Repeatable import*: add the parser to the line-framed list; *Parsers*: "Only the parsers of Plesk and web server error
   logs keep raw lines" stays true; *Implementation*: add the new types; *Related decisions*: 0093. Owner: **Dev**.
 - [Wire format](../../docs/areas/wire-format.md) — new subsection *Metric names* under `metric`: the names, units and
@@ -469,10 +562,17 @@ other parsers (AC1), README sources list (*Documentation updates*).
 - [x] Limits and where they apply: lines are cut at 16 KiB of raw bytes by `LogLineReader` (before decoding); the
   `lsof` line bound of 1,024 bytes counts raw bytes before decoding; the 64-byte row-token bound, the 1,024-byte
   `command`, the 2,048-byte `cmdline` and the 16-character header zone count UTF-8 bytes of the decoded text (U+FFFD
-  counts three), cut at a character boundary with `Utf8Text.Cut`. Per snapshot at most 4,096 rows, 4,096 socket lines,
-  128 meminfo lines, 16 pressure lines; the counter history holds four entries; the dedupe set of sockets holds at most
-  4,096 keys of at most 1,024 bytes. Worst-case memory of one buffered snapshot is a constant (about 12 MiB of UTF-8 for
-  4,096 rows at their caps), independent of the input size.
+  counts three), cut at a character boundary with `Utf8Text.Cut`. Per snapshot at most 4,096 row lines, 4,096 `lsof`
+  lines, 128 meminfo, 16 pressure and 64 vmstat lines, every non-empty line counted, lines beyond a cap dropped unseen
+  and without a skip (AC12); the only skips held back are at most 4,096 row skips before acceptance, every other skip
+  goes to the emitter at once (which keeps a count and at most `ImportLimits.MaxProblems` = 10 problems,
+  `RecordEmitter.cs:219-233`); the counter history holds four entries; the PID set and the socket dedupe set hold at most
+  4,096 entries each, a socket key at most 1,024 raw bytes. Worst-case memory is a constant independent of the input
+  size: .NET strings take 2 bytes per character, so 4,096 rows with a 2,048-byte `cmdline` and a 1,024-byte `command`
+  are about 24 MiB, 4,096 socket keys and decoded commands of up to 1,024 characters about 16 MiB — about 40 MiB in
+  all, plus one 16 KiB line (corrected from the earlier 12 MiB, Security N2). The rows are released when the top part
+  is accepted, before any section is read, so the two never peak together in practice; the documented bound is the
+  sum.
 - [x] Exceptions that reach a user-visible reason: only `InvalidOperationException` with the fixed texts
   "import.time_zone is not set" and "the time zone of the first snapshot header does not match import.time_zone"
   (the importer shows `exception.Message`, `ImportPass.cs:538`). No other exception may escape for any input: number
@@ -482,6 +582,57 @@ other parsers (AC1), README sources list (*Documentation updates*).
 - Forged lines (limitation, documented in the area): any process that can write the log file can forge snapshots with
   any time, process or connection; the content claim makes any file whose first line has a header's shape a legacy
   log. Command and user texts are input; they are stored as they are and escaped where displayed (area 12).
+
+## Security review
+
+- **B1 (unbounded line skips) — accepted, plan revised.** Skips are no longer collected per snapshot: once the top
+  part is accepted every section skip goes to the emitter at once, and the only held-back skips are the row skips of a
+  top part not yet accepted, at most 4,096 because every row line counts toward the row cap (step 5, AC12). vmstat is
+  capped at 64 lines; unread, unmapped, too-long and header lines of `lsof` count toward the 4,096-line socket cap, and
+  every line beyond any cap is dropped unseen and without a skip (AC12). The heap test
+  `LegacyMonitorParserParseRetainsBoundedMemoryForSectionLines` (200,000 malformed vmstat and 200,000 unmapped lsof
+  lines minus 2,000 each, `CountingEmitter`, `RetainedBytes`, below 1 MiB) is added; the memory figure is corrected.
+- **B2 (empty derived names) — accepted, plan revised.** `command` and `program` are never empty: derived name, else
+  the normalized COMMAND, else the COMMAND as printed (AC6, AC7, `OldCommandOf`/`CommandOf`/`ProgramOf` signatures);
+  DataRows for `+`, `/opt/x/`, `:`, `[]` and the parser test `LegacyMonitorParserParseKeepsSnapshotWithEmptyDerivedNames`
+  are added.
+- **N1 (digit bound, overflow) — accepted.** Decimal numbers: 1 to 15 integer digits, optional fraction of 1 to 6;
+  integers 1 to 20 digits within `ulong`; memory × 1024^n and meminfo × 1024 above `ulong.MaxValue` make the line
+  unreadable (AC5, AC9, step 1), with refuse DataRows in `LegacyTopLineTryParseRefusesMalformedSummaryLines` and
+  `LegacyProcLineTryParseMeminfoRefusesOtherForms`.
+- **N2 (memory estimate) — accepted.** Corrected to about 40 MiB (UTF-16) in *Security considerations*; the area
+  document states the same figure.
+- **N3 (embedded IPv4 in IPv6) — accepted, fixed rather than pinned.** A trailing dotted quad must meet the IPv4 octet
+  rule (step 6), so `::ffff:1.2.3.04` and `::1.2.3.077` are refused; DataRows in
+  `LegacyLsofLineTryParseRefusesLenientAddressForms`, the canonical form in
+  `LegacyLsofLineTryParseReadsIpv6WithEmbeddedIpv4`. The whole list of accepted forms was re-checked: IPv4 (`*`, the
+  strict dotted quad), IPv6 (`*`, bracketed hex groups with optional zone stripped, optional strict trailing quad),
+  port (`*`, strict decimal, table name); the IPv6 text alphabet still excludes letters beyond `A-F`, spaces, `[`,
+  `]` and `%` after the zone is removed, so `IPAddress.TryParse` sees no other form.
+
+## Challenge
+
+- **Major 1 (whole snapshot lost for one bad row) — accepted, plan and 0093 revised.** An unparsable row and a
+  duplicate-PID row are left out with a skip at their line and `complete` false; the whole-snapshot skip stays only
+  for structural signs of a cut or mixed top part (missing or out-of-order summary line, missing table header, a
+  summary line or table header among the rows). AC6 and AC8 now agree.
+- **Major 2 (cut snapshot reported complete) — accepted.** A snapshot closed by the end of input emits its open
+  `lsof` list or old-format process table with `complete` false (AC8, AC10) and its test
+  `LegacyMonitorParserParseMarksSnapshotCutAtEndOfInputIncomplete`; the loss of the rest at a continuation is
+  documented and pinned by `LegacyMonitorParserParseSkipsRestOfCutSnapshotAtContinuation`. The alternative (no
+  emission without a following header) is rejected: the last snapshot of every file would be lost for good.
+- **Minor 3 (empty command) — accepted**, see B2.
+- **Minor 4 (vmstat rate start dependence) — accepted.** Stated in AC9 and the area limitations, pinned in
+  `LegacyMonitorParserParseConvertsVmstatCountersToRates`; 0093 option 14's argument (formerly 11) concerns names that would change,
+  a missing first rate is a gap, not a different value, and the raw counter is complete.
+- **Minor 5 (skip volume at a continuation) — accepted, checked.** `RecordEmitter.Skip` (`RecordEmitter.cs:219-233`)
+  keeps a counter and at most `ImportLimits.MaxProblems` (10) problems, so per-line skips cost no memory;
+  `LegacyMonitorParserParseSurvivesHostileInput` bounds the skip count by the line count and the caps (AC8).
+- **Minor 6 (fixtures encode guesses) — accepted.** The orchestrator notes in `log.md` and the PR description that
+  the parser was built from the issue's description without the real sample; the area limitations say so; the tolerant
+  paths of Major 1 are required by AC8.
+- **Minor 7 (CPU line without space after a comma) — accepted.** AC5 now states the tokenization and carries the
+  DataRows `0.0 us,100.0 id` and a memory line whose number fills `top`'s column.
 
 ## Decision records
 
