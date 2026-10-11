@@ -99,7 +99,7 @@ once in the [area document](../areas/README.md) of the record's area, and the re
 | 0062 | Timeout tests use testing/synctest without network, and injected short durations over loopback | Accepted | 2026-10-05 |
 | 0063 | Storage schema: one records table holds every record's identity, metrics and log lines get own tables, other payloads are stored as JSON | Accepted | 2026-10-06 |
 | 0066 | Log search takes literal terms only; every term is quoted for FTS5, operators and prefixes are not offered yet | Accepted | 2026-10-06 |
-| 0069 | The log import is idempotent per file content: SHA-256 of the decompressed content, two passes, batches that resume by count | Accepted | 2026-10-06 |
+| 0069 | The log import is idempotent per file content: SHA-256 of the decompressed content, two passes, batches that resume by count, a grown file continued after its imported start | Proposed | 2026-10-11 |
 | 0072 | vandoxd gets the sub-command import; progress as JSON on stderr, the summary as text on stdout, exit code 1 when a file failed | Accepted | 2026-10-06 |
 | 0073 | The backend is written in .NET 10 with a Blazor web UI; the agent stays in Go | Accepted | 2026-10-06 |
 | 0074 | Two-language toolchain: Go for the agent, .NET for the backend, one set of quality gates | Accepted | 2026-10-06 |
