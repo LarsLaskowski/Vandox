@@ -848,6 +848,33 @@ public class ImportTrackingTests
     }
 
     /// <summary>
+    /// The 64 largest complete contents count as candidates even when they hold no line hashes; a container that ranks 65th behind them is not found.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task SqliteStoreBeginImportCountsLargerContentsWithoutLineHashesAsCandidates()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+        var container = Lines("a", 5);
+        var older = container[..LineEnd(4)];
+
+        await ImportAsync(store, container, "logs/container.log");
+
+        for (var index = 0; index < StorageLimits.MaxImportContainers; index++)
+        {
+            await ImportAsync(store, Lines($"decoy{index:D2}", 6), $"logs/decoy-{index}.log", withHashes: false);
+        }
+
+        // Act
+        var result = await store.BeginImportAsync(ContentStart(older, "logs/old.log"), TestContext.CancellationToken);
+
+        // Assert
+        Assert.AreEqual(string.Empty, result.ContainedIn, "the container ranks behind 64 larger contents without line hashes");
+    }
+
+    /// <summary>
     /// A content that was imported again after it was begun again is recognized by the line hashes of the attempt that completed it.
     /// </summary>
     /// <returns>A task that completes when the test is done</returns>

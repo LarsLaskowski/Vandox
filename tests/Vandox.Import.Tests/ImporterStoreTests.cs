@@ -1543,6 +1543,37 @@ public class ImporterStoreTests
     }
 
     /// <summary>
+    /// After a failed batch, a parser that catches the failure and keeps reading causes no write of line hashes: the error of the store is sticky.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task ImporterWritesNoLineHashesAfterAFailedBatchWhenTheParserKeepsReading()
+    {
+        // Arrange
+        using var harness = new ImportHarness();
+        var parser = new SwallowingParser("test");
+
+        harness.Write("a.log", TestInputs.Log(9000));
+        harness.Store.WriteFailure = new StoreException("store: writing batch: disk full");
+        harness.Store.FailFromBatch = 1;
+
+        // Act
+        var run = await harness.RunAsync(TestContext.CancellationToken,
+                                         null,
+                                         options =>
+                                         {
+                                             options.Parsers = new ParserRegistry([parser]);
+                                             options.BatchRecords = 1000;
+                                         });
+
+        // Assert
+        Assert.AreEqual(ImportOutcome.Failed, run.Summary.Files.Single().Outcome, "the file fails");
+        Assert.IsGreaterThan(0, parser.Caught, "the parser caught the failed batch and kept reading");
+        Assert.IsGreaterThan(4096L, parser.LinesRead, "the parser read past the first row of line hashes");
+        Assert.AreEqual(0, harness.Store.LineHashCalls, "no line hashes follow the failed batch");
+    }
+
+    /// <summary>
     /// The last partial row of line hashes is written after the verification read and before the completing batch, and exactly one batch completes the file.
     /// </summary>
     /// <returns>A task that completes when the test is done</returns>

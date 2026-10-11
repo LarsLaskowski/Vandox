@@ -16,4 +16,5 @@ One line per pipeline step: date, step, member, result. Lead decisions and escal
 | 2026-10-11 | 6 Implement | Dev | Implemented; suite green, coverage 98.5% new / 96.7% overall, 2 lines uncovered (RecordEmitter 78-79) (sonnet/medium · 150,676 tokens · 27 tool uses · 570 s) |
 | 2026-10-11 | 7 Code check | Code Officer | Formatted 3 test files; format, analyzer, scope, tests, coverage gates pass (haiku/medium · 69,561 tokens · 8 tool uses · 193 s) |
 | 2026-10-11 | 8 Review (security diff) | Security | APPROVED on 843c798 (opus/medium · 74,372 tokens · 14 tool uses · 110 s) |
-| 2026-10-11 | 8 Review round 1 | Reviewer | BLOCKING 2 (LIMIT 64 caps joined rows not candidates; README exception list incomplete), NON-BLOCKING 2 (storage.md wording; RecordEmitter guard test) |
+| 2026-10-11 | 8 Review round 1 | Reviewer | BLOCKING 2 (LIMIT 64 caps joined rows not candidates; README exception list incomplete), NON-BLOCKING 2 (storage.md wording; RecordEmitter guard test) (opus/medium · 115,547 tokens · 27 tool uses · 218 s) |
+| 2026-10-11 | 8 Fix round 1: tests | Tester | Test for candidate limit fails on current code; guard test for sticky emitter error added (sonnet/medium · 95,000 tokens · 24 tool uses · 94 s) |
