@@ -1,7 +1,5 @@
 using Microsoft.Data.Sqlite;
 
-#pragma warning disable RH2003, S2325
-
 namespace Vandox.Storage;
 
 /// <summary>
@@ -355,9 +353,20 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, II
     }
 
     /// <inheritdoc />
-    public Task<IReadOnlyList<ImportBase>> FindImportBasesAsync(byte[] headSha256, string sourceType, CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<ImportBase>> FindImportBasesAsync(byte[] headSha256, string sourceType, CancellationToken cancellationToken)
     {
-        throw new NotImplementedException();
+        ImportRepository.ValidateLookup(headSha256, sourceType);
+
+        try
+        {
+            await using var lease = await LeaseReaderAsync(cancellationToken).ConfigureAwait(false);
+
+            return await ImportRepository.FindBasesAsync(lease.Connection, headSha256, sourceType, cancellationToken).ConfigureAwait(false);
+        }
+        catch (SqliteException exception)
+        {
+            throw new StoreException($"store: finding import bases: {exception.Message}", exception);
+        }
     }
 
     #endregion // IImportTracker

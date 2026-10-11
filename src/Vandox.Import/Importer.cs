@@ -51,7 +51,7 @@ public static class Importer
             {
                 await scanner.ScanAsync(cancellationToken).ConfigureAwait(false);
             }
-            catch (Exception exception) when (exception is TooManyFilesException or OperationCanceledException)
+            catch (Exception exception) when (exception is TooManyFilesException or ImportException or OperationCanceledException)
             {
                 error = exception;
             }

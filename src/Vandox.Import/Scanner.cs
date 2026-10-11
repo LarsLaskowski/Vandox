@@ -3,6 +3,7 @@ using System.IO.Compression;
 
 using Vandox.Core.IO;
 using Vandox.Core.LogParsing;
+using Vandox.Storage;
 
 namespace Vandox.Import;
 
@@ -29,6 +30,7 @@ internal sealed class Scanner
     private readonly SourceRoot _source;
     private readonly ImportOptions _options;
     private readonly long _progressBytes;
+    private readonly Dictionary<string, List<ImportBase>> _runBases = [];
     private int _entries;
 
     #endregion // Fields
@@ -67,6 +69,7 @@ internal sealed class Scanner
     /// <param name="cancellationToken">Cancels the walk</param>
     /// <returns>A task that completes when the walk is done</returns>
     /// <exception cref="TooManyFilesException">The input holds more than <see cref="ImportLimits.MaxFiles"/> entries</exception>
+    /// <exception cref="ImportException">The import state could not be read</exception>
     internal async Task ScanAsync(CancellationToken cancellationToken)
     {
         if (_source.File.Length > 0)
@@ -420,6 +423,9 @@ internal sealed class Scanner
             return;
         }
 
+        var key = ContentHead.Key(head);
+        var bases = parser.LineFramed ? await CollectBasesAsync(key, parser.Type, cancellationToken).ConfigureAwait(false) : [];
+
         await using var hashing = new HashingStream(content,
                                                     _progressBytes,
                                                     mark => Report(new ImportProgress
@@ -428,9 +434,12 @@ internal sealed class Scanner
                                                                        Path = item.Display,
                                                                        Bytes = mark
                                                                    }),
-                                                    []);
+                                                    bases);
 
         await hashing.CopyToAsync(Stream.Null, cancellationToken).ConfigureAwait(false);
+
+        var size = hashing.BytesRead;
+        var sum = hashing.GetHash();
 
         Found.Add(new FoundFile
                   {
@@ -442,9 +451,89 @@ internal sealed class Scanner
                       File = file,
                       Location = item.Location,
                       Parser = parser,
-                      Size = hashing.BytesRead,
-                      Sum = hashing.GetHash()
+                      Size = size,
+                      Sum = sum,
+                      Head = key,
+                      Prefixes = [.. hashing.Matches.Where(match => match.Size < size)]
                   });
+
+        if (parser.LineFramed)
+        {
+            AddRunBase(key, parser.Type, new ImportBase
+                                         {
+                                             Sha256 = sum,
+                                             Size = size
+                                         });
+        }
+    }
+
+    /// <summary>
+    /// Collects the contents a file with a head key may continue: the complete ones of the store and the earlier files of this
+    /// run, the largest <see cref="StorageLimits.MaxImportBases"/> of them.
+    /// </summary>
+    /// <param name="key">The head key</param>
+    /// <param name="sourceType">The parser type</param>
+    /// <param name="cancellationToken">Cancels the lookup</param>
+    /// <returns>A task that returns the bases</returns>
+    /// <exception cref="ImportException">The store failed</exception>
+    private async Task<List<ImportBase>> CollectBasesAsync(byte[] key, string sourceType, CancellationToken cancellationToken)
+    {
+        IReadOnlyList<ImportBase> stored;
+
+        try
+        {
+            stored = await _options.Store!.FindImportBasesAsync(key, sourceType, cancellationToken).ConfigureAwait(false);
+        }
+        catch (StoreException exception)
+        {
+            throw new ImportException("importer: reading the import state failed", exception);
+        }
+
+        var merged = new List<ImportBase>(stored);
+
+        if (_runBases.TryGetValue(RunKey(key, sourceType), out var local))
+        {
+            merged.AddRange(local);
+        }
+
+        return Largest(merged);
+    }
+
+    /// <summary>
+    /// Remembers a file of this run as a base for later files.
+    /// </summary>
+    /// <param name="key">The head key</param>
+    /// <param name="sourceType">The parser type</param>
+    /// <param name="added">The content</param>
+    private void AddRunBase(byte[] key, string sourceType, ImportBase added)
+    {
+        var name = RunKey(key, sourceType);
+
+        var local = _runBases.TryGetValue(name, out var existing) ? existing : [];
+
+        local.Add(added);
+        _runBases[name] = Largest(local);
+    }
+
+    /// <summary>
+    /// Returns the key of the run's base table.
+    /// </summary>
+    /// <param name="key">The head key</param>
+    /// <param name="sourceType">The parser type</param>
+    /// <returns>The key</returns>
+    private static string RunKey(byte[] key, string sourceType)
+    {
+        return $"{Convert.ToHexString(key)}/{sourceType}";
+    }
+
+    /// <summary>
+    /// Removes duplicates by hash and keeps the largest <see cref="StorageLimits.MaxImportBases"/>, largest first.
+    /// </summary>
+    /// <param name="bases">The bases</param>
+    /// <returns>The kept bases</returns>
+    private static List<ImportBase> Largest(IEnumerable<ImportBase> bases)
+    {
+        return [.. bases.GroupBy(item => Convert.ToHexString(item.Sha256)).Select(group => group.First()).OrderByDescending(item => item.Size).Take(StorageLimits.MaxImportBases)];
     }
 
     /// <summary>

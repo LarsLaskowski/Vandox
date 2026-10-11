@@ -81,7 +81,14 @@ internal static class SchemaMigrator
                                                               """
                                                           ]),
                                                       new(4, ["ALTER TABLE log_lines ADD COLUMN host TEXT NOT NULL DEFAULT ''"]),
-                                                      new(5, ["ALTER TABLE log_lines ADD COLUMN event TEXT NOT NULL DEFAULT ''"])
+                                                      new(5, ["ALTER TABLE log_lines ADD COLUMN event TEXT NOT NULL DEFAULT ''"]),
+                                                      new(6,
+                                                          [
+                                                              "ALTER TABLE import_files ADD COLUMN head_sha256 BLOB CHECK (head_sha256 IS NULL OR length(head_sha256) = 32)",
+                                                              "ALTER TABLE import_files ADD COLUMN continues_id INTEGER",
+                                                              "ALTER TABLE import_files ADD COLUMN start_offset INTEGER NOT NULL DEFAULT 0 CHECK (start_offset >= 0)",
+                                                              "CREATE INDEX import_files_head ON import_files(head_sha256, source_type, size) WHERE complete = 1 AND head_sha256 IS NOT NULL"
+                                                          ])
                                                   ];
 
     #endregion // Fields

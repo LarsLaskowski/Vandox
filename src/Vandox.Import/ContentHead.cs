@@ -1,4 +1,4 @@
-#pragma warning disable RH2003, S2325
+using System.Security.Cryptography;
 
 namespace Vandox.Import;
 
@@ -16,7 +16,10 @@ internal static class ContentHead
     /// <returns>The key, 32 bytes</returns>
     internal static byte[] Key(ReadOnlySpan<byte> head)
     {
-        throw new NotImplementedException();
+        var length = Math.Min(head.Length, 4096);
+        var line = head[..length].IndexOf((byte)'\n');
+
+        return SHA256.HashData(line >= 0 ? head[..(line + 1)] : head[..length]);
     }
 
     #endregion // Methods

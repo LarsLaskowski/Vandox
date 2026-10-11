@@ -19,6 +19,7 @@ internal sealed class RecordEmitter : IRecordEmitter
     private readonly List<DataRecord> _buffer = [];
     private long _drop;
     private long _startBytes;
+    private bool _atStart;
 
     #endregion // Fields
 
@@ -45,6 +46,7 @@ internal sealed class RecordEmitter : IRecordEmitter
                 };
         _drop = state.Records;
         LineOffset = lineOffset;
+        _atStart = state.Offset > 0;
     }
 
     #endregion // Constructors
@@ -190,9 +192,14 @@ internal sealed class RecordEmitter : IRecordEmitter
 
         result.Skipped++;
 
+        if (line > 0 && _atStart)
+        {
+            result.SkippedAtStart++;
+        }
+
         if (result.Problems.Count < ImportLimits.MaxProblems)
         {
-            result.Problems.Add(new ImportProblem(line, reason));
+            result.Problems.Add(new ImportProblem(line > 0 ? line + LineOffset : line, reason));
         }
     }
 
