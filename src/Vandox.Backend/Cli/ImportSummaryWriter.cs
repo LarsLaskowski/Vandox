@@ -27,6 +27,7 @@ internal static class ImportSummaryWriter
         text.Append(CultureInfo.InvariantCulture, $"  imported:          {summary.Count(ImportOutcome.Imported)}\n");
         text.Append(CultureInfo.InvariantCulture, $"  continued:         {summary.Count(ImportOutcome.Continued)}\n");
         text.Append(CultureInfo.InvariantCulture, $"  already imported:  {summary.Count(ImportOutcome.AlreadyImported)}\n");
+        text.Append(CultureInfo.InvariantCulture, $"  contained:         {summary.Count(ImportOutcome.Contained)}\n");
         text.Append(CultureInfo.InvariantCulture, $"  not recognized:    {summary.Count(ImportOutcome.Unrecognized)}\n");
         text.Append(CultureInfo.InvariantCulture, $"  failed:            {summary.Count(ImportOutcome.Failed)}\n");
         text.Append(CultureInfo.InvariantCulture, $"Lines read:          {summary.Lines}\n");
@@ -48,6 +49,7 @@ internal static class ImportSummaryWriter
         }
 
         WriteContinued(text, summary.Files);
+        WriteContained(text, summary.Files);
         WriteListed(text, "Files not recognized", summary.Files, ImportOutcome.Unrecognized);
         WriteListed(text, "Files that failed", summary.Files, ImportOutcome.Failed);
         WriteSkipped(text, summary.Files);
@@ -110,6 +112,28 @@ internal static class ImportSummaryWriter
             var skipped = file.SkippedAtStart > 0 ? $", skipped {file.SkippedAtStart.ToString(CultureInfo.InvariantCulture)} lines before its first record" : string.Empty;
 
             text.Append(CultureInfo.InvariantCulture, $"  {Terminal.Quote(file.Path)}: continues {Terminal.Quote(file.ContinuedFrom)} after line {file.ContinuedAfter}{skipped}\n");
+        }
+    }
+
+    /// <summary>
+    /// Lists the contained files with the content they are the start of.
+    /// </summary>
+    /// <param name="text">The text so far</param>
+    /// <param name="files">The files</param>
+    private static void WriteContained(StringBuilder text, List<FileResult> files)
+    {
+        var contained = files.Where(file => file.Outcome == ImportOutcome.Contained).ToList();
+
+        if (contained.Count == 0)
+        {
+            return;
+        }
+
+        text.Append("\nFiles contained in an imported file:\n");
+
+        foreach (var file in contained)
+        {
+            text.Append(CultureInfo.InvariantCulture, $"  {Terminal.Quote(file.Path)}: start of {Terminal.Quote(file.ContainedIn)}\n");
         }
     }
 

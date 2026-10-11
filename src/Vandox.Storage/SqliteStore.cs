@@ -7,8 +7,6 @@ namespace Vandox.Storage;
 /// bounded number of query-only readers, so a committed batch is durable and reads (and the health check) do not wait for
 /// a write.
 /// </summary>
-#pragma warning disable RH2003, S2325
-
 public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IImportTracker, IAsyncDisposable
 {
     #region Constants
@@ -372,9 +370,24 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, II
     }
 
     /// <inheritdoc />
-    public Task AddLineHashesAsync(ImportLineHashes hashes, CancellationToken cancellationToken)
+    public async Task AddLineHashesAsync(ImportLineHashes hashes, CancellationToken cancellationToken)
     {
-        throw new NotImplementedException();
+        ImportRepository.ValidateLineHashes(hashes);
+
+        await _writeLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+
+        try
+        {
+            await ImportRepository.AddLineHashesAsync(_writer, hashes, cancellationToken).ConfigureAwait(false);
+        }
+        catch (SqliteException exception)
+        {
+            throw new StoreException($"store: adding line hashes: {exception.Message}", exception);
+        }
+        finally
+        {
+            _writeLock.Release();
+        }
     }
 
     #endregion // IImportTracker

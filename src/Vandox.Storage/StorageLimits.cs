@@ -15,7 +15,7 @@ public static class StorageLimits
     /// <summary>
     /// The database schema version this build reads and writes.
     /// </summary>
-    public const int SchemaVersion = 6;
+    public const int SchemaVersion = 7;
 
     /// <summary>
     /// The largest number of bases of one content.

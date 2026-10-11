@@ -118,6 +118,11 @@ internal static class BatchValidator
             throw Invalid("import done must not be negative");
         }
 
+        if (batch.Import.Attempt < 0)
+        {
+            throw Invalid("import attempt must not be negative");
+        }
+
         for (var index = 0; index < batch.Records.Count; index++)
         {
             var error = RecordRules.CheckImportRecord(batch.Records[index]);

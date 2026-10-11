@@ -120,10 +120,11 @@ internal sealed class ImportPass
     /// content was read again unchanged, the last batch that completes the file.
     /// </summary>
     /// <param name="emitter">The emitter</param>
+    /// <param name="counted">The content, which holds the line hashes not yet written</param>
     /// <param name="parseError">The exception of the parser, if any</param>
     /// <param name="cancellationToken">Cancels the import</param>
     /// <returns>A task that returns the error that failed the file, if any</returns>
-    private static async Task<Exception?> SettleAsync(RecordEmitter emitter, Exception? parseError, CancellationToken cancellationToken)
+    private static async Task<Exception?> SettleAsync(RecordEmitter emitter, ContentStream counted, Exception? parseError, CancellationToken cancellationToken)
     {
         if (parseError is not null)
         {
@@ -141,6 +142,7 @@ internal sealed class ImportPass
         {
             if (await emitter.VerifyAsync(cancellationToken).ConfigureAwait(false))
             {
+                await counted.FlushLineHashesAsync(cancellationToken).ConfigureAwait(false);
                 await TryFlushAsync(emitter, true, cancellationToken).ConfigureAwait(false);
 
                 return null;
@@ -151,6 +153,10 @@ internal sealed class ImportPass
         catch (Exception exception) when (exception is IOException or InvalidDataException or EndOfStreamException)
         {
             return exception;
+        }
+        catch (Exception) when (emitter.Error is not null)
+        {
+            return emitter.Error;
         }
     }
 
@@ -352,6 +358,15 @@ internal sealed class ImportPass
             return null;
         }
 
+        if (state.ContainedIn.Length > 0)
+        {
+            item.Result.Outcome = ImportOutcome.Contained;
+            item.Result.ContainedIn = state.ContainedIn;
+            Finished(item);
+
+            return null;
+        }
+
         if (state.Complete)
         {
             item.Result.Outcome = ImportOutcome.AlreadyImported;
@@ -438,8 +453,11 @@ internal sealed class ImportPass
                                                                   Lines = lines,
                                                                   Records = result.Records
                                                               }));
+        var emitter = new RecordEmitter(_options, item, counted, state);
         long skipped = 0;
         Exception? parseError = null;
+
+        counted.LineHashWriter = emitter.WriteLineHashesAsync;
 
         try
         {
@@ -450,11 +468,10 @@ internal sealed class ImportPass
             parseError = exception;
         }
 
-        var emitter = new RecordEmitter(_options, item, counted, state, skipped);
-
+        emitter.LineOffset = skipped;
         parseError ??= await ParseAsync(item, state, counted, emitter, cancellationToken).ConfigureAwait(false);
 
-        var reason = await JudgeAsync(emitter, parseError, cancellationToken).ConfigureAwait(false);
+        var reason = await JudgeAsync(emitter, counted, parseError, cancellationToken).ConfigureAwait(false);
 
         result.Lines = counted.Lines;
 
@@ -484,16 +501,17 @@ internal sealed class ImportPass
     /// imported completely.
     /// </summary>
     /// <param name="emitter">The emitter</param>
+    /// <param name="counted">The content</param>
     /// <param name="parseError">The exception of the parser, if any</param>
     /// <param name="cancellationToken">Cancels the import</param>
     /// <returns>A task that returns the reason, or an empty text</returns>
-    private async Task<string> JudgeAsync(RecordEmitter emitter, Exception? parseError, CancellationToken cancellationToken)
+    private async Task<string> JudgeAsync(RecordEmitter emitter, ContentStream counted, Exception? parseError, CancellationToken cancellationToken)
     {
         var error = parseError;
 
         if (emitter.Error is null)
         {
-            error = await SettleAsync(emitter, parseError, cancellationToken).ConfigureAwait(false);
+            error = await SettleAsync(emitter, counted, parseError, cancellationToken).ConfigureAwait(false);
         }
 
         if (emitter.Error is not null)
