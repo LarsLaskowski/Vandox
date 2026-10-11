@@ -179,6 +179,37 @@ public class ImportCommandTests
     }
 
     /// <summary>
+    /// <c>vandoxd import</c> reads the Dovecot log file fixture with the built-in parsers, with no hook, in the configured time zone, and stores its events.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task ImportCommandImportsTheDovecotLogWithBuiltInParsersInTheConfiguredZone()
+    {
+        // Arrange
+        using var fixture = new BackendFixture();
+        var logs = Path.Combine(fixture.Folder.Path, "logs");
+
+        Directory.CreateDirectory(logs);
+        File.Copy(RepositoryFiles.Path("testdata/logs/dovecot.log"), Path.Combine(logs, "dovecot.log-20261010"));
+        await File.AppendAllTextAsync(fixture.ConfigPath, "import:\n  time_zone: Europe/Berlin\n", TestContext.CancellationToken);
+
+        // Act
+        var code = await fixture.RunAsync(["import", logs], null, TestContext.CancellationToken);
+        var output = fixture.Out.ToString();
+        var records = await ReadLogLinesAsync(fixture.Storage, "dovecot", TestContext.CancellationToken);
+
+        // Assert
+        Assert.AreEqual(0, code, "exit code");
+        Assert.Contains("  imported:          1", output, "the file is imported");
+        Assert.Contains("  not recognized:    0", output, "the file is recognized");
+        Assert.Contains("Records stored:      11", output, "records");
+        Assert.HasCount(11, records, "11 records of source dovecot");
+        Assert.AreEqual(new DateTimeOffset(2026, 10, 9, 1, 12, 12, TimeSpan.Zero), records[0].Record.CapturedAt, "03:12:12 in Berlin summer time is 01:12:12 UTC");
+        Assert.AreEqual("dovecot.log-20261010", ((LogLine)records[0].Record.Data!).Log, "log is the path as the import lists it");
+        Assert.AreEqual("-|-|dovecot.database_unavailable|dovecot.database_unavailable|-|dovecot.panic|dovecot.fatal|-|-|-|-", string.Join('|', records.Select(record => ((LogLine)record.Record.Data!).Event is { Length: > 0 } name ? name : "-")), "events in fixture order");
+    }
+
+    /// <summary>
     /// Without <c>import.time_zone</c> the MariaDB error log fails with the fixed reason, nothing of it is stored and the exit code is 1.
     /// </summary>
     /// <returns>A task that completes when the test is done</returns>

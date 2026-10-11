@@ -80,6 +80,23 @@ public sealed class SyslogParser : ILogParser
     }
 
     /// <summary>
+    /// Resolves a year-less time; fails the file when no time zone is set.
+    /// </summary>
+    /// <param name="time">The time</param>
+    /// <param name="clock">The clock; <c>null</c> without a time zone</param>
+    /// <param name="instant">The instant on success</param>
+    /// <returns><c>null</c> on success, else the reason</returns>
+    internal static string? Resolve(SyslogTime time, SyslogClock? clock, out DateTimeOffset instant)
+    {
+        if (clock is null)
+        {
+            throw new InvalidOperationException(TimeZoneNotSet);
+        }
+
+        return clock.Resolve(time, out instant);
+    }
+
+    /// <summary>
     /// Maps the line the reader returned last to a record, or reports why there is none.
     /// </summary>
     /// <param name="file">The file</param>
@@ -140,23 +157,6 @@ public sealed class SyslogParser : ILogParser
                               Truncated = reader.Truncated || cut
                           }
                };
-    }
-
-    /// <summary>
-    /// Resolves a year-less time; fails the file when no time zone is set.
-    /// </summary>
-    /// <param name="time">The time</param>
-    /// <param name="clock">The clock; <c>null</c> without a time zone</param>
-    /// <param name="instant">The instant on success</param>
-    /// <returns><c>null</c> on success, else the reason</returns>
-    private static string? Resolve(SyslogTime time, SyslogClock? clock, out DateTimeOffset instant)
-    {
-        if (clock is null)
-        {
-            throw new InvalidOperationException(TimeZoneNotSet);
-        }
-
-        return clock.Resolve(time, out instant);
     }
 
     #endregion // Methods

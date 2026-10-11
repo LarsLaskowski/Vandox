@@ -22,7 +22,7 @@ imported data is kept apart from live data (it never raises alerts) by the detec
   the copy world-readable: a copied `/var/log` holds files such as `auth.log` and `mail.log` with mode `0640 root:adm`.
 - The backend option `import.time_zone` (IANA time zone ID, ordinal match against NodaTime's embedded database, no
   default) names the zone of the server the logs come from. It is used for year-less syslog times (see *System log
-  parsers*) and for the local times of the MariaDB error log (see *MariaDB error log*); a value that is no zone ID is refused at start-up with the line of the key and without the value. The
+  parsers*), for the local times of the MariaDB error log (see *MariaDB error log*) and for the times of Dovecot's log file (see *Dovecot log file*); a value that is no zone ID is refused at start-up with the line of the key and without the value. The
   example file holds it commented out.
 
 ## Input
@@ -92,7 +92,7 @@ imported data is kept apart from live data (it never raises alerts) by the detec
   imported up to the hashed size; the appended lines come with a later import, which continues the file (below).
 - **A file that grew is continued.** A content that starts with a content imported completely before (the same log with
   more lines at its end) has another hash, but only its new part is parsed and stored. The rules:
-  - Only a file whose parser is **line-framed** (`LineFramed`: syslog and the MariaDB error log) is continued. A journal
+  - Only a file whose parser is **line-framed** (`LineFramed`: syslog, the MariaDB error log and the Dovecot log file) is continued. A journal
     export that grew is imported as a whole and its earlier entries are stored again, because its binary fields hold
     line feeds and a line feed in the middle is no safe place to start a parse.
   - Pass 1 computes the **head key** of every recognized file: the SHA-256 of its first line (up to and including the
@@ -172,7 +172,7 @@ A parser turns the lines of one file into records. The importer and every parser
   truncated flag, the rest of the line discarded, so a file without line breaks cannot grow memory.
 - `LineFramed` tells whether the format is framed by lines only: every byte after a line feed starts a new line and is
   never the rest of a field begun before it. The importer starts a parse at a line start in the middle of a content only
-  for such a parser. Syslog and the MariaDB error log are line-framed; the journal export is not (binary fields hold
+  for such a parser. Syslog, the MariaDB error log and the Dovecot log file are line-framed; the journal export is not (binary fields hold
   line feeds). A parser a hook supplies must declare it; `true` for a format with length-framed fields is a parser bug.
 - The file name handed to a parser has a `.gz` suffix removed when the content was decompressed.
 - A new parser is one type and one entry in the list; the importer does not change.
@@ -180,8 +180,8 @@ A parser turns the lines of one file into records. The importer and every parser
 ## System log parsers
 
 `BuiltInParsers.Create(timeZone)` is the list `vandoxd import` registers when no hook replaces it: `journal`
-(`JournalExportParser`), then `mariadb` (`MariaDbErrorLogParser`, see *MariaDB error log*), then `syslog`
-(`SyslogParser`). The journal parser claims a file by content (a head that begins
+(`JournalExportParser`), then `mariadb` (`MariaDbErrorLogParser`, see *MariaDB error log*), then `dovecot`
+(`DovecotLogParser`, see *Dovecot log file*), then `syslog` (`SyslogParser`). The journal parser claims a file by content (a head that begins
 with a `__CURSOR=` or `__REALTIME_TIMESTAMP=` line and holds a `__REALTIME_TIMESTAMP=` line; the file name never
 matters); the syslog parser claims weakly (name match) a file named `syslog` or `kern.log` with an optional `.N` or
 `-YYYYMMDD` suffix, or whose first line has a syslog header. Both parsers produce `log_line` records with origin `import`
@@ -285,7 +285,8 @@ it has, and the message, program, pid, host, `truncated` and `log` are never cha
 | Dovecot | the message begins with it, or the message is `S: ` + marker + text where `S`, the text before the first `: `, is non-empty and holds no space | `Debug: ` 7, `Warning: ` 4, `Error: ` 3, `Fatal: ` 2 (`dovecot.fatal`), `Panic: ` 2 (`dovecot.panic`) |
 
 The markers include their trailing space. For Dovecot the start of the message is checked first. Dovecot's syslog
-format has no `Info: ` marker, so such a line keeps its priority.
+format has no `Info: ` marker, so such a line keeps its priority; only Dovecot's own log file reads `Info: ` (see *Dovecot
+log file*).
 
 *Unavailable database.* A warning or error line gets `postfix.database_unavailable` or `dovecot.database_unavailable`
 when the text *T* after the marker carries a client error *C* at an anchored position. *C* starts with one of eight
@@ -489,6 +490,49 @@ syslog file. The journal and syslog parsers apply these rules to the records the
   file shaped like a journal export (one a web-space user wrote under a saved `/var/www`) carries any `_PID` its writer
   chose. But the grouping state belongs to one parse of one file, so such a file cannot reach the lines of another file.
 
+## Dovecot log file
+
+**Recognition.** With `log_path` (or `info_log_path`, `debug_log_path`) set to a file, Dovecot writes its own log instead of
+syslog: each line is the time stamp of `log_timestamp` (default `%b %d %H:%M:%S `, the server's local time), the process
+prefix and the log type, without host or program. The parser `dovecot` has no path option and claims a file by content
+only: `Detect` returns a content match when the file's name is not a syslog name (as for the MariaDB error log) **and** the
+**first line** of the first 4,096 bytes is a Dovecot line (see *Lines*). A UTF-8 byte order mark at the start of the head
+and a `\r` directly before `\n` are removed, and a first line cut by the end of the head counts when it is a Dovecot line
+as far as it goes. An empty first line, or one that is no Dovecot line, means no match; no later line is looked at. The
+syslog parser claims such a file weakly as well (its grammar reads the prefix as the host); the content match wins. A
+Dovecot log under a syslog name stays with the syslog parser, and a copy cut inside its first line or a file written with
+another `log_timestamp` is listed as not recognized. Neither the source type `dovecot` nor an event proves that Dovecot
+wrote the file: any imported file whose first line has the shape, such as one a web-space user wrote under a saved
+`/var/www`, is read as one, and `log` keeps its real path.
+
+**Lines.** A **Dovecot line** is the traditional time stamp of *Syslog* (`Mmm dd HH:MM:SS`, English month abbreviation, day
+zero- or space-padded, hour 00 to 23, minute and second 00 to 59), one space, and a message *M* that carries a Dovecot
+marker at Dovecot's position: *M* begins with `Debug: `, `Info: `, `Warning: `, `Error: `, `Fatal: ` or `Panic: `, or *M* is
+`S: ` + marker + text, where `S`, the text before the first `: `, is non-empty and holds no space. The comparison is
+ordinal and case-sensitive, the parse hand-written and linear in the length of a line. Every Dovecot line is one record:
+`source` `dovecot`, origin `import`, sequence 0, `log` the file name as the import lists it, `host` and `program` empty,
+`pid` 0, `message` *M* as written (prefix and marker included), cut to 16,384 UTF-8 bytes of the decoded text with
+`truncated` set, and `truncated` also for a line the reader cut. No lines are joined: Dovecot repeats prefix and type on
+every line it writes. Any other non-empty line (a syslog line with a host, a `<PRI>` or an RFC 3339 time, a line whose
+prefix holds a space) is skipped as "not a Dovecot line", an empty line as "empty line", with the 1-based line number. A
+UTF-8 byte order mark is removed from line 1 only.
+
+**Priority and events.** The rules of the Dovecot family in *Mail lines (Postfix and Dovecot)* apply to every record, with
+`Info: ` added: `Debug: ` 7, `Info: ` 6, `Warning: ` 4, `Error: ` 3, `Fatal: ` 2 (`dovecot.fatal`), `Panic: ` 2
+(`dovecot.panic`), and a warning or error of `auth-worker(<digits>)` with the anchored database message gets
+`dovecot.database_unavailable`. A Dovecot line always carries a marker, so every record has a priority. `Info: ` is read
+only here: in syslog and the journal Dovecot writes no such label.
+
+**Time.** The time stamp is local time in `import.time_zone`, with the rules of *Year of a year-less time* and *Time zone*
+and their skip reasons ("invalid date", "time outside the storable range", "year unknown: the file has no usable date").
+With the option unset, the first Dovecot line makes `ParseAsync` throw `InvalidOperationException` with "import.time_zone
+is not set", and the file is listed as failed, as for syslog.
+
+**Forged lines (limitation).** Only Dovecot's log process writes the real file, so `logger -t dovecot` does not reach it.
+Remote text reaches a marker position or the database rule there only in the configurations named under *Forged lines* in
+*Mail lines (Postfix and Dovecot)* (a widened `auth_username_chars`, a passdb or userdb named `mysql` or `sqlpool`); an
+event or priority is a classification of text, not proof of origin.
+
 ## Result
 
 - **Outcomes per file:** imported, continued (the new part of a file that grew was stored), already imported,
@@ -524,7 +568,7 @@ syslog file. The journal and syslog parsers apply these rules to the records the
 - [0086](../decisions/0086-system-log-parsers-generic-syslog-claim-and-grouped-kernel-reports.md) — why the generic syslog claim and grouped kernel reports.
 - [0088](../decisions/0088-mariadb-error-log-entries-by-content-and-lifecycle-events-in-log-line.md) — why the MariaDB error log is detected by content, kept as entries and classified into an `event` field, and why MariaDB lines of the journal and syslog are joined by program, host and pid within 60 seconds of their header and 16,384 bytes, split rather than cut, and keep the time of their line.
 
-- [0091](../decisions/0091-mail-lines-classified-in-the-syslog-and-journal-parsers.md) — why Postfix and Dovecot lines are classified inside the syslog and journal parsers by their severity marker, and which lines count as an unavailable database.
+- [0091](../decisions/0091-mail-lines-classified-in-the-syslog-and-journal-parsers.md) — why Postfix and Dovecot lines are classified inside the syslog and journal parsers by their severity marker, which lines count as an unavailable database, and why Dovecot's own log file gets a parser `dovecot` claimed by its first line.
 
 - [0014](../decisions/0014-log-import-is-a-core-component.md) — why historical import and log shipping are core.
 - [0021](../decisions/0021-no-pseudonymization-of-log-data.md) — why log data is stored unchanged.
@@ -542,6 +586,6 @@ syslog file. The journal and syslog parsers apply these rules to the records the
 
 `Vandox.Import` (`Importer`, `Scanner`, `ImportLimits`), `Vandox.Core.LogParsing` (`ILogParser`, `ParserRegistry`,
 `LogLineReader`, `BuiltInParsers`, `JournalExportParser`, `JournalExportReader`, `SyslogParser`, `SyslogLine`,
-`SyslogClock`, `KernelReportGrouper`, `SystemLogGrouper`, `MailLineClassifier`, `MailEvents`, `MariaDbLineGrouper`, `MariaDbErrorLogParser`,
+`SyslogClock`, `KernelReportGrouper`, `SystemLogGrouper`, `MailLineClassifier`, `MailEvents`, `DovecotLogParser`, `DovecotLine`, `MariaDbLineGrouper`, `MariaDbErrorLogParser`,
 `MariaDbParseSession`, `MariaDbLine`, `MariaDbMessage`, `MariaDbEventClassifier`, `MariaDbEvents`, `Utf8Text`), `Vandox.Core.Model` (`StorableTime`), `Vandox.Core.IO` (`SecureRoot`, `FileProbe`), `Vandox.Backend/Cli` (`ImportCommand`,
 `ImportSummaryWriter`). The checklist for a new parser is in `.squad/project.md` (*Integration surface*).

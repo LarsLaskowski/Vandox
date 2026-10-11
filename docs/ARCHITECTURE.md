@@ -7,7 +7,7 @@ backend with web UI, runs as a Docker container on any Docker host in the home n
 
 This document describes the target architecture; as of now the binaries' `--version`, the data model and wire format
 (Go: `internal/model`, `internal/wire`; backend: `src/Vandox.Core`), the configuration loading (`internal/config` for the agent,
-`Vandox.Core.Configuration` for `vandoxd`) and the backend service skeleton and the log import framework exist (`vandoxd import`, with the parsers for the journal export, the MariaDB error log, `syslog` and `kern.log`): `vandoxd` loads its configuration, opens and migrates its SQLite database (schema, batched writes, queries and log search
+`Vandox.Core.Configuration` for `vandoxd`) and the backend service skeleton and the log import framework exist (`vandoxd import`, with the parsers for the journal export, the MariaDB error log, Dovecot's own log file, `syslog` and `kern.log`): `vandoxd` loads its configuration, opens and migrates its SQLite database (schema, batched writes, queries and log search
 exist as the storage layer; the service does not call it yet, `vandoxd import` writes through it), listens on the
 web and ingest ports, answers `/healthz` and shuts down gracefully, and ships as a container with a health
 check. Sections are marked as implemented as features land. The decisions behind it are recorded in
@@ -43,8 +43,8 @@ way, and agents of the hosting provider are never disabled or changed
   ([0073](decisions/0073-backend-in-dotnet-10-with-blazor-agent-stays-go.md)):
   `Vandox.Core` (data model and validation, the wire decoder, configuration and secrets, safe file access, the
   log parser interface and registry, the line reader that bounds the line length, and the built-in parsers: the
-  journal export, the MariaDB error log with its events, `syslog` and `kern.log` with their kernel report grouper and
-  the time zone rules of year-less times, and the classification of Postfix and Dovecot lines),
+  journal export, the MariaDB error log with its events, Dovecot's own log file, `syslog` and `kern.log` with their
+  kernel report grouper and the time zone rules of year-less times, and the classification of Postfix and Dovecot lines),
   `Vandox.Storage` (the SQLite database, see [Storage](areas/storage.md): schema, migrations, writing batches, queries and log search) and
   `Vandox.Import` (reads a directory, archive or file as streams, detects the parser per file, hashes the
   content, writes the parsers' records in resumable batches and builds the summary)
@@ -225,7 +225,7 @@ Implemented by `src/Vandox.Storage`:
   import is complete). A batch with an import step advances the row in the same transaction as its records, as
   a compare-and-set on the expected count, so an interrupted import resumes where it stopped and two runs of
   the same content never store it twice. A content that starts with a completely imported one (a log that grew
-  between two copies) is continued when its format is framed by lines only (syslog, MariaDB error log; never a
+  between two copies) is continued when its format is framed by lines only (syslog, MariaDB error log, Dovecot log; never a
   journal export): only the part after it is stored, and the row keeps where it continued. The store keeps a short
   hash of every imported content at each of its line ends. With these, an older copy whose content is the start of
   a completely imported one, imported after it, is recognized as contained, and nothing of it is stored.

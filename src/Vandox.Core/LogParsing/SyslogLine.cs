@@ -114,6 +114,33 @@ internal sealed class SyslogLine
     }
 
     /// <summary>
+    /// Reads <c>Mmm dd HH:MM:SS</c>: a month name, a day with a leading space or zero, and a time of day.
+    /// </summary>
+    /// <param name="line">The line</param>
+    /// <param name="position">The position of the month; set behind the time</param>
+    /// <returns>The time, or <c>null</c></returns>
+    internal static SyslogTime? ParseTraditional(string line, ref int position)
+    {
+        if (line.Length - position < TraditionalLength || line[position + 3] != ' ' || line[position + 6] != ' ')
+        {
+            return null;
+        }
+
+        var month = Array.IndexOf(_months, line.Substring(position, 3)) + 1;
+        var day = line[position + 4] == ' ' ? Digit(line, position + 5) : Digits(line, position + 4, 2);
+        var clock = ParseClock(line, position + 7);
+
+        if (month == 0 || day is < 1 or > 31 || clock is null)
+        {
+            return null;
+        }
+
+        position += TraditionalLength;
+
+        return new SyslogTime(0, month, day, clock.Value.Hour, clock.Value.Minute, clock.Value.Second, 0, null);
+    }
+
+    /// <summary>
     /// Reads <c>&lt;PRI&gt;</c>: 1 to 3 digits, 0 to 191.
     /// </summary>
     /// <param name="line">The line</param>
@@ -138,33 +165,6 @@ internal sealed class SyslogLine
         position = index + 1;
 
         return (byte)(value % PriorityClasses);
-    }
-
-    /// <summary>
-    /// Reads <c>Mmm dd HH:MM:SS</c>: a month name, a day with a leading space or zero, and a time of day.
-    /// </summary>
-    /// <param name="line">The line</param>
-    /// <param name="position">The position of the month; set behind the time</param>
-    /// <returns>The time, or <c>null</c></returns>
-    private static SyslogTime? ParseTraditional(string line, ref int position)
-    {
-        if (line.Length - position < TraditionalLength || line[position + 3] != ' ' || line[position + 6] != ' ')
-        {
-            return null;
-        }
-
-        var month = Array.IndexOf(_months, line.Substring(position, 3)) + 1;
-        var day = line[position + 4] == ' ' ? Digit(line, position + 5) : Digits(line, position + 4, 2);
-        var clock = ParseClock(line, position + 7);
-
-        if (month == 0 || day is < 1 or > 31 || clock is null)
-        {
-            return null;
-        }
-
-        position += TraditionalLength;
-
-        return new SyslogTime(0, month, day, clock.Value.Hour, clock.Value.Minute, clock.Value.Second, 0, null);
     }
 
     /// <summary>

@@ -19,6 +19,8 @@ public class BuiltInParsersTests
     private const string MailRfc3339Head = "2026-10-09T03:12:01.123456+02:00 mail-1 postfix/master[812]: daemon started -- version 3.6.4, configuration /etc/postfix\n";
     private const string MailCutHead = "ail-1 postfix/smtpd[2210]: connect from unknown[192.0.2.9]\n";
     private const string MariaDbHead = "2026-03-01 12:30:15 0 [Note] InnoDB: Buffer pool(s) load completed\n";
+    private const string DovecotHead = "Oct 09 03:12:12 master: Info: Dovecot v2.3.16 (7e2e900c1a) starting up for imap, pop3 (core dumps disabled)\nOct 09 03:12:13 imap-login: Info: Login: user=<alice@example.org>, method=PLAIN, rip=198.51.100.7, lip=192.0.2.1, mpid=2301, TLS, session=<AbCdEfGh>\n";
+    private const string DovecotSyslogHead = "Oct  9 03:12:12 mail-1 dovecot: master: Info: Dovecot v2.3.16 (7e2e900c1a) starting up for imap, pop3 (core dumps disabled)\n";
     private const string MariaDbReady = "2026-03-02 10:20:01 0 [Note] /usr/sbin/mariadbd: ready for connections.\n";
 
     #endregion // Constants
@@ -26,26 +28,28 @@ public class BuiltInParsersTests
     #region Methods
 
     /// <summary>
-    /// The list holds the journal export parser, the MariaDB error log parser and then the syslog parser, with or without a time zone.
+    /// The list holds the journal export parser, the MariaDB error log parser, the Dovecot log parser and then the syslog parser, with or without a time zone.
     /// </summary>
     /// <param name="timeZone">The time zone, or <c>null</c></param>
     [TestMethod]
     [DataRow("UTC")]
     [DataRow(null)]
     [DataRow("Europe/Berlin")]
-    public void BuiltInParsersCreateReturnsJournalThenMariaDbThenSyslog(string? timeZone)
+    public void BuiltInParsersCreateReturnsJournalThenMariaDbThenDovecotThenSyslog(string? timeZone)
     {
         // Act
         var parsers = BuiltInParsers.Create(timeZone);
 
         // Assert
-        Assert.HasCount(3, parsers, "three parsers");
+        Assert.HasCount(4, parsers, "four parsers");
         Assert.IsInstanceOfType<JournalExportParser>(parsers[0], "first parser");
         Assert.IsInstanceOfType<MariaDbErrorLogParser>(parsers[1], "second parser");
-        Assert.IsInstanceOfType<SyslogParser>(parsers[2], "third parser");
+        Assert.IsInstanceOfType<DovecotLogParser>(parsers[2], "third parser");
+        Assert.IsInstanceOfType<SyslogParser>(parsers[3], "fourth parser");
         Assert.AreEqual("journal", parsers[0].Type, "journal type");
         Assert.AreEqual("mariadb", parsers[1].Type, "mariadb type");
-        Assert.AreEqual("syslog", parsers[2].Type, "syslog type");
+        Assert.AreEqual("dovecot", parsers[2].Type, "dovecot type");
+        Assert.AreEqual("syslog", parsers[3].Type, "syslog type");
     }
 
     /// <summary>
@@ -61,7 +65,7 @@ public class BuiltInParsersTests
         var registry = new ParserRegistry(parsers);
 
         // Assert
-        Assert.AreSequenceEqual(["journal", "mariadb", "syslog"], registry.GetTypes(), "registered types in order");
+        Assert.AreSequenceEqual(["journal", "mariadb", "dovecot", "syslog"], registry.GetTypes(), "registered types in order");
     }
 
     /// <summary>
@@ -121,6 +125,12 @@ public class BuiltInParsersTests
     [DataRow("maillog", MailRfc3339Head, "syslog", Confidence.MatchName)]
     [DataRow("mail.err", MailHead, "syslog", Confidence.MatchName)]
     [DataRow("mail.err", MailRfc3339Head, "syslog", Confidence.MatchName)]
+    [DataRow("dovecot.log", DovecotHead, "dovecot", Confidence.MatchContent)]
+    [DataRow("mail/dovecot-info.log.1", DovecotHead, "dovecot", Confidence.MatchContent)]
+    [DataRow("syslog", DovecotHead, "syslog", Confidence.MatchName)]
+    [DataRow("kern.log-20261010", DovecotHead, "syslog", Confidence.MatchName)]
+    [DataRow("mail.log", DovecotSyslogHead, "syslog", Confidence.MatchName)]
+    [DataRow("notes.txt", "\n" + DovecotHead, "", Confidence.NoMatch)]
     [DataRow("mail.log", MailCutHead, "", Confidence.NoMatch)]
     [DataRow("auth.log", MailCutHead, "", Confidence.NoMatch)]
     public void BuiltInParsersRegistryDetectsFilesByContentAndName(string name, string head, string expected, Confidence expectedConfidence)
@@ -232,6 +242,30 @@ public class BuiltInParsersTests
 
         // Assert
         Assert.AreEqual(Confidence.NoMatch, confidence, "the MariaDB parser does not claim the head");
+    }
+
+    /// <summary>
+    /// The Dovecot log parser does not claim a journal export, a syslog head, a mail log head or a MariaDB error log head.
+    /// </summary>
+    /// <param name="head">A head</param>
+    [TestMethod]
+    [DataRow(JournalHead)]
+    [DataRow(TraditionalHead)]
+    [DataRow(Rfc3339Head)]
+    [DataRow(MailHead)]
+    [DataRow(DovecotSyslogHead)]
+    [DataRow(MariaDbHead)]
+    [DataRow(MariaDbReady)]
+    public void BuiltInParsersDovecotParserIgnoresJournalSyslogAndMariaDbSamples(string head)
+    {
+        // Arrange
+        var parser = new DovecotLogParser(null);
+
+        // Act
+        var confidence = parser.Detect(new LogFile("export.txt", null), Encoding.UTF8.GetBytes(head));
+
+        // Assert
+        Assert.AreEqual(Confidence.NoMatch, confidence, "the Dovecot parser does not claim the head");
     }
 
     #endregion // Methods

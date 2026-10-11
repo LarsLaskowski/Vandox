@@ -225,6 +225,156 @@ public class MailLineClassifierTests
     }
 
     /// <summary>
+    /// A line of Dovecot's own log file gets the priority of the marker at its start or after its first segment, Info included, and the event of a fatal or panic marker.
+    /// </summary>
+    /// <param name="message">The message</param>
+    /// <param name="priority">The expected priority</param>
+    /// <param name="eventName">The expected event</param>
+    [TestMethod]
+    [DataRow("Debug: x", 7, "")]
+    [DataRow("Info: x", 6, "")]
+    [DataRow("Warning: x", 4, "")]
+    [DataRow("Error: x", 3, "")]
+    [DataRow("Fatal: x", 2, MailEvents.DovecotFatal)]
+    [DataRow("Panic: x", 2, MailEvents.DovecotPanic)]
+    [DataRow("Info: ", 6, "")]
+    [DataRow("Panic: ", 2, MailEvents.DovecotPanic)]
+    [DataRow("lmtp(2400): Debug: lmtp-server: conn 192.0.2.1:41234 [1]: Connect from local", 7, "")]
+    [DataRow("master: Info: Dovecot v2.3.16 (7e2e900c1a) starting up for imap, pop3 (core dumps disabled)", 6, "")]
+    [DataRow("auth-worker(2290): Warning: sqlpool(mysql): Query failed", 4, "")]
+    [DataRow("master: Error: service(imap): child 2301 killed with signal 9", 3, "")]
+    [DataRow("auth: Fatal: master: service(auth): child 2290 returned error 89", 2, MailEvents.DovecotFatal)]
+    [DataRow("imap(alice@example.org)<2301><AbCdEfGh>: Panic: file mail-index.c: line 42 (mail_index_open): assertion failed: (index != NULL)", 2, MailEvents.DovecotPanic)]
+    [DataRow("Info: imap(bob)<2402><QrStUvWx>: Connection closed in=12 out=345", 6, "")]
+    [DataRow("imap-login: Info: Disconnected (auth failed, 1 attempts in 2 secs): user=<x: Panic: y>, method=PLAIN, rip=192.0.2.9", 6, "")]
+    [DataRow("Fatal: Panic: x", 2, MailEvents.DovecotFatal)]
+    [DataRow("Panic: Fatal: x", 2, MailEvents.DovecotPanic)]
+    [DataRow("Info: Panic: x", 6, "")]
+    public void MailLineClassifierClassifyDovecotFileLineReadsTheSixMarkers(string message, int priority, string eventName)
+    {
+        // Act and Assert
+        AssertFileClassified(message, priority, eventName);
+    }
+
+    /// <summary>
+    /// The two database messages of an <c>auth-worker</c> give the database event with the priority of their marker; anything else does not.
+    /// </summary>
+    /// <param name="message">The message</param>
+    /// <param name="priority">The expected priority</param>
+    /// <param name="eventName">The expected event</param>
+    [TestMethod]
+    [DataRow("auth-worker(2290): Error: mysql(localhost): Connect failed to database (mail): Can't connect to local server through socket '/run/mysqld/mysqld.sock' (2) - waiting for 1 seconds before retry", 3, MailEvents.DovecotDatabaseUnavailable)]
+    [DataRow("auth-worker(2290): Warning: sqlpool(mysql): Query failed, retrying: MySQL server has gone away", 4, MailEvents.DovecotDatabaseUnavailable)]
+    [DataRow("auth-worker(2290): Info: mysql(localhost): Connect failed to database (mail): " + Gone, 6, "")]
+    [DataRow("auth-worker(2290): Debug: sqlpool(mysql): Query failed, retrying: " + Mysql, 7, "")]
+    [DataRow("imap-login: Error: mysql(localhost): " + ConnectFailed, 3, "")]
+    [DataRow("auth-worker: Error: mysql(localhost): " + ConnectFailed, 3, "")]
+    [DataRow("Error: mysql(localhost): " + ConnectFailed, 3, "")]
+    [DataRow("auth-worker(2290): Fatal: " + MysqlConnectFailed, 2, MailEvents.DovecotFatal)]
+    [DataRow("auth-worker(2290): Panic: sqlpool(mysql): Query failed, retrying: " + Mysql, 2, MailEvents.DovecotPanic)]
+    public void MailLineClassifierClassifyDovecotFileLineGivesTheDatabaseEvent(string message, int priority, string eventName)
+    {
+        // Act and Assert
+        AssertFileClassified(message, priority, eventName);
+    }
+
+    /// <summary>
+    /// A message without a marker at Dovecot's position leaves priority and event as they were.
+    /// </summary>
+    /// <param name="message">The message</param>
+    [TestMethod]
+    [DataRow("")]
+    [DataRow("imap-login: Login: user=<alice@example.org>, method=PLAIN, rip=198.51.100.7")]
+    [DataRow("imap-login: Disconnected: Panic: x")]
+    [DataRow("a: b: Info: x")]
+    [DataRow("imap(a b): Info: x")]
+    [DataRow(": Info: x")]
+    [DataRow("info: x")]
+    [DataRow("auth: panic: x")]
+    [DataRow("auth: PANIC: x")]
+    [DataRow("Info:x")]
+    [DataRow("Info:")]
+    [DataRow("auth: Panic:x")]
+    [DataRow("fatal: x")]
+    [DataRow(" Info: x")]
+    public void MailLineClassifierClassifyDovecotFileLineLeavesALineWithoutMarkerUnchanged(string message)
+    {
+        // Act and Assert
+        AssertFileClassified(message, -1, string.Empty);
+    }
+
+    /// <summary>
+    /// The classification of a file line changes priority and event only; every other field stays as it was, also for a line that was cut.
+    /// </summary>
+    /// <param name="message">The message</param>
+    [TestMethod]
+    [DataRow("auth-worker(2290): Error: mysql(localhost): Connect failed to database (mail): Server has gone away")]
+    [DataRow("imap(alice@example.org)<2301><AbCdEfGh>: Panic: x")]
+    [DataRow("master: Info: x")]
+    [DataRow("imap-login: Login: user=<a>")]
+    public void MailLineClassifierClassifyDovecotFileLineChangesOnlyPriorityAndEvent(string message)
+    {
+        // Arrange
+        var payload = new LogLine
+                      {
+                          Log = "dovecot.log",
+                          Host = "mail-1",
+                          Program = "dovecot",
+                          Pid = 2290,
+                          Priority = 5,
+                          Message = message,
+                          Truncated = true
+                      };
+
+        // Act
+        MailLineClassifier.ClassifyDovecotFileLine(payload);
+
+        // Assert
+        Assert.AreEqual("dovecot.log", payload.Log, "log");
+        Assert.AreEqual("mail-1", payload.Host, "host");
+        Assert.AreEqual("dovecot", payload.Program, "program");
+        Assert.AreEqual(2290, payload.Pid, "pid");
+        Assert.AreEqual(message, payload.Message, "message");
+        Assert.IsTrue(payload.Truncated, "truncated");
+    }
+
+    /// <summary>
+    /// A message of Dovecot's own log file has a marker exactly when it begins with one of the six markers or has one after its first segment, which is not empty and holds no space.
+    /// </summary>
+    /// <param name="message">The message</param>
+    /// <param name="expected">The expected answer</param>
+    [TestMethod]
+    [DataRow("Debug: x", true)]
+    [DataRow("Info: x", true)]
+    [DataRow("Warning: x", true)]
+    [DataRow("Error: x", true)]
+    [DataRow("Fatal: x", true)]
+    [DataRow("Panic: x", true)]
+    [DataRow("Info: ", true)]
+    [DataRow("master: Info: x", true)]
+    [DataRow("imap(alice@example.org)<2301><AbCdEfGh>: Panic: x", true)]
+    [DataRow("a: Debug: ", true)]
+    [DataRow("Info:", false)]
+    [DataRow("Info:x", false)]
+    [DataRow("info: x", false)]
+    [DataRow("INFO: x", false)]
+    [DataRow("a: b: Info: x", false)]
+    [DataRow("imap(a b): Info: x", false)]
+    [DataRow(": Info: x", false)]
+    [DataRow("imap-login: Login: x", false)]
+    [DataRow("fatal: x", false)]
+    [DataRow(" Info: x", false)]
+    [DataRow("", false)]
+    public void MailLineClassifierHasDovecotFileMarkerFindsTheMarkerAtDovecotsPosition(string message, bool expected)
+    {
+        // Act
+        var actual = MailLineClassifier.HasDovecotFileMarker(message);
+
+        // Assert
+        Assert.AreEqual(expected, actual, $"HasDovecotFileMarker(\"{message}\")");
+    }
+
+    /// <summary>
     /// An event that is set stays on a line without an event of its own and is replaced by the event of a fatal or panic marker; a line is never given an empty event.
     /// </summary>
     [TestMethod]
@@ -531,6 +681,37 @@ public class MailLineClassifierTests
                    Message = message,
                    Event = eventName
                };
+    }
+
+    /// <summary>
+    /// Classifies a file line with no priority, with priority 6 and with priority 3, and checks the result and that no other field changed.
+    /// </summary>
+    /// <param name="message">The message</param>
+    /// <param name="expectedPriority">The priority a marker sets, -1 for a line the classification leaves unchanged</param>
+    /// <param name="expectedEvent">The expected event</param>
+    private static void AssertFileClassified(string message, int expectedPriority, string expectedEvent)
+    {
+        foreach (var before in new byte?[] { null, 6, 3 })
+        {
+            // Arrange
+            var payload = Line(string.Empty, message, before, string.Empty);
+            var copy = Line(string.Empty, message, before, string.Empty);
+            var expected = expectedPriority < 0 ? before : (byte?)expectedPriority;
+            var context = $"message \"{message}\", priority before {before?.ToString() ?? "none"}";
+
+            // Act
+            MailLineClassifier.ClassifyDovecotFileLine(payload);
+
+            // Assert
+            Assert.AreEqual(expected, payload.Priority, expectedPriority < 0 ? $"{KeepsPriority}: {context}" : $"the priority of the marker: {context}");
+            Assert.AreEqual(expectedEvent, payload.Event, $"event: {context}");
+            Assert.AreEqual(copy.Log, payload.Log, $"log: {context}");
+            Assert.AreEqual(copy.Host, payload.Host, $"host: {context}");
+            Assert.AreEqual(copy.Program, payload.Program, $"program: {context}");
+            Assert.AreEqual(copy.Pid, payload.Pid, $"pid: {context}");
+            Assert.AreEqual(copy.Message, payload.Message, $"message: {context}");
+            Assert.AreEqual(copy.Truncated, payload.Truncated, $"truncated: {context}");
+        }
     }
 
     /// <summary>

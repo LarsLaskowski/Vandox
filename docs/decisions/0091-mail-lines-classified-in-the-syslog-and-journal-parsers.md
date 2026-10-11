@@ -1,9 +1,9 @@
-# 0091: Postfix and Dovecot lines are classified in the syslog and journal parsers: priority from the daemon's severity marker, events for fatal, panic and an unavailable database; no parser of its own
+# 0091: Postfix and Dovecot lines are classified by the daemon's severity marker, with events for fatal, panic and an unavailable database: in the syslog and journal parsers, and in a parser of its own for Dovecot's log file
 
 - **Status:** Accepted
 - **Date:** 2026-10-11
 - **Area:** Log import
-- **Source:** Issue #18
+- **Source:** Issues #18, #194
 - **Supersedes:** —
 
 ## Context
@@ -53,6 +53,17 @@ the configuration on the server were not checked):
   results (`sieve: msgid=<...>: `), whose quoted local part keeps spaces and colons (`lib-lda/mail-deliver.c`). Dovecot's
   default `auth_username_chars` (letters, digits, `.-_@`) keeps spaces and colons out of a user name; an administrator
   can widen it.
+
+- Dovecot's own log file (issue #194, Dovecot 2.3.16): with `log_path` (or `info_log_path`, `debug_log_path`) set to a
+  file, the file handler replaces the syslog handler, so Dovecot writes nothing to syslog or the journal. Each line is
+  the `log_timestamp` (default `DEFAULT_FAILURE_STAMP_FORMAT`, `"%b %d %H:%M:%S "`, `lib/failures.h:52`, local time with
+  a zero-padded day), the process prefix and the type label, and no host or program (`default_format`, `log_prefix_add`
+  in `lib/failures.c`). Unlike the syslog format, the file gets the label for every type, `Info: ` included
+  (`syslog_format` leaves only that one out). A prefix the log process receives without a type position gets the label
+  first (`Oct 09 03:12:21 Info: ...`, `log/log-connection.c`), and a message longer than a pipe buffer is sent and
+  written as several lines that each repeat prefix and label (`internal_send_split`). The syslog parser claims such a file by its
+  first line and reads the prefix (`imap-login:`) as the host and the label (`Info`) as the program
+  (`SyslogLine.TryParse`, `ParseTag`). Whether the server sets `log_path` was not checked.
 
 ## Options considered
 
@@ -169,14 +180,59 @@ How the database messages are anchored (added after the security review of the p
     `mysql:<table> lookup error for "<key>"` with a remote key such as `a: query failed: MySQL server has gone away@x`,
     forging `postfix.database_unavailable` from an SMTP recipient.
 
+How Dovecot's own log file is read (issue #194):
+
+21. **Refuse it: the syslog parser declines a Dovecot-shaped first line, and the file is listed as not recognized** — the
+    smallest change and no wrong records; but a server with `log_path` set to a file has its Dovecot history only there,
+    so the lines this record classifies (fatal, panic, the `auth-worker` database failures) could not be imported at all.
+22. **A host-less line form inside the syslog parser** — no new source type; but the syslog grammar would become
+    ambiguous on every line of every rsyslog file (a host token that ends in `:`), `Info: ` would have to be read there
+    (option 15), and the source type `syslog` would name a format the file does not have.
+23. **A parser `dovecot` of its own** (chosen) — the format is not the syslog format, so it gets its own type, as the
+    MariaDB error log did ([0088](0088-mariadb-error-log-entries-by-content-and-lifecycle-events-in-log-line.md)); it
+    reuses the traditional time stamp, the year and zone rules ([0085](0085-syslog-time-zone-from-import-time-zone-with-embedded-tzdb.md))
+    and the Dovecot rules of this record, and goes between the MariaDB and the syslog parser (0086).
+
+How it is claimed:
+
+24. **By name (`dovecot.log`, `dovecot-info.log`)** — `log_path` is free, and copies and archives keep any layout.
+25. **By its first line, never for a syslog name** (chosen) — a content match that beats the syslog parser's weak claim;
+    as for the MariaDB error log (0088), a file named `syslog` or `kern.log` stays with the syslog parser whatever it
+    holds, and only the first line is looked at.
+
+Which lines it reads:
+
+26. **Every line with the time stamp, the marker optional** — would keep the lines of a `mail_log_prefix` that holds a
+    space; but every foreign line with a time stamp (a syslog line in a file both write) would be stored as Dovecot's,
+    with its host and tag inside the message.
+27. **The time stamp and a Dovecot marker at the position of option 11** (chosen) — the same grammar as the claim; every
+    line Dovecot writes to the file carries its label at that position under the default prefixes, and any other line
+    is skipped as "not a Dovecot line", visible in the summary.
+
+Which fields it sets:
+
+28. **Program `dovecot`, as in syslog and the journal** — one program for every source; but the file does not name the
+    instance (`instance_name` can be another), and 0088 (option 18) sets nothing the format does not carry.
+29. **Program, host and pid empty, source type `dovecot`** (chosen) — the source type and the events name the file's
+    owner; the message keeps prefix and label as written ([0021](0021-no-pseudonymization-of-log-data.md)).
+
+Which markers it reads:
+
+30. **`Info: ` (priority 6) in this parser only, with the other five Dovecot markers** (chosen) — option 15 kept `Info: `
+    out of syslog and the journal because Dovecot never writes it there and it would lower a transport's priority on
+    text that merely looks like it; in the own log file every line carries its label and there is no transport
+    priority, so neither objection applies. The syslog and journal parsers keep option 16.
+
 ## Decision
 
 Options 2, 5, 9, 11, 13, 14, 16 and 18: the journal and syslog parsers classify the lines of Postfix and Dovecot in a stage before
 MariaDB entries and kernel reports, with no parser type of their own. The daemon's severity marker at its anchored
 position (only the markers the daemons write to syslog, so no Dovecot `Info: `) sets the priority the daemon gives that class in syslog; fatal and panic lines get `postfix.fatal`,
 `postfix.panic`, `dovecot.fatal` or `dovecot.panic`, and the anchored MySQL connection failures get
-`postfix.database_unavailable` or `dovecot.database_unavailable`. The rules, and the claim of a mail log by its first line as for every rsyslog file, are in [Log import](../areas/log-import.md)
-(*Mail lines (Postfix and Dovecot)*).
+`postfix.database_unavailable` or `dovecot.database_unavailable`. Options 23, 25, 27, 29 and 30: Dovecot's own log file
+is read by a parser `dovecot`, claimed by its first line and never under a syslog name, with the Dovecot rules plus
+`Info: ` (6). The rules, and the claim of a mail log by its first line as for every rsyslog file, are in [Log import](../areas/log-import.md)
+(*Mail lines (Postfix and Dovecot)* and *Dovecot log file*).
 
 ## Consequences
 
@@ -190,8 +246,15 @@ position (only the markers the daemons write to syslog, so no Dovecot `Info: `) 
   same classification (0086); signature detection (#21) must not count such an event more than once.
 - An OOM kill of a mail process (`process ... killed by signal 9` from Postfix's master, `service(imap): child N killed
   with signal 9` from Dovecot's) gets the priority of its warning or error only; recognizing it is #21's.
-- Dovecot's own log file (`log_path` set to a file) is not read correctly: its lines have no host, so the syslog grammar
-  takes the process prefix for the host and the marker for the program. A follow-up issue covers it.
+- Dovecot's own log file is imported with the source type `dovecot`; a query for Dovecot's lines selects by program
+  `dovecot` (syslog, journal) or source type `dovecot`, or by event. Its lines appear in no other source (option 21), so
+  they are never stored twice.
+- A Dovecot log under a syslog name, a copy cut inside its first line, and a file written with another `log_timestamp`
+  are listed as not recognized or stay with the syslog parser; lines of a `mail_log_prefix` or user name with a space,
+  and foreign lines in the file, are skipped as "not a Dovecot line". Any file whose first line has the shape is read as
+  Dovecot's (as for MariaDB, 0088). In the real file the forging limits of option 14 hold for the text Dovecot's
+  processes log (remote text through a widened `auth_username_chars`); `logger -t dovecot` does not reach it, since only
+  Dovecot's log process writes it.
 - Signature detection and outage reconstruction must not treat a mail event or priority as proof that Postfix or Dovecot
   wrote the line (option 14). A marker's priority replaces the transport's (a journal `PRIORITY`, a `<PRI>`), also a
   more severe one; the stored priority is the daemon's class read from the text.
