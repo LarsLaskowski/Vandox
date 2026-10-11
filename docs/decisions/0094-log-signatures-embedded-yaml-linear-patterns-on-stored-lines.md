@@ -46,7 +46,7 @@ How a signature is written:
 6. **YAML with regular expressions on .NET's non-backtracking engine** (chosen) — the established pattern language,
    with named groups for the fields, alternation and optional parts for kernel and systemd versions; the engine runs
    in time linear in the input, so a hostile line cannot make a match hang, and constructs it cannot run in linear
-   time (lookarounds, backreferences, atomic groups) are refused when the catalog loads. The parsers stay
+   time (lookarounds, backreferences, atomic groups, conditionals) are refused when the catalog loads. The parsers stay
    hand-written; the patterns here are trusted data compiled into the binary.
 7. **YAML with a hand-written template language** — no regular expression engine; but alternation, optional parts
    and the choice between several occurrences of a delimiter would be new engine code to write and secure.
@@ -73,12 +73,33 @@ How far a kernel line is trusted:
 13. **Program `kernel` as a classification, the limit documented** (chosen) — one rule for every source, as in 0086,
     0088 and 0091; an event names its source lines, so a reader can see where it came from.
 
+How far message text a remote party controls is trusted (a signature without a parser event, such as a full disk or
+`Too many connections`, reads the message alone). The error log parsers keep the whole line from the level on as the
+message and set no program, so a web server error line carries the client's referrer, requested path and host, and PHP
+output over several lines; mail lines carry addresses:
+
+14. **Match the error text anywhere in any message** — finds every writer of a known text; but any HTTP client
+    creates the event with a referrer or a path that quotes it, and ordinary traffic (a search or a referrer naming
+    the error) does so by accident, which turns outage reconstruction into a reader of client text. 0091 already keeps
+    remote text from the mail events.
+15. **The same, accepted and documented, pinned by a test** — no schema change; but the false events above stay.
+16. **An origin condition and a pattern anchored at server-written text** (chosen) — the catalog gains a `source`
+    condition that, with `program`, forms one origin condition (a listed program or a listed record source suffices:
+    MariaDB's lines come with source `mariadb` and no program from the error log, but with program `mariadbd` and
+    source `journal` or `syslog` from the journal, so requiring both would split one writer); a signature without a
+    parser event names the writers it reads and anchors its pattern with `\A` (not `^`, which matches after every line
+    feed) at text the writer prints before any external text. Only writers whose format allows that are read: the full
+    disk from MariaDB's own messages, `Too many connections` from Postfix's and Dovecot's MySQL client errors. PHP,
+    nginx, Apache and Plesk put external text before the error (a requested path, FastCGI output) and need a pattern
+    per format checked against real logs, a later change of its own.
+
 ## Decision
 
-Options 2, 6, 11 and 13: signatures are an embedded YAML catalog whose message patterns run on
+Options 2, 6, 11, 13 and 16: signatures are an embedded YAML catalog whose message patterns run on
 .NET's non-backtracking regular expression engine; a detector matches them on stored `log_line` records in capture
 order and returns events that list their record IDs, merging the copies of one event; nothing is stored and records
-are never changed. The rules are in [Detection, alerts and reports](../areas/detection-and-reports.md) (*Log
+are never changed. A signature that reads a message without a parser event is bound to the writers it names and
+anchored at their server-written text, so text a remote party controls cannot trigger it. The rules are in [Detection, alerts and reports](../areas/detection-and-reports.md) (*Log
 signatures*).
 
 ## Consequences
@@ -94,6 +115,11 @@ signatures*).
   journal reader keeps no `UNIT` field, so `Started`/`Stopped` lines of scopes and timers match the service signatures
   too; newer systemd versions print the unit name, which the signatures read when present.
 - The OOM kill line of `vm.oom_kill_allocating_task` is recognized by the signature, but the kernel report grouper does
-  not end a report at it (follow-up issue).
+  not end a report at it (#202).
+- A full disk is recognized only in MariaDB's messages and `Too many connections` only in Postfix's and Dovecot's
+  MySQL client errors; PHP, nginx, Apache and Plesk lines with these errors are not (follow-up issue). A client of
+  MariaDB can still forge a whole MariaDB entry through a failed login's user name
+  ([0088](0088-mariadb-error-log-entries-by-content-and-lifecycle-events-in-log-line.md)), which reaches the MariaDB
+  signatures and the full disk; this stays documented, not prevented.
 - To revisit: storing events (option 3) once a consumer needs them faster than a scan, or operator-defined signatures
   (option 8), each a decision of its own.
