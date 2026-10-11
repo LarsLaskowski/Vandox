@@ -351,8 +351,8 @@ export of the same period store each mail line up to three times with the same c
 
 ## MariaDB error log
 
-**Recognition.** The parser `mariadb` has no path option: `vandoxd import` reads copies and archives under any layout, so a
-server path would match nothing, and the file is found by its content. `Detect` returns a content match only when the
+**Recognition.** The parser `mariadb` has no path option and finds the file by its content (record 0088; only the error logs of
+*Plesk and web server error logs* have path options, record 0092). `Detect` returns a content match only when the
 file's name is not a syslog name (`syslog` or `kern.log`, alone or with `.N` or `-YYYYMMDD`, the function the syslog parser
 uses; `syslog.err`, `mysql-syslog` and a directory named `syslog` do not count) **and** the **first non-empty line** of the
 first 4,096 bytes is an entry header (see below). A UTF-8 byte order mark at the start of the head is removed, a `\r`
