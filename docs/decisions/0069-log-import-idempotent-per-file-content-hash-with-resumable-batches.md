@@ -188,7 +188,9 @@ version 3 (0077), the head key and the continuation point of version 6, the line
   re-import cannot add), or when the container is not among the 64 largest complete contents with its head key.
   H1 was rejected because it stores lines twice, H2 for its size, H4 because it covers only one run.
 - Every imported content costs 16 bytes per line in `import_line_hashes`, plus one row per 4,096 lines, and pass 2
-  computes one hash per line. Pass 1 is unchanged.
+  computes one hash per line. Pass 1 is unchanged. The cost arises even for lines that store no record, so a
+  decompression bomb of nothing but line feeds fills the storage directory too, until the operator stops it. A
+  content that never completes keeps the rows of its latest attempt only.
 - The decision to leave a file out rests on 128 bits of SHA-256 over its whole content. Someone who controls both
   contents completely needs about 2^64 work for a false match; against a given content it is 2^128.
 - A contained file is not parsed, so F1 does not apply and a journal export is recognized too. Its lines are present
@@ -198,7 +200,9 @@ version 3 (0077), the head key and the continuation point of version 6, the line
   real lines under its own name, as in the continuation case.
 - A contained file keeps no state (S2, rejecting S1's extra marker), so every run looks it up again. W1 was rejected
   because a content that changed in pass 2 could leave hashes of bytes it does not hold. Under W2 a line-hash write
-  after another run completed the content fails with a conflict.
+  or batch of a run whose attempt was superseded by a later run, or after another run completed the content, fails
+  with a conflict: of two concurrent imports of one content, the one that began earlier fails and the later one
+  carries on.
 - A journal export that grew is imported as a whole, its earlier entries stored again (F1). Every parser, including
   one a hook supplies, must declare whether it is framed by lines only; declaring it for a format with
   length-framed fields would let input be read as forged records, and the second pass refuses a stored continuation
