@@ -73,12 +73,17 @@ one is invalid, and the decoder sets the origin of every decoded record to `agen
   matches a field when the two are equal ignoring ASCII case. Map keys (metric `labels`, MariaDB `status` and `variables`) that are equal
   ignoring ASCII case are refused by the model's validation, so a producer never writes them. See
   [0090](../decisions/0090-wire-keys-matched-ignoring-ascii-case-duplicates-rejected-header-shape-malformed.md).
+- **Text**: every line is valid UTF-8 (no byte that does not start a well-formed sequence: no stray continuation byte, overlong form,
+  UTF-8-encoded surrogate, code point above U+10FFFF or sequence cut short), and every `\u` escape of a surrogate is a high half
+  (`\ud800` to `\udbff`) directly followed by an escaped low half (`\udc00` to `\udfff`), in any hex case. A line that breaks this,
+  anywhere, also in the value of an unknown key and in a header of any major, is `ErrMalformed` (reason `line not valid UTF-8` or
+  `unpaired surrogate escape`). It is a line rule, checked after *Keys* and nesting, so a key that breaks it is reported as `key not
+  ASCII`. Neither decoder replaces text. The encoder writes valid UTF-8 only: an invalid byte in a Go string is replaced by U+FFFD on
+  encode, and no surrogate is ever escaped. See [0090](../decisions/0090-wire-keys-matched-ignoring-ascii-case-duplicates-rejected-header-shape-malformed.md).
 - **Name pattern**: `^[A-Za-z0-9][A-Za-z0-9._:/@+-]*$`, 1 to 128 bytes (`MaxNameBytes`). Used for `source`,
   metric names and units, label keys, `gap.collector` and `log_line.event`.
 - **Short text** at most 1024 bytes (`MaxShortTextBytes`), **text** at most 16384 bytes (`MaxTextBytes`); lengths are in
-  bytes, no character restriction. Invalid UTF-8 is replaced by U+FFFD when decoded by the Go decoder; the C# decoder still rejects a
-  string value with invalid UTF-8 or an unpaired surrogate escape as `ErrMalformed`. That difference is open (#182) and
-  blocks the ingest API (#40, see *Error text and consumer duties*).
+  UTF-8 bytes of the decoded string, no character restriction beyond *Text*.
 - **Lists and maps** hold at most 4096 entries (`MaxItems`); metric labels at most 32 (`MaxLabels`).
 - **Times** are UTC (offset 0) and non-zero; optional times are checked only when present.
 - **Floats** are finite; percentages and rates are also >= 0.
@@ -213,7 +218,7 @@ spooled. The collector that produced it records a `gap` instead (cause `unknown`
 
 ## Versioning (0043)
 
-The header carries an integer major and minor. A decoder checks line 1 against the line rules (*Common rules*, *Keys*),
+The header carries an integer major and minor. A decoder checks line 1 against the line rules (*Common rules*, *Keys* and *Text*),
 then reads the major before anything else and rejects any major it does not know with `wire.ErrUnsupportedVersion`, even
 if the rest of that header has an incompatible shape. A header that is not a JSON object or `null`, or whose major is not
 a JSON integer, is `wire.ErrMalformed`: the major is an integer in every version (0043). A minor change is additive: new optional fields and new kinds; a decoder ignores unknown
@@ -267,7 +272,9 @@ What the decoder does with unusual input; each row is a test case.
 | Time with `Z`, `+00:00`, `-00:00`, fractions | accepted |
 | Time with another offset (`+02:00`); the zero time | rejected, field error |
 | Time with a space for `T`, lower-case `t`/`z`, not RFC 3339 | rejected, `ErrMalformed` |
-| Strings with invalid UTF-8 | Go: accepted, bytes replaced by U+FFFD; C#: rejected, `ErrMalformed` (open, see *Common rules*) |
+| Invalid UTF-8 anywhere in a line (a byte `FF` or `F5`, a stray continuation byte `80`, an overlong form `C0 AF` or `E0 80 80`, an encoded surrogate `ED A0 80`, `F4 90 80 80` above U+10FFFF, a sequence cut short such as `E2 82` before the closing quote), also in `kind`, `agent_id`, a label value, the value of an unknown key or a header of another major | rejected, `ErrMalformed`, reason `line not valid UTF-8` |
+| An unpaired surrogate escape in a string (`\ud800`, `\udc00`, `\ud800\u0041`, `\ud800x`, `\udc00\ud800`, `\ud800\ud800\udc00`, `\uD800`), also in `kind`, `unit`, `agent_id` or the value of an unknown key | rejected, `ErrMalformed`, reason `unpaired surrogate escape` |
+| An escaped surrogate pair in any hex case (`\ud83d\ude00`, `\uD83D\uDE00`), escaped `\ufffd` or `\uffff`, an escaped backslash before `ud800` (`\\ud800`), raw multi-byte UTF-8 | accepted |
 | Escaped control characters in a string | accepted in text fields, rejected where a name pattern applies |
 | Address with a zone (`fe80::1%eth0`, `[fe80::1%eth0]:80`, `::ffff:1.2.3.4%eth0`), also with `\n`, `]:` or 5000 bytes in the zone | rejected, field error, reason `zone not allowed` |
 | Empty address, hostname, missing port, empty zone (`fe80::1%`), zone on IPv4 | rejected (field error or `ErrMalformed`) |
@@ -287,8 +294,6 @@ displays decode errors only through the display sanitization of the project's ar
 
 Duties of the ingest API (#40), which this package cannot take over:
 
-- do not pass agent input to `BatchDecoder` before the two decoders agree on invalid UTF-8 and unpaired
-  surrogate escapes in string values (*Common rules*, #182); that issue blocks #40;
 - wrap the request body in `http.MaxBytesReader` on the **compressed** bytes before `NewDecoder` (the decoder
   bounds only the decompressed bytes);
 - set the server's read, read-header, write and idle timeouts, so a slow reader cannot block;
@@ -336,7 +341,7 @@ Decompressed content of a batch of three records (the real stream is gzip-compre
 
 Agent (Go): `internal/model` (record types and validation) and `internal/wire` (header, encoder, streaming decoder with the line check
 in `decode.go`; golden test `internal/wire/golden_test.go`, `VANDOX_UPDATE_GOLDEN=1` rewrites the fixture; the shared decoder cases run in
-`internal/wire/decode_test.go`). Backend (C#): `Vandox.Core.Model` and `Vandox.Core.Wire` (`BatchDecoder`, `WireLimits`, `WireKeyCheck` for the
-line check; `NullAsAbsentConverterFactory` with its two converters is the C# side of the null rule), `Vandox.Core.IO` (`StrictGzip`),
+`internal/wire/decode_test.go`). Backend (C#): `Vandox.Core.Model` and `Vandox.Core.Wire` (`BatchDecoder`, `WireLimits`, `WireKeyCheck` and
+`WireTextCheck` for the line check; `NullAsAbsentConverterFactory` with its two converters is the C# side of the null rule), `Vandox.Core.IO` (`StrictGzip`),
 contract test `WireContractTests` (golden batch and shared decoder cases).
 

@@ -58,8 +58,8 @@ Indexes: a unique index on `records(agent_id, seq)` for origin `agent`; `records
   when its capture time is outside 1677-09-21 to 2262-04-11 (the range of a signed 64-bit nanosecond count), its sequence number is
   above 2^63 − 1, or it is of origin `agent` in a batch without an agent ID. An import batch has no agent ID and every record has
   origin `import`. Invalid UTF-8 in strings that are stored as JSON (payloads, metric labels) is replaced by U+FFFD; log fields
-  and the other metric fields are stored byte for byte. A record from an agent never contains invalid UTF-8, because the wire format
-  replaces it on decode.
+  and the other metric fields are stored byte for byte. A record from an agent never contains invalid UTF-8, because the wire encoder
+  replaces it and the decoder refuses a line that holds it ([Wire format](wire-format.md), *Common rules*).
 - **Deduplication:** a record of origin `agent` is identified by (agent ID, sequence number) across all kinds. It is inserted with
   `ON CONFLICT DO NOTHING` and counted as a duplicate; a stored record is never replaced or updated. Records of origin `import` are not
   deduplicated, because log lines have no identity of their own; the import is made idempotent per file instead (*Log import*).

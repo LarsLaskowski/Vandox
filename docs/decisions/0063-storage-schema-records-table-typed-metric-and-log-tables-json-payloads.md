@@ -29,7 +29,7 @@ Filling the external-content FTS5 index of the log lines (10,000 lines of about 
 - b. **Explicit insert by the write path in the same transaction** (chosen) — 0.18 to 0.33 s per batch; same atomicity, the store keeps the invariant itself.
 - c. **Index after the commit by a background indexer** — cheapest transaction, but a committed line is not searchable at once, a persisted backlog with recovery is needed, and retention must not delete unindexed lines. Next step only if option b misses the criterion.
 
-Invalid UTF-8 in strings stored as JSON: **replace with U+FFFD** (chosen; consistent with the wire format, which replaces it on decode) rather than rejecting a record the wire format accepts.
+Invalid UTF-8 in strings stored as JSON: **replace with U+FFFD** (chosen; consistent with the wire encoder, which replaces it on encode, while the decoder refuses such a line, [0090](0090-wire-keys-matched-ignoring-ascii-case-duplicates-rejected-header-shape-malformed.md)) rather than rejecting a record at the store.
 
 ## Decision
 

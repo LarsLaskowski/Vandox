@@ -1,9 +1,9 @@
-# 0090: Both wire decoders check every line for ASCII, unique keys and bounded nesting, match keys ignoring ASCII case, and report a misshapen header as malformed
+# 0090: Both wire decoders check every line for valid UTF-8, paired surrogate escapes, ASCII and unique keys and bounded nesting, match keys ignoring ASCII case, and report a misshapen header as malformed
 
-- **Status:** Accepted
+- **Status:** Proposed
 - **Date:** 2026-10-10
 - **Area:** Wire format
-- **Source:** Issue #175
+- **Source:** Issues #175, #182
 - **Supersedes:** —
 
 ## Context
@@ -23,10 +23,16 @@ parser's lenient key matching ... is handled in the format rules"). Running the 
   `1e400`, an integer beyond 64 bits) is `ErrMalformed` in Go and in the area document, but `UnsupportedVersion` in C#; a `format_minor`
   beyond 32 bits is accepted by Go and `Malformed` in C#.
 - **Nesting depth:** C# parses a line with a maximum depth of 64 and reports a deeper line as malformed; Go accepts up to 10,000 levels.
+- **Invalid text in string values (issue #182):** Go's `encoding/json` replaces every byte that does not start a valid UTF-8 sequence,
+  and every `\u` escape of a surrogate that is not half of a pair, with U+FFFD. System.Text.Json parses such a line but throws when it reads
+  a bound string, so C# reported `Malformed` (`"message":"a\xffb"`, `"unit":"\ud800"`) where Go accepted the text (`a`, U+FFFD, `b`), or
+  reported a field error (`unit`, `agent_id`) or `UnknownKind` (`kind`). C# accepted the same text in the value of an unknown key, which it
+  never reads, while Go replaced it there too.
 
 Go's `encoding/json` has no option for exact key matching or duplicate detection; `encoding/json/v2`, which has both, is still behind
 `GOEXPERIMENT=jsonv2` in Go 1.27, and a third-party JSON library is a new dependency that 0042 rules out. The only producer, the Go
-encoder, writes every key once, in lower case and ASCII, and nests at most five levels.
+encoder, writes every key once, in lower case and ASCII, and nests at most five levels, and its `json.Marshal` writes valid UTF-8 only
+(an invalid byte becomes `\ufffd`) and never a surrogate escape.
 
 ## Options considered
 
@@ -92,6 +98,25 @@ Keys seen by the duplicate test:
     hostile batch would keep, per depth, a set as large as the
     largest object seen at that depth until the batch ends.
 
+Invalid UTF-8 and unpaired surrogate escapes in a line:
+
+16. **Reject in both, as a line rule on the raw bytes** (chosen) — a line that is not valid UTF-8, or that holds a `\u` escape of a
+    surrogate other than a high half directly followed by an escaped low half, is `ErrMalformed`. RFC 8259 (section 8.1) requires UTF-8
+    and RFC 7493 (I-JSON, section 2.1) forbids invalid UTF-8 and unpaired surrogates; System.Text.Json already refuses both when it reads
+    a string, and Go's `encoding/json/v2` does by default. No batch of the only producer changes (see above). The rule needs no schema, so
+    unknown keys and a header of any major are covered alike, and it costs one pass over the line without allocating. It amends what
+    0042 and 0063 said about the decoder, which were corrected in place (both unreleased).
+17. **Replace in C# as Go does, one U+FFFD per invalid byte** — what 0042 first said. .NET's decoder replaces a sequence that is cut
+    short with one U+FFFD (`F0 9F 98` gives one, Go three), so C# would need its own pass that rewrites every line before parsing: a
+    quirk of Go's `encoding/json` v1 reproduced in a second language, like option 6; one input byte becomes three, and a corrupt batch is
+    stored with altered text instead of being refused.
+18. **Replace with .NET's own decoder** — less code, but the two decoders would store different text for the same batch, which the
+    shared fixture exists to prevent.
+19. **Reject only where C# binds a string** (C#'s behavior before) — the result depends on the schema (an unknown key passes), and Go
+    would need a schema-aware pass to match it.
+20. **I-JSON in full, also noncharacters such as U+FFFF** — wider than any difference between the decoders, and a noncharacter is valid
+    UTF-8 a log line may hold.
+
 The time bound on the hostile shape is tested as the ratio of two durations measured in one test, the one exception to the rule that tests
 read no real clock: an operation count would test the implementation's own report, not its cost. In C# it uses a 4 MiB line, because
 under coverage instrumentation the chosen check came within a factor of about 2.3 of the quadratic one at 1 MiB. Go's `clear` is not
@@ -99,9 +124,9 @@ quadratic under this module's `go 1.27`, so no Go time bound can catch a cleared
 
 ## Decision
 
-Options 1, 4, 7, 9 and 11: before binding, both decoders check every line, the header included: no key outside ASCII after unescaping, no two
-keys in one object equal ignoring ASCII case, no nesting deeper than 64 — otherwise `ErrMalformed`, at a cost in proportion to the line
-and with the check's state kept per decoder. Keys
+Options 1, 4, 7, 9, 11 and 16: before binding, both decoders check every line, the header included: no key outside ASCII after unescaping, no two
+keys in one object equal ignoring ASCII case, no nesting deeper than 64, then valid UTF-8 and no unpaired surrogate escape — otherwise
+`ErrMalformed`, at a cost in proportion to the line and with the check's state kept per decoder. Keys
 then match fields ignoring ASCII case, and a header that is not an object or whose `format_major` is not a 64-bit JSON integer is
 `ErrMalformed`. The rules are in the
 [Wire format](../areas/wire-format.md) area (*Common rules*, *Versioning*, *Accepted forms*), and a shared fixture of decoder cases that both
@@ -128,6 +153,8 @@ decoders run pins them.
   the decoder, which is why a decoder must stay with one caller at a time. Go seeds the hash of every map, and .NET switches a string
   set to its randomized hash once one insert walks a chain of more than 100 entries, so crafted keys cannot degrade the sets beyond that.
 - `jq` and the decoder can still read one spelling differently (`.kind` misses `"Kind"`), but never two values for one field.
-- Not settled here: C# rejects invalid UTF-8 and unpaired surrogate escapes in string values, where Go and 0042 replace them with U+FFFD
-  (follow-up issue #182); keys are covered, since such a key is not ASCII. The follow-up blocks the ingest API (#40): until it is settled the
-  two decoders read such a batch differently.
+- A batch with invalid UTF-8 or an unpaired surrogate escape anywhere in a line, also in the value of an unknown key or in a header of
+  another major, is refused as a whole (0044); neither decoder replaces text any more. A key that breaks the rule is still reported as
+  `key not ASCII`, because the key check runs first. Every string C# binds is then valid UTF-16, so reading one no longer throws.
+- The encoder still replaces invalid UTF-8 with U+FFFD (0042), so a log line with invalid bytes reaches the backend with U+FFFD in its
+  text; the agent never sends a line the decoders refuse for this rule. The ingest API (#40) is no longer blocked by the difference.
