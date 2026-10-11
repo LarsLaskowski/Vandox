@@ -1,7 +1,7 @@
 # Plan: Import only the new part of a log file that grew since its import
 
 Source: Issue #131
-Status: Draft
+Status: Approved
 Tier: security — the change reworks the log import's pass 1 and pass 2 (`Scanner`, `Importer`, `ImportPass` in
 `src/Vandox.Import`), decides which bytes of untrusted input reach the parsers and where a parser starts reading them
 (*Security areas* 9 and 10 in `.squad/project.md`), adds a property to `ILogParser` (`src/Vandox.Core`), and adds a
