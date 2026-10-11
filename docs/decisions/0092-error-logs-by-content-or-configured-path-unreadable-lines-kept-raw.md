@@ -107,7 +107,13 @@ options in [Configuration and secrets](../areas/configuration-and-secrets.md).
 - nginx's multi-line FastCGI output produces many raw lines and warnings in a normal log; the summary lists counts
   and the first reasons per file, not every line.
 - A raw line before the first readable line, and the first raw lines of the new part of a continued file, get the
-  file's modification time, which can lie after the time of the line.
+  file's modification time, which can lie after the time of the line. The modification time comes from the file system
+  or a tar header and can be forged, so it is used only inside the storable range (as the syslog year anchor does);
+  otherwise such a line is skipped as having no time, so it is never both reported as kept raw and refused by the
+  importer.
+- Two path options that match the same file are not refused: the parser registered first wins the file, and the other
+  never sees it. Refusing them would need a rule for overlapping rotation suffixes, and the result of the tie is
+  deterministic and documented.
 - The formats, time zone and paths of the Plesk logs are unverified; a different format is kept as raw lines, and a
   different path is set by the operator.
 - These logs carry client and application text: a forged line in the log's format becomes an entry with any time

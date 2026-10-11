@@ -111,14 +111,22 @@ Tests marked *(step 6)* pass on the skeleton (pins, guards, bounds) and are writ
 - [ ] **AC6 — raw lines with a warning (parser).** A non-empty line that `TryParse` refuses, or whose time does
   not resolve, becomes a record with `priority` null, `message` the whole line (byte order mark removed on line 1
   only), `captured_at` the capture time of the record emitted before it in this parse, else the file's
-  modification time; the parser calls `IRecordEmitter.Warn(lineNumber, reason)` for it. With neither time the line
-  is skipped as `raw line without a time` (no warning). An empty line is skipped as `empty line`. A whole file of
-  an unknown format at a configured path becomes raw records only.
+  modification time **when `StorableTime.Contains(file.ModTime)`**; the parser calls
+  `IRecordEmitter.Warn(lineNumber, reason)` for it, then emits the record. With neither time (no record before it and
+  a modification time that is `null` or outside the storable range) the line is skipped as `raw line without a time`
+  with no `Warn` and no record. An empty line is skipped as `empty line`. A whole file of an unknown format at a
+  configured path becomes raw records only, also when that content is another known format (Apache content given to
+  the `nginx-error` parser gives raw lines with `not an nginx error log line`).
   Tests: `ErrorLogParserTests.ErrorLogParserParseAsyncKeepsUnreadableLinesAsRawRecordsWithAWarning`,
-  `ErrorLogParserTests.ErrorLogParserParseAsyncGivesRawLinesBeforeTheFirstEntryTheModificationTime`,
-  `ErrorLogParserTests.ErrorLogParserParseAsyncSkipsRawLinesWithoutAnyTime`,
+  `ErrorLogParserTests.ErrorLogParserParseAsyncGivesRawLinesBeforeTheFirstEntryTheModificationTime` (DataRows: an
+  ordinary time, exactly `StorableTime.Min` and exactly `StorableTime.Max`, each the record's `captured_at`),
+  `ErrorLogParserTests.ErrorLogParserParseAsyncSkipsRawLinesWithoutAnyTime` (DataRows: `ModTime` null,
+  `2300-01-01T00:00:00Z`, `1600-01-01T00:00:00Z`, and `StorableTime.Max` plus one tick; each: no record, no warning,
+  one skip `raw line without a time` per raw line before the first line of the format, and the line of the format after
+  them stored normally with the following raw line taking its time),
   `ErrorLogParserTests.ErrorLogParserParseAsyncSkipsEmptyLines`,
-  `ErrorLogParserTests.ErrorLogParserParseAsyncReadsAWholeFileOfAnUnknownFormatAsRawLines`,
+  `ErrorLogParserTests.ErrorLogParserParseAsyncReadsAWholeFileOfAnUnknownFormatAsRawLines` (DataRows: text of no
+  format; the Apache fixture lines given to the `nginx-error` parser),
   `ErrorLogParserTests.ErrorLogParserParseAsyncRemovesTheByteOrderMarkOfLineOne`.
 - [ ] **AC7 — bounds and robustness.** A message is cut to 16,384 UTF-8 bytes of the decoded text (invalid bytes
   count three) with `truncated`; a line the reader cut at 16 KiB sets `truncated`; the parser honors cancellation
@@ -139,7 +147,8 @@ Tests marked *(step 6)* pass on the skeleton (pins, guards, bounds) and are writ
   never claims by content. `Type` is the constructor's type and `LineFramed` is true.
   Tests: `ErrorLogParserTests.ErrorLogParserDetectClaimsAFileByItsFirstLine`,
   `ErrorLogParserTests.ErrorLogParserDetectNeverClaimsContentUnderASyslogName`,
-  `ErrorLogParserTests.ErrorLogParserDetectClaimsAFileAtItsConfiguredPathWhateverItsContent`,
+  `ErrorLogParserTests.ErrorLogParserDetectClaimsAFileAtItsConfiguredPathWhateverItsContent` (DataRows include an
+  Apache first line at `nginx/error.log` for the `nginx-error` parser: `MatchPath`),
   `ErrorLogParserTests.ErrorLogParserDetectOfSwCpServerClaimsOnlyByPath`,
   `ErrorLogParserTests.ErrorLogParserIsLineFramedAndKeepsItsType`.
 - [ ] **AC9 — path match.** `LogPath.Matches(configuredPath, fileName)` is true when the configured path has at
@@ -160,7 +169,12 @@ Tests marked *(step 6)* pass on the skeleton (pins, guards, bounds) and are writ
   Tests: `BuiltInParsersTests.BuiltInParsersCreateReturnsSystemParsersThenErrorLogParsers` (replaces
   `BuiltInParsersCreateReturnsJournalThenMariaDbThenDovecotThenSyslog`),
   `BuiltInParsersTests.BuiltInParsersCreateListIsAcceptedByTheRegistry` (updated sequence),
-  `BuiltInParsersTests.BuiltInParsersRegistryDetectsFilesByContentAndName` (new DataRows),
+  `BuiltInParsersTests.BuiltInParsersRegistryDetectsFilesByContentAndName` (new DataRows, among them
+  `nginx/error.log` with an Apache first line → `nginx-error`),
+  `BuiltInParsersTests.BuiltInParsersRegistryGivesAFileAtTwoConfiguredPathsToTheEarlierParser` (paths
+  `new ErrorLogPaths(DefaultPleskPanel, "/var/log/nginx/error.log", DefaultNginx, DefaultApache)`: `nginx/error.log`
+  with an nginx first line → `sw-cp-server-error`; with `SwCpServer` and `Apache` both `/srv/x/error_log`:
+  `x/error_log` with an Apache first line → `sw-cp-server-error`),
   `BuiltInParsersTests.BuiltInParsersSystemParsersIgnoreErrorLogHeads`,
   `BuiltInParsersTests.BuiltInParsersErrorLogParsersIgnoreSystemLogHeads`,
   `ParserRegistryTests.ParserRegistryPrefersAPathMatchOverAContentMatch` *(step 6)*.
@@ -214,7 +228,9 @@ No content was supplied verbatim by the issue.
    (`SyslogParser.TimeZoneNotSet`), else `SyslogClock.ResolveLocal(zone, time, previousRecognized, out instant)`,
    then `instant.AddTicks(FractionTicks)` checked with `StorableTime.Contains` (else `time outside the storable
    range`); message `Utf8Text.Cut(…, ModelLimits.MaxTextBytes, out cut)`. A raw line takes the capture time of
-   the last emitted record, else `file.ModTime`. State: two `DateTimeOffset?`.
+   the last emitted record, else `file.ModTime` when `file.ModTime is { } time && StorableTime.Contains(time)` (the
+   check of `SyslogClock.AnchorFromModTime`, `SyslogClock.cs:270-272`), computed once per parse; otherwise it is
+   skipped as `raw line without a time` before any `Warn`. State: two `DateTimeOffset?`.
 5. `LogPath.Matches` compares the last two components of the configured path with the last two of the listed
    name; the configured paths are never opened or resolved.
 6. `BuiltInParsers.Create(string? timeZone, ErrorLogPaths paths)` appends the four parsers after syslog;
@@ -409,8 +425,8 @@ No new area.
 | ---- | ------ | ----- |
 | `docs/areas/log-import.md`, `docs/areas/configuration-and-secrets.md` | see *Areas* | Lead (done with the plan) |
 | `docs/decisions/0092-…md`, `docs/decisions/README.md` | record and index row (Proposed) | Lead (done with the plan) |
-| `README.md` | *Backend options*: four rows (key, default, description) and the `import.time_zone` row names the error logs; *Import logs*: a bullet of supported sources for the four logs (types, paths and the path rule, content claim, raw lines), the summary sentence names the lines kept raw, the "grew" limit and the time zone paragraph name the error logs | Dev |
-| `deploy/backend/vandoxd.yaml` | the four options set to their defaults with a comment each (server path, the parent-directory-and-name rule); the `time_zone` comment names the error logs | Dev |
+| `README.md` | *Backend options*: four rows (key, default, description) and the `import.time_zone` row names the error logs; the `import.apache_error_log` row names `/var/log/httpd/error_log` as the RHEL-family path; *Import logs*: a bullet of supported sources for the four logs (types, paths and the path rule, content claim, raw lines), the summary sentence names the lines kept raw, the "grew" limit and the time zone paragraph name the error logs. The Plesk panel log's format and time zone, the `sw-cp-server` format and the Plesk default paths are stated as **not verified** (as in the area document), never as fact | Dev |
+| `deploy/backend/vandoxd.yaml` | the four options set to their defaults with a comment each (server path, the parent-directory-and-name rule); the `apache_error_log` comment names `/var/log/httpd/error_log` for RHEL-family servers; the `plesk_panel_log` and `sw_cp_server_error_log` comments say the Plesk paths are not verified; the `time_zone` comment names the error logs | Dev |
 | `docs/ARCHITECTURE.md` | lines 10 and 46 (parser lists), line 228 (line-framed list), the record list after the import paragraph (link 0092) | Dev |
 | `.squad/project.md` | *Security areas* 10: `ErrorLogParser`, `ErrorLogLine`, `LogPath` and the four options, record 0092; *Test doubles*: `RecordingEmitter` and `CountingEmitter` record warnings | Dev |
 | `src/Vandox.Core/LogParsing/BuiltInParsers.cs` XML doc | registry order | Dev |
@@ -446,6 +462,48 @@ existing parser returns.
   line feed followed by a line in the log's format, which becomes an entry with any time and priority; any local
   process that may write to the files can do the same. The priority is a classification of text, not proof of
   origin, as for the other parsers (0086, 0088, 0091).
+
+## Challenge
+
+Devil's Advocate (no major objections; four minor):
+
+1. *Two path options can match the same file; the registry silently picks the earlier.* **Accepted (document and
+   test), refusal rejected.** The area document already stated "the one registered first wins"; it now names the
+   example, says the configuration does not refuse it, and record 0092 gives the reason. A refusal in
+   `BackendConfigLoader.Validate` lost: equal paths are easy, but overlaps through a rotation suffix
+   (`/x/error.log` and `/x/error.log.1`) also tie on some files, so the check would need a second matching rule in the
+   loader, for a misconfiguration whose result is deterministic (registry order, `ParserRegistry.Detect` takes the
+   first parser with the highest confidence, `ParserRegistry.cs:62`) and visible in the summary's source type. Pinned
+   by `BuiltInParsersRegistryGivesAFileAtTwoConfiguredPathsToTheEarlierParser` (AC10).
+2. *Apache's default path is Debian/Ubuntu only.* **Accepted.** README row and the `vandoxd.yaml` comment name
+   `/var/log/httpd/error_log` for RHEL-family servers (*Documentation updates*); the area document says so after the
+   defaults table. The default stays `/var/log/apache2/error.log` (the monitored server runs Ubuntu 22.04, `docs/ARCHITECTURE.md:19`).
+3. *A file at the nginx path with Apache content must be `nginx-error` raw lines.* **Accepted.** DataRows in
+   `ErrorLogParserDetectClaimsAFileAtItsConfiguredPathWhateverItsContent` (AC8),
+   `BuiltInParsersRegistryDetectsFilesByContentAndName` (AC10) and
+   `ErrorLogParserParseAsyncReadsAWholeFileOfAnUnknownFormatAsRawLines` (AC6); the area document names the case.
+4. *Unverified claims must stay unverified in user-facing text.* **Accepted.** The area document already words them
+   as not verified; the README and `vandoxd.yaml` rows of *Documentation updates* now require the same wording, and the
+   Reviewer checks it there.
+
+## Security review
+
+1. **(Blocking) Raw-line fallback time from an unchecked `file.ModTime`.** **Accepted, revised.** Confirmed in the code:
+   `Scanner.cs:203` (`entry.ModificationTime.ToUniversalTime()`) and `Scanner.cs:395` (`File.GetLastWriteTimeUtc`)
+   pass the time into `LogFile` (`Scanner.cs:420`, `:542`) without a range check, and `RecordEmitter.RecordAsync`
+   (`RecordEmitter.cs:189`) refuses a record outside the range through `RecordRules.CheckImportRecord`
+   (`src/Vandox.Storage/RecordRules.cs:28`) as a skip, after the parser's `Warn` had already counted it as raw. The
+   fallback now uses `file.ModTime` only when `StorableTime.Contains` holds, as `SyslogClock.AnchorFromModTime` does;
+   otherwise the line is skipped as `raw line without a time` with no warning (AC6, *Approach* step 4, area *Raw
+   lines*, record 0092 *Consequences*). Pinned by DataRows on `ErrorLogParserParseAsyncSkipsRawLinesWithoutAnyTime`
+   (year 2300, year 1600, `StorableTime.Max` plus one tick, null) and the bounds `StorableTime.Min`/`Max` on
+   `ErrorLogParserParseAsyncGivesRawLinesBeforeTheFirstEntryTheModificationTime`. The other time source of a raw line,
+   the capture time of the record before it, is always storable because the parser emits only records whose instant
+   passed `StorableTime.Contains` (or raw records whose time is itself such an instant or a checked modification time).
+2. **(Non-blocking) State that a refused raw record counts as skipped.** **Accepted.** The area's *Raw lines* now says
+   that should the importer refuse a raw record for another rule, its line appears among the skipped lines and in the
+   raw count (the warning comes first) and nothing is stored; with the time and message checks of the parser this is
+   not expected to happen.
 
 ## Decision records
 

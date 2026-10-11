@@ -558,7 +558,8 @@ path option and a line format each, registered in this order:
 
 The defaults are the paths of a current Plesk on Ubuntu as documented by Plesk; they were not checked on the server, and
 older Plesk versions wrote the panel log elsewhere (for example `/usr/local/psa/admin/logs/panel.log`), which the operator
-sets in the option.
+sets in the option. The Apache default is the Debian and Ubuntu path; on a RHEL-family server (AlmaLinux, Rocky Linux,
+CentOS) Apache writes `/var/log/httpd/error_log`, which the operator sets in `import.apache_error_log`.
 
 **Configured path.** A file is at a configured path when the path has at least a directory and a file name, the file's
 parent directory (the element before the base name in the name the import lists) equals the parent directory of the
@@ -569,7 +570,10 @@ an archive has any root: `nginx/error.log`, `var/log/nginx/error.log` and `serve
 `/var/log/nginx/error.log`, while a file imported on its own (`error.log`, no directory) is never at a configured path.
 The configured paths are compared as text and never opened or resolved on the backend host. A file at a configured path
 is claimed above every content signature, so it is read by that parser whatever it holds; content of another format
-becomes raw lines (below). When the paths of two of these parsers match the same file, the one registered first wins.
+becomes raw lines (below): an Apache error log at the nginx path is read as `nginx-error` raw lines, not as
+`apache-error`. When the paths of two of these parsers match the same file (for example `import.sw_cp_server_error_log`
+and `import.nginx_error_log` both set to `/var/log/nginx/error.log`), the one registered first in the table above wins
+and the other never sees the file; the configuration does not refuse such paths.
 
 **Content.** `plesk-panel`, `nginx-error` and `apache-error` also claim a file by content: its name is not a syslog name
 (as for the MariaDB error log) and the first line of the first 4,096 bytes is a line of their format (a UTF-8 byte order
@@ -615,12 +619,17 @@ Plesk writes the panel log in the server's local time is not verified.
 **Raw lines.** A non-empty line that is not a line of the format, or whose time does not exist (month 13, `2026-02-30`,
 hour 24) or lies outside the storable range, is kept as a **raw record**: the fields of *Records*, but no `priority` and
 the whole line as `message` (a UTF-8 byte order mark removed on line 1 only), cut and marked like a message. Its time is
-the capture time of the record emitted before it in the same parse, else the file's modification time (for the first
-lines of a file and of the new part of a continued file, so such a line can be stored with a time later than it was
-written); with neither, the line is skipped as "raw line without a time". The parser reports every raw line with a
-warning and one of the fixed reasons "not a Plesk panel log line", "not an nginx error log line" (also for
-`sw-cp-server-error`), "not an Apache error log line", "invalid date" and "time outside the storable range". An empty
-line is skipped as "empty line", with the 1-based line number. Raw lines occur in normal logs: nginx copies the standard
+the capture time of the record emitted before it in the same parse, else the file's modification time when it lies
+inside the storable range (for the first lines of a file and of the new part of a continued file, so such a line can be
+stored with a time later than it was written). A modification time is taken from the file system or a tar header and
+can be forged; one outside the storable range (before 1677-09-21 or after 2262-04-11) counts as no modification time,
+as for the year anchor of syslog. With neither time, the line is skipped as "raw line without a time" and gets no
+warning. The parser reports every other raw line with a warning and one of the fixed reasons "not a Plesk panel log
+line", "not an nginx error log line" (also for `sw-cp-server-error`), "not an Apache error log line", "invalid date" and
+"time outside the storable range", and then emits its record. The parser's checks keep a raw record's time and message
+within the rules the importer applies to a record; should the importer refuse a raw record for another rule, its line
+appears among the skipped lines ("record refused: …") as well as in the count of lines kept raw, because the warning
+comes first, and nothing of it is stored. An empty line is skipped as "empty line", with the 1-based line number. Raw lines occur in normal logs: nginx copies the standard
 error of a FastCGI application unescaped, so a PHP message with line feeds continues on lines without a time stamp, and
 Apache writes startup messages and the standard error of child processes without one. A file of an unknown format at a
 configured path becomes raw records only. Memory is independent of the input: a parse keeps the time of the last record
