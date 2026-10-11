@@ -3,8 +3,9 @@
 Source: Issue #131
 Status: Draft
 Tier: security — the change reworks the log import's pass 1 and pass 2 (`Scanner`, `Importer`, `ImportPass` in
-`src/Vandox.Import`), decides which bytes of untrusted input reach the parsers (*Security areas* 9 and 10 in
-`.squad/project.md`), and adds a schema step and a lookup to the import state in `src/Vandox.Storage`.
+`src/Vandox.Import`), decides which bytes of untrusted input reach the parsers and where a parser starts reading them
+(*Security areas* 9 and 10 in `.squad/project.md`), adds a property to `ILogParser` (`src/Vandox.Core`), and adds a
+schema step and a lookup to the import state in `src/Vandox.Storage`.
 
 ## Problem / root cause
 
@@ -149,12 +150,49 @@ more lines.
   2026-03-01; C+D = `syslog` with C's lines plus year-less lines of September and modification time 2026-10-01.
   Run 2 stores D's first record in **2026-09** (parsed with C's anchor it would land in 2025, which the test
   catches). A resumed continuation (AC10) uses the same stored row, so the year cannot change within it.
+- [ ] AC23 (no continuation of a journal export, end to end with the built-in parsers against SQLite, Security B1):
+  C is a journal export whose first entry is complete (`__REALTIME_TIMESTAMP`, `_HOSTNAME=genuine`,
+  `SYSLOG_IDENTIFIER=app`, `MESSAGE=one`, empty line) and whose second entry (`__REALTIME_TIMESTAMP`,
+  `_HOSTNAME=genuine`, `SYSLOG_IDENTIFIER=app`, then a **binary** `MESSAGE` field) is cut inside the binary payload.
+  The payload (built in the test with its 8-byte little-endian length) is `"x\n\n__REALTIME_TIMESTAMP=1760000000000000\n_HOSTNAME=forged\n_COMM=sshd\nMESSAGE=forged\n\n"`,
+  and C ends after `"x\n\n__REALTI"`, so C's last line feed lies inside the payload and the forged entry lies after
+  it. C+D is the same export with the payload complete, its closing `\n` and the closing empty line. Run 1 imports C:
+  one record (`one`), the second entry skipped as `truncated entry`, the content complete. Run 2 imports C+D:
+  outcome `Imported` (not `Continued`), `ContinuedFrom` empty; it stores the two genuine entries (`one` again and the
+  entry with the binary `MESSAGE`, host `genuine`), and **no** stored record has host `forged`, program `sshd` or
+  message `forged`. The test fails if the importer starts the journal parser at C's last line feed (it would then
+  store the forged entry).
+- [ ] AC24 (pass 1 gate, `ILogParser.LineFramed`): for a file whose parser has `LineFramed` = `false` (a `LineParser`
+  built with `lineFramed: false`, otherwise the setup of AC1), pass 1 calls `FindImportBasesAsync` **not** at all,
+  passes no base to the hash snapshots, `BeginImportAsync` gets an empty `Prefixes` list (and the 32-byte head key),
+  and the file is not added to the run's bases: run 2 of AC1 with such a parser is `Imported` as a whole and stores
+  every line of C+D; AC3's same-run case with such a parser gives two `Imported` files. `SyslogParser.LineFramed` and
+  `MariaDbErrorLogParser.LineFramed` are `true`, `JournalExportParser.LineFramed` is `false` (one assertion each in
+  the parsers' existing test classes).
+- [ ] AC25 (pass 2 guard): when the store returns an incomplete state with `Offset` > 0 for a file whose parser has
+  `LineFramed` = `false` (a state seeded into `FakeImportStore`), the file fails with the reason
+  `the import state continues the content, which its parser does not allow`, nothing is parsed or stored, and the
+  run goes on with the next file.
 
 ## Approach
 
+**Continuation only for line-framed formats** (Security B1): a continued content is parsed from the beginning of a
+line in the middle of the file. That gives the same framing as a whole-file parse only for a format in which every
+byte after a line feed is read as the start of a new line — never as the rest of a field begun before it. Syslog and
+the MariaDB error log are such formats. The journal export is not: a binary field (`NAME\n`, 8-byte length, raw
+bytes that may hold line feeds) is consumed by length, so a line feed inside a payload is not a field boundary, and
+a parser started after it would read the payload (for example a `MESSAGE` an unprivileged local user sent through
+`systemd-cat` or `sd_journal_send`) as forged entries with trusted `_` fields. New member
+`ILogParser.LineFramed`: `true` for `SyslogParser` and `MariaDbErrorLogParser`, `false` for `JournalExportParser`; a
+parser without it does not compile, so every parser, including one a hook supplies (`ServeHooks.Parsers`), decides
+explicitly. Only a file whose parser is line-framed is ever continued; every other file is hashed and imported as a
+whole, as before #131.
+
 **Pass 1** (`Scanner.RecognizeAsync`): after detection, compute the head key `ContentHead.Key(head)` from the head
-buffer pass 1 already holds (at most `ILogParser.SniffBytes` = 4,096 bytes of the decompressed content). Collect the
-bases: `Store.FindImportBasesAsync(key, parser.Type)` (complete contents, at most 64) plus the files of this run
+buffer pass 1 already holds (at most `ILogParser.SniffBytes` = 4,096 bytes of the decompressed content) and store it
+in `FoundFile.Head` for every recognized file. When the parser's `LineFramed` is `false`, stop here: no store lookup,
+no bases for the snapshots (`HashingStream` with an empty list), `FoundFile.Prefixes` stays empty and the file is not
+added to the run's bases. Otherwise collect the bases: `Store.FindImportBasesAsync(key, parser.Type)` (complete contents, at most 64) plus the files of this run
 already hashed with the same key and source type (kept per key and type in a dictionary in the `Scanner`, at most
 the 64 largest per key; dedupe by `Sha256`; keep the 64 largest of the union). Hash the content through
 `HashingStream` with those bases: at each base size it appends exactly up to that size, takes
@@ -170,7 +208,11 @@ row for `Sha256` exists, take the largest prefix whose row exists with the same 
 `complete = 1`, and insert the new row with `head_sha256`, `continues_id` = that row's id and `start_offset` = the
 prefix's `Offset` (none: `NULL` and 0). The returned `ImportFile` carries `ContinuesId`, `Offset` and
 `ContinuedFrom` (the base row's `name`, through a `LEFT JOIN` on `continues_id`). An existing row is returned
-unchanged — so a resume uses the stored continuation point.
+unchanged — so a resume uses the stored continuation point. `ImportPass.BeginAsync` passes `item.Prefixes` (empty for a
+file that is not line-framed) and, after the existing source-type check, fails the file with
+`the import state continues the content, which its parser does not allow` when the returned state has `Offset` > 0
+and `item.Parser.LineFramed` is `false` (defense in depth: such a state is never written by this build, but a stored
+point must never start a parser that is not line-framed; AC25).
 
 **Pass 2** (`ImportPass.ImportContentAsync`): when `state.Offset > 0`, call `counted.SkipAsync(state.Offset)` before
 the parser starts (reads and hashes, no line counting, no progress), set `result.ContinuedFrom`,
@@ -211,6 +253,8 @@ can be dropped again after `DROP INDEX import_files_head`.
 
 | Project | Type / file | Change |
 | ------- | ----------- | ------ |
+| Vandox.Core | `LogParsing/ILogParser.cs` | `LineFramed` |
+| Vandox.Core | `LogParsing/SyslogParser.cs`, `LogParsing/MariaDbErrorLogParser.cs`, `LogParsing/JournalExportParser.cs` | `LineFramed` (`true`, `true`, `false`) |
 | Vandox.Storage | `ImportBase.cs` (new) | a complete content that may start a longer one |
 | Vandox.Storage | `ImportPrefix.cs` (new) | a base the content starts with, with its continuation point |
 | Vandox.Storage | `ImportFileStart.cs` | `HeadSha256`, `Prefixes` |
@@ -226,8 +270,8 @@ can be dropped again after `DROP INDEX import_files_head`.
 | Vandox.Import | `FoundFile.cs` | `Head`, `Prefixes` |
 | Vandox.Import | `FileResult.cs` | `ContinuedFrom`, `ContinuedAfter`, `SkippedAtStart`, copied by `Snapshot` |
 | Vandox.Import | `ImportOutcome.cs` | `Continued` (appended after `Failed`) |
-| Vandox.Import | `Scanner.cs` | lookup, run bases, matches into `FoundFile` |
-| Vandox.Import | `ImportPass.cs` | start with head and prefixes, skip, outcome |
+| Vandox.Import | `Scanner.cs` | `LineFramed` gate, lookup, run bases, matches into `FoundFile` |
+| Vandox.Import | `ImportPass.cs` | start with head and prefixes, guard of AC25, skip, outcome |
 | Vandox.Import | `Importer.cs` | `ImportException` from the scan ends the run |
 | Vandox.Backend | `Cli/ImportStoreAdapter.cs` | forwards `FindImportBasesAsync` |
 | Vandox.Backend | `Cli/ImportSummaryWriter.cs` | count row and *Files continued* |
@@ -236,6 +280,18 @@ can be dropped again after `DROP INDEX import_files_head`.
 Every existing file in this table was read for this plan; none is final as it stands.
 
 ## Signatures (for the Dev's skeleton)
+
+`Vandox.Core` (public):
+
+```csharp
+// ILogParser, added (region Properties):
+/// Gets whether the format is framed by lines only: every byte after a line feed starts a new line and is never the
+/// rest of a field begun before it, so the importer may start the parse at the beginning of any line of a content.
+bool LineFramed { get; }
+
+// SyslogParser, MariaDbErrorLogParser:   public bool LineFramed => true;
+// JournalExportParser:                   public bool LineFramed => false;
+```
 
 `Vandox.Storage` (public):
 
@@ -320,16 +376,22 @@ internal List<ImportPrefix> Prefixes { get; set; } = [];
 - `tests/Vandox.Import.Tests/ContentHeadTests.cs` (new): AC17.
 - `tests/Vandox.Import.Tests/HashingStreamTests.cs` (new): AC18.
 - `tests/Vandox.Import.Tests/ContentStreamTests.cs` (new): AC19.
-- `tests/Vandox.Import.Tests/ImporterStoreTests.cs`: AC1, AC4, AC5, AC6, AC8, AC9, AC10, AC15, AC21.
+- `tests/Vandox.Import.Tests/ImporterStoreTests.cs`: AC1, AC4, AC5, AC6, AC8, AC9, AC10, AC15, AC21, AC24 (gate),
+  AC25.
 - `tests/Vandox.Import.Tests/ImporterArchiveTests.cs`: AC2.
-- `tests/Vandox.Import.Tests/ImporterDirectoryTests.cs`: AC3, AC16.
+- `tests/Vandox.Import.Tests/ImporterDirectoryTests.cs`: AC3, AC16, AC24 (same-run case).
+- `tests/Vandox.Core.Tests/SyslogParserTests.cs`, `MariaDbErrorLogParserTests.cs`, `JournalExportParserTests.cs`
+  (existing): AC24 (the property's value).
 - `tests/Vandox.Backend.Tests/ImportSummaryWriterTests.cs` (new): AC7 (summary text).
 - `tests/Vandox.Backend.Tests/ImportProgressLoggerTests.cs` (new): AC7 (outcome name).
 - `tests/Vandox.Backend.Tests/ImportCommandTests.cs`: AC1 end to end against SQLite with the built-in syslog parser,
-  AC7 exit code, AC20, AC22.
+  AC7 exit code, AC20, AC22, AC23.
 - Test double: `tests/Vandox.Import.Tests/FakeImportStore.cs` — a lookup over its in-memory states (head key,
   source type, complete, largest first, at most 64), the base choice of the real store in `BeginImportAsync`,
-  and a scripted `FindFailure`.
+  a scripted `FindFailure`, a count of `FindImportBasesAsync` calls, the `Prefixes` each `BeginImportAsync` got, and
+  a seeded state (for AC25).
+- Test double: `tests/Vandox.Import.Tests/LineParser.cs` gains an optional constructor parameter `lineFramed`
+  (default `true`) for AC24 and AC25 (**Tester**, step 5).
 
 Existing test code affected by a changed signature:
 
@@ -337,6 +399,10 @@ Existing test code affected by a changed signature:
   **Dev** adds the member mechanically in step 4 (returns an empty list); the **Tester** gives it its behavior in
   step 5.
 - `HashingStream`, `ContentStream` and `RecordEmitter` have no test call sites.
+- `ILogParser` gains `LineFramed`, so every test parser stops compiling: the **Dev** adds the member mechanically in
+  step 4 — `tests/Vandox.Import.Tests/LineParser.cs` and `tests/Vandox.Backend.Tests/LineParser.cs` `=> true` (they
+  read lines), `tests/Vandox.Backend.Tests/CancellingParser.cs` and `tests/Vandox.Core.Tests/FakeParser.cs`
+  `=> false`; no assertion touched. The **Tester** makes the Import tests' `LineParser` configurable in step 5.
 - Not a signature change but a behavior the migration tests depend on: `SqliteStoreOpenMigratesVersionThreeAndAddsHost`
   and `SqliteStoreOpenMigratesVersionFourAndAddsEvent` set the version back on a database created at the latest
   version; with step 6 they must also undo step 6 in their arrange SQL (`DROP INDEX import_files_head` and
@@ -346,7 +412,12 @@ Existing test code affected by a changed signature:
 ## Areas
 
 - `docs/areas/log-import.md` (owner: Dev):
-  - *Repeatable import*: replace the "grew" limit with the continuation rules — head key (first line, or the first
+  - *Parsers* (the `ILogParser` contract list): `LineFramed` — the format is framed by lines only; the importer
+    starts a parse at a line start in the middle of a content only for such a parser; syslog and the MariaDB error
+    log are, the journal export is not (binary fields hold line feeds).
+  - *Repeatable import*: replace the "grew" limit with the continuation rules — only a file whose parser is
+    line-framed is continued (a journal export that grew is imported as a whole, its earlier entries stored again,
+    because its binary fields make a line feed in the middle no safe place to start); head key (first line, or the first
     4,096 bytes without a line feed); bases are complete contents of the same source type from earlier runs or
     earlier files of the run in input order; at most 64 bases per file; the longest base whose bytes the content
     starts with wins; the new part starts at the beginning of the line in which the base ends, and a base without a
@@ -355,8 +426,8 @@ Existing test code affected by a changed signature:
     anchored on the continued file's name date or modification time, never on the base's; the whole content is still hashed in both passes; the continuation point is stored, so a
     resume uses it. Limits: the older-after-newer order is not recognized (imported as a whole); contents imported
     before schema version 6 are never a base; at the continuation point a grouped entry is split (MariaDB error log:
-    continuation lines after the point are skipped as "line before the first entry"; journal and syslog: MariaDB
-    entries and kernel reports become the stored entry plus lines of their own) and a line cut by the earlier copy is
+    continuation lines after the point are skipped as "line before the first entry"; syslog: MariaDB entries and
+    kernel reports become the stored entry plus lines of their own) and a line cut by the earlier copy is
     stored again, complete — the one case in which a line has two records (the cut one and the complete one); a
     content whose records were removed later (retention, once it exists) keeps its complete state, so it is still
     reported as already imported and a longer content is still continued after it — the removed part is never
@@ -375,11 +446,11 @@ Existing test code affected by a changed signature:
 ## Documentation updates
 
 - `README.md`, *Import logs* (owner: Dev): the summary lists continued files; exit code 0 includes continued files;
-  the "Limits" sentence becomes: a file that grew since its import is continued after the part imported before (only
-  when the older copy was imported first), and lines appended while a file is imported come with a later import as
+  the "Limits" sentence becomes: a syslog or MariaDB error log that grew since its import is continued after the part
+  imported before (only when the older copy was imported first; a journal export that grew is imported as a whole), and lines appended while a file is imported come with a later import as
   a continuation.
-- `docs/ARCHITECTURE.md` (owner: Lead, done in this plan step): *Storage* — schema version 6 and the continuation in
-  the *Imports* bullet; it links 0069 already.
+- `docs/ARCHITECTURE.md` (owner: Lead, done in this plan step and in the revision): *Storage* — schema version 6 and
+  the continuation (line-framed formats only) in the *Imports* bullet; it links 0069 already.
 - `.squad/project.md`, *Test doubles*, row `database (C#)` (owner: Tester): `FakeImportStore` gains "base lookup"
   and "scripted begin, find and write failures".
 - `docs/decisions/0069-...md` and its index row (owner: Lead, done in this plan step).
@@ -403,6 +474,17 @@ described in `docs/ARCHITECTURE.md` (*Storage*), linking 0069.
 - [ ] Skipped bytes are never unverified input: the continuation point lies inside a prefix whose SHA-256 equals a
   complete content (pass 1), and pass 2 reads and hashes the skipped bytes too (`VerifyAsync` over the whole
   content). A crafted file can at most make the importer skip bytes that are byte-identical to stored content.
+- [ ] The framing of the bytes after the point is the framing of a whole-file parse: verified bytes alone are not
+  enough, because a parser started in the middle of a content reads from a state the whole-file parse may never have
+  had. A content is continued only when its parser is `LineFramed` (syslog, MariaDB error log), whose only state at a
+  line start is "start of a line" — so the bytes after the point are split into the same lines as in a whole-file
+  parse, and a grouped entry that spans the point is only split (the stored part plus lines of their own, or skipped
+  continuation lines), never read as something else. The journal export is not line-framed (a binary field's payload
+  may hold line feeds and `\n\n`, forming text that looks like entries): its files are never continued (pass 1 does
+  no lookup and passes no prefix, AC23, AC24), and pass 2 refuses a stored continuation point for a parser that is
+  not line-framed (AC25). A parser a hook supplies must declare `LineFramed`; declaring `true` for a format with
+  length-framed fields is a parser bug of the same kind as a non-deterministic parser (contract in the area
+  document).
 - [ ] No new file access: every open stays on `SecureRoot` as today; nothing is written to disk.
 - [ ] SQL takes the head key, source type and prefixes only as parameters; `continues_id` is taken from a row read in
   the same transaction.
@@ -422,7 +504,9 @@ described in `docs/ARCHITECTURE.md` (*Storage*), linking 0069.
   earlier files of the run), and the consequences (limits: order, pre-version-6 contents, split entries and the
   summary's count of lines skipped at the continuation point, the cut line as the one line with two records,
   contents whose records were removed later; the year anchor of the new part from the continued content's own first
-  import; the follow-up). `decision-check.py` passes.
+  import; the follow-up), and — after Security round 1 — options F1/F2 for where a continued parse may start, the
+  decision F1 (line-framed parsers only, journal exports imported as a whole) and its consequence.
+  `decision-check.py` passes.
 
 ## Challenge
 
@@ -448,6 +532,25 @@ Devil's Advocate, round 1: 0 major, 4 minor objections.
    never restored. Retention is not implemented yet (`docs/areas/storage.md`, *Retention (planned)*); no code
    change.
 
+Security, plan round 1: CHANGES_REQUIRED, 1 blocking, 3 non-blocking.
+
+- *B1 (blocking): starting the journal-export parser at a line feed in the middle of the file lets the payload of a
+  binary field be read as forged entries.* **Accepted**, option (a) of the finding. Confirmed against the code: a
+  binary field is consumed by its 8-byte length (`JournalExportReader`), a cut inside it ends the whole-file parse of
+  C with `truncated entry` (`JournalExportParser.cs` ~209, a skip, so C is complete), and C's last line feed can lie
+  inside the payload. Revised: new `ILogParser.LineFramed` (true for syslog and MariaDB, false for the journal);
+  pass 1 does no lookup and passes no prefix for a parser that is not line-framed, so the file is `Imported` as a
+  whole; pass 2 additionally refuses a stored continuation point for such a parser (*Approach*, *Signatures*, AC23
+  end to end with the built-in journal parser and a forged entry inside a binary `MESSAGE`, AC24, AC25); the
+  *Security considerations* now cover framing, not only bytes; the area document (owner Dev) states the contract
+  and the rule; record 0069 has the options and the decision. Option (b) — a continuation point at the end of the
+  last complete entry as the length-aware reader frames it — is rejected: the importer would need parser-specific
+  framing state from pass 1 (the reader's position after the last complete entry, which is not where pass 1's
+  generic hashing sees it), a journal export copied while written ends in a cut entry whose start is exactly the
+  ambiguous region, and the gain is small (a forensic journal export is rarely re-imported grown); it can follow
+  as its own issue if needed.
+- *N1, N2, N3 (non-blocking):* no change required; kept as planned.
+
 ## Out of scope / follow-ups
 
 - Follow-up issue for the orchestrator to open after the PR (record 0069 names it):
@@ -460,3 +563,5 @@ Devil's Advocate, round 1: 0 major, 4 minor objections.
     one stores no line twice; the summary says which files were recognized this way."
 - Contents imported before schema version 6 get no head key (their content is not available to the migration).
 - Keeping a grouped entry whole across the continuation point (would need parser state from the earlier import).
+- Continuing a grown journal export (would need the reader's own entry framing as the continuation point, option F2
+  of record 0069); not filed unless asked for.

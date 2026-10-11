@@ -102,6 +102,19 @@ earlier content's size, and that size must be known before the read passes it):
 - P3. **Store prefix hashes at fixed intervals** — finds a prefix only at an interval boundary, so most growths are
   missed.
 
+Where the parse of the new part may start (a parser started in the middle of a content reads from a state a
+whole-file parse may never have had; verified bytes are not enough):
+
+- F1. **Continue only formats framed by lines only** (a parser property, `ILogParser.LineFramed`): syslog and the
+  MariaDB error log, where every byte after a line feed starts a new line, so the new part is split into the same
+  lines as in a whole-file parse. The journal export is not: a binary field (`NAME`, an 8-byte length, raw bytes) may
+  hold line feeds, so a line feed in the middle of a content can lie inside a payload, and a parser started after it
+  would read text a local user put into a `MESSAGE` as entries with trusted fields. A grown journal export is
+  imported as a whole.
+- F2. **For the journal, start after the last complete entry as the length-aware reader frames it** — keeps the
+  journal continuable; but the importer would need parser-specific framing state from pass 1, and a content copied
+  while written ends in a cut entry, exactly the ambiguous region. A raw search for an empty line is not enough.
+
 The earlier content can also be a file of the same run, earlier in input order (two copies of `/var/log` in one
 input). And the older copy may come after the newer one (in a later run or later in the input); recognizing that a
 content is the start of one imported before would need prefix hashes of every stored content at arbitrary sizes.
@@ -115,7 +128,8 @@ counts the records per file in the same transaction as each batch, as a compare-
 resumes and two concurrent imports cannot store a file twice. A resumed content is parsed with the file name and
 modification time of its first import, and the second pass reads only up to the size hashed in the first. A file
 whose content starts with a completely imported content of the same source type (an earlier run, or an earlier file
-of the same run) is continued (G3, P2): only the part from the beginning of the line in which the longest such
+of the same run) is continued (G3, P2) when its parser is framed by lines only (F1; F2 was rejected for its
+complexity and its weak point at a cut entry): only the part from the beginning of the line in which the longest such
 content ends is parsed and stored, the whole content is still hashed in both passes, and the continuation point is
 stored with the content's state, so a resume uses the same one. The new part is parsed with the file name and
 modification time of the continued content's own first import (γ applied to that content), not those of the earlier
@@ -134,9 +148,13 @@ version 3 (0077), the head key and the continuation point of version 6 ([Storage
   in the same input) is imported as a whole, storing its lines twice; so are contents imported before schema
   version 6 (they have no head key) and an earlier content that ends without any line feed. A follow-up issue covers
   the older-after-newer order.
+- A journal export that grew is imported as a whole, its earlier entries stored again (F1). Every parser, including
+  one a hook supplies, must declare whether it is framed by lines only; declaring it for a format with
+  length-framed fields would let input be read as forged records, and the second pass refuses a stored continuation
+  point for a parser that is not.
 - At the continuation point a grouped entry is split: a MariaDB entry of the error log loses the continuation lines
   after the point (reported as skipped lines "line before the first entry"), and a MariaDB entry or kernel report of
-  the journal or syslog is split into the stored entry and lines of their own; the summary counts the lines skipped
+  syslog is split into the stored entry and lines of their own; the summary counts the lines skipped
   before the first record of the new part with the continued file. A line the earlier copy cut is stored again,
   complete — the one case in which a line has two records (the cut one and the complete one); skipping it would lose
   its rest, and the cut record cannot be replaced because records do not reference their import file.

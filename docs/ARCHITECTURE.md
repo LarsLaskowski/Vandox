@@ -224,7 +224,8 @@ Implemented by `src/Vandox.Storage`:
   import is complete). A batch with an import step advances the row in the same transaction as its records, as
   a compare-and-set on the expected count, so an interrupted import resumes where it stopped and two runs of
   the same content never store it twice. A content that starts with a completely imported one (a log that grew
-  between two copies) is continued: only the part after it is stored, and the row keeps where it continued.
+  between two copies) is continued when its format is framed by lines only (syslog, MariaDB error log; never a
+  journal export): only the part after it is stored, and the row keeps where it continued.
   Records do not reference their file; imports are idempotent per file content, not per record.
 - **Connections** ([0077](decisions/0077-storage-on-microsoft-data-sqlite-same-schema-and-rules.md)): one writer connection (immediate transactions, one batch per transaction) and a pool
   of query-only readers, in WAL mode with `synchronous=FULL`, so a committed batch is durable and reads (and
