@@ -125,6 +125,7 @@ public sealed partial class MariaDbStatus : IPayload
     #region IPayload
 
     /// <inheritdoc />
+    [JsonIgnore]
     public string Kind => RecordKind.MariaDbStatus;
 
     /// <inheritdoc />

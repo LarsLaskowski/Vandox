@@ -40,6 +40,7 @@ public sealed class MetricPoint : IPayload
     #region IPayload
 
     /// <inheritdoc />
+    [JsonIgnore]
     public string Kind => RecordKind.Metric;
 
     /// <inheritdoc />

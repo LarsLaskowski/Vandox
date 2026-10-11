@@ -10,3 +10,5 @@ One line per pipeline step: date, step, member, result. Lead decisions and escal
 | 2026-10-11 | 2 Plan revise | squad-lead | Both minor objections accepted; AC1b reflection guard added; tier standard (opus/medium · 29,971 tokens · 6 tool uses · 40 s) |
 | 2026-10-11 | 4 Skeleton | Orchestrator | Skipped: plan adds no signatures |
 | 2026-10-11 | 5 Tests first | squad-tester | PayloadRegistryTests added, 16 adapted rows; 25 fail on current code, AC3 rows pass (sonnet/medium · 100,877 tokens · 19 tool uses · 149 s) |
+| 2026-10-11 | 6 Implement | squad-dev | [JsonIgnore] on 8 Kind properties, storage.md updated; suite and coverage gate pass (sonnet/medium · 65,722 tokens · 7 tool uses · 330 s) |
+| 2026-10-11 | 7 Code check | Orchestrator | Format check, Analyzer gate, scope-check pass; tests/coverage gate passed in step 6 |

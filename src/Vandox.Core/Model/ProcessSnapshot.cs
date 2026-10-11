@@ -47,6 +47,7 @@ public sealed class ProcessSnapshot : IPayload
     #region IPayload
 
     /// <inheritdoc />
+    [JsonIgnore]
     public string Kind => RecordKind.ProcessSnapshot;
 
     /// <inheritdoc />

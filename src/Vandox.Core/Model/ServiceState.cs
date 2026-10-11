@@ -71,6 +71,7 @@ public sealed partial class ServiceState : IPayload
     #region IPayload
 
     /// <inheritdoc />
+    [JsonIgnore]
     public string Kind => RecordKind.ServiceState;
 
     /// <inheritdoc />
