@@ -1,6 +1,8 @@
 using System.Buffers.Binary;
 using System.Text;
 
+using Microsoft.Data.Sqlite;
+
 using Vandox.Backend.Hosting;
 using Vandox.Core.Model;
 using Vandox.Storage;
@@ -305,6 +307,44 @@ public class ImportCommandTests
         Assert.AreEqual(1, code, "exit code");
         Assert.AreEqual(string.Empty, fixture.Out.ToString(), "no summary");
         Assert.Contains("import failed", fixture.Error.ToString(), "log line");
+    }
+
+    /// <summary>
+    /// When the lookup of the import state fails, the import prints the summary of the files found so far, logs the failure and exits with 1.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task ImportCommandExitsWithOneWhenReadingTheImportStateFails()
+    {
+        // Arrange
+        using var fixture = new BackendFixture();
+        var logs = Path.Combine(fixture.Folder.Path, "logs");
+
+        Directory.CreateDirectory(logs);
+        await WriteLogsAsync(logs, TestContext.CancellationToken);
+        await File.AppendAllTextAsync(fixture.ConfigPath, "import:\n  time_zone: Europe/Berlin\n", TestContext.CancellationToken);
+
+        var created = await SqliteStore.OpenAsync(fixture.Storage, TestContext.CancellationToken);
+
+        await created.DisposeAsync();
+
+        await using (var connection = new SqliteConnection($"Data Source={Path.Combine(fixture.Storage, "vandox.db")};Pooling=False"))
+        {
+            await connection.OpenAsync(TestContext.CancellationToken);
+
+            using var command = connection.CreateCommand();
+
+            command.CommandText = "DROP INDEX import_files_head; ALTER TABLE import_files DROP COLUMN head_sha256";
+            await command.ExecuteNonQueryAsync(TestContext.CancellationToken);
+        }
+
+        // Act
+        var code = await fixture.RunAsync(["import", logs], null, TestContext.CancellationToken);
+
+        // Assert
+        Assert.AreEqual(1, code, "exit code");
+        Assert.Contains("import failed", fixture.Error.ToString(), "log line");
+        Assert.Contains("syslog", fixture.Out.ToString(), "the summary lists the files found so far");
     }
 
     /// <summary>

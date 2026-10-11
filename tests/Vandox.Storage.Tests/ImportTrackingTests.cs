@@ -1,3 +1,5 @@
+using Microsoft.Data.Sqlite;
+
 using Vandox.Core.Model;
 
 namespace Vandox.Storage.Tests;
@@ -523,6 +525,40 @@ public class ImportTrackingTests
         Assert.AreEqual("store: invalid import: head_sha256 must be 32 bytes", shortHead.Message, "short head message");
         Assert.AreEqual("store: invalid import: head_sha256 must be 32 bytes", longHead.Message, "long head message");
         Assert.AreEqual("store: invalid import: source type must match ^[a-z][a-z0-9._-]{0,63}$", badType.Message, "source type message");
+    }
+
+    /// <summary>
+    /// A lookup that the database cannot answer is reported as a store error with the fixed prefix.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task SqliteStoreFindImportBasesReportsDatabaseFailureAsStoreException()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+
+        var created = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+
+        await created.DisposeAsync();
+
+        await using (var connection = new SqliteConnection($"Data Source={Path.Combine(directory.Path, "vandox.db")};Pooling=False"))
+        {
+            await connection.OpenAsync(TestContext.CancellationToken);
+
+            using var command = connection.CreateCommand();
+
+            command.CommandText = "DROP INDEX import_files_head; ALTER TABLE import_files DROP COLUMN head_sha256";
+            await command.ExecuteNonQueryAsync(TestContext.CancellationToken);
+        }
+
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+
+        // Act
+        var error = await Assert.ThrowsExactlyAsync<StoreException>(() => store.FindImportBasesAsync(new byte[32], "syslog", TestContext.CancellationToken), "lookup on a broken table");
+
+        // Assert
+        Assert.StartsWith("store: finding import bases: ", error.Message, "message prefix");
+        Assert.IsInstanceOfType<SqliteException>(error.InnerException, "inner exception");
     }
 
     /// <summary>
