@@ -1518,20 +1518,26 @@ public class ImporterStoreTests
         switch (kind)
         {
             case "conflict":
-                Assert.AreEqual("the import state changed (another import of the same content is running?)", file.Reason, "conflict reason");
-                Assert.IsNull(run.Error, "a conflict does not end the run");
+                {
+                    Assert.AreEqual("the import state changed (another import of the same content is running?)", file.Reason, "conflict reason");
+                    Assert.IsNull(run.Error, "a conflict does not end the run");
+                }
                 break;
 
             case "store":
-                Assert.AreEqual("database error", file.Reason, "store error reason");
-                Assert.IsInstanceOfType<ImportException>(run.Error, "a store error ends the run");
-                Assert.AreEqual("importer: writing to the database failed", run.Error?.Message, "message without the text of the store");
+                {
+                    Assert.AreEqual("database error", file.Reason, "store error reason");
+                    Assert.IsInstanceOfType<ImportException>(run.Error, "a store error ends the run");
+                    Assert.AreEqual("importer: writing to the database failed", run.Error?.Message, "message without the text of the store");
+                }
                 break;
 
             default:
-                Assert.AreEqual("interrupted", file.Reason, "cancellation reason");
-                Assert.IsInstanceOfType<OperationCanceledException>(run.Error, "a cancellation ends the run");
-                Assert.IsTrue(run.Summary.Interrupted, "the run is interrupted");
+                {
+                    Assert.AreEqual("interrupted", file.Reason, "cancellation reason");
+                    Assert.IsInstanceOfType<OperationCanceledException>(run.Error, "a cancellation ends the run");
+                    Assert.IsTrue(run.Summary.Interrupted, "the run is interrupted");
+                }
                 break;
         }
     }

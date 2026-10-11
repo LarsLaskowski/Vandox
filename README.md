@@ -269,9 +269,9 @@ to import it. A file no parser claims is listed as not recognized with the reaso
 unsupported compression such as bzip2, xz, zstd or zip, nested archive, symbolic link, not a regular file);
 nothing is skipped silently. Progress is logged as JSON lines on standard error (what was found, each file,
 progress every 64 MiB hashed and every 100,000 lines), and a summary on standard output lists the files
-imported, continued, already imported, not recognized and failed, the lines read, records stored and lines skipped, the
+imported, continued, contained, already imported, not recognized and failed, the lines read, records stored and lines skipped, the
 time range of the stored records and the reasons. Names from the input are printed quoted. The exit code is 0
-when every file was imported, continued, already imported or not recognized, 1 when a file failed, the import was
+when every file was imported, continued, contained, already imported or not recognized, 1 when a file failed, the import was
 interrupted or the configuration, the database or the input could not be opened, and 2 for a usage error.
 
 Importing is repeatable: a file whose content was imported completely is not imported again, also under
@@ -279,8 +279,9 @@ another name or compressed differently (`syslog.1` and the later `syslog.2.gz`).
 (Ctrl-C, a database error) continues where it stopped when the same content is imported again, and no record
 is stored twice. Stopping or restarting the container kills a running import; nothing committed is lost, and
 the next import resumes. Limits: a syslog or MariaDB error log that grew since it was imported (the same log with more lines, as in
-a newer copy of `/var/log`) is continued after the part imported before, only when the older copy was imported
-first (a journal export that grew is imported as a whole), and lines appended to a log while it is imported
+a newer copy of `/var/log`) is continued after the part imported before (a journal export that grew is imported as a whole), an older copy
+of a log imported after a newer one stores nothing (it is listed as contained), except one that ends inside a
+line, and lines appended to a log while it is imported
 come with a later import as a continuation.
 
 Supported sources:

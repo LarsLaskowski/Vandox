@@ -105,11 +105,6 @@ internal static class ImportRepository
     /// <returns><c>true</c> when one hash equals the first bytes of the SHA-256</returns>
     internal static bool HoldsLineHash(ReadOnlySpan<byte> hashes, ReadOnlySpan<byte> sha256)
     {
-        if (sha256.Length < StorageLimits.LineHashBytes)
-        {
-            return false;
-        }
-
         var wanted = sha256[..StorageLimits.LineHashBytes];
 
         for (var position = 0; position + StorageLimits.LineHashBytes <= hashes.Length; position += StorageLimits.LineHashBytes)
@@ -206,11 +201,13 @@ internal static class ImportRepository
 
         var exists = await ExistsAsync(connection, transaction, start, cancellationToken).ConfigureAwait(false);
 
-        if (exists is false && await FindContainerAsync(connection, transaction, start, cancellationToken).ConfigureAwait(false) is { } container)
+        var container = exists ? null : await FindContainerAsync(connection, transaction, start, cancellationToken).ConfigureAwait(false);
+
+        if (container is { } found)
         {
             return new ImportFile
                    {
-                       ContainedIn = container.Name
+                       ContainedIn = found.Name
                    };
         }
 
@@ -243,10 +240,7 @@ internal static class ImportRepository
 
         var file = await SelectAsync(connection, transaction, start.Sha256, cancellationToken).ConfigureAwait(false);
 
-        if (file.Complete is false)
-        {
-            await DeleteOtherAttemptsAsync(connection, transaction, file.Id, file.Attempt, cancellationToken).ConfigureAwait(false);
-        }
+        await (file.Complete ? Task.CompletedTask : DeleteOtherAttemptsAsync(connection, transaction, file.Id, file.Attempt, cancellationToken)).ConfigureAwait(false);
 
         await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
 

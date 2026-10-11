@@ -66,22 +66,30 @@ public class ImportRepositoryTests
         switch (what)
         {
             case "one byte differs":
-                sha.AsSpan(0, 16).CopyTo(hashes.AsSpan(16));
-                hashes[16 + 9] ^= 1;
+                {
+                    sha.AsSpan(0, 16).CopyTo(hashes.AsSpan(16));
+                    hashes[16 + 9] ^= 1;
+                }
                 break;
 
             case "shifted by one byte":
-                sha.AsSpan(0, 16).CopyTo(hashes.AsSpan(17));
+                {
+                    sha.AsSpan(0, 16).CopyTo(hashes.AsSpan(17));
+                }
                 break;
 
             case "first byte differs":
-                sha.AsSpan(0, 16).CopyTo(hashes.AsSpan(0));
-                hashes[0] ^= 1;
+                {
+                    sha.AsSpan(0, 16).CopyTo(hashes.AsSpan(0));
+                    hashes[0] ^= 1;
+                }
                 break;
 
             default:
-                sha.AsSpan(0, 16).CopyTo(hashes.AsSpan(32));
-                hashes[32 + 15] ^= 1;
+                {
+                    sha.AsSpan(0, 16).CopyTo(hashes.AsSpan(32));
+                    hashes[32 + 15] ^= 1;
+                }
                 break;
         }
 

@@ -653,24 +653,32 @@ public class ImportTrackingTests
         switch (what)
         {
             case "ends inside a line":
-                start = ContentStart(newer[..(LineEnd(4) - 3)], "logs/old.log");
-                await ImportAsync(store, newer, "logs/new.log");
+                {
+                    start = ContentStart(newer[..(LineEnd(4) - 3)], "logs/old.log");
+                    await ImportAsync(store, newer, "logs/new.log");
+                }
                 break;
 
             case "one byte differs":
-                older[LineEnd(2) + 2] ^= 1;
-                start = ContentStart(older, "logs/old.log");
-                await ImportAsync(store, newer, "logs/new.log");
+                {
+                    older[LineEnd(2) + 2] ^= 1;
+                    start = ContentStart(older, "logs/old.log");
+                    await ImportAsync(store, newer, "logs/new.log");
+                }
                 break;
 
             case "other source type":
-                start.SourceType = "mariadb";
-                await ImportAsync(store, newer, "logs/new.log");
+                {
+                    start.SourceType = "mariadb";
+                    await ImportAsync(store, newer, "logs/new.log");
+                }
                 break;
 
             case "other head key":
-                start.HeadSha256 = Head(8);
-                await ImportAsync(store, newer, "logs/new.log");
+                {
+                    start.HeadSha256 = Head(8);
+                    await ImportAsync(store, newer, "logs/new.log");
+                }
                 break;
 
             case "container incomplete":
@@ -687,7 +695,9 @@ public class ImportTrackingTests
                 break;
 
             case "container without line hashes":
-                await ImportAsync(store, newer, "logs/new.log", withHashes: false);
+                {
+                    await ImportAsync(store, newer, "logs/new.log", withHashes: false);
+                }
                 break;
 
             case "rows of another attempt":
@@ -706,8 +716,10 @@ public class ImportTrackingTests
                 break;
 
             default:
-                start = ContentStart(Lines("a", 12), "logs/old.log");
-                await ImportAsync(store, newer, "logs/new.log");
+                {
+                    start = ContentStart(Lines("a", 12), "logs/old.log");
+                    await ImportAsync(store, newer, "logs/new.log");
+                }
                 break;
         }
 
@@ -1066,44 +1078,64 @@ public class ImportTrackingTests
         switch (what)
         {
             case "file ID":
-                row.FileId = 0;
+                {
+                    row.FileId = 0;
+                }
                 break;
 
             case "attempt":
-                row.Attempt = 0;
+                {
+                    row.Attempt = 0;
+                }
                 break;
 
             case "first offset":
-                row.FirstOffset = -1;
+                {
+                    row.FirstOffset = -1;
+                }
                 break;
 
             case "last offset equals first":
-                row.FirstOffset = 36;
+                {
+                    row.FirstOffset = 36;
+                }
                 break;
 
             case "last offset below first":
-                row.FirstOffset = 40;
+                {
+                    row.FirstOffset = 40;
+                }
                 break;
 
             case "no hashes":
-                row.Hashes = [];
+                {
+                    row.Hashes = [];
+                }
                 break;
 
             case "partial hash":
-                row.Hashes = new byte[17];
+                {
+                    row.Hashes = new byte[17];
+                }
                 break;
 
             case "short hash":
-                row.Hashes = new byte[15];
+                {
+                    row.Hashes = new byte[15];
+                }
                 break;
 
             case "4097 hashes":
-                row.LastOffset = 100000;
-                row.Hashes = new byte[(StorageLimits.MaxLineHashes + 1) * StorageLimits.LineHashBytes];
+                {
+                    row.LastOffset = 100000;
+                    row.Hashes = new byte[(StorageLimits.MaxLineHashes + 1) * StorageLimits.LineHashBytes];
+                }
                 break;
 
             default:
-                row.LastOffset = 1;
+                {
+                    row.LastOffset = 1;
+                }
                 break;
         }
 
