@@ -713,6 +713,49 @@ public partial class LegacyMonitorParserTests
     }
 
     /// <summary>
+    /// A line of spaces only is ignored without a skip and does not count against the line cap of a snapshot, a line of tabs only is a row that is not read.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task LegacyMonitorParserParseIgnoresSpaceOnlyLines()
+    {
+        // Arrange
+        var blank = Samples.Old(Samples.Oct2, Samples.Row(100, "root", "1000", "apache2"));
+
+        blank.Insert(blank.IndexOf(Samples.TableHeader), "   ");
+        blank.AddRange(Samples.Old(Samples.Oct2Later, Samples.Row(100, "root", "1000", "apache2")));
+
+        var many = Samples.Old(Samples.Oct2, Samples.Row(100, "root", "1000", "apache2"));
+
+        many.InsertRange(many.Count, Enumerable.Repeat("  ", 5000));
+        many.AddRange(Samples.Old(Samples.Oct2Later, Samples.Row(100, "root", "1000", "apache2")));
+
+        var tab = Samples.Old(Samples.Oct2, Samples.Row(100, "root", "1000", "apache2"), "\t", Samples.Row(102, "root", "1000", "spamd"));
+        var tabLine = tab.IndexOf("\t") + 1;
+
+        tab.AddRange(Samples.Old(Samples.Oct2Later, Samples.Row(100, "root", "1000", "apache2")));
+
+        // Act
+        var blankEmitter = await ParseAsync(Samples.Text(blank));
+        var manyEmitter = await ParseAsync(Samples.Text(many));
+        var tabEmitter = await ParseAsync(Samples.Text(tab));
+        var blankSnapshot = Payloads<ProcessSnapshot>(blankEmitter.Records)[0];
+        var manySnapshot = Payloads<ProcessSnapshot>(manyEmitter.Records)[0];
+        var tabSnapshot = Payloads<ProcessSnapshot>(tabEmitter.Records)[0];
+
+        // Assert
+        Assert.IsEmpty(blankEmitter.Skips, "a line of spaces before the table header is no skip");
+        Assert.HasCount(2, Payloads<ProcessSnapshot>(blankEmitter.Records), "both snapshots are read");
+        Assert.IsTrue(blankSnapshot.Complete, "the snapshot stays complete");
+        Assert.IsEmpty(manyEmitter.Skips, "5000 lines of spaces are no skip");
+        Assert.IsTrue(manySnapshot.Complete, "the snapshot with many blank lines stays complete");
+        Assert.HasCount(1, manySnapshot.Processes!, "the one row is kept");
+        Assert.AreEqual(((long)tabLine, RowNotRead), tabEmitter.Skips.Single(), "a line of tabs is a row that is not read");
+        Assert.IsFalse(tabSnapshot.Complete, "a row was left out");
+        Assert.AreSequenceEqual([100, 102], tabSnapshot.Processes!.Select(process => process.Pid).ToList(), "the other rows are kept");
+    }
+
+    /// <summary>
     /// A snapshot closed by the end of input may be cut: its open list is emitted incomplete, and a following header line makes it complete.
     /// </summary>
     /// <param name="kind">Where the file ends</param>
