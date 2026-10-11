@@ -782,6 +782,52 @@ public class ImportCommandTests
     }
 
     /// <summary>
+    /// <c>vandoxd import</c> reads error logs with the built-in parsers: a file at a configured path becomes raw lines of its parser whatever it holds, the sw-cp-server error log is found by its default path, an Apache error log by its content; the summary and the log count and name the raw lines.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task ImportCommandReadsErrorLogsByConfiguredPathAndContent()
+    {
+        // Arrange
+        using var fixture = new BackendFixture();
+        var logs = Path.Combine(fixture.Folder.Path, "logs");
+
+        Directory.CreateDirectory(Path.Combine(logs, "web"));
+        Directory.CreateDirectory(Path.Combine(logs, "sw-cp-server"));
+        Directory.CreateDirectory(Path.Combine(logs, "vhost"));
+        await File.WriteAllTextAsync(Path.Combine(logs, "web", "proxy.log"), "just some text\nthat is no log\n", TestContext.CancellationToken);
+        await File.WriteAllTextAsync(Path.Combine(logs, "sw-cp-server", "error_log"), "2026/10/09 03:12:12 [error] 1021#1021: *15 connect() failed\n2026/10/09 03:12:13 [warn] 1021#1021: later\n", TestContext.CancellationToken);
+        await File.WriteAllTextAsync(Path.Combine(logs, "vhost", "error_log"), "[Fri Oct 09 03:12:12.123456 2026] [core:error] [pid 1] x\nAH00558: apache2: Could not reliably determine the server's fully qualified domain name\n", TestContext.CancellationToken);
+        await File.AppendAllTextAsync(fixture.ConfigPath, "import:\n  time_zone: Europe/Berlin\n  nginx_error_log: /srv/web/proxy.log\n", TestContext.CancellationToken);
+
+        // Act
+        var code = await fixture.RunAsync(["import", logs], null, TestContext.CancellationToken);
+        var output = fixture.Out.ToString();
+        var nginx = await ReadLogLinesAsync(fixture.Storage, "nginx-error", TestContext.CancellationToken);
+        var swCpServer = await ReadLogLinesAsync(fixture.Storage, "sw-cp-server-error", TestContext.CancellationToken);
+        var apache = await ReadLogLinesAsync(fixture.Storage, "apache-error", TestContext.CancellationToken);
+
+        // Assert
+        Assert.AreEqual(0, code, "exit code");
+        Assert.Contains("  imported:          3", output, "all three files are imported");
+        Assert.Contains("  not recognized:    0", output, "every file is recognized");
+        Assert.Contains("Records stored:      6", output, "the raw lines are stored");
+        Assert.Contains("Lines skipped:       0\nLines kept raw:      3\n", output, "the raw lines are counted");
+        Assert.Contains("\nLines kept as raw lines (format not recognized):\n", output, "the section is printed");
+        Assert.Contains("\"web/proxy.log\": 2 lines\n    line 1: \"not an nginx error log line\"\n    line 2: \"not an nginx error log line\"\n", output, "the file at the configured path");
+        Assert.Contains("\"vhost/error_log\": 1 lines\n    line 2: \"not an Apache error log line\"\n", output, "the startup line of the Apache error log");
+        Assert.Contains("\"msg\":\"raw lines kept\"", fixture.Error.ToString(), "the warning goes to standard error");
+        Assert.HasCount(2, nginx, "two nginx-error records");
+        Assert.IsTrue(nginx.All(stored => stored.Record.Data is LogLine { Priority: null, Log: "web/proxy.log" }), "raw lines of the configured path");
+        Assert.HasCount(2, swCpServer, "two sw-cp-server-error records");
+        Assert.AreEqual(new DateTimeOffset(2026, 10, 9, 1, 12, 12, TimeSpan.Zero), swCpServer[0].Record.CapturedAt, "03:12:12 in Berlin summer time is 01:12:12 UTC");
+        Assert.AreEqual((byte)3, ((LogLine)swCpServer[0].Record.Data!).Priority, "priority of error");
+        Assert.HasCount(2, apache, "two apache-error records");
+        Assert.IsTrue(apache.All(stored => stored.Record.CapturedAt == new DateTimeOffset(2026, 10, 9, 1, 12, 12, TimeSpan.Zero).AddTicks(1234560)), "the fraction is kept and the raw line takes the time of the line before it");
+        Assert.ContainsSingle(stored => ((LogLine)stored.Record.Data!).Priority is null, apache, "the startup line is a raw line");
+    }
+
+    /// <summary>
     /// Writes a syslog file with a year-less line and a journal export into a directory.
     /// </summary>
     /// <param name="directory">The directory</param>

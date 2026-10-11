@@ -21,6 +21,10 @@ public class BuiltInParsersTests
     private const string MariaDbHead = "2026-03-01 12:30:15 0 [Note] InnoDB: Buffer pool(s) load completed\n";
     private const string DovecotHead = "Oct 09 03:12:12 master: Info: Dovecot v2.3.16 (7e2e900c1a) starting up for imap, pop3 (core dumps disabled)\nOct 09 03:12:13 imap-login: Info: Login: user=<alice@example.org>, method=PLAIN, rip=198.51.100.7, lip=192.0.2.1, mpid=2301, TLS, session=<AbCdEfGh>\n";
     private const string DovecotSyslogHead = "Oct  9 03:12:12 mail-1 dovecot: master: Info: Dovecot v2.3.16 (7e2e900c1a) starting up for imap, pop3 (core dumps disabled)\n";
+    private const string PleskHead = "[2026-10-09 03:12:12.123] 4821:5f3a9c1e INFO [panel] Session opened\n";
+    private const string NginxHead = "2026/10/09 03:12:12 [error] 1021#1021: *15 connect() failed\n";
+    private const string ApacheHead = "[Fri Oct 09 03:12:12.123456 2026] [core:error] [pid 1] x\n";
+    private const string Apache22Head = "[Fri Oct 09 03:12:12 2026] [error] [client 198.51.100.8] x\n";
     private const string MariaDbReady = "2026-03-02 10:20:01 0 [Note] /usr/sbin/mariadbd: ready for connections.\n";
 
     #endregion // Constants
@@ -28,28 +32,29 @@ public class BuiltInParsersTests
     #region Methods
 
     /// <summary>
-    /// The list holds the journal export parser, the MariaDB error log parser, the Dovecot log parser and then the syslog parser, with or without a time zone.
+    /// The list holds the journal export parser, the MariaDB error log parser, the Dovecot log parser and the syslog parser, then the Plesk panel, sw-cp-server, nginx and Apache error log parsers, with or without a time zone.
     /// </summary>
     /// <param name="timeZone">The time zone, or <c>null</c></param>
     [TestMethod]
     [DataRow("UTC")]
     [DataRow(null)]
     [DataRow("Europe/Berlin")]
-    public void BuiltInParsersCreateReturnsJournalThenMariaDbThenDovecotThenSyslog(string? timeZone)
+    public void BuiltInParsersCreateReturnsSystemParsersThenErrorLogParsers(string? timeZone)
     {
         // Act
         var parsers = BuiltInParsers.Create(timeZone, ErrorLogPaths.Default);
 
         // Assert
-        Assert.HasCount(4, parsers, "four parsers");
+        Assert.HasCount(8, parsers, "eight parsers");
         Assert.IsInstanceOfType<JournalExportParser>(parsers[0], "first parser");
         Assert.IsInstanceOfType<MariaDbErrorLogParser>(parsers[1], "second parser");
         Assert.IsInstanceOfType<DovecotLogParser>(parsers[2], "third parser");
         Assert.IsInstanceOfType<SyslogParser>(parsers[3], "fourth parser");
-        Assert.AreEqual("journal", parsers[0].Type, "journal type");
-        Assert.AreEqual("mariadb", parsers[1].Type, "mariadb type");
-        Assert.AreEqual("dovecot", parsers[2].Type, "dovecot type");
-        Assert.AreEqual("syslog", parsers[3].Type, "syslog type");
+        Assert.IsInstanceOfType<ErrorLogParser>(parsers[4], "fifth parser");
+        Assert.IsInstanceOfType<ErrorLogParser>(parsers[5], "sixth parser");
+        Assert.IsInstanceOfType<ErrorLogParser>(parsers[6], "seventh parser");
+        Assert.IsInstanceOfType<ErrorLogParser>(parsers[7], "eighth parser");
+        Assert.AreSequenceEqual(["journal", "mariadb", "dovecot", "syslog", "plesk-panel", "sw-cp-server-error", "nginx-error", "apache-error"], parsers.Select(parser => parser.Type).ToList(), "types in order");
     }
 
     /// <summary>
@@ -65,7 +70,7 @@ public class BuiltInParsersTests
         var registry = new ParserRegistry(parsers);
 
         // Assert
-        Assert.AreSequenceEqual(["journal", "mariadb", "dovecot", "syslog"], registry.GetTypes(), "registered types in order");
+        Assert.AreSequenceEqual(["journal", "mariadb", "dovecot", "syslog", "plesk-panel", "sw-cp-server-error", "nginx-error", "apache-error"], registry.GetTypes(), "registered types in order");
     }
 
     /// <summary>
@@ -133,6 +138,30 @@ public class BuiltInParsersTests
     [DataRow("notes.txt", "\n" + DovecotHead, "", Confidence.NoMatch)]
     [DataRow("mail.log", MailCutHead, "", Confidence.NoMatch)]
     [DataRow("auth.log", MailCutHead, "", Confidence.NoMatch)]
+    [DataRow("plesk/panel.log", "garbage\n", "plesk-panel", Confidence.MatchPath)]
+    [DataRow("plesk/panel.log.2", "", "plesk-panel", Confidence.MatchPath)]
+    [DataRow("copy/plesk/panel.log-20261010", NginxHead, "plesk-panel", Confidence.MatchPath)]
+    [DataRow("logs/other.txt", PleskHead, "plesk-panel", Confidence.MatchContent)]
+    [DataRow("logs/other.txt", NginxHead, "nginx-error", Confidence.MatchContent)]
+    [DataRow("logs/other.txt", ApacheHead, "apache-error", Confidence.MatchContent)]
+    [DataRow("logs/other.txt", Apache22Head, "apache-error", Confidence.MatchContent)]
+    [DataRow("nginx/error.log", ApacheHead, "nginx-error", Confidence.MatchPath)]
+    [DataRow("nginx/error.log", NginxHead, "nginx-error", Confidence.MatchPath)]
+    [DataRow("var/log/nginx/error.log.1", "", "nginx-error", Confidence.MatchPath)]
+    [DataRow("sw-cp-server/error_log", NginxHead, "sw-cp-server-error", Confidence.MatchPath)]
+    [DataRow("sw-cp-server/error_log", "", "sw-cp-server-error", Confidence.MatchPath)]
+    [DataRow("other/error_log", NginxHead, "nginx-error", Confidence.MatchContent)]
+    [DataRow("other/error_log", ApacheHead, "apache-error", Confidence.MatchContent)]
+    [DataRow("apache2/error.log", NginxHead, "apache-error", Confidence.MatchPath)]
+    [DataRow("apache2/error.log-20261010", "", "apache-error", Confidence.MatchPath)]
+    [DataRow("error.log", NginxHead, "nginx-error", Confidence.MatchContent)]
+    [DataRow("error.log", ApacheHead, "apache-error", Confidence.MatchContent)]
+    [DataRow("error.log", PleskHead, "plesk-panel", Confidence.MatchContent)]
+    [DataRow("error.log", "garbage\n", "", Confidence.NoMatch)]
+    [DataRow("syslog", NginxHead, "syslog", Confidence.MatchName)]
+    [DataRow("kern.log", ApacheHead, "syslog", Confidence.MatchName)]
+    [DataRow("syslog.1", PleskHead, "syslog", Confidence.MatchName)]
+    [DataRow("kern.log-20261010", Apache22Head, "syslog", Confidence.MatchName)]
     public void BuiltInParsersRegistryDetectsFilesByContentAndName(string name, string head, string expected, Confidence expectedConfidence)
     {
         // Arrange
@@ -266,6 +295,60 @@ public class BuiltInParsersTests
 
         // Assert
         Assert.AreEqual(Confidence.NoMatch, confidence, "the Dovecot parser does not claim the head");
+    }
+
+    /// <summary>
+    /// A file at two configured paths goes to the parser registered first, and a configured path of a parser decides before the content of the file.
+    /// </summary>
+    /// <param name="swCpServer">The configured path of the sw-cp-server error log</param>
+    /// <param name="apache">The configured path of the Apache error log</param>
+    /// <param name="name">The file name</param>
+    /// <param name="head">The head of the file</param>
+    /// <param name="expected">The expected parser type</param>
+    [TestMethod]
+    [DataRow("/var/log/nginx/error.log", ErrorLogPaths.DefaultApache, "nginx/error.log", NginxHead, "sw-cp-server-error")]
+    [DataRow(ErrorLogPaths.DefaultSwCpServer, "/srv/x/error_log", "x/error_log", NginxHead, "apache-error")]
+    [DataRow("/srv/x/error_log", "/srv/x/error_log", "x/error_log", ApacheHead, "sw-cp-server-error")]
+    public void BuiltInParsersRegistryGivesAFileAtTwoConfiguredPathsToTheEarlierParser(string swCpServer, string apache, string name, string head, string expected)
+    {
+        // Arrange
+        var paths = new ErrorLogPaths(ErrorLogPaths.DefaultPleskPanel, swCpServer, ErrorLogPaths.DefaultNginx, apache);
+        var registry = new ParserRegistry(BuiltInParsers.Create("UTC", paths));
+
+        // Act
+        var (parser, confidence) = registry.Detect(new LogFile(name, null), Encoding.UTF8.GetBytes(head));
+
+        // Assert
+        Assert.AreEqual(expected, parser?.Type, "the parser registered first among those whose path matches");
+        Assert.AreEqual(Confidence.MatchPath, confidence, "path match");
+    }
+
+    /// <summary>
+    /// The error log parsers do not claim a journal export, a syslog head, a mail log head, a Dovecot head or a MariaDB error log head.
+    /// </summary>
+    /// <param name="head">A head</param>
+    [TestMethod]
+    [DataRow(JournalHead)]
+    [DataRow(TraditionalHead)]
+    [DataRow(Rfc3339Head)]
+    [DataRow(MailHead)]
+    [DataRow(MailRfc3339Head)]
+    [DataRow(DovecotHead)]
+    [DataRow(DovecotSyslogHead)]
+    [DataRow(MariaDbHead)]
+    [DataRow(MariaDbReady)]
+    [DataRow("260302 10:10:10 [ERROR] mysqld got signal 6 ;\n")]
+    public void BuiltInParsersErrorLogParsersIgnoreSystemLogHeads(string head)
+    {
+        // Arrange
+        var parsers = BuiltInParsers.Create("UTC", ErrorLogPaths.Default).OfType<ErrorLogParser>().ToList();
+
+        // Act
+        var confidences = parsers.Select(parser => parser.Detect(new LogFile("export.txt", null), Encoding.UTF8.GetBytes(head))).ToList();
+
+        // Assert
+        Assert.HasCount(4, parsers, "the four error log parsers");
+        Assert.IsTrue(confidences.All(confidence => confidence == Confidence.NoMatch), "no error log parser claims the head");
     }
 
     #endregion // Methods

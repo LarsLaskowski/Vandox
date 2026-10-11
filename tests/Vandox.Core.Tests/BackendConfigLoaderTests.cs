@@ -117,6 +117,37 @@ public class BackendConfigLoaderTests
     }
 
     /// <summary>
+    /// A value of a log path option that is not an absolute, clean path of a file in a directory is refused at the line of its key with a fixed text that does not show the value.
+    /// </summary>
+    /// <param name="value">The raw YAML value</param>
+    [TestMethod]
+    [DataRow("var/log/x.log")]
+    [DataRow("/error.log")]
+    [DataRow("/")]
+    [DataRow("/var/log/nginx/")]
+    [DataRow("/var/log/../x.log")]
+    [DataRow("/var/log/./x.log")]
+    [DataRow("/var//log/x.log")]
+    [DataRow("\"\"")]
+    public void BackendConfigLoaderRefusesInvalidErrorLogPathWithoutShowingIt(string value)
+    {
+        // Arrange
+        string[] keys = ["plesk_panel_log", "sw_cp_server_error_log", "nginx_error_log", "apache_error_log"];
+
+        foreach (var key in keys)
+        {
+            using var directory = new TempDirectory();
+            var path = directory.Write("vandoxd.yaml", $"import:\n  {key}: {value}\n");
+
+            // Act
+            var exception = Assert.ThrowsExactly<ConfigException>(() => BackendConfigLoader.Load(path, []), $"invalid {key}");
+
+            // Assert
+            Assert.AreEqual($"config: {path}:2: import.{key}: must be an absolute, clean path of a file in a directory (no trailing slash, no . or .. elements)", exception.Message, $"message for {key}");
+        }
+    }
+
+    /// <summary>
     /// A time zone without a value is refused like every string option.
     /// </summary>
     /// <param name="value">The raw YAML value</param>

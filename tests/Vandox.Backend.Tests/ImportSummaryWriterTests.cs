@@ -191,6 +191,68 @@ public class ImportSummaryWriterTests
     }
 
     /// <summary>
+    /// The summary counts the raw lines right after the skipped lines and lists every file with raw lines after the skipped lines, with its first reasons; path and reason are quoted.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task ImportSummaryWriterCountsAndListsRawLines()
+    {
+        // Arrange
+        var summary = new ImportSummary
+                      {
+                          Root = "/logs",
+                          Skipped = 1,
+                          Raw = 5
+                      };
+        var skipped = Plain("a/syslog", ImportOutcome.Imported);
+        var nginx = Plain("nginx/error.log", ImportOutcome.Imported);
+        var other = Plain("b\nlog", ImportOutcome.Imported);
+
+        skipped.Skipped = 1;
+        skipped.Problems.Add(new ImportProblem(2, "not a syslog line"));
+        nginx.Raw = 3;
+        nginx.RawProblems.Add(new ImportProblem(4, "not an nginx error log line"));
+        nginx.RawProblems.Add(new ImportProblem(9, "invalid date"));
+        other.Raw = 2;
+        other.RawProblems.Add(new ImportProblem(7, "reason\u001b[31m"));
+        summary.Files.Add(skipped);
+        summary.Files.Add(nginx);
+        summary.Files.Add(other);
+
+        // Act
+        var text = await WriteAsync(summary);
+
+        // Assert
+        Assert.Contains("Lines skipped:       1\nLines kept raw:      5\n", text, "the raw line count follows the skipped line count");
+        Assert.Contains("\nLines kept as raw lines (format not recognized):\n  \"nginx/error.log\": 3 lines\n    line 4: \"not an nginx error log line\"\n    line 9: \"invalid date\"\n  \"b\\nlog\": 2 lines\n    line 7: \"reason\\u001b[31m\"\n", text, "the section lists every file with its reasons, quoted");
+        Assert.IsLessThan(text.IndexOf("Lines kept as raw lines", StringComparison.Ordinal), text.IndexOf("Lines skipped by the parsers", StringComparison.Ordinal), "the section follows the section of the skipped lines");
+        Assert.DoesNotContain("\u001b", text, "no escape character reaches the output");
+    }
+
+    /// <summary>
+    /// Without raw lines the count says 0 and there is no section.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task ImportSummaryWriterPrintsNoRawSectionWithoutRawLines()
+    {
+        // Arrange
+        var summary = new ImportSummary
+                      {
+                          Root = "/logs"
+                      };
+
+        summary.Files.Add(Plain("a/syslog", ImportOutcome.Imported));
+
+        // Act
+        var text = await WriteAsync(summary);
+
+        // Assert
+        Assert.Contains("Lines skipped:       0\nLines kept raw:      0\n", text, "the count says 0");
+        Assert.DoesNotContain("Lines kept as raw lines", text, "no section");
+    }
+
+    /// <summary>
     /// Creates the result of a file that is not continued.
     /// </summary>
     /// <param name="path">The display path</param>

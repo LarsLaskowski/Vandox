@@ -67,5 +67,35 @@ public class FileResultTests
         Assert.AreEqual(string.Empty, new FileResult().ContainedIn, "a new result is not contained");
     }
 
+    /// <summary>
+    /// A snapshot copies the number of raw lines and their reasons.
+    /// </summary>
+    [TestMethod]
+    public void FileResultSnapshotCopiesTheRawLines()
+    {
+        // Arrange
+        var result = new FileResult
+                     {
+                         Path = "nginx/error.log",
+                         Raw = 3
+                     };
+
+        result.RawProblems.Add(new ImportProblem(4, "not an nginx error log line"));
+        result.RawProblems.Add(new ImportProblem(9, "invalid date"));
+
+        // Act
+        var copy = result.Snapshot();
+
+        result.Raw = 99;
+        result.RawProblems.Clear();
+
+        // Assert
+        Assert.AreEqual(3L, copy.Raw, "raw lines");
+        Assert.HasCount(2, copy.RawProblems, "both reasons are copied");
+        Assert.AreEqual(new ImportProblem(4, "not an nginx error log line"), copy.RawProblems[0], "first reason");
+        Assert.AreEqual(new ImportProblem(9, "invalid date"), copy.RawProblems[1], "second reason");
+        Assert.AreEqual(0L, new FileResult().Raw, "a new result has no raw lines");
+    }
+
     #endregion // Methods
 }

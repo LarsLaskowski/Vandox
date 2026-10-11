@@ -130,6 +130,61 @@ public class ImporterStoreTests
     }
 
     /// <summary>
+    /// Lines a parser keeps as raw lines are counted and described, at most ten per file; they are stored, not skipped.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task ImporterCountsRawLinesAndKeepsTheirFirstReasons()
+    {
+        // Arrange
+        using var harness = new ImportHarness();
+        var content = $"LOG ok\n{string.Concat(Enumerable.Repeat("raw line\n", 12))}bad line\nLOG ok again\n";
+
+        harness.Write("a.log", content);
+
+        // Act
+        var run = await harness.RunAsync(TestContext.CancellationToken);
+        var file = run.Summary.Files[0];
+
+        // Assert
+        Assert.AreEqual(ImportOutcome.Imported, file.Outcome, "imported");
+        Assert.AreEqual(12L, file.Raw, "twelve raw lines");
+        Assert.HasCount(ImportLimits.MaxProblems, file.RawProblems, "raw line reasons are capped");
+        Assert.AreEqual(new ImportProblem(2, "raw line"), file.RawProblems[0], "first raw line");
+        Assert.AreEqual(new ImportProblem(11, "raw line"), file.RawProblems[^1], "tenth raw line");
+        Assert.AreEqual(14L, file.Records, "the raw lines are stored as records");
+        Assert.AreEqual(1L, file.Skipped, "only the bad line is skipped");
+        Assert.AreEqual(new ImportProblem(14, "bad line"), file.Problems.Single(), "the skipped line is described apart from the raw lines");
+        Assert.AreEqual(12L, run.Summary.Raw, "raw lines in the summary");
+    }
+
+    /// <summary>
+    /// The raw lines of a continued file are counted from the continuation point and numbered in the whole file.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task ImporterNumbersRawLinesOfAContinuedFileInTheWholeFile()
+    {
+        // Arrange
+        using var harness = new ImportHarness();
+        var earlier = harness.Write("a/syslog", TestInputs.Log(3));
+
+        await harness.RunAsync(TestContext.CancellationToken);
+        File.Delete(earlier);
+        harness.Write("b/syslog", $"{TestInputs.Log(3)}LOG four\nraw five\nLOG six\n");
+
+        // Act
+        var run = await harness.RunAsync(TestContext.CancellationToken);
+        var file = run.Summary.Files.Single();
+
+        // Assert
+        Assert.AreEqual(ImportOutcome.Continued, file.Outcome, "continued");
+        Assert.AreEqual(1L, file.Raw, "one raw line in the new part");
+        Assert.AreEqual(new ImportProblem(5, "raw line"), file.RawProblems.Single(), "the raw line is line 5 of the whole file");
+        Assert.AreEqual(1L, run.Summary.Raw, "the summary sums them");
+    }
+
+    /// <summary>
     /// A parser that fails fails its file after what it parsed before the failure was stored; the run goes on.
     /// </summary>
     /// <returns>A task that completes when the test is done</returns>
