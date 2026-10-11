@@ -1,11 +1,15 @@
 using System.Security.Cryptography;
 
+using Vandox.Storage;
+
 namespace Vandox.Import;
 
 /// <summary>
 /// The content a parser reads in pass 2: at most the size that was hashed in pass 1, hashed and counted again so that a change
 /// between the passes is detected, with a progress report every <see cref="ImportLimits.ProgressLines"/> lines.
 /// </summary>
+#pragma warning disable RH2003, S2325
+
 internal sealed class ContentStream : FilterStream
 {
     #region Fields
@@ -51,9 +55,29 @@ internal sealed class ContentStream : FilterStream
     /// </summary>
     internal long Lines => _counted > 0 && _last != (byte)'\n' ? _newlines + 1 : _newlines;
 
+    /// <summary>
+    /// Gets or sets the writer that receives every complete row of line hashes (with <c>FileId</c> and <c>Attempt</c> 0); <c>null</c> keeps no line hashes.
+    /// </summary>
+    internal Func<ImportLineHashes, CancellationToken, Task>? LineHashWriter { get; set; }
+
+    /// <summary>
+    /// Gets the number of line hashes computed and not yet passed to the writer.
+    /// </summary>
+    internal int PendingLineHashes => throw new NotImplementedException();
+
     #endregion // Properties
 
     #region Methods
+
+    /// <summary>
+    /// Passes the queued rows and the partial row of line hashes to the writer, in order.
+    /// </summary>
+    /// <param name="cancellationToken">Cancels the call</param>
+    /// <returns>A task that completes when the rows are written</returns>
+    internal Task FlushLineHashesAsync(CancellationToken cancellationToken)
+    {
+        throw new NotImplementedException();
+    }
 
     /// <summary>
     /// Returns the SHA-256 of what was read.

@@ -22,5 +22,10 @@ public sealed class ImportStep
     /// </summary>
     public bool Complete { get; set; }
 
+    /// <summary>
+    /// Gets or sets the attempt the batch belongs to; 0 means no line hashes were written.
+    /// </summary>
+    public long Attempt { get; set; }
+
     #endregion // Properties
 }

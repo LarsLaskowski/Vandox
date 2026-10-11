@@ -6,6 +6,8 @@ namespace Vandox.Backend.Cli;
 /// <summary>
 /// Presents the store as the part the importer writes to.
 /// </summary>
+#pragma warning disable RH2003, S2325
+
 internal sealed class ImportStoreAdapter : IImportStore
 {
     #region Fields
@@ -49,6 +51,12 @@ internal sealed class ImportStoreAdapter : IImportStore
     public Task<IReadOnlyList<ImportBase>> FindImportBasesAsync(byte[] headSha256, string sourceType, CancellationToken cancellationToken)
     {
         return _store.FindImportBasesAsync(headSha256, sourceType, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public Task AddLineHashesAsync(ImportLineHashes hashes, CancellationToken cancellationToken)
+    {
+        throw new NotImplementedException();
     }
 
     #endregion // IImportTracker

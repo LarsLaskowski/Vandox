@@ -7,6 +7,8 @@ namespace Vandox.Import;
 /// <summary>
 /// Receives the records of a parser, drops those an earlier run stored and writes the rest in batches.
 /// </summary>
+#pragma warning disable RH2003, S2325
+
 internal sealed class RecordEmitter : IRecordEmitter
 {
     #region Fields
@@ -61,11 +63,22 @@ internal sealed class RecordEmitter : IRecordEmitter
     /// <summary>
     /// Gets the lines before the continuation point, added to the line numbers of skipped lines.
     /// </summary>
-    internal long LineOffset { get; }
+    internal long LineOffset { get; set; }
 
     #endregion // Properties
 
     #region Methods
+
+    /// <summary>
+    /// Stores one row of line hashes for the file, with the file ID and the attempt of its import state.
+    /// </summary>
+    /// <param name="hashes">The row, with <c>FileId</c> and <c>Attempt</c> not set</param>
+    /// <param name="cancellationToken">Cancels the call</param>
+    /// <returns>A task that completes when the row is stored</returns>
+    internal Task WriteLineHashesAsync(ImportLineHashes hashes, CancellationToken cancellationToken)
+    {
+        throw new NotImplementedException();
+    }
 
     /// <summary>
     /// Writes the buffered records, completing the file when <paramref name="complete"/> is set. It writes nothing when there

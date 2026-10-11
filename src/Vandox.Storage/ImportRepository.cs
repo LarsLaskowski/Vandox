@@ -9,6 +9,8 @@ namespace Vandox.Storage;
 /// <summary>
 /// Reads and writes the import state of file contents.
 /// </summary>
+#pragma warning disable RH2003, S2325
+
 internal static class ImportRepository
 {
     #region Constants
@@ -32,6 +34,41 @@ internal static class ImportRepository
     #endregion // Constants
 
     #region Methods
+
+    /// <summary>
+    /// Refuses a row of line hashes the store must not keep.
+    /// </summary>
+    /// <param name="hashes">The row</param>
+    /// <exception cref="InvalidImportException">The row breaks a rule</exception>
+    internal static void ValidateLineHashes(ImportLineHashes hashes)
+    {
+        throw new NotImplementedException();
+    }
+
+    /// <summary>
+    /// Stores a row of line hashes while the file is incomplete and its attempt is the row's.
+    /// </summary>
+    /// <param name="connection">The write connection</param>
+    /// <param name="hashes">The row</param>
+    /// <param name="cancellationToken">Cancels the call</param>
+    /// <returns>A task that completes when the row is stored</returns>
+    /// <exception cref="InvalidImportException">The row breaks a rule</exception>
+    /// <exception cref="ImportConflictException">The file is complete or unknown, or was begun again</exception>
+    internal static Task AddLineHashesAsync(SqliteConnection connection, ImportLineHashes hashes, CancellationToken cancellationToken)
+    {
+        throw new NotImplementedException();
+    }
+
+    /// <summary>
+    /// Returns whether a row of line hashes holds the first bytes of a SHA-256 at an aligned position.
+    /// </summary>
+    /// <param name="hashes">The hashes, <see cref="StorageLimits.LineHashBytes"/> bytes each; a trailing partial entry is ignored</param>
+    /// <param name="sha256">The SHA-256</param>
+    /// <returns><c>true</c> when one hash equals the first bytes of the SHA-256</returns>
+    internal static bool HoldsLineHash(ReadOnlySpan<byte> hashes, ReadOnlySpan<byte> sha256)
+    {
+        throw new NotImplementedException();
+    }
 
     /// <summary>
     /// Refuses an import start the store must not keep.

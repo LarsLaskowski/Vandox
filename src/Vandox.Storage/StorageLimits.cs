@@ -23,6 +23,21 @@ public static class StorageLimits
     public const int MaxImportBases = 64;
 
     /// <summary>
+    /// The largest number of line hashes one row holds.
+    /// </summary>
+    public const int MaxLineHashes = 4096;
+
+    /// <summary>
+    /// The number of bytes of one line hash.
+    /// </summary>
+    public const int LineHashBytes = 16;
+
+    /// <summary>
+    /// The largest number of complete contents compared when a content is checked for being the start of one.
+    /// </summary>
+    public const int MaxImportContainers = 64;
+
+    /// <summary>
     /// The largest number of records a batch holds.
     /// </summary>
     public const int MaxBatchRecords = 20000;

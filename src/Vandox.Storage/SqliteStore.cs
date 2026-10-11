@@ -7,6 +7,8 @@ namespace Vandox.Storage;
 /// bounded number of query-only readers, so a committed batch is durable and reads (and the health check) do not wait for
 /// a write.
 /// </summary>
+#pragma warning disable RH2003, S2325
+
 public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IImportTracker, IAsyncDisposable
 {
     #region Constants
@@ -367,6 +369,12 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, II
         {
             throw new StoreException($"store: finding import bases: {exception.Message}", exception);
         }
+    }
+
+    /// <inheritdoc />
+    public Task AddLineHashesAsync(ImportLineHashes hashes, CancellationToken cancellationToken)
+    {
+        throw new NotImplementedException();
     }
 
     #endregion // IImportTracker

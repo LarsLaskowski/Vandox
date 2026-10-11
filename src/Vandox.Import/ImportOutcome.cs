@@ -33,5 +33,10 @@ public enum ImportOutcome
     /// <summary>
     /// The part of the file after a content imported completely before was stored in this run.
     /// </summary>
-    Continued
+    Continued,
+
+    /// <summary>
+    /// The content of the file is the start of a content imported completely before; nothing was stored.
+    /// </summary>
+    Contained
 }

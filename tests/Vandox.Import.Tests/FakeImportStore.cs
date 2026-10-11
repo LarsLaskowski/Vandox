@@ -267,6 +267,12 @@ internal sealed class FakeImportStore : IImportStore
     }
 
     /// <inheritdoc />
+    public Task AddLineHashesAsync(ImportLineHashes hashes, CancellationToken cancellationToken)
+    {
+        return Task.CompletedTask;
+    }
+
+    /// <inheritdoc />
     /// <returns>A task that returns the complete contents of the head key and source type, largest first, at most 64</returns>
     public Task<IReadOnlyList<ImportBase>> FindImportBasesAsync(byte[] headSha256, string sourceType, CancellationToken cancellationToken)
     {

@@ -11,3 +11,4 @@ One line per pipeline step: date, step, member, result. Lead decisions and escal
 | 2026-10-11 | 3 Plan security review (1) | Security | CHANGES_REQUIRED: line-hash rows of failed attempts accumulate (blocking); storage-fill limit wording (non-blocking) (opus/medium · 83,053 tokens · 21 tool uses · 203 s) |
 | 2026-10-11 | 3 Plan revise (1) | Lead | Accepted both: leftover rows bounded to latest attempt (AC20), attempt guard on writes (AC21), storage-fill wording (opus/medium · 62,768 tokens · 38 tool uses · 157 s) |
 | 2026-10-11 | 3 Plan security review (2) | Security | APPROVED (delta round) (opus/medium · 45,838 tokens · 6 tool uses · 60 s) |
+| 2026-10-11 | 4 Skeleton | Dev | Signatures built, build clean; schema step 7 and some private members left to implement (sonnet/medium · 97,781 tokens · 11 tool uses · 113 s) |
