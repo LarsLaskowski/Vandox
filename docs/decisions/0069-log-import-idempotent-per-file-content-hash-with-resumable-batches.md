@@ -141,8 +141,10 @@ Which line hashes count for a content (its pass 2 can read changed bytes, fail, 
 - W1. **Keep the first rows written** — a content that changed between the passes leaves rows of other bytes, and a
   later complete import would keep them, so an older copy could be recognized in a content that does not hold its
   lines.
-- W2. **Tag every row with the import attempt that wrote it**; the completing batch names its attempt and deletes the
-  rows of every other attempt, and rows can only be added while the content is incomplete.
+- W2. **Tag every row with the import attempt that wrote it**; beginning a new attempt and the completing batch both
+  delete the rows of every other attempt, and rows and batches are accepted only from the content's current attempt
+  while it is incomplete. Deleting only on completion was rejected: a content that fails in pass 2 on every run never
+  completes and would gain one set of rows per run.
 
 What the recognized older copy leaves in the store:
 

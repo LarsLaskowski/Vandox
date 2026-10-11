@@ -448,7 +448,7 @@ Existing test code affected by the changes:
     entry whole; the older copy's lines are found only inside the container's records, framed and grouped as the
     container's parse made them, and an entry that the older copy holds only in part is not stored as such a part.
   - *Result*: the outcome `contained`, the count line, the section, and the exit code.
-  - *Input limits* (lines 47-49, "one of valid lines fills the storage directory"): extend the sentence. Any
+  - *Input* (lines 47-49, "one of valid lines fills the storage directory"): extend the sentence. Any
     decompressed content with line feeds now fills the storage directory at 16 bytes per line end, even when no
     record is stored (a small `.gz` of nothing but `\n` suffices), until the operator presses Ctrl-C. A content that
     fails keeps the line hashes of its latest attempt only, and the next import of it deletes them.
@@ -493,7 +493,7 @@ Existing test code affected by the changes:
   Stored line hashes: a complete content keeps the rows of its completing attempt, an incomplete one the rows of its
   current attempt at most (deleted when it is begun again, AC20), so storage is 16 bytes per line end of each stored
   content, not per run. A content whose lines are all empty still costs 16 bytes per line end without any record
-  (stated in `docs/areas/log-import.md`, *Input limits*).
+  (stated in `docs/areas/log-import.md`, *Input*).
 - [x] User-visible failure texts: "the import state changed (another import of the same content is running?)" for
   `ImportConflictException`, "database error" (and the run ends) for any other `StoreException`, "interrupted" for a
   cancellation. All already exist in `ImportPass.StoreReason`. No store or SQLite message reaches the summary.
@@ -515,7 +515,9 @@ Existing test code affected by the changes:
   8. More than 64 candidates with the same head key: only the 64 largest are compared, a smaller container is missed
      (imported whole).
   9. Concurrent import of N while O begins: the lookup sees only committed complete rows. Either outcome is correct
-     (contained, or whole as before).
+     (contained, or whole as before). Two runs of the same content: the later `BeginImportAsync` supersedes the
+     earlier run's attempt and deletes its rows; the earlier run fails with a conflict on its next line-hash write
+     or batch (AC21), so a container's rows always come from the attempt that completed it.
   10. A web-space user's file that starts with the exact bytes of a real log (head included) and is imported before
       that log: it becomes the real log's container, and the real log's lines are found only under the planted
       file's `log` name. This is the same exposure as the forward continuation in 0069 (the attacker must know the
