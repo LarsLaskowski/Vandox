@@ -22,7 +22,7 @@ imported data is kept apart from live data (it never raises alerts) by the detec
   the copy world-readable: a copied `/var/log` holds files such as `auth.log` and `mail.log` with mode `0640 root:adm`.
 - The backend option `import.time_zone` (IANA time zone ID, ordinal match against NodaTime's embedded database, no
   default) names the zone of the server the logs come from. It is used for year-less syslog times (see *System log
-  parsers*) and for the local times of the MariaDB error log (see *MariaDB error log*); a value that is no zone ID is refused at start-up with the line of the key and without the value. The
+  parsers*) for the local times of the MariaDB error log (see *MariaDB error log*) and for the times of Dovecot's log file (see *Dovecot log file*); a value that is no zone ID is refused at start-up with the line of the key and without the value. The
   example file holds it commented out.
 
 ## Input
@@ -92,7 +92,7 @@ imported data is kept apart from live data (it never raises alerts) by the detec
   imported up to the hashed size; the appended lines come with a later import, which continues the file (below).
 - **A file that grew is continued.** A content that starts with a content imported completely before (the same log with
   more lines at its end) has another hash, but only its new part is parsed and stored. The rules:
-  - Only a file whose parser is **line-framed** (`LineFramed`: syslog and the MariaDB error log) is continued. A journal
+  - Only a file whose parser is **line-framed** (`LineFramed`: syslog, the MariaDB error log and the Dovecot log file) is continued. A journal
     export that grew is imported as a whole and its earlier entries are stored again, because its binary fields hold
     line feeds and a line feed in the middle is no safe place to start a parse.
   - Pass 1 computes the **head key** of every recognized file: the SHA-256 of its first line (up to and including the

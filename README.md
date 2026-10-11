@@ -73,7 +73,7 @@ the value.
 | `ingest.listen` | `:8081` | Address of the ingest endpoint, on a port other than `web.listen`. |
 | `storage.directory` | `/data` | Directory of the backend's data, an absolute and clean path. |
 | `log.level` | `info` | `debug`, `info`, `warn` or `error`. |
-| `import.time_zone` | none | IANA time zone of the server the imported logs come from, e.g. `Europe/Berlin` or `UTC`. Required to import traditional syslog files and MariaDB error logs (see *Import logs*). |
+| `import.time_zone` | none | IANA time zone of the server the imported logs come from, e.g. `Europe/Berlin` or `UTC`. Required to import traditional syslog files, MariaDB error logs and Dovecot log files (see *Import logs*). |
 
 **Secrets**
 
@@ -278,7 +278,7 @@ Importing is repeatable: a file whose content was imported completely is not imp
 another name or compressed differently (`syslog.1` and the later `syslog.2.gz`). An import that was stopped
 (Ctrl-C, a database error) continues where it stopped when the same content is imported again, and no record
 is stored twice. Stopping or restarting the container kills a running import; nothing committed is lost, and
-the next import resumes. Limits: a syslog or MariaDB error log that grew since it was imported (the same log with more lines, as in
+the next import resumes. Limits: a syslog, MariaDB error log or Dovecot log that grew since it was imported (the same log with more lines, as in
 a newer copy of `/var/log`) is continued after the part imported before (a journal export that grew is imported as a whole), an older copy
 of a log imported after a newer one stores nothing (it is listed as contained), except one that ends inside a
 line, one whose newer copy was imported by an earlier version (before database schema 7), and one whose newer copy is not among the 64 largest

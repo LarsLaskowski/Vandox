@@ -92,7 +92,7 @@ files or endpoints.
     parsers through `Vandox.Core.LogParsing` (`LogLineReader` cuts lines at 16 KiB, a parser's memory is bounded
     independently of the input size): `JournalExportParser` and `JournalExportReader` (binary-safe entry reader with
     bounded memory), `SyslogParser`, `SyslogLine` and `SyslogClock` (hand-written line parser, years and time
-    zones of year-less times, range-checked dates), `SystemLogGrouper`, `MailLineClassifier` (Postfix and Dovecot lines of the journal and syslog: severity marker and MySQL
+    zones of year-less times, range-checked dates), `SystemLogGrouper`, `MailLineClassifier` (Postfix and Dovecot lines of the journal and syslog and Dovecot's own log file: severity marker and MySQL
     connection failures at the anchored positions, ordinal text operations, no state; a classification, not a trust
     boundary: local processes can forge markers and events, record 0091), `MariaDbLineGrouper` and `KernelReportGrouper` (bounded multi-line
     reports; MariaDB lines of the journal and syslog are joined per host, program and pid, within 60 seconds of the
@@ -102,6 +102,7 @@ files or endpoints.
     `_PID` takes the sender-chosen `SYSLOG_PID` and so behaves like a syslog line for forging, record 0088 option 36),
     `MariaDbErrorLogParser`, `MariaDbParseSession`, `MariaDbLine` and `MariaDbMessage` (hand-written header parser on raw
     bytes, entries bounded to 16 KiB, claimed by the first non-empty line only and never for a syslog name),
+    `DovecotLogParser`, `DovecotLine` (Dovecot's own log file: traditional stamp plus marker at Dovecot's position, no state beyond the year clock, claimed by the first line only and never for a syslog name),
     and the backend option `import.time_zone` (`SourceTimeZone`). Records 0048, 0049, 0066, 0069, 0076, 0078, 0079, 0084,
     0085, 0086, 0088, 0091.
 11. **Outbound calls** (Telegram, external checks, the optional AI service of the nightly report, the
