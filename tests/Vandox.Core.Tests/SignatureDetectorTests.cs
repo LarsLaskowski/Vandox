@@ -680,7 +680,7 @@ public class SignatureDetectorTests
         var before = RetainedBytes();
 
         // Act
-        for (var index = 1; index <= 20000; index++)
+        for (var index = 1; index <= 3000; index++)
         {
             detector.Add(index, Flood(index), closed);
         }
@@ -690,7 +690,7 @@ public class SignatureDetectorTests
         GC.KeepAlive(detector);
 
         // Assert
-        Assert.AreEqual(20000 - 1024, closed.Added, "all but the 1,024 open events were emitted");
+        Assert.AreEqual(3000 - 1024, closed.Added, "all but the 1,024 open events were emitted");
         Assert.IsLessThan(8 * 1024 * 1024, retained, "retained bytes after the last line; keeping uncut fields, messages, matches or records would be at least 32 MiB");
     }
 

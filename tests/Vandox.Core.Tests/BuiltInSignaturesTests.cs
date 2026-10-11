@@ -583,7 +583,29 @@ public class BuiltInSignaturesTests
     }
 
     /// <summary>
-    /// The fixtures of the web server, Plesk and Dovecot logs give no event.
+    /// The Dovecot log fixture gives one fatal event that links the panic and the fatal line, and nothing for the forged user name or the connect error.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task BuiltInSignaturesDovecotLogYieldsOneFatalEvent()
+    {
+        // Arrange
+        var records = await ParseAsync(new DovecotLogParser(DateTimeZone.Utc), new LogFile("dovecot.log-20261010", null), "testdata/logs/dovecot.log", TestContext.CancellationToken);
+
+        // Act
+        var events = SignatureSamples.Run(BuiltInSignatures.Catalog, records);
+
+        // Assert
+        Assert.HasCount(11, records, "the fixture has eleven lines");
+        Assert.HasCount(1, events, "exactly one event");
+        Assert.AreEqual("dovecot_fatal", events[0].SignatureId, "signature");
+        Assert.AreSequenceEqual([records[5].Id, records[6].Id], events[0].RecordIds.ToList(), "the panic line, then the fatal line");
+        Assert.AreEqual(2L, events[0].LineCount, "two lines");
+        Assert.DoesNotContain(records[8].Id, events[0].RecordIds, "the forged line is not linked");
+    }
+
+    /// <summary>
+    /// The fixtures of the web server and Plesk logs give no event.
     /// </summary>
     /// <returns>A task that completes when the test is done</returns>
     [TestMethod]
@@ -595,8 +617,7 @@ public class BuiltInSignaturesTests
                     {
                         (new ErrorLogParser(ErrorLogParser.NginxType, ErrorLogFormat.Nginx, ErrorLogPaths.DefaultNginx, true, zone), new LogFile("logs/sample", null), "testdata/logs/nginx-error.log"),
                         (new ErrorLogParser(ErrorLogParser.ApacheType, ErrorLogFormat.Apache, ErrorLogPaths.DefaultApache, true, zone), new LogFile("logs/sample", null), "testdata/logs/apache-error.log"),
-                        (new ErrorLogParser(ErrorLogParser.PleskPanelType, ErrorLogFormat.PleskPanel, ErrorLogPaths.DefaultPleskPanel, true, zone), new LogFile("logs/sample", null), "testdata/logs/plesk-panel.log"),
-                        (new DovecotLogParser(zone), new LogFile("dovecot.log-20261010", null), "testdata/logs/dovecot.log")
+                        (new ErrorLogParser(ErrorLogParser.PleskPanelType, ErrorLogFormat.PleskPanel, ErrorLogPaths.DefaultPleskPanel, true, zone), new LogFile("logs/sample", null), "testdata/logs/plesk-panel.log")
                     };
 
         foreach (var (parser, file, path) in cases)
