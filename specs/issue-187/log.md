@@ -20,3 +20,4 @@ One line per pipeline step: date, step, member, result. Lead decisions and escal
 | 2026-10-11 | 8 Fix round 1: tests | Tester | Test for candidate limit fails on current code; guard test for sticky emitter error added (sonnet/medium · 95,000 tokens · 24 tool uses · 94 s) |
 | 2026-10-11 | 8 Fix round 1: implement | Dev | Candidate limit moved before join; README and storage.md fixed; gates pass (coverage new 100%) (sonnet/medium · 71,675 tokens · 9 tool uses · 223 s) |
 | 2026-10-11 | 8 Review round 2 (delta) | Reviewer | APPROVE on 77ccdbc (opus/medium · 37,072 tokens · 10 tool uses · 52 s) |
+| 2026-10-11 | 9 PR approval | Lead | APPROVED (ARCHITECTURE.md change confirmed) (opus/medium · 38,164 tokens · 6 tool uses · 33 s) |
