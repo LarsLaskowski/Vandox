@@ -34,16 +34,16 @@ public class MailLineClassifierTests
         get
         {
             var phrases = new[]
-            {
-                "Can't connect to local MySQL server",
-                "Can't connect to MySQL server",
-                "MySQL server has gone away",
-                "Lost connection to MySQL server",
-                "Can't connect to local server",
-                "Can't connect to server",
-                "Server has gone away",
-                "Lost connection to server"
-            };
+                          {
+                              "Can't connect to local MySQL server",
+                              "Can't connect to MySQL server",
+                              "MySQL server has gone away",
+                              "Lost connection to MySQL server",
+                              "Can't connect to local server",
+                              "Can't connect to server",
+                              "Server has gone away",
+                              "Lost connection to server"
+                          };
 
             foreach (var phrase in phrases)
             {

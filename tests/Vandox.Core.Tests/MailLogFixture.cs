@@ -29,28 +29,28 @@ internal static class MailLogFixture
     /// The priority (-1 for none) and the event of each line of the fixture after the classification.
     /// </summary>
     internal static readonly (int Priority, string Event)[] Expected = new (int Priority, string Event)[]
-    {
-        (-1, string.Empty),
-        (-1, string.Empty),
-        (4, string.Empty),
-        (-1, string.Empty),
-        (-1, string.Empty),
-        (4, MailEvents.PostfixDatabaseUnavailable),
-        (4, MailEvents.PostfixDatabaseUnavailable),
-        (2, MailEvents.PostfixFatal),
-        (4, string.Empty),
-        (2, MailEvents.PostfixPanic),
-        (-1, string.Empty),
-        (-1, string.Empty),
-        (3, MailEvents.DovecotDatabaseUnavailable),
-        (4, MailEvents.DovecotDatabaseUnavailable),
-        (3, string.Empty),
-        (2, MailEvents.DovecotPanic),
-        (2, MailEvents.DovecotFatal),
-        (-1, string.Empty),
-        (4, string.Empty),
-        (-1, string.Empty)
-    };
+                                                                       {
+                                                                           (-1, string.Empty),
+                                                                           (-1, string.Empty),
+                                                                           (4, string.Empty),
+                                                                           (-1, string.Empty),
+                                                                           (-1, string.Empty),
+                                                                           (4, MailEvents.PostfixDatabaseUnavailable),
+                                                                           (4, MailEvents.PostfixDatabaseUnavailable),
+                                                                           (2, MailEvents.PostfixFatal),
+                                                                           (4, string.Empty),
+                                                                           (2, MailEvents.PostfixPanic),
+                                                                           (-1, string.Empty),
+                                                                           (-1, string.Empty),
+                                                                           (3, MailEvents.DovecotDatabaseUnavailable),
+                                                                           (4, MailEvents.DovecotDatabaseUnavailable),
+                                                                           (3, string.Empty),
+                                                                           (2, MailEvents.DovecotPanic),
+                                                                           (2, MailEvents.DovecotFatal),
+                                                                           (-1, string.Empty),
+                                                                           (4, string.Empty),
+                                                                           (-1, string.Empty)
+                                                                       };
 
     #endregion // Fields
 
