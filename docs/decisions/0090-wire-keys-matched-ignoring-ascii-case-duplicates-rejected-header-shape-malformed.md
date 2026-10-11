@@ -125,7 +125,8 @@ quadratic under this module's `go 1.27`, so no Go time bound can catch a cleared
 ## Decision
 
 Options 1, 4, 7, 9, 11 and 16: before binding, both decoders check every line, the header included: no key outside ASCII after unescaping, no two
-keys in one object equal ignoring ASCII case, no nesting deeper than 64, then valid UTF-8 and no unpaired surrogate escape — otherwise
+keys in one object equal ignoring ASCII case, no nesting deeper than 64, then, on a line that is one complete JSON value, valid UTF-8
+and no unpaired surrogate escape — otherwise
 `ErrMalformed`, at a cost in proportion to the line and with the check's state kept per decoder. Keys
 then match fields ignoring ASCII case, and a header that is not an object or whose `format_major` is not a 64-bit JSON integer is
 `ErrMalformed`. The rules are in the
@@ -136,8 +137,9 @@ decoders run pins them.
 
 - The two decoders return the same error class and line, or the same records, for every case of the shared fixture
   `testdata/wire/decoder-cases.json`; a new JSON-level rule gets a case there, so a difference shows up in one of the two test suites.
-- The line rules run before the major is read, so they bind every future major (0043): a future header with a duplicate or non-ASCII key
-  is `ErrMalformed` in this backend, not `ErrUnsupportedVersion`.
+- The line rules run before the major is read, so they bind every future major (0043): a future header with a duplicate or non-ASCII key,
+  invalid UTF-8 or an unpaired surrogate escape is `ErrMalformed` in this backend, not `ErrUnsupportedVersion`. This is deliberate, also
+  for the text rule: it does not depend on the major, and a later major can relax it only through a record that supersedes this one.
 - A `null` always stands for a key given once (0089): a key repeated with `null` is a duplicate.
 - The Go model refuses map keys (metric labels, MariaDB status and variables) that are equal ignoring ASCII case, so `CheckRecord` and
   `EncodeBatch` never produce a line the decoders reject; the C# model needs no such rule, because only the decoders read wire input there.
@@ -155,6 +157,9 @@ decoders run pins them.
 - `jq` and the decoder can still read one spelling differently (`.kind` misses `"Kind"`), but never two values for one field.
 - A batch with invalid UTF-8 or an unpaired surrogate escape anywhere in a line, also in the value of an unknown key or in a header of
   another major, is refused as a whole (0044); neither decoder replaces text any more. A key that breaks the rule is still reported as
-  `key not ASCII`, because the key check runs first. Every string C# binds is then valid UTF-16, so reading one no longer throws.
+  `key not ASCII`, because the key check runs first. A line that is not one complete JSON value (cut short, or with content after the
+  value) keeps its syntax error whatever bytes it holds, because C#'s parser refuses it before any line rule runs; Go checks the text only
+  after its key walk found one complete value, so both decoders give a syntax reason for it, and the binding still refuses it. Every
+  string C# binds is then valid UTF-16, so reading one no longer throws.
 - The encoder still replaces invalid UTF-8 with U+FFFD (0042), so a log line with invalid bytes reaches the backend with U+FFFD in its
   text; the agent never sends a line the decoders refuse for this rule. The ingest API (#40) is no longer blocked by the difference.

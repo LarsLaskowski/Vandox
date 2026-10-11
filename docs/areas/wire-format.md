@@ -78,7 +78,8 @@ one is invalid, and the decoder sets the origin of every decoded record to `agen
   (`\ud800` to `\udbff`) directly followed by an escaped low half (`\udc00` to `\udfff`), in any hex case. A line that breaks this,
   anywhere, also in the value of an unknown key and in a header of any major, is `ErrMalformed` (reason `line not valid UTF-8` or
   `unpaired surrogate escape`). It is a line rule, checked after *Keys* and nesting, so a key that breaks it is reported as `key not
-  ASCII`. Neither decoder replaces text. The encoder writes valid UTF-8 only: an invalid byte in a Go string is replaced by U+FFFD on
+  ASCII`, and only on a line that is one complete JSON value: a line cut short or with content after its value is refused for its
+  syntax, whatever bytes it holds. Like the key rules it does not depend on the major (see *Versioning*). Neither decoder replaces text. The encoder writes valid UTF-8 only: an invalid byte in a Go string is replaced by U+FFFD on
   encode, and no surrogate is ever escaped. See [0090](../decisions/0090-wire-keys-matched-ignoring-ascii-case-duplicates-rejected-header-shape-malformed.md).
 - **Name pattern**: `^[A-Za-z0-9][A-Za-z0-9._:/@+-]*$`, 1 to 128 bytes (`MaxNameBytes`). Used for `source`,
   metric names and units, label keys, `gap.collector` and `log_line.event`.
@@ -219,7 +220,8 @@ spooled. The collector that produced it records a `gap` instead (cause `unknown`
 ## Versioning (0043)
 
 The header carries an integer major and minor. A decoder checks line 1 against the line rules (*Common rules*, *Keys* and *Text*),
-then reads the major before anything else and rejects any major it does not know with `wire.ErrUnsupportedVersion`, even
+so a header of any major that breaks one is `wire.ErrMalformed`, not `wire.ErrUnsupportedVersion`; a later major can relax a line rule
+only through a record that supersedes 0090. It then reads the major before anything else and rejects any major it does not know with `wire.ErrUnsupportedVersion`, even
 if the rest of that header has an incompatible shape. A header that is not a JSON object or `null`, or whose major is not
 a JSON integer, is `wire.ErrMalformed`: the major is an integer in every version (0043). A minor change is additive: new optional fields and new kinds; a decoder ignores unknown
 keys at any depth and so accepts a newer minor of its major. An unknown record kind is rejected. Until the
@@ -272,7 +274,7 @@ What the decoder does with unusual input; each row is a test case.
 | Time with `Z`, `+00:00`, `-00:00`, fractions | accepted |
 | Time with another offset (`+02:00`); the zero time | rejected, field error |
 | Time with a space for `T`, lower-case `t`/`z`, not RFC 3339 | rejected, `ErrMalformed` |
-| Invalid UTF-8 anywhere in a line (a byte `FF` or `F5`, a stray continuation byte `80`, an overlong form `C0 AF` or `E0 80 80`, an encoded surrogate `ED A0 80`, `F4 90 80 80` above U+10FFFF, a sequence cut short such as `E2 82` before the closing quote), also in `kind`, `agent_id`, a label value, the value of an unknown key or a header of another major | rejected, `ErrMalformed`, reason `line not valid UTF-8` |
+| Invalid UTF-8 anywhere in a line (a byte `FF` or `F5`, a stray continuation byte `80`, an overlong form `C0 AF` or `E0 80 80`, an encoded surrogate `ED A0 80`, `F4 90 80 80` above U+10FFFF, a sequence cut short such as `E2 82` before the closing quote), also in `kind`, `agent_id`, a label value, the value of an unknown key or a header of another major | rejected, `ErrMalformed`, reason `line not valid UTF-8` (a line cut short or with content after its value: the syntax error) |
 | An unpaired surrogate escape in a string (`\ud800`, `\udc00`, `\ud800\u0041`, `\ud800x`, `\udc00\ud800`, `\ud800\ud800\udc00`, `\uD800`), also in `kind`, `unit`, `agent_id` or the value of an unknown key | rejected, `ErrMalformed`, reason `unpaired surrogate escape` |
 | An escaped surrogate pair in any hex case (`\ud83d\ude00`, `\uD83D\uDE00`), escaped `\ufffd` or `\uffff`, an escaped backslash before `ud800` (`\\ud800`), raw multi-byte UTF-8 | accepted |
 | Escaped control characters in a string | accepted in text fields, rejected where a name pattern applies |
