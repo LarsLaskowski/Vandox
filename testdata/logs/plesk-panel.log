@@ -1,0 +1,6 @@
+[2026-10-09 03:12:12.123] 4821:5f3a9c1e INFO [panel] Session opened for the administrator
+[2026-10-09 03:12:13.456] 4821:5f3a9c1e WARN [extension/letsencrypt] Certificate of example.org expires in 9 days
+[2026-10-09 03:12:14] ERR [panel] Cannot connect to the database: connection refused
+  #0 /opt/psa/admin/plib/Db.php(42): Db->connect()
+[2026-10-09 03:12:15.000789] 4822:a1b2c3d4 DEBUG [panel] Cache warmed
+[2026-10-09 03:12:16] CRIT [panel] The disk is almost full

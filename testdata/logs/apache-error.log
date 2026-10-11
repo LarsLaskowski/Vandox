@@ -1,0 +1,6 @@
+[Fri Oct 09 03:12:12.123456 2026] [mpm_prefork:notice] [pid 812] AH00163: Apache/2.4.52 (Ubuntu) configured -- resuming normal operations
+[Fri Oct 09 03:12:13.234567 2026] [core:notice] [pid 812] AH00094: Command line: '/usr/sbin/apache2'
+[Fri Oct 09 03:12:14.345678 2026] [php:error] [pid 901] [client 198.51.100.7:51234] PHP Fatal error:  Uncaught Error: Call to undefined function foo() in /var/www/vhosts/example.org/httpdocs/index.php:12
+Stack trace:
+[Fri Oct 09 03:12:15.456789 2026] [:warn] [pid 902] AH01630: client denied by server configuration: /var/www/vhosts/example.org/httpdocs/private
+[Fri Oct 09 03:12:16 2026] [error] [client 198.51.100.8] File does not exist: /var/www/html/favicon.ico

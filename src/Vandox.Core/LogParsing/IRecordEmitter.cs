@@ -24,5 +24,12 @@ public interface IRecordEmitter
     /// <param name="reason">A fixed description that never contains input text</param>
     void Skip(long line, string reason);
 
+    /// <summary>
+    /// Reports input that was kept, but not read as the format of the parser.
+    /// </summary>
+    /// <param name="line">The 1-based line number</param>
+    /// <param name="reason">A fixed description that never contains input text</param>
+    void Warn(long line, string reason);
+
     #endregion // Methods
 }

@@ -884,7 +884,7 @@ public class SyslogParserTests
     public async Task SyslogParserParseAsyncNeedsNoTimeZoneForRfc3339MariaDbLines()
     {
         // Arrange
-        var parser = BuiltInParsers.Create(null)[3];
+        var parser = BuiltInParsers.Create(null, ErrorLogPaths.Default)[3];
         var input = MariaDbSamples.SyslogFile(MariaDbSamples.SyslogLine(_start, 2345, MariaDbSamples.Note("/usr/sbin/mariadbd: ready for connections.")));
 
         // Act

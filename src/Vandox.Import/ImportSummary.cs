@@ -43,6 +43,11 @@ public sealed class ImportSummary
     public long Skipped { get; set; }
 
     /// <summary>
+    /// Gets or sets the number of lines kept as raw lines.
+    /// </summary>
+    public long Raw { get; set; }
+
+    /// <summary>
     /// Gets or sets the earliest capture time of the records stored; <c>null</c> when none.
     /// </summary>
     public DateTimeOffset? First { get; set; }

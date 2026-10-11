@@ -35,8 +35,26 @@ log:
   level: info
 
 import:
+  # Server paths of the error logs. A file of an import is taken for the log when its parent directory and its
+  # name equal those of the path (the rest of the path does not matter, so copies and archives work), also with a
+  # rotation suffix (.1, .2, ... or -YYYYMMDD); such a file is read as the log whatever its content, and lines that
+  # are not of the format are kept as raw lines. An absolute, clean path of a file in a directory (no trailing
+  # slash, no . or .. elements).
+  #
+  # Plesk panel log. Default: /var/log/plesk/panel.log. The Plesk paths here and below are not verified against
+  # a Plesk server; the line format of the panel log is not verified either.
+  plesk_panel_log: /var/log/plesk/panel.log
+  # Error log of the Plesk panel web server (sw-cp-server). Default: /var/log/sw-cp-server/error_log. Not verified
+  # against a Plesk server. The file is recognized by this path only, never by its content.
+  sw_cp_server_error_log: /var/log/sw-cp-server/error_log
+  # nginx error log. Default: /var/log/nginx/error.log
+  nginx_error_log: /var/log/nginx/error.log
+  # Apache error log. Default: /var/log/apache2/error.log (Debian and Ubuntu); on RHEL-family servers the log is
+  # /var/log/httpd/error_log.
+  apache_error_log: /var/log/apache2/error.log
   # IANA time zone of the server the log files come from, for example Europe/Berlin or UTC. Needed to import
   # syslog and kern.log files in the traditional format, whose time stamps carry neither year nor offset, and
-  # MariaDB error logs and Dovecot log files, whose time stamps are local time without an offset; such a file fails with
-  # "import.time_zone is not set" until this is set (a re-run then completes it). No default.
+  # MariaDB error logs, Dovecot log files and the Plesk panel, nginx and Apache error logs, whose time stamps are
+  # local time without an offset; such a file fails with "import.time_zone is not set" until this is set (a
+  # re-run then completes it). No default.
   # time_zone: Europe/Berlin

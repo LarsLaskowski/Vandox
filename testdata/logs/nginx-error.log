@@ -1,0 +1,6 @@
+2026/10/09 03:12:12 [notice] 1021#1021: signal process started
+2026/10/09 03:12:13 [warn] 1021#1021: *14 an upstream response is buffered to a temporary file /var/cache/nginx/fastcgi_temp/3/00/0000000003 while reading upstream, client: 198.51.100.7, server: example.org, request: "GET /report HTTP/1.1", upstream: "fastcgi://unix:/run/php/php8.1-fpm.sock:", host: "example.org"
+2026/10/09 03:12:14 [error] 1021#1021: *15 FastCGI sent in stderr: "PHP message: PHP Warning:  Undefined variable $x in /var/www/vhosts/example.org/httpdocs/index.php on line 12
+PHP message: PHP Fatal error:  Uncaught Error: Call to undefined function foo()" while reading response header from upstream, client: 198.51.100.7, server: example.org, request: "GET /index.php HTTP/1.1", upstream: "fastcgi://unix:/run/php/php8.1-fpm.sock:", host: "example.org"
+2026/10/09 03:12:15 [crit] 1021#1021: *16 connect() to unix:/run/php/php8.1-fpm.sock failed (13: Permission denied) while connecting to upstream, client: 198.51.100.8, server: example.org, request: "GET / HTTP/1.1", upstream: "fastcgi://unix:/run/php/php8.1-fpm.sock:", host: "example.org"
+2026/10/09 03:12:16 [info] 1021#1021: *17 client closed connection while waiting for request, client: 198.51.100.9, server: 0.0.0.0:443

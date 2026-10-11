@@ -8,7 +8,8 @@ namespace Vandox.Import.Tests;
 /// <summary>
 /// A parser double: every line of a file whose first line starts with <c>LOG</c> becomes a log line record one second after
 /// <see cref="Base"/> per line number. A line starting with <c>bad</c> is skipped, a line starting with <c>refuse</c> becomes an
-/// invalid record, and a line starting with <c>boom</c> makes the parser fail. The first lines it is told to skip are skipped.
+/// invalid record, and a line starting with <c>boom</c> makes the parser fail. A line starting with <c>raw</c> is reported with a
+/// warning and then becomes a record like any other line. The first lines it is told to skip are skipped.
 /// </summary>
 internal sealed class LineParser : ILogParser
 {
@@ -124,6 +125,11 @@ internal sealed class LineParser : ILogParser
             }
             else
             {
+                if (text.StartsWith("raw", StringComparison.Ordinal))
+                {
+                    output.Warn(reader.LineNumber, "raw line");
+                }
+
                 await output.RecordAsync(Record(reader.LineNumber, text, text.StartsWith("refuse", StringComparison.Ordinal)), cancellationToken);
             }
         }

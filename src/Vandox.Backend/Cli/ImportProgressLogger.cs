@@ -79,6 +79,11 @@ internal static class ImportProgressLogger
 
         logger.FileFinished(result.Path, outcome, result.SourceType, result.Lines, result.Records, result.Skipped);
 
+        if (result.Raw > 0)
+        {
+            logger.RawLinesKept(result.Path, result.SourceType, result.Raw);
+        }
+
         if (result.Reason.Length > 0)
         {
             logger.FileNotImported(result.Path, result.Reason);

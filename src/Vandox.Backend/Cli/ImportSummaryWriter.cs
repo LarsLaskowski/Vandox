@@ -33,6 +33,7 @@ internal static class ImportSummaryWriter
         text.Append(CultureInfo.InvariantCulture, $"Lines read:          {summary.Lines}\n");
         text.Append(CultureInfo.InvariantCulture, $"Records stored:      {summary.Records}\n");
         text.Append(CultureInfo.InvariantCulture, $"Lines skipped:       {summary.Skipped}\n");
+        text.Append(CultureInfo.InvariantCulture, $"Lines kept raw:      {summary.Raw}\n");
 
         if (summary.First is { } first && summary.Last is { } last)
         {
@@ -53,6 +54,7 @@ internal static class ImportSummaryWriter
         WriteListed(text, "Files not recognized", summary.Files, ImportOutcome.Unrecognized);
         WriteListed(text, "Files that failed", summary.Files, ImportOutcome.Failed);
         WriteSkipped(text, summary.Files);
+        WriteRaw(text, summary.Files);
 
         return writer.WriteAsync(text.ToString());
     }
@@ -158,6 +160,33 @@ internal static class ImportSummaryWriter
             text.Append(CultureInfo.InvariantCulture, $"  {Terminal.Quote(file.Path)}: {file.Skipped} lines\n");
 
             foreach (var problem in file.Problems)
+            {
+                text.Append(problem.Line > 0 ? $"    line {problem.Line.ToString(CultureInfo.InvariantCulture)}: {Terminal.Quote(problem.Reason)}\n" : $"    {Terminal.Quote(problem.Reason)}\n");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Lists the files with lines kept as raw lines, with the first reasons.
+    /// </summary>
+    /// <param name="text">The text so far</param>
+    /// <param name="files">The files</param>
+    private static void WriteRaw(StringBuilder text, List<FileResult> files)
+    {
+        var raw = files.Where(file => file.Raw > 0).ToList();
+
+        if (raw.Count == 0)
+        {
+            return;
+        }
+
+        text.Append("\nLines kept as raw lines (format not recognized):\n");
+
+        foreach (var file in raw)
+        {
+            text.Append(CultureInfo.InvariantCulture, $"  {Terminal.Quote(file.Path)}: {file.Raw} lines\n");
+
+            foreach (var problem in file.RawProblems)
             {
                 text.Append(problem.Line > 0 ? $"    line {problem.Line.ToString(CultureInfo.InvariantCulture)}: {Terminal.Quote(problem.Reason)}\n" : $"    {Terminal.Quote(problem.Reason)}\n");
             }

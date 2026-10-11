@@ -18,6 +18,7 @@ public static class BackendConfigLoader
     private const string KeyIngestListen = "ingest.listen";
     private const string ListenReason = "must be [host]:port with an empty host or an IP address and a port of 1 to 65535";
     private const int MaxPortDigits = 5;
+    private const string LogFileReason = "must be an absolute, clean path of a file in a directory (no trailing slash, no . or .. elements)";
 
     #endregion // Constants
 
@@ -168,6 +169,10 @@ public static class BackendConfigLoader
         Require(webPort != ingestPort, file, lines, KeyIngestListen, "must not use the same port as web.listen");
         Require(IsCleanAbsolutePath(config.Storage.Directory), file, lines, "storage.directory", "must be an absolute, clean path (no trailing slash, no . or .. elements)");
         Require(config.Log.Level is "debug" or "info" or "warn" or "error", file, lines, "log.level", "must be one of debug, info, warn, error");
+        Require(IsLogFilePath(config.Import.PleskPanelLog), file, lines, "import.plesk_panel_log", LogFileReason);
+        Require(IsLogFilePath(config.Import.SwCpServerErrorLog), file, lines, "import.sw_cp_server_error_log", LogFileReason);
+        Require(IsLogFilePath(config.Import.NginxErrorLog), file, lines, "import.nginx_error_log", LogFileReason);
+        Require(IsLogFilePath(config.Import.ApacheErrorLog), file, lines, "import.apache_error_log", LogFileReason);
         Require(config.Import.TimeZone is null || SourceTimeZone.Find(config.Import.TimeZone) is not null,
                 file,
                 lines,
@@ -193,6 +198,16 @@ public static class BackendConfigLoader
         }
 
         return value[1..].Split('/').All(element => element.Length > 0 && element != "." && element != "..");
+    }
+
+    /// <summary>
+    /// Tells whether a path is an absolute, clean path of a file in a directory (at least two elements).
+    /// </summary>
+    /// <param name="value">The path</param>
+    /// <returns><c>true</c> when the path names a file in a directory</returns>
+    private static bool IsLogFilePath(string value)
+    {
+        return IsCleanAbsolutePath(value) && value.AsSpan(1).Contains('/');
     }
 
     /// <summary>

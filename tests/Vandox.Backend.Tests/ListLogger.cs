@@ -14,6 +14,11 @@ internal sealed class ListLogger : ILogger
     /// </summary>
     internal List<string> Messages { get; } = [];
 
+    /// <summary>
+    /// Gets the level and event ID of each message, in the order of <see cref="Messages"/>.
+    /// </summary>
+    internal List<(LogLevel Level, EventId EventId)> Entries { get; } = [];
+
     #endregion // Properties
 
     #region ILogger
@@ -35,6 +40,7 @@ internal sealed class ListLogger : ILogger
     public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
     {
         Messages.Add(formatter(state, exception));
+        Entries.Add((logLevel, eventId));
     }
 
     #endregion // ILogger

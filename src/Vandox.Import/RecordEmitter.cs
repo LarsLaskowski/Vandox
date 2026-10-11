@@ -233,5 +233,18 @@ internal sealed class RecordEmitter : IRecordEmitter
         }
     }
 
+    /// <inheritdoc />
+    public void Warn(long line, string reason)
+    {
+        var result = _item.Result;
+
+        result.Raw++;
+
+        if (result.RawProblems.Count < ImportLimits.MaxProblems)
+        {
+            result.RawProblems.Add(new ImportProblem(line > 0 ? line + LineOffset : line, reason));
+        }
+    }
+
     #endregion // IRecordEmitter
 }

@@ -1,4 +1,5 @@
 using Vandox.Core.Configuration;
+using Vandox.Core.LogParsing;
 
 namespace Vandox.Core.Tests;
 
@@ -42,6 +43,7 @@ public class BackendConfigLoaderTests
             Assert.IsGreaterThan(0, lines.GetValueOrDefault(key), $"the example sets {key} explicitly");
         }
 
+        Assert.AreEqual(ErrorLogPaths.Default, config.Import.GetErrorLogPaths(), "the example sets the default error log paths");
         Assert.IsNull(config.Import.TimeZone, "import.time_zone has no default and the example leaves it unset");
         Assert.AreEqual(0, lines.GetValueOrDefault("import.time_zone"), "the example does not set import.time_zone");
         Assert.Contains("\n  # time_zone: Europe/Berlin\n", File.ReadAllText(path).Replace("\r\n", "\n", StringComparison.Ordinal), "the example holds the option commented out");
@@ -114,6 +116,37 @@ public class BackendConfigLoaderTests
 
         // Assert
         Assert.AreEqual($"config: {path}:2: import.time_zone: must be a time zone of the IANA time zone database, such as UTC or Europe/Berlin", exception.Message, "message");
+    }
+
+    /// <summary>
+    /// A value of a log path option that is not an absolute, clean path of a file in a directory is refused at the line of its key with a fixed text that does not show the value.
+    /// </summary>
+    /// <param name="value">The raw YAML value</param>
+    [TestMethod]
+    [DataRow("var/log/x.log")]
+    [DataRow("/error.log")]
+    [DataRow("/")]
+    [DataRow("/var/log/nginx/")]
+    [DataRow("/var/log/../x.log")]
+    [DataRow("/var/log/./x.log")]
+    [DataRow("/var//log/x.log")]
+    [DataRow("\"\"")]
+    public void BackendConfigLoaderRefusesInvalidErrorLogPathWithoutShowingIt(string value)
+    {
+        // Arrange
+        string[] keys = ["plesk_panel_log", "sw_cp_server_error_log", "nginx_error_log", "apache_error_log"];
+
+        foreach (var key in keys)
+        {
+            using var directory = new TempDirectory();
+            var path = directory.Write("vandoxd.yaml", $"import:\n  {key}: {value}\n");
+
+            // Act
+            var exception = Assert.ThrowsExactly<ConfigException>(() => BackendConfigLoader.Load(path, []), $"invalid {key}");
+
+            // Assert
+            Assert.AreEqual($"config: {path}:2: import.{key}: must be an absolute, clean path of a file in a directory (no trailing slash, no . or .. elements)", exception.Message, $"message for {key}");
+        }
     }
 
     /// <summary>
@@ -510,6 +543,82 @@ public class BackendConfigLoaderTests
 
         // Assert
         Assert.DoesNotContain(Secret, exception.Message, "the pasted value stays out of the message");
+    }
+
+    /// <summary>
+    /// Without the options the error log paths are those of a current Plesk on Ubuntu.
+    /// </summary>
+    [TestMethod]
+    public void BackendConfigLoaderDefaultsErrorLogPaths()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        var path = directory.Write("vandoxd.yaml", string.Empty);
+
+        // Act
+        var config = BackendConfigLoader.Load(path, []);
+
+        // Assert
+        Assert.AreEqual("/var/log/plesk/panel.log", config.Import.PleskPanelLog, "import.plesk_panel_log");
+        Assert.AreEqual("/var/log/sw-cp-server/error_log", config.Import.SwCpServerErrorLog, "import.sw_cp_server_error_log");
+        Assert.AreEqual("/var/log/nginx/error.log", config.Import.NginxErrorLog, "import.nginx_error_log");
+        Assert.AreEqual("/var/log/apache2/error.log", config.Import.ApacheErrorLog, "import.apache_error_log");
+        Assert.AreEqual(ErrorLogPaths.Default, config.Import.GetErrorLogPaths(), "the paths as a record");
+    }
+
+    /// <summary>
+    /// The four error log paths are read from the file.
+    /// </summary>
+    [TestMethod]
+    public void BackendConfigLoaderReadsErrorLogPaths()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        var path = directory.Write("vandoxd.yaml", "import:\n  plesk_panel_log: /usr/local/psa/admin/logs/panel.log\n  sw_cp_server_error_log: /srv/a/error_log\n  nginx_error_log: /srv/b/proxy.log\n  apache_error_log: /var/log/httpd/error_log\n");
+
+        // Act
+        var config = BackendConfigLoader.Load(path, []);
+
+        // Assert
+        Assert.AreEqual(new ErrorLogPaths("/usr/local/psa/admin/logs/panel.log", "/srv/a/error_log", "/srv/b/proxy.log", "/var/log/httpd/error_log"), config.Import.GetErrorLogPaths(), "the configured paths");
+    }
+
+    /// <summary>
+    /// A log path option without a value is refused like every string option.
+    /// </summary>
+    /// <param name="value">The raw YAML value</param>
+    [TestMethod]
+    [DataRow("~")]
+    [DataRow("")]
+    public void BackendConfigLoaderRefusesErrorLogPathWithoutValue(string value)
+    {
+        // Arrange
+        string[] keys = ["plesk_panel_log", "sw_cp_server_error_log", "nginx_error_log", "apache_error_log"];
+
+        foreach (var key in keys)
+        {
+            using var directory = new TempDirectory();
+            var path = directory.Write("vandoxd.yaml", $"import:\n  {key}: {value}\n");
+
+            // Act
+            var exception = Assert.ThrowsExactly<ConfigException>(() => BackendConfigLoader.Load(path, []), $"no value for {key}");
+
+            // Assert
+            Assert.AreEqual($"config: {path}:2: import.{key}: has no value", exception.Message, $"message for {key}");
+        }
+    }
+
+    /// <summary>
+    /// The list of keys names the error log paths after <c>log.level</c> and before the time zone.
+    /// </summary>
+    [TestMethod]
+    public void BackendConfigKeysListErrorLogPathsBeforeTimeZone()
+    {
+        // Act
+        var keys = BackendConfig.Keys();
+
+        // Assert
+        Assert.AreSequenceEqual(["web.listen", "ingest.listen", "storage.directory", "log.level", "import.plesk_panel_log", "import.sw_cp_server_error_log", "import.nginx_error_log", "import.apache_error_log", "import.time_zone"], keys, "keys in order");
     }
 
     #endregion // Methods

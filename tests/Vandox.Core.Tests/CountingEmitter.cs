@@ -29,6 +29,11 @@ internal sealed class CountingEmitter : IRecordEmitter
     internal long Skips { get; private set; }
 
     /// <summary>
+    /// Gets the number of warnings.
+    /// </summary>
+    internal long Warnings { get; private set; }
+
+    /// <summary>
     /// Gets the reason of the first skip, or an empty text.
     /// </summary>
     internal string FirstSkip { get; private set; } = string.Empty;
@@ -139,6 +144,12 @@ internal sealed class CountingEmitter : IRecordEmitter
     public void Skip(long line, string reason)
     {
         CountSkip(reason);
+    }
+
+    /// <inheritdoc />
+    public void Warn(long line, string reason)
+    {
+        Warnings++;
     }
 
     #endregion // IRecordEmitter

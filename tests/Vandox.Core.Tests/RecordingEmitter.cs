@@ -12,6 +12,7 @@ internal sealed class RecordingEmitter : IRecordEmitter
 
     private readonly List<DataRecord> _records = [];
     private readonly List<(long Line, string Reason)> _skips = [];
+    private readonly List<(long Line, string Reason)> _warnings = [];
 
     #endregion // Fields
 
@@ -26,6 +27,11 @@ internal sealed class RecordingEmitter : IRecordEmitter
     /// Gets the skips, including the refusals of records, in the order they were reported.
     /// </summary>
     internal IReadOnlyList<(long Line, string Reason)> Skips => _skips;
+
+    /// <summary>
+    /// Gets the warnings, in the order they were reported.
+    /// </summary>
+    internal IReadOnlyList<(long Line, string Reason)> Warnings => _warnings;
 
     /// <summary>
     /// Gets the number of calls of <see cref="RecordAsync"/>, the refused ones and the one that failed included.
@@ -145,6 +151,12 @@ internal sealed class RecordingEmitter : IRecordEmitter
     public void Skip(long line, string reason)
     {
         _skips.Add((line, reason));
+    }
+
+    /// <inheritdoc />
+    public void Warn(long line, string reason)
+    {
+        _warnings.Add((line, reason));
     }
 
     #endregion // IRecordEmitter
