@@ -225,6 +225,7 @@ public class LegacyLsofLineTests
     [DataRow(IPv6, Tcp, "[::ffff:1.2.3.256]:22" + Listen, LegacyLsofLine.NotMapped)]
     [DataRow(IPv6, Tcp, "[::ffff:1.2.3]:22" + Listen, LegacyLsofLine.NotMapped)]
     [DataRow(IPv6, Tcp, "[1.2.3.4::1]:22" + Listen, LegacyLsofLine.NotMapped)]
+    [DataRow(IPv6, Tcp, "[1:2:3]:22" + Listen, LegacyLsofLine.NotMapped)]
     [DataRow(IPv6, Tcp, "[zz::1]:22" + Listen, LegacyLsofLine.NotMapped)]
     [DataRow(IPv6, Tcp, "[]:22" + Listen, LegacyLsofLine.NotMapped)]
     [DataRow(IPv6, Tcp, "[1]:22" + Listen, LegacyLsofLine.NotMapped)]

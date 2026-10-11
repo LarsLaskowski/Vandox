@@ -189,6 +189,7 @@ public class LegacyMonitorHeaderTests
     [TestMethod]
     [DataRow(1, 1, 1, "Europe/Berlin", "CET")]
     [DataRow(1677, 1, 1, "Europe/Berlin", "CET")]
+    [DataRow(1677, 9, 20, "Europe/Berlin", "LMT")]
     [DataRow(9999, 12, 31, "America/Los_Angeles", "PST")]
     [DataRow(9999, 12, 31, "Europe/Berlin", "CET")]
     [DataRow(2263, 1, 1, "Europe/Berlin", "CET")]

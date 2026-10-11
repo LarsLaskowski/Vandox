@@ -318,6 +318,8 @@ public class LegacyTopLineTests
     [DataRow("99999999999999999999", "999", 6, "-1")]
     [DataRow("99999999999999999999", "999", 5, "-1")]
     [DataRow("999999999999999", "999999", 6, "-1")]
+    [DataRow("1234567890123456789012345678901", "", 0, "-1")]
+    [DataRow("1", "1234567890123456789012345678901", 0, "-1")]
     public void LegacyTopLineTryScaleBinaryRoundsAndRefusesOverflow(string integerDigits, string fraction, int power, string expected)
     {
         // Act

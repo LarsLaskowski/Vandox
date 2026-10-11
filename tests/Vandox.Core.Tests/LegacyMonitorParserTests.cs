@@ -964,6 +964,60 @@ public partial class LegacyMonitorParserTests
     }
 
     /// <summary>
+    /// A line shaped like a section marker whose name is not 1 to 32 lower-case letters is no marker: it is a line of the open section.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task LegacyMonitorParserParseReadsMarkerShapedLineWithOddNameAsSectionLine()
+    {
+        // Arrange
+        string[] sections = [MeminfoMarker, "MemTotal: 1 kB", "----- Meminfo -----", $"----- {new string('a', 33)} -----", "Dirty: 3 kB"];
+        var lines = Samples.New(Samples.Oct2, sections, Samples.Row(100, "root", "1000", "apache2"));
+        var first = lines.Count - sections.Length;
+
+        lines.AddRange(Samples.Old(Samples.Oct2Later, Samples.Row(100, "root", "1000", "apache2")));
+
+        (long, string)[] expected = [(first + 3, "meminfo line not read"), (first + 4, "meminfo line not read")];
+
+        // Act
+        var emitter = await ParseAsync(Samples.Text(lines));
+        var section = Metrics(emitter.Records.Where(record => record.CapturedAt == Utc(FirstUtc)).Skip(20)).Select(metric => Brief(metric.Point)).ToList();
+
+        // Assert
+        Assert.AreSequenceEqual(expected, emitter.Skips.ToList(), "the odd marker lines are skipped as meminfo lines");
+        Assert.AreSequenceEqual(["meminfo_bytes|1024|bytes|field=MemTotal", "meminfo_bytes|3072|bytes|field=Dirty"], section, "the section continues after them");
+    }
+
+    /// <summary>
+    /// A vmstat counter repeated in one snapshot is skipped at its line: the first value stays, no second point is emitted and the counter history of the next snapshot uses the first value.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task LegacyMonitorParserParseSkipsRepeatedVmstatCounter()
+    {
+        // Arrange
+        var row = Samples.Row(100, "root", "1000", "apache2");
+        var lines = VmstatSnapshot(Samples.Oct2, 100, 10, 1000, 0, row);
+
+        lines.AddRange(Samples.New("Fri Oct  2 09:16:01 CEST 2026", [VmstatMarker, "pswpin 220", "pswpin 7", "pswpout 10"], row));
+
+        var repeated = lines.LastIndexOf("pswpin 7") + 1;
+
+        lines.AddRange(VmstatSnapshot("Fri Oct  2 09:17:01 CEST 2026", 340, 10, 1000, 0, row));
+
+        // Act
+        var emitter = await ParseAsync(Samples.Text(lines));
+        var totals = Metrics(emitter.Records.Where(record => record.CapturedAt == Utc("2026-10-02T07:16:01Z"))).Where(metric => metric.Point.Name == "vmstat_total").ToList();
+
+        // Assert
+        Assert.AreEqual(((long)repeated, "vmstat line not read"), emitter.Skips.Single(), "one skip at the repeated line");
+        Assert.ContainsSingle(metric => metric.Point.Labels!["counter"] == "pswpin", totals, "one point for the counter");
+        Assert.AreEqual(220.0, totals.Single(metric => metric.Point.Labels!["counter"] == "pswpin").Point.Value, Delta, "the first value is kept");
+        AssertRates(Rates(emitter, "2026-10-02T07:16:01Z"), [("pswpin", 2.0), ("pswpout", 0.0)]);
+        AssertRates(Rates(emitter, "2026-10-02T07:17:01Z"), [("pswpin", 2.0), ("pswpout", 0.0), ("pgmajfault", 0.0), ("oom_kill", 0.0)]);
+    }
+
+    /// <summary>
     /// A vmstat counter becomes a rate against the previous accepted snapshot of the parse: a falling counter gives none, a skipped snapshot is no predecessor and the first snapshot of a parse has none.
     /// </summary>
     /// <returns>A task that completes when the test is done</returns>
