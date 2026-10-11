@@ -220,6 +220,15 @@ socket, the Telegram Bot API, the Tailscale network) touches:
 - the privilege it needs in `deploy/agent/` (0030) or the ACL and port binding (0010, 0017)
 - the *Security areas* entry it falls under
 
+**A change to a configuration file that a decision record constrains** — `.github/dependabot.yml`, a workflow
+under `.github/workflows/`, `deploy/backend/Dockerfile` or `deploy/backend/docker-compose.yml` — touches:
+- the records that constrain it, found with `grep -l '<file name>' docs/decisions/0*.md`: among them 0041 (base
+  images pinned by digest through build arguments, no Dependabot `docker` entry, `base-image-digests.yml`), 0060
+  (the compose file, no Dependabot entry for it), 0037 (release workflow), 0047 (`gocognit` in `ci.yml`) and 0052
+  (image labels)
+- a change that contradicts such a record is not merged as is: the record is edited (unreleased) or superseded
+  (released) in the same pull request, or the change is dropped
+
 ## Test doubles
 
 The hand-written fakes and stubs the tests reuse (no mocking library unless `docs/UNIT_TESTS.md` says
