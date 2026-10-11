@@ -256,7 +256,7 @@ escape in a regular string literal).
     correct one keeps about 1,024 × 2 KiB of text plus small per-event state. The test also asserts that 1,976 events
     (3,000 − 1,024) were closed. (Revised in step 6 from 20,000 lines: 3,000 still fill all 1,024 open events and evict
     1,976, which is all the bound needs, since the retained state is capped by the open limit and not by the line count;
-    20,000 lines took 8 to 10 s against the 10 s test time limit.)
+    20,000 lines took 8 to 10 s; 3,000 is the smallest input that still detects the failure.)
   - and AC1's `BuiltInSignaturesPatternsRunWithoutBacktracking`. No wall-clock bound is tested.
 
 ## Approach

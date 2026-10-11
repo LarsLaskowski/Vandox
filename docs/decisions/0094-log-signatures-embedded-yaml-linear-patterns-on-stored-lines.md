@@ -89,7 +89,7 @@ output over several lines; mail lines carry addresses:
     source `journal` or `syslog` from the journal, so requiring both would split one writer); a signature without a
     parser event that reads a message able to hold remote text names the writers it reads and anchors its pattern
     with `\A` (not `^`, which matches after every line feed) at text the writer prints before any external text.
-    Signatures on messages that only the named program writes (`oom_kill` and `boot` from `kernel`, the `service_*`
+    Signatures on messages whose text the named program writes without any remote text (`oom_kill` and `boot` from `kernel`, the `service_*`
     signatures from `systemd`) keep the origin condition and may use `^`. Only writers whose format allows that are read: the full
     disk from MariaDB's own messages, `Too many connections` from Postfix's and Dovecot's MySQL client errors. PHP,
     nginx, Apache and Plesk put external text before the error (a requested path, FastCGI output) and need a pattern
