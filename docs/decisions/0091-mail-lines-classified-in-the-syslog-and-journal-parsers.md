@@ -1,6 +1,6 @@
 # 0091: Postfix and Dovecot lines are classified by the daemon's severity marker, with events for fatal, panic and an unavailable database: in the syslog and journal parsers, and in a parser of its own for Dovecot's log file
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-11
 - **Area:** Log import
 - **Source:** Issues #18, #194
