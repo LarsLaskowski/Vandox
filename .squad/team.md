@@ -18,8 +18,8 @@ specific to this repository lives in two files the members read first:
 
 | Role             | Subagent (charter)                                                    | Model, effort  | Writes                                                           |
 | ---------------- | --------------------------------------------------------------------- | -------------- | ---------------------------------------------------------------- |
-| Lead             | [`squad-lead`](../.claude/agents/squad-lead.md)                       | Opus, high     | plans, decisions, area documents                                 |
-| Devil's Advocate | [`squad-devils-advocate`](../.claude/agents/squad-devils-advocate.md) | Sonnet, high   | nothing (read-only)                                              |
+| Lead             | [`squad-lead`](../.claude/agents/squad-lead.md)                       | Opus, medium   | plans, decisions, area documents                                 |
+| Devil's Advocate | [`squad-devils-advocate`](../.claude/agents/squad-devils-advocate.md) | Sonnet, medium | nothing (read-only)                                              |
 | Security         | [`squad-security`](../.claude/agents/squad-security.md)               | Opus, medium   | nothing (read-only)                                              |
 | Tester           | [`squad-tester`](../.claude/agents/squad-tester.md)                   | Sonnet, medium | test code                                                        |
 | Dev              | [`squad-dev`](../.claude/agents/squad-dev.md)                         | Sonnet, medium | production code                                                  |
@@ -29,7 +29,8 @@ specific to this repository lives in two files the members read first:
 
 The model aliases resolve to the current generation of each line; the effort is set per role in the agent
 file so a session's effort setting does not change every role at once. The orchestrator may raise a single
-launch (a feature plan on `xhigh`) through the launch's own `model` and `effort` parameters. Every run
+launch (the plan of a feature on `high`) through the launch's own `model` and `effort` parameters; a run on
+`xhigh` costs about half the member time of a feature run (Vandox#17) and is not used. Every run
 records launches, tokens, tool uses and seconds per role in its working record (`squad-log.py --summary`);
 a model or effort change for a role is made on that evidence, in the template, and rolled out from there.
 
@@ -52,3 +53,14 @@ to GitHub — the `PreToolUse` hook `.claude/hooks/git-guard.py`, declared in ev
 (`git add` and a scratch `git worktree` for experiments stay allowed, `.squad/routing.md`, *Concurrency*);
 the orchestrator commits and pushes to the work branch at any time (see `CLAUDE.md`, golden rules) and
 opens the pull request only after the Lead's approval.
+
+Session-management tools (`create_session`, `send_message`, `archive_session` and the other remote-session
+tools) belong to the orchestrator alone: a member never calls them, also not to "hand over" work — it
+reports the need in its result instead.
+
+**Escapes in files.** The Write and Edit tools turn a single-backslash escape such as `\u0041` into the
+character it names, so a plan table or a test fixture whose cases are about escapes silently loses them. Write
+each such escape with a doubled backslash in the tool input, or generate the file with a script; either way
+check the bytes on disk (`grep -n '\\u' <file>`) and confirm every escape is there exactly as the case needs
+before reporting the file done. A test whose case is about an escape also asserts that its input still
+contains the backslash, so a lost escape fails the run instead of testing the wrong input.
