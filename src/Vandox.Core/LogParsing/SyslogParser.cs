@@ -167,6 +167,9 @@ public sealed class SyslogParser : ILogParser
     public string Type => ParserType;
 
     /// <inheritdoc />
+    public bool LineFramed => true;
+
+    /// <inheritdoc />
     public Confidence Detect(LogFile file, ReadOnlySpan<byte> head)
     {
         var first = head;

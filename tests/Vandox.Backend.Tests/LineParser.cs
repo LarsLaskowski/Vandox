@@ -81,6 +81,9 @@ internal sealed class LineParser : ILogParser
     public string Type { get; }
 
     /// <inheritdoc />
+    public bool LineFramed => true;
+
+    /// <inheritdoc />
     public Confidence Detect(LogFile file, ReadOnlySpan<byte> head)
     {
         return head.StartsWith("LOG"u8) ? Confidence.MatchContent : Confidence.NoMatch;

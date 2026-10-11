@@ -1,3 +1,8 @@
+using System.Buffers.Binary;
+using System.Text;
+
+using Microsoft.Data.Sqlite;
+
 using Vandox.Backend.Hosting;
 using Vandox.Core.Model;
 using Vandox.Storage;
@@ -305,6 +310,45 @@ public class ImportCommandTests
     }
 
     /// <summary>
+    /// When the lookup of the import state fails, the import prints the summary of the files found so far, logs the failure and exits with 1.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task ImportCommandExitsWithOneWhenReadingTheImportStateFails()
+    {
+        // Arrange
+        using var fixture = new BackendFixture();
+        var logs = Path.Combine(fixture.Folder.Path, "logs");
+
+        Directory.CreateDirectory(logs);
+        await WriteLogsAsync(logs, TestContext.CancellationToken);
+        await File.WriteAllTextAsync(Path.Combine(logs, "a.txt"), "just a note\n", TestContext.CancellationToken);
+        await File.AppendAllTextAsync(fixture.ConfigPath, "import:\n  time_zone: Europe/Berlin\n", TestContext.CancellationToken);
+
+        var created = await SqliteStore.OpenAsync(fixture.Storage, TestContext.CancellationToken);
+
+        await created.DisposeAsync();
+
+        await using (var connection = new SqliteConnection($"Data Source={Path.Combine(fixture.Storage, "vandox.db")};Pooling=False"))
+        {
+            await connection.OpenAsync(TestContext.CancellationToken);
+
+            using var command = connection.CreateCommand();
+
+            command.CommandText = "DROP INDEX import_files_head; ALTER TABLE import_files DROP COLUMN head_sha256";
+            await command.ExecuteNonQueryAsync(TestContext.CancellationToken);
+        }
+
+        // Act
+        var code = await fixture.RunAsync(["import", logs], null, TestContext.CancellationToken);
+
+        // Assert
+        Assert.AreEqual(1, code, "exit code");
+        Assert.Contains("import failed", fixture.Error.ToString(), "log line");
+        Assert.Contains("a.txt", fixture.Out.ToString(), "the summary lists the files found so far");
+    }
+
+    /// <summary>
     /// A bad configuration, a missing storage directory and invalid parsers stop the import with exit code 1.
     /// </summary>
     /// <returns>A task that completes when the test is done</returns>
@@ -373,6 +417,173 @@ public class ImportCommandTests
     }
 
     /// <summary>
+    /// A syslog file that grew since its import stores only its new lines, the summary lists it as continued, and the exit code stays 0.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task ImportCommandContinuesAGrownSyslogFileAndPrintsItInTheSummary()
+    {
+        // Arrange
+        using var fixture = new BackendFixture();
+        var logs = Path.Combine(fixture.Folder.Path, "logs");
+        var first = "Jul  1 12:00:00 web-1 sshd[1]: m1\nJul  1 12:00:01 web-1 sshd[1]: m2\n";
+        var grown = $"{first}Jul  1 12:00:02 web-1 sshd[1]: m3\nJul  1 12:00:03 web-1 sshd[1]: m4\n";
+
+        Directory.CreateDirectory(Path.Combine(logs, "a"));
+        Directory.CreateDirectory(Path.Combine(logs, "b"));
+        await File.AppendAllTextAsync(fixture.ConfigPath, "import:\n  time_zone: Europe/Berlin\n", TestContext.CancellationToken);
+        await File.WriteAllTextAsync(Path.Combine(logs, "a", "syslog"), first, TestContext.CancellationToken);
+        File.SetLastWriteTimeUtc(Path.Combine(logs, "a", "syslog"), new DateTime(2026, 7, 2, 0, 0, 0, DateTimeKind.Utc));
+
+        // Act
+        var run1 = await fixture.RunAsync(["import", logs], null, TestContext.CancellationToken);
+
+        fixture.Out.GetStringBuilder().Clear();
+        File.Delete(Path.Combine(logs, "a", "syslog"));
+        await File.WriteAllTextAsync(Path.Combine(logs, "b", "syslog"), grown, TestContext.CancellationToken);
+        File.SetLastWriteTimeUtc(Path.Combine(logs, "b", "syslog"), new DateTime(2026, 7, 2, 0, 0, 0, DateTimeKind.Utc));
+
+        var run2 = await fixture.RunAsync(["import", logs], null, TestContext.CancellationToken);
+        var secondOutput = fixture.Out.ToString();
+
+        fixture.Out.GetStringBuilder().Clear();
+
+        var run3 = await fixture.RunAsync(["import", logs], null, TestContext.CancellationToken);
+        var records = (await ReadLogLinesAsync(fixture.Storage, "syslog", TestContext.CancellationToken)).OrderBy(record => record.Record.CapturedAt).ToList();
+
+        // Assert
+        Assert.AreEqual(0, run1, "exit code of the first run");
+        Assert.AreEqual(0, run2, "exit code of the run that continues a file");
+        Assert.Contains("  imported:          0\n  continued:         1\n", secondOutput, "the file is counted as continued");
+        Assert.Contains("\nFiles continued:\n  \"b/syslog\": continues \"a/syslog\" after line 2\n", secondOutput, "the summary lists the continued file");
+        Assert.Contains("Records stored:      2", secondOutput, "only the new lines are stored");
+        Assert.Contains("Lines read:          2", secondOutput, "only the new lines are read");
+        Assert.AreEqual(0, run3, "exit code of the third run");
+        Assert.Contains("  already imported:  1", fixture.Out.ToString(), "the third run imports nothing");
+        Assert.AreEqual("m1|m2|m3|m4", string.Join('|', records.Select(record => ((LogLine)record.Record.Data!).Message)), "every line is stored once");
+    }
+
+    /// <summary>
+    /// The new part of a grown syslog file is parsed with the name and modification time of the grown file, not those of the earlier one.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task ImportCommandAnchorsTheYearOfTheNewPartOnTheGrownFile()
+    {
+        // Arrange
+        using var fixture = new BackendFixture();
+        var logs = Path.Combine(fixture.Folder.Path, "logs");
+        var february = "Feb  3 08:00:00 web-1 sshd[1]: feb one\nFeb  4 08:00:00 web-1 sshd[1]: feb two\n";
+        var earlier = Path.Combine(logs, "a", "syslog");
+        var later = Path.Combine(logs, "b", "syslog");
+
+        Directory.CreateDirectory(Path.Combine(logs, "a"));
+        Directory.CreateDirectory(Path.Combine(logs, "b"));
+        await File.AppendAllTextAsync(fixture.ConfigPath, "import:\n  time_zone: Europe/Berlin\n", TestContext.CancellationToken);
+        await File.WriteAllTextAsync(earlier, february, TestContext.CancellationToken);
+        File.SetLastWriteTimeUtc(earlier, new DateTime(2026, 3, 1, 0, 0, 0, DateTimeKind.Utc));
+
+        // Act
+        await fixture.RunAsync(["import", logs], null, TestContext.CancellationToken);
+        File.Delete(earlier);
+        await File.WriteAllTextAsync(later, $"{february}Sep  5 12:00:00 web-1 sshd[1]: sep one\nSep  6 12:00:00 web-1 sshd[1]: sep two\n", TestContext.CancellationToken);
+        File.SetLastWriteTimeUtc(later, new DateTime(2026, 10, 1, 0, 0, 0, DateTimeKind.Utc));
+
+        var code = await fixture.RunAsync(["import", logs], null, TestContext.CancellationToken);
+        var records = await ReadLogLinesAsync(fixture.Storage, "syslog", TestContext.CancellationToken);
+        var september = records.Single(record => ((LogLine)record.Record.Data!).Message == "sep one");
+
+        // Assert
+        Assert.AreEqual(0, code, "exit code");
+        Assert.Contains("continues \"a/syslog\" after line 2", fixture.Out.ToString(), "the file is continued");
+        Assert.AreEqual(new DateTimeOffset(2026, 9, 5, 10, 0, 0, TimeSpan.Zero), september.Record.CapturedAt, "September is in 2026, the year of the grown file's modification time");
+    }
+
+    /// <summary>
+    /// A grown MariaDB error log is continued, the continuation lines of the last entry of the earlier copy are skipped and named in the summary, and the entries after them are stored.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task ImportCommandContinuesAGrownMariaDbErrorLogAndNamesTheSkippedContinuationLines()
+    {
+        // Arrange
+        using var fixture = new BackendFixture();
+        var logs = Path.Combine(fixture.Folder.Path, "logs");
+        var earlier = Path.Combine(logs, "a", "error.log");
+        var first = "2026-03-01 23:00:01 0 [Note] first entry\n2026-03-01 23:00:02 0 [Note] second entry\nmore of the second entry\n";
+        var grown = $"{first}even more\nand more\n2026-03-01 23:00:05 0 [Note] third entry\n2026-03-01 23:00:06 0 [Note] fourth entry\n";
+
+        Directory.CreateDirectory(Path.Combine(logs, "a"));
+        Directory.CreateDirectory(Path.Combine(logs, "b"));
+        await File.AppendAllTextAsync(fixture.ConfigPath, "import:\n  time_zone: Europe/Berlin\n", TestContext.CancellationToken);
+        await File.WriteAllTextAsync(earlier, first, TestContext.CancellationToken);
+
+        // Act
+        await fixture.RunAsync(["import", logs], null, TestContext.CancellationToken);
+        File.Delete(earlier);
+        fixture.Out.GetStringBuilder().Clear();
+        await File.WriteAllTextAsync(Path.Combine(logs, "b", "error.log"), grown, TestContext.CancellationToken);
+
+        var code = await fixture.RunAsync(["import", logs], null, TestContext.CancellationToken);
+        var output = fixture.Out.ToString();
+        var records = (await ReadLogLinesAsync(fixture.Storage, "mariadb", TestContext.CancellationToken)).OrderBy(record => record.Record.CapturedAt).ToList();
+
+        // Assert
+        Assert.AreEqual(0, code, "exit code");
+        Assert.Contains("  \"b/error.log\": continues \"a/error.log\" after line 3, skipped 2 lines before its first record\n", output, "the summary names the skipped lines");
+        Assert.Contains("    line 4: \"line before the first entry\"\n    line 5: \"line before the first entry\"\n", output, "the lines are skipped with their numbers in the whole file");
+        Assert.Contains("Records stored:      2", output, "the entries after them are stored");
+        Assert.HasCount(4, records, "four entries in all");
+        Assert.Contains("third entry", ((LogLine)records[2].Record.Data!).Message, "the third entry is stored");
+        Assert.Contains("fourth entry", ((LogLine)records[3].Record.Data!).Message, "the fourth entry is stored");
+    }
+
+    /// <summary>
+    /// A grown journal export is imported as a whole, and a forged entry inside the payload of a binary field never becomes a record.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task ImportCommandImportsAGrownJournalExportAsAWholeAndStoresNoForgedEntry()
+    {
+        // Arrange
+        using var fixture = new BackendFixture();
+        var logs = Path.Combine(fixture.Folder.Path, "logs");
+        var earlier = Path.Combine(logs, "a", "journal.export");
+        var payload = "x\n\n__REALTIME_TIMESTAMP=1760000000000000\n_HOSTNAME=forged\n_COMM=sshd\nMESSAGE=forged\n\n";
+        var cut = JournalExport(payload, "x\n\n__REALTI", false);
+
+        Directory.CreateDirectory(Path.Combine(logs, "a"));
+        Directory.CreateDirectory(Path.Combine(logs, "b"));
+        await File.WriteAllBytesAsync(earlier, cut, TestContext.CancellationToken);
+
+        // Act
+        var run1 = await fixture.RunAsync(["import", logs], null, TestContext.CancellationToken);
+        var firstOutput = fixture.Out.ToString();
+
+        File.Delete(earlier);
+        fixture.Out.GetStringBuilder().Clear();
+        await File.WriteAllBytesAsync(Path.Combine(logs, "b", "journal.export"), JournalExport(payload, payload, true), TestContext.CancellationToken);
+
+        var run2 = await fixture.RunAsync(["import", logs], null, TestContext.CancellationToken);
+        var secondOutput = fixture.Out.ToString();
+        var records = await ReadLogLinesAsync(fixture.Storage, "journal", TestContext.CancellationToken);
+        var lines = records.Select(record => (LogLine)record.Record.Data!).ToList();
+
+        // Assert
+        Assert.AreEqual(0, run1, "exit code of the first run");
+        Assert.Contains("Records stored:      1", firstOutput, "the first run stores the complete entry");
+        Assert.Contains("\"truncated entry\"", firstOutput, "the cut entry is skipped");
+        Assert.AreEqual(0, run2, "exit code of the second run");
+        Assert.Contains("  imported:          1\n  continued:         0\n", secondOutput, "the grown export is imported as a whole");
+        Assert.DoesNotContain("Files continued", secondOutput, "it is not listed as continued");
+        Assert.Contains("Records stored:      2", secondOutput, "both genuine entries are stored");
+        Assert.HasCount(3, lines, "the genuine entry of the first run is stored again");
+        Assert.AreEqual(2, lines.Count(line => line.Message == "one"), "the first entry has two records");
+        Assert.IsTrue(lines.All(line => line.Host == "genuine"), "every record has the genuine host");
+        Assert.DoesNotContain(line => line.Host == "forged" || line.Program == "sshd" || line.Message == "forged", lines, "no forged entry is stored");
+    }
+
+    /// <summary>
     /// Writes a syslog file with a year-less line and a journal export into a directory.
     /// </summary>
     /// <param name="directory">The directory</param>
@@ -407,6 +618,34 @@ public class ImportCommandTests
                                             Limit = 100
                                         },
                                         cancellationToken);
+    }
+
+    /// <summary>
+    /// Builds a journal export of a complete entry and an entry with a binary message.
+    /// </summary>
+    /// <param name="payload">The payload the binary field declares</param>
+    /// <param name="written">The part of the payload that is written</param>
+    /// <param name="closed">Whether the field and the entry are closed</param>
+    /// <returns>The bytes</returns>
+    private static byte[] JournalExport(string payload, string written, bool closed)
+    {
+        var length = new byte[sizeof(ulong)];
+
+        BinaryPrimitives.WriteUInt64LittleEndian(length, (ulong)Encoding.UTF8.GetByteCount(payload));
+
+        using var output = new MemoryStream();
+
+        output.Write(Encoding.UTF8.GetBytes("__REALTIME_TIMESTAMP=1760000000000000\n_HOSTNAME=genuine\nSYSLOG_IDENTIFIER=app\nMESSAGE=one\n\n"));
+        output.Write(Encoding.UTF8.GetBytes("__REALTIME_TIMESTAMP=1760000001000000\n_HOSTNAME=genuine\nSYSLOG_IDENTIFIER=app\nMESSAGE\n"));
+        output.Write(length);
+        output.Write(Encoding.UTF8.GetBytes(written));
+
+        if (closed)
+        {
+            output.Write(Encoding.UTF8.GetBytes("\n\n"));
+        }
+
+        return output.ToArray();
     }
 
     #endregion // Methods

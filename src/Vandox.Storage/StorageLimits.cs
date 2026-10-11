@@ -15,7 +15,12 @@ public static class StorageLimits
     /// <summary>
     /// The database schema version this build reads and writes.
     /// </summary>
-    public const int SchemaVersion = 5;
+    public const int SchemaVersion = 6;
+
+    /// <summary>
+    /// The largest number of bases of one content.
+    /// </summary>
+    public const int MaxImportBases = 64;
 
     /// <summary>
     /// The largest number of records a batch holds.

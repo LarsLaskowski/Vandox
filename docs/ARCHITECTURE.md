@@ -217,14 +217,16 @@ Implemented by `src/Vandox.Storage`:
   2^63 - 1.
 - **Migrations** ([0077](decisions/0077-storage-on-microsoft-data-sqlite-same-schema-and-rules.md)): at
   start-up every step above the stored `meta.schema_version` runs in its own transaction; a database with a
-  newer version is refused. Schema version 3 adds the table `import_files`, version 4 the column `log_lines.host`, version 5 the column `log_lines.event`.
+  newer version is refused. Schema version 3 adds the table `import_files`, version 4 the column `log_lines.host`, version 5 the column `log_lines.event`, version 6 the head key and the continuation point of `import_files`.
 - **Imports** ([0069](decisions/0069-log-import-idempotent-per-file-content-hash-with-resumable-batches.md)):
   `import_files` holds one row per imported file content (SHA-256 of the decompressed content, size, the name
   and modification time the parser got, the source type, the number of records stored so far and whether the
   import is complete). A batch with an import step advances the row in the same transaction as its records, as
   a compare-and-set on the expected count, so an interrupted import resumes where it stopped and two runs of
-  the same content never store it twice. Records do not reference their file; imports are idempotent per
-  file content, not per record.
+  the same content never store it twice. A content that starts with a completely imported one (a log that grew
+  between two copies) is continued when its format is framed by lines only (syslog, MariaDB error log; never a
+  journal export): only the part after it is stored, and the row keeps where it continued.
+  Records do not reference their file; imports are idempotent per file content, not per record.
 - **Connections** ([0077](decisions/0077-storage-on-microsoft-data-sqlite-same-schema-and-rules.md)): one writer connection (immediate transactions, one batch per transaction) and a pool
   of query-only readers, in WAL mode with `synchronous=FULL`, so a committed batch is durable and reads (and
   `/healthz`) do not wait for a write.

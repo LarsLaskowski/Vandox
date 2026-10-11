@@ -86,11 +86,38 @@ imported data is kept apart from live data (it never raises alerts) by the detec
   in the middle of a file).
 - Pass 2 reads the content only up to the size hashed in pass 1 and hashes it again. If fewer bytes can be read or
   the hash differs, the file fails and is not completed. A file that is only appended to while it is imported is
-  imported up to the hashed size; the appended lines come with a later import.
-- Limits of the guarantee: a file that **grew** since its import has another hash and is imported again as a whole,
-  storing the overlapping lines twice. A file whose hashed part changes while it is imported fails; the records
-  written before the change was detected stay stored under the original hash. Records do not reference their import
-  file, so one import cannot be removed or redone.
+  imported up to the hashed size; the appended lines come with a later import, which continues the file (below).
+- **A file that grew is continued.** A content that starts with a content imported completely before (the same log with
+  more lines at its end) has another hash, but only its new part is parsed and stored. The rules:
+  - Only a file whose parser is **line-framed** (`LineFramed`: syslog and the MariaDB error log) is continued. A journal
+    export that grew is imported as a whole and its earlier entries are stored again, because its binary fields hold
+    line feeds and a line feed in the middle is no safe place to start a parse.
+  - Pass 1 computes the **head key** of every recognized file: the SHA-256 of its first line (up to and including the
+    first line feed within the first 4,096 bytes; the whole head when it holds none). **Bases** are the complete
+    contents of the same source type and head key from earlier runs (the store, schema version 6 and later) and the
+    earlier files of the same run, in input order. At most 64 bases (the largest) are compared for one file. While
+    hashing, pass 1 compares the hash of the first *n* bytes with each base of size *n*; the **longest** base whose bytes
+    the content starts with wins.
+  - The new part starts at the **beginning of the line in which the base ends** (after the last line feed within the
+    base). A base without any line feed is never continued. The whole content is still hashed in both passes, the
+    skipped part included, so a change of the skipped bytes between the passes fails the file ("the content changed
+    while it was imported").
+  - The new part is parsed on its own with the file name and modification time of the **continued** content's own
+    first import (its own state row), never those of the base: the year of year-less times in the new part is
+    anchored on the continued file's name date or modification time. The continuation point is stored with the state,
+    so a resume continues at the same place, with the records already stored dropped as for any resume.
+  - Skip line numbers of the new part count in the whole file.
+  - A parse that starts at the continuation point treats the first new line as the file's first line: a UTF-8 byte order mark (EF BB BF) at its start is removed, as it is at the start of a file, while a whole-file parse keeps it in that line's message. Framing and the stored lines are otherwise the same.
+- Limits of the guarantee: an older copy imported **after** a newer one (or later in the same input) is not recognized
+  and is imported as a whole; contents imported before schema version 6 are never a base. At the continuation point a
+  grouped entry is split: continuation lines of a MariaDB error log entry after the point are skipped as "line before
+  the first entry" (the summary counts them), and MariaDB entries and kernel reports of syslog become the stored entry
+  plus lines of their own. A line the earlier copy cut (no final line feed) is stored again, complete: the one case in
+  which a line has two records, the cut one and the complete one. A content whose records were removed later
+  (retention, once it exists) keeps its complete state, so it is still reported as already imported and a longer
+  content is still continued after it; the removed part is never restored. A file whose hashed part changes while it is
+  imported fails; the records written before the change was detected stay stored under the original hash. Records do
+  not reference their import file, so one import cannot be removed or redone.
 
 ## Parsers
 
@@ -113,6 +140,10 @@ A parser turns the lines of one file into records. The importer and every parser
   not noticed.
 - Lines are read with a bounded line reader: lines without the line ending, cut at 16 KiB at a UTF-8 boundary with a
   truncated flag, the rest of the line discarded, so a file without line breaks cannot grow memory.
+- `LineFramed` tells whether the format is framed by lines only: every byte after a line feed starts a new line and is
+  never the rest of a field begun before it. The importer starts a parse at a line start in the middle of a content only
+  for such a parser. Syslog and the MariaDB error log are line-framed; the journal export is not (binary fields hold
+  line feeds). A parser a hook supplies must declare it; `true` for a format with length-framed fields is a parser bug.
 - The file name handed to a parser has a `.gz` suffix removed when the content was decompressed.
 - A new parser is one type and one entry in the list; the importer does not change.
 
@@ -362,17 +393,20 @@ syslog file. The journal and syslog parsers apply these rules to the records the
 
 ## Result
 
-- **Outcomes per file:** imported, already imported, not recognized (with the reason), failed (with the reason).
+- **Outcomes per file:** imported, continued (the new part of a file that grew was stored), already imported, not
+  recognized (with the reason), failed (with the reason).
   Every file that is not imported appears with its outcome and reason; nothing is skipped silently.
-- **Progress** goes as JSON log lines to standard error: one line per finished file (path, outcome, source type,
+- **Progress** goes as JSON log lines to standard error: one line per finished file (path, outcome including `continued`, source type,
   reason, lines, records, skipped), one per 64 MiB hashed, one when the scan is done (files, pending) and one per
   100,000 lines of a large file. Names are attributes, never part of the message.
 - **The summary** goes as text to standard output and holds nothing else: the root; files found and counts per
-  outcome; lines read, records stored and lines skipped; the time range of the stored records (RFC 3339, UTC) or that
-  none were stored; whether the run was interrupted; then the files not recognized and the files that failed with
+  outcome; lines read (for a continued file only from the continuation point), records stored and lines skipped; the time range of the stored records (RFC 3339, UTC) or that
+  none were stored; whether the run was interrupted; then the files continued (path, the name of the content continued,
+  the line after which the new part starts and, when there are any, the lines the parser skipped before its first
+  record), the files not recognized and the files that failed with
   their reasons, and the files with skipped lines with their first problems (at most ten per file). The text
   format belongs to the command and is not an interface.
-- **Exit code:** 0 when every file was imported, already imported or not recognized (a saved `/var/log` always holds
+- **Exit code:** 0 when every file was imported, continued, already imported or not recognized (a saved `/var/log` always holds
   files no parser claims, such as `wtmp` and `lastlog`); 1 when a file failed, the run was interrupted or ended with
   an error, or the configuration or the database could not be opened (the summary is still printed when there is one);
   2 for a usage error.
@@ -386,7 +420,7 @@ syslog file. The journal and syslog parsers apply these rules to the records the
 
 - [0014](../decisions/0014-log-import-is-a-core-component.md) — why historical import and log shipping are core.
 - [0021](../decisions/0021-no-pseudonymization-of-log-data.md) — why log data is stored unchanged.
-- [0069](../decisions/0069-log-import-idempotent-per-file-content-hash-with-resumable-batches.md) — why content hashes, two passes and resume by count.
+- [0069](../decisions/0069-log-import-idempotent-per-file-content-hash-with-resumable-batches.md) — why content hashes, two passes, resume by count and the continuation of a grown file.
 - [0072](../decisions/0072-vandoxd-import-sub-command-output-and-exit-codes.md) — why the sub-command, the output channels and the exit codes.
 - [0079](../decisions/0079-log-parsing-and-import-in-the-backend-without-following-links.md) — why streaming, content-based formats and kernel-level link-free file access.
 

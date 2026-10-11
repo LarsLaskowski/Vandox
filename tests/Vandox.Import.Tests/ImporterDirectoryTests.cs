@@ -1,4 +1,5 @@
 using Vandox.Core.Model;
+using Vandox.Storage;
 
 namespace Vandox.Import.Tests;
 
@@ -329,6 +330,128 @@ public class ImporterDirectoryTests
         await Assert.ThrowsExactlyAsync<ArgumentException>(() => harness.RunAsync(TestContext.CancellationToken, null, options => options.BatchRecords = 20001), "huge batch");
         await Assert.ThrowsExactlyAsync<ArgumentException>(() => harness.RunAsync(TestContext.CancellationToken, null, options => options.BatchBytes = -1), "negative bytes");
         await Assert.ThrowsExactlyAsync<ArgumentException>(() => harness.RunAsync(TestContext.CancellationToken, null, options => options.ProgressBytes = -1), "negative progress");
+    }
+
+    /// <summary>
+    /// Two files of one run, the shorter one first in input order, are imported once each: the longer one is continued from the shorter one.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task ImporterContinuesALaterFileFromAnEarlierFileOfTheSameRun()
+    {
+        // Arrange
+        using var harness = new ImportHarness();
+
+        harness.Write("2026-09/syslog", TestInputs.Log(3));
+        harness.Write("2026-10/syslog", TestInputs.Log(5));
+
+        // Act
+        var run = await harness.RunAsync(TestContext.CancellationToken);
+
+        // Assert
+        Assert.AreEqual(ImportOutcome.Imported, run.Summary.Files[0].Outcome, "the earlier file is imported");
+        Assert.AreEqual(ImportOutcome.Continued, run.Summary.Files[1].Outcome, "the later file is continued");
+        Assert.AreEqual("2026-09/syslog", run.Summary.Files[1].ContinuedFrom, "from the earlier file");
+        Assert.AreEqual(3L, run.Summary.Files[1].ContinuedAfter, "after its lines");
+        Assert.AreEqual(TestInputs.Messages(1, 5), string.Join('|', harness.Store.Messages), "every line is stored once");
+    }
+
+    /// <summary>
+    /// With the longer file first in input order both files are imported as a whole, which is the documented limit.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task ImporterImportsBothFilesAsAWholeWhenTheLongerFileComesFirst()
+    {
+        // Arrange
+        using var harness = new ImportHarness();
+
+        harness.Write("2026-09/syslog", TestInputs.Log(5));
+        harness.Write("2026-10/syslog", TestInputs.Log(3));
+
+        // Act
+        var run = await harness.RunAsync(TestContext.CancellationToken);
+
+        // Assert
+        Assert.AreEqual(2, run.Summary.Count(ImportOutcome.Imported), "both files are imported as a whole");
+        Assert.HasCount(8, harness.Store.Records, "the shared lines are stored twice");
+    }
+
+    /// <summary>
+    /// A later file is not continued from an earlier file of the run that failed in pass 2.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task ImporterDoesNotContinueFromAnEarlierFileThatFailed()
+    {
+        // Arrange
+        using var harness = new ImportHarness();
+
+        harness.Write("2026-09/syslog", TestInputs.Log(3));
+        harness.Write("2026-10/syslog", TestInputs.Log(5));
+        harness.Store.WriteFailure = new ImportConflictException("store: import state changed");
+        harness.Store.FailOnce = true;
+
+        // Act
+        var run = await harness.RunAsync(TestContext.CancellationToken);
+
+        // Assert
+        Assert.AreEqual(ImportOutcome.Failed, run.Summary.Files[0].Outcome, "the earlier file fails");
+        Assert.AreEqual(ImportOutcome.Imported, run.Summary.Files[1].Outcome, "the later file is imported as a whole");
+        Assert.AreEqual(string.Empty, run.Summary.Files[1].ContinuedFrom, "it continues nothing");
+        Assert.AreEqual(5L, run.Summary.Files[1].Records, "all its lines are stored");
+        Assert.HasCount(1, harness.Store.Prefixes[1], "the earlier file was offered as a prefix when the later file began");
+    }
+
+    /// <summary>
+    /// A file that grows with every file of a run never gets more than 64 bases, and nothing fails.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task ImporterPassesAtMost64BasesForSeventyGrowingFiles()
+    {
+        // Arrange
+        using var harness = new ImportHarness();
+
+        foreach (var number in Enumerable.Range(1, 70))
+        {
+            harness.Write($"f{number:D2}", TestInputs.Log(number));
+        }
+
+        // Act
+        var run = await harness.RunAsync(TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsNull(run.Error, "no error");
+        Assert.AreEqual(0, run.Summary.Count(ImportOutcome.Failed), "no file fails");
+        Assert.AreEqual(1, run.Summary.Count(ImportOutcome.Imported), "the first file is imported as a whole");
+        Assert.AreEqual(69, run.Summary.Count(ImportOutcome.Continued), "every other file is continued");
+        Assert.AreEqual(70L, run.Summary.Records, "every line is stored once");
+        Assert.AreEqual(StorageLimits.MaxImportBases, harness.Store.Prefixes.Max(prefixes => prefixes.Count), "never more than 64 prefixes, and 64 for the files with more candidates");
+        Assert.AreEqual("f69", run.Summary.Files[^1].ContinuedFrom, "the last file continues the longest base");
+    }
+
+    /// <summary>
+    /// Files whose parser is not line-framed are imported as a whole in a run, without lookups or prefixes.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task ImporterImportsBothFilesAsAWholeInOneRunWhenTheParserIsNotLineFramed()
+    {
+        // Arrange
+        using var harness = new ImportHarness(false);
+
+        harness.Write("2026-09/syslog", TestInputs.Log(3));
+        harness.Write("2026-10/syslog", TestInputs.Log(5));
+
+        // Act
+        var run = await harness.RunAsync(TestContext.CancellationToken);
+
+        // Assert
+        Assert.AreEqual(2, run.Summary.Count(ImportOutcome.Imported), "both files are imported as a whole");
+        Assert.AreEqual(0, harness.Store.FindCalls, "the store is not asked for bases");
+        Assert.IsTrue(harness.Store.Prefixes.All(prefixes => prefixes.Count == 0), "no prefix is passed to the store");
+        Assert.HasCount(8, harness.Store.Records, "every line of both files is stored");
     }
 
     #endregion // Methods

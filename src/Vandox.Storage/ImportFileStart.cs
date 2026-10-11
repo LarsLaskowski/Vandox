@@ -42,5 +42,15 @@ public sealed class ImportFileStart
     /// </summary>
     public DateTimeOffset StartedAt { get; set; }
 
+    /// <summary>
+    /// Gets or sets the head key of the content; 32 bytes.
+    /// </summary>
+    public byte[] HeadSha256 { get; set; } = new byte[32];
+
+    /// <summary>
+    /// Gets or sets the bases the content starts with, at most <see cref="StorageLimits.MaxImportBases"/>.
+    /// </summary>
+    public IReadOnlyList<ImportPrefix> Prefixes { get; set; } = [];
+
     #endregion // Properties
 }

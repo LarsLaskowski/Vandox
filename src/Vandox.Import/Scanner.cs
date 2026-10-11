@@ -3,6 +3,7 @@ using System.IO.Compression;
 
 using Vandox.Core.IO;
 using Vandox.Core.LogParsing;
+using Vandox.Storage;
 
 namespace Vandox.Import;
 
@@ -29,6 +30,7 @@ internal sealed class Scanner
     private readonly SourceRoot _source;
     private readonly ImportOptions _options;
     private readonly long _progressBytes;
+    private readonly Dictionary<string, List<ImportBase>> _runBases = [];
     private int _entries;
 
     #endregion // Fields
@@ -67,6 +69,7 @@ internal sealed class Scanner
     /// <param name="cancellationToken">Cancels the walk</param>
     /// <returns>A task that completes when the walk is done</returns>
     /// <exception cref="TooManyFilesException">The input holds more than <see cref="ImportLimits.MaxFiles"/> entries</exception>
+    /// <exception cref="ImportException">The import state could not be read</exception>
     internal async Task ScanAsync(CancellationToken cancellationToken)
     {
         if (_source.File.Length > 0)
@@ -110,6 +113,132 @@ internal sealed class Scanner
         while (read > 0 && total < buffer.Length);
 
         return buffer[..total];
+    }
+
+    /// <summary>
+    /// Returns the key of the run's base table.
+    /// </summary>
+    /// <param name="key">The head key</param>
+    /// <param name="sourceType">The parser type</param>
+    /// <returns>The key</returns>
+    private static string RunKey(byte[] key, string sourceType)
+    {
+        return $"{Convert.ToHexString(key)}/{sourceType}";
+    }
+
+    /// <summary>
+    /// Removes duplicates by hash and keeps the largest <see cref="StorageLimits.MaxImportBases"/>, largest first.
+    /// </summary>
+    /// <param name="bases">The bases</param>
+    /// <returns>The kept bases</returns>
+    private static List<ImportBase> Largest(IEnumerable<ImportBase> bases)
+    {
+        return [.. bases.GroupBy(item => Convert.ToHexString(item.Sha256)).Select(group => group.First()).OrderByDescending(item => item.Size).Take(StorageLimits.MaxImportBases)];
+    }
+
+    /// <summary>
+    /// Reads a tar archive and examines its entries; an error of the archive itself is listed as the archive's failure.
+    /// </summary>
+    /// <param name="item">The archive</param>
+    /// <param name="content">The decompressed content of the archive</param>
+    /// <param name="cancellationToken">Cancels the scan</param>
+    /// <returns>A task that completes when the archive is done</returns>
+    private async Task ArchiveAsync(ScanItem item, Stream content, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await using var reader = new TarReader(new TarHeaderGuardStream(content), leaveOpen: true);
+            var index = 0;
+
+            while (await reader.GetNextEntryAsync(false, cancellationToken).ConfigureAwait(false) is { } entry)
+            {
+                await TarEntryAsync(item, index, entry, cancellationToken).ConfigureAwait(false);
+                index++;
+            }
+        }
+        catch (Exception exception) when (IsFailure(exception))
+        {
+            List(new ScanItem
+                 {
+                     Display = item.Display,
+                     Name = item.Name,
+                     Modified = item.Modified,
+                     Location = new ImportLocation
+                                {
+                                    FsPath = item.Location.FsPath
+                                }
+                 },
+                 ImportOutcome.Failed,
+                 ImportReasons.Of(exception));
+        }
+    }
+
+    /// <summary>
+    /// Examines one header of an archive.
+    /// </summary>
+    /// <param name="archive">The archive</param>
+    /// <param name="index">The ordinal of the entry among the archive's headers</param>
+    /// <param name="entry">The entry</param>
+    /// <param name="cancellationToken">Cancels the scan</param>
+    /// <returns>A task that completes when the entry is done</returns>
+    private async Task TarEntryAsync(ScanItem archive, int index, TarEntry entry, CancellationToken cancellationToken)
+    {
+        if (entry.EntryType == TarEntryType.GlobalExtendedAttributes)
+        {
+            return;
+        }
+
+        Count();
+
+        if (entry.EntryType == TarEntryType.Directory)
+        {
+            return;
+        }
+
+        var name = PathText.CleanName(entry.Name);
+        var item = new ScanItem
+                   {
+                       Display = $"{archive.Display}:{PathText.Cut(name)}",
+                       Name = name,
+                       Modified = entry.ModificationTime.ToUniversalTime(),
+                       Location = new ImportLocation
+                                  {
+                                      FsPath = archive.Location.FsPath,
+                                      Entry = index,
+                                      ArchiveGzip = archive.Location.Gzip
+                                  },
+                       InArchive = true
+                   };
+
+        if (PathText.IsTooLong(name))
+        {
+            List(item, ImportOutcome.Failed, ReasonTooLong);
+        }
+        else if (entry.EntryType is TarEntryType.RegularFile or TarEntryType.V7RegularFile)
+        {
+            item.Tracker = new ErrorTrackingStream(entry.DataStream ?? Stream.Null);
+
+            try
+            {
+                await StreamAsync(item, item.Tracker, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (IsFailure(exception))
+            {
+                Fail(item, exception);
+            }
+        }
+        else if (entry.EntryType == TarEntryType.SymbolicLink)
+        {
+            List(item, ImportOutcome.Unrecognized, ReasonSymlink);
+        }
+        else if (entry.EntryType == TarEntryType.HardLink)
+        {
+            List(item, ImportOutcome.Unrecognized, ReasonHardLink);
+        }
+        else
+        {
+            List(item, ImportOutcome.Unrecognized, ReasonNotRegular);
+        }
     }
 
     /// <summary>
@@ -420,6 +549,9 @@ internal sealed class Scanner
             return;
         }
 
+        var key = ContentHead.Key(head);
+        var bases = parser.LineFramed ? await CollectBasesAsync(key, parser.Type, cancellationToken).ConfigureAwait(false) : [];
+
         await using var hashing = new HashingStream(content,
                                                     _progressBytes,
                                                     mark => Report(new ImportProgress
@@ -427,9 +559,13 @@ internal sealed class Scanner
                                                                        Event = ProgressEvent.ScanProgress,
                                                                        Path = item.Display,
                                                                        Bytes = mark
-                                                                   }));
+                                                                   }),
+                                                    bases);
 
         await hashing.CopyToAsync(Stream.Null, cancellationToken).ConfigureAwait(false);
+
+        var size = hashing.BytesRead;
+        var sum = hashing.GetHash();
 
         Found.Add(new FoundFile
                   {
@@ -441,114 +577,70 @@ internal sealed class Scanner
                       File = file,
                       Location = item.Location,
                       Parser = parser,
-                      Size = hashing.BytesRead,
-                      Sum = hashing.GetHash()
+                      Size = size,
+                      Sum = sum,
+                      Head = key,
+                      Prefixes = [.. hashing.Matches.Where(match => match.Size < size)]
                   });
+
+        if (parser.LineFramed)
+        {
+            AddRunBase(key,
+                       parser.Type,
+                       new ImportBase
+                       {
+                           Sha256 = sum,
+                           Size = size
+                       });
+        }
     }
 
     /// <summary>
-    /// Reads a tar archive and examines its entries; an error of the archive itself is listed as the archive's failure.
+    /// Collects the contents a file with a head key may continue: the complete ones of the store and the earlier files of this
+    /// run, the largest <see cref="StorageLimits.MaxImportBases"/> of them.
     /// </summary>
-    /// <param name="item">The archive</param>
-    /// <param name="content">The decompressed content of the archive</param>
-    /// <param name="cancellationToken">Cancels the scan</param>
-    /// <returns>A task that completes when the archive is done</returns>
-    private async Task ArchiveAsync(ScanItem item, Stream content, CancellationToken cancellationToken)
+    /// <param name="key">The head key</param>
+    /// <param name="sourceType">The parser type</param>
+    /// <param name="cancellationToken">Cancels the lookup</param>
+    /// <returns>A task that returns the bases</returns>
+    /// <exception cref="ImportException">The store failed</exception>
+    private async Task<List<ImportBase>> CollectBasesAsync(byte[] key, string sourceType, CancellationToken cancellationToken)
     {
+        IReadOnlyList<ImportBase> stored;
+
         try
         {
-            await using var reader = new TarReader(new TarHeaderGuardStream(content), leaveOpen: true);
-            var index = 0;
-
-            while (await reader.GetNextEntryAsync(false, cancellationToken).ConfigureAwait(false) is { } entry)
-            {
-                await TarEntryAsync(item, index, entry, cancellationToken).ConfigureAwait(false);
-                index++;
-            }
+            stored = await _options.Store!.FindImportBasesAsync(key, sourceType, cancellationToken).ConfigureAwait(false);
         }
-        catch (Exception exception) when (IsFailure(exception))
+        catch (StoreException exception)
         {
-            List(new ScanItem
-                 {
-                     Display = item.Display,
-                     Name = item.Name,
-                     Modified = item.Modified,
-                     Location = new ImportLocation
-                                {
-                                    FsPath = item.Location.FsPath
-                                }
-                 },
-                 ImportOutcome.Failed,
-                 ImportReasons.Of(exception));
+            throw new ImportException("importer: reading the import state failed", exception);
         }
+
+        var merged = new List<ImportBase>(stored);
+
+        if (_runBases.TryGetValue(RunKey(key, sourceType), out var local))
+        {
+            merged.AddRange(local);
+        }
+
+        return Largest(merged);
     }
 
     /// <summary>
-    /// Examines one header of an archive.
+    /// Remembers a file of this run as a base for later files.
     /// </summary>
-    /// <param name="archive">The archive</param>
-    /// <param name="index">The ordinal of the entry among the archive's headers</param>
-    /// <param name="entry">The entry</param>
-    /// <param name="cancellationToken">Cancels the scan</param>
-    /// <returns>A task that completes when the entry is done</returns>
-    private async Task TarEntryAsync(ScanItem archive, int index, TarEntry entry, CancellationToken cancellationToken)
+    /// <param name="key">The head key</param>
+    /// <param name="sourceType">The parser type</param>
+    /// <param name="added">The content</param>
+    private void AddRunBase(byte[] key, string sourceType, ImportBase added)
     {
-        if (entry.EntryType == TarEntryType.GlobalExtendedAttributes)
-        {
-            return;
-        }
+        var name = RunKey(key, sourceType);
 
-        Count();
+        var local = _runBases.TryGetValue(name, out var existing) ? existing : [];
 
-        if (entry.EntryType == TarEntryType.Directory)
-        {
-            return;
-        }
-
-        var name = PathText.CleanName(entry.Name);
-        var item = new ScanItem
-                   {
-                       Display = $"{archive.Display}:{PathText.Cut(name)}",
-                       Name = name,
-                       Modified = entry.ModificationTime.ToUniversalTime(),
-                       Location = new ImportLocation
-                                  {
-                                      FsPath = archive.Location.FsPath,
-                                      Entry = index,
-                                      ArchiveGzip = archive.Location.Gzip
-                                  },
-                       InArchive = true
-                   };
-
-        if (PathText.IsTooLong(name))
-        {
-            List(item, ImportOutcome.Failed, ReasonTooLong);
-        }
-        else if (entry.EntryType is TarEntryType.RegularFile or TarEntryType.V7RegularFile)
-        {
-            item.Tracker = new ErrorTrackingStream(entry.DataStream ?? Stream.Null);
-
-            try
-            {
-                await StreamAsync(item, item.Tracker, cancellationToken).ConfigureAwait(false);
-            }
-            catch (Exception exception) when (IsFailure(exception))
-            {
-                Fail(item, exception);
-            }
-        }
-        else if (entry.EntryType == TarEntryType.SymbolicLink)
-        {
-            List(item, ImportOutcome.Unrecognized, ReasonSymlink);
-        }
-        else if (entry.EntryType == TarEntryType.HardLink)
-        {
-            List(item, ImportOutcome.Unrecognized, ReasonHardLink);
-        }
-        else
-        {
-            List(item, ImportOutcome.Unrecognized, ReasonNotRegular);
-        }
+        local.Add(added);
+        _runBases[name] = Largest(local);
     }
 
     #endregion // Methods

@@ -15,6 +15,9 @@ internal sealed class ContentStream : FilterStream
     private readonly Action<long> _report;
     private long _next = ImportLimits.ProgressLines;
     private long _newlines;
+    private long _counted;
+    private long _skippedNewlines;
+    private bool _skipping;
     private byte _last;
 
     #endregion // Fields
@@ -46,7 +49,7 @@ internal sealed class ContentStream : FilterStream
     /// <summary>
     /// Gets the number of lines read: the line feeds plus one for a last line without one.
     /// </summary>
-    internal long Lines => BytesRead > 0 && _last != (byte)'\n' ? _newlines + 1 : _newlines;
+    internal long Lines => _counted > 0 && _last != (byte)'\n' ? _newlines + 1 : _newlines;
 
     #endregion // Properties
 
@@ -61,6 +64,42 @@ internal sealed class ContentStream : FilterStream
         return _hash.GetHashAndReset();
     }
 
+    /// <summary>
+    /// Reads and hashes bytes without counting lines or reporting progress.
+    /// </summary>
+    /// <param name="count">The number of bytes to skip</param>
+    /// <param name="cancellationToken">Cancels the read</param>
+    /// <returns>A task that returns the number of line feeds in the bytes skipped</returns>
+    internal async Task<long> SkipAsync(long count, CancellationToken cancellationToken)
+    {
+        var buffer = new byte[(int)Math.Min(count, 81920)];
+        var remaining = count;
+
+        _skipping = true;
+        _skippedNewlines = 0;
+
+        try
+        {
+            while (remaining > 0)
+            {
+                var read = await ReadAsync(buffer.AsMemory(0, (int)Math.Min(remaining, buffer.Length)), cancellationToken).ConfigureAwait(false);
+
+                if (read == 0)
+                {
+                    break;
+                }
+
+                remaining -= read;
+            }
+        }
+        finally
+        {
+            _skipping = false;
+        }
+
+        return _skippedNewlines;
+    }
+
     #endregion // Methods
 
     #region FilterStream
@@ -70,6 +109,15 @@ internal sealed class ContentStream : FilterStream
     {
         _hash.AppendData(data);
         BytesRead += data.Length;
+
+        if (_skipping)
+        {
+            _skippedNewlines += data.Count((byte)'\n');
+
+            return;
+        }
+
+        _counted += data.Length;
         _newlines += data.Count((byte)'\n');
         _last = data[^1];
 

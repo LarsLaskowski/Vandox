@@ -23,6 +23,12 @@ public interface ILogParser
     /// </summary>
     string Type { get; }
 
+    /// <summary>
+    /// Gets a value indicating whether the format is framed by lines only: every byte after a line feed starts a new line and is
+    /// never the rest of a field begun before it, so the importer may start the parse at the beginning of any line of a content.
+    /// </summary>
+    bool LineFramed { get; }
+
     #endregion // Properties
 
     #region Methods

@@ -93,6 +93,29 @@ internal sealed class ImportPass
     }
 
     /// <summary>
+    /// Runs the parser of a file on the content, positioned at the continuation point if there is one.
+    /// </summary>
+    /// <param name="item">The file</param>
+    /// <param name="state">The stored import state; its file name and modification time are the parser's</param>
+    /// <param name="counted">The content</param>
+    /// <param name="emitter">The emitter</param>
+    /// <param name="cancellationToken">Cancels the parse</param>
+    /// <returns>A task that returns the exception of the parser, if any</returns>
+    private static async Task<Exception?> ParseAsync(FoundFile item, ImportFile state, ContentStream counted, RecordEmitter emitter, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await item.Parser!.ParseAsync(new LogFile(state.FileName, state.ModTime), counted, emitter, cancellationToken).ConfigureAwait(false);
+
+            return null;
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException || cancellationToken.IsCancellationRequested)
+        {
+            return exception;
+        }
+    }
+
+    /// <summary>
     /// Stores what the emitter still holds: after a parser error what was parsed before it, otherwise, once the whole hashed
     /// content was read again unchanged, the last batch that completes the file.
     /// </summary>
@@ -315,7 +338,9 @@ internal sealed class ImportPass
                                                                FileName = item.File.Name,
                                                                ModTime = item.File.ModTime,
                                                                SourceType = item.Parser!.Type,
-                                                               StartedAt = _options.Clock!.GetUtcNow()
+                                                               StartedAt = _options.Clock!.GetUtcNow(),
+                                                               HeadSha256 = item.Head,
+                                                               Prefixes = item.Prefixes
                                                            },
                                                            cancellationToken)
                                         .ConfigureAwait(false);
@@ -342,7 +367,14 @@ internal sealed class ImportPass
             return null;
         }
 
-        return state;
+        if (item.Parser.LineFramed || state.Offset == 0)
+        {
+            return state;
+        }
+
+        FailFile(item, "the import state continues the content, which its parser does not allow");
+
+        return null;
     }
 
     /// <summary>
@@ -406,17 +438,21 @@ internal sealed class ImportPass
                                                                   Lines = lines,
                                                                   Records = result.Records
                                                               }));
-        var emitter = new RecordEmitter(_options, item, counted, state);
+        long skipped = 0;
         Exception? parseError = null;
 
         try
         {
-            await item.Parser!.ParseAsync(new LogFile(state.FileName, state.ModTime), counted, emitter, cancellationToken).ConfigureAwait(false);
+            skipped = state.Offset > 0 ? await counted.SkipAsync(state.Offset, cancellationToken).ConfigureAwait(false) : 0;
         }
         catch (Exception exception) when (exception is not OperationCanceledException || cancellationToken.IsCancellationRequested)
         {
             parseError = exception;
         }
+
+        var emitter = new RecordEmitter(_options, item, counted, state, skipped);
+
+        parseError ??= await ParseAsync(item, state, counted, emitter, cancellationToken).ConfigureAwait(false);
 
         var reason = await JudgeAsync(emitter, parseError, cancellationToken).ConfigureAwait(false);
 
@@ -429,7 +465,17 @@ internal sealed class ImportPass
             return;
         }
 
-        result.Outcome = ImportOutcome.Imported;
+        if (state.Offset > 0)
+        {
+            result.ContinuedFrom = state.ContinuedFrom;
+            result.ContinuedAfter = skipped;
+            result.Outcome = ImportOutcome.Continued;
+        }
+        else
+        {
+            result.Outcome = ImportOutcome.Imported;
+        }
+
         Finished(item);
     }
 

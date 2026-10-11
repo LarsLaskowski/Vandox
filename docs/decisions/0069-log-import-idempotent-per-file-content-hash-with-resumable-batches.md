@@ -1,9 +1,9 @@
-# 0069: The log import is idempotent per file content: SHA-256 of the decompressed content, two passes, batches that resume by count
+# 0069: The log import is idempotent per file content: SHA-256 of the decompressed content, two passes, batches that resume by count, a grown file continued after its imported start
 
 - **Status:** Accepted
-- **Date:** 2026-10-06
+- **Date:** 2026-10-11
 - **Area:** Log import
-- **Source:** Issue #15
+- **Source:** Issue #15, issue #131
 - **Supersedes:** —
 
 ## Context
@@ -28,6 +28,14 @@ imported. Further forces:
   is known whether the file was imported already. Input from a `.tar.gz` cannot be re-read without reading
   the archive again.
 - Two imports may run at the same time (an operator starting the command twice).
+- A log grows between two copies of `/var/log`: `syslog` imported once comes back later with the same bytes at its
+  start and more lines after them, as `syslog` or rotated as `syslog.1` (issue #131). Its hash differs, so without a
+  further rule it is imported as a whole and the earlier lines are stored twice. The copy may end in the middle of a
+  line (a write caught by the copy).
+- The parsers group lines (MariaDB lines of the journal and syslog per host, program and pid; kernel reports; MariaDB
+  error log entries with their continuation lines) and emit a grouped entry only when it ends, while lines of other
+  programs are emitted at once (0086, 0088). So the first *n* records of a longer content are not the *n* records of
+  its start parsed alone.
 
 ## Options considered
 
@@ -71,6 +79,46 @@ For a file that changes between the passes (a log still being written):
 - B. **Read pass 2 only up to the size hashed in pass 1** — appended bytes are ignored and left to a later
   import; only a change or shrinking of the hashed part fails.
 
+For a file that grew since its import (issue #131):
+
+- G1. **Import it as a whole** (the state before #131) — simplest; stores the earlier lines twice.
+- G2. **Parse the whole content and drop as many records as the earlier import stored**, like a resume — no new
+  parser rule; but wrong with grouping parsers: an entry open at the end of the shorter content is emitted after
+  later lines of other programs in the longer one, so dropping by count drops new lines and stores an old entry
+  again.
+- G3. **Parse only the part after the earlier content, on its own, starting at the beginning of the line in which
+  the earlier content ends** — no record is stored twice except a line the earlier copy cut, which is stored again
+  complete; an entry that spans the boundary is split: the part after it becomes lines of their own or, where a
+  parser cannot place a line without its entry, a skipped line that the summary reports.
+
+How the earlier content is found while the longer one is hashed in pass 1 (the prefix hash is known only at the
+earlier content's size, and that size must be known before the read passes it):
+
+- P1. **Take a snapshot of the hash at the size of every completely imported content** — exact; but the number of
+  sizes grows with every import, for every file.
+- P2. **Look up candidates by a key from the head of the content** (the hash of the first line, or of the first
+  4,096 bytes when they hold no line feed), stored with every content, and snapshot the hash only at their sizes,
+  at most 64 per file — bounded; a content imported before the key existed is never found.
+- P3. **Store prefix hashes at fixed intervals** — finds a prefix only at an interval boundary, so most growths are
+  missed.
+
+Where the parse of the new part may start (a parser started in the middle of a content reads from a state a
+whole-file parse may never have had; verified bytes are not enough):
+
+- F1. **Continue only formats framed by lines only** (a parser property, `ILogParser.LineFramed`): syslog and the
+  MariaDB error log, where every byte after a line feed starts a new line, so the new part is split into the same
+  lines as in a whole-file parse. The journal export is not: a binary field (`NAME`, an 8-byte length, raw bytes) may
+  hold line feeds, so a line feed in the middle of a content can lie inside a payload, and a parser started after it
+  would read text a local user put into a `MESSAGE` as entries with trusted fields. A grown journal export is
+  imported as a whole.
+- F2. **For the journal, start after the last complete entry as the length-aware reader frames it** — keeps the
+  journal continuable; but the importer would need parser-specific framing state from pass 1, and a content copied
+  while written ends in a cut entry, exactly the ambiguous region. A raw search for an empty line is not enough.
+
+The earlier content can also be a file of the same run, earlier in input order (two copies of `/var/log` in one
+input). And the older copy may come after the newer one (in a later run or later in the input); recognizing that a
+content is the start of one imported before would need prefix hashes of every stored content at arbitrary sizes.
+
 ## Decision
 
 Options 2, 5, c, γ and B (α was rejected because it mixes parses within a file; β because it can leave a content
@@ -78,16 +126,41 @@ that can never be completed). A file is identified by the SHA-256 of its decompr
 every recognized file twice, hashing first and importing second; a file is written in bounded batches, and the store
 counts the records per file in the same transaction as each batch, as a compare-and-set, so an interrupted import
 resumes and two concurrent imports cannot store a file twice. A resumed content is parsed with the file name and
-modification time of its first import, and the second pass reads only up to the size hashed in the first. The
-rules and their limits are in [Log import](../areas/log-import.md), *Repeatable import*; the table that tracks
-the files is part of schema version 3 (0077).
+modification time of its first import, and the second pass reads only up to the size hashed in the first. A file
+whose content starts with a completely imported content of the same source type (an earlier run, or an earlier file
+of the same run) is continued (G3, P2) when its parser is framed by lines only (F1; F2 was rejected for its
+complexity and its weak point at a cut entry): only the part from the beginning of the line in which the longest such
+content ends is parsed and stored, the whole content is still hashed in both passes, and the continuation point is
+stored with the content's state, so a resume uses the same one. The new part is parsed with the file name and
+modification time of the continued content's own first import (γ applied to that content), not those of the earlier
+content: the year of its year-less times is anchored on the file it comes from. The rules and their limits are in
+[Log import](../areas/log-import.md), *Repeatable import*; the table that tracks the files is part of schema
+version 3 (0077), the head key and the continuation point of version 6 ([Storage](../areas/storage.md)).
 
 ## Consequences
 
 - Re-importing a directory or archive stores nothing new, and an interrupted import continues where it stopped.
 - Every recognized file is read and decompressed twice. For a forensic, one-off import this is accepted.
-- **A file that grew since its import is imported again as a whole** (another hash), storing the overlapping
-  lines twice. Recognizing a known prefix is split into a follow-up issue.
+- A file that grew since its import stores only its new lines; the summary lists it as continued, naming the
+  earlier import and the line after which it continued. Every recognized file costs one more indexed query in pass 1
+  and up to 64 hash snapshots.
+- Only the newer-after-older order is recognized. An older copy imported after a newer one (in a later run, or later
+  in the same input) is imported as a whole, storing its lines twice; so are contents imported before schema
+  version 6 (they have no head key) and an earlier content that ends without any line feed. A follow-up issue covers
+  the older-after-newer order.
+- A journal export that grew is imported as a whole, its earlier entries stored again (F1). Every parser, including
+  one a hook supplies, must declare whether it is framed by lines only; declaring it for a format with
+  length-framed fields would let input be read as forged records, and the second pass refuses a stored continuation
+  point for a parser that is not.
+- At the continuation point a grouped entry is split: a MariaDB entry of the error log loses the continuation lines
+  after the point (reported as skipped lines "line before the first entry"), and a MariaDB entry or kernel report of
+  syslog is split into the stored entry and lines of their own; the summary counts the lines skipped
+  before the first record of the new part with the continued file. A line the earlier copy cut is stored again,
+  complete — the one case in which a line has two records (the cut one and the complete one); skipping it would lose
+  its rest, and the cut record cannot be replaced because records do not reference their import file.
+- A content whose records are removed later (retention, once it exists) keeps its complete state: re-importing it
+  stores nothing, and a longer content is continued after it, so the removed part is never restored. This is the
+  same as for re-importing the unchanged content.
 - A file that changes while it is imported is detected only when the second pass has read the whole hashed size,
   so the records written before that stay counted under the original hash and a later import of the original
   content resumes after that count. Detecting the change earlier would need a third pass or a temporary copy

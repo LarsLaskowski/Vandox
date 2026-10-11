@@ -46,6 +46,9 @@ public sealed class MariaDbErrorLogParser : ILogParser
     public string Type => ParserType;
 
     /// <inheritdoc />
+    public bool LineFramed => true;
+
+    /// <inheritdoc />
     public Confidence Detect(LogFile file, ReadOnlySpan<byte> head)
     {
         // The first-line rule relies on the syslog grammar never accepting a line starting "DDDD-DD-DD " or "DDDDDD " (SyslogLine.TryParse), so the two detectors cannot overlap.
