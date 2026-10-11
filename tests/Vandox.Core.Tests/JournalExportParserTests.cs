@@ -1132,6 +1132,95 @@ public class JournalExportParserTests
     }
 
     /// <summary>
+    /// The journal parser classifies Postfix and Dovecot entries like the syslog parser does.
+    /// </summary>
+    /// <param name="identifier">The <c>SYSLOG_IDENTIFIER</c></param>
+    /// <param name="priority">The <c>PRIORITY</c></param>
+    /// <param name="message">The <c>MESSAGE</c></param>
+    /// <param name="expectedPriority">The expected priority</param>
+    /// <param name="expectedEvent">The expected event</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [DataRow("postfix/smtpd", 6, "fatal: the Postfix mail system is not running", 2, MailEvents.PostfixFatal)]
+    [DataRow("dovecot", 2, "auth-worker(2290): Error: mysql(localhost): Connect failed to database (mail): Can't connect to MySQL server on 'db' (111) - waiting for 1 seconds before retry", 3, MailEvents.DovecotDatabaseUnavailable)]
+    [DataRow("dovecot", 6, "imap-login: Login: user=<a>", 6, "")]
+    [DataRow("dovecot", 3, "master: Info: x", 3, "")]
+    [DataRow("postfix/smtpd", 6, "warning: x", 4, "")]
+    [DataRow("spamd", 6, "fatal: x", 6, "")]
+    public async Task JournalExportParserParseAsyncClassifiesMailEntries(string identifier, int priority, string message, int expectedPriority, string expectedEvent)
+    {
+        // Arrange
+        var content = new JournalExportBuilder().Entry("1790000000000000", MailLogFixture.Host, identifier, 2210, priority, message).ToArray();
+
+        // Act
+        var emitter = await RecordingEmitter.ParseAsync(new JournalExportParser(), _file, content, TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsEmpty(emitter.Skips, "nothing is skipped");
+        Assert.HasCount(1, emitter.Records, "one record");
+
+        var line = RecordingEmitter.Line(emitter.Records[0]);
+
+        Assert.AreEqual((byte)expectedPriority, line.Priority, "priority");
+        Assert.AreEqual(expectedEvent, line.Event, "event");
+        Assert.AreEqual(identifier, line.Program, "program");
+        Assert.AreEqual(message, line.Message, "message");
+        Assert.AreEqual(2210, line.Pid, "pid");
+        Assert.AreEqual("journal", emitter.Records[0].Source, "source");
+    }
+
+    /// <summary>
+    /// Every line of the mail log fixture gets the same priority and event from the journal as from the syslog parser; a line without a marker keeps the priority of the journal entry.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task JournalExportParserParseAsyncClassifiesTheLinesOfTheMailLogFixtureLikeTheSyslogParser()
+    {
+        // Arrange
+        var lines = MailLogFixture.Lines();
+        var builder = new JournalExportBuilder();
+        var start = new DateTimeOffset(2026, 10, 9, 3, 12, 1, TimeSpan.Zero);
+        var syslogFile = new LogFile("mail.log", new DateTimeOffset(2026, 10, 11, 0, 0, 0, TimeSpan.Zero));
+
+        for (var index = 0; index < lines.Length; index++)
+        {
+            var (program, pid, message) = MailLogFixture.Split(lines[index]);
+
+            builder.Entry(MariaDbSamples.Micros(start.AddSeconds(index)), MailLogFixture.Host, program, pid, 6, message);
+        }
+
+        // Act
+        var journal = await RecordingEmitter.ParseAsync(new JournalExportParser(), _file, builder.ToArray(), TestContext.CancellationToken);
+        var syslog = await RecordingEmitter.ParseAsync(new SyslogParser(DateTimeZone.Utc), syslogFile, await File.ReadAllBytesAsync(RepositoryFiles.Path(MailLogFixture.RelativePath), TestContext.CancellationToken), TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsEmpty(journal.Skips, "nothing is skipped");
+        Assert.HasCount(20, journal.Records, "one record per line");
+        Assert.HasCount(20, syslog.Records, "one syslog record per line");
+
+        for (var index = 0; index < lines.Length; index++)
+        {
+            var (priority, eventName) = MailLogFixture.Expected[index];
+
+            var fromJournal = RecordingEmitter.Line(journal.Records[index]);
+            var fromSyslog = RecordingEmitter.Line(syslog.Records[index]);
+            var context = $"line {index + 1}";
+
+            Assert.AreEqual((byte)(priority < 0 ? 6 : priority), fromJournal.Priority, $"priority of {context}");
+            Assert.AreEqual(eventName, fromJournal.Event, $"event of {context}");
+            Assert.AreEqual(fromSyslog.Event, fromJournal.Event, $"event like the syslog parser, {context}");
+            Assert.AreEqual(fromSyslog.Program, fromJournal.Program, $"program like the syslog parser, {context}");
+            Assert.AreEqual(fromSyslog.Pid, fromJournal.Pid, $"pid like the syslog parser, {context}");
+            Assert.AreEqual(fromSyslog.Message, fromJournal.Message, $"message like the syslog parser, {context}");
+
+            if (priority >= 0)
+            {
+                Assert.AreEqual(fromSyslog.Priority, fromJournal.Priority, $"priority like the syslog parser, {context}");
+            }
+        }
+    }
+
+    /// <summary>
     /// Returns a journal export with an open MariaDB entry, a line of sshd written inside it, and more lines of the entry's process.
     /// </summary>
     /// <returns>The bytes</returns>
