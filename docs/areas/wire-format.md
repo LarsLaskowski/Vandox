@@ -105,6 +105,25 @@ one is invalid, and the decoder sets the origin of every decoded record to `agen
 map of name-pattern key to short text, at most 32, keys unique ignoring ASCII case). Counters are named with the suffix `_total` (convention,
 not validated).
 
+#### Metric names
+
+These names, units and labels are used by every producer of these values, the agent's collectors (#31, #32, #33) and the importer's
+legacy monitoring log parser (see [log import](log-import.md), *Legacy monitoring log*), so the same value has the same name whoever
+produced it. Byte values are exact integers in a double (up to 2^53 exactly), counters carry the suffix `_total`.
+
+| Name | Unit | Labels | Value |
+| ---- | ---- | ------ | ----- |
+| `load1`, `load5`, `load15` | — | — | load average over 1, 5 and 15 minutes |
+| `cpu_percent` | `percent` | `mode`: `user`, `system`, `nice`, `idle`, `iowait`, `irq`, `softirq`, `steal` | share of CPU time in the mode (`top`: `us sy ni id wa hi si st`) |
+| `mem_total_bytes`, `mem_free_bytes`, `mem_used_bytes`, `mem_buff_cache_bytes`, `mem_available_bytes` | `bytes` | — | memory as `top` prints it (`avail Mem` for the available memory) |
+| `swap_total_bytes`, `swap_free_bytes`, `swap_used_bytes` | `bytes` | — | swap as `top` prints it |
+| `meminfo_bytes` | `bytes` | `field`: the name in `/proc/meminfo` | a value in `kB`, times 1,024 |
+| `meminfo` | — | `field` | a value without a unit (for example `HugePages_Total`) |
+| `pressure_avg10`, `pressure_avg60`, `pressure_avg300` | `percent` | `resource`: `memory`, `cpu`, `io`; `kind`: `some`, `full` | pressure stall average over 10, 60 and 300 seconds |
+| `pressure_stall_microseconds_total` | `microseconds` | `resource`, `kind` | total stall time |
+| `vmstat_total` | — | `counter`: `pswpin`, `pswpout`, `pgmajfault`, `oom_kill` | the raw counter of `/proc/vmstat` |
+| `vmstat_per_second` | `per_second` | `counter` | (value − previous value) / seconds between two samples; only when the counter did not fall |
+
 ### `process_snapshot`
 
 `complete` (true only if `processes` and `programs` hold every process and program the producer saw; false when
@@ -178,7 +197,7 @@ connection collector #33 and the legacy `lsof -ni` parser #20):
 - a wildcard local address (`*` in `lsof`) becomes `0.0.0.0` for IPv4 and `::` for IPv6 sockets;
 - a port given as a service name (legacy `lsof -ni` without `-P`) is mapped to its number from a built-in
   table, never by a lookup on the host;
-- a socket whose address or port cannot be mapped is left out with a warning and `complete` is set to false;
+- a socket whose address or port cannot be mapped is left out and reported (the importer counts it as a skipped line) and `complete` is set to false;
 - an unconnected socket without a remote endpoint (listening TCP, unconnected UDP) goes to `listeners`, never
   to `connections`.
 

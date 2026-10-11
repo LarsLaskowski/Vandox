@@ -77,7 +77,7 @@ the value.
 | `import.sw_cp_server_error_log` | `/var/log/sw-cp-server/error_log` | Server path of the error log of the Plesk panel web server `sw-cp-server`; recognized by this path only. Not verified against a Plesk server. |
 | `import.nginx_error_log` | `/var/log/nginx/error.log` | Server path of the nginx error log. |
 | `import.apache_error_log` | `/var/log/apache2/error.log` | Server path of the Apache error log (Debian and Ubuntu); on RHEL-family servers (AlmaLinux, Rocky Linux, CentOS) it is `/var/log/httpd/error_log`. |
-| `import.time_zone` | none | IANA time zone of the server the imported logs come from, e.g. `Europe/Berlin` or `UTC`. Required to import traditional syslog files, MariaDB error logs, Dovecot log files and the Plesk panel, nginx and Apache error logs (see *Import logs*). |
+| `import.time_zone` | none | IANA time zone of the server the imported logs come from, e.g. `Europe/Berlin` or `UTC`. Required to import traditional syslog files, MariaDB error logs, Dovecot log files, the Plesk panel, nginx and Apache error logs and the legacy `top`/`lsof` monitoring log (see *Import logs*). |
 
 **Secrets**
 
@@ -282,7 +282,7 @@ Importing is repeatable: a file whose content was imported completely is not imp
 another name or compressed differently (`syslog.1` and the later `syslog.2.gz`). An import that was stopped
 (Ctrl-C, a database error) continues where it stopped when the same content is imported again, and no record
 is stored twice. Stopping or restarting the container kills a running import; nothing committed is lost, and
-the next import resumes. Limits: a syslog, MariaDB error log, Dovecot log or Plesk or web server error log that grew since it was imported (the same log with more lines, as in
+the next import resumes. Limits: a syslog, MariaDB error log, Dovecot log, Plesk or web server error log or legacy monitoring log that grew since it was imported (the same log with more lines, as in
 a newer copy of `/var/log`) is continued after the part imported before (a journal export that grew is imported as a whole), an older copy
 of a log imported after a newer one stores nothing (it is listed as contained), except one that ends inside a
 line, one whose newer copy was imported by an earlier version (before database schema 7), and one whose newer copy is not among the 64 largest
@@ -345,6 +345,17 @@ Supported sources:
   program wrote it. The format of the Plesk panel log, that it is written in the server's local time, that
   `sw-cp-server` writes nginx's format and the default Plesk paths are not verified against a Plesk server; a file in
   another format is kept as raw lines, and the path options name the real files.
+- The legacy monitoring log of the shell script that ran before the agent (source type `legacy-monitor`), recognized by
+  its first line, a snapshot header such as `===== Fri Oct  2 09:15:01 CEST 2026 =====` (the output of `date`), under any
+  name except `syslog` and `kern.log`, including their rotation suffixes (`.N`, `-YYYYMMDD`). Each snapshot holds the output of `top -b -n 1` and, in the newer format, the
+  sections `meminfo`, `pressure`, `vmstat` and `lsof -ni`. A snapshot becomes metrics (load, CPU, memory, swap and, in the
+  newer format, `/proc` values with the vmstat counters and their rates), a process snapshot with the sums per program and,
+  with `lsof`, a connection snapshot. The header time is read in `import.time_zone` with the zone abbreviation of the header
+  (`CEST`, `CET`), which tells the two passes of the repeated hour apart, and the option must be set: without it the file
+  fails with "import.time_zone is not set"; a first header whose abbreviation does not belong to the zone fails the file
+  too. A snapshot that is cut or mixed with other output is skipped with a reason, a single unreadable row is left out
+  and marks the snapshot incomplete, and the last snapshot of a copy is marked incomplete because the log has no end marker.
+  The formats were built from the description of the script, not from the real file.
 
 The file name of a rotated log must stay as the server wrote it (`syslog.1`, `kern.log-20260301`), and the
 modification time of the files matters: the traditional format has no year, and the backend takes it from a
@@ -357,7 +368,7 @@ server the logs come from (for example `Europe/Berlin`); there is no default, be
 time stamp and an import cannot be redone. Without the option a file with year-less lines fails with
 "import.time_zone is not set" (the lines before the first year-less line are stored, and the run exits with 1).
 Set the option and run the import again: the file is completed. RFC 3339 files and journal exports carry their
-offset and need no option. MariaDB error logs, Dovecot's log file and the Plesk panel, nginx and Apache error logs also write local time without a zone and are read in the same zone;
+offset and need no option. MariaDB error logs, Dovecot's log file, the Plesk panel, nginx and Apache error logs and the legacy monitoring log also write local time without a zone and are read in the same zone;
 without the option such a file fails at its first entry with the same reason.
 
 Times outside 1677-09-21 to 2262-04-11 and dates that do not exist (31 November, 29 February in a year that is not a

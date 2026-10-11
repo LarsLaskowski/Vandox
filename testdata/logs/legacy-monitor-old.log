@@ -1,0 +1,84 @@
+===== Fri Oct  2 09:15:01 CEST 2026 =====
+top - 09:15:01 up 10 days,  3:02,  1 user,  load average: 0.52, 0.48, 0.45
+Tasks: 20 total,   1 running, 19 sleeping,   0 stopped,   0 zombie
+%Cpu(s):  3.1 us,   1.2 sy,   0.0 ni,  95.0 id,   0.5 wa,   0.0 hi,   0.2 si,   0.0 st
+KiB Mem : 131926528 total,   1234567 free,  80000000 used,  50692961 buff/cache
+KiB Swap:   8388604 total,  8388604 free,        0 used.  49000000 avail Mem
+
+  PID USER      PR  NI    VIRT    RES    SHR S  %CPU %MEM     TIME+ COMMAND
+  100 root      20   0 1204560 183452  12044 S   0.0   0.1   43:50.22 systemd
+  137 root      20   0   98760   1.2g   4320 S   0.0   0.1   57:20.13 kthreadd
+  174 www-data  20   0 2410000  98.4m  12044 S   1.9   0.1   4:16.26 apache2
+  211 www-data  20   0   98760 101.2m  12044 S   0.0   0.1   37:38.62 apache2
+  248 www-data  20   0 1204560  95.7m   8800 S   3.8   0.1   20:50.97 apache2
+  285 www-data  20   0   98760  99.0m  12044 S   0.0   0.1   27:15.90 apache2
+  322 psaadm    20   0 2410000 412.5m  12044 S   0.0   0.1   5:23.83 sw-engi+
+  359 psaadm    20   0 1204560 301.7m   8800 S   0.0   0.1   12:16.20 sw-cp-s+
+  396 mysql     20   0 1204560   2.3g  12044 S   5.7   0.1   44:58.46 mariadbd
+  433 bind      20   0   98760  76404   4320 S   0.0   0.1   16:20.89 named
+  470 dovecot   20   0  512340  33152   8800 S   0.0   0.1   17:55.39 dovecot
+  507 dovecot   20   0 1204560  18772   4320 S   0.0   0.1   15:13.11 imap-log+
+  544 popuser   20   0   98760  64.1m  12044 S   0.0   0.1   8:54.92 spamd child
+  581 popuser   20   0   98760  61.3m   4320 S   0.0   0.1   46:38.29 spamd child
+  618 root      20   0   98760   3216   4320 S   0.0   0.1   53:37.30 cron
+  655 root      20   0 1204560   9148  12044 S   0.0   0.1   59:55.25 sshd
+  692 root      20   0 1204560  11.5m   4320 S   0.0   0.1   27:32.38 nginx
+  729 nginx     20   0  512340  10.2m   4320 S   0.0   0.1   3:43.34 nginx
+  766 psaadm    20   0 2410000  44.8m   8800 S   0.0   0.1   11:15.24 psa-pc-r+
+  803 www-data  20   0   98760 187.3m   8800 S   1.9   0.1   51:51.50 php-fpm7.4
+===== Fri Oct  2 09:20:01 CEST 2026 =====
+top - 09:20:01 up 10 days,  3:02,  1 user,  load average: 0.61, 0.55, 0.49
+Tasks: 20 total,   1 running, 19 sleeping,   0 stopped,   0 zombie
+%Cpu(s):  5.4 us,   1.8 sy,   0.0 ni,  92.0 id,   0.6 wa,   0.0 hi,   0.2 si,   0.0 st
+KiB Mem : 131926528 total,   1233567 free,  80001000 used,  50692961 buff/cache
+KiB Swap:   8388604 total,  8388604 free,        0 used.  48995000 avail Mem
+
+  PID USER      PR  NI    VIRT    RES    SHR S  %CPU %MEM     TIME+ COMMAND
+  101 root      20   0 2410000 183452  12044 S   0.0   0.1   33:58.16 systemd
+  138 root      20   0 1204560   1.2g   8800 S   0.0   0.1   29:45.52 kthreadd
+  175 www-data  20   0  512340  98.4m   8800 S   1.9   0.1   36:57.23 apache2
+  212 www-data  20   0  512340 101.2m  12044 S   0.0   0.1   16:51.20 apache2
+  249 www-data  20   0   98760  95.7m   4320 S   3.8   0.1   2:11.34 apache2
+  286 www-data  20   0 1204560  99.0m   4320 S   0.0   0.1   32:54.11 apache2
+  323 psaadm    20   0 1204560 412.5m   8800 S   0.0   0.1   59:52.77 sw-engi+
+  360 psaadm    20   0 1204560 301.7m  12044 S   0.0   0.1   55:18.63 sw-cp-s+
+  397 mysql     20   0   98760   2.3g   8800 S   5.7   0.1   24:16.37 mariadbd
+  434 bind      20   0 1204560  76404   8800 S   0.0   0.1   54:24.22 named
+  471 dovecot   20   0   98760  33152   8800 S   0.0   0.1   35:34.27 dovecot
+  508 dovecot   20   0  512340  18772  12044 S   0.0   0.1   31:10.32 imap-log+
+  545 popuser   20   0 1204560  64.1m   4320 S   0.0   0.1   19:35.22 spamd child
+  582 popuser   20   0   98760  61.3m   8800 S   0.0   0.1   23:49.48 spamd child
+  619 root      20   0 1204560   3216   4320 S   0.0   0.1   46:16.10 cron
+  656 root      20   0   98760   9148   8800 S   0.0   0.1   56:34.57 sshd
+  693 root      20   0   98760  11.5m  12044 S   0.0   0.1   53:39.22 nginx
+  730 nginx     20   0  512340  10.2m   4320 S   0.0   0.1   30:23.11 nginx
+  767 psaadm    20   0  512340  44.8m   4320 S   0.0   0.1   39:31.11 psa-pc-r+
+  804 www-data  20   0 1204560 187.3m  12044 S   1.9   0.1   18:48.22 php-fpm7.4
+===== Fri Oct  2 09:25:01 CEST 2026 =====
+top - 09:25:01 up 10 days,  3:02,  1 user,  load average: 1.05, 0.78, 0.58
+Tasks: 20 total,   1 running, 19 sleeping,   0 stopped,   0 zombie
+%Cpu(s): 12.3 us,   3.1 sy,   0.0 ni,  83.0 id,   1.4 wa,   0.0 hi,   0.2 si,   0.0 st
+KiB Mem : 131926528 total,   1232567 free,  80002000 used,  50692961 buff/cache
+KiB Swap:   8388604 total,  8388604 free,        0 used.  48990000 avail Mem
+
+  PID USER      PR  NI    VIRT    RES    SHR S  %CPU %MEM     TIME+ COMMAND
+  102 root      20   0  512340 183452   8800 S   0.0   0.1   13:57.36 systemd
+  139 root      20   0 2410000   1.2g   4320 S   0.0   0.1   38:15.84 kthreadd
+  176 www-data  20   0   98760  98.4m  12044 S   1.9   0.1   28:13.93 apache2
+  213 www-data  20   0 1204560 101.2m   4320 S   0.0   0.1   24:45.60 apache2
+  250 www-data  20   0 2410000  95.7m  12044 S   3.8   0.1   0:59.68 apache2
+  287 www-data  20   0  512340  99.0m   4320 S   0.0   0.1   55:41.50 apache2
+  324 psaadm    20   0 1204560 412.5m   8800 S   0.0   0.1   18:38.53 sw-engi+
+  361 psaadm    20   0 2410000 301.7m   8800 S   0.0   0.1   39:13.54 sw-cp-s+
+  398 mysql     20   0 1204560   2.3g   8800 S   5.7   0.1   47:33.12 mariadbd
+  435 bind      20   0  512340  76404  12044 S   0.0   0.1   15:44.28 named
+  472 dovecot   20   0   98760  33152   4320 S   0.0   0.1   0:18.97 dovecot
+  509 dovecot   20   0   98760  18772  12044 S   0.0   0.1   33:19.12 imap-log+
+  546 popuser   20   0 1204560  64.1m  12044 S   0.0   0.1   33:38.41 spamd child
+  583 popuser   20   0 2410000  61.3m  12044 S   0.0   0.1   44:44.99 spamd child
+  620 root      20   0   98760   3216   4320 S   0.0   0.1   38:51.47 cron
+  657 root      20   0  512340   9148   4320 S   0.0   0.1   31:27.55 sshd
+  694 root      20   0 1204560  11.5m  12044 S   0.0   0.1   42:57.40 nginx
+  731 nginx     20   0 2410000  10.2m   8800 S   0.0   0.1   22:30.90 nginx
+  768 psaadm    20   0 1204560  44.8m   4320 S   0.0   0.1   47:54.97 psa-pc-r+
+  805 www-data  20   0  512340 187.3m   4320 S   1.9   0.1   17:51.14 php-fpm7.4

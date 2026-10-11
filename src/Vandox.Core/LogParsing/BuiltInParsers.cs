@@ -8,7 +8,7 @@ public static class BuiltInParsers
     #region Methods
 
     /// <summary>
-    /// Creates the built-in parsers in registry order: the journal export, the MariaDB error log, Dovecot's own log file, the generic syslog parser, then the error log parsers.
+    /// Creates the built-in parsers in registry order: the journal export, the MariaDB error log, Dovecot's own log file, the generic syslog parser, then the error log parsers and the legacy monitoring log parser.
     /// </summary>
     /// <param name="timeZone">The IANA time zone for year-less log lines and the local times of the MariaDB error log; <c>null</c> when not set</param>
     /// <param name="paths">The configured paths of the error logs</param>
@@ -34,7 +34,8 @@ public static class BuiltInParsers
             new ErrorLogParser(ErrorLogParser.PleskPanelType, ErrorLogFormat.PleskPanel, paths.PleskPanel, true, zone),
             new ErrorLogParser(ErrorLogParser.SwCpServerType, ErrorLogFormat.Nginx, paths.SwCpServer, false, zone),
             new ErrorLogParser(ErrorLogParser.NginxType, ErrorLogFormat.Nginx, paths.Nginx, true, zone),
-            new ErrorLogParser(ErrorLogParser.ApacheType, ErrorLogFormat.Apache, paths.Apache, true, zone)
+            new ErrorLogParser(ErrorLogParser.ApacheType, ErrorLogFormat.Apache, paths.Apache, true, zone),
+            new LegacyMonitorParser(zone)
         ];
     }
 

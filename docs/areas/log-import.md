@@ -22,7 +22,7 @@ imported data is kept apart from live data (it never raises alerts) by the detec
   the copy world-readable: a copied `/var/log` holds files such as `auth.log` and `mail.log` with mode `0640 root:adm`.
 - The backend option `import.time_zone` (IANA time zone ID, ordinal match against NodaTime's embedded database, no
   default) names the zone of the server the logs come from. It is used for year-less syslog times (see *System log
-  parsers*), for the local times of the MariaDB error log (see *MariaDB error log*), for the times of Dovecot's log file (see *Dovecot log file*) and for the local times of the Plesk and web server error logs (see *Plesk and web server error logs*); a value that is no zone ID is refused at start-up with the line of the key and without the value. The
+  parsers*), for the local times of the MariaDB error log (see *MariaDB error log*), for the times of Dovecot's log file (see *Dovecot log file*), for the local times of the Plesk and web server error logs (see *Plesk and web server error logs*) and for the header times of the legacy monitoring log (see *Legacy monitoring log*); a value that is no zone ID is refused at start-up with the line of the key and without the value. The
   example file holds it commented out.
 - The backend options `import.plesk_panel_log`, `import.sw_cp_server_error_log`, `import.nginx_error_log` and
   `import.apache_error_log` name the server path of the Plesk panel log, the `sw-cp-server` error log and the nginx and
@@ -97,7 +97,7 @@ imported data is kept apart from live data (it never raises alerts) by the detec
   imported up to the hashed size; the appended lines come with a later import, which continues the file (below).
 - **A file that grew is continued.** A content that starts with a content imported completely before (the same log with
   more lines at its end) has another hash, but only its new part is parsed and stored. The rules:
-  - Only a file whose parser is **line-framed** (`LineFramed`: syslog, the MariaDB error log, the Dovecot log file and the Plesk and web server error logs) is continued. A journal
+  - Only a file whose parser is **line-framed** (`LineFramed`: syslog, the MariaDB error log, the Dovecot log file, the Plesk and web server error logs and the legacy monitoring log) is continued. A journal
     export that grew is imported as a whole and its earlier entries are stored again, because its binary fields hold
     line feeds and a line feed in the middle is no safe place to start a parse.
   - Pass 1 computes the **head key** of every recognized file: the SHA-256 of its first line (up to and including the
@@ -182,7 +182,7 @@ A parser turns the lines of one file into records. The importer and every parser
   truncated flag, the rest of the line discarded, so a file without line breaks cannot grow memory.
 - `LineFramed` tells whether the format is framed by lines only: every byte after a line feed starts a new line and is
   never the rest of a field begun before it. The importer starts a parse at a line start in the middle of a content only
-  for such a parser. Syslog, the MariaDB error log, the Dovecot log file and the Plesk and web server error logs are line-framed; the journal export is not (binary fields hold
+  for such a parser. Syslog, the MariaDB error log, the Dovecot log file, the Plesk and web server error logs and the legacy monitoring log are line-framed; the journal export is not (binary fields hold
   line feeds). A parser a hook supplies must declare it; `true` for a format with length-framed fields is a parser bug.
 - The file name handed to a parser has a `.gz` suffix removed when the content was decompressed.
 - A new parser is one type and one entry in the list; the importer does not change.
@@ -192,7 +192,7 @@ A parser turns the lines of one file into records. The importer and every parser
 `BuiltInParsers.Create(timeZone, paths)` is the list `vandoxd import` registers when no hook replaces it: `journal`
 (`JournalExportParser`), then `mariadb` (`MariaDbErrorLogParser`, see *MariaDB error log*), then `dovecot`
 (`DovecotLogParser`, see *Dovecot log file*), then `syslog` (`SyslogParser`), then `plesk-panel`, `sw-cp-server-error`,
-`nginx-error` and `apache-error` (`ErrorLogParser`, see *Plesk and web server error logs*). The journal parser claims a file by content (a head that begins
+`nginx-error` and `apache-error` (`ErrorLogParser`, see *Plesk and web server error logs*), then `legacy-monitor` (`LegacyMonitorParser`, see *Legacy monitoring log*). The journal parser claims a file by content (a head that begins
 with a `__CURSOR=` or `__REALTIME_TIMESTAMP=` line and holds a `__REALTIME_TIMESTAMP=` line; the file name never
 matters); the syslog parser claims weakly (name match) a file named `syslog` or `kern.log` with an optional `.N` or
 `-YYYYMMDD` suffix, or whose first line has a syslog header. Both parsers produce `log_line` records with origin `import`
@@ -641,6 +641,162 @@ standard error, the standard error of an Apache child process), the line after i
 time and level; a PHP message that echoes request data lets a remote client do this. Any local process that may write to
 the files can do the same. A priority is a classification of text, not proof that the web server or Plesk wrote the line.
 
+## Legacy monitoring log
+
+**Source.** The parser `legacy-monitor` (`LegacyMonitorParser`, line-framed) reads the log of a shell script that, before the
+agent exists, appends a snapshot of the monitored server every five minutes (later every minute): a header line with the
+output of `date`, the output of `top -b -n 1` and, in the **new format**, the sections `meminfo`, `pressure`, `vmstat` and
+`lsof`. The **old format** has the `top` output only. Both formats were built from the description in issue #20 and tested with
+anonymized fixtures (`testdata/logs/legacy-monitor-old.log`, `legacy-monitor-new.log`), not with the real file: the exact line
+shapes of `top` (the memory suffixes of the process table, that a command line cut by `-w 512` ends in `+`, that the number of
+rows equals `Tasks: N total`) and of the `pressure` lines are not verified, which is why a single bad row does not skip a
+snapshot (below).
+
+**Recognition.** The parser claims a file by content (content match) when its name is not a syslog name (as for the MariaDB error
+log) and the first line of the head (a UTF-8 byte order mark and a `\r` before `\n` removed) is a valid header. An empty head, a
+first line that is no header and a header on line 2 are not claimed. Any process that can write the file can therefore make it
+a legacy log by its first line; that is the *Forged lines* limitation below.
+
+**Snapshots and header.** A line beginning with `===== ` is a header line: it ends the open snapshot and opens the next. A valid
+header is `===== ` + weekday (`Mon` to `Sun`) + space + month (`Jan` to `Dec`) + space + two characters of day (a space or a
+digit, then a digit) + space + `HH:MM:SS` + space + a zone of 1 to 16 characters of `A-Z a-z 0-9 + -` + space + a four-digit year +
+` =====`, ASCII and case-sensitive, nothing before or after (the weekday is not compared with the date). A header line that is
+not valid gives the skip "invalid snapshot header" at its line. Lines before the first header line are skipped one by one as
+"line before the first snapshot".
+
+**Time.** The header is the server's local time. It is read in `import.time_zone` with the offset of the zone interval **whose name
+equals the header's zone** (ordinal comparison; NodaTime's TZDB names the intervals of `Europe/Berlin` `CEST` and `CET`, of
+`Etc/UTC` `UTC`, of `Asia/Istanbul` `+03`): in the repeated hour at the end of daylight saving time the abbreviation tells the two
+passes apart, and when both intervals carry the name, the earlier offset is taken. A local time in the skipped hour, a day that
+does not exist, hour 24, minute or second 60 give the skip "invalid date"; a year outside 1677 to 2262 or an instant outside the
+storable range gives "time outside the storable range" (the year is checked as a number before any date is built). A zone
+name that is not a name of an interval at that local time gives the skip "time zone does not match import.time_zone" at the
+header's line. With `import.time_zone` unset, the first valid header makes `ParseAsync` throw `InvalidOperationException` with
+"import.time_zone is not set" and the file is listed as failed, as for syslog; a file without a valid header does not need the
+option. A zone mismatch **before any header of this parse resolved** throws `InvalidOperationException` with "the time zone of the
+first snapshot header does not match import.time_zone" (the option is probably wrong for this file); a mismatch after a header
+resolved skips that snapshot. The snapshot of a header that is invalid or cannot be resolved is skipped whole: its lines give
+no further skip.
+
+**Top part.** A snapshot expects the lines of `top` in this order, empty lines ignored: `top - …` with `load average:`, `Tasks:`,
+`%Cpu(s):`, `<unit> Mem :`, `<unit> Swap:` and the table header `PID USER PR NI VIRT RES SHR S %CPU %MEM TIME+ COMMAND`, then
+the rows. The summary lines are split at `,` (in the swap line also at the `.` directly after `used`); each piece is a number, one
+or more spaces and a label, so a piece needs no space after the comma or the colon, and the labels are read in any order, each
+exactly once. **Numbers** (load, CPU, %CPU, pressure averages) are an integer part of 1 to 15 ASCII digits and an optional
+point with 1 to 6 ASCII digits and nothing else (no sign, exponent or comma), so every value is finite and below 10^15. The memory
+and swap values are scaled by their unit (`KiB` to `EiB`) in exact integer arithmetic (the integer part is compared with
+`ulong.MaxValue >> (10 × n)` before anything is multiplied, then `UInt128` is used), rounded half away from zero; a value that
+does not fit 64 bits makes its line unreadable.
+
+A snapshot is **skipped whole**, with one skip at its header line and no record, when it ends (next header line or end of input) before
+its table header ("truncated snapshot"), or when its top part is malformed ("malformed snapshot"): a non-empty line before the
+table header that is not the next expected line, a summary line that is not read, a section marker before the table header, or
+a line after the table header that begins like a summary line (`top - `, `Tasks:`, `%Cpu(s):`, `<unit> Mem `, `<unit> Swap:`) or is the table
+header again, which are the signs of another run's output mixed in. The snapshots before and after are emitted.
+
+**Summary metrics.** For a snapshot whose top part is complete the parser emits metrics (origin `import`, source `legacy-monitor`,
+`captured_at` the header instant) in the order `load1`, `load5`, `load15`, `cpu_percent` (modes `user`, `system`, `nice`, `idle`,
+`iowait`, `irq`, `softirq`, `steal`), `mem_total_bytes`, `mem_free_bytes`, `mem_used_bytes`, `mem_buff_cache_bytes`,
+`mem_available_bytes` (from `avail Mem`), `swap_total_bytes`, `swap_free_bytes`, `swap_used_bytes`; the names, units and labels are
+in *Metric names* of the [wire format](wire-format.md). The values are as `top` printed them with its rounding; that the
+first frame of `top` can show averages since boot for the CPU is not verified.
+
+**Process snapshot.** A row is `PID USER PR NI VIRT RES SHR S %CPU %MEM TIME+ COMMAND`, separated by spaces; COMMAND is the rest of
+the line. A token before COMMAND longer than 64 bytes makes the row unreadable. `pid` is 1 to 2,147,483,647, `state` one ASCII
+letter, `rss_bytes` the RES column: digits (1 to 20) with an optional fraction (1 to 3 digits) and an optional suffix `k` or none
+(KiB), `m`, `g`, `t`, `p`, `e` (the powers of 1,024), scaled exactly; a RES that does not fit 64 bits makes the row unreadable. A
+COMMAND ending in `+` is cut by `top`: the `+` is removed and `truncated` set. In the **old format** (no section marker in the
+snapshot) `command` is the COMMAND without the `+`, cut to 1,024 bytes (`truncated` is also set for a cut), `cmdline` is empty. In the
+**new format** (at least one section marker, known or not) `cmdline` is the COMMAND without the `+`, cut to 2,048 bytes (a cut sets
+`truncated`), and `command` is the text inside `[...]` for a bracketed COMMAND, else the part after the last `/` of the first
+word with one trailing `:` removed, cut to 1,024 bytes. The two formats therefore name the same process differently
+(`apache2` against a name derived from the command line); a new-format snapshot cut before its first section reads as old.
+`command` and `program` are **never empty**, because the model refuses an empty one and would refuse the whole snapshot: when the
+derived name is empty the normalized COMMAND is used, and when that is empty too (the COMMAND `+`) the COMMAND as printed.
+`programs` holds one entry per program (the first space-separated word of `command`, the command itself when that word is
+empty) in order of first appearance with `count`, the sums of `cpu_percent` and `rss_bytes` (the sum saturates at 2^64 − 1 instead of
+wrapping), no `pss_bytes`, and `rss_overcounted` true exactly when `count` is above 1. `total` is `Tasks: N total`; `complete` is
+true only when the number of rows equals `total`, no row was left out and the table was not ended by the end of input. A table with
+no row gives no process snapshot.
+
+**A single bad row** does not skip the snapshot: a row that does not parse is left out with the skip "process row not read", a row
+whose PID an earlier row of the snapshot has with "duplicate process id", both at the row's line, and `complete` is false.
+
+**Acceptance.** The top part is accepted at the first section marker after the table header or when the snapshot ends after the
+table header; only then are its records emitted and its row skips reported (at most 4,097 are held until then). After acceptance a
+snapshot cannot fail any more. The records of a snapshot are emitted in this order: the summary metrics, the process snapshot,
+then per section in file order the metrics in line order and the connection snapshot.
+
+**Sections** (new format). A line `----- <name> -----` (1 to 32 lower-case ASCII letters) begins a section. An unknown name is skipped
+with one skip "unknown section" at the marker, a known section that appears a second time in the snapshot with "repeated
+section"; the lines of both are not read and give no skip. Empty lines are ignored. An unreadable line is skipped with "meminfo
+line not read", "pressure line not read" or "vmstat line not read" at its line, and the rest of the section is read.
+
+- `meminfo`: `Name: N kB` is the metric `meminfo_bytes` (N × 1,024, unit `bytes`) and `Name: N` the metric `meminfo`, label `field` the name
+  (1 to 64 characters of `A-Z a-z 0-9 _ ( )`). N is 1 to 20 ASCII digits within 64 bits; for `kB` N times 1,024 must fit as well. A repeated
+  field is unread.
+- `pressure`: a line `<res>: some avg10=F avg60=F avg300=F total=N` with an optional ` full avg10=…` part (resource `memory`,
+  `cpu` or `io`), or a line `full …` directly after a resource line that had only `some`, gives `pressure_avg10`, `pressure_avg60`,
+  `pressure_avg300` and `pressure_stall_microseconds_total` with the labels `resource` and `kind`. A line `n/a` or `<res>: n/a` gives
+  no metric and no skip. A repeated resource and kind is unread.
+- `vmstat`: a line `<counter> N` for `pswpin`, `pswpout`, `pgmajfault` and `oom_kill` gives `vmstat_total` (label `counter`) and, when
+  the previous accepted snapshot of this parse had the counter at an earlier instant and a value not above N, `vmstat_per_second` =
+  (N − previous) / seconds between the two headers; other well-formed `<name> N` lines are ignored. The rate **depends on where a
+  parse starts**: the first snapshot of a parse has no rate, and a continued import starts with an empty history, so the first
+  snapshot of a continuation has none either (a gap of one rate per continuation; the raw `vmstat_total` is complete and a
+  rate can be derived from it later). A skipped snapshot is not a predecessor. A repeated counter is unread ("vmstat line not read").
+- `lsof` (below).
+
+**Connection snapshot.** An `lsof -ni` line is split at runs of spaces: COMMAND, PID (1 to 2,147,483,647), TYPE the first token from
+the fourth on that is `IPv4` or `IPv6`, and from the end an optional `(STATE)`, NAME and NODE (`TCP` or `UDP`, after TYPE). A line of
+another shape is skipped with "lsof line not read", also a line over 1,024 bytes (counted on the decoded line, an invalid byte counting three). The header line of `lsof` is ignored wherever it
+is. COMMAND escapes `\xHH` are decoded to bytes and the result is read as UTF-8, cut to 1,024 bytes. NAME is `LOCAL` or `LOCAL->REMOTE`,
+an endpoint is `ADDR:PORT`. The **address guard** maps only what `lsof` prints, in front of `IPAddress.TryParse`, which would accept
+far more (`127.1`, `1`, `0x7f.0.0.1`, `010.0.0.1`, `2130706433`, a zone that is looked up on the host):
+
+- TYPE `IPv4`: `*` (0.0.0.0) or exactly four dot-separated decimal octets of 1 to 3 digits, at most 255 and without a leading zero,
+  built from the four bytes. TYPE `IPv6`: `*` (::) or an address in brackets followed by `:PORT`; a zone (`%` to the closing
+  bracket) is removed and the address kept; the rest is 2 to 45 characters of `0-9 A-F a-f : .` with a colon; a trailing dotted quad
+  (after the last colon, with no point before it) must meet the IPv4 octet rule, so `::ffff:1.2.3.04` is refused, not read as decimal;
+  only then `IPAddress.TryParse` is called on that text, and the result must be an IPv6 address without a scope.
+- Port: `*` (0), 1 to 5 ASCII digits up to 65,535 without a leading zero, or a service name of 1 to 32 characters of `A-Z a-z 0-9 . _ + -`
+  found in a built-in table for the protocol (`LegacyServiceNames`: every name and alias of the `/etc/services` of Ubuntu's `netbase` 6.4,
+  never a lookup on the host; a name missing from the table only leaves its socket unmapped). For TCP the state is required and must
+  be one of the model's TCP states; for UDP a state token is ignored.
+- Every other form is skipped with "socket address not mapped". The protocol is `tcp`, `tcp6`, `udp` or `udp6` from NODE and TYPE.
+
+A socket is unique by the text of its line from TYPE on, and its owner is that of its first line (a socket shared by two processes is
+counted once). The snapshot has `states` (per protocol and state over unique sockets, by protocol then state), `processes` (per PID
+and decoded command over every socket line, in order of first appearance), `remotes` (per remote address over unique connected
+sockets, by count descending then address text), `listeners` (unique sockets without a remote endpoint) and `connections` (unique
+sockets with one); lists without entries are left out. It is emitted when the section ends (next section marker, next header line
+or end of input). A section without a line gives no record; one with only the header an empty, complete snapshot. `complete` is false
+when a line was left out (unread, unmapped, too long or beyond the cap) or the section was closed by the end of input.
+
+**The end of the input.** The log has no end marker, and a copy of a growing file can be cut anywhere. A snapshot closed by the end of
+input instead of a header line is therefore emitted as far as it was read: an open `lsof` section gives its connection snapshot with
+`complete` false, an open process table (old format) its process snapshot with `complete` false, and the metrics of a cut section as
+read; one cut before its table header is skipped whole ("truncated snapshot"). The last snapshot of every file is thus marked incomplete
+in its open list. The parser is line-framed, so a continued import starts at a line start: the rest of a snapshot cut by the earlier copy
+is skipped line by line as "line before the first snapshot", and that rest is lost.
+
+**Bounds.** A line that is empty or holds only spaces counts as empty everywhere in a snapshot: it is ignored and counts
+toward no cap (a line with a tab or another character is not empty). Every non-empty line counts toward the cap of its part, read or not, and at the first line beyond a cap one skip is reported and
+every later line of that part is dropped unseen and without a skip: 4,096 row lines per snapshot ("too many processes in a snapshot",
+`complete` false, the aggregates are over the rows kept), 4,096 `lsof` lines ("too many sockets in a snapshot", `complete` false), and per
+section 128 `meminfo`, 16 `pressure` and 64 `vmstat` lines ("too many lines in a section"). Lines are cut at 16 KiB by the line reader. The only
+skips held back are the row skips of a top part not yet accepted (at most 4,097); every section skip is reported at once. Memory does not
+grow with the number of snapshots or the number of lines in a snapshot; the worst case is a constant of about 40 MiB for one snapshot (4,096
+rows with a 2,048-byte command line and a 1,024-byte command, and 4,096 socket keys and commands, counted in UTF-16), plus one line.
+
+**Errors.** The parse never throws for input. It throws `InvalidOperationException` for the time zone (above), `OperationCanceledException` on
+cancellation and what the emitter throws; the open snapshot is not finished then, so the records emitted are a prefix of those of a complete
+parse.
+
+**Forged lines (limitation).** Any process that may write the file can forge snapshots with any time, process or connection, and the content
+claim makes any file whose first line has the shape of a header a legacy log. Command and user texts are stored as they are and escaped where
+they are displayed.
+
 ## Result
 
 - **Outcomes per file:** imported, continued (the new part of a file that grew was stored), already imported,
@@ -684,6 +840,8 @@ the files can do the same. A priority is a classification of text, not proof tha
 - [0091](../decisions/0091-mail-lines-classified-in-the-syslog-and-journal-parsers.md) — why Postfix and Dovecot lines are classified inside the syslog and journal parsers by their severity marker, which lines count as an unavailable database, and why Dovecot's own log file gets a parser `dovecot` claimed by its first line.
 - [0092](../decisions/0092-error-logs-by-content-or-configured-path-unreadable-lines-kept-raw.md) — why the Plesk and web server error logs have path options that rank above content, how a configured path is matched, and why unreadable lines are kept as raw records with a warning.
 
+- [0093](../decisions/0093-legacy-monitoring-log-snapshots-by-header-zone-and-whole-snapshot-validity.md) — why the legacy monitoring log is read snapshot by snapshot, timed by the zone abbreviation of its header within `import.time_zone`, and why a snapshot with a broken top part is skipped whole while a single bad row is not.
+
 - [0014](../decisions/0014-log-import-is-a-core-component.md) — why historical import and log shipping are core.
 - [0021](../decisions/0021-no-pseudonymization-of-log-data.md) — why log data is stored unchanged.
 - [0069](../decisions/0069-log-import-idempotent-per-file-content-hash-with-resumable-batches.md) — why content hashes, two passes, resume by count and the continuation of a grown file.
@@ -702,5 +860,5 @@ the files can do the same. A priority is a classification of text, not proof tha
 `LogLineReader`, `BuiltInParsers`, `JournalExportParser`, `JournalExportReader`, `SyslogParser`, `SyslogLine`,
 `SyslogClock`, `KernelReportGrouper`, `SystemLogGrouper`, `MailLineClassifier`, `MailEvents`, `DovecotLogParser`, `DovecotLine`, `MariaDbLineGrouper`, `MariaDbErrorLogParser`,
 `MariaDbParseSession`, `MariaDbLine`, `MariaDbMessage`, `MariaDbEventClassifier`, `MariaDbEvents`, `Utf8Text`, `ErrorLogParser`,
-`ErrorLogLine`, `ErrorLogFormat`, `ErrorLogPaths`, `LogPath`), `Vandox.Core.Model` (`StorableTime`), `Vandox.Core.IO` (`SecureRoot`, `FileProbe`), `Vandox.Backend/Cli` (`ImportCommand`,
+`ErrorLogLine`, `ErrorLogFormat`, `ErrorLogPaths`, `LogPath`, `LegacyMonitorParser`, `LegacyMonitorHeader`, `LegacyMonitorSnapshot`, `LegacyProcessTable`, `LegacyConnectionTally`, `LegacyMetrics`, `LegacyTopLine`, `LegacyTopRow`, `LegacyProcessNames`, `LegacyProcLine`, `LegacyPressure`, `LegacyLsofLine`, `LegacyServiceNames`, `LegacyCounter`, `LegacyParseState`), `Vandox.Core.Model` (`StorableTime`), `Vandox.Core.IO` (`SecureRoot`, `FileProbe`), `Vandox.Backend/Cli` (`ImportCommand`,
 `ImportSummaryWriter`, `ImportProgressLogger`). The checklist for a new parser is in `.squad/project.md` (*Integration surface*).

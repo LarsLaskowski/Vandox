@@ -7,7 +7,7 @@ backend with web UI, runs as a Docker container on any Docker host in the home n
 
 This document describes the target architecture; as of now the binaries' `--version`, the data model and wire format
 (Go: `internal/model`, `internal/wire`; backend: `src/Vandox.Core`), the configuration loading (`internal/config` for the agent,
-`Vandox.Core.Configuration` for `vandoxd`) and the backend service skeleton and the log import framework exist (`vandoxd import`, with the parsers for the journal export, the MariaDB error log, Dovecot's own log file, `syslog` and `kern.log`, the Plesk panel log and the nginx, `sw-cp-server` and Apache error logs): `vandoxd` loads its configuration, opens and migrates its SQLite database (schema, batched writes, queries and log search
+`Vandox.Core.Configuration` for `vandoxd`) and the backend service skeleton and the log import framework exist (`vandoxd import`, with the parsers for the journal export, the MariaDB error log, Dovecot's own log file, `syslog` and `kern.log`, the Plesk panel log, the nginx, `sw-cp-server` and Apache error logs and the legacy `top`/`lsof` monitoring log): `vandoxd` loads its configuration, opens and migrates its SQLite database (schema, batched writes, queries and log search
 exist as the storage layer; the service does not call it yet, `vandoxd import` writes through it), listens on the
 web and ingest ports, answers `/healthz` and shuts down gracefully, and ships as a container with a health
 check. Sections are marked as implemented as features land. The decisions behind it are recorded in
@@ -45,7 +45,8 @@ way, and agents of the hosting provider are never disabled or changed
   log parser interface and registry, the line reader that bounds the line length, and the built-in parsers: the
   journal export, the MariaDB error log with its events, Dovecot's own log file, `syslog` and `kern.log` with their
   kernel report grouper and the time zone rules of year-less times, the Plesk panel log and the nginx, `sw-cp-server` and Apache error logs
-  (found by content or by a configured path, unreadable lines kept as raw lines), and the classification of Postfix and Dovecot lines),
+  (found by content or by a configured path, unreadable lines kept as raw lines), the legacy `top`/`lsof` monitoring log (snapshots
+  into metrics, process and connection snapshots), and the classification of Postfix and Dovecot lines),
   `Vandox.Storage` (the SQLite database, see [Storage](areas/storage.md): schema, migrations, writing batches, queries and log search) and
   `Vandox.Import` (reads a directory, archive or file as streams, detects the parser per file, hashes the
   content, writes the parsers' records in resumable batches and builds the summary)
@@ -135,7 +136,8 @@ Records: [0006](decisions/0006-agent-connects-outbound-only.md),
 [0086](decisions/0086-system-log-parsers-generic-syslog-claim-and-grouped-kernel-reports.md),
 [0088](decisions/0088-mariadb-error-log-entries-by-content-and-lifecycle-events-in-log-line.md),
 [0091](decisions/0091-mail-lines-classified-in-the-syslog-and-journal-parsers.md),
-[0092](decisions/0092-error-logs-by-content-or-configured-path-unreadable-lines-kept-raw.md).
+[0092](decisions/0092-error-logs-by-content-or-configured-path-unreadable-lines-kept-raw.md),
+[0093](decisions/0093-legacy-monitoring-log-snapshots-by-header-zone-and-whole-snapshot-validity.md).
 
 ## Network
 
@@ -227,7 +229,7 @@ Implemented by `src/Vandox.Storage`:
   import is complete). A batch with an import step advances the row in the same transaction as its records, as
   a compare-and-set on the expected count, so an interrupted import resumes where it stopped and two runs of
   the same content never store it twice. A content that starts with a completely imported one (a log that grew
-  between two copies) is continued when its format is framed by lines only (syslog, MariaDB error log, Dovecot log, the Plesk and web server error logs; never a
+  between two copies) is continued when its format is framed by lines only (syslog, MariaDB error log, Dovecot log, the Plesk and web server error logs, the legacy monitoring log; never a
   journal export): only the part after it is stored, and the row keeps where it continued. The store keeps a short
   hash of every imported content at each of its line ends. With these, an older copy whose content is the start of
   a completely imported one, imported after it, is recognized as contained, and nothing of it is stored.

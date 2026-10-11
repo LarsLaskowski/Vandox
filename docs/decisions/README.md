@@ -119,4 +119,5 @@ once in the [area document](../areas/README.md) of the record's area, and the re
 | 0090 | Both wire decoders check every line for valid UTF-8, paired surrogate escapes, ASCII and unique keys and bounded nesting, match keys ignoring ASCII case, and report a misshapen header as malformed | Accepted | 2026-10-10 |
 | 0091 | Postfix and Dovecot lines are classified by the daemon's severity marker, with events for fatal, panic and an unavailable database: in the syslog and journal parsers, and in a parser of its own for Dovecot's log file | Accepted | 2026-10-11 |
 | 0092 | Plesk panel, sw-cp-server, nginx and Apache error logs are claimed by a configured path or by content; lines they cannot read are kept as raw records with a warning | Accepted | 2026-10-11 |
+| 0093 | The legacy top/lsof monitoring log is read snapshot by snapshot, timed by the zone abbreviation of its header within import.time_zone, and a snapshot whose top output is broken is skipped whole | Accepted | 2026-10-11 |
 <!-- project:end index -->

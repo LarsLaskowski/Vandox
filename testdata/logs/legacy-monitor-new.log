@@ -1,0 +1,344 @@
+===== Sun Oct 25 02:58:01 CEST 2026 =====
+top - 02:58:01 up 10 days,  3:02,  1 user,  load average: 0.40, 0.50, 0.45
+Tasks: 17 total,   1 running, 16 sleeping,   0 stopped,   0 zombie
+%Cpu(s):  2.0 us,   1.0 sy,   0.0 ni,  95.0 id,   1.5 wa,   0.0 hi,   0.5 si,   0.0 st
+KiB Mem : 131926528 total,   1034567 free,  80000000 used,  50892961 buff/cache
+KiB Swap:   8388604 total,  8388604 free,        0 used.  49000000 avail Mem
+
+  PID USER      PR  NI    VIRT    RES    SHR S  %CPU %MEM     TIME+ COMMAND
+  200 root      20   0 1204560  12.5m  12044 S   0.0   0.1   44:36.91 /sbin/init splash
+  241 root      20   0   98760      0  12044 S   0.0   0.1   53:23.70 [kworker/0:1-events]
+  282 www-data  20   0 1204560   1204   4320 S   1.9   0.1   33:25.10 /usr/sbin/apache2 -k start
+  323 www-data  20   0  512340 101.2m  12044 S   0.0   0.1   59:47.64 /usr/sbin/apache2 -k start
+  364 www-data  20   0  512340  95.7m   8800 S   3.8   0.1   50:58.39 /usr/sbin/apache2 -k start
+  405 psaadm    20   0 1204560  99.0m   4320 S   0.0   0.1   2:37.62 /usr/local/psa/admin/sbin/sw-engine -c /usr/local/psa/admin/conf/php.ini +
+  446 psaadm    20   0 2410000 412.5m   8800 S   0.0   0.1   21:44.73 /opt/psa/admin/sbin/sw-cp-serverd -c /etc/sw-cp-server/config
+  487 mysql     20   0  512340 301.7m   4320 S   0.0   0.1   23:11.29 /usr/sbin/mariadbd
+  528 bind      20   0  512340   2.3g   8800 S   5.7   0.1   51:11.68 /usr/sbin/named -f -u bind
+  569 dovecot   20   0 1204560  18772   4320 S   0.0   0.1   46:31.61 dovecot/imap-login
+  610 popuser   20   0 2410000  64.1m   8800 S   0.0   0.1   11:52.14 spamd child
+  651 root      20   0 2410000  33152   8800 S   0.0   0.1   4:59.35 php-fpm: master process (/etc/php/7.4/fpm/php-fpm.conf)
+  692 www-data  20   0 1204560  44.8m   4320 S   0.0   0.1   51:52.84 php-fpm: pool www
+  733 root      20   0  512340   3216   8800 S   0.0   0.1   35:40.81 /usr/sbin/cron -f
+  774 root      20   0 2410000   9148   8800 S   0.0   0.1   21:19.78 sshd: /usr/sbin/sshd -D [listener] 0 of 10-100 startups
+  815 nginx     20   0 2410000  10.2m  12044 S   0.0   0.1   23:38.74 nginx: worker process
+  856 root      20   0 2410000      0  12044 S   0.0   0.1   31:34.44 [kswapd0]
+----- meminfo -----
+MemTotal:        131926528 kB
+MemFree:           1034567 kB
+MemAvailable:     49000000 kB
+Buffers:           2048000 kB
+Cached:           40000000 kB
+SwapTotal:         8388604 kB
+SwapFree:          8388604 kB
+Dirty:                1024 kB
+Slab:              3200000 kB
+HugePages_Total:         0
+HugePages_Free:          0
+----- pressure -----
+memory: some avg10=0.00 avg60=0.01 avg300=0.00 total=1234567
+full avg10=0.00 avg60=0.00 avg300=0.00 total=234567
+cpu: some avg10=1.00 avg60=0.80 avg300=0.40 total=98765432
+io: n/a
+----- vmstat -----
+pswpin 100
+pswpout 250
+pgmajfault 4000
+oom_kill 0
+pgfault 9000000
+nr_free_pages 258000
+----- lsof -----
+COMMAND    PID     USER   FD   TYPE   DEVICE SIZE/OFF NODE NAME
+sshd        812 root       3u IPv4    20001      0t0  TCP *:ssh (LISTEN)
+sshd        812 root       4u IPv6    20002      0t0  TCP *:ssh (LISTEN)
+apache2     933 root       4u IPv6    20010      0t0  TCP *:http (LISTEN)
+apache2    1001 www-data   4u IPv6    20010      0t0  TCP *:http (LISTEN)
+apache2     933 root       6u IPv6    20011      0t0  TCP *:https (LISTEN)
+apache2    1001 www-data   6u IPv6    20011      0t0  TCP *:https (LISTEN)
+apache2    1001 www-data   9u IPv6    20120      0t0  TCP [2001:db8::10]:https->[2001:db8:1::77]:51234 (ESTABLISHED)
+nginx      1203 nginx      8u IPv4    20130      0t0  TCP 192.0.2.10:https->198.51.100.7:40012 (ESTABLISHED)
+nginx      1203 nginx      9u IPv4    20140      0t0  TCP 192.0.2.10:https->198.51.100.7:40013 (ESTABLISHED)
+nginx      1203 nginx     10u IPv4    20141      0t0  TCP 192.0.2.10:https->203.0.113.25:55871 (TIME_WAIT)
+dovecot    1310 root      23u IPv4    20201      0t0  TCP *:imaps (LISTEN)
+dovecot    1310 root      24u IPv4    20202      0t0  TCP *:pop3s (LISTEN)
+mariadbd   1402 mysql     31u IPv4    20301      0t0  TCP 127.0.0.1:mysql (LISTEN)
+mariadbd   1402 mysql     42u IPv4    20302      0t0  TCP 127.0.0.1:mysql->127.0.0.1:44120 (ESTABLISHED)
+named      1501 bind     512u IPv4    20401      0t0  UDP 127.0.0.53:domain
+named      1501 bind     513u IPv6    20402      0t0  UDP [::1]:domain
+named      1501 bind     514u IPv4    20403      0t0  TCP 127.0.0.1:domain (LISTEN)
+php-fpm\x20  1601 www-data   5u IPv4    20501      0t0  UDP *:*
+exim4      1701 Debian-exim   3u IPv4    20601      0t0  TCP 192.0.2.10:smtp->198.51.100.99:33001 (ESTABLISHED)
+exim4      1701 Debian-exim   4u IPv4    20602      0t0  TCP *:smtp (LISTEN)
+===== Sun Oct 25 02:59:01 CEST 2026 =====
+top - 02:59:01 up 10 days,  3:02,  1 user,  load average: 0.50, 0.50, 0.45
+Tasks: 17 total,   1 running, 16 sleeping,   0 stopped,   0 zombie
+%Cpu(s):  3.0 us,   1.0 sy,   0.0 ni,  94.0 id,   1.5 wa,   0.0 hi,   0.5 si,   0.0 st
+KiB Mem : 131926528 total,   1031567 free,  80003000 used,  50892961 buff/cache
+KiB Swap:   8388604 total,  8388600 free,        4 used.  48995000 avail Mem
+
+  PID USER      PR  NI    VIRT    RES    SHR S  %CPU %MEM     TIME+ COMMAND
+  200 root      20   0  512340  12.5m   8800 S   0.0   0.1   10:55.73 /sbin/init splash
+  241 root      20   0  512340      0  12044 S   0.0   0.1   4:45.86 [kworker/0:1-events]
+  282 www-data  20   0 1204560   1204   4320 S   1.9   0.1   38:30.81 /usr/sbin/apache2 -k start
+  323 www-data  20   0  512340 101.2m   8800 S   0.0   0.1   42:20.90 /usr/sbin/apache2 -k start
+  364 www-data  20   0   98760  95.7m  12044 S   3.8   0.1   22:58.86 /usr/sbin/apache2 -k start
+  405 psaadm    20   0   98760  99.0m   8800 S   0.0   0.1   6:20.18 /usr/local/psa/admin/sbin/sw-engine -c /usr/local/psa/admin/conf/php.ini +
+  446 psaadm    20   0 1204560 412.5m  12044 S   0.0   0.1   23:20.97 /opt/psa/admin/sbin/sw-cp-serverd -c /etc/sw-cp-server/config
+  487 mysql     20   0  512340 301.7m   4320 S   0.0   0.1   33:52.40 /usr/sbin/mariadbd
+  528 bind      20   0 2410000   2.3g   8800 S   5.7   0.1   47:47.11 /usr/sbin/named -f -u bind
+  569 dovecot   20   0   98760  18772  12044 S   0.0   0.1   32:34.95 dovecot/imap-login
+  610 popuser   20   0 1204560  64.1m   8800 S   0.0   0.1   10:45.18 spamd child
+  651 root      20   0 2410000  33152  12044 S   0.0   0.1   49:57.71 php-fpm: master process (/etc/php/7.4/fpm/php-fpm.conf)
+  692 www-data  20   0  512340  44.8m  12044 S   0.0   0.1   3:26.94 php-fpm: pool www
+  733 root      20   0   98760   3216   8800 S   0.0   0.1   26:25.31 /usr/sbin/cron -f
+  774 root      20   0 2410000   9148   8800 S   0.0   0.1   55:31.92 sshd: /usr/sbin/sshd -D [listener] 0 of 10-100 startups
+  815 nginx     20   0 1204560  10.2m   8800 S   0.0   0.1   47:56.71 nginx: worker process
+  856 root      20   0  512340      0  12044 S   0.0   0.1   8:51.77 [kswapd0]
+----- meminfo -----
+MemTotal:        131926528 kB
+MemFree:           1031567 kB
+MemAvailable:     48995000 kB
+Buffers:           2048000 kB
+Cached:           40000000 kB
+SwapTotal:         8388604 kB
+SwapFree:          8388600 kB
+Dirty:                1025 kB
+Slab:              3200000 kB
+HugePages_Total:         0
+HugePages_Free:          0
+----- pressure -----
+memory: some avg10=0.01 avg60=0.01 avg300=0.00 total=1235567
+full avg10=0.00 avg60=0.00 avg300=0.00 total=235067
+cpu: some avg10=1.01 avg60=0.80 avg300=0.40 total=98835432
+io: n/a
+----- vmstat -----
+pswpin 103
+pswpout 257
+pgmajfault 4060
+oom_kill 0
+pgfault 9005000
+nr_free_pages 257990
+----- lsof -----
+COMMAND    PID     USER   FD   TYPE   DEVICE SIZE/OFF NODE NAME
+sshd        812 root       3u IPv4    20001      0t0  TCP *:ssh (LISTEN)
+sshd        812 root       4u IPv6    20002      0t0  TCP *:ssh (LISTEN)
+apache2     933 root       4u IPv6    20010      0t0  TCP *:http (LISTEN)
+apache2    1001 www-data   4u IPv6    20010      0t0  TCP *:http (LISTEN)
+apache2     933 root       6u IPv6    20011      0t0  TCP *:https (LISTEN)
+apache2    1001 www-data   6u IPv6    20011      0t0  TCP *:https (LISTEN)
+apache2    1001 www-data   9u IPv6    20121      0t0  TCP [2001:db8::10]:https->[2001:db8:1::77]:51234 (ESTABLISHED)
+nginx      1203 nginx      8u IPv4    20131      0t0  TCP 192.0.2.10:https->198.51.100.7:40012 (ESTABLISHED)
+nginx      1203 nginx      9u IPv4    20140      0t0  TCP 192.0.2.10:https->198.51.100.7:40013 (ESTABLISHED)
+nginx      1203 nginx     10u IPv4    20141      0t0  TCP 192.0.2.10:https->203.0.113.25:55871 (TIME_WAIT)
+dovecot    1310 root      23u IPv4    20201      0t0  TCP *:imaps (LISTEN)
+dovecot    1310 root      24u IPv4    20202      0t0  TCP *:pop3s (LISTEN)
+mariadbd   1402 mysql     31u IPv4    20301      0t0  TCP 127.0.0.1:mysql (LISTEN)
+mariadbd   1402 mysql     42u IPv4    20302      0t0  TCP 127.0.0.1:mysql->127.0.0.1:44120 (ESTABLISHED)
+named      1501 bind     512u IPv4    20401      0t0  UDP 127.0.0.53:domain
+named      1501 bind     513u IPv6    20402      0t0  UDP [::1]:domain
+named      1501 bind     514u IPv4    20403      0t0  TCP 127.0.0.1:domain (LISTEN)
+php-fpm\x20  1601 www-data   5u IPv4    20501      0t0  UDP *:*
+exim4      1701 Debian-exim   3u IPv4    20601      0t0  TCP 192.0.2.10:smtp->198.51.100.99:33001 (ESTABLISHED)
+exim4      1701 Debian-exim   4u IPv4    20602      0t0  TCP *:smtp (LISTEN)
+===== Sun Oct 25 02:00:01 CET 2026 =====
+top - 02:00:01 up 10 days,  3:02,  1 user,  load average: 0.60, 0.50, 0.45
+Tasks: 17 total,   1 running, 16 sleeping,   0 stopped,   0 zombie
+%Cpu(s):  4.0 us,   1.0 sy,   0.0 ni,  93.0 id,   1.5 wa,   0.0 hi,   0.5 si,   0.0 st
+KiB Mem : 131926528 total,   1028567 free,  80006000 used,  50892961 buff/cache
+KiB Swap:   8388604 total,  8388596 free,        8 used.  48990000 avail Mem
+
+  PID USER      PR  NI    VIRT    RES    SHR S  %CPU %MEM     TIME+ COMMAND
+  200 root      20   0 2410000  12.5m   8800 S   0.0   0.1   13:33.29 /sbin/init splash
+  241 root      20   0   98760      0   4320 S   0.0   0.1   49:37.72 [kworker/0:1-events]
+  282 www-data  20   0 2410000   1204  12044 S   1.9   0.1   8:44.85 /usr/sbin/apache2 -k start
+  323 www-data  20   0   98760 101.2m   8800 S   0.0   0.1   49:56.11 /usr/sbin/apache2 -k start
+  364 www-data  20   0 2410000  95.7m   4320 S   3.8   0.1   8:55.13 /usr/sbin/apache2 -k start
+  405 psaadm    20   0   98760  99.0m   4320 S   0.0   0.1   20:51.41 /usr/local/psa/admin/sbin/sw-engine -c /usr/local/psa/admin/conf/php.ini +
+  446 psaadm    20   0 2410000 412.5m  12044 S   0.0   0.1   43:35.27 /opt/psa/admin/sbin/sw-cp-serverd -c /etc/sw-cp-server/config
+  487 mysql     20   0 1204560 301.7m   8800 S   0.0   0.1   6:35.22 /usr/sbin/mariadbd
+  528 bind      20   0 1204560   2.3g   8800 S   5.7   0.1   41:38.28 /usr/sbin/named -f -u bind
+  569 dovecot   20   0  512340  18772   8800 S   0.0   0.1   41:28.26 dovecot/imap-login
+  610 popuser   20   0   98760  64.1m   4320 S   0.0   0.1   20:35.73 spamd child
+  651 root      20   0 1204560  33152   4320 S   0.0   0.1   10:21.33 php-fpm: master process (/etc/php/7.4/fpm/php-fpm.conf)
+  692 www-data  20   0 2410000  44.8m   8800 S   0.0   0.1   45:57.80 php-fpm: pool www
+  733 root      20   0  512340   3216   4320 S   0.0   0.1   45:42.17 /usr/sbin/cron -f
+  774 root      20   0  512340   9148  12044 S   0.0   0.1   29:14.60 sshd: /usr/sbin/sshd -D [listener] 0 of 10-100 startups
+  815 nginx     20   0 1204560  10.2m   4320 S   0.0   0.1   14:26.99 nginx: worker process
+  856 root      20   0   98760      0   4320 S   0.0   0.1   2:25.59 [kswapd0]
+----- meminfo -----
+MemTotal:        131926528 kB
+MemFree:           1028567 kB
+MemAvailable:     48990000 kB
+Buffers:           2048000 kB
+Cached:           40000000 kB
+SwapTotal:         8388604 kB
+SwapFree:          8388596 kB
+Dirty:                1026 kB
+Slab:              3200000 kB
+HugePages_Total:         0
+HugePages_Free:          0
+----- pressure -----
+memory: some avg10=0.02 avg60=0.01 avg300=0.00 total=1236567
+full avg10=0.00 avg60=0.00 avg300=0.00 total=235567
+cpu: some avg10=1.02 avg60=0.80 avg300=0.40 total=98905432
+io: n/a
+----- vmstat -----
+pswpin 106
+pswpout 264
+pgmajfault 4120
+oom_kill 0
+pgfault 9010000
+nr_free_pages 257980
+----- lsof -----
+COMMAND    PID     USER   FD   TYPE   DEVICE SIZE/OFF NODE NAME
+sshd        812 root       3u IPv4    20001      0t0  TCP *:ssh (LISTEN)
+sshd        812 root       4u IPv6    20002      0t0  TCP *:ssh (LISTEN)
+apache2     933 root       4u IPv6    20010      0t0  TCP *:http (LISTEN)
+apache2    1001 www-data   4u IPv6    20010      0t0  TCP *:http (LISTEN)
+apache2     933 root       6u IPv6    20011      0t0  TCP *:https (LISTEN)
+apache2    1001 www-data   6u IPv6    20011      0t0  TCP *:https (LISTEN)
+apache2    1001 www-data   9u IPv6    20122      0t0  TCP [2001:db8::10]:https->[2001:db8:1::77]:51234 (ESTABLISHED)
+nginx      1203 nginx      8u IPv4    20132      0t0  TCP 192.0.2.10:https->198.51.100.7:40012 (ESTABLISHED)
+nginx      1203 nginx      9u IPv4    20140      0t0  TCP 192.0.2.10:https->198.51.100.7:40013 (ESTABLISHED)
+nginx      1203 nginx     10u IPv4    20141      0t0  TCP 192.0.2.10:https->203.0.113.25:55871 (TIME_WAIT)
+dovecot    1310 root      23u IPv4    20201      0t0  TCP *:imaps (LISTEN)
+dovecot    1310 root      24u IPv4    20202      0t0  TCP *:pop3s (LISTEN)
+mariadbd   1402 mysql     31u IPv4    20301      0t0  TCP 127.0.0.1:mysql (LISTEN)
+mariadbd   1402 mysql     42u IPv4    20302      0t0  TCP 127.0.0.1:mysql->127.0.0.1:44120 (ESTABLISHED)
+named      1501 bind     512u IPv4    20401      0t0  UDP 127.0.0.53:domain
+named      1501 bind     513u IPv6    20402      0t0  UDP [::1]:domain
+named      1501 bind     514u IPv4    20403      0t0  TCP 127.0.0.1:domain (LISTEN)
+php-fpm\x20  1601 www-data   5u IPv4    20501      0t0  UDP *:*
+exim4      1701 Debian-exim   3u IPv4    20601      0t0  TCP 192.0.2.10:smtp->198.51.100.99:33001 (ESTABLISHED)
+exim4      1701 Debian-exim   4u IPv4    20602      0t0  TCP *:smtp (LISTEN)
+===== Sun Oct 25 02:01:01 CET 2026 =====
+top - 02:01:01 up 10 days,  3:02,  1 user,  load average: 0.70, 0.50, 0.45
+Tasks: 17 total,   1 running, 16 sleeping,   0 stopped,   0 zombie
+%Cpu(s):  5.0 us,   1.0 sy,   0.0 ni,  92.0 id,   1.5 wa,   0.0 hi,   0.5 si,   0.0 st
+KiB Mem : 131926528 total,   1025567 free,  80009000 used,  50892961 buff/cache
+KiB Swap:   8388604 total,  8388592 free,       12 used.  48985000 avail Mem
+
+  PID USER      PR  NI    VIRT    RES    SHR S  %CPU %MEM     TIME+ COMMAND
+  200 root      20   0 1204560  12.5m  12044 S   0.0   0.1   46:28.74 /sbin/init splash
+  241 root      20   0 2410000      0   4320 S   0.0   0.1   6:44.86 [kworker/0:1-events]
+  282 www-data  20   0  512340   1204   4320 S   1.9   0.1   38:57.51 /usr/sbin/apache2 -k start
+  323 www-data  20   0   98760 101.2m  12044 S   0.0   0.1   44:49.77 /usr/sbin/apache2 -k start
+  364 www-data  20   0 1204560  95.7m   8800 S   3.8   0.1   39:30.35 /usr/sbin/apache2 -k start
+  405 psaadm    20   0   98760  99.0m   8800 S   0.0   0.1   20:52.63 /usr/local/psa/admin/sbin/sw-engine -c /usr/local/psa/admin/conf/php.ini +
+  446 psaadm    20   0  512340 412.5m   8800 S   0.0   0.1   41:14.90 /opt/psa/admin/sbin/sw-cp-serverd -c /etc/sw-cp-server/config
+  487 mysql     20   0 2410000 301.7m   4320 S   0.0   0.1   39:11.97 /usr/sbin/mariadbd
+  528 bind      20   0 2410000   2.3g  12044 S   5.7   0.1   33:42.59 /usr/sbin/named -f -u bind
+  569 dovecot   20   0 2410000  18772   8800 S   0.0   0.1   14:11.16 dovecot/imap-login
+  610 popuser   20   0 2410000  64.1m   8800 S   0.0   0.1   15:27.85 spamd child
+  651 root      20   0 2410000  33152   4320 S   0.0   0.1   27:39.40 php-fpm: master process (/etc/php/7.4/fpm/php-fpm.conf)
+  692 www-data  20   0 2410000  44.8m  12044 S   0.0   0.1   20:41.39 php-fpm: pool www
+  733 root      20   0  512340   3216   8800 S   0.0   0.1   30:21.72 /usr/sbin/cron -f
+  774 root      20   0   98760   9148   4320 S   0.0   0.1   38:23.67 sshd: /usr/sbin/sshd -D [listener] 0 of 10-100 startups
+  815 nginx     20   0   98760  10.2m   8800 S   0.0   0.1   30:41.59 nginx: worker process
+  856 root      20   0   98760      0   4320 S   0.0   0.1   24:43.10 [kswapd0]
+----- meminfo -----
+MemTotal:        131926528 kB
+MemFree:           1025567 kB
+MemAvailable:     48985000 kB
+Buffers:           2048000 kB
+Cached:           40000000 kB
+SwapTotal:         8388604 kB
+SwapFree:          8388592 kB
+Dirty:                1027 kB
+Slab:              3200000 kB
+HugePages_Total:         0
+HugePages_Free:          0
+----- pressure -----
+memory: some avg10=0.03 avg60=0.01 avg300=0.00 total=1237567
+full avg10=0.00 avg60=0.00 avg300=0.00 total=236067
+cpu: some avg10=1.03 avg60=0.80 avg300=0.40 total=98975432
+io: n/a
+----- vmstat -----
+pswpin 109
+pswpout 271
+pgmajfault 4180
+oom_kill 1
+pgfault 9015000
+nr_free_pages 257970
+----- lsof -----
+COMMAND    PID     USER   FD   TYPE   DEVICE SIZE/OFF NODE NAME
+sshd        812 root       3u IPv4    20001      0t0  TCP *:ssh (LISTEN)
+sshd        812 root       4u IPv6    20002      0t0  TCP *:ssh (LISTEN)
+apache2     933 root       4u IPv6    20010      0t0  TCP *:http (LISTEN)
+apache2    1001 www-data   4u IPv6    20010      0t0  TCP *:http (LISTEN)
+apache2     933 root       6u IPv6    20011      0t0  TCP *:https (LISTEN)
+apache2    1001 www-data   6u IPv6    20011      0t0  TCP *:https (LISTEN)
+apache2    1001 www-data   9u IPv6    20123      0t0  TCP [2001:db8::10]:https->[2001:db8:1::77]:51234 (ESTABLISHED)
+nginx      1203 nginx      8u IPv4    20133      0t0  TCP 192.0.2.10:https->198.51.100.7:40012 (ESTABLISHED)
+nginx      1203 nginx      9u IPv4    20140      0t0  TCP 192.0.2.10:https->198.51.100.7:40013 (ESTABLISHED)
+nginx      1203 nginx     10u IPv4    20141      0t0  TCP 192.0.2.10:https->203.0.113.25:55871 (TIME_WAIT)
+dovecot    1310 root      23u IPv4    20201      0t0  TCP *:imaps (LISTEN)
+dovecot    1310 root      24u IPv4    20202      0t0  TCP *:pop3s (LISTEN)
+mariadbd   1402 mysql     31u IPv4    20301      0t0  TCP 127.0.0.1:mysql (LISTEN)
+mariadbd   1402 mysql     42u IPv4    20302      0t0  TCP 127.0.0.1:mysql->127.0.0.1:44120 (ESTABLISHED)
+named      1501 bind     512u IPv4    20401      0t0  UDP 127.0.0.53:domain
+named      1501 bind     513u IPv6    20402      0t0  UDP [::1]:domain
+named      1501 bind     514u IPv4    20403      0t0  TCP 127.0.0.1:domain (LISTEN)
+php-fpm\x20  1601 www-data   5u IPv4    20501      0t0  UDP *:*
+exim4      1701 Debian-exim   3u IPv4    20601      0t0  TCP 192.0.2.10:smtp->198.51.100.99:33001 (ESTABLISHED)
+exim4      1701 Debian-exim   4u IPv4    20602      0t0  TCP *:smtp (LISTEN)
+===== Sun Oct 25 02:02:01 CET 2026 =====
+top - 02:02:01 up 10 days,  3:02,  1 user,  load average: 0.80, 0.50, 0.45
+Tasks: 17 total,   1 running, 16 sleeping,   0 stopped,   0 zombie
+%Cpu(s):  6.0 us,   1.0 sy,   0.0 ni,  91.0 id,   1.5 wa,   0.0 hi,   0.5 si,   0.0 st
+KiB Mem : 131926528 total,   1022567 free,  80012000 used,  50892961 buff/cache
+KiB Swap:   8388604 total,  8388588 free,       16 used.  48980000 avail Mem
+
+  PID USER      PR  NI    VIRT    RES    SHR S  %CPU %MEM     TIME+ COMMAND
+  200 root      20   0 1204560  12.5m  12044 S   0.0   0.1   12:29.60 /sbin/init splash
+  241 root      20   0 1204560      0   8800 S   0.0   0.1   35:21.20 [kworker/0:1-events]
+  282 www-data  20   0   98760   1204   4320 S   1.9   0.1   24:57.69 /usr/sbin/apache2 -k start
+  323 www-data  20   0  512340 101.2m   8800 S   0.0   0.1   45:37.36 /usr/sbin/apache2 -k start
+  364 www-data  20   0   98760  95.7m  12044 S   3.8   0.1   41:47.97 /usr/sbin/apache2 -k start
+  405 psaadm    20   0 1204560  99.0m  12044 S   0.0   0.1   5:11.51 /usr/local/psa/admin/sbin/sw-engine -c /usr/local/psa/admin/conf/php.ini +
+  446 psaadm    20   0   98760 412.5m   8800 S   0.0   0.1   57:53.74 /opt/psa/admin/sbin/sw-cp-serverd -c /etc/sw-cp-server/config
+  487 mysql     20   0 1204560 301.7m   8800 S   0.0   0.1   38:54.45 /usr/sbin/mariadbd
+  528 bind      20   0 2410000   2.3g   8800 S   5.7   0.1   25:39.61 /usr/sbin/named -f -u bind
+  569 dovecot   20   0 2410000  18772  12044 S   0.0   0.1   39:52.45 dovecot/imap-login
+  610 popuser   20   0 1204560  64.1m   4320 S   0.0   0.1   24:49.44 spamd child
+  651 root      20   0  512340  33152   8800 S   0.0   0.1   13:12.54 php-fpm: master process (/etc/php/7.4/fpm/php-fpm.conf)
+  692 www-data  20   0   98760  44.8m   8800 S   0.0   0.1   4:42.84 php-fpm: pool www
+  733 root      20   0  512340   3216  12044 S   0.0   0.1   38:38.99 /usr/sbin/cron -f
+  774 root      20   0 2410000   9148   8800 S   0.0   0.1   0:44.28 sshd: /usr/sbin/sshd -D [listener] 0 of 10-100 startups
+  815 nginx     20   0  512340  10.2m  12044 S   0.0   0.1   12:39.57 nginx: worker process
+  856 root      20   0  512340      0  12044 S   0.0   0.1   10:18.83 [kswapd0]
+----- meminfo -----
+MemTotal:        131926528 kB
+MemFree:           1022567 kB
+MemAvailable:     48980000 kB
+Buffers:           2048000 kB
+Cached:           40000000 kB
+SwapTotal:         8388604 kB
+SwapFree:          8388588 kB
+Dirty:                1028 kB
+Slab:              3200000 kB
+HugePages_Total:         0
+HugePages_Free:          0
+----- pressure -----
+memory: some avg10=0.04 avg60=0.01 avg300=0.00 total=1238567
+full avg10=0.00 avg60=0.00 avg300=0.00 total=236567
+cpu: some avg10=1.04 avg60=0.80 avg300=0.40 total=99045432
+io: n/a
+----- vmstat -----
+pswpin 112
+pswpout 278
+pgmajfault 4240
+oom_kill 1
+pgfault 9020000
+nr_free_pages 257960
+----- lsof -----
+COMMAND    PID     USER   FD   TYPE   DEVICE SIZE/OFF NODE NAME
+sshd        812 root       3u IPv4    20001      0t0  TCP *:ssh (LISTEN)
+sshd        812 root       4u IPv6    20002      0t0  TCP *:ssh (LISTEN)
+apache2     933 root       4u IPv6    20010      0t0  TCP *:http (LISTEN)
+apache2    1001 www-data   4u IPv6    20010      0t0  TCP *:http (LISTEN)
+apache2     933 root       6u IPv6    20011      0t0  TCP *:https (LISTEN)
+apache2    1001 www-data   6u IPv6    20011      0t0  TCP *:https (LISTEN)
+apache2    1001 www-data   9u IPv6    20124      0t0  TCP [2001:db8::10]:https->[2001:db8:1::77]:51234 (ESTABLISHED)
+nginx      1203 nginx      8u IPv4    20134      0t0  TCP 192.0.2.10:https->198.51.100.7:40012 (ESTABLISHED)
+nginx      1203 nginx      9u IPv4    20140      0t0  TCP 192.0.2.10:https->198.51.100.7:40013 (ESTABLISHED)
