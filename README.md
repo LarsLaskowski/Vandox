@@ -295,8 +295,8 @@ Supported sources:
   3339 format (`2026-03-01T12:00:00.123456+01:00 host program[pid]: message`), with or without `<PRI>`. The
   detection also claims any other file whose first line has such a header (so `mail.log`, `mail.err` and `maillog`
   are recognized by their first line). RFC 5424 files are not read. Lines of Postfix (`postfix/<daemon>`) and Dovecot
-  (`dovecot`) in any rsyslog file or journal export get the priority of their severity (`warning:` 4, `error:` 3,
-  `fatal:` and `panic:` 2; Dovecot also `Debug:` 7) and the events `postfix.fatal`, `postfix.panic`, `dovecot.fatal`,
+  (`dovecot`) in any rsyslog file or journal export get the priority of their severity (Postfix `warning:` 4, `error:` 3,
+  `fatal:` and `panic:` 2; Dovecot `Debug:` 7, `Warning:` 4, `Error:` 3, `Fatal:` and `Panic:` 2) and the events `postfix.fatal`, `postfix.panic`, `dovecot.fatal`,
   `dovecot.panic`, and `postfix.database_unavailable` or `dovecot.database_unavailable` for a failed or lost
   MySQL/MariaDB connection.
 - The MariaDB error log (source type `mariadb`), recognized by its content under any name (`mysql/error.log`,
