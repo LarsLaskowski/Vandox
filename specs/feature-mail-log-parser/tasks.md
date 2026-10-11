@@ -15,10 +15,10 @@ Every documentation edit appears in exactly one row; the Lead's approval only to
 | 7 | Syslog parser tests: fixture, mail names are no syslog names, heap-bound large mail log | `tests/Vandox.Core.Tests/SyslogParserTests.cs` | AC1.3, AC1.6, AC4, AC5.2 | Tester | [x] |
 | 8 | Journal parser tests: mail entries, parity with the fixture | `tests/Vandox.Core.Tests/JournalExportParserTests.cs` | AC5.1, AC5.2 | Tester | [x] |
 | 9 | Registry detection of mail log heads, cut first line under `mail.log` not claimed | `tests/Vandox.Core.Tests/BuiltInParsersTests.cs` | AC1.5, AC1.6 | Tester | [x] |
-| 10 | Implement `MailLineClassifier`; call it in `SystemLogGrouper.Add` before the MariaDB stage; class summaries of `SystemLogGrouper` and `SyslogParser`; remove the skeleton pragma | `src/Vandox.Core/LogParsing/MailLineClassifier.cs`, `src/Vandox.Core/LogParsing/SystemLogGrouper.cs`, `src/Vandox.Core/LogParsing/SyslogParser.cs` | AC1–AC5 | Dev | [ ] |
-| 11 | Area document: three stages, subsection *Mail lines (Postfix and Dovecot)* (rules, claim of mail logs, earlier imports stay unclassified, forged lines), *Duplicates*, *Related decisions*, *Implementation* | `docs/areas/log-import.md` | — | Dev | [ ] |
-| 12 | README *Supported sources*: `mail.log` and the mail classification | `README.md` | — | Dev | [ ] |
-| 13 | ARCHITECTURE *Components* (`Vandox.Core` item) and *Data flow* records (0091) | `docs/ARCHITECTURE.md` | — | Dev | [ ] |
-| 14 | project.md: security area 10 (`MailLineClassifier`, 0091) and the *Test doubles* row "log parsers (C#)" (`CountingEmitter`) | `.squad/project.md` | — | Dev | [ ] |
+| 10 | Implement `MailLineClassifier`; call it in `SystemLogGrouper.Add` before the MariaDB stage; class summaries of `SystemLogGrouper` and `SyslogParser`; remove the skeleton pragma | `src/Vandox.Core/LogParsing/MailLineClassifier.cs`, `src/Vandox.Core/LogParsing/SystemLogGrouper.cs`, `src/Vandox.Core/LogParsing/SyslogParser.cs` | AC1–AC5 | Dev | [x] |
+| 11 | Area document: three stages, subsection *Mail lines (Postfix and Dovecot)* (rules, claim of mail logs, earlier imports stay unclassified, forged lines), *Duplicates*, *Related decisions*, *Implementation* | `docs/areas/log-import.md` | — | Dev | [x] |
+| 12 | README *Supported sources*: `mail.log` and the mail classification | `README.md` | — | Dev | [x] |
+| 13 | ARCHITECTURE *Components* (`Vandox.Core` item) and *Data flow* records (0091) | `docs/ARCHITECTURE.md` | — | Dev | [x] |
+| 14 | project.md: security area 10 (`MailLineClassifier`, 0091) and the *Test doubles* row "log parsers (C#)" (`CountingEmitter`) | `.squad/project.md` | — | Dev | [x] |
 | 15 | Coverage gate: tests until 80 % on new and changed lines | as needed in `tests/Vandox.Core.Tests/` | — | Tester | [ ] |
 | 16 | Follow-up issue "[Logs] Dovecot's own log file is misread as syslog" (text in the plan) | GitHub | — | Orchestrator | [ ] |
