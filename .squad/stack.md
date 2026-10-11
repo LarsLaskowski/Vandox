@@ -148,6 +148,10 @@ Go (agent):
 C# (backend): follow the surrounding code and the analyzers; in particular
 - file-scoped namespaces, `#region` sections and XML documentation on every member as in the existing files
   (Reihitsu enforces the layout; run *Format* before building);
+- a C# file ends without a final newline (Reihitsu `RH5603`) and never mixes line endings (`RH5604`); the
+  repository stores `.cs` files with LF and checks them out with CRLF (`.gitattributes`). Do not fix layout by
+  hand: *Format* removes the final newline and normalizes the line endings, and the member that wrote the file
+  runs it before building (`.squad/team.md`, *Shared rules*);
 - nullable reference types on, `CancellationToken` as the last parameter of anything that does I/O or can
   block, and honored;
 - logging through `[LoggerMessage]` methods (`BackendLog`), never string interpolation in a log call;
@@ -160,7 +164,9 @@ C# (backend): follow the surrounding code and the analyzers; in particular
 
 See `docs/UNIT_TESTS.md`. Go: the standard `testing` package, table-driven tests with `t.Run`, `t.Helper()` in
 helpers, `t.TempDir()` for files, failure messages that state got and want. .NET: MSTest, one test class per
-class under test, Arrange/Act/Assert comments, helper classes for temporary directories and fakes.
+class under test, Arrange/Act/Assert comments, helper classes for temporary directories and fakes. New C# test
+files follow the C# layout in *Writing code*: the Tester does not fix layout by hand but runs *Format* on the files
+it wrote before building, so *Format check* finds nothing in them.
 
 Heap-bound tests (.NET) measure retention with `GC.GetTotalMemory(true)`, which Sonar `S1215` flags. The accepted
 form is one private helper in the test class that wraps exactly that call in `#pragma warning disable S1215` /
@@ -190,6 +196,7 @@ return a zero value or an error (`errors.New("not implemented")`) where the sign
 `panic("not implemented")` only where it does not (a `panic` aborts the whole test binary), so the module
 builds and the tests compile and fail. C#: new types and members with their full signature and XML
 documentation, bodies `throw new NotImplementedException();`, so the solution builds and the tests compile and fail.
+New skeleton files follow the C# layout in *Writing code* (no final newline); run *Format* on them before *Build*.
 Reihitsu `RH2003` forbids `NotImplementedException` and Sonar `S2325` flags instance members that do not use `this`,
 so every skeleton file carries `#pragma warning disable RH2003, S2325` before its type and the Dev
 removes the line when implementing the file; no skeleton pragma may remain when the *Analyzer gate* runs in step 7.
