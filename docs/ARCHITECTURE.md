@@ -7,7 +7,7 @@ backend with web UI, runs as a Docker container on any Docker host in the home n
 
 This document describes the target architecture; as of now the binaries' `--version`, the data model and wire format
 (Go: `internal/model`, `internal/wire`; backend: `src/Vandox.Core`), the configuration loading (`internal/config` for the agent,
-`Vandox.Core.Configuration` for `vandoxd`) and the backend service skeleton and the log import framework exist (`vandoxd import`, with the parsers for the journal export, the MariaDB error log, Dovecot's own log file, `syslog` and `kern.log`, the Plesk panel log, the nginx, `sw-cp-server` and Apache error logs and the legacy `top`/`lsof` monitoring log): `vandoxd` loads its configuration, opens and migrates its SQLite database (schema, batched writes, queries and log search
+`Vandox.Core.Configuration` for `vandoxd`) and the backend service skeleton the log import framework and the log signature catalog with its detector (`Vandox.Core.Signatures`; the service does not call it yet) exist (`vandoxd import`, with the parsers for the journal export, the MariaDB error log, Dovecot's own log file, `syslog` and `kern.log`, the Plesk panel log, the nginx, `sw-cp-server` and Apache error logs and the legacy `top`/`lsof` monitoring log): `vandoxd` loads its configuration, opens and migrates its SQLite database (schema, batched writes, queries and log search
 exist as the storage layer; the service does not call it yet, `vandoxd import` writes through it), listens on the
 web and ingest ports, answers `/healthz` and shuts down gracefully, and ships as a container with a health
 check. Sections are marked as implemented as features land. The decisions behind it are recorded in
@@ -46,7 +46,8 @@ way, and agents of the hosting provider are never disabled or changed
   journal export, the MariaDB error log with its events, Dovecot's own log file, `syslog` and `kern.log` with their
   kernel report grouper and the time zone rules of year-less times, the Plesk panel log and the nginx, `sw-cp-server` and Apache error logs
   (found by content or by a configured path, unreadable lines kept as raw lines), the legacy `top`/`lsof` monitoring log (snapshots
-  into metrics, process and connection snapshots), and the classification of Postfix and Dovecot lines),
+  into metrics, process and connection snapshots), and the classification of Postfix and Dovecot lines; the log signatures, an embedded
+  catalog, and the detector that matches them on stored log lines),
   `Vandox.Storage` (the SQLite database, see [Storage](areas/storage.md): schema, migrations, writing batches, queries and log search) and
   `Vandox.Import` (reads a directory, archive or file as streams, detects the parser per file, hashes the
   content, writes the parsers' records in resumable batches and builds the summary)
@@ -54,7 +55,7 @@ way, and agents of the hosting provider are never disabled or changed
   [0077](decisions/0077-storage-on-microsoft-data-sqlite-same-schema-and-rules.md),
   [0079](decisions/0079-log-parsing-and-import-in-the-backend-without-following-links.md)).
 - `internal/` — the agent's Go packages: data model and the versioned wire encoder (see
-  [wire format](areas/wire-format.md)), signatures, version information, agent configuration loading (see
+  [wire format](areas/wire-format.md)), version information, agent configuration loading (see
   *Configuration*) and command-line handling (`internal/cli`). The model and the wire format exist twice, in Go
   (producer) and in C# (consumer); a golden batch produced by the Go encoder and decoded by the C# decoder keeps
   them in step ([0075](decisions/0075-wire-contract-pinned-by-golden-fixtures.md)).
@@ -137,7 +138,8 @@ Records: [0006](decisions/0006-agent-connects-outbound-only.md),
 [0088](decisions/0088-mariadb-error-log-entries-by-content-and-lifecycle-events-in-log-line.md),
 [0091](decisions/0091-mail-lines-classified-in-the-syslog-and-journal-parsers.md),
 [0092](decisions/0092-error-logs-by-content-or-configured-path-unreadable-lines-kept-raw.md),
-[0093](decisions/0093-legacy-monitoring-log-snapshots-by-header-zone-and-whole-snapshot-validity.md).
+[0093](decisions/0093-legacy-monitoring-log-snapshots-by-header-zone-and-whole-snapshot-validity.md),
+[0094](decisions/0094-log-signatures-embedded-yaml-linear-patterns-on-stored-lines.md).
 
 ## Network
 

@@ -1,5 +1,3 @@
-#pragma warning disable RH2003, S2325, S3453, S1144
-
 namespace Vandox.Core.Signatures;
 
 /// <summary>
@@ -64,7 +62,10 @@ public sealed class SignatureCatalog
     /// <exception cref="SignatureException">The text breaks a catalog rule</exception>
     public static SignatureCatalog Parse(string name, string text)
     {
-        throw new NotImplementedException();
+        ArgumentNullException.ThrowIfNull(name);
+        ArgumentNullException.ThrowIfNull(text);
+
+        return new SignatureCatalog(new SignatureCatalogReader(name).Read(text));
     }
 
     #endregion // Methods
