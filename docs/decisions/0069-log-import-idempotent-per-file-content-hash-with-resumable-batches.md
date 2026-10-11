@@ -117,7 +117,9 @@ modification time of its first import, and the second pass reads only up to the 
 whose content starts with a completely imported content of the same source type (an earlier run, or an earlier file
 of the same run) is continued (G3, P2): only the part from the beginning of the line in which the longest such
 content ends is parsed and stored, the whole content is still hashed in both passes, and the continuation point is
-stored with the content's state, so a resume uses the same one. The rules and their limits are in
+stored with the content's state, so a resume uses the same one. The new part is parsed with the file name and
+modification time of the continued content's own first import (γ applied to that content), not those of the earlier
+content: the year of its year-less times is anchored on the file it comes from. The rules and their limits are in
 [Log import](../areas/log-import.md), *Repeatable import*; the table that tracks the files is part of schema
 version 3 (0077), the head key and the continuation point of version 6 ([Storage](../areas/storage.md)).
 
@@ -134,8 +136,13 @@ version 3 (0077), the head key and the continuation point of version 6 ([Storage
   the older-after-newer order.
 - At the continuation point a grouped entry is split: a MariaDB entry of the error log loses the continuation lines
   after the point (reported as skipped lines "line before the first entry"), and a MariaDB entry or kernel report of
-  the journal or syslog is split into the stored entry and lines of their own. A line the earlier copy cut is stored
-  again, complete.
+  the journal or syslog is split into the stored entry and lines of their own; the summary counts the lines skipped
+  before the first record of the new part with the continued file. A line the earlier copy cut is stored again,
+  complete — the one case in which a line has two records (the cut one and the complete one); skipping it would lose
+  its rest, and the cut record cannot be replaced because records do not reference their import file.
+- A content whose records are removed later (retention, once it exists) keeps its complete state: re-importing it
+  stores nothing, and a longer content is continued after it, so the removed part is never restored. This is the
+  same as for re-importing the unchanged content.
 - A file that changes while it is imported is detected only when the second pass has read the whole hashed size,
   so the records written before that stay counted under the original hash and a later import of the original
   content resumes after that count. Detecting the change earlier would need a third pass or a temporary copy

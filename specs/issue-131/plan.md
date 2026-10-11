@@ -46,7 +46,8 @@ criterion names a built-in parser. "C" is a content that ends with a line feed, 
 more lines.
 
 - [ ] AC1 (issue AC1): run 1 imports `a/syslog` = C; run 2 imports `b/syslog` = C+D. Run 2 stores exactly the
-  records of the lines of D, in order; the records of both runs together are the lines of C+D, each once. Run 2's
+  records of the lines of D, in order; the records of both runs together are the lines of C+D, each once (C here
+  ends with a line feed; the one exception to "each once" is a C that ends inside a line, AC5). Run 2's
   result: outcome `Continued`, `Records` = number of records of D, `ContinuedFrom` = `a/syslog` (the earlier
   content's stored display name), `ContinuedAfter` = number of lines of C. A third run of C+D reports
   `AlreadyImported` and stores nothing. Checked with `FakeImportStore` (`ImporterStoreTests`) and end to end
@@ -62,7 +63,10 @@ more lines.
   (not after C): only E is stored in run 3, `ContinuedFrom` names the C+D file.
 - [ ] AC5 (cut line): C = `"LOG l1\nLOG l2\nLOG l3-part"` (no final line feed), C+D =
   `"LOG l1\nLOG l2\nLOG l3-partrest\nLOG l4\n"`. Run 2 starts at the beginning of the line in which C ends: it stores
-  `LOG l3-partrest` and `LOG l4`, `ContinuedAfter` = 2. A base without any line feed (`"LOG only-part"`, then
+  `LOG l3-partrest` and `LOG l4`, `ContinuedAfter` = 2. This is the **one exception** to "each line once" (issue
+  AC1, plan AC1): the cut line has two records afterwards, the truncated `LOG l3-part` of run 1 and the complete
+  `LOG l3-partrest` of run 2; the test asserts both. Skipping the cut line instead would lose its rest, and the
+  record of run 1 cannot be replaced (records do not reference their import file). A base without any line feed (`"LOG only-part"`, then
   `"LOG only-part more\n"`) gives no continuation: outcome `Imported`, all lines stored.
 - [ ] AC6 (no false continuation): the file is `Imported` as a whole when (a) its first |C| bytes differ from C in
   one byte after the first line (same head key, different prefix hash); (b) C was imported with another source type
@@ -73,7 +77,9 @@ more lines.
   after `  imported:          <n>`, and, when a file was continued, a section `\nFiles continued:\n` before
   *Files not recognized* with one line per file, exactly
   `  <Terminal.Quote(path)>: continues <Terminal.Quote(ContinuedFrom)> after line <ContinuedAfter>\n`
-  (e.g. `  "b/syslog": continues "a/syslog" after line 3`). A path or name with a control character is printed
+  (e.g. `  "b/syslog": continues "a/syslog" after line 3`); when `SkippedAtStart` > 0 the line ends instead with
+  `after line <ContinuedAfter>, skipped <SkippedAtStart> lines before its first record\n` (e.g.
+  `  "b/mariadb.err": continues "a/mariadb.err" after line 3, skipped 2 lines before its first record`). A path or name with a control character is printed
   quoted and escaped like every other path. `ImportProgressLogger` logs the outcome of a continued file as
   `continued`. The exit code is 0 for a run whose files are imported, continued, already imported or not
   recognized.
@@ -130,7 +136,19 @@ more lines.
   never reads beyond the limit, and returns early at the end of input.
 - [ ] AC20 (built-in parsers at the boundary, end to end): a MariaDB error log C+D whose D begins with two
   continuation lines of C's last entry is continued; the two lines are reported as skipped
-  (`line before the first entry`, with their line numbers in the whole file) and the entries after them are stored.
+  (`line before the first entry`, with their line numbers in the whole file) and the entries after them are stored;
+  `FileResult.SkippedAtStart` = 2 and the summary's *Files continued* line names them (AC7).
+- [ ] AC21 (`SkippedAtStart`, `RecordEmitter`): for a continued file it counts the `Skip` calls with a line number
+  above 0 that come before the parser's first `RecordAsync` call (a refused record also ends the count; a record
+  dropped on resume ends it too, so a resumed run gives the same count); skips after the first record and skips
+  with line 0 are not counted; for a file that is not continued it stays 0. Checked with `FakeImportStore`
+  (`ImporterStoreTests`) and a `LineParser` that skips its first lines; `FileResult.Snapshot` copies it.
+- [ ] AC22 (year anchor of the new part, end to end with the built-in syslog parser): the new part is parsed with the
+  file name and modification time stored in the continued content's **own** state row (the row `BeginImportAsync`
+  creates for C+D), never those of the base. C = `syslog` with year-less lines of February and modification time
+  2026-03-01; C+D = `syslog` with C's lines plus year-less lines of September and modification time 2026-10-01.
+  Run 2 stores D's first record in **2026-09** (parsed with C's anchor it would land in 2025, which the test
+  catches). A resumed continuation (AC10) uses the same stored row, so the year cannot change within it.
 
 ## Approach
 
@@ -157,9 +175,15 @@ unchanged — so a resume uses the stored continuation point.
 **Pass 2** (`ImportPass.ImportContentAsync`): when `state.Offset > 0`, call `counted.SkipAsync(state.Offset)` before
 the parser starts (reads and hashes, no line counting, no progress), set `result.ContinuedFrom`,
 `result.ContinuedAfter` (the line feeds skipped) and later the outcome `Continued` instead of `Imported`. The
-emitter gets the skipped line count as `lineOffset` and adds it to every `Skip` line number above 0. The parser gets
-`new LogFile(state.FileName, state.ModTime)` as today (γ of 0069) and the stream positioned at the continuation
-point; `VerifyAsync` still checks the whole content against pass 1.
+emitter gets the skipped line count as `lineOffset` and adds it to every `Skip` line number above 0; for a continued
+file (`state.Offset` > 0, passed to the emitter through `state`) it counts the skips with a line number above 0 before the parser's first
+`RecordAsync` call into `FileResult.SkippedAtStart` (AC21). The parser gets `new LogFile(state.FileName,
+state.ModTime)` as today (γ of 0069) and the stream positioned at the continuation point. `state` is the continued
+content's **own** row (created by `BeginAsync` from this file's `FileName` and `ModTime`, or the row of its first,
+interrupted import on a resume) — the year anchor of the new part is the continued file's own name date or
+modification time, never the base's; `ImportFile.ContinuedFrom` carries only the base's display name for the
+summary, and the Dev must not take a file name or modification time from the base row (AC22).
+`VerifyAsync` still checks the whole content against pass 1.
 
 **Store lookup** (`SqliteStore.FindImportBasesAsync`): validate (head 32 bytes, `ParserTypes.IsValid`), then on a
 reader connection: `SELECT sha256, size FROM import_files WHERE head_sha256 = $head AND source_type = $type AND
@@ -179,7 +203,8 @@ for a column with a foreign key; the id is written only from a row read in the s
 a scratch in-memory database (SQLite 3.45): the four statements run on a `STRICT` table with rows, and the columns
 can be dropped again after `DROP INDEX import_files_head`.
 
-**Summary and log**: `ImportOutcome.Continued`, the count row and the *Files continued* section (AC7),
+**Summary and log**: `ImportOutcome.Continued`, the count row and the *Files continued* section with the
+`SkippedAtStart` suffix (AC7),
 `ImportProgressLogger` outcome name `continued`. No new log attribute.
 
 ## Affected projects and types
@@ -197,9 +222,9 @@ can be dropped again after `DROP INDEX import_files_head`.
 | Vandox.Import | `ContentHead.cs` (new) | head key |
 | Vandox.Import | `HashingStream.cs` | base snapshots, `Matches` |
 | Vandox.Import | `ContentStream.cs` | `SkipAsync` |
-| Vandox.Import | `RecordEmitter.cs` | `lineOffset` for skip line numbers |
+| Vandox.Import | `RecordEmitter.cs` | `lineOffset` for skip line numbers, `SkippedAtStart` count |
 | Vandox.Import | `FoundFile.cs` | `Head`, `Prefixes` |
-| Vandox.Import | `FileResult.cs` | `ContinuedFrom`, `ContinuedAfter`, copied by `Snapshot` |
+| Vandox.Import | `FileResult.cs` | `ContinuedFrom`, `ContinuedAfter`, `SkippedAtStart`, copied by `Snapshot` |
 | Vandox.Import | `ImportOutcome.cs` | `Continued` (appended after `Failed`) |
 | Vandox.Import | `Scanner.cs` | lookup, run bases, matches into `FoundFile` |
 | Vandox.Import | `ImportPass.cs` | start with head and prefixes, skip, outcome |
@@ -261,6 +286,7 @@ internal static Task<IReadOnlyList<ImportBase>> FindBasesAsync(SqliteConnection 
 // FileResult (public), added:
 public string ContinuedFrom { get; set; } = string.Empty;   // display name of the first import of the continued content; empty when not continued
 public long ContinuedAfter { get; set; }                     // the lines of the content before the continuation point
+public long SkippedAtStart { get; set; }                     // continued file: lines the parser skipped before its first record; 0 otherwise
 
 // internal
 internal static class ContentHead
@@ -294,13 +320,13 @@ internal List<ImportPrefix> Prefixes { get; set; } = [];
 - `tests/Vandox.Import.Tests/ContentHeadTests.cs` (new): AC17.
 - `tests/Vandox.Import.Tests/HashingStreamTests.cs` (new): AC18.
 - `tests/Vandox.Import.Tests/ContentStreamTests.cs` (new): AC19.
-- `tests/Vandox.Import.Tests/ImporterStoreTests.cs`: AC1, AC4, AC5, AC6, AC8, AC9, AC10, AC15.
+- `tests/Vandox.Import.Tests/ImporterStoreTests.cs`: AC1, AC4, AC5, AC6, AC8, AC9, AC10, AC15, AC21.
 - `tests/Vandox.Import.Tests/ImporterArchiveTests.cs`: AC2.
 - `tests/Vandox.Import.Tests/ImporterDirectoryTests.cs`: AC3, AC16.
 - `tests/Vandox.Backend.Tests/ImportSummaryWriterTests.cs` (new): AC7 (summary text).
 - `tests/Vandox.Backend.Tests/ImportProgressLoggerTests.cs` (new): AC7 (outcome name).
 - `tests/Vandox.Backend.Tests/ImportCommandTests.cs`: AC1 end to end against SQLite with the built-in syslog parser,
-  AC7 exit code, AC20.
+  AC7 exit code, AC20, AC22.
 - Test double: `tests/Vandox.Import.Tests/FakeImportStore.cs` — a lookup over its in-memory states (head key,
   source type, complete, largest first, at most 64), the base choice of the real store in `BeginImportAsync`,
   and a scripted `FindFailure`.
@@ -325,13 +351,18 @@ Existing test code affected by a changed signature:
     earlier files of the run in input order; at most 64 bases per file; the longest base whose bytes the content
     starts with wins; the new part starts at the beginning of the line in which the base ends, and a base without a
     line feed is never continued; the new part is parsed on its own with the file name and modification time of the
-    content's first import; the whole content is still hashed in both passes; the continuation point is stored, so a
+    **continued** content's own first import (its own state row) — so the year of year-less times in the new part is
+    anchored on the continued file's name date or modification time, never on the base's; the whole content is still hashed in both passes; the continuation point is stored, so a
     resume uses it. Limits: the older-after-newer order is not recognized (imported as a whole); contents imported
     before schema version 6 are never a base; at the continuation point a grouped entry is split (MariaDB error log:
     continuation lines after the point are skipped as "line before the first entry"; journal and syslog: MariaDB
     entries and kernel reports become the stored entry plus lines of their own) and a line cut by the earlier copy is
-    stored again, complete. Fix the sentence on appended lines ("come with a later import" — now as a continuation).
-  - *Result*: outcome "continued"; the summary's count row and *Files continued* list (path, earlier name, line);
+    stored again, complete — the one case in which a line has two records (the cut one and the complete one); a
+    content whose records were removed later (retention, once it exists) keeps its complete state, so it is still
+    reported as already imported and a longer content is still continued after it — the removed part is never
+    restored. Fix the sentence on appended lines ("come with a later import" — now as a continuation).
+  - *Result*: outcome "continued"; the summary's count row and *Files continued* list (path, earlier name, line, and
+    the lines skipped before the first record of the new part when there are any);
     *Lines read* counts the new part of a continued file, skipped-line numbers count in the whole file; exit code 0
     also for continued files; progress outcome `continued`.
   - *Related decisions*: the 0069 line becomes "why content hashes, two passes, resume by count and the continuation
@@ -376,7 +407,8 @@ described in `docs/ARCHITECTURE.md` (*Storage*), linking 0069.
 - [ ] SQL takes the head key, source type and prefixes only as parameters; `continues_id` is taken from a row read in
   the same transaction.
 - [ ] User-visible texts: the summary prints `ContinuedFrom` (the earlier content's stored display name, derived from
-  input, at most 1,024 bytes) and the path only through `Terminal.Quote`; the progress log adds no attribute. Errors:
+  input, at most 1,024 bytes) and the path only through `Terminal.Quote`, and `SkippedAtStart` as an invariant-culture
+  number; the progress log adds no attribute. Errors:
   a pass-1 store failure ends the run with `importer: reading the import state failed` (logged with the inner
   `StoreException` message through the JSON logger, which escapes control characters; never in the summary);
   `InvalidImportException` texts are those of AC13 (fixed texts, no input); pass-2 reasons are unchanged
@@ -387,8 +419,34 @@ described in `docs/ARCHITECTURE.md` (*Storage*), linking 0069.
 - `docs/decisions/0069-log-import-idempotent-per-file-content-hash-with-resumable-batches.md` — unreleased (no `v*`
   tag exists), extended in place on its own topic and set back to `Proposed` (index row too, title extended):
   options G1–G3 for the grown file, P1–P3 for finding the base, the decision (G3, P2, bases from earlier runs and
-  earlier files of the run), and the consequences (limits: order, pre-version-6 contents, split entries; the
-  follow-up). `decision-check.py` passes.
+  earlier files of the run), and the consequences (limits: order, pre-version-6 contents, split entries and the
+  summary's count of lines skipped at the continuation point, the cut line as the one line with two records,
+  contents whose records were removed later; the year anchor of the new part from the continued content's own first
+  import; the follow-up). `decision-check.py` passes.
+
+## Challenge
+
+Devil's Advocate, round 1: 0 major, 4 minor objections.
+
+1. *Cut line stored twice contradicts "each line once" (issue AC1, plan AC1).* **Accepted** (wording; behavior
+   kept, as the objection itself recommends). AC1 now names the exception and points to AC5; AC5 states plainly
+   that the cut line has two records afterwards (truncated from run 1, complete from run 2), that the test asserts
+   both, and why skipping it would lose data; the area document (owner Dev) and record 0069 name it as the one case
+   of a line with two records. The orchestrator names the exception in the PR description.
+2. *MariaDB continuation lines dropped at the continuation point are not linked to the continuation in the
+   summary.* **Accepted.** New `FileResult.SkippedAtStart` (lines with a line number the parser skipped before its
+   first record in a continued file, counted by `RecordEmitter`, AC21); the *Files continued* line ends with
+   `, skipped <n> lines before its first record` when it is above 0 (AC7, AC20). Generic (no parser reason text is
+   matched), deterministic on resume, and a number only. Keeping the entry whole stays out of scope.
+3. *Year anchor wording and a test.* **Accepted.** *Approach / Pass 2* and the *Areas* wording now say that the new
+   part is parsed with the file name and modification time of the continued content's own state row, never the
+   base's; AC22 pins it end to end with a syslog D whose September lines lie far after C's modification time
+   (March), which the base's anchor would put in the year before.
+4. *Contents whose records were removed (retention) keep a complete state and serve as a base.* **Accepted.** One
+   sentence in record 0069 (*Consequences*) and in the area document's limits (owner Dev): the state stays complete,
+   so the content is still reported already imported and a longer one is continued after it; the removed part is
+   never restored. Retention is not implemented yet (`docs/areas/storage.md`, *Retention (planned)*); no code
+   change.
 
 ## Out of scope / follow-ups
 
