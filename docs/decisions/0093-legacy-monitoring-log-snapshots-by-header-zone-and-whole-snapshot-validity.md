@@ -1,6 +1,6 @@
 # 0093: The legacy top/lsof monitoring log is read snapshot by snapshot, timed by the zone abbreviation of its header within import.time_zone, and a snapshot whose top output is broken is skipped whole
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-11
 - **Area:** Log import
 - **Source:** Issue #20
