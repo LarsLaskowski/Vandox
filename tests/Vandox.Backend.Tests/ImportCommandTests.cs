@@ -322,6 +322,7 @@ public class ImportCommandTests
 
         Directory.CreateDirectory(logs);
         await WriteLogsAsync(logs, TestContext.CancellationToken);
+        await File.WriteAllTextAsync(Path.Combine(logs, "a.txt"), "just a note\n", TestContext.CancellationToken);
         await File.AppendAllTextAsync(fixture.ConfigPath, "import:\n  time_zone: Europe/Berlin\n", TestContext.CancellationToken);
 
         var created = await SqliteStore.OpenAsync(fixture.Storage, TestContext.CancellationToken);
@@ -344,7 +345,7 @@ public class ImportCommandTests
         // Assert
         Assert.AreEqual(1, code, "exit code");
         Assert.Contains("import failed", fixture.Error.ToString(), "log line");
-        Assert.Contains("syslog", fixture.Out.ToString(), "the summary lists the files found so far");
+        Assert.Contains("a.txt", fixture.Out.ToString(), "the summary lists the files found so far");
     }
 
     /// <summary>
