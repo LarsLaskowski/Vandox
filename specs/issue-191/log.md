@@ -13,4 +13,4 @@ One line per pipeline step: date, step, member, result. Lead decisions and escal
 | 2026-10-11 | 6 Implement | squad-dev | implemented per plan; suite green; coverage 100% of changed lines (sonnet/medium · 72,660 tokens · 14 tool uses · 329 s) |
 | 2026-10-11 | 7 Code check | Orchestrator | format, analyzer (0), tests, coverage (100%/96.9%), scope: all pass; Code Officer not needed |
 | 2026-10-11 | 8 Review | squad-reviewer | round 1 @97cbc82: APPROVE, 1 non-blocking (catch in ImportArchiveAsync redundant given backstop) (opus/medium · 46,321 tokens · 13 tool uses · 100 s) |
-| 2026-10-11 | 9 PR approval | squad-lead | APPROVED. Non-blocking finding (catch in ImportArchiveAsync not pinned) accepted unfixed; plan wording corrected; no code change, no delta round |
+| 2026-10-11 | 9 PR approval | squad-lead | APPROVED. Non-blocking finding (catch in ImportArchiveAsync not pinned) accepted unfixed; plan wording corrected; no code change, no delta round (opus/medium · 34,442 tokens · 9 tool uses · 37 s) |
