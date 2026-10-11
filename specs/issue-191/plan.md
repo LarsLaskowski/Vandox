@@ -1,7 +1,7 @@
 # Plan: Print the import summary when pass 2 is interrupted outside the parser
 
 Source: Issue #191
-Status: Draft
+Status: Approved
 Tier: standard — a behavior change on the cancellation path of the log import (the run now returns a summary instead
 of throwing); it changes no file access, path handling, parsing bound or output escaping, so no security area is
 touched.
@@ -85,8 +85,11 @@ Related observations (not changed here):
 3. `Importer.RunAsync`: wrap the pass-2 call (line 69) in `try` with
    `catch (OperationCanceledException exception) when (cancellationToken.IsCancellationRequested) { error = exception; }`,
    as the scan call above it does, so `Summary.Interrupted`, `Summarize` and `Finished` run for any cancellation that a
-   future code path lets escape. Points 1 and 2 stay necessary: without them the file being verified would be missing
-   from the summary (no outcome) although records of it were stored.
+   future code path lets escape. Point 1 stays necessary: without it the file being verified would be missing
+   from the summary (no outcome) although records of it were stored (AC2 fails). Point 2 is not required for AC1 — the
+   backstop alone gives the same summary, only `Error` would be the escaped `TaskCanceledException` — and is kept so that
+   pass 2 reports an interruption between archive entries through `_fatal` like every other interruption inside the pass
+   (Lead decision at approval, review round 1 non-blocking finding).
 4. `ImportCommand` is unchanged: it prints the summary whenever `Summary.Interrupted` is set (line 126); its catch at line
    76 stays for the cancellation of `SqliteStore.OpenAsync`.
 
