@@ -116,6 +116,14 @@ after a `\n` (1 to the content size).
 - [ ] AC18 (migration): a database at schema version 6 opens and migrates to 7. Existing rows get `attempt` 0 and
   `hashes_attempt` `NULL`, the table `import_line_hashes` exists, `meta.schema_version` is `7`, and a build with
   version 7 refuses version 8.
+- [ ] AC19 (contained result): for a contained O, `BeginImportAsync` returns an `ImportFile` whose `ContainedIn` is
+  the container's display name and whose other members keep their defaults (`Id` 0, `Complete` false, `Attempt` 0);
+  containment is signalled by `ContainedIn` alone. `ImportPass` checks `ContainedIn` before `Complete`, before the
+  source-type check and before any use of `state.Id`. Test (against `FakeImportStore` scripted to return exactly that
+  object): O ends as `Contained`, not `AlreadyImported` and not failed, and the fake records no batch, no
+  `AddLineHashesAsync` call and no other call carrying a file ID. An implementation that checked `Complete` first
+  would import O with file ID 0 and fail this test. A state with `Complete` true and empty `ContainedIn` stays
+  `AlreadyImported`.
 
 ## Approach
 
@@ -133,8 +141,11 @@ after a `\n` (1 to the content size).
    before the forward base choice. Candidates are the complete rows with the same head key and source type and a
    size larger than O, joined to the one line-hash row of their `hashes_attempt` that spans O's size. They are taken
    largest first, at most 64. The first candidate whose row holds `sha256(O)[..16]` at a 16-byte aligned position is
-   the container. Then no row is created. The store returns an `ImportFile` with `Id` 0, `Complete` true and
-   `ContainedIn` set to the container's display name. `ImportPass.BeginAsync` turns that into `Contained`.
+   the container. Then no row is created. The store returns an `ImportFile` with only `ContainedIn` set, to the
+   container's display name; `Id`, `Complete` and `Attempt` keep their defaults and carry no meaning. Containment is
+   signalled by `ContainedIn` alone, never by an `Id` of 0 or by `Complete`. `ImportPass.BeginAsync` checks
+   `ContainedIn` first, before `state.Complete` (`ImportPass.cs:355`), before the source-type check and before
+   `state.Id` is used anywhere, and turns it into `Contained` (AC19).
 4. **Nothing is parsed for a contained file**, whatever its parser. Every line of O lies in N's bytes, and N's
    records (or those of its base chain) hold them. That is why `LineFramed` (F1) does not apply.
 5. **Pass 1 does not change.** Containment needs only the hash, size and head key that pass 1 already computes.
@@ -202,14 +213,17 @@ Task AddLineHashesAsync(ImportLineHashes hashes, CancellationToken cancellationT
 ```
 
 The doc of `BeginImportAsync` changes to: creates the state with attempt 1 when it is unknown, unless the content is
-the start of a complete stored content, in which case no state is created and the returned `ImportFile` has `Id` 0,
-`Complete` true and `ContainedIn` set. An existing incomplete state is returned with its attempt advanced by one, and
-a complete state is returned unchanged.
+the start of a complete stored content, in which case no state is created and the returned `ImportFile` has
+`ContainedIn` set (not empty) and no other member set; a caller checks `ContainedIn` before any other member. An
+existing incomplete state is returned with its attempt advanced by one, and a complete state is returned unchanged;
+both have an empty `ContainedIn`.
 
 `ImportFile` (new properties):
 
 ```csharp
 public long Attempt { get; set; }
+/// Gets or sets the display name of the complete content this content is the start of; empty unless the content is
+/// contained, in which case no state exists and no other member is set.
 public string ContainedIn { get; set; } = string.Empty;
 ```
 
@@ -305,8 +319,9 @@ internal long LineOffset { get; set; }
 internal async Task WriteLineHashesAsync(ImportLineHashes hashes, CancellationToken cancellationToken);   // sets FileId and Attempt from the state; a failure is kept in Error (sticky, as for batches) and rethrown; throws Error when it is already set
 ```
 
-`ImportPass` (private, bodies only): `BeginAsync` sets `Outcome = Contained` and `Result.ContainedIn` when
-`state.Complete` and `state.ContainedIn` is not empty, and `AlreadyImported` otherwise. `ImportContentAsync` creates
+`ImportPass` (private, bodies only): `BeginAsync`, right after the store call and before the `state.Complete` check,
+sets `Outcome = Contained` and `Result.ContainedIn` and returns `null` when `state.ContainedIn` is not empty; the
+`Complete` check (`AlreadyImported`) and everything after it stay as they are. `ImportContentAsync` creates
 the emitter before `SkipAsync`, sets `counted.LineHashWriter = emitter.WriteLineHashesAsync` and, after the skip,
 `emitter.LineOffset = skipped`. `SettleAsync(RecordEmitter emitter, ContentStream counted, Exception? parseError, CancellationToken cancellationToken)`
 calls `counted.FlushLineHashesAsync` after `VerifyAsync` returned true and before `TryFlushAsync(emitter, true, …)`,
@@ -327,7 +342,9 @@ private static void WriteContained(StringBuilder text, List<FileResult> files); 
 
 ## Test files
 
-- `tests/Vandox.Storage.Tests/ImportTrackingTests.cs`: AC4 (c–f) on the store, AC5, AC8, AC9, AC11, and containment
+- `tests/Vandox.Storage.Tests/ImportTrackingTests.cs`: AC4 (c–f) on the store, AC5, AC8, AC9, AC11, the store side
+  of AC19 (a contained result has `ContainedIn` set and no row exists afterwards; an existing state has an empty
+  `ContainedIn`), and containment
   with the real store (exact prefix at a line end, not at a line end, one byte off, row spanning the size at a row
   boundary: size equal to a row's `LastOffset` and one line end after it).
 - `tests/Vandox.Storage.Tests/SqliteStoreWriteTests.cs`: AC10. `BatchValidator` is internal and has no test class
@@ -335,7 +352,7 @@ private static void WriteContained(StringBuilder text, List<FileResult> files); 
 - `tests/Vandox.Storage.Tests/SqliteStoreOpenTests.cs`: AC18.
 - `tests/Vandox.Import.Tests/ContentStreamTests.cs`: AC7 (hash values, rows, offsets, independence of read size, skip
   included, no row without a line feed) and AC12.
-- `tests/Vandox.Import.Tests/ImporterStoreTests.cs`: AC1, AC2, AC3, AC4 (a, d), AC5, AC6, AC13 and AC14 against
+- `tests/Vandox.Import.Tests/ImporterStoreTests.cs`: AC1, AC2, AC3, AC4 (a, d), AC5, AC6, AC13, AC14 and AC19 against
   `FakeImportStore`. `ImportPass` and `RecordEmitter` are covered through `Importer` here, as for #131.
 - `tests/Vandox.Import.Tests/ImporterArchiveTests.cs`: AC2 with both copies as entries of one tar archive.
 - `tests/Vandox.Import.Tests/FileResultTests.cs`: AC16 (`Snapshot` copies `ContainedIn`).
@@ -347,7 +364,8 @@ private static void WriteContained(StringBuilder text, List<FileResult> files); 
 Test doubles: `FakeImportStore` (`tests/Vandox.Import.Tests/FakeImportStore.cs`) needs the following, extended by
 the Tester in step 5: `AddLineHashesAsync` that records every row (`LineHashes`) with a scripted failure (exception
 and call number); `BeginImportAsync` counting attempts as the store does; a containment emulation that applies the
-store's rule to the recorded rows of complete states; and batches that keep `Attempt` and apply the deletion on
+store's rule to the recorded rows of complete states and returns an `ImportFile` with only `ContainedIn` set, as the
+store does (AC19); and batches that keep `Attempt` and apply the deletion on
 completion.
 
 Existing test code affected by the changes:
@@ -378,6 +396,12 @@ Existing test code affected by the changes:
     and a container outside the 64 largest. The older copy's lines are present as the container's parse stored them
     (its file name and modification time, grouped entries). Lines are left out on a 128-bit match of truncated
     SHA-256.
+  - The same limits text says explicitly that the grouping is the container's: the older copy is cut at a line end,
+    which for a parser that is not framed by lines only (`LineFramed` false, the journal export) or that groups
+    lines into entries (MariaDB error log, kernel reports) can lie inside an entry of the container, or inside a
+    binary field of a journal entry. Nothing of the older copy is lost, because the container's parse stored that
+    entry whole; the older copy's lines are found only inside the container's records, framed and grouped as the
+    container's parse made them, and an entry that the older copy holds only in part is not stored as such a part.
   - *Result*: the outcome `contained`, the count line, the section, and the exit code.
 - `docs/areas/storage.md` (owner **Dev**): schema version 7 (step 7), the table `import_line_hashes` in the table
   list, the columns `attempt` and `hashes_attempt` of `import_files`, the primary key as index, and the rules under
@@ -448,6 +472,26 @@ Existing test code affected by the changes:
   (unreleased: there are no tags), status set back to `Proposed`, index row `Proposed`. New options H1–H4 (how
   containment is verified), W1–W2 (hashes of a failed or concurrent attempt), S1–S2 (whether the older copy keeps a
   state). Decision: H3, W2, S2. Consequences replace the "only the newer-after-older order" bullet.
+
+## Challenge
+
+Devil's Advocate: 0 major, 2 minor objections.
+
+1. *`ImportFile.Id` of 0 as a "contained" sentinel overloads `Complete`/`Id`; rely on a `ContainedIn` check alone,
+   state that `ImportPass` checks it before using `state.Id`, and test it.* **Accepted.** The contained result is now
+   signalled by a non-empty `ContainedIn` alone: the store sets nothing else (`Id`, `Complete` and `Attempt` keep
+   their defaults and carry no meaning), and `Complete` is no longer set to true for it. `ImportPass.BeginAsync`
+   checks `ContainedIn` right after the store call, before `state.Complete`, the source-type check and any use of
+   `state.Id`. Changed: Approach step 3, the doc of `BeginImportAsync`, the doc of `ImportFile.ContainedIn`, the
+   `ImportPass` body description, the `FakeImportStore` emulation, and the new AC19 with its tests in
+   `ImporterStoreTests.cs` (the fake returns exactly the store's shape, `Complete` false, so a check of `Complete`
+   first would import O with file ID 0 and fail the test) and `ImportTrackingTests.cs` (store side).
+2. *For a journal export the older copy is cut at a line end that may fall inside a multi-line entry of the
+   container; the limits text should say the grouping is the container's.* **Accepted.** Nothing is lost, as the
+   objection notes, but the area document must say it. *Areas* now gives the Dev the exact content of that sentence
+   for `docs/areas/log-import.md` (*Limits of the guarantee*), covering `LineFramed` false parsers and grouping
+   parsers alike. Record 0069 (*Consequences*) already states that the lines are present as the container's parse
+   stored them, with an open entry stored with its later lines; it is unchanged.
 
 ## Out of scope / follow-ups
 
