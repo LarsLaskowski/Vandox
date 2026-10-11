@@ -1,6 +1,6 @@
 # 0069: The log import is idempotent per file content: SHA-256 of the decompressed content, two passes, batches that resume by count, a grown file continued after its imported start, an older copy recognized by the line-end hashes of the imported one
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-11
 - **Area:** Log import
 - **Source:** Issue #15, issue #131, issue #187
