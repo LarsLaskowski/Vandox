@@ -31,7 +31,7 @@ All tables are `STRICT`.
 | Table | Content |
 | ----- | ------- |
 | `meta` | key and value; the schema version |
-| `records` | one row per record: `id`, `kind`, `origin` (`agent`, `backend` or `import`), `source`, `agent_id`, `seq`, `captured_at`, `received_at`, `boot_id`, `clock_offset_ns`, `data` (the record's JSON for every kind except metrics and log lines; `NULL` there) |
+| `records` | one row per record: `id`, `kind`, `origin` (`agent`, `backend` or `import`), `source`, `agent_id`, `seq`, `captured_at`, `received_at`, `boot_id`, `clock_offset_ns`, `data` (the record's payload as the `data` object of the wire format, without the kind, which is the `kind` column, for every kind except metrics and log lines; `NULL` there) |
 | `metrics` | typed rows for metric records: `record_id`, `source`, `name`, `captured_at`, `value`, `unit`, `labels` (JSON object or `NULL`) |
 | `log_lines` | typed rows for log lines: `record_id`, `log`, `program`, `pid`, `priority`, `message`, `truncated`, `host`, `event` |
 | `log_fts` | FTS5 index over `log_lines.message` (external content, tokenizer `unicode61 remove_diacritics 2`) |
@@ -79,6 +79,8 @@ Indexes: a unique index on `records(agent_id, seq)` for origin `agent`; `records
 
 - A series is read by kind, source and name for a time range, in time order; a kind-wide time range uses the kind indexes. A query
   returns at most 10,000 records.
+- A stored payload is read with the payload options of the wire decoder, so an unknown member is ignored; this includes the `Kind`
+  member that rows written before #183 carry.
 - Callers depend on small interfaces (record writer, record reader, log searcher, import tracker). The real store is tested against
   real files; a consumer whose behavior depends on the store's semantics (such as "a resent batch is stored once") is tested against
   the real store. Fakes for other consumers only record calls and return what the test scripts.

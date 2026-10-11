@@ -68,6 +68,7 @@ public sealed class LogLine : IPayload
     #region IPayload
 
     /// <inheritdoc />
+    [JsonIgnore]
     public string Kind => RecordKind.LogLine;
 
     /// <inheritdoc />

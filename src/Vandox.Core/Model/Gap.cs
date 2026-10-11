@@ -53,6 +53,7 @@ public sealed class Gap : IPayload
     #region IPayload
 
     /// <inheritdoc />
+    [JsonIgnore]
     public string Kind => RecordKind.Gap;
 
     /// <inheritdoc />

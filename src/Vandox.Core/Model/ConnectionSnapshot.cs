@@ -159,6 +159,7 @@ public sealed class ConnectionSnapshot : IPayload
     #region IPayload
 
     /// <inheritdoc />
+    [JsonIgnore]
     public string Kind => RecordKind.ConnectionSnapshot;
 
     /// <inheritdoc />

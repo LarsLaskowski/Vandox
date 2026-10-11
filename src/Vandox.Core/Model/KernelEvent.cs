@@ -97,6 +97,7 @@ public sealed class KernelEvent : IPayload
     #region IPayload
 
     /// <inheritdoc />
+    [JsonIgnore]
     public string Kind => RecordKind.KernelEvent;
 
     /// <inheritdoc />
