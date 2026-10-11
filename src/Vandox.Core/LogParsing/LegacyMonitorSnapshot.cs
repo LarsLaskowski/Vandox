@@ -45,6 +45,7 @@ internal sealed class LegacyMonitorSnapshot
     private readonly List<(long Line, string Reason)> _held = [];
     private readonly HashSet<string> _meminfoFields = new(StringComparer.Ordinal);
     private readonly HashSet<string> _pressureKeys = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _vmstatCounters = new(StringComparer.Ordinal);
     private LegacySnapshotPhase _phase = LegacySnapshotPhase.Load;
     private LegacySection _section = LegacySection.None;
     private LegacyProcessTable? _table = new();
@@ -562,7 +563,14 @@ internal sealed class LegacyMonitorSnapshot
         {
             if (Array.IndexOf(_counterNames, counter) >= 0)
             {
-                AddCounter(counter, value, ready);
+                if (_vmstatCounters.Add(counter))
+                {
+                    AddCounter(counter, value, ready);
+                }
+                else
+                {
+                    output.Skip(lineNumber, VmstatNotRead);
+                }
             }
         }
         else

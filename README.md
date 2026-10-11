@@ -347,7 +347,7 @@ Supported sources:
   another format is kept as raw lines, and the path options name the real files.
 - The legacy monitoring log of the shell script that ran before the agent (source type `legacy-monitor`), recognized by
   its first line, a snapshot header such as `===== Fri Oct  2 09:15:01 CEST 2026 =====` (the output of `date`), under any
-  name except `syslog` and `kern.log`. Each snapshot holds the output of `top -b -n 1` and, in the newer format, the
+  name except `syslog` and `kern.log`, including their rotation suffixes (`.N`, `-YYYYMMDD`). Each snapshot holds the output of `top -b -n 1` and, in the newer format, the
   sections `meminfo`, `pressure`, `vmstat` and `lsof -ni`. A snapshot becomes metrics (load, CPU, memory, swap and, in the
   newer format, `/proc` values with the vmstat counters and their rates), a process snapshot with the sums per program and,
   with `lsof`, a connection snapshot. The header time is read in `import.time_zone` with the zone abbreviation of the header

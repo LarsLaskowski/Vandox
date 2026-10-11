@@ -723,7 +723,7 @@ no row gives no process snapshot.
 whose PID an earlier row of the snapshot has with "duplicate process id", both at the row's line, and `complete` is false.
 
 **Acceptance.** The top part is accepted at the first section marker after the table header or when the snapshot ends after the
-table header; only then are its records emitted and its row skips reported (at most 4,096 are held until then). After acceptance a
+table header; only then are its records emitted and its row skips reported (at most 4,097 are held until then). After acceptance a
 snapshot cannot fail any more. The records of a snapshot are emitted in this order: the summary metrics, the process snapshot,
 then per section in file order the metrics in line order and the connection snapshot.
 
@@ -744,7 +744,7 @@ line not read", "pressure line not read" or "vmstat line not read" at its line, 
   (N − previous) / seconds between the two headers; other well-formed `<name> N` lines are ignored. The rate **depends on where a
   parse starts**: the first snapshot of a parse has no rate, and a continued import starts with an empty history, so the first
   snapshot of a continuation has none either (a gap of one rate per continuation; the raw `vmstat_total` is complete and a
-  rate can be derived from it later). A skipped snapshot is not a predecessor.
+  rate can be derived from it later). A skipped snapshot is not a predecessor. A repeated counter is unread ("vmstat line not read").
 - `lsof` (below).
 
 **Connection snapshot.** An `lsof -ni` line is split at runs of spaces: COMMAND, PID (1 to 2,147,483,647), TYPE the first token from

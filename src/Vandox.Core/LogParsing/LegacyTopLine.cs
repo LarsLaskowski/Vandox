@@ -260,7 +260,7 @@ internal static class LegacyTopLine
     /// Scales a decimal number by a power of 1024 in exact integer arithmetic.
     /// </summary>
     /// <param name="integerDigits">The validated ASCII digits of the integer part</param>
-    /// <param name="fractionDigits">The validated ASCII digits of the fraction; may be empty</param>
+    /// <param name="fractionDigits">The validated ASCII digits of the fraction, at most 6 digits for the callers; may be empty</param>
     /// <param name="power">The power of 1024, 0 to 6</param>
     /// <param name="bytes">The value rounded half away from zero</param>
     /// <returns><c>true</c> when the value fits 64 bits</returns>

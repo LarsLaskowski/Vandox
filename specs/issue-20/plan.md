@@ -280,7 +280,7 @@ Every test lives in the file named under *Test files*; names are `{Class}{Scenar
   lines (skip "too many processes in a snapshot" at the 4,097th, `complete` false, aggregates over the kept rows), at
   most 4,096 `lsof` lines (skip "too many sockets in a snapshot", `complete` false), and per section at most 128
   meminfo, 16 pressure and 64 vmstat lines (skip "too many lines in a section"). An `lsof` line longer than 1,024 bytes
-  (raw, before decoding) is "lsof line not read"; row tokens before COMMAND longer than 64 bytes make the row
+  (counted on the decoded text, an invalid byte counting three) is "lsof line not read"; row tokens before COMMAND longer than 64 bytes make the row
   unparsable. Skips are never collected beyond these caps: the only skips held back are the row skips of a top part
   not yet accepted (at most 4,096, step 5); every section skip is reported at once. Memory does not grow with the
   number of snapshots or with the number of lines in a snapshot.
@@ -581,7 +581,7 @@ other parsers (AC1), README sources list (*Documentation updates*).
 ## Security considerations
 
 - [x] Limits and where they apply: lines are cut at 16 KiB of raw bytes by `LogLineReader` (before decoding); the
-  `lsof` line bound of 1,024 bytes counts raw bytes before decoding; the 64-byte row-token bound, the 1,024-byte
+  `lsof` line bound of 1,024 bytes counts the decoded text (an invalid byte counts three, so at least as strict as raw bytes); the 64-byte row-token bound, the 1,024-byte
   `command`, the 2,048-byte `cmdline` and the 16-character header zone count UTF-8 bytes of the decoded text (U+FFFD
   counts three), cut at a character boundary with `Utf8Text.Cut`. Per snapshot at most 4,096 row lines, 4,096 `lsof`
   lines, 128 meminfo, 16 pressure and 64 vmstat lines, every non-empty line counted, lines beyond a cap dropped unseen
