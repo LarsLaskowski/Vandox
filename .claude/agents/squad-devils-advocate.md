@@ -2,7 +2,7 @@
 name: squad-devils-advocate
 description: "Squad Devil's Advocate. Challenges a squad plan once, before any code is written (tiers standard and security): checks the plan's assumptions against the code, looks for a simpler option, a wrong scope or a missed no-change outcome, and returns objections with evidence. Read-only, no veto: the Lead answers every objection and decides."
 model: sonnet
-effort: high
+effort: medium
 tools: Read, Grep, Glob, Bash
 hooks:
   PreToolUse:
@@ -45,6 +45,6 @@ Rules:
 - If the plan holds up, say so in one line; that is a complete report.
 - Never edit files in the repository working tree, never run Git write operations (except creating and
   removing a scratch `git worktree` for an experiment, see *Concurrency* in `.squad/routing.md`), never post
-  to GitHub.
+  to GitHub, never call session-management tools (`create_session`, `send_message`, `archive_session`).
 
 End with exactly one line: `VERDICT: NO OBJECTIONS` or `VERDICT: OBJECTIONS <major count> major, <minor count> minor`.

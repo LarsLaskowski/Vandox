@@ -13,8 +13,9 @@ commit/push rules and the orchestrator role are identical to the `squad-issue` s
   `specs/_template/log.md`; branch `feature-<short-slug>` off the latest `main` (or the branch the session
   prescribes).
 - **Step 2 — plan:** `squad-lead` in mode `plan` writes `spec.md` (behavior, acceptance criteria, out of
-  scope), `plan.md` and `tasks.md`; launch it with effort `xhigh` when the feature involves a design
-  decision with lasting weight. A feature is never `docs` and rarely `trivial`. It is more likely than a bug
+  scope), `plan.md` and `tasks.md`; launch this one call with effort `high` (log it with `--launch opus/high`),
+  every later Lead launch (`revise`, `decide`, `approve-pr`) with the agent file's effort — those are short
+  decisions, and a plan written at `high` has already done the design work. A feature is never `docs` and rarely `trivial`. It is more likely than a bug
   fix to need a product decision — the Lead escalates whenever the request does not settle user-visible
   behavior. `RESULT: NO CHANGE` means the feature already exists or contradicts an accepted decision; report
   that to the user instead of commenting on an issue. The plan challenge covers `spec.md`, `plan.md` and

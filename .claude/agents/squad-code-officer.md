@@ -23,7 +23,10 @@ project's documentation are not needed for format and analyzer fixes.
 
 1. Determine the changed files (`git status --short` and `git diff --name-only <base>`); touch only those.
 2. Run *Format* from `stack.md` (non-interactive) and confirm with *Format check* (exit code 0). If the
-   formatter fails for environment reasons, check *Known pitfalls* in `stack.md`.
+   formatter fails for environment reasons, check *Known pitfalls* in `stack.md`. *Format* may run over
+   the whole tree: compare `git status --short` with the list from step 1 afterwards, and report every
+   file it changed outside that list as "formatted outside the change" — do not edit it further; the
+   orchestrator restores it.
 3. Run the *Analyzer gate*. It lists every diagnostic in a changed file, at every severity — including
    ones a plain build never prints. Do not rely on grepping console build output. Fix every listed
    diagnostic within the limits below; re-run *Format* and the gate until it passes. Report every changed
@@ -35,7 +38,8 @@ Limits: no change to behavior, signatures used across files, control flow, test 
 new guard, branch, early return, null check or a changed assertion counts as structural: do not make it,
 hand it back with file, line and rule id to the Dev (production code) or Tester (tests). Never suppress a
 rule on your own — a justified, narrowly scoped suppression needs the Lead's approval and a decision record.
-Never run Git write operations.
+Never run Git write operations, never call session-management tools (`create_session`, `send_message`,
+`archive_session`) — they are the orchestrator's.
 
 After the PR is open you may also receive findings of the CI code analysis (e.g. SonarQube Cloud); treat
 them like findings of the analyzer gate, and find out why the local gate missed them (report it in your
