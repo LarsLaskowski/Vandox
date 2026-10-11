@@ -133,6 +133,7 @@ public static class Importer
             summary.Lines += result.Lines;
             summary.Records += result.Records;
             summary.Skipped += result.Skipped;
+            summary.Raw += result.Raw;
             summary.First = result.First is { } first && (summary.First is null || first < summary.First) ? first : summary.First;
             summary.Last = result.Last is { } last && (summary.Last is null || last > summary.Last) ? last : summary.Last;
         }

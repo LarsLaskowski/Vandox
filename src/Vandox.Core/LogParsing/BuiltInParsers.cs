@@ -25,7 +25,17 @@ public static class BuiltInParsers
             throw new ArgumentException("logparse: the time zone is not a time zone of the IANA time zone database", nameof(timeZone));
         }
 
-        return [new JournalExportParser(), new MariaDbErrorLogParser(zone), new DovecotLogParser(zone), new SyslogParser(zone)];
+        return
+        [
+            new JournalExportParser(),
+            new MariaDbErrorLogParser(zone),
+            new DovecotLogParser(zone),
+            new SyslogParser(zone),
+            new ErrorLogParser(ErrorLogParser.PleskPanelType, ErrorLogFormat.PleskPanel, paths.PleskPanel, true, zone),
+            new ErrorLogParser(ErrorLogParser.SwCpServerType, ErrorLogFormat.Nginx, paths.SwCpServer, false, zone),
+            new ErrorLogParser(ErrorLogParser.NginxType, ErrorLogFormat.Nginx, paths.Nginx, true, zone),
+            new ErrorLogParser(ErrorLogParser.ApacheType, ErrorLogFormat.Apache, paths.Apache, true, zone)
+        ];
     }
 
     #endregion // Methods

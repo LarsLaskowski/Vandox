@@ -1,5 +1,3 @@
-#pragma warning disable RH2003, S2325
-
 using NodaTime;
 
 namespace Vandox.Core.LogParsing;
@@ -33,6 +31,17 @@ public sealed class ErrorLogParser : ILogParser
 
     #endregion // Constants
 
+    #region Fields
+
+    private static readonly byte[] _bom = [0xEF, 0xBB, 0xBF];
+
+    private readonly ErrorLogFormat _format;
+    private readonly string _path;
+    private readonly bool _claimsContent;
+    private readonly DateTimeZone? _timeZone;
+
+    #endregion // Fields
+
     #region Constructors
 
     /// <summary>
@@ -45,15 +54,52 @@ public sealed class ErrorLogParser : ILogParser
     /// <param name="timeZone">The zone of the local times; <c>null</c> when not set</param>
     public ErrorLogParser(string type, ErrorLogFormat format, string path, bool claimsContent, DateTimeZone? timeZone)
     {
-        throw new NotImplementedException();
+        Type = type;
+        _format = format;
+        _path = path;
+        _claimsContent = claimsContent;
+        _timeZone = timeZone;
     }
 
     #endregion // Constructors
 
+    #region Methods
+
+    /// <summary>
+    /// Tells whether the first line of a head has the format of the parser.
+    /// </summary>
+    /// <param name="head">The first bytes of the file</param>
+    /// <returns><c>true</c> when the first line is of the format</returns>
+    private bool HasFormatLine(ReadOnlySpan<byte> head)
+    {
+        var first = head;
+
+        if (first.StartsWith(_bom))
+        {
+            first = first[_bom.Length..];
+        }
+
+        var lineEnd = first.IndexOf((byte)'\n');
+
+        if (lineEnd >= 0)
+        {
+            first = first[..lineEnd];
+        }
+
+        if (first.Length > 0 && first[^1] == (byte)'\r')
+        {
+            first = first[..^1];
+        }
+
+        return ErrorLogLine.TryParse(_format, Utf8Text.Decode(first, int.MaxValue, out _)) is not null;
+    }
+
+    #endregion // Methods
+
     #region ILogParser
 
     /// <inheritdoc />
-    public string Type => throw new NotImplementedException();
+    public string Type { get; }
 
     /// <inheritdoc />
     public bool LineFramed => true;
@@ -61,13 +107,36 @@ public sealed class ErrorLogParser : ILogParser
     /// <inheritdoc />
     public Confidence Detect(LogFile file, ReadOnlySpan<byte> head)
     {
-        throw new NotImplementedException();
+        if (LogPath.Matches(_path, file.Name))
+        {
+            return Confidence.MatchPath;
+        }
+
+        if (_claimsContent && SyslogParser.HasSyslogName(file.Name))
+        {
+            return Confidence.NoMatch;
+        }
+
+        return _claimsContent && HasFormatLine(head) ? Confidence.MatchContent : Confidence.NoMatch;
     }
 
     /// <inheritdoc />
-    public Task ParseAsync(LogFile file, Stream input, IRecordEmitter output, CancellationToken cancellationToken)
+    public async Task ParseAsync(LogFile file, Stream input, IRecordEmitter output, CancellationToken cancellationToken)
     {
-        throw new NotImplementedException();
+        var reader = new LogLineReader(input);
+        var session = new ErrorLogParseSession(file, Type, _format, _timeZone, output);
+
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var record = session.Map(reader);
+
+            if (record is not null)
+            {
+                await output.RecordAsync(record, cancellationToken).ConfigureAwait(false);
+            }
+        }
     }
 
     #endregion // ILogParser

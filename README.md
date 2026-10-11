@@ -73,7 +73,11 @@ the value.
 | `ingest.listen` | `:8081` | Address of the ingest endpoint, on a port other than `web.listen`. |
 | `storage.directory` | `/data` | Directory of the backend's data, an absolute and clean path. |
 | `log.level` | `info` | `debug`, `info`, `warn` or `error`. |
-| `import.time_zone` | none | IANA time zone of the server the imported logs come from, e.g. `Europe/Berlin` or `UTC`. Required to import traditional syslog files, MariaDB error logs and Dovecot log files (see *Import logs*). |
+| `import.plesk_panel_log` | `/var/log/plesk/panel.log` | Server path of the Plesk panel log; a file at this path is read as that log whatever it holds. An absolute, clean path of a file in a directory. The default is not verified against a Plesk server (see *Import logs*). |
+| `import.sw_cp_server_error_log` | `/var/log/sw-cp-server/error_log` | Server path of the error log of the Plesk panel web server `sw-cp-server`; recognized by this path only. Not verified against a Plesk server. |
+| `import.nginx_error_log` | `/var/log/nginx/error.log` | Server path of the nginx error log. |
+| `import.apache_error_log` | `/var/log/apache2/error.log` | Server path of the Apache error log (Debian and Ubuntu); on RHEL-family servers (AlmaLinux, Rocky Linux, CentOS) it is `/var/log/httpd/error_log`. |
+| `import.time_zone` | none | IANA time zone of the server the imported logs come from, e.g. `Europe/Berlin` or `UTC`. Required to import traditional syslog files, MariaDB error logs, Dovecot log files and the Plesk panel, nginx and Apache error logs (see *Import logs*). |
 
 **Secrets**
 
@@ -269,7 +273,7 @@ to import it. A file no parser claims is listed as not recognized with the reaso
 unsupported compression such as bzip2, xz, zstd or zip, nested archive, symbolic link, not a regular file);
 nothing is skipped silently. Progress is logged as JSON lines on standard error (what was found, each file,
 progress every 64 MiB hashed and every 100,000 lines), and a summary on standard output lists the files
-imported, continued, contained, already imported, not recognized and failed, the lines read, records stored and lines skipped, the
+imported, continued, contained, already imported, not recognized and failed, the lines read, records stored, lines skipped and lines kept raw, the
 time range of the stored records and the reasons. Names from the input are printed quoted. The exit code is 0
 when every file was imported, continued, contained, already imported or not recognized, 1 when a file failed, the import was
 interrupted or the configuration, the database or the input could not be opened, and 2 for a usage error.
@@ -278,7 +282,7 @@ Importing is repeatable: a file whose content was imported completely is not imp
 another name or compressed differently (`syslog.1` and the later `syslog.2.gz`). An import that was stopped
 (Ctrl-C, a database error) continues where it stopped when the same content is imported again, and no record
 is stored twice. Stopping or restarting the container kills a running import; nothing committed is lost, and
-the next import resumes. Limits: a syslog, MariaDB error log or Dovecot log that grew since it was imported (the same log with more lines, as in
+the next import resumes. Limits: a syslog, MariaDB error log, Dovecot log or Plesk or web server error log that grew since it was imported (the same log with more lines, as in
 a newer copy of `/var/log`) is continued after the part imported before (a journal export that grew is imported as a whole), an older copy
 of a log imported after a newer one stores nothing (it is listed as contained), except one that ends inside a
 line, one whose newer copy was imported by an earlier version (before database schema 7), and one whose newer copy is not among the 64 largest
@@ -319,6 +323,28 @@ Supported sources:
   `Warning:` 4, `Error:` 3, `Fatal:` and `Panic:` 2) and the events `dovecot.fatal`, `dovecot.panic` and
   `dovecot.database_unavailable` as above; host and program are empty. Times are read in `import.time_zone` like the
   traditional syslog format. Lines without a time stamp and a Dovecot label are skipped.
+- The Plesk panel log (source type `plesk-panel`) and the error logs of the web servers: `sw-cp-server-error`
+  (the panel's web server), `nginx-error` and `apache-error`. Each has a path option in `vandoxd.yaml`
+  (`import.plesk_panel_log`, `import.sw_cp_server_error_log`, `import.nginx_error_log`,
+  `import.apache_error_log`; the defaults are the usual server paths, and on a RHEL-family server Apache writes
+  `/var/log/httpd/error_log`). A file is at such a path when its parent directory and its name equal those of the
+  option (the rest of the path does not matter, so a copy such as `server-1/nginx/error.log` works), also with a
+  rotation suffix (`error.log.1`, `error.log-20261010`); the paths are compared as text and never opened. A file at
+  a path is read as that log whatever it holds. Besides, `plesk-panel`, `nginx-error` and `apache-error` claim any
+  file, under any name but a syslog name, whose first line has their format (so the per-domain logs of Plesk are
+  found); `sw-cp-server-error` is claimed by its path only. If two path options match the same file, the source type
+  listed first above gets it. Lines get the priority of their level (`emerg` 0 to `debug` 7; Plesk's `EMERG` to
+  `DEBUG`; Apache's `trace1` to `trace8` 7) and keep the text after the time stamp as message; the times are local
+  times, read in `import.time_zone` (without it the first such line fails the file as above; the lines before it are
+  stored). A line that is not of the format (for example the continuation lines of a PHP error in nginx's log, or
+  Apache's startup messages) is not dropped: it is stored as a record without priority, with the time of the
+  record before it (for the first lines of a file the modification time of the file, when it lies in the storable
+  range, else the line is skipped), and is counted in the summary as a line kept raw with its reason, and logged as a
+  warning. These logs contain text of clients and web applications, so a line written by a web application can
+  imitate a line of the format with any time and level; the priority classifies text and does not prove which
+  program wrote it. The format of the Plesk panel log, that it is written in the server's local time, that
+  `sw-cp-server` writes nginx's format and the default Plesk paths are not verified against a Plesk server; a file in
+  another format is kept as raw lines, and the path options name the real files.
 
 The file name of a rotated log must stay as the server wrote it (`syslog.1`, `kern.log-20260301`), and the
 modification time of the files matters: the traditional format has no year, and the backend takes it from a
@@ -331,7 +357,7 @@ server the logs come from (for example `Europe/Berlin`); there is no default, be
 time stamp and an import cannot be redone. Without the option a file with year-less lines fails with
 "import.time_zone is not set" (the lines before the first year-less line are stored, and the run exits with 1).
 Set the option and run the import again: the file is completed. RFC 3339 files and journal exports carry their
-offset and need no option. MariaDB error logs and Dovecot's log file also write local time without a zone and are read in the same zone;
+offset and need no option. MariaDB error logs, Dovecot's log file and the Plesk panel, nginx and Apache error logs also write local time without a zone and are read in the same zone;
 without the option such a file fails at its first entry with the same reason.
 
 Times outside 1677-09-21 to 2262-04-11 and dates that do not exist (31 November, 29 February in a year that is not a
