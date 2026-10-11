@@ -15,4 +15,5 @@ One line per pipeline step: date, step, member, result. Lead decisions and escal
 | 2026-10-11 | 6 Fix gocognit in Go tests | Tester | Extracted helpers in decode_test.go; golangci-lint clean (sonnet/medium · 65,398 tokens · 6 tool uses · 62 s) |
 | 2026-10-11 | 7 Code check | Orchestrator | Format check, Analyzer gate, Test, Coverage gate (new lines 100% 118/118, overall 96.3%), scope-check all pass; Release run of wire tests passes; no Code Officer needed |
 | 2026-10-11 | 8 Review round 1 | Security | APPROVED at 58f4ffa, no findings (opus/medium · 46,481 tokens · 9 tool uses · 68 s) |
-| 2026-10-11 | 8 Review round 1 | Reviewer | APPROVE at 58f4ffa; 1 non-blocking: docs/decisions/0043 line rules list (line 32) lacks the text rule |
+| 2026-10-11 | 8 Review round 1 | Reviewer | APPROVE at 58f4ffa; 1 non-blocking: docs/decisions/0043 line rules list (line 32) lacks the text rule (opus/medium · 90,195 tokens · 24 tool uses · 164 s) |
+| 2026-10-11 | 8 Lead decision | Lead | Fix non-blocking finding now: record 0043 line 32 lists valid UTF-8 and paired surrogate escapes among the 0090 line rules; delta review round needed (opus/medium · 19,965 tokens · 4 tool uses · 14 s) |
