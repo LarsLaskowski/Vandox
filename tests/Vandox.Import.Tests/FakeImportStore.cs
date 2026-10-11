@@ -161,5 +161,12 @@ internal sealed class FakeImportStore : IImportStore
                                });
     }
 
+    /// <inheritdoc />
+    /// <returns>A task that returns an empty list</returns>
+    public Task<IReadOnlyList<ImportBase>> FindImportBasesAsync(byte[] headSha256, string sourceType, CancellationToken cancellationToken)
+    {
+        return Task.FromResult<IReadOnlyList<ImportBase>>([]);
+    }
+
     #endregion // IImportTracker
 }

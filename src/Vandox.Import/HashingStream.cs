@@ -1,5 +1,9 @@
 using System.Security.Cryptography;
 
+using Vandox.Storage;
+
+#pragma warning disable RH2003, S2325
+
 namespace Vandox.Import;
 
 /// <summary>
@@ -24,7 +28,8 @@ internal sealed class HashingStream : FilterStream
     /// <param name="inner">The stream to read</param>
     /// <param name="step">The number of bytes between two reports</param>
     /// <param name="report">Called with the multiple of the step that was passed</param>
-    internal HashingStream(Stream inner, long step, Action<long> report)
+    /// <param name="bases">The complete contents the stream may start with; at most <see cref="StorageLimits.MaxImportBases"/></param>
+    internal HashingStream(Stream inner, long step, Action<long> report, IReadOnlyList<ImportBase> bases)
         : base(inner)
     {
         _step = step;
@@ -40,6 +45,11 @@ internal sealed class HashingStream : FilterStream
     /// Gets the number of bytes read.
     /// </summary>
     internal long BytesRead { get; private set; }
+
+    /// <summary>
+    /// Gets the bases whose SHA-256 equals the hash of the first bytes read, with the position after the last line feed in them.
+    /// </summary>
+    internal List<ImportPrefix> Matches { get; } = [];
 
     #endregion // Properties
 

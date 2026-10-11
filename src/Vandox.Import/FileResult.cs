@@ -48,6 +48,21 @@ public sealed class FileResult
     public long ResumedAfter { get; set; }
 
     /// <summary>
+    /// Gets or sets the display name of the first import of the continued content; empty when the file is not continued.
+    /// </summary>
+    public string ContinuedFrom { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the number of lines of the content before the continuation point.
+    /// </summary>
+    public long ContinuedAfter { get; set; }
+
+    /// <summary>
+    /// Gets or sets the number of lines the parser skipped before its first record in a continued file; 0 otherwise.
+    /// </summary>
+    public long SkippedAtStart { get; set; }
+
+    /// <summary>
     /// Gets or sets the earliest capture time of the records stored; <c>null</c> when none.
     /// </summary>
     public DateTimeOffset? First { get; set; }
@@ -82,6 +97,9 @@ public sealed class FileResult
                        Records = Records,
                        Skipped = Skipped,
                        ResumedAfter = ResumedAfter,
+                       ContinuedFrom = ContinuedFrom,
+                       ContinuedAfter = ContinuedAfter,
+                       SkippedAtStart = SkippedAtStart,
                        First = First,
                        Last = Last
                    };

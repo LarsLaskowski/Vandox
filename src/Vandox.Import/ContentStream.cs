@@ -1,5 +1,7 @@
 using System.Security.Cryptography;
 
+#pragma warning disable RH2003, S2325
+
 namespace Vandox.Import;
 
 /// <summary>
@@ -59,6 +61,17 @@ internal sealed class ContentStream : FilterStream
     internal byte[] GetHash()
     {
         return _hash.GetHashAndReset();
+    }
+
+    /// <summary>
+    /// Reads and hashes bytes without counting lines or reporting progress.
+    /// </summary>
+    /// <param name="count">The number of bytes to skip</param>
+    /// <param name="cancellationToken">Cancels the read</param>
+    /// <returns>A task that returns the number of line feeds in the bytes skipped</returns>
+    internal Task<long> SkipAsync(long count, CancellationToken cancellationToken)
+    {
+        throw new NotImplementedException();
     }
 
     #endregion // Methods

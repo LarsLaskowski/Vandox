@@ -32,6 +32,9 @@ internal sealed class CancellingParser : ILogParser
     public string Type => "cancelling";
 
     /// <inheritdoc />
+    public bool LineFramed => false;
+
+    /// <inheritdoc />
     public Confidence Detect(LogFile file, ReadOnlySpan<byte> head)
     {
         return head.StartsWith("LOG"u8) ? Confidence.MatchContent : Confidence.NoMatch;

@@ -31,7 +31,8 @@ internal sealed class RecordEmitter : IRecordEmitter
     /// <param name="item">The file being imported</param>
     /// <param name="content">The content the parser reads</param>
     /// <param name="state">The stored import state of the content</param>
-    internal RecordEmitter(ImportOptions options, FoundFile item, ContentStream content, ImportFile state)
+    /// <param name="lineOffset">The lines before the continuation point, added to the line numbers of skipped lines</param>
+    internal RecordEmitter(ImportOptions options, FoundFile item, ContentStream content, ImportFile state, long lineOffset)
     {
         _options = options;
         _store = options.Store!;
@@ -43,6 +44,7 @@ internal sealed class RecordEmitter : IRecordEmitter
                     Done = state.Records
                 };
         _drop = state.Records;
+        LineOffset = lineOffset;
     }
 
     #endregion // Constructors
@@ -53,6 +55,11 @@ internal sealed class RecordEmitter : IRecordEmitter
     /// Gets the first exception of the store; sticky.
     /// </summary>
     internal Exception? Error { get; private set; }
+
+    /// <summary>
+    /// Gets the lines before the continuation point, added to the line numbers of skipped lines.
+    /// </summary>
+    internal long LineOffset { get; }
 
     #endregion // Properties
 

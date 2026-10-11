@@ -1,5 +1,7 @@
 using Microsoft.Data.Sqlite;
 
+#pragma warning disable RH2003, S2325
+
 namespace Vandox.Storage;
 
 /// <summary>
@@ -350,6 +352,12 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, II
         {
             _writeLock.Release();
         }
+    }
+
+    /// <inheritdoc />
+    public Task<IReadOnlyList<ImportBase>> FindImportBasesAsync(byte[] headSha256, string sourceType, CancellationToken cancellationToken)
+    {
+        throw new NotImplementedException();
     }
 
     #endregion // IImportTracker

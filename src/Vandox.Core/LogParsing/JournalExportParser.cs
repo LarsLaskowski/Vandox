@@ -181,6 +181,9 @@ public sealed class JournalExportParser : ILogParser
     public string Type => ParserType;
 
     /// <inheritdoc />
+    public bool LineFramed => false;
+
+    /// <inheritdoc />
     public Confidence Detect(LogFile file, ReadOnlySpan<byte> head)
     {
         var startsWithTimestamp = head.StartsWith(_timestamp);

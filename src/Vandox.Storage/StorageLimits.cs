@@ -18,6 +18,11 @@ public static class StorageLimits
     public const int SchemaVersion = 5;
 
     /// <summary>
+    /// The largest number of bases of one content.
+    /// </summary>
+    public const int MaxImportBases = 64;
+
+    /// <summary>
     /// The largest number of records a batch holds.
     /// </summary>
     public const int MaxBatchRecords = 20000;

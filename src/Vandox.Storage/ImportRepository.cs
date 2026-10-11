@@ -4,6 +4,8 @@ using Microsoft.Data.Sqlite;
 
 using Vandox.Core.LogParsing;
 
+#pragma warning disable RH2003, S2325
+
 namespace Vandox.Storage;
 
 /// <summary>
@@ -39,6 +41,31 @@ internal static class ImportRepository
         Require(start.Size >= 0, "size must not be negative");
         Require(Encoding.UTF8.GetByteCount(start.FileName) <= StorageLimits.MaxImportNameBytes, $"file name is longer than {StorageLimits.MaxImportNameBytes} bytes");
         Require(ParserTypes.IsValid(start.SourceType), "source type must match ^[a-z][a-z0-9._-]{0,63}$");
+    }
+
+    /// <summary>
+    /// Refuses a base lookup the store must not run.
+    /// </summary>
+    /// <param name="headSha256">The head key</param>
+    /// <param name="sourceType">The parser type</param>
+    /// <exception cref="InvalidImportException">The head key or the source type breaks a rule</exception>
+    internal static void ValidateLookup(byte[] headSha256, string sourceType)
+    {
+        throw new NotImplementedException();
+    }
+
+    /// <summary>
+    /// Returns the completely imported contents with a head key and source type, largest first, at most
+    /// <see cref="StorageLimits.MaxImportBases"/>.
+    /// </summary>
+    /// <param name="connection">The connection</param>
+    /// <param name="headSha256">The head key; 32 bytes</param>
+    /// <param name="sourceType">The parser type</param>
+    /// <param name="cancellationToken">Cancels the read</param>
+    /// <returns>A task that returns the contents</returns>
+    internal static Task<IReadOnlyList<ImportBase>> FindBasesAsync(SqliteConnection connection, byte[] headSha256, string sourceType, CancellationToken cancellationToken)
+    {
+        throw new NotImplementedException();
     }
 
     /// <summary>

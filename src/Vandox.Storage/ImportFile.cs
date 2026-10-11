@@ -62,5 +62,20 @@ public sealed class ImportFile
     /// </summary>
     public DateTimeOffset? CompletedAt { get; set; }
 
+    /// <summary>
+    /// Gets or sets the ID of the content this one continues; <c>null</c> when it is imported as a whole.
+    /// </summary>
+    public long? ContinuesId { get; set; }
+
+    /// <summary>
+    /// Gets or sets the byte offset where the import of the content starts; 0 when it is imported as a whole.
+    /// </summary>
+    public long Offset { get; set; }
+
+    /// <summary>
+    /// Gets or sets the display path of the content this one continues; empty when it is imported as a whole.
+    /// </summary>
+    public string ContinuedFrom { get; set; } = string.Empty;
+
     #endregion // Properties
 }

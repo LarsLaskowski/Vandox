@@ -1,4 +1,5 @@
 using Vandox.Core.LogParsing;
+using Vandox.Storage;
 
 namespace Vandox.Import;
 
@@ -38,6 +39,16 @@ internal sealed class FoundFile
     /// Gets or sets the size of the decompressed content in bytes.
     /// </summary>
     internal long Size { get; set; }
+
+    /// <summary>
+    /// Gets or sets the head key of the content; 32 bytes.
+    /// </summary>
+    internal byte[] Head { get; set; } = new byte[32];
+
+    /// <summary>
+    /// Gets or sets the bases the content starts with, with their continuation points.
+    /// </summary>
+    internal List<ImportPrefix> Prefixes { get; set; } = [];
 
     #endregion // Properties
 }

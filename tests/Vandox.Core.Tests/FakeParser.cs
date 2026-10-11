@@ -37,6 +37,9 @@ internal sealed class FakeParser : ILogParser
     public string Type { get; }
 
     /// <inheritdoc />
+    public bool LineFramed => false;
+
+    /// <inheritdoc />
     public Confidence Detect(LogFile file, ReadOnlySpan<byte> head)
     {
         return file.Name.Contains(Type, StringComparison.Ordinal) ? Confidence : Confidence.NoMatch;

@@ -406,7 +406,7 @@ internal sealed class ImportPass
                                                                   Lines = lines,
                                                                   Records = result.Records
                                                               }));
-        var emitter = new RecordEmitter(_options, item, counted, state);
+        var emitter = new RecordEmitter(_options, item, counted, state, 0);
         Exception? parseError = null;
 
         try

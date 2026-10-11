@@ -427,7 +427,8 @@ internal sealed class Scanner
                                                                        Event = ProgressEvent.ScanProgress,
                                                                        Path = item.Display,
                                                                        Bytes = mark
-                                                                   }));
+                                                                   }),
+                                                    []);
 
         await hashing.CopyToAsync(Stream.Null, cancellationToken).ConfigureAwait(false);
 

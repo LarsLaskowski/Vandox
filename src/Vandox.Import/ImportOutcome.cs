@@ -28,5 +28,10 @@ public enum ImportOutcome
     /// <summary>
     /// The file could not be imported.
     /// </summary>
-    Failed
+    Failed,
+
+    /// <summary>
+    /// The part of the file after a content imported completely before was stored in this run.
+    /// </summary>
+    Continued
 }
