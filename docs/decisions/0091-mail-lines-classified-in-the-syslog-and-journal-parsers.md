@@ -113,13 +113,32 @@ Forged lines:
     script) with any marker; a priority or event is a classification of text, not proof that Postfix or Dovecot wrote the
     line.
 
+Which markers are read:
+
+15. **Also Dovecot's `Info: ` (priority 6)** — complete against Dovecot's list of log types; but Dovecot's `syslog_format`
+    leaves `Info: ` out (`lib/failures.c`), so in syslog and the journal the marker never comes from Dovecot, and the
+    mapping would only fire on text that merely looks like it (a journal error whose message reads `x: Info: ...`),
+    lowering the priority the source gave the line. It belongs to Dovecot's own log file, a follow-up.
+16. **Only the markers the daemons write to syslog** (chosen) — Postfix `warning: `, `error: `, `fatal: `, `panic: `;
+    Dovecot `Debug: `, `Warning: `, `Error: `, `Fatal: `, `Panic: `. An info line keeps the priority its source gave it.
+
+How a mail log is claimed:
+
+17. **By name too: `mail.log`, `mail.err`, `maillog` and their rotations as syslog names** (`SyslogParser.HasSyslogName`)
+    — would also claim a copy whose first line is cut; but 0086 (option 2) claims every rsyslog file other than `syslog`
+    and `kern.log` by its first line only (`auth.log`, `daemon.log` alike), rsyslog writes whole lines and a rotation
+    begins with one, so only a manual partial copy (`tail -c`) starts mid-line; the function is also the list of names the
+    MariaDB parser refuses, which would widen with it; and `maillog` was not checked on the server.
+18. **By the first line, as every rsyslog file** (chosen) — no change to the claim; a mail log whose first line is cut is
+    listed as not recognized instead of being read.
+
 ## Decision
 
-Options 2, 5, 9, 11, 13 and 14: the journal and syslog parsers classify the lines of Postfix and Dovecot in a stage before
+Options 2, 5, 9, 11, 13, 14, 16 and 18: the journal and syslog parsers classify the lines of Postfix and Dovecot in a stage before
 MariaDB entries and kernel reports, with no parser type of their own. The daemon's severity marker at its anchored
-position sets the priority the daemon gives that class in syslog; fatal and panic lines get `postfix.fatal`,
+position (only the markers the daemons write to syslog, so no Dovecot `Info: `) sets the priority the daemon gives that class in syslog; fatal and panic lines get `postfix.fatal`,
 `postfix.panic`, `dovecot.fatal` or `dovecot.panic`, and the anchored MySQL connection failures get
-`postfix.database_unavailable` or `dovecot.database_unavailable`. The rules are in [Log import](../areas/log-import.md)
+`postfix.database_unavailable` or `dovecot.database_unavailable`. The rules, and the claim of a mail log by its first line as for every rsyslog file, are in [Log import](../areas/log-import.md)
 (*Mail lines (Postfix and Dovecot)*).
 
 ## Consequences
@@ -127,8 +146,9 @@ position sets the priority the daemon gives that class in syslog; fatal and pani
 - `mail.log` keeps the source type `syslog`. Mail records are selected by program and event, the file by `log`.
 - The stage only sets the priority and the event of a record, never adds, drops or reorders one, and holds no state, so
   resuming by count is unaffected and memory does not depend on the input. Contents imported before keep their
-  unclassified records (an import is idempotent per content); a file whose interrupted import is resumed by a version
-  with this stage has unclassified records before the resume point and classified ones after it.
+  unclassified records (an import is idempotent per content and a changed parser version is not noticed); a file whose
+  interrupted import is resumed by a version with this stage has unclassified records before the resume point and
+  classified ones after it. No release has imported mail logs before this change (no version tag exists).
 - Importing `mail.log`, `syslog` and a journal export of the same period stores each mail line up to three times with the
   same classification (0086); signature detection (#21) must not count such an event more than once.
 - An OOM kill of a mail process (`process ... killed by signal 9` from Postfix's master, `service(imap): child N killed

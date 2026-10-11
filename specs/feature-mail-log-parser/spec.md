@@ -17,15 +17,17 @@ Signature detection (#21, "Postfix/Dovecot fatal errors") and outage reconstruct
 ## Behavior
 
 - A `mail.log` (and its rotations, `mail.err`, Plesk's `maillog`, any rsyslog file) is imported as before by the syslog
-  parser; the journal export as before by the journal parser. Neither the claim nor the source type changes.
+  parser; the journal export as before by the journal parser. Neither the claim (by the first line, as for `auth.log`)
+  nor the source type changes.
+- Contents imported before this change keep their unclassified records (no release has imported mail logs yet).
 - In the syslog and journal parsers, every line of **Postfix** (program `postfix/<daemon>`, also with an instance or
   service syslog name such as `postfix/submission/smtpd` or `postfix-out/smtp`) and of **Dovecot** (program `dovecot`) is
   classified:
   - its severity marker, written by the daemon where the daemon writes it (Postfix `warning: `, `error: `, `fatal: `,
-    `panic: ` at the start of the message; Dovecot `Debug: `, `Info: `, `Warning: `, `Error: `, `Fatal: `, `Panic: ` at the
+    `panic: ` at the start of the message; Dovecot `Debug: `, `Warning: `, `Error: `, `Fatal: `, `Panic: ` at the
     start or right after the first prefix segment such as `imap-login: ` or `auth-worker(2290): `), sets the record's
-    priority to the level the daemon itself gives that class in syslog (warning 4, error 3, fatal and panic 2, debug 7,
-    info 6);
+    priority to the level the daemon itself gives that class in syslog (warning 4, error 3, fatal and panic 2, debug 7);
+    neither daemon writes a marker for info lines to syslog, so an info line keeps the priority its source gave it;
   - `fatal` and `panic` lines get the event `postfix.fatal`, `postfix.panic`, `dovecot.fatal` or `dovecot.panic`;
   - a warning or error about a database connection that failed or was lost (Postfix's MySQL lookup table, Dovecot's
     MySQL driver, with the client error texts of libmysqlclient and MariaDB Connector/C) gets the event
@@ -39,7 +41,7 @@ Signature detection (#21, "Postfix/Dovecot fatal errors") and outage reconstruct
 
 - [ ] AC1: Postfix and Dovecot lines are attributed to their service: the record keeps the program as the source names it
   (Postfix `syslog_name/daemon`, Dovecot `dovecot`), and exactly the lines of these programs are classified.
-- [ ] AC2: The severity classes fatal, panic, warning (and error, Dovecot's debug and info) are recognized from the
+- [ ] AC2: The severity classes fatal, panic, warning (and error, Dovecot's debug) are recognized from the
   daemon's marker at its anchored position and set the priority; fatal and panic set an event.
 - [ ] AC3: Warnings and errors about a lost or failed database connection get a database event.
 - [ ] AC4: A large mail log is parsed without memory growth (heap-bound test).

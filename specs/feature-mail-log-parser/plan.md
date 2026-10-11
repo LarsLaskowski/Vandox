@@ -69,6 +69,10 @@ exactly as the parser read them and the message byte-equal to the input.
 - [ ] AC1.5 In the built-in registry, the heads `Oct  9 03:12:01 mail-1 postfix/master[812]: daemon started -- ...`
   (traditional) and `2026-10-09T03:12:01.123456+02:00 mail-1 postfix/master[812]: daemon started -- ...` (RFC 3339) under
   the names `mail.log`, `mail.log.1`, `maillog` and `mail.err` are detected as `syslog` (no other parser claims them).
+- [ ] AC1.6 The mail names are not syslog names (record 0091 options 17 and 18): `SyslogParser.HasSyslogName` is `false` for
+  `mail.log`, `mail.log.1`, `mail.err`, `maillog`; in the built-in registry the head `ail-1 postfix/smtpd[2210]: connect
+  from unknown[192.0.2.9]\n` (first line cut, no syslog header) under the name `mail.log` is claimed by no parser
+  (`Confidence.NoMatch`), as under `auth.log`.
 
 **AC2 — severity (`MailLineClassifier.Classify` on a `LogLine` with the given program and message, priority before
 classification `null`, and once more `6` for the replacement case).**
@@ -91,7 +95,6 @@ classification `null`, and once more `6` for the replacement case).**
   | Message | Priority | Event |
   | ------- | -------- | ----- |
   | `auth: Debug: Loading modules from directory: /usr/lib/dovecot/modules/auth` | 7 | — |
-  | `master: Info: x` | 6 | — |
   | `master: Warning: Killed with signal 15 (by pid=1 uid=0 code=kill)` | 4 | — |
   | `master: Error: service(imap): child 2301 killed with signal 9` | 3 | — |
   | `auth: Fatal: master: service(auth): child 2290 returned error 89` | 2 | `dovecot.fatal` |
@@ -102,9 +105,11 @@ classification `null`, and once more `6` for the replacement case).**
   | `imap-login: Disconnected: Panic: x` (marker after the second segment) | unchanged | — |
   | `a b: Panic: x` (first segment with a space), `: Panic: x` (empty first segment) | unchanged | — |
   | `auth: panic: x`, `auth: PANIC: x`, `fatal: x`, `auth: Panic:x` | unchanged | — |
+  | `master: Info: x`, `Info: x`, `auth: info: x` (no `Info` marker in syslog) | unchanged | — |
 
 - [ ] AC2.3 With a priority already set (6, as from the journal or a `<PRI>`), every row with a marker sets the table's
-  priority and every row without one keeps 6. The event of a row without a marker stays empty. The message, program,
+  priority and every row without one keeps 6. Also with priority 3 (an error from the journal): `master: Info: x` keeps
+  3 (an `Info: ` text never lowers a priority). The event of a row without a marker stays empty. The message, program,
   pid, host, `truncated` and `log` are never changed (compare the whole payload against a copy).
 
 **AC3 — unavailable database (`Classify`; Postfix rows with program `postfix/proxymap`, Dovecot rows with `dovecot`).**
@@ -186,10 +191,12 @@ classification `null`, and once more `6` for the replacement case).**
 | Family | Position | Marker → priority (event) |
 | ------ | -------- | ------------------------- |
 | Postfix | the message begins with it | `warning: ` → 4, `error: ` → 3, `fatal: ` → 2 (`postfix.fatal`), `panic: ` → 2 (`postfix.panic`) |
-| Dovecot | the message begins with it, or the message is `S: ` + marker + text where `S`, the text before the first `: `, is non-empty and holds no space (U+0020) | `Debug: ` → 7, `Info: ` → 6, `Warning: ` → 4, `Error: ` → 3, `Fatal: ` → 2 (`dovecot.fatal`), `Panic: ` → 2 (`dovecot.panic`) |
+| Dovecot | the message begins with it, or the message is `S: ` + marker + text where `S`, the text before the first `: `, is non-empty and holds no space (U+0020) | `Debug: ` → 7, `Warning: ` → 4, `Error: ` → 3, `Fatal: ` → 2 (`dovecot.fatal`), `Panic: ` → 2 (`dovecot.panic`) |
 
 The text after the marker is called *T* below. Markers include their trailing space. For Dovecot the start of the
-message is checked first (`Fatal: Panic: x` is fatal).
+message is checked first (`Fatal: Panic: x` is fatal). Only the markers the daemons write to syslog are read: Dovecot's
+`syslog_format` leaves out `Info: ` (`lib/failures.c`), so `Info: ` is no marker here and a line carrying it keeps its
+priority (record 0091 options 15 and 16; Dovecot's own log file, where `Info: ` occurs, is the follow-up).
 
 **Database rule** (only for warning and error markers). The client error *C* starts with one of these eight phrases
 (ASCII apostrophe U+0027, case-sensitive):
@@ -220,7 +227,13 @@ program rules of `IsPostfix`/`IsDovecot`, "the classification sets only the prio
 reorders a record, and holds no state", "`mail.log` and the other rsyslog files keep the source type `syslog`", and the
 forged-lines limitation of record 0091 option 14 in the style of the MariaDB section (a local process can log under
 `postfix/<x>` or `dovecot`; remote text reaches the anchored positions only through a Dovecot user name, which the default
-`auth_username_chars` keeps free of spaces and colons; an event or priority is a classification, not proof of origin).
+`auth_username_chars` keeps free of spaces and colons; an event or priority is a classification, not proof of origin),
+the claim of a mail log ("`mail.log`, `mail.err`, `maillog` and their rotations are claimed by their first line, like
+`auth.log`; they are no syslog names, so a copy whose first line is cut is not recognized"), and the limit for earlier
+imports in the style of the *Stored source type* sentence of *Parser contract* ("contents imported by a version without
+the classification keep their records unclassified: an import is idempotent per content and a changed parser version is
+not noticed; a file whose interrupted import is resumed by a version with it has unclassified records before the resume
+point; `vandoxd import` offers no way to read such a content again").
 
 ## Affected projects and types
 
@@ -269,10 +282,11 @@ in step 6. No existing file is rewritten by the skeleton.
 
 - `tests/Vandox.Core.Tests/MailLineClassifierTests.cs` — new: AC1.1, AC1.2, AC1.4, AC2, AC3.
 - `tests/Vandox.Core.Tests/SystemLogGrouperTests.cs` — extended: AC5.3.
-- `tests/Vandox.Core.Tests/SyslogParserTests.cs` — extended: AC1.3, AC4, AC5.2 (syslog side).
+- `tests/Vandox.Core.Tests/SyslogParserTests.cs` — extended: AC1.3, AC1.6 (`HasSyslogName` rows), AC4, AC5.2 (syslog
+  side).
 - `tests/Vandox.Core.Tests/JournalExportParserTests.cs` — extended: AC5.1, AC5.2 (journal side, entries built with
   `JournalExportBuilder` from the fixture's lines).
-- `tests/Vandox.Core.Tests/BuiltInParsersTests.cs` — extended: AC1.5.
+- `tests/Vandox.Core.Tests/BuiltInParsersTests.cs` — extended: AC1.5, AC1.6 (registry row).
 - `tests/Vandox.Core.Tests/CountingEmitter.cs` — new test double (Tester): validates every record like
   `RecordingEmitter`, keeps none, counts records and skips and counts per event and per priority, and runs an optional
   `Observed` action per accepted record (used to take the retained memory at the 1,000th and the last record).
@@ -353,9 +367,48 @@ stays bounded independently of the input (0079): the stage holds no state. The w
 
 ## Decision records
 
-- `docs/decisions/0091-mail-lines-classified-in-the-syslog-and-journal-parsers.md` (Proposed, indexed).
+- `docs/decisions/0091-mail-lines-classified-in-the-syslog-and-journal-parsers.md` (Proposed, indexed; revised after the
+  challenge: options 15 to 18, decision and earlier-imports consequence).
 - `docs/decisions/0086-system-log-parsers-generic-syslog-claim-and-grouped-kernel-reports.md` (Accepted, unreleased:
   edited in place, option 2 and the first consequence now point to 0091 instead of announcing a mail parser).
+
+## Challenge
+
+Devil's Advocate: 0 major, 3 minor objections.
+
+1. *Dovecot `Info: ` is dead code in the in-scope sources and lets marker-like text overwrite a real syslog priority with
+   6.* — **Accepted.** Dovecot's `syslog_format` omits `Info: ` (`lib/failures.c`), as this plan's own claim check says, so
+   the mapping could only ever fire on text that is not Dovecot's marker, e.g. an error-level journal line whose message
+   reads `x: Info: ...`, and would lower its priority. `Info: ` is removed from the marker table (*Marker rule*), the
+   `master: Info: x` → 6 row of AC2.2 becomes an "unchanged" row together with `Info: x` and `auth: info: x`, AC2.3 adds
+   that a priority of 3 is kept for `master: Info: x`; `spec.md` (behavior, AC2) and record 0091 no longer lists it
+   (context, new options 15 and 16, decision). The README text in *Documentation updates* already named only `Debug:` for Dovecot. The
+   follow-up issue for Dovecot's own log file, where `Info: ` does occur, now names it.
+2. *Contents imported before this change stay unclassified; the area document does not say so.* — **Accepted.** Record
+   0091 already named it under *Consequences*; the area document text (*Approach*, *Area document text*) now carries the
+   sentence next to the *Parser contract* rule that a changed parser version is not noticed. Checked: `git tag` lists no
+   tag, so no released version imported mail logs; only imports made with development builds of this repository are
+   affected, and `vandoxd import` has no command to read an already imported content again.
+3. *`mail.log`, `mail.err`, `maillog` are claimed only by their first line; a copy cut mid-line is not claimed; extending
+   `HasSyslogName` affects `MariaDbErrorLogParser`.* — **Rejected, recorded as options 17 (rejected) and 18 (chosen) of 0091 and pinned by AC1.6.**
+   Record 0086 (option 2) claims every rsyslog file other than `syslog` and `kern.log` by its first line only (`auth.log`,
+   `daemon.log` alike); a mail log is no different. rsyslog writes whole lines and logrotate rotates by rename or
+   copy-and-truncate, so a real `mail.log` or rotation begins with a header; a first line cut mid-line comes from a manual
+   partial copy (`tail -c`), and such a file is listed as not recognized (exit code 0) rather than read. Widening
+   `HasSyslogName` would also widen the names the MariaDB parser refuses (`MariaDbErrorLogParser.Detect`, line 55) and
+   rely on file names that were not checked on the server (`maillog`). Changing the claim rule is a change to 0086 for
+   every rsyslog file, not for this issue.
+
+Additional point (orchestrator): the issue title says "Parser for mail.log", so the PR description must state the choice;
+see *Pull request text*.
+
+## Pull request text
+
+The PR description (3–5 sentences, written by the orchestrator) must say that no separate `mail` parser type was added:
+`mail.log` keeps being read by the existing syslog parser (source type `syslog`), and Postfix and Dovecot lines are
+classified in the syslog and journal parsers so the same line gets the same priority and event from `mail.log`, `syslog`
+and a journal export (record 0091). Suggested title: `[Logs] Classify Postfix and Dovecot lines in syslog and journal
+imports`.
 
 ## Out of scope / follow-ups
 
@@ -364,6 +417,6 @@ stays bounded independently of the input (0079): the stage holds no state. The w
   (`DEFAULT_FAILURE_STAMP_FORMAT`, `lib/failures.h:52`). `vandoxd import` claims such a file with the syslog parser by its
   first line, which then takes the process prefix (`imap-login:`) for the host and the marker (`Info`) for the program
   (`SyslogLine.TryParse`/`ParseTag`). Recognize the format (by content, never for a syslog name) and read it with the
-  marker rules of record 0091, or refuse it." Labels `area: logs`, `type: bug`, milestone v0.1.0.
+  marker rules of record 0091 plus `Info: ` (priority 6), which Dovecot writes only to its own log file, or refuse it." Labels `area: logs`, `type: bug`, milestone v0.1.0.
 - Lifecycle events and OOM victims among mail processes, Postfix queue analysis: #21.
 - PostgreSQL and other drivers; non-default `syslog_name`, `instance_name` or `mail_log_prefix`.
