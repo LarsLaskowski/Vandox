@@ -780,7 +780,8 @@ read; one cut before its table header is skipped whole ("truncated snapshot"). T
 in its open list. The parser is line-framed, so a continued import starts at a line start: the rest of a snapshot cut by the earlier copy
 is skipped line by line as "line before the first snapshot", and that rest is lost.
 
-**Bounds.** Every non-empty line counts toward the cap of its part, read or not, and at the first line beyond a cap one skip is reported and
+**Bounds.** A line that is empty or holds only spaces counts as empty everywhere in a snapshot: it is ignored and counts
+toward no cap (a line with a tab or another character is not empty). Every non-empty line counts toward the cap of its part, read or not, and at the first line beyond a cap one skip is reported and
 every later line of that part is dropped unseen and without a skip: 4,096 row lines per snapshot ("too many processes in a snapshot",
 `complete` false, the aggregates are over the rows kept), 4,096 `lsof` lines ("too many sockets in a snapshot", `complete` false), and per
 section 128 `meminfo`, 16 `pressure` and 64 `vmstat` lines ("too many lines in a section"). Lines are cut at 16 KiB by the line reader. The only

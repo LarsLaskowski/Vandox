@@ -282,7 +282,7 @@ Every test lives in the file named under *Test files*; names are `{Class}{Scenar
   meminfo, 16 pressure and 64 vmstat lines (skip "too many lines in a section"). An `lsof` line longer than 1,024 bytes
   (counted on the decoded text, an invalid byte counting three) is "lsof line not read"; row tokens before COMMAND longer than 64 bytes make the row
   unparsable. Skips are never collected beyond these caps: the only skips held back are the row skips of a top part
-  not yet accepted (at most 4,096, step 5); every section skip is reported at once. Memory does not grow with the
+  not yet accepted (at most 4,097: 4,096 row skips and the cap skip, step 5); every section skip is reported at once. Memory does not grow with the
   number of snapshots or with the number of lines in a snapshot.
   Tests: `LegacyMonitorParserTests.LegacyMonitorParserParseCapsProcessRows` (4,097 unparsable rows count to the cap
   too), `LegacyMonitorParserParseCapsSocketLines` (unmapped and too long lines count, lines after the cap give no
@@ -327,7 +327,7 @@ All new code is in `src/Vandox.Core/LogParsing`; the importer, storage and model
    letters) is a section marker and ends the top part; known names are `meminfo`, `pressure`, `vmstat`, `lsof`. The
    snapshot is new-format when any marker (known or not) occurs. Row parsing by `LegacyTopLine.TryParseRow`; command
    normalization by `LegacyProcessNames` (AC6, AC7). An unparsable or duplicate-PID row is left out and its skip held
-   back (line number and fixed reason; at most 4,096, because every row line counts toward the row cap); the PID set
+   back (line number and fixed reason; at most 4,097, because every row line counts toward the row cap and the cap skip is held with them); the PID set
    holds at most 4,096 entries.
 4. **Sections.** `LegacyProcLine` reads meminfo, pressure and vmstat lines (AC9); the snapshot keeps the resource of the
    last pressure resource line for a following `full` line. A vmstat value updates the parser's counter history (one
@@ -585,7 +585,7 @@ other parsers (AC1), README sources list (*Documentation updates*).
   `command`, the 2,048-byte `cmdline` and the 16-character header zone count UTF-8 bytes of the decoded text (U+FFFD
   counts three), cut at a character boundary with `Utf8Text.Cut`. Per snapshot at most 4,096 row lines, 4,096 `lsof`
   lines, 128 meminfo, 16 pressure and 64 vmstat lines, every non-empty line counted, lines beyond a cap dropped unseen
-  and without a skip (AC12); the only skips held back are at most 4,096 row skips before acceptance, every other skip
+  and without a skip (AC12); the only skips held back are at most 4,097 row skips (the cap skip included) before acceptance, every other skip
   goes to the emitter at once (which keeps a count and at most `ImportLimits.MaxProblems` = 10 problems,
   `RecordEmitter.cs:219-233`); the counter history holds four entries; the PID set and the socket dedupe set hold at most
   4,096 entries each, a socket key at most 1,024 raw bytes. Worst-case memory is a constant independent of the input
