@@ -30,57 +30,74 @@ internal static class WireTextCheck
     /// <returns><c>null</c> when the line keeps the rule, otherwise <see cref="NotUtf8"/> or <see cref="UnpairedSurrogate"/></returns>
     internal static string? FindViolation(ReadOnlySpan<byte> line)
     {
-        if (Utf8.IsValid(line) is false)
+        if (Utf8.IsValid(line))
         {
-            return NotUtf8;
-        }
+            var index = 0;
 
-        var index = 0;
-
-        while (index < line.Length)
-        {
-            if (line[index] != (byte)'\\')
+            while (index < line.Length)
             {
-                index++;
+                var step = Step(line, index);
 
-                continue;
-            }
-
-            if (index + 1 >= line.Length || line[index + 1] != (byte)'u')
-            {
-                index += 2;
-
-                continue;
-            }
-
-            if (TryReadEscape(line, index, out var unit) is false)
-            {
-                index++;
-
-                continue;
-            }
-
-            if (unit is >= 0xDC00 and <= 0xDFFF)
-            {
-                return UnpairedSurrogate;
-            }
-
-            if (unit is >= 0xD800 and <= 0xDBFF)
-            {
-                if (TryReadEscape(line, index + 6, out var low) is false || low is < 0xDC00 or > 0xDFFF)
+                if (step < 0)
                 {
                     return UnpairedSurrogate;
                 }
 
-                index += 12;
-
-                continue;
+                index += step;
             }
 
-            index += 6;
+            return null;
         }
 
-        return null;
+        return NotUtf8;
+    }
+
+    /// <summary>
+    /// Examines the byte at <paramref name="index"/> and tells how far the scan advances.
+    /// </summary>
+    /// <param name="line">The bytes of the line</param>
+    /// <param name="index">The position to examine</param>
+    /// <returns>The number of bytes to skip, or a negative number for an unpaired surrogate escape</returns>
+    private static int Step(ReadOnlySpan<byte> line, int index)
+    {
+        if (line[index] != (byte)'\\')
+        {
+            return 1;
+        }
+
+        if (TryReadEscape(line, index, out var unit))
+        {
+            return StepEscape(line, index, unit);
+        }
+
+        return 2;
+    }
+
+    /// <summary>
+    /// Judges a complete <c>\uXXXX</c> escape and tells how far the scan advances.
+    /// </summary>
+    /// <param name="line">The bytes of the line</param>
+    /// <param name="index">The position of the backslash</param>
+    /// <param name="unit">The code unit of the escape</param>
+    /// <returns>The number of bytes to skip, or a negative number for an unpaired surrogate escape</returns>
+    private static int StepEscape(ReadOnlySpan<byte> line, int index, int unit)
+    {
+        if (unit is >= 0xDC00 and <= 0xDFFF)
+        {
+            return -1;
+        }
+
+        if (unit is >= 0xD800 and <= 0xDBFF)
+        {
+            if (TryReadEscape(line, index + 6, out var low) && low is >= 0xDC00 and <= 0xDFFF)
+            {
+                return 12;
+            }
+
+            return -1;
+        }
+
+        return 6;
     }
 
     /// <summary>

@@ -1362,22 +1362,29 @@ func requireSharedCasesWellFormed(t *testing.T, cases []sharedCase) {
 		}
 		names[c.Name] = true
 		ids[sharedCaseID(c.Name)] = true
-		if c.Want.Error != "" {
-			if _, ok := sharedErrors[c.Want.Error]; !ok {
-				t.Fatalf("case %q: error %q is not one of the seven error names", c.Name, c.Want.Error)
-			}
-		}
-		if slices.Contains(escapedCaseIDs, sharedCaseID(c.Name)) && !slices.ContainsFunc(c.Lines, func(line string) bool { return strings.Contains(line, `\`) }) {
-			t.Fatalf("case %q: no line holds a backslash, want the escape of the key kept (doubled backslash in the fixture)", c.Name)
-		}
-		if c.Latin1 {
-			requireLatin1Case(t, c)
-		}
+		requireSharedCaseWellFormed(t, c)
 	}
 	for _, id := range requiredCaseIDs() {
 		if !ids[id] {
 			t.Errorf("fixture holds no case %s, want every case of the plan", id)
 		}
+	}
+}
+
+// requireSharedCaseWellFormed fails the test for a case with an unknown error name, an escaped key whose lines hold no
+// backslash, or a malformed latin1 case.
+func requireSharedCaseWellFormed(t *testing.T, c sharedCase) {
+	t.Helper()
+	if c.Want.Error != "" {
+		if _, ok := sharedErrors[c.Want.Error]; !ok {
+			t.Fatalf("case %q: error %q is not one of the seven error names", c.Name, c.Want.Error)
+		}
+	}
+	if slices.Contains(escapedCaseIDs, sharedCaseID(c.Name)) && !slices.ContainsFunc(c.Lines, func(line string) bool { return strings.Contains(line, `\`) }) {
+		t.Fatalf("case %q: no line holds a backslash, want the escape of the key kept (doubled backslash in the fixture)", c.Name)
+	}
+	if c.Latin1 {
+		requireLatin1Case(t, c)
 	}
 }
 
@@ -2145,57 +2152,63 @@ func TestDecoder_InvalidByteIsReportedBeforeUnpairedEscape(t *testing.T) {
 	}
 }
 
-func TestCheckText(t *testing.T) {
-	reasonOf := func(err error) string {
-		if err == nil {
-			return ""
-		}
+// checkTextReason fails the test when CheckText does not report the want reason (empty for an accepted input) or the
+// error is not ErrMalformed.
+func checkTextReason(t *testing.T, input, want string) {
+	t.Helper()
+	err := wire.CheckText([]byte(input))
+	got := ""
+	if err != nil {
 		if !errors.Is(err, wire.ErrMalformed) {
 			t.Errorf("error = %v, want errors.Is(err, ErrMalformed)", err)
 		}
-		return strings.TrimPrefix(err.Error(), textMalformed)
+		got = strings.TrimPrefix(err.Error(), textMalformed)
 	}
-	check := func(t *testing.T, input, want string) {
-		t.Helper()
-		if got := reasonOf(wire.CheckText([]byte(input))); got != want {
-			t.Errorf("CheckText(%q) = %q, want %q", input, got, want)
-		}
+	if got != want {
+		t.Errorf("CheckText(%q) = %q, want %q", input, got, want)
 	}
+}
+
+func TestCheckText(t *testing.T) {
 	t.Run("accepted", func(t *testing.T) {
 		accepted := []string{"", "plain ASCII", "\u00e9\u20ac\U0001F600", `\ud83d\ude00`, `\uD83D\uDE00`, `\uD83d\uDe00`, `\ufffd`, `\uffff`,
 			`\\ud800`, `\"`, `\/`, `\b`, `\f`, `\n`, `\r`, `\t`, `\`, `\u`, `\u12`, `\u123`, `\uZZZZ`, `\ud83d\ude00\ud83d\ude00`,
 			`\\\ud83d\ude00`, `\u0041\u0042`}
 		for _, input := range accepted {
-			check(t, input, "")
+			checkTextReason(t, input, "")
 		}
 	})
 	t.Run("whitespace inside an escape is no hex", func(t *testing.T) {
 		for _, input := range []string{`\u d800`, `\u d80`, `\u+d800`} {
-			check(t, input, "")
+			checkTextReason(t, input, "")
 		}
-		check(t, `\ud800 \udc00`, textUnpaired)
-		check(t, `\ud800\u dc00`, textUnpaired)
+		checkTextReason(t, `\ud800 \udc00`, textUnpaired)
+		checkTextReason(t, `\ud800\u dc00`, textUnpaired)
 	})
 	t.Run("invalid UTF-8", func(t *testing.T) {
 		for _, f := range invalidByteForms {
-			for _, input := range textVariants(f.form) {
-				check(t, input, textNotUTF8)
-			}
-			check(t, f.form+"x", textNotUTF8)
+			requireTextVariantsReason(t, f.form, textNotUTF8)
+			checkTextReason(t, f.form+"x", textNotUTF8)
 		}
 	})
 	t.Run("unpaired surrogate escapes", func(t *testing.T) {
 		for _, f := range unpairedEscapeForms {
-			for _, input := range textVariants(f.form) {
-				check(t, input, textUnpaired)
-			}
+			requireTextVariantsReason(t, f.form, textUnpaired)
 		}
-		check(t, `\ud800`+`\ud800`, textUnpaired)
+		checkTextReason(t, `\ud800`+`\ud800`, textUnpaired)
 	})
 	t.Run("invalid byte before escape and after", func(t *testing.T) {
-		check(t, "\xff"+`\ud800`, textNotUTF8)
-		check(t, `\ud800`+"\xff", textNotUTF8)
+		checkTextReason(t, "\xff"+`\ud800`, textNotUTF8)
+		checkTextReason(t, `\ud800`+"\xff", textNotUTF8)
 	})
+}
+
+// requireTextVariantsReason checks every textVariants input of the form against the want reason.
+func requireTextVariantsReason(t *testing.T, form, want string) {
+	t.Helper()
+	for _, input := range textVariants(form) {
+		checkTextReason(t, input, want)
+	}
 }
 
 func TestCheckText_AllocatesNothing(t *testing.T) {

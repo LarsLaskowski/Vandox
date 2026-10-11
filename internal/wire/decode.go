@@ -156,7 +156,7 @@ func (c *keyCheck) checkLine(line []byte) error {
 	}
 	complete, err := c.walk(line)
 	c.unwind()
-	if err != nil || complete == false {
+	if err != nil || !complete {
 		return err
 	}
 	return checkText(line)
@@ -181,35 +181,40 @@ func (c *keyCheck) pop() {
 // checkText checks the text rule of one line: valid UTF-8, and every \u escape of a surrogate a high half directly
 // followed by an escaped low half. It returns nil, errNotUTF8 or errUnpairedSurrogate.
 func checkText(line []byte) error {
-	if utf8.Valid(line) == false {
+	if !utf8.Valid(line) {
 		return errNotUTF8
 	}
-	for i := 0; i < len(line); i++ {
-		if line[i] != '\\' {
-			continue
+	for i := 0; i < len(line); {
+		step, err := scanEscape(line[i:])
+		if err != nil {
+			return err
 		}
-		if i+1 >= len(line) || line[i+1] != 'u' {
-			i++
-			continue
-		}
-		unit, ok := escapedUnit(line[i:])
-		if ok == false {
-			continue
-		}
-		switch {
-		case unit >= 0xDC00 && unit <= 0xDFFF:
-			return errUnpairedSurrogate
-		case unit >= 0xD800 && unit <= 0xDBFF:
-			low, ok := escapedUnit(line[i+6:])
-			if ok == false || low < 0xDC00 || low > 0xDFFF {
-				return errUnpairedSurrogate
-			}
-			i += 11
-		default:
-			i += 5
-		}
+		i += step
 	}
 	return nil
+}
+
+// scanEscape judges the byte at the start of b and returns how many bytes the scan skips: one for an ordinary byte, two
+// for a backslash that does not start a complete \uXXXX escape, six for an escape and twelve for a surrogate pair.
+func scanEscape(b []byte) (int, error) {
+	if b[0] != '\\' {
+		return 1, nil
+	}
+	unit, ok := escapedUnit(b)
+	if !ok {
+		return 2, nil
+	}
+	switch {
+	case unit >= 0xDC00 && unit <= 0xDFFF:
+		return 0, errUnpairedSurrogate
+	case unit >= 0xD800 && unit <= 0xDBFF:
+		low, ok := escapedUnit(b[6:])
+		if !ok || low < 0xDC00 || low > 0xDFFF {
+			return 0, errUnpairedSurrogate
+		}
+		return 12, nil
+	}
+	return 6, nil
 }
 
 // escapedUnit returns the UTF-16 code unit of the \uXXXX escape at the start of b, and false when b does not start
