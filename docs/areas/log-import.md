@@ -22,7 +22,7 @@ imported data is kept apart from live data (it never raises alerts) by the detec
   the copy world-readable: a copied `/var/log` holds files such as `auth.log` and `mail.log` with mode `0640 root:adm`.
 - The backend option `import.time_zone` (IANA time zone ID, ordinal match against NodaTime's embedded database, no
   default) names the zone of the server the logs come from. It is used for year-less syslog times (see *System log
-  parsers*) for the local times of the MariaDB error log (see *MariaDB error log*) and for the times of Dovecot's log file (see *Dovecot log file*); a value that is no zone ID is refused at start-up with the line of the key and without the value. The
+  parsers*), for the local times of the MariaDB error log (see *MariaDB error log*) and for the times of Dovecot's log file (see *Dovecot log file*); a value that is no zone ID is refused at start-up with the line of the key and without the value. The
   example file holds it commented out.
 
 ## Input
