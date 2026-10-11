@@ -51,6 +51,10 @@ Backend:
 | `ingest.listen` | `:8081` | `[host]:port`, a port different from `web.listen` |
 | `storage.directory` | `/data` | absolute, clean path |
 | `log.level` | `info` | `debug`, `info`, `warn` or `error` |
+| `import.plesk_panel_log` | `/var/log/plesk/panel.log` | absolute, clean path of a file in a directory |
+| `import.sw_cp_server_error_log` | `/var/log/sw-cp-server/error_log` | absolute, clean path of a file in a directory |
+| `import.nginx_error_log` | `/var/log/nginx/error.log` | absolute, clean path of a file in a directory |
+| `import.apache_error_log` | `/var/log/apache2/error.log` | absolute, clean path of a file in a directory |
 | `import.time_zone` | none (optional) | a time zone ID of the IANA time zone database, compared ordinally (`UTC`, `Etc/UTC`, `Europe/Berlin`; not `europe/berlin`, an offset or a Windows name) |
 
 - A listen address is a host and a port separated by a colon. The host is empty (all interfaces) or an IP literal
@@ -68,7 +72,14 @@ Backend:
   null or only holds comments. A value that is no zone ID is refused with the key, the line and the reason "must be a
   time zone of the IANA time zone database, such as UTC or Europe/Berlin", never the value; an empty value is refused
   with the same error, a null value as "has no value" like every string option. While it is unset, `vandoxd import` fails a
-  syslog file at its first line without a year, a MariaDB error log at its first entry and a Dovecot log file at its first Dovecot line (see [Log import](log-import.md)); the service itself does not use it.
+  syslog file at its first line without a year, a MariaDB error log at its first entry, a Dovecot log file at its first Dovecot line and a Plesk or web server error log at its first line of the format (see [Log import](log-import.md)); the service itself does not use it.
+- The four error log paths (`import.plesk_panel_log`, `import.sw_cp_server_error_log`, `import.nginx_error_log`,
+  `import.apache_error_log`) name where the server writes these logs; `vandoxd import` compares them as text with the
+  names of the imported files (see [Log import](log-import.md), *Plesk and web server error logs*) and never opens
+  them. A value must be absolute and clean like a directory and have at least two elements (a directory and a file
+  name); otherwise it is refused with the key, the line and the reason "must be an absolute, clean path of a file in a
+  directory (no trailing slash, no . or .. elements)", never the value; an empty value is refused with the same error,
+  a null value as "has no value". The service itself does not use them.
 
 ## Secrets
 

@@ -22,8 +22,13 @@ imported data is kept apart from live data (it never raises alerts) by the detec
   the copy world-readable: a copied `/var/log` holds files such as `auth.log` and `mail.log` with mode `0640 root:adm`.
 - The backend option `import.time_zone` (IANA time zone ID, ordinal match against NodaTime's embedded database, no
   default) names the zone of the server the logs come from. It is used for year-less syslog times (see *System log
-  parsers*), for the local times of the MariaDB error log (see *MariaDB error log*) and for the times of Dovecot's log file (see *Dovecot log file*); a value that is no zone ID is refused at start-up with the line of the key and without the value. The
+  parsers*), for the local times of the MariaDB error log (see *MariaDB error log*), for the times of Dovecot's log file (see *Dovecot log file*) and for the local times of the Plesk and web server error logs (see *Plesk and web server error logs*); a value that is no zone ID is refused at start-up with the line of the key and without the value. The
   example file holds it commented out.
+- The backend options `import.plesk_panel_log`, `import.sw_cp_server_error_log`, `import.nginx_error_log` and
+  `import.apache_error_log` name the server path of the Plesk panel log, the `sw-cp-server` error log and the nginx and
+  Apache error logs (see *Plesk and web server error logs*). Each has the path of a current Plesk on Ubuntu as its
+  default; a value that is not an absolute, clean path with a directory is refused at start-up with the line of the key
+  and without the value.
 
 ## Input
 
@@ -92,7 +97,7 @@ imported data is kept apart from live data (it never raises alerts) by the detec
   imported up to the hashed size; the appended lines come with a later import, which continues the file (below).
 - **A file that grew is continued.** A content that starts with a content imported completely before (the same log with
   more lines at its end) has another hash, but only its new part is parsed and stored. The rules:
-  - Only a file whose parser is **line-framed** (`LineFramed`: syslog, the MariaDB error log and the Dovecot log file) is continued. A journal
+  - Only a file whose parser is **line-framed** (`LineFramed`: syslog, the MariaDB error log, the Dovecot log file and the Plesk and web server error logs) is continued. A journal
     export that grew is imported as a whole and its earlier entries are stored again, because its binary fields hold
     line feeds and a line feed in the middle is no safe place to start a parse.
   - Pass 1 computes the **head key** of every recognized file: the SHA-256 of its first line (up to and including the
@@ -155,8 +160,9 @@ A parser turns the lines of one file into records. The importer and every parser
 
 - A parser has a type name matching `^[a-z][a-z0-9._-]{0,63}$`; the type is stored with the imported file.
 - `Detect` receives the file (cleaned name and modification time) and the first 4,096 bytes and returns a
-  confidence: none, name match or content match. The parser with the highest confidence wins, the one registered
-  earlier on a tie. A content signature beats a name match; generic parsers claim files weakly.
+  confidence: none, name match, content match or path match. The parser with the highest confidence wins, the one
+  registered earlier on a tie. A configured path beats a content signature, a content signature beats a name match;
+  generic parsers claim files weakly. Only the parsers of *Plesk and web server error logs* return a path match.
 - The parsers are registered in an explicit, ordered list (the order is part of the behavior). The registry refuses
   a missing parser, a duplicate type or an invalid type name.
 - `Parse` reads a stream and emits records of origin `import` with capture times in UTC. It is **deterministic**
@@ -165,6 +171,10 @@ A parser turns the lines of one file into records. The importer and every parser
   deterministic order (file order, except that a parser that combines lines into one record may emit records of lines
   written inside it first), keeps memory bounded independently of the input size, honors cancellation and returns the
   error of the emitter. Skip reasons are fixed texts that never contain input content.
+- A parser may keep a line it cannot read as a **raw record** and report it with a warning (a fixed reason, like a skip
+  reason, with the line number). The line is stored, not skipped; the importer counts such lines per file and keeps the
+  first ten reasons, with line numbers counted in the whole file as for skipped lines. Only the parsers of *Plesk and
+  web server error logs* keep raw lines; the others skip what they cannot read.
 - The importer validates every record; a refused record is counted as skipped, so a parser bug cannot fail a whole
   batch. Stored source type: a changed detection of a resumed content fails the file, a changed parser version is
   not noticed.
@@ -172,16 +182,17 @@ A parser turns the lines of one file into records. The importer and every parser
   truncated flag, the rest of the line discarded, so a file without line breaks cannot grow memory.
 - `LineFramed` tells whether the format is framed by lines only: every byte after a line feed starts a new line and is
   never the rest of a field begun before it. The importer starts a parse at a line start in the middle of a content only
-  for such a parser. Syslog, the MariaDB error log and the Dovecot log file are line-framed; the journal export is not (binary fields hold
+  for such a parser. Syslog, the MariaDB error log, the Dovecot log file and the Plesk and web server error logs are line-framed; the journal export is not (binary fields hold
   line feeds). A parser a hook supplies must declare it; `true` for a format with length-framed fields is a parser bug.
 - The file name handed to a parser has a `.gz` suffix removed when the content was decompressed.
 - A new parser is one type and one entry in the list; the importer does not change.
 
 ## System log parsers
 
-`BuiltInParsers.Create(timeZone)` is the list `vandoxd import` registers when no hook replaces it: `journal`
+`BuiltInParsers.Create(timeZone, paths)` is the list `vandoxd import` registers when no hook replaces it: `journal`
 (`JournalExportParser`), then `mariadb` (`MariaDbErrorLogParser`, see *MariaDB error log*), then `dovecot`
-(`DovecotLogParser`, see *Dovecot log file*), then `syslog` (`SyslogParser`). The journal parser claims a file by content (a head that begins
+(`DovecotLogParser`, see *Dovecot log file*), then `syslog` (`SyslogParser`), then `plesk-panel`, `sw-cp-server-error`,
+`nginx-error` and `apache-error` (`ErrorLogParser`, see *Plesk and web server error logs*). The journal parser claims a file by content (a head that begins
 with a `__CURSOR=` or `__REALTIME_TIMESTAMP=` line and holds a `__REALTIME_TIMESTAMP=` line; the file name never
 matters); the syslog parser claims weakly (name match) a file named `syslog` or `kern.log` with an optional `.N` or
 `-YYYYMMDD` suffix, or whose first line has a syslog header. Both parsers produce `log_line` records with origin `import`
@@ -533,6 +544,94 @@ Remote text reaches a marker position or the database rule there only in the con
 *Mail lines (Postfix and Dovecot)* (a widened `auth_username_chars`, a passdb or userdb named `mysql` or `sqlpool`); an
 event or priority is a classification of text, not proof of origin.
 
+## Plesk and web server error logs
+
+**Sources.** Four parsers read the error logs of Plesk and the web servers. They are one parser with a source type, a
+path option and a line format each, registered in this order:
+
+| Source type | Log | Path option (default) | Format | Claimed by content |
+| ----------- | --- | --------------------- | ------ | ------------------ |
+| `plesk-panel` | Plesk panel log | `import.plesk_panel_log` (`/var/log/plesk/panel.log`) | Plesk panel | yes |
+| `sw-cp-server-error` | error log of `sw-cp-server`, Plesk's web server of the panel | `import.sw_cp_server_error_log` (`/var/log/sw-cp-server/error_log`) | nginx | no |
+| `nginx-error` | nginx error log | `import.nginx_error_log` (`/var/log/nginx/error.log`) | nginx | yes |
+| `apache-error` | Apache error log | `import.apache_error_log` (`/var/log/apache2/error.log`) | Apache | yes |
+
+The defaults are the paths of a current Plesk on Ubuntu as documented by Plesk; they were not checked on the server, and
+older Plesk versions wrote the panel log elsewhere (for example `/usr/local/psa/admin/logs/panel.log`), which the operator
+sets in the option.
+
+**Configured path.** A file is at a configured path when the path has at least a directory and a file name, the file's
+parent directory (the element before the base name in the name the import lists) equals the parent directory of the
+configured path, and the file's base name equals the configured base name, alone or followed by `.` and one or more
+ASCII digits (`error.log.1`) or by `-` and exactly eight ASCII digits (`error.log-20261010`); the `.gz` of a decompressed
+file is removed before. The comparison is ordinal and case-sensitive. Only these two elements count, because a copy or
+an archive has any root: `nginx/error.log`, `var/log/nginx/error.log` and `server-1/nginx/error.log` are all at
+`/var/log/nginx/error.log`, while a file imported on its own (`error.log`, no directory) is never at a configured path.
+The configured paths are compared as text and never opened or resolved on the backend host. A file at a configured path
+is claimed above every content signature, so it is read by that parser whatever it holds; content of another format
+becomes raw lines (below). When the paths of two of these parsers match the same file, the one registered first wins.
+
+**Content.** `plesk-panel`, `nginx-error` and `apache-error` also claim a file by content: its name is not a syslog name
+(as for the MariaDB error log) and the first line of the first 4,096 bytes is a line of their format (a UTF-8 byte order
+mark at the start and a `\r` directly before `\n` removed; a first line cut by the end of the head counts when its
+beginning is complete). No later line is looked at. `sw-cp-server-error` has nginx's format and claims a file only by its
+path: a copy of that log under another parent directory is read as `nginx-error`, with `log` keeping its path. The
+per-domain logs of Plesk (`proxy_error_log` in nginx's format and `error_log` in Apache's, under
+`/var/www/vhosts/system/<domain>/logs/`) are found by content. The beginnings of the three formats differ from each other
+and from the first lines the other parsers claim (nginx starts with `DDDD/`, the Plesk panel log with `[DDDD-`, Apache
+with `[` and a weekday), so no first line is claimed by content twice. Neither a source type nor a priority proves which
+program wrote a file: any file whose first line has one of the shapes is read as that log, and `log` keeps its real path.
+
+**Lines.** A **line of the format** begins with these fields, checked on the decoded line with ordinal comparisons of ASCII
+characters (`D` an ASCII digit). The digits of month, day, hour, minute and second are not range-checked here (see
+*Time*), and the weekday is not compared with the date.
+
+| Format | Beginning of the line | Levels and priority |
+| ------ | --------------------- | ------------------- |
+| Plesk panel | `[DDDD-DD-DD DD:DD:DD`, optionally `.` and 1 to 6 digits, `] `, optionally 1 to 10 digits, `:`, 1 to 64 ASCII letters or digits and a space, then the level | `EMERG` 0, `ALERT` 1, `CRIT` 2, `ERR` 3, `WARN` 4, `NOTICE` 5, `INFO` 6, `DEBUG` 7 |
+| nginx | `DDDD/DD/DD DD:DD:DD [`, the level, `]` | `emerg` 0, `alert` 1, `crit` 2, `error` 3, `warn` 4, `notice` 5, `info` 6, `debug` 7 |
+| Apache | `[`, a weekday `Mon` to `Sun`, a space, a month `Jan` to `Dec`, a space, `DD DD:DD:DD`, optionally `.` and exactly 6 digits, a space, `DDDD`, `] [`, optionally a module of 0 to 64 ASCII letters, digits or `_` followed by `:`, the level, `]` | as nginx, and `trace1` to `trace8` 7 |
+
+The level is followed by a space or the end of the line; levels, weekdays and months are case-sensitive. nginx's format
+was checked in nginx 1.18.0 and Apache's in httpd 2.4.52 (`[module:level]`, `[:level]` without a module name) and 2.2.34
+(no fraction, no module); the Plesk panel format is taken from Plesk's documentation (Obsidian writes the process ID and a
+request ID before the level, older versions only the level) and is not verified, nor is it verified that `sw-cp-server`
+writes nginx's format.
+
+**Records.** Every line of the format is one record: source the source type, origin `import`, sequence 0, `log` the file
+name as the import lists it, `host` and `program` empty, `pid` 0, no event, `priority` from the level, and `message` the
+text after the time stamp and the one space after it (so the level, a process or request ID, the module and a client
+address stay in it), cut to 16,384 UTF-8 bytes of the decoded text (invalid bytes count three) with `truncated` set;
+`truncated` is also set for a line the reader cut. No lines are joined.
+
+**Time.** The time stamp is the server's local time with its year. It is read in `import.time_zone` with the rules of
+*Time zone* (the skipped hour shifted forward; the repeated hour takes the earlier offset unless that lies more than ten
+minutes before the previous line of the format whose time was resolved; raw lines do not count), and the fraction is
+added to the resolved instant; an instant that leaves the storable range only by the fraction is outside it. With
+the option unset, the first line of the format makes `ParseAsync` throw `InvalidOperationException` with
+"import.time_zone is not set", and the file is listed as failed, as for syslog; raw lines before it stay stored. That
+Plesk writes the panel log in the server's local time is not verified.
+
+**Raw lines.** A non-empty line that is not a line of the format, or whose time does not exist (month 13, `2026-02-30`,
+hour 24) or lies outside the storable range, is kept as a **raw record**: the fields of *Records*, but no `priority` and
+the whole line as `message` (a UTF-8 byte order mark removed on line 1 only), cut and marked like a message. Its time is
+the capture time of the record emitted before it in the same parse, else the file's modification time (for the first
+lines of a file and of the new part of a continued file, so such a line can be stored with a time later than it was
+written); with neither, the line is skipped as "raw line without a time". The parser reports every raw line with a
+warning and one of the fixed reasons "not a Plesk panel log line", "not an nginx error log line" (also for
+`sw-cp-server-error`), "not an Apache error log line", "invalid date" and "time outside the storable range". An empty
+line is skipped as "empty line", with the 1-based line number. Raw lines occur in normal logs: nginx copies the standard
+error of a FastCGI application unescaped, so a PHP message with line feeds continues on lines without a time stamp, and
+Apache writes startup messages and the standard error of child processes without one. A file of an unknown format at a
+configured path becomes raw records only. Memory is independent of the input: a parse keeps the time of the last record
+and of the last line of the format.
+
+**Forged lines (limitation).** These logs hold text of clients and web applications (request lines, host names, the
+standard error of FastCGI and CGI programs). Where such text reaches the file raw with a line feed (nginx's FastCGI
+standard error, the standard error of an Apache child process), the line after it can have the log's format with any
+time and level; a PHP message that echoes request data lets a remote client do this. Any local process that may write to
+the files can do the same. A priority is a classification of text, not proof that the web server or Plesk wrote the line.
+
 ## Result
 
 - **Outcomes per file:** imported, continued (the new part of a file that grew was stored), already imported,
@@ -540,16 +639,21 @@ event or priority is a classification of text, not proof of origin.
   recognized (with the reason), failed (with the reason).
   Every file that is not imported appears with its outcome and reason; nothing is skipped silently.
 - **Progress** goes as JSON log lines to standard error: one line per finished file (path, outcome including `continued` and `contained`, source type,
-  reason, lines, records, skipped), one per 64 MiB hashed, one when the scan is done (files, pending) and one per
+  reason, lines, records, skipped), after it a line at level warning for a file with lines kept raw (path, source type,
+  number of raw lines), one per 64 MiB hashed, one when the scan is done (files, pending) and one per
   100,000 lines of a large file. Names are attributes, never part of the message.
 - **The summary** goes as text to standard output and holds nothing else: the root; files found and counts per
-  outcome; lines read (for a continued file only from the continuation point), records stored and lines skipped; the time range of the stored records (RFC 3339, UTC) or that
+  outcome; lines read (for a continued file only from the continuation point), records stored, lines skipped and lines
+  kept raw; the time range of the stored records (RFC 3339, UTC) or that
   none were stored; whether the run was interrupted; then the files continued (path, the name of the content continued,
   the line after which the new part starts and, when there are any, the lines the parser skipped before its first
   record), the files contained in an imported file (path and the name of the content they are the start of), the files
   not recognized and the files that failed with
-  their reasons, and the files with skipped lines with their first problems (at most ten per file). The text
-  format belongs to the command and is not an interface.
+  their reasons, the files with skipped lines with their first problems (at most ten per file), and the files with
+  lines kept raw with their number and first reasons (at most ten per file). Lines kept raw are stored records, so
+  they count among the records stored and never change the outcome or the exit code. Like skipped lines, they are
+  counted over the whole parse of this run, including the part a resumed run drops because an earlier run stored it.
+  The text format belongs to the command and is not an interface.
 - **Interruption** (Ctrl-C) anywhere in pass 2 — while a file is parsed, verified or stored, between two files or
   between the entries of an archive — stops the run and still prints the summary of what was done, which says that
   the run was interrupted. The file being imported when the interruption arrives is listed as failed with the
@@ -569,6 +673,7 @@ event or priority is a classification of text, not proof of origin.
 - [0088](../decisions/0088-mariadb-error-log-entries-by-content-and-lifecycle-events-in-log-line.md) — why the MariaDB error log is detected by content, kept as entries and classified into an `event` field, and why MariaDB lines of the journal and syslog are joined by program, host and pid within 60 seconds of their header and 16,384 bytes, split rather than cut, and keep the time of their line.
 
 - [0091](../decisions/0091-mail-lines-classified-in-the-syslog-and-journal-parsers.md) — why Postfix and Dovecot lines are classified inside the syslog and journal parsers by their severity marker, which lines count as an unavailable database, and why Dovecot's own log file gets a parser `dovecot` claimed by its first line.
+- [0092](../decisions/0092-error-logs-by-content-or-configured-path-unreadable-lines-kept-raw.md) — why the Plesk and web server error logs have path options that rank above content, how a configured path is matched, and why unreadable lines are kept as raw records with a warning.
 
 - [0014](../decisions/0014-log-import-is-a-core-component.md) — why historical import and log shipping are core.
 - [0021](../decisions/0021-no-pseudonymization-of-log-data.md) — why log data is stored unchanged.
@@ -587,5 +692,6 @@ event or priority is a classification of text, not proof of origin.
 `Vandox.Import` (`Importer`, `Scanner`, `ImportLimits`), `Vandox.Core.LogParsing` (`ILogParser`, `ParserRegistry`,
 `LogLineReader`, `BuiltInParsers`, `JournalExportParser`, `JournalExportReader`, `SyslogParser`, `SyslogLine`,
 `SyslogClock`, `KernelReportGrouper`, `SystemLogGrouper`, `MailLineClassifier`, `MailEvents`, `DovecotLogParser`, `DovecotLine`, `MariaDbLineGrouper`, `MariaDbErrorLogParser`,
-`MariaDbParseSession`, `MariaDbLine`, `MariaDbMessage`, `MariaDbEventClassifier`, `MariaDbEvents`, `Utf8Text`), `Vandox.Core.Model` (`StorableTime`), `Vandox.Core.IO` (`SecureRoot`, `FileProbe`), `Vandox.Backend/Cli` (`ImportCommand`,
-`ImportSummaryWriter`). The checklist for a new parser is in `.squad/project.md` (*Integration surface*).
+`MariaDbParseSession`, `MariaDbLine`, `MariaDbMessage`, `MariaDbEventClassifier`, `MariaDbEvents`, `Utf8Text`, `ErrorLogParser`,
+`ErrorLogLine`, `ErrorLogFormat`, `ErrorLogPaths`, `LogPath`), `Vandox.Core.Model` (`StorableTime`), `Vandox.Core.IO` (`SecureRoot`, `FileProbe`), `Vandox.Backend/Cli` (`ImportCommand`,
+`ImportSummaryWriter`, `ImportProgressLogger`). The checklist for a new parser is in `.squad/project.md` (*Integration surface*).
