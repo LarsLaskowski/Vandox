@@ -67,6 +67,9 @@ var (
 	errDuplicateKey = fmt.Errorf("%w: duplicate key", ErrMalformed)
 	errKeyNotASCII  = fmt.Errorf("%w: key not ASCII", ErrMalformed)
 	errTooDeep      = fmt.Errorf("%w: nesting deeper than %d", ErrMalformed, MaxDepth)
+
+	errNotUTF8           = fmt.Errorf("%w: line not valid UTF-8", ErrMalformed)
+	errUnpairedSurrogate = fmt.Errorf("%w: unpaired surrogate escape", ErrMalformed)
 )
 
 const (
@@ -149,7 +152,7 @@ func (c *keyCheck) checkLine(line []byte) error {
 	if c.frames == nil {
 		c.frames = make([]frame, 0, MaxDepth)
 	}
-	err := c.walk(line)
+	_, err := c.walk(line)
 	c.unwind()
 	return err
 }
@@ -170,24 +173,37 @@ func (c *keyCheck) pop() {
 	c.frames = c.frames[:top]
 }
 
+// checkText checks the text rule of one line: valid UTF-8, and every \u escape of a surrogate a high half directly
+// followed by an escaped low half. It returns nil, errNotUTF8 or errUnpairedSurrogate.
+func checkText(line []byte) error {
+	return errors.New("not implemented")
+}
+
+// escapedUnit returns the UTF-16 code unit of the \uXXXX escape at the start of b, and false when b does not start
+// with a complete one.
+func escapedUnit(b []byte) (rune, bool) {
+	return 0, false
+}
+
 // walk reads the first value of line token by token. A syntax error is reported as malformed; a line that ends
-// inside a value is left to the binding that follows, which reports it.
-func (c *keyCheck) walk(line []byte) error {
+// inside a value is left to the binding that follows, which reports it. complete is true when the first value ended
+// and only JSON whitespace follows it.
+func (c *keyCheck) walk(line []byte) (complete bool, err error) {
 	dec := json.NewDecoder(bytes.NewReader(line))
 	dec.UseNumber()
 	for {
 		tok, err := dec.Token()
 		if err != nil {
 			if errors.Is(err, io.EOF) {
-				return nil
+				return false, nil
 			}
-			return fmt.Errorf("%w: %w", ErrMalformed, err)
+			return false, fmt.Errorf("%w: %w", ErrMalformed, err)
 		}
 		if err := c.step(tok); err != nil {
-			return err
+			return false, err
 		}
 		if len(c.frames) == 0 {
-			return nil
+			return false, nil
 		}
 	}
 }
