@@ -24,3 +24,4 @@ are quoted in full.
 | 2026-10-11 20:59 | 8 Security delta | squad-security | APPROVED at d37d94d |
 | 2026-10-11 20:59 | 8 Review round 2 (delta) | squad-reviewer | APPROVE at d37d94d; all round-1 findings fixed (opus/medium · 175,711 tokens · 3 tool uses · 26 s) |
 | 2026-10-11 21:01 | 9 PR approval | squad-lead | NOT APPROVED: deviations 1,2,3,5,6 accepted; 4 (space-only lines count as empty) undocumented and untested; Lead documented it in log-import.md Bounds and fixed 4,096->4,097 in plan.md; Tester to add LegacyMonitorParserParseIgnoresSpaceOnlyLines, then gates + delta review (opus/medium · 90,000 tokens · 25 tool uses · 200 s) |
+| 2026-10-11 21:08 | 6-7 Tester + code check | squad-tester | LegacyMonitorParserParseIgnoresSpaceOnlyLines added (3 cases); gates on bd536d7 PASS (3088/171/145/92, coverage new 99.9% overall 97.5%, analyzer, format, scope) (sonnet/medium · 74,091 tokens · 15 tool uses · 139 s) |
