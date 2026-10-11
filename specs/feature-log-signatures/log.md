@@ -12,3 +12,4 @@ are quoted in full.
 | 2026-10-11 21:40 | 3 Plan security | squad-security | CHANGES_REQUIRED: B1 remote-triggerable disk_full/too_many_connections via web error logs; B2 AC7 heap test too weak; B3 number guard bypass forms; 8 non-blocking |
 | 2026-10-11 21:49 | 3 Revise | squad-lead | Revised: B1 restrict via source condition, B2/B3 accepted, N1-N8 accepted, both minors accepted; opened #203 follow-up |
 | 2026-10-11 21:50 | 3 Plan security delta | squad-security | APPROVED (round 2) |
+| 2026-10-11 21:52 | 4 Skeleton | squad-dev | Skeleton built, 0 warnings; CA1720 suppression on SignatureFieldType.Integer (to be judged) |

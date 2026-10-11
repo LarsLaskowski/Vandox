@@ -10,6 +10,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <EmbeddedResource Include="Signatures/signatures.yaml" LogicalName="Vandox.Core.Signatures.signatures.yaml" />
+  </ItemGroup>
+
+  <ItemGroup>
     <InternalsVisibleTo Include="Vandox.Core.Tests" />
     <InternalsVisibleTo Include="Vandox.Import" />
   </ItemGroup>
