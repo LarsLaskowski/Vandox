@@ -445,7 +445,6 @@ func acceptedFormCases(t *testing.T) []acceptedCase {
 			envelope("metric", 1, `"2026-03-01T12:00:00+00:00"`, okData),
 			envelope("metric", 2, `"2026-03-01T12:00:00-00:00"`, okData),
 			envelope("metric", 3, `"2026-03-01T12:00:00.123456789Z"`, okData)), 3, checkZeroOffsetTimes},
-		{"invalid UTF-8 in a string", withHeader(t, kindLine("log_line", "{\"log\":\"journal\",\"message\":\"a\xffb\"}")), 1, logMessage("a\ufffdb")},
 		{"escaped control characters in a text", withHeader(t, kindLine("log_line", `{"log":"journal","message":"a\u0000b\n"}`)), 1, logMessage("a\x00b\n")},
 		{"IPv4-mapped address without zone", withHeader(t, kindLine("connection_snapshot", `{"remotes":[{"addr":"::ffff:1.2.3.4","count":1}]}`)), 1, nil},
 		{"empty connection snapshot", withHeader(t, kindLine("connection_snapshot", `{"complete":true}`)), 1, nil},
@@ -1296,9 +1295,10 @@ type sharedWant struct {
 
 // sharedCase is one case of testdata/wire/decoder-cases.json.
 type sharedCase struct {
-	Name  string     `json:"name"`
-	Lines []string   `json:"lines"`
-	Want  sharedWant `json:"want"`
+	Name   string     `json:"name"`
+	Lines  []string   `json:"lines"`
+	Latin1 bool       `json:"latin1"`
+	Want   sharedWant `json:"want"`
 }
 
 // sharedErrors maps the error names of the fixture (the names of WireErrorKind in the backend) to the Go errors.
@@ -1314,12 +1314,12 @@ var sharedErrors = map[string]error{
 
 // escapedCaseIDs are the cases whose line under test holds a JSON escape that the fixture spells with a doubled
 // backslash; read wrongly, they would pass without testing the escape.
-var escapedCaseIDs = []string{"K4", "K5", "N4", "N7", "N8", "N9", "N10", "N11", "D9"}
+var escapedCaseIDs = []string{"K4", "K5", "N4", "N7", "N8", "N9", "N10", "N11", "D9", "S13", "S14", "S15", "S16", "S17", "S18", "S19", "S20", "S21", "S22", "S23", "S24", "S25", "S26", "S27", "S28", "S29", "S30", "S31"}
 
-// requiredCaseIDs lists the cases the fixture must hold, from the plan of issue 175.
+// requiredCaseIDs lists the cases the fixture must hold, from the plans of issues 175 and 182.
 func requiredCaseIDs() []string {
 	var ids []string
-	for prefix, count := range map[string]int{"K": 6, "N": 11, "D": 28, "H": 31, "O": 4, "X": 4, "M": 5, "U": 2} {
+	for prefix, count := range map[string]int{"K": 6, "N": 11, "D": 28, "H": 31, "O": 4, "X": 4, "M": 5, "U": 2, "S": 32} {
 		for i := 1; i <= count; i++ {
 			ids = append(ids, prefix+strconv.Itoa(i))
 		}
@@ -1370,6 +1370,9 @@ func requireSharedCasesWellFormed(t *testing.T, cases []sharedCase) {
 		if slices.Contains(escapedCaseIDs, sharedCaseID(c.Name)) && !slices.ContainsFunc(c.Lines, func(line string) bool { return strings.Contains(line, `\`) }) {
 			t.Fatalf("case %q: no line holds a backslash, want the escape of the key kept (doubled backslash in the fixture)", c.Name)
 		}
+		if c.Latin1 {
+			requireLatin1Case(t, c)
+		}
 	}
 	for _, id := range requiredCaseIDs() {
 		if !ids[id] {
@@ -1378,10 +1381,53 @@ func requireSharedCasesWellFormed(t *testing.T, cases []sharedCase) {
 	}
 }
 
+// requireLatin1Case fails the test for a latin1 case with a character above U+00FF, or with no character from U+0080
+// to U+00FF (a byte whose escape was lost or doubled in the file).
+func requireLatin1Case(t *testing.T, c sharedCase) {
+	t.Helper()
+	high := false
+	for _, line := range c.Lines {
+		for _, r := range line {
+			if r > 0xFF {
+				t.Fatalf("case %q: latin1 case holds U+%04X, want only U+0000 to U+00FF", c.Name, r)
+			}
+			high = high || r >= 0x80
+		}
+	}
+	if !high {
+		t.Fatalf("case %q: latin1 case holds no character from U+0080 to U+00FF, want the byte kept", c.Name)
+	}
+}
+
+// latin1Stream gzips the lines one character per byte, each line followed by a line feed.
+func latin1Stream(t *testing.T, lines []string) []byte {
+	t.Helper()
+	var plain []byte
+	for _, line := range lines {
+		for _, r := range line {
+			plain = append(plain, byte(r))
+		}
+		plain = append(plain, '\n')
+	}
+	var buf bytes.Buffer
+	zw := gzip.NewWriter(&buf)
+	if _, err := zw.Write(plain); err != nil {
+		t.Fatalf("gzip write = %v, want nil", err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatalf("gzip close = %v, want nil", err)
+	}
+	return buf.Bytes()
+}
+
 // decodeSharedCase gzips the lines of a case and decodes the batch to its end.
 func decodeSharedCase(t *testing.T, c sharedCase) ([]sharedRecord, int64, error) {
 	t.Helper()
-	d, err := wire.NewDecoder(bytes.NewReader(stream(t, c.Lines...)), wire.DefaultLimits())
+	data := stream(t, c.Lines...)
+	if c.Latin1 {
+		data = latin1Stream(t, c.Lines)
+	}
+	d, err := wire.NewDecoder(bytes.NewReader(data), wire.DefaultLimits())
 	if err != nil {
 		return nil, 0, err
 	}
@@ -1799,5 +1845,372 @@ func TestDecoder_ReturnsRecordsBeforeDuplicateKeyThenFailsForGood(t *testing.T) 
 	_, again := d.Next()
 	if !errors.Is(again, first) {
 		t.Errorf("Next() after the error = %v, want the same error %v", again, first)
+	}
+}
+
+// Text rule (record 0090, option 16): a complete line must be valid UTF-8 and hold no surrogate escape that is not a high
+// half directly followed by an escaped low half.
+
+const (
+	textNotUTF8   = "line not valid UTF-8"
+	textUnpaired  = "unpaired surrogate escape"
+	textMalformed = "malformed batch: "
+)
+
+// invalidByteForms are the byte forms of the plan (AC6) that are no valid UTF-8.
+var invalidByteForms = []struct {
+	name string
+	form string
+}{
+	{"byte FF", "\xff"},
+	{"byte F5 80 80 80", "\xf5\x80\x80\x80"},
+	{"stray continuation byte", "\x80"},
+	{"overlong C0 AF", "\xc0\xaf"},
+	{"overlong C0 80", "\xc0\x80"},
+	{"overlong E0 80 80", "\xe0\x80\x80"},
+	{"encoded surrogate", "\xed\xa0\x80"},
+	{"above U+10FFFF", "\xf4\x90\x80\x80"},
+	{"cut short E2 82", "\xe2\x82"},
+	{"cut short F0 9F 98", "\xf0\x9f\x98"},
+}
+
+// unpairedEscapeForms are the escapes of the cases S13-S20 that hold an unpaired surrogate.
+var unpairedEscapeForms = []struct {
+	name string
+	form string
+}{
+	{"S13 high alone", `\ud800`},
+	{"S14 low alone", `\udc00`},
+	{"S15 high then non-surrogate escape", `\ud800\u0041`},
+	{"S16 high then letter", `\ud800x`},
+	{"S17 low then high", `\udc00\ud800`},
+	{"S18 high before a valid pair", `\ud800\ud800\udc00`},
+	{"S19 upper-case hex", `\uD800`},
+	{"S20 high before escaped newline", `\ud800\n`},
+	{"escaped backslash then escape", `\\\ud800`},
+	{"high then short escape", `\ud800\u12`},
+	{"high then backslash alone", `\ud800\`},
+	{"high then non-hex escape", `\ud800\uZZZZ`},
+}
+
+// acceptedEscapeForms are escapes the text rule keeps.
+var acceptedEscapeForms = []struct {
+	name string
+	form string
+}{
+	{"pair", `\ud83d\ude00`},
+	{"pair upper-case", `\uD83D\uDE00`},
+	{"pair mixed case", `\uD83d\uDe00`},
+	{"replacement character", `\ufffd`},
+	{"noncharacter", `\uffff`},
+	{"escaped backslash before ud800", `\\ud800`},
+	{"simple escapes", `\"\/\b\f\n\r\t`},
+	{"escaped backslash before pair", `\\\ud83d\ude00`},
+}
+
+func logMessageLine(message string) string {
+	return kindLine("log_line", `{"log":"journal","message":"`+message+`"}`)
+}
+
+// textVariants places a form at the very start, in the middle and at the very end of a message.
+func textVariants(form string) map[string]string {
+	return map[string]string{"start": form + "b", "middle": "a" + form + "b", "end": "a" + form, "whole": form}
+}
+
+func requireTextError(t *testing.T, err error, line int, reason string) {
+	t.Helper()
+	if err == nil {
+		t.Fatalf("decoding = nil, want malformed (%s)", reason)
+	}
+	if !errors.Is(err, wire.ErrMalformed) {
+		t.Errorf("error = %v, want errors.Is(err, ErrMalformed)", err)
+	}
+	want := fmt.Sprintf("wire: line %d: %s%s", line, textMalformed, reason)
+	if got := err.Error(); got != want {
+		t.Errorf("error text = %q, want %q", got, want)
+	}
+}
+
+func TestDecoder_TextRuleRejectsInvalidBytes(t *testing.T) {
+	for _, f := range invalidByteForms {
+		for place, message := range textVariants(f.form) {
+			t.Run(f.name+" "+place, func(t *testing.T) {
+				_, err := decodeAll(t, withHeader(t, logMessageLine(message)), wire.DefaultLimits())
+				requireTextError(t, err, 2, textNotUTF8)
+			})
+		}
+		t.Run(f.name+" followed by a letter", func(t *testing.T) {
+			_, err := decodeAll(t, withHeader(t, logMessageLine(f.form+"x")), wire.DefaultLimits())
+			requireTextError(t, err, 2, textNotUTF8)
+		})
+	}
+}
+
+func TestDecoder_TextRuleRejectsUnpairedSurrogateEscapes(t *testing.T) {
+	for _, f := range unpairedEscapeForms {
+		if !strings.Contains(f.form, `\`) {
+			t.Fatalf("test setup: %s holds no backslash", f.name)
+		}
+		// Forms that end in a lone backslash or a short escape are no JSON; the text rule only sees them through checkText.
+		if strings.HasSuffix(f.form, `\`) || strings.HasSuffix(f.form, `\u12`) || strings.HasSuffix(f.form, `\uZZZZ`) {
+			continue
+		}
+		for place, message := range textVariants(f.form) {
+			t.Run(f.name+" "+place, func(t *testing.T) {
+				_, err := decodeAll(t, withHeader(t, logMessageLine(message)), wire.DefaultLimits())
+				requireTextError(t, err, 2, textUnpaired)
+			})
+		}
+	}
+}
+
+func TestDecoder_TextRuleAcceptsValidEscapes(t *testing.T) {
+	for _, f := range acceptedEscapeForms {
+		t.Run(f.name, func(t *testing.T) {
+			if !strings.Contains(f.form, `\`) {
+				t.Fatalf("test setup: %s holds no backslash", f.name)
+			}
+			recs, err := decodeAll(t, withHeader(t, logMessageLine("a"+f.form+"b")), wire.DefaultLimits())
+			if err != nil || len(recs) != 1 {
+				t.Fatalf("decoding = %d records, %v, want 1 record, nil", len(recs), err)
+			}
+		})
+	}
+}
+
+func TestDecoder_TextRuleAcceptsRawMultiByteText(t *testing.T) {
+	recs, err := decodeAll(t, withHeader(t, logMessageLine("\u00e9\u20ac\U0001F600")), wire.DefaultLimits())
+	if err != nil || len(recs) != 1 {
+		t.Fatalf("decoding = %d records, %v, want 1 record, nil", len(recs), err)
+	}
+	logMessage("\u00e9\u20ac\U0001F600")(t, recs)
+}
+
+func TestDecoder_TextRuleCoversEveryPlaceOfALine(t *testing.T) {
+	record := func(extra string) string {
+		return strings.Replace(metricLine(1), `"captured_at"`, extra+`,"captured_at"`, 1)
+	}
+	header := func(extra string) string {
+		return `{"format_major":1,"format_minor":0,` + hdrTail + `,` + extra + `}`
+	}
+	for _, value := range []string{"\xff", `\ud800`} {
+		reason := textNotUTF8
+		if value != "\xff" {
+			reason = textUnpaired
+		}
+		t.Run("unknown record value "+reason, func(t *testing.T) {
+			_, err := decodeAll(t, stream(t, headerJSON, record(`"x":"`+value+`"`)), wire.DefaultLimits())
+			requireTextError(t, err, 2, reason)
+		})
+		t.Run("unknown record value in a list "+reason, func(t *testing.T) {
+			_, err := decodeAll(t, stream(t, headerJSON, record(`"x":["`+value+`"]`)), wire.DefaultLimits())
+			requireTextError(t, err, 2, reason)
+		})
+		t.Run("unknown header value "+reason, func(t *testing.T) {
+			_, err := decodeAll(t, stream(t, header(`"x":"`+value+`"`), metricLine(1)), wire.DefaultLimits())
+			requireTextError(t, err, 1, reason)
+		})
+		t.Run("header of major 2 "+reason, func(t *testing.T) {
+			_, err := decodeAll(t, stream(t, `{"format_major":2,"x":"`+value+`"}`, metricLine(1)), wire.DefaultLimits())
+			requireTextError(t, err, 1, reason)
+		})
+		t.Run("agent_id "+reason, func(t *testing.T) {
+			line := `{"format_major":1,"format_minor":0,"agent_id":"` + value + `","boot_id":"` + testBootID + `","mode":"live"}`
+			_, err := decodeAll(t, stream(t, line, metricLine(1)), wire.DefaultLimits())
+			requireTextError(t, err, 1, reason)
+		})
+		t.Run("kind "+reason, func(t *testing.T) {
+			line := strings.Replace(metricLine(1), `"kind":"metric"`, `"kind":"metric`+value+`"`, 1)
+			_, err := decodeAll(t, stream(t, headerJSON, line), wire.DefaultLimits())
+			requireTextError(t, err, 2, reason)
+		})
+		t.Run("label value "+reason, func(t *testing.T) {
+			line := kindLine("metric", `{"name":"cpu","value":1,"labels":{"a":"`+value+`"}}`)
+			_, err := decodeAll(t, stream(t, headerJSON, line), wire.DefaultLimits())
+			requireTextError(t, err, 2, reason)
+		})
+		t.Run("unit "+reason, func(t *testing.T) {
+			line := kindLine("metric", `{"name":"cpu","value":1,"unit":"`+value+`"}`)
+			_, err := decodeAll(t, stream(t, headerJSON, line), wire.DefaultLimits())
+			requireTextError(t, err, 2, reason)
+		})
+	}
+}
+
+func TestDecoder_TextRuleReturnsRecordsBeforeTheLine(t *testing.T) {
+	data := withHeader(t, logMessageLine("a"), strings.Replace(logMessageLine("a\xffb"), `"seq":1`, `"seq":2`, 1))
+	recs, err := decodeAll(t, data, wire.DefaultLimits())
+	requireTextError(t, err, 3, textNotUTF8)
+	if len(recs) != 1 {
+		t.Errorf("records before the error = %d, want 1", len(recs))
+	}
+}
+
+func TestDecoder_TextRuleErrorNamesNoContent(t *testing.T) {
+	cases := []struct {
+		name   string
+		header string
+		record string
+		reason string
+		line   int
+	}{
+		{"record byte", headerJSON, logMessageLine("SENTINELTEXT\xff"), textNotUTF8, 2},
+		{"record escape", headerJSON, logMessageLine(`SENTINELTEXT\ud800`), textUnpaired, 2},
+		{"header byte", `{"format_major":1,"format_minor":0,` + hdrTail + `,"x":"SENTINELTEXT` + "\xff" + `"}`, metricLine(1), textNotUTF8, 1},
+		{"header escape", `{"format_major":1,"format_minor":0,` + hdrTail + `,"x":"SENTINELTEXT\ud800"}`, metricLine(1), textUnpaired, 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := decodeAll(t, stream(t, tc.header, tc.record), wire.DefaultLimits())
+			requireTextError(t, err, tc.line, tc.reason)
+			if strings.Contains(err.Error(), "SENTINEL") {
+				t.Errorf("error text = %q, want no part of the line", err.Error())
+			}
+		})
+	}
+}
+
+// syntaxFirstLines are lines that are not one complete JSON value; whatever bytes they hold, the syntax error stays.
+func syntaxFirstLines(complete string) map[string]string {
+	return map[string]string{
+		"cut short inside a string after FF":          `{"kind":"log_line","x":"a` + "\xff",
+		"cut short after a string holding FF":         `{"kind":"log_line","x":"a` + "\xff" + `"`,
+		"cut short inside a string after escape":      `{"kind":"log_line","x":"a\ud800`,
+		"FF after the object":                         complete + "\xff",
+		"escaped surrogate string after the object":   complete + ` "\ud800"`,
+		"cut short inside a string after bad pair":    `{"kind":"log_line","x":"\ud800\u0041`,
+		"invalid byte after the object and a comma":   complete + ",\xff",
+		"cut short after an object holding a bad key": `{"kind":"log_line","x\ud800":`,
+	}
+}
+
+func TestDecoder_SyntaxErrorComesBeforeTextRule(t *testing.T) {
+	for name, line := range syntaxFirstLines(metricLine(1)) {
+		t.Run("record line "+name, func(t *testing.T) {
+			_, err := decodeAll(t, stream(t, headerJSON, line), wire.DefaultLimits())
+			requireSyntaxError(t, err)
+		})
+	}
+	for name, line := range syntaxFirstLines(headerJSON) {
+		t.Run("header line "+name, func(t *testing.T) {
+			_, err := decodeAll(t, stream(t, line, metricLine(1)), wire.DefaultLimits())
+			requireSyntaxError(t, err)
+		})
+	}
+}
+
+func requireSyntaxError(t *testing.T, err error) {
+	t.Helper()
+	if err == nil {
+		t.Fatalf("decoding = nil, want a syntax error")
+	}
+	if !errors.Is(err, wire.ErrMalformed) {
+		t.Errorf("error = %v, want errors.Is(err, ErrMalformed)", err)
+	}
+	for _, text := range []string{textNotUTF8, textUnpaired} {
+		if strings.Contains(err.Error(), text) {
+			t.Errorf("error text = %q, want the syntax error, not %q", err.Error(), text)
+		}
+	}
+}
+
+func TestDecoder_KeyRulesComeBeforeTextRule(t *testing.T) {
+	withExtra := func(extra string) string {
+		return strings.Replace(metricLine(1), `"captured_at"`, extra+`,"captured_at"`, 1)
+	}
+	cases := []struct {
+		name   string
+		extra  string
+		reason string
+	}{
+		{"key not ASCII, byte FF in a value", "\"k\u00e9y\":1,\"x\":\"\xff\"", "key not ASCII"},
+		{"key not ASCII, surrogate escape in a value", "\"k\u00e9y\":1,\"x\":\"\\ud800\"", "key not ASCII"},
+		{"duplicate key, surrogate escape in a value", `"a":1,"a":2,"x":"\ud800"`, "duplicate key"},
+		{"duplicate key, byte FF in a value", "\"a\":1,\"a\":2,\"x\":\"\xff\"", "duplicate key"},
+		{"key of invalid UTF-8", "\"k\xffy\":1", "key not ASCII"},
+		{"key with a surrogate escape", `"k\ud800y":1`, "key not ASCII"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := decodeAll(t, stream(t, headerJSON, withExtra(tc.extra)), wire.DefaultLimits())
+			requireTextError(t, err, 2, tc.reason)
+		})
+	}
+}
+
+func TestDecoder_InvalidByteIsReportedBeforeUnpairedEscape(t *testing.T) {
+	for _, message := range []string{"\xff" + `\ud800`, `\ud800` + "\xff"} {
+		_, err := decodeAll(t, withHeader(t, logMessageLine(message)), wire.DefaultLimits())
+		requireTextError(t, err, 2, textNotUTF8)
+	}
+}
+
+func TestCheckText(t *testing.T) {
+	reasonOf := func(err error) string {
+		if err == nil {
+			return ""
+		}
+		if !errors.Is(err, wire.ErrMalformed) {
+			t.Errorf("error = %v, want errors.Is(err, ErrMalformed)", err)
+		}
+		return strings.TrimPrefix(err.Error(), textMalformed)
+	}
+	check := func(t *testing.T, input, want string) {
+		t.Helper()
+		if got := reasonOf(wire.CheckText([]byte(input))); got != want {
+			t.Errorf("CheckText(%q) = %q, want %q", input, got, want)
+		}
+	}
+	t.Run("accepted", func(t *testing.T) {
+		accepted := []string{"", "plain ASCII", "\u00e9\u20ac\U0001F600", `\ud83d\ude00`, `\uD83D\uDE00`, `\uD83d\uDe00`, `\ufffd`, `\uffff`,
+			`\\ud800`, `\"`, `\/`, `\b`, `\f`, `\n`, `\r`, `\t`, `\`, `\u`, `\u12`, `\u123`, `\uZZZZ`, `\ud83d\ude00\ud83d\ude00`,
+			`\\\ud83d\ude00`, `\u0041\u0042`}
+		for _, input := range accepted {
+			check(t, input, "")
+		}
+	})
+	t.Run("whitespace inside an escape is no hex", func(t *testing.T) {
+		for _, input := range []string{`\u d800`, `\u d80`, `\ud800 \udc00`, `\ud800\u dc00`, `\u+d800`} {
+			if err := wire.CheckText([]byte(input)); input != `\ud800 \udc00` && input != `\ud800\u dc00` && err != nil {
+				t.Errorf("CheckText(%q) = %v, want nil (not a complete escape)", input, err)
+			}
+		}
+		check(t, `\ud800 \udc00`, textUnpaired)
+		check(t, `\ud800\u dc00`, textUnpaired)
+	})
+	t.Run("invalid UTF-8", func(t *testing.T) {
+		for _, f := range invalidByteForms {
+			for place, input := range textVariants(f.form) {
+				check(t, input, textNotUTF8)
+				_ = place
+			}
+			check(t, f.form+"x", textNotUTF8)
+		}
+	})
+	t.Run("unpaired surrogate escapes", func(t *testing.T) {
+		for _, f := range unpairedEscapeForms {
+			for _, input := range textVariants(f.form) {
+				check(t, input, textUnpaired)
+			}
+		}
+		check(t, `\ud800`+`\ud800`, textUnpaired)
+	})
+	t.Run("invalid byte before escape and after", func(t *testing.T) {
+		check(t, "\xff"+`\ud800`, textNotUTF8)
+		check(t, `\ud800`+"\xff", textNotUTF8)
+	})
+}
+
+func TestCheckText_AllocatesNothing(t *testing.T) {
+	var sb strings.Builder
+	for sb.Len() < 1<<20 {
+		sb.WriteString(`valid text \ud83d\ude00 and \u00e9 `)
+	}
+	line := []byte(sb.String())
+	if err := wire.CheckText(line); err != nil {
+		t.Fatalf("test setup: CheckText() = %v, want nil", err)
+	}
+	if allocs := testing.AllocsPerRun(100, func() { _ = wire.CheckText(line) }); allocs != 0 {
+		t.Errorf("CheckText() allocates %v times per call, want 0", allocs)
 	}
 }

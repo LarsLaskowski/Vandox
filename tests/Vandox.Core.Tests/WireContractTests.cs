@@ -1,5 +1,6 @@
 using System.IO.Compression;
 using System.Reflection;
+using System.Text;
 using System.Text.Json;
 
 using Vandox.Core.Model;
@@ -18,7 +19,7 @@ public class WireContractTests
     /// <summary>
     /// The shared cases whose line under test holds a JSON escape that the fixture spells with a doubled backslash.
     /// </summary>
-    private static readonly string[] _escapedCaseIds = ["K4", "K5", "N4", "N7", "N8", "N9", "N10", "N11", "D9"];
+    private static readonly string[] _escapedCaseIds = ["K4", "K5", "N4", "N7", "N8", "N9", "N10", "N11", "D9", "S13", "S14", "S15", "S16", "S17", "S18", "S19", "S20", "S21", "S22", "S23", "S24", "S25", "S26", "S27", "S28", "S29", "S30", "S31"];
 
     #endregion // Fields
 
@@ -150,8 +151,16 @@ public class WireContractTests
             Assert.Contains(line => line.Contains('\\'), lines, $"{name}: a line holds a backslash, the escape of the key was kept");
         }
 
+        var latin1 = matches[0].TryGetProperty("latin1", out var flag) && flag.GetBoolean();
+
+        if (latin1)
+        {
+            Assert.DoesNotContain(line => line.Any(character => character > '\u00ff'), lines, $"{name}: a latin1 case holds no character above U+00FF");
+            Assert.Contains(line => line.Any(character => character >= '\u0080'), lines, $"{name}: a latin1 case holds a character from U+0080 to U+00FF, the byte was kept");
+        }
+
         // Act
-        var (records, formatMinor, failure) = await ReadSharedCaseAsync(lines);
+        var (records, formatMinor, failure) = await ReadSharedCaseAsync(lines, latin1);
 
         // Assert
         Assert.AreSequenceEqual(want.TryGetProperty("records", out var wanted) ? wanted.EnumerateArray().Select(DescribeWanted).ToList() : [], records, $"{name}: records before the end or the error");
@@ -172,7 +181,7 @@ public class WireContractTests
     }
 
     /// <summary>
-    /// The shared decoder cases have unique names and hold every case the plan of issue 175 lists.
+    /// The shared decoder cases have unique names and hold every case the plans of issues 175 and 182 list.
     /// </summary>
     [TestMethod]
     public void SharedCasesHaveUniqueNamesAndHoldEveryRequiredCase()
@@ -188,7 +197,8 @@ public class WireContractTests
                          ("O", 4),
                          ("X", 4),
                          ("M", 5),
-                         ("U", 2)
+                         ("U", 2),
+                         ("S", 32)
                      };
         var required = groups.SelectMany(pair => Enumerable.Range(1, pair.Count).Select(number => $"{pair.Prefix}{number}"));
 
@@ -225,12 +235,13 @@ public class WireContractTests
     /// Gzips the lines of a case and decodes the batch to its end. A <see cref="WireException"/> is part of the outcome, any other exception is not.
     /// </summary>
     /// <param name="lines">The lines of the batch</param>
+    /// <param name="latin1"><c>true</c> to write every character of the lines as one byte, <c>false</c> to encode the lines as UTF-8</param>
     /// <returns>The descriptions of the records, the minor version of the header and the error, if any</returns>
-    private static async Task<(List<string> Records, long FormatMinor, WireException? Failure)> ReadSharedCaseAsync(string[] lines)
+    private static async Task<(List<string> Records, long FormatMinor, WireException? Failure)> ReadSharedCaseAsync(string[] lines, bool latin1)
     {
         var records = new List<string>();
         long formatMinor = 0;
-        using var input = BatchBuilder.Gzip(lines);
+        using var input = latin1 ? BatchBuilder.Gzip(Encoding.Latin1.GetBytes(string.Concat(lines.Select(line => line + "\n")))) : BatchBuilder.Gzip(lines);
 
         try
         {
