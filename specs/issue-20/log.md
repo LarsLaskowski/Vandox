@@ -15,3 +15,4 @@ are quoted in full.
 | 2026-10-11 19:43 | 3 Plan security review (confirm) | squad-security | APPROVED at 7c158fd; N4 (parenthesize (x << 10n) + half) passed to Dev (opus/medium · 102,030 tokens · 3 tool uses · 23 s) |
 | 2026-10-11 19:45 | 4 Skeleton | squad-dev | 12 files in src/Vandox.Core/LogParsing, BuiltInParsers appends LegacyMonitorParser; build 0 warnings/errors (sonnet/medium · 102,243 tokens · 10 tool uses · 128 s) |
 | 2026-10-11 20:15 | 5 Tests first | squad-tester | 9 test files + 2 helpers + 2 fixtures; BuiltInParsersTests extended to nine; confirmed 623 fail / 21 pass (NotImplementedException) of 644 (sonnet/medium · 355,619 tokens · 61 tool uses · 1726 s) |
+| 2026-10-11 20:40 | 6 Implement | squad-dev | Implemented; Legacy*/BuiltInParsers 644 pass; Coverage gate PASS (new 99.6%, overall 97.5%); 4 uncovered spots left for Tester; docs updated; no test disputed |

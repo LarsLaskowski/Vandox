@@ -107,10 +107,14 @@ files or endpoints.
     ASCII line parser without regular expressions, no date built before the range checks of `SyslogClock.ResolveLocal`; a configured path is compared with the
     listed name as text by parent directory and base name and never opened or resolved; unreadable lines are kept as raw
     records whose time is the previous record's or a modification time inside the storable range, else skipped; forged lines in
-    these logs are a documented limitation, record 0092), and the backend options `import.time_zone` (`SourceTimeZone`) and
+    these logs are a documented limitation, record 0092), `LegacyMonitorParser`, `LegacyMonitorHeader`, `LegacyMonitorSnapshot` (with `LegacyProcessTable`, `LegacyConnectionTally`),
+    `LegacyTopLine`, `LegacyProcLine` and `LegacyLsofLine` (the legacy `top`/`lsof` monitoring log: hand-written ASCII grammars, numbers validated as digit strings with
+    digit bounds and 64-bit checks before any conversion or scaling, no date built before the range checks, caps that count every line of a part, skips reported at once;
+    `LegacyLsofLine` puts a strict address guard in front of `IPAddress.TryParse`, so only the forms `lsof` prints reach it and no zone is looked up on the host;
+    `LegacyServiceNames` is a built-in table of port names, never a lookup; forged snapshots are a documented limitation, record 0093), and the backend options `import.time_zone` (`SourceTimeZone`) and
     `import.plesk_panel_log`, `import.sw_cp_server_error_log`, `import.nginx_error_log` and `import.apache_error_log`
     (`BackendConfigLoader`: absolute, clean path of a file in a directory, the value never shown in an error). Records 0048, 0049, 0066, 0069, 0076, 0078, 0079, 0084,
-    0085, 0086, 0088, 0091, 0092.
+    0085, 0086, 0088, 0091, 0092, 0093.
 11. **Outbound calls** (Telegram, external checks, the optional AI service of the nightly report, the
     agent's connection to the backend): *Goal:* every call has a timeout, goes only to its configured
     destination and leaves encrypted to a verified peer. The agent's only destination is the ingest port,
