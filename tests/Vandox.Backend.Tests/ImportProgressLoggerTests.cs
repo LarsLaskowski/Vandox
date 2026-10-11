@@ -41,5 +41,32 @@ public class ImportProgressLoggerTests
         Assert.AreEqual("file finished b/syslog continued syslog 2 2 0", logger.Messages.Single(), "the file finished event names the outcome");
     }
 
+    /// <summary>
+    /// The outcome of a contained file is logged as <c>contained</c>.
+    /// </summary>
+    [TestMethod]
+    public void ImportProgressLoggerLogsTheOutcomeOfAContainedFileAsContained()
+    {
+        // Arrange
+        var logger = new ListLogger();
+        var progress = new ImportProgress
+                       {
+                           Event = ProgressEvent.FileFinished,
+                           Result = new FileResult
+                                    {
+                                        Path = "b/syslog",
+                                        SourceType = "syslog",
+                                        Outcome = ImportOutcome.Contained,
+                                        ContainedIn = "a/syslog"
+                                    }
+                       };
+
+        // Act
+        ImportProgressLogger.Log(logger, progress);
+
+        // Assert
+        Assert.AreEqual("file finished b/syslog contained syslog 0 0 0", logger.Messages.Single(), "the file finished event names the outcome");
+    }
+
     #endregion // Methods
 }

@@ -51,6 +51,39 @@ public class ImporterArchiveTests
     }
 
     /// <summary>
+    /// An older copy that is a later entry of the same archive as the newer copy is recognized, also when it is compressed, and each line is stored once; in a later run an archive with only the older copy is contained too.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task ImporterRecognizesOlderCopyAsALaterEntryOfTheSameArchive()
+    {
+        // Arrange
+        using var harness = new ImportHarness();
+        var archive = harness.Write("logs.tar", TestInputs.Tar(("a/syslog", TestInputs.Bytes(TestInputs.Log(8))), ("b/syslog.gz", TestInputs.Gzip(TestInputs.Log(5)))));
+
+        // Act
+        var first = await harness.RunAsync(TestContext.CancellationToken);
+
+        File.Delete(archive);
+        harness.Write("more.tar", TestInputs.Tar(("c/syslog", TestInputs.Bytes(TestInputs.Log(6)))));
+
+        var second = await harness.RunAsync(TestContext.CancellationToken);
+        var newer = first.Summary.Files.Single(file => file.Path == "logs.tar:a/syslog");
+        var older = first.Summary.Files.Single(file => file.Path == "logs.tar:b/syslog.gz");
+        var later = second.Summary.Files.Single();
+
+        // Assert
+        Assert.IsNull(first.Error, "no error");
+        Assert.AreEqual(ImportOutcome.Imported, newer.Outcome, "the newer copy is imported");
+        Assert.AreEqual(ImportOutcome.Contained, older.Outcome, "the older entry is contained");
+        Assert.AreEqual("logs.tar:a/syslog", older.ContainedIn, "in the newer entry");
+        Assert.AreEqual(ImportOutcome.Contained, later.Outcome, "an older copy in another archive is contained in a later run");
+        Assert.AreEqual("logs.tar:a/syslog", later.ContainedIn, "in the first import");
+        Assert.AreEqual(TestInputs.Messages(1, 8), string.Join('|', harness.Store.Messages), "every line is stored once");
+        Assert.ContainsSingle(harness.Store.States, "only the newer entry has a state");
+    }
+
+    /// <summary>
     /// Links, directories, special entries and archives inside archives are listed or skipped, never followed or opened.
     /// </summary>
     /// <returns>A task that completes when the test is done</returns>
@@ -207,7 +240,7 @@ public class ImporterArchiveTests
 
         await harness.RunAsync(TestContext.CancellationToken);
         File.Delete(plain);
-        harness.Write("logs/syslog.1.gz", TestInputs.Gzip(TestInputs.Log(5)));
+        harness.Write("logs/syslog.1.gz", TestInputs.Gzip($"{TestInputs.Log(3)}LOG alt 4\nLOG alt 5\n"));
 
         // Act
         var gzipped = await harness.RunAsync(TestContext.CancellationToken, Path.Combine(harness.Directory.Path, "logs"));
@@ -224,7 +257,7 @@ public class ImporterArchiveTests
         Assert.AreEqual(ImportOutcome.Continued, entry.Summary.Files.Single().Outcome, "the archive entry is continued");
         Assert.AreEqual("syslog", entry.Summary.Files.Single().ContinuedFrom, "from the plain file");
         Assert.AreEqual(1L, entry.Summary.Files.Single().Records, "only its new line is stored");
-        Assert.AreEqual($"{TestInputs.Messages(1, 5)}|{TestInputs.Messages(4, 4)}", string.Join('|', harness.Store.Messages), "the plain file, the new lines of the gzip file and of the entry");
+        Assert.AreEqual($"{TestInputs.Messages(1, 3)}|LOG alt 4|LOG alt 5|{TestInputs.Messages(4, 4)}", string.Join('|', harness.Store.Messages), "the plain file, the new lines of the gzip file and of the entry");
     }
 
     #endregion // Methods

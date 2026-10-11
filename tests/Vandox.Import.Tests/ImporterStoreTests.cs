@@ -968,5 +968,715 @@ public class ImporterStoreTests
         Assert.AreEqual("LOG b 1|LOG b 2", string.Join('|', harness.Store.Messages), "only the next file is stored");
     }
 
+    /// <summary>
+    /// An older copy of a complete content, imported in a later run, is recognized: nothing is stored or written for it, and the result names the first import. The copy may be gzip-compressed.
+    /// </summary>
+    /// <param name="gzip">Whether the older copy is gzip-compressed</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public async Task ImporterRecognizesOlderCopyImportedAfterTheNewerOne(bool gzip)
+    {
+        // Arrange
+        using var harness = new ImportHarness();
+        var newer = harness.Write("a/syslog", TestInputs.Log(8));
+
+        await harness.RunAsync(TestContext.CancellationToken);
+        File.Delete(newer);
+
+        if (gzip)
+        {
+            harness.Write("b/syslog.gz", TestInputs.Gzip(TestInputs.Log(5)));
+        }
+        else
+        {
+            harness.Write("b/syslog", TestInputs.Log(5));
+        }
+
+        var batches = harness.Store.Batches.Count;
+        var calls = harness.Store.LineHashCalls;
+        var states = harness.Store.States.Count();
+
+        harness.Events.Clear();
+
+        // Act
+        var run = await harness.RunAsync(TestContext.CancellationToken);
+        var file = run.Summary.Files.Single();
+        var finished = harness.Events.Single(item => item.Event == ProgressEvent.FileFinished);
+
+        // Assert
+        Assert.IsNull(run.Error, "no error");
+        Assert.AreEqual(ImportOutcome.Contained, file.Outcome, "the older copy is contained");
+        Assert.AreEqual("a/syslog", file.ContainedIn, "the display name of the first import");
+        Assert.AreEqual(0L, file.Records, "no records");
+        Assert.AreEqual(1, run.Summary.Count(ImportOutcome.Contained), "counted in the summary");
+        Assert.HasCount(batches, harness.Store.Batches, "no batch is written");
+        Assert.AreEqual(calls, harness.Store.LineHashCalls, "no line hashes are written");
+        Assert.HasCount(states, harness.Store.States, "no state is created");
+        Assert.AreEqual(TestInputs.Messages(1, 8), string.Join('|', harness.Store.Messages), "every line is stored once");
+        Assert.AreEqual("a/syslog", finished.Result!.ContainedIn, "the progress event carries the container");
+    }
+
+    /// <summary>
+    /// An older copy that comes later in the same input is recognized, and each line is stored once.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task ImporterRecognizesOlderCopyLaterInTheSameRun()
+    {
+        // Arrange
+        using var harness = new ImportHarness();
+
+        harness.Write("a/syslog", TestInputs.Log(8));
+        harness.Write("b/syslog", TestInputs.Log(5));
+
+        // Act
+        var run = await harness.RunAsync(TestContext.CancellationToken);
+        var newer = run.Summary.Files.Single(file => file.Path == "a/syslog");
+        var older = run.Summary.Files.Single(file => file.Path == "b/syslog");
+
+        // Assert
+        Assert.AreEqual(ImportOutcome.Imported, newer.Outcome, "the newer copy is imported");
+        Assert.AreEqual(ImportOutcome.Contained, older.Outcome, "the older copy is contained");
+        Assert.AreEqual("a/syslog", older.ContainedIn, "in the newer copy");
+        Assert.AreEqual(TestInputs.Messages(1, 8), string.Join('|', harness.Store.Messages), "every line is stored once");
+        Assert.ContainsSingle(harness.Store.States, "the older copy has no state");
+    }
+
+    /// <summary>
+    /// An older copy is recognized whether or not the parser is line-framed.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task ImporterRecognizesOlderCopyForAParserThatIsNotLineFramed()
+    {
+        // Arrange
+        using var harness = new ImportHarness(false);
+        var newer = harness.Write("a/syslog", TestInputs.Log(8));
+
+        await harness.RunAsync(TestContext.CancellationToken);
+        File.Delete(newer);
+        harness.Write("b/syslog", TestInputs.Log(5));
+
+        // Act
+        var run = await harness.RunAsync(TestContext.CancellationToken);
+        var file = run.Summary.Files.Single();
+
+        // Assert
+        Assert.AreEqual(ImportOutcome.Contained, file.Outcome, "contained");
+        Assert.AreEqual("a/syslog", file.ContainedIn, "in the first import");
+        Assert.HasCount(8, harness.Store.Records, "nothing is stored again");
+    }
+
+    /// <summary>
+    /// An older copy that ends inside a line is imported as a whole.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task ImporterImportsAnOlderCopyThatEndsInsideALineAsAWhole()
+    {
+        // Arrange
+        using var harness = new ImportHarness();
+        var newer = harness.Write("a/syslog", TestInputs.Log(8));
+
+        await harness.RunAsync(TestContext.CancellationToken);
+        File.Delete(newer);
+        harness.Write("b/syslog", $"{TestInputs.Log(5)}LOG line 6 par");
+
+        // Act
+        var run = await harness.RunAsync(TestContext.CancellationToken);
+        var file = run.Summary.Files.Single();
+
+        // Assert
+        Assert.AreEqual(ImportOutcome.Imported, file.Outcome, "imported as a whole");
+        Assert.AreEqual(string.Empty, file.ContainedIn, "not contained");
+        Assert.AreEqual(6L, file.Records, "every line is stored");
+    }
+
+    /// <summary>
+    /// An older copy that differs from the newer one in one byte before its end is imported as a whole.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task ImporterImportsAnOlderCopyThatDiffersInOneByteAsAWhole()
+    {
+        // Arrange
+        using var harness = new ImportHarness();
+        var newer = harness.Write("a/syslog", TestInputs.Log(8));
+
+        await harness.RunAsync(TestContext.CancellationToken);
+        File.Delete(newer);
+        harness.Write("b/syslog", TestInputs.Log(5).Replace("line 3", "lime 3", StringComparison.Ordinal));
+
+        // Act
+        var run = await harness.RunAsync(TestContext.CancellationToken);
+        var file = run.Summary.Files.Single();
+
+        // Assert
+        Assert.AreEqual(ImportOutcome.Imported, file.Outcome, "imported as a whole");
+        Assert.AreEqual(5L, file.Records, "every line is stored");
+    }
+
+    /// <summary>
+    /// An older copy is imported as a whole when the larger content is not complete: interrupted in an earlier run, or failed in the same run.
+    /// </summary>
+    /// <param name="how">How the larger content is not complete</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [DataRow("interrupted")]
+    [DataRow("failed in the same run")]
+    public async Task ImporterImportsAnOlderCopyAsAWholeWhenTheLargerContentIsNotComplete(string how)
+    {
+        // Arrange
+        using var harness = new ImportHarness();
+        using var interrupt = new CancellationTokenSource();
+
+        if (how == "interrupted")
+        {
+            var newer = harness.Write("a/syslog", TestInputs.Log(7));
+
+            harness.Store.AfterBatch = count =>
+                                       {
+                                           if (count == 1)
+                                           {
+                                               interrupt.Cancel();
+                                           }
+                                       };
+            await harness.RunAsync(interrupt.Token, null, options => options.BatchRecords = 2);
+            harness.Store.AfterBatch = null;
+            File.Delete(newer);
+            harness.Write("b/syslog", TestInputs.Log(4));
+        }
+        else
+        {
+            harness.Write("a/syslog", "LOG line 1\nLOG line 2\nboom\nLOG line 4\n");
+            harness.Write("b/syslog", "LOG line 1\nLOG line 2\n");
+        }
+
+        // Act
+        var run = await harness.RunAsync(TestContext.CancellationToken);
+        var file = run.Summary.Files.Single(item => item.Path == "b/syslog");
+
+        // Assert
+        Assert.AreEqual(ImportOutcome.Imported, file.Outcome, "imported as a whole");
+        Assert.AreEqual(string.Empty, file.ContainedIn, "not contained");
+        Assert.AreEqual(how == "interrupted" ? 4L : 2L, file.Records, "every line of the copy is stored");
+    }
+
+    /// <summary>
+    /// A content with the hash of a complete stored content is already imported even if it is the start of a larger complete content.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task ImporterKeepsAlreadyImportedForTheSameContentThatIsTheStartOfALargerOne()
+    {
+        // Arrange
+        using var harness = new ImportHarness();
+        var older = harness.Write("a/syslog", TestInputs.Log(5));
+
+        await harness.RunAsync(TestContext.CancellationToken);
+        File.Delete(older);
+        harness.Write("b/syslog", TestInputs.Log(8));
+        await harness.RunAsync(TestContext.CancellationToken);
+        File.Delete(Path.Combine(harness.Directory.Path, "b/syslog"));
+        harness.Write("c/syslog", TestInputs.Log(5));
+
+        // Act
+        var run = await harness.RunAsync(TestContext.CancellationToken);
+        var file = run.Summary.Files.Single();
+
+        // Assert
+        Assert.AreEqual(ImportOutcome.AlreadyImported, file.Outcome, "already imported");
+        Assert.AreEqual(string.Empty, file.ContainedIn, "not contained");
+    }
+
+    /// <summary>
+    /// A content with the hash of an incomplete stored content is resumed even if it is the start of a larger complete content.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task ImporterResumesTheSameContentThatIsTheStartOfALargerOne()
+    {
+        // Arrange
+        using var harness = new ImportHarness();
+        using var interrupt = new CancellationTokenSource();
+        var older = harness.Write("a/syslog", TestInputs.Log(7));
+
+        harness.Store.AfterBatch = count =>
+                                   {
+                                       if (count == 1)
+                                       {
+                                           interrupt.Cancel();
+                                       }
+                                   };
+        await harness.RunAsync(interrupt.Token, null, options => options.BatchRecords = 2);
+        harness.Store.AfterBatch = null;
+        File.Delete(older);
+        harness.Write("b/syslog", TestInputs.Log(9));
+        await harness.RunAsync(TestContext.CancellationToken);
+        File.Delete(Path.Combine(harness.Directory.Path, "b/syslog"));
+        harness.Write("c/syslog", TestInputs.Log(7));
+
+        // Act
+        var run = await harness.RunAsync(TestContext.CancellationToken, null, options => options.BatchRecords = 2);
+        var file = run.Summary.Files.Single();
+
+        // Assert
+        Assert.AreEqual(ImportOutcome.Imported, file.Outcome, "resumed and completed");
+        Assert.AreEqual(string.Empty, file.ContainedIn, "not contained");
+        Assert.AreEqual(2L, file.ResumedAfter, "after the records of the first run");
+    }
+
+    /// <summary>
+    /// A content that continues a smaller base and is also the start of a larger complete content is contained.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task ImporterPrefersContainmentOverContinuation()
+    {
+        // Arrange
+        using var harness = new ImportHarness();
+        var small = harness.Write("a/syslog", TestInputs.Log(3));
+
+        await harness.RunAsync(TestContext.CancellationToken);
+        File.Delete(small);
+
+        var large = harness.Write("b/syslog", TestInputs.Log(10));
+
+        await harness.RunAsync(TestContext.CancellationToken);
+        File.Delete(large);
+        harness.Write("c/syslog", TestInputs.Log(6));
+
+        // Act
+        var run = await harness.RunAsync(TestContext.CancellationToken);
+        var file = run.Summary.Files.Single();
+
+        // Assert
+        Assert.IsNotEmpty(harness.Store.Prefixes[^1], "the smaller content was offered as a base");
+        Assert.AreEqual(ImportOutcome.Contained, file.Outcome, "contained, not continued");
+        Assert.AreEqual("b/syslog", file.ContainedIn, "in the larger content");
+        Assert.AreEqual(string.Empty, file.ContinuedFrom, "continues nothing");
+        Assert.AreEqual(TestInputs.Messages(1, 10), string.Join('|', harness.Store.Messages), "every line is stored once");
+    }
+
+    /// <summary>
+    /// Importing a contained older copy again gives the same result with no state and no record.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task ImporterReportsAContainedOlderCopyAgainInALaterRun()
+    {
+        // Arrange
+        using var harness = new ImportHarness();
+        var newer = harness.Write("a/syslog", TestInputs.Log(8));
+
+        await harness.RunAsync(TestContext.CancellationToken);
+        File.Delete(newer);
+        harness.Write("b/syslog", TestInputs.Log(5));
+        await harness.RunAsync(TestContext.CancellationToken);
+
+        var batches = harness.Store.Batches.Count;
+
+        // Act
+        var run = await harness.RunAsync(TestContext.CancellationToken);
+        var file = run.Summary.Files.Single();
+
+        // Assert
+        Assert.AreEqual(ImportOutcome.Contained, file.Outcome, "contained again");
+        Assert.AreEqual("a/syslog", file.ContainedIn, "in the same import");
+        Assert.HasCount(batches, harness.Store.Batches, "no batch");
+        Assert.ContainsSingle(harness.Store.States, "no state");
+    }
+
+    /// <summary>
+    /// A store result that carries only the container ends the file as contained, before the completeness, the source type or the file ID is looked at, and nothing carrying a file ID is sent.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task ImporterEndsAFileAsContainedWhenTheStoreReturnsOnlyTheContainer()
+    {
+        // Arrange
+        using var harness = new ImportHarness();
+
+        harness.Write("a/syslog", TestInputs.Log(3));
+        harness.Store.ScriptedBeginResult = new ImportFile
+                                            {
+                                                ContainedIn = "other/name"
+                                            };
+
+        // Act
+        var run = await harness.RunAsync(TestContext.CancellationToken);
+        var file = run.Summary.Files.Single();
+
+        // Assert
+        Assert.IsNull(run.Error, "no error");
+        Assert.AreEqual(ImportOutcome.Contained, file.Outcome, "contained, not already imported and not failed");
+        Assert.AreEqual("other/name", file.ContainedIn, "the container of the store");
+        Assert.AreEqual(string.Empty, file.Reason, "no reason");
+        Assert.IsEmpty(harness.Store.Batches, "no batch");
+        Assert.AreEqual(0, harness.Store.LineHashCalls, "no line hashes");
+        Assert.IsEmpty(harness.Store.FileIdCalls, "no call carries a file ID");
+        Assert.IsEmpty(harness.Parser.Seen, "nothing is parsed");
+    }
+
+    /// <summary>
+    /// A complete state with an empty container is already imported.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task ImporterEndsAFileAsAlreadyImportedWhenTheStoreReturnsACompleteState()
+    {
+        // Arrange
+        using var harness = new ImportHarness();
+
+        harness.Write("a/syslog", TestInputs.Log(3));
+        harness.Store.ScriptedBeginResult = new ImportFile
+                                            {
+                                                Id = 5,
+                                                SourceType = "test",
+                                                Complete = true
+                                            };
+
+        // Act
+        var run = await harness.RunAsync(TestContext.CancellationToken);
+        var file = run.Summary.Files.Single();
+
+        // Assert
+        Assert.AreEqual(ImportOutcome.AlreadyImported, file.Outcome, "already imported");
+        Assert.AreEqual(string.Empty, file.ContainedIn, "not contained");
+    }
+
+    /// <summary>
+    /// Every imported content stores the first 16 bytes of the SHA-256 up to every line end, whatever the parser, the packing and the continuation point; the rows cover the whole content, and a content without a line feed has none.
+    /// </summary>
+    /// <param name="lineFramed">Whether the parser is line-framed</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [DataRow(true)]
+    [DataRow(false)]
+    public async Task ImporterStoresLineHashesOfEveryImportedContent(bool lineFramed)
+    {
+        // Arrange
+        using var harness = new ImportHarness(lineFramed);
+        var gzipped = TestInputs.Log(3, "LOG gz");
+
+        harness.Write("a.log", TestInputs.Log(5, "LOG a"));
+        harness.Write("b.log.gz", TestInputs.Gzip(gzipped));
+        harness.Write("c.log", "LOG only-part");
+
+        // Act
+        var run = await harness.RunAsync(TestContext.CancellationToken);
+        var plain = harness.Store.States.Single(state => state.Name == "a.log");
+        var packed = harness.Store.States.Single(state => state.Name == "b.log.gz");
+        var cut = harness.Store.States.Single(state => state.Name == "c.log");
+
+        // Assert
+        Assert.IsNull(run.Error, "no error");
+        Assert.AreEqual(ExpectedLineHashes.Describe(Expected(TestInputs.Bytes(TestInputs.Log(5, "LOG a")), plain)), ExpectedLineHashes.Describe(harness.Store.LineHashes.Where(row => row.FileId == plain.Id)), "rows of the plain file");
+        Assert.AreEqual(ExpectedLineHashes.Describe(Expected(TestInputs.Bytes(gzipped), packed)), ExpectedLineHashes.Describe(harness.Store.LineHashes.Where(row => row.FileId == packed.Id)), "rows of the decompressed content");
+        Assert.IsEmpty(harness.Store.LineHashes.Where(row => row.FileId == cut.Id), "a content without a line feed has no row");
+    }
+
+    /// <summary>
+    /// A continued file stores the line hashes of its whole content, the part before the continuation point included.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task ImporterStoresLineHashesOfTheWholeContentOfAContinuedFile()
+    {
+        // Arrange
+        using var harness = new ImportHarness();
+        var earlier = harness.Write("a/syslog", TestInputs.Log(3));
+
+        await harness.RunAsync(TestContext.CancellationToken);
+        File.Delete(earlier);
+        harness.Write("b/syslog", TestInputs.Log(9));
+
+        // Act
+        var run = await harness.RunAsync(TestContext.CancellationToken);
+        var continued = harness.Store.States.Single(state => state.Name == "b/syslog");
+
+        // Assert
+        Assert.AreEqual(ImportOutcome.Continued, run.Summary.Files.Single().Outcome, "continued");
+        Assert.AreEqual(ExpectedLineHashes.Describe(Expected(TestInputs.Bytes(TestInputs.Log(9)), continued)), ExpectedLineHashes.Describe(harness.Store.LineHashes.Where(row => row.FileId == continued.Id)), "rows of the whole content");
+    }
+
+    /// <summary>
+    /// Every step the importer writes carries the attempt of its state, an interrupted import that is resumed ends with the line hashes of its completing attempt only, and the rows cover the whole content.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task ImporterSendsTheAttemptOfTheStateAndKeepsTheRowsOfTheCompletingAttempt()
+    {
+        // Arrange
+        using var harness = new ImportHarness();
+        using var interrupt = new CancellationTokenSource();
+        var content = TestInputs.Bytes(TestInputs.Log(9000));
+
+        harness.Write("a.log", content);
+        harness.Store.AfterBatch = count =>
+                                   {
+                                       if (count == 3000)
+                                       {
+                                           interrupt.Cancel();
+                                       }
+                                   };
+
+        // Act
+        var first = await harness.RunAsync(interrupt.Token, null, options => options.BatchRecords = 2);
+        var firstBatches = harness.Store.Batches.Count;
+        var firstRows = harness.Store.LineHashWrites.Count;
+
+        harness.Store.AfterBatch = null;
+
+        var second = await harness.RunAsync(TestContext.CancellationToken, null, options => options.BatchRecords = 2);
+        var state = harness.Store.States.Single();
+
+        // Assert
+        Assert.IsTrue(first.Summary.Interrupted, "the first run is interrupted");
+        Assert.IsGreaterThan(0, firstRows, "the first run wrote a full row");
+        Assert.IsTrue(harness.Store.Batches.Take(firstBatches).All(batch => batch.Import!.Attempt == 1), "the steps of the first run carry attempt 1");
+        Assert.IsTrue(harness.Store.Batches.Skip(firstBatches).All(batch => batch.Import!.Attempt == 2), "the steps of the second run carry attempt 2");
+        Assert.IsTrue(harness.Store.LineHashWrites.Take(firstRows).All(row => row.Attempt == 1), "the first run wrote rows of attempt 1");
+        Assert.AreEqual(ImportOutcome.Imported, second.Summary.Files.Single().Outcome, "the second run completes the file");
+        Assert.AreEqual(2L, state.Attempt, "the state is at attempt 2");
+        Assert.AreEqual(ExpectedLineHashes.Describe(Expected(content, state, 2)), ExpectedLineHashes.Describe(harness.Store.LineHashes), "only the rows of the completing attempt are held, for the whole content");
+        Assert.IsTrue(harness.Store.Batches[^1].Import!.Complete, "the last batch completes the file");
+    }
+
+    /// <summary>
+    /// A failed write of line hashes fails the file, in every phase of pass 2: a conflict with the reason of the state, any other store error with "database error" and the end of the run, a cancellation with "interrupted". The completing batch is never written, and nothing escapes.
+    /// </summary>
+    /// <param name="phase">Where the write happens</param>
+    /// <param name="kind">What goes wrong</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [DataRow("skip", "conflict")]
+    [DataRow("skip", "store")]
+    [DataRow("skip", "cancel")]
+    [DataRow("parse", "conflict")]
+    [DataRow("parse", "store")]
+    [DataRow("parse", "cancel")]
+    [DataRow("verification", "conflict")]
+    [DataRow("verification", "store")]
+    [DataRow("verification", "cancel")]
+    [DataRow("flush", "conflict")]
+    [DataRow("flush", "store")]
+    [DataRow("flush", "cancel")]
+    public async Task ImporterFailsAFileWhenAWriteOfLineHashesFails(string phase, string kind)
+    {
+        // Arrange
+        using var harness = new ImportHarness();
+        using var interrupt = new CancellationTokenSource();
+        var parser = new ProbeParser("test", phase == "verification" ? 1 : 0);
+        var registry = new ParserRegistry([parser]);
+        var target = phase == "skip" ? "b/syslog" : "a/syslog";
+        var evidence = string.Empty;
+
+        if (phase == "skip")
+        {
+            var earlier = harness.Write("a/syslog", TestInputs.Log(12000));
+
+            await harness.RunAsync(TestContext.CancellationToken, null, options => options.Parsers = registry);
+            File.Delete(earlier);
+            harness.Write(target, TestInputs.Log(12100));
+        }
+        else
+        {
+            harness.Write(target, TestInputs.Log(phase == "flush" ? 10 : 9000));
+        }
+
+        var armed = harness.Store.LineHashCalls + 1;
+        var batches = harness.Store.Batches.Count;
+
+        harness.Store.FailFromLineHashCall = armed;
+        harness.Store.OnLineHashes = count =>
+                                     {
+                                         if (count == armed)
+                                         {
+                                             evidence = $"started={parser.Started} completed={parser.Completed}";
+
+                                             if (kind == "cancel")
+                                             {
+                                                 interrupt.Cancel();
+                                             }
+                                         }
+                                     };
+        harness.Store.LineHashFailure = Failure(kind);
+
+        // Act
+        var run = await harness.RunAsync(interrupt.Token, null, options => options.Parsers = registry);
+        var file = run.Summary.Files.Single(item => item.Path == target);
+
+        // Assert
+        Assert.AreEqual(ImportOutcome.Failed, file.Outcome, $"{phase}, {kind}: the file fails");
+        Assert.DoesNotContain(batch => batch.Import!.Complete, harness.Store.Batches.Skip(batches), $"{phase}, {kind}: the file is never completed");
+        Assert.IsFalse(harness.Store.States.Last().Complete, $"{phase}, {kind}: the state is not complete");
+        Assert.AreEqual(phase == "parse" ? "started=1 completed=0" : "started=1 completed=1", evidence, $"{phase}, {kind}: the write happened in this phase");
+
+        switch (kind)
+        {
+            case "conflict":
+                Assert.AreEqual("the import state changed (another import of the same content is running?)", file.Reason, "conflict reason");
+                Assert.IsNull(run.Error, "a conflict does not end the run");
+                break;
+
+            case "store":
+                Assert.AreEqual("database error", file.Reason, "store error reason");
+                Assert.IsInstanceOfType<ImportException>(run.Error, "a store error ends the run");
+                Assert.AreEqual("importer: writing to the database failed", run.Error?.Message, "message without the text of the store");
+                break;
+
+            default:
+                Assert.AreEqual("interrupted", file.Reason, "cancellation reason");
+                Assert.IsInstanceOfType<OperationCanceledException>(run.Error, "a cancellation ends the run");
+                Assert.IsTrue(run.Summary.Interrupted, "the run is interrupted");
+                break;
+        }
+    }
+
+    /// <summary>
+    /// The last partial row of line hashes is written after the verification read and before the completing batch, and exactly one batch completes the file.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task ImporterWritesTheLastRowOfLineHashesBeforeTheCompletingBatch()
+    {
+        // Arrange
+        using var harness = new ImportHarness();
+        var events = new List<string>();
+
+        harness.Write("a.log", TestInputs.Log(9000));
+        harness.Store.OnLineHashes = _ => events.Add("rows");
+        harness.Store.AfterBatch = _ => events.Add(harness.Store.Batches[^1].Import!.Complete ? "complete" : "batch");
+
+        // Act
+        var run = await harness.RunAsync(TestContext.CancellationToken, null, options => options.BatchRecords = 1000);
+
+        // Assert
+        Assert.AreEqual(ImportOutcome.Imported, run.Summary.Files.Single().Outcome, "imported");
+        Assert.ContainsSingle(item => item == "complete", events, "one completing batch");
+        Assert.AreEqual("complete", events[^1], "the completing batch is last");
+        Assert.AreEqual("rows", events[^2], "the last row is written right before it");
+        Assert.AreEqual(3, events.Count(item => item == "rows"), "two full rows and the last partial one");
+    }
+
+    /// <summary>
+    /// A file that changed between the passes gets no completing batch and no partial row of line hashes.
+    /// </summary>
+    /// <param name="lines">The number of lines of the file</param>
+    /// <param name="rows">The number of full rows written while the file was parsed</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [DataRow(5, 0)]
+    [DataRow(9000, 2)]
+    public async Task ImporterWritesNoCompletingBatchAndNoLastRowForAChangedFile(int lines, int rows)
+    {
+        // Arrange
+        using var harness = new ImportHarness();
+        var path = harness.Write("a.log", TestInputs.Log(lines));
+        var changed = TestInputs.Log(lines).Replace($"line {lines}\n", $"lime {lines}\n", StringComparison.Ordinal);
+
+        // Act
+        var run = await harness.RunAsync(TestContext.CancellationToken,
+                                         null,
+                                         options => options.Progress = progress =>
+                                                                       {
+                                                                           if (progress.Event == ProgressEvent.Scanned)
+                                                                           {
+                                                                               File.WriteAllText(path, changed);
+                                                                           }
+                                                                       });
+        var file = run.Summary.Files.Single();
+
+        // Assert
+        Assert.AreEqual(ImportOutcome.Failed, file.Outcome, "failed");
+        Assert.AreEqual("the content changed while it was imported", file.Reason, "reason");
+        Assert.DoesNotContain(batch => batch.Import!.Complete, harness.Store.Batches, "no completing batch");
+        Assert.AreEqual(rows, harness.Store.LineHashCalls, "only full rows were written, the last partial row was not");
+    }
+
+    /// <summary>
+    /// A file that fails in pass 2 on every run sends every row of line hashes and every step with the attempt the store returned for that run, and afterwards the store holds only the rows of the last attempt.
+    /// </summary>
+    /// <param name="how">How the file fails</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [DataRow("content changed")]
+    [DataRow("parser error")]
+    public async Task ImporterKeepsOnlyTheLineHashesOfTheLatestAttemptOfAFileThatFailsEveryRun(string how)
+    {
+        // Arrange
+        using var harness = new ImportHarness();
+        var content = how == "parser error" ? $"{TestInputs.Log(6000)}boom\n" : TestInputs.Log(9000);
+        var changed = content.Replace("line 9000\n", "lime 9000\n", StringComparison.Ordinal);
+        var path = Path.Combine(harness.Directory.Path, "a.log");
+        var batchesBefore = 0;
+        var rowsBefore = 0;
+
+        // Act and Assert
+        for (var attempt = 1; attempt <= 3; attempt++)
+        {
+            harness.Write("a.log", content);
+
+            var run = await harness.RunAsync(TestContext.CancellationToken,
+                                             null,
+                                             options => options.Progress = progress =>
+                                                                           {
+                                                                               if (how == "content changed" && progress.Event == ProgressEvent.Scanned)
+                                                                               {
+                                                                                   File.WriteAllText(path, changed);
+                                                                               }
+                                                                           });
+
+            Assert.AreEqual(ImportOutcome.Failed, run.Summary.Files.Single().Outcome, $"run {attempt} fails");
+            Assert.IsGreaterThan(rowsBefore, harness.Store.LineHashWrites.Count, $"run {attempt} writes rows");
+            Assert.IsTrue(harness.Store.LineHashWrites.Skip(rowsBefore).All(row => row.Attempt == attempt), $"run {attempt}: every row carries the attempt the store returned");
+            Assert.IsTrue(harness.Store.Batches.Skip(batchesBefore).All(batch => batch.Import!.Attempt == attempt), $"run {attempt}: every step carries the attempt the store returned");
+            batchesBefore = harness.Store.Batches.Count;
+            rowsBefore = harness.Store.LineHashWrites.Count;
+        }
+
+        Assert.AreEqual(3L, harness.Store.States.Single().Attempt, "the store counted three attempts");
+        Assert.IsNotEmpty(harness.Store.Batches, "a step was written in the first run");
+        Assert.IsTrue(harness.Store.LineHashes.All(row => row.Attempt == 3), "only the rows of attempt 3 are held");
+    }
+
+    /// <summary>
+    /// Creates the failure of the store the case describes.
+    /// </summary>
+    /// <param name="kind">The kind: <c>conflict</c>, <c>store</c> or anything else for none</param>
+    /// <returns>The exception, or <c>null</c> when the case cancels instead</returns>
+    private static Exception? Failure(string kind)
+    {
+        if (kind == "conflict")
+        {
+            return new ImportConflictException("store: import state changed: file 1 is complete, unknown or was begun again");
+        }
+
+        return kind == "store" ? new StoreException("store: adding line hashes: disk full") : null;
+    }
+
+    /// <summary>
+    /// Returns the rows of line hashes a content must have, for the state the store holds for it.
+    /// </summary>
+    /// <param name="content">The content</param>
+    /// <param name="state">The state</param>
+    /// <param name="attempt">The attempt of the rows</param>
+    /// <returns>The rows with file ID and attempt</returns>
+    private static List<ImportLineHashes> Expected(byte[] content, ImportFile state, long attempt = 1)
+    {
+        var rows = ExpectedLineHashes.Rows(content);
+
+        foreach (var row in rows)
+        {
+            row.FileId = state.Id;
+            row.Attempt = attempt;
+        }
+
+        return rows;
+    }
+
     #endregion // Methods
 }

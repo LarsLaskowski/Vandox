@@ -116,6 +116,81 @@ public class ImportSummaryWriterTests
     }
 
     /// <summary>
+    /// The count row of contained files follows the already imported row, and the section lists every contained file in input order with its container, after the continued files and before the files not recognized.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task ImportSummaryWriterListsContainedFilesAndCountsThem()
+    {
+        // Arrange
+        var summary = new ImportSummary
+                      {
+                          Root = "/logs"
+                      };
+
+        summary.Files.Add(Plain("a/syslog", ImportOutcome.Imported));
+        summary.Files.Add(Contained("b/syslog", "a/syslog"));
+        summary.Files.Add(Continued("c/syslog", "b/syslog", 5, 0));
+        summary.Files.Add(Contained("d/syslog.gz", "a/syslog"));
+        summary.Files.Add(Plain("note.txt", ImportOutcome.Unrecognized));
+
+        // Act
+        var text = await WriteAsync(summary);
+
+        // Assert
+        Assert.Contains("  already imported:  0\n  contained:         2\n  not recognized:", text, "the count row follows the already imported row");
+        Assert.Contains("\nFiles contained in an imported file:\n  \"b/syslog\": start of \"a/syslog\"\n  \"d/syslog.gz\": start of \"a/syslog\"\n", text, "the section lists every contained file in input order");
+        Assert.IsLessThan(text.IndexOf("Files contained in an imported file", StringComparison.Ordinal), text.IndexOf("Files continued", StringComparison.Ordinal), "the section follows the continued files");
+        Assert.IsLessThan(text.IndexOf("Files not recognized", StringComparison.Ordinal), text.IndexOf("Files contained in an imported file", StringComparison.Ordinal), "the section comes before the files not recognized");
+    }
+
+    /// <summary>
+    /// Without a contained file the count row says 0 and there is no section.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task ImportSummaryWriterPrintsNoSectionWithoutContainedFiles()
+    {
+        // Arrange
+        var summary = new ImportSummary
+                      {
+                          Root = "/logs"
+                      };
+
+        summary.Files.Add(Plain("a/syslog", ImportOutcome.Imported));
+
+        // Act
+        var text = await WriteAsync(summary);
+
+        // Assert
+        Assert.Contains("  already imported:  0\n  contained:         0\n", text, "the count row says 0");
+        Assert.DoesNotContain("Files contained in an imported file", text, "no section");
+    }
+
+    /// <summary>
+    /// The path and the container of a contained file are quoted and escaped.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task ImportSummaryWriterQuotesThePathAndTheContainerOfAContainedFile()
+    {
+        // Arrange
+        var summary = new ImportSummary
+                      {
+                          Root = "/logs"
+                      };
+
+        summary.Files.Add(Contained("b\nsyslog", "a\u001b[31msyslog"));
+
+        // Act
+        var text = await WriteAsync(summary);
+
+        // Assert
+        Assert.Contains("  \"b\\nsyslog\": start of \"a\\u001b[31msyslog\"\n", text, "both are escaped");
+        Assert.DoesNotContain("\u001b", text, "no escape character reaches the output");
+    }
+
+    /// <summary>
     /// Creates the result of a file that is not continued.
     /// </summary>
     /// <param name="path">The display path</param>
@@ -128,6 +203,22 @@ public class ImportSummaryWriterTests
                    Path = path,
                    Outcome = outcome,
                    Reason = outcome == ImportOutcome.Unrecognized ? "no parser recognized the file" : string.Empty
+               };
+    }
+
+    /// <summary>
+    /// Creates the result of a contained file.
+    /// </summary>
+    /// <param name="path">The display path</param>
+    /// <param name="container">The display name of the first import of the content it is the start of</param>
+    /// <returns>The result</returns>
+    private static FileResult Contained(string path, string container)
+    {
+        return new FileResult
+               {
+                   Path = path,
+                   Outcome = ImportOutcome.Contained,
+                   ContainedIn = container
                };
     }
 

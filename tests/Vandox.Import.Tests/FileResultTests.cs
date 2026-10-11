@@ -42,5 +42,30 @@ public class FileResultTests
         Assert.AreEqual(5L, copy.Records, "records");
     }
 
+    /// <summary>
+    /// A snapshot copies the container of a contained file.
+    /// </summary>
+    [TestMethod]
+    public void FileResultSnapshotCopiesTheContainer()
+    {
+        // Arrange
+        var result = new FileResult
+                     {
+                         Path = "b/syslog",
+                         Outcome = ImportOutcome.Contained,
+                         ContainedIn = "a/syslog"
+                     };
+
+        // Act
+        var copy = result.Snapshot();
+
+        result.ContainedIn = "changed";
+
+        // Assert
+        Assert.AreEqual(ImportOutcome.Contained, copy.Outcome, "outcome");
+        Assert.AreEqual("a/syslog", copy.ContainedIn, "contained in");
+        Assert.AreEqual(string.Empty, new FileResult().ContainedIn, "a new result is not contained");
+    }
+
     #endregion // Methods
 }
