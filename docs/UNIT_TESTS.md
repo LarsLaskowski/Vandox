@@ -69,7 +69,7 @@ covers, and the rules under *Code coverage* and the checklist apply to both.
   compare two durations measured in the same test, never an absolute duration. It warms both sides up once,
   takes the best of three runs of each, and bounds the ratio of the code under test to a plain reference (Go
   `json.Unmarshal`, .NET `JsonDocument.Parse` of the same bytes) by at least three times the highest ratio
-  measured for the correct code, coverage instrumentation (`-race`, coverlet) included, so a loaded CI host does
+  measured for the correct code, instrumentation (race detector, coverage) included, so a loaded CI host does
   not make it flaky ([0090](decisions/0090-wire-keys-matched-ignoring-ascii-case-duplicates-rejected-header-shape-malformed.md)).
 
 ## Code coverage
