@@ -1,6 +1,6 @@
 # 0092: Plesk panel, sw-cp-server, nginx and Apache error logs are claimed by a configured path or by content; lines they cannot read are kept as raw records with a warning
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-11
 - **Area:** Log import
 - **Source:** Issue #19
