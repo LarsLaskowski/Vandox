@@ -43,6 +43,19 @@ public class SyslogParserTests
     #region Methods
 
     /// <summary>
+    /// The syslog format is framed by lines only, so an import may continue it at the start of a line.
+    /// </summary>
+    [TestMethod]
+    public void SyslogParserIsLineFramed()
+    {
+        // Act
+        var parser = new SyslogParser(DateTimeZone.Utc);
+
+        // Assert
+        Assert.IsTrue(parser.LineFramed, "line framed");
+    }
+
+    /// <summary>
     /// The type of the parser is <c>syslog</c>.
     /// </summary>
     [TestMethod]

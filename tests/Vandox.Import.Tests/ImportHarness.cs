@@ -14,10 +14,11 @@ internal sealed class ImportHarness : IDisposable
     /// <summary>
     /// Initializes a new instance of the <see cref="ImportHarness"/> class.
     /// </summary>
-    internal ImportHarness()
+    /// <param name="lineFramed">Whether the parser is line-framed</param>
+    internal ImportHarness(bool lineFramed = true)
     {
         Directory = new TempDirectory();
-        Parser = new LineParser("test");
+        Parser = new LineParser("test", lineFramed);
         Store = new FakeImportStore();
         Clock = new FakeTimeProvider(new DateTimeOffset(2026, 10, 5, 12, 0, 0, TimeSpan.Zero));
     }

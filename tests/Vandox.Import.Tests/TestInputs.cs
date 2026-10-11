@@ -23,6 +23,17 @@ internal static class TestInputs
     }
 
     /// <summary>
+    /// Returns the messages of the records <see cref="Log"/> makes of the lines from <paramref name="first"/> to <paramref name="last"/>.
+    /// </summary>
+    /// <param name="first">The first line number</param>
+    /// <param name="last">The last line number</param>
+    /// <returns>The messages joined by a vertical bar</returns>
+    internal static string Messages(int first, int last)
+    {
+        return string.Join('|', Enumerable.Range(first, last - first + 1).Select(number => $"LOG line {number}"));
+    }
+
+    /// <summary>
     /// Compresses bytes with gzip.
     /// </summary>
     /// <param name="content">The content</param>

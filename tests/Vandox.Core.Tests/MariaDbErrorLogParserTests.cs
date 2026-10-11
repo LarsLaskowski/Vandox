@@ -71,6 +71,19 @@ public class MariaDbErrorLogParserTests
     }
 
     /// <summary>
+    /// The MariaDB error log is framed by lines only, so an import may continue it at the start of a line.
+    /// </summary>
+    [TestMethod]
+    public void MariaDbErrorLogParserIsLineFramed()
+    {
+        // Act
+        var parser = new MariaDbErrorLogParser(DateTimeZone.Utc);
+
+        // Assert
+        Assert.IsTrue(parser.LineFramed, "line framed");
+    }
+
+    /// <summary>
     /// The type of the parser is <c>mariadb</c>.
     /// </summary>
     [TestMethod]

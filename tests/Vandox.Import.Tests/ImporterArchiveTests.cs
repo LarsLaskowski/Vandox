@@ -193,5 +193,39 @@ public class ImporterArchiveTests
         Assert.AreEqual(ImportOutcome.Imported, results["ok.log"].Outcome, "the other file");
     }
 
+    /// <summary>
+    /// A grown file is continued per decompressed content: as a gzip file in a directory and as an entry of a tar.gz archive, each stores only its new lines.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task ImporterContinuesGzipFilesAndArchiveEntriesPerDecompressedContent()
+    {
+        // Arrange
+        using var harness = new ImportHarness();
+        using var archives = new TempDirectory();
+        var plain = harness.Write("syslog", TestInputs.Log(3));
+
+        await harness.RunAsync(TestContext.CancellationToken);
+        File.Delete(plain);
+        harness.Write("logs/syslog.1.gz", TestInputs.Gzip(TestInputs.Log(5)));
+
+        // Act
+        var gzipped = await harness.RunAsync(TestContext.CancellationToken, Path.Combine(harness.Directory.Path, "logs"));
+        var archive = Path.Combine(archives.Path, "logs.tar.gz");
+
+        await File.WriteAllBytesAsync(archive, TestInputs.Gzip(TestInputs.Tar(("var/log/syslog", TestInputs.Bytes(TestInputs.Log(4))))), TestContext.CancellationToken);
+
+        var entry = await harness.RunAsync(TestContext.CancellationToken, archive);
+
+        // Assert
+        Assert.AreEqual(ImportOutcome.Continued, gzipped.Summary.Files.Single().Outcome, "the gzip file is continued");
+        Assert.AreEqual("syslog", gzipped.Summary.Files.Single().ContinuedFrom, "from the plain file");
+        Assert.AreEqual(2L, gzipped.Summary.Files.Single().Records, "only its new lines are stored");
+        Assert.AreEqual(ImportOutcome.Continued, entry.Summary.Files.Single().Outcome, "the archive entry is continued");
+        Assert.AreEqual("syslog", entry.Summary.Files.Single().ContinuedFrom, "from the plain file");
+        Assert.AreEqual(1L, entry.Summary.Files.Single().Records, "only its new line is stored");
+        Assert.AreEqual($"{TestInputs.Messages(1, 5)}|{TestInputs.Messages(4, 4)}", string.Join('|', harness.Store.Messages), "the plain file, the new lines of the gzip file and of the entry");
+    }
+
     #endregion // Methods
 }

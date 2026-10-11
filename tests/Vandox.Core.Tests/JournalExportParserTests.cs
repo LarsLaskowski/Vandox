@@ -47,6 +47,19 @@ public class JournalExportParserTests
     #region Methods
 
     /// <summary>
+    /// The journal export is not framed by lines only, because a binary field holds line feeds, so an import never continues it.
+    /// </summary>
+    [TestMethod]
+    public void JournalExportParserIsNotLineFramed()
+    {
+        // Act
+        var parser = new JournalExportParser();
+
+        // Assert
+        Assert.IsFalse(parser.LineFramed, "not line framed");
+    }
+
+    /// <summary>
     /// The type of the parser is <c>journal</c>.
     /// </summary>
     [TestMethod]

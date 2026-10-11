@@ -8,7 +8,7 @@ namespace Vandox.Import.Tests;
 /// <summary>
 /// A parser double: every line of a file whose first line starts with <c>LOG</c> becomes a log line record one second after
 /// <see cref="Base"/> per line number. A line starting with <c>bad</c> is skipped, a line starting with <c>refuse</c> becomes an
-/// invalid record, and a line starting with <c>boom</c> makes the parser fail.
+/// invalid record, and a line starting with <c>boom</c> makes the parser fail. The first lines it is told to skip are skipped.
 /// </summary>
 internal sealed class LineParser : ILogParser
 {
@@ -24,6 +24,7 @@ internal sealed class LineParser : ILogParser
     #region Fields
 
     private readonly List<LogFile> _seen = [];
+    private readonly long _skipFirst;
 
     #endregion // Fields
 
@@ -33,9 +34,13 @@ internal sealed class LineParser : ILogParser
     /// Initializes a new instance of the <see cref="LineParser"/> class.
     /// </summary>
     /// <param name="type">The source type</param>
-    internal LineParser(string type)
+    /// <param name="lineFramed">The value of <see cref="LineFramed"/></param>
+    /// <param name="skipFirst">The number of leading lines the parser skips instead of making records of them</param>
+    internal LineParser(string type, bool lineFramed = true, long skipFirst = 0)
     {
         Type = type;
+        LineFramed = lineFramed;
+        _skipFirst = skipFirst;
     }
 
     #endregion // Constructors
@@ -81,7 +86,7 @@ internal sealed class LineParser : ILogParser
     public string Type { get; }
 
     /// <inheritdoc />
-    public bool LineFramed => true;
+    public bool LineFramed { get; }
 
     /// <inheritdoc />
     public Confidence Detect(LogFile file, ReadOnlySpan<byte> head)
@@ -100,6 +105,13 @@ internal sealed class LineParser : ILogParser
         while (await reader.ReadAsync(cancellationToken))
         {
             var text = Encoding.UTF8.GetString(reader.Line.Span);
+
+            if (reader.LineNumber <= _skipFirst)
+            {
+                output.Skip(reader.LineNumber, "leading line");
+
+                continue;
+            }
 
             if (text.StartsWith("boom", StringComparison.Ordinal))
             {
