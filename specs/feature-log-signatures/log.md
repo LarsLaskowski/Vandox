@@ -18,3 +18,4 @@ are quoted in full.
 | 2026-10-11 22:25 | 6 Decide | squad-lead | AC3 corrected: dovecot.log yields exactly one dovecot_fatal (lines 03:12:17/18), forged 03:12:20 yields nothing, new test BuiltInSignaturesDovecotLogYieldsOneFatalEvent; ErrorLogFixturesYieldNothing narrowed to nginx/apache/plesk (Tester). CA1720 pragma on SignatureFieldType.Integer accepted (catalog keyword, scoped, justified; precedent HealthCheckCommand S5332). |
 | 2026-10-11 22:36 | 7 Code check | Orchestrator | Format check, analyzer gate, scope-check, tests (3366 core), coverage gate PASS: new 100% (485/485), overall 97.7% |
 | 2026-10-11 22:37 | 8 Security diff | squad-security | APPROVED at 7da17d2, no findings |
+| 2026-10-11 22:39 | 8 Review 1 | squad-reviewer | BLOCKING 1 (project.md area 10 + record 0094 drop the 'remote-text' qualifier on the \A rule), NON-BLOCKING 2 (plan AC7 says 20,000 lines; ARCHITECTURE intro lost a comma) |
