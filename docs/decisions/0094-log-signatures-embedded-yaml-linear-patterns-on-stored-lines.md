@@ -1,6 +1,6 @@
 # 0094: Log signatures are data: an embedded YAML catalog of linear-time patterns, matched on stored log lines on demand, with the copies of one event merged
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-11
 - **Area:** Detection, alerts and reports
 - **Source:** Issue #21

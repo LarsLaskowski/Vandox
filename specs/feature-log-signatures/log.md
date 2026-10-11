@@ -21,3 +21,4 @@ are quoted in full.
 | 2026-10-11 22:39 | 8 Review 1 | squad-reviewer | BLOCKING 1 (project.md area 10 + record 0094 drop the 'remote-text' qualifier on the \A rule), NON-BLOCKING 2 (plan AC7 says 20,000 lines; ARCHITECTURE intro lost a comma) |
 | 2026-10-11 22:40 | 8 Fix round | squad-dev, squad-lead | Docs fixes: project.md area 10 qualifier, record 0094 option 16/Decision, ARCHITECTURE intro, plan AC7 (3,000 lines) |
 | 2026-10-11 22:41 | 8 Review 2 | squad-reviewer | APPROVE at 3baf0c5; 3 non-blocking doc nits applied verbatim by orchestrator (ARCHITECTURE comma, 0094 wording, plan clause) |
+| 2026-10-11 22:42 | 9 PR approval | squad-lead | APPROVED; deviations accepted (Require helper, SignatureKey without IEquatable, explicit InfiniteMatchTimeout, 3,000-line flood test); record 0094 set to Accepted |
