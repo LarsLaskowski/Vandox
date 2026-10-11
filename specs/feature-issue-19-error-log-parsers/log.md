@@ -18,4 +18,4 @@ are quoted in full.
 | 2026-10-11 19:01 | 7 Code check | Orchestrator | Format check, Test (Core 2540, Import 171, Backend 92, Storage 145), Coverage gate (new 100.0% 499/499, overall 97.2%), Analyzer gate, scope-check all PASS |
 | 2026-10-11 19:02 | 8 Review (security diff) | squad-security | APPROVED on 1efc675: ModTime fallback, no file access, bounds, output quoting all hold (opus/medium · 71,620 tokens · 14 tool uses · 61 s) |
 | 2026-10-11 19:06 | 8 Review round 1 | squad-reviewer | BLOCKING 0, NON-BLOCKING 1 (stale MariaDB 'no path option' sentence in log-import.md); applied verbatim by orchestrator (opus/medium · 137,666 tokens · 38 tool uses · 279 s) |
-| 2026-10-11 19:06 | 8 Review delta | squad-reviewer | APPROVE on b87386f (doc fix only), continued |
+| 2026-10-11 19:06 | 8 Review delta | squad-reviewer | APPROVE on b87386f (doc fix only), continued (opus/medium · 139,230 tokens · 40 tool uses · 300 s) |
