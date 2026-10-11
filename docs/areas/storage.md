@@ -79,10 +79,10 @@ Indexes: a unique index on `records(agent_id, seq)` for origin `agent`; `records
   every other attempt of that file, so an incomplete file keeps the rows of one attempt at most.
 - **Import bases:** beginning an import with prefixes (at most 64) picks, in the same transaction, the largest prefix whose content
   is stored complete with the same size and source type, and keeps it as the new row's continued content and continuation point; an
-  existing row is returned unchanged. The lookup of complete contents by head key and source type returns the SHA-256 and size,
+  existing row keeps its continuation. The lookup of complete contents by head key and source type returns the SHA-256 and size,
   largest first, at most 64; rows without a head key are never returned.
 - **Import containment:** beginning an import of a content that has no row first looks for a complete row of the same head key and
-  source type that is larger, using the 64 largest, largest first. A candidate is joined to its one line-hash row of `hashes_attempt`
+  source type that is larger, using the 64 largest, largest first (the limit applies to the candidates, whether or not they have line hashes). A candidate is joined to its one line-hash row of `hashes_attempt`
   that spans the content's size; the candidate contains the content when that row holds the first 16 bytes of its SHA-256. Then no
   row is created and the caller gets the candidate's display name. The lookup runs before the choice of a base.
 

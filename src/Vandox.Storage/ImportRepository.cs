@@ -35,11 +35,12 @@ internal static class ImportRepository
                                             + "SELECT $id, $attempt, $first, $last, $hashes "
                                             + "WHERE EXISTS (SELECT 1 FROM import_files WHERE id = $id AND complete = 0 AND attempt = $attempt)";
 
-    private const string SelectContainers = "SELECT f.id, f.name, h.hashes FROM import_files f "
+    private const string SelectContainers = "SELECT f.id, f.name, h.hashes FROM (SELECT id, name, size, hashes_attempt FROM import_files "
+                                            + "WHERE head_sha256 = $head AND source_type = $type AND complete = 1 AND size > $size "
+                                            + "ORDER BY size DESC, id LIMIT $limit) f "
                                             + "JOIN import_line_hashes h ON h.file_id = f.id AND h.attempt = f.hashes_attempt "
-                                            + "WHERE f.head_sha256 = $head AND f.source_type = $type AND f.complete = 1 AND f.size > $size "
-                                            + "AND h.first_offset < $size AND h.last_offset >= $size "
-                                            + "ORDER BY f.size DESC, f.id LIMIT $limit";
+                                            + "WHERE h.first_offset < $size AND h.last_offset >= $size "
+                                            + "ORDER BY f.size DESC, f.id";
 
     private const int Sha256Bytes = 32;
 

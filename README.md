@@ -281,7 +281,8 @@ is stored twice. Stopping or restarting the container kills a running import; no
 the next import resumes. Limits: a syslog or MariaDB error log that grew since it was imported (the same log with more lines, as in
 a newer copy of `/var/log`) is continued after the part imported before (a journal export that grew is imported as a whole), an older copy
 of a log imported after a newer one stores nothing (it is listed as contained), except one that ends inside a
-line, and lines appended to a log while it is imported
+line, one whose newer copy was imported by an earlier version (before database schema 7), and one whose newer copy is not among the 64 largest
+candidates (those are imported as a whole), and lines appended to a log while it is imported
 come with a later import as a continuation.
 
 Supported sources:
