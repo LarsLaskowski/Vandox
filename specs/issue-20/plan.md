@@ -109,8 +109,14 @@ Every test lives in the file named under *Test files*; names are `{Class}{Scenar
   colon (`0.0 us,100.0 id`, `KiB Mem :131926528 total,` where the number fills `top`'s 9-character column).
   **Numbers** (summary, %CPU of rows, pressure averages): an integer part of 1 to 15 ASCII digits and an optional `.`
   with 1 to 6 ASCII digits — nothing else (no sign, exponent, comma); every value read is therefore finite and below
-  10^15. A memory or swap value times 1024^n is computed exactly (decimal) and rounded; a result above `ulong.MaxValue`
-  makes the line unreadable (a summary line that is not read makes the snapshot "malformed snapshot", AC8).
+  10^15. A memory or swap value times 1024^n is computed exactly and rounded half away from zero; a result above
+  `ulong.MaxValue` makes the line unreadable (a summary line that is not read makes the snapshot "malformed snapshot",
+  AC8). **Scaling order** (shared with RES, AC6, in `LegacyTopLine.TryScaleBinary`; no `decimal`, no `double`, no
+  intermediate type can overflow): (1) the integer digits I are converted to `UInt128` (at most 20 digits, so below
+  2^67); (2) if I > `ulong.MaxValue >> (10*n)` the value is refused before any multiplication; (3) otherwise, with d
+  fraction digits F, `UInt128` r = ((I×10^d + F) << (10*n) + 10^d / 2) / 10^d — bounded by (2^64 + 2^60)×10^6 < 2^85,
+  far below `UInt128.MaxValue`; (4) r > `ulong.MaxValue` is refused (I passes step 2 but the fraction or the rounding
+  carries it over), else r is the byte count.
   Tests: `LegacyTopLineTests.LegacyTopLineTryParseLoadReadsThreeValues`, `LegacyTopLineTryParseTasksReadsTotal`,
   `LegacyTopLineTryParseCpuReadsEightModes` (DataRows: the issue's line, `0.0 us,100.0 id` without a space after the
   comma), `LegacyTopLineTryParseMemoryReadsUnitsAndLabels` (DataRows `KiB Mem :`, `MiB Mem :`, `GiB Mem :`, order
@@ -118,13 +124,16 @@ Every test lives in the file named under *Test files*; names are `{Class}{Scenar
   comma), `LegacyTopLineTryParseSwapReadsAvailMem`,
   `LegacyTopLineTryParseRefusesMalformedSummaryLines` (DataRows: missing label, label twice, `NaN`, `1e3`, `1,5`
   decimal comma, `٣` Arabic-Indic digit, a ninth CPU pair, a load value of 16 integer digits, a fraction of 7 digits,
-  `-0.1`, `EiB Mem : 16.0 total` and `GiB Mem : 999999999999999.0 total` (above `ulong.MaxValue` bytes)),
+  `-0.1`, `EiB Mem : 16.0 total` and `GiB Mem : 999999999999999.0 total` (above `ulong.MaxValue` bytes), and at the
+  maximum digit bounds `EiB Mem : 999999999999999.999999 total` and `PiB Mem : 999999999999999.999999 total` (refused
+  by the order of step 2 without an exception; with `decimal` they would throw `OverflowException`)),
   `LegacyMonitorParserTests.LegacyMonitorParserParseEmitsSummaryMetricsInOrder`.
 - [ ] **AC6 Process table → process snapshot, RES suffixes, truncated names.** A row is `PID USER PR NI VIRT RES SHR S
   %CPU %MEM TIME+ COMMAND` (tokens separated by spaces; COMMAND is the rest after the eleventh token and its spaces).
   `rss_bytes` from RES: digits (1 to 20) with an optional fraction (1 to 3 digits) and an optional suffix `k`/none
-  (×1024), `m` (×1024²), `g`, `t`, `p`, `e` (×1024³..×1024⁶), exact integer arithmetic, rounded half away from zero, an
-  overflow of 64 bits is no value. `cpu_percent` from %CPU, `user` from USER, `state` from S (one ASCII letter),
+  (×1024), `m` (×1024²), `g`, `t`, `p`, `e` (×1024³..×1024⁶), exact integer arithmetic in AC5's scaling order
+  (`TryScaleBinary`: integer part checked against `ulong.MaxValue >> (10*n)` before multiplying, then `UInt128`),
+  rounded half away from zero, a result above 64 bits is no value and never an exception. `cpu_percent` from %CPU, `user` from USER, `state` from S (one ASCII letter),
   `pid` from PID (1..2,147,483,647). A COMMAND ending in `+` is truncated: the `+` is removed and `truncated` set. Old
   format (no section in the snapshot): `command` is the normalized COMMAND (cut to 1,024 bytes), `cmdline` empty. New
   format (at least one section marker in the snapshot): `cmdline` is the normalized COMMAND cut to 2,048 UTF-8 bytes
@@ -140,7 +149,9 @@ Every test lives in the file named under *Test files*; names are `{Class}{Scenar
   `123.4m`→129,394,278, `1.234g`→1,324,997,411, `2.000t`→2,199,023,255,552, `1.5p`→1,688,849,860,263,936,
   `1.000e`→1,152,921,504,606,846,976, `0.001m`→1,049 (1,048.576 rounded)),
   `LegacyTopLineTryParseMemoryValueRefusesOtherForms` (`?`, `1.2M`, `1.2345g`, `-1`, 21 digits, `1e3`, `1.`, `.5`,
-  `16.000e` overflow), `LegacyTopLineTryParseRowReadsColumns` (PR `rt`, NI `-20`, COMMAND with spaces),
+  `16.000e` overflow, and at the maximum digit bounds `99999999999999999999.999e` and `99999999999999999999.999p`),
+  `15.999e`→18,445,591,152,204,944,769 is a further DataRow of `...ConvertsSuffixes` (the largest `e` value with a
+  fraction below the bound; I = 15 = `ulong.MaxValue >> 60`), `LegacyTopLineTryParseRowReadsColumns` (PR `rt`, NI `-20`, COMMAND with spaces),
   `LegacyTopLineTryParseRowRefusesMalformedRows`, `LegacyProcessNamesTests.LegacyProcessNamesNormalizeRemovesTrailingPlus`,
   `LegacyProcessNamesCommandOfDerivesNameFromCommandLine` (DataRows: `/usr/sbin/apache2 -k start`→`apache2`,
   `php-fpm: pool www`→`php-fpm`, `[kworker/0:1-events]`→`kworker/0:1-events`, `spamd child`→`spamd`),
@@ -154,7 +165,10 @@ Every test lives in the file named under *Test files*; names are `{Class}{Scenar
   `:`, `[]`: the process snapshot record is emitted and passes `RecordingEmitter`'s validation).
 - [ ] **AC7 Per-program aggregates.** Each process snapshot carries `programs`: one entry per program name (the first
   space-separated word of the process's `command`), in order of first appearance, with `count`, the sums of
-  `cpu_percent` and `rss_bytes`, no `pss_bytes`, and `rss_overcounted` true exactly when `count` > 1.
+  `cpu_percent` and `rss_bytes`, no `pss_bytes`, and `rss_overcounted` true exactly when `count` > 1. The `rss_bytes`
+  sum saturates at `ulong.MaxValue` (it never wraps; the project compiles unchecked, so a plain `+=` would wrap).
+  Further test: `LegacyMonitorParserTests.LegacyMonitorParserParseSaturatesProgramRssSum` (two `apache2` rows with RES
+  `15.999e` → `rss_bytes` = 18,446,744,073,709,551,615).
   Tests: `LegacyProcessNamesTests.LegacyProcessNamesProgramOfTakesFirstWord`,
   `LegacyMonitorParserTests.LegacyMonitorParserParseAggregatesPerProgram` (three `apache2` rows, one `spamd` and one
   `spamd child` row → `apache2` count 3 overcounted, `spamd` count 2 overcounted, a single program not overcounted).
@@ -196,7 +210,9 @@ Every test lives in the file named under *Test files*; names are `{Class}{Scenar
   cap skips).
 - [ ] **AC9 New-format sections.** `meminfo`: `Name: N kB` → `meminfo_bytes` (unit `bytes`, N×1024, label `field` =
   Name), `Name: N` → `meminfo` (no unit, label `field`); Name 1 to 64 characters of `A-Z a-z 0-9 _ ( )`; N is 1 to 20
-  ASCII digits within `ulong`, and N×1024 above `ulong.MaxValue` makes the line unreadable. Pressure `total=N` and
+  ASCII digits within `ulong` (converted with `ulong.TryParse`, never a throwing parse), and for `kB` N >
+  `ulong.MaxValue >> 10` makes the line unreadable, checked before N is shifted by 10, so N×1024 is never computed
+  for a value that does not fit; `TryParseMeminfo`'s `value` is the byte count for `kB`, else N. Pressure `total=N` and
   vmstat `N` are 1 to 20 ASCII digits within `ulong`; averages follow AC5's number rule. `pressure`: a
   line `<res>: some avg10=F avg60=F avg300=F total=N[ full avg10=F avg60=F avg300=F total=N]` with res `memory`, `cpu`
   or `io`, or a line `full avg10=F avg60=F avg300=F total=N` directly after a resource line that had only `some` →
@@ -296,7 +312,10 @@ All new code is in `src/Vandox.Core/LogParsing`; the importer, storage and model
    checked on ASCII characters with ordinal comparisons, and numbers are validated as ASCII digit strings before any
    conversion (never `char.IsDigit`, never `double.Parse` on unchecked text; conversion with
    `CultureInfo.InvariantCulture` and `NumberStyles.AllowDecimalPoint` only), with the digit bounds of AC5, AC6 and
-   AC9, so no conversion can give an infinite value or overflow unchecked.
+   AC9, so no conversion can give an infinite value or overflow unchecked. Byte scaling (memory, swap, RES, meminfo
+   `kB`) compares the integer part against `ulong.MaxValue >> (10*n)` before it multiplies and then computes in
+   `UInt128` (AC5 *Scaling order*); `decimal` is not used for it, since its range (about 7.9×10^28) is smaller than
+   the largest input times 1024^6.
 2. **Header and time.** `LegacyMonitorHeader.TryParse` (AC2); `Resolve` (AC3): year range checked as an integer first,
    then day against `SyslogTime.DaysInMonth`, then `LocalDateTime` → `zone.MapLocal`; candidates are `EarlyInterval`
    (count ≥ 1) and `LateInterval` (count 2); the first candidate whose `Name` equals the zone text wins; count 0 →
@@ -452,6 +471,7 @@ internal static class LegacyTopLine
     internal static bool IsTableHeader(string line);
     internal static LegacyTopRow? TryParseRow(string line);
     internal static bool TryParseMemoryValue(string token, out ulong bytes);
+    internal static bool TryScaleBinary(string integerDigits, string fractionDigits, int power, out ulong bytes);  // AC5 scaling order; digits pre-validated ASCII, fractionDigits may be empty, power 0..6
 }
 
 internal static class LegacyProcessNames
@@ -520,7 +540,8 @@ extends them to nine in step 5 (they fail on the skeleton, which registers nothi
 - [Log import](../../docs/areas/log-import.md) — new section *Legacy monitoring log* (after *Plesk and web server error
   logs*): recognition, snapshot and header grammar, time and zone rules (AC3, AC4), top part, process snapshot and
   programs (the never-empty name rule), sections, lsof mapping and the address guard (with the embedded-IPv4 rule),
-  skips and their reasons, bounds (every line counts toward its cap; worst-case memory as in *Security considerations*),
+  skips and their reasons, bounds (every line counts toward its cap; worst-case memory as in *Security considerations*;
+  a byte value that does not fit 64 bits makes its line unreadable, a program's `rss_bytes` sum saturates),
   the limitations (old/new command names differ, a new-format snapshot cut before its first section reads as old, the
   last snapshot of a file is marked incomplete in its open list because the log has no end marker, the rest of a
   snapshot cut by a copy boundary is skipped line by line in a continued import and lost, `vmstat_per_second` is
@@ -600,6 +621,20 @@ other parsers (AC1), README sources list (*Documentation updates*).
   integers 1 to 20 digits within `ulong`; memory × 1024^n and meminfo × 1024 above `ulong.MaxValue` make the line
   unreadable (AC5, AC9, step 1), with refuse DataRows in `LegacyTopLineTryParseRefusesMalformedSummaryLines` and
   `LegacyProcLineTryParseMeminfoRefusesOtherForms`.
+- **B3 (intermediate overflow in byte scaling, second review) — accepted by Lead decision, plan fixed.** The earlier
+  "computed exactly (decimal)" overflowed `decimal` for `PiB`/`EiB` at the digit bounds and `UInt128` for RES at
+  `e`. The plan now fixes the order (AC5 *Scaling order*, `TryScaleBinary`): integer part against
+  `ulong.MaxValue >> (10*n)` first, then `UInt128` arithmetic bounded below 2^85, then the `ulong` check after
+  rounding; meminfo `kB` checks N against `ulong.MaxValue >> 10` before the shift (AC9). Refuse DataRows at the
+  maximum digit bounds: `99999999999999999999.999e` and `99999999999999999999.999p`
+  (`LegacyTopLineTryParseMemoryValueRefusesOtherForms`), `EiB Mem : 999999999999999.999999 total` and
+  `PiB Mem : 999999999999999.999999 total` (`LegacyTopLineTryParseRefusesMalformedSummaryLines`), plus the boundary
+  read `15.999e`. The rest of the number paths was re-checked: decimal numbers (load, CPU, %CPU, pressure averages)
+  are at most 15+6 digits and go to `double` without scaling (finite); integers (`Tasks`, PID, pressure `total`,
+  vmstat, meminfo without `kB`) use `uint`/`int`/`ulong.TryParse` on at most 20 validated digits, which returns false
+  instead of throwing. Related gap found on the way: the per-program `rss_bytes` sum (AC7) would wrap silently in the
+  unchecked build; AC7 now makes it saturate at `ulong.MaxValue`, pinned by
+  `LegacyMonitorParserParseSaturatesProgramRssSum` (the only other byte arithmetic in the plan).
 - **N2 (memory estimate) — accepted.** Corrected to about 40 MiB (UTF-16) in *Security considerations*; the area
   document states the same figure.
 - **N3 (embedded IPv4 in IPv6) — accepted, fixed rather than pinned.** A trailing dotted quad must meet the IPv4 octet
