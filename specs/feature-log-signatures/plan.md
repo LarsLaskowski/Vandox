@@ -139,9 +139,14 @@ escape in a regular string literal).
     03:12:09 `fatal:` and the 03:12:11 `panic:` lines, `LineCount` 2) and one `dovecot_fatal` event (the IDs of the
     03:12:17 `Panic:` and the 03:12:18 `Fatal:` lines), in this order; the forged `user=<x: Panic: y>` line yields
     nothing. Test: `BuiltInSignaturesMailLogYieldsOneEventPerDaemon`.
-  - `testdata/logs/nginx-error.log`, `apache-error.log`, `plesk-panel.log` and `dovecot.log`, each parsed by its parser
-    (`ErrorLogParser` for the first three, `DovecotLogParser`): no event at all. Test:
-    `BuiltInSignaturesErrorLogFixturesYieldNothing`.
+  - `testdata/logs/dovecot.log` parsed by `DovecotLogParser` (which tags the 03:12:17 `Panic:` line `dovecot.panic` and
+    the 03:12:18 `Fatal:` line `dovecot.fatal`, pinned in `DovecotLogParserTests`): exactly one `dovecot_fatal` event
+    whose `RecordIds` are the IDs of those two lines, `LineCount` 2; the forged 03:12:20 `user=<x: Panic: y>` line and the
+    03:12:14 `Connect failed to database (mail): Can't connect ...` line (not `Too many connections`) yield nothing.
+    Test: `BuiltInSignaturesDovecotLogYieldsOneFatalEvent`. (Lead decision in step 6: the fixture holds real panic and
+    fatal lines, so the earlier "no event" statement for this file was a plan defect.)
+  - `testdata/logs/nginx-error.log`, `apache-error.log` and `plesk-panel.log`, each parsed by `ErrorLogParser`: no event
+    at all. Test: `BuiltInSignaturesErrorLogFixturesYieldNothing`.
 
 - [ ] **AC4 — detector rules** (catalogs parsed from test text, independent of the built-in one). Test class
   `SignatureDetectorTests`:
