@@ -605,6 +605,11 @@ version writes. Area 10's goal is strengthened (fewer readings of one line, fail
 
 ## Decision records
 
+Approval note: the Go implementation compares an object's first 8 keys by scanning its per-depth key list and fills the per-depth
+set only from the 9th key (`smallKeys` in `internal/wire/decode.go`). This deviates from the binding shape's wording but keeps its rule
+(state per decoder, emptying bounded by the object's own keys, no map cleared, AC15 bounds pass) and is not option 14 (nothing is
+created per line or per object); accepted by the Lead and stated in 0090, option 11.
+
 - `docs/decisions/0090-wire-keys-matched-ignoring-ascii-case-duplicates-rejected-header-shape-malformed.md` (Proposed, indexed).
 - 0042, 0043, 0075, 0089 edited in place (unreleased: no `v*` tag exists).
 
@@ -726,7 +731,7 @@ APPROVED, one non-blocking wording defect and one note; both applied as wording,
 
 ## Out of scope / follow-ups
 
-Follow-up issues for the orchestrator to open:
+Follow-up issues for the orchestrator to open (opened: F1 as #182, with the blocker comment on #40; F2 as #183):
 
 - **F1** — title `[Wire] C# decoder rejects invalid UTF-8 and unpaired surrogate escapes in string values`; body: "Found while planning
   #175. The Go decoder, record 0042 and the area row 'Strings with invalid UTF-8 ... replaced by U+FFFD' replace invalid UTF-8 and unpaired

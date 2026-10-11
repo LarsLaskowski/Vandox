@@ -77,7 +77,7 @@ one is invalid, and the decoder sets the origin of every decoded record to `agen
   metric names and units, label keys, `gap.collector` and `log_line.event`.
 - **Short text** at most 1024 bytes (`MaxShortTextBytes`), **text** at most 16384 bytes (`MaxTextBytes`); lengths are in
   bytes, no character restriction. Invalid UTF-8 is replaced by U+FFFD when decoded by the Go decoder; the C# decoder still rejects a
-  string value with invalid UTF-8 or an unpaired surrogate escape as `ErrMalformed`. That difference is open (follow-up of #175) and
+  string value with invalid UTF-8 or an unpaired surrogate escape as `ErrMalformed`. That difference is open (#182) and
   blocks the ingest API (#40, see *Error text and consumer duties*).
 - **Lists and maps** hold at most 4096 entries (`MaxItems`); metric labels at most 32 (`MaxLabels`).
 - **Times** are UTC (offset 0) and non-zero; optional times are checked only when present.
@@ -288,7 +288,7 @@ displays decode errors only through the display sanitization of the project's ar
 Duties of the ingest API (#40), which this package cannot take over:
 
 - do not pass agent input to `BatchDecoder` before the two decoders agree on invalid UTF-8 and unpaired
-  surrogate escapes in string values (*Common rules*, follow-up of #175); that issue blocks #40;
+  surrogate escapes in string values (*Common rules*, #182); that issue blocks #40;
 - wrap the request body in `http.MaxBytesReader` on the **compressed** bytes before `NewDecoder` (the decoder
   bounds only the decompressed bytes);
 - set the server's read, read-header, write and idle timeouts, so a slow reader cannot block;
