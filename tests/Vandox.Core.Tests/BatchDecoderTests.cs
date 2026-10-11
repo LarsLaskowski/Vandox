@@ -29,6 +29,21 @@ public class BatchDecoderTests
     /// </summary>
     private const double MaxTimeFactor = 50;
 
+    /// <summary>
+    /// The text of an escape of a high surrogate, with its backslash.
+    /// </summary>
+    private const string HighSurrogateEscape = @"\ud800";
+
+    /// <summary>
+    /// The character U+00FF, which the ISO-8859-1 helpers write as the single raw byte FF.
+    /// </summary>
+    private const string InvalidByte = "\u00ff";
+
+    /// <summary>
+    /// The character U+00E9, which the ISO-8859-1 helpers write as the single raw byte E9.
+    /// </summary>
+    private const string LatinLetter = "\u00e9";
+
     #endregion // Constants
 
     #region Properties
@@ -1077,6 +1092,228 @@ public class BatchDecoderTests
     }
 
     /// <summary>
+    /// A byte that is no valid UTF-8 anywhere in a line is malformed with the fixed reason, in the header and in the record.
+    /// </summary>
+    /// <returns>A task that completes when the work is done</returns>
+    [TestMethod]
+    public async Task BatchDecoderRefusesInvalidUtf8InEveryPlace()
+    {
+        // Arrange
+        var places = TextPlaces(InvalidByte);
+
+        // Act / Assert
+        foreach (var place in places)
+        {
+            using var input = GzipLatin1(place.Header, place.Record);
+            var exception = await Assert.ThrowsExactlyAsync<WireException>(() => OpenAndReadAllAsync(input), place.Name);
+
+            Assert.AreEqual(WireErrorKind.Malformed, exception.Kind, $"{place.Name}: error class");
+            Assert.AreEqual(place.Line, exception.Line, $"{place.Name}: line");
+            Assert.AreEqual("line not valid UTF-8", exception.Reason, $"{place.Name}: reason");
+            Assert.AreEqual($"wire: line {place.Line}: line not valid UTF-8", exception.Message, $"{place.Name}: exact message");
+        }
+    }
+
+    /// <summary>
+    /// An unpaired surrogate escape anywhere in a line is malformed with the fixed reason, in the header and in the record.
+    /// </summary>
+    /// <param name="escape">The escape text, the digits after the <c>\u</c></param>
+    /// <returns>A task that completes when the work is done</returns>
+    [TestMethod]
+    [DataRow("d800")]
+    [DataRow("dc00")]
+    [DataRow("D800")]
+    public async Task BatchDecoderRefusesUnpairedSurrogateEscapeInEveryPlace(string escape)
+    {
+        // Arrange
+        var value = $@"\u{escape}";
+        var places = TextPlaces(value);
+
+        Assert.Contains(@"\u", value, "the escape keeps its backslash");
+
+        // Act / Assert
+        foreach (var place in places)
+        {
+            using var input = GzipLatin1(place.Header, place.Record);
+            var exception = await Assert.ThrowsExactlyAsync<WireException>(() => OpenAndReadAllAsync(input), place.Name);
+
+            Assert.AreEqual(WireErrorKind.Malformed, exception.Kind, $"{place.Name}: error class");
+            Assert.AreEqual(place.Line, exception.Line, $"{place.Name}: line");
+            Assert.AreEqual("unpaired surrogate escape", exception.Reason, $"{place.Name}: reason");
+            Assert.AreEqual($"wire: line {place.Line}: unpaired surrogate escape", exception.Message, $"{place.Name}: exact message");
+        }
+    }
+
+    /// <summary>
+    /// Valid escapes of a surrogate pair, of the replacement character and of a noncharacter, and an escaped backslash before the text of a surrogate, are accepted.
+    /// </summary>
+    /// <param name="first">The four hex digits of the first escape</param>
+    /// <param name="second">The four hex digits of the second escape, or empty for none</param>
+    /// <returns>A task that completes when the work is done</returns>
+    [TestMethod]
+    [DataRow("d83d", "de00")]
+    [DataRow("D83D", "DE00")]
+    [DataRow("D83d", "De00")]
+    [DataRow("fffd", "")]
+    [DataRow("ffff", "")]
+    public async Task BatchDecoderAcceptsValidEscapes(string first, string second)
+    {
+        // Arrange
+        var message = second.Length == 0 ? $@"\u{first}" : $@"\u{first}\u{second}";
+        var escapedBackslash = $@"\{HighSurrogateEscape}";
+        using var input = GzipLatin1(BatchBuilder.Header, LogLine(message, 1), LogLine(escapedBackslash, 2));
+        using var decoder = await BatchDecoder.OpenAsync(input, null, TestContext.CancellationToken);
+
+        // Act
+        var firstRecord = await decoder.NextAsync(TestContext.CancellationToken);
+        var secondRecord = await decoder.NextAsync(TestContext.CancellationToken);
+
+        // Assert
+        Assert.AreEqual(1UL, firstRecord?.Seq, "the record with the escape is read");
+        Assert.AreEqual(2UL, secondRecord?.Seq, "the record with the escaped backslash is read");
+    }
+
+    /// <summary>
+    /// The records before a line with an invalid byte are returned, then the error follows at its line.
+    /// </summary>
+    /// <returns>A task that completes when the work is done</returns>
+    [TestMethod]
+    public async Task BatchDecoderReturnsRecordsBeforeInvalidUtf8ThenFails()
+    {
+        // Arrange
+        using var input = GzipLatin1(BatchBuilder.Header, LogLine("a", 1), LogLine($"a{InvalidByte}b", 2));
+        using var decoder = await BatchDecoder.OpenAsync(input, null, TestContext.CancellationToken);
+
+        // Act
+        var first = await decoder.NextAsync(TestContext.CancellationToken);
+        var exception = await Assert.ThrowsExactlyAsync<WireException>(() => decoder.NextAsync(TestContext.CancellationToken), "invalid byte");
+
+        // Assert
+        Assert.AreEqual(1UL, first?.Seq, "the record before the line is returned");
+        Assert.AreEqual(WireErrorKind.Malformed, exception.Kind, "error class");
+        Assert.AreEqual(3, exception.Line, "line");
+        Assert.AreEqual("line not valid UTF-8", exception.Reason, "reason");
+    }
+
+    /// <summary>
+    /// The error text of the text rule carries nothing of the line, for both reasons, in the header and in the record.
+    /// </summary>
+    /// <param name="inHeader"><c>true</c> to break the header, <c>false</c> to break the record</param>
+    /// <param name="invalidByte"><c>true</c> to use an invalid byte, <c>false</c> to use an unpaired surrogate escape</param>
+    /// <returns>A task that completes when the work is done</returns>
+    [TestMethod]
+    [DataRow(false, true)]
+    [DataRow(false, false)]
+    [DataRow(true, true)]
+    [DataRow(true, false)]
+    public async Task BatchDecoderTextErrorNamesNoContent(bool inHeader, bool invalidByte)
+    {
+        // Arrange
+        var broken = invalidByte ? $"SENTINELTEXT{InvalidByte}" : $"SENTINELTEXT{HighSurrogateEscape}";
+        var reason = invalidByte ? "line not valid UTF-8" : "unpaired surrogate escape";
+        var line = inHeader ? 1 : 2;
+        using var input = inHeader
+                              ? GzipLatin1(HeaderWithMembers($"\"x\":\"{broken}\""), BatchBuilder.Metric(1))
+                              : GzipLatin1(BatchBuilder.Header, LogLine(broken, 1));
+
+        // Act
+        var exception = await Assert.ThrowsExactlyAsync<WireException>(() => OpenAndReadAllAsync(input), "broken text");
+
+        // Assert
+        Assert.AreEqual(WireErrorKind.Malformed, exception.Kind, "error class");
+        Assert.AreEqual($"wire: line {line}: {reason}", exception.Message, "exact message");
+        Assert.DoesNotContain("SENTINEL", exception.Message, "the text of the line stays out of the message");
+    }
+
+    /// <summary>
+    /// A line that is not one complete JSON value keeps its syntax error, whatever bytes it holds: the text rule is never its reason.
+    /// </summary>
+    /// <param name="inHeader"><c>true</c> to break the header line, <c>false</c> to break the record line</param>
+    /// <returns>A task that completes when the work is done</returns>
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public async Task BatchDecoderKeepsSyntaxErrorBeforeTextRule(bool inHeader)
+    {
+        // Arrange
+        var complete = inHeader ? BatchBuilder.Header : BatchBuilder.Metric(1);
+        var lines = new Dictionary<string, string>
+                    {
+                        ["cut short inside a string after FF"] = $"{{\"kind\":\"log_line\",\"x\":\"a{InvalidByte}",
+                        ["cut short after a string holding FF"] = $"{{\"kind\":\"log_line\",\"x\":\"a{InvalidByte}\"",
+                        ["cut short inside a string after a surrogate escape"] = $"{{\"kind\":\"log_line\",\"x\":\"a{HighSurrogateEscape}",
+                        ["FF after the object"] = $"{complete}{InvalidByte}",
+                        ["a surrogate escape string after the object"] = $"{complete} \"{HighSurrogateEscape}\""
+                    };
+        var expected = inHeader ? "header is not valid JSON" : "record is not valid JSON";
+
+        // Act / Assert
+        foreach (var (name, line) in lines)
+        {
+            using var input = inHeader ? GzipLatin1(line, BatchBuilder.Metric(1)) : GzipLatin1(BatchBuilder.Header, line);
+            var exception = await Assert.ThrowsExactlyAsync<WireException>(() => OpenAndReadAllAsync(input), name);
+
+            Assert.AreEqual(WireErrorKind.Malformed, exception.Kind, $"{name}: error class");
+            Assert.AreEqual(inHeader ? 1 : 2, exception.Line, $"{name}: line");
+            Assert.AreEqual(expected, exception.Reason, $"{name}: reason");
+        }
+    }
+
+    /// <summary>
+    /// The key rules run before the text rule: a bad key is reported as the key, whatever the values hold.
+    /// </summary>
+    /// <param name="inHeader"><c>true</c> to break the header, <c>false</c> to break the record</param>
+    /// <returns>A task that completes when the work is done</returns>
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public async Task BatchDecoderReportsKeyRulesBeforeTextRule(bool inHeader)
+    {
+        // Arrange
+        var members = new Dictionary<string, (string Members, string Reason)>
+                      {
+                          ["non-ASCII key and FF in a value"] = ($"\"k{LatinLetter}y\":1,\"x\":\"{InvalidByte}\"", "key not ASCII"),
+                          ["non-ASCII key and a surrogate escape in a value"] = ($"\"k{LatinLetter}y\":1,\"x\":\"{HighSurrogateEscape}\"", "key not ASCII"),
+                          ["duplicate key and a surrogate escape in a value"] = ($"\"a\":1,\"a\":2,\"x\":\"{HighSurrogateEscape}\"", "duplicate key"),
+                          ["duplicate key and FF in a value"] = ($"\"a\":1,\"a\":2,\"x\":\"{InvalidByte}\"", "duplicate key"),
+                          ["key of invalid UTF-8"] = ($"\"k{InvalidByte}y\":1", "key not ASCII"),
+                          ["key with a surrogate escape"] = ($"\"k{HighSurrogateEscape}y\":1", "key not ASCII")
+                      };
+
+        // Act / Assert
+        foreach (var (name, (text, reason)) in members)
+        {
+            using var input = inHeader
+                                  ? GzipLatin1(HeaderWithMembers(text), BatchBuilder.Metric(1))
+                                  : GzipLatin1(BatchBuilder.Header, RecordWithMembers(text));
+            var exception = await Assert.ThrowsExactlyAsync<WireException>(() => OpenAndReadAllAsync(input), name);
+
+            Assert.AreEqual(WireErrorKind.Malformed, exception.Kind, $"{name}: error class");
+            Assert.AreEqual(reason, exception.Reason, $"{name}: reason");
+        }
+    }
+
+    /// <summary>
+    /// A line with an invalid byte and an unpaired surrogate escape gives the byte reason, in either order.
+    /// </summary>
+    /// <returns>A task that completes when the work is done</returns>
+    [TestMethod]
+    public async Task BatchDecoderReportsInvalidUtf8BeforeUnpairedEscape()
+    {
+        // Arrange
+        foreach (var message in new[] { $"{InvalidByte}{HighSurrogateEscape}", $"{HighSurrogateEscape}{InvalidByte}" })
+        {
+            using var input = GzipLatin1(BatchBuilder.Header, LogLine(message, 1));
+
+            // Act
+            var exception = await Assert.ThrowsExactlyAsync<WireException>(() => OpenAndReadAllAsync(input), "both violations");
+
+            // Assert
+            Assert.AreEqual("line not valid UTF-8", exception.Reason, "reason");
+        }
+    }
+
+    /// <summary>
     /// A line nested 64 deep is accepted, in the record and in the header, also inside an unknown key.
     /// </summary>
     /// <param name="inHeader"><c>true</c> to nest the header, <c>false</c> to nest the record</param>
@@ -1617,6 +1854,50 @@ public class BatchDecoderTests
     private static string HeaderWithMinor(string minor)
     {
         return $$"""{"format_major":1,"format_minor":{{minor}},"agent_id":"agent-1","boot_id":"0123abcd-0123-0123-0123-0123456789ab","mode":"live"}""";
+    }
+
+    /// <summary>
+    /// Compresses the lines as ISO-8859-1, one byte per character, each followed by a line feed, so a character from U+0080 to U+00FF is a single raw byte.
+    /// </summary>
+    /// <param name="lines">The lines</param>
+    /// <returns>The compressed stream, positioned at its start</returns>
+    private static MemoryStream GzipLatin1(params string[] lines)
+    {
+        return BatchBuilder.Gzip(Encoding.Latin1.GetBytes(string.Concat(lines.Select(line => line + "\n"))));
+    }
+
+    /// <summary>
+    /// Builds a valid log line record with the text as its message.
+    /// </summary>
+    /// <param name="message">The JSON text of the message, without the quotes</param>
+    /// <param name="seq">The sequence number</param>
+    /// <returns>The line</returns>
+    private static string LogLine(string message, int seq)
+    {
+        return $$$"""{"kind":"log_line","source":"journal","seq":{{{seq}}},"captured_at":"2026-10-01T10:00:00Z","data":{"log":"journal","message":"{{{message}}}"}}""";
+    }
+
+    /// <summary>
+    /// Places the text into every string of a batch that the decoder binds or skips.
+    /// </summary>
+    /// <param name="value">The JSON text to place</param>
+    /// <returns>The places: a name, the header line, the record line and the number of the line that holds the text</returns>
+    private static List<(string Name, string Header, string Record, int Line)> TextPlaces(string value)
+    {
+        var metric = BatchBuilder.Metric(1);
+
+        return
+        [
+            ("message", BatchBuilder.Header, LogLine($"a{value}b", 1), 2),
+            ("kind", BatchBuilder.Header, metric.Replace("\"kind\":\"metric\"", $"\"kind\":\"metric{value}\"", StringComparison.Ordinal), 2),
+            ("header agent_id", BatchBuilder.Header.Replace("agent-1", $"agent-1{value}", StringComparison.Ordinal), metric, 1),
+            ("label value", BatchBuilder.Header, metric.Replace("\"value\":1.5", $"\"value\":1.5,\"labels\":{{\"a\":\"{value}\"}}", StringComparison.Ordinal), 2),
+            ("unit", BatchBuilder.Header, metric.Replace("\"value\":1.5", $"\"value\":1.5,\"unit\":\"{value}\"", StringComparison.Ordinal), 2),
+            ("unknown envelope value", BatchBuilder.Header, RecordWithMembers($"\"x\":\"{value}\""), 2),
+            ("unknown payload value in a list", BatchBuilder.Header, metric.Replace("\"value\":1.5", $"\"value\":1.5,\"x\":[\"{value}\"]", StringComparison.Ordinal), 2),
+            ("unknown header value", HeaderWithMembers($"\"x\":\"{value}\""), metric, 1),
+            ("header of major 2", $"{{\"format_major\":2,\"x\":\"{value}\"}}", metric, 1)
+        ];
     }
 
     /// <summary>

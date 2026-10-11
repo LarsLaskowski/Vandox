@@ -2170,19 +2170,16 @@ func TestCheckText(t *testing.T) {
 		}
 	})
 	t.Run("whitespace inside an escape is no hex", func(t *testing.T) {
-		for _, input := range []string{`\u d800`, `\u d80`, `\ud800 \udc00`, `\ud800\u dc00`, `\u+d800`} {
-			if err := wire.CheckText([]byte(input)); input != `\ud800 \udc00` && input != `\ud800\u dc00` && err != nil {
-				t.Errorf("CheckText(%q) = %v, want nil (not a complete escape)", input, err)
-			}
+		for _, input := range []string{`\u d800`, `\u d80`, `\u+d800`} {
+			check(t, input, "")
 		}
 		check(t, `\ud800 \udc00`, textUnpaired)
 		check(t, `\ud800\u dc00`, textUnpaired)
 	})
 	t.Run("invalid UTF-8", func(t *testing.T) {
 		for _, f := range invalidByteForms {
-			for place, input := range textVariants(f.form) {
+			for _, input := range textVariants(f.form) {
 				check(t, input, textNotUTF8)
-				_ = place
 			}
 			check(t, f.form+"x", textNotUTF8)
 		}

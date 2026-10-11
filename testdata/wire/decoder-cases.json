@@ -1292,7 +1292,7 @@
       "name": "S18 message high before a valid pair",
       "lines": [
         "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
-        "{\"kind\":\"log_line\",\"source\":\"journal\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"log\":\"journal\",\"message\":\"\\ud800𐀀\"}}"
+        "{\"kind\":\"log_line\",\"source\":\"journal\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"log\":\"journal\",\"message\":\"\\ud800\\ud800\\udc00\"}}"
       ],
       "want": {
         "error": "Malformed",
@@ -1380,7 +1380,7 @@
       "name": "S26 message escaped surrogate pair",
       "lines": [
         "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
-        "{\"kind\":\"log_line\",\"source\":\"journal\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"log\":\"journal\",\"message\":\"😀\"}}"
+        "{\"kind\":\"log_line\",\"source\":\"journal\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"log\":\"journal\",\"message\":\"\\ud83d\\ude00\"}}"
       ],
       "want": {
         "records": [
@@ -1395,7 +1395,7 @@
       "name": "S27 message escaped pair in upper-case hex",
       "lines": [
         "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
-        "{\"kind\":\"log_line\",\"source\":\"journal\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"log\":\"journal\",\"message\":\"😀\"}}"
+        "{\"kind\":\"log_line\",\"source\":\"journal\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"log\":\"journal\",\"message\":\"\\uD83D\\uDE00\"}}"
       ],
       "want": {
         "records": [
@@ -1410,7 +1410,7 @@
       "name": "S28 message escaped pair in mixed case",
       "lines": [
         "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
-        "{\"kind\":\"log_line\",\"source\":\"journal\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"log\":\"journal\",\"message\":\"😀\"}}"
+        "{\"kind\":\"log_line\",\"source\":\"journal\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"log\":\"journal\",\"message\":\"\\uD83d\\uDe00\"}}"
       ],
       "want": {
         "records": [
@@ -1425,7 +1425,7 @@
       "name": "S29 message escaped replacement character",
       "lines": [
         "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
-        "{\"kind\":\"log_line\",\"source\":\"journal\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"log\":\"journal\",\"message\":\"�\"}}"
+        "{\"kind\":\"log_line\",\"source\":\"journal\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"log\":\"journal\",\"message\":\"\\ufffd\"}}"
       ],
       "want": {
         "records": [
@@ -1440,7 +1440,7 @@
       "name": "S30 message escaped noncharacter",
       "lines": [
         "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
-        "{\"kind\":\"log_line\",\"source\":\"journal\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"log\":\"journal\",\"message\":\"￿\"}}"
+        "{\"kind\":\"log_line\",\"source\":\"journal\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"log\":\"journal\",\"message\":\"\\uffff\"}}"
       ],
       "want": {
         "records": [
