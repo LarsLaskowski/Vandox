@@ -139,7 +139,9 @@ after the *The summary* bullet (before *Exit code*):
 > - **Interruption** (Ctrl-C) anywhere in pass 2 — while a file is parsed, verified or stored, between two files or
 >   between the entries of an archive — stops the run and still prints the summary of what was done, which says that
 >   the run was interrupted. The file being imported when the interruption arrives is listed as failed with the
->   reason `interrupted` and is resumed by the next run; recognized files not reached are not listed.
+>   reason `interrupted` and is resumed by the next run. Entries of an archive not reached are not listed; a plain file
+>   reached after the interruption may be listed as failed with the reason `interrupted`, and is likewise imported by the
+>   next run.
 
 ## Documentation updates
 
@@ -161,6 +163,18 @@ existing `ImportSummaryWriter` (`Terminal.Quote`), so security area 12 is unaffe
 ## Decision records
 
 None: no decision beyond the obvious fix (the code is brought in line with `docs/areas/log-import.md` and record 0072).
+
+## Challenge
+
+Devil's Advocate: 0 major, 1 minor.
+
+- **Minor — the area bullet contradicts *Related observations*.** The planned sentence "recognized files not reached are
+  not listed" is wrong for plain files: after an interruption between two plain files, the next file's `BeginAsync`
+  (`ImportPass.cs` line 354) fails through `StoreReason` (line 546, `cancellationToken.IsCancellationRequested`), so that
+  file is listed as failed `interrupted`. **Accepted** (re-checked against the code). The bullet in *Areas* now says that
+  unreached archive entries are not listed and that a plain file reached after the interruption may be listed as failed
+  with the reason `interrupted` and is imported by the next run ("may": whether a file is reached first depends on where
+  the token is observed). No change to the acceptance criteria, the approach, the tests or the tier.
 
 ## Out of scope / follow-ups
 
