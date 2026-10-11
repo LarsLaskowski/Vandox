@@ -260,5 +260,42 @@ public class ImporterArchiveTests
         Assert.AreEqual($"{TestInputs.Messages(1, 3)}|LOG alt 4|LOG alt 5|{TestInputs.Messages(4, 4)}", string.Join('|', harness.Store.Messages), "the plain file, the new lines of the gzip file and of the entry");
     }
 
+    /// <summary>
+    /// Cancelling between two entries of a tar archive ends the run as interrupted with the summary of the first entry, and the second entry is neither listed nor stored.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task ImporterReturnsInterruptedSummaryWhenCancelledBetweenArchiveEntries()
+    {
+        // Arrange
+        using var harness = new ImportHarness();
+        using var interrupt = new CancellationTokenSource();
+
+        harness.Write("logs.tar", TestInputs.Tar(("a.log", TestInputs.Bytes(TestInputs.Log(2))), ("b.log", TestInputs.Bytes(TestInputs.Log(3, "LOG b")))));
+
+        // Act
+        var run = await harness.RunAsync(interrupt.Token,
+                                         null,
+                                         options => options.Progress = progress =>
+                                                                       {
+                                                                           harness.Events.Add(progress);
+
+                                                                           if (progress.Event == ProgressEvent.FileFinished)
+                                                                           {
+                                                                               interrupt.Cancel();
+                                                                           }
+                                                                       });
+        var first = run.Summary.Files.SingleOrDefault(file => file.Path == "logs.tar:a.log");
+
+        // Assert
+        Assert.IsTrue(run.Summary.Interrupted, "the run is interrupted");
+        Assert.IsInstanceOfType<OperationCanceledException>(run.Error, "the run ends with the cancellation");
+        Assert.IsNotNull(first, "the first entry is listed");
+        Assert.AreEqual(ImportOutcome.Imported, first.Outcome, "the first entry is imported");
+        Assert.AreEqual(2L, first.Records, "with its records");
+        Assert.DoesNotContain(file => file.Path == "logs.tar:b.log", run.Summary.Files, "the second entry is not listed");
+        Assert.AreEqual(TestInputs.Messages(1, 2), string.Join('|', harness.Store.Messages), "only the records of the first entry are stored");
+    }
+
     #endregion // Methods
 }

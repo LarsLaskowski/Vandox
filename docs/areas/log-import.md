@@ -438,6 +438,12 @@ syslog file. The journal and syslog parsers apply these rules to the records the
   not recognized and the files that failed with
   their reasons, and the files with skipped lines with their first problems (at most ten per file). The text
   format belongs to the command and is not an interface.
+- **Interruption** (Ctrl-C) anywhere in pass 2 — while a file is parsed, verified or stored, between two files or
+  between the entries of an archive — stops the run and still prints the summary of what was done, which says that
+  the run was interrupted. The file being imported when the interruption arrives is listed as failed with the
+  reason `interrupted` and is resumed by the next run. Entries of an archive not reached are not listed; a plain file
+  reached after the interruption may be listed as failed with the reason `interrupted`, and is likewise imported by the
+  next run.
 - **Exit code:** 0 when every file was imported, continued, contained, already imported or not recognized (a saved `/var/log` always holds
   files no parser claims, such as `wtmp` and `lastlog`); 1 when a file failed, the run was interrupted or ended with
   an error, or the configuration or the database could not be opened (the summary is still printed when there is one);

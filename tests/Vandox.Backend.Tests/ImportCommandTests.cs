@@ -720,6 +720,37 @@ public class ImportCommandTests
     }
 
     /// <summary>
+    /// An import that is interrupted during the verification read prints the summary with the file as failed and exits with 1.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task ImportCommandPrintsSummaryWhenInterruptedDuringTheVerificationRead()
+    {
+        // Arrange
+        using var fixture = new BackendFixture();
+        using var cancelled = new CancellationTokenSource();
+        var logs = Path.Combine(fixture.Folder.Path, "logs");
+
+        Directory.CreateDirectory(logs);
+        await File.WriteAllTextAsync(Path.Combine(logs, "a.log"), "LOG one\nLOG two\nLOG three\n", TestContext.CancellationToken);
+
+        // Act
+        var code = await fixture.RunAsync(["import", logs],
+                                          new ServeHooks
+                                          {
+                                              Parsers = [new CancelAfterReadParser(cancelled)]
+                                          },
+                                          cancelled.Token);
+
+        // Assert
+        Assert.AreEqual(1, code, "exit code");
+        Assert.Contains("import interrupted", fixture.Error.ToString(), "log says so");
+        Assert.Contains("The import was interrupted; run it again to continue.", fixture.Out.ToString(), "summary says so");
+        Assert.Contains("a.log", fixture.Out.ToString(), "the summary names the file");
+        Assert.Contains("interrupted", fixture.Out.ToString().Replace("The import was interrupted", string.Empty, StringComparison.Ordinal), "with the reason interrupted");
+    }
+
+    /// <summary>
     /// Writes a syslog file with a year-less line and a journal export into a directory.
     /// </summary>
     /// <param name="directory">The directory</param>

@@ -66,7 +66,15 @@ public static class Importer
                                                Files = scanner.Found.Count,
                                                Pending = pending
                                            });
-                error = await new ImportPass(source, effective, scanner.Found).RunAsync(cancellationToken).ConfigureAwait(false);
+
+                try
+                {
+                    error = await new ImportPass(source, effective, scanner.Found).RunAsync(cancellationToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException exception) when (cancellationToken.IsCancellationRequested)
+                {
+                    error = exception;
+                }
             }
 
             summary.Interrupted = error is OperationCanceledException && cancellationToken.IsCancellationRequested;

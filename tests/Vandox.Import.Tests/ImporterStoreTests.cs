@@ -1681,6 +1681,113 @@ public class ImporterStoreTests
     }
 
     /// <summary>
+    /// Cancelling after the parser returned with content left unread hits the verification read: the run ends as interrupted, the file is listed as failed with the reason interrupted and the next run imports it to the end.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task ImporterReturnsInterruptedSummaryWhenCancelledDuringTheVerificationRead()
+    {
+        // Arrange
+        using var harness = new ImportHarness();
+        using var interrupt = new CancellationTokenSource();
+        var probe = new ProbeParser("test", 1);
+
+        harness.Write("a.log", TestInputs.Log(2000));
+        harness.Store.AfterBatch = _ => interrupt.Cancel();
+
+        // Act
+        var first = await harness.RunAsync(interrupt.Token,
+                                           null,
+                                           options =>
+                                           {
+                                               options.Parsers = new ParserRegistry([probe]);
+                                               options.BatchRecords = 1;
+                                           });
+        var file = first.Summary.Files.SingleOrDefault();
+
+        harness.Store.AfterBatch = null;
+
+        var second = await harness.RunAsync(TestContext.CancellationToken, null, options => options.Parsers = new ParserRegistry([new ProbeParser("test")]));
+
+        // Assert
+        Assert.IsTrue(first.Summary.Interrupted, "the first run is interrupted");
+        Assert.IsInstanceOfType<OperationCanceledException>(first.Error, "the first run ends with the cancellation");
+        Assert.IsNotNull(file, "the file is listed");
+        Assert.AreEqual(ImportOutcome.Failed, file.Outcome, "the file is failed");
+        Assert.AreEqual("interrupted", file.Reason, "with the reason interrupted");
+        Assert.IsNull(second.Error, "the second run has no error");
+        Assert.AreEqual(ImportOutcome.Imported, second.Summary.Files.Single().Outcome, "the second run imports the file");
+        Assert.AreEqual(TestInputs.Messages(1, 2000), string.Join('|', harness.Store.Messages), "every record is stored once");
+    }
+
+    /// <summary>
+    /// A cancellation that escapes pass 2 while the token is cancelled ends the run as interrupted instead of throwing.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task ImporterReturnsInterruptedSummaryWhenACancellationEscapesPassTwo()
+    {
+        // Arrange
+        using var harness = new ImportHarness();
+        using var interrupt = new CancellationTokenSource();
+        var thrown = new OperationCanceledException(interrupt.Token);
+
+        harness.Write("a.log", TestInputs.Log(2));
+        harness.Write("b.log", TestInputs.Log(2));
+
+        // Act
+        var run = await harness.RunAsync(interrupt.Token,
+                                         null,
+                                         options => options.Progress = progress =>
+                                                                       {
+                                                                           if (progress.Event == ProgressEvent.FileStarted)
+                                                                           {
+                                                                               interrupt.Cancel();
+
+                                                                               throw thrown;
+                                                                           }
+                                                                       });
+
+        // Assert
+        Assert.IsTrue(run.Summary.Interrupted, "the run is interrupted");
+        Assert.AreSame(thrown, run.Error, "the error is the escaped exception");
+    }
+
+    /// <summary>
+    /// A cancellation exception without a cancelled token is not caught by the backstop of the run.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task ImporterLetsACancellationExceptionWithoutCancelledTokenEscape()
+    {
+        // Arrange
+        using var harness = new ImportHarness();
+
+        harness.Write("a.log", TestInputs.Log(2));
+
+        // Act
+        var thrown = await Assert.ThrowsExactlyAsync<OperationCanceledException>(() => harness.RunAsync(TestContext.CancellationToken, null, ThrowOnFileStarted));
+
+        // Assert
+        Assert.IsNotNull(thrown, "the exception leaves the run");
+    }
+
+    /// <summary>
+    /// Makes the progress callback throw a cancellation exception without cancelling the token.
+    /// </summary>
+    /// <param name="options">The options</param>
+    private static void ThrowOnFileStarted(ImportOptions options)
+    {
+        options.Progress = progress =>
+                           {
+                               if (progress.Event == ProgressEvent.FileStarted)
+                               {
+                                   throw new OperationCanceledException();
+                               }
+                           };
+    }
+
+    /// <summary>
     /// Creates the failure of the store the case describes.
     /// </summary>
     /// <param name="kind">The kind: <c>conflict</c>, <c>store</c> or anything else for none</param>
