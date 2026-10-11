@@ -1,7 +1,10 @@
 using System.Collections;
+using System.Diagnostics;
 using System.Reflection;
 using System.Text;
+using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.Json.Serialization;
 
 using Vandox.Core.Model;
 using Vandox.Core.Wire;
@@ -14,6 +17,20 @@ namespace Vandox.Core.Tests;
 [TestClass]
 public class BatchDecoderTests
 {
+    #region Constants
+
+    /// <summary>
+    /// The most bytes the decoder may allocate per byte of the record line, or of the batch for many short lines.
+    /// </summary>
+    private const int MaxAllocationFactor = 20;
+
+    /// <summary>
+    /// The most the decoder may take as a multiple of a plain parse of the same line.
+    /// </summary>
+    private const double MaxTimeFactor = 50;
+
+    #endregion // Constants
+
     #region Properties
 
     /// <summary>
@@ -83,8 +100,8 @@ public class BatchDecoderTests
     [DataRow("{}", WireErrorKind.UnsupportedVersion)]
     [DataRow("null", WireErrorKind.UnsupportedVersion)]
     [DataRow("""{"format_major":null}""", WireErrorKind.UnsupportedVersion)]
-    [DataRow("[1]", WireErrorKind.UnsupportedVersion)]
-    [DataRow("""{"format_major":"1"}""", WireErrorKind.UnsupportedVersion)]
+    [DataRow("[1]", WireErrorKind.Malformed)]
+    [DataRow("""{"format_major":"1"}""", WireErrorKind.Malformed)]
     [DataRow("""{"format_major":2}""", WireErrorKind.UnsupportedVersion)]
     [DataRow("""{"format_major":99999999999}""", WireErrorKind.UnsupportedVersion)]
     [DataRow("""{"format_major":1,"format_minor":"x"}""", WireErrorKind.Malformed)]
@@ -725,6 +742,610 @@ public class BatchDecoderTests
     }
 
     /// <summary>
+    /// The deepest nesting of a line is 64.
+    /// </summary>
+    [TestMethod]
+    public void WireFormatLimitsNestingTo64()
+    {
+        // Arrange
+        var depth = WireFormat.MaxDepth;
+
+        // Act
+        var limit = depth;
+
+        // Assert
+        Assert.AreEqual(64, limit, "WireFormat.MaxDepth");
+    }
+
+    /// <summary>
+    /// A header that is no JSON object and no <c>null</c> is malformed, not an unsupported version.
+    /// </summary>
+    /// <param name="header">The header line</param>
+    /// <returns>A task that completes when the work is done</returns>
+    [TestMethod]
+    [DataRow("[1]")]
+    [DataRow("[]")]
+    [DataRow("5")]
+    [DataRow("\"x\"")]
+    [DataRow("true")]
+    public async Task BatchDecoderRefusesHeaderThatIsNoObject(string header)
+    {
+        // Arrange
+        using var input = BatchBuilder.Gzip(header, BatchBuilder.Metric(1));
+
+        // Act
+        var exception = await Assert.ThrowsExactlyAsync<WireException>(() => BatchDecoder.OpenAsync(input, null, TestContext.CancellationToken), "header that is no object");
+
+        // Assert
+        Assert.AreEqual(WireErrorKind.Malformed, exception.Kind, "error class");
+        Assert.AreEqual(1, exception.Line, "line");
+        Assert.AreEqual("header is not a JSON object", exception.Reason, "reason");
+    }
+
+    /// <summary>
+    /// A <c>format_major</c> that is no integer of 64 bits is malformed, not an unsupported version.
+    /// </summary>
+    /// <param name="major">The JSON text of the value</param>
+    /// <returns>A task that completes when the work is done</returns>
+    [TestMethod]
+    [DataRow("\"1\"")]
+    [DataRow("\"2\"")]
+    [DataRow("1.0")]
+    [DataRow("1e0")]
+    [DataRow("1E0")]
+    [DataRow("10e-1")]
+    [DataRow("2.5")]
+    [DataRow("true")]
+    [DataRow("{}")]
+    [DataRow("[1]")]
+    [DataRow("9223372036854775808")]
+    [DataRow("-9223372036854775809")]
+    [DataRow("1e400")]
+    public async Task BatchDecoderRefusesMajorThatIsNoInteger(string major)
+    {
+        // Arrange
+        using var input = BatchBuilder.Gzip(HeaderWithMajor(major), BatchBuilder.Metric(1));
+
+        // Act
+        var exception = await Assert.ThrowsExactlyAsync<WireException>(() => BatchDecoder.OpenAsync(input, null, TestContext.CancellationToken), "major that is no integer");
+
+        // Assert
+        Assert.AreEqual(WireErrorKind.Malformed, exception.Kind, "error class");
+        Assert.AreEqual(1, exception.Line, "line");
+        Assert.AreEqual("format_major is not an integer", exception.Reason, "reason");
+    }
+
+    /// <summary>
+    /// A <c>format_major</c> that is an integer of 64 bits other than 1 is an unsupported version, whatever its size.
+    /// </summary>
+    /// <param name="major">The JSON text of the value</param>
+    /// <returns>A task that completes when the work is done</returns>
+    [TestMethod]
+    [DataRow("null")]
+    [DataRow("0")]
+    [DataRow("-0")]
+    [DataRow("-1")]
+    [DataRow("2")]
+    [DataRow("3000000000")]
+    [DataRow("9223372036854775807")]
+    [DataRow("-9223372036854775808")]
+    public async Task BatchDecoderRefusesOtherMajorAsUnsupportedVersion(string major)
+    {
+        // Arrange
+        using var input = BatchBuilder.Gzip(HeaderWithMajor(major), BatchBuilder.Metric(1));
+
+        // Act
+        var exception = await Assert.ThrowsExactlyAsync<WireException>(() => BatchDecoder.OpenAsync(input, null, TestContext.CancellationToken), "other major");
+
+        // Assert
+        Assert.AreEqual(WireErrorKind.UnsupportedVersion, exception.Kind, "error class");
+        Assert.AreEqual(1, exception.Line, "line");
+    }
+
+    /// <summary>
+    /// The minor version is a 64-bit integer that is read back exactly.
+    /// </summary>
+    /// <param name="minor">The JSON text of the value</param>
+    /// <param name="expected">The expected value</param>
+    /// <returns>A task that completes when the work is done</returns>
+    [TestMethod]
+    [DataRow("3000000000", 3000000000L)]
+    [DataRow("9223372036854775807", long.MaxValue)]
+    public async Task BatchDecoderReadsFormatMinorAsLong(string minor, long expected)
+    {
+        // Arrange
+        using var input = BatchBuilder.Gzip(HeaderWithMinor(minor), BatchBuilder.Metric(1));
+
+        // Act
+        using var decoder = await BatchDecoder.OpenAsync(input, null, TestContext.CancellationToken);
+
+        // Assert
+        Assert.AreEqual(expected, decoder.Header.FormatMinor, "minor version");
+    }
+
+    /// <summary>
+    /// A minor version beyond 64 bits or of another type is malformed.
+    /// </summary>
+    /// <param name="minor">The JSON text of the value</param>
+    /// <returns>A task that completes when the work is done</returns>
+    [TestMethod]
+    [DataRow("9223372036854775808")]
+    [DataRow("\"0\"")]
+    public async Task BatchDecoderRefusesMinorThatIsNoInteger(string minor)
+    {
+        // Arrange
+        using var input = BatchBuilder.Gzip(HeaderWithMinor(minor), BatchBuilder.Metric(1));
+
+        // Act
+        var exception = await Assert.ThrowsExactlyAsync<WireException>(() => BatchDecoder.OpenAsync(input, null, TestContext.CancellationToken), "minor that is no integer");
+
+        // Assert
+        Assert.AreEqual(WireErrorKind.Malformed, exception.Kind, "error class");
+        Assert.AreEqual(1, exception.Line, "line");
+    }
+
+    /// <summary>
+    /// A negative minor version is invalid and names its field.
+    /// </summary>
+    /// <returns>A task that completes when the work is done</returns>
+    [TestMethod]
+    public async Task BatchDecoderRefusesNegativeMinor()
+    {
+        // Arrange
+        using var input = BatchBuilder.Gzip(HeaderWithMinor("-1"), BatchBuilder.Metric(1));
+
+        // Act
+        var exception = await Assert.ThrowsExactlyAsync<WireException>(() => BatchDecoder.OpenAsync(input, null, TestContext.CancellationToken), "negative minor");
+
+        // Assert
+        Assert.AreEqual(WireErrorKind.Invalid, exception.Kind, "error class");
+        Assert.AreEqual("format_minor", exception.FieldError?.Field, "field");
+        Assert.AreEqual("must not be negative", exception.FieldError?.Reason, "reason");
+    }
+
+    /// <summary>
+    /// The options every wire line is bound with match names ignoring ASCII case.
+    /// </summary>
+    [TestMethod]
+    public void PayloadRegistryOptionsMatchNamesIgnoringCase()
+    {
+        // Arrange
+        var options = PayloadRegistry.Options;
+
+        // Act
+        var insensitive = options.PropertyNameCaseInsensitive;
+
+        // Assert
+        Assert.IsTrue(insensitive, "property names are matched ignoring case");
+    }
+
+    /// <summary>
+    /// A key in another ASCII case, also written with escapes, is the field, in the header, the envelope and the payload at any depth.
+    /// </summary>
+    /// <returns>A task that completes when the work is done</returns>
+    [TestMethod]
+    public async Task BatchDecoderBindsKeysIgnoringAsciiCase()
+    {
+        // Arrange
+        const string header = """{"FORMAT_MAJOR":1,"Format_Minor":3,"AGENT_ID":"agent-1","Boot_ID":"0123abcd-0123-0123-0123-0123456789ab","MODE":"live"}""";
+        const string metric = """{"KIND":"metric","Source":"host","SEQ":4,"Captured_At":"2026-10-01T10:00:00Z","DATA":{"NAME":"cpu","Value":1,"LABELS":{"Mount":"/var"}}}""";
+        const string processes = """{"kind":"process_snapshot","source":"host","seq":5,"captured_at":"2026-10-01T10:00:00Z","data":{"Complete":true,"Processes":[{"PID":7,"Command":"x"}]}}""";
+        const string escaped = "{\"\\u006bind\":\"metric\",\"\\u0053OURCE\":\"host\",\"seq\":6,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}";
+        using var input = BatchBuilder.Gzip(header, metric, processes, escaped);
+        using var decoder = await BatchDecoder.OpenAsync(input, null, TestContext.CancellationToken);
+
+        // Act
+        var first = await decoder.NextAsync(TestContext.CancellationToken);
+        var second = await decoder.NextAsync(TestContext.CancellationToken);
+        var third = await decoder.NextAsync(TestContext.CancellationToken);
+
+        // Assert
+        Assert.AreEqual(3L, decoder.Header.FormatMinor, "minor version of the header");
+        Assert.AreEqual("agent-1", decoder.Header.AgentId, "agent ID of the header");
+        Assert.AreEqual(4UL, first?.Seq, "seq of the envelope");
+
+        var metricPoint = first?.Data as MetricPoint;
+
+        Assert.AreEqual("cpu", metricPoint?.Name, "name of the payload");
+        Assert.AreEqual("/var", metricPoint?.Labels?["Mount"], "label of the payload keeps the case of its key");
+        Assert.AreEqual(7, (second?.Data as ProcessSnapshot)?.Processes?[0].Pid, "pid of a list element");
+        Assert.AreEqual("host", third?.Source, "source with an escaped key");
+        Assert.AreEqual(RecordKind.Metric, third?.Kind, "kind with an escaped key");
+    }
+
+    /// <summary>
+    /// A key that is not ASCII once unescaped is malformed in the record and in the header, with the error naming the rule and not the key.
+    /// </summary>
+    /// <param name="key">The JSON text of the key, escapes included, without the quotes</param>
+    /// <returns>A task that completes when the work is done</returns>
+    [TestMethod]
+    [DataRow("\\u212aind")]
+    [DataRow("\\u017feq")]
+    [DataRow("agent_\\u0131d")]
+    [DataRow("\\u00e9")]
+    [DataRow("\\ud83d\\ude00")]
+    [DataRow("\\ud800")]
+    [DataRow("a\\udc00")]
+    [DataRow("\\ud800\\u0041")]
+    [DataRow("\\u0080")]
+    public async Task BatchDecoderRefusesNonAsciiKey(string key)
+    {
+        // Arrange
+        using var inRecord = BatchBuilder.Gzip(BatchBuilder.Header, RecordWithKey(key));
+        using var inHeader = BatchBuilder.Gzip(HeaderWithKey(key), BatchBuilder.Metric(1));
+
+        // Act
+        var record = await Assert.ThrowsExactlyAsync<WireException>(() => OpenAndReadAllAsync(inRecord), "key in the record");
+        var header = await Assert.ThrowsExactlyAsync<WireException>(() => BatchDecoder.OpenAsync(inHeader, null, TestContext.CancellationToken), "key in the header");
+
+        // Assert
+        Assert.AreEqual(WireErrorKind.Malformed, record.Kind, "record error class");
+        Assert.AreEqual(2, record.Line, "record line");
+        Assert.AreEqual("key not ASCII", record.Reason, "record reason");
+        Assert.AreEqual(WireErrorKind.Malformed, header.Kind, "header error class");
+        Assert.AreEqual(1, header.Line, "header line");
+        Assert.AreEqual("key not ASCII", header.Reason, "header reason");
+    }
+
+    /// <summary>
+    /// A key with a raw non-ASCII character is malformed in the record and in the header.
+    /// </summary>
+    /// <param name="codePoint">The code point of the character</param>
+    /// <returns>A task that completes when the work is done</returns>
+    [TestMethod]
+    [DataRow(0x212A)]
+    [DataRow(0x017F)]
+    [DataRow(0x0131)]
+    [DataRow(0x00E9)]
+    [DataRow(0x1F600)]
+    public async Task BatchDecoderRefusesRawNonAsciiKey(int codePoint)
+    {
+        // Arrange
+        var key = $"k{char.ConvertFromUtf32(codePoint)}y";
+        using var inRecord = BatchBuilder.Gzip(BatchBuilder.Header, RecordWithKey(key));
+        using var inHeader = BatchBuilder.Gzip(HeaderWithKey(key), BatchBuilder.Metric(1));
+
+        // Act
+        var record = await Assert.ThrowsExactlyAsync<WireException>(() => OpenAndReadAllAsync(inRecord), "raw key in the record");
+        var header = await Assert.ThrowsExactlyAsync<WireException>(() => BatchDecoder.OpenAsync(inHeader, null, TestContext.CancellationToken), "raw key in the header");
+
+        // Assert
+        Assert.AreEqual("key not ASCII", record.Reason, "record reason");
+        Assert.AreEqual(WireErrorKind.Malformed, record.Kind, "record error class");
+        Assert.AreEqual("key not ASCII", header.Reason, "header reason");
+        Assert.AreEqual(WireErrorKind.Malformed, header.Kind, "header error class");
+    }
+
+    /// <summary>
+    /// A key with bytes that are no valid UTF-8 is malformed in the record and in the header, and only a <see cref="WireException"/> leaves the decoder.
+    /// </summary>
+    /// <param name="hex">The bytes of the key in hexadecimal</param>
+    /// <returns>A task that completes when the work is done</returns>
+    [TestMethod]
+    [DataRow("FF")]
+    [DataRow("6B696EFF64")]
+    [DataRow("C0AF")]
+    [DataRow("EDA080")]
+    [DataRow("C3")]
+    public async Task BatchDecoderRefusesKeyOfInvalidUtf8(string hex)
+    {
+        // Arrange
+        var key = Convert.FromHexString(hex);
+        using var inRecord = BatchBuilder.Gzip(RawLines(Encoding.UTF8.GetBytes(BatchBuilder.Header), RecordBytesWithKey(key)));
+        using var inHeader = BatchBuilder.Gzip(RawLines(HeaderBytesWithKey(key), Encoding.UTF8.GetBytes(BatchBuilder.Metric(1))));
+
+        // Act
+        var record = await Assert.ThrowsExactlyAsync<WireException>(() => OpenAndReadAllAsync(inRecord), "invalid UTF-8 key in the record");
+        var header = await Assert.ThrowsExactlyAsync<WireException>(() => BatchDecoder.OpenAsync(inHeader, null, TestContext.CancellationToken), "invalid UTF-8 key in the header");
+
+        // Assert
+        Assert.AreEqual(WireErrorKind.Malformed, record.Kind, "record error class");
+        Assert.AreEqual(2, record.Line, "record line");
+        Assert.AreEqual(WireErrorKind.Malformed, header.Kind, "header error class");
+        Assert.AreEqual(1, header.Line, "header line");
+    }
+
+    /// <summary>
+    /// The error text names the broken rule and never the key.
+    /// </summary>
+    /// <param name="inHeader"><c>true</c> to break the header, <c>false</c> to break the record</param>
+    /// <param name="duplicate"><c>true</c> to repeat a key, <c>false</c> to use a key that is not ASCII</param>
+    /// <returns>A task that completes when the work is done</returns>
+    [TestMethod]
+    [DataRow(false, true)]
+    [DataRow(false, false)]
+    [DataRow(true, true)]
+    [DataRow(true, false)]
+    public async Task BatchDecoderErrorNamesNoKey(bool inHeader, bool duplicate)
+    {
+        // Arrange
+        var members = duplicate ? "\"SENTINELKEY\":1,\"SENTINELKEY\":2" : $"\"SENTINELK{char.ConvertFromUtf32(0xC9)}Y\":1";
+        var reason = duplicate ? "duplicate key" : "key not ASCII";
+        var line = inHeader ? 1 : 2;
+        using var input = inHeader
+                              ? BatchBuilder.Gzip(HeaderWithMembers(members), BatchBuilder.Metric(1))
+                              : BatchBuilder.Gzip(BatchBuilder.Header, RecordWithMembers(members));
+
+        // Act
+        var exception = await Assert.ThrowsExactlyAsync<WireException>(() => OpenAndReadAllAsync(input), "broken key rule");
+
+        // Assert
+        Assert.AreEqual(WireErrorKind.Malformed, exception.Kind, "error class");
+        Assert.AreEqual(reason, exception.Reason, "reason");
+        Assert.AreEqual($"wire: line {line}: {reason}", exception.Message, "exact message");
+        Assert.DoesNotContain("SENTINEL", exception.Message, "the key stays out of the message");
+    }
+
+    /// <summary>
+    /// A line nested 64 deep is accepted, in the record and in the header, also inside an unknown key.
+    /// </summary>
+    /// <param name="inHeader"><c>true</c> to nest the header, <c>false</c> to nest the record</param>
+    /// <returns>A task that completes when the work is done</returns>
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public async Task BatchDecoderAcceptsNestingOf64(bool inHeader)
+    {
+        // Arrange
+        var nested = WireShapes.Arrays(WireFormat.MaxDepth - 1);
+        using var input = inHeader
+                              ? BatchBuilder.Gzip(HeaderWithMembers($"\"x\":{nested}"), BatchBuilder.Metric(1))
+                              : BatchBuilder.Gzip(BatchBuilder.Header, WireShapes.Record(1, nested));
+        using var decoder = await BatchDecoder.OpenAsync(input, null, TestContext.CancellationToken);
+
+        // Act
+        var record = await decoder.NextAsync(TestContext.CancellationToken);
+
+        // Assert
+        Assert.AreEqual(1UL, record?.Seq, "the record behind a line nested 64 deep is read");
+    }
+
+    /// <summary>
+    /// A line nested 65 deep is malformed, in the record and in the header, also inside an unknown key.
+    /// </summary>
+    /// <param name="inHeader"><c>true</c> to nest the header, <c>false</c> to nest the record</param>
+    /// <returns>A task that completes when the work is done</returns>
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public async Task BatchDecoderRefusesNestingOf65(bool inHeader)
+    {
+        // Arrange
+        var nested = WireShapes.Arrays(WireFormat.MaxDepth);
+        using var input = inHeader
+                              ? BatchBuilder.Gzip(HeaderWithMembers($"\"x\":{nested}"), BatchBuilder.Metric(1))
+                              : BatchBuilder.Gzip(BatchBuilder.Header, WireShapes.Record(1, nested));
+
+        // Act
+        var exception = await Assert.ThrowsExactlyAsync<WireException>(() => OpenAndReadAllAsync(input), "nesting of 65");
+
+        // Assert
+        Assert.AreEqual(WireErrorKind.Malformed, exception.Kind, "error class");
+        Assert.AreEqual(inHeader ? 1 : 2, exception.Line, "line");
+        Assert.AreEqual(inHeader ? "header is not valid JSON" : "record is not valid JSON", exception.Reason, "reason");
+    }
+
+    /// <summary>
+    /// The records before a line with a repeated key are returned, then the error follows at its line and stays.
+    /// </summary>
+    /// <returns>A task that completes when the work is done</returns>
+    [TestMethod]
+    public async Task BatchDecoderReturnsRecordsBeforeDuplicateKeyThenFails()
+    {
+        // Arrange
+        const string repeated = """{"kind":"metric","source":"host","seq":2,"seq":2,"captured_at":"2026-10-01T10:00:00Z","data":{"name":"cpu","value":1.5}}""";
+        using var input = BatchBuilder.Gzip(BatchBuilder.Header, BatchBuilder.Metric(1), repeated, BatchBuilder.Metric(3));
+        using var decoder = await BatchDecoder.OpenAsync(input, null, TestContext.CancellationToken);
+
+        // Act
+        var first = await decoder.NextAsync(TestContext.CancellationToken);
+        var exception = await Assert.ThrowsExactlyAsync<WireException>(() => decoder.NextAsync(TestContext.CancellationToken), "repeated key");
+        var again = await Assert.ThrowsExactlyAsync<WireException>(() => decoder.NextAsync(TestContext.CancellationToken), "sticky error");
+
+        // Assert
+        Assert.AreEqual(1UL, first?.Seq, "the record before the line is returned");
+        Assert.AreEqual(WireErrorKind.Malformed, exception.Kind, "error class");
+        Assert.AreEqual(3, exception.Line, "line");
+        Assert.AreSame(exception, again, "the error is sticky");
+    }
+
+    /// <summary>
+    /// Two decoders that read two batches with the same nested keys one record at a time in turn both return every record.
+    /// </summary>
+    /// <returns>A task that completes when the work is done</returns>
+    [TestMethod]
+    public async Task BatchDecodersKeepTheirOwnKeyStateWhenInterleaved()
+    {
+        // Arrange
+        const string value = """{"a":{"b":1},"c":[{"b":2},{"b":3,"d":4}]}""";
+        using var firstInput = BatchBuilder.Gzip(BatchBuilder.Header, WireShapes.Record(1, value), WireShapes.Record(2, value), WireShapes.Record(3, value));
+        using var secondInput = BatchBuilder.Gzip(BatchBuilder.Header, WireShapes.Record(1, value), WireShapes.Record(2, value), WireShapes.Record(3, value));
+        using var first = await BatchDecoder.OpenAsync(firstInput, null, TestContext.CancellationToken);
+        using var second = await BatchDecoder.OpenAsync(secondInput, null, TestContext.CancellationToken);
+        var firstSeqs = new List<ulong?>();
+        var secondSeqs = new List<ulong?>();
+
+        // Act
+        for (var round = 0; round < 4; round++)
+        {
+            firstSeqs.Add((await first.NextAsync(TestContext.CancellationToken))?.Seq);
+            secondSeqs.Add((await second.NextAsync(TestContext.CancellationToken))?.Seq);
+        }
+
+        // Assert
+        Assert.AreSequenceEqual(new ulong?[] { 1, 2, 3, null }, firstSeqs, "records of the first decoder");
+        Assert.AreSequenceEqual(new ulong?[] { 1, 2, 3, null }, secondSeqs, "records of the second decoder");
+    }
+
+    /// <summary>
+    /// Every public settable property that wire data binds to has a JSON name or is ignored, and no two names of one type are equal ignoring ASCII case.
+    /// </summary>
+    [TestMethod]
+    public void WireTypesNameEveryBoundPropertyOnceIgnoringCase()
+    {
+        // Arrange
+        var kinds = new[]
+                    {
+                        RecordKind.Metric,
+                        RecordKind.ProcessSnapshot,
+                        RecordKind.ConnectionSnapshot,
+                        RecordKind.ServiceState,
+                        RecordKind.MariaDbStatus,
+                        RecordKind.KernelEvent,
+                        RecordKind.LogLine,
+                        RecordKind.Gap
+                    };
+        var roots = new List<Type>
+                    {
+                        typeof(WireHeader),
+                        typeof(Envelope)
+                    };
+
+        roots.AddRange(kinds.Select(kind => PayloadRegistry.TypeOf(kind) ?? throw new InvalidOperationException($"no payload type for {kind}")));
+
+        // Act
+        var types = ReachableWireTypes(roots);
+        var failures = types.SelectMany(DescribeNameProblems).ToList();
+
+        // Assert
+        Assert.IsGreaterThan(roots.Count, types.Count, "types below the roots are reached");
+        Assert.IsEmpty(failures, $"properties without a JSON name or with names equal ignoring case: {string.Join("; ", failures)}");
+    }
+
+    /// <summary>
+    /// A line of distinct keys with a repeat at its very end is malformed.
+    /// </summary>
+    /// <returns>A task that completes when the work is done</returns>
+    [TestMethod]
+    public async Task BatchDecoderRefusesRepeatedKeyAtTheEndOfALongLine()
+    {
+        // Arrange
+        var value = WireShapes.ObjectFillingBytes(WireShapes.LineBytes - 200).TrimEnd('}') + ",\"a\":0}";
+        var line = WireShapes.Record(1, value);
+        using var input = BatchBuilder.Gzip(BatchBuilder.Header, line);
+        using var decoder = await BatchDecoder.OpenAsync(input, null, TestContext.CancellationToken);
+
+        // Act
+        var exception = await Assert.ThrowsExactlyAsync<WireException>(() => decoder.NextAsync(TestContext.CancellationToken), "repeat at the end of the line");
+
+        // Assert
+        Assert.IsGreaterThan(WireShapes.LineBytes / 2, line.Length, "the line is long");
+        Assert.AreEqual(WireErrorKind.Malformed, exception.Kind, "error class");
+        Assert.AreEqual("duplicate key", exception.Reason, "reason");
+    }
+
+    /// <summary>
+    /// Opening and reading a batch with one record line of a hostile shape allocates at most <see cref="MaxAllocationFactor"/> times the line.
+    /// </summary>
+    /// <param name="shape">The shape, see <see cref="WireShapes.Value"/></param>
+    /// <param name="keys">The number of keys of the objects of shape 6</param>
+    /// <returns>A task that completes when the work is done</returns>
+    [TestMethod]
+    [DataRow(1, 0)]
+    [DataRow(2, 0)]
+    [DataRow(3, 0)]
+    [DataRow(4, 0)]
+    [DataRow(5, 0)]
+    [DataRow(6, 9)]
+    [DataRow(6, 12)]
+    [DataRow(6, 24)]
+    [DataRow(6, 48)]
+    [DataRow(6, 65)]
+    [DataRow(6, 1025)]
+    public async Task BatchDecoderAllocationIsBoundedPerLine(int shape, int keys)
+    {
+        // Arrange
+        var line = WireShapes.Record(1, WireShapes.Value(shape, keys));
+        var compressed = BatchBuilder.Gzip(BatchBuilder.Header, line).ToArray();
+
+        await ReadCompressedAsync(compressed);
+
+        // Act
+        var allocated = await AllocatedAsync(() => ReadCompressedAsync(compressed));
+
+        // Assert
+        TestContext.WriteLine($"shape {shape} with {keys} keys: {allocated / (double)line.Length:F1} times the line of {line.Length} bytes");
+        Assert.IsGreaterThan(WireShapes.LineBytes * 9 / 10, line.Length, "the line is about 1 MiB");
+        Assert.IsLessThan((long)MaxAllocationFactor * line.Length, allocated, "allocated bytes");
+    }
+
+    /// <summary>
+    /// Opening and reading a batch of many short records nested 64 deep allocates at most <see cref="MaxAllocationFactor"/> times the batch.
+    /// </summary>
+    /// <param name="variant">0 for 63 arrays, 1 for 61 objects, 2 for 61 objects with 8 more keys each</param>
+    /// <returns>A task that completes when the work is done</returns>
+    [TestMethod]
+    [DataRow(0)]
+    [DataRow(1)]
+    [DataRow(2)]
+    public async Task BatchDecoderAllocationIsBoundedPerBatchOfDeeplyNestedRecords(int variant)
+    {
+        // Arrange
+        var value = variant switch
+                    {
+                        0 => WireShapes.Arrays(63),
+                        1 => WireShapes.Objects(61, string.Empty),
+                        _ => WireShapes.Objects(61, "\"a\":0,\"b\":0,\"c\":0,\"d\":0,\"e\":0,\"f\":0,\"g\":0,\"h\":0,")
+                    };
+        var lines = WireShapes.Batch(value, 1 << 20);
+        var length = lines.Sum(line => line.Length + 1);
+        var compressed = BatchBuilder.Gzip(lines.ToArray()).ToArray();
+
+        await ReadCompressedAsync(compressed);
+
+        // Act
+        var allocated = await AllocatedAsync(() => ReadCompressedAsync(compressed));
+
+        // Assert
+        TestContext.WriteLine($"variant {variant}: {allocated / (double)length:F1} times the batch of {length} bytes in {lines.Count - 1} records");
+        Assert.IsLessThan((long)MaxAllocationFactor * length, allocated, "allocated bytes");
+    }
+
+    /// <summary>
+    /// One big object followed by many small ones in a line of about 4 MiB takes at most <see cref="MaxTimeFactor"/> times a plain parse of the line. The test compares two
+    /// durations of its own run and asserts no absolute duration.
+    /// </summary>
+    /// <returns>A task that completes when the work is done</returns>
+    [TestMethod]
+    public async Task BatchDecoderTimeIsInProportionToTheLine()
+    {
+        // Arrange
+        const int size = 4 << 20;
+        var line = WireShapes.Record(1, WireShapes.ListOf(WireShapes.ObjectFillingBytes(size / 2), """{"a":0}""", size));
+        var lineBytes = Encoding.UTF8.GetBytes(line);
+        var compressed = BatchBuilder.Gzip(BatchBuilder.Header, line).ToArray();
+        var limits = new WireLimits
+                     {
+                         MaxLineBytes = 8 << 20
+                     };
+        var options = new JsonDocumentOptions
+                      {
+                          MaxDepth = WireFormat.MaxDepth
+                      };
+
+        // Act
+        var decode = await BestOfThreeAsync(async () =>
+                                            {
+                                                using var input = new MemoryStream(compressed);
+                                                using var decoder = await BatchDecoder.OpenAsync(input, limits, TestContext.CancellationToken);
+
+                                                await ReadAllAsync(decoder);
+                                            });
+        var parse = await BestOfThreeAsync(() =>
+                                           {
+                                               using var document = JsonDocument.Parse(lineBytes, options);
+
+                                               return Task.CompletedTask;
+                                           });
+
+        // Assert
+        var ratio = decode.TotalMilliseconds / parse.TotalMilliseconds;
+
+        TestContext.WriteLine($"decoding took {decode.TotalMilliseconds:F1} ms, JsonDocument.Parse {parse.TotalMilliseconds:F1} ms, ratio {ratio:F2}, line of {lineBytes.Length} bytes");
+        Assert.IsLessThan(MaxTimeFactor, ratio, "time of the decoder as a multiple of a plain parse");
+    }
+
+    /// <summary>
     /// Builds a record line of the given kind with a valid envelope.
     /// </summary>
     /// <param name="kind">The record kind</param>
@@ -979,6 +1600,208 @@ public class BatchDecoderTests
     }
 
     /// <summary>
+    /// Builds a header line with the given <c>format_major</c>.
+    /// </summary>
+    /// <param name="major">The JSON text of the value</param>
+    /// <returns>The line</returns>
+    private static string HeaderWithMajor(string major)
+    {
+        return $$"""{"format_major":{{major}},"format_minor":0,"agent_id":"agent-1","boot_id":"0123abcd-0123-0123-0123-0123456789ab","mode":"live"}""";
+    }
+
+    /// <summary>
+    /// Builds a header line with the given <c>format_minor</c>.
+    /// </summary>
+    /// <param name="minor">The JSON text of the value</param>
+    /// <returns>The line</returns>
+    private static string HeaderWithMinor(string minor)
+    {
+        return $$"""{"format_major":1,"format_minor":{{minor}},"agent_id":"agent-1","boot_id":"0123abcd-0123-0123-0123-0123456789ab","mode":"live"}""";
+    }
+
+    /// <summary>
+    /// Builds a valid header line with further members behind the known ones.
+    /// </summary>
+    /// <param name="members">The JSON text of the members</param>
+    /// <returns>The line</returns>
+    private static string HeaderWithMembers(string members)
+    {
+        return string.Concat("{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\",", members, "}");
+    }
+
+    /// <summary>
+    /// Builds a valid header line with one further member named by the key.
+    /// </summary>
+    /// <param name="key">The JSON text of the key, escapes included, without the quotes</param>
+    /// <returns>The line</returns>
+    private static string HeaderWithKey(string key)
+    {
+        return HeaderWithMembers($"\"{key}\":1");
+    }
+
+    /// <summary>
+    /// Builds a valid metric record line with further members before the payload.
+    /// </summary>
+    /// <param name="members">The JSON text of the members</param>
+    /// <returns>The line</returns>
+    private static string RecordWithMembers(string members)
+    {
+        return string.Concat("{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",", members, ",\"data\":{\"name\":\"cpu\",\"value\":1}}");
+    }
+
+    /// <summary>
+    /// Builds a valid metric record line with one further member named by the key.
+    /// </summary>
+    /// <param name="key">The JSON text of the key, escapes included, without the quotes</param>
+    /// <returns>The line</returns>
+    private static string RecordWithKey(string key)
+    {
+        return RecordWithMembers($"\"{key}\":1");
+    }
+
+    /// <summary>
+    /// Builds the bytes of a valid header line with one further member whose key is the given bytes.
+    /// </summary>
+    /// <param name="key">The bytes of the key, no valid UTF-8 text</param>
+    /// <returns>The line</returns>
+    private static byte[] HeaderBytesWithKey(byte[] key)
+    {
+        var prefix = Encoding.UTF8.GetBytes("{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\",\"");
+
+        return [.. prefix, .. key, .. Encoding.UTF8.GetBytes("\":1}")];
+    }
+
+    /// <summary>
+    /// Builds the bytes of a valid metric record line with one further member whose key is the given bytes.
+    /// </summary>
+    /// <param name="key">The bytes of the key, no valid UTF-8 text</param>
+    /// <returns>The line</returns>
+    private static byte[] RecordBytesWithKey(byte[] key)
+    {
+        var prefix = Encoding.UTF8.GetBytes("{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"");
+
+        return [.. prefix, .. key, .. Encoding.UTF8.GetBytes("\":1,\"data\":{\"name\":\"cpu\",\"value\":1}}")];
+    }
+
+    /// <summary>
+    /// Joins two lines as bytes, each followed by a line feed.
+    /// </summary>
+    /// <param name="first">The first line</param>
+    /// <param name="second">The second line</param>
+    /// <returns>The bytes</returns>
+    private static byte[] RawLines(byte[] first, byte[] second)
+    {
+        return [.. first, (byte)'\n', .. second, (byte)'\n'];
+    }
+
+    /// <summary>
+    /// Lists the types that wire data binds to: the roots and, below them, the types of their properties, the elements of their lists and the values of their maps.
+    /// </summary>
+    /// <param name="roots">The root types</param>
+    /// <returns>The types</returns>
+    private static List<Type> ReachableWireTypes(List<Type> roots)
+    {
+        var seen = new List<Type>();
+        var queue = new Queue<Type>(roots);
+
+        while (queue.Count > 0)
+        {
+            var type = queue.Dequeue();
+
+            if (seen.Contains(type))
+            {
+                continue;
+            }
+
+            seen.Add(type);
+
+            foreach (var inner in type.GetProperties(BindingFlags.Public | BindingFlags.Instance).SelectMany(property => Unwrap(property.PropertyType)))
+            {
+                if (inner.IsClass && inner.Namespace is { } scope && scope.StartsWith("Vandox", StringComparison.Ordinal))
+                {
+                    queue.Enqueue(inner);
+                }
+            }
+        }
+
+        return seen;
+    }
+
+    /// <summary>
+    /// Lists a type together with its element type and its generic arguments, at any depth.
+    /// </summary>
+    /// <param name="type">The type</param>
+    /// <returns>The types</returns>
+    private static IEnumerable<Type> Unwrap(Type type)
+    {
+        yield return type;
+
+        var parts = type.GetGenericArguments().Concat(type.GetElementType() is { } element ? [element] : []);
+
+        foreach (var inner in parts.SelectMany(Unwrap))
+        {
+            yield return inner;
+        }
+    }
+
+    /// <summary>
+    /// Describes what is wrong with the JSON names of the public settable properties of a type.
+    /// </summary>
+    /// <param name="type">The type</param>
+    /// <returns>One text per problem</returns>
+    private static IEnumerable<string> DescribeNameProblems(Type type)
+    {
+        var bound = type.GetProperties(BindingFlags.Public | BindingFlags.Instance).Where(property => property.SetMethod is { IsPublic: true }).ToList();
+        var unnamed = bound.Where(property => property.GetCustomAttribute<JsonPropertyNameAttribute>() is null && property.GetCustomAttribute<JsonIgnoreAttribute>() is null)
+                           .Select(property => $"{type.Name}.{property.Name} has no JSON name");
+        var names = bound.Select(property => property.GetCustomAttribute<JsonPropertyNameAttribute>()?.Name).OfType<string>();
+        var clashes = names.GroupBy(name => name, StringComparer.OrdinalIgnoreCase)
+                           .Where(group => group.Count() > 1)
+                           .Select(group => $"{type.Name}: {string.Join(" and ", group)} are equal ignoring case");
+
+        return unnamed.Concat(clashes);
+    }
+
+    /// <summary>
+    /// Measures the bytes an action allocates.
+    /// </summary>
+    /// <param name="action">The action</param>
+    /// <returns>A task that returns the number of allocated bytes</returns>
+    private static async Task<long> AllocatedAsync(Func<Task> action)
+    {
+        var before = GC.GetTotalAllocatedBytes(true);
+
+        await action();
+
+        return GC.GetTotalAllocatedBytes(true) - before;
+    }
+
+    /// <summary>
+    /// Runs an action once to warm up and three times more and returns the shortest of the three durations.
+    /// </summary>
+    /// <param name="action">The action</param>
+    /// <returns>A task that returns the shortest duration</returns>
+    private static async Task<TimeSpan> BestOfThreeAsync(Func<Task> action)
+    {
+        var best = TimeSpan.MaxValue;
+
+        await action();
+
+        for (var run = 0; run < 3; run++)
+        {
+            var start = Stopwatch.GetTimestamp();
+
+            await action();
+
+            var elapsed = Stopwatch.GetElapsedTime(start);
+
+            best = elapsed < best ? elapsed : best;
+        }
+
+        return best;
+    }
+
+    /// <summary>
     /// Decodes a header line (line index 0) or a record line behind a valid header and describes the outcome as text.
     /// A <see cref="WireException"/> is part of the outcome, any other exception is not.
     /// </summary>
@@ -1027,6 +1850,19 @@ public class BatchDecoderTests
             record = await decoder.NextAsync(TestContext.CancellationToken);
         }
         while (record is not null);
+    }
+
+    /// <summary>
+    /// Opens a batch from its compressed bytes and reads it to the end. A run before the measured one fills the array pools of the
+    /// runtime, so the measurement does not depend on which test ran first.
+    /// </summary>
+    /// <param name="compressed">The compressed batch</param>
+    /// <returns>A task that completes at the end of the batch</returns>
+    private async Task ReadCompressedAsync(byte[] compressed)
+    {
+        using var input = new MemoryStream(compressed);
+
+        await OpenAndReadAllAsync(input);
     }
 
     #endregion // Methods

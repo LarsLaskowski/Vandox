@@ -42,6 +42,10 @@ covers, and the rules under *Code coverage* and the checklist apply to both.
   result: await the task or signal the fake.
 - The wire format is covered by a contract test: `WireContractTests` decodes the golden batch the Go encoder
   writes (`testdata/wire/all-kinds.jsonl`; [0075](decisions/0075-wire-contract-pinned-by-golden-fixtures.md)).
+  Both decoders also run the shared decoder cases in `testdata/wire/decoder-cases.json` (Go
+  `TestDecoder_SharedCases`, .NET `WireContractTests.DecodeSharedCaseGivesExpectedResult`); a new JSON-level
+  decoding rule (key matching, duplicate keys, nesting, header shape) gets a case there, so both decoders are
+  proven to read a line alike.
 - Go: table-driven tests for several inputs: a slice of cases, one `t.Run` per case.
 - Arrange / Act / Assert inside each case; one act per case.
 - Failure messages state what was called, what came back and what was expected:
@@ -61,6 +65,12 @@ covers, and the rules under *Code coverage* and the checklist apply to both.
   network, test them in a `testing/synctest` bubble (fake time, `synctest.Wait`); over loopback listeners,
   inject short durations (where the timeout must fire) or a long one (where it must not), synchronize on
   channels and recorded events, never `time.Sleep`, and assert no elapsed time.
+- One narrow exception to "no real clock", in both languages: a test that guards against a quadratic cost may
+  compare two durations measured in the same test, never an absolute duration. It warms both sides up once,
+  takes the best of three runs of each, and bounds the ratio of the code under test to a plain reference (Go
+  `json.Unmarshal`, .NET `JsonDocument.Parse` of the same bytes) by at least three times the highest ratio
+  measured for the correct code, coverage instrumentation (`-race`, coverlet) included, so a loaded CI host does
+  not make it flaky ([0090](decisions/0090-wire-keys-matched-ignoring-ascii-case-duplicates-rejected-header-shape-malformed.md)).
 
 ## Code coverage
 
@@ -86,5 +96,5 @@ the pattern for `vandoxd`).
 - [ ] The *Analyzer gate* passes.
 - [ ] At least 80 % line coverage on new/changed production code and overall (*Coverage gate*).
 - [ ] Table-driven where there is more than one input; failure messages with got and want.
-- [ ] Go: passes with `-race`; no real network or clock (timeouts: `synctest` or injected durations, decision 0062). .NET: no real network, clock or sleep; the whole solution builds without any analyzer diagnostic.
+- [ ] Go: passes with `-race`; no real network or clock except the ratio of two durations (see Structure; timeouts: `synctest` or injected durations, decision 0062). .NET: no real network, clock or sleep, again except such a ratio; the whole solution builds without any analyzer diagnostic.
 - [ ] *Format* from `.squad/stack.md` run before committing.

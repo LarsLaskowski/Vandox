@@ -117,3 +117,59 @@ func TestMariaDBStatus_Validate_Invalid(t *testing.T) {
 	}
 	runInvalid(t, validMariaDBStatus, cases)
 }
+
+func TestMariaDBStatus_Validate_KeysDifferingOnlyInCase(t *testing.T) {
+	const reason = "duplicate key ignoring case"
+	cases := []struct {
+		name   string
+		mutate func(p *model.MariaDBStatus)
+		field  string
+	}{
+		{"status UPTIME and Uptime", func(p *model.MariaDBStatus) { p.Status = map[string]uint64{"UPTIME": 1, "Uptime": 2} }, `status["Uptime"]`},
+		{"status among other keys", func(p *model.MariaDBStatus) {
+			p.Status = map[string]uint64{"Threads_connected": 3, "threads_connected": 4, "Uptime": 5}
+		}, `status["threads_connected"]`},
+		{"variables MAX_CONNECTIONS and max_connections", func(p *model.MariaDBStatus) {
+			p.Variables = map[string]string{"MAX_CONNECTIONS": "1", "max_connections": "2"}
+		}, `variables["max_connections"]`},
+		{"status and variables are checked apart", func(p *model.MariaDBStatus) {
+			p.Status = map[string]uint64{"Uptime": 1}
+			p.Variables = map[string]string{"UPTIME": "1", "uptime": "2"}
+		}, `variables["uptime"]`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			p := validMariaDBStatus()
+			tc.mutate(p)
+			fe := fieldErrorOf(t, p.Validate(), tc.field)
+			if fe.Reason != reason {
+				t.Errorf("Validate() reason = %q, want %q", fe.Reason, reason)
+			}
+		})
+	}
+}
+
+func TestMariaDBStatus_Validate_KeysDifferingInMoreThanCase(t *testing.T) {
+	cases := []struct {
+		name   string
+		mutate func(p *model.MariaDBStatus)
+	}{
+		{"status keys of different words", func(p *model.MariaDBStatus) {
+			p.Status = map[string]uint64{"Uptime": 1, "Uptime_since_flush_status": 2}
+		}},
+		{"the same key in status and variables", func(p *model.MariaDBStatus) {
+			p.Status = map[string]uint64{"Uptime": 1}
+			p.Variables = map[string]string{"Uptime": "1"}
+		}},
+		{"variables keys with an underscore apart", func(p *model.MariaDBStatus) {
+			p.Variables = map[string]string{"max_connections": "1", "maxconnections": "2"}
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			p := validMariaDBStatus()
+			tc.mutate(p)
+			requireValid(t, p)
+		})
+	}
+}

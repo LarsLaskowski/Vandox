@@ -576,3 +576,60 @@ func TestCheckRecord_Invalid(t *testing.T) {
 		}
 	})
 }
+
+// requireFieldErrorReason is requireFieldError that also checks the reason.
+func requireFieldErrorReason(t *testing.T, err error, field, reason string) {
+	t.Helper()
+	requireFieldError(t, err, field)
+	var fe *model.FieldError
+	if errors.As(err, &fe) && fe.Reason != reason {
+		t.Errorf("reason = %q, want %q", fe.Reason, reason)
+	}
+}
+
+// foldDuplicateRecords returns records whose map keys differ only in ASCII case, with the field the model names.
+func foldDuplicateRecords() []struct {
+	name   string
+	data   model.Payload
+	field  string
+	reason string
+} {
+	return []struct {
+		name   string
+		data   model.Payload
+		field  string
+		reason string
+	}{
+		{"metric labels", &model.MetricPoint{Name: "cpu", Labels: map[string]string{"Mount": "a", "mount": "b"}}, `data.labels["mount"]`, "duplicate key ignoring case"},
+		{"mariadb status", &model.MariaDBStatus{Availability: model.MariaDBUp, Status: map[string]uint64{"UPTIME": 1, "Uptime": 2}}, `data.status["Uptime"]`, "duplicate key ignoring case"},
+		{"mariadb variables", &model.MariaDBStatus{Availability: model.MariaDBUp, Variables: map[string]string{"MAX_CONNECTIONS": "1", "max_connections": "2"}}, `data.variables["max_connections"]`, "duplicate key ignoring case"},
+	}
+}
+
+func TestCheckRecord_RefusesKeysDifferingOnlyInCase(t *testing.T) {
+	for _, tc := range foldDuplicateRecords() {
+		t.Run(tc.name, func(t *testing.T) {
+			r := model.Record{Meta: agentMetaOf(metricRecord(1)), Data: tc.data}
+			n, err := wire.CheckRecord(&r)
+			requireFieldErrorReason(t, err, tc.field, tc.reason)
+			if n != 0 {
+				t.Errorf("CheckRecord() size = %d, want 0 for a refused record", n)
+			}
+		})
+	}
+}
+
+func TestEncodeBatch_RefusesKeysDifferingOnlyInCaseAndWritesNothing(t *testing.T) {
+	for _, tc := range foldDuplicateRecords() {
+		t.Run(tc.name, func(t *testing.T) {
+			b := validBatch(3)
+			b.Records[1].Data = tc.data
+			w := &countingWriter{}
+			err := wire.EncodeBatch(w, b)
+			requireFieldErrorReason(t, err, "records[1]."+tc.field, tc.reason)
+			if w.n != 0 {
+				t.Errorf("EncodeBatch wrote %d bytes, want 0", w.n)
+			}
+		})
+	}
+}

@@ -10,6 +10,9 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"runtime"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -169,8 +172,6 @@ func TestNewDecoder_RejectsUnsupportedVersion(t *testing.T) {
 		{"major null", `{"format_major":null,` + hdrTail + `}`},
 		{"line is null", `null`},
 		{"major 2 with incompatible header shape", `{"format_major":2,"agent_id":{"x":1},"boot_id":[1],"mode":5}`},
-		{"upper-case duplicate wins", `{"format_major":1,"FORMAT_MAJOR":2,` + hdrTail + `}`},
-		{"later duplicate wins", `{"format_major":1,"format_major":2,` + hdrTail + `}`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -179,16 +180,6 @@ func TestNewDecoder_RejectsUnsupportedVersion(t *testing.T) {
 		})
 	}
 
-	t.Run("folded duplicate with major 1 wins", func(t *testing.T) {
-		header := `{"format_major":2,"Format_Major":1,"format_minor":0,` + hdrTail + `}`
-		d, err := wire.NewDecoder(bytes.NewReader(stream(t, header, metricLine(1))), wire.DefaultLimits())
-		if err != nil {
-			t.Fatalf("NewDecoder() = %v, want nil", err)
-		}
-		if got := d.Header().FormatMajor; got != 1 {
-			t.Errorf("Header().FormatMajor = %d, want 1", got)
-		}
-	})
 }
 
 func TestDecoder_AcceptsNewerMinorWithUnknownKeys(t *testing.T) {
@@ -238,6 +229,14 @@ func TestNewDecoder_MalformedHeader(t *testing.T) {
 		{"major as 1e0", stream(t, `{"format_major":1e0,`+hdrTail+`}`, metricLine(1)), malformed(1)},
 		{"major as string", stream(t, `{"format_major":"1",`+hdrTail+`}`, metricLine(1)), malformed(1)},
 		{"major 1 with incompatible shape", stream(t, `{"format_major":1,"format_minor":0,"agent_id":{"x":1},"boot_id":"`+testBootID+`","mode":"live"}`, metricLine(1)), malformed(1)},
+		{"upper-case duplicate of format_major", stream(t, `{"format_major":1,"FORMAT_MAJOR":2,`+hdrTail+`}`, metricLine(1)), malformed(1)},
+		{"repeated format_major", stream(t, `{"format_major":1,"format_major":2,`+hdrTail+`}`, metricLine(1)), malformed(1)},
+		{"folded duplicate of format_major with major 1 last", stream(t, `{"format_major":2,"Format_Major":1,"format_minor":0,`+hdrTail+`}`, metricLine(1)), malformed(1)},
+		{"header is true", stream(t, `true`, metricLine(1)), malformed(1)},
+		{"major as 1E0", stream(t, `{"format_major":1E0,`+hdrTail+`}`, metricLine(1)), malformed(1)},
+		{"major above int64", stream(t, `{"format_major":9223372036854775808,`+hdrTail+`}`, metricLine(1)), malformed(1)},
+		{"major as true", stream(t, `{"format_major":true,`+hdrTail+`}`, metricLine(1)), malformed(1)},
+		{"minor above int64", stream(t, `{"format_major":1,"format_minor":9223372036854775808,`+hdrTail+`}`, metricLine(1)), malformed(1)},
 		{"minor as string", stream(t, `{"format_major":1,"format_minor":"0",`+hdrTail+`}`, metricLine(1)), malformed(1)},
 
 		{"agent id empty", stream(t, `{"format_major":1,"format_minor":0,"agent_id":"","boot_id":"`+testBootID+`","mode":"live"}`, metricLine(1)), want{is: model.ErrInvalid, fieldSuffix: "agent_id", line: 1}},
@@ -396,13 +395,6 @@ func metricSeq(seq uint64) recordCheck {
 	}
 }
 
-func checkSeq3(t *testing.T, recs []model.Record) {
-	t.Helper()
-	if recs[0].Seq != 3 {
-		t.Errorf("Seq = %d, want 3", recs[0].Seq)
-	}
-}
-
 func checkOriginAgent(t *testing.T, recs []model.Record) {
 	t.Helper()
 	if recs[0].Origin != model.OriginAgent {
@@ -432,13 +424,6 @@ func logMessage(want string) recordCheck {
 	}
 }
 
-func checkKindMetric(t *testing.T, recs []model.Record) {
-	t.Helper()
-	if recs[0].Kind() != model.KindMetric {
-		t.Errorf("Kind() = %q, want %q", recs[0].Kind(), model.KindMetric)
-	}
-}
-
 type acceptedCase struct {
 	name  string
 	data  []byte
@@ -454,7 +439,6 @@ func acceptedFormCases(t *testing.T) []acceptedCase {
 		{"last line without newline", gzipString(t, headerJSON+"\n"+metricLine(1)), 1, nil},
 		{"spaces and tabs around objects", gzipString(t, " \t"+headerJSON+"\t \n \t"+metricLine(1)+" \t\n"), 1, nil},
 		{"keys in other case", stream(t, keyHeader, `{"KIND":"metric","Source":"proc.stat","SEQ":4,"Captured_At":`+tsJSON+`,"DATA":{"NAME":"cpu","Value":1}}`), 1, metricSeq(4)},
-		{"duplicate keys, last wins", stream(t, headerJSON, `{"kind":"metric","source":"proc.stat","seq":9,"seq":3,"captured_at":`+tsJSON+`,"data":{"name":"x y","name":"cpu","value":1}}`), 1, checkSeq3},
 		{"unknown keys at any depth", stream(t, headerJSON, `{"kind":"metric","source":"proc.stat","seq":1,"captured_at":`+tsJSON+`,"extra":{"a":[1,{"b":null}]},"data":{"name":"cpu","value":1,"extra":[[[]]]}}`), 1, nil},
 		{"origin and received_at keys are ignored", stream(t, headerJSON, `{"kind":"metric","origin":"backend","received_at":"2026-03-02T00:00:00Z","source":"proc.stat","seq":1,"captured_at":`+tsJSON+`,"data":`+okData+`}`), 1, checkOriginAgent},
 		{"time forms with zero offset", withHeader(t,
@@ -465,8 +449,6 @@ func acceptedFormCases(t *testing.T) []acceptedCase {
 		{"escaped control characters in a text", withHeader(t, kindLine("log_line", `{"log":"journal","message":"a\u0000b\n"}`)), 1, logMessage("a\x00b\n")},
 		{"IPv4-mapped address without zone", withHeader(t, kindLine("connection_snapshot", `{"remotes":[{"addr":"::ffff:1.2.3.4","count":1}]}`)), 1, nil},
 		{"empty connection snapshot", withHeader(t, kindLine("connection_snapshot", `{"complete":true}`)), 1, nil},
-		{"Kelvin sign and long s in keys", withHeader(t, "{\"Kind\":\"metric\",\"source\":\"proc.stat\",\"\u017feq\":5,\"captured_at\":"+tsJSON+",\"data\":"+okData+"}"), 1, metricSeq(5)},
-		{"folded duplicate key wins", withHeader(t, "{\"kind\":\"gap\",\"Kind\":\"metric\",\"source\":\"proc.stat\",\"seq\":1,\"captured_at\":"+tsJSON+",\"data\":"+okData+"}"), 1, checkKindMetric},
 	}
 }
 
@@ -1293,5 +1275,529 @@ func TestDecoder_WrongTypeStaysMalformed(t *testing.T) {
 			_, err := decodeAll(t, withHeader(t, kindLine(tc.kind, tc.data)), wire.DefaultLimits())
 			malformed(2).check(t, err)
 		})
+	}
+}
+
+// sharedRecord is a record a shared decoder case expects.
+type sharedRecord struct {
+	Kind string `json:"kind"`
+	Seq  uint64 `json:"seq"`
+}
+
+// sharedWant is the outcome of a shared decoder case: the records before the end or the error, and the error.
+type sharedWant struct {
+	Records     []sharedRecord `json:"records"`
+	Error       string         `json:"error"`
+	Line        int            `json:"line"`
+	Field       string         `json:"field"`
+	Reason      string         `json:"reason"`
+	FormatMinor *int64         `json:"format_minor"`
+}
+
+// sharedCase is one case of testdata/wire/decoder-cases.json.
+type sharedCase struct {
+	Name  string     `json:"name"`
+	Lines []string   `json:"lines"`
+	Want  sharedWant `json:"want"`
+}
+
+// sharedErrors maps the error names of the fixture (the names of WireErrorKind in the backend) to the Go errors.
+var sharedErrors = map[string]error{
+	"UnsupportedVersion": wire.ErrUnsupportedVersion,
+	"Malformed":          wire.ErrMalformed,
+	"UnknownKind":        wire.ErrUnknownKind,
+	"Sequence":           wire.ErrSequence,
+	"EmptyBatch":         wire.ErrEmptyBatch,
+	"LimitExceeded":      wire.ErrLimitExceeded,
+	"Invalid":            model.ErrInvalid,
+}
+
+// escapedCaseIDs are the cases whose line under test holds a JSON escape that the fixture spells with a doubled
+// backslash; read wrongly, they would pass without testing the escape.
+var escapedCaseIDs = []string{"K4", "K5", "N4", "N7", "N8", "N9", "N10", "N11", "D9"}
+
+// requiredCaseIDs lists the cases the fixture must hold, from the plan of issue 175.
+func requiredCaseIDs() []string {
+	var ids []string
+	for prefix, count := range map[string]int{"K": 6, "N": 11, "D": 28, "H": 31, "O": 4, "X": 4, "M": 5, "U": 2} {
+		for i := 1; i <= count; i++ {
+			ids = append(ids, prefix+strconv.Itoa(i))
+		}
+	}
+	return ids
+}
+
+func sharedCaseID(name string) string {
+	id, _, _ := strings.Cut(name, " ")
+	return id
+}
+
+func loadSharedCases(t *testing.T) []sharedCase {
+	t.Helper()
+	path := filepath.Join("..", "..", "testdata", "wire", "decoder-cases.json")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading %s = %v, want nil", path, err)
+	}
+	var file struct {
+		Cases []sharedCase `json:"cases"`
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&file); err != nil {
+		t.Fatalf("parsing %s = %v, want nil", path, err)
+	}
+	return file.Cases
+}
+
+// requireSharedCasesWellFormed fails the test for a case with an unknown error name, a duplicate case name, a missing
+// required case and for a case with an escaped key whose line holds no backslash after the fixture was read.
+func requireSharedCasesWellFormed(t *testing.T, cases []sharedCase) {
+	t.Helper()
+	names := make(map[string]bool)
+	ids := make(map[string]bool)
+	for _, c := range cases {
+		if names[c.Name] {
+			t.Fatalf("case name %q appears twice, want unique names", c.Name)
+		}
+		names[c.Name] = true
+		ids[sharedCaseID(c.Name)] = true
+		if c.Want.Error != "" {
+			if _, ok := sharedErrors[c.Want.Error]; !ok {
+				t.Fatalf("case %q: error %q is not one of the seven error names", c.Name, c.Want.Error)
+			}
+		}
+		if slices.Contains(escapedCaseIDs, sharedCaseID(c.Name)) && !slices.ContainsFunc(c.Lines, func(line string) bool { return strings.Contains(line, `\`) }) {
+			t.Fatalf("case %q: no line holds a backslash, want the escape of the key kept (doubled backslash in the fixture)", c.Name)
+		}
+	}
+	for _, id := range requiredCaseIDs() {
+		if !ids[id] {
+			t.Errorf("fixture holds no case %s, want every case of the plan", id)
+		}
+	}
+}
+
+// decodeSharedCase gzips the lines of a case and decodes the batch to its end.
+func decodeSharedCase(t *testing.T, c sharedCase) ([]sharedRecord, int64, error) {
+	t.Helper()
+	d, err := wire.NewDecoder(bytes.NewReader(stream(t, c.Lines...)), wire.DefaultLimits())
+	if err != nil {
+		return nil, 0, err
+	}
+	defer func() { _ = d.Close() }()
+	var recs []sharedRecord
+	for range 1000 {
+		rec, err := d.Next()
+		if errors.Is(err, io.EOF) {
+			return recs, d.Header().FormatMinor, nil
+		}
+		if err != nil {
+			return recs, d.Header().FormatMinor, err
+		}
+		recs = append(recs, sharedRecord{Kind: string(rec.Kind()), Seq: rec.Seq})
+	}
+	t.Fatalf("decoder did not end the stream within 1000 records")
+	return nil, 0, nil
+}
+
+// requireSharedOutcome compares the records, the error and the minor version a shared case gave with the ones it wants.
+func requireSharedOutcome(t *testing.T, c sharedCase, recs []sharedRecord, minor int64, err error) {
+	t.Helper()
+	if !slices.Equal(recs, c.Want.Records) {
+		t.Errorf("records = %v, want %v (error %v)", recs, c.Want.Records, err)
+	}
+	if c.Want.Error == "" {
+		if err != nil {
+			t.Fatalf("decoding = %v, want nil", err)
+		}
+	} else {
+		want{is: sharedErrors[c.Want.Error], field: c.Want.Field, reason: c.Want.Reason, line: c.Want.Line}.check(t, err)
+	}
+	if c.Want.FormatMinor != nil && minor != *c.Want.FormatMinor {
+		t.Errorf("Header().FormatMinor = %d, want %d", minor, *c.Want.FormatMinor)
+	}
+}
+
+func TestDecoder_SharedCases(t *testing.T) {
+	cases := loadSharedCases(t)
+	requireSharedCasesWellFormed(t, cases)
+	for _, c := range cases {
+		t.Run(c.Name, func(t *testing.T) {
+			recs, minor, err := decodeSharedCase(t, c)
+			requireSharedOutcome(t, c, recs, minor, err)
+		})
+	}
+}
+
+func TestDecoder_MaxDepthIs64(t *testing.T) {
+	if wire.MaxDepth != 64 {
+		t.Errorf("wire.MaxDepth = %d, want 64", wire.MaxDepth)
+	}
+}
+
+func TestDecoder_HeaderFormatMinorIsInt64(t *testing.T) {
+	for _, minor := range []int64{3000000000, math.MaxInt64} {
+		header := fmt.Sprintf(`{"format_major":1,"format_minor":%d,%s}`, minor, hdrTail)
+		d, err := wire.NewDecoder(bytes.NewReader(stream(t, header, metricLine(1))), wire.DefaultLimits())
+		if err != nil {
+			t.Fatalf("NewDecoder(format_minor %d) = %v, want nil", minor, err)
+		}
+		if got := d.Header().FormatMinor; got != minor {
+			t.Errorf("Header().FormatMinor = %d, want %d", got, minor)
+		}
+	}
+}
+
+func TestDecoder_RejectsRawInvalidUTF8Keys(t *testing.T) {
+	keys := []struct {
+		name string
+		key  string
+	}{
+		{"byte 0xFF", "\xff"},
+		{"byte 0xFF after letters", "kin\xffd"},
+		{"overlong encoding 0xC0 0xAF", "\xc0\xaf"},
+		{"encoded surrogate 0xED 0xA0 0x80", "\xed\xa0\x80"},
+	}
+	for _, k := range keys {
+		t.Run("record key "+k.name, func(t *testing.T) {
+			record := strings.Replace(metricLine(1), `"captured_at"`, `"`+k.key+`":1,"captured_at"`, 1)
+			_, err := decodeAll(t, withHeader(t, record), wire.DefaultLimits())
+			malformed(2).check(t, err)
+		})
+		t.Run("header key "+k.name, func(t *testing.T) {
+			header := `{"format_major":1,"format_minor":0,"` + k.key + `":1,` + hdrTail + `}`
+			_, err := wire.NewDecoder(bytes.NewReader(stream(t, header, metricLine(1))), wire.DefaultLimits())
+			malformed(1).check(t, err)
+		})
+	}
+}
+
+func TestDecoder_ErrorTextsNameNoKey(t *testing.T) {
+	deep := strings.Repeat("[", wire.MaxDepth) + "0" + strings.Repeat("]", wire.MaxDepth)
+	withExtra := func(extra string) string {
+		return strings.Replace(metricLine(1), `"captured_at"`, extra+`,"captured_at"`, 1)
+	}
+	cases := []struct {
+		name   string
+		header string
+		record string
+		want   string
+	}{
+		{"duplicate key", headerJSON, withExtra(`"SENTINELKEY":1,"SENTINELKEY":2`), "wire: line 2: malformed batch: duplicate key"},
+		{"duplicate key in the header", `{"format_major":1,"format_minor":0,` + hdrTail + `,"SENTINELKEY":1,"SENTINELKEY":2}`, metricLine(1), "wire: line 1: malformed batch: duplicate key"},
+		{"key not ASCII", headerJSON, withExtra("\"SENTINELK\xc3\x89Y\":1"), "wire: line 2: malformed batch: key not ASCII"},
+		{"key not ASCII in the header", `{"format_major":1,"format_minor":0,` + hdrTail + `,"SENTINELK` + "\xc3\x89" + `Y":1}`, metricLine(1), "wire: line 1: malformed batch: key not ASCII"},
+		{"nesting too deep", headerJSON, withExtra(`"x":` + deep), "wire: line 2: malformed batch: nesting deeper than 64"},
+		{"nesting too deep in the header", `{"format_major":1,"format_minor":0,` + hdrTail + `,"x":` + deep + `}`, metricLine(1), "wire: line 1: malformed batch: nesting deeper than 64"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := decodeAll(t, stream(t, tc.header, tc.record), wire.DefaultLimits())
+			if err == nil {
+				t.Fatalf("decoding = nil, want %q", tc.want)
+			}
+			if !errors.Is(err, wire.ErrMalformed) {
+				t.Errorf("error = %v, want errors.Is(err, ErrMalformed)", err)
+			}
+			if got := err.Error(); got != tc.want {
+				t.Errorf("error text = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestDecoder_InterleavedDecodersKeepTheirOwnState(t *testing.T) {
+	record := func(seq int) string {
+		return strings.Replace(metricLine(seq), `"captured_at"`, `"x":{"a":{"b":1},"c":[{"b":2},{"b":3,"d":4}]},"captured_at"`, 1)
+	}
+	open := func() *wire.Decoder {
+		d, err := wire.NewDecoder(bytes.NewReader(stream(t, headerJSON, record(1), record(2), record(3))), wire.DefaultLimits())
+		if err != nil {
+			t.Fatalf("NewDecoder() = %v, want nil", err)
+		}
+		t.Cleanup(func() { _ = d.Close() })
+		return d
+	}
+	first, second := open(), open()
+	for seq := uint64(1); seq <= 3; seq++ {
+		for name, d := range map[string]*wire.Decoder{"first": first, "second": second} {
+			rec, err := d.Next()
+			if err != nil || rec.Seq != seq {
+				t.Fatalf("%s decoder Next() = seq %d, %v, want seq %d, nil", name, rec.Seq, err, seq)
+			}
+		}
+	}
+	for name, d := range map[string]*wire.Decoder{"first": first, "second": second} {
+		if _, err := d.Next(); !errors.Is(err, io.EOF) {
+			t.Errorf("%s decoder Next() after the last record = %v, want io.EOF", name, err)
+		}
+	}
+}
+
+// Shapes of the memory and time tests: every one sits in the unknown envelope key "x" of a valid metric record.
+
+// shapeLineBytes is the size of the record line of the shapes; the default line limit is 1 MiB.
+const shapeLineBytes = 1_000_000
+
+// shortKeys returns the first n distinct keys, ignoring ASCII case, that are as short as possible: the printable ASCII
+// characters other than the quote and the backslash, then pairs, then triples.
+func shortKeys(n int) []string {
+	keys := make([]string, 0, n)
+	var alphabet []string
+	seen := make(map[string]bool)
+	for c := byte(0x20); c <= 0x7e; c++ {
+		if c == '"' || c == '\\' || seen[strings.ToLower(string(c))] {
+			continue
+		}
+		seen[strings.ToLower(string(c))] = true
+		alphabet = append(alphabet, string(c))
+	}
+	keys = append(keys, alphabet...)
+	for _, a := range alphabet {
+		for _, b := range alphabet {
+			keys = append(keys, a+b)
+		}
+	}
+	for _, a := range alphabet {
+		for _, b := range alphabet {
+			for _, c := range alphabet {
+				keys = append(keys, a+b+c)
+			}
+		}
+	}
+	return keys[:n]
+}
+
+// objectOfKeys returns {"k1":0,"k2":0,...} for the keys.
+func objectOfKeys(keys []string) string {
+	var b strings.Builder
+	b.WriteByte('{')
+	for i, k := range keys {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		b.WriteString(`"` + k + `":0`)
+	}
+	b.WriteByte('}')
+	return b.String()
+}
+
+// objectFillingBytes returns an object of distinct short keys of about size bytes.
+func objectFillingBytes(size int) string {
+	keys := shortKeys(250_000)
+	n := 0
+	for length := 2; length < size; n++ {
+		length += len(keys[n]) + 5
+	}
+	return objectOfKeys(keys[:n])
+}
+
+// listOf returns [first,unit,unit,...] with first and as many units as fit into about size bytes.
+func listOf(first, unit string, size int) string {
+	var b strings.Builder
+	b.WriteByte('[')
+	if first != "" {
+		b.WriteString(first)
+	}
+	for b.Len() < size {
+		if first != "" || b.Len() > 1 {
+			b.WriteByte(',')
+		}
+		b.WriteString(unit)
+	}
+	b.WriteByte(']')
+	return b.String()
+}
+
+// shapeRecord returns a valid metric record line whose unknown envelope key "x" holds x.
+func shapeRecord(seq int, x string) string {
+	return fmt.Sprintf(`{"kind":"metric","source":"host","seq":%d,"captured_at":"2026-10-01T10:00:00Z","x":%s,"data":{"name":"cpu","value":1}}`, seq, x)
+}
+
+// shapeCase is one shape: its name and the JSON value of the key "x".
+type shapeCase struct{ name, x string }
+
+// shapeValues returns the value of "x" of the shapes 1 to 6 of the plan, named.
+func shapeValues() []shapeCase {
+	half := objectFillingBytes(shapeLineBytes / 2)
+	shapes := []shapeCase{
+		{"1 list of small objects", listOf("", `{"a":0}`, shapeLineBytes)},
+		{"2 one object of distinct keys", objectFillingBytes(shapeLineBytes)},
+		{"3 list of empty arrays", listOf("", `[]`, shapeLineBytes)},
+		{"4 list of numbers", listOf("", `0`, shapeLineBytes)},
+		{"5 big object then small objects", listOf(half, `{"a":0}`, shapeLineBytes)},
+	}
+	for _, k := range []int{9, 12, 24, 48, 65, 1025} {
+		shapes = append(shapes, shapeCase{fmt.Sprintf("6 objects of %d keys", k), listOf("", objectOfKeys(shortKeys(k)), shapeLineBytes)})
+	}
+	return shapes
+}
+
+// readBatch opens the batch and reads it to the end; any error fails the test.
+func readBatch(t *testing.T, data []byte, lim wire.Limits) {
+	t.Helper()
+	d, err := wire.NewDecoder(bytes.NewReader(data), lim)
+	if err != nil {
+		t.Fatalf("NewDecoder() = %v, want nil", err)
+	}
+	defer func() { _ = d.Close() }()
+	for {
+		_, err := d.Next()
+		if errors.Is(err, io.EOF) {
+			return
+		}
+		if err != nil {
+			t.Fatalf("Next() = %v, want nil", err)
+		}
+	}
+}
+
+// allocatedBy returns the bytes the process allocated while f ran.
+func allocatedBy(f func()) uint64 {
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	f()
+	runtime.ReadMemStats(&after)
+	return after.TotalAlloc - before.TotalAlloc
+}
+
+// maxAllocFactor bounds the bytes the decoder allocates per byte of the record line (shape 7: of the batch).
+const maxAllocFactor = 64
+
+func TestDecoder_AllocationIsBoundedPerShape(t *testing.T) {
+	for _, shape := range shapeValues() {
+		t.Run("shape "+shape.name, func(t *testing.T) {
+			line := shapeRecord(1, shape.x)
+			if len(line) > wire.DefaultLimits().MaxLineBytes || len(line) < shapeLineBytes*9/10 {
+				t.Fatalf("test setup: line has %d bytes, want about %d and within the line limit", len(line), shapeLineBytes)
+			}
+			data := withHeader(t, line)
+			allocated := allocatedBy(func() { readBatch(t, data, wire.DefaultLimits()) })
+			t.Logf("allocated %.1f times the line of %d bytes", float64(allocated)/float64(len(line)), len(line))
+			if limit := uint64(maxAllocFactor) * uint64(len(line)); allocated > limit {
+				t.Errorf("decoding allocated %d bytes (%.1f times the line of %d bytes), want at most %d times", allocated, float64(allocated)/float64(len(line)), len(line), maxAllocFactor)
+			}
+		})
+	}
+}
+
+// deepBatch returns a batch of about size decompressed bytes of short records, each with the unknown key "x" holding x.
+func deepBatch(t *testing.T, x string, size int) ([]byte, int) {
+	t.Helper()
+	lines := []string{headerJSON}
+	total := len(headerJSON) + 1
+	for seq := 1; total < size; seq++ {
+		line := shapeRecord(seq, x)
+		lines = append(lines, line)
+		total += len(line) + 1
+	}
+	return stream(t, lines...), total
+}
+
+func TestDecoder_AllocationIsBoundedForDeeplyNestedRecords(t *testing.T) {
+	variants := []shapeCase{
+		{"63 arrays deep", strings.Repeat("[", 63) + "0" + strings.Repeat("]", 63)},
+		{"61 objects deep", strings.Repeat(`{"":`, 61) + "0" + strings.Repeat("}", 61)},
+		{"61 objects deep with 8 more keys each", strings.Repeat(`{"a":0,"b":0,"c":0,"d":0,"e":0,"f":0,"g":0,"h":0,"":`, 61) + "0" + strings.Repeat("}", 61)},
+	}
+	for _, v := range variants {
+		t.Run(v.name, func(t *testing.T) {
+			data, size := deepBatch(t, v.x, 1<<20)
+			allocated := allocatedBy(func() { readBatch(t, data, wire.DefaultLimits()) })
+			t.Logf("allocated %.1f times the batch of %d bytes", float64(allocated)/float64(size), size)
+			if limit := uint64(maxAllocFactor) * uint64(size); allocated > limit {
+				t.Errorf("decoding allocated %d bytes (%.1f times the batch of %d bytes), want at most %d times", allocated, float64(allocated)/float64(size), size, maxAllocFactor)
+			}
+		})
+	}
+}
+
+// bestOfThree runs f once to warm up and three times more and returns the shortest of the three durations.
+func bestOfThree(f func()) time.Duration {
+	f()
+	best := time.Duration(math.MaxInt64)
+	for range 3 {
+		start := time.Now()
+		f()
+		best = min(best, time.Since(start))
+	}
+	return best
+}
+
+// maxTimeFactor bounds the time of the decoder against a plain json.Unmarshal of the same line.
+const maxTimeFactor = 10
+
+// TestDecoder_TimeIsInProportionToTheLine guards against a quadratic key check: one big object followed by many small
+// ones. It compares two durations measured here and asserts no absolute duration (docs/UNIT_TESTS.md).
+func TestDecoder_TimeIsInProportionToTheLine(t *testing.T) {
+	line := shapeRecord(1, listOf(objectFillingBytes(shapeLineBytes/2), `{"a":0}`, shapeLineBytes))
+	if len(line) > wire.DefaultLimits().MaxLineBytes {
+		t.Fatalf("test setup: line has %d bytes, want at most %d", len(line), wire.DefaultLimits().MaxLineBytes)
+	}
+	data := withHeader(t, line)
+	decode := bestOfThree(func() { readBatch(t, data, wire.DefaultLimits()) })
+	raw := []byte(line)
+	plain := bestOfThree(func() {
+		var v any
+		if err := json.Unmarshal(raw, &v); err != nil {
+			t.Fatalf("json.Unmarshal() = %v, want nil", err)
+		}
+	})
+	ratio := float64(decode) / float64(plain)
+	t.Logf("decoding took %v, json.Unmarshal %v, ratio %.2f", decode, plain, ratio)
+	if ratio > maxTimeFactor {
+		t.Errorf("decoding took %.1f times a json.Unmarshal of the line, want at most %d times", ratio, maxTimeFactor)
+	}
+}
+
+func TestDecoder_RejectsDuplicateAtTheEndOfALongLine(t *testing.T) {
+	// The distinct keys include "A"; the key "a" at the end repeats it ignoring case.
+	object := strings.TrimSuffix(objectFillingBytes(shapeLineBytes-100), "}") + `,"a":0}`
+	line := shapeRecord(1, object)
+	if len(line) > wire.DefaultLimits().MaxLineBytes || len(line) < shapeLineBytes/2 {
+		t.Fatalf("test setup: line has %d bytes, want a long line within the limit", len(line))
+	}
+	_, err := decodeAll(t, withHeader(t, line), wire.DefaultLimits())
+	malformed(2).check(t, err)
+}
+
+func TestDecoder_RejectsDuplicateKeysOfTheTable(t *testing.T) {
+	cases := []struct {
+		name string
+		data []byte
+	}{
+		{"duplicate keys, last used to win", stream(t, headerJSON, `{"kind":"metric","source":"proc.stat","seq":9,"seq":3,"captured_at":`+tsJSON+`,"data":{"name":"x y","name":"cpu","value":1}}`)},
+		{"Kelvin sign and long s in keys", withHeader(t, "{\"Kind\":\"metric\",\"source\":\"proc.stat\",\"\xc5\xbfeq\":5,\"captured_at\":"+tsJSON+",\"data\":"+okData+"}")},
+		{"Kelvin sign alone in a key", withHeader(t, "{\"\xe2\x84\xaaind\":\"metric\",\"source\":\"proc.stat\",\"seq\":5,\"captured_at\":"+tsJSON+",\"data\":"+okData+"}")},
+		{"folded duplicate key", withHeader(t, "{\"kind\":\"gap\",\"Kind\":\"metric\",\"source\":\"proc.stat\",\"seq\":1,\"captured_at\":"+tsJSON+",\"data\":"+okData+"}")},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			recs, err := decodeAll(t, tc.data, wire.DefaultLimits())
+			malformed(2).check(t, err)
+			if len(recs) != 0 {
+				t.Errorf("decoded %d records before the error, want 0", len(recs))
+			}
+		})
+	}
+}
+
+func TestDecoder_ReturnsRecordsBeforeDuplicateKeyThenFailsForGood(t *testing.T) {
+	repeated := strings.Replace(metricLine(2), `"seq":2`, `"seq":2,"seq":2`, 1)
+	d, err := wire.NewDecoder(bytes.NewReader(withHeader(t, metricLine(1), repeated, metricLine(3))), wire.DefaultLimits())
+	if err != nil {
+		t.Fatalf("NewDecoder() = %v, want nil", err)
+	}
+	t.Cleanup(func() { _ = d.Close() })
+	rec, err := d.Next()
+	if err != nil || rec.Seq != 1 {
+		t.Fatalf("first Next() = seq %d, %v, want seq 1, nil", rec.Seq, err)
+	}
+	_, first := d.Next()
+	malformed(3).check(t, first)
+	_, again := d.Next()
+	if !errors.Is(again, first) {
+		t.Errorf("Next() after the error = %v, want the same error %v", again, first)
 	}
 }

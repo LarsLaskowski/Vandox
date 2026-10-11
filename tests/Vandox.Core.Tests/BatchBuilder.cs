@@ -57,11 +57,21 @@ internal static class BatchBuilder
     /// <returns>The compressed stream, positioned at its start</returns>
     internal static MemoryStream Gzip(string text)
     {
+        return Gzip(Encoding.UTF8.GetBytes(text));
+    }
+
+    /// <summary>
+    /// Compresses the bytes as they are, for lines that are no valid UTF-8 text.
+    /// </summary>
+    /// <param name="bytes">The bytes</param>
+    /// <returns>The compressed stream, positioned at its start</returns>
+    internal static MemoryStream Gzip(byte[] bytes)
+    {
         var output = new MemoryStream();
 
         using (var zip = new GZipStream(output, CompressionMode.Compress, leaveOpen: true))
         {
-            zip.Write(Encoding.UTF8.GetBytes(text));
+            zip.Write(bytes);
         }
 
         output.Position = 0;
