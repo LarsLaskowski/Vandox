@@ -48,6 +48,12 @@ already stored with `"Kind"` therefore still read back through `RecordQueries` (
 - [ ] AC1: For each of the eight kinds (`metric`, `process_snapshot`, `connection_snapshot`, `service_state`, `mariadb_status`,
   `kernel_event`, `log_line`, `gap`), `PayloadRegistry.Serialize` of a payload read with `PayloadRegistry.Deserialize` from a
   valid wire payload yields a JSON object with no property whose name equals `kind` ignoring ASCII case, at the top level.
+- [ ] AC1b (guard for future payload types, reflection-driven, no hand-kept list): (i) every `public const string` field of
+  `RecordKind` maps through `PayloadRegistry.TypeOf` to a non-null type; (ii) every concrete (non-abstract) class in
+  `typeof(IPayload).Assembly` that implements `IPayload` is the `TypeOf` of one of those kinds; (iii) for every type so found,
+  the public instance property `Kind` declared on it carries `System.Text.Json.Serialization.JsonIgnoreAttribute`
+  (`GetCustomAttribute<JsonIgnoreAttribute>()` is not `null`) and its `Condition` is `JsonIgnoreCondition.Always`. A ninth
+  payload type added without the attribute, or added without a registry entry or a `RecordKind` constant, fails this test.
 - [ ] AC2: The serialized payload otherwise stays as before: the 15 expectations of `BatchDecoderAcceptsNullOfOptionalPayloadField`
   (`BatchDecoderTests.cs:701-715`) and the three of `NullAsAbsentConverterFactoryTests.cs:219-221` hold with the trailing
   `,"Kind":"<kind>"` removed and nothing else changed (e.g. `{"name":"cpu","value":0,"unit":""}` for the first row).
@@ -61,13 +67,16 @@ already stored with `"Kind"` therefore still read back through `RecordQueries` (
 ## Approach
 
 Add `[JsonIgnore]` to the implementing `Kind` property in each of the eight payload types (each file already has
-`using System.Text.Json.Serialization;`). Keep the attribute on `IPayload.Kind`: it still applies when a payload is serialized
-through its declared interface type (for example `DataRecord.Data`, declared `IPayload?`).
+`using System.Text.Json.Serialization;`). Keep the attribute on `IPayload.Kind` only as documentation of intent: System.Text.Json
+does not read it for any serialization in the code base, because the only serialization of a payload is
+`PayloadRegistry.Serialize` (`PayloadRegistry.cs:74`), which always uses the runtime type; nothing serializes `DataRecord` or
+an `IPayload`-typed value (`grep` for `JsonSerializer.Serialize`/`Serialize(` in `src/`: only `PayloadRegistry.cs:74`,
+`BatchWriter.cs:103` through it, and `NullElementListConverter{TItem}.cs:47` for list items, which are not payloads).
 
 Option rejected: a `DefaultJsonTypeInfoResolver` modifier in `PayloadRegistry.Options` that drops a property named `Kind` from
 every payload type. It would hold for a future payload type without an attribute, but it hides a per-type contract in a
-name-based rule and adds code; the guard for a future type is AC1's test over every registered kind instead (a new kind added
-to `PayloadRegistry` without a test row is a review finding, as for every other per-kind test).
+name-based rule and adds code; the guard for a future type is the reflection-driven test of AC1b instead, which needs no
+per-kind row and fails for a new payload type that lacks the attribute.
 
 ## Affected projects and types
 
@@ -92,7 +101,8 @@ None: no member is added or changes its signature; only an attribute is added to
 
 - `tests/Vandox.Core.Tests/PayloadRegistryTests.cs` (new; class `PayloadRegistryTests` for `PayloadRegistry.cs`): AC1 (one
   `DataRow` per kind, the valid payloads of `PayloadValidationTests.PayloadValidateValidPayloadReturnsNull` may be reused as
-  input), AC3.
+  input), AC1b (one test method, no `DataRow`s, e.g. `PayloadRegistryEveryPayloadTypeIgnoresKindProperty`, enumerating by
+  reflection as stated in AC1b), AC3.
 - `tests/Vandox.Core.Tests/BatchDecoderTests.cs`: AC2, the 15 `DataRow`s at lines 701-715.
 - `tests/Vandox.Core.Tests/NullAsAbsentConverterFactoryTests.cs`: AC2, the three expectations at lines 219-221.
 - `tests/Vandox.Core.Tests/PayloadValidationTests.cs`: AC4, unchanged.
@@ -131,3 +141,18 @@ part of the payload JSON; record 0063 (stored JSON payloads) is unaffected in su
 ## Out of scope / follow-ups
 
 - No migration that strips `"Kind"` from rows already stored: nothing is released, and reading ignores the member (AC3).
+
+## Challenge
+
+Devil's Advocate, round 1 (two minor objections):
+
+1. *The Approach claims the interface `[JsonIgnore]` still applies when a payload is serialized through its declared interface
+   type, e.g. `DataRecord.Data`, but nothing serializes `DataRecord` or an `IPayload`-typed value.* — **Accepted.** Confirmed by
+   reading: the only payload serialization is `PayloadRegistry.Serialize` with `payload.GetType()` (`PayloadRegistry.cs:74`).
+   The example is dropped; the Approach now says the interface attribute is kept only as documentation of intent.
+2. *The future-type guard is only a review convention; make AC1 reflection-driven over all registered payload types.* —
+   **Accepted.** New AC1b enumerates the `RecordKind` constants, the registry and the concrete `IPayload` implementations of
+   `Vandox.Core` by reflection and requires `[JsonIgnore]` (condition `Always`) on each type's `Kind` property; a ninth type
+   without the attribute (or without registration) fails a test. The per-kind behavioral check (AC1) stays, because the
+   attribute check alone would not catch a serialization change through options or converters. The rejected resolver option
+   under *Approach* now names AC1b as its replacement guard. Tier, scope and signatures are unchanged.
