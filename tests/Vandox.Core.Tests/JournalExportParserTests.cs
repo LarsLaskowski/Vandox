@@ -874,7 +874,7 @@ public class JournalExportParserTests
     public async Task JournalExportParserParseAsyncNeedsNoTimeZoneForMariaDbLines()
     {
         // Arrange
-        var parser = BuiltInParsers.Create(null)[0];
+        var parser = BuiltInParsers.Create(null, ErrorLogPaths.Default)[0];
         var input = new JournalExportBuilder().Entry(MariaDbSamples.Micros(MariaDbSamples.Start), "web-1", "mariadbd", 2345, 6, "2026-03-01 23:00:05 0 [Note] /usr/sbin/mariadbd: ready for connections.").ToArray();
 
         // Act
@@ -897,7 +897,7 @@ public class JournalExportParserTests
     public async Task JournalExportParserParseAsyncOpensAnEntryAtAHeaderWithAnImpossibleDate(string message)
     {
         // Arrange
-        var parser = BuiltInParsers.Create(null)[0];
+        var parser = BuiltInParsers.Create(null, ErrorLogPaths.Default)[0];
         var input = new JournalExportBuilder().Entry(MariaDbSamples.Micros(MariaDbSamples.Start), "web-1", "mariadbd", 2345, 6, message)
                                               .Entry(MariaDbSamples.Micros(MariaDbSamples.Start), "web-1", "mariadbd", 2345, 6, "continued")
                                               .ToArray();

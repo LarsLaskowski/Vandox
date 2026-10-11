@@ -8,13 +8,16 @@ public static class BuiltInParsers
     #region Methods
 
     /// <summary>
-    /// Creates the built-in parsers in registry order: the journal export, the MariaDB error log, Dovecot's own log file, then the generic syslog parser.
+    /// Creates the built-in parsers in registry order: the journal export, the MariaDB error log, Dovecot's own log file, the generic syslog parser, then the error log parsers.
     /// </summary>
     /// <param name="timeZone">The IANA time zone for year-less log lines and the local times of the MariaDB error log; <c>null</c> when not set</param>
+    /// <param name="paths">The configured paths of the error logs</param>
     /// <returns>The parsers</returns>
     /// <exception cref="ArgumentException">The zone is unknown</exception>
-    public static IReadOnlyList<ILogParser> Create(string? timeZone)
+    public static IReadOnlyList<ILogParser> Create(string? timeZone, ErrorLogPaths paths)
     {
+        ArgumentNullException.ThrowIfNull(paths);
+
         var zone = timeZone is null ? null : SourceTimeZone.Find(timeZone);
 
         if (timeZone is not null && zone is null)

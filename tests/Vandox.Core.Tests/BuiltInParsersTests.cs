@@ -38,7 +38,7 @@ public class BuiltInParsersTests
     public void BuiltInParsersCreateReturnsJournalThenMariaDbThenDovecotThenSyslog(string? timeZone)
     {
         // Act
-        var parsers = BuiltInParsers.Create(timeZone);
+        var parsers = BuiltInParsers.Create(timeZone, ErrorLogPaths.Default);
 
         // Assert
         Assert.HasCount(4, parsers, "four parsers");
@@ -59,7 +59,7 @@ public class BuiltInParsersTests
     public void BuiltInParsersCreateListIsAcceptedByTheRegistry()
     {
         // Arrange
-        var parsers = BuiltInParsers.Create("UTC");
+        var parsers = BuiltInParsers.Create("UTC", ErrorLogPaths.Default);
 
         // Act
         var registry = new ParserRegistry(parsers);
@@ -80,7 +80,7 @@ public class BuiltInParsersTests
     public void BuiltInParsersCreateRefusesUnknownZoneWithoutItsText(string timeZone)
     {
         // Act
-        var exception = Assert.ThrowsExactly<ArgumentException>(() => BuiltInParsers.Create(timeZone), "unknown zone");
+        var exception = Assert.ThrowsExactly<ArgumentException>(() => BuiltInParsers.Create(timeZone, ErrorLogPaths.Default), "unknown zone");
 
         // Assert
         if (timeZone.Length > 0)
@@ -136,7 +136,7 @@ public class BuiltInParsersTests
     public void BuiltInParsersRegistryDetectsFilesByContentAndName(string name, string head, string expected, Confidence expectedConfidence)
     {
         // Arrange
-        var registry = new ParserRegistry(BuiltInParsers.Create("UTC"));
+        var registry = new ParserRegistry(BuiltInParsers.Create("UTC", ErrorLogPaths.Default));
         var bytes = Encoding.UTF8.GetBytes(head);
 
         // Act
@@ -154,7 +154,7 @@ public class BuiltInParsersTests
     public void BuiltInParsersRegistryRatesJournalByContentAndSyslogByName()
     {
         // Arrange
-        var registry = new ParserRegistry(BuiltInParsers.Create("UTC"));
+        var registry = new ParserRegistry(BuiltInParsers.Create("UTC", ErrorLogPaths.Default));
 
         // Act
         var journal = registry.Detect(new LogFile("anything", null), Encoding.UTF8.GetBytes(JournalHead));

@@ -182,5 +182,15 @@ internal static partial class BackendLog
     [LoggerMessage(EventId = 28, Level = LogLevel.Information, Message = "file not imported {Path} {Reason}")]
     internal static partial void FileNotImported(this ILogger logger, string path, string reason);
 
+    /// <summary>
+    /// Logs the raw lines kept of a file.
+    /// </summary>
+    /// <param name="logger">The logger</param>
+    /// <param name="path">The display path of the file</param>
+    /// <param name="sourceType">The source type of the file</param>
+    /// <param name="raw">The raw lines kept</param>
+    [LoggerMessage(EventId = 29, Level = LogLevel.Warning, Message = "raw lines kept {Path} {SourceType} {Raw}")]
+    internal static partial void RawLinesKept(this ILogger logger, string path, string sourceType, long raw);
+
     #endregion // Methods
 }

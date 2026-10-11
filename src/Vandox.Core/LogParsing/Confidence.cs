@@ -18,5 +18,10 @@ public enum Confidence
     /// <summary>
     /// The content carries the signature of the format.
     /// </summary>
-    MatchContent = 2
+    MatchContent = 2,
+
+    /// <summary>
+    /// The file is at a path the configuration names for the parser.
+    /// </summary>
+    MatchPath = 3
 }

@@ -43,6 +43,11 @@ public sealed class FileResult
     public long Skipped { get; set; }
 
     /// <summary>
+    /// Gets or sets the number of lines kept as raw lines because they are not of the format.
+    /// </summary>
+    public long Raw { get; set; }
+
+    /// <summary>
     /// Gets or sets the number of records an earlier, interrupted run had stored.
     /// </summary>
     public long ResumedAfter { get; set; }
@@ -82,6 +87,11 @@ public sealed class FileResult
     /// </summary>
     public List<ImportProblem> Problems { get; } = [];
 
+    /// <summary>
+    /// Gets the raw line warnings, at most <see cref="ImportLimits.MaxProblems"/>.
+    /// </summary>
+    public List<ImportProblem> RawProblems { get; } = [];
+
     #endregion // Properties
 
     #region Methods
@@ -101,6 +111,7 @@ public sealed class FileResult
                        Lines = Lines,
                        Records = Records,
                        Skipped = Skipped,
+                       Raw = Raw,
                        ResumedAfter = ResumedAfter,
                        ContinuedFrom = ContinuedFrom,
                        ContainedIn = ContainedIn,
@@ -111,6 +122,7 @@ public sealed class FileResult
                    };
 
         copy.Problems.AddRange(Problems);
+        copy.RawProblems.AddRange(RawProblems);
 
         return copy;
     }

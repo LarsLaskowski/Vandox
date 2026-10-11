@@ -1,3 +1,5 @@
+#pragma warning disable RH2003, S2325
+
 using Vandox.Core.LogParsing;
 using Vandox.Core.Model;
 using Vandox.Storage;
@@ -231,6 +233,12 @@ internal sealed class RecordEmitter : IRecordEmitter
         {
             result.Problems.Add(new ImportProblem(line > 0 ? line + LineOffset : line, reason));
         }
+    }
+
+    /// <inheritdoc />
+    public void Warn(long line, string reason)
+    {
+        throw new NotImplementedException();
     }
 
     #endregion // IRecordEmitter

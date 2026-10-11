@@ -35,6 +35,11 @@ log:
   level: info
 
 import:
+  # Paths of the error logs recognized by their location (skeleton values: the defaults; task 5 documents them).
+  plesk_panel_log: /var/log/plesk/panel.log
+  sw_cp_server_error_log: /var/log/sw-cp-server/error_log
+  nginx_error_log: /var/log/nginx/error.log
+  apache_error_log: /var/log/apache2/error.log
   # IANA time zone of the server the log files come from, for example Europe/Berlin or UTC. Needed to import
   # syslog and kern.log files in the traditional format, whose time stamps carry neither year nor offset, and
   # MariaDB error logs and Dovecot log files, whose time stamps are local time without an offset; such a file fails with
