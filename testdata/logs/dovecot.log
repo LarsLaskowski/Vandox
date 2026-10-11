@@ -1,0 +1,11 @@
+Oct 09 03:12:12 master: Info: Dovecot v2.3.16 (7e2e900c1a) starting up for imap, pop3 (core dumps disabled)
+Oct 09 03:12:13 imap-login: Info: Login: user=<alice@example.org>, method=PLAIN, rip=198.51.100.7, lip=192.0.2.1, mpid=2301, TLS, session=<AbCdEfGh>
+Oct 09 03:12:14 auth-worker(2290): Error: mysql(localhost): Connect failed to database (mail): Can't connect to local server through socket '/run/mysqld/mysqld.sock' (2) - waiting for 1 seconds before retry
+Oct 09 03:12:15 auth-worker(2290): Warning: sqlpool(mysql): Query failed, retrying: MySQL server has gone away
+Oct 09 03:12:16 master: Error: service(imap): child 2301 killed with signal 9
+Oct 09 03:12:17 imap(alice@example.org)<2301><AbCdEfGh>: Panic: file mail-index.c: line 42 (mail_index_open): assertion failed: (index != NULL)
+Oct 09 03:12:18 auth: Fatal: master: service(auth): child 2290 returned error 89
+Oct 09 03:12:19 lmtp(2400): Debug: lmtp-server: conn 192.0.2.1:41234 [1]: Connect from local
+Oct 09 03:12:20 imap-login: Info: Disconnected (auth failed, 1 attempts in 2 secs): user=<x: Panic: y>, method=PLAIN, rip=192.0.2.9
+Oct 09 03:12:21 Info: imap(bob)<2402><QrStUvWx>: Connection closed in=12 out=345
+Oct 09 03:12:22 imap(bob)<2402><QrStUvWx>: Info: Logged out in=12 out=345
