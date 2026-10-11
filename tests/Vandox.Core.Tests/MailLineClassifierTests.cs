@@ -486,7 +486,7 @@ public class MailLineClassifierTests
     }
 
     /// <summary>
-    /// The time of a classification grows with the length of the message and not faster: a message eight times as long takes less than 40 times as long.
+    /// The time of a classification grows with the length of the message and not faster: a message eight times as long takes less than 20 times as long.
     /// </summary>
     [TestMethod]
     public void MailLineClassifierClassifyIsLinearInTheLengthOfTheMessage()
@@ -508,7 +508,7 @@ public class MailLineClassifierTests
         // Assert
         var ratio = (double)longTime / Math.Max(1, baseTime);
 
-        Assert.IsLessThan(40.0, ratio, $"the time of a message of {baseLength * factor} characters against one of {baseLength} (a linear scan gives about {factor}, a quadratic one about {factor * factor})");
+        Assert.IsLessThan(20.0, ratio, $"the time of a message of {baseLength * factor} characters against one of {baseLength} (a linear scan gives about {factor}, a quadratic one about {factor * factor})");
     }
 
     /// <summary>
