@@ -42,6 +42,8 @@ internal static class ImportRepository
                                             + "WHERE h.first_offset < $size AND h.last_offset >= $size "
                                             + "ORDER BY f.size DESC, f.id";
 
+    private const string SourceTypeParameter = "$type";
+
     private const int Sha256Bytes = 32;
 
     #endregion // Constants
@@ -171,7 +173,7 @@ internal static class ImportRepository
 
         command.CommandText = SelectBases;
         command.Parameters.AddWithValue("$head", headSha256);
-        command.Parameters.AddWithValue("$type", sourceType);
+        command.Parameters.AddWithValue(SourceTypeParameter, sourceType);
         command.Parameters.AddWithValue("$limit", StorageLimits.MaxImportBases);
 
         using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
@@ -223,7 +225,7 @@ internal static class ImportRepository
             insert.Parameters.AddWithValue("$name", CutName(start.Name));
             insert.Parameters.AddWithValue("$file", Encoding.UTF8.GetBytes(start.FileName));
             insert.Parameters.AddWithValue("$mod", start.ModTime is { } mod && StorageTime.InStorableRange(mod) ? StorageTime.ToNanoseconds(mod) : DBNull.Value);
-            insert.Parameters.AddWithValue("$type", start.SourceType);
+            insert.Parameters.AddWithValue(SourceTypeParameter, start.SourceType);
             insert.Parameters.AddWithValue("$started", StorageTime.ToNanoseconds(start.StartedAt));
             insert.Parameters.AddWithValue("$head", start.HeadSha256);
             insert.Parameters.AddWithValue("$continues", continuesId is { } id ? id : DBNull.Value);
@@ -365,7 +367,7 @@ internal static class ImportRepository
         command.Transaction = transaction;
         command.CommandText = SelectContainers;
         command.Parameters.AddWithValue("$head", start.HeadSha256);
-        command.Parameters.AddWithValue("$type", start.SourceType);
+        command.Parameters.AddWithValue(SourceTypeParameter, start.SourceType);
         command.Parameters.AddWithValue("$size", start.Size);
         command.Parameters.AddWithValue("$limit", StorageLimits.MaxImportContainers);
 
@@ -406,7 +408,7 @@ internal static class ImportRepository
             command.CommandText = SelectBase;
             command.Parameters.AddWithValue("$sha", prefix.Sha256);
             command.Parameters.AddWithValue("$size", prefix.Size);
-            command.Parameters.AddWithValue("$type", start.SourceType);
+            command.Parameters.AddWithValue(SourceTypeParameter, start.SourceType);
 
             if (await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false) is long id)
             {
