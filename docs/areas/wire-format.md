@@ -187,7 +187,8 @@ connection collector #33 and the legacy `lsof -ni` parser #20):
 The nesting depth of a line is fixed at 64 (`MaxDepth`, see *Common rules*) and is not part of the limits. In both decoders the line
 rules cost time and memory in proportion to the line's length: the work for one object never depends on the size of another object
 ([0090](../decisions/0090-wire-keys-matched-ignoring-ascii-case-duplicates-rejected-header-shape-malformed.md)). A decoder keeps the
-state of this check from one line to the next and, between lines, keeps no key set sized for more than 64 keys; a decoder (Go `Decoder`,
+state of this check from one line to the next and, between lines, holds no key of an earlier line and no key set or list sized for more
+than 64 keys; a line that is cut short is `wire.ErrMalformed` and stops the decoder; a decoder (Go `Decoder`,
 C# `BatchDecoder`) is used by one caller at a time.
 `wire.DefaultLimits()` returns them; `NewDecoder` takes a `Limits` where a zero or negative field means that
 field's default. The encoder always uses the defaults. A line over the limit, a stream that decompresses to

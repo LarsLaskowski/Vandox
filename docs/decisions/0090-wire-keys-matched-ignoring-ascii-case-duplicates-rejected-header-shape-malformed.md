@@ -69,7 +69,10 @@ Keys seen by the duplicate test:
     an object of more than 64 keys drops its depth's set instead** (chosen) — emptying costs the object's own keys, never a capacity
     another object reached, so the check stays linear in the line; nothing is created again per line or per small object, so neither a
     list of small objects nor a batch of many short, deeply nested lines multiplies a fixed cost; and a decoder keeps, from one line to the
-    next, at most one set per depth of at most 64 keys. In C# an object reserves room for its own property count first, so its set grows once. Measured with
+    next, at most one empty set and list per depth, sized for at most 64 keys. A list's entries are zeroed before its length is set to 0
+    (Go `clear` on the slice, which costs its own length): a Go slice merely cut to length 0 keeps its old key strings referenced, which
+    Security measured at 13.0 MiB after 15 lines with keys of about 1 MiB; C#'s `List.Clear` and `HashSet.Remove` drop the references
+    themselves. In C# an object reserves room for its own property count first, so its set grows once. Measured with
     the check in copies of both decoders on the hostile shapes of the area's tests: C# at most 17.3 times the line or batch allocated
     (today up to 13.4), Go at most 33.7 (today up to 2.0). A decoder is used by one caller at a time already, so the shared state needs
     no lock.
@@ -118,7 +121,8 @@ decoders run pins them.
 - Case-insensitive binding lives in the shared `PayloadRegistry.Options`, so the storage read path matches keys ignoring case too; that
   changes nothing for the rows the store writes, whose keys come from the same model.
 - The check costs one pass over the parsed line. The cost of emptying or reusing the keys seen of an object is bounded by the keys that
-  object held, never by the capacity a container once reached for another object, and no key set is ever cleared; the state lives in
+  object held, never by the capacity a container once reached for another object, and no key set is ever cleared (a key list is zeroed,
+  at the cost of its own length, so no key of an earlier line stays referenced); the state lives in
   the decoder, which is why a decoder must stay with one caller at a time. Go seeds the hash of every map, and .NET switches a string
   set to its randomized hash once one insert walks a chain of more than 100 entries, so crafted keys cannot degrade the sets beyond that.
 - `jq` and the decoder can still read one spelling differently (`.kind` misses `"Kind"`), but never two values for one field.

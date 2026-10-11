@@ -155,9 +155,13 @@ texts, allocation, model rules).
   once each returns `null`; two `BatchDecoder`s that read two batches with the same nested keys alternately (`NextAsync` on one, then on
   the other) both return every record (`BatchDecoderTests.cs`). (b) Both languages through the fixture: cases D23-D27 (a sibling, a
   nested sibling and the next line reuse keys an earlier object had; a duplicate in an object of more than 64 keys; a sibling after an
-  object of more than 64 keys). (c) The Reviewer checks the diff: the walk's frame stack and per-depth containers are created per
-  decoder, not per line or per `checkLine` / `FindViolation` call; no key set or map is emptied with `clear(...)` or `.Clear()`; a set
-  is created only the first time a depth is reached or after an object of more than 64 keys dropped it.
+  object of more than 64 keys), and D28 (a truncated record line: the decoder stops at it, so no key it left behind reaches the next
+  line). (c) The Reviewer checks the diff: the walk's frame stack and per-depth containers are created per decoder, not per line or per
+  `checkLine` / `FindViolation` call; no key set or map is emptied with `clear(...)` or `.Clear()`; a set is created only the first time
+  a depth is reached or after an object of more than 64 keys dropped it; a per-depth key list has its entries zeroed before its length is
+  set to 0 — Go `clear(list)` on the slice (allowed: it costs the slice's own length, unlike `clear` on a map, which stays forbidden) or
+  assigning `""` to each entry inside the delete loop; C# `List<string>.Clear()` (allowed: it costs the list's count). A Go
+  `list = list[:0]` without zeroing is a finding.
 
 ### Fixture format
 
@@ -247,6 +251,7 @@ texts, allocation, model rules).
 | D25 | `H`, `M(1)` and `M(2)`, both records with the unknown key `"x":{"a":1,"b":2}` | accepted, metric 1, metric 2 |
 | D26 | unknown key `"x":{"k1":1,"k2":2,...,"k65":65,"K65":66}` (66 keys `k1` to `k65` written out, the 66th repeats the 65th) | Malformed, 2 |
 | D27 | unknown key `"x":[{"k1":1,"k2":2,...,"k65":65},{"k1":1,"k65":2}]` (the first object's 65 keys written out) | accepted, metric 1 |
+| D28 | `H`, then the truncated record `{"kind":"metric","source":"host","seq":1,"captured_at":"2026-10-01T10:00:00Z","data":{"name":"cpu","value":1},"x":{"a":1,"b":2` (cut before its two closing braces), then `M(2)` with the unknown key `"x":{"a":1,"b":2}` | no records, Malformed, 2 |
 | H1-H5 | header `[1]`, `[]`, `5`, `"x"`, `true` | Malformed, 1 |
 | H6-H7 | header `null`, `{}` | UnsupportedVersion, 1 |
 | H8-H20 | `format_major` `"1"`, `"2"`, `1.0`, `1e0`, `1E0`, `10e-1`, `2.5`, `true`, `{}`, `[1]`, `9223372036854775808`, `-9223372036854775809`, `1e400`, each followed by `T` | Malformed, 1 |
@@ -344,7 +349,8 @@ store's own canonical rows, which do not change meaning.
 
 **Rule:** the work to reset or reuse the keys seen of an object is bounded by the number of keys that object holds, never by the capacity a
 container once reached for another object; in total the line check costs time and memory in proportion to the line, and the state a
-decoder keeps from one line to the next is bounded by a constant. No set or map is ever emptied with `clear(...)` / `Clear()`. Reason
+decoder keeps from one line to the next is bounded by a constant and holds no key of an earlier line. No set or map is ever emptied
+with `clear(...)` / `Clear()` (a key list is, see below: that costs only its own length). Reason
 (Security, plan review round 1): clearing costs the capacity, not the content (Go `clear(m)` walks the whole table, depending on the
 toolchain; .NET `HashSet.Clear()` wipes the whole bucket array whenever the set is non-empty), so one object with about 58,700 keys followed
 in the same list by about 65,500 objects `{"a":0}` (1 MiB) makes a cleared, reused set quadratic. And (Security, plan review round 2): state
@@ -365,12 +371,23 @@ multiplies it; the state of the walk therefore lives in the decoder.
   its own properties (`set.EnsureCapacity(element.GetPropertyCount())`, the same for the list; `GetPropertyCount` is constant time,
   checked), so a set grows at most once per object instead of doubling; Go has no count up front and lets the map grow.
 - **Emptied by removing the object's own keys.** When an object ends — normally or because the walk stops at a violation — every key in
-  its depth's list is removed from that depth's set (Go `delete`, C# `Remove`) and the list's length is set to 0, so a sibling or the next
-  line finds the set empty. The cost is the object's own key count. After `checkLine` / `FindViolation` returns, every set is empty.
+  its depth's list is removed from that depth's set (Go `delete`, C# `Remove`), then the list's entries are zeroed and its length is set
+  to 0, so a sibling or the next line finds the set and the list empty and no key string stays referenced. Go: `clear(list)` on the
+  slice (it costs the slice's own length, not a capacity another object reached) or `list[i] = ""` inside the delete loop, then
+  `list = list[:0]`; a bare `list[:0]` would leave the old key strings in the backing array, so between lines Go would keep up to the
+  batch size referenced (Security measured 13.0 MiB through the lists after 15 lines with keys of about 1 MiB). C#: `List<string>.Clear()`
+  (it zeroes its `Count` entries) and `HashSet.Remove` drop the references themselves, so C# needs nothing extra. The cost is the
+  object's own key count. After `checkLine` / `FindViolation` returns on a complete line, every set and list is empty. On a truncated
+  line Go's `json.Decoder.Token` reaches the end without a syntax error (it returns `io.EOF` with objects still open, checked), so the
+  open objects' keys may remain; `json.Unmarshal` of the same line then reports `ErrMalformed`, and every error stops the decoder for good
+  (`d.err`, `internal/wire/decode.go:157`), so no such key reaches a later line (fixture case D28). The Dev may also empty the open
+  objects or return `ErrMalformed` from `checkLine` itself at that `io.EOF`; D28 expects `Malformed`, line 2, either way. C# parses the
+  line with `JsonDocument` before `FindViolation` walks it, so a truncated line never reaches the check.
 - **No large set is kept.** An object with more than 64 keys (C#: whose property count, Go: whose added keys exceed 64; an unexported /
   private constant whose name is the Dev's choice) drops its depth's set and list when it ends (set to `nil` / `null`) instead of removing
-  its keys; the next object at that depth creates new ones. So a decoder keeps, from line to line, at most `MaxDepth` sets and lists of
-  at most 64 keys each, and a large object pays for its own set, which is in proportion to its own keys.
+  its keys; the next object at that depth creates new ones. So a decoder keeps, from line to line, at most `MaxDepth` empty sets and
+  lists, each sized for at most 64 keys and holding no key of an earlier line, and a large object pays for its own set, which is in
+  proportion to its own keys.
 
 Measured in scratch prototypes that put this check into copies of both decoders (C#: `OpenAsync` and `NextAsync` to the end,
 `GC.GetTotalAllocatedBytes(true)`, Release and Debug; Go: `NewDecoder` and `Next` to the end, `runtime.MemStats.TotalAlloc`, with and
@@ -508,7 +525,7 @@ signature. Files the skeleton rewrites: none beyond the files above; `WireKeyChe
 - C#: `tests/Vandox.Core.Tests/WireKeyCheckTests.cs` (new, for `WireKeyCheck`, including the instance reuse after a violation of AC17 (a)),
   `tests/Vandox.Core.Tests/BatchDecoderTests.cs` (raw-byte keys, no foreign exception, error texts, header shape, `FormatMinor`,
   `MaxDepth`, reflection test, allocation and the shape-5 time ratio of AC14, the two interleaved decoders of AC17; the reuse and the
-  dropping of the per-depth sets of *Cost of the duplicate test* are exercised in both languages by fixture cases D23-D27),
+  dropping of the per-depth sets of *Cost of the duplicate test* are exercised in both languages by fixture cases D23-D28),
   `tests/Vandox.Core.Tests/WireContractTests.cs` (shared cases runner `DecodeSharedCaseGivesExpectedResult`).
 - Shared: `testdata/wire/decoder-cases.json` (Tester).
 
@@ -535,7 +552,7 @@ compares an untyped constant or formats with `%d` (`wire.go:91`, `:103`; `wire_t
   makes a collector record a gap for a refused record; *Duties of the ingest API* names F1 as a blocker of #40. After the Security plan
   review: *Limits* states that the line rules cost time and memory in proportion to the line in both decoders; after round 2 also that a
   decoder keeps the check's state from line to line, keeps no set of more than 64 keys after its object, and is used by one caller at a
-  time.
+  time; after the Security delta confirmation also that it keeps no key of an earlier line.
 
 ## Documentation updates
 
@@ -569,7 +586,9 @@ version writes. Area 10's goal is strengthened (fewer readings of one line, fail
   object removes exactly its own keys when it ends, also when the walk stops at a violation, an object of more than 64 keys drops its
   depth's set instead, and no set is ever emptied with `clear` / `Clear()` (*Cost of the duplicate test*). So the check costs time and
   memory in proportion to the line, nothing is paid again per line or per small object, and what a decoder keeps from one line to the
-  next is at most `MaxDepth` sets and lists of at most 64 keys. A set holds at most the keys of one object of one line (<=
+  next is at most `MaxDepth` empty sets and lists, each sized for at most 64 keys; a list's entries are zeroed before its length is set
+  to 0 (Go `clear(list)` on the slice or `""` in the delete loop; C# `List.Clear` and `HashSet.Remove` drop the references), so no key
+  string of an earlier line stays referenced, and a truncated line stops the decoder (D28). A set holds at most the keys of one object of one line (<=
   `MaxLineBytes`). Sharing the state is safe because a decoder is used by one caller at a time, as it already keeps its line number,
   count and last `seq` from call to call; `WireKeyCheck` has no static mutable state, and two interleaved decoders are tested (AC17).
   Hash flooding: Go seeds the hash of every map randomly when it is created (a reused map keeps its seed, which the input cannot
@@ -688,6 +707,22 @@ Options weighed (`.squad/routing.md`, *Loop limits*):
   allow the Lead the "accept, fix, exactly one Security delta confirmation" route only for a pure wording defect, so the Lead escalates
   the route to the Product Manager, recommending exactly one Security delta confirmation of this revision (a further rejection returns
   to the Product Manager).
+
+### Security delta confirmation
+
+APPROVED, one non-blocking wording defect and one note; both applied as wording, without a further Security round.
+
+- **N4 A Go key list cut to length 0 keeps its old strings referenced** — accepted. `list = list[:0]` leaves the key strings in the
+  backing array, so between lines Go kept up to the batch size referenced (Security: 13.0 MiB through the lists after 15 lines with
+  keys of about 1 MiB), contradicting the rule that the state kept from line to line is bounded by a constant. Revised in *Cost of the
+  duplicate test* (rule and "Emptied by removing the object's own keys"), *Security considerations*, AC17 (c), record 0090 (option 11,
+  *Consequences*) and the area document's *Limits*: a list's entries are zeroed before its length is set to 0 (Go `clear(list)` on the
+  slice, which costs its own length, or `""` in the delete loop); AC17 (c) allows that slice `clear` and keeps `clear` on a map
+  forbidden. C# is unaffected: `List<string>.Clear()` and `HashSet.Remove` drop the references.
+- **Note: a truncated line** — accepted. Checked: `json.Decoder.Token` returns `io.EOF` with objects still open, no syntax error; the
+  following `json.Unmarshal` reports `ErrMalformed` and the decoder stays failed (`d.err`), so keys left in the sets never reach a later
+  line. *Cost of the duplicate test* says so, and new fixture case D28 (a truncated record followed by a record with the same keys:
+  no records, `Malformed`, line 2) pins it in both languages (AC17 (b)).
 
 ## Out of scope / follow-ups
 
