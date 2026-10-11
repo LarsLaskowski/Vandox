@@ -633,3 +633,36 @@ func TestEncodeBatch_RefusesKeysDifferingOnlyInCaseAndWritesNothing(t *testing.T
 		})
 	}
 }
+
+// The producer never trips the text rule (record 0090): json.Marshal turns every invalid byte into � and escapes no surrogate.
+func TestEncodeBatch_InvalidTextDecodesAsReplacementCharacters(t *testing.T) {
+	logRecord := func(seq uint64, message string) model.Record {
+		return model.Record{Meta: agentMeta(seq, "journal", time.UTC), Data: &model.LogLine{Log: "journal", Message: message}}
+	}
+	labelRecord := model.Record{Meta: agentMeta(3, "proc.meminfo", time.UTC), Data: &model.MetricPoint{
+		Name: "mem_free_bytes", Value: 1, Labels: map[string]string{"a": "\xff"},
+	}}
+	b := &wire.Batch{
+		Header:  wire.NewHeader("agent-1", testBootID, wire.ModeLive),
+		Records: []model.Record{logRecord(1, "a\xffb"), logRecord(2, "\xed\xa0\x80"), labelRecord},
+	}
+	for i := range b.Records {
+		if _, err := wire.CheckRecord(&b.Records[i]); err != nil {
+			t.Errorf("CheckRecord(record %d) = %v, want nil", i+1, err)
+		}
+	}
+	_, recs := decodeBatch(t, encodeBytes(t, b))
+	if len(recs) != 3 {
+		t.Fatalf("decoded %d records, want 3", len(recs))
+	}
+	for i, want := range []string{"a�b", "���"} {
+		line, ok := recs[i].Data.(*model.LogLine)
+		if !ok || line.Message != want {
+			t.Errorf("record %d = %#v, want a log line with message %q", i+1, recs[i].Data, want)
+		}
+	}
+	metric, ok := recs[2].Data.(*model.MetricPoint)
+	if !ok || metric.Labels["a"] != "�" {
+		t.Errorf("record 3 = %#v, want a metric with label a = %q", recs[2].Data, "�")
+	}
+}

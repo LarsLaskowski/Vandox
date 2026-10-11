@@ -1081,6 +1081,405 @@
         "error": "UnknownKind",
         "line": 2
       }
+    },
+    {
+      "name": "S1 message with byte FF",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"log_line\",\"source\":\"journal\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"log\":\"journal\",\"message\":\"a\u00ffb\"}}"
+      ],
+      "latin1": true,
+      "want": {
+        "error": "Malformed",
+        "line": 2
+      }
+    },
+    {
+      "name": "S2 message with an encoded surrogate",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"log_line\",\"source\":\"journal\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"log\":\"journal\",\"message\":\"\u00ed\u00a0\u0080\"}}"
+      ],
+      "latin1": true,
+      "want": {
+        "error": "Malformed",
+        "line": 2
+      }
+    },
+    {
+      "name": "S3 message cut short before the quote",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"log_line\",\"source\":\"journal\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"log\":\"journal\",\"message\":\"a\u00e2\u0082\"}}"
+      ],
+      "latin1": true,
+      "want": {
+        "error": "Malformed",
+        "line": 2
+      }
+    },
+    {
+      "name": "S4 kind with byte FF",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"metric\u00ff\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "latin1": true,
+      "want": {
+        "error": "Malformed",
+        "line": 2
+      }
+    },
+    {
+      "name": "S5 header agent_id with byte FF",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\u00ff\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "latin1": true,
+      "want": {
+        "error": "Malformed",
+        "line": 1
+      }
+    },
+    {
+      "name": "S6 label value with byte FF",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1,\"labels\":{\"a\":\"\u00ff\"}}}"
+      ],
+      "latin1": true,
+      "want": {
+        "error": "Malformed",
+        "line": 2
+      }
+    },
+    {
+      "name": "S7 unknown envelope value with byte FF",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"x\":\"\u00ff\",\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "latin1": true,
+      "want": {
+        "error": "Malformed",
+        "line": 2
+      }
+    },
+    {
+      "name": "S8 unknown payload value in a list with byte FF",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1,\"x\":[\"\u00ff\"]}}"
+      ],
+      "latin1": true,
+      "want": {
+        "error": "Malformed",
+        "line": 2
+      }
+    },
+    {
+      "name": "S9 unknown header value with byte FF",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\",\"x\":\"\u00ff\"}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "latin1": true,
+      "want": {
+        "error": "Malformed",
+        "line": 1
+      }
+    },
+    {
+      "name": "S10 header major 2 with byte FF",
+      "lines": [
+        "{\"format_major\":2,\"x\":\"\u00ff\"}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "latin1": true,
+      "want": {
+        "error": "Malformed",
+        "line": 1
+      }
+    },
+    {
+      "name": "S11 byte FF after the record object",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}\u00ff"
+      ],
+      "latin1": true,
+      "want": {
+        "error": "Malformed",
+        "line": 2
+      }
+    },
+    {
+      "name": "S12 second record with byte FF",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"log_line\",\"source\":\"journal\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"log\":\"journal\",\"message\":\"a\"}}",
+        "{\"kind\":\"log_line\",\"source\":\"journal\",\"seq\":2,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"log\":\"journal\",\"message\":\"a\u00ffb\"}}"
+      ],
+      "latin1": true,
+      "want": {
+        "records": [
+          {
+            "kind": "log_line",
+            "seq": 1
+          }
+        ],
+        "error": "Malformed",
+        "line": 3
+      }
+    },
+    {
+      "name": "S13 message high surrogate alone",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"log_line\",\"source\":\"journal\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"log\":\"journal\",\"message\":\"\\ud800\"}}"
+      ],
+      "want": {
+        "error": "Malformed",
+        "line": 2
+      }
+    },
+    {
+      "name": "S14 message low surrogate alone",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"log_line\",\"source\":\"journal\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"log\":\"journal\",\"message\":\"\\udc00\"}}"
+      ],
+      "want": {
+        "error": "Malformed",
+        "line": 2
+      }
+    },
+    {
+      "name": "S15 message high then a non-surrogate escape",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"log_line\",\"source\":\"journal\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"log\":\"journal\",\"message\":\"\\ud800A\"}}"
+      ],
+      "want": {
+        "error": "Malformed",
+        "line": 2
+      }
+    },
+    {
+      "name": "S16 message high then a letter",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"log_line\",\"source\":\"journal\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"log\":\"journal\",\"message\":\"\\ud800x\"}}"
+      ],
+      "want": {
+        "error": "Malformed",
+        "line": 2
+      }
+    },
+    {
+      "name": "S17 message low then high",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"log_line\",\"source\":\"journal\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"log\":\"journal\",\"message\":\"\\udc00\\ud800\"}}"
+      ],
+      "want": {
+        "error": "Malformed",
+        "line": 2
+      }
+    },
+    {
+      "name": "S18 message high before a valid pair",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"log_line\",\"source\":\"journal\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"log\":\"journal\",\"message\":\"\\ud800\\ud800\\udc00\"}}"
+      ],
+      "want": {
+        "error": "Malformed",
+        "line": 2
+      }
+    },
+    {
+      "name": "S19 message high surrogate in upper-case hex",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"log_line\",\"source\":\"journal\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"log\":\"journal\",\"message\":\"\\uD800\"}}"
+      ],
+      "want": {
+        "error": "Malformed",
+        "line": 2
+      }
+    },
+    {
+      "name": "S20 message high surrogate before an escaped newline",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"log_line\",\"source\":\"journal\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"log\":\"journal\",\"message\":\"\\ud800\\n\"}}"
+      ],
+      "want": {
+        "error": "Malformed",
+        "line": 2
+      }
+    },
+    {
+      "name": "S21 metric unit with a high surrogate",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1,\"unit\":\"\\ud800\"}}"
+      ],
+      "want": {
+        "error": "Malformed",
+        "line": 2
+      }
+    },
+    {
+      "name": "S22 kind with a high surrogate",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"\\ud800\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "want": {
+        "error": "Malformed",
+        "line": 2
+      }
+    },
+    {
+      "name": "S23 header agent_id with a high surrogate",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"\\ud800\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "want": {
+        "error": "Malformed",
+        "line": 1
+      }
+    },
+    {
+      "name": "S24 unknown envelope value with a high surrogate",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"x\":\"\\ud800\",\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "want": {
+        "error": "Malformed",
+        "line": 2
+      }
+    },
+    {
+      "name": "S25 header major 2 with a low surrogate",
+      "lines": [
+        "{\"format_major\":2,\"x\":\"\\udc00\"}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "want": {
+        "error": "Malformed",
+        "line": 1
+      }
+    },
+    {
+      "name": "S26 message escaped surrogate pair",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"log_line\",\"source\":\"journal\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"log\":\"journal\",\"message\":\"\\ud83d\\ude00\"}}"
+      ],
+      "want": {
+        "records": [
+          {
+            "kind": "log_line",
+            "seq": 1
+          }
+        ]
+      }
+    },
+    {
+      "name": "S27 message escaped pair in upper-case hex",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"log_line\",\"source\":\"journal\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"log\":\"journal\",\"message\":\"\\uD83D\\uDE00\"}}"
+      ],
+      "want": {
+        "records": [
+          {
+            "kind": "log_line",
+            "seq": 1
+          }
+        ]
+      }
+    },
+    {
+      "name": "S28 message escaped pair in mixed case",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"log_line\",\"source\":\"journal\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"log\":\"journal\",\"message\":\"\\uD83d\\uDe00\"}}"
+      ],
+      "want": {
+        "records": [
+          {
+            "kind": "log_line",
+            "seq": 1
+          }
+        ]
+      }
+    },
+    {
+      "name": "S29 message escaped replacement character",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"log_line\",\"source\":\"journal\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"log\":\"journal\",\"message\":\"\\ufffd\"}}"
+      ],
+      "want": {
+        "records": [
+          {
+            "kind": "log_line",
+            "seq": 1
+          }
+        ]
+      }
+    },
+    {
+      "name": "S30 message escaped noncharacter",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"log_line\",\"source\":\"journal\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"log\":\"journal\",\"message\":\"\\uffff\"}}"
+      ],
+      "want": {
+        "records": [
+          {
+            "kind": "log_line",
+            "seq": 1
+          }
+        ]
+      }
+    },
+    {
+      "name": "S31 message escaped backslash before ud800",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"log_line\",\"source\":\"journal\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"log\":\"journal\",\"message\":\"\\\\ud800\"}}"
+      ],
+      "want": {
+        "records": [
+          {
+            "kind": "log_line",
+            "seq": 1
+          }
+        ]
+      }
+    },
+    {
+      "name": "S32 message with raw multi-byte UTF-8",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"log_line\",\"source\":\"journal\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"log\":\"journal\",\"message\":\"é€😀\"}}"
+      ],
+      "want": {
+        "records": [
+          {
+            "kind": "log_line",
+            "seq": 1
+          }
+        ]
+      }
     }
   ]
 }

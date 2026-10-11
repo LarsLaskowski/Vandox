@@ -235,7 +235,7 @@ public sealed class BatchDecoder : IDisposable
         try
         {
             using var document = JsonDocument.Parse(raw.Value, _parseOptions);
-            var violation = _keyCheck.FindViolation(document.RootElement);
+            var violation = _keyCheck.FindViolation(document.RootElement) ?? WireTextCheck.FindViolation(raw.Value.Span);
 
             if (violation is not null)
             {
@@ -290,7 +290,7 @@ public sealed class BatchDecoder : IDisposable
         try
         {
             using var document = JsonDocument.Parse(line.ToArray(), _parseOptions);
-            var violation = _keyCheck.FindViolation(document.RootElement);
+            var violation = _keyCheck.FindViolation(document.RootElement) ?? WireTextCheck.FindViolation(line);
 
             if (violation is not null)
             {

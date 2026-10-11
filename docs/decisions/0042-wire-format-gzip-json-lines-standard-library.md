@@ -31,4 +31,4 @@ Option 1. The layout and all rules are in the [Wire format](../areas/wire-format
 - No new dependency; the vulnerability scan covers the codec through the standard library.
 - Batches can be inspected with standard tools during an incident.
 - The encoding is larger before compression; if the volume ever matters (several monitored servers, #89), zstd or a binary encoding can come in as a new major version (0043).
-- Invalid UTF-8 in strings is replaced by U+FFFD on encode and decode, so a log line with invalid bytes is not stored byte for byte; 0021 (no pseudonymization) is not affected.
+- Invalid UTF-8 in strings is replaced by U+FFFD on encode, so a log line with invalid bytes is not stored byte for byte; 0021 (no pseudonymization) is not affected. The decoders do not replace: they refuse a line with invalid UTF-8 or an unpaired surrogate escape ([0090](0090-wire-keys-matched-ignoring-ascii-case-duplicates-rejected-header-shape-malformed.md)), which the encoder never writes.
