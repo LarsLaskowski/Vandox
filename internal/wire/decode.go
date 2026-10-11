@@ -146,15 +146,20 @@ type keyCheck struct {
 }
 
 // checkLine checks the JSON-level rules of one line before it is bound: no key outside ASCII after unescaping,
-// no two keys of one object equal ignoring ASCII case, no nesting deeper than MaxDepth. It returns nil or an
-// error wrapping ErrMalformed whose text names the broken rule but never the key.
+// no two keys of one object equal ignoring ASCII case, no nesting deeper than MaxDepth. A line that is one
+// complete JSON value is then checked for the text rule (checkText); any other line is left to the binding, which
+// reports its syntax error. It returns nil or an error wrapping ErrMalformed whose text names the broken rule but
+// never the key or the text.
 func (c *keyCheck) checkLine(line []byte) error {
 	if c.frames == nil {
 		c.frames = make([]frame, 0, MaxDepth)
 	}
-	_, err := c.walk(line)
+	complete, err := c.walk(line)
 	c.unwind()
-	return err
+	if err != nil || complete == false {
+		return err
+	}
+	return checkText(line)
 }
 
 // unwind closes every object still open, so the next line starts with empty levels.
@@ -176,13 +181,59 @@ func (c *keyCheck) pop() {
 // checkText checks the text rule of one line: valid UTF-8, and every \u escape of a surrogate a high half directly
 // followed by an escaped low half. It returns nil, errNotUTF8 or errUnpairedSurrogate.
 func checkText(line []byte) error {
-	return errors.New("not implemented")
+	if utf8.Valid(line) == false {
+		return errNotUTF8
+	}
+	for i := 0; i < len(line); i++ {
+		if line[i] != '\\' {
+			continue
+		}
+		if i+1 >= len(line) || line[i+1] != 'u' {
+			i++
+			continue
+		}
+		unit, ok := escapedUnit(line[i:])
+		if ok == false {
+			continue
+		}
+		switch {
+		case unit >= 0xDC00 && unit <= 0xDFFF:
+			return errUnpairedSurrogate
+		case unit >= 0xD800 && unit <= 0xDBFF:
+			low, ok := escapedUnit(line[i+6:])
+			if ok == false || low < 0xDC00 || low > 0xDFFF {
+				return errUnpairedSurrogate
+			}
+			i += 11
+		default:
+			i += 5
+		}
+	}
+	return nil
 }
 
 // escapedUnit returns the UTF-16 code unit of the \uXXXX escape at the start of b, and false when b does not start
 // with a complete one.
 func escapedUnit(b []byte) (rune, bool) {
-	return 0, false
+	if len(b) < 6 || b[0] != '\\' || b[1] != 'u' {
+		return 0, false
+	}
+	var unit rune
+	for _, h := range b[2:6] {
+		var d byte
+		switch {
+		case h >= '0' && h <= '9':
+			d = h - '0'
+		case h >= 'a' && h <= 'f':
+			d = h - 'a' + 10
+		case h >= 'A' && h <= 'F':
+			d = h - 'A' + 10
+		default:
+			return 0, false
+		}
+		unit = unit<<4 | rune(d)
+	}
+	return unit, true
 }
 
 // walk reads the first value of line token by token. A syntax error is reported as malformed; a line that ends
@@ -203,9 +254,19 @@ func (c *keyCheck) walk(line []byte) (complete bool, err error) {
 			return false, err
 		}
 		if len(c.frames) == 0 {
-			return false, nil
+			return onlyWhitespace(line[dec.InputOffset():]), nil
 		}
 	}
+}
+
+// onlyWhitespace reports whether b holds nothing but JSON whitespace.
+func onlyWhitespace(b []byte) bool {
+	for _, c := range b {
+		if c != ' ' && c != '\t' && c != '\r' && c != '\n' {
+			return false
+		}
+	}
+	return true
 }
 
 // step applies one token to the frame stack.
