@@ -37,5 +37,5 @@ func (p *MetricPoint) Validate() error {
 			return err
 		}
 	}
-	return nil
+	return checkFoldUnique("labels", p.Labels)
 }

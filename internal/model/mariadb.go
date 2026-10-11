@@ -70,6 +70,9 @@ func (s *MariaDBStatus) Validate() error {
 			return err
 		}
 	}
+	if err := checkFoldUnique("status", s.Status); err != nil {
+		return err
+	}
 	for _, k := range sortedKeys(s.Variables) {
 		path := keyed("variables", k)
 		if err := checkPattern(path, k, statusKeyPattern, MaxNameBytes); err != nil {
@@ -78,6 +81,9 @@ func (s *MariaDBStatus) Validate() error {
 		if err := checkShort(path, s.Variables[k]); err != nil {
 			return err
 		}
+	}
+	if err := checkFoldUnique("variables", s.Variables); err != nil {
+		return err
 	}
 	for i := range s.Threads {
 		if err := s.Threads[i].validate(indexed("threads", i)); err != nil {
