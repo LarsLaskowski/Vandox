@@ -7,5 +7,5 @@ One line per pipeline step: date, step, member, result. Lead decisions and escal
 | 2026-10-11 | 1 Intake | Orchestrator | issue read, branch created |
 | 2026-10-11 | 2 Plan | squad-lead | tier standard; plan.md written (opus/medium · 118,468 tokens · 23 tool uses · 270 s) |
 | 2026-10-11 | 2 Plan challenge | squad-devils-advocate | OBJECTIONS 0 major, 1 minor (area text contradicts plan observation) (sonnet/medium · 33,612 tokens · 9 tool uses · 20 s) |
-| 2026-10-11 | 2 Plan revise | squad-lead | objection accepted; area text narrowed |
+| 2026-10-11 | 2 Plan revise | squad-lead | objection accepted; area text narrowed (opus/medium · 25,604 tokens · 6 tool uses · 19 s) |
 | 2026-10-11 | 4 Skeleton | Orchestrator | skipped: no new or changed signatures |
