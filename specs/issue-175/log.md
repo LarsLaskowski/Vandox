@@ -24,4 +24,5 @@ One line per pipeline step: date, step, member, result. Lead decisions and escal
 | 2026-10-11 | 9 PR approval (Lead) | squad-lead | NOT APPROVED pending a delta round: Lead fixed area doc (#182 in two places) and 0090 (Go smallKeys=8 deviation accepted, #182); Tester to apply UNIT_TESTS.md:71 wording; then one Reviewer delta round (no Security round), then approve-pr again |
 | 2026-10-11 | 8 Docs wording fix | squad-tester | UNIT_TESTS.md: instrumentation (race detector, coverage) included (sonnet/medium · 54,934 tokens · 4 tool uses · 8 s) |
 | 2026-10-11 | 8 Review round 2 (delta) | squad-reviewer | APPROVE at b3a4333, docs-only delta clean (opus/medium · 25,587 tokens · 4 tool uses · 21 s) |
-| 2026-10-11 | 9 PR approval (Lead, 2nd call) | squad-lead | APPROVED: delta round 2 covers all docs changes since dee5f46; 0090 and its index row set to Accepted |
+| 2026-10-11 | 9 PR approval (Lead, 2nd call) | squad-lead | APPROVED: delta round 2 covers all docs changes since dee5f46; 0090 and its index row set to Accepted (opus/high · 26,543 tokens · 9 tool uses · 24 s) |
+| 2026-10-11 | 12 Wrap-up | Orchestrator | lessons: Squad-Spec-Repository-Template#74 (unicode escapes in plans and fixtures, ratio-time tests, stray create_session, loop limits after 2nd security rejection); no project-knowledge lessons; follow-ups #182 (blocks #40), #183 |
