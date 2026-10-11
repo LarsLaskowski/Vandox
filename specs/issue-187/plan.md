@@ -76,7 +76,8 @@ after a `\n` (1 to the content size).
   continuation point is included. The rows do not depend on how the input is cut into reads (`ChunkedStream`, chunk
   sizes 1, 7 and 4,096). A content without any line feed writes no row.
 - [ ] AC8 (attempts): `BeginImportAsync` sets `attempt` to 1 for a new row. It adds 1 to an existing incomplete row
-  and returns the new value, and it returns a complete row unchanged. The completing batch sets `hashes_attempt` to
+  and returns the new value, and in the same transaction deletes the line-hash rows of that file with any other
+  attempt. It returns a complete row unchanged and deletes nothing. The completing batch sets `hashes_attempt` to
   its step's `Attempt` and, in the same transaction, deletes the line-hash rows of the file with any other attempt.
   A resumed import (interrupted, then completed) therefore keeps only the rows of the completing attempt, and a
   later O is still recognized.
@@ -84,11 +85,18 @@ after a `\n` (1 to the content size).
   `store: invalid import: <rule>`. The rules are `file id must be positive`, `attempt must be positive`,
   `first offset must not be negative`, `last offset must be greater than the first offset`,
   `line hashes must be 1 to 4096 hashes of 16 bytes` (length 0, not a multiple of 16, or above 65,536) and
-  `line hashes must not outnumber the bytes they cover`. A file that is complete or unknown gives
-  `ImportConflictException` with `store: import state changed: file <id> is complete or unknown`. A second row with
-  the same (file, attempt, last offset) is a `StoreException`.
+  `line hashes must not outnumber the bytes they cover`. A file that is complete or unknown, or whose current
+  `attempt` is not the row's `Attempt`, gives `ImportConflictException` with
+  `store: import state changed: file <id> is complete, unknown or was begun again`. A second row with the same
+  (file, attempt, last offset) is a `StoreException`.
 - [ ] AC10 (batch step): a batch whose `ImportStep.Attempt` is negative is refused with
-  `store: invalid batch: import attempt must not be negative`. `Attempt` 0 is allowed and means "no line hashes".
+  `store: invalid batch: import attempt must not be negative`. `Attempt` 0 is allowed and means "no line hashes":
+  such a batch is not checked against the file's attempt, and when it completes the file it sets `hashes_attempt`
+  `NULL` and deletes every line-hash row of the file, so the file is never a container. A batch with `Attempt` above
+  0 whose file has another current `attempt` is refused with `ImportConflictException`
+  `store: import state changed: file <id> does not have <done> records stored, is complete or was begun again`
+  (the same text as a records mismatch) and changes nothing. Production always sends the state's attempt (at least
+  1, see AC8).
 - [ ] AC11 (lookup bound): only the 64 largest complete contents with the same head key and source type, larger than
   O, are compared (`MaxImportContainers`), largest first. A container that ranks 65th by size is not found. Every
   candidate reads exactly one row (the row with `first_offset < size <= last_offset`).
@@ -124,6 +132,20 @@ after a `\n` (1 to the content size).
   `AddLineHashesAsync` call and no other call carrying a file ID. An implementation that checked `Complete` first
   would import O with file ID 0 and fail this test. A state with `Complete` true and empty `ContainedIn` stays
   `AlreadyImported`.
+- [ ] AC20 (leftover rows bounded, real store): line-hash rows of an attempt that never completes do not pile up.
+  Begin a content (attempt 1), add two rows, begin it again (attempt 2): no row of attempt 1 is left. Add one row
+  for attempt 2, begin a third time: no row of attempts 1 or 2 is left. After any number of `BeginImportAsync` calls
+  for one incomplete content, `import_line_hashes` holds rows of at most the content's current `attempt`. Rows of
+  other files are untouched. Through `Importer` (`ImporterStoreTests`, `FakeImportStore` applying the store's rules):
+  a file that fails in pass 2 on every run (content changed between the passes, as in the existing tests at
+  `ImporterStoreTests.cs:181`, and separately a parser error), imported three times, sends every line-hash row and
+  every step with the attempt the store returned for that run (1, 2, 3), and afterwards the fake holds only rows of
+  attempt 3 for it, or none.
+- [ ] AC21 (superseded run, real store): run A begins a content (attempt 1), run B begins it again (attempt 2). A's
+  next `AddLineHashesAsync` with attempt 1 fails with `ImportConflictException` and the AC9 text and inserts nothing;
+  A's batch with attempt 1, completing or not, fails with `ImportConflictException` and the AC10 text, leaves
+  `records`, `complete` and `hashes_attempt` unchanged and deletes no row. B's line-hash writes and its completing
+  batch with attempt 2 succeed, and the content is then a container (a later O of it is `Contained`).
 
 ## Approach
 
@@ -134,9 +156,14 @@ after a `\n` (1 to the content size).
    stays at one row plus one read. `FlushLineHashesAsync` writes the queue and the partial row. `ImportPass` calls it
    after `VerifyAsync` succeeded and before the completing batch.
 2. **Attempts.** `import_files.attempt` counts the `BeginImportAsync` calls that return an incomplete state. Every
-   line-hash row carries the attempt that wrote it. The completing batch sets `hashes_attempt` and deletes the rows of
-   other attempts, so the rows of an attempt that read changed bytes or lost a race are never used. A line-hash write
-   runs in its own transaction, guarded by `complete = 0`, so nothing can be added after completion.
+   line-hash row carries the attempt that wrote it. Raising the attempt deletes the rows of every other attempt of
+   that file in the same transaction, so a file that never completes keeps the rows of one attempt at most, however
+   often it is imported again (AC20). The completing batch sets `hashes_attempt` and deletes the rows of other
+   attempts, so the rows of an attempt that read changed bytes or lost a race are never used. A line-hash write runs
+   in its own transaction, guarded by `complete = 0 AND attempt = $attempt`, and every batch with an attempt above 0
+   is guarded by the same `attempt = $attempt` in its compare-and-set. A run whose attempt was superseded by a later
+   `BeginImportAsync` therefore gets `ImportConflictException` on its next line-hash write or batch, and can neither
+   add rows next to the new attempt's nor complete the file over rows that were deleted (AC21).
 3. **Containment check in `BeginImportAsync`.** The check runs in the same transaction, after "existing row" and
    before the forward base choice. Candidates are the complete rows with the same head key and source type and a
    size larger than O, joined to the one line-hash row of their `hashes_attempt` that spans O's size. They are taken
@@ -209,14 +236,14 @@ public sealed class ImportLineHashes
 ```csharp
 Task AddLineHashesAsync(ImportLineHashes hashes, CancellationToken cancellationToken);
 // <exception cref="InvalidImportException">The row breaks a rule</exception>
-// <exception cref="ImportConflictException">The file is complete or unknown</exception>
+// <exception cref="ImportConflictException">The file is complete or unknown, or was begun again with a later attempt</exception>
 ```
 
 The doc of `BeginImportAsync` changes to: creates the state with attempt 1 when it is unknown, unless the content is
 the start of a complete stored content, in which case no state is created and the returned `ImportFile` has
 `ContainedIn` set (not empty) and no other member set; a caller checks `ContainedIn` before any other member. An
-existing incomplete state is returned with its attempt advanced by one, and a complete state is returned unchanged;
-both have an empty `ContainedIn`.
+existing incomplete state is returned with its attempt advanced by one, and the line hashes of its earlier attempts
+are deleted; a complete state is returned unchanged; both have an empty `ContainedIn`.
 
 `ImportFile` (new properties):
 
@@ -268,8 +295,17 @@ private static async Task<(long Id, string Name)?> FindContainerAsync(SqliteConn
 ```
 
 `AddLineHashesAsync` (`ImportRepository`): one transaction that runs
-`INSERT INTO import_line_hashes(file_id, attempt, first_offset, last_offset, hashes) SELECT $id, $attempt, $first, $last, $hashes WHERE EXISTS (SELECT 1 FROM import_files WHERE id = $id AND complete = 0)`.
-If no row was inserted, it throws `ImportConflictException("store: import state changed: file <id> is complete or unknown")`.
+`INSERT INTO import_line_hashes(file_id, attempt, first_offset, last_offset, hashes) SELECT $id, $attempt, $first, $last, $hashes WHERE EXISTS (SELECT 1 FROM import_files WHERE id = $id AND complete = 0 AND attempt = $attempt)`.
+If no row was inserted, it throws `ImportConflictException("store: import state changed: file <id> is complete, unknown or was begun again")`.
+
+`BeginAsync`: `InsertImportFile` inserts a new row with `attempt` 0 (the column default) as today. Then, in the same
+transaction and before `SelectAsync`, it runs
+`UPDATE import_files SET attempt = attempt + 1 WHERE sha256 = $sha AND complete = 0`, so a new row ends at 1 and an
+existing incomplete row is raised by one. When the selected state is incomplete, it then runs
+`DELETE FROM import_line_hashes WHERE file_id = $id AND attempt <> $attempt` with the state's new attempt (no row of
+the new attempt can exist yet, so this leaves none). `SelectImportFile` reads `f.attempt` into `ImportFile.Attempt`.
+The containment lookup (Approach step 3) runs before the insert and only when no row with the SHA-256 exists; it
+creates, raises and deletes nothing.
 
 `FindContainerAsync` query:
 
@@ -282,8 +318,12 @@ ORDER BY f.size DESC, f.id LIMIT $limit
 ```
 
 `AdvanceAsync`: the CAS update also sets `hashes_attempt = $hashes`, where `$hashes` is `step.Attempt` when
-`step.Complete` and `NULL` otherwise. When `step.Complete`, it then runs
-`DELETE FROM import_line_hashes WHERE file_id = $id AND attempt <> $attempt` in the same transaction.
+`step.Complete` and `step.Attempt` is above 0, and `NULL` otherwise, and its `WHERE` gains
+`AND ($attempt = 0 OR attempt = $attempt)`. When the update changes no row it throws
+`ImportConflictException("store: import state changed: file <id> does not have <done> records stored, is complete or was begun again")`
+(today's text at `ImportRepository.cs:169` extended; no test asserts the old text). When `step.Complete`, it then runs
+`DELETE FROM import_line_hashes WHERE file_id = $id AND attempt <> $attempt` in the same transaction (with
+`$attempt` 0 this deletes every row of the file).
 
 `SqliteStore`:
 
@@ -342,17 +382,20 @@ private static void WriteContained(StringBuilder text, List<FileResult> files); 
 
 ## Test files
 
-- `tests/Vandox.Storage.Tests/ImportTrackingTests.cs`: AC4 (c–f) on the store, AC5, AC8, AC9, AC11, the store side
+- `tests/Vandox.Storage.Tests/ImportTrackingTests.cs`: AC4 (c–f) on the store, AC5, AC8, AC9, AC11, AC20 (store
+  part; rows read back with SQL on the store's file, as `SqliteStoreOpenTests` does), AC21, the store side
   of AC19 (a contained result has `ContainedIn` set and no row exists afterwards; an existing state has an empty
   `ContainedIn`), and containment
   with the real store (exact prefix at a line end, not at a line end, one byte off, row spanning the size at a row
   boundary: size equal to a row's `LastOffset` and one line end after it).
-- `tests/Vandox.Storage.Tests/SqliteStoreWriteTests.cs`: AC10. `BatchValidator` is internal and has no test class
+- `tests/Vandox.Storage.Tests/SqliteStoreWriteTests.cs`: AC10 (validation rule; the attempt check of a batch is
+  in AC21). `BatchValidator` is internal and has no test class
   of its own; its import-step rules are tested through `SqliteStore.WriteBatchAsync` here (existing case at line 372).
 - `tests/Vandox.Storage.Tests/SqliteStoreOpenTests.cs`: AC18.
 - `tests/Vandox.Import.Tests/ContentStreamTests.cs`: AC7 (hash values, rows, offsets, independence of read size, skip
   included, no row without a line feed) and AC12.
-- `tests/Vandox.Import.Tests/ImporterStoreTests.cs`: AC1, AC2, AC3, AC4 (a, d), AC5, AC6, AC13, AC14 and AC19 against
+- `tests/Vandox.Import.Tests/ImporterStoreTests.cs`: AC1, AC2, AC3, AC4 (a, d), AC5, AC6, AC13, AC14, AC19 and the
+  `Importer` part of AC20 against
   `FakeImportStore`. `ImportPass` and `RecordEmitter` are covered through `Importer` here, as for #131.
 - `tests/Vandox.Import.Tests/ImporterArchiveTests.cs`: AC2 with both copies as entries of one tar archive.
 - `tests/Vandox.Import.Tests/FileResultTests.cs`: AC16 (`Snapshot` copies `ContainedIn`).
@@ -363,7 +406,9 @@ private static void WriteContained(StringBuilder text, List<FileResult> files); 
 
 Test doubles: `FakeImportStore` (`tests/Vandox.Import.Tests/FakeImportStore.cs`) needs the following, extended by
 the Tester in step 5: `AddLineHashesAsync` that records every row (`LineHashes`) with a scripted failure (exception
-and call number); `BeginImportAsync` counting attempts as the store does; a containment emulation that applies the
+and call number), refusing a row whose attempt is not the state's current one with `ImportConflictException`;
+`BeginImportAsync` counting attempts as the store does and deleting the recorded rows of earlier attempts of an
+incomplete state; batches refused the same way when their `Attempt` is above 0 and not the current one; a containment emulation that applies the
 store's rule to the recorded rows of complete states and returns an `ImportFile` with only `ContainedIn` set, as the
 store does (AC19); and batches that keep `Attempt` and apply the deletion on
 completion.
@@ -403,6 +448,13 @@ Existing test code affected by the changes:
     entry whole; the older copy's lines are found only inside the container's records, framed and grouped as the
     container's parse made them, and an entry that the older copy holds only in part is not stored as such a part.
   - *Result*: the outcome `contained`, the count line, the section, and the exit code.
+  - *Input limits* (lines 47-49, "one of valid lines fills the storage directory"): extend the sentence. Any
+    decompressed content with line feeds now fills the storage directory at 16 bytes per line end, even when no
+    record is stored (a small `.gz` of nothing but `\n` suffices), until the operator presses Ctrl-C. A content that
+    fails keeps the line hashes of its latest attempt only, and the next import of it deletes them.
+- `docs/areas/storage.md` rules (owner **Dev**, in the same entry as below): raising the attempt in
+  `BeginImportAsync` deletes the line hashes of earlier attempts of that file; line-hash writes and batches with an
+  attempt above 0 require the file's current attempt.
 - `docs/areas/storage.md` (owner **Dev**): schema version 7 (step 7), the table `import_line_hashes` in the table
   list, the columns `attempt` and `hashes_attempt` of `import_files`, the primary key as index, and the rules under
   *Import batches* / *Import bases*: attempts, completion with deletion, line-hash writes guarded by `complete = 0`,
@@ -430,13 +482,18 @@ Existing test code affected by the changes:
 - Storage rules (0063, 0077): a new table and columns through a migration step. Records are still never updated.
   The import state is still the only link between files and records.
 - Memory: pass 1 is unchanged. Pass 2 holds at most one row of 4,096 hashes plus the line ends of one read
-  (AC12). The lookup reads at most 64 rows of at most 64 KiB.
+  (AC12). The lookup reads at most 64 rows of at most 64 KiB. Stored line hashes are bounded to one attempt per
+  file (AC20).
 
 ## Security considerations
 
 - [x] Byte and length limits: line ends and offsets count **raw decompressed bytes**. Nothing is decoded, and the
   limits sit before any text decoding. Bounds: `MaxLineHashes` 4,096 per row (64 KiB blob, also a `CHECK` in the
   schema), `MaxImportContainers` 64 candidate rows per lookup, and one row queued plus one read's line ends in pass 2.
+  Stored line hashes: a complete content keeps the rows of its completing attempt, an incomplete one the rows of its
+  current attempt at most (deleted when it is begun again, AC20), so storage is 16 bytes per line end of each stored
+  content, not per run. A content whose lines are all empty still costs 16 bytes per line end without any record
+  (stated in `docs/areas/log-import.md`, *Input limits*).
 - [x] User-visible failure texts: "the import state changed (another import of the same content is running?)" for
   `ImportConflictException`, "database error" (and the run ends) for any other `StoreException`, "interrupted" for a
   cancellation. All already exist in `ImportPass.StoreReason`. No store or SQLite message reaches the summary.
@@ -492,6 +549,25 @@ Devil's Advocate: 0 major, 2 minor objections.
    for `docs/areas/log-import.md` (*Limits of the guarantee*), covering `LineFramed` false parsers and grouping
    parsers alike. Record 0069 (*Consequences*) already states that the lines are present as the container's parse
    stored them, with an open entry stored with its later lines; it is unchanged.
+
+Security plan review, round 1: CHANGES_REQUIRED, 1 blocking, 1 non-blocking.
+
+1. *Blocking: line hashes of attempts that never complete pile up on every run (a file failing in pass 2 never
+   completes; each re-run raises the attempt and writes a new set of rows, unbounded).* **Accepted.** Confirmed by
+   reading: the plan deleted other attempts' rows only in the completing batch, and a parser error
+   (`ImportPass.cs:128-137`) or a changed content (`ImportPass.cs:149`) writes no completing batch. Changed:
+   `BeginImportAsync` deletes the rows of every other attempt of the file in the transaction that raises the attempt
+   (Approach step 2, `BeginAsync` statements, AC8, AC20); `AddLineHashesAsync` requires `attempt = $attempt`, and
+   every batch with `Attempt` above 0 requires it in its compare-and-set, so a superseded run gets
+   `ImportConflictException` on its next write and cannot complete over deleted rows (AC9, AC10, AC21; the existing
+   failure text "the import state changed (another import of the same content is running?)" applies). `Attempt` 0
+   is kept for a step without line hashes; such a completion sets `hashes_attempt` `NULL` and deletes every row, so
+   it can never make a container. `FakeImportStore` emulates the same rules. Record 0069 (W2, *Consequences*) is
+   updated.
+2. *Non-blocking: the area's decompression-bomb sentence must say that any content with line feeds now fills
+   storage at 16 bytes per line end, even with no record stored.* **Accepted.** *Areas* gives the Dev the extended
+   sentence for `docs/areas/log-import.md` lines 47-49, and record 0069 *Consequences* states it next to the
+   16-bytes-per-line cost.
 
 ## Out of scope / follow-ups
 
