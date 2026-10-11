@@ -244,7 +244,7 @@ escape in a regular string literal).
     adding the 1,025th puts the first event into `closed`);
   - `SignatureDetectorCountsLinesBeyondTheIdLimit` (300 copies: `RecordIds` holds the first 256 IDs, `LineCount` 300);
   - `SignatureDetectorRetainsBoundedMemoryUnderAFlood` (heap bound, revised for Security B2): a test catalog with one
-    signature, message `^(?<t>[^;]*);`, field `t: text`. Each of 20,000 lines within one window has a message of
+    signature, message `^(?<t>[^;]*);`, field `t: text`. Each of 3,000 lines within one window has a message of
     16,380 ASCII bytes: a text capture of 16,000 characters that starts with the line's number in eight digits (so the
     first 1,024 bytes, and the events, differ), then `;`, then filler. Lines are built one at a time and not kept by the
     test; closed events go to a collection that counts and discards them. The baseline is taken after one warm-up line
@@ -253,7 +253,10 @@ escape in a regular string literal).
     retained after the last `Add` minus the baseline stays below 8 MiB, measured with the `RetainedBytes` helper form
     of `.squad/stack.md` (*Writing tests*). With 1,024 open events, an implementation that keeps an uncut field, the
     message, the `Match` or the record per open event retains at least 1,024 × 32,000 bytes (UTF-16) and fails; the
-    correct one keeps about 1,024 × 2 KiB of text plus small per-event state.
+    correct one keeps about 1,024 × 2 KiB of text plus small per-event state. The test also asserts that 1,976 events
+    (3,000 − 1,024) were closed. (Revised in step 6 from 20,000 lines: 3,000 still fill all 1,024 open events and evict
+    1,976, which is all the bound needs, since the retained state is capped by the open limit and not by the line count;
+    20,000 lines took 8 to 10 s against the 10 s test time limit.)
   - and AC1's `BuiltInSignaturesPatternsRunWithoutBacktracking`. No wall-clock bound is tested.
 
 ## Approach
