@@ -8,15 +8,22 @@ namespace Vandox.Core.Wire;
 
 /// <summary>
 /// Reads a batch record by record from a gzip-compressed stream of JSON lines. The first line is the header, every
-/// further line one record. The decoder allocates only within <see cref="WireLimits"/>.
+/// further line one record. The decoder allocates only within <see cref="WireLimits"/>. An instance is used by one caller at a
+/// time.
 /// </summary>
 public sealed class BatchDecoder : IDisposable
 {
     #region Fields
 
+    private static readonly JsonDocumentOptions _parseOptions = new()
+                                                                {
+                                                                    MaxDepth = WireFormat.MaxDepth
+                                                                };
+
     private readonly GZipStream _gzip;
     private readonly WireLineReader _lines;
     private readonly WireLimits _limits;
+    private readonly WireKeyCheck _keyCheck = new();
     private int _line;
     private int _count;
     private ulong _last;
@@ -155,15 +162,47 @@ public sealed class BatchDecoder : IDisposable
     /// Reads <c>format_major</c> from the header.
     /// </summary>
     /// <param name="root">The header document</param>
-    /// <returns>The major version, <see cref="int.MinValue"/> when it is no 32-bit integer, or <c>null</c> when it is missing</returns>
-    private static int? ReadMajor(JsonElement root)
+    /// <returns>The major version, or <c>null</c> when it is missing or <c>null</c></returns>
+    /// <exception cref="WireException">The header is not an object or <c>format_major</c> is not an integer</exception>
+    private long? ReadMajor(JsonElement root)
     {
-        if (root.ValueKind == JsonValueKind.Object && root.TryGetProperty("format_major", out var major) && major.ValueKind == JsonValueKind.Number)
+        if (root.ValueKind == JsonValueKind.Null)
         {
-            return major.TryGetInt32(out var value) ? value : int.MinValue;
+            return null;
         }
 
-        return null;
+        if (root.ValueKind != JsonValueKind.Object)
+        {
+            throw Fail(WireErrorKind.Malformed, "header is not a JSON object", null, 1);
+        }
+
+        var major = root.EnumerateObject()
+                        .Where(p => string.Equals(p.Name, "format_major", StringComparison.OrdinalIgnoreCase))
+                        .Select(p => (JsonElement?)p.Value)
+                        .FirstOrDefault();
+
+        return major is null ? null : ReadMajorValue(major.Value);
+    }
+
+    /// <summary>
+    /// Reads the value of <c>format_major</c>.
+    /// </summary>
+    /// <param name="value">The value</param>
+    /// <returns>The major version, or <c>null</c> when the value is <c>null</c></returns>
+    /// <exception cref="WireException">The value is not an integer</exception>
+    private long? ReadMajorValue(JsonElement value)
+    {
+        if (value.ValueKind == JsonValueKind.Null)
+        {
+            return null;
+        }
+
+        if (value.ValueKind == JsonValueKind.Number && value.TryGetInt64(out var major))
+        {
+            return major;
+        }
+
+        throw Fail(WireErrorKind.Malformed, "format_major is not an integer", null, 1);
     }
 
     /// <summary>
@@ -195,7 +234,13 @@ public sealed class BatchDecoder : IDisposable
 
         try
         {
-            using var document = JsonDocument.Parse(raw.Value);
+            using var document = JsonDocument.Parse(raw.Value, _parseOptions);
+            var violation = _keyCheck.FindViolation(document.RootElement);
+
+            if (violation is not null)
+            {
+                throw Fail(WireErrorKind.Malformed, violation, null, 1);
+            }
 
             root = document.RootElement.Clone();
         }
@@ -244,7 +289,13 @@ public sealed class BatchDecoder : IDisposable
 
         try
         {
-            using var document = JsonDocument.Parse(line.ToArray());
+            using var document = JsonDocument.Parse(line.ToArray(), _parseOptions);
+            var violation = _keyCheck.FindViolation(document.RootElement);
+
+            if (violation is not null)
+            {
+                throw Fail(WireErrorKind.Malformed, violation, null, _line);
+            }
 
             root = document.RootElement.Clone();
         }

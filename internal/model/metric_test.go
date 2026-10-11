@@ -72,3 +72,46 @@ func TestMetricPoint_Validate_Invalid(t *testing.T) {
 	}
 	runInvalid(t, validMetric, cases)
 }
+
+func TestMetricPoint_Validate_LabelKeysDifferingOnlyInCase(t *testing.T) {
+	const reason = "duplicate key ignoring case"
+	cases := []struct {
+		name   string
+		labels map[string]string
+		field  string
+	}{
+		{"Mount and mount", map[string]string{"Mount": "a", "mount": "b"}, `labels["mount"]`},
+		{"mixed case in the middle of three keys", map[string]string{"a": "1", "B": "2", "b": "3"}, `labels["b"]`},
+		{"three spellings name the second one in byte order", map[string]string{"MOUNT": "1", "Mount": "2", "mount": "3"}, `labels["Mount"]`},
+		{"other keys do not hide the duplicate", map[string]string{"device": "sda1", "Device": "sda2", "mount": "/var"}, `labels["device"]`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			p := validMetric()
+			p.Labels = tc.labels
+			fe := fieldErrorOf(t, p.Validate(), tc.field)
+			if fe.Reason != reason {
+				t.Errorf("Validate() reason = %q, want %q", fe.Reason, reason)
+			}
+		})
+	}
+}
+
+func TestMetricPoint_Validate_LabelKeysDifferingInMoreThanCase(t *testing.T) {
+	cases := []struct {
+		name   string
+		labels map[string]string
+	}{
+		{"one key longer", map[string]string{"mount": "a", "mounts": "b"}},
+		{"different letters", map[string]string{"a": "1", "b": "2"}},
+		{"upper and lower case of different words", map[string]string{"Mount": "a", "device": "b"}},
+		{"underscore and dash", map[string]string{"a_b": "1", "a-b": "2"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			p := validMetric()
+			p.Labels = tc.labels
+			requireValid(t, p)
+		})
+	}
+}

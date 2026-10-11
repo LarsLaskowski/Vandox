@@ -1,0 +1,1086 @@
+{
+  "cases": [
+    {
+      "name": "K1 header keys in other case",
+      "lines": [
+        "{\"FORMAT_MAJOR\":1,\"Format_Minor\":0,\"AGENT_ID\":\"agent-1\",\"Boot_ID\":\"0123abcd-0123-0123-0123-0123456789ab\",\"MODE\":\"live\"}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "want": {
+        "records": [
+          {
+            "kind": "metric",
+            "seq": 1
+          }
+        ]
+      }
+    },
+    {
+      "name": "K2 record keys in other case",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"KIND\":\"metric\",\"Source\":\"host\",\"SEQ\":4,\"Captured_At\":\"2026-10-01T10:00:00Z\",\"DATA\":{\"NAME\":\"cpu\",\"Value\":1}}"
+      ],
+      "want": {
+        "records": [
+          {
+            "kind": "metric",
+            "seq": 4
+          }
+        ]
+      }
+    },
+    {
+      "name": "K3 process snapshot keys in other case",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"process_snapshot\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"complete\":true,\"Processes\":[{\"PID\":7,\"Command\":\"x\"}]}}"
+      ],
+      "want": {
+        "records": [
+          {
+            "kind": "process_snapshot",
+            "seq": 1
+          }
+        ]
+      }
+    },
+    {
+      "name": "K4 record key with an escaped letter",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"\\u006bind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "want": {
+        "records": [
+          {
+            "kind": "metric",
+            "seq": 1
+          }
+        ]
+      }
+    },
+    {
+      "name": "K5 record key escaped in upper-case hex",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"\\u004BIND\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "want": {
+        "records": [
+          {
+            "kind": "metric",
+            "seq": 1
+          }
+        ]
+      }
+    },
+    {
+      "name": "K6 payload key kind is an unknown key",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1,\"kind\":\"gap\"}}"
+      ],
+      "want": {
+        "records": [
+          {
+            "kind": "metric",
+            "seq": 1
+          }
+        ]
+      }
+    },
+    {
+      "name": "N1 record key with raw Kelvin sign",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"Kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "want": {
+        "error": "Malformed",
+        "line": 2
+      }
+    },
+    {
+      "name": "N2 record key with raw long s",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"ſeq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "want": {
+        "error": "Malformed",
+        "line": 2
+      }
+    },
+    {
+      "name": "N3 header key with raw dotless i",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_ıd\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "want": {
+        "error": "Malformed",
+        "line": 1
+      }
+    },
+    {
+      "name": "N4 record key with an escaped Kelvin sign",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"\\u212aind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "want": {
+        "error": "Malformed",
+        "line": 2
+      }
+    },
+    {
+      "name": "N5 unknown payload key with raw e acute",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1,\"é\":1}}"
+      ],
+      "want": {
+        "error": "Malformed",
+        "line": 2
+      }
+    },
+    {
+      "name": "N6 label key that is a raw Kelvin sign",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1,\"labels\":{\"K\":\"x\"}}}"
+      ],
+      "want": {
+        "error": "Malformed",
+        "line": 2
+      }
+    },
+    {
+      "name": "N7 unknown envelope key with an unpaired high surrogate",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"\\ud800\":1,\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "want": {
+        "error": "Malformed",
+        "line": 2
+      }
+    },
+    {
+      "name": "N8 label key with an unpaired low surrogate",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1,\"labels\":{\"a\\udc00\":\"x\"}}}"
+      ],
+      "want": {
+        "error": "Malformed",
+        "line": 2
+      }
+    },
+    {
+      "name": "N9 unknown envelope key with an escaped surrogate pair",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"\\ud83d\\ude00\":1,\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "want": {
+        "error": "Malformed",
+        "line": 2
+      }
+    },
+    {
+      "name": "N10 header unknown key with an unpaired high surrogate",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\",\"\\ud800\":1}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "want": {
+        "error": "Malformed",
+        "line": 1
+      }
+    },
+    {
+      "name": "N11 unknown payload key with a high surrogate and a non-surrogate escape",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1,\"\\ud800\\u0041\":1}}"
+      ],
+      "want": {
+        "error": "Malformed",
+        "line": 2
+      }
+    },
+    {
+      "name": "D1 seq twice",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":9,\"seq\":3,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "want": {
+        "error": "Malformed",
+        "line": 2
+      }
+    },
+    {
+      "name": "D2 data twice",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1},\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "want": {
+        "error": "Malformed",
+        "line": 2
+      }
+    },
+    {
+      "name": "D3 oom_kill twice",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"kernel_event\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"type\":\"oom_kill\",\"oom_kill\":{\"victim_pid\":4242,\"victim_command\":\"mysqld\",\"anon_rss_bytes\":1073741824,\"oom_score_adj\":-900},\"oom_kill\":{\"victim_pid\":4242,\"victim_command\":\"mysqld\",\"anon_rss_bytes\":1073741824,\"oom_score_adj\":-900},\"message\":\"Out of memory\"}}"
+      ],
+      "want": {
+        "error": "Malformed",
+        "line": 2
+      }
+    },
+    {
+      "name": "D4 labels twice",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1,\"labels\":{\"a\":\"1\"},\"labels\":{\"b\":\"2\"}}}"
+      ],
+      "want": {
+        "error": "Malformed",
+        "line": 2
+      }
+    },
+    {
+      "name": "D5 processes twice",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"process_snapshot\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"complete\":true,\"processes\":[{\"pid\":1,\"user\":\"root\",\"command\":\"x\"}],\"processes\":[{\"pid\":2,\"command\":\"y\"}]}}"
+      ],
+      "want": {
+        "error": "Malformed",
+        "line": 2
+      }
+    },
+    {
+      "name": "D6 name and name null",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"name\":null,\"value\":1}}"
+      ],
+      "want": {
+        "error": "Malformed",
+        "line": 2
+      }
+    },
+    {
+      "name": "D7 kind and kind null",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"metric\",\"kind\":null,\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "want": {
+        "error": "Malformed",
+        "line": 2
+      }
+    },
+    {
+      "name": "D8 kind and Kind",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"gap\",\"Kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "want": {
+        "error": "Malformed",
+        "line": 2
+      }
+    },
+    {
+      "name": "D9 kind and its escaped spelling",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"gap\",\"\\u006bind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "want": {
+        "error": "Malformed",
+        "line": 2
+      }
+    },
+    {
+      "name": "D10 label key twice",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1,\"labels\":{\"a\":\"1\",\"a\":\"2\"}}}"
+      ],
+      "want": {
+        "error": "Malformed",
+        "line": 2
+      }
+    },
+    {
+      "name": "D11 label keys Mount and mount",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1,\"labels\":{\"Mount\":\"a\",\"mount\":\"b\"}}}"
+      ],
+      "want": {
+        "error": "Malformed",
+        "line": 2
+      }
+    },
+    {
+      "name": "D12 status key twice",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"mariadb_status\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"availability\":\"up\",\"status\":{\"Uptime\":1,\"Uptime\":2}}}"
+      ],
+      "want": {
+        "error": "Malformed",
+        "line": 2
+      }
+    },
+    {
+      "name": "D13 unknown payload key twice",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1,\"x\":1,\"x\":2}}"
+      ],
+      "want": {
+        "error": "Malformed",
+        "line": 2
+      }
+    },
+    {
+      "name": "D14 repeat inside a nested unknown value",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"x\":[{\"a\":1,\"A\":2}],\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "want": {
+        "error": "Malformed",
+        "line": 2
+      }
+    },
+    {
+      "name": "D15 header format_major and null",
+      "lines": [
+        "{\"format_major\":1,\"format_major\":null,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "want": {
+        "error": "Malformed",
+        "line": 1
+      }
+    },
+    {
+      "name": "D16 header format_major twice",
+      "lines": [
+        "{\"format_major\":1,\"format_major\":2,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "want": {
+        "error": "Malformed",
+        "line": 1
+      }
+    },
+    {
+      "name": "D17 header format_major and Format_Major",
+      "lines": [
+        "{\"format_major\":2,\"Format_Major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "want": {
+        "error": "Malformed",
+        "line": 1
+      }
+    },
+    {
+      "name": "D18 same key in sibling objects",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"x\":[{\"a\":1},{\"a\":2}],\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "want": {
+        "records": [
+          {
+            "kind": "metric",
+            "seq": 1
+          }
+        ]
+      }
+    },
+    {
+      "name": "D19 same key at another depth",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"a\":{\"a\":{\"A\":1}},\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "want": {
+        "records": [
+          {
+            "kind": "metric",
+            "seq": 1
+          }
+        ]
+      }
+    },
+    {
+      "name": "D20 eighth key repeats the first",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"x\":{\"k1\":1,\"k2\":2,\"k3\":3,\"k4\":4,\"k5\":5,\"k6\":6,\"k7\":7,\"K1\":8},\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "want": {
+        "error": "Malformed",
+        "line": 2
+      }
+    },
+    {
+      "name": "D21 ninth key repeats the first",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"x\":{\"k1\":1,\"k2\":2,\"k3\":3,\"k4\":4,\"k5\":5,\"k6\":6,\"k7\":7,\"k8\":8,\"K1\":9},\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "want": {
+        "error": "Malformed",
+        "line": 2
+      }
+    },
+    {
+      "name": "D22 tenth key repeats the ninth",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"x\":{\"k1\":1,\"k2\":2,\"k3\":3,\"k4\":4,\"k5\":5,\"k6\":6,\"k7\":7,\"k8\":8,\"k9\":9,\"K9\":10},\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "want": {
+        "error": "Malformed",
+        "line": 2
+      }
+    },
+    {
+      "name": "D23 sibling after a nine-key object",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"x\":[{\"k1\":1,\"k2\":2,\"k3\":3,\"k4\":4,\"k5\":5,\"k6\":6,\"k7\":7,\"k8\":8,\"k9\":9},{\"k1\":1,\"k9\":9}],\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "want": {
+        "records": [
+          {
+            "kind": "metric",
+            "seq": 1
+          }
+        ]
+      }
+    },
+    {
+      "name": "D24 nested siblings reuse keys",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"x\":[{\"a\":{\"b\":1,\"c\":2}},{\"a\":{\"c\":1,\"b\":2}}],\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "want": {
+        "records": [
+          {
+            "kind": "metric",
+            "seq": 1
+          }
+        ]
+      }
+    },
+    {
+      "name": "D25 next line reuses keys",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"x\":{\"a\":1,\"b\":2},\"data\":{\"name\":\"cpu\",\"value\":1}}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":2,\"captured_at\":\"2026-10-01T10:00:00Z\",\"x\":{\"a\":1,\"b\":2},\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "want": {
+        "records": [
+          {
+            "kind": "metric",
+            "seq": 1
+          },
+          {
+            "kind": "metric",
+            "seq": 2
+          }
+        ]
+      }
+    },
+    {
+      "name": "D26 sixty-sixth key repeats the sixty-fifth",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"x\":{\"k1\":1,\"k2\":2,\"k3\":3,\"k4\":4,\"k5\":5,\"k6\":6,\"k7\":7,\"k8\":8,\"k9\":9,\"k10\":10,\"k11\":11,\"k12\":12,\"k13\":13,\"k14\":14,\"k15\":15,\"k16\":16,\"k17\":17,\"k18\":18,\"k19\":19,\"k20\":20,\"k21\":21,\"k22\":22,\"k23\":23,\"k24\":24,\"k25\":25,\"k26\":26,\"k27\":27,\"k28\":28,\"k29\":29,\"k30\":30,\"k31\":31,\"k32\":32,\"k33\":33,\"k34\":34,\"k35\":35,\"k36\":36,\"k37\":37,\"k38\":38,\"k39\":39,\"k40\":40,\"k41\":41,\"k42\":42,\"k43\":43,\"k44\":44,\"k45\":45,\"k46\":46,\"k47\":47,\"k48\":48,\"k49\":49,\"k50\":50,\"k51\":51,\"k52\":52,\"k53\":53,\"k54\":54,\"k55\":55,\"k56\":56,\"k57\":57,\"k58\":58,\"k59\":59,\"k60\":60,\"k61\":61,\"k62\":62,\"k63\":63,\"k64\":64,\"k65\":65,\"K65\":66},\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "want": {
+        "error": "Malformed",
+        "line": 2
+      }
+    },
+    {
+      "name": "D27 sibling after an object of 65 keys",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"x\":[{\"k1\":1,\"k2\":2,\"k3\":3,\"k4\":4,\"k5\":5,\"k6\":6,\"k7\":7,\"k8\":8,\"k9\":9,\"k10\":10,\"k11\":11,\"k12\":12,\"k13\":13,\"k14\":14,\"k15\":15,\"k16\":16,\"k17\":17,\"k18\":18,\"k19\":19,\"k20\":20,\"k21\":21,\"k22\":22,\"k23\":23,\"k24\":24,\"k25\":25,\"k26\":26,\"k27\":27,\"k28\":28,\"k29\":29,\"k30\":30,\"k31\":31,\"k32\":32,\"k33\":33,\"k34\":34,\"k35\":35,\"k36\":36,\"k37\":37,\"k38\":38,\"k39\":39,\"k40\":40,\"k41\":41,\"k42\":42,\"k43\":43,\"k44\":44,\"k45\":45,\"k46\":46,\"k47\":47,\"k48\":48,\"k49\":49,\"k50\":50,\"k51\":51,\"k52\":52,\"k53\":53,\"k54\":54,\"k55\":55,\"k56\":56,\"k57\":57,\"k58\":58,\"k59\":59,\"k60\":60,\"k61\":61,\"k62\":62,\"k63\":63,\"k64\":64,\"k65\":65},{\"k1\":1,\"k65\":2}],\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "want": {
+        "records": [
+          {
+            "kind": "metric",
+            "seq": 1
+          }
+        ]
+      }
+    },
+    {
+      "name": "D28 truncated line leaves no key behind",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1},\"x\":{\"a\":1,\"b\":2",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":2,\"captured_at\":\"2026-10-01T10:00:00Z\",\"x\":{\"a\":1,\"b\":2},\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "want": {
+        "error": "Malformed",
+        "line": 2
+      }
+    },
+    {
+      "name": "H1 header is [1]",
+      "lines": [
+        "[1]",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "want": {
+        "error": "Malformed",
+        "line": 1
+      }
+    },
+    {
+      "name": "H2 header is []",
+      "lines": [
+        "[]",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "want": {
+        "error": "Malformed",
+        "line": 1
+      }
+    },
+    {
+      "name": "H3 header is 5",
+      "lines": [
+        "5",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "want": {
+        "error": "Malformed",
+        "line": 1
+      }
+    },
+    {
+      "name": "H4 header is \"x\"",
+      "lines": [
+        "\"x\"",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "want": {
+        "error": "Malformed",
+        "line": 1
+      }
+    },
+    {
+      "name": "H5 header is true",
+      "lines": [
+        "true",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "want": {
+        "error": "Malformed",
+        "line": 1
+      }
+    },
+    {
+      "name": "H6 header is null",
+      "lines": [
+        "null",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "want": {
+        "error": "UnsupportedVersion",
+        "line": 1
+      }
+    },
+    {
+      "name": "H7 header is an empty object",
+      "lines": [
+        "{}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "want": {
+        "error": "UnsupportedVersion",
+        "line": 1
+      }
+    },
+    {
+      "name": "H8 format_major \"1\"",
+      "lines": [
+        "{\"format_major\":\"1\",\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "want": {
+        "error": "Malformed",
+        "line": 1
+      }
+    },
+    {
+      "name": "H9 format_major \"2\"",
+      "lines": [
+        "{\"format_major\":\"2\",\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "want": {
+        "error": "Malformed",
+        "line": 1
+      }
+    },
+    {
+      "name": "H10 format_major 1.0",
+      "lines": [
+        "{\"format_major\":1.0,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "want": {
+        "error": "Malformed",
+        "line": 1
+      }
+    },
+    {
+      "name": "H11 format_major 1e0",
+      "lines": [
+        "{\"format_major\":1e0,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "want": {
+        "error": "Malformed",
+        "line": 1
+      }
+    },
+    {
+      "name": "H12 format_major 1E0",
+      "lines": [
+        "{\"format_major\":1E0,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "want": {
+        "error": "Malformed",
+        "line": 1
+      }
+    },
+    {
+      "name": "H13 format_major 10e-1",
+      "lines": [
+        "{\"format_major\":10e-1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "want": {
+        "error": "Malformed",
+        "line": 1
+      }
+    },
+    {
+      "name": "H14 format_major 2.5",
+      "lines": [
+        "{\"format_major\":2.5,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "want": {
+        "error": "Malformed",
+        "line": 1
+      }
+    },
+    {
+      "name": "H15 format_major true",
+      "lines": [
+        "{\"format_major\":true,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "want": {
+        "error": "Malformed",
+        "line": 1
+      }
+    },
+    {
+      "name": "H16 format_major {}",
+      "lines": [
+        "{\"format_major\":{},\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "want": {
+        "error": "Malformed",
+        "line": 1
+      }
+    },
+    {
+      "name": "H17 format_major [1]",
+      "lines": [
+        "{\"format_major\":[1],\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "want": {
+        "error": "Malformed",
+        "line": 1
+      }
+    },
+    {
+      "name": "H18 format_major 9223372036854775808",
+      "lines": [
+        "{\"format_major\":9223372036854775808,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "want": {
+        "error": "Malformed",
+        "line": 1
+      }
+    },
+    {
+      "name": "H19 format_major -9223372036854775809",
+      "lines": [
+        "{\"format_major\":-9223372036854775809,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "want": {
+        "error": "Malformed",
+        "line": 1
+      }
+    },
+    {
+      "name": "H20 format_major 1e400",
+      "lines": [
+        "{\"format_major\":1e400,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "want": {
+        "error": "Malformed",
+        "line": 1
+      }
+    },
+    {
+      "name": "H21 format_major null",
+      "lines": [
+        "{\"format_major\":null,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "want": {
+        "error": "UnsupportedVersion",
+        "line": 1
+      }
+    },
+    {
+      "name": "H22 format_major missing",
+      "lines": [
+        "{\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "want": {
+        "error": "UnsupportedVersion",
+        "line": 1
+      }
+    },
+    {
+      "name": "H23 format_major 0",
+      "lines": [
+        "{\"format_major\":0,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "want": {
+        "error": "UnsupportedVersion",
+        "line": 1
+      }
+    },
+    {
+      "name": "H24 format_major -0",
+      "lines": [
+        "{\"format_major\":-0,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "want": {
+        "error": "UnsupportedVersion",
+        "line": 1
+      }
+    },
+    {
+      "name": "H25 format_major -1",
+      "lines": [
+        "{\"format_major\":-1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "want": {
+        "error": "UnsupportedVersion",
+        "line": 1
+      }
+    },
+    {
+      "name": "H26 format_major 2",
+      "lines": [
+        "{\"format_major\":2,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "want": {
+        "error": "UnsupportedVersion",
+        "line": 1
+      }
+    },
+    {
+      "name": "H27 format_major 3000000000",
+      "lines": [
+        "{\"format_major\":3000000000,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "want": {
+        "error": "UnsupportedVersion",
+        "line": 1
+      }
+    },
+    {
+      "name": "H28 format_major 9223372036854775807",
+      "lines": [
+        "{\"format_major\":9223372036854775807,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "want": {
+        "error": "UnsupportedVersion",
+        "line": 1
+      }
+    },
+    {
+      "name": "H29 format_major -9223372036854775808",
+      "lines": [
+        "{\"format_major\":-9223372036854775808,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "want": {
+        "error": "UnsupportedVersion",
+        "line": 1
+      }
+    },
+    {
+      "name": "H30 major 2 with an incompatible rest",
+      "lines": [
+        "{\"format_major\":2,\"agent_id\":{\"x\":1},\"boot_id\":[1],\"mode\":5}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "want": {
+        "error": "UnsupportedVersion",
+        "line": 1
+      }
+    },
+    {
+      "name": "H31 major 1 with an object agent_id",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":{\"x\":1},\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "want": {
+        "error": "Malformed",
+        "line": 1
+      }
+    },
+    {
+      "name": "O1 header major 2 with a duplicate key",
+      "lines": [
+        "{\"format_major\":2,\"x\":1,\"x\":2}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "want": {
+        "error": "Malformed",
+        "line": 1
+      }
+    },
+    {
+      "name": "O2 header major 2 with a non-ASCII key",
+      "lines": [
+        "{\"format_major\":2,\"é\":1}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "want": {
+        "error": "Malformed",
+        "line": 1
+      }
+    },
+    {
+      "name": "O3 header major 2 nested 65 deep",
+      "lines": [
+        "{\"format_major\":2,\"x\":[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[0]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "want": {
+        "error": "Malformed",
+        "line": 1
+      }
+    },
+    {
+      "name": "O4 second record has a duplicate key",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":2,\"seq\":2,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "want": {
+        "records": [
+          {
+            "kind": "metric",
+            "seq": 1
+          }
+        ],
+        "error": "Malformed",
+        "line": 3
+      }
+    },
+    {
+      "name": "X1 record nested 64 deep",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"x\":[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[0]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]],\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "want": {
+        "records": [
+          {
+            "kind": "metric",
+            "seq": 1
+          }
+        ]
+      }
+    },
+    {
+      "name": "X2 record nested 65 deep",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"x\":[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[0]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]],\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "want": {
+        "error": "Malformed",
+        "line": 2
+      }
+    },
+    {
+      "name": "X3 header nested 64 deep",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\",\"x\":[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[0]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "want": {
+        "records": [
+          {
+            "kind": "metric",
+            "seq": 1
+          }
+        ]
+      }
+    },
+    {
+      "name": "X4 header nested 65 deep",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\",\"x\":[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[0]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "want": {
+        "error": "Malformed",
+        "line": 1
+      }
+    },
+    {
+      "name": "M1 format_minor 3000000000",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":3000000000,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "want": {
+        "records": [
+          {
+            "kind": "metric",
+            "seq": 1
+          }
+        ],
+        "format_minor": 3000000000
+      }
+    },
+    {
+      "name": "M2 format_minor 2^63-1",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":9223372036854775807,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "want": {
+        "records": [
+          {
+            "kind": "metric",
+            "seq": 1
+          }
+        ],
+        "format_minor": 9223372036854775807
+      }
+    },
+    {
+      "name": "M3 format_minor 2^63",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":9223372036854775808,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "want": {
+        "error": "Malformed",
+        "line": 1
+      }
+    },
+    {
+      "name": "M4 format_minor as string",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":\"0\",\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "want": {
+        "error": "Malformed",
+        "line": 1
+      }
+    },
+    {
+      "name": "M5 format_minor negative",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":-1,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "want": {
+        "error": "Invalid",
+        "line": 1,
+        "field": "format_minor",
+        "reason": "must not be negative"
+      }
+    },
+    {
+      "name": "U1 kind Metric",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"Metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "want": {
+        "error": "UnknownKind",
+        "line": 2
+      }
+    },
+    {
+      "name": "U2 record line null",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "null"
+      ],
+      "want": {
+        "error": "UnknownKind",
+        "line": 2
+      }
+    }
+  ]
+}

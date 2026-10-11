@@ -31,6 +31,11 @@ public static partial class WireFormat
     /// </summary>
     public const string ModeBackfill = "backfill";
 
+    /// <summary>
+    /// The deepest nesting of objects and arrays a line may have; the line's outermost value counts as 1.
+    /// </summary>
+    public const int MaxDepth = 64;
+
     private const int MaxAgentIdBytes = 64;
 
     #endregion // Constants

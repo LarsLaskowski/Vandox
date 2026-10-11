@@ -307,3 +307,28 @@ func nilReceiver() error { return invalid("", "required") }
 func sortedKeys[V any](m map[string]V) []string {
 	return slices.Sorted(maps.Keys(m))
 }
+
+// checkFoldUnique requires the keys of m to differ from each other ignoring ASCII case; the error names the
+// later of two such keys in byte order, as field[<quoted key>].
+func checkFoldUnique[V any](field string, m map[string]V) error {
+	seen := make(map[string]struct{}, len(m))
+	for _, k := range sortedKeys(m) {
+		folded := asciiLower(k)
+		if _, dup := seen[folded]; dup {
+			return invalid(keyed(field, k), "duplicate key ignoring case")
+		}
+		seen[folded] = struct{}{}
+	}
+	return nil
+}
+
+// asciiLower lower-cases the ASCII letters of s and leaves every other byte alone.
+func asciiLower(s string) string {
+	b := []byte(s)
+	for i, c := range b {
+		if c >= 'A' && c <= 'Z' {
+			b[i] = c + ('a' - 'A')
+		}
+	}
+	return string(b)
+}

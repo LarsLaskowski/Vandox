@@ -9,7 +9,9 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"slices"
 	"time"
+	"unicode/utf8"
 
 	"github.com/LarsLaskowski/Vandox/internal/model"
 )
@@ -60,7 +62,206 @@ func (g *guardReader) Read(p []byte) (int, error) {
 	return n, err
 }
 
-// Decoder reads a batch record by record.
+// Fixed texts of the line check; none names a key, because a key is input from outside.
+var (
+	errDuplicateKey = fmt.Errorf("%w: duplicate key", ErrMalformed)
+	errKeyNotASCII  = fmt.Errorf("%w: key not ASCII", ErrMalformed)
+	errTooDeep      = fmt.Errorf("%w: nesting deeper than %d", ErrMalformed, MaxDepth)
+)
+
+const (
+	// smallKeys is the number of keys an object compares by scanning its key list, before a set is used.
+	smallKeys = 8
+	// keptKeys is the largest object whose set and key list are kept for the next object at the same depth.
+	keptKeys = 64
+)
+
+// keyLevel holds the keys of the object that is open at one depth. keys lists the ASCII-lower-cased keys the
+// object added; set holds the same keys once there are more than smallKeys of them, and is empty otherwise.
+type keyLevel struct {
+	set  map[string]struct{}
+	keys []string
+}
+
+// add records key and reports whether the open object had it already.
+func (l *keyLevel) add(key string) bool {
+	n := len(l.keys)
+	if n < smallKeys {
+		if slices.Contains(l.keys, key) {
+			return true
+		}
+		l.keys = append(l.keys, key)
+		return false
+	}
+	if n == smallKeys {
+		if slices.Contains(l.keys, key) {
+			return true
+		}
+		if l.set == nil {
+			l.set = make(map[string]struct{}, 2*smallKeys)
+		}
+		for _, k := range l.keys {
+			l.set[k] = struct{}{}
+		}
+	} else if _, dup := l.set[key]; dup {
+		return true
+	}
+	l.set[key] = struct{}{}
+	l.keys = append(l.keys, key)
+	return false
+}
+
+// release removes exactly the keys the object added, so the level is empty for the next object. An object of
+// more than keptKeys keys drops its set and list instead. The set is never cleared as a whole: that would cost
+// the capacity a larger object once reached.
+func (l *keyLevel) release() {
+	n := len(l.keys)
+	if n > keptKeys {
+		l.set, l.keys = nil, nil
+		return
+	}
+	if n > smallKeys {
+		for _, k := range l.keys {
+			delete(l.set, k)
+		}
+	}
+	clear(l.keys)
+	l.keys = l.keys[:0]
+}
+
+// frame is one open object or array of the walk; it holds no keys.
+type frame struct {
+	object    bool
+	expectKey bool
+}
+
+// keyCheck holds the state of the line check, reused for every line of one Decoder: the frame stack and, per
+// depth, the keys seen in the open object. Every set is empty between two calls of checkLine.
+type keyCheck struct {
+	frames []frame
+	levels [MaxDepth]keyLevel
+}
+
+// checkLine checks the JSON-level rules of one line before it is bound: no key outside ASCII after unescaping,
+// no two keys of one object equal ignoring ASCII case, no nesting deeper than MaxDepth. It returns nil or an
+// error wrapping ErrMalformed whose text names the broken rule but never the key.
+func (c *keyCheck) checkLine(line []byte) error {
+	if c.frames == nil {
+		c.frames = make([]frame, 0, MaxDepth)
+	}
+	err := c.walk(line)
+	c.unwind()
+	return err
+}
+
+// unwind closes every object still open, so the next line starts with empty levels.
+func (c *keyCheck) unwind() {
+	for len(c.frames) > 0 {
+		c.pop()
+	}
+}
+
+// pop closes the innermost frame.
+func (c *keyCheck) pop() {
+	top := len(c.frames) - 1
+	if c.frames[top].object {
+		c.levels[top].release()
+	}
+	c.frames = c.frames[:top]
+}
+
+// walk reads the first value of line token by token. A syntax error is reported as malformed; a line that ends
+// inside a value is left to the binding that follows, which reports it.
+func (c *keyCheck) walk(line []byte) error {
+	dec := json.NewDecoder(bytes.NewReader(line))
+	dec.UseNumber()
+	for {
+		tok, err := dec.Token()
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				return nil
+			}
+			return fmt.Errorf("%w: %w", ErrMalformed, err)
+		}
+		if err := c.step(tok); err != nil {
+			return err
+		}
+		if len(c.frames) == 0 {
+			return nil
+		}
+	}
+}
+
+// step applies one token to the frame stack.
+func (c *keyCheck) step(tok json.Token) error {
+	if d, ok := tok.(json.Delim); ok {
+		if d == '{' || d == '[' {
+			return c.open(d == '{')
+		}
+		c.pop()
+		c.valueDone()
+		return nil
+	}
+	if key, ok := tok.(string); ok && c.expectsKey() {
+		return c.key(key)
+	}
+	c.valueDone()
+	return nil
+}
+
+// open pushes an object or an array and enforces the depth.
+func (c *keyCheck) open(object bool) error {
+	if len(c.frames) >= MaxDepth {
+		return errTooDeep
+	}
+	c.frames = append(c.frames, frame{object: object, expectKey: object})
+	return nil
+}
+
+// expectsKey reports whether the next string token is a key.
+func (c *keyCheck) expectsKey() bool {
+	return len(c.frames) > 0 && c.frames[len(c.frames)-1].expectKey
+}
+
+// valueDone notes that a value ended, so an enclosing object expects its next key.
+func (c *keyCheck) valueDone() {
+	if n := len(c.frames); n > 0 && c.frames[n-1].object {
+		c.frames[n-1].expectKey = true
+	}
+}
+
+// key checks one key of the innermost object.
+func (c *keyCheck) key(key string) error {
+	top := len(c.frames) - 1
+	c.frames[top].expectKey = false
+	for i := 0; i < len(key); i++ {
+		if key[i] >= utf8.RuneSelf {
+			return errKeyNotASCII
+		}
+	}
+	if c.levels[top].add(asciiLower(key)) {
+		return errDuplicateKey
+	}
+	return nil
+}
+
+// asciiLower lower-cases the ASCII letters of s; it returns s itself when there is nothing to change.
+func asciiLower(s string) string {
+	for i := 0; i < len(s); i++ {
+		if s[i] >= 'A' && s[i] <= 'Z' {
+			b := []byte(s)
+			for j := i; j < len(b); j++ {
+				if b[j] >= 'A' && b[j] <= 'Z' {
+					b[j] += 'a' - 'A'
+				}
+			}
+			return string(b)
+		}
+	}
+	return s
+}
+
+// Decoder reads a batch record by record. It is not safe for concurrent use.
 type Decoder struct {
 	zr     *gzip.Reader
 	guard  *guardReader
@@ -71,6 +272,7 @@ type Decoder struct {
 	count  int
 	last   uint64
 	err    error
+	keys   keyCheck
 }
 
 // NewDecoder reads and validates the header of the batch in r.
@@ -128,8 +330,11 @@ func (d *Decoder) readHeader() error {
 	}
 	d.line = 1
 	raw := d.sc.Bytes()
+	if err := d.keys.checkLine(raw); err != nil {
+		return d.fail(err)
+	}
 	var ver struct {
-		FormatMajor *int `json:"format_major"`
+		FormatMajor *int64 `json:"format_major"`
 	}
 	if err := json.Unmarshal(raw, &ver); err != nil {
 		return d.fail(fmt.Errorf("%w: %w", ErrMalformed, err))
@@ -210,6 +415,9 @@ func (d *Decoder) Next() (model.Record, error) {
 }
 
 func (d *Decoder) decodeRecord(line []byte) (model.Record, error) {
+	if err := d.keys.checkLine(line); err != nil {
+		return model.Record{}, err
+	}
 	var env envelope
 	if err := json.Unmarshal(line, &env); err != nil {
 		return model.Record{}, fmt.Errorf("%w: %w", ErrMalformed, err)

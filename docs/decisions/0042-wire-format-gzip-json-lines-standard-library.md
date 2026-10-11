@@ -16,7 +16,7 @@ of the project.
 
 ## Options considered
 
-1. **JSON Lines, gzip-compressed, standard library only** (chosen) — no dependency; streamable line by line with a hard per-line bound; readable with `zcat | jq` during an outage; gzip of repetitive keys makes the larger raw size irrelevant at the volume of one server. Larger and slower than binary; the standard JSON parser's lenient key matching (case-insensitive, last duplicate wins) is handled in the format rules.
+1. **JSON Lines, gzip-compressed, standard library only** (chosen) — no dependency; streamable line by line with a hard per-line bound; readable with `zcat | jq` during an outage; gzip of repetitive keys makes the larger raw size irrelevant at the volume of one server. Larger and slower than binary; the standard JSON parser's lenient key matching (case-insensitive, last duplicate wins) is narrowed by the format rules (ASCII keys matched ignoring case, duplicates rejected, [0090](0090-wire-keys-matched-ignoring-ascii-case-duplicates-rejected-header-shape-malformed.md)).
 2. **JSON Lines with zstd** — better ratio and speed, but a dependency on both binaries for a gain that does not matter at this volume, and decoders need explicit window and memory limits against hostile input.
 3. **CBOR** — compact and schema-less, but a dependency, unreadable without tooling, and compression absorbs most of the compactness.
 4. **Protocol Buffers** — explicit schema evolution, but a dependency plus code generation in the build, and no readable form.
