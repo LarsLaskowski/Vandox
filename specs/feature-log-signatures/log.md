@@ -13,3 +13,4 @@ are quoted in full.
 | 2026-10-11 21:49 | 3 Revise | squad-lead | Revised: B1 restrict via source condition, B2/B3 accepted, N1-N8 accepted, both minors accepted; opened #203 follow-up |
 | 2026-10-11 21:50 | 3 Plan security delta | squad-security | APPROVED (round 2) |
 | 2026-10-11 21:52 | 4 Skeleton | squad-dev | Skeleton built, 0 warnings; CA1720 suppression on SignatureFieldType.Integer (to be judged) |
+| 2026-10-11 22:09 | 5 Tests first | squad-tester | 277 new cases, all fail on skeleton (NotImplementedException); other suites green |
