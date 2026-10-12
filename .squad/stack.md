@@ -85,9 +85,18 @@ run the lint pass over changed shell scripts, workflows and Dockerfiles describe
    Fixable style findings are the Code Officer's; findings that need a code change go to the Dev or Tester.
    The `.editorconfig` raises the diagnostics that SonarQube Cloud lists but the compiler reports only at info level
    (`MSTEST0037`, `MSTEST0068`, `ASP0015`, `SYSLIB1092`, `IDE0028`) to errors; add an id there when SonarQube reports a
-   new one that the build did not. It also switches on SonarQube Cloud's cognitive-complexity rule `S3776` (threshold
-   15, the same as SonarQube Cloud), which the SonarAnalyzer package does not run by default: keep methods below it
-   while writing them instead of splitting them after the gate fails.
+   new one that the build did not. SonarQube Cloud analyses this project with the built-in C# profile *Sonar way
+   comprehensive* (376 rules), while the SonarAnalyzer package runs by default only the rules of *Sonar way core*
+   (166), so `.editorconfig` switches on every `csharpsquid` rule the comprehensive profile has beyond core (204 ids,
+   generated on 2026-10-12 from the two profiles' active rules through `api/qualityprofiles/search` and
+   `api/rules/search?qprofile=…&activation=true` of `sonarcloud.io`, organization `networlddev`) as errors — among
+   them the cognitive-complexity rule `S3776` (threshold 15, the same as SonarQube Cloud): keep methods below it while
+   writing them instead of splitting them after the gate fails. `tests/**` is excluded from the cloud analysis
+   (`ci.yml`, `sonar.exclusions`), so `S107` (more than seven parameters) is switched off there, where data-driven
+   test methods need them. A rule that runs only under the scanner stays cloud-only even when listed: `S1192`
+   (duplicated string literals) is one, found on PR #214 and reported by no local build. When the cloud profile
+   changes, or SonarQube reports a `csharpsquid` rule the local build did not, regenerate the block the same way and
+   note a scanner-only rule here.
    Never trust a test result after a build that failed on analyzer errors: the test run uses the stale DLLs.
 
 Other SonarQube Cloud findings (further rules, duplication, hotspots) have no local equivalent and arrive in
