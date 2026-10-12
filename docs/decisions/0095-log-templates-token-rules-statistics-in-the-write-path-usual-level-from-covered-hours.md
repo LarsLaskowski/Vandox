@@ -92,7 +92,8 @@ How the cost of the usual-level query is held:
     consumer yet the value would be a guess; to be revisited with the first caller.
 15. **Make deadlines interrupt the statement** (`sqlite3_interrupt` or a progress handler bound to the cancellation
     token) — would make a deadline a real bound; but Microsoft.Data.Sqlite does neither, so this is a change of every
-    reader query, the log search included, and of their error mapping: a follow-up of its own.
+    reader query, the log search included, and of their error mapping: a follow-up of its own, decided in
+    [0097](0097-reader-statements-interrupted-by-a-progress-handler-bound-to-the-token.md) (issue #210).
 
 ## Decision
 
@@ -121,8 +122,8 @@ source and hour, the baseline sum once per candidate, and the query's cost is st
 - Templates are external text: whoever shows them escapes them like log lines (security area 12); the normalizer
   removes control characters of category Cc, keeps format characters (Cf) and does not make the text safe for any
   output format.
-- The usual-level query's work is not bounded by its range or limit, and a deadline does not interrupt a running
-  statement; a caller that serves a user cannot rely on a deadline alone until deadlines interrupt statements
-  (option 15).
+- The usual-level query's work is not bounded by its range or limit; a deadline interrupts the running statement
+  ([0097](0097-reader-statements-interrupted-by-a-progress-handler-bound-to-the-token.md)), so a caller that serves a
+  user bounds it with a deadline.
 - Nothing shows the queries yet; incident reconstruction (#23) and the web UI build on them. The criterion for one
   million lines on the reference host is in `docs/BENCHMARKS.md`.

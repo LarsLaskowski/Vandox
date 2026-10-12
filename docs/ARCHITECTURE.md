@@ -263,7 +263,8 @@ Implemented by `src/Vandox.Storage`:
 - **Log search** ([0066](decisions/0066-log-search-takes-literal-terms-only.md)): the FTS5 index of the log
   messages is filled by the write path in the same transaction, so a line is searchable when it is committed.
   The search text is taken as literal terms only (no FTS5 operators, bounded length and term count). The cost
-  of a search grows with the stored lines that contain its terms, so callers bound it with a context deadline.
+  of a search grows with the stored lines that contain its terms, so callers bound it with a deadline, which interrupts
+  the running statement on the reader connection ([0097](decisions/0097-reader-statements-interrupted-by-a-progress-handler-bound-to-the-token.md)).
 - **Interfaces** ([0077](decisions/0077-storage-on-microsoft-data-sqlite-same-schema-and-rules.md)):
   `IRecordWriter`, `IRecordReader` (with a keyset on the record ID for paging), `ILogSearcher`, `ILogTemplateReader`,
   `IImportTracker` and `IIncidentStore`; a consumer that depends on the store's semantics is tested against the real store.
