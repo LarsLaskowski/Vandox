@@ -414,6 +414,40 @@ public class SqliteStoreTemplateRebuildTests
     }
 
     /// <summary>
+    /// A run whose marker was replaced after its last batch fails in the finish transaction and leaves the other run's marker.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task SqliteStoreRebuildTemplatesSupersededBeforeFinishFails()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+        var calls = 0;
+
+        await WriteAsync(store, SixLines());
+
+        // Act
+        var exception = await Assert.ThrowsExactlyAsync<StoreException>(() => store.RebuildTemplatesAsync(10,
+                                                                                                          async (_, _) =>
+                                                                                                          {
+                                                                                                              calls++;
+
+                                                                                                              using var cancel = new CancellationTokenSource();
+
+                                                                                                              await Assert.ThrowsAsync<OperationCanceledException>(() => store.RebuildTemplatesAsync(2, (_, _) => cancel.CancelAsync(), cancel.Token), "run B");
+                                                                                                          },
+                                                                                                          TestContext.CancellationToken),
+                                                                        "run A after run B was interrupted");
+
+        // Assert
+        Assert.AreEqual(Superseded, exception.Message, "message");
+        Assert.AreEqual(1, calls, "the callback of run A was called once");
+        Assert.AreSequenceEqual(["1"], await RowsAsync(directory.Path, MarkerCount), "B's marker remains");
+        Assert.AreSequenceEqual(["2"], await RowsAsync(directory.Path, CountSum), "only B's first batch is counted");
+    }
+
+    /// <summary>
     /// Gets an hour relative to <see cref="Samples.Base"/>, which starts on a full hour.
     /// </summary>
     /// <param name="offset">The hours after the base</param>
