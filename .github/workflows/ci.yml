@@ -117,7 +117,7 @@ jobs:
             /d:sonar.go.coverage.reportPaths=coverage.out \
             /d:sonar.test.inclusions="**/*_test.go,tests/**" \
             /d:sonar.exclusions="**/*_test.go,tests/**,bin/**,dist/**,**/obj/**,**/bin/**,TestResults/**,src/Vandox.Backend/wwwroot/lib/**" \
-            /d:sonar.coverage.exclusions=".squad/**,.claude/**"
+            /d:sonar.coverage.exclusions=".squad/**,.claude/**,src/Vandox.Backend/wwwroot/js/**"
 
       - name: Build, test and generate coverage
         run: |

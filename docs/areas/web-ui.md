@@ -138,4 +138,5 @@ The ingest listener serves none of this: every UI path, static file and the live
 ## Implementation
 
 `Vandox.Backend` (`Components/App.razor`, `Components/Layout/MainLayout.razor`, `Components/Charts`, `Hosting/SecurityHeadersMiddleware`,
-`Hosting/ServeCommand`, `wwwroot/`).
+`Hosting/ServeCommand`, `wwwroot/`, and `Vandox.Backend.csproj`, whose `RequiresAspNetWebAssets` makes the restore add the framework
+script independently of the sources, as the image build restores before copying them; record 0098).

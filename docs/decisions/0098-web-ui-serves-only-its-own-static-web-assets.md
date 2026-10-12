@@ -52,6 +52,25 @@ How the theme is applied:
 2. **A Blazor component with JS interop** — the theme would apply only after the circuit starts.
 3. **A cookie read on the server** — request-dependent rendering and a cookie before the login exists.
 
+How the framework script gets into the image (the SDK adds the package `Microsoft.AspNetCore.App.Internal.Assets`, which carries
+`_framework/blazor.web.js`, at restore only when the project has a `.razor` file as content; the image build restores from the
+project files alone, before the sources are copied, so the published image had no `_framework/` and answered 404):
+
+1. **`RequiresAspNetWebAssets` set to `true` in `Vandox.Backend.csproj`** (chosen) — the restore no longer depends on which files are
+   present, in the image as everywhere else; the Dockerfile and its cached restore layer stay unchanged. The image smoke test checks
+   that the script answers 200.
+2. **Copy the `.razor` files before the restore in the Dockerfile** — changes the image build (a security area), and every component
+   change would invalidate the cached restore layer.
+3. **Restore together with the publish** — the same, and a second restore path that differs from the one the tests use.
+
+How the own scripts are verified (no Node build, so no JavaScript test runner):
+
+1. **Analyzed by SonarQube Cloud but excluded from its coverage measure (`sonar.coverage.exclusions`)** (chosen) — the source rules
+   of `WebUiContentTests` check what they may contain, the reviewer reads them against the uPlot API, and the image smoke test checks
+   that they are served; their lines are not unit-tested.
+2. **A JavaScript test runner** — needs Node and a package install in CI, which the issue rules out.
+3. **Keep them in the coverage measure** — their lines can never be covered, so the quality gate fails on every change to them.
+
 Charts in the foundation: **a chart component and its interop now** (chosen, the issue requires uPlot through JS interop and #48/#49
 build on it) against **only vendoring the library** (the views would each invent the interop).
 
@@ -71,5 +90,9 @@ area.
 - Assets are linked by their plain names, not by the fingerprinted URLs `MapStaticAssets` also offers, so the source checks see fixed
   local paths; the browser revalidates them instead of caching them for good.
 - The vendored files are excluded from the CI code analysis; the own scripts and style sheets are analyzed there (no local analyzer).
+  The own scripts (`wwwroot/js/`) are excluded from the coverage measure only: a script with logic worth a unit test needs a new
+  decision, not a quietly lower gate.
+- The framework script comes from the restore, not from the sources: removing `RequiresAspNetWebAssets` from the project file breaks
+  only the image, which the CI smoke test (*Release build check*) catches, not the unit tests.
 - The chart module is first used in a browser by the views of #48 and #49; the foundation tests its C# side with test doubles.
 - The favicon is the SVG of 0051 only; a browser without SVG favicon support shows none, as no raster favicon exists.
