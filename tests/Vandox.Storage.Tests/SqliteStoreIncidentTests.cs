@@ -188,7 +188,7 @@ public class SqliteStoreIncidentTests
         // Arrange
         using var directory = new TempDirectory();
         await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
-        var incident = WorstCase();
+        var incident = Samples.WorstCase();
         var json = JsonSerializer.Serialize(incident, IncidentJson.Options);
         var escaped = string.Concat((char)92, "u003C");
 
@@ -285,6 +285,28 @@ public class SqliteStoreIncidentTests
         // Assert
         Assert.AreEqual("store: reading incidents: decoding incident data", exception.Message, "message");
         Assert.AreEqual(hasCause, exception.InnerException is JsonException, "the decoding error is the cause");
+    }
+
+    /// <summary>
+    /// Stored incident data that is not valid UTF-8 is refused with the same fixed text and the decoding error as the cause.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task SqliteStoreIncidentsRefusesInvalidUtf8Data()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+
+        await store.SaveIncidentAsync(Sample(0, 2), Samples.Base.AddDays(1), TestContext.CancellationToken);
+        await ExecuteAsync(Path.Combine(directory.Path, StorageLimits.FileName), "UPDATE incidents SET data = CAST(x'7B2261223A22C328FF227D' AS TEXT)");
+
+        // Act
+        var exception = await Assert.ThrowsExactlyAsync<StoreException>(() => ReadAsync(store, StorableTime.Min, StorableTime.Max, 10), "reading data that is not UTF-8");
+
+        // Assert
+        Assert.AreEqual("store: reading incidents: decoding incident data", exception.Message, "message");
+        Assert.IsInstanceOfType<JsonException>(exception.InnerException, "the decoding error is the cause");
     }
 
     /// <summary>
@@ -403,236 +425,6 @@ public class SqliteStoreIncidentTests
                                                      });
                            }
                        });
-    }
-
-    /// <summary>
-    /// Builds the largest incident the builder can produce from texts that the JSON encoder writes with six bytes per character.
-    /// </summary>
-    /// <returns>The incident</returns>
-    private static Incident WorstCase()
-    {
-        var text = new string('<', 1024);
-        var kill = Hour(1);
-        var cluster = new KillCluster
-                      {
-                          Start = kill.AddHours(-1),
-                          End = kill.AddMinutes(45),
-                          FirstKillAt = kill,
-                          LastKillAt = kill.AddMinutes(15),
-                          KillCount = 20,
-                          Kills = Enumerable.Range(0, 16)
-                                            .Select(index => new IncidentKill
-                                                             {
-                                                                 At = kill.AddSeconds(index),
-                                                                 Host = text,
-                                                                 VictimPid = long.MaxValue,
-                                                                 VictimCommand = text,
-                                                                 AnonRssBytes = long.MaxValue,
-                                                                 OomScoreAdj = long.MinValue,
-                                                                 RecordIds = Enumerable.Repeat(long.MaxValue, 16).ToList(),
-                                                                 LineCount = long.MaxValue
-                                                             })
-                                            .ToList()
-                      };
-        var builder = new IncidentBuilder(cluster, TimeSpan.FromHours(1), TimeSpan.FromMinutes(30));
-
-        for (var index = 0; index < 1100; index++)
-        {
-            builder.AddEvent(HeavyEvent(index == 0 ? IncidentSignatures.Boot : IncidentSignatures.ServiceStart, kill.AddMinutes(-59).AddSeconds(index), text));
-        }
-
-        builder.AddProcessSnapshot(1, kill.AddMinutes(-30), HeavyPrograms(0));
-        builder.AddProcessSnapshot(2, kill.AddMinutes(-10), HeavyPrograms(1));
-        builder.AddConnectionSnapshot(3, kill.AddMinutes(-20), HeavyConnections(text));
-        AddHeavyMetrics(builder, kill);
-        AddHeavyTemplates(builder, kill, text);
-
-        return builder.Build();
-    }
-
-    /// <summary>
-    /// Creates a detected event whose texts, host and record IDs are at their caps.
-    /// </summary>
-    /// <param name="signatureId">The signature ID</param>
-    /// <param name="at">The time</param>
-    /// <param name="text">The text of 1,024 bytes</param>
-    /// <returns>The event</returns>
-    private static DetectedEvent HeavyEvent(string signatureId, DateTimeOffset at, string text)
-    {
-        return new DetectedEvent
-               {
-                   SignatureId = signatureId,
-                   CapturedAt = at,
-                   Host = text,
-                   Texts = new Dictionary<string, string>
-                           {
-                               ["unit"] = text,
-                               ["description"] = text
-                           },
-                   RecordIds = Enumerable.Repeat(long.MaxValue, 256).ToList(),
-                   LineCount = long.MaxValue
-               };
-    }
-
-    /// <summary>
-    /// Creates a process snapshot of 4,096 programs with names of 1,024 bytes of <c>&lt;</c> and a backup program.
-    /// </summary>
-    /// <param name="step">0 for the first snapshot, 1 for the later one in which every program grew</param>
-    /// <returns>The snapshot</returns>
-    private static ProcessSnapshot HeavyPrograms(int step)
-    {
-        var programs = Enumerable.Range(0, 4096)
-                                 .Select(index => new ProgramAggregate
-                                                  {
-                                                      Program = new string('<', 1018) + index.ToString("D6", System.Globalization.CultureInfo.InvariantCulture),
-                                                      Count = 1,
-                                                      RssBytes = (ulong)(1000 + index + (step * ((index % 7) + 1)))
-                                                  })
-                                 .ToList();
-
-        programs.Add(new ProgramAggregate
-                     {
-                         Program = "pzstd",
-                         Count = 1,
-                         RssBytes = 200
-                     });
-
-        return new ProcessSnapshot
-               {
-                   Complete = true,
-                   Programs = programs
-               };
-    }
-
-    /// <summary>
-    /// Creates a connection snapshot with three processes whose commands are at their cap.
-    /// </summary>
-    /// <param name="text">The text of 1,024 bytes</param>
-    /// <returns>The snapshot</returns>
-    private static ConnectionSnapshot HeavyConnections(string text)
-    {
-        return new ConnectionSnapshot
-               {
-                   Complete = true,
-                   States = [
-                                new StateCount
-                                {
-                                    Proto = Proto.Tcp,
-                                    State = "ESTABLISHED",
-                                    Count = 5
-                                }
-                            ],
-                   Processes = [
-                                   new ProcessConnections
-                                   {
-                                       Pid = 1,
-                                       Command = text,
-                                       Count = 3
-                                   },
-                                   new ProcessConnections
-                                   {
-                                       Pid = 2,
-                                       Command = text + "a",
-                                       Count = 2
-                                   },
-                                   new ProcessConnections
-                                   {
-                                       Pid = 3,
-                                       Command = text + "b",
-                                       Count = 1
-                                   }
-                               ]
-               };
-    }
-
-    /// <summary>
-    /// Adds a sample of each metric definition, with a source of 128 bytes of <c>&lt;</c>.
-    /// </summary>
-    /// <param name="builder">The builder</param>
-    /// <param name="kill">The time of the first kill</param>
-    private static void AddHeavyMetrics(IncidentBuilder builder, DateTimeOffset kill)
-    {
-        var source = new string('<', 128);
-        var memory = new Dictionary<string, string>
-                     {
-                         ["resource"] = "memory",
-                         ["kind"] = "some"
-                     };
-        var full = new Dictionary<string, string>
-                   {
-                       ["resource"] = "memory",
-                       ["kind"] = "full"
-                   };
-
-        builder.AddMetric(source,
-                          kill.AddMinutes(-20),
-                          new MetricPoint
-                          {
-                              Name = "mem_available_bytes",
-                              Value = double.MaxValue
-                          });
-        builder.AddMetric(source,
-                          kill.AddMinutes(-20),
-                          new MetricPoint
-                          {
-                              Name = "swap_used_bytes",
-                              Value = double.MaxValue
-                          });
-        builder.AddMetric(source,
-                          kill.AddMinutes(-20),
-                          new MetricPoint
-                          {
-                              Name = "pressure_avg10",
-                              Value = double.MaxValue,
-                              Labels = memory
-                          });
-        builder.AddMetric(source,
-                          kill.AddMinutes(-20),
-                          new MetricPoint
-                          {
-                              Name = "pressure_avg10",
-                              Value = double.MaxValue,
-                              Labels = full
-                          });
-        builder.AddMetric(source,
-                          kill.AddMinutes(-20),
-                          new MetricPoint
-                          {
-                              Name = "load1",
-                              Value = double.MaxValue
-                          });
-    }
-
-    /// <summary>
-    /// Adds 25 new templates and 25 spikes with texts at their caps.
-    /// </summary>
-    /// <param name="builder">The builder</param>
-    /// <param name="kill">The time of the first kill</param>
-    /// <param name="text">The text of 1,024 bytes</param>
-    private static void AddHeavyTemplates(IncidentBuilder builder, DateTimeOffset kill, string text)
-    {
-        var source = new string('<', 128);
-
-        for (var index = 0; index < 25; index++)
-        {
-            builder.AddNewTemplate(new IncidentNewTemplate
-                                   {
-                                       Source = source,
-                                       Program = text,
-                                       Template = text,
-                                       FirstSeen = kill,
-                                       Count = long.MaxValue
-                                   });
-            builder.AddTemplateSpike(new IncidentTemplateSpike
-                                     {
-                                         Source = source,
-                                         Program = text,
-                                         Template = text,
-                                         Hour = kill,
-                                         Count = long.MaxValue,
-                                         UsualLevel = double.MaxValue
-                                     });
-        }
     }
 
     /// <summary>
