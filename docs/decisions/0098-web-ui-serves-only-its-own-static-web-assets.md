@@ -1,6 +1,6 @@
 # 0098: The web UI serves only its own static web assets: brand copies checked against docs/assets, uPlot vendored, theme and reconnect without inline code
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-12
 - **Area:** Web UI
 - **Source:** Issue #24

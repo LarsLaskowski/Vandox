@@ -124,6 +124,6 @@ once in the [area document](../areas/README.md) of the record's area, and the re
 | 0095 | Log templates: fixed token rules, statistics kept by the write path per source and program, the usual level from the hours the source logged | Accepted | 2026-10-12 |
 | 0096 | Outage incidents are rebuilt from the stored data by `vandoxd incidents`: OOM-kill windows merged by overlap, an incident's identity kept by overlap, a structured cause hypothesis from fixed rules | Accepted | 2026-10-12 |
 | 0097 | A cancelled token interrupts a running reader statement through a progress handler; the interruption is an OperationCanceledException | Accepted | 2026-10-12 |
-| 0098 | The web UI serves only its own static web assets: brand copies checked against docs/assets, uPlot vendored, theme and reconnect without inline code | Proposed | 2026-10-12 |
-| 0099 | The web listener sends one strict Content-Security-Policy with self-only sources and frame-ancestors 'none', set by the application | Proposed | 2026-10-12 |
+| 0098 | The web UI serves only its own static web assets: brand copies checked against docs/assets, uPlot vendored, theme and reconnect without inline code | Accepted | 2026-10-12 |
+| 0099 | The web listener sends one strict Content-Security-Policy with self-only sources and frame-ancestors 'none', set by the application | Accepted | 2026-10-12 |
 <!-- project:end index -->

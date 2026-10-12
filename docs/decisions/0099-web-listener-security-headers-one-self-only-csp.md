@@ -1,6 +1,6 @@
 # 0099: The web listener sends one strict Content-Security-Policy with self-only sources and frame-ancestors 'none', set by the application
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-12
 - **Area:** Web UI
 - **Source:** Issue #24
