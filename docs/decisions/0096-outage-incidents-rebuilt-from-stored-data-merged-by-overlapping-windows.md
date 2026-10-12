@@ -64,9 +64,9 @@ When kills belong to one incident:
 How the hypothesis is formed:
 
 9. **Structured, from fixed rules** (chosen) — growth is the change of each program's summed RSS between the first and
-   the last process snapshot in the *before* period of the first kill, the top three that grew; the largest consumers
-   are the top three of the last snapshot; activities are a backup program in a snapshot, the last boot and the
-   number of service events before the kill; each is explainable from the stored records.
+   the last process snapshot in the *before* period of the first kill after its last boot, the top three that grew;
+   the largest consumers are the top three of the last snapshot; activities are a backup program in a snapshot, the
+   last boot and the number of service events before the kill; each is explainable from the stored records.
 10. **A slope over all snapshots, or the maximum minus the minimum** — robust against one odd snapshot; but needs every
     snapshot's programs in memory and reacts to sampling gaps the legacy script has under memory pressure.
 11. **A written text, by rules or by the optional AI** — excluded by 0008 for anything but the nightly report.
@@ -96,9 +96,39 @@ How the reader pages through lines that share a capture time:
 19. **A streaming reader that keeps one statement open for the whole pass** — no paging; but holds a read transaction
     for minutes, which stops WAL checkpoints for that time, and needs a new reader interface.
 
+Where the growth baseline starts when the *before* period holds a reboot (the 2 Oct chain: reboot 06:51, kill 06:59,
+both inside the default hour):
+
+20. **After the last boot** (chosen) — snapshots at or before it show processes the reboot ended; the growth after it
+    (services starting, a catch-up backup) is what explains such a kill; with fewer than two snapshots after the boot,
+    growth is unknown.
+21. **At the first snapshot of the period, or growth unknown whenever a boot lies in it** — the first makes every
+    service started after the boot "grow from nothing"; the second gives up exactly on the chain the issue describes.
+
+How an incident stays within the 8 MiB the store accepts, when forged text is escaped to six bytes per character:
+
+22. **A serialized byte budget for the timeline (4 MiB), measured with the options the store serializes with**
+    (chosen) — every other part is bounded by counts at the worst escape; normal incidents keep 1,000 entries, a forged
+    one keeps fewer and counts the rest. An incident the store still refuses is skipped and counted; one bad window does
+    not stop the run.
+23. **Count caps sized for six-fold escaping** — about 300 timeline entries for every incident, also the normal ones.
+24. **Another encoder** — control and supplementary characters still expand, so it gives no bound by itself, and it
+    would differ from the payload encoder.
+
+How much of the stored snapshots is held at once:
+
+25. **One snapshot per page, the payload read as UTF-8 bytes** (chosen) — one forged maximum process snapshot (about
+    100 MiB of stored JSON) peaks at about 240 MiB instead of about 440 MiB.
+26. **A query that reads only the programs of a snapshot** — smaller still; but a new query form for one caller, and
+    snapshots without programs need their processes anyway.
+
+Whether a rebuilt incident may replace a richer stored one (after retention, #46): no guard here; refusing a lower kill
+count would also freeze legitimate corrections and misses a shorter timeline with the same kill count, and retention
+deletes nothing yet.
+
 ## Decision
 
-Options 1, 4, 7, 9, 12, 15 and 17: `vandoxd incidents` runs the signature detector over every stored log line in
+Options 1, 4, 7, 9, 12, 15, 17, 20, 22 and 25: `vandoxd incidents` runs the signature detector over every stored log line in
 capture order, merges OOM kills whose configured windows overlap into incidents, builds each incident (timeline,
 structured hypothesis, metrics, connections, templates) from the stored records of its window, and saves it in its
 own transaction, matched to the stored incidents by overlapping windows so that a re-run updates instead of
@@ -114,7 +144,12 @@ duplicating. The rules, defaults and limits are in [Detection, alerts and report
   path.
 - A stored incident without a rebuilt match is kept unchanged. Retention (#46) must keep re-runs from rebuilding an
   incident from a window whose lines have partly expired: either keep the data of incident windows or stop
-  rebuilding incidents older than the log retention.
+  rebuilding incidents older than the log retention. Incidents are kept without limit, so forged kills spaced apart
+  leave incidents (up to 8 MiB each) that outlive their lines; #46 has to bound that, too.
+- Reading one forged maximum process snapshot still takes about 240 MiB at its peak, in a container of 512 MiB that
+  the service shares; it needs a forged legacy monitoring log at every cap. Storing such a snapshot on import costs
+  more (follow-up issue).
+- A reboot without a stored boot line is not seen; snapshots before it then count as the growth baseline.
 - Backups are recognized only by the program name `pzstd`; another backup program shows as growth or consumer, not as
   a backup. To revisit with #36 or with real snapshots.
 - The program names of the legacy log's old and new format differ for one process; names that start with `/` are

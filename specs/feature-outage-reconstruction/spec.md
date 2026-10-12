@@ -30,9 +30,10 @@ Nothing turns them into outages yet: the detector is called by nobody, and no in
     starts, stops and failures, MariaDB crash and recovery, *Too many connections*, a full disk, Postfix and
     Dovecot fatal errors) and the first and last process snapshot in which a backup program ran, in time order;
   - a **cause hypothesis**, structured, not prose: the (up to) **three programs with the strongest memory
-    growth** in the *before* period of the first kill, the three **largest memory consumers** in the last
-    process snapshot before it, and the **correlated activities** before it: whether a backup program ran,
-    the last boot, the number of service starts, stops and failures;
+    growth** in the *before* period of the first kill — counted from the last boot in it when there is one, so
+    processes a reboot ended never serve as the baseline —, the three **largest memory consumers** in the last
+    process snapshot before it, and the **correlated activities** before it: whether a backup program ran
+    (since that boot), the last boot, the number of service starts, stops and failures;
   - **system metrics** of the window: lowest available memory, highest swap use, highest memory pressure and
     highest load, each with its time;
   - **connection history** of the window: the connection snapshot with the most sockets and its three busiest
@@ -40,15 +41,20 @@ Nothing turns them into outages yet: the detector is called by nobody, and no in
   - **log templates**: templates first seen in the window and hours of the window in which a template was well
     above its usual level.
 - Where the data needed for a statement is missing, the incident says **unknown**, never "nothing happened":
-  growth is unknown with fewer than two process snapshots before the kill, a running backup is unknown without
-  any process snapshot there, a metric without samples is absent.
+  growth is unknown with fewer than two process snapshots before the kill (after the last boot), a running backup
+  is unknown without any process snapshot there, a metric without samples is absent.
+- An incident's stored size is bounded: when the timeline of a window does not fit its caps, the incident keeps
+  the earliest events and counts the rest. An incident the database still refuses is reported and skipped; the
+  run goes on.
 - **Stored and re-computable.** Incidents are stored in the database. Running the sub-command again updates
   them: a recomputed incident whose window overlaps a stored one keeps that incident's number and replaces its
   content (or leaves it untouched when nothing changed); stored incidents that a recomputed one joins are merged
   into the oldest of them; a recomputed incident that overlaps none is added; a stored incident that no
-  recomputed one overlaps is kept as it is (incidents outlive the 90-day log retention).
+  recomputed one overlaps is kept as it is. Incidents are kept without limit; keeping a re-run from rebuilding
+  an incident from a window whose lines retention has partly deleted is a requirement on the retention (#46),
+  which does not delete anything yet.
 - The output lists one line per incident (number, created, updated or unchanged, first kill time, number of
-  kills, the first victim's command) and a summary of the counts. Victim commands are log text and are printed
+  kills, the first victim's command) and a summary of the counts, skipped incidents included. Victim commands are log text and are printed
   escaped.
 
 ## Acceptance criteria
@@ -56,8 +62,8 @@ Nothing turns them into outages yet: the detector is called by nobody, and no in
 - [ ] AC1: Every OOM kill in the stored data produces exactly one incident, or is part of the incident whose
   window overlaps its own; copies of one kill in several log files count as one kill.
 - [ ] AC2: Each incident has a timeline of the events in its window and up to three growth candidates (the
-  programs whose memory grew most before the first kill), or growth marked unknown when fewer than two process
-  snapshots exist before the kill.
+  programs whose memory grew most before the first kill, since the last boot before it), or growth marked unknown
+  when fewer than two process snapshots exist in that period.
 - [ ] AC3: Running the reconstruction again after a new import updates the stored incidents instead of
   duplicating them; a run without new data changes nothing.
 - [ ] AC4: The window before and after a kill is configurable in the backend configuration file and is validated
