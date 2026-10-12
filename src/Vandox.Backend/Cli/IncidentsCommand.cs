@@ -2,7 +2,6 @@ using Microsoft.Extensions.Logging;
 
 using Vandox.Backend.Hosting;
 using Vandox.Backend.Incidents;
-using Vandox.Backend.Logging;
 using Vandox.Core.Configuration;
 using Vandox.Core.Signatures;
 using Vandox.Storage;
@@ -27,48 +26,9 @@ internal static class IncidentsCommand
     /// <param name="hooks">The hooks of the host</param>
     /// <param name="cancellationToken">The cancellation token</param>
     /// <returns>The exit code: 0 when the incidents are rebuilt, 1 otherwise</returns>
-    internal static async Task<int> RunAsync(string configPath, IEnumerable<KeyValuePair<string, string>> environment, TextWriter stdout, TextWriter stderr, ServeHooks hooks, CancellationToken cancellationToken)
+    internal static Task<int> RunAsync(string configPath, IEnumerable<KeyValuePair<string, string>> environment, TextWriter stdout, TextWriter stderr, ServeHooks hooks, CancellationToken cancellationToken)
     {
-        var clock = hooks.Clock ?? TimeProvider.System;
-        using var bootstrap = BackendLogging.Create(stderr, "info", clock)!;
-        BackendConfig config;
-
-        try
-        {
-            config = BackendConfigLoader.Load(configPath, environment);
-        }
-        catch (ConfigException exception)
-        {
-            bootstrap.CreateLogger("vandoxd").ConfigurationInvalid(exception, exception.Message);
-
-            return 1;
-        }
-
-        using var loggerFactory = BackendLogging.Create(stderr, config.Log.Level, clock)!;
-        var logger = loggerFactory.CreateLogger("vandoxd");
-        SqliteStore store;
-
-        try
-        {
-            store = await SqliteStore.OpenAsync(config.Storage.Directory, cancellationToken).ConfigureAwait(false);
-        }
-        catch (StoreException exception)
-        {
-            logger.OpeningDatabaseFailed(exception, exception.Message);
-
-            return 1;
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            logger.IncidentsInterrupted();
-
-            return 1;
-        }
-
-        await using (store.ConfigureAwait(false))
-        {
-            return await ReconstructAsync(store, config, logger, stdout, clock, cancellationToken).ConfigureAwait(false);
-        }
+        return StoreCommand.RunAsync(configPath, environment, stderr, hooks, logger => logger.IncidentsInterrupted(), (store, config, logger, clock) => ReconstructAsync(store, config, logger, stdout, clock, cancellationToken), cancellationToken);
     }
 
     /// <summary>

@@ -33,12 +33,12 @@ readable by the next, whichever language implements it, so the schema below is p
 ## Schema
 
 The schema version is stored in `meta.schema_version`; the current version is 9 (step 9 adds the table `incidents` with its index, empty; step 8 adds the tables `log_templates`,
-`log_template_hours` and `log_source_hours` with their indexes, empty, so log lines stored before it have no template statistics; step 7 adds `import_files.attempt`, `INTEGER NOT NULL DEFAULT 0`, and `import_files.hashes_attempt`, `INTEGER`, and the table `import_line_hashes`, so existing rows get attempt 0 and no line hashes; step 6 adds `import_files.head_sha256`, `continues_id` and `start_offset` and the index `import_files_head`; step 4 adds `log_lines.host`, `TEXT NOT NULL DEFAULT ''`, so lines stored before it get an empty host; step 5 adds `log_lines.event`, `TEXT NOT NULL DEFAULT ''`, so lines stored before it get an empty event). Times are Unix nanoseconds in `INTEGER` columns.
+`log_template_hours` and `log_source_hours` with their indexes, empty, so log lines stored before it have no template statistics until `vandoxd templates` rebuilds them; step 7 adds `import_files.attempt`, `INTEGER NOT NULL DEFAULT 0`, and `import_files.hashes_attempt`, `INTEGER`, and the table `import_line_hashes`, so existing rows get attempt 0 and no line hashes; step 6 adds `import_files.head_sha256`, `continues_id` and `start_offset` and the index `import_files_head`; step 4 adds `log_lines.host`, `TEXT NOT NULL DEFAULT ''`, so lines stored before it get an empty host; step 5 adds `log_lines.event`, `TEXT NOT NULL DEFAULT ''`, so lines stored before it get an empty event). Times are Unix nanoseconds in `INTEGER` columns.
 All tables are `STRICT`.
 
 | Table | Content |
 | ----- | ------- |
-| `meta` | key and value; the schema version |
+| `meta` | key and value; the schema version, and the run marker `template_rebuild` from the start of a template rebuild until one completes |
 | `records` | one row per record: `id`, `kind`, `origin` (`agent`, `backend` or `import`), `source`, `agent_id`, `seq`, `captured_at`, `received_at`, `boot_id`, `clock_offset_ns`, `data` (the record's payload as the `data` object of the wire format, without the kind, which is the `kind` column, for every kind except metrics and log lines; `NULL` there) |
 | `metrics` | typed rows for metric records: `record_id`, `source`, `name`, `captured_at`, `value`, `unit`, `labels` (JSON object or `NULL`) |
 | `log_lines` | typed rows for log lines: `record_id`, `log`, `program`, `pid`, `priority`, `message`, `truncated`, `host`, `event` |
@@ -85,8 +85,20 @@ Indexes: a unique index on `records(agent_id, seq)` for origin `agent`; `records
   rules in [Detection, alerts and reports](detection-and-reports.md), *Log templates*): the template row's `count`, `first_seen` and
   `last_seen`, the template's hour and the source's hour. The counts of a batch are summed per template and hour first, so a batch
   runs one statement per template, template hour and source hour it touches; a batch without log lines runs none. A record that is not
-  stored (a duplicate) is not counted. The template tables are written only by this path; code that deletes log lines leaves them
+  stored (a duplicate) is not counted. The template tables are written only by this path and the rebuild below; code that deletes log lines leaves them
   unchanged.
+- **Template rebuild** (`vandoxd templates`, `SqliteStore.RebuildTemplatesAsync`): a clear transaction empties the three template tables
+  (hours first), writes the run marker (the row `template_rebuild` of `meta`, 32 random hexadecimal characters) and reads the
+  high-water ID (the highest record ID), then the stored log lines up to it are counted in batches of at most 10,000 by record ID, one
+  transaction each, with the write path's own counting. Every counting transaction first checks that the marker is its own; the finish
+  transaction checks it again and removes it. Lines stored meanwhile have IDs above the high-water ID and are counted by the write path,
+  so each line is counted once. Two runs at once: the one that cleared last wins, the other fails with `store: rebuilding templates:
+  superseded by another rebuild`. An interrupted or failed run leaves the marker: the statistics are incomplete, and hours may hold
+  **partial counts** (batches go by record ID, not by time), so they look covered with counts too low, not unknown; every run starts
+  over. The clear transaction grows with the statistics: it holds the writer lock that long (another process may hit its busy timeout
+  and is run again) and writes the deleted pages to the WAL, which grows by about the size of the three tables until the next
+  checkpoint. A batch size outside 1 to 20,000 is an `ArgumentOutOfRangeException`; database errors are `store: rebuilding templates: `
+  errors.
 - **Import batches** carry the import state: in the same transaction as its records, a batch advances the file's `records` counter with
   a compare-and-set on the expected count (and sets the complete flag with the last batch). If the counter does not match, nothing is
   written and the caller gets a conflict. A batch with an attempt above 0 also requires the file's current attempt; a batch with
@@ -160,7 +172,7 @@ A search takes literal terms only; the text is never passed to FTS5 as a query.
 ## Retention (planned)
 
 Raw data is kept 30 days, 5-minute rollups 1 year, hourly rollups 3 years (the template statistics count as hourly rollups), incidents
-unlimited, logs 90 days, process and connection snapshots 30 days. Incidents are kept without limit, and an incident that no rebuilt one overlaps is kept as it is (*Incidents* in [Detection, alerts and reports](detection-and-reports.md)). Open limit for #46: once retention deletes lines, a re-run rebuilds an incident whose window lines have partly expired from what is left and replaces the richer stored one (fewer kills, a shorter timeline); retention must prevent that (keep the data of incident windows, or stop rebuilding incidents older than the log retention). Forged incidents (up to 8 MiB each) outlive the lines they came from, so retention must bound them, too. Retention and rollups are the backend's own job and **are not implemented yet**; deleting log lines must also remove
+unlimited, logs 90 days, process and connection snapshots 30 days. Incidents are kept without limit, and an incident that no rebuilt one overlaps is kept as it is (*Incidents* in [Detection, alerts and reports](detection-and-reports.md)). Open limit for #46: once retention deletes lines, a re-run rebuilds an incident whose window lines have partly expired from what is left and replaces the richer stored one (fewer kills, a shorter timeline); retention must prevent that (keep the data of incident windows, or stop rebuilding incidents older than the log retention). Forged incidents (up to 8 MiB each) outlive the lines they came from, so retention must bound them, too. Open limit for #46: a template rebuild counts only the lines still stored, so after retention it would lose the history of expired lines (retention must make the rebuild refuse or keep that history). Retention and rollups are the backend's own job and **are not implemented yet**; deleting log lines must also remove
 their `log_fts` entries (the FTS5 `delete` command with the old message).
 
 ## Write throughput
@@ -191,4 +203,4 @@ weakened silently, and `synchronous=FULL` stays unless the Product Manager decid
 
 ## Implementation
 
-`Vandox.Storage` (`SqliteStore`, `SchemaMigrator`, `BatchWriter`, `BatchValidator`, `FtsQuery`, `TemplateTally`, `TemplateQueries`, `IncidentRepository`, `ReaderQuery`, `StorageLimits`).
+`Vandox.Storage` (`SqliteStore`, `SchemaMigrator`, `BatchWriter`, `BatchValidator`, `FtsQuery`, `TemplateTally`, `TemplateRebuilder`, `TemplateQueries`, `IncidentRepository`, `ReaderQuery`, `StorageLimits`).

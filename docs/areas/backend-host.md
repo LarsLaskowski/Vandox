@@ -13,7 +13,7 @@ The options of the configuration file are in [Configuration and secrets](configu
 - `vandoxd` without a sub-command runs the service. Flags: `-config <file>` (default `/etc/vandox/vandoxd.yaml`), `-healthcheck`,
   `-version` and `-h`. `-version` wins over the other flags and prints the version line to standard output. `-h` prints the usage to
   standard error and exits 0.
-- The first positional argument `import` starts the import sub-command, `incidents` the incident reconstruction; any other
+- The first positional argument `import` starts the import sub-command, `incidents` the incident reconstruction, `templates` the template rebuild; any other
   positional argument is a usage error.
 - `vandoxd [flags] incidents [-config file]` rebuilds the incidents from the stored data (*Incidents* in [Detection, alerts and
   reports](detection-and-reports.md)). Its flags are `-config` and `-h`/`-help` (usage to standard error, exit 0); any positional
@@ -22,6 +22,15 @@ The options of the configuration file are in [Configuration and secrets](configu
   incident and then the counts to standard output; the log goes to standard error as JSON lines. Exit **0** when the run completed
   (also when it skipped an incident the store refused, which the counts show); **1** when the run was interrupted or the store
   failed, without the counts. Run again, it completes the work.
+- `vandoxd [flags] templates [-config file]` rebuilds the log template statistics from the stored log lines (*Template rebuild* in
+  [Storage](storage.md), *Statistics* in [Detection, alerts and reports](detection-and-reports.md)). Its flags are `-config` and
+  `-h`/`-help` (usage to standard error, exit 0); any positional argument after `templates` is a usage error (`vandoxd templates: no
+  argument is expected`, exit 2), and it is not combined with `-healthcheck`. It starts like `incidents` (invalid configuration or
+  database that cannot be opened: exit 1), logs `template rebuild started` and `template rebuild progress` after every batch to
+  standard error as JSON lines, and writes the three summary lines (`Log lines:`, `Batches:`, `Templates:`) to standard output. Exit
+  **0** when the run completed; **1** when it was interrupted (`template rebuild interrupted`: the statistics are incomplete until a
+  run completes; run again, it starts over) or the store failed (`template rebuild failed`, including `superseded by another
+  rebuild` when a second run started meanwhile; the other run continues), without the summary.
 - Exit codes: **0** after a clean shutdown, a printed version or help; **1** when the configuration or the database cannot be loaded or
   opened, or serving fails; **2** for a usage error (unknown flag, flag without value, unexpected argument), with the message and the
   usage on standard error.
@@ -136,5 +145,5 @@ deadline and the health timeout are constants, not options.
 ## Implementation
 
 `Vandox.Backend` (`Cli/CommandLine`, `Hosting/BackendApp`, `ServeCommand`, `ListenerRoutes`, `PortRoutingMiddleware`, `HealthEndpoint`,
-`PingChecker`, `Cli/HealthCheckCommand`, `Logging/JsonLineLogger`), `deploy/backend/` (Dockerfile, compose file, example
+`PingChecker`, `Cli/HealthCheckCommand`, `Cli/StoreCommand`, `Cli/TemplatesCommand`, `Logging/JsonLineLogger`), `deploy/backend/` (Dockerfile, compose file, example
 configuration), `.github/scripts/smoke-test-backend.sh`.

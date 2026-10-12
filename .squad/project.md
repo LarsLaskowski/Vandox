@@ -116,8 +116,9 @@ files or endpoints.
     (`BackendConfigLoader`: absolute, clean path of a file in a directory, the value never shown in an error). The signature detection over stored log lines
     (`Vandox.Core.Signatures`: `SignatureCatalog`, `SignatureDetector`, `BuiltInSignatures`) reads the embedded catalog and the decoded messages of stored
     records: patterns run on the non-backtracking engine in linear time, with the constructs it cannot run refused when the catalog loads; a signature
-    without an event condition that reads a message which can hold remote text (`disk_full`, `mariadb_too_many_connections`) carries an origin condition (`program` or `source`) and a `\A` anchor at server-written text, so remote text in web server or
-    mail lines cannot trigger it; integer fields are accepted only as ASCII digits by an ordinal scan of the whole captured text and range-checked before
+    without an event condition that reads a message which can hold remote text (`disk_full`, `mariadb_too_many_connections`, `php_too_many_connections`, `php_disk_full`, `nginx_disk_full`) carries an origin condition (`program` or `source`) and a `\A` anchor at server-written text, so remote text in the fields a web server or
+    mail server adds and in PHP's own messages cannot trigger it; an application that logs request data at the start of a message (`trigger_error`, `error_log`, standard error of programs it starts)
+    or in PHP output that nginx, `mod_fcgid` or `mod_proxy_fcgi` splits into several entries can create PHP events (record 0094); integer fields are accepted only as ASCII digits by an ordinal scan of the whole captured text and range-checked before
     use (`NumberGuard`); text fields are cut to 1,024 bytes; at most 1,024 events are open and 256 IDs kept per event, and an open event keeps no message,
     match or record; an event is a classification, not proof of origin: local processes can log as `kernel`, `systemd`, `mariadbd`, `postfix/*` or
     `dovecot`, and MariaDB entries forged through a login name reach the MariaDB signatures (record 0094). The log template normalizer
@@ -139,7 +140,7 @@ files or endpoints.
     candidates, 20 + 20 templates and two program maps of at most 4,096 entries (`Vandox.Core.Incidents`: `IncidentLimits`); `IncidentReconstructor` reads log lines and
     metrics in pages of 1,000 and process and connection snapshots one per page, pages by capture time and record ID (`RecordQuery.AfterId`) and fails a page that does not
     lead past the previous one; `RecordQueries.ReadJson` reads the payload as UTF-8 bytes so that one forged maximum process snapshot peaks near 240 MiB; `IncidentRepository` refuses an
-    incident of more than 8 MiB of serialized JSON (`InvalidIncidentException`), which the reconstructor skips and counts. Forged kill lines make forged incidents
+    incident of more than 8 MiB of serialized JSON (`InvalidIncidentException`), which the reconstructor skips and counts. `vandoxd templates` (`SqliteStore.RebuildTemplatesAsync`, `TemplateRebuilder`) reads stored log lines in batches of 10,000 by record ID up to the high-water ID fixed when the tables are emptied, one transaction each, with the write path's normalizer and tally, so a batch's tally holds at most `batchLines` keys of source (at most 128 UTF-8 bytes), program (at most 1,024) and template (at most 1,024), plus as many source hours, each with its own source string (about 46 MB of UTF-16 strings at 10,000, plus dictionary overhead), and reads one message (at most 16 KiB) at a time; every counting transaction checks the run marker in `meta`, so a run superseded by a later one counts nothing more and fails; the transaction that empties the tables grows with the statistics. Forged kill lines make forged incidents
     (a documented limitation, record 0096). Records 0048, 0049, 0066, 0069, 0076, 0078, 0079, 0084,
     0085, 0086, 0088, 0091, 0092, 0093, 0094, 0095, 0096, 0097.
 11. **Outbound calls** (Telegram, external checks, the optional AI service of the nightly report, the

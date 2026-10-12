@@ -419,6 +419,31 @@ public class SqliteStoreTemplateTests
     }
 
     /// <summary>
+    /// The baseline sums the template's counts of the baseline hours before the hour, including the first of them and hours below the minimum count, and neither an older hour nor the hour itself.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task SqliteStoreTemplateSpikesSumsTheBaselineHoursBeforeTheHourOnly()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+
+        await WriteAsync(store,
+                         Lines("syslog", "sshd", "heartbeat event", 0, 10, 1).Concat(Lines("syslog", "sshd", "edge event", 5, 100))
+                                                                             .Concat(Lines("syslog", "sshd", "edge event", 6, 4))
+                                                                             .Concat(Lines("syslog", "sshd", "edge event", 8, 2))
+                                                                             .Concat(Lines("syslog", "sshd", "edge event", 10, 5))
+                                                                             .ToArray());
+
+        // Act
+        var spikes = await store.TemplateSpikesAsync(SpikeQuery(string.Empty, Hour(9), Hour(11), 4, 4, 3, 4, 100), TestContext.CancellationToken);
+
+        // Assert
+        Assert.AreSequenceEqual(["edge event|5|1.5|4"], spikes.Select(spike => $"{spike.Template.Template}|{spike.Count}|{spike.UsualLevel.ToString(CultureInfo.InvariantCulture)}|{spike.CoveredHours}"), "the baseline is the hours 6 to 9: 4 + 2 lines over 4 covered hours, without the 100 lines of hour 5 and the 5 of hour 10");
+    }
+
+    /// <summary>
     /// A template absent from every covered hour has the usual level 0 and is reported once it reaches the minimum count.
     /// </summary>
     /// <returns>A task that completes when the test is done</returns>

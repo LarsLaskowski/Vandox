@@ -3,7 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-10-12
 - **Area:** Detection, alerts and reports
-- **Source:** Issue #22
+- **Source:** Issue #22, issue #209 (rebuild)
 - **Supersedes:** —
 
 ## Context
@@ -22,6 +22,13 @@ advances the file's counter in the same transaction, and a resent agent record i
 kernel line is stored up to three times (`syslog`, `kern.log`, the journal), and a journal export may cover only the last
 weeks while `syslog` covers months. A source that was not imported for some hours has no lines there: that is unknown,
 not "zero" (guarantee *No data gaps unless explicitly recorded*, [0028](0028-data-gaps-are-always-recorded.md)).
+
+Issue #209 adds the rebuild: a database upgraded from schema version 7 has template tables that cover only the lines stored after
+the upgrade, and a change of the normalization rules leaves the stored statistics under the old templates. The issue asks for a
+rebuild that reads the stored lines in batches, normalizes them and replaces the three template tables in bounded transactions, and
+for a choice between a sub-command and a migration step. Two processes may open the database at once (`vandoxd import` next to the
+service), every write transaction takes the writer lock with `BEGIN IMMEDIATE`, and another process waits at most the 5-second busy
+timeout for it (storage, *Database file and connections*).
 
 ## Options considered
 
@@ -84,8 +91,10 @@ How the cost of the usual-level query is held:
     template hours of the range that reach the minimum count, which neither the range nor the limit bounds, and text
     without digits that varies per line makes one template per line. The covered hours are computed per source and hour
     instead of per candidate, which needs the statement to materialize them (`AS MATERIALIZED`; SQLite would otherwise
-    flatten the common table expressions and run the count per candidate); the baseline sum is still read once per
-    candidate. The rest is measured at the default and the widest parameters
+    flatten the common table expressions and run the count per candidate). The baseline sum is a window function over the
+    template's hours (`RANGE BETWEEN baseline PRECEDING AND 1 PRECEDING`), so each template is read once and not once per
+    candidate from its primary key: with the sums read per candidate the widest query took 12.0 s on the reference host
+    (issue #208), above the 10 s line of issue #208, with the window 2.0 s on the same host and the same rows. The rest is measured at the default and the widest parameters
     and on such hostile text, and documented, because nothing calls the query yet.
 14. **A cap on the candidates** — bounds the work; but a cap that cuts silently drops spikes and turns unknown into
     quiet, and a cap that refuses the query fails exactly when a flood happens, the moment its spikes matter. With no
@@ -95,6 +104,48 @@ How the cost of the usual-level query is held:
     reader query, the log search included, and of their error mapping: a follow-up of its own, decided in
     [0097](0097-reader-statements-interrupted-by-a-progress-handler-bound-to-the-token.md) (issue #210).
 
+How the statistics are rebuilt from the stored lines (issue #209):
+
+16. **A sub-command, `vandoxd templates`** (chosen) — run on purpose after an upgrade or a rule change, as often as needed, like
+    `vandoxd incidents`; the service start is not delayed, and an interrupted run is visible (exit code 1) and is simply run again.
+    The price: someone has to run it; the release notes of a rule change say so.
+17. **A migration step** — runs by itself, once per database; but a migration step is one transaction by rule (all or nothing, the
+    version written in the same transaction), so a rebuild of millions of lines would be one unbounded transaction, or a step whose
+    batches commit before the version does; every opener (service start, import, incidents) would wait for it, the service's start
+    and health check on the reference host for minutes; and a later rule change is not a schema change, so it would need a further
+    step that changes no schema, once per rule change.
+18. **Automatically at service start when a stored rules version differs** — no manual step; but needs a rules version kept in step
+    with the normalizer by hand and a background job the service does not have (option 6), and nobody notices statistics that are
+    incomplete while it runs or after it was stopped. To be revisited with the ingest service.
+
+How the tables are replaced:
+
+19. **In place, behind a high-water record ID** (chosen) — one transaction empties the three tables and reads the highest record
+    ID; then batches of log lines with IDs up to that one are counted in transactions of their own, with the counting code of the
+    write path. The write path keeps counting the lines it stores meanwhile, whose IDs are higher, and both only add to counts and
+    widen first and last seen, so the order does not matter and every stored line is counted once when the run completes, provided
+    no other rebuild counts meanwhile (option 22). The price: until a run completes, the statistics are incomplete (during the run
+    and after an interrupted one), and the transaction that empties the tables grows with the statistics, not with a batch.
+20. **Into shadow tables, swapped in at the end** — readers never see incomplete statistics, and an interrupted run leaves the old
+    ones; but the swap is one transaction as large as the statistics plus a catch-up of the lines stored meanwhile, holding the
+    writer lock (and another process past its busy timeout) for that long, and renamed tables cannot keep the index names and schema
+    text of a migrated database, which is part of the contract.
+21. **Resume an interrupted run from a stored cursor** — saves the work already done; but needs state in `meta` and a rule for a
+    resume by a build with other rules, while a run from the start costs minutes. Every run starts from the beginning.
+
+How two rebuilds at once are kept apart (the writer lock serializes transactions, not runs: a second run, started by an operator who
+thinks the first one hangs, clears and counts again while the first one keeps adding the lines past its cursor on top):
+
+22. **A run marker in `meta`, checked in every counting transaction** (chosen) — the transaction that empties the tables writes a
+    random marker of its own; every batch and the final transaction first check, inside the transaction, that the marker is still
+    theirs. A later run's clear deletes everything an earlier run counted and replaces the marker in one transaction, so the earlier
+    run cannot count again and fails; the run that cleared last wins, and no line is counted twice. A marker left by an interrupted
+    run records in the database that the statistics are incomplete and is simply overwritten by the next run. The price: one row and
+    one read per batch, and a superseded run ends with exit code 1.
+23. **No guard: a documented rule "never run two at once", or a lock held for the whole run** — the rule leaves both runs ending
+    with exit code 0 and lines counted twice, which nothing shows afterwards; SQLite has no lock that outlives a transaction, and a
+    lock file needs stale-lock handling after a crash, which a marker does not need.
+
 ## Decision
 
 Options 1, 4, 7, 9 and 13: a hand-written normalizer turns every message into a template by fixed token rules; the
@@ -102,19 +153,35 @@ storage write path counts every stored log line under its source, program and te
 and per UTC hour, in the transaction of its batch; a template is new when it was first seen in the range and its source
 has earlier lines, and an hour exceeds the usual level when its count reaches the minimum and is more than the factor
 times the template's mean over the covered hours of the baseline window; the covered hours are computed (materialized) once per
-source and hour, the baseline sum once per candidate, and the query's cost is stated, not capped. The rules, defaults and limits are in
-[Detection, alerts and reports](../areas/detection-and-reports.md) (*Log templates*) and the tables in
-[Storage](../areas/storage.md).
+source and hour, the baseline sum is a window function over each template's hours, and the query's cost is stated, not capped. Options 16, 19 and 22: the sub-command `vandoxd templates` rebuilds the statistics in place,
+in one transaction that empties the tables, writes the run's marker and fixes the high-water record ID, and then in bounded batches
+of stored lines counted by the write path's code, each checking the marker first. The rules, defaults and limits are in
+[Detection, alerts and reports](../areas/detection-and-reports.md) (*Log templates*), the tables and the rebuild in
+[Storage](../areas/storage.md) and the sub-command in [Backend host](../areas/backend-host.md).
 
 ## Consequences
 
 - The template statistics are history: they are kept when log lines expire (they fall under the hourly-rollup
   retention once retention exists), and code that deletes log lines does not change them.
-- A change of the normalization rules changes the templates of new lines only; stored statistics keep the old
-  templates, so a pattern would appear new again. Such a change, like a database upgraded from schema version 7
-  (whose stored lines have no templates), needs a rebuild of the statistics from the stored lines, which is a follow-up
-  of its own; until then the queries treat hours before the upgrade as unknown, because the source has no counted lines
-  there.
+- A change of the normalization rules changes the templates of new lines only, until `vandoxd templates` rebuilds the
+  statistics from the stored lines; so does a database upgraded from schema version 7 (whose stored lines have no
+  templates), where until then the queries treat hours before the upgrade as unknown, because the source has no counted
+  lines there. The rebuild counts only lines that are still stored: once retention deletes lines (90 days), a rebuild
+  loses the history of the expired ones, so it must stay a deliberate step, never a routine.
+- During a rebuild and after an interrupted one the statistics are incomplete, and not in the way of the upgrade case:
+  batches go by record ID, not by time, so an hour can hold a partial count that looks covered, and usual-level and
+  new-template results are wrong, not unknown. The marker row in `meta` records that state in the database until a run
+  completes; nothing reads it yet, so the first consumer that shows template results to a user must check it. Incidents
+  rebuilt meanwhile carry the templates of that state, so `vandoxd incidents` is run again after the rebuild. The
+  high-water ID holds because a new record gets an ID above every stored one; code that deletes the newest records (none
+  does) would break it.
+- Two rebuilds at once never double-count: the one that cleared last completes, the other fails as superseded.
+- The transaction that empties the tables grows with the statistics: it holds the writer lock that long, so another
+  process that waits longer than the busy timeout fails and is run again, and it writes the deleted pages to the WAL,
+  which grows by about the size of the template tables until the next checkpoint.
+- A rebuild batch holds at most as many keys as lines (source, program and template, each bounded by the model limits),
+  and does no more work than the write path's largest batch; how long that holds the writer lock on the reference host
+  is measured with the write path, not separately.
 - A template's first-seen time is the earliest stored line: importing an older log later moves it earlier, so a
   template reported new may no longer be new afterwards.
 - Hostile or random text without digits creates a template per line; the statistics grow at most by one row per stored

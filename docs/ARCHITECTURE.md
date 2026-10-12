@@ -37,7 +37,9 @@ way, and agents of the hosting provider are never disabled or changed
   web UI. Without arguments it runs the service; `-healthcheck` probes its `/healthz`; `vandoxd import <path>`
   imports logs saved on the backend host
   ([0072](decisions/0072-vandoxd-import-sub-command-output-and-exit-codes.md)); `vandoxd incidents` rebuilds the incidents from the
-  stored data ([0096](decisions/0096-outage-incidents-rebuilt-from-stored-data-merged-by-overlapping-windows.md)). Two Kestrel listeners serve
+  stored data ([0096](decisions/0096-outage-incidents-rebuilt-from-stored-data-merged-by-overlapping-windows.md)); `vandoxd templates`
+  rebuilds the log template statistics from the stored log lines
+  ([0095](decisions/0095-log-templates-token-rules-statistics-in-the-write-path-usual-level-from-covered-hours.md)). Two Kestrel listeners serve
   the web and the ingest port; a middleware routes each request by the label of its listener, and logs are JSON
   lines ([0081](decisions/0081-backend-host-two-listeners-json-logs-blazor-interactive-server.md)).
 - The backend's libraries, one project each with a test project under `tests/`
@@ -251,8 +253,10 @@ Implemented by `src/Vandox.Storage`:
 - **Log templates** ([0095](decisions/0095-log-templates-token-rules-statistics-in-the-write-path-usual-level-from-covered-hours.md)):
   the write path normalizes every stored log line into a template and counts it, in the same transaction, per source, program and
   template (first and last seen, count per UTC hour) and per source and hour; queries return the template of a line, its hourly counts,
-  the templates new in a range and the hours above a template's usual level, taken only from hours in which the source logged. The rules
-  are in [Detection, alerts and reports](areas/detection-and-reports.md) (*Log templates*).
+  the templates new in a range and the hours above a template's usual level, taken only from hours in which the source logged. After an
+  upgrade from schema version 7 or a change of the normalization rules, `vandoxd templates` replaces the statistics with ones counted
+  from the stored lines, in bounded transactions next to the write path. The rules are in
+  [Detection, alerts and reports](areas/detection-and-reports.md) (*Log templates*), the rebuild in [Storage](areas/storage.md).
 - **Incidents** ([0096](decisions/0096-outage-incidents-rebuilt-from-stored-data-merged-by-overlapping-windows.md)):
   one row per incident with its window, its first kill, its number of kills and the incident itself as a JSON document; numbers
   are never reused. Saving an incident takes over the oldest stored incident whose window overlaps it, merges the other
