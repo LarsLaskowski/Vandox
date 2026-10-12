@@ -25,7 +25,8 @@ readable by the next, whichever language implements it, so the schema below is p
 
 ## Schema
 
-The schema version is stored in `meta.schema_version`; the current version is 7 (step 7 adds `import_files.attempt`, `INTEGER NOT NULL DEFAULT 0`, and `import_files.hashes_attempt`, `INTEGER`, and the table `import_line_hashes`, so existing rows get attempt 0 and no line hashes; step 6 adds `import_files.head_sha256`, `continues_id` and `start_offset` and the index `import_files_head`; step 4 adds `log_lines.host`, `TEXT NOT NULL DEFAULT ''`, so lines stored before it get an empty host; step 5 adds `log_lines.event`, `TEXT NOT NULL DEFAULT ''`, so lines stored before it get an empty event). Times are Unix nanoseconds in `INTEGER` columns.
+The schema version is stored in `meta.schema_version`; the current version is 8 (step 8 adds the tables `log_templates`,
+`log_template_hours` and `log_source_hours` with their indexes, empty, so log lines stored before it have no template statistics; step 7 adds `import_files.attempt`, `INTEGER NOT NULL DEFAULT 0`, and `import_files.hashes_attempt`, `INTEGER`, and the table `import_line_hashes`, so existing rows get attempt 0 and no line hashes; step 6 adds `import_files.head_sha256`, `continues_id` and `start_offset` and the index `import_files_head`; step 4 adds `log_lines.host`, `TEXT NOT NULL DEFAULT ''`, so lines stored before it get an empty host; step 5 adds `log_lines.event`, `TEXT NOT NULL DEFAULT ''`, so lines stored before it get an empty event). Times are Unix nanoseconds in `INTEGER` columns.
 All tables are `STRICT`.
 
 | Table | Content |
@@ -36,10 +37,14 @@ All tables are `STRICT`.
 | `log_lines` | typed rows for log lines: `record_id`, `log`, `program`, `pid`, `priority`, `message`, `truncated`, `host`, `event` |
 | `log_fts` | FTS5 index over `log_lines.message` (external content, tokenizer `unicode61 remove_diacritics 2`) |
 | `import_files` | one row per imported file content: SHA-256 of the decompressed content (unique), size, display name, file name and modification time of the first import, source type, number of records stored, complete flag, start and completion times, the head key (SHA-256 of the first line; `NULL` for rows of versions before 6), the id of the content it continues (no foreign key) and the continuation point in bytes (0 when it is not continued), the attempt (the number of times an incomplete content was begun; 0 for rows of versions before 7) and the attempt whose line hashes are kept (`hashes_attempt`, `NULL` when the content was completed without line hashes) |
+| `log_templates` | one row per log template: `id`, `source` (the record's source), `program`, `template` (the normalized message, at most 1,024 UTF-8 bytes), `first_seen` and `last_seen` (the earliest and latest capture time of its lines), `count` (its stored lines, at least 1); unique on `(source, program, template)` |
+| `log_template_hours` | `template_id`, `hour` (the start of a UTC hour), `count` (the template's stored lines in that hour, at least 1); primary key `(template_id, hour)`, without row ID |
+| `log_source_hours` | `source`, `hour`, `count` (the stored log lines of the source in that hour, at least 1); primary key `(source, hour)`, without row ID |
 | `import_line_hashes` | rows of line hashes of an imported content: `file_id`, `attempt`, `first_offset`, `last_offset` and `hashes` (a blob of 16-byte entries, 1 to 4,096, in ascending order of their line ends); the primary key `(file_id, attempt, last_offset)` is its index |
 
 Indexes: a unique index on `records(agent_id, seq)` for origin `agent`; `records(kind, source, captured_at)`;
-`records(kind, captured_at)`; `metrics(source, name, captured_at)`; `import_files(head_sha256, source_type, size)` for complete rows with a head key (`import_files_head`).
+`records(kind, captured_at)`; `metrics(source, name, captured_at)`; `import_files(head_sha256, source_type, size)` for complete rows with a head key (`import_files_head`);
+`log_templates(source, first_seen)` (`log_templates_source_first_seen`); `log_template_hours(hour)` (`log_template_hours_hour`).
 
 - `agent_id`, `seq`, `boot_id` and `clock_offset_ns` are `NULL` when absent (`seq` for any origin other than `agent`). `source` and
   `captured_at` of a metric are copied from `records`, so one index serves a time series in order.
@@ -68,6 +73,12 @@ Indexes: a unique index on `records(agent_id, seq)` for origin `agent`; `records
   trigger. Invariant: every `log_lines` row has exactly one index entry with its message, written in the transaction that wrote the row.
   The write path of a batch is the only code that inserts into `log_lines`, so a log line is searchable as soon as its batch is
   committed. Any code that writes or deletes `log_lines` (a repair tool, retention) must maintain `log_fts` in the same transaction.
+- **Log templates:** in the same transaction, the write path counts every log line it stored under its template (normalization and
+  rules in [Detection, alerts and reports](detection-and-reports.md), *Log templates*): the template row's `count`, `first_seen` and
+  `last_seen`, the template's hour and the source's hour. The counts of a batch are summed per template and hour first, so a batch
+  runs one statement per template, template hour and source hour it touches; a batch without log lines runs none. A record that is not
+  stored (a duplicate) is not counted. The template tables are written only by this path; code that deletes log lines leaves them
+  unchanged.
 - **Import batches** carry the import state: in the same transaction as its records, a batch advances the file's `records` counter with
   a compare-and-set on the expected count (and sets the complete flag with the last batch). If the counter does not match, nothing is
   written and the caller gets a conflict. A batch with an attempt above 0 also requires the file's current attempt; a batch with
@@ -92,7 +103,9 @@ Indexes: a unique index on `records(agent_id, seq)` for origin `agent`; `records
   returns at most 10,000 records.
 - A stored payload is read with the payload options of the wire decoder, so an unknown member is ignored; this includes the `Kind`
   member that rows written before #183 carry.
-- Callers depend on small interfaces (record writer, record reader, log searcher, import tracker). The real store is tested against
+- The template statistics are read by the queries of *Log templates* in [Detection, alerts and reports](detection-and-reports.md)
+  (template of a line, hourly counts, new templates, templates above their usual level), with the same time range and limit rules.
+- Callers depend on small interfaces (record writer, record reader, log searcher, log template reader, import tracker). The real store is tested against
   real files; a consumer whose behavior depends on the store's semantics (such as "a resent batch is stored once") is tested against
   the real store. Fakes for other consumers only record calls and return what the test scripts.
 
@@ -115,8 +128,8 @@ A search takes literal terms only; the text is never passed to FTS5 as a query.
 
 ## Retention (planned)
 
-Raw data is kept 30 days, 5-minute rollups 1 year, hourly rollups 3 years, incidents unlimited, logs 90 days, process and connection
-snapshots 30 days. Retention and rollups are the backend's own job and **are not implemented yet**; deleting log lines must also remove
+Raw data is kept 30 days, 5-minute rollups 1 year, hourly rollups 3 years (the template statistics count as hourly rollups), incidents
+unlimited, logs 90 days, process and connection snapshots 30 days. Retention and rollups are the backend's own job and **are not implemented yet**; deleting log lines must also remove
 their `log_fts` entries (the FTS5 `delete` command with the old message).
 
 ## Write throughput
@@ -135,6 +148,7 @@ weakened silently, and `synchronous=FULL` stays unless the Product Manager decid
 - [0066](../decisions/0066-log-search-takes-literal-terms-only.md) — why log search takes literal terms only.
 - [0077](../decisions/0077-storage-on-microsoft-data-sqlite-same-schema-and-rules.md) — why the same schema on Microsoft.Data.Sqlite, one writer, `synchronous=FULL` and migrations in code.
 - [0083](../decisions/0083-storage-write-criterion-is-the-median-of-five-batches-on-the-data-volume.md) — why the writer was made cheaper and why the criterion is the median of five batches.
+- [0095](../decisions/0095-log-templates-token-rules-statistics-in-the-write-path-usual-level-from-covered-hours.md) — why the write path keeps the template statistics in the batch's transaction.
 
 ## Not here
 
@@ -144,4 +158,4 @@ weakened silently, and `synchronous=FULL` stays unless the Product Manager decid
 
 ## Implementation
 
-`Vandox.Storage` (`SqliteStore`, `SchemaMigrator`, `BatchWriter`, `BatchValidator`, `FtsQuery`, `StorageLimits`).
+`Vandox.Storage` (`SqliteStore`, `SchemaMigrator`, `BatchWriter`, `BatchValidator`, `FtsQuery`, `TemplateTally`, `TemplateQueries`, `StorageLimits`).
