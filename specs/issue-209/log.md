@@ -19,3 +19,4 @@ are quoted in full.
 | 2026-10-12 18:07 | 7 Code check | Orchestrator | format, tests (Core 3548, Storage 265, Import 171, Backend 116), coverage 99.5%/98.0%, analyzer, scope all PASS |
 | 2026-10-12 18:08 | 8 Security diff | squad-security | APPROVED; N1 non-blocking: no test isolates the finish-transaction marker check (opus/medium · 54,904 tokens · 9 tool uses · 47 s) |
 | 2026-10-12 18:10 | 8 Review round 1 | squad-reviewer | 0 blocking, 2 non-blocking: doc placement fixed verbatim by orchestrator; PR-description sentence on incomplete-statistics state (opus/medium · 109,245 tokens · 19 tool uses · 121 s) |
+| 2026-10-12 18:11 | 8 Lead decision | squad-lead | Security N1 fix now: Tester adds SupersededBeforeFinishFails (AC13c), then Reviewer+Security delta |

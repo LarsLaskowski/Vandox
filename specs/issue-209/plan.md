@@ -83,8 +83,14 @@ first_seen, last_seen, count), `log_template_hours` joined to its template as (s
   `OperationCanceledException`). A then throws the same `StoreException` (the marker is present but B's), the sum of
   `log_templates.count` is 2 (B's first batch only), and the `template_rebuild` row is present; a third, complete run restores the
   write path's statistics and removes the row. Test: `SqliteStoreRebuildTemplatesSupersededByInterruptedRunFails`.
+  (c) Run A with `batchLines` 10 (one batch holds all 6 lines, so A's callback runs after its last batch and before its finish
+  transaction); the callback runs B whose own callback cancels B after B's first batch (`batchLines` 2). A then throws the same
+  `StoreException`, its callback was called once, the `template_rebuild` row is still present (B's marker, not deleted by A's finish)
+  and the sum of `log_templates.count` is 2 (B's first batch only). Test: `SqliteStoreRebuildTemplatesSupersededBeforeFinishFails`
+  (added at PR approval for the Security diff finding N1).
   The guard these tests pin: without the marker check in the batch transaction, (a) ends with counts above the write path's and (b)
-  with a sum above 2.
+  with a sum above 2; without the marker check in the finish transaction, (c) returns normally and deletes B's marker, so the
+  incomplete statistics would no longer be recorded.
 
 Sub-command `vandoxd templates`:
 
