@@ -59,5 +59,48 @@ public class StorageTimeTests
         Assert.IsGreaterThan(0, maximum, "maximum is after the epoch");
     }
 
+    /// <summary>
+    /// The hour start floors a nanosecond time to the start of its UTC hour, also before 1970.
+    /// </summary>
+    /// <param name="nanoseconds">The time in Unix nanoseconds</param>
+    /// <param name="expected">The start of its hour in Unix nanoseconds</param>
+    [TestMethod]
+    [DataRow(0L, 0L)]
+    [DataRow(7_200_000_000_000L, 7_200_000_000_000L)]
+    [DataRow(9_000_000_000_000L, 7_200_000_000_000L)]
+    [DataRow(10_799_999_999_999L, 7_200_000_000_000L)]
+    [DataRow(1L, 0L)]
+    [DataRow(-1L, -3_600_000_000_000L)]
+    [DataRow(-3_600_000_000_000L, -3_600_000_000_000L)]
+    [DataRow(-5_400_000_000_000L, -7_200_000_000_000L)]
+    [DataRow(9_223_372_036_854_775_807L, 9_223_369_200_000_000_000L)]
+    [DataRow(-9_223_369_200_000_000_000L, -9_223_369_200_000_000_000L)]
+    public void StorageTimeHourStartFloorsToTheHour(long nanoseconds, long expected)
+    {
+        // Act
+        var start = StorageTime.HourStart(nanoseconds);
+
+        // Assert
+        Assert.AreEqual(expected, start, $"hour start of {nanoseconds}");
+    }
+
+    /// <summary>
+    /// A time of the first, partial hour of the storable range belongs to the hour that starts at the beginning of the range.
+    /// </summary>
+    /// <param name="nanoseconds">The time in Unix nanoseconds</param>
+    [TestMethod]
+    [DataRow(long.MinValue)]
+    [DataRow(long.MinValue + 1)]
+    [DataRow(long.MinValue + 1_000_000_000_000L)]
+    [DataRow(-9_223_369_200_000_000_001L)]
+    public void StorageTimeHourStartClampsTheFirstPartialHour(long nanoseconds)
+    {
+        // Act
+        var start = StorageTime.HourStart(nanoseconds);
+
+        // Assert
+        Assert.AreEqual(long.MinValue, start, $"hour start of {nanoseconds} is clamped to the first instant");
+    }
+
     #endregion // Methods
 }
