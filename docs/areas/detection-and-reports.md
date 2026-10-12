@@ -145,7 +145,8 @@ same template, whatever was seen before.
 
 1. **Separators:** every white-space character and every other control character (Unicode category Cc) is a separator. A run of
    separators becomes one ASCII space; separators at the start and the end are dropped. A template therefore holds no line feed and no
-   control character.
+   control character of category Cc. Format characters (category Cf, such as U+202E and the other bidirectional controls, or U+200B)
+   are no separators and stay inside their token.
 2. **Delimiters:** the ASCII characters `"` `'` `(` `)` `[` `]` `{` `}` `<` `>` `,` `;` `=` `#` `!` `?` `*` `&` `|` `^` `$` `\` and
    the backtick are kept as they are and end a token.
 3. **Tokens:** a token is a run of characters that are neither separators nor delimiters. Trailing `.` and `:` characters are split off
@@ -167,7 +168,8 @@ same template, whatever was seen before.
 | j | any other token that holds a digit (hex strings such as queue IDs and hashes included) | `<id>` | `eth0`, `sda1`, `4F2A31C0B2`, `4Xb2Kq1Zz0z9`, `v2` |
 
 5. **Text:** a lone surrogate (UTF-16 text that is not valid Unicode) becomes U+FFFD. The template is cut at a character boundary to at
-   most **1,024 UTF-8 bytes** (counted on the finished template); an empty message has the empty template.
+   most **1,024 UTF-8 bytes** (counted on the finished template; the cut is the last step, so a cut template may end in a space); an
+   empty message has the empty template.
 
 For example `connect from unknown[203.0.113.7]` becomes `connect from unknown[<ip>]`, `4F2A31C0B2: from=<info@example.com>, size=1234`
 becomes `<id>: from=<<email>>, size=<num>`, and `Out of memory: Killed process 1234 (mariadbd) total-vm:1234567kB, anon-rss:654321kB`
@@ -183,6 +185,9 @@ told from a placeholder; a template is a grouping key, not a reversible form of 
   starts at a full hour of Unix time; a capture time in the first, partial hour of the storable range belongs to the hour that starts at
   the beginning of that range). A record that is not stored (a resent agent record, a batch that fails or is rolled back) counts
   nothing. Lines arrive in any order: an older log imported later moves a template's first-seen time earlier.
+- The times come from the records' capture times, which an agent or a log file supplies: they are **not trusted**. Any time within
+  the storable range is counted as given, so a wrong or forged capture time puts a line into a wrong hour and can move a template's
+  first or last seen time.
 - Per source and hour the number of stored lines is kept as well; an hour in which a source has at least one line is **covered** for
   that source.
 - The statistics are history: they are not changed when log lines are deleted (retention, when it exists, keeps them as hourly
@@ -190,11 +195,11 @@ told from a placeholder; a template is a grouping key, not a reversible form of 
 
 ### Queries
 
-Every query takes a time range `from` to `to` (both required, within the storable range, `from` before `to`) and a limit of 1 to
-10,000 results; a broken rule is an error that names the rule.
+Every query except the template of a line takes a time range `from` to `to` (both required, within the storable range, `from` before
+`to`) and a limit of 1 to 10,000 results; a broken rule is an error that names the rule.
 
-- **Template of a line:** given a source, a program and a message, the template the message normalizes to, with its first and last
-  seen time and count, or none.
+- **Template of a line:** given a source, a program and a message of at most 16,384 UTF-8 bytes (the longest message a log line
+  can have; a longer one is an error), the template the message normalizes to, with its first and last seen time and count, or none.
 - **Hourly counts** of one template: the hours that start in the range (from the hour that holds `from`, before `to`) in which the
   template has lines, with their counts, in time order. Hours without a line are not returned.
 - **New templates:** the templates whose first-seen time lies in the range and whose source has a template first seen before `from`,
@@ -228,13 +233,23 @@ covered hours than the minimum no usual level is known and nothing is reported.
   `256.1.1.1`); the placeholders are a grouping, not a validation of the value.
 - Text without digits that varies per line (random words, as any local process or remote client can write into some logs) creates one
   template per line. The statistics grow by at most one template and one hourly count per stored line.
-- Templates are **external text**: the normalizer removes control characters, but whoever shows a template escapes it like any log line
-  (security area 12 of `.squad/project.md`).
+- Templates are **external text**: the normalizer removes control characters of category Cc, but keeps format characters (Cf, such as
+  U+202E, which reverses the display direction, and U+200B) and any markup; whoever shows a template escapes it like any log line and
+  handles format characters (security area 12 of `.squad/project.md`).
+- The template statistics are kept as hourly rollups (3 years) and outlive the log lines (90 days): after the lines have expired, a
+  template's text is the only trace of them.
 - A change of these rules changes only the templates of lines stored afterwards: the old templates keep their statistics, and the
   changed ones start anew. Rebuilding the statistics from the stored lines is not offered yet.
-- The cost of writing log lines grows by the normalization and one statement per template and hour a batch touches; the measurement for
-  one million lines is in `docs/BENCHMARKS.md`. The usual-level query reads up to `baseline hours` counts per reported candidate, which
-  its range limit bounds; callers that serve a user pass a deadline.
+- The cost of writing log lines grows by the normalization and one statement per template and hour a batch touches; text without
+  digits that varies per line costs three statements per line. The measurement for one million lines, and for such a hostile case, is
+  in `docs/BENCHMARKS.md`.
+- The **cost of the usual-level query is not bounded by its range or its limit.** It evaluates every template hour of the range whose
+  count reaches the minimum count, all of them before the limit applies, and reads per such hour up to `baseline hours` counts of the
+  template; the covered hours are counted once per source and hour. Text without digits that varies per line makes one template per
+  line, so ten copies of such a line in an hour make a candidate at the default minimum count. A deadline or cancellation does **not**
+  stop a running query (the SQLite library used does not interrupt a statement): a caller that serves a user must not rely on a
+  deadline alone, but narrows the range and the source and runs the query off the request path. The measured times at the default and
+  the widest parameters are in `docs/BENCHMARKS.md`.
 
 ## Nightly report
 

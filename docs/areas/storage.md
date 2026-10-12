@@ -104,7 +104,9 @@ Indexes: a unique index on `records(agent_id, seq)` for origin `agent`; `records
 - A stored payload is read with the payload options of the wire decoder, so an unknown member is ignored; this includes the `Kind`
   member that rows written before #183 carry.
 - The template statistics are read by the queries of *Log templates* in [Detection, alerts and reports](detection-and-reports.md)
-  (template of a line, hourly counts, new templates, templates above their usual level), with the same time range and limit rules.
+  (template of a line, hourly counts, new templates, templates above their usual level), with the same time range and limit rules,
+  on a reader connection. The cost of the usual-level query is not bounded by its range or limit, and a cancellation token does not
+  interrupt a running statement (*Limits of templates* there).
 - Callers depend on small interfaces (record writer, record reader, log searcher, log template reader, import tracker). The real store is tested against
   real files; a consumer whose behavior depends on the store's semantics (such as "a resent batch is stored once") is tested against
   the real store. Fakes for other consumers only record calls and return what the test scripts.

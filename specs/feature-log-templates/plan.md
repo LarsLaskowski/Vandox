@@ -46,6 +46,11 @@ Facts the plan rests on, from the code:
   the new reader interface is registered the same way (covered by the existing `ServeTests`, which start the host).
 - Related defect found on the way: none in code. `docs/BENCHMARKS.md` *Background* lists record 0077 twice and 0083 twice
   (wording only); the Dev may tidy it while editing that file.
+- Related finding (from the security review, checked: `Microsoft.Data.Sqlite.dll` 10.0.12 references neither
+  `sqlite3_interrupt` nor a progress handler): `docs/areas/storage.md` (*Log search*) says the search "honors its cancellation
+  token, so every caller that serves a user must pass a deadline" — the token is not checked while the `MATCH` statement runs,
+  so the deadline does not bound a running search either. Not changed here (behavior of the existing log search, outside #22);
+  follow-up issue below.
 
 ## Acceptance criteria
 
@@ -76,13 +81,22 @@ characters (U+0000 and the like) are built in code with C# escapes, never writte
   delimiters between two numbers; `port 25.`; `4F2A31C0B2:` → `<id>:`; `memory:`; `a...`),
   `LogTemplateNormalizerReplacesLoneSurrogates`, `LogTemplateNormalizerCutsTemplatesAtTheByteLimit` (ASCII over the limit gives
   exactly 1,024 bytes; a three-byte character straddling the limit is dropped whole; a 3,000-byte message that normalizes to
-  fewer than 1,024 bytes is not cut), `LogTemplateNormalizerGivesTheEmptyTemplateForAnEmptyMessage`,
-  `LogTemplateNormalizerRefusesNull`.
-- [ ] **AC4 — linear time (step 6).** Normalization time grows linearly with the message length on hostile shapes.
-  Test: `LogTemplateNormalizerTimeGrowsLinearly` — ratio test as in `docs/UNIT_TESTS.md` (*Structure*, the one clock exception):
-  the time on twice the base input against the base input, best of three after one warm-up, bounded by three times the highest
-  ratio measured for the correct code with coverage on; inputs of 8 KiB base: repeated `1:`, repeated `a@`, repeated `0.`,
-  repeated `::1 `, and one token of hex digits and colons without separators.
+  fewer than 1,024 bytes is not cut; the cut is the last step, so a cut template may end in a space — the test asserts the
+  exact expected text and its byte length, never "trimmed at both ends" on a cut template),
+  `LogTemplateNormalizerGivesTheEmptyTemplateForAnEmptyMessage`, `LogTemplateNormalizerRefusesNull`.
+- [ ] **AC4 — linear time, local buffers.** Normalization time grows linearly with the message length on hostile shapes
+  (step 6); concurrent calls give the same templates as single-threaded calls; an output far larger than the input and than
+  any stack buffer is produced without failure.
+  Tests: `LogTemplateNormalizerTimeGrowsLinearly` (step 6) — ratio test as in `docs/UNIT_TESTS.md` (*Structure*, the one clock
+  exception): the time on twice the base input against the base input, best of three after one warm-up, bounded by three times
+  the highest ratio measured for the correct code with coverage on; inputs of 8 KiB base: repeated `1:`, repeated `a@`, repeated
+  `0.`, repeated `::1 `, and one token of hex digits and colons without separators.
+  `LogTemplateNormalizerGivesTheSameTemplatesUnderConcurrentCalls` (step 5): a fixed list of mixed inputs (short lines of AC1,
+  a 16 KiB `1 1 1 …` message whose output exceeds 1,024 characters before the cut, a 16 KiB message of one long digitless
+  token, messages with lone surrogates) is normalized once single-threaded, then with `Parallel.For` (at least 8 workers, each
+  input at least 200 times, in shuffled order from a fixed seed); every concurrent result equals the single-threaded one.
+  `LogTemplateNormalizerHandlesOutputLargerThanTheInput` (step 5): a 1 MiB message of `1 ` repeated (an output of about
+  2.5 times the input before the cut) gives `<num> <num> …` cut at exactly 1,024 bytes, without exception.
 - [ ] **AC5 — hour start.** `HourStart` floors a nanosecond time to the start of its UTC hour, also before 1970, and clamps a time
   of the first, partial hour of the storable range to `long.MinValue`.
   Tests: `StorageTimeHourStartFloorsToTheHour` (data rows: an exact hour, mid-hour, −1 ns → −3,600,000,000,000, a mid-hour time
@@ -96,7 +110,14 @@ characters (U+0000 and the like) are built in code with C# escapes, never writte
   `SqliteStoreWriteBatchMovesFirstSeenEarlierForOlderLines`, `SqliteStoreWriteBatchDoesNotCountDuplicateAgentRecords`,
   `SqliteStoreWriteBatchCountsNothingWhenTheBatchFails` (an import step whose expected count does not match: conflict, and the
   three template tables are unchanged), `SqliteStoreWriteBatchWithoutLogLinesWritesNoTemplate`,
-  `SqliteStoreWriteBatchCountsLinesPerSourceAndHour` (reads `log_source_hours` directly), `SqliteStoreFindTemplateReturnsTheTemplateOfAMessage`
+  `SqliteStoreWriteBatchCountsLinesPerSourceAndHour` (reads `log_source_hours` directly),
+  `SqliteStoreWriteBatchCountsLinesAtTheEdgesOfTheStorableRange` (capture times are agent-supplied and not trusted: one line at
+  the first storable instant, `long.MinValue` ns, and one at the last, `long.MaxValue` ns, are written without exception; the
+  first lands in the hour `long.MinValue` in `log_template_hours` and `log_source_hours`, the second in
+  `HourStart(long.MaxValue)`; first and last seen are those two times),
+  `SqliteStoreWriteBatchCutsLongTemplates` (a stored message of 16,384 bytes of digitless words gives a
+  `log_templates.template` of at most 1,024 UTF-8 bytes, equal to `LogTemplateNormalizer.Normalize` of the message),
+  `SqliteStoreFindTemplateReturnsTheTemplateOfAMessage`
   (and `null` for an unknown one), `SqliteStoreTemplateHoursReturnsHourlyCountsInOrder` (from mid-hour includes that hour, `to`
   exclusive, limit).
 - [ ] **AC7 — new templates and templates above the usual level.** As specified in *Queries* of the area document:
@@ -108,16 +129,28 @@ characters (U+0000 and the like) are built in code with C# escapes, never writte
   `SqliteStoreTemplateSpikesNeedsTheMinimumCount`, `SqliteStoreTemplateSpikesReportsATemplateAbsentFromTheBaseline` (usual level 0),
   `SqliteStoreTemplateSpikesOrdersAndLimitsResults`, `SqliteStoreTemplateSpikesClipsTheBaselineAtTheStorableRange` (`from` at the
   start of the storable range: no exception, the window is clipped);
-  `SqliteStoreTemplateQueriesRefuseInvalidQueries` (data rows per query and rule, comparing the exact texts below).
+  `SqliteStoreTemplateSpikesSharesCoveredHoursPerSourceAndHour` (two templates of one source with candidates in the same hour,
+  and a template of a second source in that hour: each result carries the covered hours of its own source, asserted exactly);
+  `SqliteStoreTemplateQueriesRefuseInvalidQueries` (data rows per query and rule, comparing the exact texts below, including a
+  *find* message of 16,385 ASCII bytes refused and one of 16,384 accepted).
 - [ ] **AC8 — schema step 8.** Opening a version-7 database migrates it to 8: the three tables and two indexes exist and are empty
   (stored lines get no template rows); a version-9 database is refused.
   Test: `SqliteStoreOpenMigratesVersionSevenAndAddsTemplateTables` (asserts the message
   `store: schema version 9 is not supported, this build uses 8`).
 - [ ] **AC9 — one million lines measured (no unit test).** `tools/Vandox.StorageBenchmark --log-lines N` writes N generated log
-  lines with their templates and prints the times listed under *Approach*; the development-host result for N = 1,000,000 is in
-  `docs/BENCHMARKS.md`, with the procedure for the reference host and its row marked "not measured yet" until the operator runs it.
+  lines with their templates and prints the times listed under *Approach* (write time, the usual-level query at default and at
+  the widest parameters with their candidate counts, and the hostile digitless case); the development-host result for
+  N = 1,000,000 is in `docs/BENCHMARKS.md`, with the procedure for the reference host and its row marked "not measured yet" until
+  the operator runs it, together with the usual-level query times the area document's *Limits of templates* points to.
   Verified by: the Dev runs it in step 6 and pastes the output into `log.md`; the Reviewer checks `docs/BENCHMARKS.md` against
   that output; the Product Manager runs the published tool on the DS918+ (*Out of scope / follow-ups*).
+  If the widest usual-level query on the development host takes longer than 10 seconds for N = 1,000,000 or for the hostile
+  case, the Dev reports it in step 6 and the Lead decides (a candidate bound in SQL, or a stated limit in the area document,
+  written by the Lead) before the review.
+- [ ] **AC10 — query structure (no unit test).** The usual-level statement computes the covered hours once per distinct
+  (source, hour) of the candidates (the `windows`/`covered` CTEs of *Approach* step 4), never in a subquery per candidate, and
+  binds every value. Verified by: the Reviewer against the SQL in `TemplateQueries.Build(TemplateSpikeQuery)`; the result is
+  exercised by AC7.
 
 Exact error texts (`InvalidQueryException`, prefix `store: invalid query: ` as `RecordQueries.Require` writes it):
 
@@ -130,6 +163,7 @@ Exact error texts (`InvalidQueryException`, prefix `store: invalid query: ` as `
 | usual level: minimum baseline hours outside 1–baseline hours | `minimum baseline hours must be between 1 and the baseline hours` |
 | usual level: factor not within 1–1,000 (NaN included) | `factor must be between 1 and 1000` |
 | usual level: minimum count below 1 | `minimum count must be at least 1` |
+| find: message of more than 16,384 UTF-8 bytes (counted as `Encoding.UTF8.GetByteCount`, like `Check.Text`) | `message must be at most 16384 UTF-8 bytes` |
 
 A `null` query, source, program or message is an `ArgumentNullException`. A `SqliteException` in a template query becomes
 `StoreException` with `store: reading templates: <message>` (as `QueryAsync` does for records).
@@ -229,7 +263,11 @@ A `null` query, source, program or message is an `ArgumentNullException`. A `Sql
    `mariadb`, `nginx`) and program, numbers, addresses, IDs and e-mail addresses varying with the index, capture times in order over
    30 days, origin `import`, no agent ID, no import step. It prints: runtime and host line; the time to normalize the N messages in
    memory (lines/s); the time to write them (total, median batch, lines/s); the number of templates and template hours; the time of
-   a new-templates query and of a usual-level query over the last 744 hours; and, for N = 1,000,000 with the default batch size, the
+   a new-templates query and of two usual-level queries over the last 744 hours, one with the default parameters and one with the
+   widest (baseline 2,160 hours, minimum baseline hours 1, factor 1, minimum count 1, limit 10,000), each with its number of
+   candidates; then, in a second, fresh database, the **hostile case**: min(N, 100,000) lines whose messages hold no digit and
+   differ per line (a fixed word list combined by the line index, so every line is its own template and costs three upserts),
+   with its write time (total, lines/s) and the time of the widest usual-level query on it; and, for N = 1,000,000 with the default batch size, the
    verdict against the criterion "1,000,000 log lines written with their templates in under 10 minutes on the reference host"
    (stating that only the reference host counts). `[ExcludeFromCodeCoverage]` like `Program`.
 
@@ -249,6 +287,11 @@ Record 0095 weighs them; in short:
 - **Usual level:** mean over covered hours times a factor with a minimum count (chosen) against every hour counted as zero (turns
   unknown into quiet, against the gap guarantee), median or seasonal baselines (more data and per-hour lists; later, with
   alerting) and fixed thresholds (no basis to choose them).
+- **Usual-level query cost:** covered hours counted once per (source, hour) and the cost stated and measured (chosen) against a
+  candidate cap (a silent cap drops spikes and turns unknown into quiet; a cap that refuses the query fails exactly when a flood
+  happens, the moment the spikes matter; with no consumer yet the cap value would be a guess) and against making deadlines real
+  with `sqlite3_interrupt` registered on the cancellation token of a reader lease (it changes the existing log search and the
+  error mapping of every reader query too; follow-up issue below).
 - **Measurement:** extend the existing benchmark tool (chosen; it already runs on the DS918+ with the runtime only) against an
   opt-in test (needs the SDK on the reference host).
 
@@ -296,6 +339,7 @@ public static class LogTemplateNormalizer
 namespace Vandox.Storage;
 public interface ILogTemplateReader
 {
+    /// <exception cref="InvalidQueryException">message longer than ModelLimits.MaxTextBytes UTF-8 bytes</exception>
     Task<LogTemplate?> FindTemplateAsync(string source, string program, string message, CancellationToken cancellationToken);
     Task<IReadOnlyList<TemplateHour>> TemplateHoursAsync(TemplateHourQuery query, CancellationToken cancellationToken);
     Task<IReadOnlyList<LogTemplate>> NewTemplatesAsync(NewTemplateQuery query, CancellationToken cancellationToken);
@@ -386,6 +430,7 @@ internal static class TemplateQueries
     internal static (string Sql, Dictionary<string, object> Parameters) Build(TemplateHourQuery query);
     internal static (string Sql, Dictionary<string, object> Parameters) Build(NewTemplateQuery query);
     internal static (string Sql, Dictionary<string, object> Parameters) Build(TemplateSpikeQuery query);
+    internal static void ValidateMessage(string message);                    // the find rule of the error table
     internal static (string Sql, Dictionary<string, object> Parameters) BuildFind(string source, string program, string template);
 }
 
@@ -440,8 +485,8 @@ No new area: templates are analysis of stored lines and sit next to the signatur
 | `docs/areas/detection-and-reports.md`, `docs/areas/storage.md` | as above | Lead (done in step 2) |
 | `docs/ARCHITECTURE.md` | intro list, components (`Vandox.Core`, `Vandox.Storage`), *Storage and retention* bullet *Log templates* and version 8, record links | Lead (done in step 2) |
 | `docs/decisions/0095-…md` and its index row | new, `Proposed` | Lead (done in step 2) |
-| `docs/BENCHMARKS.md` | new section *Log templates* (criterion from record 0095: one million lines with templates under 10 minutes on the reference host; procedure with `--log-lines`; results table with the development-host row and a reference-host row "not measured yet"); one development-host row of the metric measurement after this change, showing the metric criterion unaffected | Dev |
-| `.squad/project.md` | security area 10: the normalizer (`Vandox.Core.Templates.LogTemplateNormalizer`: hand-written, linear, ordinal ASCII, output cut at 1,024 UTF-8 bytes, control characters removed) and the template queries (bound parameters, range and limit bounds), record 0095 in the list; area 12: templates are external text, escaped by whoever shows them | Dev |
+| `docs/BENCHMARKS.md` | new section *Log templates* (criterion from record 0095: one million lines with templates under 10 minutes on the reference host; procedure with `--log-lines`; results table with the development-host row and a reference-host row "not measured yet"; the usual-level query times at default and widest parameters with their candidate counts; the hostile digitless case, write time and widest query); one development-host row of the metric measurement after this change, showing the metric criterion unaffected | Dev |
+| `.squad/project.md` | security area 10: the normalizer (`Vandox.Core.Templates.LogTemplateNormalizer`: hand-written, linear, ordinal ASCII, no shared mutable state, output cut at 1,024 UTF-8 bytes, Cc control characters removed, format characters (Cf) kept) and the template queries (bound parameters, range and limit bounds, *find* message at most 16 KiB; the usual-level query's work is not bounded by range or limit and a deadline does not interrupt it), record 0095 in the list; area 12: templates are external text, escaped by whoever shows them, format characters (Cf, e.g. U+202E, U+200B) included | Dev |
 | `.squad/stack.md` | *Layout*: `src/Vandox.Core` lists "log templates" | Dev |
 | `README.md` | none: no option, command or secret | — |
 
@@ -462,18 +507,38 @@ No new area: templates are analysis of stored lines and sit next to the signatur
 
 - [x] **Limits and decoding.** The template limit of 1,024 bytes applies **after** normalization, counted on the UTF-8 encoding of
   the finished template, after lone surrogates became U+FFFD (three bytes each). The normalizer adds no input limit: messages are
-  already bounded by the parsers (16 KiB lines and entries, `LogLineReader`, `ModelLimits.MaxTextBytes`), and the pass is linear
-  (AC4). Query bounds: limit 1–10,000, usual-level range at most 744 hours, baseline at most 2,160 hours, so a usual-level query
-  reads at most 2,160 hourly rows per candidate from two primary-key ranges.
+  already bounded by the parsers and the model (16 KiB lines and entries, `LogLineReader`, `ModelLimits.MaxTextBytes`; a record
+  with a longer message is refused before it is written), *find* refuses a caller's message above that limit, and the pass is
+  linear (AC4).
+- [x] **Normalizer memory and threads.** No shared mutable static state (no static or `[ThreadStatic]` buffer); the output
+  buffer is local to the call, on the stack only up to the fixed constant of 1,024 characters and in a pooled or heap array
+  beyond, so no input can overflow the stack (AC4: concurrency and 1 MiB tests).
+- [x] **Query cost — the real bound.** Limit 1–10,000, usual-level range at most 744 hours, baseline at most 2,160 hours. These
+  bound the result, not the work: the usual-level query evaluates **every** template-hour row in the range with a count of at
+  least `minCount` (neither range nor limit bounds their number; `ORDER BY` evaluates all before `LIMIT`), and per candidate
+  reads the template's rows in its baseline window (at most 2,160, by primary key); the covered hours are counted once per
+  distinct (source, hour) (at most sources × 744 counts of at most 2,160 rows). Hostile digitless text that varies per line
+  (an nginx `Host` header, a user name) makes one template per line; ten copies of a line in one hour reach the default
+  minimum count, so a flood of N such lines makes up to N / 10 candidates (N with `minCount` 1). Microsoft.Data.Sqlite never
+  calls `sqlite3_interrupt` or a progress handler, so **a deadline or cancellation does not stop a running statement**. Nothing
+  calls the query today; the area document says plainly that a caller serving a user must not rely on a deadline alone (it
+  narrows range and source, and runs the query off the request path). The cost at default and widest parameters, and on the
+  hostile case, is measured (AC9). The same limitation of the existing log search is a related finding (below).
+- [x] **Untrusted capture times.** `first_seen`, `last_seen` and the hour rows take the record's `CapturedAt`, which an agent
+  supplies; the record rules refuse a time outside the storable range, `HourStart` clamps the first partial hour, and the edges
+  are tested (AC5, AC6). The area document says these times are not trusted.
 - [x] **Exceptions that reach a user.** None today: no command or view calls the queries. `InvalidQueryException` texts are the
   fixed rule texts above and contain no input; `StoreException` carries SQLite's message as the existing queries do.
 - Every value (source, program, template, times, numbers) is bound as a parameter, never concatenated into SQL.
 - Memory: the tally of one batch holds at most one entry per stored line (≤ 20,000), each template at most 1,024 bytes, plus the
   hours it touches — less than the batch's own messages.
 - Growth: hostile text without digits makes one template per line; storage grows by at most one template row, one template hour
-  and nothing more per stored line (record 0095, *Consequences*).
-- Output: templates hold no control character and no line feed but may hold `<`, `&` and any other text: security area 12 applies
-  to whoever shows them (documented in the area and in `.squad/project.md`).
+  and nothing more per stored line (record 0095, *Consequences*), and each such line costs three upserts instead of being summed
+  (measured as the hostile case, AC9). Template rows fall under the hourly-rollup retention (3 years) and outlive the log lines
+  (90 days); a template's text is then the only trace of its lines.
+- Output: templates hold no control character of category Cc and no line feed, but format characters (category Cf: U+202E and
+  the other bidirectional controls, U+200B) are kept, and so are `<`, `&` and any other text: security area 12 applies to whoever
+  shows them, including the handling of format characters (documented in the area and in `.squad/project.md`).
 - The normalizer is a classification for grouping, not a guard: a token that looks like an address need not be one, and a local
   process can write lines that land in any template. Nothing trusts a template.
 
@@ -489,7 +554,67 @@ No new area: templates are analysis of stored lines and sit next to the signatur
   only lines stored afterwards; a rebuild reads the stored log lines in batches, normalizes them and replaces the three template
   tables in bounded transactions; decide whether it runs as a sub-command or a migration step.
 - Reference-host measurement: the Product Manager runs `dotnet Vandox.StorageBenchmark.dll <folder on the SSD volume>
-  --log-lines 1000000` on the DS918+ (procedure in `docs/BENCHMARKS.md`) and the result row replaces "not measured yet". If it is
-  not available before the PR, the orchestrator opens the issue **"[Docs] Measure log template throughput on the DS918+"** with
-  that command and the criterion, linked under Next Steps.
+  --log-lines 1000000` on the DS918+ (procedure in `docs/BENCHMARKS.md`) and the result row replaces "not measured yet". The
+  squad cannot run it, so the orchestrator **always opens, before the PR,** the issue **"[Docs] Measure log template throughput
+  on the DS918+"** — body: the command above, the criterion (one million log lines with their templates in under 10 minutes on
+  the reference host, record 0095), the usual-level query times to record next to it, and the row of `docs/BENCHMARKS.md` to
+  replace — and links it in the PR under Next Steps.
+- **PR reference to #22: `Closes #22`**, decided deliberately: the spec's AC4 scopes the performance criterion as "measured on
+  the development host, reference-host procedure ready, result recorded when the operator has run it"; everything else of the
+  issue is delivered, and the open reference-host measurement lives on in the issue above (linked from the PR and the issue
+  comment) instead of keeping #22 open for an operator task.
+- Follow-up issue (orchestrator, before the PR): **"[Storage] Make deadlines interrupt running SQLite queries"** — body:
+  Microsoft.Data.Sqlite 10.0.12 calls neither `sqlite3_interrupt` nor a progress handler, so a cancellation token or deadline
+  does not stop a running statement; this affects the log search (`docs/areas/storage.md`, *Log search*, which claims the
+  deadline bounds it) and the usual-level template query (`docs/areas/detection-and-reports.md`, *Limits of templates*).
+  Options: register `sqlite3_interrupt` on the reader connection's handle for the token, or a progress handler that checks
+  it; map `SQLITE_INTERRUPT` to `OperationCanceledException`; correct both area documents.
 - Showing templates and spikes in the web UI or a command; alerting; seasonal baselines; templates per host.
+
+## Challenge
+
+Devil's Advocate, round 1 (0 major, 3 minor); all three accepted.
+
+1. *Cost of the usual-level query* — accepted. `TemplateBenchmark` times the usual-level query at the default and at the widest
+   parameters, with the number of candidates, and on a hostile digitless corpus (*Approach* step 6, AC9); the results go into
+   `docs/BENCHMARKS.md`, to which the area document's *Limits of templates* points (it already states the cost as unbounded by
+   range and limit). A widest-query time above 10 seconds on the development host comes back to the Lead before the review,
+   who then bounds the candidates in SQL or states the limit in the area document (AC9). The query itself now counts covered hours
+   once per (source, hour) (Security B2, AC10).
+2. *Hostile `CapturedAt`* — accepted. `SqliteStoreWriteBatchCountsLinesAtTheEdgesOfTheStorableRange` (AC6) writes lines at both
+   edges of the storable range (the record rules refuse anything outside it) and asserts the clamped and floored hours and first
+   and last seen; AC5 already pins `HourStart` at `long.MinValue`. The note that these times are agent-supplied and not trusted is
+   written by the Lead now, in *Statistics* of the area document (not left to the Dev, so it is in place before the tests).
+3. *PR wording and the DS918+ measurement* — accepted. The orchestrator always opens "[Docs] Measure log template throughput on
+   the DS918+" before the PR (no longer "if not available"), and the PR says `Closes #22` with the reason under *Out of
+   scope / follow-ups*.
+
+## Security review
+
+Security, plan round 1 (CHANGES_REQUIRED). Every finding addressed:
+
+- **B1 — normalizer buffer** — accepted, plan revised. *Approach* step 1 now forbids shared mutable static state (no static
+  and no `[ThreadStatic]` buffer) and fixes the buffer: local `StringBuilder`, or `stackalloc` of the fixed constant 1,024
+  characters continuing in an `ArrayPool<char>.Shared` array returned in `finally`; a `stackalloc` sized from the input is
+  forbidden. Tests: `LogTemplateNormalizerGivesTheSameTemplatesUnderConcurrentCalls` and
+  `LogTemplateNormalizerHandlesOutputLargerThanTheInput` (AC4, step 5).
+- **B2 — usual-level query cost** — accepted, plan revised. (1) The statement in *Approach* step 4 computes the window start and
+  the covered hours once per distinct (source, hour) in CTEs joined to the candidates (AC10, test
+  `SqliteStoreTemplateSpikesSharesCoveredHoursPerSourceAndHour`). (2) The real bound — candidates are every template-hour row of
+  the range with at least `minCount`, unbounded by range and limit, each reading up to `baseline hours` rows; a deadline does not
+  interrupt a running statement (checked: the `Microsoft.Data.Sqlite.dll` of 10.0.12 references no `sqlite3_interrupt`) — is
+  stated in *Security considerations*, the area document (*Queries* and *Limits of templates*) and record 0095. (3) No cap
+  (reasons under *Options considered*); the area document says plainly that a caller serving a user must not rely on a deadline
+  alone. The same flaw in the log search's documentation is a related finding with a follow-up issue.
+- **N1 — format characters survive** — accepted. The area document (*Normalization* step 1, *Limits of templates*), record 0095
+  and the `.squad/project.md` row (areas 10 and 12, Dev) now say "Cc control characters" and that format characters (Cf: U+202E,
+  bidirectional controls, U+200B) are kept and must be handled by whoever shows a template.
+- **N2 — stored long message** — accepted: `SqliteStoreWriteBatchCutsLongTemplates` (AC6).
+- **N3 — unbounded *find* message** — accepted: *find* refuses a message above `ModelLimits.MaxTextBytes` with
+  `message must be at most 16384 UTF-8 bytes` (error table, `TemplateQueries.ValidateMessage`, rows in
+  `SqliteStoreTemplateQueriesRefuseInvalidQueries`); no stored line can be longer, so nothing findable is refused.
+- **N4 — hostile write cost** — accepted: the benchmark's hostile case (min(N, 100,000) unique digitless lines, three upserts
+  each) is measured and recorded in `docs/BENCHMARKS.md` (AC9).
+- **N5 — templates outlive log lines** — accepted: *Limits of templates* in the area document and *Security considerations*.
+- **N6 — cut templates** — accepted: AC3 tells the Tester to assert the exact text and byte length of a cut template, never
+  "trimmed at both ends"; the area document says a cut template may end in a space.

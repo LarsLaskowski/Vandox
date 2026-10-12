@@ -24,7 +24,8 @@ before an outage. Lines of one pattern differ in numbers, IDs, addresses and pat
   already had lines before it); the templates whose hourly count is **above their usual level** (more than a factor times the mean
   over the covered hours of a baseline window, at least a minimum count; hours in which the source has no line at all are unknown and
   never count as quiet).
-- No command, view or alert shows templates yet.
+- No command, view or alert shows templates yet. The cost of the usual-level query grows with the template hours in its range,
+  not with its limit, and is measured and documented; a deadline does not interrupt it.
 - The time to write one million log lines with their templates is measured with the storage benchmark tool and noted in
   `docs/BENCHMARKS.md`, on the development host by the squad and on the reference host (DS918+) by the operator.
 

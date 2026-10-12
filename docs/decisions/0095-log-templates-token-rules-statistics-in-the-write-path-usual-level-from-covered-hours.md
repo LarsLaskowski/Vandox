@@ -78,13 +78,28 @@ What "usual level" means:
     revisited with alerting.
 12. **A fixed threshold per template** — does not adapt and needs configuration nobody can choose yet.
 
+How the cost of the usual-level query is held:
+
+13. **Covered hours counted once per source and hour, the cost stated and measured** (chosen) — the work grows with the
+    template hours of the range that reach the minimum count, which neither the range nor the limit bounds, and text
+    without digits that varies per line makes one template per line. Counting the covered hours per source and hour
+    instead of per candidate removes the part that repeats; the rest is measured at the default and the widest parameters
+    and on such hostile text, and documented, because nothing calls the query yet.
+14. **A cap on the candidates** — bounds the work; but a cap that cuts silently drops spikes and turns unknown into
+    quiet, and a cap that refuses the query fails exactly when a flood happens, the moment its spikes matter. With no
+    consumer yet the value would be a guess; to be revisited with the first caller.
+15. **Make deadlines interrupt the statement** (`sqlite3_interrupt` or a progress handler bound to the cancellation
+    token) — would make a deadline a real bound; but Microsoft.Data.Sqlite does neither, so this is a change of every
+    reader query, the log search included, and of their error mapping: a follow-up of its own.
+
 ## Decision
 
-Options 1, 4, 7 and 9: a hand-written normalizer turns every message into a template by fixed token rules; the
+Options 1, 4, 7, 9 and 13: a hand-written normalizer turns every message into a template by fixed token rules; the
 storage write path counts every stored log line under its source, program and template, first and last capture time
 and per UTC hour, in the transaction of its batch; a template is new when it was first seen in the range and its source
 has earlier lines, and an hour exceeds the usual level when its count reaches the minimum and is more than the factor
-times the template's mean over the covered hours of the baseline window. The rules, defaults and limits are in
+times the template's mean over the covered hours of the baseline window; the covered hours are counted once per
+source and hour, and the query's cost is stated, not capped. The rules, defaults and limits are in
 [Detection, alerts and reports](../areas/detection-and-reports.md) (*Log templates*) and the tables in
 [Storage](../areas/storage.md).
 
@@ -102,6 +117,10 @@ times the template's mean over the covered hours of the baseline window. The rul
 - Hostile or random text without digits creates a template per line; the statistics grow at most by one row per stored
   line and one per template and hour, and a template text is cut at 1,024 UTF-8 bytes.
 - Templates are external text: whoever shows them escapes them like log lines (security area 12); the normalizer
-  removes control characters but does not make the text safe for any output format.
+  removes control characters of category Cc, keeps format characters (Cf) and does not make the text safe for any
+  output format.
+- The usual-level query's work is not bounded by its range or limit, and a deadline does not interrupt a running
+  statement; a caller that serves a user cannot rely on a deadline alone until deadlines interrupt statements
+  (option 15).
 - Nothing shows the queries yet; incident reconstruction (#23) and the web UI build on them. The criterion for one
   million lines on the reference host is in `docs/BENCHMARKS.md`.
