@@ -18,3 +18,4 @@ are quoted in full.
 | 2026-10-12 17:55 | 6 Implement | squad-dev | 3 signatures in signatures.yaml + docs; Core tests 3570 pass, Coverage gate PASS (sonnet/medium · 93,168 tokens · 11 tool uses · 393 s) |
 | 2026-10-12 18:04 | 6 Coverage pass | squad-tester | AC6-AC8 pin tests added, all pass; Coverage gate PASS (sonnet/medium · 11,526 tokens · 7 tool uses · 314 s · continued) |
 | 2026-10-12 18:07 | 7 Code check | Orchestrator | Format check, Analyzer gate, scope-check, Core tests 3625, Coverage gate PASS on 185521c |
+| 2026-10-12 18:08 | 8 Review (security diff) | squad-security | APPROVED on 185521c; N: php[0-9]? accepts php0-php4/6/9 (no attack-surface change) |
