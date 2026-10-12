@@ -102,7 +102,7 @@ public class BoundedBufferWriterTests
 
         // Assert
         Assert.IsFalse(writer.Exceeded, "not exceeded");
-        Assert.HasCount(0, writer.WrittenSpan.ToArray(), "nothing written");
+        Assert.IsEmpty(writer.WrittenSpan.ToArray(), "nothing written");
     }
 
     /// <summary>
@@ -142,7 +142,7 @@ public class BoundedBufferWriterTests
 
         // Assert
         Assert.IsTrue(writer.Exceeded, "limit exceeded");
-        Assert.HasCount(0, writer.WrittenSpan.ToArray(), "written bytes are dropped");
+        Assert.IsEmpty(writer.WrittenSpan.ToArray(), "written bytes are dropped");
         Assert.IsGreaterThanOrEqualTo(1000, scratch.Length, "scratch room covers the hint");
     }
 
@@ -165,7 +165,7 @@ public class BoundedBufferWriterTests
 
         // Assert
         Assert.IsTrue(writer.Exceeded, "still exceeded");
-        Assert.HasCount(0, writer.WrittenSpan.ToArray(), "no bytes come back");
+        Assert.IsEmpty(writer.WrittenSpan.ToArray(), "no bytes come back");
     }
 
     /// <summary>

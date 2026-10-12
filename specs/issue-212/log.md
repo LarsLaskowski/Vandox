@@ -11,3 +11,4 @@ are quoted in full.
 | 2026-10-12 17:41 | 4 Skeleton | squad-dev | skeleton built, build clean |
 | 2026-10-12 17:49 | 5 Tests first | squad-tester | 15 tests fail on skeleton |
 | 2026-10-12 18:01 | 6 Implement | squad-dev | implemented, tests green; BoundedBufferWriter lines uncovered |
+| 2026-10-12 18:16 | 6 Coverage | squad-tester | AC7 + BoundedBufferWriterTests; coverage gate PASS 100% changed |

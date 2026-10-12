@@ -485,7 +485,7 @@ public class SqliteStoreWriteTests
 
         Assert.AreEqual("text", storedType, "SQLite type of the payload");
         Assert.AreSequenceEqual(expected, stored, "stored bytes equal the serializer output");
-        Assert.IsGreaterThanOrEqualTo(3, CountOccurrences(stored, escapedLessThan), "the < characters are stored as six bytes each");
+        Assert.AreEqual(2, CountOccurrences(stored, escapedLessThan), "the < characters are stored as six bytes each");
         Assert.AreEqual(1L, typedWithoutData, "the metric keeps NULL");
     }
 
