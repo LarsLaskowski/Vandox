@@ -85,7 +85,10 @@ internal static class IncidentsCommand
     {
         logger.IncidentsStarted();
 
-        var reconstructor = new IncidentReconstructor(store, store, store, BuiltInSignatures.Catalog, config.Incidents.GetWindowBefore(), config.Incidents.GetWindowAfter(), clock, logger);
+        var reconstructor = new IncidentReconstructor(store, store, store, BuiltInSignatures.Catalog, config.Incidents.GetWindowBefore(), config.Incidents.GetWindowAfter(), clock)
+                            {
+                                Logger = logger
+                            };
 
         try
         {

@@ -43,9 +43,17 @@ public sealed class IncidentReconstructor
     private readonly TimeSpan _before;
     private readonly TimeSpan _after;
     private readonly TimeProvider _clock;
-    private readonly ILogger? _logger;
 
     #endregion // Fields
+
+    #region Properties
+
+    /// <summary>
+    /// Gets the logger that reports skipped incidents; <c>null</c> for none.
+    /// </summary>
+    public ILogger? Logger { get; init; }
+
+    #endregion // Properties
 
     #region Constructors
 
@@ -59,8 +67,7 @@ public sealed class IncidentReconstructor
     /// <param name="before">The window before a kill</param>
     /// <param name="after">The window after a kill</param>
     /// <param name="clock">The clock that stamps the saved incidents</param>
-    /// <param name="logger">The logger that reports skipped incidents, or <c>null</c> for none</param>
-    public IncidentReconstructor(IRecordReader records, ILogTemplateReader templates, IIncidentStore incidents, SignatureCatalog catalog, TimeSpan before, TimeSpan after, TimeProvider clock, ILogger? logger = null)
+    public IncidentReconstructor(IRecordReader records, ILogTemplateReader templates, IIncidentStore incidents, SignatureCatalog catalog, TimeSpan before, TimeSpan after, TimeProvider clock)
     {
         ArgumentNullException.ThrowIfNull(records);
         ArgumentNullException.ThrowIfNull(templates);
@@ -75,7 +82,6 @@ public sealed class IncidentReconstructor
         _before = before;
         _after = after;
         _clock = clock;
-        _logger = logger;
     }
 
     #endregion // Constructors
@@ -273,7 +279,7 @@ public sealed class IncidentReconstructor
         catch (InvalidIncidentException exception)
         {
             result.Skipped++;
-            _logger?.IncidentSkipped(incident.FirstKillAt.ToString("O", CultureInfo.InvariantCulture), exception.Message);
+            Logger?.IncidentSkipped(incident.FirstKillAt.ToString("O", CultureInfo.InvariantCulture), exception.Message);
         }
     }
 

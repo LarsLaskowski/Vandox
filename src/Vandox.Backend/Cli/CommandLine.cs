@@ -15,6 +15,9 @@ public static class CommandLine
     /// </summary>
     public const string BinaryName = "vandoxd";
 
+    private const string ImportName = "import";
+    private const string IncidentsName = "incidents";
+
     #endregion // Constants
 
     #region Methods
@@ -57,12 +60,12 @@ public static class CommandLine
     /// <returns>The text</returns>
     public static string Usage(string usageFor)
     {
-        if (usageFor == "import")
+        if (usageFor == ImportName)
         {
             return $"Usage of {BinaryName} import [-config file] <path>:\n  <path> is a directory, a .tar or .tar.gz archive, a .gz file or a log file\n  -config string\n    \tpath of the configuration file\n";
         }
 
-        if (usageFor == "incidents")
+        if (usageFor == IncidentsName)
         {
             return $"Usage of {BinaryName} incidents [-config file]:\n  -config string\n    \tpath of the configuration file\n";
         }
@@ -78,19 +81,19 @@ public static class CommandLine
     /// <param name="index">The position of the argument</param>
     private static void ParseArgument(CommandOptions options, IReadOnlyList<string> args, int index)
     {
-        if (args[index] == "import" && options.Healthcheck)
+        if (args[index] == ImportName && options.Healthcheck)
         {
             options.Error = $"unexpected argument {Terminal.Quote(args[index])}";
         }
-        else if (args[index] == "import")
+        else if (args[index] == ImportName)
         {
             ParseImport(options, args, index + 1);
         }
-        else if (args[index] == "incidents" && options.Healthcheck)
+        else if (args[index] == IncidentsName && options.Healthcheck)
         {
             options.Error = $"unexpected argument {Terminal.Quote(args[index])}";
         }
-        else if (args[index] == "incidents")
+        else if (args[index] == IncidentsName)
         {
             ParseIncidents(options, args, index + 1);
         }
@@ -198,7 +201,7 @@ public static class CommandLine
     {
         var index = start;
 
-        options.UsageFor = "import";
+        options.UsageFor = ImportName;
         options.ImportPath = string.Empty;
 
         if (ParseSubFlags(options, args, ref index))
@@ -235,7 +238,7 @@ public static class CommandLine
     {
         var index = start;
 
-        options.UsageFor = "incidents";
+        options.UsageFor = IncidentsName;
         options.Incidents = true;
 
         if (ParseSubFlags(options, args, ref index) && index < args.Count)

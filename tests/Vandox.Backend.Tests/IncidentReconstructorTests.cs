@@ -413,7 +413,10 @@ public class IncidentReconstructorTests
     /// <returns>A task that returns the result</returns>
     private Task<ReconstructionResult> RunAsync(SqliteStore store, IIncidentStore incidents, FakeTimeProvider clock, List<SavedIncident> saved, ILogger? logger = null)
     {
-        var reconstructor = new IncidentReconstructor(store, store, incidents, BuiltInSignatures.Catalog, _before, _after, clock, logger);
+        var reconstructor = new IncidentReconstructor(store, store, incidents, BuiltInSignatures.Catalog, _before, _after, clock)
+                            {
+                                Logger = logger
+                            };
 
         return reconstructor.RunAsync(item =>
                                       {
