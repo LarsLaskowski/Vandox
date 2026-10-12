@@ -107,5 +107,10 @@ public static class StorageLimits
     /// </summary>
     public const long DefaultSpikeMinCount = 10;
 
+    /// <summary>
+    /// The number of stored log lines a template rebuild counts in one transaction.
+    /// </summary>
+    public const int TemplateRebuildBatchLines = 10000;
+
     #endregion // Constants
 }

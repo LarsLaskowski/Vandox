@@ -464,6 +464,90 @@ public class SqliteStoreQueryTests
     }
 
     /// <summary>
+    /// A token that is already cancelled makes the log search throw an OperationCanceledException.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task SqliteStoreSearchLogsThrowsCanceledForCancelledToken()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+        using var source = new CancellationTokenSource();
+        var search = new LogSearch
+                     {
+                         Text = "memory",
+                         From = Samples.Base.AddHours(-1),
+                         To = Samples.Base.AddHours(1),
+                         Limit = 10
+                     };
+
+        await source.CancelAsync();
+
+        // Act and Assert
+        await Assert.ThrowsAsync<OperationCanceledException>(() => store.SearchLogsAsync(search, source.Token), "a cancelled token cancels the search");
+    }
+
+    /// <summary>
+    /// A reader connection leased by the store interrupts a running statement once the token is cancelled.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task SqliteStoreLeaseReaderInterruptsRunningStatement()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        using var source = CancellationTokenSource.CreateLinkedTokenSource(TestContext.CancellationToken);
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+        await using var lease = await store.LeaseReaderAsync(source.Token);
+
+        lease.Connection.CreateFunction("cancel_at",
+                                        (long value, long at) =>
+                                        {
+                                            if (value == at)
+                                            {
+                                                source.Cancel();
+                                            }
+
+                                            return 0L;
+                                        });
+
+        // Act
+        var exception = await Assert.ThrowsExactlyAsync<OperationCanceledException>(() => ReaderQuery.ReadAsync(lease.Connection,
+                                                                                                                "WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM c WHERE x < 20000000) SELECT count(*) FROM c WHERE cancel_at(x, 1) = 0",
+                                                                                                                new Dictionary<string, object>(),
+                                                                                                                reader => reader.GetInt64(0),
+                                                                                                                "store: reading records",
+                                                                                                                source.Token),
+                                                                                    "the leased connection interrupts the statement");
+
+        // Assert
+        var inner = Assert.IsInstanceOfType<SqliteException>(exception.InnerException, "inner exception");
+
+        Assert.AreEqual(9, inner.SqliteErrorCode, "SQLITE_INTERRUPT");
+    }
+
+    /// <summary>
+    /// A reader connection leased by the store stays query-only.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task SqliteStoreLeaseReaderStaysQueryOnly()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        using var source = CancellationTokenSource.CreateLinkedTokenSource(TestContext.CancellationToken);
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+        await using var lease = await store.LeaseReaderAsync(source.Token);
+        await using var command = lease.Connection.CreateCommand();
+
+        command.CommandText = "INSERT INTO meta (key, value) VALUES ('probe', 'x')";
+
+        // Act and Assert
+        await Assert.ThrowsExactlyAsync<SqliteException>(() => command.ExecuteNonQueryAsync(TestContext.CancellationToken), "a write on a reader connection fails");
+    }
+
+    /// <summary>
     /// Reads the stored JSON text of the first record with a JSON payload.
     /// </summary>
     /// <param name="path">The database file</param>

@@ -65,16 +65,29 @@ A line may match several signatures; it then yields one event each, in catalog o
 | `mariadb_recovery_start` | MariaDB started a crash recovery | event `mariadb.recovery_start` | none |
 | `mariadb_recovery_end` | MariaDB finished a crash recovery | event `mariadb.recovery_end` | none |
 | `mariadb_too_many_connections` | Postfix or Dovecot could not connect to MariaDB because of *Too many connections* | programs `postfix/proxymap`, `postfix/cleanup`, `postfix/smtpd`, `postfix/trivial-rewrite`, `postfix/local`, `postfix/virtual`, `dovecot`, or source `dovecot`; message anchored with `\A` | none |
+| `php_too_many_connections` | PHP's `mysqli` (warning of `mysqli_connect`, `mysqli_real_connect`, `mysqli::__construct`, `mysqli::connect`, `mysqli::real_connect`, `mysqli::mysqli`, or the uncaught `mysqli_sql_exception`) or PDO (uncaught `PDOException`) could not connect to MariaDB because of *Too many connections* (error 1040) | sources `nginx-error`, `sw-cp-server-error`, `apache-error`; message anchored with `\A` at the first PHP message after nginx's FastCGI prefix, Apache's `mod_proxy_fcgi` (`AH01071`) or `mod_fcgid` prefix, or a message of PHP's Apache module (`php`, `php5`, `php7`, `php8`) | none |
 | `service_start` | systemd started a unit | program `systemd`; message `Started ...` | `unit` (when named), `description` |
 | `service_stop` | systemd stopped a unit | program `systemd`; message `Stopped ...` | `unit` (when named), `description` |
 | `service_failed` | a systemd service failed | program `systemd`; message `<unit>.service: Failed with result '<result>'.` | `unit`, `result` |
 | `disk_full` | MariaDB could not write because a file system was full | programs `mariadbd`, `mysqld` or source `mariadb`; message anchored with `\A` | none |
+| `php_disk_full` | PHP could not write a file because a file system was full (`errno=28`) | as `php_too_many_connections` | none |
+| `nginx_disk_full` | nginx could not write a file because a file system was full (`(28: No space left on device)` of `pwrite()`, `write()`, `pwritev()`, `writev()`) | sources `nginx-error`, `sw-cp-server-error`; message anchored with `\A` | none |
 | `postfix_fatal` | Postfix logged a fatal error or a panic | events `postfix.fatal`, `postfix.panic` | none |
 | `dovecot_fatal` | Dovecot logged a fatal error or a panic | events `dovecot.fatal`, `dovecot.panic` | none |
 | `boot` | the kernel started (the first kernel line of a boot) | program `kernel` | `kernel_version` |
 
 `disk_full` reads only MariaDB's own error messages, and `mariadb_too_many_connections` only the MySQL client errors of Postfix and
-Dovecot. Lines of other writers (PHP, nginx, Apache, Plesk) are not recognized: their messages carry external text before the error.
+Dovecot. The web server and PHP have a signature each: `nginx_disk_full` reads nginx's failed writes (`pwrite()`, `write()`,
+`pwritev()`, `writev()` at `crit` or `alert`), `php_disk_full` PHP's `Notice` about a failed write and `php_too_many_connections`
+the `mysqli` and PDO errors above, as nginx, `sw-cp-server` (nginx's format) and Apache (`mod_proxy_fcgi`, `mod_fcgid`, PHP's Apache
+module) log them. The formats were checked against the sources of nginx 1.18.0, Apache httpd 2.4.52, `mod_fcgid` and PHP 7.4 and
+8.3, not against logs of the server. Only the **first PHP message** after the server's prefix is read, so an error that follows an
+earlier PHP message of the same request is missed. An Apache line without a module name (`[:warn]`) is not read, and PHP's write
+error is read only when ` in /<script path>` follows the error text, so a write error without a script (origins `Unknown`,
+`PHP Request Shutdown`, `in Unknown on line 0`, e.g. a session or output flush at shutdown) is not recognized. Not read at all: the
+Plesk panel log (its format is unverified), Apache's own status texts (`(28)No space left on device:` is also printed for
+exhausted semaphores), Apache 2.2, a custom `ErrorLogFormat`, nginx's `open()` and `mkdir()` (they report requested paths) and
+PHP's `Only 0 of N bytes written`. One full disk that MariaDB and nginx both log gives one event per signature.
 On systemd 249 (Ubuntu 22.04) `Started` and `Stopped` name a unit by its description, and the journal reader does not keep the unit
 name, so `unit` is present only where systemd prints `<unit> - <description>`.
 
@@ -123,8 +136,16 @@ bounded by those limits and not by the input.
   and are **counted as two events**.
 - A flood of 1,024 or more distinct matching lines within 60 seconds (which any local process, and for some signatures a client of
   MariaDB, can write) **closes events early**, so the later copy of a real event can become an event of its own.
-- The **writers are narrowed**: disk-full and *Too many connections* lines of PHP, nginx, Apache and Plesk are not recognized, because
-  those messages carry text of remote HTTP clients (requested paths, referrers, application output).
+- The **anchor has residuals**. It keeps out client text in the fields the servers add (request line, host, referrer, upstream,
+  paths) and in PHP's own messages (the 1040 warning only from the mysqli connect functions, whose origin carries no parameters),
+  but not (1) output the writer splits (nginx keeps the line feeds of PHP output; `mod_fcgid` logs each line of standard error as
+  an entry; nginx and `mod_proxy_fcgi` log FastCGI standard error in pieces of their read buffer), nor (2) a message whose head the
+  application writes (`trigger_error`, which logs no origin; `error_log` without a log file, written verbatim to FastCGI or Apache;
+  programs started from PHP or a CGI that write into Apache's error log directly, whose raw lines need only the prefix). An HTTP
+  client whose request data an application puts into such a message can create a PHP event. Likewise a WebDAV `COPY` destination
+  or a variable access log path in a failed nginx write, and an Apache client address that a reverse-proxy module copies
+  unchecked from a forwarded header (`mod_remoteip` stores a parsed address; Plesk's module is not verified). Record 0094 has
+  the reasoning.
 - Real repeats with equal fields within 60 seconds are one event, whose lines are all linked and counted. On systemd 249 start and stop
   name the description, so scopes and timers match too. The kill line of `oom_kill_allocating_task` is recognized, but its report is
   not ended by the report grouper (issue #202).
@@ -191,7 +212,7 @@ told from a placeholder; a template is a grouping key, not a reversible form of 
 - Per source and hour the number of stored lines is kept as well; an hour in which a source has at least one line is **covered** for
   that source.
 - The statistics are history: they are not changed when log lines are deleted (retention, when it exists, keeps them as hourly
-  rollups). Lines stored before the statistics existed (a database of schema version 7) are not counted.
+  rollups). Lines stored before the statistics existed (a database of schema version 7) are not counted until `vandoxd templates` rebuilds the statistics.
 
 ### Queries
 
@@ -238,17 +259,22 @@ covered hours than the minimum no usual level is known and nothing is reported.
   handles format characters (security area 12 of `.squad/project.md`).
 - The template statistics are kept as hourly rollups (3 years) and outlive the log lines (90 days): after the lines have expired, a
   template's text is the only trace of them.
-- A change of these rules changes only the templates of lines stored afterwards: the old templates keep their statistics, and the
-  changed ones start anew. Rebuilding the statistics from the stored lines is not offered yet.
+- A change of these rules changes only the templates of lines stored afterwards until the statistics are rebuilt: after a rule change
+  `vandoxd templates` recounts every stored line under the current rules, then `vandoxd incidents` is run again.
+- While a rebuild runs and after an interrupted one (the `template_rebuild` row in `meta`, *Template rebuild* in the storage area), hours
+  may hold **partial counts**: they count as covered with counts too low, so new-template and usual-level results are wrong, not
+  unknown, until a run completes (the "unknown" rule of *Queries* covers only hours with no line of the source, as after the schema-7
+  upgrade).
 - The cost of writing log lines grows by the normalization and one statement per template and hour a batch touches; text without
   digits that varies per line costs three statements per line. The measurement for one million lines, and for such a hostile case, is
   in `docs/BENCHMARKS.md`.
 - The **cost of the usual-level query is not bounded by its range or its limit.** It evaluates every template hour of the range whose
-  count reaches the minimum count, all of them before the limit applies, and reads per such hour up to `baseline hours` counts of the
-  template; the covered hours are computed once per source and hour (the statement materializes them), the baseline sum once per such hour. Text without digits that varies per line makes one template per
-  line, so ten copies of such a line in an hour make a candidate at the default minimum count. A deadline or cancellation does **not**
-  stop a running query (the SQLite library used does not interrupt a statement): a caller that serves a user must not rely on a
-  deadline alone, but narrows the range and the source and runs the query off the request path. The measured times at the default and
+  count reaches the minimum count, all of them before the limit applies, and reads every template hour of the range and of the
+  `baseline hours` before it once (the baseline sums are a window function per template); the covered hours are computed once per
+  source and hour (the statement materializes them). Text without digits that varies per line makes one template per
+  line, so ten copies of such a line in an hour make a candidate at the default minimum count. A deadline or cancellation
+  stops a running query (storage, *Database file and connections*) with no partial result: a caller that serves a user bounds it
+  with a deadline and narrows the range and the source so that it can finish within it. The measured times at the default and
   the widest parameters are in `docs/BENCHMARKS.md`.
 
 ## Incidents
@@ -395,7 +421,7 @@ level of the mail services (process state, ports, logs), never individual mail a
 `SignatureFieldType`, `SignatureException`, `SignatureDetector`, `DetectedEvent`, `OpenEvent`, `SignatureKey`, `FieldValue`,
 `NumberGuard`, and the catalog `signatures.yaml` embedded in the assembly).
 `Vandox.Core.Templates` (`LogTemplateNormalizer`) for the normalization; `Vandox.Storage` (`BatchWriter`, `TemplateTally`,
-`TemplateQueries`, `SqliteStore` as `ILogTemplateReader`) for the statistics and the queries.
+`TemplateQueries`, `SqliteStore` as `ILogTemplateReader`) for the statistics and the queries; `Vandox.Storage` (`TemplateRebuilder`, `SqliteStore.RebuildTemplatesAsync`) for the template rebuild.
 `Vandox.Core.Incidents` (`Incident` and its parts, `KillClusterer`, `KillCluster`, `IncidentBuilder`, `MemoryAnalysis`,
 `BackupPrograms`, `IncidentSignatures`, `IncidentLimits`, `IncidentJson`); `Vandox.Storage` (`IIncidentStore`, `IncidentRepository`,
 `SqliteStore`); `Vandox.Backend` (`Incidents/IncidentReconstructor`, `Cli/IncidentsCommand`, `Cli/IncidentSummaryWriter`).

@@ -33,6 +33,10 @@ signatures:
     program: [postfix/proxymap, postfix/cleanup, postfix/smtpd, postfix/trivial-rewrite, postfix/local, postfix/virtual, dovecot]
     source: [dovecot]
     message: '\A(?:warning: connect to mysql server [^ \n]+: Too many connections|auth-worker\([0-9]+\): Error: mysql\([^)\n]*\): Connect failed to database \([^)\n]*\): Too many connections)'
+  - id: php_too_many_connections
+    description: PHP's mysqli or PDO could not connect to MariaDB because of Too many connections (error 1040), as nginx or Apache logged the first PHP message of a request.
+    source: [nginx-error, sw-cp-server-error, apache-error]
+    message: '\A(?:\[error\] [0-9]+#[0-9]+: \*[0-9]+ FastCGI sent in stderr: "PHP message: |\[proxy_fcgi:error\] \[pid [0-9]+(?::tid [0-9]+)?\] \[client [0-9A-Fa-f:.]+:[0-9]+\] AH01071: Got error ''PHP message: |\[fcgid:warn\] \[pid [0-9]+(?::tid [0-9]+)?\] \[client [0-9A-Fa-f:.]+:[0-9]+\] mod_fcgid: stderr: |\[php[0-9]?:(?:error|warn|notice)\] \[pid [0-9]+(?::tid [0-9]+)?\] \[client [0-9A-Fa-f:.]+:[0-9]+\] )PHP (?:Warning:  (?:mysqli_connect|mysqli_real_connect|mysqli::(?:__construct|connect|real_connect|mysqli))\(\): \([0-9A-Z]{5}/1040\): Too many connections|Fatal error:  Uncaught (?:mysqli_sql_exception: Too many connections|PDOException: SQLSTATE\[[0-9A-Z]{5}\] \[1040\] Too many connections))'
   - id: service_start
     description: systemd started a unit (on systemd 249 named by its description).
     program: [systemd]
@@ -59,6 +63,14 @@ signatures:
     program: [mariadbd, mysqld]
     source: [mariadb]
     message: '\A(?:[^ \n]+: )?(?:Disk full \(|Disk is full writing '')'
+  - id: php_disk_full
+    description: PHP could not write a file because a file system was full (errno 28), as nginx or Apache logged the first PHP message of a request.
+    source: [nginx-error, sw-cp-server-error, apache-error]
+    message: '\A(?:\[error\] [0-9]+#[0-9]+: \*[0-9]+ FastCGI sent in stderr: "PHP message: |\[proxy_fcgi:error\] \[pid [0-9]+(?::tid [0-9]+)?\] \[client [0-9A-Fa-f:.]+:[0-9]+\] AH01071: Got error ''PHP message: |\[fcgid:warn\] \[pid [0-9]+(?::tid [0-9]+)?\] \[client [0-9A-Fa-f:.]+:[0-9]+\] mod_fcgid: stderr: |\[php[0-9]?:(?:error|warn|notice)\] \[pid [0-9]+(?::tid [0-9]+)?\] \[client [0-9A-Fa-f:.]+:[0-9]+\] )PHP Notice:  [^ \n()]+\(\): [Ww]rite of [0-9]+ bytes failed with errno=28 No space left on device in /'
+  - id: nginx_disk_full
+    description: nginx could not write a file because a file system was full (error 28).
+    source: [nginx-error, sw-cp-server-error]
+    message: '\A\[(?:crit|alert)\] [0-9]+#[0-9]+: (?:\*[0-9]+ )?(?:pwrite|write|pwritev|writev)\(\) (?:to )?"[^"\n]*" failed \(28: No space left on device\)'
   - id: postfix_fatal
     description: Postfix logged a fatal error or a panic.
     event: [postfix.fatal, postfix.panic]
