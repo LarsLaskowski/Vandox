@@ -62,5 +62,40 @@ public static class StorageLimits
     /// </summary>
     public const int MaxSearchBytes = 1024;
 
+    /// <summary>
+    /// The longest range of a usual-level query in hours.
+    /// </summary>
+    public const int MaxSpikeRangeHours = 744;
+
+    /// <summary>
+    /// The largest number of baseline hours of a usual-level query.
+    /// </summary>
+    public const int MaxBaselineHours = 2160;
+
+    /// <summary>
+    /// The largest factor of a usual-level query.
+    /// </summary>
+    public const double MaxSpikeFactor = 1000;
+
+    /// <summary>
+    /// The default number of baseline hours.
+    /// </summary>
+    public const int DefaultBaselineHours = 168;
+
+    /// <summary>
+    /// The default fewest baseline hours with lines of the source.
+    /// </summary>
+    public const int DefaultMinBaselineHours = 24;
+
+    /// <summary>
+    /// The default factor above the usual level.
+    /// </summary>
+    public const double DefaultSpikeFactor = 3;
+
+    /// <summary>
+    /// The default fewest lines in an hour to be reported.
+    /// </summary>
+    public const long DefaultSpikeMinCount = 10;
+
     #endregion // Constants
 }

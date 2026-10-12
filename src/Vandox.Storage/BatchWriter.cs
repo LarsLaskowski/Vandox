@@ -15,6 +15,7 @@ namespace Vandox.Storage;
 /// Microsoft.Data.Sqlite runs them synchronously anyway: per record this saves the lookups by name and the asynchronous
 /// state machines, which matters on a slow host (record 0083).
 /// </summary>
+#pragma warning disable RH2003, S2325, S1172
 internal sealed class BatchWriter : IDisposable
 {
     #region Fields
@@ -113,10 +114,19 @@ internal sealed class BatchWriter : IDisposable
         }
         else if (payload is LogLine line)
         {
-            WriteLogLine(recordId, line);
+            WriteLogLine(recordId, record, line);
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// Writes the template statistics of the log lines written so far.
+    /// </summary>
+    /// <param name="cancellationToken">Cancels the write</param>
+    internal void WriteTemplates(CancellationToken cancellationToken)
+    {
+        throw new NotImplementedException();
     }
 
     /// <summary>
@@ -203,8 +213,9 @@ internal sealed class BatchWriter : IDisposable
     /// Inserts the typed row of a log line and its full-text index entry.
     /// </summary>
     /// <param name="id">The ID of the record</param>
+    /// <param name="record">The record</param>
     /// <param name="line">The log line</param>
-    private void WriteLogLine(long id, LogLine line)
+    private void WriteLogLine(long id, DataRecord record, LogLine line)
     {
         _logLineValues[0].Value = id;
         _logLineValues[1].Value = line.Log;

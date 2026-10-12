@@ -7,7 +7,8 @@ namespace Vandox.Storage;
 /// bounded number of query-only readers, so a committed batch is durable and reads (and the health check) do not wait for
 /// a write.
 /// </summary>
-public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IImportTracker, IAsyncDisposable
+#pragma warning disable RH2003, S2325, S1172
+public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, ILogTemplateReader, IImportTracker, IAsyncDisposable
 {
     #region Constants
 
@@ -328,6 +329,34 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, II
     }
 
     #endregion // ILogSearcher
+
+    #region ILogTemplateReader
+
+    /// <inheritdoc />
+    public Task<LogTemplate?> FindTemplateAsync(string source, string program, string message, CancellationToken cancellationToken)
+    {
+        throw new NotImplementedException();
+    }
+
+    /// <inheritdoc />
+    public Task<IReadOnlyList<TemplateHour>> TemplateHoursAsync(TemplateHourQuery query, CancellationToken cancellationToken)
+    {
+        throw new NotImplementedException();
+    }
+
+    /// <inheritdoc />
+    public Task<IReadOnlyList<LogTemplate>> NewTemplatesAsync(NewTemplateQuery query, CancellationToken cancellationToken)
+    {
+        throw new NotImplementedException();
+    }
+
+    /// <inheritdoc />
+    public Task<IReadOnlyList<TemplateSpike>> TemplateSpikesAsync(TemplateSpikeQuery query, CancellationToken cancellationToken)
+    {
+        throw new NotImplementedException();
+    }
+
+    #endregion // ILogTemplateReader
 
     #region IImportTracker
 

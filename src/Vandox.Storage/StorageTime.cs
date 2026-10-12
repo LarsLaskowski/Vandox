@@ -5,6 +5,7 @@ namespace Vandox.Storage;
 /// <summary>
 /// Converts instants to and from the nanoseconds since the Unix epoch the database stores.
 /// </summary>
+#pragma warning disable RH2003, S2325, S1172
 internal static class StorageTime
 {
     #region Constants
@@ -59,6 +60,16 @@ internal static class StorageTime
     internal static DateTimeOffset FromNanoseconds(long nanoseconds)
     {
         return new DateTimeOffset(UnixEpochTicks + (nanoseconds / TicksPerNanosecondInverse), TimeSpan.Zero);
+    }
+
+    /// <summary>
+    /// Returns the start of the UTC hour of a time, clamped to the smallest storable time for the first, partial hour.
+    /// </summary>
+    /// <param name="nanoseconds">The nanoseconds since the Unix epoch</param>
+    /// <returns>The nanoseconds of the start of the hour</returns>
+    internal static long HourStart(long nanoseconds)
+    {
+        throw new NotImplementedException();
     }
 
     #endregion // Methods
