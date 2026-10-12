@@ -32,6 +32,12 @@ internal static class TemplateBenchmark
     private const int DefaultBatchSize = 10000;
     private const int RangeHours = 744;
     private const string Lowercase = "abcdefghijklmnopqrstuvwxyz";
+    private const string NginxSource = "nginx";
+    private const string NginxProgram = "nginx";
+    private const string SyslogSource = "syslog";
+    private const string JournalSource = "journal";
+    private const string PostfixSmtpdProgram = "postfix/smtpd";
+    private const string SystemdProgram = "systemd";
 
     #endregion // Constants
 
@@ -449,7 +455,7 @@ internal static class TemplateBenchmark
         {
             // One heartbeat per hour makes the baseline hours of the source covered; all other lines fall into the hour after them.
             return index < StorageLimits.MaxBaselineHours
-                       ? (("nginx", "nginx", "heartbeat"), _start.AddHours(index))
+                       ? ((NginxSource, NginxProgram, "heartbeat"), _start.AddHours(index))
                        : (Hostile(index - StorageLimits.MaxBaselineHours), _start.AddHours(StorageLimits.MaxBaselineHours).AddMinutes(5));
         }
 
@@ -472,7 +478,7 @@ internal static class TemplateBenchmark
             rest /= _words.Length;
         }
 
-        return ("nginx", "nginx", $"client {string.Join(' ', words)} sent an invalid host header");
+        return (NginxSource, NginxProgram, $"client {string.Join(' ', words)} sent an invalid host header");
     }
 
     /// <summary>
@@ -497,30 +503,30 @@ internal static class TemplateBenchmark
 
         return shape switch
                {
-                   0 => ("syslog", "postfix/smtpd", $"connect from unknown[{ip}]"),
-                   1 => ("syslog", "postfix/smtpd", $"disconnect from unknown[{ip}] ehlo=1 mail=1 rcpt=0/1 quit=1 commands={number % 5}/4"),
-                   2 => ("syslog", "postfix/smtpd", $"{id}: client=unknown[{ip}]"),
-                   3 => ("syslog", "postfix/qmgr", $"{id}: from=<{user}@example.org>, size={number}, nrcpt=1 (queue active)"),
-                   4 => ("syslog", "postfix/smtp", $"{id}: to=<{user}@example.net>, relay=mx.example.net[{ip}]:25, delay={number % 90}, delays=0.1/0/0.5/0.2, dsn=2.0.0, status=sent (250 2.0.0 Ok: queued as {id})"),
-                   5 => ("syslog", "postfix/smtpd", $"warning: unknown[{ip}]: SASL LOGIN authentication failed: UGFzc3dvcmQ6"),
-                   6 => ("journal", "dovecot", $"imap-login: Login: user=<{user}>, method=PLAIN, rip={ip}, lip=10.0.0.5, mpid={other}, TLS, session=<{session}>"),
-                   7 => ("journal", "dovecot", $"imap({user})<{other}><{session}>: Disconnected: Logged out in={number} out={other}"),
-                   8 => ("journal", "kernel", $"Out of memory: Killed process {other} (mariadbd) total-vm:{number}kB, anon-rss:{other}kB, file-rss:0kB, shmem-rss:0kB, UID:{number % 1000} pgtables:{number}kB oom_score_adj:0"),
-                   9 => ("journal", "kernel", $"oom-kill:constraint=CONSTRAINT_NONE,nodemask=(null),cpuset=/,mems_allowed=0,global_oom,task_memcg=/system.slice/mariadb.service,task=mariadbd,pid={other},uid={number % 1000}"),
+                   0 => (SyslogSource, PostfixSmtpdProgram, $"connect from unknown[{ip}]"),
+                   1 => (SyslogSource, PostfixSmtpdProgram, $"disconnect from unknown[{ip}] ehlo=1 mail=1 rcpt=0/1 quit=1 commands={number % 5}/4"),
+                   2 => (SyslogSource, PostfixSmtpdProgram, $"{id}: client=unknown[{ip}]"),
+                   3 => (SyslogSource, "postfix/qmgr", $"{id}: from=<{user}@example.org>, size={number}, nrcpt=1 (queue active)"),
+                   4 => (SyslogSource, "postfix/smtp", $"{id}: to=<{user}@example.net>, relay=mx.example.net[{ip}]:25, delay={number % 90}, delays=0.1/0/0.5/0.2, dsn=2.0.0, status=sent (250 2.0.0 Ok: queued as {id})"),
+                   5 => (SyslogSource, PostfixSmtpdProgram, $"warning: unknown[{ip}]: SASL LOGIN authentication failed: UGFzc3dvcmQ6"),
+                   6 => (JournalSource, "dovecot", $"imap-login: Login: user=<{user}>, method=PLAIN, rip={ip}, lip=10.0.0.5, mpid={other}, TLS, session=<{session}>"),
+                   7 => (JournalSource, "dovecot", $"imap({user})<{other}><{session}>: Disconnected: Logged out in={number} out={other}"),
+                   8 => (JournalSource, "kernel", $"Out of memory: Killed process {other} (mariadbd) total-vm:{number}kB, anon-rss:{other}kB, file-rss:0kB, shmem-rss:0kB, UID:{number % 1000} pgtables:{number}kB oom_score_adj:0"),
+                   9 => (JournalSource, "kernel", $"oom-kill:constraint=CONSTRAINT_NONE,nodemask=(null),cpuset=/,mems_allowed=0,global_oom,task_memcg=/system.slice/mariadb.service,task=mariadbd,pid={other},uid={number % 1000}"),
                    10 => ("mariadb", "mariadbd", $"2026-09-{1 + (seconds / 86400 % 30):D2} 10:{seconds / 60 % 60:D2}:{seconds % 60:D2} {other} [Warning] Aborted connection {number} to db: 'wordpress' user: 'wpuser' host: '{ip}' (Got timeout reading communication packets)"),
                    11 => ("mariadb", "mariadbd", $"[Warning] Access denied for user '{user}'@'{ip}' (using password: YES)"),
-                   12 => ("nginx", "nginx", $"{other}#{other}: *{number} open() \"/var/www/html/{file}.php\" failed (2: No such file or directory), client: {ip}, server: example.org, request: \"GET /{file}.php HTTP/1.1\", host: \"example.org\""),
-                   13 => ("nginx", "nginx", $"{other}#{other}: *{number} upstream timed out (110: Connection timed out) while reading response header from upstream, client: {ip}, server: example.org, request: \"POST /{file}.php HTTP/1.1\", upstream: \"fastcgi://unix:/run/php/php8.2-fpm.sock:\", host: \"example.org\""),
-                   14 => ("journal", "systemd", $"Started Session {number} of User {user}."),
-                   15 => ("journal", "systemd", $"Stopping User Manager for UID {number % 1000}..."),
-                   16 => ("journal", "systemd", $"session-{number}.scope: Deactivated successfully."),
-                   17 => ("syslog", "sshd", $"Failed password for invalid user {user} from {ip} port {other} ssh2"),
-                   18 => ("syslog", "sshd", $"Accepted publickey for root from {ip} port {other} ssh2: RSA SHA256:{session}{id}"),
-                   19 => ("syslog", "CRON", "(root) CMD (/usr/lib/php/sessionclean)"),
-                   20 => ("journal", "systemd", "Starting Cleanup of Temporary Directories..."),
-                   21 => ("syslog", "kernel", $"[UFW BLOCK] IN=eth0 OUT= MAC=00:1a:2b:3c:4d:5e SRC={ip} DST=10.0.0.5 LEN={number % 1500} TOS=0x00 PREC=0x00 TTL={number % 64} ID={other} DF PROTO=TCP SPT={other} DPT=22"),
-                   22 => ("journal", "systemd-logind", $"New session {number} of user {user}."),
-                   _ => ("syslog", "plesk", $"Disk usage warning: /var/lib/psa/dumps is {number % 100}% full")
+                   12 => (NginxSource, NginxProgram, $"{other}#{other}: *{number} open() \"/var/www/html/{file}.php\" failed (2: No such file or directory), client: {ip}, server: example.org, request: \"GET /{file}.php HTTP/1.1\", host: \"example.org\""),
+                   13 => (NginxSource, NginxProgram, $"{other}#{other}: *{number} upstream timed out (110: Connection timed out) while reading response header from upstream, client: {ip}, server: example.org, request: \"POST /{file}.php HTTP/1.1\", upstream: \"fastcgi://unix:/run/php/php8.2-fpm.sock:\", host: \"example.org\""),
+                   14 => (JournalSource, SystemdProgram, $"Started Session {number} of User {user}."),
+                   15 => (JournalSource, SystemdProgram, $"Stopping User Manager for UID {number % 1000}..."),
+                   16 => (JournalSource, SystemdProgram, $"session-{number}.scope: Deactivated successfully."),
+                   17 => (SyslogSource, "sshd", $"Failed password for invalid user {user} from {ip} port {other} ssh2"),
+                   18 => (SyslogSource, "sshd", $"Accepted publickey for root from {ip} port {other} ssh2: RSA SHA256:{session}{id}"),
+                   19 => (SyslogSource, "CRON", "(root) CMD (/usr/lib/php/sessionclean)"),
+                   20 => (JournalSource, SystemdProgram, "Starting Cleanup of Temporary Directories..."),
+                   21 => (SyslogSource, "kernel", $"[UFW BLOCK] IN=eth0 OUT= MAC=00:1a:2b:3c:4d:5e SRC={ip} DST=10.0.0.5 LEN={number % 1500} TOS=0x00 PREC=0x00 TTL={number % 64} ID={other} DF PROTO=TCP SPT={other} DPT=22"),
+                   22 => (JournalSource, "systemd-logind", $"New session {number} of user {user}."),
+                   _ => (SyslogSource, "plesk", $"Disk usage warning: /var/lib/psa/dumps is {number % 100}% full")
                };
     }
 
