@@ -66,7 +66,7 @@ project files alone, before the sources are copied, so the published image had n
 How the own scripts are verified (no Node build, so no JavaScript test runner):
 
 1. **Analyzed by SonarQube Cloud but excluded from its coverage measure (`sonar.coverage.exclusions`)** (chosen) — the source rules
-   of `WebUiContentTests` check what they may contain, the reviewer reads them against the uPlot API, and the image smoke test checks
+   of `WebUiContentTests` check what they may contain, the reviewer reads `charts.js` against the uPlot API, and `ServeTests.ServeServesWebAssetsOnlyOnWebPort` checks
    that they are served; their lines are not unit-tested.
 2. **A JavaScript test runner** — needs Node and a package install in CI, which the issue rules out.
 3. **Keep them in the coverage measure** — their lines can never be covered, so the quality gate fails on every change to them.
