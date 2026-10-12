@@ -58,7 +58,7 @@ public sealed partial class TimeSeriesChart : IAsyncDisposable
 
         _interop ??= new ChartInterop(JSRuntime);
 
-        await _interop.RenderAsync(_host, Title, data, _cancellation.Token).ConfigureAwait(false);
+        await _interop.RenderAsync(_host, Title, data, _cancellation.Token);
 
         _rendered = data;
     }
@@ -70,12 +70,12 @@ public sealed partial class TimeSeriesChart : IAsyncDisposable
     /// <inheritdoc />
     public async ValueTask DisposeAsync()
     {
-        await _cancellation.CancelAsync().ConfigureAwait(false);
-
         if (_interop is not null)
         {
             await _interop.DisposeAsync().ConfigureAwait(false);
         }
+
+        await _cancellation.CancelAsync().ConfigureAwait(false);
 
         _cancellation.Dispose();
     }

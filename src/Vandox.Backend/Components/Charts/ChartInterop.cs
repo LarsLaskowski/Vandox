@@ -21,6 +21,8 @@ public sealed class ChartInterop : IAsyncDisposable
 
     private readonly IJSRuntime _jsRuntime;
 
+    private readonly SemaphoreSlim _gate = new(1, 1);
+
     private IJSObjectReference? _module;
 
     private IJSObjectReference? _chart;
@@ -63,18 +65,31 @@ public sealed class ChartInterop : IAsyncDisposable
 
         var columns = data.ToColumns();
 
-        if (_chart is not null)
+        // One render at a time: a later render waits for the earlier one, so the chart is created once, and the disposal
+        // waits for a pending create and then tears down the chart it made.
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+
+        try
         {
-            await _chart.InvokeVoidAsync("update", cancellationToken, [columns]).ConfigureAwait(false);
+            ObjectDisposedException.ThrowIf(_disposed, this);
 
-            return;
+            if (_chart is not null)
+            {
+                await _chart.InvokeVoidAsync("update", cancellationToken, [columns]).ConfigureAwait(false);
+
+                return;
+            }
+
+            _module ??= await _jsRuntime.InvokeAsync<IJSObjectReference>("import", cancellationToken, [ModulePath]).ConfigureAwait(false);
+
+            var labels = data.Series.Select(series => series.Label).ToArray();
+
+            _chart = await _module.InvokeAsync<IJSObjectReference>("create", cancellationToken, [host, title, labels, columns]).ConfigureAwait(false);
         }
-
-        _module ??= await _jsRuntime.InvokeAsync<IJSObjectReference>("import", cancellationToken, [ModulePath]).ConfigureAwait(false);
-
-        var labels = data.Series.Select(series => series.Label).ToArray();
-
-        _chart = await _module.InvokeAsync<IJSObjectReference>("create", cancellationToken, [host, title, labels, columns]).ConfigureAwait(false);
+        finally
+        {
+            _gate.Release();
+        }
     }
 
     #endregion // Methods
@@ -91,14 +106,17 @@ public sealed class ChartInterop : IAsyncDisposable
 
         _disposed = true;
 
-        var chart = _chart;
-        var module = _module;
-
-        _chart = null;
-        _module = null;
+        // Waits for a render in flight; its own outcome, an exception included, belongs to its caller.
+        await _gate.WaitAsync().ConfigureAwait(false);
 
         try
         {
+            var chart = _chart;
+            var module = _module;
+
+            _chart = null;
+            _module = null;
+
             if (chart is not null)
             {
                 await chart.InvokeVoidAsync("destroy").ConfigureAwait(false);
@@ -113,6 +131,10 @@ public sealed class ChartInterop : IAsyncDisposable
         catch (JSDisconnectedException)
         {
             // The circuit is gone, and the browser has dropped the chart with it.
+        }
+        finally
+        {
+            _gate.Release();
         }
     }
 
