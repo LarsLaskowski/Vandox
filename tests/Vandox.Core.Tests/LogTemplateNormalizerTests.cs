@@ -365,6 +365,12 @@ public class LogTemplateNormalizerTests
     [DataRow("white space run")]
     [DataRow("dotted letters")]
     [DataRow("hex digits")]
+    [DataRow("1:")]
+    [DataRow("a@")]
+    [DataRow("0.")]
+    [DataRow("::1 ")]
+    [DataRow("dead:beef:")]
+    [DataRow("a:")]
     public void LogTemplateNormalizerTimeGrowsLinearly(string scenario)
     {
         // Arrange
@@ -402,6 +408,7 @@ public class LogTemplateNormalizerTests
                    "email with dotted domain" => string.Concat("user@", string.Concat(Enumerable.Repeat("a.", length / 2)), "b"),
                    "white space run" => string.Concat("head", new string(' ', length), "tail"),
                    "dotted letters" => string.Concat(string.Concat(Enumerable.Repeat("a.", length / 2)), "b"),
+                   "1:" or "a@" or "0." or "::1 " or "dead:beef:" or "a:" => string.Concat(Enumerable.Repeat(scenario, length / scenario.Length)),
                    _ => string.Concat(string.Concat(Enumerable.Repeat("dead", length / 4)), "1")
                };
     }

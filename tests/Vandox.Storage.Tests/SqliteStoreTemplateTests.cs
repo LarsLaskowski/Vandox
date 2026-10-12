@@ -520,6 +520,34 @@ public class SqliteStoreTemplateTests
     }
 
     /// <summary>
+    /// The usual-level query computes the covered hours once per source and hour: the plan materializes the covered hours and reads the source hours only below that step.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task SqliteStoreTemplateSpikesPlanMaterializesCoveredHoursAndReadsSourceHoursOnlyBelowIt()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+        var query = SpikeQuery(string.Empty, Hour(24), Hour(25), 24, 1, 3, 1, 100);
+
+        TemplateQueries.Validate(query);
+
+        var (sql, parameters) = TemplateQueries.Build(query);
+
+        // Act
+        var plan = await PlanAsync(directory.Path, sql, parameters);
+
+        // Assert
+        var materialize = plan.FindIndex(step => step.Detail == "MATERIALIZE covered");
+        var sourceHourReads = plan.Where(step => step.Detail.Contains("log_source_hours", StringComparison.Ordinal)).ToList();
+
+        Assert.AreNotEqual(-1, materialize, $"the plan materializes the covered hours: {string.Join(" / ", plan.Select(step => step.Detail))}");
+        Assert.IsNotEmpty(sourceHourReads, "the plan reads the source hours");
+        Assert.IsTrue(sourceHourReads.All(step => IsBelow(plan, step, plan[materialize].Id)), $"the source hours are read only below the materialized covered hours: {string.Join(" / ", plan.Select(step => $"{step.Id}<-{step.Parent} {step.Detail}"))}");
+    }
+
+    /// <summary>
     /// A find message of exactly 16,384 UTF-8 bytes is accepted.
     /// </summary>
     /// <param name="message">The text that is repeated to make the message</param>
@@ -1030,6 +1058,30 @@ public class SqliteStoreTemplateTests
     }
 
     /// <summary>
+    /// Tells whether a step of a query plan lies below the step with the given ID.
+    /// </summary>
+    /// <param name="plan">The plan</param>
+    /// <param name="step">The step</param>
+    /// <param name="ancestorId">The ID of the step that must be an ancestor</param>
+    /// <returns><c>true</c> if the step is a descendant of the ancestor</returns>
+    private static bool IsBelow(List<(int Id, int Parent, string Detail)> plan, (int Id, int Parent, string Detail) step, int ancestorId)
+    {
+        var parent = step.Parent;
+
+        while (parent != 0)
+        {
+            if (parent == ancestorId)
+            {
+                return true;
+            }
+
+            parent = plan.Single(candidate => candidate.Id == parent).Parent;
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// Reads every row of the three template tables.
     /// </summary>
     /// <param name="directory">The database directory</param>
@@ -1043,6 +1095,41 @@ public class SqliteStoreTemplateTests
         rows.AddRange(await RowsAsync(directory, "SELECT 'source hours', source, hour, count FROM log_source_hours ORDER BY source, hour"));
 
         return rows;
+    }
+
+    /// <summary>
+    /// Reads the query plan of a statement.
+    /// </summary>
+    /// <param name="directory">The database directory</param>
+    /// <param name="sql">The statement</param>
+    /// <param name="parameters">The parameters of the statement</param>
+    /// <returns>A task that returns the steps of the plan</returns>
+    private async Task<List<(int Id, int Parent, string Detail)>> PlanAsync(string directory, string sql, Dictionary<string, object> parameters)
+    {
+        await using var connection = new SqliteConnection($"Data Source={Path.Combine(directory, StorageLimits.FileName)};Mode=ReadOnly;Pooling=False");
+
+        await connection.OpenAsync(TestContext.CancellationToken);
+
+        await using var command = connection.CreateCommand();
+
+#pragma warning disable CA2100
+        command.CommandText = $"EXPLAIN QUERY PLAN {sql}";
+#pragma warning restore CA2100
+
+        foreach (var (name, value) in parameters)
+        {
+            command.Parameters.AddWithValue(name, value);
+        }
+
+        await using var reader = await command.ExecuteReaderAsync(TestContext.CancellationToken);
+        var plan = new List<(int Id, int Parent, string Detail)>();
+
+        while (await reader.ReadAsync(TestContext.CancellationToken))
+        {
+            plan.Add((reader.GetInt32(0), reader.GetInt32(1), reader.GetString(3)));
+        }
+
+        return plan;
     }
 
     /// <summary>
