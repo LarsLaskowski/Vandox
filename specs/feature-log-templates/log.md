@@ -25,3 +25,4 @@ are quoted in full.
 | 2026-10-12 07:54 | 8 Review (delta) | squad-reviewer | Round 2 on 834dbae: APPROVE; non-blocking doc sentence (concentrated case in BENCHMARKS procedure) applied verbatim by orchestrator (opus/medium · 21,383 tokens · 4 tool uses · 52 s · continued) |
 | 2026-10-12 07:55 | 8 Security diff (delta) | squad-security | APPROVED on 834dbae; B-D1, N-D1, N-D2 resolved; N-R1 (widest query est. 12-16 s on DS918+) goes into the DS918+ follow-up issue (opus/medium · 20,181 tokens · 6 tool uses · 103 s · continued) |
 | 2026-10-12 07:55 | 9 PR approval | Orchestrator | approved by checklist: latest rounds clean (reviewer APPROVE, security APPROVED on 834dbae), gates pass, area docs in diff; record 0095 set to Accepted |
+| 2026-10-12 07:55 | 10 Follow-up issues | Orchestrator | Opened #208 (DS918+ measurement), #209 (rebuild statistics), #210 (interrupt SQLite queries) |
