@@ -93,6 +93,33 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
     }
 
     /// <summary>
+    /// Opens a query-only reader connection, waiting for one of the <see cref="MaxReaders"/> slots.
+    /// </summary>
+    /// <param name="cancellationToken">Cancels the wait</param>
+    /// <returns>A task that returns the lease</returns>
+    internal async Task<ReaderLease> LeaseReaderAsync(CancellationToken cancellationToken)
+    {
+        await _readers.WaitAsync(cancellationToken).ConfigureAwait(false);
+
+        var connection = new SqliteConnection(ConnectionString(_path));
+
+        try
+        {
+            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+            await ExecuteAsync(connection, $"{CommonPragmas} PRAGMA query_only=1;", cancellationToken).ConfigureAwait(false);
+
+            return new ReaderLease(connection, _readers);
+        }
+        catch
+        {
+            await connection.DisposeAsync().ConfigureAwait(false);
+            _readers.Release();
+
+            throw;
+        }
+    }
+
+    /// <summary>
     /// Opens the database file in a directory that exists.
     /// </summary>
     /// <param name="directory">The storage directory</param>
@@ -196,33 +223,6 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
         catch
         {
             await DisposeAsync().ConfigureAwait(false);
-
-            throw;
-        }
-    }
-
-    /// <summary>
-    /// Opens a query-only reader connection, waiting for one of the <see cref="MaxReaders"/> slots.
-    /// </summary>
-    /// <param name="cancellationToken">Cancels the wait</param>
-    /// <returns>A task that returns the lease</returns>
-    private async Task<ReaderLease> LeaseReaderAsync(CancellationToken cancellationToken)
-    {
-        await _readers.WaitAsync(cancellationToken).ConfigureAwait(false);
-
-        var connection = new SqliteConnection(ConnectionString(_path));
-
-        try
-        {
-            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-            await ExecuteAsync(connection, $"{CommonPragmas} PRAGMA query_only=1;", cancellationToken).ConfigureAwait(false);
-
-            return new ReaderLease(connection, _readers);
-        }
-        catch
-        {
-            await connection.DisposeAsync().ConfigureAwait(false);
-            _readers.Release();
 
             throw;
         }
