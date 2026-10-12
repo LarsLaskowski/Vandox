@@ -764,6 +764,24 @@ public class SqliteStoreTemplateTests
     }
 
     /// <summary>
+    /// A token that is already cancelled makes the usual-level query throw an OperationCanceledException.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task SqliteStoreTemplateSpikesThrowsCanceledForCancelledToken()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+        using var source = new CancellationTokenSource();
+
+        await source.CancelAsync();
+
+        // Act and Assert
+        await Assert.ThrowsAsync<OperationCanceledException>(() => store.TemplateSpikesAsync(SpikeQuery(string.Empty, Hour(24), Hour(25), 24, 24, 3, 1, 100), source.Token), "a cancelled token cancels the query");
+    }
+
+    /// <summary>
     /// Applies the change of the shared range, limit and ID rules.
     /// </summary>
     /// <param name="change">What is wrong with the query</param>

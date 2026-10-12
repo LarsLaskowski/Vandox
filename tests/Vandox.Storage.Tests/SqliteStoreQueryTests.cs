@@ -464,6 +464,31 @@ public class SqliteStoreQueryTests
     }
 
     /// <summary>
+    /// A token that is already cancelled makes the log search throw an OperationCanceledException.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task SqliteStoreSearchLogsThrowsCanceledForCancelledToken()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+        using var source = new CancellationTokenSource();
+        var search = new LogSearch
+                     {
+                         Text = "memory",
+                         From = Samples.Base.AddHours(-1),
+                         To = Samples.Base.AddHours(1),
+                         Limit = 10
+                     };
+
+        await source.CancelAsync();
+
+        // Act and Assert
+        await Assert.ThrowsAsync<OperationCanceledException>(() => store.SearchLogsAsync(search, source.Token), "a cancelled token cancels the search");
+    }
+
+    /// <summary>
     /// A reader connection leased by the store interrupts a running statement once the token is cancelled.
     /// </summary>
     /// <returns>A task that completes when the test is done</returns>
