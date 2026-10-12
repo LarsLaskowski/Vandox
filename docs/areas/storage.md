@@ -134,7 +134,7 @@ Indexes: a unique index on `records(agent_id, seq)` for origin `agent`; `records
   of the record query, and counted; a `data` value that does not decode is `store: reading incidents: decoding incident data`.
 - The template statistics are read by the queries of *Log templates* in [Detection, alerts and reports](detection-and-reports.md)
   (template of a line, hourly counts, new templates, templates above their usual level), with the same time range and limit rules,
-  on a reader connection. The cost of the usual-level query is not bounded by its range or limit, ; a cancelled token or deadline interrupts it
+  on a reader connection. The cost of the usual-level query is not bounded by its range or limit; a cancelled token or deadline interrupts it
   (*Database file and connections*; *Limits of templates* there).
 - Callers depend on small interfaces (record writer, record reader, log searcher, log template reader, incident store, import tracker). The real store is tested against
   real files; a consumer whose behavior depends on the store's semantics (such as "a resent batch is stored once") is tested against
