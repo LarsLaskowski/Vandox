@@ -111,35 +111,6 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
     }
 
     /// <summary>
-    /// Opens a query-only reader connection, waiting for one of the <see cref="MaxReaders"/> slots.
-    /// </summary>
-    /// <param name="cancellationToken">Cancels the wait</param>
-    /// <returns>A task that returns the lease</returns>
-    internal async Task<ReaderLease> LeaseReaderAsync(CancellationToken cancellationToken)
-    {
-        await _readers.WaitAsync(cancellationToken).ConfigureAwait(false);
-
-        var connection = new SqliteConnection(ConnectionString(_path));
-
-        try
-        {
-            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-            await ExecuteAsync(connection, $"{CommonPragmas} PRAGMA query_only=1;", cancellationToken).ConfigureAwait(false);
-
-            ReaderQuery.Attach(connection, cancellationToken);
-
-            return new ReaderLease(connection, _readers);
-        }
-        catch
-        {
-            await connection.DisposeAsync().ConfigureAwait(false);
-            _readers.Release();
-
-            throw;
-        }
-    }
-
-    /// <summary>
     /// Rebuilds the template statistics from the stored log lines: empties the three tables, writes the run marker and fixes the
     /// high-water record ID in one transaction, then counts the lines up to it in batches of at most <paramref name="batchLines"/>,
     /// one transaction each, and removes the marker; a run whose marker was replaced by another rebuild fails.
@@ -215,6 +186,35 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
         catch (SqliteException exception)
         {
             throw new StoreException($"store: rebuilding templates: {exception.Message}", exception);
+        }
+    }
+
+    /// <summary>
+    /// Opens a query-only reader connection, waiting for one of the <see cref="MaxReaders"/> slots.
+    /// </summary>
+    /// <param name="cancellationToken">Cancels the wait</param>
+    /// <returns>A task that returns the lease</returns>
+    internal async Task<ReaderLease> LeaseReaderAsync(CancellationToken cancellationToken)
+    {
+        await _readers.WaitAsync(cancellationToken).ConfigureAwait(false);
+
+        var connection = new SqliteConnection(ConnectionString(_path));
+
+        try
+        {
+            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+            await ExecuteAsync(connection, $"{CommonPragmas} PRAGMA query_only=1;", cancellationToken).ConfigureAwait(false);
+
+            ReaderQuery.Attach(connection, cancellationToken);
+
+            return new ReaderLease(connection, _readers);
+        }
+        catch
+        {
+            await connection.DisposeAsync().ConfigureAwait(false);
+            _readers.Release();
+
+            throw;
         }
     }
 
