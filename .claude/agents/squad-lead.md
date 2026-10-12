@@ -110,7 +110,8 @@ The orchestrator tells you which **mode** to run:
   or the Reviewer did not find consistent. Decide those first. Then check `log.md` and the evidence
   you are given: the latest review round must report
   no blocking finding that is not covered by a recorded decision of yours, and must cover every change to
-  production code, tests and `docs/` since it ran — only `specs/` bookkeeping and your own approval edits
+  production code, tests and `docs/` since it ran — only `specs/` bookkeeping, a documentation fix the
+  orchestrator applied verbatim from that round's finding and logged as such, and your own approval edits
   (record status, the index, a link from `docs/ARCHITECTURE.md`) may follow it; a correction that resolves
   a blocking finding, even in your own record, needs a delta round. Otherwise answer
   `RESULT: NOT APPROVED — delta review missing`. Then review the final diff (`git diff <base>...HEAD` plus

@@ -5,8 +5,9 @@ The pipeline is the same for issues and features; only the input differs (a GitH
 the skill — launches the members, passes documents between them (subagents cannot talk to each other
 directly), performs every Git and GitHub action (including follow-up issues the Lead decides on) and
 records every step in the work folder's `log.md` with `python3 .squad/tools/squad-log.py` — each subagent
-launch with its model and effort (`--agent`) and the usage its task notification reports, added later with
-`--amend-last` when the notification follows the hand-back and corrected with `--replace-last` — (after step 10, in the "Squad working record"
+launch with its model and effort (`--agent`) and the usage its task notification reports, one row per launch,
+added later with `--amend-last` when the notification follows the hand-back, corrected with `--replace-last`
+and reduced to the round's share with `--continued` for a continued member — (after step 10, in the "Squad working record"
 comment that replaces it). Step numbers below are the ones the skills use.
 
 ## Work folder
@@ -117,10 +118,10 @@ skip is a blocking finding. If production or test code changes after all, steps 
 | 6 | Implementation + coverage | Dev, Tester | All tests green; *Coverage gate* from `.squad/stack.md` passes; doc updates from the plan done, including the area documents. The Tester's coverage pass adds tests only for lines the gate reports uncovered, a resource bound the plan names, or a test a reviewer asks for |
 | 7 | Code check | Orchestrator, Code Officer | Dev and Tester ran *Format* on their files before handing back. The orchestrator runs *Format check*, *Analyzer gate*, *Test*, *Coverage gate* and `scope-check.py`. A *Format check* failure the orchestrator clears itself (*Format*, then `git restore` of every file outside the change); only analyzer diagnostics or style findings that need reading launch the Code Officer (analyzer-only edits; structural items go to the Dev or Tester), then the gates run again. Exit: every gate passes on the head, same tests green |
 | 8 | Review | Reviewer (+ Security on `security`) | They get the code SHA and the orchestrator's gate output of step 7 (they do not re-run the gates); later commits during the round may touch only `specs/` and do not make it stale. No blocking findings → 9; blocking → owner fixes (Dev: code, Tester: tests), back to 6, then a mandatory delta round |
-| 9 | PR approval | Orchestrator, Lead when needed | The orchestrator checks: the latest review round is clean and covers every change to production code, tests and `docs/` since it ran (only `specs/` bookkeeping may follow it); the gates of step 7 pass on the head; the area documents and documentation updates the plan names are in the diff; then sets each `Proposed` record of this change and its index row to `Accepted` (`decision-check.py` passes). The Lead is launched in mode `approve-pr` only after this checklist passed in full (a due delta round runs first) and only when a decision is open: a plan deviation in a member's report, a Lead decision recorded during steps 3–8 (loop limit, dispute, accepted gap, finding accepted unfixed), non-blocking findings that touch code and are not yet decided, or a change to `docs/ARCHITECTURE.md` or `.squad/project.md` that the plan does not name or the Reviewer did not find consistent. Otherwise "approved by checklist" is logged → 10 |
+| 9 | PR approval | Orchestrator, Lead when needed | The orchestrator checks: the latest review round is clean and covers every change to production code, tests and `docs/` since it ran (only `specs/` bookkeeping and the verbatim documentation fixes of that round, *Non-blocking findings*, may follow it); the gates of step 7 pass on the head; the area documents and documentation updates the plan names are in the diff; then sets each `Proposed` record of this change and its index row to `Accepted` (`decision-check.py` passes). The Lead is launched in mode `approve-pr` only after this checklist passed in full (a due delta round runs first) and only when a decision is open: a plan deviation in a member's report, a Lead decision recorded during steps 3–8 (loop limit, dispute, accepted gap, finding accepted unfixed), non-blocking findings that touch code and are not yet decided, or a change to `docs/ARCHITECTURE.md` or `.squad/project.md` that the plan does not name or the Reviewer did not find consistent. Otherwise "approved by checklist" is logged → 10 |
 | 10 | Pull request | Orchestrator | Working record posted as comment (a long `plan.md` may be given as a permalink to the last commit that contains it plus a summary), `specs/<folder>/` removed and `scope-check.py --no-specs` clean, PR opened (merged later with *Squash and merge*) |
 | 11 | After the PR | Dev, Code Officer, Reviewer | CI green, the CI code analysis (e.g. SonarQube Cloud) passed, review comments worked |
-| 12 | Wrap-up | Orchestrator | Squad lessons filed as one issue per destination (*Squad lessons*), or "no lessons" logged; run metrics (launches, tokens, tool uses and seconds per role, plus the Orchestrator row: wall time, time not covered by launches, gate runs — `squad-log.py --summary`) appended to the working record and reported to the user |
+| 12 | Wrap-up | Orchestrator | Squad lessons filed as one issue per destination (*Squad lessons*), or "no lessons" logged; run metrics (launches with their continuations, tokens, tool uses and seconds per role, plus the Orchestrator row: wall time, time not covered by launches, gate runs — `squad-log.py --summary`; exit code 3 names launch rows still without usage, which are amended first) appended to the working record and reported to the user |
 
 A change without production or test code (tier `docs`, or any other tier whose plan declares it, see
 *Changes without production or test code*) skips steps 4 and 5; step 6 is the Dev's edits alone (tier
@@ -133,8 +134,9 @@ that member's last launch (the harness keeps a launched subagent's context: `Sen
 or the Agent tool's resume) with the findings and the new head SHA, instead of a fresh launch that reloads
 `CLAUDE.md`, `stack.md`, `project.md`, the plan and the code. A fresh launch stays the rule for the first
 launch of a mode, after a session restart (the agent id is gone) and when the previous launch ended on an
-API error. The log records a continuation as a launch of that member with the usage its notification
-reports, marked "(continued)" in the result.
+API error. The log records a continuation as a launch of that member (`squad-log.py … --continued`): the
+notification reports the agent's totals since its first launch, the script writes this round's share and
+marks the trailer, so the summary counts every token once and shows how many launches were continuations.
 
 Commits and pushes to the work branch happen right after intake (`specs/<folder>/log.md`, so a stop hook
 or a crashed session finds no untracked files) and after every further completed step; with *Squash and
@@ -249,8 +251,12 @@ the PR under Next Steps.
 Fixed in the same change or opened as a linked GitHub issue now — never deferred to "a later change".
 
 - A finding whose fix the reviewer states verbatim and that touches only documentation, a decision record
-  or an area document is applied by the orchestrator (as in tier `docs`), logged, and rides the next delta
-  round — or, when none is due, gets one delta round by the reviewer that proposed it. No Lead launch.
+  or an area document is applied by the orchestrator exactly as proposed (as in tier `docs`), checked with
+  `git diff` to contain nothing else, and logged with file and commit. It needs no confirming delta round:
+  the text is the reviewer's own, from the reviewer's own round (Vandox#194 and Vandox#19 each spent an Opus
+  launch on confirming two commas and one sentence). It is read again only when a delta round is due anyway
+  for another change; any edit beyond the proposed text is an ordinary fix with a delta round. No Lead
+  launch.
 - Every other non-blocking finding — one that touches code, or one the orchestrator would turn into a
   follow-up issue — is decided by the Lead in step 9 (one launch for all of them); a finding fixed now gets
   a delta round.

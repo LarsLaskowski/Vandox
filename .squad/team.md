@@ -29,8 +29,11 @@ specific to this repository lives in two files the members read first:
 
 The model aliases resolve to the current generation of each line; the effort is set per role in the agent
 file so a session's effort setting does not change every role at once. The orchestrator may raise a single
-launch (the plan of a feature on `high`) through the launch's own `model` and `effort` parameters; a run on
-`xhigh` costs about half the member time of a feature run (Vandox#17) and is not used. Every run
+launch through the launch's own `model` and `effort` parameters, but no step does so by default: the plan of
+a feature ran on `high` until Vandox#19 (1,188 s and 307 k tokens for the plan, and a `CHANGES_REQUIRED`
+from Security all the same), while the plan of Vandox#20 on `medium` went through challenge and security
+review with the same rigor; a run on `xhigh` costs about half the member time of a feature run (Vandox#17)
+and is not used. Every run
 records launches, tokens, tool uses and seconds per role in its working record (`squad-log.py --summary`);
 a model or effort change for a role is made on that evidence, in the template, and rolled out from there.
 
@@ -65,7 +68,9 @@ reports the need in its result instead.
 **Continued members.** For a fix or delta round the orchestrator may continue a member's earlier launch of
 the same run instead of starting a fresh one (`.squad/routing.md`, *Pipeline*). A continued member keeps
 its role and its limits: the Dev still does not edit tests, the Reviewer and Security still review only the
-commit SHA they are given, and nothing it remembers from an earlier round replaces reading the delta.
+commit SHA they are given, and nothing it remembers from an earlier round replaces reading the delta. Its
+task notification reports the agent's totals since the first launch; the orchestrator logs the round with
+`--continued`, so the record carries the round's share.
 
 **Escapes in files.** The Write and Edit tools turn a single-backslash escape such as `\u0041` into the
 character it names, so a plan table or a test fixture whose cases are about escapes silently loses them. Write

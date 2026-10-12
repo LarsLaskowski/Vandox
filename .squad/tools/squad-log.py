@@ -16,6 +16,14 @@ mechanics out of the orchestrator's hands:
   so nothing is typed from memory) or `--launch MODEL/EFFORT`, with `--tokens N --tool-uses N --seconds N` from
   the usage block of the launch's task notification, appends a trailer `(opus/high · 37,445 tokens · 6 tool
   uses · 57 s)` the summary can read back;
+- one row names one member: a member cell that lists two (`squad-reviewer / squad-security`, a comma, `and`)
+  is refused, because the trailer of a parallel launch belongs to one row each, or `--amend-last` cannot tell
+  them apart;
+- a continued launch (`SendMessage` to the agent of an earlier round; `.squad/routing.md`, *Continuing a
+  member*) reports the agent's totals since its first launch: with `--continued` the script subtracts the
+  totals of that member's earlier rows back to its last fresh launch and writes the round's own share, marked
+  `· continued` in the trailer; a reported figure below the earlier total can only be the round alone and is
+  kept as it is. `--continued` needs an earlier row of that member with usage;
 - the usage block often arrives only after the member's hand-back: `--amend-last MEMBER` with the same
   options adds the trailer to the last row of that member afterwards, so the row can be written as soon as
   the report is in. A row gets its trailer once; a second amend is refused;
@@ -35,18 +43,24 @@ Usage, from anywhere inside the repository:
         --tool-uses 6 --seconds 57
     python3 .squad/tools/squad-log.py <work folder> --replace-last Lead --agent squad-lead --tokens 37445
         --tool-uses 6 --seconds 57
+    python3 .squad/tools/squad-log.py <work folder> "8 Review delta" Reviewer "APPROVE" --agent squad-reviewer
+        --tokens 139230 --tool-uses 40 --seconds 300 --continued
     python3 .squad/tools/squad-log.py <work folder> --summary
 
 `<work folder>` is the folder's name under `specs/` (`issue-12`, or `specs/issue-12`); it is matched against the
 folders that exist there, never used as a path, so no argument reaches the file system; `--agent` is matched
 against the files under `.claude/agents/` the same way. `<result>` may contain line breaks.
-`--summary` prints a Markdown table per member (launches, tokens, tool uses, seconds) with a total row, for
-the "Squad working record" comment and the wrap-up report, followed by an **Orchestrator** table once two rows
-carry a time of day: the wall time from the first to the last such row, the part of it no launch trailer
-covers (an upper bound for the orchestrator's own work and the waiting between launches) and the number of
-gate runs (Orchestrator rows of step 7). Exit code 0 when the row was written, amended or
-the summary printed, 1 when the folder has no `log.md`, the agent file is unknown or no row can be amended or
-replaced.
+`--summary` prints a Markdown table per member (launches, with the continuations among them, tokens, tool
+uses, seconds) with a total row, for the "Squad working record" comment and the wrap-up report, followed by an
+**Orchestrator** table once two rows carry a time of day: the wall time from the first to the last such row,
+the part of it no launch covers (an upper bound for the orchestrator's own work and the waiting between
+launches; launches that ran in parallel count once, each placed by its row's time and its seconds) and the
+number of gate runs (Orchestrator rows of step 7). Every row of a member other than the Orchestrator is a
+launch: the summary ends with the launch rows that carry no usage yet, so the orchestrator amends them before
+posting and an incomplete table is never posted as complete. Exit code 0 when the row was written, amended or
+the summary is complete, 1 when the folder has no `log.md`, the agent file is unknown, no row can be amended or
+replaced, or `--continued` finds no earlier usage of the member, 3 when the summary lists launch rows without
+usage.
 """
 import argparse
 import datetime
@@ -59,7 +73,9 @@ import unicodedata
 CONTROL_CATEGORIES = {"Cc", "Cf", "Zl", "Zp"}
 KEEP = {"\t", "\n", "\r"}
 TRAILER = re.compile(r"\((?P<launch>[\w.-]+/[\w-]+) · (?P<tokens>[\d,]+) tokens · (?P<tools>\d+) tool uses · "
-                     r"(?P<seconds>\d+) s\)\s*$")
+                     r"(?P<seconds>\d+) s(?P<continued> · continued)?\)\s*$")
+TWO_MEMBERS = re.compile(r"[,/+&]|\band\b")
+ORCHESTRATOR = "orchestrator"
 STAMP = r"\d{4}-\d{2}-\d{2}(?: \d{2}:\d{2})?"
 ROW = re.compile(rf"^\| (?P<date>{STAMP}) \| (?P<step>(?:[^|\\]|\\\|)*) \| (?P<member>(?:[^|\\]|\\\|)*) \| "
                  r"(?P<result>.*) \|\s*$")
@@ -79,8 +95,47 @@ def cell(text):
     return text.replace("|", "\\|")
 
 
-def trailer(launch, tokens, tool_uses, seconds):
-    return f"({launch} · {tokens:,} tokens · {tool_uses} tool uses · {seconds} s)"
+def trailer(launch, tokens, tool_uses, seconds, continued=False):
+    mark = " · continued" if continued else ""
+    return f"({launch} · {tokens:,} tokens · {tool_uses} tool uses · {seconds} s{mark})"
+
+
+def metrics(match):
+    """(tokens, tool uses, seconds) of a trailer match."""
+    return (int(match.group("tokens").replace(",", "")), int(match.group("tools")), int(match.group("seconds")))
+
+
+def previous_totals(path, member, skip_last=False):
+    """What the member's agent had used before the round being logged: the trailers of that member's rows,
+    summed backwards until the last fresh (not continued) launch is included; None when no row of the member
+    carries a trailer. With `skip_last` the member's last trailer is left out (it is the one being replaced)."""
+    with open(path, encoding="utf-8-sig") as handle:
+        rows = parse_rows(handle.read())
+    wanted = cell(member)
+    totals, found = [0, 0, 0], False
+    for _, _, row_member, result in reversed(rows):
+        match = TRAILER.search(result) if row_member == wanted else None
+        if not match:
+            continue
+        if skip_last:
+            skip_last = False
+            continue
+        totals, found = [a + b for a, b in zip(totals, metrics(match), strict=True)], True
+        if not match.group("continued"):
+            break
+    return tuple(totals) if found else None
+
+
+def continued_launch(path, member, launch, skip_last=False):
+    """The round's own share of a continued launch: the reported totals minus the member's earlier totals. A
+    reported figure below the earlier total was already the round alone and is kept. None when the member has
+    no earlier row with usage."""
+    earlier = previous_totals(path, member, skip_last)
+    if earlier is None:
+        return None
+    model, *reported = launch[:4]
+    share = [now - before if now >= before else now for now, before in zip(reported, earlier, strict=True)]
+    return (model, *share, True)
 
 
 def resolve_log(root, folder):
@@ -178,12 +233,40 @@ def orchestrator(rows):
     times = [datetime.datetime.strptime(stamp, "%Y-%m-%d %H:%M") for stamp, _, _, _ in rows if " " in stamp]
     if len(times) < 2:
         return None
-    wall = int((max(times) - min(times)).total_seconds())
-    launched = sum(int(match.group("seconds")) for _, _, _, result in rows if (match := TRAILER.search(result)))
+    first, last = min(times), max(times)
+    wall = int((last - first).total_seconds())
+    covered = covered_seconds(rows, first, last)
     gates = sum(1 for _, step, member, _ in rows if member == "Orchestrator" and re.match(r"7\b", step))
     return "\n".join(["| Member | Wall time (s) | Not covered by launches (s) | Gate runs |",
                       "| ------ | ------------- | --------------------------- | --------- |",
-                      f"| Orchestrator | {wall:,} | {max(wall - launched, 0):,} | {gates} |"])
+                      f"| Orchestrator | {wall:,} | {max(wall - covered, 0):,} | {gates} |"])
+
+
+def covered_seconds(rows, first, last):
+    """Seconds between `first` and `last` during which at least one launch ran: each timed row with a trailer
+    ends at its time of day and started its seconds earlier; the intervals are merged, so parallel launches
+    count once."""
+    intervals = []
+    for stamp, _, _, result in rows:
+        match = TRAILER.search(result)
+        if " " not in stamp or not match:
+            continue
+        end = datetime.datetime.strptime(stamp, "%Y-%m-%d %H:%M")
+        start = end - datetime.timedelta(seconds=metrics(match)[2])
+        intervals.append((max(start, first), min(end, last)))
+    covered, reach = 0, first
+    for start, end in sorted(intervals):
+        start = max(start, reach)
+        if end > start:
+            covered += int((end - start).total_seconds())
+            reach = end
+    return covered
+
+
+def missing_usage(rows):
+    """(stamp, step, member) of every launch row — a member other than the Orchestrator — without a trailer."""
+    return [(stamp, step, member) for stamp, step, member, result in rows
+            if member.lower() != ORCHESTRATOR and not TRAILER.search(result)]
 
 
 def summary(path):
@@ -196,21 +279,31 @@ def summary(path):
         match = TRAILER.search(result)
         if not match:
             continue
-        key = (member, match.group("launch"))
-        entry = per_member.setdefault(key, [0, 0, 0, 0])
+        entry = per_member.setdefault((member, match.group("launch")), [0, 0, 0, 0, 0])
         entry[0] += 1
-        entry[1] += int(match.group("tokens").replace(",", ""))
-        entry[2] += int(match.group("tools"))
-        entry[3] += int(match.group("seconds"))
+        entry[4] += 1 if match.group("continued") else 0
+        for index, value in enumerate(metrics(match), start=1):
+            entry[index] += value
     lines = ["| Member | Model/effort | Launches | Tokens | Tool uses | Seconds |",
              "| ------ | ------------ | -------- | ------ | --------- | ------- |"]
-    total = [0, 0, 0, 0]
-    for (member, launch), (launches, tokens, tools, seconds) in sorted(per_member.items()):
-        lines.append(f"| {member} | {launch} | {launches} | {tokens:,} | {tools} | {seconds} |")
-        total = [a + b for a, b in zip(total, (launches, tokens, tools, seconds), strict=True)]
-    lines.append(f"| **Total** | | {total[0]} | {total[1]:,} | {total[2]} | {total[3]} |")
+    total = [0, 0, 0, 0, 0]
+    for (member, launch), entry in sorted(per_member.items()):
+        lines.append(f"| {member} | {launch} | {launches(entry[0], entry[4])} | {entry[1]:,} | {entry[2]} | "
+                     f"{entry[3]} |")
+        total = [a + b for a, b in zip(total, entry, strict=True)]
+    lines.append(f"| **Total** | | {launches(total[0], total[4])} | {total[1]:,} | {total[2]} | {total[3]} |")
     own = orchestrator(rows)
-    return "\n".join(lines) + (f"\n\n{own}" if own else "")
+    text = "\n".join(lines) + (f"\n\n{own}" if own else "")
+    missing = missing_usage(rows)
+    if missing:
+        names = ", ".join(f"`{step} · {member}`" for _, step, member in missing)
+        text += (f"\n\n**Incomplete:** {len(missing)} launch row(s) without usage — add it with `--amend-last` "
+                 f"from the launch's task notification before posting this table: {names}")
+    return text
+
+
+def launches(count, continued):
+    return f"{count} ({continued} continued)" if continued else str(count)
 
 
 def build_parser():
@@ -229,6 +322,9 @@ def build_parser():
     parser.add_argument("--tokens", type=int, help="subagent_tokens from the usage block of the task notification")
     parser.add_argument("--tool-uses", type=int, help="tool_uses from the usage block of the task notification")
     parser.add_argument("--seconds", type=int, help="duration of the launch in seconds (duration_ms / 1000)")
+    parser.add_argument("--continued", action="store_true",
+                        help="the launch continued the member's earlier agent: the usage block reports the agent's "
+                             "totals, the trailer gets this round's share")
     return parser
 
 
@@ -249,10 +345,25 @@ def launch_metrics(parser, root, args):
     return (model, args.tokens, args.tool_uses, args.seconds)
 
 
-def amend_command(parser, path, folder, member, launch, replace):
+def share_of_round(path, member, launch, continued, replace=False):
+    """The launch as logged: with `continued`, this round's share of the reported totals; None when there is no
+    earlier usage of the member to subtract (reported to the user, exit code 1). With `replace`, the trailer
+    being replaced is not part of the earlier usage."""
+    if launch is None or not continued:
+        return launch
+    share = continued_launch(path, member, launch, skip_last=replace)
+    if share is None:
+        print(f"--continued: no earlier row of {member} with usage to continue from")
+    return share
+
+
+def amend_command(parser, path, folder, member, launch, replace, continued):
     option = "--replace-last" if replace else "--amend-last"
     if launch is None:
         parser.error(f"{option} needs --agent (or --launch), --tokens, --tool-uses and --seconds")
+    launch = share_of_round(path, member, launch, continued, replace)
+    if launch is None:
+        return 1
     row = amend_last(path, member, launch, replace=replace)
     if row is None:
         state = "with" if replace else "without"
@@ -273,15 +384,25 @@ def main():
         return 1
     if args.summary:
         print(summary(path))
-        return 0
+        with open(path, encoding="utf-8-sig") as handle:
+            return 3 if missing_usage(parse_rows(handle.read())) else 0
     launch = launch_metrics(parser, root, args)
     if args.amend_last and args.replace_last:
         parser.error("--amend-last and --replace-last exclude each other")
     if args.amend_last or args.replace_last:
         return amend_command(parser, path, args.folder, args.amend_last or args.replace_last, launch,
-                             replace=bool(args.replace_last))
+                             replace=bool(args.replace_last), continued=args.continued)
     if args.step is None or args.member is None or args.result is None:
         parser.error("a row needs <step> <member> <result> (or --summary, --amend-last or --replace-last)")
+    if TWO_MEMBERS.search(args.member):
+        parser.error(f"one row per launch: '{args.member}' names more than one member; write a row for each, "
+                     "also when they ran in parallel")
+    if args.continued and launch is None:
+        parser.error("--continued goes with the launch's usage (--agent or --launch, --tokens, --tool-uses, "
+                     "--seconds), on the row or with --amend-last")
+    launch = share_of_round(path, args.member, launch, args.continued)
+    if args.continued and launch is None:
+        return 1
     print(append_row(path, args.step, args.member, args.result, launch=launch))
     return 0
 

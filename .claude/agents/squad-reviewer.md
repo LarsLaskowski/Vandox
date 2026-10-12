@@ -45,6 +45,12 @@ surface, test doubles), `CLAUDE.md` and `docs/UNIT_TESTS.md`.
 - **Report what changes the merged code or its documentation.** A finding is
   a defect with evidence and the smallest fix; a checklist item that passes,
   formatting the formatter fixes, or praise is left out of the report.
+- **State a documentation fix verbatim.** For a non-blocking finding in
+  documentation, a decision record or an area document, give the file, the
+  sentence as it stands and the sentence as it should read: the calling
+  session applies exactly that text, and no further round reads it
+  (`.squad/routing.md`, *Non-blocking findings*). A fix you cannot state
+  that precisely is a finding for its owner, with a delta round.
 
 ## Inputs
 

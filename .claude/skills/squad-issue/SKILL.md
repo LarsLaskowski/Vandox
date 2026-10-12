@@ -32,8 +32,9 @@ action yourself — including follow-up issues the Lead decides on.
   40 k to 50 k tokens of instructions and code it already knows (`.squad/routing.md`, *Continuing a
   member*). Keep the agent id of each member's last launch. Launch fresh for the first launch of a mode,
   after a session restart, and when the previous launch ended on an API error. Log a continuation as a
-  launch of that member with its notification's usage and "(continued)" in the result. A continued member
-  keeps its role's limits (`.squad/team.md`).
+  launch of that member with its notification's usage and `--continued`: the usage block reports the agent's
+  totals since its first launch, the script writes this round's share and marks the trailer. A continued
+  member keeps its role's limits (`.squad/team.md`).
 - **The squad does not change itself in a product PR.** An issue or feature PR never touches `.squad/`
   (`team.md`, `routing.md`, tools), `.claude/`, `CLAUDE.md` or `.github/copilot-instructions.md`. Lessons about the squad are filed in step 12 as `.squad/routing.md`,
   *Squad lessons*, says — template-managed files in the template repository, project knowledge here. If the
@@ -90,7 +91,10 @@ action yourself — including follow-up issues the Lead decides on.
    `python3 .squad/tools/squad-log.py issue-<number> --amend-last "<member>" --agent squad-<role> --tokens …
    --tool-uses … --seconds …` — `--amend-last` is the only way to add them later, never editing `log.md` by
    hand or placeholder numbers (the script refuses fewer than 1,000 tokens). A trailer with wrong numbers is corrected with `--replace-last "<member>"` and the
-   same options, never with an extra row, which would count the launch twice. The wrap-up sums the trailers
+   same options, never with an extra row, which would count the launch twice. One row per launch, also for
+   two members that ran in parallel: the script refuses a member cell that names two, because `--amend-last`
+   could not tell their usage apart. A continued launch (*Continue a member*) is logged with the same
+   options plus `--continued`. The wrap-up sums the trailers
    per role. After every member's report, commit and push the files it left in the work
    folder (the Lead's records, the Tester's tests) yourself, so the next report does not list them as
    untracked noise.
@@ -181,9 +185,12 @@ action yourself — including follow-up issues the Lead decides on.
    a blocking finding straight to PR approval. The same holds for a non-blocking finding the Lead decides
    to fix now: any change to production code, tests or `docs/` after a review round needs a delta round. A
    non-blocking finding whose fix the reviewer states verbatim and that touches only documentation, a
-   decision record or an area document you apply yourself, without a Lead launch, and log it; it rides the
-   next delta round when one is due anyway; when none is due, it gets its own delta round by the member that
-   proposed it. At most **2 fix rounds** after round 1; then `squad-lead`
+   decision record or an area document you apply yourself, without a Lead launch: apply exactly the text the
+   reviewer proposed, confirm with `git diff` that the file changed in nothing else, and log the finding, the
+   file and the commit. That is the reviewer's own text from the reviewer's own round, so it needs no
+   confirming delta round; it is read again only when a delta round is due anyway for another change.
+   Anything you changed beyond the proposed text is an ordinary fix with a delta round. At most **2 fix
+   rounds** after round 1; then `squad-lead`
    in mode `decide`. Delta rounds continue the reviewer's earlier launch (*Continue a member*). Pass each
    reviewer the exact code SHA to review and tell it that later commits may only touch `specs/`. Avoid
    commits while a round runs; a commit a stop hook demands that touches only `specs/` (log rows) does not
@@ -192,7 +199,8 @@ action yourself — including follow-up issues the Lead decides on.
    on an API error (for example `529 Overloaded`, or `429` for a rate limit — relaunch it once the limit has
    reset) is relaunched unchanged, at most twice; after that report a blocker to the user. Non-blocking findings are collected for step 9.
 9. **PR approval.** First run the checklist yourself (`.squad/routing.md`, step 9), in full: the latest
-   review round is clean and nothing but `specs/` bookkeeping changed since it ran — when a delta round is
+   review round is clean and nothing but `specs/` bookkeeping and the verbatim documentation fixes of that
+   round (step 8, logged) changed since it ran — when a delta round is
    due, run it first, never launch the Lead to find that out; the gates of step 7 pass on this head;
    the area documents and documentation updates the plan names are in the diff. Then set each `Proposed`
    decision record of this change and its index row in `docs/decisions/README.md` (the Lead added it with
@@ -252,7 +260,10 @@ action yourself — including follow-up issues the Lead decides on.
     as **one** issue labelled `squad` in this repository (create the labels if missing). Link the issues
     from the working record comment. Do **not** edit `.squad/`, `.claude/` or the instruction files.
     Then run `python3 .squad/tools/squad-log.py issue-<number> --summary` on the log (restore it from the
-    working record comment if the folder is gone) and append the tables to the working record comment under
+    working record comment if the folder is gone). Exit code 3 means the summary ends with launch rows that
+    carry no usage: add it with `--amend-last` from each launch's task notification and run the summary
+    again — a table is posted only as the script prints it, never typed from memory or with rows left out.
+    Append the tables to the working record comment under
     a "Squad run metrics" heading: launches, tokens, tool uses and seconds per role are what tunes the
     squad's models and effort over time, and the **Orchestrator** row (wall time from the first to the last
     row, the part no launch covers, the gate runs) shows your own share.
