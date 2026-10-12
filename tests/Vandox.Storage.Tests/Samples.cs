@@ -93,6 +93,34 @@ internal static class Samples
     }
 
     /// <summary>
+    /// Creates a log line record with its own source, program and capture time.
+    /// </summary>
+    /// <param name="origin">The origin</param>
+    /// <param name="seq">The sequence number; 0 unless the origin is agent</param>
+    /// <param name="source">The source of the record</param>
+    /// <param name="program">The program</param>
+    /// <param name="capturedAt">The capture time</param>
+    /// <param name="message">The message</param>
+    /// <returns>The record</returns>
+    internal static DataRecord LogAt(string origin, ulong seq, string source, string program, DateTimeOffset capturedAt, string message)
+    {
+        return new DataRecord
+               {
+                   Origin = origin,
+                   Source = source,
+                   Seq = seq,
+                   CapturedAt = capturedAt,
+                   Data = new LogLine
+                          {
+                              Log = source,
+                              Host = "web-1",
+                              Program = program,
+                              Message = message
+                          }
+               };
+    }
+
+    /// <summary>
     /// Creates a gap record, which is stored as a JSON document.
     /// </summary>
     /// <param name="seconds">Seconds after <see cref="Base"/></param>

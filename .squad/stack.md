@@ -25,7 +25,7 @@ repository (record 0074): keep it true when the build changes.
 
 - Go (agent): `cmd/vandox-agent`, `internal/` (model, wire, config, cli, version); tests colocated as
   `foo_test.go` next to `foo.go`.
-- .NET (backend): `src/Vandox.Core` (model, wire decoder, configuration, safe file access, log parsing, log signatures),
+- .NET (backend): `src/Vandox.Core` (model, wire decoder, configuration, safe file access, log parsing, log signatures, log templates),
   `src/Vandox.Storage`, `src/Vandox.Import`, `src/Vandox.Backend` (host, CLI, Blazor; assembly `vandoxd`).
   `tools/Vandox.StorageBenchmark` (console program for the storage write measurement, `docs/BENCHMARKS.md`). Tests in `tests/<Project>.Tests`, mirroring the namespace and file of the class under test
   (`Foo.cs` → `FooTests.cs`).

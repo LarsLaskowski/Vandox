@@ -22,6 +22,7 @@ public static class Program
     private const int UsageError = 2;
     private const int WarmupSize = 1000;
     private const int ProbeRounds = 15;
+    private const int MaxLogLines = 10000000;
     private const double CriterionMilliseconds = 1000;
 
     #endregion // Constants
@@ -31,11 +32,11 @@ public static class Program
     /// <summary>
     /// Runs the measurement.
     /// </summary>
-    /// <param name="args">The directory for the temporary database, then optionally <c>--batches N</c>, <c>--size N</c> and <c>--warmup</c></param>
+    /// <param name="args">The directory for the temporary database, then optionally <c>--batches N</c>, <c>--size N</c> and <c>--warmup</c>, or <c>--log-lines N</c> with optionally <c>--size N</c></param>
     /// <returns>The exit code: 0 on success, 1 on a failure, 2 on a usage error</returns>
     public static async Task<int> Main(string[] args)
     {
-        if (TryParse(args, out var directory, out var batches, out var size, out var warmup))
+        if (TryParse(args, out var directory, out var batches, out var size, out var warmup, out var logLines))
         {
             using var stop = new CancellationTokenSource();
 
@@ -47,7 +48,14 @@ public static class Program
 
             try
             {
-                await RunAsync(directory, batches, size, warmup, stop.Token).ConfigureAwait(false);
+                if (logLines > 0)
+                {
+                    await TemplateBenchmark.RunAsync(directory, logLines, size, stop.Token).ConfigureAwait(false);
+                }
+                else
+                {
+                    await RunAsync(directory, batches, size, warmup, stop.Token).ConfigureAwait(false);
+                }
 
                 return 0;
             }
@@ -65,7 +73,7 @@ public static class Program
             }
         }
 
-        await Console.Error.WriteLineAsync("usage: Vandox.StorageBenchmark <existing directory on the volume to measure> [--batches N] [--size N] [--warmup]").ConfigureAwait(false);
+        await Console.Error.WriteLineAsync("usage: Vandox.StorageBenchmark <existing directory on the volume to measure> [--batches N] [--size N] [--warmup] | --log-lines N [--size N]").ConfigureAwait(false);
 
         return UsageError;
     }
@@ -78,21 +86,25 @@ public static class Program
     /// <param name="batches">The number of batches</param>
     /// <param name="size">The number of records per batch</param>
     /// <param name="warmup">Whether a small batch that is not counted runs first</param>
+    /// <param name="logLines">The number of log lines of the log template measurement, 0 for the metric measurement</param>
     /// <returns><c>true</c> when the arguments are valid</returns>
-    private static bool TryParse(string[] args, out string directory, out int batches, out int size, out bool warmup)
+    private static bool TryParse(string[] args, out string directory, out int batches, out int size, out bool warmup, out int logLines)
     {
         directory = args.Length > 0 ? args[0] : string.Empty;
         batches = DefaultBatches;
         size = DefaultSize;
         warmup = false;
+        logLines = 0;
 
         var index = 1;
+        var metricOptions = 0;
 
         while (index < args.Length)
         {
             if (args[index] == "--warmup")
             {
                 warmup = true;
+                metricOptions++;
                 index++;
 
                 continue;
@@ -103,6 +115,11 @@ public static class Program
             if (valid && args[index] == "--batches")
             {
                 batches = int.Parse(args[index + 1], CultureInfo.InvariantCulture);
+                metricOptions++;
+            }
+            else if (valid && args[index] == "--log-lines")
+            {
+                logLines = int.Parse(args[index + 1], CultureInfo.InvariantCulture);
             }
             else if (valid && args[index] == "--size")
             {
@@ -116,7 +133,7 @@ public static class Program
             index += 2;
         }
 
-        return directory.Length > 0 && Directory.Exists(directory) && size <= StorageLimits.MaxBatchRecords;
+        return directory.Length > 0 && Directory.Exists(directory) && size <= StorageLimits.MaxBatchRecords && logLines <= MaxLogLines && (logLines == 0 || metricOptions == 0);
     }
 
     /// <summary>

@@ -103,6 +103,39 @@ internal static class SchemaMigrator
                                                                 PRIMARY KEY (file_id, attempt, last_offset)
                                                               ) STRICT
                                                               """
+                                                          ]),
+                                                      new(8,
+                                                          [
+                                                              """
+                                                              CREATE TABLE log_templates (
+                                                                id INTEGER PRIMARY KEY,
+                                                                source TEXT NOT NULL,
+                                                                program TEXT NOT NULL,
+                                                                template TEXT NOT NULL,
+                                                                first_seen INTEGER NOT NULL,
+                                                                last_seen INTEGER NOT NULL,
+                                                                count INTEGER NOT NULL CHECK (count > 0),
+                                                                UNIQUE (source, program, template)
+                                                              ) STRICT
+                                                              """,
+                                                              "CREATE INDEX log_templates_source_first_seen ON log_templates(source, first_seen)",
+                                                              """
+                                                              CREATE TABLE log_template_hours (
+                                                                template_id INTEGER NOT NULL REFERENCES log_templates(id),
+                                                                hour INTEGER NOT NULL,
+                                                                count INTEGER NOT NULL CHECK (count > 0),
+                                                                PRIMARY KEY (template_id, hour)
+                                                              ) STRICT, WITHOUT ROWID
+                                                              """,
+                                                              "CREATE INDEX log_template_hours_hour ON log_template_hours(hour)",
+                                                              """
+                                                              CREATE TABLE log_source_hours (
+                                                                source TEXT NOT NULL,
+                                                                hour INTEGER NOT NULL,
+                                                                count INTEGER NOT NULL CHECK (count > 0),
+                                                                PRIMARY KEY (source, hour)
+                                                              ) STRICT, WITHOUT ROWID
+                                                              """
                                                           ])
                                                   ];
 

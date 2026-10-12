@@ -7,7 +7,7 @@ backend with web UI, runs as a Docker container on any Docker host in the home n
 
 This document describes the target architecture; as of now the binaries' `--version`, the data model and wire format
 (Go: `internal/model`, `internal/wire`; backend: `src/Vandox.Core`), the configuration loading (`internal/config` for the agent,
-`Vandox.Core.Configuration` for `vandoxd`), the backend service skeleton, the log import framework and the log signature catalog with its detector (`Vandox.Core.Signatures`; the service does not call it yet) exist (`vandoxd import`, with the parsers for the journal export, the MariaDB error log, Dovecot's own log file, `syslog` and `kern.log`, the Plesk panel log, the nginx, `sw-cp-server` and Apache error logs and the legacy `top`/`lsof` monitoring log): `vandoxd` loads its configuration, opens and migrates its SQLite database (schema, batched writes, queries and log search
+`Vandox.Core.Configuration` for `vandoxd`), the backend service skeleton, the log import framework and the log signature catalog with its detector (`Vandox.Core.Signatures`; the service does not call it yet), the log templates with their statistics and queries (`Vandox.Core.Templates`, `Vandox.Storage`; nothing shows them yet) exist (`vandoxd import`, with the parsers for the journal export, the MariaDB error log, Dovecot's own log file, `syslog` and `kern.log`, the Plesk panel log, the nginx, `sw-cp-server` and Apache error logs and the legacy `top`/`lsof` monitoring log): `vandoxd` loads its configuration, opens and migrates its SQLite database (schema, batched writes, queries and log search
 exist as the storage layer; the service does not call it yet, `vandoxd import` writes through it), listens on the
 web and ingest ports, answers `/healthz` and shuts down gracefully, and ships as a container with a health
 check. Sections are marked as implemented as features land. The decisions behind it are recorded in
@@ -47,8 +47,9 @@ way, and agents of the hosting provider are never disabled or changed
   kernel report grouper and the time zone rules of year-less times, the Plesk panel log and the nginx, `sw-cp-server` and Apache error logs
   (found by content or by a configured path, unreadable lines kept as raw lines), the legacy `top`/`lsof` monitoring log (snapshots
   into metrics, process and connection snapshots), and the classification of Postfix and Dovecot lines; the log signatures, an embedded
-  catalog, and the detector that matches them on stored log lines),
-  `Vandox.Storage` (the SQLite database, see [Storage](areas/storage.md): schema, migrations, writing batches, queries and log search) and
+  catalog, and the detector that matches them on stored log lines; the normalizer that turns a message into a log template),
+  `Vandox.Storage` (the SQLite database, see [Storage](areas/storage.md): schema, migrations, writing batches, queries, log search and
+  the log template statistics) and
   `Vandox.Import` (reads a directory, archive or file as streams, detects the parser per file, hashes the
   content, writes the parsers' records in resumable batches and builds the summary)
   ([0069](decisions/0069-log-import-idempotent-per-file-content-hash-with-resumable-batches.md),
@@ -139,7 +140,8 @@ Records: [0006](decisions/0006-agent-connects-outbound-only.md),
 [0091](decisions/0091-mail-lines-classified-in-the-syslog-and-journal-parsers.md),
 [0092](decisions/0092-error-logs-by-content-or-configured-path-unreadable-lines-kept-raw.md),
 [0093](decisions/0093-legacy-monitoring-log-snapshots-by-header-zone-and-whole-snapshot-validity.md),
-[0094](decisions/0094-log-signatures-embedded-yaml-linear-patterns-on-stored-lines.md).
+[0094](decisions/0094-log-signatures-embedded-yaml-linear-patterns-on-stored-lines.md),
+[0095](decisions/0095-log-templates-token-rules-statistics-in-the-write-path-usual-level-from-covered-hours.md).
 
 ## Network
 
@@ -224,7 +226,7 @@ Implemented by `src/Vandox.Storage`:
   2^63 - 1.
 - **Migrations** ([0077](decisions/0077-storage-on-microsoft-data-sqlite-same-schema-and-rules.md)): at
   start-up every step above the stored `meta.schema_version` runs in its own transaction; a database with a
-  newer version is refused. Schema version 3 adds the table `import_files`, version 4 the column `log_lines.host`, version 5 the column `log_lines.event`, version 6 the head key and the continuation point of `import_files`, version 7 the line hashes (`import_line_hashes`) and the import attempts of `import_files`.
+  newer version is refused. Schema version 3 adds the table `import_files`, version 4 the column `log_lines.host`, version 5 the column `log_lines.event`, version 6 the head key and the continuation point of `import_files`, version 7 the line hashes (`import_line_hashes`) and the import attempts of `import_files`, version 8 the log template statistics.
 - **Imports** ([0069](decisions/0069-log-import-idempotent-per-file-content-hash-with-resumable-batches.md)):
   `import_files` holds one row per imported file content (SHA-256 of the decompressed content, size, the name
   and modification time the parser got, the source type, the number of records stored so far and whether the
@@ -236,6 +238,11 @@ Implemented by `src/Vandox.Storage`:
   hash of every imported content at each of its line ends. With these, an older copy whose content is the start of
   a completely imported one, imported after it, is recognized as contained, and nothing of it is stored.
   Records do not reference their file; imports are idempotent per file content, not per record.
+- **Log templates** ([0095](decisions/0095-log-templates-token-rules-statistics-in-the-write-path-usual-level-from-covered-hours.md)):
+  the write path normalizes every stored log line into a template and counts it, in the same transaction, per source, program and
+  template (first and last seen, count per UTC hour) and per source and hour; queries return the template of a line, its hourly counts,
+  the templates new in a range and the hours above a template's usual level, taken only from hours in which the source logged. The rules
+  are in [Detection, alerts and reports](areas/detection-and-reports.md) (*Log templates*).
 - **Connections** ([0077](decisions/0077-storage-on-microsoft-data-sqlite-same-schema-and-rules.md)): one writer connection (immediate transactions, one batch per transaction) and a pool
   of query-only readers, in WAL mode with `synchronous=FULL`, so a committed batch is durable and reads (and
   `/healthz`) do not wait for a write.

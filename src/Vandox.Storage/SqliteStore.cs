@@ -1,5 +1,7 @@
 using Microsoft.Data.Sqlite;
 
+using Vandox.Core.Templates;
+
 namespace Vandox.Storage;
 
 /// <summary>
@@ -7,7 +9,7 @@ namespace Vandox.Storage;
 /// bounded number of query-only readers, so a committed batch is durable and reads (and the health check) do not wait for
 /// a write.
 /// </summary>
-public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IImportTracker, IAsyncDisposable
+public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, ILogTemplateReader, IImportTracker, IAsyncDisposable
 {
     #region Constants
 
@@ -262,6 +264,59 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, II
         }
     }
 
+    /// <summary>
+    /// Runs a template query on a reader connection and maps the rows.
+    /// </summary>
+    /// <typeparam name="T">The type of the result rows</typeparam>
+    /// <param name="sql">The SQL</param>
+    /// <param name="parameters">The parameters</param>
+    /// <param name="map">Maps the current row</param>
+    /// <param name="cancellationToken">Cancels the query</param>
+    /// <returns>A task that returns the rows</returns>
+    private async Task<IReadOnlyList<T>> QueryTemplatesAsync<T>(string sql, Dictionary<string, object> parameters, Func<SqliteDataReader, T> map, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await using var lease = await LeaseReaderAsync(cancellationToken).ConfigureAwait(false);
+            using var command = lease.Connection.CreateCommand();
+
+            command.CommandText = sql;
+
+            foreach (var (name, value) in parameters)
+            {
+                command.Parameters.AddWithValue(name, value);
+            }
+
+            using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+            var rows = new List<T>();
+
+            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                rows.Add(map(reader));
+            }
+
+            return rows;
+        }
+        catch (SqliteException exception)
+        {
+            throw new StoreException($"store: reading templates: {exception.Message}", exception);
+        }
+    }
+
+    /// <summary>
+    /// Runs a template lookup and returns its first row.
+    /// </summary>
+    /// <param name="sql">The SQL</param>
+    /// <param name="parameters">The parameters</param>
+    /// <param name="cancellationToken">Cancels the query</param>
+    /// <returns>A task that returns the template, or <c>null</c> when there is none</returns>
+    private async Task<LogTemplate?> FindFirstAsync(string sql, Dictionary<string, object> parameters, CancellationToken cancellationToken)
+    {
+        var rows = await QueryTemplatesAsync(sql, parameters, TemplateQueries.ReadTemplate, cancellationToken).ConfigureAwait(false);
+
+        return rows.Count > 0 ? rows[0] : null;
+    }
+
     #endregion // Methods
 
     #region IRecordWriter
@@ -284,6 +339,8 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, II
             }
 
             var stored = batch.Records.Count(record => writer.Write(batch, record, cancellationToken));
+
+            writer.WriteTemplates(cancellationToken);
 
             await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
 
@@ -328,6 +385,52 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, II
     }
 
     #endregion // ILogSearcher
+
+    #region ILogTemplateReader
+
+    /// <inheritdoc />
+    public Task<LogTemplate?> FindTemplateAsync(string source, string program, string message, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        ArgumentNullException.ThrowIfNull(program);
+        TemplateQueries.ValidateMessage(message);
+
+        var (sql, parameters) = TemplateQueries.BuildFind(source, program, LogTemplateNormalizer.Normalize(message));
+
+        return FindFirstAsync(sql, parameters, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public Task<IReadOnlyList<TemplateHour>> TemplateHoursAsync(TemplateHourQuery query, CancellationToken cancellationToken)
+    {
+        TemplateQueries.Validate(query);
+
+        var (sql, parameters) = TemplateQueries.Build(query);
+
+        return QueryTemplatesAsync(sql, parameters, TemplateQueries.ReadHour, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public Task<IReadOnlyList<LogTemplate>> NewTemplatesAsync(NewTemplateQuery query, CancellationToken cancellationToken)
+    {
+        TemplateQueries.Validate(query);
+
+        var (sql, parameters) = TemplateQueries.Build(query);
+
+        return QueryTemplatesAsync(sql, parameters, TemplateQueries.ReadTemplate, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public Task<IReadOnlyList<TemplateSpike>> TemplateSpikesAsync(TemplateSpikeQuery query, CancellationToken cancellationToken)
+    {
+        TemplateQueries.Validate(query);
+
+        var (sql, parameters) = TemplateQueries.Build(query);
+
+        return QueryTemplatesAsync(sql, parameters, TemplateQueries.ReadSpike, cancellationToken);
+    }
+
+    #endregion // ILogTemplateReader
 
     #region IImportTracker
 

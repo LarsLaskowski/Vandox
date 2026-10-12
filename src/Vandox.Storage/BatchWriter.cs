@@ -29,6 +29,7 @@ internal sealed class BatchWriter : IDisposable
     private readonly SqliteParameter[] _logFtsValues;
     private readonly ArrayBufferWriter<byte> _labelBuffer = new();
     private readonly Utf8JsonWriter _labelWriter;
+    private readonly TemplateTally _tally;
 
     #endregion // Fields
 
@@ -57,6 +58,7 @@ internal sealed class BatchWriter : IDisposable
         _logLineValues = Bind(_logLine, "$id", "$log", "$program", "$pid", "$priority", "$message", "$truncated", "$host", "$event");
         _logFtsValues = Bind(_logFts, "$id", "$message");
         _labelWriter = new Utf8JsonWriter(_labelBuffer);
+        _tally = new TemplateTally(connection, transaction);
     }
 
     #endregion // Constructors
@@ -113,10 +115,19 @@ internal sealed class BatchWriter : IDisposable
         }
         else if (payload is LogLine line)
         {
-            WriteLogLine(recordId, line);
+            WriteLogLine(recordId, record, line);
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// Writes the template statistics of the log lines written so far.
+    /// </summary>
+    /// <param name="cancellationToken">Cancels the write</param>
+    internal void WriteTemplates(CancellationToken cancellationToken)
+    {
+        _tally.Write(cancellationToken);
     }
 
     /// <summary>
@@ -203,8 +214,9 @@ internal sealed class BatchWriter : IDisposable
     /// Inserts the typed row of a log line and its full-text index entry.
     /// </summary>
     /// <param name="id">The ID of the record</param>
+    /// <param name="record">The record</param>
     /// <param name="line">The log line</param>
-    private void WriteLogLine(long id, LogLine line)
+    private void WriteLogLine(long id, DataRecord record, LogLine line)
     {
         _logLineValues[0].Value = id;
         _logLineValues[1].Value = line.Log;
@@ -220,6 +232,7 @@ internal sealed class BatchWriter : IDisposable
         _logFtsValues[0].Value = id;
         _logFtsValues[1].Value = line.Message;
         _logFts.ExecuteNonQuery();
+        _tally.Add(record.Source, line.Program, line.Message, StorageTime.ToNanoseconds(record.CapturedAt));
     }
 
     #endregion // Methods
@@ -234,6 +247,7 @@ internal sealed class BatchWriter : IDisposable
         _logLine.Dispose();
         _logFts.Dispose();
         _labelWriter.Dispose();
+        _tally.Dispose();
     }
 
     #endregion // IDisposable

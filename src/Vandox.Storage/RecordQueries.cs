@@ -172,7 +172,7 @@ internal static class RecordQueries
     /// </summary>
     /// <param name="condition">The rule</param>
     /// <param name="rule">The rule that is broken</param>
-    private static void Require(bool condition, string rule)
+    internal static void Require(bool condition, string rule)
     {
         if (condition)
         {
