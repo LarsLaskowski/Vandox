@@ -1,7 +1,7 @@
 # Plan: Recognize disk-full and Too many connections lines of PHP, nginx, Apache and Plesk
 
 Source: Issue #203
-Status: Draft
+Status: Revised (1)
 Tier: security — the change adds signatures to the detection over stored external text, which is security area 10
 (*Parsing of external input*, `Vandox.Core.Signatures`) of `.squad/project.md`, and its whole point is a guard (origin
 condition plus `\A` anchor) against text that HTTP clients control.
@@ -39,8 +39,20 @@ Claims of the issue, checked:
   sources fix:
   - PHP log line: `PHP <type>:  <origin>: <text> in <file> on line <n>` (two spaces after the colon); `<type>` is
     `Warning` (E_WARNING), `Notice` (E_NOTICE), `Fatal error` (E_ERROR and uncaught exceptions); `<origin>` is
-    `[class::]function()` of the active function, `Unknown` without one; a docref link is added only when `docref_root`
-    is set (default empty, not read).
+    `[class::]function(<params>)` of the active function (`main/main.c:1026`, `"%s%s%s(%s)"`), `Unknown` or
+    `PHP Request Shutdown` without one; `<params>` is empty for `php_error_docref` and holds a value the script passed
+    for `php_error_docref1`/`2` — the stream layer passes the path or URL (`main/streams/streams.c:217`), so
+    `getimagesize($_GET['u'])` logs `getimagesize(<client text>): Failed to open stream: …`; a docref link is added only
+    when `docref_root` is set (default empty, not read). A message the **application** writes has no PHP head at all:
+    `trigger_error($x)` logs `PHP Warning:  <x> in …` / `PHP Notice:  <x> in …` without an origin, and `error_log($x)`
+    without an `error_log` file goes to the SAPI log verbatim (FPM `PHP message: <x>`, php-cgi `<x>`, the Apache module
+    at `notice`). So PHP fixes the head only of the messages it raises itself.
+  - The mysqli connect warning is raised only in `php_mysqli_throw_sql_exception` (`ext/mysqli/mysqli_exception.c:41`,
+    `php_error_docref(NULL, E_WARNING, "(%s/%d): %s", …)`, empty params), reached from `mysqli_common_connect`, i.e. from
+    `mysqli_connect`, `mysqli_real_connect`, `mysqli::__construct`, `mysqli::connect`, `mysqli::real_connect` (and
+    `mysqli::mysqli` of old versions). The write error is raised with `php_error_docref` (empty params) at E_NOTICE
+    (`main/streams/plain_wrapper.c:397`); no `php_error_docref1`/`2` call at E_NOTICE exists in PHP 7.4, and in 8.3 only
+    exif's `Done` under `EXIF_DEBUG` (`ext/exif/exif.c:4698`), so a `PHP Notice:` origin never carries params.
   - mysqli connect warning: `<origin>: (<sqlstate>/1040): Too many connections`; mysqlnd sets SQL state `08004` for
     1040 in the greeting, `HY000` is its default (`UNKNOWN_SQLSTATE`); PHP 8.1+ throws by default:
     `Uncaught mysqli_sql_exception: Too many connections in <file>:<line>`; PDO: `Uncaught PDOException:
@@ -87,7 +99,7 @@ All tests are in `tests/Vandox.Core.Tests/BuiltInSignaturesTests.cs` and use its
   5. `apache-error`: `[proxy_fcgi:error] [pid 3101:tid 140231] [client 198.51.100.7:0] AH01071: Got error 'PHP message: PHP Fatal error:  Uncaught PDOException: SQLSTATE[HY000] [1040] Too many connections in /var/www/vhosts/example.org/httpdocs/wp-db.php:12', referer: https://example.org/`
   6. `apache-error`: `[fcgid:warn] [pid 3101:tid 140231] [client 2001:db8::7:51234] mod_fcgid: stderr: PHP Warning:  mysqli_real_connect(): (HY000/1040): Too many connections in /var/www/vhosts/example.org/httpdocs/db.php on line 4`
   7. `apache-error`: `[php:warn] [pid 901] [client 198.51.100.7:51234] PHP Warning:  mysqli_connect(): (HY000/1040): Too many connections in /var/www/vhosts/example.org/index.php on line 3` (the message of the existing row of `BuiltInSignaturesTooManyConnectionsIgnoresOtherLines`)
-  8. `apache-error`: `[:error] [pid 901] [client 198.51.100.7:51234] PHP Fatal error:  Uncaught mysqli_sql_exception: Too many connections in /var/www/vhosts/example.org/index.php:3`
+  8. `apache-error`: `[php:error] [pid 901] [client 198.51.100.7:51234] PHP Fatal error:  Uncaught mysqli_sql_exception: Too many connections in /var/www/vhosts/example.org/index.php:3`
   9. `apache-error`: `[php7:warn] [pid 901:tid 140231] [client 198.51.100.7:51234] PHP Warning:  mysqli::real_connect(): (HY000/1040): Too many connections in /var/www/vhosts/example.org/index.php on line 3`
 - [ ] AC4: `php_disk_full` yields exactly one event without fields for each of these lines. Test:
   `BuiltInSignaturesPhpDiskFullMatchesWriteErrors(string source, string message)`:
@@ -97,6 +109,7 @@ All tests are in `tests/Vandox.Core.Tests/BuiltInSignaturesTests.cs` and use its
   4. `apache-error`: `[proxy_fcgi:error] [pid 3101:tid 140231] [client 198.51.100.7:0] AH01071: Got error 'PHP message: PHP Notice:  fwrite(): Write of 8192 bytes failed with errno=28 No space left on device in /var/www/vhosts/example.org/httpdocs/cache.php on line 7', referer: https://example.org/`
   5. `apache-error`: `[php:notice] [pid 901] [client 198.51.100.7:51234] PHP Notice:  fflush(): Write of 8192 bytes failed with errno=28 No space left on device in /var/www/vhosts/example.org/index.php on line 5`
   6. `apache-error`: `[fcgid:warn] [pid 3101:tid 140231] [client 198.51.100.7:51234] mod_fcgid: stderr: PHP Notice:  Unknown: Write of 512 bytes failed with errno=28 No space left on device in Unknown on line 0`
+  7. `nginx-error`: `[error] 2101#2101: *16 FastCGI sent in stderr: "PHP message: PHP Notice:  PHP Request Shutdown: Write of 512 bytes failed with errno=28 No space left on device in Unknown on line 0"` (a write at shutdown, PHP 8.3)
 - [ ] AC5: `nginx_disk_full` yields exactly one event without fields for each of these lines. Test:
   `BuiltInSignaturesNginxDiskFullMatchesWriteErrors(string source, string message)`:
   1. `nginx-error`: `[crit] 2101#2101: *16 pwrite() "/var/lib/nginx/body/0000000001" failed (28: No space left on device), client: 198.51.100.7, server: example.org, request: "POST /upload.php HTTP/1.1", host: "example.org"` (the message of the existing row of `BuiltInSignaturesDiskFullIgnoresOtherLines`)
@@ -119,7 +132,11 @@ All tests are in `tests/Vandox.Core.Tests/BuiltInSignaturesTests.cs` and use its
   and these single rows:
   - f. requested path closing the quote, at `crit`: `[crit] 2101#2101: *16 stat() "/var/www/vhosts/example.org/httpdocs/x" failed (28: No space left on device)" failed (13: Permission denied), client: 198.51.100.7, server: example.org, request: "GET /x%22%20failed%20(28:%20No%20space%20left%20on%20device) HTTP/1.1"` (the existing `open()` row stays)
   - g. FastCGI stderr, trigger in a **later** PHP message: `[error] 2101#2101: *15 FastCGI sent in stderr: "PHP message: PHP Warning:  Undefined array key "q" in /var/www/vhosts/example.org/httpdocs/index.php on line 2; T1 in /x.php on line 1" while reading response header from upstream, client: 198.51.100.7` (and the same with `T2`)
-  - h. FastCGI stderr, trigger **inside** the first PHP message: `[error] 2101#2101: *15 FastCGI sent in stderr: "PHP message: PHP Warning:  Undefined array key "T1" in /var/www/vhosts/example.org/httpdocs/index.php on line 2" while reading response header from upstream, client: 198.51.100.7`
+  - h. FastCGI stderr, trigger as a quoted fragment inside the text of a PHP-raised warning: `[error] 2101#2101: *15 FastCGI sent in stderr: "PHP message: PHP Warning:  Undefined array key "T1" in /var/www/vhosts/example.org/httpdocs/index.php on line 2" while reading response header from upstream, client: 198.51.100.7` (this shows only that a fragment after a PHP-raised head does not count; it does not prove that the head is fixed — see the residual of application-written heads)
+  - n. trigger in the **params of the origin** (stream path), nginx: `[error] 2101#2101: *15 FastCGI sent in stderr: "PHP message: PHP Warning:  getimagesize(): (HY000/1040): Too many connections): Failed to open stream: No such file or directory in /var/www/vhosts/example.org/httpdocs/img.php on line 4" while reading response header from upstream, client: 198.51.100.7` — the guard is the closed set of mysqli origins
+  - o. the same through `include()` behind the Apache module: `[php:warn] [pid 901] [client 198.51.100.7:51234] PHP Warning:  include(): (HY000/1040): Too many connections.php): Failed to open stream: No such file or directory in /var/www/vhosts/example.org/index.php on line 3`
+  - p. the same behind `mod_proxy_fcgi`: `[proxy_fcgi:error] [pid 3101:tid 140231] [client 198.51.100.7:0] AH01071: Got error 'PHP message: PHP Warning:  file_get_contents(): (HY000/1040): Too many connections): Failed to open stream: No such file or directory in /x.php on line 4'`
+  - q. the write text in the params of a warning: `[php:warn] [pid 901] [client 198.51.100.7:51234] PHP Warning:  fopen(): Write of 1 bytes failed with errno=28 No space left on device): Failed to open stream: No such file or directory in /x.php on line 4` (no match: `php_disk_full` reads `PHP Notice:` only, and no E_NOTICE origin carries params)
   - i. FastCGI stderr, trigger after a real line feed in the message: `[error] 2101#2101: *15 FastCGI sent in stderr: "PHP message: PHP Warning:  Undefined array key "q` + line feed + `T1 in /x.php on line 1" in /var/www/vhosts/example.org/httpdocs/index.php on line 2"` — the guard is `\A` (a `^` would match after the line feed)
   - j. Apache `referer:` — `[proxy_fcgi:error] [pid 3101:tid 140231] [client 198.51.100.7:0] AH01071: Got error 'PHP message: PHP Warning:  Undefined variable $x in /var/www/vhosts/example.org/httpdocs/index.php on line 12', referer: T1` (and the same with `T2`)
   - k. Apache request path in the message — `[authz_core:error] [pid 3101:tid 140231] [client 198.51.100.7:0] AH01630: client denied by server configuration: /var/www/vhosts/example.org/httpdocs/T1`
@@ -138,7 +155,9 @@ All tests are in `tests/Vandox.Core.Tests/BuiltInSignaturesTests.cs` and use its
     source `plesk-panel` and on `syslog`; `(HY000/1045): Access denied for user 'u'@'localhost' (using password: YES)`
     in place of the 1040 text; `Uncaught Exception: Too many connections` (another exception class);
     `Uncaught PDOException: SQLSTATE[HY000] [2002] Connection refused`; mysqli's `(HY000/1040)` without the text
-    `Too many connections` (`(HY000/1040): x`); an nginx FastCGI line at level `warn` instead of `error`.
+    `Too many connections` (`(HY000/1040): x`); an nginx FastCGI line at level `warn` instead of `error`; another
+    origin than the mysqli connect functions (`mysqli_query(): (HY000/1040): Too many connections`); the Apache line
+    without a module name (`[:warn] [pid 901] [client 198.51.100.7:51234] PHP Warning:  mysqli_connect(): (HY000/1040): Too many connections in /x.php on line 3`, Security N2).
   - `BuiltInSignaturesPhpDiskFullIgnoresOtherLines(string source, string message)`: `errno=122 Disk quota exceeded`;
     `Read of 8192 bytes failed with errno=28 No space left on device`; `PHP Warning:  file_put_contents(): Only 0 of
     4096 bytes written, possibly out of free disk space`; the AC4 row 1 line on source `plesk-panel`; the existing
@@ -176,7 +195,13 @@ All tests are in `tests/Vandox.Core.Tests/BuiltInSignaturesTests.cs` and use its
   `BuiltInSignaturesDiskFullIgnoresOtherLines` asserts `AssertNoneOf("disk_full", …)` (its `nginx-error` row now yields
   `nginx_disk_full`); rows unchanged. `BuiltInSignaturesErrorLogFixturesYieldNothing` and
   `BuiltInSignaturesClientTextInWebServerLogsYieldsNothing` keep their rows and pass unchanged (the fixtures hold none
-  of the new texts).
+  of the new texts). The Tester confirms for every row of the two adapted tests that it still yields no event of the
+  old signature it names. A line that matches a new signature does not fire an old one: AC3, AC4 and AC5 use
+  `AssertDetected`, which requires exactly one event.
+
+Not tested, documented: a message whose head the application writes (`trigger_error`, `error_log`, inherited standard
+error) or that the writer splits is indistinguishable from a real line, so a "pin" would repeat an AC3/AC4 row; these
+residuals are documented in record 0094 and the area document instead (Challenge, Minor 1).
 
 Tests first (step 5): AC1, AC2, AC3, AC4, AC5, AC9 and the AC10 assertion changes fail on the current catalog (unknown
 IDs, no events). AC6, AC7 and AC8 are guards that pass on the current catalog already; they are written in step 6
@@ -193,7 +218,7 @@ entries (YAML single-quoted scalars, so the quote before `PHP message` in Apache
   - id: php_too_many_connections
     description: PHP's mysqli or PDO could not connect to MariaDB because of Too many connections (error 1040), as nginx or Apache logged the first PHP message of a request.
     source: [nginx-error, sw-cp-server-error, apache-error]
-    message: '\A(?:\[error\] [0-9]+#[0-9]+: \*[0-9]+ FastCGI sent in stderr: "PHP message: |\[proxy_fcgi:error\] \[pid [0-9]+(?::tid [0-9]+)?\] \[client [0-9A-Fa-f:.]+:[0-9]+\] AH01071: Got error ''PHP message: |\[fcgid:warn\] \[pid [0-9]+(?::tid [0-9]+)?\] \[client [0-9A-Fa-f:.]+:[0-9]+\] mod_fcgid: stderr: |\[(?:php[0-9]?)?:(?:error|warn|notice)\] \[pid [0-9]+(?::tid [0-9]+)?\] \[client [0-9A-Fa-f:.]+:[0-9]+\] )PHP (?:Warning:  [^ \n()]+\(\): \([0-9A-Z]{5}/1040\): Too many connections|Fatal error:  Uncaught (?:mysqli_sql_exception: Too many connections|PDOException: SQLSTATE\[[0-9A-Z]{5}\] \[1040\] Too many connections))'
+    message: '\A(?:\[error\] [0-9]+#[0-9]+: \*[0-9]+ FastCGI sent in stderr: "PHP message: |\[proxy_fcgi:error\] \[pid [0-9]+(?::tid [0-9]+)?\] \[client [0-9A-Fa-f:.]+:[0-9]+\] AH01071: Got error ''PHP message: |\[fcgid:warn\] \[pid [0-9]+(?::tid [0-9]+)?\] \[client [0-9A-Fa-f:.]+:[0-9]+\] mod_fcgid: stderr: |\[php[0-9]?:(?:error|warn|notice)\] \[pid [0-9]+(?::tid [0-9]+)?\] \[client [0-9A-Fa-f:.]+:[0-9]+\] )PHP (?:Warning:  (?:mysqli_connect|mysqli_real_connect|mysqli::(?:__construct|connect|real_connect|mysqli))\(\): \([0-9A-Z]{5}/1040\): Too many connections|Fatal error:  Uncaught (?:mysqli_sql_exception: Too many connections|PDOException: SQLSTATE\[[0-9A-Z]{5}\] \[1040\] Too many connections))'
 ```
 
 `php_disk_full` and `nginx_disk_full`, directly after `disk_full`:
@@ -202,7 +227,7 @@ entries (YAML single-quoted scalars, so the quote before `PHP message` in Apache
   - id: php_disk_full
     description: PHP could not write a file because a file system was full (errno 28), as nginx or Apache logged the first PHP message of a request.
     source: [nginx-error, sw-cp-server-error, apache-error]
-    message: '\A(?:\[error\] [0-9]+#[0-9]+: \*[0-9]+ FastCGI sent in stderr: "PHP message: |\[proxy_fcgi:error\] \[pid [0-9]+(?::tid [0-9]+)?\] \[client [0-9A-Fa-f:.]+:[0-9]+\] AH01071: Got error ''PHP message: |\[fcgid:warn\] \[pid [0-9]+(?::tid [0-9]+)?\] \[client [0-9A-Fa-f:.]+:[0-9]+\] mod_fcgid: stderr: |\[(?:php[0-9]?)?:(?:error|warn|notice)\] \[pid [0-9]+(?::tid [0-9]+)?\] \[client [0-9A-Fa-f:.]+:[0-9]+\] )PHP Notice:  (?:[^ \n()]+\(\)|Unknown): [Ww]rite of [0-9]+ bytes failed with errno=28 No space left on device'
+    message: '\A(?:\[error\] [0-9]+#[0-9]+: \*[0-9]+ FastCGI sent in stderr: "PHP message: |\[proxy_fcgi:error\] \[pid [0-9]+(?::tid [0-9]+)?\] \[client [0-9A-Fa-f:.]+:[0-9]+\] AH01071: Got error ''PHP message: |\[fcgid:warn\] \[pid [0-9]+(?::tid [0-9]+)?\] \[client [0-9A-Fa-f:.]+:[0-9]+\] mod_fcgid: stderr: |\[php[0-9]?:(?:error|warn|notice)\] \[pid [0-9]+(?::tid [0-9]+)?\] \[client [0-9A-Fa-f:.]+:[0-9]+\] )PHP Notice:  (?:[^ \n()]+\(\)|Unknown|PHP Request Shutdown): [Ww]rite of [0-9]+ bytes failed with errno=28 No space left on device'
   - id: nginx_disk_full
     description: nginx could not write a file because a file system was full (error 28).
     source: [nginx-error, sw-cp-server-error]
@@ -225,7 +250,9 @@ first match only). Forms that reach it, and its behavior:
 | trigger in nginx `request:`, `host:`, `referrer:`, `upstream:` | AC6 a-d | no match: these fields follow the message; the prefix and the error text must sit at `\A` |
 | trigger in a requested path inside the message | AC6 e, f; existing `open()` row | no match: only write calls are read (`open()`, `stat()`, `mkdir()` and paths in other texts are not), so the quote-closing path cannot supply the call |
 | trigger in a later PHP message (`; `, Apache `\n` escape) | AC6 g, l; AC7 | no match: the PHP text must follow the first `PHP message: ` (or Apache's prefix) directly |
-| trigger inside the first PHP message | AC6 h | no match: the first message's head (`PHP <type>:  <origin>: `) is fixed by PHP; an origin holds no space or parenthesis |
+| trigger as a fragment inside the text of a PHP-raised message | AC6 h | no match: the text after a PHP-raised head is not read; this says nothing about heads the application writes (row below) |
+| trigger in the params of the origin (`getimagesize(<path>)`, `include(<path>)`, stream functions) | AC6 n, o, p, q | no match: `php_too_many_connections` accepts only the mysqli connect origins with empty params; `php_disk_full` reads `PHP Notice:` only, whose origins never carry params (no E_NOTICE `php_error_docref1`/`2` in PHP 7.4, only exif's debug `Done` in 8.3); the open class `[^ \n()]+` there excludes space and parentheses |
+| message whose head the **application** writes: `trigger_error($x)` (`PHP Warning:  <x>` / `PHP Notice:  <x>`, no origin), `error_log($x)` without an `error_log` file (FPM `PHP message: <x>`, php-cgi `<x>`, Apache module at `notice`) with client text at the start of `$x` | (documented, not tested: indistinguishable from a real line) | **match**: residual (2) in *Security considerations* |
 | trigger after a real line feed in the same record | AC6 i | no match: `\A`, not `^` |
 | trigger in Apache `referer:` or a request path in Apache's message | AC6 j, k | no match: after the message / not after the prefix |
 | Apache client address that is not an address | AC6 m | no match: `[0-9A-Fa-f:.]+:[0-9]+` |
@@ -233,11 +260,13 @@ first match only). Forms that reach it, and its behavior:
 | right text at a level nginx does not use for it | AC8 | no match: levels are part of the prefix |
 | PHP output split by the writer (nginx keeps line feeds; `mod_fcgid` one entry per line; nginx and `mod_proxy_fcgi` log stderr per read-buffer chunk) with client text at the start of the new entry | (documented, not tested: indistinguishable from a real line) | **match**: residual, see *Security considerations* |
 | WebDAV `COPY` destination or a variable access log path in a failed nginx write | (documented) | **match** when the write fails with another error: residual |
-| raw lines (no time stamp) | the stack trace in AC9 | no match: their message starts with the line itself, never with the level prefix — unless forged, which is the residual of record 0092 |
+| Apache line without a module name (`[:warn]`, a module without `APLOG_USE_MODULE`) | AC8 | no match: the Apache-module alternative requires `php`, `php5`, `php7` or `php8` (Security N2: dropped instead of documented) |
+| raw lines (no time stamp) of nginx | the stack trace in AC9 | no match: their message starts with the line itself, never with the level prefix — unless forged, the residual of record 0092 (needs a line feed and a whole forged time stamp in nginx) |
+| raw lines of Apache from inherited standard error (programs that PHP's Apache module or a CGI starts write into the error log directly); and `php://stderr` of php-cgi under `mod_fcgid`, which becomes `mod_fcgid: stderr: <x>` | (documented) | **match** when such a line begins with one of the prefixes: a raw record's message is the whole line, so it needs only the prefix, no time stamp: residual (2) |
 
 ## Options considered
 
-Recorded in record 0094, options 17 to 22:
+Recorded in record 0094, options 17 to 23:
 
 1. **Extend `disk_full` and `mariadb_too_many_connections`** (option 17) — lost: one pattern per signature runs every
    alternative on every listed writer; MariaDB's loose `\A(?:[^ \n]+: )?Disk full \(` would read Apache's raw lines
@@ -249,6 +278,9 @@ Recorded in record 0094, options 17 to 22:
    the quote.
 5. **Read Apache's own `(28)No space left on device:`** (option 21) — lost: also printed for semaphore exhaustion.
 6. **Read the Plesk panel log** (option 22) — lost: unverified format, holds login names and request paths.
+7. **Any PHP origin before the 1040 text** (option 23, added in revision 1) — lost: the params of stream functions
+   carry client paths (Security B1); the closed set of mysqli connect origins is read instead, and Apache lines without
+   a module name are not read.
 
 ## Affected projects and types
 
@@ -278,7 +310,7 @@ trigger text; they stay unchanged.
 `docs/areas/detection-and-reports.md` (*Log signatures*), owner **Dev**:
 
 - Table: three rows after `mariadb_too_many_connections` and `disk_full` respectively:
-  - `php_too_many_connections` | PHP's `mysqli` or PDO could not connect to MariaDB because of *Too many connections* (error 1040) | sources `nginx-error`, `sw-cp-server-error`, `apache-error`; message anchored with `\A` at the first PHP message after nginx's FastCGI prefix, Apache's `mod_proxy_fcgi` (`AH01071`) or `mod_fcgid` prefix, or a message of PHP's Apache module | none
+  - `php_too_many_connections` | PHP's `mysqli` (warning of `mysqli_connect`, `mysqli_real_connect`, `mysqli::__construct`, `mysqli::connect`, `mysqli::real_connect`, `mysqli::mysqli`, or the uncaught `mysqli_sql_exception`) or PDO (uncaught `PDOException`) could not connect to MariaDB because of *Too many connections* (error 1040) | sources `nginx-error`, `sw-cp-server-error`, `apache-error`; message anchored with `\A` at the first PHP message after nginx's FastCGI prefix, Apache's `mod_proxy_fcgi` (`AH01071`) or `mod_fcgid` prefix, or a message of PHP's Apache module (`php`, `php5`, `php7`, `php8`) | none
   - `php_disk_full` | PHP could not write a file because a file system was full (`errno=28`) | as `php_too_many_connections` | none
   - `nginx_disk_full` | nginx could not write a file because a file system was full (`(28: No space left on device)` of `pwrite()`, `write()`, `pwritev()`, `writev()`) | sources `nginx-error`, `sw-cp-server-error`; message anchored with `\A` | none
 - Replace the paragraph "`disk_full` reads only MariaDB's own error messages, … their messages carry external text before
@@ -288,13 +320,19 @@ trigger text; they stay unchanged.
   the Plesk panel log, Apache's own status texts (`(28)…` is also printed for exhausted semaphores), Apache 2.2, a custom
   `ErrorLogFormat`, nginx's `open()`/`mkdir()` and PHP's `Only 0 of N bytes written` are not read; and that one full disk
   seen by MariaDB and nginx gives one event per signature.
-- Limitations: replace the bullet "The **writers are narrowed**: …" with one that states the residual of record 0094's
-  new consequence: the anchor holds for one line, not for output the writer splits (nginx keeps the line feeds of PHP
-  output; `mod_fcgid` logs each line of standard error as an entry; nginx and `mod_proxy_fcgi` log FastCGI standard
-  error in pieces of their read buffer), so an HTTP client that makes an application log request data in a long or
-  multi-line PHP message can create a PHP event; likewise a WebDAV `COPY` destination or a variable access log path in
-  a failed nginx write, and an Apache client address that a reverse-proxy module copies unchecked from a forwarded header
-  (`mod_remoteip` stores a parsed address; Plesk's module is not verified).
+- Limitations: replace the bullet "The **writers are narrowed**: …" with one that states the residuals of record
+  0094's new consequence: the anchor keeps out client text in the fields the servers add (request line, host,
+  referrer, upstream, paths) and in PHP's own messages (the 1040 warning only from the mysqli connect functions, whose
+  origin carries no parameters), but not (1) output the writer splits (nginx keeps the line feeds of PHP output;
+  `mod_fcgid` logs each line of standard error as an entry; nginx and `mod_proxy_fcgi` log FastCGI standard error in
+  pieces of their read buffer), nor (2) a message whose head the application writes (`trigger_error`, which logs no
+  origin; `error_log` without a log file, written verbatim to FastCGI or Apache; programs started from PHP or a CGI
+  that write into Apache's error log directly, whose raw lines need only the prefix). An HTTP client whose request data
+  an application puts into such a message can create a PHP event. Likewise a WebDAV `COPY` destination or a variable
+  access log path in a failed nginx write, and an Apache client address that a reverse-proxy module copies unchecked
+  from a forwarded header (`mod_remoteip` stores a parsed address; Plesk's module is not verified).
+- In the paragraph on writers also: an Apache line without a module name (`[:warn]`) is not read, and PHP 8.3's
+  `PHP Request Shutdown` origin is read for the write error.
 
 `docs/areas/log-import.md` (*Plesk and web server error logs*, *Forged lines (limitation)*), owner **Dev**: append
 "Forged lines reach the signatures of PHP and nginx (*Detection, alerts and reports*, *Log signatures*)." to that
@@ -307,10 +345,11 @@ paragraph.
   "a signature without an event condition that reads a message which can hold remote text (`disk_full`, `mariadb_too_many_connections`) carries an origin condition (`program` or `source`) and a `\A` anchor at server-written text, so remote text in web server or
   mail lines cannot trigger it;"
   with
-  "a signature without an event condition that reads a message which can hold remote text (`disk_full`, `mariadb_too_many_connections`, `php_too_many_connections`, `php_disk_full`, `nginx_disk_full`) carries an origin condition (`program` or `source`) and a `\A` anchor at server-written text, so remote text within one web server or
-  mail line cannot trigger it, while PHP output that nginx, `mod_fcgid` or `mod_proxy_fcgi` splits into several entries can (record 0094);"
+  "a signature without an event condition that reads a message which can hold remote text (`disk_full`, `mariadb_too_many_connections`, `php_too_many_connections`, `php_disk_full`, `nginx_disk_full`) carries an origin condition (`program` or `source`) and a `\A` anchor at server-written text, so remote text in the fields a web server or
+  mail server adds and in PHP's own messages cannot trigger it; an application that logs request data at the start of a message (`trigger_error`, `error_log`, standard error of programs it starts)
+  or in PHP output that nginx, `mod_fcgid` or `mod_proxy_fcgi` splits into several entries can create PHP events (record 0094);"
   keeping the line breaks of the surrounding paragraph as the editor likes.
-- `docs/decisions/0094-…md` — extended by the Lead in this step (options 17 to 22, *Decision*, *Consequences*).
+- `docs/decisions/0094-…md` — extended by the Lead in this step (options 17 to 23, *Decision*, *Consequences*).
 - No `README.md`, `docs/ARCHITECTURE.md` or configuration change: no option, no new component.
 
 ## Architecture check
@@ -331,19 +370,73 @@ not by a weaker mechanism for the existing signatures.
   entries — nginx (and `sw-cp-server`) keep PHP's line feeds (the forged lines of record 0092), `mod_fcgid` logs one
   entry per line, nginx and `mod_proxy_fcgi` log FastCGI stderr in read-buffer chunks — lets a client whose request data
   an application logs in a long or multi-line PHP message create `php_too_many_connections` or `php_disk_full`;
-  (2) a WebDAV `COPY` destination or an access log path with variables in a failed nginx write (needs the write to fail
-  with another error) reaches `nginx_disk_full`; (3) an Apache reverse-proxy module that copies `X-Forwarded-For`
-  unchecked into the client address would let that header supply the Apache prefix (`mod_remoteip` does not; Plesk's
-  module unverified). Mitigation considered and rejected: anchoring the end of the PHP message (the fields after it are
-  client text as well). Security reviews whether these residuals are acceptable for a classification that consumers
-  weigh by its record IDs.
+  (2) **a message whose head the application writes** is client text in one single line: `trigger_error($x)` logs
+  `PHP Warning:  <x>` / `PHP Notice:  <x>` without an origin, `error_log($x)` without an `error_log` file is written
+  verbatim (FPM `PHP message: <x>`, php-cgi and `mod_fcgid` `mod_fcgid: stderr: <x>`, the Apache module at `notice`),
+  and programs started from PHP or a CGI write into Apache's error log directly (raw records, whose message is the whole
+  line and needs only the prefix, no time stamp); an application that passes request data at the start of such a
+  message lets the client create a PHP event; (3) a WebDAV `COPY` destination or an access log path with variables in a
+  failed nginx write (needs the write to fail with another error) reaches `nginx_disk_full`; (4) an Apache reverse-proxy
+  module that copies `X-Forwarded-For` unchecked into the client address would let that header supply the Apache prefix
+  (`mod_remoteip` does not; Plesk's module unverified). Closed by this revision instead of documented: the params of a
+  PHP origin (`getimagesize(<path>)`, Security B1) — the 1040 pattern accepts only the mysqli connect origins; an Apache
+  line without a module name (Security N2) — not read. Mitigations considered and rejected: anchoring the end of the
+  PHP message (the fields after it are client text as well); telling `trigger_error`/`error_log` text from PHP-raised
+  text (the log line is byte-identical). So the anchor protects the signatures against client text in the **fields
+  the servers add** (request line, host, referrer, upstream, paths) and in PHP's own messages, not against an
+  application that logs client text as the start of a message: residuals (1) and (2) need such an application, (3) a
+  WebDAV or variable log path, (4) a misconfigured proxy module. The events are a classification that consumers weigh by
+  their record IDs; Security confirms whether this is acceptable.
 
 ## Decision records
 
 - `docs/decisions/0094-log-signatures-embedded-yaml-linear-patterns-on-stored-lines.md` — unreleased (no `v*` tag), so
-  extended in place: options 17 to 22, *Decision* (options 18, 19, 20 added; the five anchored signatures), *Consequences*
-  (what is read and not; the split-output residual), *Source* adds issue #203. Its index row is unchanged (title, status
+  extended in place: options 17 to 23, *Decision* (options 18, 19, 20, 23 added; the five anchored signatures), *Consequences*
+  (what is read and not; the residuals of split output and of application-written heads), *Source* adds issue #203. Its index row is unchanged (title, status
   `Accepted`).
+
+## Challenge
+
+- **Major 1 (the head of the first PHP message is not fixed by PHP; `trigger_error`, `error_log`)** — accepted. Checked
+  in php-src: `trigger_error` logs `PHP <type>:  <x>` without an origin, `error_log` without a file goes verbatim to the
+  SAPI log. The claim is corrected in the problem section, the guard table (row "fragment inside the text of a
+  PHP-raised message" and a new row for application-written heads), *Security considerations* (residual 2), the area
+  text, the `.squad/project.md` text and record 0094 (*Decision*: "in the fields the servers add and in PHP's own
+  messages"; *Consequences*: the residual). Tightening is not possible: a `trigger_error` or `error_log` line is
+  byte-identical to the PHP-raised one; the origin set of the 1040 warning is closed anyway (Security B1). Accepted
+  explicitly as a residual that needs an application which logs request data at the start of a message.
+- **Minor 1 (describe AC6 h correctly; a row for `trigger_error`/`error_log`)** — accepted for the wording (AC6 h and the
+  guard table now say "a fragment after a PHP-raised head", not proof that the head is fixed). The row is documented,
+  not tested: such a line is indistinguishable from an AC3/AC4 row, so a pin would duplicate a positive row without
+  adding a check (stated under AC10).
+- **Minor 2 (AC10: rows must still hold for the old signature; a new match must not fire an old one)** — accepted: AC10
+  now asks the Tester to confirm each row of the two adapted tests against the old signature, and states that AC3 to
+  AC5 use `AssertDetected` (exactly one event), so no old signature fires on a new line.
+
+## Security review
+
+- **B1 (origin params: `getimagesize(<client path>)` puts `): (HY000/1040): Too many connections` behind the origin)** —
+  resolved. Confirmed: `php_error_docref1` in `php_stream_display_wrapper_errors` (`main/streams/streams.c:217`) and the
+  origin format `"%s%s%s(%s)"` (`main/main.c:1026`). `php_too_many_connections` now accepts only
+  `(?:mysqli_connect|mysqli_real_connect|mysqli::(?:__construct|connect|real_connect|mysqli))\(\)` — the warning comes only
+  from `php_mysqli_throw_sql_exception` via `mysqli_common_connect`, with empty params. AC6 n, o, p add the injection
+  through `getimagesize()` (nginx), `include()` (`[php:warn]`) and `file_get_contents()` (`mod_proxy_fcgi`); AC8 adds
+  another origin (`mysqli_query()`). Re-check of the whole list of accepted forms for both PHP signatures: the four
+  prefixes (fixed text, digits, the address class), the PHP type word (fixed), the origin (closed set for 1040; for the
+  write error the open class `[^ \n()]+` with empty params, because the write error is raised by `php_error_docref` and
+  no E_NOTICE `php_error_docref1`/`2` exists in 7.4 and only exif's `EXIF_DEBUG` `Done` in 8.3 — recorded in the problem
+  section and the guard table; AC6 q pins that a `PHP Warning:` with the write text in its params gives nothing), the
+  error text (fixed). The forms left that a client can drive are residuals 1, 2, 3 and 4.
+- **B2 (application-written heads: `error_log`, `trigger_error`, inherited standard error; raw Apache lines need only the
+  prefix)** — resolved as a documented residual of its own (residual 2) in *Security considerations*, the guard table
+  (corrected row h; new rows for application-written heads and for Apache raw lines, separate from nginx's raw lines,
+  which need a forged time stamp), record 0094 *Consequences*, the Limitations text of the area document; the "one line"
+  claims are corrected in record 0094 *Decision* and in the planned `.squad/project.md` text.
+- **N1 (`PHP Request Shutdown` origin)** — accepted: `php_disk_full` accepts it as a fixed literal; AC4 row 7.
+- **N2 (`[:error]` without a module name)** — accepted by tightening instead of documenting: the Apache-module
+  alternative now requires `php[0-9]?`; AC3 row 8 uses `[php:error]`, and AC8 adds a `[:warn]` row that gives nothing.
+  PHP's Apache handler declares `APLOG_USE_MODULE` in 7.4 and 8.3, so only PHP versions older than the supported ones
+  lose detection.
 
 ## Out of scope / follow-ups
 

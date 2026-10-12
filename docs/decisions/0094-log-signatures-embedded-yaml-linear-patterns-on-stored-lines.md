@@ -131,16 +131,25 @@ these lines starts with the level (*Log import*, *Plesk and web server error log
 22. **The Plesk panel log** — Plesk's own PHP errors; but its format is not verified (record 0092) and its messages hold
     login names and request paths. Not read; the panel's FastCGI errors reach the `sw-cp-server` error log in nginx's
     format, which is read.
+23. **Any PHP origin before the error text** (`<function>(): `) — covers frameworks and future wrappers; but PHP prints
+    the origin as `function(<params>)`, and the stream functions put the path or URL the script passed into the params
+    (`getimagesize(<client text>): Failed to open stream`), so a client could supply `): (HY000/1040): Too many
+    connections` in one line. Rejected for the 1040 warning: only the functions that raise it (`mysqli_connect`,
+    `mysqli_real_connect`, `mysqli::__construct`, `mysqli::connect`, `mysqli::real_connect`, `mysqli::mysqli`) are read.
+    The write error keeps any origin without space or parenthesis: PHP raises it without params, and no notice of PHP
+    7.4 or 8.3 carries params (only exif's debug build). An Apache line without a module name is not read either, since
+    any module without a declared name logs that way.
 
 ## Decision
 
-Options 2, 6, 11, 13, 16, 18, 19 and 20: signatures are an embedded YAML catalog whose message patterns run on
+Options 2, 6, 11, 13, 16, 18, 19, 20 and 23: signatures are an embedded YAML catalog whose message patterns run on
 .NET's non-backtracking regular expression engine; a detector matches them on stored `log_line` records in capture
 order and returns events that list their record IDs, merging the copies of one event; nothing is stored and records
 are never changed. Every signature without a parser event is bound to the writers it names; one whose message can
 hold remote text (`disk_full`, `mariadb_too_many_connections`, `php_too_many_connections`, `php_disk_full`,
-`nginx_disk_full`) is also anchored with `\A` at their server-written text, so text a remote party puts into one line
-cannot trigger it. The rules are in [Detection, alerts and reports](../areas/detection-and-reports.md) (*Log
+`nginx_disk_full`) is also anchored with `\A` at their server-written text, so text a remote party puts into the fields
+a server adds or into PHP's own messages cannot trigger it; an application that logs request data at the start of a
+message, or output a writer splits, still can (*Consequences*). The rules are in [Detection, alerts and reports](../areas/detection-and-reports.md) (*Log
 signatures*).
 
 ## Consequences
@@ -167,8 +176,13 @@ signatures*).
   (forged lines, [0092](0092-error-logs-by-content-or-configured-path-unreadable-lines-kept-raw.md)), `mod_fcgid` logs every
   line of PHP's standard error as an entry of its own, and nginx and `mod_proxy_fcgi` log FastCGI standard error in
   pieces of their read buffer, each behind the server's prefix. An HTTP client that makes an application log request data
-  in a long or multi-line PHP message can so place the trigger text at the start of an entry and create a PHP event; the
-  same holds for a WebDAV `COPY` destination or a variable access log path in a failed nginx write, and for an Apache
+  in a long or multi-line PHP message can so place the trigger text at the start of an entry and create a PHP event.
+- The anchor also does not hold where the application writes the head of the message itself: `trigger_error` logs
+  `PHP Warning:  <text>` without an origin, `error_log` without a log file writes its text verbatim behind FPM's
+  `PHP message: `, `mod_fcgid` or PHP's Apache module, and programs started from PHP or a CGI write into Apache's error
+  log directly, as raw lines whose message is the whole line and needs only the prefix. Such a line is byte-identical to
+  one PHP raises, so an application that logs request data at the start of a message lets the client create a PHP
+  event. The same holds for a WebDAV `COPY` destination or a variable access log path in a failed nginx write, and for an Apache
   client address that a reverse-proxy module copies unchecked from a forwarded header (`mod_remoteip` stores a parsed
   address). This stays documented, not prevented: the events list their record IDs.
 - To revisit: storing events (option 3) once a consumer needs them faster than a scan, or operator-defined signatures
