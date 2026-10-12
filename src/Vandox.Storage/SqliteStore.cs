@@ -15,6 +15,17 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
     #region Constants
 
     private const int MaxReaders = 4;
+
+    /// <summary>
+    /// The operation named in the error of a record read.
+    /// </summary>
+    private const string RecordsContext = "store: reading records";
+
+    /// <summary>
+    /// The operation named in the error of a template read.
+    /// </summary>
+    private const string TemplatesContext = "store: reading templates";
+
     private const string CommonPragmas = "PRAGMA busy_timeout=5000; PRAGMA foreign_keys=1; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;";
 
     // The writer connection holds up to 16 MiB of pages (the default is 2 MiB), so a large transaction does not spill pages to the
@@ -87,9 +98,16 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
     /// <exception cref="StoreException">The database cannot be read</exception>
     public async Task PingAsync(CancellationToken cancellationToken)
     {
-        await using var lease = await LeaseReaderAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await using var lease = await LeaseReaderAsync(cancellationToken).ConfigureAwait(false);
 
-        await SchemaMigrator.ReadVersionAsync(lease.Connection, cancellationToken).ConfigureAwait(false);
+            await SchemaMigrator.ReadVersionAsync(lease.Connection, cancellationToken).ConfigureAwait(false);
+        }
+        catch (SqliteException exception)
+        {
+            throw ReaderQuery.Translate(exception, "store: reading schema version", cancellationToken);
+        }
     }
 
     /// <summary>
@@ -168,6 +186,35 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
         catch (SqliteException exception)
         {
             throw new StoreException($"store: rebuilding templates: {exception.Message}", exception);
+        }
+    }
+
+    /// <summary>
+    /// Opens a query-only reader connection, waiting for one of the <see cref="MaxReaders"/> slots.
+    /// </summary>
+    /// <param name="cancellationToken">Cancels the wait</param>
+    /// <returns>A task that returns the lease</returns>
+    internal async Task<ReaderLease> LeaseReaderAsync(CancellationToken cancellationToken)
+    {
+        await _readers.WaitAsync(cancellationToken).ConfigureAwait(false);
+
+        var connection = new SqliteConnection(ConnectionString(_path));
+
+        try
+        {
+            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+            await ExecuteAsync(connection, $"{CommonPragmas} PRAGMA query_only=1;", cancellationToken).ConfigureAwait(false);
+
+            ReaderQuery.Attach(connection, cancellationToken);
+
+            return new ReaderLease(connection, _readers);
+        }
+        catch
+        {
+            await connection.DisposeAsync().ConfigureAwait(false);
+            _readers.Release();
+
+            throw;
         }
     }
 
@@ -281,105 +328,26 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
     }
 
     /// <summary>
-    /// Opens a query-only reader connection, waiting for one of the <see cref="MaxReaders"/> slots.
-    /// </summary>
-    /// <param name="cancellationToken">Cancels the wait</param>
-    /// <returns>A task that returns the lease</returns>
-    private async Task<ReaderLease> LeaseReaderAsync(CancellationToken cancellationToken)
-    {
-        await _readers.WaitAsync(cancellationToken).ConfigureAwait(false);
-
-        var connection = new SqliteConnection(ConnectionString(_path));
-
-        try
-        {
-            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-            await ExecuteAsync(connection, $"{CommonPragmas} PRAGMA query_only=1;", cancellationToken).ConfigureAwait(false);
-
-            return new ReaderLease(connection, _readers);
-        }
-        catch
-        {
-            await connection.DisposeAsync().ConfigureAwait(false);
-            _readers.Release();
-
-            throw;
-        }
-    }
-
-    /// <summary>
     /// Runs a query on a reader connection and maps the rows.
-    /// </summary>
-    /// <param name="sql">The SQL</param>
-    /// <param name="parameters">The parameters</param>
-    /// <param name="cancellationToken">Cancels the query</param>
-    /// <returns>A task that returns the records</returns>
-    private async Task<IReadOnlyList<StoredRecord>> QueryAsync(string sql, Dictionary<string, object> parameters, CancellationToken cancellationToken)
-    {
-        try
-        {
-            await using var lease = await LeaseReaderAsync(cancellationToken).ConfigureAwait(false);
-            using var command = lease.Connection.CreateCommand();
-
-            command.CommandText = sql;
-
-            foreach (var (name, value) in parameters)
-            {
-                command.Parameters.AddWithValue(name, value);
-            }
-
-            using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
-            var records = new List<StoredRecord>();
-
-            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
-            {
-                records.Add(RecordQueries.Read(reader));
-            }
-
-            return records;
-        }
-        catch (SqliteException exception)
-        {
-            throw new StoreException($"store: reading records: {exception.Message}", exception);
-        }
-    }
-
-    /// <summary>
-    /// Runs a template query on a reader connection and maps the rows.
     /// </summary>
     /// <typeparam name="T">The type of the result rows</typeparam>
     /// <param name="sql">The SQL</param>
     /// <param name="parameters">The parameters</param>
     /// <param name="map">Maps the current row</param>
+    /// <param name="context">The operation named in an error message</param>
     /// <param name="cancellationToken">Cancels the query</param>
     /// <returns>A task that returns the rows</returns>
-    private async Task<IReadOnlyList<T>> QueryTemplatesAsync<T>(string sql, Dictionary<string, object> parameters, Func<SqliteDataReader, T> map, CancellationToken cancellationToken)
+    private async Task<IReadOnlyList<T>> QueryAsync<T>(string sql, Dictionary<string, object> parameters, Func<SqliteDataReader, T> map, string context, CancellationToken cancellationToken)
     {
         try
         {
             await using var lease = await LeaseReaderAsync(cancellationToken).ConfigureAwait(false);
-            using var command = lease.Connection.CreateCommand();
 
-            command.CommandText = sql;
-
-            foreach (var (name, value) in parameters)
-            {
-                command.Parameters.AddWithValue(name, value);
-            }
-
-            using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
-            var rows = new List<T>();
-
-            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
-            {
-                rows.Add(map(reader));
-            }
-
-            return rows;
+            return await ReaderQuery.ReadAsync(lease.Connection, sql, parameters, map, context, cancellationToken).ConfigureAwait(false);
         }
         catch (SqliteException exception)
         {
-            throw new StoreException($"store: reading templates: {exception.Message}", exception);
+            throw ReaderQuery.Translate(exception, context, cancellationToken);
         }
     }
 
@@ -392,7 +360,7 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
     /// <returns>A task that returns the template, or <c>null</c> when there is none</returns>
     private async Task<LogTemplate?> FindFirstAsync(string sql, Dictionary<string, object> parameters, CancellationToken cancellationToken)
     {
-        var rows = await QueryTemplatesAsync(sql, parameters, TemplateQueries.ReadTemplate, cancellationToken).ConfigureAwait(false);
+        var rows = await QueryAsync(sql, parameters, TemplateQueries.ReadTemplate, TemplatesContext, cancellationToken).ConfigureAwait(false);
 
         return rows.Count > 0 ? rows[0] : null;
     }
@@ -491,7 +459,7 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
 
         var (sql, parameters) = RecordQueries.Build(query);
 
-        return QueryAsync(sql, parameters, cancellationToken);
+        return QueryAsync(sql, parameters, RecordQueries.Read, RecordsContext, cancellationToken);
     }
 
     #endregion // IRecordReader
@@ -505,7 +473,7 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
 
         var (sql, parameters) = RecordQueries.Build(search);
 
-        return QueryAsync(sql, parameters, cancellationToken);
+        return QueryAsync(sql, parameters, RecordQueries.Read, RecordsContext, cancellationToken);
     }
 
     #endregion // ILogSearcher
@@ -531,7 +499,7 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
 
         var (sql, parameters) = TemplateQueries.Build(query);
 
-        return QueryTemplatesAsync(sql, parameters, TemplateQueries.ReadHour, cancellationToken);
+        return QueryAsync(sql, parameters, TemplateQueries.ReadHour, TemplatesContext, cancellationToken);
     }
 
     /// <inheritdoc />
@@ -541,7 +509,7 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
 
         var (sql, parameters) = TemplateQueries.Build(query);
 
-        return QueryTemplatesAsync(sql, parameters, TemplateQueries.ReadTemplate, cancellationToken);
+        return QueryAsync(sql, parameters, TemplateQueries.ReadTemplate, TemplatesContext, cancellationToken);
     }
 
     /// <inheritdoc />
@@ -551,7 +519,7 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
 
         var (sql, parameters) = TemplateQueries.Build(query);
 
-        return QueryTemplatesAsync(sql, parameters, TemplateQueries.ReadSpike, cancellationToken);
+        return QueryAsync(sql, parameters, TemplateQueries.ReadSpike, TemplatesContext, cancellationToken);
     }
 
     #endregion // ILogTemplateReader
@@ -592,32 +560,7 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
 
         var (sql, parameters) = IncidentRepository.Build(query);
 
-        try
-        {
-            await using var lease = await LeaseReaderAsync(cancellationToken).ConfigureAwait(false);
-            using var command = lease.Connection.CreateCommand();
-
-            command.CommandText = sql;
-
-            foreach (var (name, value) in parameters)
-            {
-                command.Parameters.AddWithValue(name, value);
-            }
-
-            using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
-            var rows = new List<StoredIncident>();
-
-            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
-            {
-                rows.Add(IncidentRepository.Read(reader));
-            }
-
-            return rows;
-        }
-        catch (SqliteException exception)
-        {
-            throw new StoreException($"store: reading incidents: {exception.Message}", exception);
-        }
+        return await QueryAsync(sql, parameters, IncidentRepository.Read, "store: reading incidents", cancellationToken).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
@@ -634,7 +577,7 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
         }
         catch (SqliteException exception)
         {
-            throw new StoreException($"store: reading incidents: {exception.Message}", exception);
+            throw ReaderQuery.Translate(exception, "store: reading incidents", cancellationToken);
         }
     }
 
@@ -676,7 +619,7 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
         }
         catch (SqliteException exception)
         {
-            throw new StoreException($"store: finding import bases: {exception.Message}", exception);
+            throw ReaderQuery.Translate(exception, "store: finding import bases", cancellationToken);
         }
     }
 

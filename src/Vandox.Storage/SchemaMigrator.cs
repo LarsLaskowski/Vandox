@@ -196,7 +196,7 @@ internal static class SchemaMigrator
         }
         catch (SqliteException exception)
         {
-            throw new StoreException("store: reading schema version: " + exception.Message, exception);
+            throw ReaderQuery.Translate(exception, "store: reading schema version", cancellationToken);
         }
     }
 

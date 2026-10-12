@@ -21,6 +21,13 @@ readable by the next, whichever language implements it, so the schema below is p
   applies instead of a failure in the middle of a transaction), and up to four **query-only reader connections**. Readers never wait
   for the writer. The busy timeout is 5 seconds; it matters only against another process that opens the same file, such as
   `vandoxd import` or a backup. The writer has a page cache of up to 16 MiB; readers keep the default.
+- A **cancelled token or a passed deadline interrupts a running reader statement.** Every reader connection gets a SQLite progress
+  handler bound to the token of its call, checked every 1,000 virtual-machine instructions, so it also stops the work SQLite does
+  before the first row (a sort, an aggregate, the `MATCH` of a search). The call then ends with `OperationCanceledException` carrying
+  that token and no partial result; every other SQLite error stays a `StoreException` with the message of its operation. A token
+  that cannot be cancelled installs no handler. Work inside one instruction (for example one call into the FTS5 module) finishes
+  before the next check, and the bound applies while the statement runs, not while it waits for a lock. The writer connection is never
+  interrupted: a batch, an incident save, an import step and a migration run to their commit or rollback.
 - Two processes may open the database at once.
 
 ## Schema
@@ -139,8 +146,8 @@ Indexes: a unique index on `records(agent_id, seq)` for origin `agent`; `records
   of the record query, and counted; a `data` value that does not decode is `store: reading incidents: decoding incident data`.
 - The template statistics are read by the queries of *Log templates* in [Detection, alerts and reports](detection-and-reports.md)
   (template of a line, hourly counts, new templates, templates above their usual level), with the same time range and limit rules,
-  on a reader connection. The cost of the usual-level query is not bounded by its range or limit, and a cancellation token does not
-  interrupt a running statement (*Limits of templates* there).
+  on a reader connection. The cost of the usual-level query is not bounded by its range or limit; a cancelled token or deadline interrupts it
+  (*Database file and connections*; *Limits of templates* there).
 - Callers depend on small interfaces (record writer, record reader, log searcher, log template reader, incident store, import tracker). The real store is tested against
   real files; a consumer whose behavior depends on the store's semantics (such as "a resent batch is stored once") is tested against
   the real store. Fakes for other consumers only record calls and return what the test scripts.
@@ -159,8 +166,8 @@ A search takes literal terms only; the text is never passed to FTS5 as a query.
   refused although the tokenizer would index it.
 - A violated rule is an error that names the rule and never contains the search text.
 - The cost of a search is not bounded by the time range or the limit: SQLite runs the `MATCH` over the whole retention first and filters
-  by time and source afterwards. The bound is time: the search honors its cancellation token, so every caller that serves a user must
-  pass a deadline.
+  by time and source afterwards. The bound is time: a cancelled token or a passed deadline interrupts the
+  running search (*Database file and connections*), so every caller that serves a user must pass a deadline.
 
 ## Retention (planned)
 
@@ -186,6 +193,7 @@ weakened silently, and `synchronous=FULL` stays unless the Product Manager decid
 - [0083](../decisions/0083-storage-write-criterion-is-the-median-of-five-batches-on-the-data-volume.md) — why the writer was made cheaper and why the criterion is the median of five batches.
 - [0095](../decisions/0095-log-templates-token-rules-statistics-in-the-write-path-usual-level-from-covered-hours.md) — why the write path keeps the template statistics in the batch's transaction.
 - [0096](../decisions/0096-outage-incidents-rebuilt-from-stored-data-merged-by-overlapping-windows.md) — why incidents are matched by overlapping windows, kept per number and saved one transaction each, and why the record query pages by ID.
+- [0097](../decisions/0097-reader-statements-interrupted-by-a-progress-handler-bound-to-the-token.md) — why a progress handler interrupts reader statements and why the interruption is an `OperationCanceledException`.
 
 ## Not here
 
@@ -195,4 +203,4 @@ weakened silently, and `synchronous=FULL` stays unless the Product Manager decid
 
 ## Implementation
 
-`Vandox.Storage` (`SqliteStore`, `SchemaMigrator`, `BatchWriter`, `BatchValidator`, `FtsQuery`, `TemplateTally`, `TemplateRebuilder`, `TemplateQueries`, `IncidentRepository`, `StorageLimits`).
+`Vandox.Storage` (`SqliteStore`, `SchemaMigrator`, `BatchWriter`, `BatchValidator`, `FtsQuery`, `TemplateTally`, `TemplateRebuilder`, `TemplateQueries`, `IncidentRepository`, `ReaderQuery`, `StorageLimits`).

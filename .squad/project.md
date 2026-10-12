@@ -129,8 +129,10 @@ files or endpoints.
     characters (Cf, e.g. U+202E, U+200B) are kept, and the normalizer is a grouping, not a guard. The template queries (`TemplateQueries`,
     `ILogTemplateReader`) bind every value as a parameter, bound the range (the usual-level query at most 744 hours), the limit (1 to 10,000)
     and the baseline (at most 2,160 hours), and refuse a *find* message of more than 16 KiB; the work of the usual-level query is **not** bounded by
-    range or limit (it evaluates every template hour of the range that reaches the minimum count) and a deadline does not interrupt a running
-    statement, so a caller that serves a user must not rely on a deadline alone (record 0095). The backend options `incidents.window_before` and
+    range or limit (it evaluates every template hour of the range that reaches the minimum count); a cancelled token or
+    deadline interrupts a running reader statement (`ReaderQuery`: a progress handler on every reader connection, checked every
+    1,000 instructions), which then ends with `OperationCanceledException`, so a caller that serves a user bounds it with a deadline
+    (records 0095, 0097). The backend options `incidents.window_before` and
     `incidents.window_after` (`BackendConfigLoader`, `ConfigDuration`) accept exactly one to four ASCII digits and `m` or `h` by an ordinal scan (no parsing API, no culture, sign,
     white space, other digit script or second unit), within 1 minute to 24 hours, the value never shown in an error. The incident reconstruction (`vandoxd incidents`)
     reads stored external text, including forged lines, under bounds it must keep: `KillClusterer` keeps 16 kills per incident and ignores a kill at the last storable
@@ -140,7 +142,7 @@ files or endpoints.
     lead past the previous one; `RecordQueries.ReadJson` reads the payload as UTF-8 bytes so that one forged maximum process snapshot peaks near 240 MiB; `IncidentRepository` refuses an
     incident of more than 8 MiB of serialized JSON (`InvalidIncidentException`), which the reconstructor skips and counts. `vandoxd templates` (`SqliteStore.RebuildTemplatesAsync`, `TemplateRebuilder`) reads stored log lines in batches of 10,000 by record ID up to the high-water ID fixed when the tables are emptied, one transaction each, with the write path's normalizer and tally, so a batch's tally holds at most `batchLines` keys of source (at most 128 UTF-8 bytes), program (at most 1,024) and template (at most 1,024), plus as many source hours, each with its own source string (about 46 MB of UTF-16 strings at 10,000, plus dictionary overhead), and reads one message (at most 16 KiB) at a time; every counting transaction checks the run marker in `meta`, so a run superseded by a later one counts nothing more and fails; the transaction that empties the tables grows with the statistics. Forged kill lines make forged incidents
     (a documented limitation, record 0096). Records 0048, 0049, 0066, 0069, 0076, 0078, 0079, 0084,
-    0085, 0086, 0088, 0091, 0092, 0093, 0094, 0095, 0096.
+    0085, 0086, 0088, 0091, 0092, 0093, 0094, 0095, 0096, 0097.
 11. **Outbound calls** (Telegram, external checks, the optional AI service of the nightly report, the
     agent's connection to the backend): *Goal:* every call has a timeout, goes only to its configured
     destination and leaves encrypted to a verified peer. The agent's only destination is the ingest port,
