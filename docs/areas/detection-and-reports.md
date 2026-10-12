@@ -397,9 +397,9 @@ level of the mail services (process state, ports, logs), never individual mail a
 
 `Vandox.Core.Signatures` (`BuiltInSignatures`, `SignatureCatalog`, `SignatureCatalogReader`, `Signature`, `SignatureField`,
 `SignatureFieldType`, `SignatureException`, `SignatureDetector`, `DetectedEvent`, `OpenEvent`, `SignatureKey`, `FieldValue`,
-`NumberGuard`, and the catalog `signatures.yaml` embedded in the assembly). Template rebuild: `Vandox.Storage` (`TemplateRebuilder`, `SqliteStore.RebuildTemplatesAsync`).
+`NumberGuard`, and the catalog `signatures.yaml` embedded in the assembly).
 `Vandox.Core.Templates` (`LogTemplateNormalizer`) for the normalization; `Vandox.Storage` (`BatchWriter`, `TemplateTally`,
-`TemplateQueries`, `SqliteStore` as `ILogTemplateReader`) for the statistics and the queries.
+`TemplateQueries`, `SqliteStore` as `ILogTemplateReader`) for the statistics and the queries; `Vandox.Storage` (`TemplateRebuilder`, `SqliteStore.RebuildTemplatesAsync`) for the template rebuild.
 `Vandox.Core.Incidents` (`Incident` and its parts, `KillClusterer`, `KillCluster`, `IncidentBuilder`, `MemoryAnalysis`,
 `BackupPrograms`, `IncidentSignatures`, `IncidentLimits`, `IncidentJson`); `Vandox.Storage` (`IIncidentStore`, `IncidentRepository`,
 `SqliteStore`); `Vandox.Backend` (`Incidents/IncidentReconstructor`, `Cli/IncidentsCommand`, `Cli/IncidentSummaryWriter`).
