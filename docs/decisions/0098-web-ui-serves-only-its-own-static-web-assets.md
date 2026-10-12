@@ -39,7 +39,9 @@ How uPlot gets into the application (no Node build, no CDN):
 
 1. **The ES module build `dist/uPlot.esm.js`, `dist/uPlot.min.css` and `LICENSE` of the uPlot release tag 1.6.32, vendored under
    `wwwroot/lib/uplot/` and pinned by SHA-256 in a test** (chosen) — loaded only by the chart module when a page shows a chart; its
-   1.6.32 source sets styles only through the CSSOM and writes no HTML, so it runs under the policy of 0099.
+   1.6.32 source sets styles only through the CSSOM, writes no HTML and loads nothing: its 12 URLs all stand in comments, none
+   outside them, so it runs under the policy of 0099. It is not run through the source scanner of the own scripts (its comments
+   would fail the URL rule); reading it and the hash pin take that place.
 2. **The minified IIFE build as a global script on every page** — smaller file, but loaded on pages without charts and a global.
 3. **LibMan or a package restore at build time** — fetches from a CDN during the build; no official NuGet package exists.
 
@@ -64,7 +66,10 @@ area.
 
 - A new brand file is added in `docs/assets/` first and copied byte for byte; a changed logo changes both, or the test fails.
 - uPlot is updated by hand: a new release's three files and their hashes in the test change together, after reading the new source for
-  inline styles, HTML writes and external URLs. Dependabot does not track it.
+  inline styles, HTML writes (the sinks the own scripts may not use, listed in the Web UI area), dynamic code and URLs outside
+  comments. Dependabot does not track it.
+- Assets are linked by their plain names, not by the fingerprinted URLs `MapStaticAssets` also offers, so the source checks see fixed
+  local paths; the browser revalidates them instead of caching them for good.
 - The vendored files are excluded from the CI code analysis; the own scripts and style sheets are analyzed there (no local analyzer).
 - The chart module is first used in a browser by the views of #48 and #49; the foundation tests its C# side with test doubles.
 - The favicon is the SVG of 0051 only; a browser without SVG favicon support shows none, as no raster favicon exists.
