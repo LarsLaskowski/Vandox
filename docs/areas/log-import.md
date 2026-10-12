@@ -175,7 +175,7 @@ A parser turns the lines of one file into records. The importer and every parser
   reason, with the line number). The line is stored, not skipped; the importer counts such lines per file and keeps the
   first ten reasons, with line numbers counted in the whole file as for skipped lines. Only the parsers of *Plesk and
   web server error logs* keep raw lines; the others skip what they cannot read.
-- The importer validates every record; a refused record is counted as skipped, so a parser bug cannot fail a whole
+- The importer validates every record, including the size of a JSON payload (at most 16,777,216 bytes of JSON, *Bounds* of the legacy monitoring log; metric points and log lines are not checked); a refused record is counted as skipped, so a parser bug cannot fail a whole
   batch. Stored source type: a changed detection of a resumed content fails the file, a changed parser version is
   not noticed.
 - Lines are read with a bounded line reader: lines without the line ending, cut at 16 KiB at a UTF-8 boundary with a
@@ -628,8 +628,7 @@ warning. The parser reports every other raw line with a warning and one of the f
 line", "not an nginx error log line" (also for `sw-cp-server-error`), "not an Apache error log line", "invalid date" and
 "time outside the storable range", and then emits its record. The parser's checks keep a raw record's time and message
 within the rules the importer applies to a record; should the importer refuse a raw record for another rule, its line
-appears among the skipped lines ("record refused: …"; besides the model rules this includes a payload of more than 16,777,216 bytes
-of JSON, *Bounds* of the legacy monitoring log) as well as in the count of lines kept raw, because the warning
+appears among the skipped lines ("record refused: …") as well as in the count of lines kept raw, because the warning
 comes first, and nothing of it is stored. An empty line is skipped as "empty line", with the 1-based line number. Raw lines occur in normal logs: nginx copies the standard
 error of a FastCGI application unescaped, so a PHP message with line feeds continues on lines without a time stamp, and
 Apache writes startup messages and the standard error of child processes without one. A file of an unknown format at a

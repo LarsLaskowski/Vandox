@@ -1,3 +1,5 @@
+using System.Globalization;
+
 using Vandox.Core.Model;
 
 namespace Vandox.Storage;
@@ -8,14 +10,14 @@ namespace Vandox.Storage;
 /// </summary>
 public static class RecordRules
 {
-    #region Constants
+    #region Fields
 
     /// <summary>
     /// The text of the refusal of a payload above <see cref="StorageLimits.MaxPayloadBytes"/>.
     /// </summary>
-    internal const string TooLargeMessage = "data is larger than 16777216 bytes as JSON";
+    internal static readonly string TooLargeMessage = $"data is larger than {StorageLimits.MaxPayloadBytes.ToString(CultureInfo.InvariantCulture)} bytes as JSON";
 
-    #endregion // Constants
+    #endregion // Fields
 
     #region Methods
 
