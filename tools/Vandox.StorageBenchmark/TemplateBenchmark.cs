@@ -22,6 +22,9 @@ internal static class TemplateBenchmark
 
     private const int ShapeCount = 24;
     private const int HostileLimit = 100000;
+    private const int NormalKind = 0;
+    private const int HostileKind = 1;
+    private const int ConcentratedKind = 2;
     private const int QueryLimit = 10000;
     private const long SecondsInThirtyDays = 30L * 24 * 3600;
     private const double ReferenceCriterionMinutes = 10;
@@ -147,7 +150,7 @@ internal static class TemplateBenchmark
 
             Directory.CreateDirectory(main);
 
-            var written = await WriteAsync(main, lines, size, false, cancellationToken).ConfigureAwait(false);
+            var written = await WriteAsync(main, lines, size, NormalKind, cancellationToken).ConfigureAwait(false);
 
             await QueryAsync(main, lines, cancellationToken).ConfigureAwait(false);
 
@@ -167,8 +170,16 @@ internal static class TemplateBenchmark
 
             Directory.CreateDirectory(hostile);
             Print($"hostile case: {hostileLines} lines whose messages hold no digit and differ per line (one template per line, three upserts each)");
-            await WriteAsync(hostile, hostileLines, size, true, cancellationToken).ConfigureAwait(false);
+            await WriteAsync(hostile, hostileLines, size, HostileKind, cancellationToken).ConfigureAwait(false);
             await QueryAsync(hostile, hostileLines, cancellationToken, true).ConfigureAwait(false);
+
+            var concentrated = Path.Combine(work, "concentrated");
+            var concentratedLines = hostileLines + StorageLimits.MaxBaselineHours;
+
+            Directory.CreateDirectory(concentrated);
+            Print($"concentrated case: {hostileLines} digitless lines that differ per line, all of one source in one hour, after {StorageLimits.MaxBaselineHours} hourly heartbeat lines of that source (one hour holds {hostileLines} candidates with a baseline of {StorageLimits.MaxBaselineHours} covered hours)");
+            await WriteAsync(concentrated, concentratedLines, size, ConcentratedKind, cancellationToken).ConfigureAwait(false);
+            await QueryAsync(concentrated, concentratedLines, cancellationToken, true, _start.AddHours(StorageLimits.MaxBaselineHours)).ConfigureAwait(false);
         }
         finally
         {
@@ -228,10 +239,10 @@ internal static class TemplateBenchmark
     /// <param name="folder">The folder of the database</param>
     /// <param name="lines">The number of lines</param>
     /// <param name="size">The number of lines per batch</param>
-    /// <param name="hostile">Whether the lines are the hostile ones</param>
+    /// <param name="kind">The kind of lines: normal, hostile or concentrated</param>
     /// <param name="cancellationToken">Cancels the write</param>
     /// <returns>The total write time</returns>
-    private static async Task<TimeSpan> WriteAsync(string folder, int lines, int size, bool hostile, CancellationToken cancellationToken)
+    private static async Task<TimeSpan> WriteAsync(string folder, int lines, int size, int kind, CancellationToken cancellationToken)
     {
         var times = new List<double>();
         var total = Stopwatch.StartNew();
@@ -240,7 +251,7 @@ internal static class TemplateBenchmark
         {
             for (var first = 0; first < lines; first += size)
             {
-                var batch = Build(first, Math.Min(size, lines - first), lines, hostile);
+                var batch = Build(first, Math.Min(size, lines - first), lines, kind);
                 var watch = Stopwatch.StartNew();
 
                 await store.WriteBatchAsync(batch, cancellationToken).ConfigureAwait(false);
@@ -265,12 +276,13 @@ internal static class TemplateBenchmark
     /// <param name="lines">The number of lines that were written</param>
     /// <param name="cancellationToken">Cancels the queries</param>
     /// <param name="hostile">Whether the database holds the hostile lines, for which only the widest query is timed</param>
+    /// <param name="rangeEnd">The end of the 30 days, when the lines end elsewhere</param>
     /// <returns>A task that completes when the figures are printed</returns>
-    private static async Task QueryAsync(string folder, int lines, CancellationToken cancellationToken, bool hostile = false)
+    private static async Task QueryAsync(string folder, int lines, CancellationToken cancellationToken, bool hostile = false, DateTimeOffset? rangeEnd = null)
     {
         await using var store = await SqliteStore.OpenAsync(folder, cancellationToken).ConfigureAwait(false);
 
-        var end = _start.AddSeconds(SecondsInThirtyDays);
+        var end = rangeEnd ?? _start.AddSeconds(SecondsInThirtyDays);
         var to = end.AddHours(1);
         var from = to.AddHours(-RangeHours);
 
@@ -389,22 +401,22 @@ internal static class TemplateBenchmark
     /// <param name="first">The index of the first line</param>
     /// <param name="count">The number of lines</param>
     /// <param name="lines">The number of lines of the whole run</param>
-    /// <param name="hostile">Whether the lines are the hostile ones</param>
+    /// <param name="kind">The kind of lines: normal, hostile or concentrated</param>
     /// <returns>The batch</returns>
-    private static RecordBatch Build(int first, int count, int lines, bool hostile)
+    private static RecordBatch Build(int first, int count, int lines, int kind)
     {
         var records = new DataRecord[count];
 
         for (var offset = 0; offset < count; offset++)
         {
             var index = first + offset;
-            var line = hostile ? Hostile(index) : Line(index, lines);
+            var (line, capturedAt) = Generate(index, lines, kind);
 
             records[offset] = new DataRecord
                               {
                                   Origin = RecordOrigin.Import,
                                   Source = line.Source,
-                                  CapturedAt = _start.AddTicks(index * SecondsInThirtyDays / lines * TimeSpan.TicksPerSecond),
+                                  CapturedAt = capturedAt,
                                   Data = new LogLine
                                          {
                                              Log = line.Source,
@@ -420,6 +432,28 @@ internal static class TemplateBenchmark
                    ReceivedAt = _start.AddDays(31),
                    Records = records
                };
+    }
+
+    /// <summary>
+    /// Generates a line and its capture time.
+    /// </summary>
+    /// <param name="index">The index of the line</param>
+    /// <param name="lines">The number of lines</param>
+    /// <param name="kind">The kind of lines: normal, hostile or concentrated</param>
+    /// <returns>The line and its capture time</returns>
+    private static ((string Source, string Program, string Message) Line, DateTimeOffset CapturedAt) Generate(int index, int lines, int kind)
+    {
+        var spread = _start.AddTicks(index * SecondsInThirtyDays / lines * TimeSpan.TicksPerSecond);
+
+        if (kind == ConcentratedKind)
+        {
+            // One heartbeat per hour makes the baseline hours of the source covered; all other lines fall into the hour after them.
+            return index < StorageLimits.MaxBaselineHours
+                       ? (("nginx", "nginx", "heartbeat"), _start.AddHours(index))
+                       : (Hostile(index - StorageLimits.MaxBaselineHours), _start.AddHours(StorageLimits.MaxBaselineHours).AddMinutes(5));
+        }
+
+        return kind == HostileKind ? (Hostile(index), spread) : (Line(index, lines), spread);
     }
 
     /// <summary>

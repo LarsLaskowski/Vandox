@@ -82,8 +82,10 @@ How the cost of the usual-level query is held:
 
 13. **Covered hours counted once per source and hour, the cost stated and measured** (chosen) — the work grows with the
     template hours of the range that reach the minimum count, which neither the range nor the limit bounds, and text
-    without digits that varies per line makes one template per line. Counting the covered hours per source and hour
-    instead of per candidate removes the part that repeats; the rest is measured at the default and the widest parameters
+    without digits that varies per line makes one template per line. The covered hours are computed per source and hour
+    instead of per candidate, which needs the statement to materialize them (`AS MATERIALIZED`; SQLite would otherwise
+    flatten the common table expressions and run the count per candidate); the baseline sum is still read once per
+    candidate. The rest is measured at the default and the widest parameters
     and on such hostile text, and documented, because nothing calls the query yet.
 14. **A cap on the candidates** — bounds the work; but a cap that cuts silently drops spikes and turns unknown into
     quiet, and a cap that refuses the query fails exactly when a flood happens, the moment its spikes matter. With no
@@ -98,8 +100,8 @@ Options 1, 4, 7, 9 and 13: a hand-written normalizer turns every message into a 
 storage write path counts every stored log line under its source, program and template, first and last capture time
 and per UTC hour, in the transaction of its batch; a template is new when it was first seen in the range and its source
 has earlier lines, and an hour exceeds the usual level when its count reaches the minimum and is more than the factor
-times the template's mean over the covered hours of the baseline window; the covered hours are counted once per
-source and hour, and the query's cost is stated, not capped. The rules, defaults and limits are in
+times the template's mean over the covered hours of the baseline window; the covered hours are computed (materialized) once per
+source and hour, the baseline sum once per candidate, and the query's cost is stated, not capped. The rules, defaults and limits are in
 [Detection, alerts and reports](../areas/detection-and-reports.md) (*Log templates*) and the tables in
 [Storage](../areas/storage.md).
 

@@ -206,7 +206,7 @@ Every query except the template of a line takes a time range `from` to `to` (bot
   optionally of one source, ordered by first-seen time, then by identity. A template of a source without earlier lines is not new but
   unknown, and is not returned: the first import of a source makes nothing "new".
 - **Templates above their usual level:** for every template and hour that starts in the range (at most **744 hours**, 31 days,
-  from `from` to `to`), optionally of one source:
+  from `from` to `to`; the first hour is the one that holds `from`, so the hours counted can reach 745), optionally of one source:
   - the **baseline window** is the `baseline hours` before the hour (default **168**, one week; 1 to 2,160), clipped to the storable
     range; the hour itself is not part of it;
   - the **covered hours** are the hours of the window that are covered for the template's source; the template's **usual level** is its
@@ -245,7 +245,7 @@ covered hours than the minimum no usual level is known and nothing is reported.
   in `docs/BENCHMARKS.md`.
 - The **cost of the usual-level query is not bounded by its range or its limit.** It evaluates every template hour of the range whose
   count reaches the minimum count, all of them before the limit applies, and reads per such hour up to `baseline hours` counts of the
-  template; the covered hours are counted once per source and hour. Text without digits that varies per line makes one template per
+  template; the covered hours are computed once per source and hour (the statement materializes them), the baseline sum once per such hour. Text without digits that varies per line makes one template per
   line, so ten copies of such a line in an hour make a candidate at the default minimum count. A deadline or cancellation does **not**
   stop a running query (the SQLite library used does not interrupt a statement): a caller that serves a user must not rely on a
   deadline alone, but narrows the range and the source and runs the query off the request path. The measured times at the default and

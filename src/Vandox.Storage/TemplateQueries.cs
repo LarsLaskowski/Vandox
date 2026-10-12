@@ -21,7 +21,9 @@ internal static class TemplateQueries
     private const long NanosecondsPerHour = 3_600_000_000_000;
 
     // The candidates are the template hours of the range that reach the minimum count. The window start and the covered hours
-    // are computed once per distinct (source, hour) of the candidates, never per candidate (record 0095); every value is bound.
+    // are computed once per distinct (source, hour) of the candidates: SQLite would flatten a plain CTE into the join and run the
+    // covered-hours subquery per candidate, so `covered` and `scored` are MATERIALIZED (record 0095). The baseline sum is read once
+    // per candidate, by primary key. Every value is bound.
     private const string SpikeSql = """
                                     WITH candidates AS (
                                       SELECT h.template_id, h.hour, h.count, t.source
@@ -31,12 +33,12 @@ internal static class TemplateQueries
                                       SELECT source, hour,
                                              CASE WHEN hour < $minTime + $baselineNs THEN $minTime ELSE hour - $baselineNs END AS window_start
                                       FROM (SELECT DISTINCT source, hour FROM candidates)),
-                                    covered AS (
+                                    covered AS MATERIALIZED (
                                       SELECT w.source, w.hour, w.window_start,
                                              (SELECT count(*) FROM log_source_hours s
                                               WHERE s.source = w.source AND s.hour >= w.window_start AND s.hour < w.hour) AS covered_hours
                                       FROM windows w),
-                                    scored AS (
+                                    scored AS MATERIALIZED (
                                       SELECT c.template_id, c.hour, c.count, v.covered_hours,
                                              (SELECT coalesce(sum(b.count), 0) FROM log_template_hours b
                                               WHERE b.template_id = c.template_id AND b.hour >= v.window_start AND b.hour < c.hour) AS baseline_sum
