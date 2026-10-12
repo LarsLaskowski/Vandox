@@ -2,14 +2,21 @@ using Vandox.Core.Model;
 
 namespace Vandox.Storage;
 
-#pragma warning disable RH2003, S2325
-
 /// <summary>
 /// The rules a record must satisfy to be stored, on top of the model rules: the storable time range and the
 /// sequence number range.
 /// </summary>
 public static class RecordRules
 {
+    #region Constants
+
+    /// <summary>
+    /// The text of the refusal of a payload above <see cref="StorageLimits.MaxPayloadBytes"/>.
+    /// </summary>
+    internal const string TooLargeMessage = "data is larger than 16777216 bytes as JSON";
+
+    #endregion // Constants
+
     #region Methods
 
     /// <summary>
@@ -70,7 +77,12 @@ public static class RecordRules
     /// <returns>The broken rule, or <c>null</c></returns>
     public static string? CheckPayloadSize(DataRecord record)
     {
-        throw new NotImplementedException();
+        if (record.Data is null or MetricPoint or LogLine)
+        {
+            return null;
+        }
+
+        return PayloadJson.Fits(record.Data, StorageLimits.MaxPayloadBytes) ? null : TooLargeMessage;
     }
 
     #endregion // Methods

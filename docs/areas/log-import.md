@@ -628,7 +628,8 @@ warning. The parser reports every other raw line with a warning and one of the f
 line", "not an nginx error log line" (also for `sw-cp-server-error`), "not an Apache error log line", "invalid date" and
 "time outside the storable range", and then emits its record. The parser's checks keep a raw record's time and message
 within the rules the importer applies to a record; should the importer refuse a raw record for another rule, its line
-appears among the skipped lines ("record refused: …") as well as in the count of lines kept raw, because the warning
+appears among the skipped lines ("record refused: …"; besides the model rules this includes a payload of more than 16,777,216 bytes
+of JSON, *Bounds* of the legacy monitoring log) as well as in the count of lines kept raw, because the warning
 comes first, and nothing of it is stored. An empty line is skipped as "empty line", with the 1-based line number. Raw lines occur in normal logs: nginx copies the standard
 error of a FastCGI application unescaped, so a PHP message with line feeds continues on lines without a time stamp, and
 Apache writes startup messages and the standard error of child processes without one. A file of an unknown format at a
@@ -788,6 +789,9 @@ section 128 `meminfo`, 16 `pressure` and 64 `vmstat` lines ("too many lines in a
 skips held back are the row skips of a top part not yet accepted (at most 4,097); every section skip is reported at once. Memory does not
 grow with the number of snapshots or the number of lines in a snapshot; the worst case is a constant of about 40 MiB for one snapshot (4,096
 rows with a 2,048-byte command line and a 1,024-byte command, and 4,096 socket keys and commands, counted in UTF-16), plus one line.
+A process or connection snapshot whose stored JSON would be larger than 16,777,216 bytes (`StorageLimits.MaxPayloadBytes`; possible
+only for forged text, because these caps allow about 105 MB of escaped JSON, while a legitimate snapshot stays far below) is skipped
+with `record refused: data is larger than 16777216 bytes as JSON` and not stored; the file goes on with the next record.
 
 **Errors.** The parse never throws for input. It throws `InvalidOperationException` for the time zone (above), `OperationCanceledException` on
 cancellation and what the emitter throws; the open snapshot is not finished then, so the records emitted are a prefix of those of a complete

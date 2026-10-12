@@ -1,8 +1,8 @@
+using System.Text.Json;
+
 using Vandox.Core.Model;
 
 namespace Vandox.Storage;
-
-#pragma warning disable RH2003, S2325
 
 /// <summary>
 /// Serializes a payload to UTF-8 JSON in a bounded buffer.
@@ -19,7 +19,9 @@ internal static class PayloadJson
     /// <returns>The JSON, or <c>null</c> when it is longer than <paramref name="maxBytes"/></returns>
     internal static byte[]? Serialize(IPayload payload, int maxBytes)
     {
-        throw new NotImplementedException();
+        var buffer = Write(payload, maxBytes);
+
+        return buffer.Exceeded ? null : buffer.WrittenSpan.ToArray();
     }
 
     /// <summary>
@@ -30,7 +32,37 @@ internal static class PayloadJson
     /// <returns><c>true</c> when the JSON fits</returns>
     internal static bool Fits(IPayload payload, int maxBytes)
     {
-        throw new NotImplementedException();
+        if (Write(payload, maxBytes).Exceeded)
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Writes a payload into a bounded buffer with the writer options that match <see cref="PayloadRegistry.Options"/>.
+    /// </summary>
+    /// <param name="payload">The payload</param>
+    /// <param name="maxBytes">The most bytes kept</param>
+    /// <returns>The buffer</returns>
+    private static BoundedBufferWriter Write(IPayload payload, int maxBytes)
+    {
+        var options = PayloadRegistry.Options;
+        var buffer = new BoundedBufferWriter(maxBytes);
+        var writerOptions = new JsonWriterOptions
+                            {
+                                Encoder = options.Encoder,
+                                Indented = options.WriteIndented,
+                                MaxDepth = options.MaxDepth
+                            };
+
+        using var writer = new Utf8JsonWriter(buffer, writerOptions);
+
+        JsonSerializer.Serialize(writer, payload, payload.GetType(), options);
+        writer.Flush();
+
+        return buffer;
     }
 
     #endregion // Methods
