@@ -1,7 +1,7 @@
 # Plan: Web UI foundation
 
 Source: Issue #24 | [spec.md](spec.md)
-Status: Draft
+Status: Approved by Security
 Tier: security — the change adds a third-party browser library (uPlot, vendored), sets the security headers that back up security
 area 12 (display of external data in the web UI), and edits CI configuration (`.github/workflows/ci.yml`) and the image smoke script
 (security area 13).

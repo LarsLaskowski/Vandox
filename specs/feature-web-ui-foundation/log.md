@@ -24,3 +24,4 @@ are quoted in full.
 | 2026-10-12 22:46 | 8 Fix round 2 tests | Tester | ChartInteropQueuedRenderBeforeDisposeCompletesWithoutException added; fails on current code |
 | 2026-10-12 22:53 | 8 Fix round 2 | Dev | Queued render returns inside gate after disposal; gates green (format, analyzer, tests 267 backend, coverage 100%/98.0%, scope) (sonnet/medium · 1,318 tokens · 2 tool uses · 47 s · continued) |
 | 2026-10-12 22:53 | 8 Review round 3 | Reviewer | APPROVE at 3507df4; no new findings (opus/medium · 2,703 tokens · 2 tool uses · 9 s · continued) |
+| 2026-10-12 22:54 | 9 PR approval | Lead | APPROVED; both Dev deviations accepted (MapStaticAssets order; reconnect dialog per plan Approach 3); records 0098/0099 Accepted |
