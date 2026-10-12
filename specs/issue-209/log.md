@@ -11,4 +11,4 @@ are quoted in full.
 | 2026-10-12 17:28 | 3 Plan security review | squad-security | CHANGES_REQUIRED: 2 blocking (concurrent rebuild double-count, memory bound figure), 4 non-blocking (opus/medium · 54,296 tokens · 13 tool uses · 149 s) |
 | 2026-10-12 17:32 | 3 Plan revision | squad-lead | revised: run marker in meta (AC13), memory bound on whole key, docs; record 0095 Proposed (opus/medium · 76,062 tokens · 44 tool uses · 235 s) |
 | 2026-10-12 17:33 | 3 Plan security delta | squad-security | APPROVED (opus/medium · 19,292 tokens · 4 tool uses · 21 s · continued) |
-| 2026-10-12 17:40 | 4 Skeleton | squad-dev | skeleton built, build 0 warnings; no plan deviations |
+| 2026-10-12 17:40 | 4 Skeleton | squad-dev | skeleton built, build 0 warnings; no plan deviations (sonnet/medium · 103,013 tokens · 28 tool uses · 391 s) |
