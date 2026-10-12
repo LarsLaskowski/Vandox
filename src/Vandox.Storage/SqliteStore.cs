@@ -93,6 +93,24 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
     }
 
     /// <summary>
+    /// Rebuilds the template statistics from the stored log lines: empties the three tables, writes the run marker and fixes the
+    /// high-water record ID in one transaction, then counts the lines up to it in batches of at most <paramref name="batchLines"/>,
+    /// one transaction each, and removes the marker; a run whose marker was replaced by another rebuild fails.
+    /// </summary>
+    /// <param name="batchLines">The most log lines one transaction counts, 1 to <see cref="StorageLimits.MaxBatchRecords"/></param>
+    /// <param name="afterBatch">Called outside the writer lock after each committed batch with the lines counted so far; may be <c>null</c></param>
+    /// <param name="cancellationToken">Cancels the rebuild</param>
+    /// <returns>A task that returns the result of the rebuild</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="batchLines"/> is outside 1 to <see cref="StorageLimits.MaxBatchRecords"/></exception>
+    /// <exception cref="StoreException">The database fails, or another rebuild superseded this one</exception>
+#pragma warning disable RH2003, S2325
+    public Task<TemplateRebuildResult> RebuildTemplatesAsync(int batchLines, Func<long, CancellationToken, Task>? afterBatch, CancellationToken cancellationToken)
+    {
+        throw new NotImplementedException();
+    }
+#pragma warning restore RH2003, S2325
+
+    /// <summary>
     /// Opens the database file in a directory that exists.
     /// </summary>
     /// <param name="directory">The storage directory</param>

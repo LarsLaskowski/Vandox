@@ -224,5 +224,36 @@ internal static partial class BackendLog
     [LoggerMessage(EventId = 33, Level = LogLevel.Warning, Message = "incident skipped {FirstKillAt} {Error}")]
     internal static partial void IncidentSkipped(this ILogger logger, string firstKillAt, string error);
 
+    /// <summary>
+    /// Logs the start of a template rebuild.
+    /// </summary>
+    /// <param name="logger">The logger</param>
+    [LoggerMessage(EventId = 34, Level = LogLevel.Information, Message = "template rebuild started")]
+    internal static partial void TemplateRebuildStarted(this ILogger logger);
+
+    /// <summary>
+    /// Logs an interrupted template rebuild.
+    /// </summary>
+    /// <param name="logger">The logger</param>
+    [LoggerMessage(EventId = 35, Level = LogLevel.Warning, Message = "template rebuild interrupted; the template statistics are incomplete until a rebuild completes")]
+    internal static partial void TemplateRebuildInterrupted(this ILogger logger);
+
+    /// <summary>
+    /// Logs a failed template rebuild.
+    /// </summary>
+    /// <param name="logger">The logger</param>
+    /// <param name="exception">The failure</param>
+    /// <param name="error">The text of the failure</param>
+    [LoggerMessage(EventId = 36, Level = LogLevel.Error, Message = "template rebuild failed {Error}")]
+    internal static partial void TemplateRebuildFailed(this ILogger logger, Exception exception, string error);
+
+    /// <summary>
+    /// Logs the progress of a template rebuild.
+    /// </summary>
+    /// <param name="logger">The logger</param>
+    /// <param name="lines">The log lines counted so far</param>
+    [LoggerMessage(EventId = 37, Level = LogLevel.Information, Message = "template rebuild progress {Lines}")]
+    internal static partial void TemplateRebuildProgress(this ILogger logger, long lines);
+
     #endregion // Methods
 }
