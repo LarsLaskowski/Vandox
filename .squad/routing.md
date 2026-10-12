@@ -97,18 +97,19 @@ lessons*) is only for lessons the squad itself raised, never for an issue a pers
 
 ### Gates of a patch
 
-A `patch` is small by definition, so its step 7 runs the checks its files need and nothing else; the full
-suite, the overall coverage figure and the complete analysis are CI's job on the draft pull request
-(*Draft until green*). The orchestrator picks the rows that match the diff and runs every gate they name,
-without judgment; when the diff spans two kinds, both rows apply. Every `patch` ends with
-`scope-check.py --tier patch`.
+A `patch` is small by definition, so its step 7 runs the checks its files need and nothing else; the
+complete analysis, and for a `patch` without production code the full suite and the overall coverage
+figure, are CI's job on the draft pull request (*Draft until green*). The orchestrator picks the rows that
+match the diff and runs every gate they name, without judgment; when the diff spans two kinds, both rows
+apply. Every `patch` ends with `scope-check.py --tier patch`.
 
 | The diff touches | Gates |
 | ---------------- | ----- |
 | documentation only (Markdown, the project blocks) | *Format check* |
 | a shell script, a workflow or a Dockerfile | *Analyzer gate* with `--lint-only` (shellcheck, actionlint, hadolint and the shell rules on the changed files, no build), plus the check the Lead's result names for the edit (a pin check, `bash -n`, a dry run) |
 | a configuration file or a data file the product reads (YAML, JSON, a catalog) | the check the Lead's result names (a loader test, a schema check), run as *Test (project)* when it is a test |
-| production or test code | *Format check*, *Analyzer gate*, *Test (project)* for the test project(s) of the changed code (`stack.md`), the *Coverage gate* when production code changed |
+| test code only | *Format check*, *Analyzer gate*, *Test (project)* for the test project(s) of the changed code (`stack.md`) |
+| production code | *Format check*, *Analyzer gate*, *Test with coverage* and the *Coverage gate* — not *Test (project)*: it writes no coverage report, and the gate reads the reports of the full run, the overall figure included |
 
 A gate the row names that the stack does not have (`stack.md` lists no *Test (project)*) is replaced by the
 next broader one (*Test*); the orchestrator logs which rows applied.
