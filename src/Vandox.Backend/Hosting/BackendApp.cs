@@ -59,6 +59,11 @@ public static class BackendApp
             return await IncidentsCommand.RunAsync(options.ConfigPath, environment, stdout, stderr, hooks, cancellationToken).ConfigureAwait(false);
         }
 
+        if (options.Templates)
+        {
+            return await TemplatesCommand.RunAsync(options.ConfigPath, environment, stdout, stderr, hooks, cancellationToken).ConfigureAwait(false);
+        }
+
         if (options.Healthcheck)
         {
             return await HealthCheckCommand.RunAsync(options.ConfigPath, stderr, null, cancellationToken).ConfigureAwait(false);

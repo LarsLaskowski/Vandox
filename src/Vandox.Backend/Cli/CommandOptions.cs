@@ -38,12 +38,17 @@ public sealed class CommandOptions
     public bool Incidents { get; set; }
 
     /// <summary>
+    /// Gets or sets a value indicating whether the sub-command <c>templates</c> was given.
+    /// </summary>
+    public bool Templates { get; set; }
+
+    /// <summary>
     /// Gets or sets what is wrong with the command line; empty when it is valid.
     /// </summary>
     public string Error { get; set; } = string.Empty;
 
     /// <summary>
-    /// Gets or sets which usage text belongs to the error: <c>import</c> or <c>incidents</c> for a sub-command, empty for the main command.
+    /// Gets or sets which usage text belongs to the error: <c>import</c>, <c>incidents</c> or <c>templates</c> for a sub-command, empty for the main command.
     /// </summary>
     public string UsageFor { get; set; } = string.Empty;
 
