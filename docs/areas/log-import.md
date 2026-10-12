@@ -639,7 +639,8 @@ and of the last line of the format.
 standard error of FastCGI and CGI programs). Where such text reaches the file raw with a line feed (nginx's FastCGI
 standard error, the standard error of an Apache child process), the line after it can have the log's format with any
 time and level; a PHP message that echoes request data lets a remote client do this. Any local process that may write to
-the files can do the same. A priority is a classification of text, not proof that the web server or Plesk wrote the line.
+the files can do the same. A priority is a classification of text, not proof that the web server or Plesk wrote the line. Forged lines reach the
+signatures of PHP and nginx (*Detection, alerts and reports*, *Log signatures*).
 
 ## Legacy monitoring log
 
