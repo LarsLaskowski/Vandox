@@ -157,7 +157,13 @@ files or endpoints.
     AI-written report): *Goal:* they cannot inject into log output (control characters, newlines), into the
     web UI (HTML is escaped) or into Telegram messages (escaped for the parse mode used, or sent as plain
     text without a parse mode). Record 0031 for Telegram; Razor escapes HTML by default in the web UI (record
-    0081).
+    0081). Every web response carries one self-only Content-Security-Policy (`default-src 'none'`, no inline code,
+    no external origin), `X-Content-Type-Options`, `Referrer-Policy` and `X-Frame-Options`, set by
+    `SecurityHeadersMiddleware` (record 0099); `WebUiContentTests` checks the sources with `WebSourceScanner`: the
+    own scripts (`wwwroot/js`) contain none of its HTML sinks, no `eval`/`Function`/string timer and no
+    `setAttribute`; component markup and code contain no `MarkupString` or `AddMarkupContent`, so external text
+    never reaches the page as raw HTML. What only the policy covers is listed in the Web UI area (*Limits and
+    errors*). Records 0098, 0099.
     Configuration error texts never echo document text other than schema or safe key names
     (`decodeStrict`, `StrictYamlDecoder`), never a `_FILE` value or path or an unsafe variable name
     (`readSecret`/`SecretReader`, `checkEnviron`). Configuration values are free of Cc, Cf, Zl and Zp characters but
@@ -199,6 +205,9 @@ files or endpoints.
     digests, SBOM generator pin) holds only `contents: read` and `issues: write`, runs its lookups (registries,
     syft's Git tags) without a token, writes only regex-checked image, tag and digest values into its own
     issue, and never writes to the repository. Records 0027, 0037, 0041.
+    Vendored browser code (`src/Vandox.Backend/wwwroot/lib/uplot/`, uPlot 1.6.32) is copied by hand from the release
+    tag, pinned by SHA-256 in `WebUiContentTests`, not loaded from a CDN and excluded from the code analysis, not
+    from review (record 0098).
     The cloud sessions have no Docker daemon: a change to the Dockerfile, compose file, `.dockerignore` or the smoke
     script is verified by the CI job *Release build check* on the pull request head, not locally (the local
     substitutes are listed in `.squad/stack.md`, *Not checkable in a cloud session*).
@@ -242,6 +251,13 @@ change with it.
 - where it is wired up: `cmd/vandox-agent`, or `src/Vandox.Backend` (`Hosting`, `Cli`, `Program.cs`)
 - the test double used by the tests of its callers
 - the component list in `docs/ARCHITECTURE.md`
+
+**A new web UI page, component or static asset** touches:
+- a page: the navigation in `src/Vandox.Backend/Components/Layout/MainLayout.razor`
+- a file the browser loads: the *Static assets* list in `docs/areas/web-ui.md` and `ServeTests.ServeServesWebAssetsOnlyOnWebPort`
+  (served on the web port, `404` on the ingest port)
+- the rules of record 0099, checked by `WebUiContentTests` (no inline code, no external URL, no raw HTML)
+- a brand file: the byte copy of `docs/assets/` in `wwwroot/brand/`
 
 **A new log parser** touches:
 - its type in `src/` (implementing `ILogParser`, with a type accepted by `ParserTypes.IsValid`)

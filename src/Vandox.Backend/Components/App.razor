@@ -4,14 +4,36 @@
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <base href="/" />
     <title>Vandox</title>
-    <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+    <script src="js/app.js"></script>
+    <link rel="icon" type="image/svg+xml" href="brand/vandox-favicon.svg" />
+    <link rel="stylesheet" href="lib/uplot/uPlot.min.css" />
     <link rel="stylesheet" href="app.css" />
-    <HeadOutlet />
+    <HeadOutlet @rendermode="InteractiveServer" />
 </head>
 
 <body>
-    <Routes />
+    <Routes @rendermode="InteractiveServer" />
+
+    <div id="components-reconnect-modal">
+        <div class="reconnect-box" role="alert">
+            <p class="reconnect-reconnecting">Connection to the server lost. Trying to reconnect&hellip;</p>
+            <p class="reconnect-failed">The server cannot be reached. Retry, or reload the page.</p>
+            <p class="reconnect-rejected">The server no longer knows this page. Reload the page.</p>
+            <div class="reconnect-actions">
+                <button type="button" class="reconnect-retry" data-reconnect-retry>Retry</button>
+                <button type="button" data-reload>Reload</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="blazor-error-ui" role="alert">
+        An error occurred. Reload the page to continue.
+        <button type="button" data-reload>Reload</button>
+        <button type="button" class="dismiss" aria-label="Dismiss">Dismiss</button>
+    </div>
+
     <script src="_framework/blazor.web.js"></script>
 </body>
 

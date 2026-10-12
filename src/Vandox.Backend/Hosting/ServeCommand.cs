@@ -153,16 +153,18 @@ internal static class ServeCommand
         builder.Services.AddSingleton<IImportTracker>(store);
         builder.Services.Configure<HostOptions>(options => options.ShutdownTimeout = _shutdownTimeout);
         builder.Services.AddRazorComponents().AddInteractiveServerComponents();
+        builder.WebHost.UseStaticWebAssets();
         builder.WebHost.ConfigureKestrel(options => Listen(options, config, hooks));
 
         var app = builder.Build();
         var checker = new PingChecker(store.PingAsync, _pingTimeout);
 
         app.UseMiddleware<PortRoutingMiddleware>();
-        app.UseStaticFiles();
+        app.UseMiddleware<SecurityHeadersMiddleware>();
         app.UseAntiforgery();
+        app.MapStaticAssets();
         HealthEndpoint.Map(app, checker, loggerFactory.CreateLogger("health"));
-        app.MapRazorComponents<App>().AddInteractiveServerRenderMode();
+        app.MapRazorComponents<App>().AddInteractiveServerRenderMode(options => options.ContentSecurityFrameAncestorsPolicy = null);
 
         return app;
     }

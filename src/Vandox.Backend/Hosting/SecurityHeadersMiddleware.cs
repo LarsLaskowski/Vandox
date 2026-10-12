@@ -2,8 +2,6 @@ using Microsoft.AspNetCore.Http;
 
 namespace Vandox.Backend.Hosting;
 
-#pragma warning disable RH2003, S2325
-
 /// <summary>
 /// Sets the security headers on every response of the web listener.
 /// </summary>
@@ -33,6 +31,12 @@ public sealed class SecurityHeadersMiddleware
 
     #endregion // Constants
 
+    #region Fields
+
+    private readonly RequestDelegate _next;
+
+    #endregion // Fields
+
     #region Constructors
 
     /// <summary>
@@ -41,7 +45,7 @@ public sealed class SecurityHeadersMiddleware
     /// <param name="next">The rest of the pipeline</param>
     public SecurityHeadersMiddleware(RequestDelegate next)
     {
-        throw new NotImplementedException();
+        _next = next;
     }
 
     #endregion // Constructors
@@ -55,7 +59,14 @@ public sealed class SecurityHeadersMiddleware
     /// <returns>A task that completes when the request is handled</returns>
     public Task InvokeAsync(HttpContext context)
     {
-        throw new NotImplementedException();
+        var headers = context.Response.Headers;
+
+        headers.ContentSecurityPolicy = ContentSecurityPolicy;
+        headers.XContentTypeOptions = ContentTypeOptions;
+        headers.XFrameOptions = FrameOptions;
+        headers["Referrer-Policy"] = ReferrerPolicy;
+
+        return _next(context);
     }
 
     #endregion // Methods

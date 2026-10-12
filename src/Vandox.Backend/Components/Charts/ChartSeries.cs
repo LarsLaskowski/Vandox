@@ -1,7 +1,5 @@
 namespace Vandox.Backend.Components.Charts;
 
-#pragma warning disable RH2003, S2325
-
 /// <summary>
 /// One labelled series of a time series chart; a <c>null</c> value is a gap.
 /// </summary>
@@ -16,7 +14,11 @@ public sealed class ChartSeries
     /// <param name="values">The values, one per point in time; <c>null</c> is a gap</param>
     public ChartSeries(string label, IReadOnlyList<double?> values)
     {
-        throw new NotImplementedException();
+        ArgumentNullException.ThrowIfNull(label);
+        ArgumentNullException.ThrowIfNull(values);
+
+        Label = label;
+        Values = values;
     }
 
     #endregion // Constructors
@@ -26,12 +28,12 @@ public sealed class ChartSeries
     /// <summary>
     /// Gets the label of the series.
     /// </summary>
-    public string Label => throw new NotImplementedException();
+    public string Label { get; }
 
     /// <summary>
     /// Gets the values of the series.
     /// </summary>
-    public IReadOnlyList<double?> Values => throw new NotImplementedException();
+    public IReadOnlyList<double?> Values { get; }
 
     #endregion // Properties
 }

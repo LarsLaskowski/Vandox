@@ -123,6 +123,7 @@ locally, <authoritative check>" once in `log.md` and does not repeat it as an op
 | shell scripts (`.github/scripts/*.sh`, `deploy/**/*.sh`) | `shfmt` (`shellcheck` runs in the *Analyzer gate*) | `bash -n <script>`; the *Analyzer gate* runs shellcheck and checks the shell pitfalls below | SonarQube Cloud (`shelldre:*`, step 11) and the CI step that runs the script |
 | workflows (`.github/workflows/*.yml`) | a GitHub Actions runner (`actionlint` runs in the *Analyzer gate*) | the *Analyzer gate* (actionlint) | the workflow's own run on the pull request |
 | `deploy/backend/Dockerfile`, `docker-compose.yml`, `.dockerignore`, image contents | a Docker daemon (`hadolint` runs in the *Analyzer gate* on the Dockerfile) | `.github/scripts/check-base-image-pinning.sh`, `.github/scripts/check-builder-dotnet-version.sh`, `bash -n` on the smoke script | CI job *Release build check*, steps "Build and verify image" and "Smoke test backend container" |
+| own browser scripts and style sheets (`src/Vandox.Backend/wwwroot/js/*.js`, `wwwroot/*.css`) | a JavaScript and CSS analyzer | `WebUiContentTests` (`WebSourceScanner` rules) | SonarQube Cloud (step 11) |
 | known vulnerabilities (Go) | `govulncheck` (the proxy blocks `vuln.go.dev`, HTTP 403) | none | CI job *Vulnerability scan* |
 
 When the *Analyzer gate* reports shellcheck, actionlint or hadolint as NOT RUN (a refused download), that tool is

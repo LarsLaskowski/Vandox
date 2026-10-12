@@ -3,8 +3,6 @@ using Microsoft.JSInterop;
 
 namespace Vandox.Backend.Components.Charts;
 
-#pragma warning disable RH2003, S2325, S4487
-
 /// <summary>
 /// Draws a time series chart for the given data.
 /// </summary>
@@ -12,7 +10,13 @@ public sealed partial class TimeSeriesChart : IAsyncDisposable
 {
     #region Fields
 
+    private readonly CancellationTokenSource _cancellation = new();
+
     private ElementReference _host;
+
+    private ChartInterop? _interop;
+
+    private ChartData? _rendered;
 
     #endregion // Fields
 
@@ -43,9 +47,20 @@ public sealed partial class TimeSeriesChart : IAsyncDisposable
     #region ComponentBase
 
     /// <inheritdoc />
-    protected override Task OnAfterRenderAsync(bool firstRender)
+    protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        throw new NotImplementedException();
+        var data = Data;
+
+        if (data is null || ReferenceEquals(data, _rendered))
+        {
+            return;
+        }
+
+        _interop ??= new ChartInterop(JSRuntime);
+
+        await _interop.RenderAsync(_host, Title, data, _cancellation.Token).ConfigureAwait(false);
+
+        _rendered = data;
     }
 
     #endregion // ComponentBase
@@ -53,9 +68,16 @@ public sealed partial class TimeSeriesChart : IAsyncDisposable
     #region IAsyncDisposable
 
     /// <inheritdoc />
-    public ValueTask DisposeAsync()
+    public async ValueTask DisposeAsync()
     {
-        throw new NotImplementedException();
+        await _cancellation.CancelAsync().ConfigureAwait(false);
+
+        if (_interop is not null)
+        {
+            await _interop.DisposeAsync().ConfigureAwait(false);
+        }
+
+        _cancellation.Dispose();
     }
 
     #endregion // IAsyncDisposable

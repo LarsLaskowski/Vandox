@@ -1,40 +1,267 @@
+/* Design tokens of docs/BRANDING.md (light), plus the surface and chart colors derived for the web UI. */
 :root {
-    color-scheme: light dark;
-    --bg: #f6f4ee;
-    --text: #1c2024;
-    --accent: #11693a;
+    color-scheme: light;
+    --vandox-color-brand: #086030;
+    --vandox-color-ink: #243142;
+    --vandox-bg: #f6f4ee;
+    --vandox-surface: #ffffff;
+    --vandox-line: rgba(36, 49, 66, 0.18);
+    --vandox-chart-1: var(--vandox-color-brand);
+    --vandox-chart-2: #1f5fa8;
+    --vandox-chart-3: #b45309;
+    --vandox-chart-4: #7c3aed;
+    --vandox-chart-grid: rgba(36, 49, 66, 0.12);
 }
 
+/* Dark values: the system setting, unless the user chose the light theme. */
 @media (prefers-color-scheme: dark) {
-    :root {
-        --bg: #14171b;
-        --text: #e8eaec;
-        --accent: #6fc98f;
+    :root:not([data-theme="light"]) {
+        color-scheme: dark;
+        --vandox-color-brand: #3DAA6E;
+        --vandox-color-ink: #E6EAF0;
+        --vandox-bg: #14171b;
+        --vandox-surface: #1c2127;
+        --vandox-line: rgba(230, 234, 240, 0.2);
+        --vandox-chart-2: #6aa9e9;
+        --vandox-chart-3: #e0a458;
+        --vandox-chart-4: #b79cf0;
+        --vandox-chart-grid: rgba(230, 234, 240, 0.14);
     }
+}
+
+/* Dark values: the user chose the dark theme. */
+:root[data-theme="dark"] {
+    color-scheme: dark;
+    --vandox-color-brand: #3DAA6E;
+    --vandox-color-ink: #E6EAF0;
+    --vandox-bg: #14171b;
+    --vandox-surface: #1c2127;
+    --vandox-line: rgba(230, 234, 240, 0.2);
+    --vandox-chart-2: #6aa9e9;
+    --vandox-chart-3: #e0a458;
+    --vandox-chart-4: #b79cf0;
+    --vandox-chart-grid: rgba(230, 234, 240, 0.14);
+}
+
+/* Light values: the user chose the light theme (also when the system is dark). */
+:root[data-theme="light"] {
+    color-scheme: light;
+    --vandox-color-brand: #086030;
+    --vandox-color-ink: #243142;
+    --vandox-bg: #f6f4ee;
+    --vandox-surface: #ffffff;
+    --vandox-line: rgba(36, 49, 66, 0.18);
+    --vandox-chart-2: #1f5fa8;
+    --vandox-chart-3: #b45309;
+    --vandox-chart-4: #7c3aed;
+    --vandox-chart-grid: rgba(36, 49, 66, 0.12);
+}
+
+* {
+    box-sizing: border-box;
 }
 
 body {
     margin: 0;
-    background: var(--bg);
-    color: var(--text);
+    background: var(--vandox-bg);
+    color: var(--vandox-color-ink);
     font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
 }
 
-.top {
-    display: flex;
-    align-items: center;
-    gap: 0.6rem;
-    padding: 0.75rem 1rem;
-    border-bottom: 1px solid color-mix(in srgb, var(--text) 15%, transparent);
+a {
+    color: var(--vandox-color-brand);
 }
 
-.brand {
-    font-weight: 700;
-    color: var(--accent);
+button {
+    font: inherit;
+    color: inherit;
+    background: var(--vandox-surface);
+    border: 1px solid var(--vandox-line);
+    border-radius: 0.375rem;
+    padding: 0.25rem 0.75rem;
+    cursor: pointer;
+}
+
+/* Header: logo and theme switch on the first row, the navigation on its own row on narrow screens. */
+.top {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    grid-template-areas:
+        "logo toggle"
+        "nav nav";
+    align-items: center;
+    gap: 0.5rem 1rem;
+    padding: 0.75rem 1rem;
+    background: var(--vandox-surface);
+    border-bottom: 1px solid var(--vandox-line);
+}
+
+.logo {
+    grid-area: logo;
+    display: inline-flex;
+    align-items: center;
+}
+
+.logo img {
+    display: block;
+    max-width: 100%;
+    height: auto;
+}
+
+.logo-dark {
+    display: none;
+}
+
+.theme-toggle {
+    grid-area: toggle;
+}
+
+.theme-label {
+    opacity: 0.7;
+    margin-right: 0.25rem;
+}
+
+.theme-light,
+.theme-dark {
+    display: none;
+}
+
+.top nav {
+    grid-area: nav;
+    min-width: 0;
+    display: flex;
+    gap: 1rem;
+    overflow-x: auto;
+    white-space: nowrap;
+}
+
+.top nav a {
+    padding: 0.25rem 0;
+    text-decoration: none;
+    border-bottom: 2px solid transparent;
+}
+
+.top nav a.active {
+    font-weight: 600;
+    border-bottom-color: var(--vandox-color-brand);
+}
+
+@media (min-width: 40rem) {
+    .top {
+        grid-template-columns: auto 1fr auto;
+        grid-template-areas: "logo nav toggle";
+    }
 }
 
 main {
     max-width: 60rem;
     margin: 0 auto;
     padding: 1.5rem 1rem;
+}
+
+.chart {
+    width: 100%;
+    min-height: 240px;
+}
+
+/* Theme-dependent visibility: the logo and the text of the theme switch. */
+:root[data-theme="light"] .theme-system,
+:root[data-theme="dark"] .theme-system {
+    display: none;
+}
+
+:root[data-theme="light"] .theme-light,
+:root[data-theme="dark"] .theme-dark {
+    display: inline;
+}
+
+:root[data-theme="dark"] .logo-light {
+    display: none;
+}
+
+:root[data-theme="dark"] .logo-dark {
+    display: block;
+}
+
+@media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .logo-light {
+        display: none;
+    }
+
+    :root:not([data-theme="light"]) .logo-dark {
+        display: block;
+    }
+}
+
+/* Reconnect dialog: the framework sets the components-reconnect-* classes on this element. */
+#components-reconnect-modal {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem;
+    background: rgba(0, 0, 0, 0.5);
+}
+
+#components-reconnect-modal.components-reconnect-show,
+#components-reconnect-modal.components-reconnect-failed,
+#components-reconnect-modal.components-reconnect-rejected,
+#components-reconnect-modal.components-reconnect-paused,
+#components-reconnect-modal.components-reconnect-resume-failed {
+    display: flex;
+}
+
+.reconnect-box {
+    max-width: 24rem;
+    padding: 1.25rem;
+    background: var(--vandox-surface);
+    border: 1px solid var(--vandox-line);
+    border-radius: 0.5rem;
+}
+
+.reconnect-box p {
+    display: none;
+    margin: 0 0 1rem;
+}
+
+.reconnect-actions {
+    display: none;
+    gap: 0.5rem;
+}
+
+.components-reconnect-show .reconnect-reconnecting,
+.components-reconnect-failed .reconnect-failed,
+.components-reconnect-resume-failed .reconnect-failed,
+.components-reconnect-rejected .reconnect-rejected,
+.components-reconnect-paused .reconnect-rejected {
+    display: block;
+}
+
+.components-reconnect-failed .reconnect-actions,
+.components-reconnect-resume-failed .reconnect-actions,
+.components-reconnect-rejected .reconnect-actions,
+.components-reconnect-paused .reconnect-actions {
+    display: flex;
+}
+
+.components-reconnect-rejected .reconnect-retry,
+.components-reconnect-paused .reconnect-retry {
+    display: none;
+}
+
+/* Error banner: the framework shows it by setting its display. */
+#blazor-error-ui {
+    display: none;
+    position: fixed;
+    inset: auto 0 0 0;
+    z-index: 1000;
+    padding: 0.75rem 1rem;
+    background: var(--vandox-surface);
+    border-top: 2px solid var(--vandox-color-brand);
+}
+
+#blazor-error-ui .dismiss {
+    float: right;
 }
