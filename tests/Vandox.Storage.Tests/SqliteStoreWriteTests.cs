@@ -1,3 +1,6 @@
+using System.Text;
+using System.Text.Json;
+
 using Vandox.Core.Model;
 
 namespace Vandox.Storage.Tests;
@@ -454,6 +457,102 @@ public class SqliteStoreWriteTests
             default:
                 ((MetricPoint)batch.Records[0].Data!).Name = string.Empty;
                 break;
+        }
+    }
+
+    /// <summary>
+    /// A JSON payload is stored as SQLite text whose bytes equal the serializer output, typed records keep NULL, and the payload reads back equal.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task SqliteStoreWriteBatchStoresPayloadJsonAsText()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+
+        var snapshot = new ProcessSnapshot
+                       {
+                           Complete = true,
+                           Processes = [
+                                           new ProcessSample
+                                           {
+                                               Pid = 7,
+                                               Command = "<a>",
+                                               Cmdline = "x<y>&'+ \u00E4 \U0001F600"
+                                           }
+                                       ]
+                       };
+        var expected = JsonSerializer.SerializeToUtf8Bytes(snapshot, snapshot.GetType(), PayloadRegistry.Options);
+        var escapedLessThan = Encoding.UTF8.GetBytes(string.Concat((char)92, "u003C"));
+        byte[] stored;
+        string storedType;
+        long typedWithoutData;
+
+        await using (var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken))
+        {
+            // Act
+            await store.WriteBatchAsync(Samples.Batch(Samples.Metric(RecordOrigin.Backend, 0, 0, "cpu"),
+                                                      new DataRecord
+                                                      {
+                                                          Origin = RecordOrigin.Backend,
+                                                          Source = "host",
+                                                          CapturedAt = Samples.Base,
+                                                          Data = snapshot
+                                                      }),
+                                        TestContext.CancellationToken);
+
+            var rows = await store.RecordsAsync(Samples.Query(RecordKind.ProcessSnapshot), TestContext.CancellationToken);
+
+            // Assert
+            Assert.HasCount(1, rows, "one process snapshot");
+            Assert.AreEqual("x<y>&'+ \u00E4 \U0001F600", ((ProcessSnapshot)rows[0].Record.Data!).Processes![0].Cmdline, "command line read back");
+        }
+
+        await using (var connection = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={Path.Combine(directory.Path, "vandox.db")};Mode=ReadOnly;Pooling=False"))
+        {
+            await connection.OpenAsync(TestContext.CancellationToken);
+
+            await using var command = connection.CreateCommand();
+
+            command.CommandText = "SELECT typeof(data), CAST(data AS BLOB) FROM records WHERE kind = 'process_snapshot'";
+
+            await using var reader = await command.ExecuteReaderAsync(TestContext.CancellationToken);
+
+            Assert.IsTrue(await reader.ReadAsync(TestContext.CancellationToken), "the snapshot row exists");
+
+            storedType = reader.GetString(0);
+            stored = (byte[])reader.GetValue(1);
+            typedWithoutData = await CountAsync(connection, "records WHERE kind = 'metric' AND data IS NULL");
+        }
+
+        Assert.AreEqual("text", storedType, "SQLite type of the payload");
+        Assert.AreSequenceEqual(expected, stored, "stored bytes equal the serializer output");
+        Assert.IsGreaterThanOrEqualTo(3, CountOccurrences(stored, escapedLessThan), "the < characters are stored as six bytes each");
+        Assert.AreEqual(1L, typedWithoutData, "the metric keeps NULL");
+    }
+
+    /// <summary>
+    /// Counts the occurrences of a byte sequence.
+    /// </summary>
+    /// <param name="data">The data to search</param>
+    /// <param name="pattern">The sequence to count</param>
+    /// <returns>The number of non-overlapping occurrences</returns>
+    private static int CountOccurrences(byte[] data, byte[] pattern)
+    {
+        var count = 0;
+        var offset = 0;
+
+        while (true)
+        {
+            var index = data.AsSpan(offset).IndexOf(pattern);
+
+            if (index < 0)
+            {
+                return count;
+            }
+
+            count++;
+            offset += index + pattern.Length;
         }
     }
 
