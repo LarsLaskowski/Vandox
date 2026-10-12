@@ -15,3 +15,5 @@ are quoted in full.
 | 2026-10-12 18:18 | 7 Code check | Orchestrator | format, analyzer, scope PASS; tests+coverage PASS (tester run) |
 | 2026-10-12 18:27 | 8 Review r1 (reviewer) | squad-reviewer | 1 blocking (docs) + 3 non-blocking; fixed by Dev/Tester |
 | 2026-10-12 18:27 | 8 Review r1 (security) | squad-security | APPROVED |
+| 2026-10-12 18:27 | 8 Review r2 (delta) | squad-reviewer | APPROVE on 27b3089 |
+| 2026-10-12 18:27 | 9 PR approval | Orchestrator | approved by checklist; records already Accepted |
