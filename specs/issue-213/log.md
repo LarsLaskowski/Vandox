@@ -10,3 +10,6 @@ are quoted in full.
 | 2026-10-12 17:36 | 2 Challenge + 3 Plan security | Orchestrator | DA: 0 major minor notes appended; Security: APPROVED |
 | 2026-10-12 18:29 | 5 Tests first | squad-tester | 2 tests fail on current code (AC1, AC3 invalid UTF-8); AC2 pin deferred |
 | 2026-10-12 18:29 | 4 Skeleton | Orchestrator | skipped: no signature changes |
+| 2026-10-12 18:39 | 6 Implement | squad-dev | IncidentRepository.Read reads UTF-8 bytes; docs |
+| 2026-10-12 18:39 | 6 Coverage | squad-tester | AC1-AC3 tests; coverage gate PASS 100% changed |
+| 2026-10-12 18:39 | 7 Code check | Orchestrator | format, analyzer, scope PASS; tests+coverage PASS; AC tests green in Release |
