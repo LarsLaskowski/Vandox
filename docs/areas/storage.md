@@ -136,7 +136,7 @@ Indexes: a unique index on `records(agent_id, seq)` for origin `agent`; `records
 - A stored payload is read with the payload options of the wire decoder, so an unknown member is ignored; this includes the `Kind`
   member that rows written before #183 carry.
 - Incidents are read by range (`started_at < to` and `ended_at > from`, ordered by start, then number) with the window and limit rules
-  of the record query, and counted; a `data` value that does not decode (including bytes that are not valid UTF-8) is `store: reading incidents: decoding incident data`.
+  of the record query, and counted; a `data` value that does not decode (including bytes that are not valid UTF-8 in a member the incident reads; such bytes in an unknown member are skipped unchecked) is `store: reading incidents: decoding incident data`.
   The `data` column is read from its UTF-8 bytes, like a payload. A page holds every returned incident decoded at once: in the worst
   case up to 10,000 incidents per page, each decoded from up to 8 MiB of JSON, so the memory of a read grows with the limit. A caller
   that serves a user pages with a small limit (open limit for #27, which adds the first caller).
