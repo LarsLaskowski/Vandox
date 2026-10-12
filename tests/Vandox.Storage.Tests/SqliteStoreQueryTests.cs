@@ -1,3 +1,5 @@
+using Microsoft.Data.Sqlite;
+
 using Vandox.Core.Model;
 
 namespace Vandox.Storage.Tests;
@@ -383,6 +385,118 @@ public class SqliteStoreQueryTests
 
         // Assert
         Assert.AreEqual("store: invalid query: after id must not be negative", exception.Message, "message");
+    }
+
+    /// <summary>
+    /// A process snapshot whose texts hold characters that JSON escapes is read back equal through the UTF-8 bytes of the payload column.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task SqliteStoreRecordsRoundTripsEscapedPayloadText()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+        const string command = "<mariadbd> \u00E4";
+        const string cmdline = "/usr/sbin/mariadbd --name=<\u00E4> \u202E \U0001F600";
+        var snapshot = new ProcessSnapshot
+                       {
+                           Complete = true,
+                           Processes = [
+                                           new ProcessSample
+                                           {
+                                               Pid = 7,
+                                               Command = command,
+                                               Cmdline = cmdline
+                                           }
+                                       ]
+                       };
+
+        await store.WriteBatchAsync(Samples.Batch(new DataRecord
+                                                  {
+                                                      Origin = RecordOrigin.Backend,
+                                                      Source = "host",
+                                                      CapturedAt = Samples.Base,
+                                                      Data = snapshot
+                                                  }),
+                                    TestContext.CancellationToken);
+
+        // Act
+        var rows = await store.RecordsAsync(Samples.Query(RecordKind.ProcessSnapshot), TestContext.CancellationToken);
+        var stored = await StoredDataAsync(Path.Combine(directory.Path, StorageLimits.FileName));
+
+        // Assert
+        Assert.IsTrue(char.IsSurrogatePair(cmdline, cmdline.IndexOf('\uD83D', StringComparison.Ordinal)), "the command line holds a surrogate pair");
+        Assert.Contains("\u202E", cmdline, "the command line holds the right-to-left override");
+        Assert.Contains(string.Concat((char)92, "u003C"), stored, "the stored JSON holds the escaped <");
+        Assert.HasCount(1, rows, "one process snapshot");
+
+        var read = (ProcessSnapshot)rows[0].Record.Data!;
+
+        Assert.HasCount(1, read.Processes!, "one process");
+        Assert.AreEqual(command, read.Processes![0].Command, "command with < and a");
+        Assert.AreEqual(cmdline, read.Processes[0].Cmdline, "command line with a right-to-left override and a surrogate pair");
+        Assert.AreEqual(7, read.Processes[0].Pid, "process ID");
+    }
+
+    /// <summary>
+    /// A stored payload that is SQL NULL or the JSON text null is refused with the no-data message.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task SqliteStoreRecordsRefusesStoredNullPayload()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+
+        await store.WriteBatchAsync(Samples.Batch(Samples.Gap(0)), TestContext.CancellationToken);
+
+        // Act and assert
+        foreach (var value in new[] { "NULL", "'null'" })
+        {
+            await ExecuteAsync(Path.Combine(directory.Path, StorageLimits.FileName), $"UPDATE records SET data = {value}");
+
+            var exception = await Assert.ThrowsExactlyAsync<StoreException>(() => store.RecordsAsync(Samples.Query(RecordKind.Gap), TestContext.CancellationToken), $"stored payload {value}");
+
+            Assert.AreEqual("store: reading records: decoding gap payload: no data", exception.Message, $"message for {value}");
+        }
+    }
+
+    /// <summary>
+    /// Reads the stored JSON text of the first record with a JSON payload.
+    /// </summary>
+    /// <param name="path">The database file</param>
+    /// <returns>A task that returns the text</returns>
+    private async Task<string> StoredDataAsync(string path)
+    {
+        await using var connection = new SqliteConnection($"Data Source={path};Pooling=False;Mode=ReadOnly");
+
+        await connection.OpenAsync(TestContext.CancellationToken);
+
+        using var command = connection.CreateCommand();
+
+        command.CommandText = "SELECT data FROM records WHERE data IS NOT NULL LIMIT 1";
+
+        return (string)(await command.ExecuteScalarAsync(TestContext.CancellationToken))!;
+    }
+
+    /// <summary>
+    /// Runs a statement on the database file through its own connection.
+    /// </summary>
+    /// <param name="path">The database file</param>
+    /// <param name="sql">The statement</param>
+    /// <returns>A task that completes when the statement ran</returns>
+    private async Task ExecuteAsync(string path, string sql)
+    {
+        await using var connection = new SqliteConnection($"Data Source={path};Pooling=False");
+
+        await connection.OpenAsync(TestContext.CancellationToken);
+
+        using var command = connection.CreateCommand();
+
+        command.CommandText = sql;
+        await command.ExecuteNonQueryAsync(TestContext.CancellationToken);
     }
 
     /// <summary>

@@ -1,5 +1,8 @@
 using System.Globalization;
 
+using Microsoft.Data.Sqlite;
+
+using Vandox.Backend.Hosting;
 using Vandox.Core.Model;
 using Vandox.Storage;
 
@@ -98,6 +101,74 @@ public class IncidentsCommandTests
     }
 
     /// <summary>
+    /// A storage directory that cannot be opened stops the command with exit code 1 and no output.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task IncidentsCommandExitsOneWhenStorageCannotBeOpened()
+    {
+        // Arrange
+        using var fixture = new BackendFixture();
+
+        Directory.Delete(fixture.Storage);
+
+        // Act
+        var code = await fixture.RunAsync(["incidents"], null, TestContext.CancellationToken);
+
+        // Assert
+        Assert.AreEqual(1, code, "exit code");
+        Assert.Contains("opening database failed", fixture.Error.ToString(), "the failure is logged");
+        Assert.AreEqual(string.Empty, fixture.Out.ToString(), "nothing on standard output");
+    }
+
+    /// <summary>
+    /// A store failure during the run is logged, prints no summary and exits with 1.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task IncidentsCommandExitsOneWhenStoreFailsDuringRun()
+    {
+        // Arrange
+        using var fixture = new BackendFixture();
+
+        await StoreKillAsync(fixture.Storage);
+        await DropIncidentTableAsync(fixture.Storage);
+
+        // Act
+        var code = await fixture.RunAsync(["incidents"], null, TestContext.CancellationToken);
+
+        // Assert
+        Assert.AreEqual(1, code, "exit code");
+        Assert.Contains("\"msg\":\"incident reconstruction failed\"", fixture.Error.ToString(), "the failure is logged");
+        Assert.Contains("store: saving incident: ", fixture.Error.ToString(), "the log carries the store's text");
+        Assert.DoesNotContain("Incidents:", fixture.Out.ToString(), "no summary");
+    }
+
+    /// <summary>
+    /// A run that is cancelled after the first incident was printed logs the interruption, prints no summary and exits with 1.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task IncidentsCommandExitsOneWhenInterruptedDuringRun()
+    {
+        // Arrange
+        using var fixture = new BackendFixture();
+        using var cancelled = new CancellationTokenSource();
+        await using var output = new CancellingWriter(cancelled);
+
+        await StoreKillsAsync(fixture.Storage);
+
+        // Act
+        var code = await BackendApp.RunAsync(["-config", fixture.ConfigPath, "incidents"], [], output, fixture.Error, new ServeHooks(), cancelled.Token);
+
+        // Assert
+        Assert.AreEqual(1, code, "exit code");
+        Assert.Contains("incident reconstruction interrupted", fixture.Error.ToString(), "the interruption is logged");
+        Assert.StartsWith("#1 created ", Normalize(output.ToString()), "the first incident was printed");
+        Assert.DoesNotContain("Incidents:", output.ToString(), "no summary");
+    }
+
+    /// <summary>
     /// Builds the summary that the command prints for one kill.
     /// </summary>
     /// <param name="created">The number of created incidents</param>
@@ -140,6 +211,35 @@ public class IncidentsCommandTests
         await using var store = await SqliteStore.OpenAsync(directory, TestContext.CancellationToken);
 
         await IncidentSamples.WriteAsync(store, TestContext.CancellationToken, IncidentSamples.Kill(IncidentSamples.Base));
+    }
+
+    /// <summary>
+    /// Stores two OOM kill lines three hours apart, which are two incidents, in a new store and closes it.
+    /// </summary>
+    /// <param name="directory">The storage directory</param>
+    /// <returns>A task that completes when the lines are stored</returns>
+    private async Task StoreKillsAsync(string directory)
+    {
+        await using var store = await SqliteStore.OpenAsync(directory, TestContext.CancellationToken);
+
+        await IncidentSamples.WriteAsync(store, TestContext.CancellationToken, IncidentSamples.Kill(IncidentSamples.Base), IncidentSamples.Kill(IncidentSamples.Base.AddHours(3)));
+    }
+
+    /// <summary>
+    /// Drops the incident table of a store, so that every incident statement fails.
+    /// </summary>
+    /// <param name="directory">The storage directory</param>
+    /// <returns>A task that completes when the table is dropped</returns>
+    private async Task DropIncidentTableAsync(string directory)
+    {
+        await using var connection = new SqliteConnection($"Data Source={Path.Combine(directory, StorageLimits.FileName)};Pooling=False");
+
+        await connection.OpenAsync(TestContext.CancellationToken);
+
+        using var command = connection.CreateCommand();
+
+        command.CommandText = "DROP TABLE incidents";
+        await command.ExecuteNonQueryAsync(TestContext.CancellationToken);
     }
 
     #endregion // Methods

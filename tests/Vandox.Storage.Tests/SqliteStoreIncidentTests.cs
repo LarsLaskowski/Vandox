@@ -262,6 +262,59 @@ public class SqliteStoreIncidentTests
     }
 
     /// <summary>
+    /// Stored incident data that is no incident is refused with a fixed text, with the decoding error as the cause when there is one.
+    /// </summary>
+    /// <param name="data">The stored data</param>
+    /// <param name="hasCause">Whether the decoder gave an error</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [DataRow("{", true, DisplayName = "text that is no JSON")]
+    [DataRow("null", false, DisplayName = "the JSON text null")]
+    public async Task SqliteStoreIncidentsRefusesUndecodableData(string data, bool hasCause)
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+
+        await store.SaveIncidentAsync(Sample(0, 2), Samples.Base.AddDays(1), TestContext.CancellationToken);
+        await ExecuteAsync(Path.Combine(directory.Path, StorageLimits.FileName), $"UPDATE incidents SET data = '{data}'");
+
+        // Act
+        var exception = await Assert.ThrowsExactlyAsync<StoreException>(() => ReadAsync(store, StorableTime.Min, StorableTime.Max, 10), "reading undecodable data");
+
+        // Assert
+        Assert.AreEqual("store: reading incidents: decoding incident data", exception.Message, "message");
+        Assert.AreEqual(hasCause, exception.InnerException is JsonException, "the decoding error is the cause");
+    }
+
+    /// <summary>
+    /// A database error in a save, a read or a count becomes a store error with the database error as the cause.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task SqliteStoreIncidentMethodsWrapDatabaseErrors()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+
+        await ExecuteAsync(Path.Combine(directory.Path, StorageLimits.FileName), "DROP TABLE incidents");
+
+        // Act
+        var save = await Assert.ThrowsExactlyAsync<StoreException>(() => store.SaveIncidentAsync(Sample(0, 2), Samples.Base.AddDays(1), TestContext.CancellationToken), "save without the table");
+        var read = await Assert.ThrowsExactlyAsync<StoreException>(() => ReadAsync(store, StorableTime.Min, StorableTime.Max, 10), "read without the table");
+        var count = await Assert.ThrowsExactlyAsync<StoreException>(() => store.CountIncidentsAsync(TestContext.CancellationToken), "count without the table");
+
+        // Assert
+        Assert.StartsWith("store: saving incident: ", save.Message, "message of the save");
+        Assert.IsInstanceOfType<SqliteException>(save.InnerException, "cause of the save");
+        Assert.StartsWith("store: reading incidents: ", read.Message, "message of the read");
+        Assert.IsInstanceOfType<SqliteException>(read.InnerException, "cause of the read");
+        Assert.StartsWith("store: reading incidents: ", count.Message, "message of the count");
+        Assert.IsInstanceOfType<SqliteException>(count.InnerException, "cause of the count");
+    }
+
+    /// <summary>
     /// Returns a time in hours after the base time of the samples.
     /// </summary>
     /// <param name="hours">The hours</param>
@@ -609,6 +662,24 @@ public class SqliteStoreIncidentTests
                                         Limit = limit
                                     },
                                     TestContext.CancellationToken);
+    }
+
+    /// <summary>
+    /// Runs a statement on the database file through its own connection.
+    /// </summary>
+    /// <param name="path">The database file</param>
+    /// <param name="sql">The statement</param>
+    /// <returns>A task that completes when the statement ran</returns>
+    private async Task ExecuteAsync(string path, string sql)
+    {
+        await using var connection = new SqliteConnection($"Data Source={path};Pooling=False");
+
+        await connection.OpenAsync(TestContext.CancellationToken);
+
+        using var command = connection.CreateCommand();
+
+        command.CommandText = sql;
+        await command.ExecuteNonQueryAsync(TestContext.CancellationToken);
     }
 
     /// <summary>

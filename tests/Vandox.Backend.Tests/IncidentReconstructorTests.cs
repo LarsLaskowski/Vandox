@@ -1,5 +1,7 @@
+using System.Globalization;
 using System.Text.Json;
 
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Time.Testing;
 
 using Vandox.Backend.Incidents;
@@ -255,11 +257,12 @@ public class IncidentReconstructorTests
         var clock = new FakeTimeProvider(IncidentSamples.Base.AddDays(1));
         var refusing = new RefusingIncidentStore(store, 2);
         var saved = new List<SavedIncident>();
+        var logger = new ListLogger();
 
         await IncidentSamples.WriteAsync(store, TestContext.CancellationToken, IncidentSamples.Kill(At(0)), IncidentSamples.Kill(At(180)), IncidentSamples.Kill(At(360)));
 
         // Act
-        var result = await RunAsync(store, refusing, clock, saved);
+        var result = await RunAsync(store, refusing, clock, saved, logger);
         var stored = await ReadAllAsync(store);
 
         // Assert
@@ -271,6 +274,8 @@ public class IncidentReconstructorTests
         Assert.AreEqual(0L, result.Kept, "nothing is left over");
         Assert.AreSequenceEqual([At(0), At(360)], saved.Select(item => item.Incident.FirstKillAt), "the first and the third incident were passed on");
         Assert.AreSequenceEqual([At(0), At(360)], stored.Select(row => row.Incident.FirstKillAt), "the first and the third incident are stored");
+        Assert.AreSequenceEqual([(LogLevel.Warning, new EventId(33))], logger.Entries, "one warning with the event ID of the skipped incident");
+        Assert.AreSequenceEqual([$"incident skipped {At(180).ToString("O", CultureInfo.InvariantCulture)} store: invalid incident: refused by the test double"], logger.Messages, "the warning names the first kill and the store's reason");
     }
 
     /// <summary>
@@ -404,10 +409,11 @@ public class IncidentReconstructorTests
     /// <param name="incidents">The store that saves the incidents</param>
     /// <param name="clock">The clock</param>
     /// <param name="saved">Receives every saved incident</param>
+    /// <param name="logger">The logger of the reconstructor, or <c>null</c> for none</param>
     /// <returns>A task that returns the result</returns>
-    private Task<ReconstructionResult> RunAsync(SqliteStore store, IIncidentStore incidents, FakeTimeProvider clock, List<SavedIncident> saved)
+    private Task<ReconstructionResult> RunAsync(SqliteStore store, IIncidentStore incidents, FakeTimeProvider clock, List<SavedIncident> saved, ILogger? logger = null)
     {
-        var reconstructor = new IncidentReconstructor(store, store, incidents, BuiltInSignatures.Catalog, _before, _after, clock);
+        var reconstructor = new IncidentReconstructor(store, store, incidents, BuiltInSignatures.Catalog, _before, _after, clock, logger);
 
         return reconstructor.RunAsync(item =>
                                       {

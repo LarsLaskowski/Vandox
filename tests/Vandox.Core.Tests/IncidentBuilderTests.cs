@@ -468,6 +468,82 @@ public class IncidentBuilderTests
     }
 
     /// <summary>
+    /// Process snapshots, connection snapshots and metrics outside the window, at its start minus a minute and at its exclusive end, change nothing.
+    /// </summary>
+    [TestMethod]
+    public void IncidentBuilderIgnoresSnapshotsAndMetricsOutsideWindow()
+    {
+        // Arrange
+        var builder = IncidentSamples.Builder(IncidentSamples.Base);
+        var legacy = "legacy-monitor";
+
+        builder.AddProcessSnapshot(1, At(-61), IncidentSamples.Programs(("huge", 9000), (Backup, 50)));
+        builder.AddProcessSnapshot(2, At(-30), IncidentSamples.Programs(("base", 100)));
+        builder.AddProcessSnapshot(3, At(-10), IncidentSamples.Programs(("base", 200)));
+        builder.AddProcessSnapshot(4, At(30), IncidentSamples.Programs(("huge", 9000), (Backup, 50)));
+        builder.AddConnectionSnapshot(5, At(-61), IncidentSamples.Connections(1000, ("evil", 1000)));
+        builder.AddConnectionSnapshot(6, At(-20), IncidentSamples.Connections(5, ("web", 5)));
+        builder.AddConnectionSnapshot(7, At(30), IncidentSamples.Connections(1000, ("evil", 1000)));
+        builder.AddMetric(legacy, At(-61), IncidentSamples.Metric("load1", 99));
+        builder.AddMetric(legacy, At(-20), IncidentSamples.Metric("load1", 2));
+        builder.AddMetric(legacy, At(30), IncidentSamples.Metric("load1", 99));
+
+        // Act
+        var incident = builder.Build();
+
+        // Assert
+        Assert.AreEqual(2L, incident.Hypothesis.SnapshotCount, "only the snapshots of the window count");
+        Assert.IsFalse(incident.Hypothesis.BackupRunning, "the backup program outside the window is not seen");
+        Assert.IsEmpty(incident.Timeline, "no backup entries");
+        Assert.IsNotNull(incident.Connections, "connection peak of the window");
+        Assert.AreEqual(5L, incident.Connections.Sockets, "sockets of the only snapshot in the window");
+        Assert.AreEqual(1L, incident.Connections.Snapshots, "connection snapshots in the window");
+        Assert.AreEqual(6L, incident.Connections.RecordId, "record of the peak");
+        Assert.HasCount(1, incident.Metrics, "one metric");
+        Assert.AreEqual(2.0, incident.Metrics[0].Value, "the metric sample outside the window is ignored");
+        Assert.AreEqual(1L, incident.Metrics[0].Samples, "metric samples in the window");
+    }
+
+    /// <summary>
+    /// 100,000 events with large texts and 1,000 snapshots of 4,096 programs leave only what the caps keep: the first 1,000 timeline entries and two program lists.
+    /// </summary>
+    [TestMethod]
+    public void IncidentBuilderRetainsBoundedMemory()
+    {
+        // Arrange
+        const int eventCount = 100000;
+        const int snapshotCount = 1000;
+        const long bound = 24L * 1024 * 1024;
+        var builder = IncidentSamples.Builder(IncidentSamples.Base);
+        var snapshot = IncidentSamples.Programs(Enumerable.Range(0, 4096).Select(index => (index == 0 ? Backup : $"program-{index}", (ulong)(index + 1))).ToArray());
+        var before = RetainedBytes();
+
+        // Act
+        for (var index = 0; index < eventCount; index++)
+        {
+            builder.AddEvent(LargeEvent(At(-55).AddSeconds(index % 3000), index + 1));
+        }
+
+        for (var index = 0; index < snapshotCount; index++)
+        {
+            builder.AddProcessSnapshot(index + 1, At(-50).AddSeconds(index), snapshot);
+        }
+
+        var retained = RetainedBytes() - before;
+
+        GC.KeepAlive(builder);
+
+        var incident = builder.Build();
+
+        // Assert
+        Assert.IsLessThan(bound, retained, "retained bytes, keeping every event would be about 600 MB and every snapshot about 600 MB");
+        Assert.HasCount(IncidentLimits.MaxTimelineEvents, incident.Timeline.Where(entry => entry.Type == IncidentSignatures.ServiceStart).ToList(), "timeline entries kept");
+        Assert.AreEqual(eventCount - IncidentLimits.MaxTimelineEvents, incident.TimelineOmitted, "omitted events are counted");
+        Assert.AreEqual((long)snapshotCount, incident.Hypothesis.SnapshotCount, "snapshots counted");
+        Assert.HasCount(IncidentLimits.MaxCandidates, incident.Hypothesis.Consumers, "consumers");
+    }
+
+    /// <summary>
     /// Returns a time relative to the first kill.
     /// </summary>
     /// <param name="minutes">Minutes after the first kill, negative before it</param>
@@ -485,6 +561,39 @@ public class IncidentBuilderTests
     private static string Describe(Incident incident)
     {
         return string.Join(',', incident.Timeline.Select(entry => string.Create(CultureInfo.InvariantCulture, $"{(entry.At - IncidentSamples.Base).TotalMinutes}:{entry.Type}:{entry.RecordIds[0]}")));
+    }
+
+    /// <summary>
+    /// Returns the bytes the process retains after a full collection, which is how the heap-bound claims are measured.
+    /// </summary>
+    /// <returns>The number of bytes</returns>
+    private static long RetainedBytes()
+    {
+#pragma warning disable S1215
+        return GC.GetTotalMemory(true);
+#pragma warning restore S1215
+    }
+
+    /// <summary>
+    /// Creates a service start whose three texts are separate strings of 1,024 characters and that names 256 records.
+    /// </summary>
+    /// <param name="at">The time</param>
+    /// <param name="recordId">The ID of the first record</param>
+    /// <returns>The event</returns>
+    private static DetectedEvent LargeEvent(DateTimeOffset at, long recordId)
+    {
+        var detected = IncidentSamples.ServiceStart(at, recordId);
+
+        detected.Host = new string('h', 1024);
+        detected.Texts = new Dictionary<string, string>
+                         {
+                             ["unit"] = new string('u', 1024),
+                             ["description"] = new string('d', 1024)
+                         };
+        detected.RecordIds = Enumerable.Range(0, 256).Select(offset => recordId + offset).ToList();
+        detected.LineCount = 256;
+
+        return detected;
     }
 
     /// <summary>
