@@ -289,6 +289,34 @@ public class ChartInteropTests
     }
 
     /// <summary>
+    /// A render queued behind a pending <c>create</c> before the disposal ends quietly: no exception, no update, and the chart is torn down once.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task ChartInteropQueuedRenderBeforeDisposeCompletesWithoutException()
+    {
+        // Arrange
+        var runtime = new RecordingJsRuntime { CreateGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously) };
+        var interop = new ChartInterop(runtime);
+        var host = new ElementReference("host-1");
+        var first = interop.RenderAsync(host, "Load", CreateData(1.0), CancellationToken.None);
+        var second = interop.RenderAsync(host, "Load", CreateData(2.0), CancellationToken.None);
+        var dispose = interop.DisposeAsync().AsTask();
+
+        // Act
+        runtime.CreateGate.SetResult();
+
+        await first;
+        await second;
+        await dispose;
+
+        // Assert
+        var sequence = runtime.Calls.Select(call => $"{call.Target}.{call.Identifier}").ToArray();
+
+        Assert.AreSequenceEqual(_lateDisposeSequence, sequence, "import, create, destroy, dispose the chart, dispose the module; no update");
+    }
+
+    /// <summary>
     /// Two renders while <c>create</c> is pending create the chart once and update it once.
     /// </summary>
     /// <returns>A task that completes when the test is done</returns>
