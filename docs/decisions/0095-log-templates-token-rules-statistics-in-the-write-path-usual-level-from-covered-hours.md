@@ -120,15 +120,28 @@ How the tables are replaced:
 19. **In place, behind a high-water record ID** (chosen) — one transaction empties the three tables and reads the highest record
     ID; then batches of log lines with IDs up to that one are counted in transactions of their own, with the counting code of the
     write path. The write path keeps counting the lines it stores meanwhile, whose IDs are higher, and both only add to counts and
-    widen first and last seen, so the order does not matter and every stored line is counted once when the run completes. The
-    price: until a run completes, the statistics are incomplete (during the run and after an interrupted one), and the transaction
-    that empties the tables grows with the statistics, not with a batch.
+    widen first and last seen, so the order does not matter and every stored line is counted once when the run completes, provided
+    no other rebuild counts meanwhile (option 22). The price: until a run completes, the statistics are incomplete (during the run
+    and after an interrupted one), and the transaction that empties the tables grows with the statistics, not with a batch.
 20. **Into shadow tables, swapped in at the end** — readers never see incomplete statistics, and an interrupted run leaves the old
     ones; but the swap is one transaction as large as the statistics plus a catch-up of the lines stored meanwhile, holding the
     writer lock (and another process past its busy timeout) for that long, and renamed tables cannot keep the index names and schema
     text of a migrated database, which is part of the contract.
 21. **Resume an interrupted run from a stored cursor** — saves the work already done; but needs state in `meta` and a rule for a
     resume by a build with other rules, while a run from the start costs minutes. Every run starts from the beginning.
+
+How two rebuilds at once are kept apart (the writer lock serializes transactions, not runs: a second run, started by an operator who
+thinks the first one hangs, clears and counts again while the first one keeps adding the lines past its cursor on top):
+
+22. **A run marker in `meta`, checked in every counting transaction** (chosen) — the transaction that empties the tables writes a
+    random marker of its own; every batch and the final transaction first check, inside the transaction, that the marker is still
+    theirs. A later run's clear deletes everything an earlier run counted and replaces the marker in one transaction, so the earlier
+    run cannot count again and fails; the run that cleared last wins, and no line is counted twice. A marker left by an interrupted
+    run records in the database that the statistics are incomplete and is simply overwritten by the next run. The price: one row and
+    one read per batch, and a superseded run ends with exit code 1.
+23. **No guard: a documented rule "never run two at once", or a lock held for the whole run** — the rule leaves both runs ending
+    with exit code 0 and lines counted twice, which nothing shows afterwards; SQLite has no lock that outlives a transaction, and a
+    lock file needs stale-lock handling after a crash, which a marker does not need.
 
 ## Decision
 
@@ -137,9 +150,9 @@ storage write path counts every stored log line under its source, program and te
 and per UTC hour, in the transaction of its batch; a template is new when it was first seen in the range and its source
 has earlier lines, and an hour exceeds the usual level when its count reaches the minimum and is more than the factor
 times the template's mean over the covered hours of the baseline window; the covered hours are computed (materialized) once per
-source and hour, the baseline sum once per candidate, and the query's cost is stated, not capped. Options 16 and 19: the sub-command `vandoxd templates` rebuilds the statistics in place,
-in one transaction that empties the tables and fixes the high-water record ID and then in bounded batches of stored lines counted
-by the write path's code. The rules, defaults and limits are in
+source and hour, the baseline sum once per candidate, and the query's cost is stated, not capped. Options 16, 19 and 22: the sub-command `vandoxd templates` rebuilds the statistics in place,
+in one transaction that empties the tables, writes the run's marker and fixes the high-water record ID, and then in bounded batches
+of stored lines counted by the write path's code, each checking the marker first. The rules, defaults and limits are in
 [Detection, alerts and reports](../areas/detection-and-reports.md) (*Log templates*), the tables and the rebuild in
 [Storage](../areas/storage.md) and the sub-command in [Backend host](../areas/backend-host.md).
 
@@ -152,11 +165,20 @@ by the write path's code. The rules, defaults and limits are in
   templates), where until then the queries treat hours before the upgrade as unknown, because the source has no counted
   lines there. The rebuild counts only lines that are still stored: once retention deletes lines (90 days), a rebuild
   loses the history of the expired ones, so it must stay a deliberate step, never a routine.
-- During a rebuild and after an interrupted one the statistics are incomplete; incidents rebuilt meanwhile carry the
-  templates of that state, so `vandoxd incidents` is run again after the rebuild. The high-water ID holds because a new
-  record gets an ID above every stored one; code that deletes the newest records (none does) would break it.
-- The transaction that empties the tables grows with the statistics; another process that waits for it longer than the
-  busy timeout fails and is run again.
+- During a rebuild and after an interrupted one the statistics are incomplete, and not in the way of the upgrade case:
+  batches go by record ID, not by time, so an hour can hold a partial count that looks covered, and usual-level and
+  new-template results are wrong, not unknown. The marker row in `meta` records that state in the database until a run
+  completes; nothing reads it yet, so the first consumer that shows template results to a user must check it. Incidents
+  rebuilt meanwhile carry the templates of that state, so `vandoxd incidents` is run again after the rebuild. The
+  high-water ID holds because a new record gets an ID above every stored one; code that deletes the newest records (none
+  does) would break it.
+- Two rebuilds at once never double-count: the one that cleared last completes, the other fails as superseded.
+- The transaction that empties the tables grows with the statistics: it holds the writer lock that long, so another
+  process that waits longer than the busy timeout fails and is run again, and it writes the deleted pages to the WAL,
+  which grows by about the size of the template tables until the next checkpoint.
+- A rebuild batch holds at most as many keys as lines (source, program and template, each bounded by the model limits),
+  and does no more work than the write path's largest batch; how long that holds the writer lock on the reference host
+  is measured with the write path, not separately.
 - A template's first-seen time is the earliest stored line: importing an older log later moves it earlier, so a
   template reported new may no longer be new afterwards.
 - Hostile or random text without digits creates a template per line; the statistics grow at most by one row per stored
