@@ -244,8 +244,9 @@ covered hours than the minimum no usual level is known and nothing is reported.
   digits that varies per line costs three statements per line. The measurement for one million lines, and for such a hostile case, is
   in `docs/BENCHMARKS.md`.
 - The **cost of the usual-level query is not bounded by its range or its limit.** It evaluates every template hour of the range whose
-  count reaches the minimum count, all of them before the limit applies, and reads per such hour up to `baseline hours` counts of the
-  template; the covered hours are computed once per source and hour (the statement materializes them), the baseline sum once per such hour. Text without digits that varies per line makes one template per
+  count reaches the minimum count, all of them before the limit applies, and reads every template hour of the range and of the
+  `baseline hours` before it once (the baseline sums are a window function per template); the covered hours are computed once per
+  source and hour (the statement materializes them). Text without digits that varies per line makes one template per
   line, so ten copies of such a line in an hour make a candidate at the default minimum count. A deadline or cancellation does **not**
   stop a running query (the SQLite library used does not interrupt a statement): a caller that serves a user must not rely on a
   deadline alone, but narrows the range and the source and runs the query off the request path. The measured times at the default and
