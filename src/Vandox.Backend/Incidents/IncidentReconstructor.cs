@@ -18,7 +18,7 @@ public sealed class IncidentReconstructor
     #region Constants
 
     /// <summary>
-    /// The page size of log line and metric reads.
+    /// The page size of log line reads.
     /// </summary>
     internal const int LinePage = 1000;
 
