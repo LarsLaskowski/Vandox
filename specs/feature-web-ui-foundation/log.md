@@ -21,7 +21,7 @@ are quoted in full.
 | 2026-10-12 22:35 | 8 Fix round 1 tests | Tester | Gated-double tests added (dispose during pending create, concurrent renders); I confirmed 2 fail on current code, 13 others pass (sonnet/medium · 12,758 tokens · 7 tool uses · 1021 s · continued) |
 | 2026-10-12 22:42 | 8 Fix round 1 | Dev | SemaphoreSlim serialises renders, late chart destroyed in DisposeAsync, interop disposed before token cancel; gates green (format, analyzer, tests, coverage 100% new/98.0%, scope) (sonnet/medium · 6,720 tokens · 4 tool uses · 83 s · continued) |
 | 2026-10-12 22:44 | 8 Review round 2 | Reviewer | Round-1 leak fixed; BLOCKING 1: queued render throws ObjectDisposedException into renderer after DisposeAsync (use return inside gate); fix round 2 (opus/medium · 12,097 tokens · 5 tool uses · 74 s · continued) |
-| 2026-10-12 22:46 | 8 Fix round 2 tests | Tester | ChartInteropQueuedRenderBeforeDisposeCompletesWithoutException added; fails on current code |
+| 2026-10-12 22:46 | 8 Fix round 2 tests | Tester | ChartInteropQueuedRenderBeforeDisposeCompletesWithoutException added; fails on current code (sonnet/medium · 4,385 tokens · 3 tool uses · 152 s · continued) |
 | 2026-10-12 22:53 | 8 Fix round 2 | Dev | Queued render returns inside gate after disposal; gates green (format, analyzer, tests 267 backend, coverage 100%/98.0%, scope) (sonnet/medium · 1,318 tokens · 2 tool uses · 47 s · continued) |
 | 2026-10-12 22:53 | 8 Review round 3 | Reviewer | APPROVE at 3507df4; no new findings (opus/medium · 2,703 tokens · 2 tool uses · 9 s · continued) |
-| 2026-10-12 22:54 | 9 PR approval | Lead | APPROVED; both Dev deviations accepted (MapStaticAssets order; reconnect dialog per plan Approach 3); records 0098/0099 Accepted |
+| 2026-10-12 22:54 | 9 PR approval | Lead | APPROVED; both Dev deviations accepted (MapStaticAssets order; reconnect dialog per plan Approach 3); records 0098/0099 Accepted (opus/medium · 71,330 tokens · 13 tool uses · 47 s) |
