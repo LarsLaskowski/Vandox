@@ -603,6 +603,60 @@ public class SqliteStoreTemplateTests
     }
 
     /// <summary>
+    /// The accepted boundary values of the usual-level parameters give a result: 744 hours of range, a baseline of 1 and of 2,160 hours, a factor of 1 and of 1,000.
+    /// </summary>
+    /// <param name="rangeHours">The hours from the start to the end of the range</param>
+    /// <param name="baselineHours">The baseline hours</param>
+    /// <param name="minBaselineHours">The minimum baseline hours</param>
+    /// <param name="factor">The factor</param>
+    /// <param name="expected">The number of reported hours</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [DataRow(744, 24, 24, 3.0, 1)]
+    [DataRow(1, 2160, 24, 3.0, 1)]
+    [DataRow(1, 2160, 2160, 3.0, 0)]
+    [DataRow(1, 1, 1, 3.0, 1)]
+    [DataRow(1, 24, 24, 1.0, 1)]
+    [DataRow(1, 24, 24, 1000.0, 0)]
+    public async Task SqliteStoreTemplateSpikesAcceptsTheBoundaryValues(int rangeHours, int baselineHours, int minBaselineHours, double factor, int expected)
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+
+        await WriteAsync(store, Lines("syslog", "sshd", "alpha event", 0, 24, 2).Concat(Lines("syslog", "sshd", "alpha event", 24, 50)).ToArray());
+
+        // Act
+        var spikes = await store.TemplateSpikesAsync(SpikeQuery(string.Empty, Hour(24), Hour(24 + rangeHours), baselineHours, minBaselineHours, factor, 1, 100), TestContext.CancellationToken);
+
+        // Assert
+        Assert.HasCount(expected, spikes, $"reported hours for range {rangeHours}, baseline {baselineHours}, minimum baseline {minBaselineHours} and factor {factor}");
+    }
+
+    /// <summary>
+    /// A database error while reading templates is reported as a store error with the reading context.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task SqliteStoreTemplateQueriesReportDatabaseErrorsAsStoreErrors()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+
+        await WriteAsync(store, Lines("syslog", "sshd", "alpha event", 0, 1));
+        await DropTableAsync(directory.Path, "log_template_hours");
+
+        // Act
+        var exception = await Assert.ThrowsExactlyAsync<StoreException>(() => store.TemplateHoursAsync(HoursQuery(1, Hour(0), Hour(1), 10), TestContext.CancellationToken), "hourly counts after the table is gone");
+
+        // Assert
+        Assert.StartsWith("store: reading templates: ", exception.Message, "message prefix");
+        Assert.Contains("log_template_hours", exception.Message, "the database message names the missing table");
+        Assert.IsInstanceOfType<SqliteException>(exception.InnerException, "the database error is kept as the inner exception");
+    }
+
+    /// <summary>
     /// Every stored log line is counted under its template: count, first seen, last seen, the template's hour and the source's hour.
     /// </summary>
     /// <returns>A task that completes when the test is done</returns>
@@ -952,6 +1006,27 @@ public class SqliteStoreTemplateTests
         var result = await store.WriteBatchAsync(Samples.Batch(records), TestContext.CancellationToken);
 
         Assert.AreEqual(new WriteResult(records.Length, 0), result, "all records of the arranged batch are stored");
+    }
+
+    /// <summary>
+    /// Drops a table of the database behind the store's back.
+    /// </summary>
+    /// <param name="directory">The database directory</param>
+    /// <param name="table">The table</param>
+    /// <returns>A task that completes when the table is gone</returns>
+    private async Task DropTableAsync(string directory, string table)
+    {
+        await using var connection = new SqliteConnection($"Data Source={Path.Combine(directory, StorageLimits.FileName)};Mode=ReadWrite;Pooling=False");
+
+        await connection.OpenAsync(TestContext.CancellationToken);
+
+        await using var command = connection.CreateCommand();
+
+#pragma warning disable CA2100
+        command.CommandText = $"DROP TABLE {table}";
+#pragma warning restore CA2100
+
+        await command.ExecuteNonQueryAsync(TestContext.CancellationToken);
     }
 
     /// <summary>

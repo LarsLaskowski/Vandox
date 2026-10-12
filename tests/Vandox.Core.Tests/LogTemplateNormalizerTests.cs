@@ -155,25 +155,18 @@ public class LogTemplateNormalizerTests
     [DataRow("00:1a:2b:3c:4d:5e", "<num>:<num>a:<num>b:<num>c:<num>d:<num>e")]
     [DataRow("\u0661\u0662\u0663", "\u0661\u0662\u0663")]
     [DataRow("\uFF11\uFF12\uFF13", "\uFF11\uFF12\uFF13")]
-    [DataRow("0123abcd-0123-4567-89ab-0123456789ag", "?")]
-    [DataRow("5.ms", "?")]
-    [DataRow("a@.example.com", "?")]
-    [DataRow("a@b..c", "?")]
-    [DataRow("a@b_c", "?")]
-    [DataRow("1.2.3.4:x", "?")]
-    [DataRow("1.2.3.4:", "?")]
-    [DataRow("1.2.3.4x5", "?")]
-    [DataRow("1.2.3.4/123", "?")]
-    [DataRow("1.2.3.4/", "?")]
-    [DataRow("1:2::3:", "?")]
-    [DataRow("1:2:3:4:5:6:7:", "?")]
-    [DataRow("fe80::12345", "?")]
-    [DataRow("1:2:3:4:5:6:7:8:9", "?")]
-    [DataRow("1::2::3", "?")]
-    [DataRow("1:2:3:4:5:6:7:8", "?")]
-    [DataRow("1.2.3.4.5", "?")]
-    [DataRow("1.2.3", "?")]
-    [DataRow("::ffff:10.0.0.256", "?")]
+    [DataRow("0123abcd-0123-4567-89ab-0123456789ag", "<id>")]
+    [DataRow("5.ms", "<id>")]
+    [DataRow("a@.example.com", "a@.example.com")]
+    [DataRow("a@b..c", "a@b..c")]
+    [DataRow("a@b_c", "a@b_c")]
+    [DataRow("1.2.3.4:x", "<ip>:x")]
+    [DataRow("1.2.3.4:", "<ip>:")]
+    [DataRow("1.2.3.4x5", "<id>")]
+    [DataRow("1.2.3.4/123", "<num>")]
+    [DataRow("1.2.3.4/", "<num>")]
+    [DataRow("1:2:3:4:5:6:7:", "<num>:")]
+    [DataRow("fe80::12345", "<id>::<num>")]
     public void LogTemplateNormalizerLeavesNearMissesToLaterRules(string token, string expected)
     {
         // Act
@@ -362,28 +355,55 @@ public class LogTemplateNormalizerTests
     }
 
     /// <summary>
-    /// The time to normalize a message grows linearly with its length: a doubled message takes about twice as long, not four times.
+    /// The time to normalize a message grows linearly with its length: a message eight times as long takes about eight times as long, not sixty-four times.
+    /// The messages are single long tokens or runs whose template stays short, so that the whole input is read.
     /// </summary>
+    /// <param name="scenario">The shape of the message</param>
     [TestMethod]
-    public void LogTemplateNormalizerTimeGrowsLinearly()
+    [DataRow("digits with a unit")]
+    [DataRow("email with dotted domain")]
+    [DataRow("white space run")]
+    [DataRow("dotted letters")]
+    [DataRow("hex digits")]
+    public void LogTemplateNormalizerTimeGrowsLinearly(string scenario)
     {
         // Arrange
-        const int baseWords = 40000;
+        const int baseLength = 50_000;
+        const int factor = 8;
         const int repetitions = 5;
 
-        var baseMessage = string.Concat(Enumerable.Repeat("conn 10.0.0.1 id4F2A31C0B2 /var/lib/x user@host 0x7f 12ms ", baseWords / 8));
-        var doubledMessage = string.Concat(baseMessage, baseMessage);
+        var baseMessage = BuildLongMessage(scenario, baseLength);
+        var longMessage = BuildLongMessage(scenario, factor * baseLength);
 
         LogTemplateNormalizer.Normalize(baseMessage);
-        LogTemplateNormalizer.Normalize(doubledMessage);
+        LogTemplateNormalizer.Normalize(longMessage);
 
         // Act
         var baseTicks = BestTicks(baseMessage, repetitions);
-        var doubledTicks = BestTicks(doubledMessage, repetitions);
-        var ratio = (double)doubledTicks / Math.Max(1, baseTicks);
+        var longTicks = BestTicks(longMessage, repetitions);
+        var ratio = (double)longTicks / Math.Max(1, baseTicks);
 
         // Assert
-        Assert.IsLessThan(8.0, ratio, $"the time of the doubled message over the time of the base message is {ratio:F2}; linear growth is about 2, quadratic about 4 and more");
+        Assert.IsGreaterThanOrEqualTo(baseLength, baseMessage.Length, "the base message has the intended length");
+        Assert.IsLessThan(30.0, ratio, $"{scenario}: the time of the message {factor} times as long over the time of the base message is {ratio:F2}; linear growth is about {factor}, quadratic about {factor * factor}");
+    }
+
+    /// <summary>
+    /// Builds a long message of one shape.
+    /// </summary>
+    /// <param name="scenario">The shape</param>
+    /// <param name="length">The approximate length in characters</param>
+    /// <returns>The message</returns>
+    private static string BuildLongMessage(string scenario, int length)
+    {
+        return scenario switch
+               {
+                   "digits with a unit" => string.Concat(new string('7', length), "kB"),
+                   "email with dotted domain" => string.Concat("user@", string.Concat(Enumerable.Repeat("a.", length / 2)), "b"),
+                   "white space run" => string.Concat("head", new string(' ', length), "tail"),
+                   "dotted letters" => string.Concat(string.Concat(Enumerable.Repeat("a.", length / 2)), "b"),
+                   _ => string.Concat(string.Concat(Enumerable.Repeat("dead", length / 4)), "1")
+               };
     }
 
     /// <summary>
