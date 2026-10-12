@@ -1,6 +1,6 @@
 # 0095: Log templates: fixed token rules, statistics kept by the write path per source and program, the usual level from the hours the source logged
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-12
 - **Area:** Detection, alerts and reports
 - **Source:** Issue #22
