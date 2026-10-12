@@ -235,7 +235,8 @@ action yourself — including follow-up issues the Lead decides on.
     available; otherwise check the CI and code-analysis (e.g. SonarQube Cloud) results yourself before finishing) — a session
     that ends with an unwatched PR has not completed this step. Stay with the PR until CI is green and the
     code analysis (e.g. SonarQube Cloud) passed with no new issue on the head, then mark it ready for review
-    (`update_pull_request` with `draft: false`) — never earlier, see `.squad/routing.md`, *Draft until green*:
+    (`update_pull_request` with `draft: false`) — never earlier, and after a fix only once its re-approval
+    (step 9) has passed on the new head, see `.squad/routing.md`, *Draft until green*:
     - code-analysis findings → `squad-code-officer` (structural ones → `squad-dev`);
     - failing build or tests → `squad-dev` (test defects → `squad-tester`);
     - review comments (human, automated, `review-pr`) → `squad-dev`, worked in this PR, blocking or not.

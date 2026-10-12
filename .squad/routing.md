@@ -157,7 +157,8 @@ review (`update_pull_request` with `draft: false`) only when all of this holds o
 - the CI code analysis (e.g. SonarQube Cloud) has reported on this head, its quality gate passed and it lists
   **no new issue** on the pull request — a passed gate with open new issues (bugs, code smells, security
   hotspots to review) is still rework, worked like a failing check;
-- no commit for a known failure or finding is still to be pushed.
+- no commit for a known failure or finding is still to be pushed, and after a fix in the squad skills the
+  re-approval of step 9 has passed on this head.
 
 Each failure is fixed on the branch as step 11 describes, and the check starts again on the new head. When
 a check fails for reasons outside the change (red on the base branch too), or the code analysis cannot be
