@@ -9,7 +9,8 @@ namespace Vandox.Import.Tests;
 /// A parser double: every line of a file whose first line starts with <c>LOG</c> becomes a log line record one second after
 /// <see cref="Base"/> per line number. A line starting with <c>bad</c> is skipped, a line starting with <c>refuse</c> becomes an
 /// invalid record, and a line starting with <c>boom</c> makes the parser fail. A line starting with <c>raw</c> is reported with a
-/// warning and then becomes a record like any other line. The first lines it is told to skip are skipped.
+/// warning and then becomes a record like any other line, and a line starting with <c>huge</c> becomes a process snapshot whose JSON
+/// is larger than the payload limit. The first lines it is told to skip are skipped.
 /// </summary>
 internal sealed class LineParser : ILogParser
 {
