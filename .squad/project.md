@@ -137,7 +137,7 @@ files or endpoints.
     candidates, 20 + 20 templates and two program maps of at most 4,096 entries (`Vandox.Core.Incidents`: `IncidentLimits`); `IncidentReconstructor` reads log lines and
     metrics in pages of 1,000 and process and connection snapshots one per page, pages by capture time and record ID (`RecordQuery.AfterId`) and fails a page that does not
     lead past the previous one; `RecordQueries.ReadJson` reads the payload as UTF-8 bytes so that one forged maximum process snapshot of an earlier build peaks near 240 MiB (this version stores no payload of more than 16 MiB of JSON: `StorageLimits.MaxPayloadBytes`, checked by `RecordRules.CheckPayloadSize` in the importer's `RecordEmitter` and by `BatchWriter` while it serializes with `PayloadJson` into a `BoundedBufferWriter`, which drops the bytes above the limit); `IncidentRepository` refuses an
-    incident of more than 8 MiB of serialized JSON (`InvalidIncidentException`), which the reconstructor skips and counts. Forged kill lines make forged incidents
+    incident of more than 8 MiB of serialized JSON (`InvalidIncidentException`), which the reconstructor skips and counts, and reads stored incident data as UTF-8 bytes. Forged kill lines make forged incidents
     (a documented limitation, record 0096). Records 0048, 0049, 0066, 0069, 0076, 0078, 0079, 0084,
     0085, 0086, 0088, 0091, 0092, 0093, 0094, 0095, 0096.
 11. **Outbound calls** (Telegram, external checks, the optional AI service of the nightly report, the
