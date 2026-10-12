@@ -129,3 +129,12 @@ row shrinks.
   `IIncidentStore.IncidentsAsync`, page with a small limit: a page keeps every returned incident decoded at once, each from up
   to 8 MiB of stored JSON (see *Reading* in docs/areas/storage.md, #213)."
 - The incident write path: see *Options considered*.
+
+## Challenge notes
+
+Devil's Advocate verdict: OBJECTIONS 0 major, 3 minor. Security plan review: APPROVED (non-blocking notes below).
+
+1. #213 is implemented after #212. The Dev re-reads the current `docs/areas/storage.md` and `.squad/project.md` (area 10) and applies the #213 edits as separate, bullet-local edits.
+2. AC1: use `GC.GetAllocatedBytesForCurrentThread` around fully synchronous calls with the reader already positioned; run `Read` and `Deserialize` once each beforehand (warm-up of JIT and options cache); confirm `GetFieldValue<byte[]>` on a TEXT column allocates about 1 x S, not 2 x S, before relying on the threshold.
+3. AC3: add one row with invalid UTF-8 in the stored data (blob literal cast to text, e.g. `CAST(x'7B22...FF...' AS TEXT)`), expecting the same `StoreException` text with a `JsonException` cause.
+4. (Security) `storage.md` *Reading* states the worst case plainly: up to 10,000 incidents per page, each decoded from up to 8 MiB. The proposed comment for #27 is posted on that issue.

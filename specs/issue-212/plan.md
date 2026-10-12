@@ -236,3 +236,15 @@ is refused; an import record above it is a reported skip, as every refused impor
   32 MiB; no change.
 - Planned verification (Tester, Dev — not run by the Lead): AC1–AC7 as named; no end-to-end import of a 105 MB forged legacy
   log is required, AC3 and AC5 cover the bound with small inputs.
+
+## Challenge notes
+
+Devil's Advocate verdict: OBJECTIONS 0 major, 2 minor. Security plan review: APPROVED (non-blocking notes below).
+
+1. AC6 must prove the rollback itself: valid records before the oversized one, a read-back showing none of them stored, and a normal batch written afterwards to show the writer connection and lock stay usable. The Dev confirms in `SqliteStore.WriteBatchAsync` that the transaction is disposed without commit on a non-`SqliteException`.
+2. Every JSON payload in an import is serialized twice (in `Fits` in the emitter, then in the writer). Deliberate trade-off: keep `Fits` copy-free, name the double serialization as a known cost in `docs/areas/storage.md`; the Reviewer does not flag it.
+3. (Security) Step 2 claims the kept array never exceeds `maxBytes` plus the largest size hint, while plain doubling can reach 2 x the limit and the area document says "about twice the limit": clamp growth to `min(2 x capacity, maxBytes + hint)` or align the text. The Tester adds one row pinning allocation for a payload that just fits (total allocation of `Serialize` <= 4 x output length).
+4. (Security) When the limit is crossed the Dev drops the reference to the kept array (sets it to null), not just stops using it.
+5. (Security) The byte counter stops counting once `Exceeded` is set (sticky flag) or is a `long`, so it cannot wrap.
+6. (Security) The 6 MiB bound for agent records is untested; the ingest plan must check it when ingest lands.
+7. Shared docs with #213 (`docs/areas/storage.md`, `.squad/project.md` area 10): #212 is implemented first; #213 re-reads the current text and edits bullet-locally.
