@@ -3,7 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-10-12
 - **Area:** Detection, alerts and reports
-- **Source:** Issue #23
+- **Source:** Issue #23; two consequences updated by issues #212 and #213
 - **Supersedes:** —
 
 ## Context
@@ -146,9 +146,13 @@ duplicating. The rules, defaults and limits are in [Detection, alerts and report
   incident from a window whose lines have partly expired: either keep the data of incident windows or stop
   rebuilding incidents older than the log retention. Incidents are kept without limit, so forged kills spaced apart
   leave incidents (up to 8 MiB each) that outlive their lines; #46 has to bound that, too.
-- Reading one forged maximum process snapshot still takes about 240 MiB at its peak, in a container of 512 MiB that
-  the service shares; it needs a forged legacy monitoring log at every cap. Storing such a snapshot on import costs
-  more (follow-up issue).
+- Reading one forged maximum process snapshot (about 100 MiB of JSON) takes about 240 MiB at its peak, in a container
+  of 512 MiB that the service shares. Since #212 the store refuses a payload above its JSON limit
+  ([0063](0063-storage-schema-records-table-typed-metric-and-log-tables-json-payloads.md)), so the import skips such a
+  snapshot and only a database written by an earlier build can hold one.
+- `IncidentsAsync` returns every incident of a page decoded at once, up to the query limit of 10,000, each from up to
+  8 MiB of JSON; it has no product caller yet. Its first caller, the incidents view (#27), pages with a small limit
+  instead of relying on the store (#213).
 - A reboot without a stored boot line is not seen; snapshots before it then count as the growth baseline.
 - Backups are recognized only by the program name `pzstd`; another backup program shows as growth or consumer, not as
   a backup. To revisit with #36 or with real snapshots.
