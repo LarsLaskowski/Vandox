@@ -3,11 +3,13 @@
 (`analyzer-check-<profile>.py` next to this script, written by adopt-template) and fails when any of them
 fails. A profile whose tool is missing fails its own script, so a missing analyzer is never skipped.
 
-The scripts are found by their fixed name pattern next to this file; the script takes no arguments, so
-nothing user-supplied reaches the shell, git or the filesystem.
+The scripts are found by their fixed name pattern next to this file; the script accepts one flag,
+`--lint-only`, which it passes to every profile's script (the lint pass over changed shell scripts, workflows
+and Dockerfiles without the stacks' builds, for a `patch` that touches no production code — `.squad/routing.md`,
+*Gates of a patch*), and no value, so nothing user-supplied reaches the shell, git or the filesystem.
 
 Usage, from the repository root:
-    python3 .squad/tools/analyzer-check.py
+    python3 .squad/tools/analyzer-check.py [--lint-only]
 
 Exit code 0 when every profile passes, 1 otherwise.
 """
@@ -17,7 +19,13 @@ import subprocess
 import sys
 
 
+LINT_ONLY = "--lint-only"
+
+
 def main():
+    flags = sys.argv[1:]
+    if flags and flags != [LINT_ONLY]:
+        sys.exit(f"usage: analyzer-check.py [{LINT_ONLY}]")
     here = os.path.dirname(os.path.abspath(__file__))
     scripts = sorted(glob.glob(os.path.join(here, "analyzer-check-*.py")))
     if not scripts:
@@ -28,7 +36,7 @@ def main():
         profile = os.path.basename(script)[len("analyzer-check-"):-len(".py")]
         print(f"=== Analyzer gate: {profile} ===")
         sys.stdout.flush()
-        if subprocess.run([sys.executable, script], check=False).returncode != 0:
+        if subprocess.run([sys.executable, script, *flags], check=False).returncode != 0:
             failed.append(profile)
         print()
     print("PASS" if not failed else f"FAIL ({', '.join(failed)})")

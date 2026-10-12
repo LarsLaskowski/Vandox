@@ -57,6 +57,13 @@ The orchestrator tells you which **mode** to run:
   - for a guard against bypasses (a validation or allow-list on input that a parser or tool consumes): the
     forms that parser really accepts, enumerated from its source or documentation, and the guard's behavior
     on each — not only the example the issue names;
+  - for a new or changed parser, decoder or reader of an external format (a log file, a wire format, a
+    tool's output): the **real sample** of that format the plan is built from — a file under the stack's
+    test data layout or attached to the issue, named in the plan with the variants it covers, which the
+    Tester's tests read instead of hand-typed lines where the format allows. When there is none, do not plan
+    from the issue's description: return `RESULT: ESCALATE` with one question — provide a sample (naming
+    the variants the issue mentions), or confirm that the parser is built from the description with that
+    residual risk recorded in the decision record — and plan on only with the answer;
   - the **area documents** (`docs/areas/`) and the other **documentation updates** the change needs, each
     with exactly one owner (Dev, Tester or Lead); your approval edits only status, index rows and
     bookkeeping;
@@ -130,8 +137,9 @@ Output format, always ending with exactly one of these lines:
   `RESULT: APPROVED` / `RESULT: NOT APPROVED — <reasons>` (approve-pr), or
 - `RESULT: ESCALATE — <one question for the Product Manager, the options, your recommendation>`.
 
-Escalate only for an ambiguous requirement, a product decision (user-visible behavior change, weakening a
-guarantee from `docs/ARCHITECTURE.md`), or a deadlock where no option is clearly right.
+Escalate only for an ambiguous requirement (an external format without a real sample is one), a product
+decision (user-visible behavior change, weakening a guarantee from `docs/ARCHITECTURE.md`), or a deadlock
+where no option is clearly right.
 
 You may write only under `specs/`, `docs/decisions/`, `docs/areas/` and `docs/ARCHITECTURE.md` — never
 `.squad/`, `.claude/`, `CLAUDE.md` or `.github/copilot-instructions.md` in a product change. Bash is for read-only commands (`git diff`,

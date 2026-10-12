@@ -41,6 +41,7 @@ repository (record 0074): keep it true when the build changes.
 | *Build* | `go build ./... && dotnet build Vandox.slnx` |
 | *Test* | `go test ./... -race && dotnet test Vandox.slnx` |
 | *Single test* | Go: `go test ./<package> -run '^TestName$'`; .NET: `dotnet test tests/<Project>.Tests --filter <ClassOrMethodName>` |
+| *Test (project)* | Go: `go test ./<package>/... -race`; .NET: `dotnet test tests/<Project>.Tests` (the package or test project of the changed code; a `patch`, `.squad/routing.md` *Gates of a patch*). It writes no coverage report: a `patch` that changes production code runs *Test with coverage* instead, because the *Coverage gate* reads the Go and .NET reports of a full run |
 | *Test with coverage* | `rm -rf TestResults coverage.out && go test ./... -race -coverprofile=coverage.out && python3 .squad/tools/go-coverage-to-cobertura.py && dotnet test Vandox.slnx --settings coverlet.runsettings --results-directory TestResults` (clears the results first) |
 | *Coverage gate* | `python3 .squad/tools/coverage-check.py` |
 | *Analyzer gate* | `python3 .squad/tools/analyzer-check.py` |
@@ -68,7 +69,8 @@ their own beyond GitHub's job timeout.
 
 `analyzer-check.py` runs `analyzer-check-go.py` and `analyzer-check-dotnet.py`; each must pass, and both also
 run the lint pass over changed shell scripts, workflows and Dockerfiles described below. The .NET part needs
-*Restore* first.
+*Restore* first. `analyzer-check.py --lint-only` runs the lint pass alone, with no build and no Go or .NET
+analysis (the gate of a `patch` that touches only scripts, workflows or Dockerfiles).
 
 1. `go vet ./...` for the whole module.
 2. `golangci-lint run --new-from-merge-base=origin/main --whole-files ./...`, which reports every issue

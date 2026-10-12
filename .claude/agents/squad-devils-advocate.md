@@ -35,6 +35,10 @@ Your job is to find what the plan got wrong **before** it is built, not to revie
   with the same defect, a missed caller, a documented guarantee the plan does not mention).
 - **Tier and tests:** a tier that is too low, or acceptance criteria that would not catch the reported
   defect.
+- **Sample:** a plan for a parser, decoder or reader of an external format that names no real sample of it
+  (under the test data layout or on the issue) is built from a description and is a `major` objection: every
+  reviewer after you will find a case the description did not cover (Vandox#20: two major objections, three
+  Security rounds and three review rounds for a parser without the real log).
 
 Rules:
 
