@@ -139,10 +139,15 @@ A `null` query, source, program or message is an `ArgumentNullException`. A `Sql
 1. **Normalizer** (`Vandox.Core.Templates.LogTemplateNormalizer`): a static, stateless, hand-written single forward pass over the
    message, exactly the rules of the area document (*Log templates*, *Normalization*), ordinal ASCII comparisons only, no regular
    expression, no culture. Each token is classified by rules a to j in order, each rule a scan of the token bounded by its length;
-   rule i classifies the parts of one token with the same rules (no recursion beyond one level). Output into a reused or
-   stack-bounded buffer, one string per call; the result is cut with `Utf8Text.Cut(…, MaxTemplateBytes, out _)` after lone
-   surrogates are replaced. The Dev may move the token classification into an internal static helper in the same namespace,
-   tested through `LogTemplateNormalizerTests`.
+   rule i classifies the parts of one token with the same rules (no recursion beyond one level). **No shared mutable state:** the
+   class has no static field other than constants and read-only tables (no static buffer, no `[ThreadStatic]` buffer), because
+   `BatchWriter` (under `_writeLock`) and `FindTemplateAsync` (on reader leases) call `Normalize` concurrently. The output buffer
+   is local to the call: either a local `StringBuilder`, or a span over `stackalloc char[StackBufferChars]` with the private
+   constant `StackBufferChars = 1024` that, when the output outgrows it, continues in an array rented from
+   `ArrayPool<char>.Shared` and returned in a `finally`. A `stackalloc` sized from the input is not allowed (the output can be
+   about three times the input, `1 1 1` → `<num> <num> <num>`, and a stack overflow cannot be caught). One string per call; the
+   result is cut with `Utf8Text.Cut(…, MaxTemplateBytes, out _)` after lone surrogates are replaced. The Dev may move the token
+   classification into an internal static helper in the same namespace, tested through `LogTemplateNormalizerTests`.
 2. **Schema step 8** (`SchemaMigrator`), `StorageLimits.SchemaVersion = 8`:
    ```sql
    CREATE TABLE log_templates (
@@ -179,14 +184,42 @@ A `null` query, source, program or message is an `ArgumentNullException`. A `Sql
    count = count + excluded.count RETURNING id`, then an upsert per template hour and per source hour adding the count. An empty
    tally runs nothing (the metric write criterion of record 0083 is untouched).
 4. **Queries** (`ILogTemplateReader`, implemented by `SqliteStore` on a reader lease, SQL and validation in `TemplateQueries`):
-   *find* normalizes the message and reads the row by its unique key; *hourly counts* reads `log_template_hours` by primary key
-   range; *new templates* selects `first_seen` in range with `EXISTS (SELECT 1 FROM log_templates p WHERE p.source = t.source AND
-   p.first_seen < $from)`; *usual level* takes the candidates `log_template_hours` rows with `hour >= HourStart(from) AND hour <
-   to AND count >= $minCount` (index `log_template_hours_hour`), and per candidate counts the covered hours in
-   `log_source_hours` and sums the template's counts in `log_template_hours` over `[max(hour − baseline·3600·10^9, long.MinValue),
-   hour)` (computed without overflow), filters `covered >= minBaselineHours AND count > factor × sum / covered` (the Dev may compare
-   `count · covered > factor · sum`), orders by hour, count descending, template ID, and limits. Rows map to `LogTemplate`,
-   `TemplateHour` and `TemplateSpike`.
+   *find* refuses a message of more than `ModelLimits.MaxTextBytes` (16,384) UTF-8 bytes (no stored line can be longer, the
+   model refuses it), then normalizes the message and reads the row by its unique key; *hourly counts* reads
+   `log_template_hours` by primary key range; *new templates* selects `first_seen` in range with `EXISTS (SELECT 1 FROM
+   log_templates p WHERE p.source = t.source AND p.first_seen < $from)`; *usual level* is one statement of this shape (names
+   and layout are the Dev's, the structure is fixed):
+   ```sql
+   WITH candidates AS (            -- template-hour rows of the range that reach the minimum count
+     SELECT h.template_id, h.hour, h.count, t.source
+     FROM log_template_hours h JOIN log_templates t ON t.id = h.template_id
+     WHERE h.hour >= $fromHour AND h.hour < $to AND h.count >= $minCount AND ($source = '' OR t.source = $source)),
+   windows AS (                    -- once per distinct (source, hour), never per candidate
+     SELECT source, hour,
+            CASE WHEN hour < $minTime + $baselineNs THEN $minTime ELSE hour - $baselineNs END AS window_start
+     FROM (SELECT DISTINCT source, hour FROM candidates)),
+   covered AS (
+     SELECT w.source, w.hour, w.window_start,
+            (SELECT count(*) FROM log_source_hours s
+             WHERE s.source = w.source AND s.hour >= w.window_start AND s.hour < w.hour) AS covered_hours
+     FROM windows w)
+   SELECT … FROM candidates c JOIN covered v ON v.source = c.source AND v.hour = c.hour
+   WHERE v.covered_hours >= $minBaselineHours
+     AND c.count * v.covered_hours > $factor * (SELECT coalesce(sum(b.count), 0) FROM log_template_hours b
+                                               WHERE b.template_id = c.template_id AND b.hour >= v.window_start AND b.hour < c.hour)
+   ORDER BY c.hour, c.count DESC, c.template_id LIMIT $limit
+   ```
+   `$fromHour = HourStart(from)`, `$minTime = long.MinValue`, `$baselineNs = baseline hours · 3,600 · 10^9` (at most 2,160 hours,
+   no overflow); the `CASE` keeps `hour − $baselineNs` from underflowing (`$minTime + $baselineNs` cannot overflow). The usual
+   level returned is `sum / covered_hours`. Rows map to `LogTemplate`, `TemplateHour` and `TemplateSpike`.
+   **Cost, stated as it is** (also in the area document and *Security considerations*): the candidates are every
+   `log_template_hours` row in the up to 744 hours of the range with a count of at least `minCount` (index
+   `log_template_hours_hour`); neither the range nor the limit bounds their number, and `ORDER BY` evaluates all of them before
+   `LIMIT`. The work is (candidates × the template's rows in its baseline window, at most `baseline hours` each, by primary key)
+   plus (distinct source-hours of the candidates, at most sources × 744, × the source's rows in the window, by primary key).
+   Microsoft.Data.Sqlite 10.0.12 calls neither `sqlite3_interrupt` nor a progress handler, so a cancellation token or deadline
+   is checked only before the statement starts and between rows, and the first row arrives only after the sort: **a deadline
+   does not stop a running usual-level query.** There is no candidate cap (see *Options considered*).
 5. **Wiring**: `ServeCommand.Build` registers `ILogTemplateReader` like `ILogSearcher`.
 6. **Benchmark** (`tools/Vandox.StorageBenchmark`): `Program.TryParse` accepts `--log-lines N` (1 to 10,000,000) with an optional
    `--size N` (batch size, default 10,000); `--batches` or `--warmup` together with `--log-lines` is a usage error. The new
