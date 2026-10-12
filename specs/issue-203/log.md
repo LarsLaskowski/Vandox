@@ -14,3 +14,4 @@ are quoted in full.
 | 2026-10-12 17:44 | 3 Lead decide | squad-lead | Lead decision after the 2nd Security rejection: narrow the scope of php_disk_full to lines where ' in /' follows the error text; write errors without a script are not detected; one Security delta confirmation follows (opus/medium · 21,565 tokens · 29 tool uses · 120 s · continued) |
 | 2026-10-12 17:45 | 3 Plan security (confirm) | squad-security | APPROVED on 8ec47fa |
 | 2026-10-12 17:45 | 4 Skeleton | Orchestrator | skipped: catalog data only, no API change |
+| 2026-10-12 17:48 | 5 Tests first | squad-tester | 24 new tests fail on current catalog (AC1-5, AC9; AC10 adapted, AC6-8 wait for coverage pass) |

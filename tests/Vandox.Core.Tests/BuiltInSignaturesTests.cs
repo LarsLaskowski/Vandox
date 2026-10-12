@@ -1,3 +1,5 @@
+using System.Text;
+
 using NodaTime;
 
 using Vandox.Core.LogParsing;
@@ -26,7 +28,7 @@ public class BuiltInSignaturesTests
     #region Fields
 
     private static readonly string[] _crashAndRecoveryEvents = ["mariadb.recovery_start", "mariadb.recovery_end", "mariadb.abort"];
-    private static readonly string[] _remoteTextSignatures = ["disk_full", "mariadb_too_many_connections"];
+    private static readonly string[] _remoteTextSignatures = ["disk_full", "mariadb_too_many_connections", "php_too_many_connections", "php_disk_full", "nginx_disk_full"];
 
     #endregion // Fields
 
@@ -48,7 +50,7 @@ public class BuiltInSignaturesTests
     public void BuiltInSignaturesCatalogListsTheSignaturesInOrder()
     {
         // Arrange
-        string[] expected = ["oom_kill", "mariadb_crash", "mariadb_recovery_start", "mariadb_recovery_end", "mariadb_too_many_connections", "service_start", "service_stop", "service_failed", "disk_full", "postfix_fatal", "dovecot_fatal", "boot"];
+        string[] expected = ["oom_kill", "mariadb_crash", "mariadb_recovery_start", "mariadb_recovery_end", "mariadb_too_many_connections", "php_too_many_connections", "service_start", "service_stop", "service_failed", "disk_full", "php_disk_full", "nginx_disk_full", "postfix_fatal", "dovecot_fatal", "boot"];
 
         // Act
         var ids = BuiltInSignatures.Catalog.Signatures.Select(signature => signature.Id).ToList();
@@ -99,7 +101,7 @@ public class BuiltInSignaturesTests
     }
 
     /// <summary>
-    /// Every signature has an event or an origin condition, and the two that read messages with remote text anchor their pattern at the start of the message.
+    /// Every signature has an event or an origin condition, and the signatures that read messages with remote text anchor their pattern at the start of the message.
     /// </summary>
     [TestMethod]
     public void BuiltInSignaturesEverySignatureHasAnEventOrOriginCondition()
@@ -121,6 +123,31 @@ public class BuiltInSignaturesTests
             Assert.IsNotNull(signature.Pattern, $"{id} has a pattern");
             Assert.StartsWith("\\A", signature.Pattern.ToString(), $"the pattern of {id} starts with the start-of-text anchor");
         }
+    }
+
+    /// <summary>
+    /// The signatures of PHP and nginx read only the sources of the web servers and no program.
+    /// </summary>
+    [TestMethod]
+    public void BuiltInSignaturesWebSignaturesReadOnlyTheWebServerSources()
+    {
+        // Arrange
+        var signatures = BuiltInSignatures.Catalog.Signatures;
+        string[] phpSources = ["nginx-error", "sw-cp-server-error", "apache-error"];
+        string[] nginxSources = ["nginx-error", "sw-cp-server-error"];
+
+        // Act
+        var phpTooMany = signatures.Single(candidate => candidate.Id == "php_too_many_connections");
+        var phpDiskFull = signatures.Single(candidate => candidate.Id == "php_disk_full");
+        var nginxDiskFull = signatures.Single(candidate => candidate.Id == "nginx_disk_full");
+
+        // Assert
+        Assert.AreSequenceEqual(phpSources, phpTooMany.Sources.ToList(), "sources of php_too_many_connections");
+        Assert.AreSequenceEqual(phpSources, phpDiskFull.Sources.ToList(), "sources of php_disk_full");
+        Assert.AreSequenceEqual(nginxSources, nginxDiskFull.Sources.ToList(), "sources of nginx_disk_full");
+        Assert.IsEmpty(phpTooMany.Programs, "php_too_many_connections has no program");
+        Assert.IsEmpty(phpDiskFull.Programs, "php_disk_full has no program");
+        Assert.IsEmpty(nginxDiskFull.Programs, "nginx_disk_full has no program");
     }
 
     /// <summary>
@@ -275,7 +302,60 @@ public class BuiltInSignaturesTests
     [DataRow("nginx-error", "", "[alert] 1021#1021: accept4() failed (24: Too many open files)")]
     public void BuiltInSignaturesTooManyConnectionsIgnoresOtherLines(string source, string program, string message)
     {
-        AssertNothing(source, program, string.Empty, string.Empty, message);
+        AssertNoneOf("mariadb_too_many_connections", source, program, string.Empty, string.Empty, message);
+    }
+
+    /// <summary>
+    /// The mysqli and PDO errors about too many connections are recognized at the first PHP message of nginx and Apache lines.
+    /// </summary>
+    /// <param name="source">The source</param>
+    /// <param name="message">The message</param>
+    [TestMethod]
+    [DataRow("nginx-error", "[error] 2101#2101: *15 FastCGI sent in stderr: \"PHP message: PHP Warning:  mysqli_connect(): (HY000/1040): Too many connections in /var/www/vhosts/example.org/httpdocs/db.php on line 3; PHP message: PHP Warning:  mysqli_query(): Argument #1 must be of type mysqli, bool given in /var/www/vhosts/example.org/httpdocs/db.php on line 5\" while reading response header from upstream, client: 198.51.100.7, server: example.org, request: \"GET / HTTP/1.1\", upstream: \"fastcgi://unix:/var/www/vhosts/system/example.org/php-fpm.sock:\", host: \"example.org\", referrer: \"https://example.org/\"")]
+    [DataRow("sw-cp-server-error", "[error] 1201#0: *42 FastCGI sent in stderr: \"PHP message: PHP Warning:  mysqli::__construct(): (08004/1040): Too many connections in /opt/psa/admin/plib/Db.php on line 9\" while reading response header from upstream, client: 198.51.100.7, server: , request: \"GET /admin/ HTTP/1.1\", upstream: \"fastcgi://unix:/var/run/sw-engine.sock:\", host: \"panel.example.org:8443\"")]
+    [DataRow("nginx-error", "[error] 2101#2101: *16 FastCGI sent in stderr: \"PHP message: PHP Fatal error:  Uncaught mysqli_sql_exception: Too many connections in /var/www/vhosts/example.org/httpdocs/db.php:3")]
+    [DataRow("nginx-error", "[error] 2101#2101: *17 FastCGI sent in stderr: \"PHP message: PHP Fatal error:  Uncaught PDOException: SQLSTATE[08004] [1040] Too many connections in /var/www/vhosts/example.org/httpdocs/db.php:4")]
+    [DataRow("apache-error", "[proxy_fcgi:error] [pid 3101:tid 140231] [client 198.51.100.7:0] AH01071: Got error 'PHP message: PHP Fatal error:  Uncaught PDOException: SQLSTATE[HY000] [1040] Too many connections in /var/www/vhosts/example.org/httpdocs/wp-db.php:12', referer: https://example.org/")]
+    [DataRow("apache-error", "[fcgid:warn] [pid 3101:tid 140231] [client 2001:db8::7:51234] mod_fcgid: stderr: PHP Warning:  mysqli_real_connect(): (HY000/1040): Too many connections in /var/www/vhosts/example.org/httpdocs/db.php on line 4")]
+    [DataRow("apache-error", "[php:warn] [pid 901] [client 198.51.100.7:51234] PHP Warning:  mysqli_connect(): (HY000/1040): Too many connections in /var/www/vhosts/example.org/index.php on line 3")]
+    [DataRow("apache-error", "[php:error] [pid 901] [client 198.51.100.7:51234] PHP Fatal error:  Uncaught mysqli_sql_exception: Too many connections in /var/www/vhosts/example.org/index.php:3")]
+    [DataRow("apache-error", "[php7:warn] [pid 901:tid 140231] [client 198.51.100.7:51234] PHP Warning:  mysqli::real_connect(): (HY000/1040): Too many connections in /var/www/vhosts/example.org/index.php on line 3")]
+    public void BuiltInSignaturesPhpTooManyConnectionsMatchesMysqliAndPdoErrors(string source, string message)
+    {
+        AssertDetected("php_too_many_connections", source, string.Empty, string.Empty, string.Empty, message, string.Empty);
+    }
+
+    /// <summary>
+    /// The write errors of PHP about a full disk are recognized at the first PHP message of nginx and Apache lines.
+    /// </summary>
+    /// <param name="source">The source</param>
+    /// <param name="message">The message</param>
+    [TestMethod]
+    [DataRow("nginx-error", "[error] 2101#2101: *15 FastCGI sent in stderr: \"PHP message: PHP Notice:  fwrite(): Write of 8192 bytes failed with errno=28 No space left on device in /var/www/vhosts/example.org/httpdocs/cache.php on line 7\" while reading response header from upstream, client: 198.51.100.7, server: example.org, request: \"GET / HTTP/1.1\", host: \"example.org\"")]
+    [DataRow("nginx-error", "[error] 2101#2101: *16 FastCGI sent in stderr: \"PHP message: PHP Notice:  file_put_contents(): write of 4096 bytes failed with errno=28 No space left on device in /var/www/vhosts/example.org/httpdocs/cache.php on line 9\"")]
+    [DataRow("sw-cp-server-error", "[error] 1201#0: *42 FastCGI sent in stderr: \"PHP message: PHP Notice:  SplFileObject::fwrite(): Write of 512 bytes failed with errno=28 No space left on device in /opt/psa/admin/plib/Cache.php on line 20\"")]
+    [DataRow("apache-error", "[proxy_fcgi:error] [pid 3101:tid 140231] [client 198.51.100.7:0] AH01071: Got error 'PHP message: PHP Notice:  fwrite(): Write of 8192 bytes failed with errno=28 No space left on device in /var/www/vhosts/example.org/httpdocs/cache.php on line 7', referer: https://example.org/")]
+    [DataRow("apache-error", "[php:notice] [pid 901] [client 198.51.100.7:51234] PHP Notice:  fflush(): Write of 8192 bytes failed with errno=28 No space left on device in /var/www/vhosts/example.org/index.php on line 5")]
+    [DataRow("apache-error", "[fcgid:warn] [pid 3101:tid 140231] [client 198.51.100.7:51234] mod_fcgid: stderr: PHP Notice:  fputs(): Write of 512 bytes failed with errno=28 No space left on device in /var/www/vhosts/example.org/httpdocs/log.php on line 4")]
+    public void BuiltInSignaturesPhpDiskFullMatchesWriteErrors(string source, string message)
+    {
+        AssertDetected("php_disk_full", source, string.Empty, string.Empty, string.Empty, message, string.Empty);
+    }
+
+    /// <summary>
+    /// The failed writes of nginx with error 28 are recognized at the start of the message.
+    /// </summary>
+    /// <param name="source">The source</param>
+    /// <param name="message">The message</param>
+    [TestMethod]
+    [DataRow("nginx-error", "[crit] 2101#2101: *16 pwrite() \"/var/lib/nginx/body/0000000001\" failed (28: No space left on device), client: 198.51.100.7, server: example.org, request: \"POST /upload.php HTTP/1.1\", host: \"example.org\"")]
+    [DataRow("nginx-error", "[crit] 2101#2101: *17 pwritev() \"/var/cache/nginx/fastcgi_temp/3/00/0000000003\" failed (28: No space left on device) while reading upstream, client: 198.51.100.7, server: example.org, request: \"GET /report HTTP/1.1\", upstream: \"fastcgi://unix:/run/php/php8.1-fpm.sock:\", host: \"example.org\"")]
+    [DataRow("nginx-error", "[crit] 2101#2101: *18 writev() \"/var/cache/nginx/proxy_temp/1/00/0000000001\" failed (28: No space left on device) while reading upstream, client: 198.51.100.7, server: example.org, request: \"GET / HTTP/1.1\", host: \"example.org\"")]
+    [DataRow("nginx-error", "[alert] 2101#2101: *19 write() to \"/var/log/nginx/access.log\" failed (28: No space left on device) while logging request, client: 198.51.100.7, server: example.org, request: \"GET / HTTP/1.1\", host: \"example.org\"")]
+    [DataRow("sw-cp-server-error", "[crit] 1201#0: pwrite() \"/var/cache/sw-cp-server/x\" failed (28: No space left on device)")]
+    public void BuiltInSignaturesNginxDiskFullMatchesWriteErrors(string source, string message)
+    {
+        AssertDetected("nginx_disk_full", source, string.Empty, string.Empty, string.Empty, message, string.Empty);
     }
 
     /// <summary>
@@ -391,7 +471,7 @@ public class BuiltInSignaturesTests
     [DataRow("nginx-error", "", "[crit] 1021#1021: *16 pwrite() \"/var/lib/nginx/body/0000000001\" failed (28: No space left on device), client: 198.51.100.7, server: example.org")]
     public void BuiltInSignaturesDiskFullIgnoresOtherLines(string source, string program, string message)
     {
-        AssertNothing(source, program, string.Empty, string.Empty, message);
+        AssertNoneOf("disk_full", source, program, string.Empty, string.Empty, message);
     }
 
     /// <summary>
@@ -634,6 +714,40 @@ public class BuiltInSignaturesTests
     }
 
     /// <summary>
+    /// Lines of the nginx and Apache error logs give the events of PHP and nginx with their records, and the copies of one full disk are one event.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task BuiltInSignaturesWebServerErrorLogsYieldPhpAndNginxEvents()
+    {
+        // Arrange
+        const string nginxContent = "2026/10/12 10:00:00 [crit] 2101#2101: *16 pwrite() \"/var/lib/nginx/body/0000000001\" failed (28: No space left on device), client: 198.51.100.7, server: example.org, request: \"POST /upload.php HTTP/1.1\", host: \"example.org\"\n"
+                                    + "2026/10/12 10:00:01 [crit] 2101#2101: *17 pwrite() \"/var/lib/nginx/body/0000000002\" failed (28: No space left on device), client: 198.51.100.8, server: example.org, request: \"POST /upload.php HTTP/1.1\", host: \"example.org\"\n"
+                                    + "2026/10/12 10:00:02 [error] 2101#2101: *18 FastCGI sent in stderr: \"PHP message: PHP Fatal error:  Uncaught mysqli_sql_exception: Too many connections in /var/www/vhosts/example.org/httpdocs/db.php:3\n"
+                                    + "Stack trace:\n"
+                                    + "#0 /var/www/vhosts/example.org/httpdocs/db.php(3): mysqli->__construct()\n"
+                                    + "#1 {main}\n"
+                                    + "  thrown in /var/www/vhosts/example.org/httpdocs/db.php on line 3\" while reading response header from upstream, client: 198.51.100.7, server: example.org, request: \"GET / HTTP/1.1\", host: \"example.org\"\n";
+        const string apacheContent = "[Mon Oct 12 10:00:03.123456 2026] [proxy_fcgi:error] [pid 3101:tid 140231] [client 198.51.100.7:0] AH01071: Got error 'PHP message: PHP Notice:  fwrite(): Write of 8192 bytes failed with errno=28 No space left on device in /var/www/vhosts/example.org/httpdocs/cache.php on line 7', referer: https://example.org/\n";
+        var zone = DateTimeZone.Utc;
+        var nginx = await ParseContentAsync(new ErrorLogParser(ErrorLogParser.NginxType, ErrorLogFormat.Nginx, ErrorLogPaths.DefaultNginx, true, zone), new LogFile("logs/sample", null), nginxContent, 0, TestContext.CancellationToken);
+        var apache = await ParseContentAsync(new ErrorLogParser(ErrorLogParser.ApacheType, ErrorLogFormat.Apache, ErrorLogPaths.DefaultApache, true, zone), new LogFile("logs/sample", null), apacheContent, nginx.Count, TestContext.CancellationToken);
+        var records = nginx.Concat(apache).OrderBy(pair => pair.Record.CapturedAt).ThenBy(pair => pair.Id).ToList();
+
+        // Act
+        var events = SignatureSamples.Run(BuiltInSignatures.Catalog, records);
+
+        // Assert
+        Assert.AreSequenceEqual(["nginx_disk_full", "php_too_many_connections", "php_disk_full"], events.Select(detected => detected.SignatureId).ToList(), "events in time order");
+        Assert.AreSequenceEqual([IdOf(records, "body/0000000001"), IdOf(records, "body/0000000002")], events[0].RecordIds.ToList(), "the two pwrite lines");
+        Assert.AreEqual(2L, events[0].LineCount, "two nginx lines");
+        Assert.AreSequenceEqual([IdOf(records, "Uncaught mysqli_sql_exception")], events[1].RecordIds.ToList(), "the Uncaught line");
+        Assert.AreEqual(1L, events[1].LineCount, "one connection line");
+        Assert.AreSequenceEqual([IdOf(records, "Write of 8192 bytes")], events[2].RecordIds.ToList(), "the Apache line");
+        Assert.AreEqual(1L, events[2].LineCount, "one write line");
+    }
+
+    /// <summary>
     /// Parses a fixture and numbers the records from 1.
     /// </summary>
     /// <param name="parser">The parser</param>
@@ -644,11 +758,41 @@ public class BuiltInSignaturesTests
     private static async Task<List<(long Id, DataRecord Record)>> ParseAsync(ILogParser parser, LogFile file, string path, CancellationToken cancellationToken)
     {
         var content = await File.ReadAllBytesAsync(RepositoryFiles.Path(path), cancellationToken);
+
+        return await ParseBytesAsync(parser, file, content, 0, path, cancellationToken);
+    }
+
+    /// <summary>
+    /// Parses inline content and numbers the records after a given count.
+    /// </summary>
+    /// <param name="parser">The parser</param>
+    /// <param name="file">The file the content stands for</param>
+    /// <param name="text">The content</param>
+    /// <param name="idOffset">The number of IDs already used; the first record gets the next one</param>
+    /// <param name="cancellationToken">The token the parser honors</param>
+    /// <returns>A task that returns the records with their IDs</returns>
+    private static Task<List<(long Id, DataRecord Record)>> ParseContentAsync(ILogParser parser, LogFile file, string text, int idOffset, CancellationToken cancellationToken)
+    {
+        return ParseBytesAsync(parser, file, Encoding.UTF8.GetBytes(text), idOffset, file.Name, cancellationToken);
+    }
+
+    /// <summary>
+    /// Parses bytes and numbers the records after a given count.
+    /// </summary>
+    /// <param name="parser">The parser</param>
+    /// <param name="file">The file the bytes stand for</param>
+    /// <param name="content">The bytes</param>
+    /// <param name="idOffset">The number of IDs already used</param>
+    /// <param name="name">The name used in assert messages</param>
+    /// <param name="cancellationToken">The token the parser honors</param>
+    /// <returns>A task that returns the records with their IDs</returns>
+    private static async Task<List<(long Id, DataRecord Record)>> ParseBytesAsync(ILogParser parser, LogFile file, byte[] content, int idOffset, string name, CancellationToken cancellationToken)
+    {
         var emitter = await RecordingEmitter.ParseAsync(parser, file, content, cancellationToken);
 
-        Assert.IsEmpty(emitter.Skips, $"nothing of {path} is skipped");
+        Assert.IsEmpty(emitter.Skips, $"nothing of {name} is skipped");
 
-        return emitter.Records.Select((record, index) => ((long)index + 1, record)).ToList();
+        return emitter.Records.Select((record, index) => ((long)idOffset + index + 1, record)).ToList();
     }
 
     /// <summary>
