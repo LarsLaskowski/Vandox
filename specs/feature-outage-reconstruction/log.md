@@ -6,4 +6,4 @@ are quoted in full.
 | Date | Step | Member | Result |
 | ---- | ---- | ------ | ------ |
 | 2026-10-12 08:36 | 1 Intake | Orchestrator | Issue #23 read (open, type: feature, area: logs); branch claude/squad-feature-issue-23-ufn4qx at main 1aedd12 |
-| 2026-10-12 08:54 | 2 Plan | squad-lead | RESULT: DONE, tier security; spec/plan/tasks, record 0096 Proposed, ARCHITECTURE updated |
+| 2026-10-12 08:54 | 2 Plan | squad-lead | RESULT: DONE, tier security; spec/plan/tasks, record 0096 Proposed, ARCHITECTURE updated (opus/medium · 303,554 tokens · 68 tool uses · 1103 s) |
