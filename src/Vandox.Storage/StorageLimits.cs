@@ -18,6 +18,11 @@ public static class StorageLimits
     public const int SchemaVersion = 8;
 
     /// <summary>
+    /// The largest size of the serialized data of one incident in UTF-8 bytes.
+    /// </summary>
+    public const int MaxIncidentDataBytes = 8388608;
+
+    /// <summary>
     /// The largest number of bases of one content.
     /// </summary>
     public const int MaxImportBases = 64;

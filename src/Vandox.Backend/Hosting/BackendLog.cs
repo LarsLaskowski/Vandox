@@ -192,5 +192,37 @@ internal static partial class BackendLog
     [LoggerMessage(EventId = 29, Level = LogLevel.Warning, Message = "raw lines kept {Path} {SourceType} {Raw}")]
     internal static partial void RawLinesKept(this ILogger logger, string path, string sourceType, long raw);
 
+    /// <summary>
+    /// Logs the start of an incident reconstruction.
+    /// </summary>
+    /// <param name="logger">The logger</param>
+    [LoggerMessage(EventId = 30, Level = LogLevel.Information, Message = "incident reconstruction started")]
+    internal static partial void IncidentsStarted(this ILogger logger);
+
+    /// <summary>
+    /// Logs an interrupted incident reconstruction.
+    /// </summary>
+    /// <param name="logger">The logger</param>
+    [LoggerMessage(EventId = 31, Level = LogLevel.Warning, Message = "incident reconstruction interrupted; run it again to complete it")]
+    internal static partial void IncidentsInterrupted(this ILogger logger);
+
+    /// <summary>
+    /// Logs a failed incident reconstruction.
+    /// </summary>
+    /// <param name="logger">The logger</param>
+    /// <param name="exception">The failure</param>
+    /// <param name="error">The text of the failure</param>
+    [LoggerMessage(EventId = 32, Level = LogLevel.Error, Message = "incident reconstruction failed {Error}")]
+    internal static partial void IncidentsFailed(this ILogger logger, Exception exception, string error);
+
+    /// <summary>
+    /// Logs an incident the store refused.
+    /// </summary>
+    /// <param name="logger">The logger</param>
+    /// <param name="firstKillAt">The time of the first kill, in the round-trip format</param>
+    /// <param name="error">The text the store gave</param>
+    [LoggerMessage(EventId = 33, Level = LogLevel.Warning, Message = "incident skipped {FirstKillAt} {Error}")]
+    internal static partial void IncidentSkipped(this ILogger logger, string firstKillAt, string error);
+
     #endregion // Methods
 }

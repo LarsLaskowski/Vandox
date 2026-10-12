@@ -33,12 +33,17 @@ public sealed class CommandOptions
     public string? ImportPath { get; set; }
 
     /// <summary>
+    /// Gets or sets a value indicating whether the sub-command <c>incidents</c> was given.
+    /// </summary>
+    public bool Incidents { get; set; }
+
+    /// <summary>
     /// Gets or sets what is wrong with the command line; empty when it is valid.
     /// </summary>
     public string Error { get; set; } = string.Empty;
 
     /// <summary>
-    /// Gets or sets which usage text belongs to the error: <c>import</c> for the sub-command, empty for the main command.
+    /// Gets or sets which usage text belongs to the error: <c>import</c> or <c>incidents</c> for a sub-command, empty for the main command.
     /// </summary>
     public string UsageFor { get; set; } = string.Empty;
 

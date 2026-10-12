@@ -53,11 +53,11 @@ public static class CommandLine
     /// <summary>
     /// Returns the usage text.
     /// </summary>
-    /// <param name="forImport">Whether to return the usage of the sub-command</param>
+    /// <param name="usageFor">The sub-command the usage is for: <c>import</c>, <c>incidents</c>, or anything else for the main command</param>
     /// <returns>The text</returns>
-    public static string Usage(bool forImport)
+    public static string Usage(string usageFor)
     {
-        if (forImport)
+        if (usageFor == "import")
         {
             return $"Usage of {BinaryName} import [-config file] <path>:\n  <path> is a directory, a .tar or .tar.gz archive, a .gz file or a log file\n  -config string\n    \tpath of the configuration file\n";
         }

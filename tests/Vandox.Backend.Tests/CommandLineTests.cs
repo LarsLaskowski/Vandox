@@ -108,8 +108,8 @@ public class CommandLineTests
         // Assert
         Assert.IsTrue(main.Help, "help of the main command");
         Assert.IsTrue(sub.Help, "help of the sub-command");
-        Assert.Contains("-healthcheck", CommandLine.Usage(false), "usage names the health check flag");
-        Assert.Contains("import [-config file] <path>", CommandLine.Usage(true), "usage of the sub-command");
+        Assert.Contains("-healthcheck", CommandLine.Usage(string.Empty), "usage names the health check flag");
+        Assert.Contains("import [-config file] <path>", CommandLine.Usage("import"), "usage of the sub-command");
     }
 
     /// <summary>

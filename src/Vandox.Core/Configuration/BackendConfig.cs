@@ -44,6 +44,12 @@ public sealed class BackendConfig
     public ImportConfig Import { get; } = new();
 
     /// <summary>
+    /// Gets the incident reconstruction options.
+    /// </summary>
+    [ConfigKey("incidents")]
+    public IncidentConfig Incidents { get; } = new();
+
+    /// <summary>
     /// Gets or sets the secrets of the backend.
     /// </summary>
     public BackendSecrets Secrets { get; set; } = new();

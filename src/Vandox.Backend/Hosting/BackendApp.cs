@@ -29,7 +29,7 @@ public static class BackendApp
 
         if (options.Help)
         {
-            await stderr.WriteAsync(CommandLine.Usage(options.UsageFor == "import")).ConfigureAwait(false);
+            await stderr.WriteAsync(CommandLine.Usage(options.UsageFor)).ConfigureAwait(false);
 
             return 0;
         }
@@ -37,7 +37,7 @@ public static class BackendApp
         if (options.Error.Length > 0)
         {
             await stderr.WriteLineAsync(options.Error).ConfigureAwait(false);
-            await stderr.WriteAsync(CommandLine.Usage(options.UsageFor == "import")).ConfigureAwait(false);
+            await stderr.WriteAsync(CommandLine.Usage(options.UsageFor)).ConfigureAwait(false);
 
             return 2;
         }
@@ -52,6 +52,11 @@ public static class BackendApp
         if (options.ImportPath is not null)
         {
             return await ImportCommand.RunAsync(options.ImportPath, options.ConfigPath, environment, stdout, stderr, hooks, cancellationToken).ConfigureAwait(false);
+        }
+
+        if (options.Incidents)
+        {
+            return await IncidentsCommand.RunAsync(options.ConfigPath, environment, stdout, stderr, hooks, cancellationToken).ConfigureAwait(false);
         }
 
         if (options.Healthcheck)

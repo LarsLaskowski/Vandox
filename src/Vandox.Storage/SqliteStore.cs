@@ -1,5 +1,6 @@
 using Microsoft.Data.Sqlite;
 
+using Vandox.Core.Incidents;
 using Vandox.Core.Templates;
 
 namespace Vandox.Storage;
@@ -9,7 +10,7 @@ namespace Vandox.Storage;
 /// bounded number of query-only readers, so a committed batch is durable and reads (and the health check) do not wait for
 /// a write.
 /// </summary>
-public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, ILogTemplateReader, IImportTracker, IAsyncDisposable
+public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, ILogTemplateReader, IIncidentStore, IImportTracker, IAsyncDisposable
 {
     #region Constants
 
@@ -431,6 +432,32 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
     }
 
     #endregion // ILogTemplateReader
+
+#pragma warning disable RH2003, S2325
+
+    #region IIncidentStore
+
+    /// <inheritdoc />
+    public Task<IncidentSaveResult> SaveIncidentAsync(Incident incident, DateTimeOffset savedAt, CancellationToken cancellationToken)
+    {
+        throw new NotImplementedException();
+    }
+
+    /// <inheritdoc />
+    public Task<IReadOnlyList<StoredIncident>> IncidentsAsync(IncidentQuery query, CancellationToken cancellationToken)
+    {
+        throw new NotImplementedException();
+    }
+
+    /// <inheritdoc />
+    public Task<long> CountIncidentsAsync(CancellationToken cancellationToken)
+    {
+        throw new NotImplementedException();
+    }
+
+    #endregion // IIncidentStore
+
+#pragma warning restore RH2003, S2325
 
     #region IImportTracker
 
