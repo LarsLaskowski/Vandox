@@ -13,3 +13,5 @@ are quoted in full.
 | 2026-10-12 18:01 | 6 Implement | squad-dev | implemented, tests green; BoundedBufferWriter lines uncovered |
 | 2026-10-12 18:16 | 6 Coverage | squad-tester | AC7 + BoundedBufferWriterTests; coverage gate PASS 100% changed |
 | 2026-10-12 18:18 | 7 Code check | Orchestrator | format, analyzer, scope PASS; tests+coverage PASS (tester run) |
+| 2026-10-12 18:27 | 8 Review r1 (reviewer) | squad-reviewer | 1 blocking (docs) + 3 non-blocking; fixed by Dev/Tester |
+| 2026-10-12 18:27 | 8 Review r1 (security) | squad-security | APPROVED |
