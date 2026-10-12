@@ -373,6 +373,22 @@ def amend_command(parser, path, folder, member, launch, replace, continued):
     return 0
 
 
+def row_command(parser, path, args, launch):
+    if args.step is None or args.member is None or args.result is None:
+        parser.error("a row needs <step> <member> <result> (or --summary, --amend-last or --replace-last)")
+    if TWO_MEMBERS.search(args.member):
+        parser.error(f"one row per launch: '{args.member}' names more than one member; write a row for each, "
+                     "also when they ran in parallel")
+    if args.continued and launch is None:
+        parser.error("--continued goes with the launch's usage (--agent or --launch, --tokens, --tool-uses, "
+                     "--seconds), on the row or with --amend-last")
+    launch = share_of_round(path, args.member, launch, args.continued)
+    if args.continued and launch is None:
+        return 1
+    print(append_row(path, args.step, args.member, args.result, launch=launch))
+    return 0
+
+
 def main():
     parser = build_parser()
     args = parser.parse_args()
@@ -392,19 +408,7 @@ def main():
     if args.amend_last or args.replace_last:
         return amend_command(parser, path, args.folder, args.amend_last or args.replace_last, launch,
                              replace=bool(args.replace_last), continued=args.continued)
-    if args.step is None or args.member is None or args.result is None:
-        parser.error("a row needs <step> <member> <result> (or --summary, --amend-last or --replace-last)")
-    if TWO_MEMBERS.search(args.member):
-        parser.error(f"one row per launch: '{args.member}' names more than one member; write a row for each, "
-                     "also when they ran in parallel")
-    if args.continued and launch is None:
-        parser.error("--continued goes with the launch's usage (--agent or --launch, --tokens, --tool-uses, "
-                     "--seconds), on the row or with --amend-last")
-    launch = share_of_round(path, args.member, launch, args.continued)
-    if args.continued and launch is None:
-        return 1
-    print(append_row(path, args.step, args.member, args.result, launch=launch))
-    return 0
+    return row_command(parser, path, args, launch)
 
 
 if __name__ == "__main__":
