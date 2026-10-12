@@ -262,8 +262,8 @@ file.
 
 **Kernel reports.** Both parsers pass their `kernel` lines through `KernelReportGrouper`. A line containing
 `invoked oom-killer:` or `------------[ cut here ]------------` opens a report; kernel lines of the same host join it; it
-ends after a line containing `Out of memory: Killed process`, `Memory cgroup out of memory: Killed process` or `Out of
-memory and no killable processes` (OOM), or `---[ end trace ` (`cut here`), or at a new start line, at a same-host kernel
+ends after a line containing `Out of memory: Killed process`, `Out of memory (oom_kill_allocating_task): Killed
+process`, `Memory cgroup out of memory: Killed process` or `Out of memory and no killable processes` (OOM), or `---[ end trace ` (`cut here`), or at a new start line, at a same-host kernel
 line more than 60 seconds after the first line, after 2,000 lines, or at the normal end of input. The record has
 program `kernel`, pid 0, the host, `log` and time of the first line, the member messages joined by `\n` in file order and
 the lowest member priority (a single-line report is emitted unchanged). Kernel lines are recognized by program `kernel`
