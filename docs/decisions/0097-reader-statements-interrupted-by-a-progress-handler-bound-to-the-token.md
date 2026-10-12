@@ -1,6 +1,6 @@
 # 0097: A cancelled token interrupts a running reader statement through a progress handler; the interruption is an OperationCanceledException
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-12
 - **Area:** Storage
 - **Source:** Issue #210

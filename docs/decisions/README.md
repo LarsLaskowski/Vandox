@@ -123,5 +123,5 @@ once in the [area document](../areas/README.md) of the record's area, and the re
 | 0094 | Log signatures are data: an embedded YAML catalog of linear-time patterns, matched on stored log lines on demand, with the copies of one event merged | Accepted | 2026-10-11 |
 | 0095 | Log templates: fixed token rules, statistics kept by the write path per source and program, the usual level from the hours the source logged | Accepted | 2026-10-12 |
 | 0096 | Outage incidents are rebuilt from the stored data by `vandoxd incidents`: OOM-kill windows merged by overlap, an incident's identity kept by overlap, a structured cause hypothesis from fixed rules | Accepted | 2026-10-12 |
-| 0097 | A cancelled token interrupts a running reader statement through a progress handler; the interruption is an OperationCanceledException | Proposed | 2026-10-12 |
+| 0097 | A cancelled token interrupts a running reader statement through a progress handler; the interruption is an OperationCanceledException | Accepted | 2026-10-12 |
 <!-- project:end index -->
