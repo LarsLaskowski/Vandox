@@ -540,10 +540,10 @@ public class SqliteStoreTemplateTests
 
         // Assert
         var materialize = plan.FindIndex(step => step.Detail == "MATERIALIZE covered");
-        var sourceHourReads = plan.Where(step => step.Detail.Contains("log_source_hours", StringComparison.Ordinal)).ToList();
+        var sourceHourReads = plan.Where(step => step.Detail.EndsWith("USING PRIMARY KEY (source=? AND hour>? AND hour<?)", StringComparison.Ordinal)).ToList();
 
         Assert.AreNotEqual(-1, materialize, $"the plan materializes the covered hours: {string.Join(" / ", plan.Select(step => step.Detail))}");
-        Assert.IsNotEmpty(sourceHourReads, "the plan reads the source hours");
+        Assert.IsNotEmpty(sourceHourReads, "the plan reads the source hours by their primary key (source and hour range): " + string.Join(" / ", plan.Select(step => $"{step.Id}<-{step.Parent} {step.Detail}")));
         Assert.IsTrue(sourceHourReads.All(step => IsBelow(plan, step, plan[materialize].Id)), $"the source hours are read only below the materialized covered hours: {string.Join(" / ", plan.Select(step => $"{step.Id}<-{step.Parent} {step.Detail}"))}");
     }
 
@@ -978,6 +978,30 @@ public class SqliteStoreTemplateTests
     }
 
     /// <summary>
+    /// Tells whether a step of a query plan lies below the step with the given ID.
+    /// </summary>
+    /// <param name="plan">The plan</param>
+    /// <param name="step">The step</param>
+    /// <param name="ancestorId">The ID of the step that must be an ancestor</param>
+    /// <returns><c>true</c> if the step is a descendant of the ancestor</returns>
+    private static bool IsBelow(List<(int Id, int Parent, string Detail)> plan, (int Id, int Parent, string Detail) step, int ancestorId)
+    {
+        var parent = step.Parent;
+
+        while (parent != 0)
+        {
+            if (parent == ancestorId)
+            {
+                return true;
+            }
+
+            parent = plan.Single(candidate => candidate.Id == parent).Parent;
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// Runs the query of a kind with the change that breaks one rule.
     /// </summary>
     /// <param name="store">The store</param>
@@ -1055,30 +1079,6 @@ public class SqliteStoreTemplateTests
 #pragma warning restore CA2100
 
         await command.ExecuteNonQueryAsync(TestContext.CancellationToken);
-    }
-
-    /// <summary>
-    /// Tells whether a step of a query plan lies below the step with the given ID.
-    /// </summary>
-    /// <param name="plan">The plan</param>
-    /// <param name="step">The step</param>
-    /// <param name="ancestorId">The ID of the step that must be an ancestor</param>
-    /// <returns><c>true</c> if the step is a descendant of the ancestor</returns>
-    private static bool IsBelow(List<(int Id, int Parent, string Detail)> plan, (int Id, int Parent, string Detail) step, int ancestorId)
-    {
-        var parent = step.Parent;
-
-        while (parent != 0)
-        {
-            if (parent == ancestorId)
-            {
-                return true;
-            }
-
-            parent = plan.Single(candidate => candidate.Id == parent).Parent;
-        }
-
-        return false;
     }
 
     /// <summary>
