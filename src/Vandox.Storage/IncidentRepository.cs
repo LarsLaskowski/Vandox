@@ -142,7 +142,7 @@ internal static class IncidentRepository
 
         try
         {
-            incident = JsonSerializer.Deserialize<Incident>(reader.GetString(7), IncidentJson.Options);
+            incident = JsonSerializer.Deserialize<Incident>(reader.GetFieldValue<byte[]>(7), IncidentJson.Options);
         }
         catch (JsonException exception)
         {

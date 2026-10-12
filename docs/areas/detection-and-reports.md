@@ -361,7 +361,7 @@ connection snapshot gives no peak (`connections` null).
   builder (at most 1,000 timeline entries within 4 MiB, two program maps of at most 4,096 entries each, one connection peak, 20 + 20
   templates). The largest single read is one process snapshot; one forged at every cap (a legacy monitoring log with 4,096 processes
   and programs, all texts such that the stored JSON escapes them to six bytes per character, about 100 MiB of stored JSON) peaks at
-  about **240 MiB**, plus the page of log lines held by the pass over all lines, which leaves the service less than half of the container's 512 MiB while it is read.
+  about **240 MiB**, plus the page of log lines held by the pass over all lines, which leaves the service less than half of the container's 512 MiB while it is read. Only a database written by an earlier build can hold such a snapshot: this version refuses a payload of more than 16 MiB of JSON when it is written (*Storage*, *Writing*), so a snapshot stored by this version is read from at most 16 MiB of JSON.
 - **Time** grows with all stored log lines and, per incident, with the data of its window, so forged kills spaced far enough apart
   to form many incidents multiply the window reads; the cost of the spike query is not bounded by its range (*Limits of templates*).
   The sub-command runs off any request path.

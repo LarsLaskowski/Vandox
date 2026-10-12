@@ -186,7 +186,7 @@ internal sealed class RecordEmitter : IRecordEmitter
 
         _atStart = false;
 
-        var refusal = RecordRules.CheckImportRecord(record);
+        var refusal = RecordRules.CheckImportRecord(record) ?? RecordRules.CheckPayloadSize(record);
 
         if (refusal is not null)
         {

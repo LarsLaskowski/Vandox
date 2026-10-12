@@ -1,3 +1,5 @@
+using System.Globalization;
+
 using Vandox.Core.Model;
 
 namespace Vandox.Storage;
@@ -8,6 +10,15 @@ namespace Vandox.Storage;
 /// </summary>
 public static class RecordRules
 {
+    #region Fields
+
+    /// <summary>
+    /// The text of the refusal of a payload above <see cref="StorageLimits.MaxPayloadBytes"/>.
+    /// </summary>
+    internal static readonly string TooLargeMessage = $"data is larger than {StorageLimits.MaxPayloadBytes.ToString(CultureInfo.InvariantCulture)} bytes as JSON";
+
+    #endregion // Fields
+
     #region Methods
 
     /// <summary>
@@ -58,6 +69,22 @@ public static class RecordRules
         }
 
         return record.Origin == RecordOrigin.Import ? null : "origin must be import";
+    }
+
+    /// <summary>
+    /// Checks that the JSON of the payload of a record is not larger than <see cref="StorageLimits.MaxPayloadBytes"/>.
+    /// Typed records (metric, log line) keep no JSON and are not checked.
+    /// </summary>
+    /// <param name="record">The record</param>
+    /// <returns>The broken rule, or <c>null</c></returns>
+    public static string? CheckPayloadSize(DataRecord record)
+    {
+        if (record.Data is null or MetricPoint or LogLine)
+        {
+            return null;
+        }
+
+        return PayloadJson.Fits(record.Data, StorageLimits.MaxPayloadBytes) ? null : TooLargeMessage;
     }
 
     #endregion // Methods

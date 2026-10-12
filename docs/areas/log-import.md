@@ -175,7 +175,7 @@ A parser turns the lines of one file into records. The importer and every parser
   reason, with the line number). The line is stored, not skipped; the importer counts such lines per file and keeps the
   first ten reasons, with line numbers counted in the whole file as for skipped lines. Only the parsers of *Plesk and
   web server error logs* keep raw lines; the others skip what they cannot read.
-- The importer validates every record; a refused record is counted as skipped, so a parser bug cannot fail a whole
+- The importer validates every record, including the size of a JSON payload (at most 16,777,216 bytes of JSON, *Bounds* of the legacy monitoring log; metric points and log lines are not checked); a refused record is counted as skipped, so a parser bug cannot fail a whole
   batch. Stored source type: a changed detection of a resumed content fails the file, a changed parser version is
   not noticed.
 - Lines are read with a bounded line reader: lines without the line ending, cut at 16 KiB at a UTF-8 boundary with a
@@ -789,6 +789,9 @@ section 128 `meminfo`, 16 `pressure` and 64 `vmstat` lines ("too many lines in a
 skips held back are the row skips of a top part not yet accepted (at most 4,097); every section skip is reported at once. Memory does not
 grow with the number of snapshots or the number of lines in a snapshot; the worst case is a constant of about 40 MiB for one snapshot (4,096
 rows with a 2,048-byte command line and a 1,024-byte command, and 4,096 socket keys and commands, counted in UTF-16), plus one line.
+A process or connection snapshot whose stored JSON would be larger than 16,777,216 bytes (`StorageLimits.MaxPayloadBytes`; possible
+only for forged text, because these caps allow about 105 MB of escaped JSON, while a legitimate snapshot stays far below) is skipped
+with `record refused: data is larger than 16777216 bytes as JSON` and not stored; the file goes on with the next record.
 
 **Errors.** The parse never throws for input. It throws `InvalidOperationException` for the time zone (above), `OperationCanceledException` on
 cancellation and what the emitter throws; the open snapshot is not finished then, so the records emitted are a prefix of those of a complete

@@ -68,12 +68,24 @@ Indexes: a unique index on `records(agent_id, seq)` for origin `agent`; `records
 - A **batch** is written in one transaction. A batch holds at most 20,000 records and at least one, except the batch that completes an
   import file. The batch has a required receive time in UTC and, for records of origin `agent`, an agent ID that follows the agent ID
   rule of the wire format; the boot ID is stored as given.
-- Every record is validated before anything is written. A record is refused with a message that names the record's index and the rule
+- Every record is validated before anything is written (the size rule of the next bullet is the exception: it is checked while the
+  record is written, in the same transaction). A record is refused with a message that names the record's index and the rule
   when its capture time is outside 1677-09-21 to 2262-04-11 (the range of a signed 64-bit nanosecond count), its sequence number is
   above 2^63 − 1, or it is of origin `agent` in a batch without an agent ID. An import batch has no agent ID and every record has
   origin `import`. Invalid UTF-8 in strings that are stored as JSON (payloads, metric labels) is replaced by U+FFFD; log fields
   and the other metric fields are stored byte for byte. A record from an agent never contains invalid UTF-8, because the wire encoder
   replaces it and the decoder refuses a line that holds it ([Wire format](wire-format.md), *Common rules*).
+- A **JSON payload** (every payload except a metric point and a log line) is serialized to UTF-8 in a bounded buffer and stored as
+  text (the insert binds the bytes with `CAST($data AS TEXT)`, because `records` is `STRICT` and refuses a blob in a text column). A
+  payload whose JSON is larger than 16,777,216 bytes (`StorageLimits.MaxPayloadBytes`, counted after escaping, exactly the stored
+  bytes) is refused: the import skips the record with `record refused: data is larger than 16777216 bytes as JSON` (the check runs
+  before the record is buffered, so a resumed import refuses it again), and any other batch is refused whole with `store: invalid
+  batch: data is larger than 16777216 bytes as JSON` and nothing of it is stored (the exception leaves the transaction before the
+  commit). A record from an agent cannot reach the limit: its wire line has at most 1 MiB and re-serializing expands a byte by at
+  most six. Memory per payload: the JSON as bytes (at most the limit), the buffer while it is built (at most about twice the limit;
+  above the limit the bytes are dropped and the buffer is released) and SQLite's copies while it is inserted (about twice the
+  JSON). A JSON payload of an import is serialized twice, once for the size check of the importer and once by the writer; this is a
+  deliberate cost that keeps the check free of copies.
 - **Deduplication:** a record of origin `agent` is identified by (agent ID, sequence number) across all kinds. It is inserted with
   `ON CONFLICT DO NOTHING` and counted as a duplicate; a stored record is never replaced or updated. Records of origin `import` are not
   deduplicated, because log lines have no identity of their own; the import is made idempotent per file instead (*Log import*).
@@ -143,7 +155,10 @@ Indexes: a unique index on `records(agent_id, seq)` for origin `agent`; `records
 - A stored payload is read with the payload options of the wire decoder, so an unknown member is ignored; this includes the `Kind`
   member that rows written before #183 carry.
 - Incidents are read by range (`started_at < to` and `ended_at > from`, ordered by start, then number) with the window and limit rules
-  of the record query, and counted; a `data` value that does not decode is `store: reading incidents: decoding incident data`.
+  of the record query, and counted; a `data` value that does not decode (including bytes that are not valid UTF-8 in a member the incident reads; such bytes in an unknown member are skipped unchecked) is `store: reading incidents: decoding incident data`.
+  The `data` column is read from its UTF-8 bytes, like a payload. A page holds every returned incident decoded at once: in the worst
+  case up to 10,000 incidents per page, each decoded from up to 8 MiB of JSON, so the memory of a read grows with the limit. A caller
+  that serves a user pages with a small limit (open limit for #27, which adds the first caller).
 - The template statistics are read by the queries of *Log templates* in [Detection, alerts and reports](detection-and-reports.md)
   (template of a line, hourly counts, new templates, templates above their usual level), with the same time range and limit rules,
   on a reader connection. The cost of the usual-level query is not bounded by its range or limit; a cancelled token or deadline interrupts it

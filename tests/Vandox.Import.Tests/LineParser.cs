@@ -9,7 +9,8 @@ namespace Vandox.Import.Tests;
 /// A parser double: every line of a file whose first line starts with <c>LOG</c> becomes a log line record one second after
 /// <see cref="Base"/> per line number. A line starting with <c>bad</c> is skipped, a line starting with <c>refuse</c> becomes an
 /// invalid record, and a line starting with <c>boom</c> makes the parser fail. A line starting with <c>raw</c> is reported with a
-/// warning and then becomes a record like any other line. The first lines it is told to skip are skipped.
+/// warning and then becomes a record like any other line, and a line starting with <c>huge</c> becomes a process snapshot whose JSON
+/// is larger than the payload limit. The first lines it is told to skip are skipped.
 /// </summary>
 internal sealed class LineParser : ILogParser
 {
@@ -79,6 +80,38 @@ internal sealed class LineParser : ILogParser
                };
     }
 
+    /// <summary>
+    /// Creates the record of a line that holds a process snapshot above the payload limit.
+    /// </summary>
+    /// <param name="line">The line number</param>
+    /// <returns>The record</returns>
+    private static DataRecord HugeRecord(long line)
+    {
+        var processes = new List<ProcessSample>();
+
+        for (var pid = 1; pid <= 200; pid++)
+        {
+            processes.Add(new ProcessSample
+                          {
+                              Pid = pid,
+                              Command = "c",
+                              Cmdline = new string('<', 16384)
+                          });
+        }
+
+        return new DataRecord
+               {
+                   Origin = RecordOrigin.Import,
+                   Source = "import",
+                   CapturedAt = Base.AddSeconds(line),
+                   Data = new ProcessSnapshot
+                          {
+                              Complete = true,
+                              Processes = processes
+                          }
+               };
+    }
+
     #endregion // Methods
 
     #region ILogParser
@@ -130,7 +163,9 @@ internal sealed class LineParser : ILogParser
                     output.Warn(reader.LineNumber, "raw line");
                 }
 
-                await output.RecordAsync(Record(reader.LineNumber, text, text.StartsWith("refuse", StringComparison.Ordinal)), cancellationToken);
+                var record = text.StartsWith("huge", StringComparison.Ordinal) ? HugeRecord(reader.LineNumber) : Record(reader.LineNumber, text, text.StartsWith("refuse", StringComparison.Ordinal));
+
+                await output.RecordAsync(record, cancellationToken);
             }
         }
     }

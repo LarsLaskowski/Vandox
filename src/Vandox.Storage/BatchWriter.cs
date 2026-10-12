@@ -45,7 +45,7 @@ internal sealed class BatchWriter : IDisposable
         _record = Create(connection,
                          transaction,
                          "INSERT INTO records(kind, origin, source, agent_id, seq, captured_at, received_at, boot_id, clock_offset_ns, data) "
-                         + "VALUES ($kind, $origin, $source, $agent, $seq, $captured, $received, $boot, $offset, $data) ON CONFLICT DO NOTHING RETURNING id");
+                         + "VALUES ($kind, $origin, $source, $agent, $seq, $captured, $received, $boot, $offset, CAST($data AS TEXT)) ON CONFLICT DO NOTHING RETURNING id");
         _metric = Create(connection,
                          transaction,
                          "INSERT INTO metrics(record_id, source, name, captured_at, value, unit, labels) VALUES ($id, $source, $name, $captured, $value, $unit, $labels)");
@@ -102,7 +102,11 @@ internal sealed class BatchWriter : IDisposable
         _recordValues[6].Value = StorageTime.ToNanoseconds(batch.ReceivedAt);
         _recordValues[7].Value = batch.BootId.Length == 0 ? DBNull.Value : (object)batch.BootId;
         _recordValues[8].Value = batch.ClockOffsetNs ?? (object)DBNull.Value;
-        _recordValues[9].Value = typed ? DBNull.Value : (object)PayloadRegistry.Serialize(payload);
+
+        _recordValues[9].Value = typed
+                                     ? DBNull.Value
+                                     : PayloadJson.Serialize(payload, StorageLimits.MaxPayloadBytes)
+                                           ?? throw new InvalidBatchException($"store: invalid batch: {RecordRules.TooLargeMessage}");
 
         if (_record.ExecuteScalar() is not long recordId)
         {
