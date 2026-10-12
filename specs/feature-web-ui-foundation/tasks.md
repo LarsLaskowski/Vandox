@@ -17,7 +17,7 @@ Every documentation edit appears in exactly one row; the Lead's approval only to
 | 9 | Branding: Web UI bullet | `docs/BRANDING.md` | — | Dev | [x] |
 | 10 | Project knowledge: security areas 12 and 13, integration surface item | `.squad/project.md` | — | Dev | [x] |
 | 11 | Stack: row for browser scripts and style sheets under *Not checkable in a cloud session* | `.squad/stack.md` | — | Dev | [x] |
-| 12 | Test doubles row "Blazor components (C#)" | `.squad/project.md` | — | Tester | [ ] |
-| 13 | AC1 pin and coverage pass (*Coverage gate*) | tests as needed | AC1 | Tester | [ ] |
+| 12 | Test doubles row "Blazor components (C#)" | `.squad/project.md` | — | Tester | [x] |
+| 13 | AC1 pin and coverage pass (*Coverage gate*) | tests as needed | AC1 | Tester | [x] |
 | 14 | Web UI area (revised after the plan review), its index row, ARCHITECTURE link, records 0098/0099 and index rows (Proposed) | `docs/areas/web-ui.md`, `docs/areas/README.md`, `docs/ARCHITECTURE.md`, `docs/decisions/0098-…`, `0099-…`, `docs/decisions/README.md` | — | Lead | [x] |
 | 15 | Browser check: layout desktop/360 px, theme, chosen theme survives a navigation link and a reconnect, console without CSP violations, network panel own origin only, reconnect dialog | — | *Verification without tests* | Product Manager | [ ] |

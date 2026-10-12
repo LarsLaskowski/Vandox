@@ -117,6 +117,29 @@ public class ChartInteropTests
     }
 
     /// <summary>
+    /// Disposing a second time calls nothing more.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task ChartInteropDisposeTwiceDestroysOnce()
+    {
+        // Arrange
+        var runtime = new RecordingJsRuntime();
+        var interop = new ChartInterop(runtime);
+
+        await interop.RenderAsync(new ElementReference("host-1"), "Load", CreateData(1.0), CancellationToken.None);
+        await interop.DisposeAsync();
+
+        var callsAfterFirst = runtime.Calls.Count;
+
+        // Act
+        await interop.DisposeAsync();
+
+        // Assert
+        Assert.HasCount(callsAfterFirst, runtime.Calls, "the second disposal calls nothing");
+    }
+
+    /// <summary>
     /// Disposing before the first render calls nothing.
     /// </summary>
     /// <returns>A task that completes when the test is done</returns>
@@ -206,6 +229,29 @@ public class ChartInteropTests
 
         // Assert
         Assert.IsNotNull(exception, "the refusal is an ObjectDisposedException");
+        Assert.IsEmpty(runtime.Calls, "nothing was called");
+    }
+
+    /// <summary>
+    /// A render without a title or without data is refused before anything is called.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task ChartInteropRenderWithoutTitleOrDataThrows()
+    {
+        // Arrange
+        var runtime = new RecordingJsRuntime();
+        var host = new ElementReference("host-1");
+
+        await using var interop = new ChartInterop(runtime);
+
+        // Act
+        var titleException = await Assert.ThrowsExactlyAsync<ArgumentNullException>(() => interop.RenderAsync(host, null!, CreateData(1.0), CancellationToken.None), "render without title");
+        var dataException = await Assert.ThrowsExactlyAsync<ArgumentNullException>(() => interop.RenderAsync(host, "Load", null!, CancellationToken.None), "render without data");
+
+        // Assert
+        Assert.AreEqual("title", titleException.ParamName, "the title is named");
+        Assert.AreEqual("data", dataException.ParamName, "the data is named");
         Assert.IsEmpty(runtime.Calls, "nothing was called");
     }
 

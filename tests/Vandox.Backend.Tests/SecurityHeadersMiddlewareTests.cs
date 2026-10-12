@@ -76,6 +76,34 @@ public class SecurityHeadersMiddlewareTests
     }
 
     /// <summary>
+    /// The policy is the pinned text and allows only the own origin: every source is <c>'self'</c> or <c>'none'</c>.
+    /// </summary>
+    [TestMethod]
+    public void SecurityHeadersMiddlewarePolicyAllowsOnlyOwnOrigin()
+    {
+        // Arrange
+        var pinnedPolicy = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'";
+        var policy = SecurityHeadersMiddleware.ContentSecurityPolicy;
+        var directives = policy.Split(';', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+
+        // Act
+        var sourcesByDirective = directives.ToDictionary(directive => directive.Split(' ')[0], directive => directive.Split(' ').Skip(1).ToArray());
+
+        // Assert
+        Assert.AreEqual(pinnedPolicy, policy, "the pinned policy");
+        Assert.HasCount(directives.Length, sourcesByDirective, "no directive is repeated");
+
+        foreach (var pair in sourcesByDirective)
+        {
+            Assert.HasCount(1, pair.Value, $"{pair.Key}: one source");
+            Assert.IsTrue(pair.Value[0] is "'self'" or "'none'", $"{pair.Key}: source is 'self' or 'none'");
+        }
+
+        Assert.AreEqual("'none'", sourcesByDirective["default-src"][0], "default-src");
+        Assert.AreEqual("'none'", sourcesByDirective["frame-ancestors"][0], "frame-ancestors");
+    }
+
+    /// <summary>
     /// Asserts that a header has exactly one value.
     /// </summary>
     /// <param name="expected">The expected value</param>
