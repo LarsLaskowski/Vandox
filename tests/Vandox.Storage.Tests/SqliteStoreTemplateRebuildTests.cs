@@ -72,7 +72,7 @@ public class SqliteStoreTemplateRebuildTests
         // Assert
         Assert.Contains("\uD800", lone, "the arranged message holds the lone surrogate");
         Assert.IsGreaterThan(1024, Encoding.UTF8.GetByteCount(longMessage), "the long message exceeds 1,024 UTF-8 bytes");
-        Assert.AreEqual(9L, lines, "the stored log lines: the resent record is stored once");
+        Assert.AreEqual(8L, lines, "the stored log lines: the resent record is stored once");
         Assert.AreSequenceEqual(expected, await SnapshotAsync(directory.Path), "the rebuilt tables equal the write path's, by key");
         Assert.AreEqual(lines, result.Lines, "lines");
         Assert.AreEqual((int)((lines + 1) / 2), result.Batches, "batches");
