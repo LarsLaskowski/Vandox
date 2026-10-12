@@ -115,7 +115,8 @@ action yourself — including follow-up issues the Lead decides on.
      Lead named a test to add, launch `squad-tester` in mode `coverage` with that test name once; run the
      gates of *Gates of a patch* in `.squad/routing.md` for the kinds of file the diff touches and nothing
      more (*Format* on your own edits; a script, workflow or Dockerfile gets the *Analyzer gate* with
-     `--lint-only` and no build; code gets *Test (project)* for its test project, not the whole suite) and
+     `--lint-only` and no build; test code gets *Test (project)* for its test project, not the whole suite;
+     production code gets *Test with coverage* and the *Coverage gate*, which reads the full run's reports) and
      `python3 .squad/tools/scope-check.py --tier patch`, and log which rows applied; then one review
      round in step 8 — `squad-reviewer`, or on `patch/security` `squad-security` in mode `diff` instead of
      it — and step 10 directly. No challenge, plan security review, skeleton, tests first, Code Officer or

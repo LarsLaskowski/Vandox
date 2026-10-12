@@ -41,7 +41,7 @@ repository (record 0074): keep it true when the build changes.
 | *Build* | `go build ./... && dotnet build Vandox.slnx` |
 | *Test* | `go test ./... -race && dotnet test Vandox.slnx` |
 | *Single test* | Go: `go test ./<package> -run '^TestName$'`; .NET: `dotnet test tests/<Project>.Tests --filter <ClassOrMethodName>` |
-| *Test (project)* | Go: `go test ./<package>/... -race`; .NET: `dotnet test tests/<Project>.Tests` (the package or test project of the changed code; a `patch`, `.squad/routing.md` *Gates of a patch*). It writes no coverage report: a `patch` that changes production code runs *Test with coverage* instead, because the *Coverage gate* reads the Go and .NET reports of a full run |
+| *Test (project)* | Go: `go test ./<package>/... -race`; .NET: `dotnet test tests/<Project>.Tests` (the package or test project of the changed code; a `patch` that changes only test code, `.squad/routing.md` *Gates of a patch* — it writes no coverage report, so a `patch` that changes production code runs *Test with coverage* instead) |
 | *Test with coverage* | `rm -rf TestResults coverage.out && go test ./... -race -coverprofile=coverage.out && python3 .squad/tools/go-coverage-to-cobertura.py && dotnet test Vandox.slnx --settings coverlet.runsettings --results-directory TestResults` (clears the results first) |
 | *Coverage gate* | `python3 .squad/tools/coverage-check.py` |
 | *Analyzer gate* | `python3 .squad/tools/analyzer-check.py` |

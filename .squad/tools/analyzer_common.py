@@ -154,7 +154,7 @@ def lint_check():
 
 def lint_only_requested(argv=None):
     """True when the gate was called with `--lint-only`, the one flag it accepts. Any other argument ends the run
-    with a usage error (exit code 2), so no user-supplied value reaches the shell, git or the filesystem."""
+    with a usage error (exit code 1), so no user-supplied value reaches the shell, git or the filesystem."""
     args = sys.argv[1:] if argv is None else list(argv)
     if args and args != [LINT_ONLY]:
         sys.exit(f"usage: analyzer-check.py [{LINT_ONLY}]")
