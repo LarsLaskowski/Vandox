@@ -691,3 +691,9 @@ Verdict CHANGES_REQUIRED, 1 blocking and 3 non-blocking findings; all accepted.
    the note for #25; the Web UI area states the limits.
 4. *No `Origin` check on the WebSocket, no `Host` filtering* — accepted as existing exposure outside this change; noted for #25
    under *Out of scope / follow-ups* and in the Web UI area.
+
+## Security delta notes (round 2, non-blocking)
+
+1. Removing HTML comments first hides a sibling form: in `<p title="<!--" style="x" data-x="-->">` the browser parses `style` as a real attribute, but the scanner deletes everything from `<!--` to `-->`; the same trick can hide `<meta http-equiv="refresh" …>`. Fix: treat `<!--` as a comment start only outside a quoted attribute value, or find any `<!--` / `-->` inside a quoted value; add the found row `"<p title=\"<!--\" style=\"x\" class=\"-->\">"` → `style-attribute`. If not fixed, name it among the forms neither the scanner nor the policy covers.
+2. The `src` check in `inline-script` must match the exact attribute name `src` (same name-boundary rule as the URL attributes), so `<script data-src="x">alert(1)</script>` is not treated as "has src".
+3. Smoke script: compare with the right-hand side quoted, `[[ "$got" == "$want" ]]`, so the value is never read as a glob pattern.
