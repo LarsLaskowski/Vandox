@@ -116,8 +116,9 @@ files or endpoints.
     (`BackendConfigLoader`: absolute, clean path of a file in a directory, the value never shown in an error). The signature detection over stored log lines
     (`Vandox.Core.Signatures`: `SignatureCatalog`, `SignatureDetector`, `BuiltInSignatures`) reads the embedded catalog and the decoded messages of stored
     records: patterns run on the non-backtracking engine in linear time, with the constructs it cannot run refused when the catalog loads; a signature
-    without an event condition that reads a message which can hold remote text (`disk_full`, `mariadb_too_many_connections`) carries an origin condition (`program` or `source`) and a `\A` anchor at server-written text, so remote text in web server or
-    mail lines cannot trigger it; integer fields are accepted only as ASCII digits by an ordinal scan of the whole captured text and range-checked before
+    without an event condition that reads a message which can hold remote text (`disk_full`, `mariadb_too_many_connections`, `php_too_many_connections`, `php_disk_full`, `nginx_disk_full`) carries an origin condition (`program` or `source`) and a `\A` anchor at server-written text, so remote text in the fields a web server or
+    mail server adds and in PHP's own messages cannot trigger it; an application that logs request data at the start of a message (`trigger_error`, `error_log`, standard error of programs it starts)
+    or in PHP output that nginx, `mod_fcgid` or `mod_proxy_fcgi` splits into several entries can create PHP events (record 0094); integer fields are accepted only as ASCII digits by an ordinal scan of the whole captured text and range-checked before
     use (`NumberGuard`); text fields are cut to 1,024 bytes; at most 1,024 events are open and 256 IDs kept per event, and an open event keeps no message,
     match or record; an event is a classification, not proof of origin: local processes can log as `kernel`, `systemd`, `mariadbd`, `postfix/*` or
     `dovecot`, and MariaDB entries forged through a login name reach the MariaDB signatures (record 0094). The log template normalizer

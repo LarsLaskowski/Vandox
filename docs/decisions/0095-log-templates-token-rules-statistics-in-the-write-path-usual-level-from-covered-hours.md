@@ -91,8 +91,10 @@ How the cost of the usual-level query is held:
     template hours of the range that reach the minimum count, which neither the range nor the limit bounds, and text
     without digits that varies per line makes one template per line. The covered hours are computed per source and hour
     instead of per candidate, which needs the statement to materialize them (`AS MATERIALIZED`; SQLite would otherwise
-    flatten the common table expressions and run the count per candidate); the baseline sum is still read once per
-    candidate. The rest is measured at the default and the widest parameters
+    flatten the common table expressions and run the count per candidate). The baseline sum is a window function over the
+    template's hours (`RANGE BETWEEN baseline PRECEDING AND 1 PRECEDING`), so each template is read once and not once per
+    candidate from its primary key: with the sums read per candidate the widest query took 12.0 s on the reference host
+    (issue #208), above the 10 s line of issue #208, with the window 2.0 s on the same host and the same rows. The rest is measured at the default and the widest parameters
     and on such hostile text, and documented, because nothing calls the query yet.
 14. **A cap on the candidates** — bounds the work; but a cap that cuts silently drops spikes and turns unknown into
     quiet, and a cap that refuses the query fails exactly when a flood happens, the moment its spikes matter. With no
@@ -150,7 +152,7 @@ storage write path counts every stored log line under its source, program and te
 and per UTC hour, in the transaction of its batch; a template is new when it was first seen in the range and its source
 has earlier lines, and an hour exceeds the usual level when its count reaches the minimum and is more than the factor
 times the template's mean over the covered hours of the baseline window; the covered hours are computed (materialized) once per
-source and hour, the baseline sum once per candidate, and the query's cost is stated, not capped. Options 16, 19 and 22: the sub-command `vandoxd templates` rebuilds the statistics in place,
+source and hour, the baseline sum is a window function over each template's hours, and the query's cost is stated, not capped. Options 16, 19 and 22: the sub-command `vandoxd templates` rebuilds the statistics in place,
 in one transaction that empties the tables, writes the run's marker and fixes the high-water record ID, and then in bounded batches
 of stored lines counted by the write path's code, each checking the marker first. The rules, defaults and limits are in
 [Detection, alerts and reports](../areas/detection-and-reports.md) (*Log templates*), the tables and the rebuild in
