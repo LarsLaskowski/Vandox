@@ -13,8 +13,9 @@
             return value === "light" || value === "dark" ? value : null;
         } catch (error) {
             // Local storage can be unavailable (private mode, blocked site data); the page then follows the system theme.
-            return null;
         }
+
+        return null;
     }
 
     function storeTheme(theme) {
