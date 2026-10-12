@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Text;
 
 using Vandox.Core.Templates;
@@ -154,6 +155,25 @@ public class LogTemplateNormalizerTests
     [DataRow("00:1a:2b:3c:4d:5e", "<num>:<num>a:<num>b:<num>c:<num>d:<num>e")]
     [DataRow("\u0661\u0662\u0663", "\u0661\u0662\u0663")]
     [DataRow("\uFF11\uFF12\uFF13", "\uFF11\uFF12\uFF13")]
+    [DataRow("0123abcd-0123-4567-89ab-0123456789ag", "?")]
+    [DataRow("5.ms", "?")]
+    [DataRow("a@.example.com", "?")]
+    [DataRow("a@b..c", "?")]
+    [DataRow("a@b_c", "?")]
+    [DataRow("1.2.3.4:x", "?")]
+    [DataRow("1.2.3.4:", "?")]
+    [DataRow("1.2.3.4x5", "?")]
+    [DataRow("1.2.3.4/123", "?")]
+    [DataRow("1.2.3.4/", "?")]
+    [DataRow("1:2::3:", "?")]
+    [DataRow("1:2:3:4:5:6:7:", "?")]
+    [DataRow("fe80::12345", "?")]
+    [DataRow("1:2:3:4:5:6:7:8:9", "?")]
+    [DataRow("1::2::3", "?")]
+    [DataRow("1:2:3:4:5:6:7:8", "?")]
+    [DataRow("1.2.3.4.5", "?")]
+    [DataRow("1.2.3", "?")]
+    [DataRow("::ffff:10.0.0.256", "?")]
     public void LogTemplateNormalizerLeavesNearMissesToLaterRules(string token, string expected)
     {
         // Act
@@ -211,20 +231,18 @@ public class LogTemplateNormalizerTests
     /// </summary>
     /// <param name="message">The message</param>
     /// <param name="expected">The expected template</param>
+    /// <param name="loneSurrogates">The number of lone surrogates the message must hold</param>
     [TestMethod]
-    [DataRow("a\uD800b", "a\uFFFDb")]
-    [DataRow("a\uDC00", "a\uFFFD")]
-    [DataRow("\uD800\uD800", "\uFFFD\uFFFD")]
-    [DataRow("\uDC00\uD800", "\uFFFD\uFFFD")]
-    [DataRow("x\uD83D", "x\uFFFD")]
-    [DataRow("x\uD83D\uDE00y", "x\uD83D\uDE00y")]
-    public void LogTemplateNormalizerReplacesLoneSurrogates(string message, string expected)
+    [DynamicData(nameof(LoneSurrogateCases))]
+    public void LogTemplateNormalizerReplacesLoneSurrogates(string message, string expected, int loneSurrogates)
     {
         // Act
         var template = LogTemplateNormalizer.Normalize(message);
         var roundTrip = Encoding.UTF8.GetString(Encoding.UTF8.GetBytes(template));
 
         // Assert
+        Assert.AreEqual(loneSurrogates, CountLoneSurrogates(message), "the input still holds the intended lone surrogates");
+        Assert.AreEqual(0, CountLoneSurrogates(template), "the template holds no lone surrogate");
         Assert.AreEqual(expected, template, "template");
         Assert.AreEqual(template, roundTrip, "the template is valid Unicode and survives UTF-8 encoding unchanged");
     }
@@ -341,6 +359,102 @@ public class LogTemplateNormalizerTests
         Assert.AreEqual(1024 * 1024, message.Length, "the message is 1 MiB");
         Assert.AreEqual(expected, template, "template text");
         Assert.AreEqual(1024, Encoding.UTF8.GetByteCount(template), "template length in UTF-8 bytes");
+    }
+
+    /// <summary>
+    /// The time to normalize a message grows linearly with its length: a doubled message takes about twice as long, not four times.
+    /// </summary>
+    [TestMethod]
+    public void LogTemplateNormalizerTimeGrowsLinearly()
+    {
+        // Arrange
+        const int baseWords = 40000;
+        const int repetitions = 5;
+
+        var baseMessage = string.Concat(Enumerable.Repeat("conn 10.0.0.1 id4F2A31C0B2 /var/lib/x user@host 0x7f 12ms ", baseWords / 8));
+        var doubledMessage = string.Concat(baseMessage, baseMessage);
+
+        LogTemplateNormalizer.Normalize(baseMessage);
+        LogTemplateNormalizer.Normalize(doubledMessage);
+
+        // Act
+        var baseTicks = BestTicks(baseMessage, repetitions);
+        var doubledTicks = BestTicks(doubledMessage, repetitions);
+        var ratio = (double)doubledTicks / Math.Max(1, baseTicks);
+
+        // Assert
+        Assert.IsLessThan(8.0, ratio, $"the time of the doubled message over the time of the base message is {ratio:F2}; linear growth is about 2, quadratic about 4 and more");
+    }
+
+    /// <summary>
+    /// Measures the best of several runs of one normalization.
+    /// </summary>
+    /// <param name="message">The message</param>
+    /// <param name="repetitions">The number of runs</param>
+    /// <returns>The shortest duration in stopwatch ticks</returns>
+    private static long BestTicks(string message, int repetitions)
+    {
+        var best = long.MaxValue;
+
+        for (var run = 0; run < repetitions; run++)
+        {
+            var start = Stopwatch.GetTimestamp();
+
+            LogTemplateNormalizer.Normalize(message);
+
+            best = Math.Min(best, Stopwatch.GetTimestamp() - start);
+        }
+
+        return best;
+    }
+
+    /// <summary>
+    /// Builds the lone-surrogate cases at runtime, because a lone surrogate in an attribute literal is corrupted in the assembly metadata.
+    /// </summary>
+    /// <returns>The messages, the expected templates and the number of lone surrogates of each message</returns>
+    private static IEnumerable<(string Message, string Expected, int LoneSurrogates)> LoneSurrogateCases()
+    {
+        const char highSurrogate = (char)0xD800;
+        const char lowSurrogate = (char)0xDC00;
+        const char emojiHigh = (char)0xD83D;
+        const char emojiLow = (char)0xDE00;
+        const char replacement = (char)0xFFFD;
+
+        yield return (string.Concat("a", highSurrogate, "b"), string.Concat("a", replacement, "b"), 1);
+        yield return (string.Concat("a", lowSurrogate), string.Concat("a", replacement), 1);
+        yield return (string.Concat(highSurrogate, highSurrogate), string.Concat(replacement, replacement), 2);
+        yield return (string.Concat(lowSurrogate, highSurrogate), string.Concat(replacement, replacement), 2);
+        yield return (string.Concat("x", emojiHigh), string.Concat("x", replacement), 1);
+        yield return (string.Concat("x", emojiHigh, emojiLow, "y"), string.Concat("x", emojiHigh, emojiLow, "y"), 0);
+    }
+
+    /// <summary>
+    /// Counts the surrogates of a text that are not part of a valid pair.
+    /// </summary>
+    /// <param name="text">The text</param>
+    /// <returns>The number of lone surrogates</returns>
+    private static int CountLoneSurrogates(string text)
+    {
+        var count = 0;
+        var pairOpen = false;
+
+        foreach (var character in text)
+        {
+            if (pairOpen && char.IsLowSurrogate(character))
+            {
+                pairOpen = false;
+
+                continue;
+            }
+
+            count += pairOpen ? 1 : 0;
+            pairOpen = char.IsHighSurrogate(character);
+            count += char.IsLowSurrogate(character) ? 1 : 0;
+        }
+
+        count += pairOpen ? 1 : 0;
+
+        return count;
     }
 
     /// <summary>
