@@ -22,3 +22,4 @@ are quoted in full.
 | 2026-10-12 22:42 | 8 Fix round 1 | Dev | SemaphoreSlim serialises renders, late chart destroyed in DisposeAsync, interop disposed before token cancel; gates green (format, analyzer, tests, coverage 100% new/98.0%, scope) (sonnet/medium · 6,720 tokens · 4 tool uses · 83 s · continued) |
 | 2026-10-12 22:44 | 8 Review round 2 | Reviewer | Round-1 leak fixed; BLOCKING 1: queued render throws ObjectDisposedException into renderer after DisposeAsync (use return inside gate); fix round 2 (opus/medium · 12,097 tokens · 5 tool uses · 74 s · continued) |
 | 2026-10-12 22:46 | 8 Fix round 2 tests | Tester | ChartInteropQueuedRenderBeforeDisposeCompletesWithoutException added; fails on current code |
+| 2026-10-12 22:53 | 8 Fix round 2 | Dev | Queued render returns inside gate after disposal; gates green (format, analyzer, tests 267 backend, coverage 100%/98.0%, scope) (sonnet/medium · 1,318 tokens · 2 tool uses · 47 s · continued) |

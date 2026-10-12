@@ -71,7 +71,10 @@ public sealed class ChartInterop : IAsyncDisposable
 
         try
         {
-            ObjectDisposedException.ThrowIf(_disposed, this);
+            if (_disposed)
+            {
+                return;
+            }
 
             if (_chart is not null)
             {
