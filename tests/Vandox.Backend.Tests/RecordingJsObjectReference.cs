@@ -50,12 +50,38 @@ internal sealed class RecordingJsObjectReference : IJSObjectReference
     {
         _runtime.Record(new RecordedJsCall(Name, identifier, args ?? [], cancellationToken));
 
+        var gate = identifier == "create" ? _runtime.CreateGate : null;
+
+        if (gate is not null)
+        {
+            return InvokeGatedAsync<TValue>(identifier, gate.Task);
+        }
+
         if (typeof(TValue) == typeof(IJSObjectReference))
         {
             return ValueTask.FromResult((TValue)(object)_runtime.CreateReference(identifier));
         }
 
         return ValueTask.FromResult(default(TValue)!);
+    }
+
+    /// <summary>
+    /// Completes a call once its gate is released.
+    /// </summary>
+    /// <typeparam name="TValue">The type of the result</typeparam>
+    /// <param name="identifier">The identifier of the call</param>
+    /// <param name="gate">The task that is completed when the call may finish</param>
+    /// <returns>The result of the call</returns>
+    private async ValueTask<TValue> InvokeGatedAsync<TValue>(string identifier, Task gate)
+    {
+        await gate.ConfigureAwait(false);
+
+        if (typeof(TValue) == typeof(IJSObjectReference))
+        {
+            return (TValue)(object)_runtime.CreateReference(identifier);
+        }
+
+        return default!;
     }
 
     #endregion // IJSObjectReference

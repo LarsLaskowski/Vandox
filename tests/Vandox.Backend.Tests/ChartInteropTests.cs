@@ -21,6 +21,10 @@ public class ChartInteropTests
 
     private static readonly string[] _disposeSequence = ["chart.destroy", "chart.DisposeAsync", "module.DisposeAsync"];
 
+    private static readonly string[] _singleCreateSequence = ["runtime.import", "module.create", "chart.update"];
+
+    private static readonly string[] _lateDisposeSequence = ["runtime.import", "module.create", "chart.destroy", "chart.DisposeAsync", "module.DisposeAsync"];
+
     private static readonly object?[] _importArguments = [ChartInterop.ModulePath];
 
     #endregion // Fields
@@ -253,6 +257,66 @@ public class ChartInteropTests
         Assert.AreEqual("title", titleException.ParamName, "the title is named");
         Assert.AreEqual("data", dataException.ParamName, "the data is named");
         Assert.IsEmpty(runtime.Calls, "nothing was called");
+    }
+
+    /// <summary>
+    /// Disposing while <c>create</c> is pending waits for it, then destroys and disposes the chart that arrives and the module.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task ChartInteropDisposeDuringPendingCreateDestroysTheLateChart()
+    {
+        // Arrange
+        var runtime = new RecordingJsRuntime
+                      {
+                          CreateGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)
+                      };
+        var interop = new ChartInterop(runtime);
+        var render = interop.RenderAsync(new ElementReference("host-1"), "Load", CreateData(1.0), CancellationToken.None);
+
+        // Act
+        var dispose = interop.DisposeAsync().AsTask();
+
+        runtime.CreateGate.SetResult();
+
+        await render;
+        await dispose;
+
+        // Assert
+        var sequence = runtime.Calls.Select(call => $"{call.Target}.{call.Identifier}").ToArray();
+
+        Assert.AreSequenceEqual(_lateDisposeSequence, sequence, "import, create, then destroy and dispose the late chart, then dispose the module");
+    }
+
+    /// <summary>
+    /// Two renders while <c>create</c> is pending create the chart once and update it once.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task ChartInteropRendersDuringPendingCreateCreateOnce()
+    {
+        // Arrange
+        var runtime = new RecordingJsRuntime
+                      {
+                          CreateGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)
+                      };
+
+        await using var interop = new ChartInterop(runtime);
+
+        var host = new ElementReference("host-1");
+        var first = interop.RenderAsync(host, "Load", CreateData(1.0), CancellationToken.None);
+        var second = interop.RenderAsync(host, "Load", CreateData(2.0), CancellationToken.None);
+
+        // Act
+        runtime.CreateGate.SetResult();
+
+        await first;
+        await second;
+
+        // Assert
+        var sequence = runtime.Calls.Select(call => $"{call.Target}.{call.Identifier}").ToArray();
+
+        Assert.AreSequenceEqual(_singleCreateSequence, sequence, "one import, one create, one update");
     }
 
     /// <summary>

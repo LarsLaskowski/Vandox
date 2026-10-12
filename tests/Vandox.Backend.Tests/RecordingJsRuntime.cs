@@ -16,6 +16,11 @@ internal sealed class RecordingJsRuntime : IJSRuntime
     #region Properties
 
     /// <summary>
+    /// Gets or sets the gate that holds back the completion of every <c>create</c> call; <see langword="null"/> completes the call at once.
+    /// </summary>
+    internal TaskCompletionSource? CreateGate { get; set; }
+
+    /// <summary>
     /// Gets every call of the runtime and of the references it handed out, in the order they were made.
     /// </summary>
     internal List<RecordedJsCall> Calls { get; } = [];

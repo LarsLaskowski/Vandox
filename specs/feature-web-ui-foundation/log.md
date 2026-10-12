@@ -18,3 +18,4 @@ are quoted in full.
 | 2026-10-12 22:24 | 7 Code check | Orchestrator | Format check, Analyzer gate, Test (Go+.NET all green), Coverage gate 100%/98.0%, scope-check, decision-check PASS; no Code Officer needed |
 | 2026-10-12 22:25 | 8 Review (diff) | Security | APPROVED at 0548b1e; no blocking findings (opus/medium · 61,269 tokens · 13 tool uses · 84 s) |
 | 2026-10-12 22:28 | 8 Review round 1 | Reviewer | BLOCKING 1: ChartInterop/TimeSeriesChart leak a browser chart when render is in flight (concurrent create, dispose during create); fix round 1 -> Tester tests with gated double, then Dev (opus/medium · 131,038 tokens · 24 tool uses · 218 s) |
+| 2026-10-12 22:35 | 8 Fix round 1 tests | Tester | Gated-double tests added (dispose during pending create, concurrent renders); I confirmed 2 fail on current code, 13 others pass (sonnet/medium · 12,758 tokens · 7 tool uses · 1021 s · continued) |
