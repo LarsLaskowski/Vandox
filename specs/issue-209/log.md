@@ -17,3 +17,4 @@ are quoted in full.
 | 2026-10-12 18:01 | 6 Dispute | squad-lead | decide: AC1 test constant 9->8, Tester fixes; code unchanged (opus/medium · 47,345 tokens · 4 tool uses · 23 s) |
 | 2026-10-12 18:07 | 6 Test fix | squad-tester | AC1 constant corrected to 8 (sonnet/medium · 1,632 tokens · 2 tool uses · 101 s · continued) |
 | 2026-10-12 18:07 | 7 Code check | Orchestrator | format, tests (Core 3548, Storage 265, Import 171, Backend 116), coverage 99.5%/98.0%, analyzer, scope all PASS |
+| 2026-10-12 18:08 | 8 Security diff | squad-security | APPROVED; N1 non-blocking: no test isolates the finish-transaction marker check (opus/medium · 54,904 tokens · 9 tool uses · 47 s) |
