@@ -20,15 +20,22 @@ internal static class TemplateQueries
 
     private const long NanosecondsPerHour = 3_600_000_000_000;
 
-    // The candidates are the template hours of the range that reach the minimum count. The window start and the covered hours
-    // are computed once per distinct (source, hour) of the candidates: SQLite would flatten a plain CTE into the join and run the
-    // covered-hours subquery per candidate, so `covered` and `scored` are MATERIALIZED (record 0095). The baseline sum is read once
-    // per candidate, by primary key. Every value is bound.
+    // `rows` reads the template hours of the range and of the baseline before it in one pass per template and sums the counts of the
+    // `baseline` hours before each row with a window function (a template's hours are distinct multiples of an hour, so `1 PRECEDING`
+    // ends the window just before the row's own hour). The candidates are the rows of the range that reach the minimum count. The
+    // window start and the covered hours are computed once per distinct (source, hour) of the candidates: SQLite would flatten a plain
+    // CTE into the join and run the covered-hours subquery per candidate, so `covered` and `scored` are MATERIALIZED (record 0095).
+    // Every value is bound.
     private const string SpikeSql = """
-                                    WITH candidates AS (
-                                      SELECT h.template_id, h.hour, h.count, t.source
+                                    WITH rows AS (
+                                      SELECT h.template_id, h.hour, h.count, t.source,
+                                             sum(h.count) OVER (PARTITION BY h.template_id ORDER BY h.hour RANGE BETWEEN $baselineNs PRECEDING AND 1 PRECEDING) AS baseline_sum
                                       FROM log_template_hours h JOIN log_templates t ON t.id = h.template_id
-                                      WHERE h.hour >= $fromHour AND h.hour < $to AND h.count >= $minCount AND ($source = '' OR t.source = $source)),
+                                      WHERE h.hour >= $fromHour - $baselineNs AND h.hour < $to AND ($source = '' OR t.source = $source)),
+                                    candidates AS (
+                                      SELECT template_id, hour, count, source, coalesce(baseline_sum, 0) AS baseline_sum
+                                      FROM rows
+                                      WHERE hour >= $fromHour AND count >= $minCount),
                                     windows AS (
                                       SELECT source, hour,
                                              CASE WHEN hour < $minTime + $baselineNs THEN $minTime ELSE hour - $baselineNs END AS window_start
@@ -39,9 +46,7 @@ internal static class TemplateQueries
                                               WHERE s.source = w.source AND s.hour >= w.window_start AND s.hour < w.hour) AS covered_hours
                                       FROM windows w),
                                     scored AS MATERIALIZED (
-                                      SELECT c.template_id, c.hour, c.count, v.covered_hours,
-                                             (SELECT coalesce(sum(b.count), 0) FROM log_template_hours b
-                                              WHERE b.template_id = c.template_id AND b.hour >= v.window_start AND b.hour < c.hour) AS baseline_sum
+                                      SELECT c.template_id, c.hour, c.count, v.covered_hours, c.baseline_sum
                                       FROM candidates c JOIN covered v ON v.source = c.source AND v.hour = c.hour
                                       WHERE v.covered_hours >= $minBaselineHours)
                                     SELECT t.id, t.source, t.program, t.template, t.first_seen, t.last_seen, t.count, s.hour, s.count, s.covered_hours, s.baseline_sum
