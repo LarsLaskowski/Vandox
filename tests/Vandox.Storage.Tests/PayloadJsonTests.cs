@@ -12,7 +12,7 @@ public class PayloadJsonTests
 {
     #region Constants
 
-    private const string Tricky = "<>&'+ä‮😀 lone \uD800 end";
+    private const string Tricky = "<>&'+ä\u202E😀 lone \uD800 end";
 
     #endregion // Constants
 
