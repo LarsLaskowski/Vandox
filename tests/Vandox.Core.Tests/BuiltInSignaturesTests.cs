@@ -23,6 +23,18 @@ public class BuiltInSignaturesTests
     private const string DovecotConnect = "auth-worker(2290): Error: mysql(localhost): Connect failed to database (mail): Too many connections - waiting for 1 seconds before retry";
     private const string Kernel = "5.15.0-91-generic (buildd@lcy02-amd64-045) (gcc (Ubuntu 11.4.0-1ubuntu1~22.04) 11.4.0, GNU ld (GNU Binutils for Ubuntu) 2.38) #101-Ubuntu SMP Tue Nov 14 13:30:08 UTC 2023";
 
+    private const string TooManyText = "PHP message: PHP Warning:  mysqli_connect(): (HY000/1040): Too many connections";
+    private const string WriteText = "PHP message: PHP Notice:  fwrite(): Write of 1 bytes failed with errno=28 No space left on device";
+    private const string NginxWriteText = "pwrite() \"/x\" failed (28: No space left on device)";
+    private const string NginxOpenHead = "[error] 2101#2101: *15 open() \"/var/www/vhosts/example.org/httpdocs/x\" failed (2: No such file or directory), client: 198.51.100.7, server: example.org, request: \"GET /";
+    private const string NginxUpstreamHead = "[error] 2101#2101: *15 upstream timed out (110: Connection timed out) while reading response header from upstream, client: 198.51.100.7, server: example.org, request: \"GET /x HTTP/1.1\", upstream: \"http://127.0.0.1:7080/";
+    private const string NginxNotFoundHead = "[error] 2101#2101: *15 \"/var/www/vhosts/example.org/httpdocs/";
+    private const string NginxFcgiHead = "[error] 2101#2101: *15 FastCGI sent in stderr: \"";
+    private const string ExifTail = "): Image has corrupt COM section: some software set wrong length information in /var/www/vhosts/example.org/";
+    private const string ApacheProxyHead = "[proxy_fcgi:error] [pid 3101:tid 140231] [client 198.51.100.7:0] AH01071: Got error '";
+    private const string ApacheModuleHead = "[php:warn] [pid 901] [client 198.51.100.7:51234] ";
+    private const string ApacheNoticeHead = "[php:notice] [pid 901] [client 198.51.100.7:51234] ";
+
     #endregion // Constants
 
     #region Fields
@@ -359,6 +371,76 @@ public class BuiltInSignaturesTests
     }
 
     /// <summary>
+    /// Apache's escaped line feed does not let a later PHP message count.
+    /// </summary>
+    /// <param name="message">The message</param>
+    [TestMethod]
+    [DataRow(ApacheProxyHead + "PHP message: PHP Warning:  x in /x.php on line 1\\n" + TooManyText + " in /x.php on line 2'")]
+    [DataRow(ApacheProxyHead + "PHP message: PHP Warning:  x in /x.php on line 1\\n" + WriteText + " in /x.php on line 2'")]
+    public void BuiltInSignaturesApacheEscapedLineFeedReadsOnlyTheFirstPhpMessage(string message)
+    {
+        // Assert
+        Assert.Contains("\\", message, "the input holds the backslash of the escape, not a line feed");
+
+        // Act and assert
+        AssertNothing("apache-error", string.Empty, string.Empty, string.Empty, message);
+    }
+
+    /// <summary>
+    /// The mysqli and PDO lines of the wrong source, text, level or origin give no too-many-connections event of PHP.
+    /// </summary>
+    /// <param name="source">The source</param>
+    /// <param name="message">The message</param>
+    [TestMethod]
+    [DataRow("plesk-panel", "[error] 2101#2101: *15 FastCGI sent in stderr: \"PHP message: PHP Warning:  mysqli_connect(): (HY000/1040): Too many connections in /x.php on line 3\"")]
+    [DataRow("syslog", "[error] 2101#2101: *15 FastCGI sent in stderr: \"PHP message: PHP Warning:  mysqli_connect(): (HY000/1040): Too many connections in /x.php on line 3\"")]
+    [DataRow("nginx-error", "[error] 2101#2101: *15 FastCGI sent in stderr: \"PHP message: PHP Warning:  mysqli_connect(): (HY000/1045): Access denied for user 'u'@'localhost' (using password: YES) in /x.php on line 3\"")]
+    [DataRow("nginx-error", "[error] 2101#2101: *15 FastCGI sent in stderr: \"PHP message: PHP Fatal error:  Uncaught Exception: Too many connections in /x.php:3")]
+    [DataRow("nginx-error", "[error] 2101#2101: *15 FastCGI sent in stderr: \"PHP message: PHP Fatal error:  Uncaught PDOException: SQLSTATE[HY000] [2002] Connection refused in /x.php:3")]
+    [DataRow("nginx-error", "[error] 2101#2101: *15 FastCGI sent in stderr: \"PHP message: PHP Warning:  mysqli_connect(): (HY000/1040): x in /x.php on line 3\"")]
+    [DataRow("nginx-error", "[warn] 2101#2101: *15 FastCGI sent in stderr: \"PHP message: PHP Warning:  mysqli_connect(): (HY000/1040): Too many connections in /x.php on line 3\"")]
+    [DataRow("nginx-error", "[error] 2101#2101: *15 FastCGI sent in stderr: \"PHP message: PHP Warning:  mysqli_query(): (HY000/1040): Too many connections in /x.php on line 3\"")]
+    [DataRow("apache-error", "[:warn] [pid 901] [client 198.51.100.7:51234] PHP Warning:  mysqli_connect(): (HY000/1040): Too many connections in /x.php on line 3")]
+    public void BuiltInSignaturesPhpTooManyConnectionsIgnoresOtherLines(string source, string message)
+    {
+        AssertNothing(source, string.Empty, string.Empty, string.Empty, message);
+    }
+
+    /// <summary>
+    /// Other PHP errors, other writers and write errors without a script file give no full-disk event of PHP.
+    /// </summary>
+    /// <param name="source">The source</param>
+    /// <param name="message">The message</param>
+    [TestMethod]
+    [DataRow("nginx-error", "[error] 2101#2101: *15 FastCGI sent in stderr: \"PHP message: PHP Notice:  fwrite(): Write of 1 bytes failed with errno=122 Disk quota exceeded in /x.php on line 3\"")]
+    [DataRow("nginx-error", "[error] 2101#2101: *15 FastCGI sent in stderr: \"PHP message: PHP Notice:  fread(): Read of 8192 bytes failed with errno=28 No space left on device in /x.php on line 3\"")]
+    [DataRow("nginx-error", "[error] 2101#2101: *15 FastCGI sent in stderr: \"PHP message: PHP Warning:  file_put_contents(): Only 0 of 4096 bytes written, possibly out of free disk space in /x.php on line 3\"")]
+    [DataRow("plesk-panel", "[error] 2101#2101: *15 FastCGI sent in stderr: \"PHP message: PHP Notice:  fwrite(): Write of 8192 bytes failed with errno=28 No space left on device in /x.php on line 7\"")]
+    [DataRow("apache-error", "[fcgid:warn] [pid 3101:tid 140231] [client 198.51.100.7:51234] mod_fcgid: stderr: PHP Notice:  Unknown: Write of 512 bytes failed with errno=28 No space left on device in Unknown on line 0")]
+    [DataRow("nginx-error", "[error] 2101#2101: *16 FastCGI sent in stderr: \"PHP message: PHP Notice:  PHP Request Shutdown: Write of 512 bytes failed with errno=28 No space left on device in Unknown on line 0\"")]
+    public void BuiltInSignaturesPhpDiskFullIgnoresOtherLines(string source, string message)
+    {
+        AssertNothing(source, string.Empty, string.Empty, string.Empty, message);
+    }
+
+    /// <summary>
+    /// Other nginx errors, levels, calls and sources give no full-disk event of nginx.
+    /// </summary>
+    /// <param name="source">The source</param>
+    /// <param name="message">The message</param>
+    [TestMethod]
+    [DataRow("apache-error", "[crit] 2101#2101: *16 pwrite() \"/var/lib/nginx/body/0000000001\" failed (28: No space left on device), client: 198.51.100.7")]
+    [DataRow("nginx-error", "[error] 2101#2101: *16 pwrite() \"/x\" failed (28: No space left on device)")]
+    [DataRow("nginx-error", "[crit] 2101#2101: *16 open() \"/var/lib/nginx/body/0000000001\" failed (28: No space left on device)")]
+    [DataRow("nginx-error", "[emerg] 2101#2101: mkdir() \"/var/lib/nginx/body\" failed (28: No space left on device)")]
+    [DataRow("nginx-error", "[crit] 2101#2101: *16 pwrite() \"/x\" failed (5: Input/output error)")]
+    [DataRow("apache-error", "[core:error] [pid 812] (28)No space left on device: AH00023: Couldn't create the ssl-cache mutex")]
+    public void BuiltInSignaturesNginxDiskFullIgnoresOtherLines(string source, string message)
+    {
+        AssertNothing(source, string.Empty, string.Empty, string.Empty, message);
+    }
+
+    /// <summary>
     /// A started unit of systemd gives its description and, on newer systemd versions, its unit.
     /// </summary>
     /// <param name="message">The message</param>
@@ -581,6 +663,38 @@ public class BuiltInSignaturesTests
     [DataRow("nginx-error", "[error] 1021#1021: *15 FastCGI sent in stderr: \"PHP message: x\nDisk full (y); waiting\nwarning: connect to mysql server x: Too many connections\" while reading response header from upstream, client: 198.51.100.7")]
     [DataRow("apache-error", "[core:error] [pid 902] [client 198.51.100.7:51234] AH00126: Invalid URI in request GET /x HTTP/1.1, referer: Disk is full writing './x'; Too many connections")]
     [DataRow("apache-error", "[php:warn] [pid 901] [client 198.51.100.7:51234] PHP Warning:  x, referer: auth-worker(1): Error: mysql(x): Connect failed to database (y): Too many connections")]
+    [DataRow("nginx-error", NginxOpenHead + TooManyText + " HTTP/1.1\", host: \"example.org\"")]
+    [DataRow("nginx-error", NginxOpenHead + "x HTTP/1.1\", host: \"" + TooManyText + "\"")]
+    [DataRow("nginx-error", NginxOpenHead + "x HTTP/1.1\", host: \"example.org\", referrer: \"" + TooManyText + "\"")]
+    [DataRow("nginx-error", NginxUpstreamHead + TooManyText + "\", host: \"example.org\"")]
+    [DataRow("nginx-error", NginxNotFoundHead + TooManyText + "/index.html\" is not found (2: No such file or directory), client: 198.51.100.7, server: example.org, request: \"GET /" + TooManyText + "/ HTTP/1.1\", host: \"example.org\"")]
+    [DataRow("nginx-error", NginxOpenHead + WriteText + " HTTP/1.1\", host: \"example.org\"")]
+    [DataRow("nginx-error", NginxOpenHead + "x HTTP/1.1\", host: \"" + WriteText + "\"")]
+    [DataRow("nginx-error", NginxOpenHead + "x HTTP/1.1\", host: \"example.org\", referrer: \"" + WriteText + "\"")]
+    [DataRow("nginx-error", NginxUpstreamHead + WriteText + "\", host: \"example.org\"")]
+    [DataRow("nginx-error", NginxNotFoundHead + WriteText + "/index.html\" is not found (2: No such file or directory), client: 198.51.100.7, server: example.org, request: \"GET /" + WriteText + "/ HTTP/1.1\", host: \"example.org\"")]
+    [DataRow("nginx-error", NginxOpenHead + NginxWriteText + " HTTP/1.1\", host: \"example.org\"")]
+    [DataRow("nginx-error", NginxOpenHead + "x HTTP/1.1\", host: \"" + NginxWriteText + "\"")]
+    [DataRow("nginx-error", NginxOpenHead + "x HTTP/1.1\", host: \"example.org\", referrer: \"" + NginxWriteText + "\"")]
+    [DataRow("nginx-error", NginxUpstreamHead + NginxWriteText + "\", host: \"example.org\"")]
+    [DataRow("nginx-error", NginxNotFoundHead + NginxWriteText + "/index.html\" is not found (2: No such file or directory), client: 198.51.100.7, server: example.org, request: \"GET /" + NginxWriteText + "/ HTTP/1.1\", host: \"example.org\"")]
+    [DataRow("nginx-error", "[crit] 2101#2101: *16 stat() \"/var/www/vhosts/example.org/httpdocs/x\" failed (28: No space left on device)\" failed (13: Permission denied), client: 198.51.100.7, server: example.org, request: \"GET /x%22%20failed%20(28:%20No%20space%20left%20on%20device) HTTP/1.1\"")]
+    [DataRow("nginx-error", NginxFcgiHead + "PHP message: PHP Warning:  Undefined array key \"q\" in /var/www/vhosts/example.org/httpdocs/index.php on line 2; " + TooManyText + " in /x.php on line 1\" while reading response header from upstream, client: 198.51.100.7")]
+    [DataRow("nginx-error", NginxFcgiHead + "PHP message: PHP Warning:  Undefined array key \"q\" in /var/www/vhosts/example.org/httpdocs/index.php on line 2; " + WriteText + " in /x.php on line 1\" while reading response header from upstream, client: 198.51.100.7")]
+    [DataRow("nginx-error", NginxFcgiHead + "PHP message: PHP Warning:  Undefined array key \"" + TooManyText + "\" in /var/www/vhosts/example.org/httpdocs/index.php on line 2\" while reading response header from upstream, client: 198.51.100.7")]
+    [DataRow("nginx-error", NginxFcgiHead + "PHP message: PHP Warning:  getimagesize(): (HY000/1040): Too many connections): Failed to open stream: No such file or directory in /var/www/vhosts/example.org/httpdocs/img.php on line 4\" while reading response header from upstream, client: 198.51.100.7")]
+    [DataRow("apache-error", ApacheModuleHead + "PHP Warning:  include(): (HY000/1040): Too many connections.php): Failed to open stream: No such file or directory in /var/www/vhosts/example.org/index.php on line 3")]
+    [DataRow("apache-error", ApacheProxyHead + "PHP message: PHP Warning:  file_get_contents(): (HY000/1040): Too many connections): Failed to open stream: No such file or directory in /x.php on line 4'")]
+    [DataRow("apache-error", ApacheModuleHead + "PHP Warning:  fopen(): Write of 1 bytes failed with errno=28 No space left on device): Failed to open stream: No such file or directory in /x.php on line 4")]
+    [DataRow("nginx-error", NginxFcgiHead + "PHP message: PHP Notice:  exif_read_data(): Write of 1 bytes failed with errno=28 No space left on device" + ExifTail + "httpdocs/upload.php on line 9\" while reading response header from upstream, client: 198.51.100.7")]
+    [DataRow("apache-error", ApacheNoticeHead + "PHP Notice:  exif_read_data(): Write of 1 bytes failed with errno=28 No space left on device" + ExifTail + "upload.php on line 9")]
+    [DataRow("apache-error", ApacheNoticeHead + "PHP Notice:  exif_read_data(): Write of 1 bytes failed with errno=28 No space left on device in Unknown on line 0\"" + ExifTail + "upload.php on line 9")]
+    [DataRow("nginx-error", NginxFcgiHead + "PHP message: PHP Warning:  Undefined array key \"q\nPHP message: PHP Warning:  mysqli_connect(): (HY000/1040): Too many connections in /x.php on line 1\" in /var/www/vhosts/example.org/httpdocs/index.php on line 2\"")]
+    [DataRow("apache-error", ApacheProxyHead + "PHP message: PHP Warning:  Undefined variable $x in /var/www/vhosts/example.org/httpdocs/index.php on line 12', referer: " + TooManyText)]
+    [DataRow("apache-error", ApacheProxyHead + "PHP message: PHP Warning:  Undefined variable $x in /var/www/vhosts/example.org/httpdocs/index.php on line 12', referer: " + WriteText)]
+    [DataRow("apache-error", "[authz_core:error] [pid 3101:tid 140231] [client 198.51.100.7:0] AH01630: client denied by server configuration: /var/www/vhosts/example.org/httpdocs/" + TooManyText)]
+    [DataRow("apache-error", ApacheProxyHead + "PHP message: PHP Warning:  Undefined array key \"q\" in /x.php on line 2; " + TooManyText + " in /x.php on line 1'")]
+    [DataRow("apache-error", "[proxy_fcgi:error] [pid 3101:tid 140231] [client example.org:0] AH01071: Got error '" + TooManyText + " in /x.php on line 1'")]
     public void BuiltInSignaturesClientTextInWebServerLogsYieldsNothing(string source, string message)
     {
         AssertNothing(source, string.Empty, string.Empty, string.Empty, message);
