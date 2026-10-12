@@ -321,5 +321,107 @@ public class SqliteStoreQueryTests
         Assert.AreEqual("store: invalid query: from must be before to", badWindow.Message, "window message");
     }
 
+    /// <summary>
+    /// Paging with the last capture time as the start and the last ID as AfterId returns every record once, in order, even when many records share one capture time.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task SqliteStoreRecordsPagesAfterId()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+        var records = new List<DataRecord>();
+
+        for (var index = 0; index < 5; index++)
+        {
+            records.Add(Samples.Log(RecordOrigin.Backend, 0, 10, $"same time {index}"));
+            records.Add(Samples.Metric(RecordOrigin.Backend, 0, 10, "cpu"));
+        }
+
+        records.Add(Samples.Log(RecordOrigin.Backend, 0, 20, "later 1"));
+        records.Add(Samples.Log(RecordOrigin.Backend, 0, 20, "later 2"));
+        records.Add(Samples.Metric(RecordOrigin.Backend, 0, 20, "cpu"));
+        records.Add(Samples.Metric(RecordOrigin.Backend, 0, 20, "cpu"));
+        await store.WriteBatchAsync(Samples.Batch([.. records]), TestContext.CancellationToken);
+
+        var lines = Samples.Query(RecordKind.LogLine);
+        var series = Samples.Query(RecordKind.Metric);
+
+        series.Source = "host";
+        series.Name = "cpu";
+
+        // Act
+        var everyLine = await store.RecordsAsync(lines, TestContext.CancellationToken);
+        var everyMetric = await store.RecordsAsync(series, TestContext.CancellationToken);
+        var pagedLines = await ReadPagesAsync(store, lines, 2);
+        var pagedMetrics = await ReadPagesAsync(store, series, 2);
+
+        // Assert
+        Assert.HasCount(7, everyLine, "log lines stored");
+        Assert.HasCount(7, everyMetric, "metrics stored");
+        Assert.AreSequenceEqual(everyLine.Select(row => row.Id), pagedLines, "pages of two return every log line once, in order");
+        Assert.AreSequenceEqual(everyMetric.Select(row => row.Id), pagedMetrics, "pages of two return every metric of the series once, in order");
+    }
+
+    /// <summary>
+    /// A negative AfterId is refused.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task SqliteStoreRecordsRefusesNegativeAfterId()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+        var query = Samples.Query(RecordKind.LogLine);
+
+        query.AfterId = -1;
+
+        // Act
+        var exception = await Assert.ThrowsExactlyAsync<InvalidQueryException>(() => store.RecordsAsync(query, TestContext.CancellationToken), "negative after id");
+
+        // Assert
+        Assert.AreEqual("store: invalid query: after id must not be negative", exception.Message, "message");
+    }
+
+    /// <summary>
+    /// Reads a query page by page, continuing after the last record of each full page, and stops after a safe number of pages.
+    /// </summary>
+    /// <param name="store">The store</param>
+    /// <param name="query">The query; its limit is replaced</param>
+    /// <param name="limit">The page size</param>
+    /// <returns>A task that returns the IDs of all pages in the order they were read</returns>
+    private async Task<List<long>> ReadPagesAsync(SqliteStore store, RecordQuery query, int limit)
+    {
+        var ids = new List<long>();
+        var paged = new RecordQuery
+                    {
+                        Kind = query.Kind,
+                        Source = query.Source,
+                        Name = query.Name,
+                        From = query.From,
+                        To = query.To,
+                        Limit = limit
+                    };
+
+        for (var page = 0; page < 20; page++)
+        {
+            var rows = await store.RecordsAsync(paged, TestContext.CancellationToken);
+
+            ids.AddRange(rows.Select(row => row.Id));
+
+            if (rows.Count < limit)
+            {
+                break;
+            }
+
+            paged.From = rows[^1].Record.CapturedAt;
+            paged.AfterId = rows[^1].Id;
+        }
+
+        return ids;
+    }
+
     #endregion // Methods
 }

@@ -170,7 +170,7 @@ public class BackendConfigLoaderTests
     }
 
     /// <summary>
-    /// The list of keys names the time zone after the other options.
+    /// The list of keys names the time zone after the other import options and before the incident windows.
     /// </summary>
     [TestMethod]
     public void BackendConfigKeysListTimeZone()
@@ -179,7 +179,9 @@ public class BackendConfigLoaderTests
         var keys = BackendConfig.Keys();
 
         // Assert
-        Assert.AreEqual("import.time_zone", keys[^1], "the time zone is the last key");
+        Assert.AreEqual("incidents.window_after", keys[^1], "the window after is the last key");
+        Assert.AreEqual("incidents.window_before", keys[^2], "the window before is the second last key");
+        Assert.AreEqual("import.time_zone", keys[^3], "the time zone is the last import key");
         Assert.Contains("log.level", keys, "the other keys stay");
     }
 
@@ -609,7 +611,7 @@ public class BackendConfigLoaderTests
     }
 
     /// <summary>
-    /// The list of keys names the error log paths after <c>log.level</c> and before the time zone.
+    /// The list of keys names the error log paths after <c>log.level</c> and before the time zone, and the incident windows last.
     /// </summary>
     [TestMethod]
     public void BackendConfigKeysListErrorLogPathsBeforeTimeZone()
@@ -618,7 +620,71 @@ public class BackendConfigLoaderTests
         var keys = BackendConfig.Keys();
 
         // Assert
-        Assert.AreSequenceEqual(["web.listen", "ingest.listen", "storage.directory", "log.level", "import.plesk_panel_log", "import.sw_cp_server_error_log", "import.nginx_error_log", "import.apache_error_log", "import.time_zone"], keys, "keys in order");
+        Assert.AreSequenceEqual(["web.listen", "ingest.listen", "storage.directory", "log.level", "import.plesk_panel_log", "import.sw_cp_server_error_log", "import.nginx_error_log", "import.apache_error_log", "import.time_zone", "incidents.window_before", "incidents.window_after"], keys, "keys in order");
+    }
+
+    /// <summary>
+    /// The incident windows are read from the <c>incidents</c> section, quoted or not, and keep their defaults when the section is empty.
+    /// </summary>
+    [TestMethod]
+    public void BackendConfigLoaderReadsIncidentWindows()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        var plain = directory.Write("plain.yaml", "incidents:\n  window_before: 2h\n  window_after: 15m\n");
+        var quoted = directory.Write("quoted.yaml", "incidents:\n  window_before: \"1h\"\n");
+        var empty = directory.Write("empty.yaml", "incidents:\n");
+
+        // Act
+        var plainConfig = BackendConfigLoader.Load(plain, []);
+        var quotedConfig = BackendConfigLoader.Load(quoted, []);
+        var emptyConfig = BackendConfigLoader.Load(empty, []);
+
+        // Assert
+        Assert.AreEqual(TimeSpan.FromHours(2), plainConfig.Incidents.GetWindowBefore(), "window_before 2h");
+        Assert.AreEqual(TimeSpan.FromMinutes(15), plainConfig.Incidents.GetWindowAfter(), "window_after 15m");
+        Assert.AreEqual(TimeSpan.FromHours(1), quotedConfig.Incidents.GetWindowBefore(), "quoted window_before");
+        Assert.AreEqual(TimeSpan.FromMinutes(30), quotedConfig.Incidents.GetWindowAfter(), "window_after keeps its default");
+        Assert.AreEqual(TimeSpan.FromMinutes(60), emptyConfig.Incidents.GetWindowBefore(), "default window_before");
+        Assert.AreEqual(TimeSpan.FromMinutes(30), emptyConfig.Incidents.GetWindowAfter(), "default window_after");
+    }
+
+    /// <summary>
+    /// A window outside 1 minute to 24 hours, or in another form than whole minutes or hours, is refused at its line with a fixed text that does not show the value; the bounds are accepted and a null value has no value.
+    /// </summary>
+    [TestMethod]
+    public void BackendConfigLoaderRefusesInvalidIncidentWindows()
+    {
+        // Arrange
+        const string reason = "must be a whole number of minutes or hours from 1m to 24h, such as 30m or 1h";
+        string[] invalid = ["0m", "25h", "1441m", "60", "1.5h"];
+        string[] bounds = ["1m", "24h", "1440m"];
+        using var directory = new TempDirectory();
+
+        // Act and assert
+        foreach (var value in invalid)
+        {
+            var before = directory.Write("before.yaml", $"incidents:\n  window_before: {value}\n");
+            var after = directory.Write("after.yaml", $"incidents:\n  window_after: {value}\n");
+            var both = directory.Write("both.yaml", $"incidents:\n  window_before: 1h\n  window_after: {value}\n");
+
+            Assert.AreEqual($"config: {before}:2: incidents.window_before: {reason}", Assert.ThrowsExactly<ConfigException>(() => BackendConfigLoader.Load(before, []), $"window_before {value}").Message, $"message for window_before {value}");
+            Assert.AreEqual($"config: {after}:2: incidents.window_after: {reason}", Assert.ThrowsExactly<ConfigException>(() => BackendConfigLoader.Load(after, []), $"window_after {value}").Message, $"message for window_after {value}");
+            Assert.AreEqual($"config: {both}:3: incidents.window_after: {reason}", Assert.ThrowsExactly<ConfigException>(() => BackendConfigLoader.Load(both, []), $"window_after {value} on line 3").Message, $"message at the line of the second option for {value}");
+        }
+
+        foreach (var value in bounds)
+        {
+            var path = directory.Write("bounds.yaml", $"incidents:\n  window_before: {value}\n  window_after: {value}\n");
+            var config = BackendConfigLoader.Load(path, []);
+
+            Assert.IsGreaterThan(TimeSpan.Zero, config.Incidents.GetWindowBefore(), $"window_before {value} is accepted");
+            Assert.AreEqual(config.Incidents.GetWindowBefore(), config.Incidents.GetWindowAfter(), $"window_after {value} is accepted");
+        }
+
+        var nothing = directory.Write("nothing.yaml", "incidents:\n  window_before: ~\n");
+
+        Assert.AreEqual($"config: {nothing}:2: incidents.window_before: has no value", Assert.ThrowsExactly<ConfigException>(() => BackendConfigLoader.Load(nothing, []), "null value").Message, "message of a null value");
     }
 
     #endregion // Methods
