@@ -109,23 +109,23 @@ usual-level query on it; and finally the **concentrated case** in a third, fresh
 | DS918+ (reference host, SSD volume; Linux 4.4.302+, .NET 10.0.10, 4 CPUs) | Celeron J3455 | 2026-10-12 | 1,000,000 | 195.8 s (3.3 min) | 5,107 | 1,864 | 2,741 | 153,923 | **met** (limit 10 min) |
 
 Normalizing the 1,000,000 messages alone, without the database, took 1.4 s on the development host and 4.1 s on the reference host. The
-usual-level query on the same database (range of 744 hours ending after the last line). The reference host ran the statement with the baseline
-sum read per candidate; the statement now sums the baseline with a window function per template (record 0095, option 13) and returns the same
-rows, and the development host ran both:
+usual-level query on the same database (range of 744 hours ending after the last line). The statement used to sum the baseline per candidate;
+it now sums it with a window function per template (record 0095, option 13) and returns the same rows. The development host ran both, the
+reference host ran the first measurement with the old statement and a second one with the new statement (write time 195.5 s, 5,116 lines per
+second, so the same as in the first run):
 
-| Query | Candidates | Development host, per candidate | Development host, window | Reference host, per candidate |
-| ----- | ---------: | ------------------------------: | -----------------------: | ----------------------------: |
-| new templates (last 15 days, limit 10,000), 1,197 results | — | 8 ms | 9 ms | 27 ms |
-| usual level, default parameters, 0 results | 12,960 | 572 ms | 497 ms | 1,464 ms |
-| usual level, widest parameters, 10,000 results | 153,923 | 3,913 ms | 710 ms | **11,979 ms** |
-| hostile case, widest parameters, 10,000 results (below) | 100,000 | 203 ms | 306 ms | 571 ms |
-| concentrated case, widest parameters, 10,000 results (below) | 100,743 | 275 ms | 338 ms | 970 ms |
+| Query | Candidates | Development host, per candidate | Development host, window | Reference host, per candidate | Reference host, window |
+| ----- | ---------: | ------------------------------: | -----------------------: | ----------------------------: | ---------------------: |
+| new templates (last 15 days, limit 10,000), 1,197 results | — | 8 ms | 9 ms | 27 ms | 35 ms |
+| usual level, default parameters, 0 results | 12,960 | 572 ms | 497 ms | 1,464 ms | 1,424 ms |
+| usual level, widest parameters, 10,000 results | 153,923 | 3,913 ms | 710 ms | **11,979 ms** | **1,963 ms** |
+| hostile case, widest parameters, 10,000 results (below) | 100,000 | 203 ms | 306 ms | 571 ms | 898 ms |
+| concentrated case, widest parameters, 10,000 results (below) | 100,743 | 275 ms | 338 ms | 970 ms | 1,009 ms |
 
-The widest query on the reference host (12.0 s, 3.1 times the development host) was above the 10 s the plan used, which is why the baseline sum
-became a window function: it reads each template's hours once instead of up to 2,160 counts per candidate. On the development host it is 5.5 to
-6.6 times faster at the widest parameters (4.2 s to 0.64 s in a separate run on the same database) and a little slower on the hostile case,
-where every template has one hour. At the reference ratio the widest query is expected near 2–3 s; **that is not measured yet** and needs one
-more run on the reference host.
+The widest query on the reference host took 12.0 s with the baseline sum per candidate, above the 10 s the plan used. The window function reads
+each template's hours once instead of up to 2,160 counts per candidate and brings it to 2.0 s (6.1 times faster); the default parameters and the
+concentrated case do not change. The hostile case, where every template has a single hour, is slower with the window (0.9 s against 0.6 s)
+and stays below the 10 s line, so no cap on the candidates and no other query shape is needed.
 
 The hostile case (100,000 lines, 100,000 templates, 100,000 template hours): write time 5.1 s (19,520 lines per second, median batch 509 ms) on
 the development host and 20.4 s (4,903 lines per second, median batch 2,048 ms) on the reference host. The **concentrated case** puts the worst shape for the covered hours into one database:
