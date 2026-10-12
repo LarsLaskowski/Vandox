@@ -419,48 +419,6 @@ public class SqliteStoreWriteTests
     }
 
     /// <summary>
-    /// Turns a batch into the import batch the case describes.
-    /// </summary>
-    /// <param name="batch">The batch</param>
-    /// <param name="what">The case</param>
-    private static void PrepareImport(RecordBatch batch, string what)
-    {
-        batch.Import = new ImportStep
-                       {
-                           FileId = 1,
-                           Done = 0
-                       };
-        batch.Records = [Samples.Metric(RecordOrigin.Import, 0, 0, "cpu")];
-
-        switch (what)
-        {
-            case "import with agent":
-                batch.AgentId = "agent-1";
-                break;
-
-            case "import file ID":
-                batch.Import.FileId = 0;
-                break;
-
-            case "import done negative":
-                batch.Import.Done = -1;
-                break;
-
-            case "import attempt negative":
-                batch.Import.Attempt = -1;
-                break;
-
-            case "import record from agent":
-                batch.Records = [Samples.Metric(RecordOrigin.Backend, 0, 0, "cpu")];
-                break;
-
-            default:
-                ((MetricPoint)batch.Records[0].Data!).Name = string.Empty;
-                break;
-        }
-    }
-
-    /// <summary>
     /// A JSON payload is stored as SQLite text whose bytes equal the serializer output, typed records keep NULL, and the payload reads back equal.
     /// </summary>
     /// <returns>A task that completes when the test is done</returns>
@@ -529,6 +487,48 @@ public class SqliteStoreWriteTests
         Assert.AreSequenceEqual(expected, stored, "stored bytes equal the serializer output");
         Assert.IsGreaterThanOrEqualTo(3, CountOccurrences(stored, escapedLessThan), "the < characters are stored as six bytes each");
         Assert.AreEqual(1L, typedWithoutData, "the metric keeps NULL");
+    }
+
+    /// <summary>
+    /// Turns a batch into the import batch the case describes.
+    /// </summary>
+    /// <param name="batch">The batch</param>
+    /// <param name="what">The case</param>
+    private static void PrepareImport(RecordBatch batch, string what)
+    {
+        batch.Import = new ImportStep
+                       {
+                           FileId = 1,
+                           Done = 0
+                       };
+        batch.Records = [Samples.Metric(RecordOrigin.Import, 0, 0, "cpu")];
+
+        switch (what)
+        {
+            case "import with agent":
+                batch.AgentId = "agent-1";
+                break;
+
+            case "import file ID":
+                batch.Import.FileId = 0;
+                break;
+
+            case "import done negative":
+                batch.Import.Done = -1;
+                break;
+
+            case "import attempt negative":
+                batch.Import.Attempt = -1;
+                break;
+
+            case "import record from agent":
+                batch.Records = [Samples.Metric(RecordOrigin.Backend, 0, 0, "cpu")];
+                break;
+
+            default:
+                ((MetricPoint)batch.Records[0].Data!).Name = string.Empty;
+                break;
+        }
     }
 
     /// <summary>
