@@ -34,6 +34,7 @@ commit/push rules and the orchestrator role are identical to the `squad-issue` s
   task group starts with a fresh launch, so a member's context does not grow over the whole feature.
 - **Step 10 — pull request:** the working record (`spec.md`, `plan.md`, `tasks.md`, `log.md`) is posted
   to the feature request issue if one exists (`Closes #<n>` in the PR), otherwise as the first comment on
-  the PR right after opening it; the folder is removed before the PR as in `squad-issue`. Behavior that
+  the PR right after opening it; the folder is removed before the PR as in `squad-issue`. The PR opens as a
+  draft and is marked ready for review in step 11 as in `squad-issue` (*Draft until green*). Behavior that
   must stay documented belongs in `README.md`, `docs/ARCHITECTURE.md` or a decision record, not in
   `spec.md`.

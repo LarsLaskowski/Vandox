@@ -65,7 +65,8 @@ action yourself — including follow-up issues the Lead decides on.
   requests. In these sessions the `gh` CLI only works as `gh api repos/<owner>/<repo>/...`; `gh issue`,
   `gh pr` and `gh search` fail (GraphQL is blocked and search is not scoped to the repository).
 - **Pull request:** invoking this skill is the user's approval for opening the PR in step 10, once the
-  Lead has approved it (tiers `docs` and `patch`: once the latest review round is clean).
+  Lead has approved it (tiers `docs` and `patch`: once the latest review round is clean); it opens as a draft
+  and is marked ready for review in step 11, once CI and the code analysis are clean.
 - **Product Manager:** the user is only contacted when the Lead returns `RESULT: ESCALATE` (relay the
   question verbatim with its options and wait) or for confirming a public issue comment on
   `RESULT: NO CHANGE`.
@@ -220,7 +221,8 @@ action yourself — including follow-up issues the Lead decides on.
     plus a summary of the tier, acceptance criteria, decisions and challenge outcome instead; that commit
     stays reachable through the PR's history. Then `git rm -r specs/issue-<number>/`, confirm with
     `python3 .squad/tools/scope-check.py --no-specs`, commit ("Remove squad working record"), and push. Later
-    log rows (steps 11–12) are appended by editing that comment. Then open the PR from
+    log rows (steps 11–12) are appended by editing that comment. Then open the PR **as a draft**
+    (`draft: true`, `.squad/routing.md`, *Draft until green*) from
     [`.github/pull_request_template.md`](../../../.github/pull_request_template.md): title per
     `docs/CONTRIBUTING.md` — `[area] Description`, where `area` is one of the areas
     CONTRIBUTING lists, capitalized — not a lowercase class or file name. It becomes the squash
@@ -232,7 +234,9 @@ action yourself — including follow-up issues the Lead decides on.
 11. **After the PR.** Subscribe to the PR's activity right after opening it (`subscribe_pr_activity` when
     available; otherwise check the CI and code-analysis (e.g. SonarQube Cloud) results yourself before finishing) — a session
     that ends with an unwatched PR has not completed this step. Stay with the PR until CI is green and the
-    code-analysis quality gate (e.g. SonarQube Cloud) passes:
+    code analysis (e.g. SonarQube Cloud) passed with no new issue on the head, then mark it ready for review
+    (`update_pull_request` with `draft: false`) — never earlier, and after a fix only once its re-approval
+    (step 9) has passed on the new head, see `.squad/routing.md`, *Draft until green*:
     - code-analysis findings → `squad-code-officer` (structural ones → `squad-dev`);
     - failing build or tests → `squad-dev` (test defects → `squad-tester`);
     - review comments (human, automated, `review-pr`) → `squad-dev`, worked in this PR, blocking or not.
