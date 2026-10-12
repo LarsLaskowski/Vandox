@@ -296,7 +296,10 @@ public class ChartInteropTests
     public async Task ChartInteropQueuedRenderBeforeDisposeCompletesWithoutException()
     {
         // Arrange
-        var runtime = new RecordingJsRuntime { CreateGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously) };
+        var runtime = new RecordingJsRuntime
+                      {
+                          CreateGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)
+                      };
         var interop = new ChartInterop(runtime);
         var host = new ElementReference("host-1");
         var first = interop.RenderAsync(host, "Load", CreateData(1.0), CancellationToken.None);
