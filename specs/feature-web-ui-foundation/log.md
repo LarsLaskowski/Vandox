@@ -17,3 +17,4 @@ are quoted in full.
 | 2026-10-12 22:18 | 6 Coverage | Tester | AC1 pin + double-dispose/null tests; gate 100% new lines, 98.0% overall (sonnet/medium · 81,043 tokens · 18 tool uses · 1231 s) |
 | 2026-10-12 22:24 | 7 Code check | Orchestrator | Format check, Analyzer gate, Test (Go+.NET all green), Coverage gate 100%/98.0%, scope-check, decision-check PASS; no Code Officer needed |
 | 2026-10-12 22:25 | 8 Review (diff) | Security | APPROVED at 0548b1e; no blocking findings (opus/medium · 61,269 tokens · 13 tool uses · 84 s) |
+| 2026-10-12 22:28 | 8 Review round 1 | Reviewer | BLOCKING 1: ChartInterop/TimeSeriesChart leak a browser chart when render is in flight (concurrent create, dispose during create); fix round 1 -> Tester tests with gated double, then Dev |
