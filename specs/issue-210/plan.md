@@ -260,3 +260,15 @@ hang" for the queries that read external text: a deadline now bounds them.
   callback cost applies there; expected small, not measured). No follow-up issue unless the Reviewer or Security asks for one.
 - Interrupting writer statements (option 4).
 - A caller that serves a user (logs view, web UI) does not exist yet; it must pass a deadline, as the area documents say.
+
+## Challenge notes
+
+Minor objections of the plan challenge, verbatim:
+
+1. **AC3 test cost (minor).** `ReaderQueryReadCompletesWhenNotCancelled` runs the 20,000,000-row CTE to its end, once per token variant and per statement form. With a handler installed that is seconds each, and the suite should stay fast. Tester: use a smaller completion statement for the "never cancelled" cases, about 1–2 million rows. It only has to run through many progress callbacks (one per 1,000 instructions) without being interrupted. Keep the 20,000,000-row statement only for the cancelled cases, where it ends early.
+2. **Reader disposal after an interrupt (minor).** The reader and command are disposed inside the `try` that catches `SqliteException`. Dev: add a test, or at least a check, that `ReaderQuery.ReadAsync` still throws the intended `OperationCanceledException` if disposing the reader after an interrupted step raises a `SqliteException`. If it can, dispose outside the translating catch or swallow it deliberately. The error text must not change in that case.
+
+Non-blocking notes of the plan security review:
+
+1. The deadline does not cover lock waits (existing behavior): the progress handler never runs while a reader waits on a lock. Documentation update 1 may say the bound applies while the statement runs, not while it waits for a lock.
+2. A `SqliteException` raised while `PingAsync` opens the reader lease now surfaces as `store: reading schema version: …` instead of `store: opening database: …`. Nothing in the backend or its tests depends on the inner text; the Reviewer notes it.
