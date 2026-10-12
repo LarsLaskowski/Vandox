@@ -437,7 +437,7 @@ public class SqliteStoreTemplateTests
                                                                              .ToArray());
 
         // Act
-        var spikes = await store.TemplateSpikesAsync(SpikeQuery(string.Empty, Hour(10), Hour(11), 4, 4, 3, 4, 100), TestContext.CancellationToken);
+        var spikes = await store.TemplateSpikesAsync(SpikeQuery(string.Empty, Hour(9), Hour(11), 4, 4, 3, 4, 100), TestContext.CancellationToken);
 
         // Assert
         Assert.AreSequenceEqual(["edge event|5|1.5|4"], spikes.Select(spike => $"{spike.Template.Template}|{spike.Count}|{spike.UsualLevel.ToString(CultureInfo.InvariantCulture)}|{spike.CoveredHours}"), "the baseline is the hours 6 to 9: 4 + 2 lines over 4 covered hours, without the 100 lines of hour 5 and the 5 of hour 10");

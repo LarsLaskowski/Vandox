@@ -109,7 +109,7 @@ usual-level query on it; and finally the **concentrated case** in a third, fresh
 | DS918+ (reference host, SSD volume; Linux 4.4.302+, .NET 10.0.10, 4 CPUs) | Celeron J3455 | 2026-10-12 | 1,000,000 | 195.8 s (3.3 min) | 5,107 | 1,864 | 2,741 | 153,923 | **met** (limit 10 min) |
 
 Normalizing the 1,000,000 messages alone, without the database, took 1.4 s on the development host and 4.1 s on the reference host. The
-usual-level query on the same database (range of 744 hours ending after the last line). The statement used to sum the baseline per candidate;
+usual-level query ran on the same database (range of 744 hours ending after the last line). The statement used to sum the baseline per candidate;
 it now sums it with a window function per template (record 0095, option 13) and returns the same rows. The development host ran both, the
 reference host ran the first measurement with the old statement and a second one with the new statement (write time 195.5 s, 5,116 lines per
 second, so the same as in the first run):
@@ -122,7 +122,7 @@ second, so the same as in the first run):
 | hostile case, widest parameters, 10,000 results (below) | 100,000 | 203 ms | 306 ms | 571 ms | 898 ms |
 | concentrated case, widest parameters, 10,000 results (below) | 100,743 | 275 ms | 338 ms | 970 ms | 1,009 ms |
 
-The widest query on the reference host took 12.0 s with the baseline sum per candidate, above the 10 s the plan used. The window function reads
+The widest query on the reference host took 12.0 s with the baseline sum per candidate, above the 10 s line issue #208 set. The window function reads
 each template's hours once instead of up to 2,160 counts per candidate and brings it to 2.0 s (6.1 times faster); the default parameters and the
 concentrated case do not change. The hostile case, where every template has a single hour, is slower with the window (0.9 s against 0.6 s)
 and stays below the 10 s line, so no cap on the candidates and no other query shape is needed.

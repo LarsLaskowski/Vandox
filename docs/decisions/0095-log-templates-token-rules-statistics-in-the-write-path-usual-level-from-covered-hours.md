@@ -87,7 +87,7 @@ How the cost of the usual-level query is held:
     flatten the common table expressions and run the count per candidate). The baseline sum is a window function over the
     template's hours (`RANGE BETWEEN baseline PRECEDING AND 1 PRECEDING`), so each template is read once and not once per
     candidate from its primary key: with the sums read per candidate the widest query took 12.0 s on the reference host
-    (issue #208), above the 10 s the plan allowed, with the window 2.0 s on the same host and the same rows. The rest is measured at the default and the widest parameters
+    (issue #208), above the 10 s line of issue #208, with the window 2.0 s on the same host and the same rows. The rest is measured at the default and the widest parameters
     and on such hostile text, and documented, because nothing calls the query yet.
 14. **A cap on the candidates** — bounds the work; but a cap that cuts silently drops spikes and turns unknown into
     quiet, and a cap that refuses the query fails exactly when a flood happens, the moment its spikes matter. With no
