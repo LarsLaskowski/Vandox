@@ -4,8 +4,6 @@ using Vandox.Core.Signatures;
 
 namespace Vandox.Core.Incidents;
 
-#pragma warning disable RH2003, S2325
-
 /// <summary>
 /// One entry of the timeline of an incident.
 /// </summary>
@@ -66,7 +64,16 @@ public sealed class TimelineEntry
     /// <returns>The entry</returns>
     public static TimelineEntry From(DetectedEvent detected)
     {
-        throw new NotImplementedException();
+        return new TimelineEntry
+               {
+                   At = detected.CapturedAt,
+                   Type = detected.SignatureId,
+                   Host = detected.Host,
+                   Texts = detected.Texts.OrderBy(pair => pair.Key, StringComparer.Ordinal).ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal),
+                   Numbers = detected.Numbers.OrderBy(pair => pair.Key, StringComparer.Ordinal).ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal),
+                   RecordIds = detected.RecordIds.Take(IncidentLimits.MaxRecordIds).ToList(),
+                   LineCount = detected.LineCount
+               };
     }
 
     #endregion // Methods

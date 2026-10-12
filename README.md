@@ -20,7 +20,8 @@ Both support `--version`, which prints version, commit and build date. `vandoxd`
 service; `-config <file>` names its configuration file (default `/etc/vandox/vandoxd.yaml`) and
 `-healthcheck` probes `/healthz` of a running service and exits 0 when it is healthy (the image's Docker
 `HEALTHCHECK` uses it). `vandoxd import <path>` imports a directory, an archive or a log file into the
-database, see *Import logs* below.
+database, see *Import logs* below, and `vandoxd incidents` rebuilds the outage incidents from the stored data, see
+*Reconstruct incidents* below.
 
 ## Layout
 
@@ -78,6 +79,8 @@ the value.
 | `import.nginx_error_log` | `/var/log/nginx/error.log` | Server path of the nginx error log. |
 | `import.apache_error_log` | `/var/log/apache2/error.log` | Server path of the Apache error log (Debian and Ubuntu); on RHEL-family servers (AlmaLinux, Rocky Linux, CentOS) it is `/var/log/httpd/error_log`. |
 | `import.time_zone` | none | IANA time zone of the server the imported logs come from, e.g. `Europe/Berlin` or `UTC`. Required to import traditional syslog files, MariaDB error logs, Dovecot log files, the Plesk panel, nginx and Apache error logs and the legacy `top`/`lsof` monitoring log (see *Import logs*). |
+| `incidents.window_before` | `1h` | How long before an OOM kill an incident starts: one to four digits and `m` (minutes) or `h` (hours), from `1m` to `24h`, such as `30m` or `1h` (see *Reconstruct incidents*). |
+| `incidents.window_after` | `30m` | How long after an OOM kill an incident ends; same format and range. |
 
 **Secrets**
 
@@ -375,3 +378,43 @@ Times outside 1677-09-21 to 2262-04-11 and dates that do not exist (31 November,
 leap year) are skipped with a reason, as is a year-less line in a file without a usable date. A multi-line kernel
 report (an OOM kill, a `cut here` warning) becomes one record. Ubuntu's rsyslog writes every kernel line to both
 `syslog` and `kern.log`, so importing both stores the kernel lines twice.
+
+### Reconstruct incidents
+
+`vandoxd incidents` rebuilds the outage incidents from everything stored, so run it after each import (it needs no
+argument; run it in the container like the import):
+
+```
+docker exec -it vandoxd /vandoxd incidents
+```
+
+An incident is built from the OOM kills in the stored log lines: kills whose windows (`incidents.window_before` before
+to `incidents.window_after` after each kill) overlap form one incident. Each incident gets a timeline of the events of its
+window (boots, service starts, stops and failures, the kills, a running backup), a cause hypothesis from fixed rules (the
+three programs whose memory grew most since the last boot, the three largest memory users, whether a backup ran, the last
+boot, the number of service events), the extremes of the memory, swap, pressure and load metrics, the peak of the
+connections and the new and unusually frequent log templates. Where the data is missing, the incident says unknown
+instead of none. A backup is recognized by the program name `pzstd` only.
+
+Incidents are stored. A re-run updates the incident of the same outage instead of adding another: the oldest number is
+kept, incidents that now overlap are merged into it, an unchanged incident is left untouched, and a stored incident that
+no rebuilt one overlaps is kept. The command prints one line per saved incident and then the counts:
+
+```
+#1 created 2026-10-02T04:59:00Z kills=1 victim="mariadbd"
+Incidents:           1
+  created:           1
+  updated:           0
+  unchanged:         0
+  merged:            0
+  kept:              0
+  skipped:           0
+OOM kills:           1
+Log lines read:      1
+```
+
+`merged=<n>` follows the line of an incident that took over `n` others, and `skipped` counts incidents the database
+refused (each is logged as a warning on standard error). Exit code 0 when the run completed, 1 when the configuration is
+invalid, the database cannot be opened, the store failed or the run was interrupted (run it again to complete it), 2 for a
+usage error. The log goes to standard error as JSON lines. The command reads every stored log line, so it takes a while on
+a large database; details and limits are in `docs/areas/detection-and-reports.md`.

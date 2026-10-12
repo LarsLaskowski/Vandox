@@ -1,7 +1,5 @@
 namespace Vandox.Core.Incidents;
 
-#pragma warning disable RH2003, S2325
-
 /// <summary>
 /// The names of backup programs that are recognized in process snapshots.
 /// </summary>
@@ -12,7 +10,7 @@ public static class BackupPrograms
     /// <summary>
     /// Gets the program keys that count as a backup.
     /// </summary>
-    public static IReadOnlyList<string> Names => throw new NotImplementedException();
+    public static IReadOnlyList<string> Names { get; } = ["pzstd"];
 
     #endregion // Properties
 
@@ -25,7 +23,7 @@ public static class BackupPrograms
     /// <returns>The names found, in list order</returns>
     public static IReadOnlyList<string> Find(IReadOnlyDictionary<string, ProgramUsage> programs)
     {
-        throw new NotImplementedException();
+        return Names.Where(programs.ContainsKey).ToList();
     }
 
     #endregion // Methods

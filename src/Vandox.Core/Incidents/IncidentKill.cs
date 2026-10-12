@@ -4,8 +4,6 @@ using Vandox.Core.Signatures;
 
 namespace Vandox.Core.Incidents;
 
-#pragma warning disable RH2003, S2325
-
 /// <summary>
 /// One OOM kill of an incident.
 /// </summary>
@@ -72,7 +70,28 @@ public sealed class IncidentKill
     /// <returns>The kill</returns>
     public static IncidentKill From(DetectedEvent detected)
     {
-        throw new NotImplementedException();
+        return new IncidentKill
+               {
+                   At = detected.CapturedAt,
+                   Host = detected.Host,
+                   VictimPid = Number(detected, "victim_pid"),
+                   VictimCommand = detected.Texts.GetValueOrDefault("victim_command", string.Empty),
+                   AnonRssBytes = Number(detected, "anon_rss_bytes"),
+                   OomScoreAdj = Number(detected, "oom_score_adj"),
+                   RecordIds = detected.RecordIds.Take(IncidentLimits.MaxRecordIds).ToList(),
+                   LineCount = detected.LineCount
+               };
+    }
+
+    /// <summary>
+    /// Reads an optional number field.
+    /// </summary>
+    /// <param name="detected">The detected event</param>
+    /// <param name="name">The field name</param>
+    /// <returns>The number, or <c>null</c> when the field is absent</returns>
+    private static long? Number(DetectedEvent detected, string name)
+    {
+        return detected.Numbers.TryGetValue(name, out var value) ? value : null;
     }
 
     #endregion // Methods

@@ -1,7 +1,5 @@
 namespace Vandox.Core.Configuration;
 
-#pragma warning disable RH2003, S2325
-
 /// <summary>
 /// Configures the incident reconstruction.
 /// </summary>
@@ -32,7 +30,7 @@ public sealed class IncidentConfig
     /// <exception cref="InvalidOperationException">The option does not parse</exception>
     public TimeSpan GetWindowBefore()
     {
-        throw new NotImplementedException();
+        return Parse(WindowBefore, "incidents.window_before");
     }
 
     /// <summary>
@@ -42,7 +40,23 @@ public sealed class IncidentConfig
     /// <exception cref="InvalidOperationException">The option does not parse</exception>
     public TimeSpan GetWindowAfter()
     {
-        throw new NotImplementedException();
+        return Parse(WindowAfter, "incidents.window_after");
+    }
+
+    /// <summary>
+    /// Parses one option.
+    /// </summary>
+    /// <param name="text">The option value</param>
+    /// <param name="key">The key path, for the error message</param>
+    /// <returns>The duration</returns>
+    private static TimeSpan Parse(string text, string key)
+    {
+        if (ConfigDuration.TryParse(text, out var value))
+        {
+            return value;
+        }
+
+        throw new InvalidOperationException($"config: {key} is not valid");
     }
 
     #endregion // Methods

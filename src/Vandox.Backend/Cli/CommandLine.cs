@@ -62,7 +62,12 @@ public static class CommandLine
             return $"Usage of {BinaryName} import [-config file] <path>:\n  <path> is a directory, a .tar or .tar.gz archive, a .gz file or a log file\n  -config string\n    \tpath of the configuration file\n";
         }
 
-        return $"Usage of {BinaryName}:\n  -config string\n    \tpath of the configuration file (default \"{ConfigConstants.DefaultBackendFile}\")\n  -healthcheck\n    \tprobe /healthz of the running service and exit 0 when it is healthy\n  -version\n    \tprint the version and exit\n\nSub-command:\n  {BinaryName} [flags] import [-config file] <path>\n    \timport the log directory, archive or file at <path>\n";
+        if (usageFor == "incidents")
+        {
+            return $"Usage of {BinaryName} incidents [-config file]:\n  -config string\n    \tpath of the configuration file\n";
+        }
+
+        return $"Usage of {BinaryName}:\n  -config string\n    \tpath of the configuration file (default \"{ConfigConstants.DefaultBackendFile}\")\n  -healthcheck\n    \tprobe /healthz of the running service and exit 0 when it is healthy\n  -version\n    \tprint the version and exit\n\nSub-command:\n  {BinaryName} [flags] import [-config file] <path>\n    \timport the log directory, archive or file at <path>\n  {BinaryName} [flags] incidents [-config file]\n    \trebuild the incidents from the stored data\n";
     }
 
     /// <summary>
@@ -80,6 +85,14 @@ public static class CommandLine
         else if (args[index] == "import")
         {
             ParseImport(options, args, index + 1);
+        }
+        else if (args[index] == "incidents" && options.Healthcheck)
+        {
+            options.Error = $"unexpected argument {Terminal.Quote(args[index])}";
+        }
+        else if (args[index] == "incidents")
+        {
+            ParseIncidents(options, args, index + 1);
         }
         else
         {
@@ -188,6 +201,58 @@ public static class CommandLine
         options.UsageFor = "import";
         options.ImportPath = string.Empty;
 
+        if (ParseSubFlags(options, args, ref index))
+        {
+            ImportPathOf(options, args, index);
+        }
+    }
+
+    /// <summary>
+    /// Takes the one path of the sub-command <c>import</c>.
+    /// </summary>
+    /// <param name="options">The options</param>
+    /// <param name="args">The arguments</param>
+    /// <param name="index">The position after the flags</param>
+    private static void ImportPathOf(CommandOptions options, IReadOnlyList<string> args, int index)
+    {
+        if (args.Count - index == 1)
+        {
+            options.ImportPath = args[index];
+        }
+        else
+        {
+            options.Error = $"{BinaryName} import: exactly one path is required";
+        }
+    }
+
+    /// <summary>
+    /// Parses the arguments of the sub-command <c>incidents</c>.
+    /// </summary>
+    /// <param name="options">The options</param>
+    /// <param name="args">The arguments</param>
+    /// <param name="start">The position after <c>incidents</c></param>
+    private static void ParseIncidents(CommandOptions options, IReadOnlyList<string> args, int start)
+    {
+        var index = start;
+
+        options.UsageFor = "incidents";
+        options.Incidents = true;
+
+        if (ParseSubFlags(options, args, ref index) && index < args.Count)
+        {
+            options.Error = $"{BinaryName} incidents: no argument is expected";
+        }
+    }
+
+    /// <summary>
+    /// Parses the flags of a sub-command: <c>-config</c> and <c>-h</c>.
+    /// </summary>
+    /// <param name="options">The options</param>
+    /// <param name="args">The arguments</param>
+    /// <param name="index">The position of the first flag; receives the position after the flags</param>
+    /// <returns><c>false</c> when help was asked for or a flag is wrong</returns>
+    private static bool ParseSubFlags(CommandOptions options, IReadOnlyList<string> args, ref int index)
+    {
         while (index < args.Count && IsFlag(args[index]))
         {
             var (name, value) = Split(args[index]);
@@ -198,14 +263,14 @@ public static class CommandLine
             {
                 options.Help = true;
 
-                return;
+                return false;
             }
 
             if (name != "config")
             {
                 options.Error = $"flag provided but not defined: -{name}";
 
-                return;
+                return false;
             }
 
             if (ReadConfigValue(options, args, ref index, value))
@@ -213,17 +278,10 @@ public static class CommandLine
                 continue;
             }
 
-            return;
+            return false;
         }
 
-        if (args.Count - index == 1)
-        {
-            options.ImportPath = args[index];
-        }
-        else
-        {
-            options.Error = $"{BinaryName} import: exactly one path is required";
-        }
+        return true;
     }
 
     /// <summary>

@@ -25,7 +25,7 @@ readable by the next, whichever language implements it, so the schema below is p
 
 ## Schema
 
-The schema version is stored in `meta.schema_version`; the current version is 8 (step 8 adds the tables `log_templates`,
+The schema version is stored in `meta.schema_version`; the current version is 9 (step 9 adds the table `incidents` with its index, empty; step 8 adds the tables `log_templates`,
 `log_template_hours` and `log_source_hours` with their indexes, empty, so log lines stored before it have no template statistics; step 7 adds `import_files.attempt`, `INTEGER NOT NULL DEFAULT 0`, and `import_files.hashes_attempt`, `INTEGER`, and the table `import_line_hashes`, so existing rows get attempt 0 and no line hashes; step 6 adds `import_files.head_sha256`, `continues_id` and `start_offset` and the index `import_files_head`; step 4 adds `log_lines.host`, `TEXT NOT NULL DEFAULT ''`, so lines stored before it get an empty host; step 5 adds `log_lines.event`, `TEXT NOT NULL DEFAULT ''`, so lines stored before it get an empty event). Times are Unix nanoseconds in `INTEGER` columns.
 All tables are `STRICT`.
 
@@ -40,11 +40,12 @@ All tables are `STRICT`.
 | `log_templates` | one row per log template: `id`, `source` (the record's source), `program`, `template` (the normalized message, at most 1,024 UTF-8 bytes), `first_seen` and `last_seen` (the earliest and latest capture time of its lines), `count` (its stored lines, at least 1); unique on `(source, program, template)` |
 | `log_template_hours` | `template_id`, `hour` (the start of a UTC hour), `count` (the template's stored lines in that hour, at least 1); primary key `(template_id, hour)`, without row ID |
 | `log_source_hours` | `source`, `hour`, `count` (the stored log lines of the source in that hour, at least 1); primary key `(source, hour)`, without row ID |
+| `incidents` | one row per incident: `id` (`AUTOINCREMENT`, so a number that was merged away is never given again), `started_at` and `ended_at` (the window, `ended_at > started_at`), `first_kill_at`, `kill_count` (at least 1), `created_at`, `updated_at` and `data` (the incident as JSON, at most 8,388,608 UTF-8 bytes) |
 | `import_line_hashes` | rows of line hashes of an imported content: `file_id`, `attempt`, `first_offset`, `last_offset` and `hashes` (a blob of 16-byte entries, 1 to 4,096, in ascending order of their line ends); the primary key `(file_id, attempt, last_offset)` is its index |
 
 Indexes: a unique index on `records(agent_id, seq)` for origin `agent`; `records(kind, source, captured_at)`;
 `records(kind, captured_at)`; `metrics(source, name, captured_at)`; `import_files(head_sha256, source_type, size)` for complete rows with a head key (`import_files_head`);
-`log_templates(source, first_seen)` (`log_templates_source_first_seen`); `log_template_hours(hour)` (`log_template_hours_hour`).
+`log_templates(source, first_seen)` (`log_templates_source_first_seen`); `log_template_hours(hour)` (`log_template_hours_hour`); `incidents(started_at)` (`incidents_started_at`).
 
 - `agent_id`, `seq`, `boot_id` and `clock_offset_ns` are `NULL` when absent (`seq` for any origin other than `agent`). `source` and
   `captured_at` of a metric are copied from `records`, so one index serves a time series in order.
@@ -97,17 +98,38 @@ Indexes: a unique index on `records(agent_id, seq)` for origin `agent`; `records
   that spans the content's size; the candidate contains the content when that row holds the first 16 bytes of its SHA-256. Then no
   row is created and the caller gets the candidate's display name. The lookup runs before the choice of a base.
 
+- **Incidents:** saving an incident takes the writer lock and one immediate transaction. The incident is validated first, with these
+  exact errors (`InvalidIncidentException`, a `StoreException`): `store: invalid incident: start and end must be within the storable
+  range`, `start must be before end`, `the first kill must lie in the window` (the first kill is at or after the start and before the
+  end), `kill count must be at least 1`, `saved at must be within the storable range` and `data is larger than 8388608 bytes` (the
+  UTF-8 bytes of the serialized JSON). It is serialized with one fixed set of options, the default encoder without indentation, which
+  is also what the incident builder measures its timeline with. The stored incidents whose window overlaps the new one (`started_at <
+  end` and `ended_at > start`, so windows that only touch do not overlap) are selected oldest number first: none inserts a row
+  (`created_at = updated_at =` the save time); otherwise the lowest number is kept and the others are deleted (the number of deleted
+  ones is reported as merged), and when nothing was deleted and window, first kill, kill count and data are equal the row is left
+  untouched (`unchanged`, `updated_at` too), else every column but `id` and `created_at` is replaced. A null incident is an argument
+  error.
+
 ## Reading
 
 - A series is read by kind, source and name for a time range, in time order; a kind-wide time range uses the kind indexes. A query
   returns at most 10,000 records.
+- A series or a kind can be paged through records that share a capture time with `AfterId`: when it is above 0, records whose capture
+  time equals `From` and whose ID is at most `AfterId` are skipped (the next page's `From` is the last capture time and `AfterId` its
+  ID); a negative value is refused with `store: invalid query: after id must not be negative`. This holds in whole 100 ns, because
+  every writer stores capture times in whole `DateTimeOffset` ticks, so the capture time a reader returns equals the stored one; a
+  caller that pages must check that each page leads past the previous one.
+- A stored payload is read from the column's UTF-8 bytes, not from a string, so the payload exists once as bytes and once as the
+  parsed document; the results are the same.
 - A stored payload is read with the payload options of the wire decoder, so an unknown member is ignored; this includes the `Kind`
   member that rows written before #183 carry.
+- Incidents are read by range (`started_at < to` and `ended_at > from`, ordered by start, then number) with the window and limit rules
+  of the record query, and counted; a `data` value that does not decode is `store: reading incidents: decoding incident data`.
 - The template statistics are read by the queries of *Log templates* in [Detection, alerts and reports](detection-and-reports.md)
   (template of a line, hourly counts, new templates, templates above their usual level), with the same time range and limit rules,
   on a reader connection. The cost of the usual-level query is not bounded by its range or limit, and a cancellation token does not
   interrupt a running statement (*Limits of templates* there).
-- Callers depend on small interfaces (record writer, record reader, log searcher, log template reader, import tracker). The real store is tested against
+- Callers depend on small interfaces (record writer, record reader, log searcher, log template reader, incident store, import tracker). The real store is tested against
   real files; a consumer whose behavior depends on the store's semantics (such as "a resent batch is stored once") is tested against
   the real store. Fakes for other consumers only record calls and return what the test scripts.
 
@@ -131,7 +153,7 @@ A search takes literal terms only; the text is never passed to FTS5 as a query.
 ## Retention (planned)
 
 Raw data is kept 30 days, 5-minute rollups 1 year, hourly rollups 3 years (the template statistics count as hourly rollups), incidents
-unlimited, logs 90 days, process and connection snapshots 30 days. Retention and rollups are the backend's own job and **are not implemented yet**; deleting log lines must also remove
+unlimited, logs 90 days, process and connection snapshots 30 days. Incidents are kept without limit, and an incident that no rebuilt one overlaps is kept as it is (*Incidents* in [Detection, alerts and reports](detection-and-reports.md)). Open limit for #46: once retention deletes lines, a re-run rebuilds an incident whose window lines have partly expired from what is left and replaces the richer stored one (fewer kills, a shorter timeline); retention must prevent that (keep the data of incident windows, or stop rebuilding incidents older than the log retention). Forged incidents (up to 8 MiB each) outlive the lines they came from, so retention must bound them, too. Retention and rollups are the backend's own job and **are not implemented yet**; deleting log lines must also remove
 their `log_fts` entries (the FTS5 `delete` command with the old message).
 
 ## Write throughput
@@ -151,6 +173,7 @@ weakened silently, and `synchronous=FULL` stays unless the Product Manager decid
 - [0077](../decisions/0077-storage-on-microsoft-data-sqlite-same-schema-and-rules.md) — why the same schema on Microsoft.Data.Sqlite, one writer, `synchronous=FULL` and migrations in code.
 - [0083](../decisions/0083-storage-write-criterion-is-the-median-of-five-batches-on-the-data-volume.md) — why the writer was made cheaper and why the criterion is the median of five batches.
 - [0095](../decisions/0095-log-templates-token-rules-statistics-in-the-write-path-usual-level-from-covered-hours.md) — why the write path keeps the template statistics in the batch's transaction.
+- [0096](../decisions/0096-outage-incidents-rebuilt-from-stored-data-merged-by-overlapping-windows.md) — why incidents are matched by overlapping windows, kept per number and saved one transaction each, and why the record query pages by ID.
 
 ## Not here
 
@@ -160,4 +183,4 @@ weakened silently, and `synchronous=FULL` stays unless the Product Manager decid
 
 ## Implementation
 
-`Vandox.Storage` (`SqliteStore`, `SchemaMigrator`, `BatchWriter`, `BatchValidator`, `FtsQuery`, `TemplateTally`, `TemplateQueries`, `StorageLimits`).
+`Vandox.Storage` (`SqliteStore`, `SchemaMigrator`, `BatchWriter`, `BatchValidator`, `FtsQuery`, `TemplateTally`, `TemplateQueries`, `IncidentRepository`, `StorageLimits`).
