@@ -2,6 +2,8 @@ using Vandox.Core.Model;
 
 namespace Vandox.Storage;
 
+#pragma warning disable RH2003, S2325
+
 /// <summary>
 /// The rules a record must satisfy to be stored, on top of the model rules: the storable time range and the
 /// sequence number range.
@@ -58,6 +60,17 @@ public static class RecordRules
         }
 
         return record.Origin == RecordOrigin.Import ? null : "origin must be import";
+    }
+
+    /// <summary>
+    /// Checks that the JSON of the payload of a record is not larger than <see cref="StorageLimits.MaxPayloadBytes"/>.
+    /// Typed records (metric, log line) keep no JSON and are not checked.
+    /// </summary>
+    /// <param name="record">The record</param>
+    /// <returns>The broken rule, or <c>null</c></returns>
+    public static string? CheckPayloadSize(DataRecord record)
+    {
+        throw new NotImplementedException();
     }
 
     #endregion // Methods

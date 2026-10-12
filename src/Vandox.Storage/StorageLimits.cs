@@ -23,6 +23,11 @@ public static class StorageLimits
     public const int MaxIncidentDataBytes = 8388608;
 
     /// <summary>
+    /// The most UTF-8 bytes of a payload stored as JSON.
+    /// </summary>
+    public const int MaxPayloadBytes = 16777216;
+
+    /// <summary>
     /// The largest number of bases of one content.
     /// </summary>
     public const int MaxImportBases = 64;
