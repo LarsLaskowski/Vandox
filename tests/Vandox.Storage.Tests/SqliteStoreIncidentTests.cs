@@ -299,7 +299,7 @@ public class SqliteStoreIncidentTests
         await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
 
         await store.SaveIncidentAsync(Sample(0, 2), Samples.Base.AddDays(1), TestContext.CancellationToken);
-        await ExecuteAsync(Path.Combine(directory.Path, StorageLimits.FileName), "UPDATE incidents SET data = CAST(x'7B2261223A22C328FF227D' AS TEXT)");
+        await ExecuteAsync(Path.Combine(directory.Path, StorageLimits.FileName), "UPDATE incidents SET data = CAST(x'7B226B696C6C73223A5B7B22686F7374223A22C328FF227D5D7D' AS TEXT)");
 
         // Act
         var exception = await Assert.ThrowsExactlyAsync<StoreException>(() => ReadAsync(store, StorableTime.Min, StorableTime.Max, 10), "reading data that is not UTF-8");
@@ -307,6 +307,57 @@ public class SqliteStoreIncidentTests
         // Assert
         Assert.AreEqual("store: reading incidents: decoding incident data", exception.Message, "message");
         Assert.IsInstanceOfType<JsonException>(exception.InnerException, "the decoding error is the cause");
+    }
+
+    /// <summary>
+    /// An incident whose texts hold characters the JSON encoder escapes or that need several code units is read back equal to the saved one, and the stored data holds the escape.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task SqliteStoreIncidentsRoundTripsEscapedText()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+        var text = string.Concat("<", ((char)0xE4).ToString(), ((char)0x202E).ToString(), char.ConvertFromUtf32(0x1F600));
+        var incident = Sample(0, 2);
+
+        incident.Kills.Add(new IncidentKill
+                           {
+                               At = Hour(1),
+                               Host = text,
+                               VictimCommand = text,
+                               RecordIds = [1],
+                               LineCount = 1
+                           });
+        incident.Timeline.Add(new TimelineEntry
+                              {
+                                  At = Hour(1),
+                                  Type = "boot",
+                                  Host = text,
+                                  Texts = new Dictionary<string, string>
+                                          {
+                                              ["unit"] = text
+                                          }
+                              });
+
+        var path = Path.Combine(directory.Path, StorageLimits.FileName);
+
+        // Act
+        await store.SaveIncidentAsync(incident, Samples.Base.AddDays(1), TestContext.CancellationToken);
+
+        var read = await ReadAllAsync(store);
+        var stored = await StoredDataAsync(path);
+
+        // Assert
+        Assert.HasCount(1, read, "one incident");
+        Assert.AreEqual(text, read[0].Incident.Kills[0].Host, "kill host");
+        Assert.AreEqual(text, read[0].Incident.Kills[0].VictimCommand, "victim command");
+        Assert.AreEqual(text, read[0].Incident.Timeline[0].Host, "timeline host");
+        Assert.AreEqual(text, read[0].Incident.Timeline[0].Texts["unit"], "timeline text");
+        Assert.AreEqual(JsonSerializer.Serialize(incident, IncidentJson.Options), JsonSerializer.Serialize(read[0].Incident, IncidentJson.Options), "the incident is read back as it was saved");
+        Assert.Contains(string.Concat((char)92, "u003C"), stored, "the stored data holds < as its six-character escape");
+        Assert.DoesNotContain("<", stored, "the stored data holds no raw <");
     }
 
     /// <summary>
@@ -490,6 +541,24 @@ public class SqliteStoreIncidentTests
         command.CommandText = "SELECT length(CAST(data AS BLOB)) FROM incidents";
 
         return (long)(await command.ExecuteScalarAsync(TestContext.CancellationToken))!;
+    }
+
+    /// <summary>
+    /// Reads the stored data text of the only incident.
+    /// </summary>
+    /// <param name="path">The database file</param>
+    /// <returns>A task that returns the text</returns>
+    private async Task<string> StoredDataAsync(string path)
+    {
+        await using var connection = new SqliteConnection($"Data Source={path};Pooling=False;Mode=ReadOnly");
+
+        await connection.OpenAsync(TestContext.CancellationToken);
+
+        using var command = connection.CreateCommand();
+
+        command.CommandText = "SELECT data FROM incidents";
+
+        return (string)(await command.ExecuteScalarAsync(TestContext.CancellationToken))!;
     }
 
     #endregion // Methods
