@@ -26,10 +26,17 @@ mechanics out of the orchestrator's hands:
   kept as it is. `--continued` needs an earlier row of that member with usage;
 - the usage block often arrives only after the member's hand-back: `--amend-last MEMBER` with the same
   options adds the trailer to the last row of that member afterwards, so the row can be written as soon as
-  the report is in. A row gets its trailer once; a second amend is refused;
+  the report is in. A row gets its trailer once; a second amend is refused. When a later row of that member
+  exists already (two members that ran in parallel, and the first one's notification came last),
+  `--step "<step>"` selects the last row of the member whose step cell is that text, so an earlier launch row
+  is still amended with the tool, never by hand;
 - a row whose trailer is wrong (a launch logged with made-up numbers before its notification arrived) is
-  corrected with `--replace-last MEMBER` and the same options: the trailer of that member's last row is
-  replaced, so the launch is still counted once;
+  corrected with `--replace-last MEMBER` and the same options (`--step` selects an earlier row the same way):
+  the trailer of that row is replaced, so the launch is still counted once;
+- a launch whose notification never arrived is marked with `--amend-last MEMBER --unreported --agent
+  squad-<role>` (no numbers): the trailer `(opus/medium · usage not reported)` lets the summary count the
+  launch, name it as unreported and exit 0, so the table is posted as the tool prints it instead of being
+  summed by hand or left out. `--replace-last` with the real numbers turns it into a full trailer later;
 - the metrics are what a launch really cost: fewer than 1,000 tokens (every launch loads its agent file and
   instructions first, so `--tokens 0` or `--tokens 1` can only be a placeholder) and negative numbers are
   refused, so a placeholder cannot be logged by accident. A row for a launch whose notification has not
@@ -43,6 +50,10 @@ Usage, from anywhere inside the repository:
         --tool-uses 6 --seconds 57
     python3 .squad/tools/squad-log.py <work folder> --replace-last Lead --agent squad-lead --tokens 37445
         --tool-uses 6 --seconds 57
+    python3 .squad/tools/squad-log.py <work folder> --amend-last Security --step "3 Plan security" --agent
+        squad-security --tokens 45751 --tool-uses 7 --seconds 108
+    python3 .squad/tools/squad-log.py <work folder> --amend-last "Devil's Advocate" --unreported --agent
+        squad-devils-advocate
     python3 .squad/tools/squad-log.py <work folder> "8 Review delta" Reviewer "APPROVE" --agent squad-reviewer
         --tokens 139230 --tool-uses 40 --seconds 300 --continued
     python3 .squad/tools/squad-log.py <work folder> --summary
@@ -57,10 +68,10 @@ the part of it no launch covers (an upper bound for the orchestrator's own work 
 launches; launches that ran in parallel count once, each placed by its row's time and its seconds) and the
 number of gate runs (Orchestrator rows of step 7). Every row of a member other than the Orchestrator is a
 launch: the summary ends with the launch rows that carry no usage yet, so the orchestrator amends them before
-posting and an incomplete table is never posted as complete. Exit code 0 when the row was written, amended or
-the summary is complete, 1 when the folder has no `log.md`, the agent file is unknown, no row can be amended or
-replaced, or `--continued` finds no earlier usage of the member, 3 when the summary lists launch rows without
-usage.
+posting and an incomplete table is never posted as complete; launches marked `--unreported` are counted and
+named below the table instead. Exit code 0 when the row was written, amended or the summary is complete, 1 when
+the folder has no `log.md`, the agent file is unknown, no row can be amended or replaced, or `--continued` finds
+no earlier usage of the member, 3 when the summary lists launch rows without usage.
 """
 import argparse
 import datetime
@@ -74,6 +85,10 @@ CONTROL_CATEGORIES = {"Cc", "Cf", "Zl", "Zp"}
 KEEP = {"\t", "\n", "\r"}
 TRAILER = re.compile(r"\((?P<launch>[\w.-]+/[\w-]+) · (?P<tokens>[\d,]+) tokens · (?P<tools>\d+) tool uses · "
                      r"(?P<seconds>\d+) s(?P<continued> · continued)?\)\s*$")
+UNREPORTED = "usage not reported"
+UNREPORTED_TRAILER = re.compile(rf"\((?P<launch>[\w.-]+/[\w-]+) · {UNREPORTED}\)\s*$")
+ANY_TRAILER = re.compile(rf"\((?P<launch>[\w.-]+/[\w-]+) · (?:{UNREPORTED}|[\d,]+ tokens · \d+ tool uses · \d+ s"
+                         r"(?: · continued)?)\)\s*$")
 TWO_MEMBERS = re.compile(r"[,/+&]|\band\b")
 ORCHESTRATOR = "orchestrator"
 STAMP = r"\d{4}-\d{2}-\d{2}(?: \d{2}:\d{2})?"
@@ -96,6 +111,9 @@ def cell(text):
 
 
 def trailer(launch, tokens, tool_uses, seconds, continued=False):
+    """The launch trailer; with `tokens` None, the mark of a launch whose usage was never reported."""
+    if tokens is None:
+        return f"({launch} · {UNREPORTED})"
     mark = " · continued" if continued else ""
     return f"({launch} · {tokens:,} tokens · {tool_uses} tool uses · {seconds} s{mark})"
 
@@ -105,13 +123,16 @@ def metrics(match):
     return (int(match.group("tokens").replace(",", "")), int(match.group("tools")), int(match.group("seconds")))
 
 
-def previous_totals(path, member, skip_last=False):
+def previous_totals(path, member, skip_last=False, step=None):
     """What the member's agent had used before the round being logged: the trailers of that member's rows,
     summed backwards until the last fresh (not continued) launch is included; None when no row of the member
-    carries a trailer. With `skip_last` the member's last trailer is left out (it is the one being replaced)."""
+    carries a trailer. With `skip_last` the member's last trailer is left out (it is the one being replaced).
+    With `step`, only the rows before the member's last row of that step count (that row is the one amended)."""
     with open(path, encoding="utf-8-sig") as handle:
         rows = parse_rows(handle.read())
     wanted = cell(member)
+    if step is not None:
+        rows = rows_before(rows, wanted, cell(step))
     totals, found = [0, 0, 0], False
     for _, _, row_member, result in reversed(rows):
         match = TRAILER.search(result) if row_member == wanted else None
@@ -126,11 +147,20 @@ def previous_totals(path, member, skip_last=False):
     return tuple(totals) if found else None
 
 
-def continued_launch(path, member, launch, skip_last=False):
+def rows_before(rows, member, step):
+    """The rows before the last row of `member` whose step cell is `step` (both already escaped as cells); all
+    rows when there is no such row."""
+    for index in range(len(rows) - 1, -1, -1):
+        if rows[index][2] == member and rows[index][1] == step:
+            return rows[:index]
+    return rows
+
+
+def continued_launch(path, member, launch, skip_last=False, step=None):
     """The round's own share of a continued launch: the reported totals minus the member's earlier totals. A
     reported figure below the earlier total was already the round alone and is kept. None when the member has
     no earlier row with usage."""
-    earlier = previous_totals(path, member, skip_last)
+    earlier = previous_totals(path, member, skip_last, step)
     if earlier is None:
         return None
     model, *reported = launch[:4]
@@ -177,20 +207,20 @@ def agent_launch(root, agent):
     return f"{found['model']}/{found['effort']}" if "model" in found and "effort" in found else None
 
 
-def amend_last(path, member, launch, replace=False):
-    """Add the launch trailer to the last row of `member`; the amended row, or None when no row of that member
-    exists or its last row already carries a trailer. With `replace`, that trailer is replaced instead and a
-    row without one is left alone (None)."""
+def amend_last(path, member, launch, replace=False, step=None):
+    """Add the launch trailer to the last row of `member` (with `step`, to its last row of that step); the amended
+    row, or None when no such row exists or it already carries a trailer. With `replace`, that trailer is
+    replaced instead and a row without one is left alone (None)."""
     with open(path, "rb") as handle:
         data = handle.read()
     eol = b"\r\n" if b"\r\n" in data else b"\n"
     lines = data.decode("utf-8-sig").split(eol.decode())
-    wanted = cell(member)
+    wanted, wanted_step = cell(member), None if step is None else cell(step)
     for index in range(len(lines) - 1, -1, -1):
         match = ROW.match(lines[index])
-        if not match or match.group("member") != wanted:
+        if not match or match.group("member") != wanted or (wanted_step is not None and match.group("step") != wanted_step):
             continue
-        old = TRAILER.search(match.group("result"))
+        old = ANY_TRAILER.search(match.group("result"))
         if bool(old) != replace:
             return None
         result = match.group("result")[:old.start()] if old else match.group("result")
@@ -264,9 +294,15 @@ def covered_seconds(rows, first, last):
 
 
 def missing_usage(rows):
-    """(stamp, step, member) of every launch row — a member other than the Orchestrator — without a trailer."""
+    """(stamp, step, member) of every launch row — a member other than the Orchestrator — without a trailer; a
+    launch marked as unreported has one."""
     return [(stamp, step, member) for stamp, step, member, result in rows
-            if member.lower() != ORCHESTRATOR and not TRAILER.search(result)]
+            if member.lower() != ORCHESTRATOR and not ANY_TRAILER.search(result)]
+
+
+def unreported_usage(rows):
+    """(step, member) of every launch row marked `usage not reported`."""
+    return [(step, member) for _, step, member, result in rows if UNREPORTED_TRAILER.search(result)]
 
 
 def summary(path):
@@ -276,11 +312,13 @@ def summary(path):
         rows = parse_rows(handle.read())
     per_member = {}
     for _, _, member, result in rows:
-        match = TRAILER.search(result)
+        match = TRAILER.search(result) or UNREPORTED_TRAILER.search(result)
         if not match:
             continue
         entry = per_member.setdefault((member, match.group("launch")), [0, 0, 0, 0, 0])
         entry[0] += 1
+        if "tokens" not in match.groupdict():
+            continue
         entry[4] += 1 if match.group("continued") else 0
         for index, value in enumerate(metrics(match), start=1):
             entry[index] += value
@@ -294,6 +332,11 @@ def summary(path):
     lines.append(f"| **Total** | | {launches(total[0], total[4])} | {total[1]:,} | {total[2]} | {total[3]} |")
     own = orchestrator(rows)
     text = "\n".join(lines) + (f"\n\n{own}" if own else "")
+    unreported = unreported_usage(rows)
+    if unreported:
+        names = ", ".join(f"`{step} · {member}`" for step, member in unreported)
+        text += (f"\n\n**Without reported usage:** {len(unreported)} launch(es) whose task notification never "
+                 f"arrived — counted in the launches, not in the totals: {names}")
     missing = missing_usage(rows)
     if missing:
         names = ", ".join(f"`{step} · {member}`" for _, step, member in missing)
@@ -316,6 +359,12 @@ def build_parser():
     parser.add_argument("--amend-last", metavar="MEMBER", help="add the launch trailer to the last row of this member")
     parser.add_argument("--replace-last", metavar="MEMBER", help="replace the launch trailer of the last row of "
                                                                  "this member (to correct wrong metrics)")
+    parser.add_argument("--step", dest="at_step", metavar="STEP", help="with --amend-last or --replace-last: the "
+                        "member's last row of this step instead of its last row (for a parallel launch whose "
+                        "notification arrived after the next row was written)")
+    parser.add_argument("--unreported", action="store_true",
+                        help="with --amend-last: the launch's task notification never arrived; the trailer marks "
+                             "it as unreported (with --agent or --launch, without numbers)")
     parser.add_argument("--agent", metavar="squad-ROLE", help="the launched agent; model and effort come from its file")
     parser.add_argument("--launch", metavar="MODEL/EFFORT", help="the launched subagent's model and effort (when "
                                                                "the launch overrode the agent file)")
@@ -336,6 +385,12 @@ def launch_metrics(parser, root, args):
     model = args.launch or (agent_launch(root, args.agent) if args.agent else None)
     if args.agent and not args.launch and model is None:
         sys.exit(f"No .claude/agents/{args.agent}.md with a model and an effort")
+    if args.unreported:
+        if not model or args.tokens is not None or args.tool_uses is not None or args.seconds is not None \
+                or args.continued:
+            parser.error("--unreported goes with --agent (or --launch) alone: no --tokens, --tool-uses, --seconds "
+                         "or --continued")
+        return (model, None, None, None)
     if not model or None in (args.tokens, args.tool_uses, args.seconds):
         parser.error("--agent (or --launch), --tokens, --tool-uses and --seconds go together")
     if args.tokens < MIN_TOKENS or args.tool_uses < 0 or args.seconds < 0:
@@ -345,29 +400,32 @@ def launch_metrics(parser, root, args):
     return (model, args.tokens, args.tool_uses, args.seconds)
 
 
-def share_of_round(path, member, launch, continued, replace=False):
+def share_of_round(path, member, launch, continued, replace=False, step=None):
     """The launch as logged: with `continued`, this round's share of the reported totals; None when there is no
     earlier usage of the member to subtract (reported to the user, exit code 1). With `replace`, the trailer
-    being replaced is not part of the earlier usage."""
+    being replaced is not part of the earlier usage; with `step`, only the rows before the amended one are."""
     if launch is None or not continued:
         return launch
-    share = continued_launch(path, member, launch, skip_last=replace)
+    share = continued_launch(path, member, launch, skip_last=replace, step=step)
     if share is None:
         print(f"--continued: no earlier row of {member} with usage to continue from")
     return share
 
 
-def amend_command(parser, path, folder, member, launch, replace, continued):
+def amend_command(parser, path, folder, member, launch, replace, continued, step=None):
     option = "--replace-last" if replace else "--amend-last"
     if launch is None:
-        parser.error(f"{option} needs --agent (or --launch), --tokens, --tool-uses and --seconds")
-    launch = share_of_round(path, member, launch, continued, replace)
+        parser.error(f"{option} needs --agent (or --launch), --tokens, --tool-uses and --seconds (or --unreported)")
+    if replace and launch[1] is None:
+        parser.error("--unreported marks a row without a trailer: use it with --amend-last")
+    launch = share_of_round(path, member, launch, continued, replace, step)
     if launch is None:
         return 1
-    row = amend_last(path, member, launch, replace=replace)
+    row = amend_last(path, member, launch, replace=replace, step=step)
     if row is None:
         state = "with" if replace else "without"
-        print(f"No row of {member} {state} a launch trailer in {folder}")
+        where = f"of step '{step}' " if step is not None else ""
+        print(f"No row of {member} {where}{state} a launch trailer in {folder}")
         return 1
     print(row)
     return 0
@@ -382,6 +440,8 @@ def row_command(parser, path, args, launch):
     if args.continued and launch is None:
         parser.error("--continued goes with the launch's usage (--agent or --launch, --tokens, --tool-uses, "
                      "--seconds), on the row or with --amend-last")
+    if args.at_step is not None or args.unreported:
+        parser.error("--step and --unreported go with --amend-last or --replace-last")
     launch = share_of_round(path, args.member, launch, args.continued)
     if args.continued and launch is None:
         return 1
@@ -407,7 +467,7 @@ def main():
         parser.error("--amend-last and --replace-last exclude each other")
     if args.amend_last or args.replace_last:
         return amend_command(parser, path, args.folder, args.amend_last or args.replace_last, launch,
-                             replace=bool(args.replace_last), continued=args.continued)
+                             replace=bool(args.replace_last), continued=args.continued, step=args.at_step)
     return row_command(parser, path, args, launch)
 
 

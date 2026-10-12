@@ -45,12 +45,17 @@ surface, test doubles), `CLAUDE.md` and `docs/UNIT_TESTS.md`.
 - **Report what changes the merged code or its documentation.** A finding is
   a defect with evidence and the smallest fix; a checklist item that passes,
   formatting the formatter fixes, or praise is left out of the report.
-- **State a documentation fix verbatim.** For a non-blocking finding in
-  documentation, a decision record or an area document, give the file, the
-  sentence as it stands and the sentence as it should read: the calling
-  session applies exactly that text, and no further round reads it
-  (`.squad/routing.md`, *Non-blocking findings*). A fix you cannot state
-  that precisely is a finding for its owner, with a delta round.
+- **State a documentation fix verbatim.** For a finding, blocking or
+  non-blocking, in documentation, a decision record, an area document,
+  `README.md` or a configuration example, give the file, the sentence as it
+  stands and the sentence as it should read, and mark the finding
+  `verbatim`: the calling session applies exactly that text itself, without
+  a Dev launch, and no further round reads it (`.squad/routing.md`,
+  *Verbatim documentation fixes*). A fix you cannot state that precisely,
+  one that touches code, and one that changes a behavior statement an
+  acceptance criterion or a guarantee in `.squad/project.md` relies on
+  (say so: the Lead decides) is a finding for its owner, with a delta
+  round.
 
 ## Inputs
 
@@ -234,6 +239,10 @@ Then the findings, most severe first, in this shape:
 [BLOCKING] path/to/File.ext:142 — one-sentence statement of the defect
   Evidence: what you ran and what came back
   Fix: the smallest change that resolves it
+[BLOCKING, verbatim] docs/areas/storage.md:31 — the row says 8 columns, the schema has 9
+  Evidence: SchemaMigrator step 7 adds `attempt`
+  Fix: replace "`id`, `kind`, …, `data` (8 columns)" with "`id`, `kind`, …, `data`, `attempt` (9 columns)"
 ```
 
-The evidence line is what the calling session acts on; the rest stays short.
+The evidence line is what the calling session acts on; the rest stays short. A `verbatim` finding's fix is
+the complete replacement text, nothing to interpret.

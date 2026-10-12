@@ -6,9 +6,10 @@ the skill — launches the members, passes documents between them (subagents can
 directly), performs every Git and GitHub action (including follow-up issues the Lead decides on) and
 records every step in the work folder's `log.md` with `python3 .squad/tools/squad-log.py` — each subagent
 launch with its model and effort (`--agent`) and the usage its task notification reports, one row per launch,
-added later with `--amend-last` when the notification follows the hand-back, corrected with `--replace-last`
-and reduced to the round's share with `--continued` for a continued member — (after step 10, in the "Squad working record"
-comment that replaces it). Step numbers below are the ones the skills use.
+added later with `--amend-last` when the notification follows the hand-back (`--step "<step>"` reaches a row
+that is no longer the member's last, as after parallel launches; `--unreported` marks a launch whose
+notification never came), corrected with `--replace-last` and reduced to the round's share with `--continued`
+for a continued member — (after step 10, in the "Squad working record" comment that replaces it). Step numbers below are the ones the skills use.
 
 ## Work folder
 
@@ -83,7 +84,7 @@ tier follows the change, not only the paths it touches. When in doubt, the highe
 | Tier | When | Pipeline |
 | ---- | ---- | -------- |
 | `docs` | Issues only (never a feature). The diff changes only product documentation: `README.md`, `SECURITY.md`, Markdown under `docs/` except `docs/decisions/` and `docs/areas/`, the project blocks of the marked files, and `.squad/stack.md` or `.squad/project.md` as documentation (see below). Any other file — a code comment, a config or CI file, a decision record, an area document — makes it `trivial` or higher. `scope-check.py --tier docs` checks exactly this. | Lead plans briefly (no `plan.md`: tier, exact edits and acceptance criteria go into its result, recorded as the first `log.md` row); the orchestrator applies the edits itself; `scope-check.py --tier docs` and *Format check* pass; one Reviewer round reads the diff against the first `log.md` row (no build) — a blocking finding is fixed, checked and delta-reviewed the same way; the orchestrator opens the PR once the latest round is clean. Steps 3–7 and 9 are skipped. |
-| `patch` | Issues only (never a feature). The Lead can name the exact edits, and the diff stays within `PATCH_MAX_LINES` changed lines outside `specs/` (default 30, `squad_settings.py`): no change to production logic or control flow (an attribute, a literal, a condition rewritten equivalently, a configuration value, a script line), no new dependency, no new permission, no schema change. An edit in a security area, a CI or build file is allowed and makes the tier `patch/security`. `scope-check.py --tier patch` checks the line budget; the reviewer confirms that no logic changed and raises the tier otherwise. | Lead plans briefly as for `docs` (no `plan.md`: tier, exact edits, acceptance criteria and, per edit, the existing test or check that covers it — or the one test the Tester adds — go into its result, recorded as the first `log.md` row); the orchestrator applies the edits itself; when an edit to production code has no test that pins it, `squad-tester` writes the test the Lead named, once (the only extra launch). Step 7 runs the gates the touched files need (*Format check* — the orchestrator runs *Format* on its own edits —, the *Analyzer gate*, *Test* and the *Coverage gate* when production code changed, `scope-check.py --tier patch`); one review round reads the diff against the first `log.md` row: `squad-reviewer`, or on `patch/security` `squad-security` in mode `diff` instead (not both) — a blocking finding is fixed by the orchestrator, checked and delta-reviewed the same way; the orchestrator opens the PR once the latest round is clean. No plan challenge, Security plan review, skeleton, tests first, Code Officer or step 9. |
+| `patch` | Issues only (never a feature). The Lead can name the exact edits, and the diff stays within `PATCH_MAX_LINES` changed lines outside `specs/` (default 30, `squad_settings.py`): no change to production logic or control flow (an attribute, a literal, a condition rewritten equivalently, a configuration value, a script line), no new dependency, no new permission, no schema change. An edit in a security area, a CI or build file is allowed and makes the tier `patch/security`. `scope-check.py --tier patch` checks the line budget; the reviewer confirms that no logic changed and raises the tier otherwise. | Lead plans briefly as for `docs` (no `plan.md`: tier, exact edits, acceptance criteria and, per edit, the existing test or check that covers it — or the one test the Tester adds — go into its result, recorded as the first `log.md` row); the orchestrator applies the edits itself; when an edit to production code has no test that pins it, `squad-tester` writes the test the Lead named, once (the only extra launch). Step 7 runs only the gates of *Gates of a patch* below for the kinds of file the diff touches (the orchestrator runs *Format* on its own edits); one review round reads the diff against the first `log.md` row: `squad-reviewer`, or on `patch/security` `squad-security` in mode `diff` instead (not both) — a blocking finding is fixed by the orchestrator, checked and delta-reviewed the same way; the orchestrator opens the PR once the latest round is clean. No plan challenge, Security plan review, skeleton, tests first, Code Officer or step 9. |
 | `trivial` | Documentation that does not qualify as `docs`, code comments, log or UI wording, configuration defaults, or a documentation change that needs a decision record — no change to behavior or control flow | Steps 3, 4 and 5 skipped (no Security, no tests-first); code check, Reviewer and PR approval (step 9) still run. Tests and coverage are still required if production code changes. |
 | `standard` | A behavior change that touches none of the security areas below | Plan challenge in step 2 when the plan weighs options (*Plan challenge*); steps 3 and the Security review skipped — the Reviewer covers the security checklist and raises the tier if a security area is touched after all |
 | `security` | Touches one of the security areas listed in `.squad/project.md` (*Security areas*), Docker/CI or build configuration, or adds/updates a dependency — beyond what `patch/security` allows | Full pipeline; the plan challenge (when the plan changes production code) and the Security plan review run in parallel, answered by one Lead revision |
@@ -93,6 +94,24 @@ counts as documentation for the `docs` tier — except an edit that changes *Sec
 pipeline runs: that changes what the squad enforces and is `patch/security` when it fits that tier's budget,
 `security` otherwise. A squad-maintenance PR (*Squad
 lessons*) is only for lessons the squad itself raised, never for an issue a person filed about the product.
+
+### Gates of a patch
+
+A `patch` is small by definition, so its step 7 runs the checks its files need and nothing else; the full
+suite, the overall coverage figure and the complete analysis are CI's job on the draft pull request
+(*Draft until green*). The orchestrator picks the rows that match the diff and runs every gate they name,
+without judgment; when the diff spans two kinds, both rows apply. Every `patch` ends with
+`scope-check.py --tier patch`.
+
+| The diff touches | Gates |
+| ---------------- | ----- |
+| documentation only (Markdown, the project blocks) | *Format check* |
+| a shell script, a workflow or a Dockerfile | *Analyzer gate* with `--lint-only` (shellcheck, actionlint, hadolint and the shell rules on the changed files, no build), plus the check the Lead's result names for the edit (a pin check, `bash -n`, a dry run) |
+| a configuration file or a data file the product reads (YAML, JSON, a catalog) | the check the Lead's result names (a loader test, a schema check), run as *Test (project)* when it is a test |
+| production or test code | *Format check*, *Analyzer gate*, *Test (project)* for the test project(s) of the changed code (`stack.md`), the *Coverage gate* when production code changed |
+
+A gate the row names that the stack does not have (`stack.md` lists no *Test (project)*) is replaced by the
+next broader one (*Test*); the orchestrator logs which rows applied.
 
 ### Changes without production or test code
 
@@ -117,11 +136,11 @@ skip is a blocking finding. If production or test code changes after all, steps 
 | 5 | Tests first | Tester | Only the tests the plan names for its acceptance criteria (one or a few per criterion); they compile and **fail** on the current code or the skeleton. A test that cannot fail yet is not written here: guards, pins of existing behavior, determinism and bound tests wait for step 6 |
 | 6 | Implementation + coverage | Dev, Tester | All tests green; *Coverage gate* from `.squad/stack.md` passes; doc updates from the plan done, including the area documents. The Tester's coverage pass adds tests only for lines the gate reports uncovered, a resource bound the plan names, or a test a reviewer asks for |
 | 7 | Code check | Orchestrator, Code Officer | Dev and Tester ran *Format* on their files before handing back. The orchestrator runs *Format check*, *Analyzer gate*, *Test*, *Coverage gate* and `scope-check.py`. A *Format check* failure the orchestrator clears itself (*Format*, then `git restore` of every file outside the change); only analyzer diagnostics or style findings that need reading launch the Code Officer (analyzer-only edits; structural items go to the Dev or Tester), then the gates run again. Exit: every gate passes on the head, same tests green |
-| 8 | Review | Reviewer (+ Security on `security`) | They get the code SHA and the orchestrator's gate output of step 7 (they do not re-run the gates); later commits during the round may touch only `specs/` and do not make it stale. No blocking findings → 9; blocking → owner fixes (Dev: code, Tester: tests), back to 6, then a mandatory delta round |
-| 9 | PR approval | Orchestrator, Lead when needed | The orchestrator checks: the latest review round is clean and covers every change to production code, tests and `docs/` since it ran (only `specs/` bookkeeping and the verbatim documentation fixes of that round, *Non-blocking findings*, may follow it); the gates of step 7 pass on the head; the area documents and documentation updates the plan names are in the diff; then sets each `Proposed` record of this change and its index row to `Accepted` (`decision-check.py` passes). The Lead is launched in mode `approve-pr` only after this checklist passed in full (a due delta round runs first) and only when a decision is open: a plan deviation in a member's report, a Lead decision recorded during steps 3–8 (loop limit, dispute, accepted gap, finding accepted unfixed), non-blocking findings that touch code and are not yet decided, or a change to `docs/ARCHITECTURE.md` or `.squad/project.md` that the plan does not name or the Reviewer did not find consistent. Otherwise "approved by checklist" is logged → 10 |
+| 8 | Review | Reviewer (+ Security on `security`) | They get the code SHA and the orchestrator's gate output of step 7 (they do not re-run the gates); later commits during the round may touch only `specs/` and do not make it stale. No blocking findings → 9; blocking → owner fixes (Dev: code, Tester: tests), back to 6, then a mandatory delta round — except a finding, blocking or not, whose fix is a verbatim documentation edit: the orchestrator applies it (*Verbatim documentation fixes*), no launch, no build, no delta round |
+| 9 | PR approval | Orchestrator, Lead when needed | The orchestrator checks: the latest review round is clean and covers every change to production code, tests and `docs/` since it ran (only `specs/` bookkeeping and the verbatim documentation fixes of that round, *Verbatim documentation fixes*, may follow it); the gates of step 7 pass on the head; the area documents and documentation updates the plan names are in the diff; then sets each `Proposed` record of this change and its index row to `Accepted` (`decision-check.py` passes). The Lead is launched in mode `approve-pr` only after this checklist passed in full (a due delta round runs first) and only when a decision is open: a plan deviation in a member's report, a Lead decision recorded during steps 3–8 (loop limit, dispute, accepted gap, finding accepted unfixed), non-blocking findings that touch code and are not yet decided, or a change to `docs/ARCHITECTURE.md` or `.squad/project.md` that the plan does not name or the Reviewer did not find consistent. Otherwise "approved by checklist" is logged → 10 |
 | 10 | Pull request | Orchestrator | Working record posted as comment (a long `plan.md` may be given as a permalink to the last commit that contains it plus a summary), `specs/<folder>/` removed and `scope-check.py --no-specs` clean, PR opened **as a draft** (*Draft until green*; merged later with *Squash and merge*) |
 | 11 | After the PR | Dev, Code Officer, Reviewer | CI green and the CI code analysis (e.g. SonarQube Cloud) passed with no new issue on the head, then the PR marked ready for review (*Draft until green*); review comments worked |
-| 12 | Wrap-up | Orchestrator | Squad lessons filed as one issue per destination (*Squad lessons*), or "no lessons" logged; run metrics (launches with their continuations, tokens, tool uses and seconds per role, plus the Orchestrator row: wall time, time not covered by launches, gate runs — `squad-log.py --summary`; exit code 3 names launch rows still without usage, which are amended first) appended to the working record and reported to the user |
+| 12 | Wrap-up | Orchestrator | Squad lessons filed as one issue per destination (*Squad lessons*), or "no lessons" logged; run metrics (launches with their continuations, tokens, tool uses and seconds per role, plus the Orchestrator row: wall time, time not covered by launches, gate runs — `squad-log.py --summary`; exit code 3 names launch rows still without usage, which are amended first with `--amend-last`, `--step` for an earlier row, or marked `--unreported`; the table is posted as printed, never summed by hand or left out) appended to the working record and reported to the user |
 
 A change without production or test code (tier `docs`, or any other tier whose plan declares it, see
 *Changes without production or test code*) skips steps 4 and 5; step 6 is the Dev's edits alone (tier
@@ -258,24 +277,38 @@ told so.
 
 ## Escalation to the Product Manager
 
-The Lead escalates only when it cannot decide responsibly on its own: the requirement is ambiguous, the
-fix needs a product decision (behavior change visible to users, breaking a documented guarantee in
-`docs/ARCHITECTURE.md` or an accepted decision record), or a loop limit was hit and none of the Lead's
-options is clearly right. The escalation is one concise question with the options and the Lead's
+The Lead escalates only when it cannot decide responsibly on its own: the requirement is ambiguous (a
+parser, decoder or reader of an external format without a real sample of that format in the test data or
+on the issue is one — the Lead asks for the sample, or for the confirmation to build from the description
+with the risk recorded, before it plans), the fix needs a product decision (behavior change visible to
+users, breaking a documented guarantee in `docs/ARCHITECTURE.md` or an accepted decision record), or a loop
+limit was hit and none of the Lead's options is clearly right. The escalation is one concise question with the options and the Lead's
 recommendation. Follow-up GitHub issues the Lead decides on are created by the orchestrator and listed in
 the PR under Next Steps.
+
+## Verbatim documentation fixes
+
+A review finding — blocking or non-blocking — whose fix the reviewer states verbatim (file, the sentence as it
+stands, the sentence as it should read, marked `verbatim` in the report) and that touches only documentation,
+a decision record, an area document, `README.md` or a configuration example (never production or test code)
+is applied by the orchestrator exactly as proposed (as in tier `docs`), checked with `git diff` to contain
+nothing else, and logged with file and commit. It needs no Dev, Tester or Lead launch, no build and no
+confirming delta round: the text is the reviewer's own, from the reviewer's own round (Vandox#194 and
+Vandox#19 each spent an Opus launch on confirming two commas and one sentence; in the 14 Vandox runs after
+that, 6 of 8 blocking findings were such documentation edits, each worked by a Dev launch, a gate run and a
+delta round). It is read again only when a delta round is due anyway for another change; any edit beyond the
+proposed text, and a fix the reviewer cannot state verbatim, is an ordinary fix for its owner with a delta
+round. One exception: a fix that changes a behavior statement an acceptance criterion or a guarantee in
+`.squad/project.md` relies on is not applied; the reviewer says so, and the Lead decides (mode `decide`).
+The step 7 gates that apply to documentation (*Format check*, `scope-check.py`, `decision-check.py`) run
+before the PR; the blocking finding counts as resolved once the text is in and logged.
 
 ## Non-blocking findings
 
 Fixed in the same change or opened as a linked GitHub issue now — never deferred to "a later change".
 
-- A finding whose fix the reviewer states verbatim and that touches only documentation, a decision record
-  or an area document is applied by the orchestrator exactly as proposed (as in tier `docs`), checked with
-  `git diff` to contain nothing else, and logged with file and commit. It needs no confirming delta round:
-  the text is the reviewer's own, from the reviewer's own round (Vandox#194 and Vandox#19 each spent an Opus
-  launch on confirming two commas and one sentence). It is read again only when a delta round is due anyway
-  for another change; any edit beyond the proposed text is an ordinary fix with a delta round. No Lead
-  launch.
+- A non-blocking finding with a verbatim documentation fix goes the way of *Verbatim documentation fixes*
+  above: applied by the orchestrator, no launch, no delta round.
 - Every other non-blocking finding — one that touches code, or one the orchestrator would turn into a
   follow-up issue — is decided by the Lead in step 9 (one launch for all of them); a finding fixed now gets
   a delta round.
