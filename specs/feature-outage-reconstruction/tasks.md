@@ -1,0 +1,18 @@
+# Tasks: Outage reconstruction
+
+Plan: [plan.md](plan.md) — Status: Draft
+
+Every documentation edit appears in exactly one row; the Lead's approval only touches status, index rows and bookkeeping.
+
+| # | Task | Files | Tests (AC) | Owner | Done |
+| - | ---- | ----- | ---------- | ----- | ---- |
+| 1 | Decision record 0096 (Proposed) and its index row; `docs/ARCHITECTURE.md` (status, Components, Data flow, Storage: migrations, *Incidents*, *Interfaces* rewritten) | `docs/decisions/0096-outage-incidents-rebuilt-from-stored-data-merged-by-overlapping-windows.md`, `docs/decisions/README.md`, `docs/ARCHITECTURE.md` | — | Lead | [x] |
+| 2 | Skeleton (step 4): every new type and member of *Signatures* with XML docs, regions and the skeleton pragma; `Usage(string)` replaces `Usage(bool)`; adapt `CommandLineTests` lines 111-112 mechanically; *Format*, *Build* | `src/Vandox.Core/Configuration/*`, `src/Vandox.Core/Incidents/*`, `src/Vandox.Storage/*`, `src/Vandox.Backend/Incidents/*`, `src/Vandox.Backend/Cli/*`, `src/Vandox.Backend/Hosting/BackendApp.cs`, `BackendLog.cs`, `tests/Vandox.Backend.Tests/CommandLineTests.cs` | — | Dev | [ ] |
+| 3 | Tests first (step 5): the tests named in AC1 to AC7 and the helpers `IncidentSamples` (Core, Backend); adapt `SqliteStoreOpenTests` (`UndoStepNine`, version literals) and the two `BackendConfigKeysList…` tests | `tests/Vandox.Core.Tests/{ConfigDuration,IncidentConfig,KillClusterer,MemoryAnalysis,BackupPrograms,IncidentSignatures,IncidentBuilder}Tests.cs`, `BackendConfigLoaderTests.cs`, `IncidentSamples.cs`; `tests/Vandox.Storage.Tests/{SqliteStoreIncident,SqliteStoreQuery,SqliteStoreOpen}Tests.cs`; `tests/Vandox.Backend.Tests/{IncidentReconstructor,IncidentsCommand,IncidentSummaryWriter,CommandLine}Tests.cs`, `IncidentSamples.cs` | AC1–AC7 | Tester | [ ] |
+| 4 | Configuration: `ConfigDuration`, `IncidentConfig`, `BackendConfig.Incidents` and keys, loader validation; example file section | `src/Vandox.Core/Configuration/*`, `deploy/backend/vandoxd.yaml` | AC4 | Dev | [ ] |
+| 5 | Storage: schema step 9, `StorageLimits`, `RecordQuery.AfterId` and its SQL, `IIncidentStore` with `IncidentRepository`, `SqliteStore` region | `src/Vandox.Storage/*` | AC3, AC6, AC7 | Dev | [ ] |
+| 6 | Incident model and rules: model types, `IncidentSignatures`, `IncidentLimits`, `KillClusterer`, `MemoryAnalysis`, `BackupPrograms`, `IncidentBuilder` | `src/Vandox.Core/Incidents/*` | AC1, AC2 | Dev | [ ] |
+| 7 | Reconstruction and command: `IncidentReconstructor` (two passes, keyset paging, page sizes), `IncidentsCommand`, `IncidentSummaryWriter`, `CommandLine`/`CommandOptions`/`BackendApp` routing, `BackendLog` 30–32 | `src/Vandox.Backend/Incidents/*`, `src/Vandox.Backend/Cli/*`, `src/Vandox.Backend/Hosting/*` | AC1–AC3, AC5 | Dev | [ ] |
+| 8 | Area documents: detection (*Incidents* section, scope, not here, related, implementation), storage (schema 9, writing, reading, `AfterId`, retention note), configuration (two options and the duration rule), backend host (sub-command and exit codes), areas index row | `docs/areas/detection-and-reports.md`, `docs/areas/storage.md`, `docs/areas/configuration-and-secrets.md`, `docs/areas/backend-host.md`, `docs/areas/README.md` | — | Dev | [ ] |
+| 9 | README (backend options rows, *Reconstruct incidents* section, layout if needed); `.squad/project.md` security areas 10 and 12 | `README.md`, `.squad/project.md` (*Security areas* only) | — | Dev | [ ] |
+| 10 | Coverage (step 6): the memory-bound test of AC8, tests for lines the *Coverage gate* reports uncovered; `.squad/project.md` *Test doubles* row *database (C#)* | `tests/Vandox.Core.Tests/IncidentBuilderTests.cs`, further test files of row 3, `.squad/project.md` (*Test doubles* only) | AC8 | Tester | [ ] |
