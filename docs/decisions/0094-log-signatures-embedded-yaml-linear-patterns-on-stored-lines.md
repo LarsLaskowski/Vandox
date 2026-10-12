@@ -93,7 +93,7 @@ output over several lines; mail lines carry addresses:
     signatures from `systemd`) keep the origin condition and may use `^`. Only writers whose format allows that are read: the full
     disk from MariaDB's own messages, `Too many connections` from Postfix's and Dovecot's MySQL client errors. PHP,
     nginx, Apache and Plesk put external text before the error (a requested path, FastCGI output) and need a pattern
-    per format checked against their sources, which issue #203 added (options 17 to 22).
+    per format checked against their sources, which issue #203 added (options 17 to 23).
 
 How the web server and PHP lines are read (issue #203: PHP's `mysqli` and PDO errors 1040, PHP's write errors with
 `errno=28`, nginx's `(28: No space left on device)`). The formats were checked against the programs' sources, not against
@@ -146,7 +146,7 @@ these lines starts with the level (*Log import*, *Plesk and web server error log
 
 ## Decision
 
-Options 2, 6, 11, 13, 16, 18, 19, 20 and 23: signatures are an embedded YAML catalog whose message patterns run on
+Options 2, 6, 11, 13, 16 and 18, with the narrowing that options 19, 20 and 23 state: signatures are an embedded YAML catalog whose message patterns run on
 .NET's non-backtracking regular expression engine; a detector matches them on stored `log_line` records in capture
 order and returns events that list their record IDs, merging the copies of one event; nothing is stored and records
 are never changed. Every signature without a parser event is bound to the writers it names; one whose message can

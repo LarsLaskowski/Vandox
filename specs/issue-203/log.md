@@ -19,3 +19,6 @@ are quoted in full.
 | 2026-10-12 18:04 | 6 Coverage pass | squad-tester | AC6-AC8 pin tests added, all pass; Coverage gate PASS (sonnet/medium · 11,526 tokens · 7 tool uses · 314 s · continued) |
 | 2026-10-12 18:07 | 7 Code check | Orchestrator | Format check, Analyzer gate, scope-check, Core tests 3625, Coverage gate PASS on 185521c |
 | 2026-10-12 18:08 | 8 Review (security diff) | squad-security | APPROVED on 185521c; N: php[0-9]? accepts php0-php4/6/9 (no attack-surface change) (opus/medium · 42,341 tokens · 8 tool uses · 49 s) |
+| 2026-10-12 18:09 | 8 Review (round 1) | squad-reviewer | APPROVE on 185521c; 2 non-blocking doc fixes in record 0094 (opus/medium · 87,510 tokens · 16 tool uses · 98 s) |
+| 2026-10-12 18:09 | 8 Review fixes | Orchestrator | applied the reviewer's two verbatim fixes in record 0094 (option range 17-23, Decision line); decision-check and scope-check PASS |
+| 2026-10-12 18:09 | 9 PR approval | Orchestrator | approved by checklist: review clean, gates pass on 185521c, area docs in diff, record 0094 already Accepted, no open decision |
