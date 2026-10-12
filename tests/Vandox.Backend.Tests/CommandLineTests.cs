@@ -110,6 +110,44 @@ public class CommandLineTests
     }
 
     /// <summary>
+    /// The sub-command templates takes its own config flag and no argument, and its usage names the flag.
+    /// </summary>
+    [TestMethod]
+    public void CommandLineParsesTemplatesSubCommand()
+    {
+        // Act
+        var plain = CommandLine.Parse(["templates"]);
+        var inherited = CommandLine.Parse(["-config", "x", "templates"]);
+        var own = CommandLine.Parse(["templates", "-config", "x"]);
+        var inline = CommandLine.Parse(["templates", "-config=x"]);
+        var help = CommandLine.Parse(["templates", "-h"]);
+        var extra = CommandLine.Parse(["templates", "extra"]);
+        var unknown = CommandLine.Parse(["templates", "-verbose"]);
+        var withHealthcheck = CommandLine.Parse(["-healthcheck", "templates"]);
+        var missing = CommandLine.Parse(["templates", "-config"]);
+
+        // Assert
+        Assert.IsTrue(plain.Templates, "the sub-command is set");
+        Assert.IsFalse(plain.Incidents, "not the incidents sub-command");
+        Assert.AreEqual("templates", plain.UsageFor, "usage of the sub-command");
+        Assert.AreEqual("/etc/vandox/vandoxd.yaml", plain.ConfigPath, "default config path");
+        Assert.AreEqual(string.Empty, plain.Error, "no error");
+        Assert.IsNull(plain.ImportPath, "no import");
+        Assert.AreEqual("x", inherited.ConfigPath, "the main flag is inherited");
+        Assert.IsTrue(inherited.Templates, "the sub-command after a main flag");
+        Assert.AreEqual("x", own.ConfigPath, "the sub-command flag");
+        Assert.AreEqual("x", inline.ConfigPath, "the sub-command flag with an equals sign");
+        Assert.IsTrue(help.Help, "the help flag");
+        Assert.AreEqual("templates", help.UsageFor, "help shows the usage of the sub-command");
+        Assert.AreEqual("vandoxd templates: no argument is expected", extra.Error, "an argument is refused");
+        Assert.AreEqual("flag provided but not defined: -verbose", unknown.Error, "an unknown flag");
+        Assert.AreEqual("unexpected argument \"templates\"", withHealthcheck.Error, "not together with the health check");
+        Assert.AreEqual("flag needs an argument: -config", missing.Error, "a config flag without value");
+        Assert.AreEqual("Usage of vandoxd templates [-config file]:\n  -config string\n    \tpath of the configuration file\n", CommandLine.Usage("templates"), "usage of the sub-command");
+        Assert.Contains("  vandoxd [flags] templates [-config file]\n    \trebuild the log template statistics from the stored log lines\n", CommandLine.Usage(string.Empty), "the general usage names the sub-command");
+    }
+
+    /// <summary>
     /// Bad command lines name the problem.
     /// </summary>
     /// <param name="arguments">The arguments, joined with a bar</param>
