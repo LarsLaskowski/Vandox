@@ -15,3 +15,5 @@ are quoted in full.
 | 2026-10-12 18:39 | 7 Code check | Orchestrator | format, analyzer, scope PASS; tests+coverage PASS; AC tests green in Release |
 | 2026-10-12 18:42 | 8 Review r1 (reviewer) | squad-reviewer | 1 blocking (storage.md wording); fixed by Dev |
 | 2026-10-12 18:42 | 8 Review r1 (security) | squad-security | APPROVED (same wording note) |
+| 2026-10-12 18:42 | 8 Review r2 (delta) | squad-reviewer | APPROVE on e61e090 |
+| 2026-10-12 18:42 | 9 PR approval | Orchestrator | approved by checklist; records already Accepted |
