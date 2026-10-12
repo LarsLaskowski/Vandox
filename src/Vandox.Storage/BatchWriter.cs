@@ -15,7 +15,6 @@ namespace Vandox.Storage;
 /// Microsoft.Data.Sqlite runs them synchronously anyway: per record this saves the lookups by name and the asynchronous
 /// state machines, which matters on a slow host (record 0083).
 /// </summary>
-#pragma warning disable RH2003, S2325, S1172
 internal sealed class BatchWriter : IDisposable
 {
     #region Fields
@@ -30,6 +29,7 @@ internal sealed class BatchWriter : IDisposable
     private readonly SqliteParameter[] _logFtsValues;
     private readonly ArrayBufferWriter<byte> _labelBuffer = new();
     private readonly Utf8JsonWriter _labelWriter;
+    private readonly TemplateTally _tally;
 
     #endregion // Fields
 
@@ -58,6 +58,7 @@ internal sealed class BatchWriter : IDisposable
         _logLineValues = Bind(_logLine, "$id", "$log", "$program", "$pid", "$priority", "$message", "$truncated", "$host", "$event");
         _logFtsValues = Bind(_logFts, "$id", "$message");
         _labelWriter = new Utf8JsonWriter(_labelBuffer);
+        _tally = new TemplateTally(connection, transaction);
     }
 
     #endregion // Constructors
@@ -126,7 +127,7 @@ internal sealed class BatchWriter : IDisposable
     /// <param name="cancellationToken">Cancels the write</param>
     internal void WriteTemplates(CancellationToken cancellationToken)
     {
-        throw new NotImplementedException();
+        _tally.Write(cancellationToken);
     }
 
     /// <summary>
@@ -231,6 +232,7 @@ internal sealed class BatchWriter : IDisposable
         _logFtsValues[0].Value = id;
         _logFtsValues[1].Value = line.Message;
         _logFts.ExecuteNonQuery();
+        _tally.Add(record.Source, line.Program, line.Message, StorageTime.ToNanoseconds(record.CapturedAt));
     }
 
     #endregion // Methods
@@ -245,6 +247,7 @@ internal sealed class BatchWriter : IDisposable
         _logLine.Dispose();
         _logFts.Dispose();
         _labelWriter.Dispose();
+        _tally.Dispose();
     }
 
     #endregion // IDisposable

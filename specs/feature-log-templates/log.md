@@ -13,3 +13,4 @@ are quoted in full.
 | 2026-10-12 06:24 | 3 Plan security review (delta) | squad-security | APPROVED; non-blocking: edge test must use whole-tick storable times (pass to Tester) (opus/medium · 27,607 tokens · 3 tool uses · 34 s · continued) |
 | 2026-10-12 06:31 | 4 Skeleton | squad-dev | Skeleton built, build 0 warnings; pragma also carries S1172; WriteLogLine takes DataRecord (sonnet/medium · 112,039 tokens · 12 tool uses · 397 s) |
 | 2026-10-12 06:46 | 5 Tests first | squad-tester | Tests for AC1-AC8 written; Core 96 fail, Storage 82 fail on skeleton (NotImplemented); orchestrator re-ran Core (sonnet/medium · 222,755 tokens · 38 tool uses · 884 s) |
+| 2026-10-12 07:06 | 6 Implement | squad-dev | Tasks 6-10 done; all green except 5 disputed rows of LogTemplateNormalizerReplacesLoneSurrogates (literals corrupted to U+FFFD in DataRow metadata); coverage 97.3% new / 97.6% overall; 1M lines written in 53.9 s on dev host |

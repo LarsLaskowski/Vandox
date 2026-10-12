@@ -1,0 +1,18 @@
+Ubuntu 24.04.5 LTS; .NET 10.0.12; 4 logical CPUs
+database below /tmp/claude-0/-home-user-Vandox/99b8abe8-7dda-5931-9595-fa6bf1c6406d/scratchpad/bench; 1000000 log lines in batches of 10000, generated from the line index over 30 days, one transaction per batch
+normalized 1000000 messages to 84117603 characters of templates
+normalizing 1000000 messages in memory: 1335 ms
+wrote 1000000 log lines in 100 batches: total 53900 ms (18553 lines/s, batch times only: 18816 lines/s); median batch 498 ms, fastest 367 ms, slowest 1725 ms
+1000000 lines: 2741 templates, 153923 template hours, 2880 source hours
+new templates (last 15 days, limit 10000): 10 ms, 1197 results
+usual level, default parameters: 487 ms, 12960 candidates, 0 results
+usual level, widest parameters (baseline 2160 h, minimum baseline 1 h, factor 1, minimum count 1): 372 ms, 153923 candidates, 10000 results
+criterion of record 0095 (1,000,000 log lines written with their templates in under 10 minutes): met on this host (0.9 minutes); only a run on the reference host (DS918+) counts
+hostile case: 100000 lines whose messages hold no digit and differ per line (one template per line, three upserts each)
+wrote 100000 log lines in 10 batches: total 5276 ms (18954 lines/s, batch times only: 19114 lines/s); median batch 533 ms, fastest 463 ms, slowest 586 ms
+100000 lines: 100000 templates, 100000 template hours, 720 source hours
+usual level, widest parameters (baseline 2160 h, minimum baseline 1 h, factor 1, minimum count 1): 167 ms, 100000 candidates, 10000 results
+
+real	1m2.635s
+user	0m57.923s
+sys	0m2.293s

@@ -5,13 +5,13 @@ namespace Vandox.Storage;
 /// <summary>
 /// Converts instants to and from the nanoseconds since the Unix epoch the database stores.
 /// </summary>
-#pragma warning disable RH2003, S2325, S1172
 internal static class StorageTime
 {
     #region Constants
 
     private const long TicksPerNanosecondInverse = 100;
     private const long UnixEpochTicks = 621355968000000000;
+    private const long NanosecondsPerHour = 3_600_000_000_000;
 
     #endregion // Constants
 
@@ -69,7 +69,20 @@ internal static class StorageTime
     /// <returns>The nanoseconds of the start of the hour</returns>
     internal static long HourStart(long nanoseconds)
     {
-        throw new NotImplementedException();
+        var hours = nanoseconds / NanosecondsPerHour;
+
+        if (nanoseconds % NanosecondsPerHour < 0)
+        {
+            hours--;
+        }
+
+        // The hour of the first, partial hour would start before the smallest storable time.
+        if (hours < long.MinValue / NanosecondsPerHour)
+        {
+            return long.MinValue;
+        }
+
+        return hours * NanosecondsPerHour;
     }
 
     #endregion // Methods

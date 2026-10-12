@@ -149,6 +149,7 @@ internal static class ServeCommand
         builder.Services.AddSingleton<IRecordWriter>(store);
         builder.Services.AddSingleton<IRecordReader>(store);
         builder.Services.AddSingleton<ILogSearcher>(store);
+        builder.Services.AddSingleton<ILogTemplateReader>(store);
         builder.Services.AddSingleton<IImportTracker>(store);
         builder.Services.Configure<HostOptions>(options => options.ShutdownTimeout = _shutdownTimeout);
         builder.Services.AddRazorComponents().AddInteractiveServerComponents();

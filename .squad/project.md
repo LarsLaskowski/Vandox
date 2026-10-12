@@ -120,8 +120,17 @@ files or endpoints.
     mail lines cannot trigger it; integer fields are accepted only as ASCII digits by an ordinal scan of the whole captured text and range-checked before
     use (`NumberGuard`); text fields are cut to 1,024 bytes; at most 1,024 events are open and 256 IDs kept per event, and an open event keeps no message,
     match or record; an event is a classification, not proof of origin: local processes can log as `kernel`, `systemd`, `mariadbd`, `postfix/*` or
-    `dovecot`, and MariaDB entries forged through a login name reach the MariaDB signatures (record 0094). Records 0048, 0049, 0066, 0069, 0076, 0078, 0079, 0084,
-    0085, 0086, 0088, 0091, 0092, 0093, 0094.
+    `dovecot`, and MariaDB entries forged through a login name reach the MariaDB signatures (record 0094). The log template normalizer
+    (`Vandox.Core.Templates.LogTemplateNormalizer`, with `TokenRules` and `TemplateWriter`) turns the message of every stored log line into a template:
+    hand-written, one linear forward pass, ordinal ASCII comparisons, no regular expression and no culture, no shared mutable state (no static or
+    thread-static buffer; the output goes into a buffer on the stack of the call with the fixed size of 1,024 characters, so no input can make it
+    grow), the template cut at 1,024 UTF-8 bytes at a character boundary; control characters of category Cc are removed as separators, format
+    characters (Cf, e.g. U+202E, U+200B) are kept, and the normalizer is a grouping, not a guard. The template queries (`TemplateQueries`,
+    `ILogTemplateReader`) bind every value as a parameter, bound the range (the usual-level query at most 744 hours), the limit (1 to 10,000)
+    and the baseline (at most 2,160 hours), and refuse a *find* message of more than 16 KiB; the work of the usual-level query is **not** bounded by
+    range or limit (it evaluates every template hour of the range that reaches the minimum count) and a deadline does not interrupt a running
+    statement, so a caller that serves a user must not rely on a deadline alone (record 0095). Records 0048, 0049, 0066, 0069, 0076, 0078, 0079, 0084,
+    0085, 0086, 0088, 0091, 0092, 0093, 0094, 0095.
 11. **Outbound calls** (Telegram, external checks, the optional AI service of the nightly report, the
     agent's connection to the backend): *Goal:* every call has a timeout, goes only to its configured
     destination and leaves encrypted to a verified peer. The agent's only destination is the ingest port,
@@ -146,7 +155,10 @@ files or endpoints.
     reason in its summary through `Terminal.Quote`; its log lines carry the input-derived attributes (`path`, `reason`,
     a run error's text) as JSON strings, whose encoder escapes control characters, DEL, C1 controls and
     format characters (`ImportSummaryWriter`, `ImportProgressLogger`). The text fields of detected events (`DetectedEvent.Texts`: victim command, unit,
-    description, result, kernel version) are captures of log text and external text: whoever shows them escapes them like any log line. Records 0072, 0081.
+    description, result, kernel version) are captures of log text and external text: whoever shows them escapes them like any log line. Log templates
+    (`LogTemplate.Template`, and the templates of `TemplateSpike`) are external text as well: the normalizer removes control characters of category Cc but
+    keeps format characters (Cf, e.g. U+202E, which reverses the display direction, and U+200B), `<`, `&` and any other markup, so whoever shows a template escapes it
+    like any log line and handles format characters. Records 0072, 0081, 0095.
 13. **Release pipeline and published artifacts** (`.github/workflows/release.yml`,
     `.github/workflows/base-image-digests.yml`, `.github/scripts/`, `deploy/backend/Dockerfile`,
     `.dockerignore`, `dotnet-tools.json`, the GitHub environment `release`; the smoke script
