@@ -99,7 +99,7 @@ usual-level query over the last 744 hours at the **default parameters** (baselin
 of **candidates** (the template hours of the range that reach the minimum count, all of which the query evaluates); the verdict for 1,000,000
 lines with the default batch size; and then the **hostile case** in a second, fresh database: 100,000 lines (or all lines if fewer) whose messages
 hold no digit and differ per line, so that every line is a template of its own and costs three upserts, with the write time and the widest
-usual-level query on it.
+usual-level query on it; and finally the **concentrated case** in a third, fresh database: 2,160 hourly heartbeat lines of one source followed by as many such lines as the hostile case, all of that source in the next hour, with the write time and the widest usual-level query on it.
 
 ### Results
 
