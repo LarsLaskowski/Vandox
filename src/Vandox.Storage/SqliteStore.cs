@@ -103,12 +103,73 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
     /// <returns>A task that returns the result of the rebuild</returns>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="batchLines"/> is outside 1 to <see cref="StorageLimits.MaxBatchRecords"/></exception>
     /// <exception cref="StoreException">The database fails, or another rebuild superseded this one</exception>
-#pragma warning disable RH2003, S2325
-    public Task<TemplateRebuildResult> RebuildTemplatesAsync(int batchLines, Func<long, CancellationToken, Task>? afterBatch, CancellationToken cancellationToken)
+    public async Task<TemplateRebuildResult> RebuildTemplatesAsync(int batchLines, Func<long, CancellationToken, Task>? afterBatch, CancellationToken cancellationToken)
     {
-        throw new NotImplementedException();
+        if (batchLines < 1 || batchLines > StorageLimits.MaxBatchRecords)
+        {
+            throw new ArgumentOutOfRangeException(nameof(batchLines), batchLines, $"batchLines must be 1 to {StorageLimits.MaxBatchRecords}");
+        }
+
+        try
+        {
+            var marker = TemplateRebuilder.NewMarker();
+            var highId = await RunWriteAsync(async (transaction, token) => await TemplateRebuilder.ClearAsync(_writer, transaction, marker, token).ConfigureAwait(false), cancellationToken).ConfigureAwait(false);
+            var after = 0L;
+            var lines = 0L;
+            var batches = 0;
+
+            while (true)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                var (lastId, counted) = await RunWriteAsync(async (transaction, token) =>
+                                                            {
+                                                                await RequireMarkerAsync(transaction, marker, token).ConfigureAwait(false);
+
+                                                                return await TemplateRebuilder.CountBatchAsync(_writer, transaction, after, highId, batchLines, token).ConfigureAwait(false);
+                                                            },
+                                                            cancellationToken).ConfigureAwait(false);
+
+                if (counted == 0)
+                {
+                    break;
+                }
+
+                after = lastId;
+                lines += counted;
+                batches++;
+
+                if (afterBatch is not null)
+                {
+                    await afterBatch(lines, cancellationToken).ConfigureAwait(false);
+                }
+
+                if (counted < batchLines)
+                {
+                    break;
+                }
+            }
+
+            var templates = await RunWriteAsync(async (transaction, token) =>
+                                                {
+                                                    await RequireMarkerAsync(transaction, marker, token).ConfigureAwait(false);
+
+                                                    return await TemplateRebuilder.FinishAsync(_writer, transaction, token).ConfigureAwait(false);
+                                                },
+                                                cancellationToken).ConfigureAwait(false);
+
+            return new TemplateRebuildResult
+                   {
+                       Lines = lines,
+                       Batches = batches,
+                       Templates = templates
+                   };
+        }
+        catch (SqliteException exception)
+        {
+            throw new StoreException($"store: rebuilding templates: {exception.Message}", exception);
+        }
     }
-#pragma warning restore RH2003, S2325
 
     /// <summary>
     /// Opens the database file in a directory that exists.
@@ -334,6 +395,50 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
         var rows = await QueryTemplatesAsync(sql, parameters, TemplateQueries.ReadTemplate, cancellationToken).ConfigureAwait(false);
 
         return rows.Count > 0 ? rows[0] : null;
+    }
+
+    /// <summary>
+    /// Runs an action in one committed writer transaction under the writer lock.
+    /// </summary>
+    /// <typeparam name="TResult">The type of the result</typeparam>
+    /// <param name="action">The action</param>
+    /// <param name="cancellationToken">Cancels the transaction</param>
+    /// <returns>A task that returns the result of the action</returns>
+    private async Task<TResult> RunWriteAsync<TResult>(Func<SqliteTransaction, CancellationToken, Task<TResult>> action, CancellationToken cancellationToken)
+    {
+        await _writeLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+
+        try
+        {
+            await using var transaction = (SqliteTransaction)await _writer.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, cancellationToken).ConfigureAwait(false);
+            var result = await action(transaction, cancellationToken).ConfigureAwait(false);
+
+            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+
+            return result;
+        }
+        finally
+        {
+            _writeLock.Release();
+        }
+    }
+
+    /// <summary>
+    /// Fails when the run marker of a template rebuild was replaced or removed.
+    /// </summary>
+    /// <param name="transaction">The open transaction</param>
+    /// <param name="marker">The marker of this run</param>
+    /// <param name="cancellationToken">Cancels the check</param>
+    /// <returns>A task that completes when the marker is this run's</returns>
+    /// <exception cref="StoreException">Another rebuild superseded this one</exception>
+    private async Task RequireMarkerAsync(SqliteTransaction transaction, string marker, CancellationToken cancellationToken)
+    {
+        if (await TemplateRebuilder.HoldsMarkerAsync(_writer, transaction, marker, cancellationToken).ConfigureAwait(false))
+        {
+            return;
+        }
+
+        throw new StoreException("store: rebuilding templates: superseded by another rebuild");
     }
 
     #endregion // Methods

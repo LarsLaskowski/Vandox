@@ -17,6 +17,7 @@ public static class CommandLine
 
     private const string ImportName = "import";
     private const string IncidentsName = "incidents";
+    private const string TemplatesName = "templates";
 
     #endregion // Constants
 
@@ -56,7 +57,7 @@ public static class CommandLine
     /// <summary>
     /// Returns the usage text.
     /// </summary>
-    /// <param name="usageFor">The sub-command the usage is for: <c>import</c>, <c>incidents</c>, or anything else for the main command</param>
+    /// <param name="usageFor">The sub-command the usage is for: <c>import</c>, <c>incidents</c>, <c>templates</c>, or anything else for the main command</param>
     /// <returns>The text</returns>
     public static string Usage(string usageFor)
     {
@@ -70,7 +71,12 @@ public static class CommandLine
             return $"Usage of {BinaryName} incidents [-config file]:\n  -config string\n    \tpath of the configuration file\n";
         }
 
-        return $"Usage of {BinaryName}:\n  -config string\n    \tpath of the configuration file (default \"{ConfigConstants.DefaultBackendFile}\")\n  -healthcheck\n    \tprobe /healthz of the running service and exit 0 when it is healthy\n  -version\n    \tprint the version and exit\n\nSub-command:\n  {BinaryName} [flags] import [-config file] <path>\n    \timport the log directory, archive or file at <path>\n  {BinaryName} [flags] incidents [-config file]\n    \trebuild the incidents from the stored data\n";
+        if (usageFor == TemplatesName)
+        {
+            return $"Usage of {BinaryName} templates [-config file]:\n  -config string\n    \tpath of the configuration file\n";
+        }
+
+        return $"Usage of {BinaryName}:\n  -config string\n    \tpath of the configuration file (default \"{ConfigConstants.DefaultBackendFile}\")\n  -healthcheck\n    \tprobe /healthz of the running service and exit 0 when it is healthy\n  -version\n    \tprint the version and exit\n\nSub-command:\n  {BinaryName} [flags] import [-config file] <path>\n    \timport the log directory, archive or file at <path>\n  {BinaryName} [flags] incidents [-config file]\n    \trebuild the incidents from the stored data\n  {BinaryName} [flags] templates [-config file]\n    \trebuild the log template statistics from the stored log lines\n";
     }
 
     /// <summary>
@@ -81,7 +87,7 @@ public static class CommandLine
     /// <param name="index">The position of the argument</param>
     private static void ParseArgument(CommandOptions options, IReadOnlyList<string> args, int index)
     {
-        if (args[index] == ImportName && options.Healthcheck)
+        if (options.Healthcheck || args[index] is not (ImportName or IncidentsName or TemplatesName))
         {
             options.Error = $"unexpected argument {Terminal.Quote(args[index])}";
         }
@@ -89,17 +95,9 @@ public static class CommandLine
         {
             ParseImport(options, args, index + 1);
         }
-        else if (args[index] == IncidentsName && options.Healthcheck)
-        {
-            options.Error = $"unexpected argument {Terminal.Quote(args[index])}";
-        }
-        else if (args[index] == IncidentsName)
-        {
-            ParseIncidents(options, args, index + 1);
-        }
         else
         {
-            options.Error = $"unexpected argument {Terminal.Quote(args[index])}";
+            ParseStoreCommand(options, args, index + 1, args[index]);
         }
     }
 
@@ -229,21 +227,23 @@ public static class CommandLine
     }
 
     /// <summary>
-    /// Parses the arguments of the sub-command <c>incidents</c>.
+    /// Parses the arguments of the sub-command <c>incidents</c> or <c>templates</c>.
     /// </summary>
     /// <param name="options">The options</param>
     /// <param name="args">The arguments</param>
-    /// <param name="start">The position after <c>incidents</c></param>
-    private static void ParseIncidents(CommandOptions options, IReadOnlyList<string> args, int start)
+    /// <param name="start">The position after the sub-command</param>
+    /// <param name="name">The name of the sub-command</param>
+    private static void ParseStoreCommand(CommandOptions options, IReadOnlyList<string> args, int start, string name)
     {
         var index = start;
 
-        options.UsageFor = IncidentsName;
-        options.Incidents = true;
+        options.UsageFor = name;
+        options.Incidents = name == IncidentsName;
+        options.Templates = name == TemplatesName;
 
         if (ParseSubFlags(options, args, ref index) && index < args.Count)
         {
-            options.Error = $"{BinaryName} incidents: no argument is expected";
+            options.Error = $"{BinaryName} {name}: no argument is expected";
         }
     }
 

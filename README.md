@@ -20,8 +20,9 @@ Both support `--version`, which prints version, commit and build date. `vandoxd`
 service; `-config <file>` names its configuration file (default `/etc/vandox/vandoxd.yaml`) and
 `-healthcheck` probes `/healthz` of a running service and exits 0 when it is healthy (the image's Docker
 `HEALTHCHECK` uses it). `vandoxd import <path>` imports a directory, an archive or a log file into the
-database, see *Import logs* below, and `vandoxd incidents` rebuilds the outage incidents from the stored data, see
-*Reconstruct incidents* below.
+database, see *Import logs* below, `vandoxd incidents` rebuilds the outage incidents from the stored data, see
+*Reconstruct incidents* below, and `vandoxd templates` rebuilds the log template statistics, see *Rebuild template
+statistics* below.
 
 ## Layout
 
@@ -418,3 +419,29 @@ refused (each is logged as a warning on standard error). Exit code 0 when the ru
 invalid, the database cannot be opened, the store failed or the run was interrupted (run it again to complete it), 2 for a
 usage error. The log goes to standard error as JSON lines. The command reads every stored log line, so it takes a while on
 a large database; details and limits are in `docs/areas/detection-and-reports.md`.
+
+### Rebuild template statistics
+
+The log template statistics count every stored log line under its template per hour. The service keeps them while it
+stores lines, so lines stored before the statistics existed (a database upgraded from before schema version 8) and lines
+counted under older normalization rules are missing or outdated. `vandoxd templates` empties the statistics and counts
+every stored log line again under the current rules. Run it after upgrading such a database and after a release that changes
+the normalization rules, then run `vandoxd incidents` again:
+
+```
+docker exec -it vandoxd /vandoxd templates
+```
+
+The command counts the lines in batches of 10,000, each in its own transaction, logs the progress to standard error as JSON
+lines and then prints the summary:
+
+```
+Log lines:           3
+Batches:             1
+Templates:           2
+```
+
+Best run while no import runs. Start it once: a second run started meanwhile makes the first one stop with `superseded by
+another rebuild` (exit 1) and itself counts everything. Exit code 0 when the run completed, 1 when the configuration is
+invalid, the database cannot be opened, the store failed, the run was superseded or interrupted, 2 for a usage error. After
+an exit 1 of any kind, run it again until it exits 0: it starts over, and until a run completes the statistics are incomplete.

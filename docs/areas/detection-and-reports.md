@@ -191,7 +191,7 @@ told from a placeholder; a template is a grouping key, not a reversible form of 
 - Per source and hour the number of stored lines is kept as well; an hour in which a source has at least one line is **covered** for
   that source.
 - The statistics are history: they are not changed when log lines are deleted (retention, when it exists, keeps them as hourly
-  rollups). Lines stored before the statistics existed (a database of schema version 7) are not counted.
+  rollups). Lines stored before the statistics existed (a database of schema version 7) are not counted until `vandoxd templates` rebuilds the statistics.
 
 ### Queries
 
@@ -238,8 +238,12 @@ covered hours than the minimum no usual level is known and nothing is reported.
   handles format characters (security area 12 of `.squad/project.md`).
 - The template statistics are kept as hourly rollups (3 years) and outlive the log lines (90 days): after the lines have expired, a
   template's text is the only trace of them.
-- A change of these rules changes only the templates of lines stored afterwards: the old templates keep their statistics, and the
-  changed ones start anew. Rebuilding the statistics from the stored lines is not offered yet.
+- A change of these rules changes only the templates of lines stored afterwards until the statistics are rebuilt: after a rule change
+  `vandoxd templates` recounts every stored line under the current rules, then `vandoxd incidents` is run again.
+- While a rebuild runs and after an interrupted one (the `template_rebuild` row in `meta`, *Template rebuild* in the storage area), hours
+  may hold **partial counts**: they count as covered with counts too low, so new-template and usual-level results are wrong, not
+  unknown, until a run completes (the "unknown" rule of *Queries* covers only hours with no line of the source, as after the schema-7
+  upgrade).
 - The cost of writing log lines grows by the normalization and one statement per template and hour a batch touches; text without
   digits that varies per line costs three statements per line. The measurement for one million lines, and for such a hostile case, is
   in `docs/BENCHMARKS.md`.
@@ -393,7 +397,7 @@ level of the mail services (process state, ports, logs), never individual mail a
 
 `Vandox.Core.Signatures` (`BuiltInSignatures`, `SignatureCatalog`, `SignatureCatalogReader`, `Signature`, `SignatureField`,
 `SignatureFieldType`, `SignatureException`, `SignatureDetector`, `DetectedEvent`, `OpenEvent`, `SignatureKey`, `FieldValue`,
-`NumberGuard`, and the catalog `signatures.yaml` embedded in the assembly).
+`NumberGuard`, and the catalog `signatures.yaml` embedded in the assembly). Template rebuild: `Vandox.Storage` (`TemplateRebuilder`, `SqliteStore.RebuildTemplatesAsync`).
 `Vandox.Core.Templates` (`LogTemplateNormalizer`) for the normalization; `Vandox.Storage` (`BatchWriter`, `TemplateTally`,
 `TemplateQueries`, `SqliteStore` as `ILogTemplateReader`) for the statistics and the queries.
 `Vandox.Core.Incidents` (`Incident` and its parts, `KillClusterer`, `KillCluster`, `IncidentBuilder`, `MemoryAnalysis`,
