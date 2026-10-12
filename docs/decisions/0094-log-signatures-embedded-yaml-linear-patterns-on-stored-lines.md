@@ -136,9 +136,13 @@ these lines starts with the level (*Log import*, *Plesk and web server error log
     (`getimagesize(<client text>): Failed to open stream`), so a client could supply `): (HY000/1040): Too many
     connections` in one line. Rejected for the 1040 warning: only the functions that raise it (`mysqli_connect`,
     `mysqli_real_connect`, `mysqli::__construct`, `mysqli::connect`, `mysqli::real_connect`, `mysqli::mysqli`) are read.
-    The write error keeps any origin without space or parenthesis: PHP raises it without params, and no notice of PHP
-    7.4 or 8.3 carries params (only exif's debug build). An Apache line without a module name is not read either, since
-    any module without a declared name logs that way.
+    The write error keeps any origin without space or parenthesis, because it is raised by many stream functions; but
+    notices can carry params too (exif puts the base name of the image's file, which a client may have chosen, behind
+    its origin also outside debug builds), so the write error is read only when ` in /` follows the error text directly:
+    a real line continues there with the script's absolute path, text in params is followed by `): …`, and a base name
+    holds no `/`. A write error without a script (`in Unknown on line 0`, origins `Unknown` and `PHP Request Shutdown`)
+    is therefore not read, since a file name could supply that text. An Apache line without a module name is not read
+    either, since any module without a declared name logs that way.
 
 ## Decision
 
@@ -168,9 +172,9 @@ signatures*).
   not end a report at it (#202).
 - A full disk is recognized in MariaDB's messages, nginx's file writes and PHP's write errors, and `Too many connections`
   in Postfix's and Dovecot's MySQL client errors and PHP's `mysqli` and PDO errors (#203); the Plesk panel log, Apache's
-  own status texts, a custom Apache `ErrorLogFormat`, Apache 2.2 and a PHP error after an earlier PHP message of the same
-  request are not read. A client of MariaDB can still forge a whole MariaDB entry through a failed login's user name
-  ([0088](0088-mariadb-error-log-entries-by-content-and-lifecycle-events-in-log-line.md)), which reaches the MariaDB
+  own status texts, a custom Apache `ErrorLogFormat`, Apache 2.2, a PHP error after an earlier PHP message of the same
+  request and a PHP write error without a script file are not read. A client of MariaDB can still forge a whole
+  MariaDB entry through a failed login's user name ([0088](0088-mariadb-error-log-entries-by-content-and-lifecycle-events-in-log-line.md)), which reaches the MariaDB
   signatures and the full disk; this stays documented, not prevented.
 - The anchor holds for one line, not for output that a writer splits. nginx copies a PHP message with its line feeds
   (forged lines, [0092](0092-error-logs-by-content-or-configured-path-unreadable-lines-kept-raw.md)), `mod_fcgid` logs every

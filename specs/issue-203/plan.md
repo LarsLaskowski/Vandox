@@ -1,7 +1,7 @@
 # Plan: Recognize disk-full and Too many connections lines of PHP, nginx, Apache and Plesk
 
 Source: Issue #203
-Status: Revised (1)
+Status: Revised (2)
 Tier: security — the change adds signatures to the detection over stored external text, which is security area 10
 (*Parsing of external input*, `Vandox.Core.Signatures`) of `.squad/project.md`, and its whole point is a guard (origin
 condition plus `\A` anchor) against text that HTTP clients control.
@@ -40,7 +40,7 @@ Claims of the issue, checked:
   - PHP log line: `PHP <type>:  <origin>: <text> in <file> on line <n>` (two spaces after the colon); `<type>` is
     `Warning` (E_WARNING), `Notice` (E_NOTICE), `Fatal error` (E_ERROR and uncaught exceptions); `<origin>` is
     `[class::]function(<params>)` of the active function (`main/main.c:1026`, `"%s%s%s(%s)"`), `Unknown` or
-    `PHP Request Shutdown` without one; `<params>` is empty for `php_error_docref` and holds a value the script passed
+    `PHP Request Shutdown` without one (these two log `in Unknown on line 0` as the file); `<params>` is empty for `php_error_docref` and holds a value the script passed
     for `php_error_docref1`/`2` — the stream layer passes the path or URL (`main/streams/streams.c:217`), so
     `getimagesize($_GET['u'])` logs `getimagesize(<client text>): Failed to open stream: …`; a docref link is added only
     when `docref_root` is set (default empty, not read). A message the **application** writes has no PHP head at all:
@@ -51,8 +51,13 @@ Claims of the issue, checked:
     `php_error_docref(NULL, E_WARNING, "(%s/%d): %s", …)`, empty params), reached from `mysqli_common_connect`, i.e. from
     `mysqli_connect`, `mysqli_real_connect`, `mysqli::__construct`, `mysqli::connect`, `mysqli::real_connect` (and
     `mysqli::mysqli` of old versions). The write error is raised with `php_error_docref` (empty params) at E_NOTICE
-    (`main/streams/plain_wrapper.c:397`); no `php_error_docref1`/`2` call at E_NOTICE exists in PHP 7.4, and in 8.3 only
-    exif's `Done` under `EXIF_DEBUG` (`ext/exif/exif.c:4698`), so a `PHP Notice:` origin never carries params.
+    (`main/streams/plain_wrapper.c:397`). A `PHP Notice:` origin **can** carry params (corrected in revision 2, Security
+    R1): exif's `exif_error_docref` calls `php_verror` with the image's file name as params also in non-debug builds
+    (`ext/exif/exif.c:2027`, several E_NOTICE texts such as "Image has corrupt COM section" at :3819), and that name is the
+    base name of the path the script passed (`php_basename`, exif.c:4412-4413), so it holds no `/`. The other
+    `php_verror` callers with params pass fixed texts (`openssl.c:530`: an argument name) or none (`gd.c`, `snmp.c`). A
+    real write error line continues ` in <file> on line <n>` right after `No space left on device`, with the script's
+    absolute path as `<file>` (`in Unknown on line 0` only when no script runs).
   - mysqli connect warning: `<origin>: (<sqlstate>/1040): Too many connections`; mysqlnd sets SQL state `08004` for
     1040 in the greeting, `HY000` is its default (`UNKNOWN_SQLSTATE`); PHP 8.1+ throws by default:
     `Uncaught mysqli_sql_exception: Too many connections in <file>:<line>`; PDO: `Uncaught PDOException:
@@ -108,8 +113,10 @@ All tests are in `tests/Vandox.Core.Tests/BuiltInSignaturesTests.cs` and use its
   3. `sw-cp-server-error`: `[error] 1201#0: *42 FastCGI sent in stderr: "PHP message: PHP Notice:  SplFileObject::fwrite(): Write of 512 bytes failed with errno=28 No space left on device in /opt/psa/admin/plib/Cache.php on line 20"`
   4. `apache-error`: `[proxy_fcgi:error] [pid 3101:tid 140231] [client 198.51.100.7:0] AH01071: Got error 'PHP message: PHP Notice:  fwrite(): Write of 8192 bytes failed with errno=28 No space left on device in /var/www/vhosts/example.org/httpdocs/cache.php on line 7', referer: https://example.org/`
   5. `apache-error`: `[php:notice] [pid 901] [client 198.51.100.7:51234] PHP Notice:  fflush(): Write of 8192 bytes failed with errno=28 No space left on device in /var/www/vhosts/example.org/index.php on line 5`
-  6. `apache-error`: `[fcgid:warn] [pid 3101:tid 140231] [client 198.51.100.7:51234] mod_fcgid: stderr: PHP Notice:  Unknown: Write of 512 bytes failed with errno=28 No space left on device in Unknown on line 0`
-  7. `nginx-error`: `[error] 2101#2101: *16 FastCGI sent in stderr: "PHP message: PHP Notice:  PHP Request Shutdown: Write of 512 bytes failed with errno=28 No space left on device in Unknown on line 0"` (a write at shutdown, PHP 8.3)
+  6. `apache-error`: `[fcgid:warn] [pid 3101:tid 140231] [client 198.51.100.7:51234] mod_fcgid: stderr: PHP Notice:  fputs(): Write of 512 bytes failed with errno=28 No space left on device in /var/www/vhosts/example.org/httpdocs/log.php on line 4`
+
+  (Revision 2: the former rows 6 and 7 — origins `Unknown` and `PHP Request Shutdown`, file `in Unknown on line 0` —
+  are no longer detected and move to AC8 as negative rows; see the Lead decision below.)
 - [ ] AC5: `nginx_disk_full` yields exactly one event without fields for each of these lines. Test:
   `BuiltInSignaturesNginxDiskFullMatchesWriteErrors(string source, string message)`:
   1. `nginx-error`: `[crit] 2101#2101: *16 pwrite() "/var/lib/nginx/body/0000000001" failed (28: No space left on device), client: 198.51.100.7, server: example.org, request: "POST /upload.php HTTP/1.1", host: "example.org"` (the message of the existing row of `BuiltInSignaturesDiskFullIgnoresOtherLines`)
@@ -136,7 +143,10 @@ All tests are in `tests/Vandox.Core.Tests/BuiltInSignaturesTests.cs` and use its
   - n. trigger in the **params of the origin** (stream path), nginx: `[error] 2101#2101: *15 FastCGI sent in stderr: "PHP message: PHP Warning:  getimagesize(): (HY000/1040): Too many connections): Failed to open stream: No such file or directory in /var/www/vhosts/example.org/httpdocs/img.php on line 4" while reading response header from upstream, client: 198.51.100.7` — the guard is the closed set of mysqli origins
   - o. the same through `include()` behind the Apache module: `[php:warn] [pid 901] [client 198.51.100.7:51234] PHP Warning:  include(): (HY000/1040): Too many connections.php): Failed to open stream: No such file or directory in /var/www/vhosts/example.org/index.php on line 3`
   - p. the same behind `mod_proxy_fcgi`: `[proxy_fcgi:error] [pid 3101:tid 140231] [client 198.51.100.7:0] AH01071: Got error 'PHP message: PHP Warning:  file_get_contents(): (HY000/1040): Too many connections): Failed to open stream: No such file or directory in /x.php on line 4'`
-  - q. the write text in the params of a warning: `[php:warn] [pid 901] [client 198.51.100.7:51234] PHP Warning:  fopen(): Write of 1 bytes failed with errno=28 No space left on device): Failed to open stream: No such file or directory in /x.php on line 4` (no match: `php_disk_full` reads `PHP Notice:` only, and no E_NOTICE origin carries params)
+  - q. the write text in the params of a warning: `[php:warn] [pid 901] [client 198.51.100.7:51234] PHP Warning:  fopen(): Write of 1 bytes failed with errno=28 No space left on device): Failed to open stream: No such file or directory in /x.php on line 4` (no match: `php_disk_full` reads `PHP Notice:` only)
+  - r. the write text in the params of an exif notice (a stored upload named by the client), nginx: `[error] 2101#2101: *15 FastCGI sent in stderr: "PHP message: PHP Notice:  exif_read_data(): Write of 1 bytes failed with errno=28 No space left on device): Image has corrupt COM section: some software set wrong length information in /var/www/vhosts/example.org/httpdocs/upload.php on line 9" while reading response header from upstream, client: 198.51.100.7` — the guard is ` in /` right after the error text (a base name holds no `/`)
+  - s. the same behind the Apache module: `[php:notice] [pid 901] [client 198.51.100.7:51234] PHP Notice:  exif_read_data(): Write of 1 bytes failed with errno=28 No space left on device): Image has corrupt COM section: some software set wrong length information in /var/www/vhosts/example.org/upload.php on line 9`
+  - t. the same with a file name that also supplies the file part without a slash: `[php:notice] [pid 901] [client 198.51.100.7:51234] PHP Notice:  exif_read_data(): Write of 1 bytes failed with errno=28 No space left on device in Unknown on line 0"): Image has corrupt COM section: some software set wrong length information in /var/www/vhosts/example.org/upload.php on line 9` — the reason `in Unknown on line` is not accepted
   - i. FastCGI stderr, trigger after a real line feed in the message: `[error] 2101#2101: *15 FastCGI sent in stderr: "PHP message: PHP Warning:  Undefined array key "q` + line feed + `T1 in /x.php on line 1" in /var/www/vhosts/example.org/httpdocs/index.php on line 2"` — the guard is `\A` (a `^` would match after the line feed)
   - j. Apache `referer:` — `[proxy_fcgi:error] [pid 3101:tid 140231] [client 198.51.100.7:0] AH01071: Got error 'PHP message: PHP Warning:  Undefined variable $x in /var/www/vhosts/example.org/httpdocs/index.php on line 12', referer: T1` (and the same with `T2`)
   - k. Apache request path in the message — `[authz_core:error] [pid 3101:tid 140231] [client 198.51.100.7:0] AH01630: client denied by server configuration: /var/www/vhosts/example.org/httpdocs/T1`
@@ -160,7 +170,9 @@ All tests are in `tests/Vandox.Core.Tests/BuiltInSignaturesTests.cs` and use its
     without a module name (`[:warn] [pid 901] [client 198.51.100.7:51234] PHP Warning:  mysqli_connect(): (HY000/1040): Too many connections in /x.php on line 3`, Security N2).
   - `BuiltInSignaturesPhpDiskFullIgnoresOtherLines(string source, string message)`: `errno=122 Disk quota exceeded`;
     `Read of 8192 bytes failed with errno=28 No space left on device`; `PHP Warning:  file_put_contents(): Only 0 of
-    4096 bytes written, possibly out of free disk space`; the AC4 row 1 line on source `plesk-panel`; the existing
+    4096 bytes written, possibly out of free disk space`; the AC4 row 1 line on source `plesk-panel`; the write error
+    without a script file (documented detection loss of revision 2): `[fcgid:warn] [pid 3101:tid 140231] [client 198.51.100.7:51234] mod_fcgid: stderr: PHP Notice:  Unknown: Write of 512 bytes failed with errno=28 No space left on device in Unknown on line 0`
+    and `[error] 2101#2101: *16 FastCGI sent in stderr: "PHP message: PHP Notice:  PHP Request Shutdown: Write of 512 bytes failed with errno=28 No space left on device in Unknown on line 0"`; the existing
     `plesk-panel` row of `BuiltInSignaturesDiskFullIgnoresOtherLines` stays where it is.
   - `BuiltInSignaturesNginxDiskFullIgnoresOtherLines(string source, string message)`: the AC5 row 1 line on source
     `apache-error`; at level `error` (`[error] 2101#2101: *16 pwrite() "/x" failed (28: No space left on device)`);
@@ -227,7 +239,7 @@ entries (YAML single-quoted scalars, so the quote before `PHP message` in Apache
   - id: php_disk_full
     description: PHP could not write a file because a file system was full (errno 28), as nginx or Apache logged the first PHP message of a request.
     source: [nginx-error, sw-cp-server-error, apache-error]
-    message: '\A(?:\[error\] [0-9]+#[0-9]+: \*[0-9]+ FastCGI sent in stderr: "PHP message: |\[proxy_fcgi:error\] \[pid [0-9]+(?::tid [0-9]+)?\] \[client [0-9A-Fa-f:.]+:[0-9]+\] AH01071: Got error ''PHP message: |\[fcgid:warn\] \[pid [0-9]+(?::tid [0-9]+)?\] \[client [0-9A-Fa-f:.]+:[0-9]+\] mod_fcgid: stderr: |\[php[0-9]?:(?:error|warn|notice)\] \[pid [0-9]+(?::tid [0-9]+)?\] \[client [0-9A-Fa-f:.]+:[0-9]+\] )PHP Notice:  (?:[^ \n()]+\(\)|Unknown|PHP Request Shutdown): [Ww]rite of [0-9]+ bytes failed with errno=28 No space left on device'
+    message: '\A(?:\[error\] [0-9]+#[0-9]+: \*[0-9]+ FastCGI sent in stderr: "PHP message: |\[proxy_fcgi:error\] \[pid [0-9]+(?::tid [0-9]+)?\] \[client [0-9A-Fa-f:.]+:[0-9]+\] AH01071: Got error ''PHP message: |\[fcgid:warn\] \[pid [0-9]+(?::tid [0-9]+)?\] \[client [0-9A-Fa-f:.]+:[0-9]+\] mod_fcgid: stderr: |\[php[0-9]?:(?:error|warn|notice)\] \[pid [0-9]+(?::tid [0-9]+)?\] \[client [0-9A-Fa-f:.]+:[0-9]+\] )PHP Notice:  [^ \n()]+\(\): [Ww]rite of [0-9]+ bytes failed with errno=28 No space left on device in /'
   - id: nginx_disk_full
     description: nginx could not write a file because a file system was full (error 28).
     source: [nginx-error, sw-cp-server-error]
@@ -251,7 +263,9 @@ first match only). Forms that reach it, and its behavior:
 | trigger in a requested path inside the message | AC6 e, f; existing `open()` row | no match: only write calls are read (`open()`, `stat()`, `mkdir()` and paths in other texts are not), so the quote-closing path cannot supply the call |
 | trigger in a later PHP message (`; `, Apache `\n` escape) | AC6 g, l; AC7 | no match: the PHP text must follow the first `PHP message: ` (or Apache's prefix) directly |
 | trigger as a fragment inside the text of a PHP-raised message | AC6 h | no match: the text after a PHP-raised head is not read; this says nothing about heads the application writes (row below) |
-| trigger in the params of the origin (`getimagesize(<path>)`, `include(<path>)`, stream functions) | AC6 n, o, p, q | no match: `php_too_many_connections` accepts only the mysqli connect origins with empty params; `php_disk_full` reads `PHP Notice:` only, whose origins never carry params (no E_NOTICE `php_error_docref1`/`2` in PHP 7.4, only exif's debug `Done` in 8.3); the open class `[^ \n()]+` there excludes space and parentheses |
+| trigger in the params of the origin (`getimagesize(<path>)`, `include(<path>)`, stream functions) | AC6 n, o, p, q | no match: `php_too_many_connections` accepts only the mysqli connect origins with empty params; `php_disk_full` reads `PHP Notice:` only (row q) |
+| trigger in the params of a **notice** origin: exif's `exif_read_data(<file name>)`, the base name of a file the script passed, also in non-debug builds (`exif.c:2027`) | AC6 r, s, t | no match: `php_disk_full` requires ` in /` directly after `No space left on device`; a real line continues with the script's absolute path there, while text supplied in params is followed by `): <exif text>` and a base name holds no `/`, so it cannot supply ` in /` itself (row t: `in Unknown on line 0` is not accepted for this reason) |
+| write error without a script file (origins `Unknown`, `PHP Request Shutdown`; `in Unknown on line 0`) | AC8 | no match: detection loss accepted in revision 2, because ` in Unknown` could be supplied by a file name |
 | message whose head the **application** writes: `trigger_error($x)` (`PHP Warning:  <x>` / `PHP Notice:  <x>`, no origin), `error_log($x)` without an `error_log` file (FPM `PHP message: <x>`, php-cgi `<x>`, Apache module at `notice`) with client text at the start of `$x` | (documented, not tested: indistinguishable from a real line) | **match**: residual (2) in *Security considerations* |
 | trigger after a real line feed in the same record | AC6 i | no match: `\A`, not `^` |
 | trigger in Apache `referer:` or a request path in Apache's message | AC6 j, k | no match: after the message / not after the prefix |
@@ -261,7 +275,7 @@ first match only). Forms that reach it, and its behavior:
 | PHP output split by the writer (nginx keeps line feeds; `mod_fcgid` one entry per line; nginx and `mod_proxy_fcgi` log stderr per read-buffer chunk) with client text at the start of the new entry | (documented, not tested: indistinguishable from a real line) | **match**: residual, see *Security considerations* |
 | WebDAV `COPY` destination or a variable access log path in a failed nginx write | (documented) | **match** when the write fails with another error: residual |
 | Apache line without a module name (`[:warn]`, a module without `APLOG_USE_MODULE`) | AC8 | no match: the Apache-module alternative requires `php`, `php5`, `php7` or `php8` (Security N2: dropped instead of documented) |
-| raw lines (no time stamp) of nginx | the stack trace in AC9 | no match: their message starts with the line itself, never with the level prefix — unless forged, the residual of record 0092 (needs a line feed and a whole forged time stamp in nginx) |
+| raw lines (no time stamp) of nginx | the stack trace in AC9 | no match for a line that does not begin with a prefix; but a line nginx continues after a line feed in PHP output becomes a raw record whose message is the whole line, so it needs only the prefix (`[error] N#N: *N FastCGI sent in stderr: "PHP message: …`), no time stamp: residual (1) (Security N3) |
 | raw lines of Apache from inherited standard error (programs that PHP's Apache module or a CGI starts write into the error log directly); and `php://stderr` of php-cgi under `mod_fcgid`, which becomes `mod_fcgid: stderr: <x>` | (documented) | **match** when such a line begins with one of the prefixes: a raw record's message is the whole line, so it needs only the prefix, no time stamp: residual (2) |
 
 ## Options considered
@@ -331,8 +345,9 @@ trigger text; they stay unchanged.
   an application puts into such a message can create a PHP event. Likewise a WebDAV `COPY` destination or a variable
   access log path in a failed nginx write, and an Apache client address that a reverse-proxy module copies unchecked
   from a forwarded header (`mod_remoteip` stores a parsed address; Plesk's module is not verified).
-- In the paragraph on writers also: an Apache line without a module name (`[:warn]`) is not read, and PHP 8.3's
-  `PHP Request Shutdown` origin is read for the write error.
+- In the paragraph on writers also: an Apache line without a module name (`[:warn]`) is not read, and PHP's write error
+  is read only when ` in /<script path>` follows the error text, so a write error without a script (origins `Unknown`,
+  `PHP Request Shutdown`, `in Unknown on line 0`, e.g. a session or output flush at shutdown) is not recognized.
 
 `docs/areas/log-import.md` (*Plesk and web server error logs*, *Forged lines (limitation)*), owner **Dev**: append
 "Forged lines reach the signatures of PHP and nginx (*Detection, alerts and reports*, *Log signatures*)." to that
@@ -423,16 +438,29 @@ not by a weaker mechanism for the existing signatures.
   through `getimagesize()` (nginx), `include()` (`[php:warn]`) and `file_get_contents()` (`mod_proxy_fcgi`); AC8 adds
   another origin (`mysqli_query()`). Re-check of the whole list of accepted forms for both PHP signatures: the four
   prefixes (fixed text, digits, the address class), the PHP type word (fixed), the origin (closed set for 1040; for the
-  write error the open class `[^ \n()]+` with empty params, because the write error is raised by `php_error_docref` and
-  no E_NOTICE `php_error_docref1`/`2` exists in 7.4 and only exif's `EXIF_DEBUG` `Done` in 8.3 — recorded in the problem
-  section and the guard table; AC6 q pins that a `PHP Warning:` with the write text in its params gives nothing), the
-  error text (fixed). The forms left that a client can drive are residuals 1, 2, 3 and 4.
+  write error the open class `[^ \n()]+` — the claim made here in revision 1 that no notice origin carries params was
+  false and is withdrawn, see R1 below; AC6 q pins that a `PHP Warning:` with the write text in its params gives
+  nothing), the error text (fixed).
+- **R1 (round 2: exif notices carry the client-named file's base name as params, `exif.c:2027`)** — confirmed (also
+  that `openssl.c:530` passes an argument name and `gd.c`/`snmp.c` pass none). The false claim is corrected in the
+  problem section, the guard table, this section and record 0094 option 23. Lead decision (mode `decide`, second
+  rejection): **narrow the scope** of `php_disk_full` to Security's option (b), restricted further: the pattern now ends
+  `No space left on device in /`, so a line is read only when the script's absolute path follows the error text; text
+  supplied in params is followed by `): …`, and a base name holds no `/`. The alternative ` in Unknown on line` of
+  option (b) is **not** taken, because a file name can supply it (AC6 t); so the origins `Unknown` and
+  `PHP Request Shutdown` are dropped again (N1 reversed) and write errors without a script are not detected (AC4 rows
+  6 and 7 of revision 1 move to AC8). Options (a) (an enumerated set of write origins: lossy for every unlisted stream
+  function, and the class would still need the same reasoning) and (c) (a residual PHP itself raises) lost. AC6 r, s, t
+  add the exif route (nginx, `[php:notice]`, and the `in Unknown` variant).
+- **N3 (round 2: nginx raw lines need only the prefix)** — accepted: the guard-table row now says that a line nginx
+  continues after a line feed in PHP output is a raw record needing only the prefix, covered by residual (1). The forms left that a client can drive are residuals 1, 2, 3 and 4.
 - **B2 (application-written heads: `error_log`, `trigger_error`, inherited standard error; raw Apache lines need only the
   prefix)** — resolved as a documented residual of its own (residual 2) in *Security considerations*, the guard table
-  (corrected row h; new rows for application-written heads and for Apache raw lines, separate from nginx's raw lines,
-  which need a forged time stamp), record 0094 *Consequences*, the Limitations text of the area document; the "one line"
+  (corrected row h; new rows for application-written heads and for Apache raw lines; nginx's raw lines corrected in
+  revision 2, N3), record 0094 *Consequences*, the Limitations text of the area document; the "one line"
   claims are corrected in record 0094 *Decision* and in the planned `.squad/project.md` text.
-- **N1 (`PHP Request Shutdown` origin)** — accepted: `php_disk_full` accepts it as a fixed literal; AC4 row 7.
+- **N1 (`PHP Request Shutdown` origin)** — accepted in revision 1, reversed in revision 2 (R1): the shutdown write logs
+  `in Unknown on line 0`, which a file name can supply, so it is not read.
 - **N2 (`[:error]` without a module name)** — accepted by tightening instead of documenting: the Apache-module
   alternative now requires `php[0-9]?`; AC3 row 8 uses `[php:error]`, and AC8 adds a `[:warn]` row that gives nothing.
   PHP's Apache handler declares `APLOG_USE_MODULE` in 7.4 and 8.3, so only PHP versions older than the supported ones
