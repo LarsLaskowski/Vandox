@@ -1,0 +1,73 @@
+# Signatures of known events: decision record 0094, rules in docs/areas/detection-and-reports.md (Log signatures).
+# A signature matches one log line: every given condition must hold. program and source together are one condition
+# (the line's program or its record source is listed); event and message are one condition each.
+# Patterns run with RegexOptions NonBacktracking, Multiline, CultureInvariant and ExplicitCapture; write [0-9], never
+# the Unicode digit class, and exclude \n from character classes. Every named group is a field, and every field is a
+# named group. A signature that reads a message which can hold remote text (web server lines, mail addresses, user
+# names) anchors its pattern with \A at server-written text, never with ^ (which matches after every line feed).
+# Adding a signature: an entry here plus a positive and a negative test in BuiltInSignaturesTests.
+signatures:
+  - id: oom_kill
+    description: The kernel's OOM killer killed a process.
+    program: [kernel]
+    message: '^(?:\[ *[0-9]+\.[0-9]+\] )?(?:Out of memory(?: \(oom_kill_allocating_task\))?|Memory cgroup out of memory): Killed process (?<victim_pid>[0-9]+) \((?<victim_command>.*)\) total-vm:[0-9]+kB, anon-rss:(?<anon_rss_bytes>[0-9]+)kB(?:.* oom_score_adj:(?<oom_score_adj>-?[0-9]+))?'
+    fields:
+      victim_pid: integer
+      victim_command: text
+      anon_rss_bytes: kibibytes
+      oom_score_adj: integer
+  - id: mariadb_crash
+    description: MariaDB stopped on a fatal signal.
+    event: [mariadb.abort]
+    message: 'got signal (?<signal>[0-9]+) ;$'
+    fields:
+      signal: integer
+  - id: mariadb_recovery_start
+    description: MariaDB started a crash recovery.
+    event: [mariadb.recovery_start]
+  - id: mariadb_recovery_end
+    description: MariaDB finished a crash recovery.
+    event: [mariadb.recovery_end]
+  - id: mariadb_too_many_connections
+    description: Postfix or Dovecot could not connect to MariaDB because of Too many connections (error 1040).
+    program: [postfix/proxymap, postfix/cleanup, postfix/smtpd, postfix/trivial-rewrite, postfix/local, postfix/virtual, dovecot]
+    source: [dovecot]
+    message: '\A(?:warning: connect to mysql server [^ \n]+: Too many connections|auth-worker\([0-9]+\): Error: mysql\([^)\n]*\): Connect failed to database \([^)\n]*\): Too many connections)'
+  - id: service_start
+    description: systemd started a unit (on systemd 249 named by its description).
+    program: [systemd]
+    message: '^Started (?:(?<unit>[^ \n]+\.service) - )?(?<description>.+)\.$'
+    fields:
+      unit: text
+      description: text
+  - id: service_stop
+    description: systemd stopped a unit (on systemd 249 named by its description).
+    program: [systemd]
+    message: '^Stopped (?:(?<unit>[^ \n]+\.service) - )?(?<description>[^(\n].*)\.$'
+    fields:
+      unit: text
+      description: text
+  - id: service_failed
+    description: A systemd service failed.
+    program: [systemd]
+    message: '^(?<unit>[^ \n]+\.service): Failed with result ''(?<result>[^''\n]+)''\.$'
+    fields:
+      unit: text
+      result: text
+  - id: disk_full
+    description: MariaDB could not write because a file system was full.
+    program: [mariadbd, mysqld]
+    source: [mariadb]
+    message: '\A(?:[^ \n]+: )?(?:Disk full \(|Disk is full writing '')'
+  - id: postfix_fatal
+    description: Postfix logged a fatal error or a panic.
+    event: [postfix.fatal, postfix.panic]
+  - id: dovecot_fatal
+    description: Dovecot logged a fatal error or a panic.
+    event: [dovecot.fatal, dovecot.panic]
+  - id: boot
+    description: The kernel started (the first kernel line of a boot).
+    program: [kernel]
+    message: '^(?:\[ *[0-9]+\.[0-9]+\] )?Linux version (?<kernel_version>[^ \n]+) '
+    fields:
+      kernel_version: text

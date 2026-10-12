@@ -113,8 +113,15 @@ files or endpoints.
     `LegacyLsofLine` puts a strict address guard in front of `IPAddress.TryParse`, so only the forms `lsof` prints reach it and no zone is looked up on the host;
     `LegacyServiceNames` is a built-in table of port names, never a lookup; forged snapshots are a documented limitation, record 0093), and the backend options `import.time_zone` (`SourceTimeZone`) and
     `import.plesk_panel_log`, `import.sw_cp_server_error_log`, `import.nginx_error_log` and `import.apache_error_log`
-    (`BackendConfigLoader`: absolute, clean path of a file in a directory, the value never shown in an error). Records 0048, 0049, 0066, 0069, 0076, 0078, 0079, 0084,
-    0085, 0086, 0088, 0091, 0092, 0093.
+    (`BackendConfigLoader`: absolute, clean path of a file in a directory, the value never shown in an error). The signature detection over stored log lines
+    (`Vandox.Core.Signatures`: `SignatureCatalog`, `SignatureDetector`, `BuiltInSignatures`) reads the embedded catalog and the decoded messages of stored
+    records: patterns run on the non-backtracking engine in linear time, with the constructs it cannot run refused when the catalog loads; a signature
+    without an event condition that reads a message which can hold remote text (`disk_full`, `mariadb_too_many_connections`) carries an origin condition (`program` or `source`) and a `\A` anchor at server-written text, so remote text in web server or
+    mail lines cannot trigger it; integer fields are accepted only as ASCII digits by an ordinal scan of the whole captured text and range-checked before
+    use (`NumberGuard`); text fields are cut to 1,024 bytes; at most 1,024 events are open and 256 IDs kept per event, and an open event keeps no message,
+    match or record; an event is a classification, not proof of origin: local processes can log as `kernel`, `systemd`, `mariadbd`, `postfix/*` or
+    `dovecot`, and MariaDB entries forged through a login name reach the MariaDB signatures (record 0094). Records 0048, 0049, 0066, 0069, 0076, 0078, 0079, 0084,
+    0085, 0086, 0088, 0091, 0092, 0093, 0094.
 11. **Outbound calls** (Telegram, external checks, the optional AI service of the nightly report, the
     agent's connection to the backend): *Goal:* every call has a timeout, goes only to its configured
     destination and leaves encrypted to a verified peer. The agent's only destination is the ingest port,
@@ -138,7 +145,8 @@ files or endpoints.
     methods (`BackendLog`), and `/healthz` never returns an error text. `vandoxd import` prints every path and
     reason in its summary through `Terminal.Quote`; its log lines carry the input-derived attributes (`path`, `reason`,
     a run error's text) as JSON strings, whose encoder escapes control characters, DEL, C1 controls and
-    format characters (`ImportSummaryWriter`, `ImportProgressLogger`). Records 0072, 0081.
+    format characters (`ImportSummaryWriter`, `ImportProgressLogger`). The text fields of detected events (`DetectedEvent.Texts`: victim command, unit,
+    description, result, kernel version) are captures of log text and external text: whoever shows them escapes them like any log line. Records 0072, 0081.
 13. **Release pipeline and published artifacts** (`.github/workflows/release.yml`,
     `.github/workflows/base-image-digests.yml`, `.github/scripts/`, `deploy/backend/Dockerfile`,
     `.dockerignore`, `dotnet-tools.json`, the GitHub environment `release`; the smoke script
@@ -261,7 +269,7 @@ double under this name and changes the status.
 | journald | fake journal reader (scripted entries, cursors and errors, and a reader that blocks until its context is cancelled, for 0029) |
 | MariaDB socket | fake MariaDB status source (status variables, process list, errors, and a source that hangs until its context is cancelled, for 0029) |
 | database (C#) | `FakeImportStore` for `IImportStore` (in-memory import state and records, base lookup, scripted begin, find and write failures, `AfterBatch` hook; also records line hashes with scripted failures and emulates attempts and containment as the store does; `tests/Vandox.Import.Tests`); a scripted ping delegate for `PingChecker` (`tests/Vandox.Backend.Tests`); the SQLite store itself is tested against a real database file in a `TempDirectory` (implemented) |
-| log parsers (C#) | `FakeParser` (scripted `Detect` and `Parse`) in `tests/Vandox.Core.Tests`, `LineParser` and `ProbeParser` (counts starts and completions, can stop reading early) in `tests/Vandox.Import.Tests`; `RecordingEmitter` (records, skips and warnings, validates every record like the importer, optional failure and observer), `CountingEmitter` (validates like `RecordingEmitter`, keeps no record, counts per event, priority and warnings), `JournalExportBuilder` (text and binary fields as bytes), `MariaDbSamples` (records, journal entries, syslog lines and the feeds of the error log fixture for the MariaDB line tests), `PatternStream` (lazily generated input for the heap-bound tests), `LegacyMonitorSamples` (summary lines, rows, sockets and snapshots of the legacy monitoring log as text) and `SegmentStream` (byte segments repeated lazily, for the heap-bound tests of the legacy monitoring log parser) in `tests/Vandox.Core.Tests` (implemented) |
+| log parsers (C#) | `FakeParser` (scripted `Detect` and `Parse`) in `tests/Vandox.Core.Tests`, `LineParser` and `ProbeParser` (counts starts and completions, can stop reading early) in `tests/Vandox.Import.Tests`; `RecordingEmitter` (records, skips and warnings, validates every record like the importer, optional failure and observer), `CountingEmitter` (validates like `RecordingEmitter`, keeps no record, counts per event, priority and warnings), `JournalExportBuilder` (text and binary fields as bytes), `MariaDbSamples` (records, journal entries, syslog lines and the feeds of the error log fixture for the MariaDB line tests), `PatternStream` (lazily generated input for the heap-bound tests), `LegacyMonitorSamples` (summary lines, rows, sockets and snapshots of the legacy monitoring log as text) and `SegmentStream` (byte segments repeated lazily, for the heap-bound tests of the legacy monitoring log parser), `SignatureSamples` (log line records, catalog texts and a detector run for the signature tests) and `DiscardingEventCollection` (counts the detected events and keeps none, for the heap-bound test) in `tests/Vandox.Core.Tests` (implemented) |
 | files (C#) | `TempDirectory` helper per test project (a unique directory below the temp path, removed on dispose); `RepositoryFiles.Path` for fixtures such as `testdata/` and `deploy/` |
 | Telegram Bot API | fake Telegram client (records sent messages, returns scripted updates; no network) |
 | Tailscale network | none in code (0017: `vandoxd` embeds no Tailscale); the agent's sender is tested against a `net/http/httptest` server standing in for the ingest port; the ACL itself is deployment configuration, reviewed, not unit-tested |
