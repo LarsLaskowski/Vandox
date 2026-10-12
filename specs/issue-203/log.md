@@ -16,3 +16,4 @@ are quoted in full.
 | 2026-10-12 17:45 | 4 Skeleton | Orchestrator | skipped: catalog data only, no API change |
 | 2026-10-12 17:48 | 5 Tests first | squad-tester | 24 new tests fail on current catalog (AC1-5, AC9; AC10 adapted, AC6-8 wait for coverage pass) (sonnet/medium · 115,523 tokens · 9 tool uses · 208 s) |
 | 2026-10-12 17:55 | 6 Implement | squad-dev | 3 signatures in signatures.yaml + docs; Core tests 3570 pass, Coverage gate PASS (sonnet/medium · 93,168 tokens · 11 tool uses · 393 s) |
+| 2026-10-12 18:04 | 6 Coverage pass | squad-tester | AC6-AC8 pin tests added, all pass; Coverage gate PASS (sonnet/medium · 11,526 tokens · 7 tool uses · 314 s · continued) |
