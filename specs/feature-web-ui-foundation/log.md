@@ -12,3 +12,4 @@ are quoted in full.
 | 2026-10-12 21:21 | 3 Plan revise | Lead | RESULT: DONE; all Security and 5 challenge findings accepted, plan.md Challenge/Security review sections, WebSourceScanner, tier stays security (opus/medium · 115,148 tokens · 57 tool uses · 523 s) |
 | 2026-10-12 21:22 | 3 Plan security review (delta) | Security | APPROVED; 3 non-blocking notes appended to plan.md (comment-stripping gap, exact src name, quoted smoke compare) (opus/medium · 34,675 tokens · 5 tool uses · 53 s · continued) |
 | 2026-10-12 21:24 | 4 Skeleton | Dev | Skeleton done (task 1); build 0 warnings/0 errors; no deviations (sonnet/medium · 98,574 tokens · 10 tool uses · 126 s) |
+| 2026-10-12 21:41 | 5 Tests first | Tester | Tests written (rows 2, 12); I confirmed: 37 fail on skeleton, 224 pass, all failures new tests; AC3 guard and WebSourceScannerTests pass by nature; AC1 pin deferred to row 13 (sonnet/medium · 236,610 tokens · 46 tool uses · 970 s) |
