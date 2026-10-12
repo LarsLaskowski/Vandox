@@ -44,6 +44,12 @@ public sealed class BackendConfig
     public ImportConfig Import { get; } = new();
 
     /// <summary>
+    /// Gets the incident reconstruction options.
+    /// </summary>
+    [ConfigKey("incidents")]
+    public IncidentConfig Incidents { get; } = new();
+
+    /// <summary>
     /// Gets or sets the secrets of the backend.
     /// </summary>
     public BackendSecrets Secrets { get; set; } = new();
@@ -58,7 +64,7 @@ public sealed class BackendConfig
     /// <returns>The key paths</returns>
     public static IReadOnlyList<string> Keys()
     {
-        return ["web.listen", "ingest.listen", "storage.directory", "log.level", "import.plesk_panel_log", "import.sw_cp_server_error_log", "import.nginx_error_log", "import.apache_error_log", "import.time_zone"];
+        return ["web.listen", "ingest.listen", "storage.directory", "log.level", "import.plesk_panel_log", "import.sw_cp_server_error_log", "import.nginx_error_log", "import.apache_error_log", "import.time_zone", "incidents.window_before", "incidents.window_after"];
     }
 
     #endregion // Methods

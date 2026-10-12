@@ -24,6 +24,8 @@ internal static class RecordQueries
 
     #region Fields
 
+    private static readonly byte[] _nullJson = "null"u8.ToArray();
+
     private static readonly string[] _kinds = [
                                                   RecordKind.Metric,
                                                   RecordKind.ProcessSnapshot,
@@ -50,6 +52,7 @@ internal static class RecordQueries
         Require(_kinds.Contains(query.Kind), "unknown kind");
         Require(query.Name.Length == 0 || query.Kind == RecordKind.Metric, "name needs the kind metric");
         Require(query.Name.Length == 0 || query.Source.Length > 0, "name needs a source");
+        Require(query.AfterId >= 0, "after id must not be negative");
     }
 
     /// <summary>
@@ -81,12 +84,17 @@ internal static class RecordQueries
                              ["$limit"] = (long)query.Limit
                          };
 
+        if (query.AfterId > 0)
+        {
+            parameters["$after"] = query.AfterId;
+        }
+
         if (query.Name.Length > 0)
         {
             parameters["$source"] = query.Source;
             parameters["$name"] = query.Name;
 
-            var metricSql = $"{SelectColumns(true, false)} FROM metrics m JOIN records r ON r.id = m.record_id WHERE m.source = $source AND m.name = $name AND m.captured_at >= $from AND m.captured_at < $to ORDER BY m.captured_at, m.record_id LIMIT $limit";
+            var metricSql = $"{SelectColumns(true, false)} FROM metrics m JOIN records r ON r.id = m.record_id WHERE m.source = $source AND m.name = $name AND m.captured_at >= $from{(query.AfterId > 0 ? " AND (m.captured_at > $from OR m.record_id > $after)" : string.Empty)} AND m.captured_at < $to ORDER BY m.captured_at, m.record_id LIMIT $limit";
 
             return (metricSql, parameters);
         }
@@ -109,6 +117,11 @@ internal static class RecordQueries
         {
             sql += " AND r.source = $source";
             parameters["$source"] = query.Source;
+        }
+
+        if (query.AfterId > 0)
+        {
+            sql += " AND (r.captured_at > $from OR r.id > $after)";
         }
 
         return (sql + " AND r.captured_at >= $from AND r.captured_at < $to ORDER BY r.captured_at, r.id LIMIT $limit", parameters);
@@ -271,7 +284,7 @@ internal static class RecordQueries
             throw new StoreException($"store: reading records: unknown record kind {FieldError.QuoteName(kind)}");
         }
 
-        using var document = JsonDocument.Parse(reader.IsDBNull(10) ? "null" : reader.GetString(10));
+        using var document = JsonDocument.Parse(reader.IsDBNull(10) ? _nullJson : reader.GetFieldValue<byte[]>(10));
 
         return PayloadRegistry.Deserialize(kind, document.RootElement)
                    ?? throw new StoreException($"store: reading records: decoding {kind.ToString(CultureInfo.InvariantCulture)} payload: no data");

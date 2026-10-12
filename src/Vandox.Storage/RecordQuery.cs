@@ -37,5 +37,11 @@ public sealed class RecordQuery
     /// </summary>
     public int Limit { get; set; }
 
+    /// <summary>
+    /// Gets or sets the ID after which records at the capture time <see cref="From"/> are returned; 0 returns them all. It
+    /// pages through records that share a capture time.
+    /// </summary>
+    public long AfterId { get; set; }
+
     #endregion // Properties
 }

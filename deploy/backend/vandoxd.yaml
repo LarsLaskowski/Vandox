@@ -58,3 +58,11 @@ import:
   # local time without an offset; such a file fails with "import.time_zone is not set" until this is set (a
   # re-run then completes it). No default.
   # time_zone: Europe/Berlin
+
+
+incidents:
+  # How long before an OOM kill an incident starts: a whole number of minutes or hours, written such as 30m or
+  # 1h, from 1m to 24h. Used by "vandoxd incidents". Default: 1h
+  window_before: 1h
+  # How long after an OOM kill an incident ends, same format and range as window_before. Default: 30m
+  window_after: 30m

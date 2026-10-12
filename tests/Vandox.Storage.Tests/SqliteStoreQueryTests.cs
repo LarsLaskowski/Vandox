@@ -1,3 +1,5 @@
+using Microsoft.Data.Sqlite;
+
 using Vandox.Core.Model;
 
 namespace Vandox.Storage.Tests;
@@ -319,6 +321,220 @@ public class SqliteStoreQueryTests
         // Assert
         Assert.AreEqual("store: invalid query: search text is longer than 1024 bytes", tooLong.Message, "long text message");
         Assert.AreEqual("store: invalid query: from must be before to", badWindow.Message, "window message");
+    }
+
+    /// <summary>
+    /// Paging with the last capture time as the start and the last ID as AfterId returns every record once, in order, even when many records share one capture time.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task SqliteStoreRecordsPagesAfterId()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+        var records = new List<DataRecord>();
+
+        for (var index = 0; index < 5; index++)
+        {
+            records.Add(Samples.Log(RecordOrigin.Backend, 0, 10, $"same time {index}"));
+            records.Add(Samples.Metric(RecordOrigin.Backend, 0, 10, "cpu"));
+        }
+
+        records.Add(Samples.Log(RecordOrigin.Backend, 0, 20, "later 1"));
+        records.Add(Samples.Log(RecordOrigin.Backend, 0, 20, "later 2"));
+        records.Add(Samples.Metric(RecordOrigin.Backend, 0, 20, "cpu"));
+        records.Add(Samples.Metric(RecordOrigin.Backend, 0, 20, "cpu"));
+        await store.WriteBatchAsync(Samples.Batch([.. records]), TestContext.CancellationToken);
+
+        var lines = Samples.Query(RecordKind.LogLine);
+        var series = Samples.Query(RecordKind.Metric);
+
+        series.Source = "host";
+        series.Name = "cpu";
+
+        // Act
+        var everyLine = await store.RecordsAsync(lines, TestContext.CancellationToken);
+        var everyMetric = await store.RecordsAsync(series, TestContext.CancellationToken);
+        var pagedLines = await ReadPagesAsync(store, lines, 2);
+        var pagedMetrics = await ReadPagesAsync(store, series, 2);
+
+        // Assert
+        Assert.HasCount(7, everyLine, "log lines stored");
+        Assert.HasCount(7, everyMetric, "metrics stored");
+        Assert.AreSequenceEqual(everyLine.Select(row => row.Id), pagedLines, "pages of two return every log line once, in order");
+        Assert.AreSequenceEqual(everyMetric.Select(row => row.Id), pagedMetrics, "pages of two return every metric of the series once, in order");
+    }
+
+    /// <summary>
+    /// A negative AfterId is refused.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task SqliteStoreRecordsRefusesNegativeAfterId()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+        var query = Samples.Query(RecordKind.LogLine);
+
+        query.AfterId = -1;
+
+        // Act
+        var exception = await Assert.ThrowsExactlyAsync<InvalidQueryException>(() => store.RecordsAsync(query, TestContext.CancellationToken), "negative after id");
+
+        // Assert
+        Assert.AreEqual("store: invalid query: after id must not be negative", exception.Message, "message");
+    }
+
+    /// <summary>
+    /// A process snapshot whose texts hold characters that JSON escapes is read back equal through the UTF-8 bytes of the payload column.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task SqliteStoreRecordsRoundTripsEscapedPayloadText()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+        const string command = "<mariadbd> \u00E4";
+        const string cmdline = "/usr/sbin/mariadbd --name=<\u00E4> \u202E \U0001F600";
+        var snapshot = new ProcessSnapshot
+                       {
+                           Complete = true,
+                           Processes = [
+                                           new ProcessSample
+                                           {
+                                               Pid = 7,
+                                               Command = command,
+                                               Cmdline = cmdline
+                                           }
+                                       ]
+                       };
+
+        await store.WriteBatchAsync(Samples.Batch(new DataRecord
+                                                  {
+                                                      Origin = RecordOrigin.Backend,
+                                                      Source = "host",
+                                                      CapturedAt = Samples.Base,
+                                                      Data = snapshot
+                                                  }),
+                                    TestContext.CancellationToken);
+
+        // Act
+        var rows = await store.RecordsAsync(Samples.Query(RecordKind.ProcessSnapshot), TestContext.CancellationToken);
+        var stored = await StoredDataAsync(Path.Combine(directory.Path, StorageLimits.FileName));
+
+        // Assert
+        Assert.IsTrue(char.IsSurrogatePair(cmdline, cmdline.IndexOf('\uD83D', StringComparison.Ordinal)), "the command line holds a surrogate pair");
+        Assert.Contains("\u202E", cmdline, "the command line holds the right-to-left override");
+        Assert.Contains(string.Concat((char)92, "u003C"), stored, "the stored JSON holds the escaped <");
+        Assert.HasCount(1, rows, "one process snapshot");
+
+        var read = (ProcessSnapshot)rows[0].Record.Data!;
+
+        Assert.HasCount(1, read.Processes!, "one process");
+        Assert.AreEqual(command, read.Processes![0].Command, "command with < and a");
+        Assert.AreEqual(cmdline, read.Processes[0].Cmdline, "command line with a right-to-left override and a surrogate pair");
+        Assert.AreEqual(7, read.Processes[0].Pid, "process ID");
+    }
+
+    /// <summary>
+    /// A stored payload that is SQL NULL or the JSON text null is refused with the no-data message.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task SqliteStoreRecordsRefusesStoredNullPayload()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+
+        await store.WriteBatchAsync(Samples.Batch(Samples.Gap(0)), TestContext.CancellationToken);
+
+        // Act and assert
+        foreach (var value in new[] { "NULL", "'null'" })
+        {
+            await ExecuteAsync(Path.Combine(directory.Path, StorageLimits.FileName), $"UPDATE records SET data = {value}");
+
+            var exception = await Assert.ThrowsExactlyAsync<StoreException>(() => store.RecordsAsync(Samples.Query(RecordKind.Gap), TestContext.CancellationToken), $"stored payload {value}");
+
+            Assert.AreEqual("store: reading records: decoding gap payload: no data", exception.Message, $"message for {value}");
+        }
+    }
+
+    /// <summary>
+    /// Reads the stored JSON text of the first record with a JSON payload.
+    /// </summary>
+    /// <param name="path">The database file</param>
+    /// <returns>A task that returns the text</returns>
+    private async Task<string> StoredDataAsync(string path)
+    {
+        await using var connection = new SqliteConnection($"Data Source={path};Pooling=False;Mode=ReadOnly");
+
+        await connection.OpenAsync(TestContext.CancellationToken);
+
+        using var command = connection.CreateCommand();
+
+        command.CommandText = "SELECT data FROM records WHERE data IS NOT NULL LIMIT 1";
+
+        return (string)(await command.ExecuteScalarAsync(TestContext.CancellationToken))!;
+    }
+
+    /// <summary>
+    /// Runs a statement on the database file through its own connection.
+    /// </summary>
+    /// <param name="path">The database file</param>
+    /// <param name="sql">The statement</param>
+    /// <returns>A task that completes when the statement ran</returns>
+    private async Task ExecuteAsync(string path, string sql)
+    {
+        await using var connection = new SqliteConnection($"Data Source={path};Pooling=False");
+
+        await connection.OpenAsync(TestContext.CancellationToken);
+
+        using var command = connection.CreateCommand();
+
+        command.CommandText = sql;
+        await command.ExecuteNonQueryAsync(TestContext.CancellationToken);
+    }
+
+    /// <summary>
+    /// Reads a query page by page, continuing after the last record of each full page, and stops after a safe number of pages.
+    /// </summary>
+    /// <param name="store">The store</param>
+    /// <param name="query">The query; its limit is replaced</param>
+    /// <param name="limit">The page size</param>
+    /// <returns>A task that returns the IDs of all pages in the order they were read</returns>
+    private async Task<List<long>> ReadPagesAsync(SqliteStore store, RecordQuery query, int limit)
+    {
+        var ids = new List<long>();
+        var paged = new RecordQuery
+                    {
+                        Kind = query.Kind,
+                        Source = query.Source,
+                        Name = query.Name,
+                        From = query.From,
+                        To = query.To,
+                        Limit = limit
+                    };
+
+        for (var page = 0; page < 20; page++)
+        {
+            var rows = await store.RecordsAsync(paged, TestContext.CancellationToken);
+
+            ids.AddRange(rows.Select(row => row.Id));
+
+            if (rows.Count < limit)
+            {
+                break;
+            }
+
+            paged.From = rows[^1].Record.CapturedAt;
+            paged.AfterId = rows[^1].Id;
+        }
+
+        return ids;
     }
 
     #endregion // Methods

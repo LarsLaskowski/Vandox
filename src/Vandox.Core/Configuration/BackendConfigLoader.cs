@@ -18,6 +18,7 @@ public static class BackendConfigLoader
     private const string KeyIngestListen = "ingest.listen";
     private const string ListenReason = "must be [host]:port with an empty host or an IP address and a port of 1 to 65535";
     private const int MaxPortDigits = 5;
+    private const string WindowReason = "must be a whole number of minutes or hours from 1m to 24h, such as 30m or 1h";
     private const string LogFileReason = "must be an absolute, clean path of a file in a directory (no trailing slash, no . or .. elements)";
 
     #endregion // Constants
@@ -178,6 +179,18 @@ public static class BackendConfigLoader
                 lines,
                 "import.time_zone",
                 "must be a time zone of the IANA time zone database, such as UTC or Europe/Berlin");
+        Require(IsWindow(config.Incidents.WindowBefore), file, lines, "incidents.window_before", WindowReason);
+        Require(IsWindow(config.Incidents.WindowAfter), file, lines, "incidents.window_after", WindowReason);
+    }
+
+    /// <summary>
+    /// Tells whether an incident window option is a duration of 1 minute to 24 hours.
+    /// </summary>
+    /// <param name="value">The option value</param>
+    /// <returns><c>true</c> when the value is in range</returns>
+    private static bool IsWindow(string value)
+    {
+        return ConfigDuration.TryParse(value, out var duration) && duration >= TimeSpan.FromMinutes(1) && duration <= TimeSpan.FromHours(24);
     }
 
     /// <summary>

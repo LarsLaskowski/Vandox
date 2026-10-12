@@ -1,5 +1,6 @@
 using Microsoft.Data.Sqlite;
 
+using Vandox.Core.Incidents;
 using Vandox.Core.Templates;
 
 namespace Vandox.Storage;
@@ -9,7 +10,7 @@ namespace Vandox.Storage;
 /// bounded number of query-only readers, so a committed batch is durable and reads (and the health check) do not wait for
 /// a write.
 /// </summary>
-public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, ILogTemplateReader, IImportTracker, IAsyncDisposable
+public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, ILogTemplateReader, IIncidentStore, IImportTracker, IAsyncDisposable
 {
     #region Constants
 
@@ -431,6 +432,90 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
     }
 
     #endregion // ILogTemplateReader
+
+    #region IIncidentStore
+
+    /// <inheritdoc />
+    public async Task<IncidentSaveResult> SaveIncidentAsync(Incident incident, DateTimeOffset savedAt, CancellationToken cancellationToken)
+    {
+        var data = IncidentRepository.Validate(incident, savedAt);
+
+        await _writeLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+
+        try
+        {
+            await using var transaction = (SqliteTransaction)await _writer.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, cancellationToken).ConfigureAwait(false);
+            var result = await IncidentRepository.SaveAsync(_writer, transaction, incident, data, savedAt, cancellationToken).ConfigureAwait(false);
+
+            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+
+            return result;
+        }
+        catch (SqliteException exception)
+        {
+            throw new StoreException($"store: saving incident: {exception.Message}", exception);
+        }
+        finally
+        {
+            _writeLock.Release();
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<StoredIncident>> IncidentsAsync(IncidentQuery query, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        RecordQueries.ValidateWindow(query.From, query.To, query.Limit);
+
+        var (sql, parameters) = IncidentRepository.Build(query);
+
+        try
+        {
+            await using var lease = await LeaseReaderAsync(cancellationToken).ConfigureAwait(false);
+            using var command = lease.Connection.CreateCommand();
+
+            command.CommandText = sql;
+
+            foreach (var (name, value) in parameters)
+            {
+                command.Parameters.AddWithValue(name, value);
+            }
+
+            using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+            var rows = new List<StoredIncident>();
+
+            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                rows.Add(IncidentRepository.Read(reader));
+            }
+
+            return rows;
+        }
+        catch (SqliteException exception)
+        {
+            throw new StoreException($"store: reading incidents: {exception.Message}", exception);
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<long> CountIncidentsAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await using var lease = await LeaseReaderAsync(cancellationToken).ConfigureAwait(false);
+            using var command = lease.Connection.CreateCommand();
+
+            command.CommandText = "SELECT count(*) FROM incidents";
+
+            return Convert.ToInt64(await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false), System.Globalization.CultureInfo.InvariantCulture);
+        }
+        catch (SqliteException exception)
+        {
+            throw new StoreException($"store: reading incidents: {exception.Message}", exception);
+        }
+    }
+
+    #endregion // IIncidentStore
 
     #region IImportTracker
 

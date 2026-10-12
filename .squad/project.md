@@ -129,8 +129,17 @@ files or endpoints.
     `ILogTemplateReader`) bind every value as a parameter, bound the range (the usual-level query at most 744 hours), the limit (1 to 10,000)
     and the baseline (at most 2,160 hours), and refuse a *find* message of more than 16 KiB; the work of the usual-level query is **not** bounded by
     range or limit (it evaluates every template hour of the range that reaches the minimum count) and a deadline does not interrupt a running
-    statement, so a caller that serves a user must not rely on a deadline alone (record 0095). Records 0048, 0049, 0066, 0069, 0076, 0078, 0079, 0084,
-    0085, 0086, 0088, 0091, 0092, 0093, 0094, 0095.
+    statement, so a caller that serves a user must not rely on a deadline alone (record 0095). The backend options `incidents.window_before` and
+    `incidents.window_after` (`BackendConfigLoader`, `ConfigDuration`) accept exactly one to four ASCII digits and `m` or `h` by an ordinal scan (no parsing API, no culture, sign,
+    white space, other digit script or second unit), within 1 minute to 24 hours, the value never shown in an error. The incident reconstruction (`vandoxd incidents`)
+    reads stored external text, including forged lines, under bounds it must keep: `KillClusterer` keeps 16 kills per incident and ignores a kill at the last storable
+    instant; `IncidentBuilder` keeps at most 1,000 timeline entries within a 4 MiB budget measured with `IncidentJson` (the options the store serializes with), 3 + 3
+    candidates, 20 + 20 templates and two program maps of at most 4,096 entries (`Vandox.Core.Incidents`: `IncidentLimits`); `IncidentReconstructor` reads log lines and
+    metrics in pages of 1,000 and process and connection snapshots one per page, pages by capture time and record ID (`RecordQuery.AfterId`) and fails a page that does not
+    lead past the previous one; `RecordQueries.ReadJson` reads the payload as UTF-8 bytes so that one forged maximum process snapshot peaks near 240 MiB; `IncidentRepository` refuses an
+    incident of more than 8 MiB of serialized JSON (`InvalidIncidentException`), which the reconstructor skips and counts. Forged kill lines make forged incidents
+    (a documented limitation, record 0096). Records 0048, 0049, 0066, 0069, 0076, 0078, 0079, 0084,
+    0085, 0086, 0088, 0091, 0092, 0093, 0094, 0095, 0096.
 11. **Outbound calls** (Telegram, external checks, the optional AI service of the nightly report, the
     agent's connection to the backend): *Goal:* every call has a timeout, goes only to its configured
     destination and leaves encrypted to a verified peer. The agent's only destination is the ingest port,
@@ -158,7 +167,9 @@ files or endpoints.
     description, result, kernel version) are captures of log text and external text: whoever shows them escapes them like any log line. Log templates
     (`LogTemplate.Template`, and the templates of `TemplateSpike`) are external text as well: the normalizer removes control characters of category Cc but
     keeps format characters (Cf, e.g. U+202E, which reverses the display direction, and U+200B), `<`, `&` and any other markup, so whoever shows a template escapes it
-    like any log line and handles format characters. Records 0072, 0081, 0095.
+    like any log line and handles format characters. `vandoxd incidents` prints the victim command of an incident's first kill through `Terminal.Quote`
+    (`IncidentSummaryWriter`); its log lines carry only the store's text and the first kill time, no input text, and the texts of a stored incident (kill victims and hosts,
+    timeline texts, programs, commands, templates) are external text for whoever shows them. Records 0072, 0081, 0095, 0096.
 13. **Release pipeline and published artifacts** (`.github/workflows/release.yml`,
     `.github/workflows/base-image-digests.yml`, `.github/scripts/`, `deploy/backend/Dockerfile`,
     `.dockerignore`, `dotnet-tools.json`, the GitHub environment `release`; the smoke script
@@ -280,7 +291,7 @@ double under this name and changes the status.
 | systemd D-Bus | fake systemd reader (scripted unit states and errors, and a reader that blocks until its context is cancelled, for 0029) |
 | journald | fake journal reader (scripted entries, cursors and errors, and a reader that blocks until its context is cancelled, for 0029) |
 | MariaDB socket | fake MariaDB status source (status variables, process list, errors, and a source that hangs until its context is cancelled, for 0029) |
-| database (C#) | `FakeImportStore` for `IImportStore` (in-memory import state and records, base lookup, scripted begin, find and write failures, `AfterBatch` hook; also records line hashes with scripted failures and emulates attempts and containment as the store does; `tests/Vandox.Import.Tests`); a scripted ping delegate for `PingChecker` (`tests/Vandox.Backend.Tests`); the SQLite store itself is tested against a real database file in a `TempDirectory` (implemented) |
+| database (C#) | `FakeImportStore` for `IImportStore` (in-memory import state and records, base lookup, scripted begin, find and write failures, `AfterBatch` hook; also records line hashes with scripted failures and emulates attempts and containment as the store does; `tests/Vandox.Import.Tests`); a scripted ping delegate for `PingChecker` (`tests/Vandox.Backend.Tests`); the SQLite store itself is tested against a real database file in a `TempDirectory` (implemented); the incident reconstruction is tested against the real store with `IncidentSamples` (records written through the store, `tests/Vandox.Backend.Tests`) and hand-written decorators around it (`RecordingRecordReader`, `RepeatingRecordReader`, `RecordingTemplateReader`, `RefusingIncidentStore`), a logger that keeps its messages (`ListLogger`) and a writer that cancels the run (`CancellingWriter`) (implemented) |
 | log parsers (C#) | `FakeParser` (scripted `Detect` and `Parse`) in `tests/Vandox.Core.Tests`, `LineParser` and `ProbeParser` (counts starts and completions, can stop reading early) in `tests/Vandox.Import.Tests`; `RecordingEmitter` (records, skips and warnings, validates every record like the importer, optional failure and observer), `CountingEmitter` (validates like `RecordingEmitter`, keeps no record, counts per event, priority and warnings), `JournalExportBuilder` (text and binary fields as bytes), `MariaDbSamples` (records, journal entries, syslog lines and the feeds of the error log fixture for the MariaDB line tests), `PatternStream` (lazily generated input for the heap-bound tests), `LegacyMonitorSamples` (summary lines, rows, sockets and snapshots of the legacy monitoring log as text) and `SegmentStream` (byte segments repeated lazily, for the heap-bound tests of the legacy monitoring log parser), `SignatureSamples` (log line records, catalog texts and a detector run for the signature tests) and `DiscardingEventCollection` (counts the detected events and keeps none, for the heap-bound test) in `tests/Vandox.Core.Tests` (implemented) |
 | files (C#) | `TempDirectory` helper per test project (a unique directory below the temp path, removed on dispose); `RepositoryFiles.Path` for fixtures such as `testdata/` and `deploy/` |
 | Telegram Bot API | fake Telegram client (records sent messages, returns scripted updates; no network) |

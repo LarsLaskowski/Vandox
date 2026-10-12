@@ -136,6 +136,22 @@ internal static class SchemaMigrator
                                                                 PRIMARY KEY (source, hour)
                                                               ) STRICT, WITHOUT ROWID
                                                               """
+                                                          ]),
+                                                      new(9,
+                                                          [
+                                                              """
+                                                              CREATE TABLE incidents (
+                                                                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                                                                started_at INTEGER NOT NULL,
+                                                                ended_at INTEGER NOT NULL CHECK (ended_at > started_at),
+                                                                first_kill_at INTEGER NOT NULL,
+                                                                kill_count INTEGER NOT NULL CHECK (kill_count > 0),
+                                                                created_at INTEGER NOT NULL,
+                                                                updated_at INTEGER NOT NULL,
+                                                                data TEXT NOT NULL
+                                                              ) STRICT
+                                                              """,
+                                                              "CREATE INDEX incidents_started_at ON incidents(started_at)"
                                                           ])
                                                   ];
 

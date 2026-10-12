@@ -56,10 +56,17 @@ Backend:
 | `import.nginx_error_log` | `/var/log/nginx/error.log` | absolute, clean path of a file in a directory |
 | `import.apache_error_log` | `/var/log/apache2/error.log` | absolute, clean path of a file in a directory |
 | `import.time_zone` | none (optional) | a time zone ID of the IANA time zone database, compared ordinally (`UTC`, `Etc/UTC`, `Europe/Berlin`; not `europe/berlin`, an offset or a Windows name) |
+| `incidents.window_before` | `1h` | a duration of 1 minute to 24 hours (see below) |
+| `incidents.window_after` | `30m` | a duration of 1 minute to 24 hours (see below) |
 
 - A listen address is a host and a port separated by a colon. The host is empty (all interfaces) or an IP literal
   (an IPv6 literal in brackets); a host name is rejected, because binding to a name is ambiguous. The port is one to
   five ASCII digits and 1 to 65535; a sign or a space is not accepted (`:+80` is rejected).
+- A duration (`incidents.window_before`, `incidents.window_after`) is one to four ASCII digits followed by `m` (minutes) or `h` (hours),
+  nothing before or after, and from 1 minute to 24 hours (`30m`, `1h`, `24h`, `1440m`). A sign, a space, a fraction, another digit
+  script, a second unit (`1h30m`), a missing unit (`60`) and any other unit (`1d`, `1s`) are rejected. The error reads
+  `config: <file>:<line>: incidents.window_before: must be a whole number of minutes or hours from 1m to 24h, such as 30m or 1h`
+  (and the same with `incidents.window_after`); it never contains the value.
 - A directory must be absolute and clean: no trailing slash and no empty, `.` or `..` element. The loader does not
   create it.
 - Plain `http` is allowed for `backend.url`, because the tailnet encrypts and authenticates the transport. Whether

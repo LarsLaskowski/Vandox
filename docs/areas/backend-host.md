@@ -13,7 +13,15 @@ The options of the configuration file are in [Configuration and secrets](configu
 - `vandoxd` without a sub-command runs the service. Flags: `-config <file>` (default `/etc/vandox/vandoxd.yaml`), `-healthcheck`,
   `-version` and `-h`. `-version` wins over the other flags and prints the version line to standard output. `-h` prints the usage to
   standard error and exits 0.
-- The first positional argument `import` starts the import sub-command; any other positional argument is a usage error.
+- The first positional argument `import` starts the import sub-command, `incidents` the incident reconstruction; any other
+  positional argument is a usage error.
+- `vandoxd [flags] incidents [-config file]` rebuilds the incidents from the stored data (*Incidents* in [Detection, alerts and
+  reports](detection-and-reports.md)). Its flags are `-config` and `-h`/`-help` (usage to standard error, exit 0); any positional
+  argument after `incidents` is a usage error (`vandoxd incidents: no argument is expected`, exit 2), and it is not combined with
+  `-healthcheck`. It loads the configuration (invalid: exit 1), opens the database (cannot: exit 1) and writes one line per saved
+  incident and then the counts to standard output; the log goes to standard error as JSON lines. Exit **0** when the run completed
+  (also when it skipped an incident the store refused, which the counts show); **1** when the run was interrupted or the store
+  failed, without the counts. Run again, it completes the work.
 - Exit codes: **0** after a clean shutdown, a printed version or help; **1** when the configuration or the database cannot be loaded or
   opened, or serving fails; **2** for a usage error (unknown flag, flag without value, unexpected argument), with the message and the
   usage on standard error.
@@ -121,7 +129,7 @@ deadline and the health timeout are constants, not options.
 ## Not here
 
 - The configuration file and the secrets: [Configuration and secrets](configuration-and-secrets.md).
-- The import sub-command: [Log import](log-import.md).
+- The import sub-command: [Log import](log-import.md). The incident reconstruction itself: [Detection, alerts and reports](detection-and-reports.md).
 - The database: [Storage](storage.md). The batch format: [Wire format](wire-format.md).
 - The Tailscale ACL and the security model of the monitored server: the network area.
 
