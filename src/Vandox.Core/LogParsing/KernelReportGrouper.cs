@@ -36,7 +36,7 @@ internal sealed class KernelReportGrouper
     /// </summary>
     internal static readonly TimeSpan MaxSpan = TimeSpan.FromSeconds(60);
 
-    private static readonly string[] _oomEnds = ["Out of memory: Killed process", "Memory cgroup out of memory: Killed process", "Out of memory and no killable processes"];
+    private static readonly string[] _oomEnds = ["Out of memory: Killed process", "Out of memory (oom_kill_allocating_task): Killed process", "Memory cgroup out of memory: Killed process", "Out of memory and no killable processes"];
 
     private readonly List<string> _head = [];
     private readonly Queue<(string Text, int Bytes)> _tail = new();

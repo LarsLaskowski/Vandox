@@ -137,6 +137,7 @@ public class KernelReportGrouperTests
     [TestMethod]
     [DataRow("[1.0] mariadbd invoked oom-killer: gfp_mask=0x100cca", "[1.9] Out of memory: Killed process 4242 (mariadbd)")]
     [DataRow("[1.0] mariadbd invoked oom-killer: gfp_mask=0x100cca", "[1.9] Memory cgroup out of memory: Killed process 4242 (mariadbd) total-vm:1kB")]
+    [DataRow("[1.0] mariadbd invoked oom-killer: gfp_mask=0x100cca", "[1.9] Out of memory (oom_kill_allocating_task): Killed process 4242 (mariadbd) total-vm:1kB")]
     [DataRow("[1.0] mariadbd invoked oom-killer: gfp_mask=0x100cca", "[1.9] Out of memory and no killable processes")]
     [DataRow("[  1.0] ------------[ cut here ]------------", "[  1.9] ---[ end trace 0000000000000000 ]---")]
     [DataRow("[  1.0] ------------[ cut here ]------------", "[  1.9] ---[ end trace 9f1c2d3e4a5b6c7d ]---")]
