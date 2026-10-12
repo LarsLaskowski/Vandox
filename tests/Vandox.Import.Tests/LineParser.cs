@@ -79,6 +79,38 @@ internal sealed class LineParser : ILogParser
                };
     }
 
+    /// <summary>
+    /// Creates the record of a line that holds a process snapshot above the payload limit.
+    /// </summary>
+    /// <param name="line">The line number</param>
+    /// <returns>The record</returns>
+    private static DataRecord HugeRecord(long line)
+    {
+        var processes = new List<ProcessSample>();
+
+        for (var pid = 1; pid <= 200; pid++)
+        {
+            processes.Add(new ProcessSample
+                          {
+                              Pid = pid,
+                              Command = "c",
+                              Cmdline = new string('<', 16384)
+                          });
+        }
+
+        return new DataRecord
+               {
+                   Origin = RecordOrigin.Import,
+                   Source = "import",
+                   CapturedAt = Base.AddSeconds(line),
+                   Data = new ProcessSnapshot
+                          {
+                              Complete = true,
+                              Processes = processes
+                          }
+               };
+    }
+
     #endregion // Methods
 
     #region ILogParser
@@ -130,7 +162,9 @@ internal sealed class LineParser : ILogParser
                     output.Warn(reader.LineNumber, "raw line");
                 }
 
-                await output.RecordAsync(Record(reader.LineNumber, text, text.StartsWith("refuse", StringComparison.Ordinal)), cancellationToken);
+                var record = text.StartsWith("huge", StringComparison.Ordinal) ? HugeRecord(reader.LineNumber) : Record(reader.LineNumber, text, text.StartsWith("refuse", StringComparison.Ordinal));
+
+                await output.RecordAsync(record, cancellationToken);
             }
         }
     }

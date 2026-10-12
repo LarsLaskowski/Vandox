@@ -9,3 +9,4 @@ are quoted in full.
 | 2026-10-12 17:35 | 2 Plan | squad-lead | RESULT: DONE, tier security (opus/medium · 207,443 tokens · 69 tool uses · 968 s) |
 | 2026-10-12 17:36 | 2 Challenge + 3 Plan security | Orchestrator | DA: 0 major minor notes appended; Security: APPROVED |
 | 2026-10-12 17:41 | 4 Skeleton | squad-dev | skeleton built, build clean |
+| 2026-10-12 17:49 | 5 Tests first | squad-tester | 15 tests fail on skeleton |

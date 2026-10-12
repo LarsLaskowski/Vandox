@@ -226,6 +226,58 @@ public class SqliteStoreWriteTests
     }
 
     /// <summary>
+    /// A record whose JSON is above the limit refuses the whole batch, nothing of it is stored and the writer stays usable.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task SqliteStoreWriteBatchRefusesDataLargerThanTheLimit()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+        var processes = new List<ProcessSample>();
+
+        for (var pid = 1; pid <= 200; pid++)
+        {
+            processes.Add(new ProcessSample
+                          {
+                              Pid = pid,
+                              Command = "c",
+                              Cmdline = new string('<', 16384)
+                          });
+        }
+
+        var huge = new DataRecord
+                   {
+                       Origin = RecordOrigin.Backend,
+                       Source = "backend",
+                       CapturedAt = Samples.Base.AddSeconds(2),
+                       Data = new ProcessSnapshot
+                              {
+                                  Complete = true,
+                                  Processes = processes
+                              }
+                   };
+        var batch = Samples.Batch(Samples.Metric(RecordOrigin.Backend, 0, 0, "cpu"), Samples.Gap(1), huge);
+
+        // Act
+        var exception = await Assert.ThrowsExactlyAsync<InvalidBatchException>(() => store.WriteBatchAsync(batch, TestContext.CancellationToken), "oversized data");
+        var metrics = await store.RecordsAsync(Samples.Query(RecordKind.Metric), TestContext.CancellationToken);
+        var gaps = await store.RecordsAsync(Samples.Query(RecordKind.Gap), TestContext.CancellationToken);
+        var snapshots = await store.RecordsAsync(Samples.Query(RecordKind.ProcessSnapshot), TestContext.CancellationToken);
+        var after = await store.WriteBatchAsync(Samples.Batch(Samples.Metric(RecordOrigin.Backend, 0, 3, "mem"), Samples.Gap(4)), TestContext.CancellationToken);
+        var storedAfter = await store.RecordsAsync(Samples.Query(RecordKind.Metric), TestContext.CancellationToken);
+
+        // Assert
+        Assert.AreEqual("store: invalid batch: data is larger than 16777216 bytes as JSON", exception.Message, "message");
+        Assert.IsEmpty(metrics, "no metric before the oversized record is stored");
+        Assert.IsEmpty(gaps, "no gap before the oversized record is stored");
+        Assert.IsEmpty(snapshots, "the oversized record is not stored");
+        Assert.AreEqual(new WriteResult(2, 0), after, "a normal batch is written afterwards");
+        Assert.HasCount(1, storedAfter, "the normal batch is stored");
+    }
+
+    /// <summary>
     /// Batches that break a rule are refused before anything is written.
     /// </summary>
     /// <param name="what">The rule that is broken</param>

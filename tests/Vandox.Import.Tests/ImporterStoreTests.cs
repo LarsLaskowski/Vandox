@@ -130,6 +130,33 @@ public class ImporterStoreTests
     }
 
     /// <summary>
+    /// A record whose JSON is above the payload limit is skipped with a reason, and the records around it are stored.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task ImporterRunAsyncSkipsARecordWhoseDataIsLargerThanTheLimit()
+    {
+        // Arrange
+        using var harness = new ImportHarness();
+
+        harness.Write("a.log", "LOG before\nhuge line\nLOG after\n");
+
+        // Act
+        var run = await harness.RunAsync(TestContext.CancellationToken);
+        var file = run.Summary.Files[0];
+
+        // Assert
+        Assert.AreEqual(ImportOutcome.Imported, file.Outcome, "imported");
+        Assert.AreEqual(2L, file.Records, "the records around it are stored");
+        Assert.AreEqual(1L, file.Skipped, "the oversized record is skipped");
+        Assert.HasCount(1, file.Problems, "one problem");
+        Assert.AreEqual(new ImportProblem(0, "record refused: data is larger than 16777216 bytes as JSON"), file.Problems[0], "problem");
+        Assert.HasCount(2, harness.Store.Records, "stored records");
+        Assert.AreEqual("LOG before", ((LogLine)harness.Store.Records[0].Data!).Message, "record before");
+        Assert.AreEqual("LOG after", ((LogLine)harness.Store.Records[1].Data!).Message, "record after");
+    }
+
+    /// <summary>
     /// Lines a parser keeps as raw lines are counted and described, at most ten per file; they are stored, not skipped.
     /// </summary>
     /// <returns>A task that completes when the test is done</returns>
