@@ -306,6 +306,7 @@ public sealed partial class LogTemplatesPage : ComponentBase, IDisposable
         }
 
         _error = string.Empty;
+        _handledQuery = null;
         Navigation.NavigateTo(PagePath + address.ToQuery());
     }
 

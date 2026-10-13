@@ -220,7 +220,7 @@ The first run used a scan bound of 50,000 and a cap of 20,000. With them the sca
 line, since every line of a common word's range is looked up in that word's index entry), the rare template 8b 611 to 688 ms and the case just below the cap
 (2b, 16,667 lines, then in index mode) 291 to 327 ms for its first page, about 20 microseconds per candidate. A bound and a cap of 12,000 bring the
 scan-bound case to 411 ms and every text search except case 12 under 500 ms; the later change of the index mode and the template list (notes) left the two values as they are. A smaller bound makes a search over a large range with few matches continue more often
-(case 2b finds 40 lines per 12,000 examined); the plan's lower limit for both values is 5,000 and 10,000.
+(case 2b finds 40 lines per 12,000 examined); the plan's lower limit for both values is 5,000 and 10,000. `SearchBenchmark.ScanRows` in the benchmark tool is a copy of `LogsView.ScanRows` (the tool does not reference the backend); a change of the bound changes both in the same pull request.
 
 ### Notes
 

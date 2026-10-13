@@ -354,6 +354,7 @@ public sealed partial class LogsPage : ComponentBase, IDisposable
 
         address.TemplateId = _address.TemplateId;
         _error = string.Empty;
+        _handledQuery = null;
         Navigation.NavigateTo(PagePath + address.ToQuery());
     }
 

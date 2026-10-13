@@ -92,7 +92,7 @@ The parameters, written in this order and each percent-encoded, with empty ones 
   filter form is a GET form to the same page, so it also works without script; with script it validates the entered values first and
   shows the same error texts instead of navigating.
 - The page follows every change of its address (submitting the form, a link, back and forward) and then searches what the new address
-  says; the results always come from the address.
+  says; the results always come from the address. Submitting the form searches again even when the address is unchanged, which refreshes the results.
 
 **Search page.**
 
