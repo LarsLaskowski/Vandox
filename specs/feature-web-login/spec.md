@@ -28,10 +28,12 @@ summary from the user's side.
   cookie is `HttpOnly`, `SameSite=Lax`, a browser-session cookie, and `Secure` when the request came over HTTPS through a trusted
   proxy. Sign-out ends the session on the server, so a copied cookie stops working too. A live connection is closed as soon as its
   session has ended and processes nothing after that; an idle page goes to the login within 30 seconds.
-- **CSRF:** every form post carries an antiforgery token; without a valid one it is refused with `400` and has no effect.
+- **CSRF:** every form post carries an antiforgery token; without a valid one, or with a body that cannot be read as a bounded form,
+  it is refused with `400` and has no effect.
 - **Failed sign-ins:** 5 failures of one client within 15 minutes lock that client out for 15 minutes; 100 failures of all clients
   within an hour lock everyone out until they age out. The client is the real client address: the peer address, or the address a
-  trusted proxy reports.
+  trusted proxy reports; without `web.trusted_proxies` all clients behind the proxy share its address and its lock, and a warning in the
+  log points to that. Anyone who reaches the login can provoke the overall lock; a restart of the container clears it.
 - **Reverse proxy:** `X-Forwarded-For` and `X-Forwarded-Proto` are used only from the addresses in the new option
   `web.trusted_proxies` (empty by default: ignored from everyone). They never skip the login.
 - **Documentation:** a reverse proxy guide (`docs/REVERSE_PROXY.md`) with a generic part (nginx, Caddy), Synology's and QNAP's built-in

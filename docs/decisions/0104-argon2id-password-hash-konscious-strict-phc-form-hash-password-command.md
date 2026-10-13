@@ -57,4 +57,4 @@ recommended setting).
 - A hash from a tool that writes another form (a `keyid` or `data` parameter, base64url, padding, version 16) is refused; the operator
   creates a new one with `hash-password`.
 - Konscious is updated like any NuGet package (Dependabot, NuGet vulnerability check in the release); its result for the reference
-  vectors is pinned by a test, so an update that changes the output fails the build.
+  vectors, a multi-lane one (parallelism 2) among them, is pinned by a test, so an update that changes the output fails the build.

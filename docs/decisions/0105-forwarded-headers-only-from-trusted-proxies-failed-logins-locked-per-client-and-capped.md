@@ -61,10 +61,14 @@ loopback nor a forwarded header ever skips the login; the forwarded headers only
 
 ## Consequences
 
-- Without `web.trusted_proxies`, every client behind the proxy shares the proxy's address: one client's failures lock all of them out
-  for 15 minutes, and the cookies are never `Secure`. The operator guide tells how to find the proxy's address as the container sees it.
+- Without `web.trusted_proxies` (the default), every client behind the proxy shares the proxy's address: one client's failures lock
+  all of them out for 15 minutes, repeatably, and the cookies are never `Secure`. The operator guide and `SECURITY.md` say so and tell
+  how to find the proxy's address as the container sees it; a lock started by a request whose `X-Forwarded-For` was ignored logs a
+  warning that points to the missing entry.
 - Trusting a gateway address trusts every connection that reaches the published port through the userland proxy; such a client can
   dodge the per-client lockout, and only the overall cap limits its guesses (at most 100 per hour).
-- The overall cap lets someone who can reach the login lock everyone out by failing 100 times an hour; that is accepted for a single
-  user on a home network, where such a client can do worse.
+- The overall cap lets someone who can reach the login lock everyone out by failing 100 times an hour, for up to an hour after the
+  oldest failure, and a stream of attempts makes each one wait up to 5 seconds for the single check; that is accepted for a single
+  user on a home network, where such a client can do worse. The recovery is a restart of the container: the counts live only in
+  memory.
 - The engine versions on the NAS devices remain to be verified; the follow-up records the measured result here.

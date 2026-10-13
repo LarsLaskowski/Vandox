@@ -62,8 +62,14 @@ Live connections and the session:
 3. **A per-circuit timer that kills the circuit at the expiry time** — there is no public API to terminate a circuit from outside.
 
 Also considered and not done: an `Origin` check on the live connection's endpoints (a proxy that rewrites the `Host` header would
-break the UI, and SameSite cookies, the session requirement and component descriptors that only the signed-in page can read already
-keep other sites out), and a return address after the login redirect (an open-redirect check for little gain with one user).
+break the UI; the session requirement and the component descriptors that only the signed-in page carries, which another origin cannot
+read, already keep other origins out — `SameSite` alone would not, since a page on the same host name or IP address under another port
+is the same site and gets the cookie sent), and a return address after the login redirect (an open-redirect check for little gain with
+one user).
+
+Form posts outside a component (the sign-out): validated by the antiforgery middleware through endpoint metadata, like the pages,
+rather than by calling the antiforgery service in the handler — the service lets a form-reading failure escape as an exception that
+only the middleware turns into a refused post.
 
 ## Decision
 

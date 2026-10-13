@@ -45,8 +45,17 @@ Framework facts the plan relies on, read from the 10.0.12 sources:
   (`System.Net.IPNetwork`). `ForwardLimit` defaults to 1 and the values are taken right to left.
 - `RazorComponentEndpointFactory` maps every page for GET and POST and adds `RequireAntiforgeryTokenAttribute`; the antiforgery
   middleware only records the result (`IAntiforgeryValidationFeature`) and the component endpoint answers 400. A minimal API endpoint
-  must check it itself. `DefaultAntiforgeryTokenStore` turns a malformed or oversized form (`InvalidDataException`) into an
-  antiforgery failure, so form limits answer 400.
+  must check it itself. `DefaultAntiforgeryTokenStore.GetRequestTokensAsync` rethrows a malformed or oversized form
+  (`InvalidDataException`) and a broken body (`IOException`) as `AntiforgeryValidationException`; **only `AntiforgeryMiddleware`
+  catches it** (and only for an endpoint with `IAntiforgeryMetadata { RequiresValidation: true }`), while
+  `DefaultAntiforgery.IsRequestValidAsync` lets it escape (line 104). An endpoint that calls `IsRequestValidAsync` itself therefore
+  answers `500` to an oversized form; the logout endpoint carries antiforgery metadata instead (Security B1).
+- `FormFeature` buffers each multipart **file** section with `EnableRewind(MemoryBufferThreshold, MultipartBodyLengthLimit)` and
+  caps the whole multipart body at `MultipartBodyLengthLimit` (default 128 MiB; beyond `MemoryBufferThreshold`, 64 KiB, it spills to a
+  temporary file under `/tmp`, a tmpfs counted against the 512 MiB container limit); `ValueLengthLimit` does not apply to file
+  sections. `MultipartBodyLengthLimit` is therefore set to 65,536, equal to the default `MemoryBufferThreshold` (Security B2).
+- The token is also read from the header `RequestVerificationToken`; when that header is present the form is not read at all, so the
+  form limits never run before the check fails or succeeds on the header.
 - `AuthorizationMiddleware` applies the fallback policy also when no endpoint matched (`endpoint?.Metadata … ?? Array.Empty`), so an
   unknown path is challenged, not 404.
 - `CircuitHost`: every event, interop call, navigation and the initialization go through `HandleInboundActivityAsync`; an exception
@@ -55,6 +64,13 @@ Framework facts the plan relies on, read from the 10.0.12 sources:
   it). `CircuitInboundActivityContext` has only an internal constructor.
 - `RevalidatingServerAuthenticationStateProvider` revalidates with `Task.Delay` on the real clock (not a `TimeProvider`).
 - `AuthenticationSchemeOptions.TimeProvider` exists, so the cookie handler's expiry check can use the injected clock.
+- `SemaphoreSlim.WaitAsync` has no `TimeProvider` overload; a wait abandoned with `Task.WaitAsync(timeout, timeProvider)` stays
+  queued, later takes the semaphore and is never released. A wait cancelled through its `CancellationToken` is removed from the queue.
+  Hence the gate wait uses `new CancellationTokenSource(VerificationWait, timeProvider)` linked with the request token (Security B3).
+- `ForwardedHeadersMiddleware`, when it applies `X-Forwarded-For`, writes the original peer to `X-Original-For` (line 310) and removes
+  the consumed value; when it does not apply it (untrusted peer, no middleware) the client's `X-Forwarded-For` stays and the middleware
+  writes no `X-Original-For` (one the client sent itself stays, which can only suppress the hint). This is how the hint of Devil's
+  Advocate objection 1 detects an ignored header.
 
 Related defects and inconsistencies found on the way:
 
@@ -86,8 +102,10 @@ real service through `BackendFixture` (as `ServeTests` does). The rules and exac
 - [ ] AC2.3: Every refused form of the table *Accepted forms of the hash* below throws `PasswordHashException` whose `Message` is
   exactly the listed reason. — `PasswordHashTests.PasswordHashParseRefusesInvalidForms` (DataRow per row)
 - [ ] AC2.4: `Create(password)` writes `$argon2id$v=19$m=65536,t=3,p=4$<22 base64 chars>$<43 base64 chars>`, two calls give different
-  salts, and the result parses and verifies the password; `Create` with explicit salt and parameters reproduces a reference vector
-  byte for byte. — `PasswordHashTests.PasswordHashCreateRoundTrips`, `PasswordHashTests.PasswordHashCreateReproducesReferenceVector`
+  salts, and the result parses and verifies the password; `Create` with explicit salt and parameters (which checks no bounds) reproduces
+  byte for byte the reference vectors `m=65536,t=2,p=1` and `m=256,t=2,p=2` (the second pins Konscious's multi-lane path, which the
+  default parallelism 4 uses, against the reference). — `PasswordHashTests.PasswordHashCreateRoundTrips`,
+  `PasswordHashTests.PasswordHashCreateReproducesReferenceVector` (DataRow per vector)
 - [ ] AC2.5: `Verify` returns `false` for a password of 1,025 characters (the right one with one character appended to a 1,024-character
   password whose hash the test creates) and `true` for that 1,024-character password. That no hash is computed for the long one is
   pinned at the `LoginService` level (AC7.6), where the verifier's calls are counted. — `PasswordHashTests.PasswordHashVerifyRejectsOverlongPassword`
@@ -128,8 +146,9 @@ real service through `BackendFixture` (as `ServeTests` does). The rules and exac
   untrusted); `127.0.0.1` (peer trusted))
 - [ ] AC5.2: With `web.trusted_proxies: 127.0.0.1`, five wrong passwords sent with `X-Forwarded-For: 198.51.100.7` lock that client
   (the right password with the same header → `429`) but not `X-Forwarded-For: 198.51.100.8` (right password → `302` `/`), and the log
-  carries `"client":"198.51.100.7"`. With `web.trusted_proxies: 127.0.0.2`, and with the option empty, the same sequence locks
-  `127.0.0.1`, so `198.51.100.8` gets `429` too. — Service test `ServeTests.ServeTakesClientAddressFromTrustedProxyOnly` (DataRow)
+  carries `"client":"198.51.100.7"` and no `forwarded header ignored`. With `web.trusted_proxies: 127.0.0.2`, and with the option
+  empty, the same sequence locks `127.0.0.1`, so `198.51.100.8` gets `429` too, and the log carries `forwarded header ignored` with
+  `"client":"127.0.0.1"` exactly once. — Service test `ServeTests.ServeTakesClientAddressFromTrustedProxyOnly` (DataRow)
 - [ ] AC5.3: `ForwardedHeadersSetup.CreateOptions` returns `null` for an empty list; otherwise options with exactly the configured
   networks, no `KnownProxies`, no loopback, `ForwardLimit` 1 and `XForwardedFor | XForwardedProto`. Running
   `ForwardedHeadersMiddleware` with them on a `DefaultHttpContext`: peer `10.0.0.1` in `10.0.0.1/32` → `RemoteIpAddress` and scheme
@@ -151,7 +170,19 @@ real service through `BackendFixture` (as `ServeTests` does). The rules and exac
 - [ ] AC6.1: `POST /login` without a token, and with a token that belongs to another antiforgery cookie → `400`, no session cookie, and
   the attempt is not counted (six such posts followed by the right password → `302`). `POST /logout` without a token while signed in →
   `400` and the session still works (`GET /` → `200`). `POST /` (a page) without a token while signed in → `400`. A login post with a
-  20 KiB password value → `400`, not counted. — Service test `ServeTests.ServeRejectsFormPostsWithoutValidAntiforgeryToken`
+  20 KiB password value → `400`, not counted. A signed-in `POST /logout` with a valid token and a 20 KiB value, and one with 65
+  values → `400` (not `500`), and the session still works. A multipart (`multipart/form-data`) login post with the valid token field
+  and a 1 MiB file part → `400`, not counted; the same post to `/logout` while signed in → `400`, session still works. No response of
+  this test is `500`, and the service log has no `error`-level line. — Service test
+  `ServeTests.ServeRejectsFormPostsWithoutValidAntiforgeryToken`
+- [ ] AC6.2: `WebAuthentication.AddServices` configures `FormOptions` with `ValueLengthLimit` 16,384, `ValueCountLimit` 64,
+  `MultipartBodyLengthLimit` 65,536 and `MemoryBufferThreshold` 65,536 (so no form part is ever buffered to a file). —
+  `WebAuthenticationTests.WebAuthenticationConfiguresFormLimits` (resolves `IOptions<FormOptions>` from a `ServiceCollection`)
+- [ ] AC6.3: `MapLogout` maps `POST /logout` with `IAntiforgeryMetadata` whose `RequiresValidation` is `true` and with
+  `IAllowAnonymous`; the handler answers `400` when the `IAntiforgeryValidationFeature` is missing or not valid and does not sign out.
+  — `WebAuthenticationTests.WebAuthenticationMapsLogoutWithAntiforgeryMetadata`,
+  `WebAuthenticationTests.WebAuthenticationLogoutRefusesMissingOrInvalidAntiforgeryFeature` (DataRow: no feature, invalid feature;
+  `DefaultHttpContext`, a `LoginService` over `ScriptedPasswordVerifier`)
 
 **AC7 — Failed sign-ins (issue AC 4).**
 - [ ] AC7.1: Per client: failures 1–4 leave it unlocked, the 5th within 15 minutes locks it; it stays locked until 15 minutes after the
@@ -174,6 +205,14 @@ real service through `BackendFixture` (as `ServeTests` does). The rules and exac
 - [ ] AC7.7: Two concurrent attempts never run the verifier at the same time; an attempt that waits more than 5 seconds for the running
   check returns `Throttled` and records no failure. — `LoginServiceTests.LoginServiceVerifiesOneAttemptAtATime`
   (`ScriptedPasswordVerifier` that blocks until released, `FakeTimeProvider`)
+- [ ] AC7.7a: The gate stays usable after abandoned waits: while a check blocks, one waiter times out (clock advanced by 5 seconds →
+  `Throttled`) and another waiter's token is cancelled (→ `OperationCanceledException`, nothing recorded); after the blocked check is
+  released, a new attempt runs the verifier (call count rises by one) and its outcome is not `Throttled`; the same holds for a second
+  new attempt after it. — `LoginServiceTests.LoginServiceGateStaysUsableAfterTimedOutAndCancelledWaits`
+- [ ] AC7.9: When a failure locks the client and the request carries `X-Forwarded-For` but no `X-Original-For` (the header was not
+  applied), `forwarded header ignored` (`client`) is logged once, together with `login locked`; not when `X-Original-For` is present,
+  not without `X-Forwarded-For`, and not for failures 1 to 4. — `LoginServiceTests.LoginServiceHintsAtIgnoredForwardedForWhenLocking`
+  (DataRow; `ListLogger`)
 - [ ] AC7.8: Through the login page: five wrong passwords → each `401` with *The password is not correct.*; the sixth attempt with the
   right password → `429` with *Too many sign-in attempts. Try again later.*; with `ServeHooks.Clock` a `FakeTimeProvider` advanced by
   15 minutes, the right password → `302` `/`; the log has `login failed` five times, `login locked` once, `login succeeded` once, and
@@ -289,8 +328,10 @@ client choose its address; `docs/REVERSE_PROXY.md` requires appending or overwri
 
 Order: `PortRoutingMiddleware` → `UseForwardedHeaders(options)` only when `ForwardedHeadersSetup.CreateOptions` returned options →
 `SecurityHeadersMiddleware` → `UseAuthentication` → `UseAuthorization` → `UseAntiforgery` → `MapStaticAssets().AllowAnonymous()` →
-`HealthEndpoint.Map` (now `.AllowAnonymous()` inside) → `WebAuthentication.MapLogout` (`POST /logout`, `AllowAnonymous`, checks
-`IAntiforgery.IsRequestValidAsync` itself, `400` when invalid) → `MapRazorComponents<App>().AddInteractiveServerRenderMode(…)` as today.
+`HealthEndpoint.Map` (now `.AllowAnonymous()` inside) → `WebAuthentication.MapLogout` (`POST /logout`, `AllowAnonymous`, metadata
+`new RequireAntiforgeryTokenAttribute(true)` so `UseAntiforgery` validates the post and catches every form-reading failure; the handler
+`LogoutAsync` answers `400` unless `IAntiforgeryValidationFeature` is present and valid — fail closed when the middleware did not run;
+it never calls `IAntiforgery` itself) → `MapRazorComponents<App>().AddInteractiveServerRenderMode(…)` as today.
 
 Services (`WebAuthentication.AddServices`): `AddDataProtection().UseEphemeralDataProtectionProvider()`; cookie authentication (cookie
 `vandox_session`, `HttpOnly`, `SameSite=Lax`, `SecurePolicy=SameAsRequest`, `Path=/`, `IsEssential`; `ExpireTimeSpan` 12 h,
@@ -298,18 +339,25 @@ Services (`WebAuthentication.AddServices`): `AddDataProtection().UseEphemeralDat
 RedirectToLoginAsync`, `OnRedirectToAccessDenied` → 403); `AddAuthorization` with `FallbackPolicy` = authenticated user;
 `AddCascadingAuthenticationState`; `AuthenticationStateProvider` → `SessionRevalidatingStateProvider` (scoped); `CircuitHandler` →
 `SessionCircuitHandler` (scoped, `TryAddEnumerable`); antiforgery cookie `vandox_csrf` (`HttpOnly`, `SameSite=Strict`,
-`SameAsRequest`, `Path=/`); `FormOptions.ValueLengthLimit` 16,384 and `ValueCountLimit` 64; singletons `SessionStore`, `LoginThrottle`,
+`SameAsRequest`, `Path=/`); `FormOptions.ValueLengthLimit` 16,384, `ValueCountLimit` 64, `MultipartBodyLengthLimit` 65,536 and
+`MemoryBufferThreshold` 65,536 (set explicitly, so a later change of the framework default cannot let a part spill to `/tmp`); singletons `SessionStore`, `LoginThrottle`,
 `LoginService`, `IPasswordVerifier` (the parsed `PasswordHash`). The clock is `hooks.Clock ?? TimeProvider.System`, already available in
 `ServeCommand` through `ServeHooks`.
 
 Start: `ServeCommand.RunAsync` checks the secret after the start-up log line and before `SqliteStore.OpenAsync`: not set →
 `WebPasswordHashMissing`, exit 1; `PasswordHash.Parse` throws → `WebPasswordHashInvalid(reason)`, exit 1.
 
-Sign-in (`LoginService.SignInAsync`): client key from `Connection.RemoteIpAddress`; wait for the one-check gate (`SemaphoreSlim(1,1)`;
-the wait is bounded by `VerificationWait` measured with the injected `TimeProvider`; on timeout `Throttled`, nothing recorded); inside
+Sign-in (`LoginService.SignInAsync`): client key from `Connection.RemoteIpAddress`; wait for the one-check gate (`SemaphoreSlim(1,1)`).
+The wait is prescribed exactly (Security B3): `using var timeout = new CancellationTokenSource(VerificationWait, timeProvider)`,
+`using var linked = CancellationTokenSource.CreateLinkedTokenSource(timeout.Token, cancellationToken)`, `acquired = false`, then
+`await gate.WaitAsync(linked.Token)`, `acquired = true`; `catch (OperationCanceledException) when` the caller's token is not cancelled →
+`Throttled`, nothing recorded; when the caller's token is cancelled the exception propagates, nothing recorded; the release happens in
+a `finally` only when `acquired`. No `Task.WaitAsync(timeout)` on the semaphore's task and no `WaitAsync(TimeSpan)` (real clock). Inside
 the gate: locked (client or all) → `Throttled`, no verification; password `null`, longer than 1,024 characters → failure without
 verification; else `Verify` (run synchronously inside the gate); failure → `RecordFailure`, log `login failed` and, when it started a
-lock, `login locked` / `login locked for all clients`; success → `RecordSuccess`, principal with `ClaimTypes.Name` `admin` and
+lock, `login locked` / `login locked for all clients`; when it started the client's lock and the request carries `X-Forwarded-For`
+without `X-Original-For`, also `forwarded header ignored` (Devil's Advocate objection 1: the operator learns that a proxy's header was
+ignored, so all clients behind it share one lock); success → `RecordSuccess`, principal with `ClaimTypes.Name` `admin` and
 `vandox:session` = `SessionStore.NewSessionId()`, `SignInAsync` with `IsPersistent = false`, log `login succeeded`. The check of the lock
 **inside** the gate makes "check, verify, record" atomic, so concurrent attempts of one client cannot exceed five checks.
 
@@ -335,6 +383,12 @@ failed-sign-in limits). Plan-level choices besides:
 3. **Integration tests through the real service (`BackendFixture`, `HttpClient` with a cookie container)** (chosen, as `ServeTests`
    already does) against **`Microsoft.AspNetCore.TestHost`** — a new test dependency, and it bypasses Kestrel's connection labels, so
    the port routing would not be exercised.
+4. **The logout endpoint carries antiforgery metadata and reads the middleware's result** (chosen, Security B1) against **calling
+   `IAntiforgery.IsRequestValidAsync` in the handler and catching `AntiforgeryValidationException`** — the second works too, but
+   keeps a second validation path next to the one the pages use, and the next failure type the framework adds would surface as `500`.
+5. **The gate wait through a `CancellationTokenSource` on the injected clock** (chosen, Security B3) against
+   **`SemaphoreSlim.WaitAsync(TimeSpan)`** (real clock, untestable without waiting) and **`Task.WaitAsync(timeout, timeProvider)`**
+   (abandons a queued wait that later takes the semaphore for good).
 
 ## Affected projects and types
 
@@ -354,7 +408,7 @@ failed-sign-in limits). Plan-level choices besides:
 | `Vandox.Backend` | `Hosting/BackendApp.cs`, `Hosting/ServeHooks.cs` | route `hash-password`; `Input` hook |
 | `Vandox.Backend` | `Hosting/ServeCommand.cs` | hash check before the database; `Build` wires `WebAuthentication` and forwarded headers |
 | `Vandox.Backend` | `Hosting/HealthEndpoint.cs` | `AllowAnonymous` |
-| `Vandox.Backend` | `Hosting/BackendLog.cs` | seven log methods (below) |
+| `Vandox.Backend` | `Hosting/BackendLog.cs` | eight log methods (below) |
 | `Vandox.Backend` | `Components/App.razor`, `Routes.razor`, `_Imports.razor`, `Layout/MainLayout.razor` | render mode per page, `AuthorizeRouteView`, sign-out form |
 | `Vandox.Backend` | `Components/Pages/_Imports.razor` (new), `Components/Account/Login.razor` (+ `.razor.cs` if code-behind), `Components/Account/RedirectToLogin.razor` (new) | login and redirect |
 | `Vandox.Backend` | `wwwroot/app.css` | login form and sign-out styles |
@@ -415,7 +469,7 @@ internal sealed class PasswordHash : IPasswordVerifier
     /// <exception cref="PasswordHashException">The text is not an accepted hash; the message is one of the Reason texts</exception>
     internal static PasswordHash Parse(string text);
     internal static string Create(string password);
-    internal static string Create(string password, ReadOnlySpan<byte> salt, int memoryKiB, int iterations, int parallelism, int hashBytes);
+    internal static string Create(string password, ReadOnlySpan<byte> salt, int memoryKiB, int iterations, int parallelism, int hashBytes); // no bounds check (tests, hash-password defaults)
     public bool Verify(string password);
 }
 
@@ -454,7 +508,7 @@ internal sealed class LoginService
 {
     internal static readonly TimeSpan VerificationWait = TimeSpan.FromSeconds(5);
     public LoginService(IPasswordVerifier verifier, LoginThrottle throttle, TimeProvider timeProvider, ILogger logger);
-    internal Task<LoginOutcome> SignInAsync(HttpContext context, string? password, CancellationToken cancellationToken);
+    internal Task<LoginOutcome> SignInAsync(HttpContext context, string? password, CancellationToken cancellationToken); // OperationCanceledException only when cancellationToken is cancelled
     internal Task SignOutAsync(HttpContext context);
 }
 
@@ -512,8 +566,10 @@ internal static class WebAuthentication
     internal const string LogoutPath = "/logout";
     internal const int MaxFormValueLength = 16384;
     internal const int MaxFormValueCount = 64;
+    internal const int MaxMultipartBodyLength = 65536;          // also the MemoryBufferThreshold
     internal static void AddServices(IServiceCollection services, IPasswordVerifier verifier, TimeProvider timeProvider, ILoggerFactory loggerFactory);
     internal static void MapLogout(IEndpointRouteBuilder endpoints);
+    internal static Task LogoutAsync(HttpContext context, LoginService loginService); // 400 unless the antiforgery feature is valid; else sign out, 303 /login
     internal static Task RedirectToLoginAsync(RedirectContext<CookieAuthenticationOptions> context);
 }
 
@@ -538,6 +594,7 @@ internal static class HashPasswordCommand
 //   [Warning]     "login locked {Client} {Until}"             LoginLocked(this ILogger logger, string client, string until)
 //   [Warning]     "login locked for all clients {Until}"      LoginLockedForAll(this ILogger logger, string until)
 //   [Information] "logged out {Client}"                       LoggedOut(this ILogger logger, string client)
+//   [Warning]     "forwarded header ignored {Client}"         ForwardedHeaderIgnored(this ILogger logger, string client)
 // `client` is the client address text (IPAddress.ToString(), "unknown" without address); `until` is UTC RFC 3339.
 ```
 
@@ -633,11 +690,16 @@ Files of the change no unit test can cover: none. (The smoke script is CI, not p
 | `docs/decisions/0103`–`0105`, `docs/decisions/README.md` | written in this step, `Proposed` | Lead (done) |
 | `docs/areas/web-ui.md`, `backend-host.md`, `configuration-and-secrets.md`, `network-and-security-model.md` | as *Areas* says | Dev |
 | `docs/areas/web-login.md` | only a deviation the build forces, reported in the Dev's report | Dev (step 6) |
-| `docs/REVERSE_PROXY.md` (new) | operator guide: what the proxy must do (TLS, pass `Host`, append/overwrite `X-Forwarded-For`, set `X-Forwarded-Proto`, WebSocket upgrade for `/_blazor`, no buffering of it), a generic nginx block and a Caddyfile, Synology DSM 7 (*Login Portal → Advanced → Reverse Proxy*, *Custom Header → Create → WebSocket*, certificate under *Security → Certificate*), QNAP QTS 5 (*Network & File Services → Network Access → Reverse Proxy*, certificate under *Security → SSL Certificate & Private Key*), the vendor steps marked as written from the vendors' documentation and not verified on a device; how to find the address for `web.trusted_proxies` (`docker network inspect vandox_default` gateway for a proxy on the same host; the proxy host's LAN address otherwise) and what trusting it means; a check list after setup; the Docker Engine check (from a second LAN host, route the container network via the NAS and `curl` the container address and `127.0.0.1`-published port, expected: refused; Engine ≥ 28.3.3 recommended) | Dev |
-| `README.md` | backend options row `web.trusted_proxies`; secrets row of `VANDOX_WEB_PASSWORD_HASH` (argon2id PHC form, link to Web login, `hash-password`); *Run the backend with Docker Compose*: create `secrets/vandox_web_password_hash` with `read -rs` + `docker run --rm -i networlddev/vandox hash-password`, owner 65532 and mode 0400, then the proxy guide; the sub-command `hash-password` | Dev |
-| `SECURITY.md` | *Deployment Security Considerations*: the hash secret file's owner and mode, set `web.trusted_proxies` only to the proxy's address, Docker Engine ≥ 28.3.3 | Dev |
+| `docs/REVERSE_PROXY.md` (new) | operator guide: what the proxy must do (TLS, pass `Host`, append/overwrite `X-Forwarded-For`, set `X-Forwarded-Proto`, WebSocket upgrade for `/_blazor`, no buffering of it), a generic nginx block and a Caddyfile, Synology DSM 7 (*Login Portal → Advanced → Reverse Proxy*, *Custom Header → Create → WebSocket*, certificate under *Security → Certificate*), QNAP QTS 5 (*Network & File Services → Network Access → Reverse Proxy*, certificate under *Security → SSL Certificate & Private Key*), the vendor steps marked as written from the vendors' documentation and not verified on a device; how to find the address for `web.trusted_proxies` (`docker network inspect vandox_default` gateway for a proxy on the same host; the proxy host's LAN address otherwise) and what trusting it means; that without the option all clients behind the proxy share the proxy's address, so five wrong passwords
+from any of them lock everyone behind it out for 15 minutes, and that the log line `forwarded header ignored` points to that (Devil's
+Advocate 1); that the overall lock of 100 failures per hour can be provoked by any client that reaches the login and is cleared by
+restarting the container (Devil's Advocate 2); a recommendation to give the UI its own host name, not shared with other web
+applications on the same host name or IP address (another port is the same site, and its pages receive the `SameSite` cookies,
+Security N1); a check list after setup; the Docker Engine check (from a second LAN host, route the container network via the NAS and `curl` the container address and `127.0.0.1`-published port, expected: refused; Engine ≥ 28.3.3 recommended) | Dev |
+| `README.md` | backend options row `web.trusted_proxies`; secrets row of `VANDOX_WEB_PASSWORD_HASH` (argon2id PHC form, link to Web login, `hash-password`); *Run the backend with Docker Compose*: create `secrets/vandox_web_password_hash` with `read -rs` + a pipe into `docker run --rm -i networlddev/vandox hash-password`, with the warning not to add `-t` (a terminal echoes what is typed; Security N4), owner 65532 and mode 0400, then the proxy guide; the sub-command `hash-password` | Dev |
+| `SECURITY.md` | *Deployment Security Considerations*: the hash secret file's owner and mode, set `web.trusted_proxies` only to the proxy's address, and without it all clients behind the proxy share one lockout; the overall lock (100 failures per hour) can be provoked from the LAN and is cleared by a restart; Docker Engine ≥ 28.3.3 | Dev |
 | `docs/ARCHITECTURE.md` | *Network* and *Security model*: the login with server-side sessions, forwarded headers only from `web.trusted_proxies`, records 0103–0105 linked; the introduction's list of what exists gains the login | Dev |
-| `.squad/project.md` security areas 3 and 8 | area 3 implemented: name `PasswordHash`, `LoginService`, `LoginThrottle`, `SessionStore`, `SessionCircuitHandler`, `SessionRevalidatingStateProvider`, `ForwardedHeadersSetup`, `WebAuthentication`, `TrustedProxyList`, `Login.razor`, the dependency Konscious, records 0103–0105; replace "the UI port is reachable only by that proxy" by "the UI port is published for that proxy only, as defense in depth (0060)"; area 8 names the hash check (`PasswordHash`, constant-time comparison) | Dev |
+| `.squad/project.md` security areas 3 and 8 | area 3 implemented: name `PasswordHash`, `LoginService`, `LoginThrottle`, `SessionStore`, `SessionCircuitHandler`, `SessionRevalidatingStateProvider`, `ForwardedHeadersSetup`, `WebAuthentication`, `TrustedProxyList`, `Login.razor`, the dependency Konscious, records 0103–0105; replace "the UI port is reachable only by that proxy" by "the UI port is published for that proxy only, as defense in depth (0060)"; replace "travel only in `HttpOnly`, `Secure`, `SameSite` cookies" by "travel only in `HttpOnly`, `SameSite` cookies that are `Secure` whenever the request reached the proxy over HTTPS" (Security N2: the issue makes `Secure` depend on the proxy's TLS); area 8 names the hash check (`PasswordHash`, constant-time comparison) | Dev |
 | `.squad/project.md` *Test doubles* | Blazor/web row: `LoginTestClient`, `ScriptedPasswordVerifier`, `FixedAuthenticationStateProvider` (implemented) | Tester |
 | `deploy/backend/docker-compose.yml` | `VANDOX_WEB_PASSWORD_HASH_FILE: /run/secrets/vandox_web_password_hash`, the secret uncommented, header comment explains the file | Dev |
 | `deploy/backend/vandoxd.yaml` | `web.trusted_proxies: ""` with a comment (format, default, what it trusts, link to the guide); the secrets comment names the argon2id form and `hash-password` | Dev |
@@ -658,19 +720,73 @@ Files of the change no unit test can cover: none. (The smoke script is CI, not p
 
 - [x] Limits and whether before or after decoding: the password limit of 1,024 characters applies to the decoded form value (after
   URL decoding), and `hash-password` reads at most 1,026 characters of its first line (decoded text from the reader); the form reader's
-  limits (16 KiB per value, 64 values) apply as the framework's form reader measures them, before any of our code; the hash is at most
+  limits (16 KiB per value, 64 values, 64 KiB for a whole multipart body, never buffered to a file) apply as the framework's form
+  reader measures them, inside the antiforgery middleware, before any of our code; the hash is at most
   4,096 bytes of printable ASCII by the secret rules before `PasswordHash.Parse`; `web.trusted_proxies` is bounded by the 1 MiB file and
   16 entries; the session table (16), client table (4,096) and global failure queue (100) are counts of entries.
 - [x] Exceptions that can reach a user: none. The login page shows only its two fixed messages; `PasswordHashException` reaches the
   log as one of the seven fixed reasons; `SessionEndedException` ends the circuit, and the browser receives the framework's generic
   circuit error text (`DetailedErrors` is off outside Development), never our message; a refused form post is the framework's plain
-  `400`. The framework logs the ended circuit at error level as an unhandled circuit exception; the JSON logger writes only the
+  `400` (pages) or the logout handler's `400`, also for a malformed, oversized or broken form body, because the antiforgery middleware
+  catches every form-reading failure for both (no `500`, Security B1). The framework logs the ended circuit at error level as an unhandled circuit exception; the JSON logger writes only the
   exception type name.
 - Secrets: the hash is held as `Secret` until parsed, never logged; the password is never logged, echoed or stored; the computed hash is
   compared with `CryptographicOperations.FixedTimeEquals`.
 - New dependency: `Konscious.Security.Cryptography.Argon2` 1.3.1 (MIT, managed) and its `Konscious.Security.Cryptography.Blake2` 1.1.1;
   its `net8.0` dependency group also names `System.Memory` 4.5.4, which has no assembly for `net10.0`. Security reviews the pin
   (`Directory.Packages.props`, transitive pinning on).
+
+## Security review
+
+Plan review (squad-security, CHANGES_REQUIRED), each finding answered:
+
+- **B1 (blocking) — logout answers `500` to a malformed or oversized form.** Accepted; confirmed in the 10.0.12 sources
+  (`DefaultAntiforgery.IsRequestValidAsync` line 104 without a catch, `DefaultAntiforgeryTokenStore` rethrowing as
+  `AntiforgeryValidationException`, caught only in `AntiforgeryMiddleware.InvokeAwaited`). Revised: the logout endpoint carries
+  `RequireAntiforgeryTokenAttribute(true)`, so the middleware validates and catches, and the handler reads only
+  `IAntiforgeryValidationFeature` (missing → `400`, fail closed). Chosen over a `try/catch` around `IsRequestValidAsync` because it
+  is the path the page endpoints already take, so one mechanism decides every form post. *Framework facts*, *Pipeline*, signature
+  `LogoutAsync`, AC6.1 (20 KiB value, 65 values on `/logout`), AC6.3 (metadata and feature check), area document *Cross-site requests*.
+- **B2 (blocking) — multipart file sections escape the form limits.** Accepted; `MultipartBodyLengthLimit` 65,536 and
+  `MemoryBufferThreshold` 65,536 set explicitly (constant `MaxMultipartBodyLength`), listed in *Services*, *Security considerations* and
+  the area document. AC6.1 (1 MiB file part to `/login` and `/logout`), AC6.2 (the options). The compose file's `/tmp` tmpfs stays
+  unsized: with the limit nothing reaches it from a form, and sizing it is SQLite's concern (0060).
+- **B3 (blocking) — an abandoned gate wait leaks the semaphore.** Accepted; the wait is prescribed exactly in *Sign-in*
+  (`CancellationTokenSource(VerificationWait, timeProvider)` linked with the request token, release only after an acquire; caller
+  cancellation propagates as `OperationCanceledException`, nothing recorded). AC7.7a pins that the gate is usable after a timed-out and
+  after a cancelled waiter.
+- **N1 — `SameSite=Lax` does not keep same-site pages off the live connection.** Accepted; the area document now names the protection
+  that holds (the live connection renders only components named in protected descriptors of the signed-in page, which another origin
+  cannot read; the antiforgery token for posts likewise) and says that `SameSite` only keeps *other sites* out; record 0103 reworded;
+  `docs/REVERSE_PROXY.md` recommends a host name of its own (Dev, *Documentation updates*).
+- **N2 — `.squad/project.md` area 3 says the cookies are always `Secure`.** Accepted; the goal sentence is restated to the issue's rule
+  (`Secure` whenever the request reached the proxy over HTTPS), in *Documentation updates* and tasks row 18. This aligns the goal with
+  what the issue's owner asked for; no guarantee of `docs/ARCHITECTURE.md` changes.
+- **N3 — multi-lane path only checked against itself.** Accepted; AC2.4 reproduces the reference vector `m=256,t=2,p=2` through the
+  explicit `Create` overload, which checks no bounds (signature comment). Should Konscious not reproduce it, that is a finding that
+  stops the pipeline (escalation), not a test to relax.
+- **N4 — "never echoes the password".** Accepted; the area document now says that the command prints nothing but the hash and does
+  not switch off terminal echo, and gives the `read -rs` plus pipe recipe without `-t`; README row carries the warning.
+- **N5 — "nothing it sent is processed" too broad.** Accepted; the area document now says no event, interop call or navigation it sends
+  is processed after the session ended, and names the exception (data of a server-to-client transfer that had already started, which
+  no page uses).
+- Dependency pin: no objection; unchanged.
+
+## Challenge
+
+Devil's Advocate (0 major, 2 minor), each objection answered:
+
+1. **Shared client address by default** — accepted. Revised: `docs/REVERSE_PROXY.md` and `SECURITY.md` say plainly that without
+   `web.trusted_proxies` every client behind the proxy shares the proxy's address and its lockout (Dev, *Documentation updates*); the
+   area document says it under *Failed sign-ins*; `LoginService` logs `forwarded header ignored` (`client`) when a client lock starts on
+   a request whose `X-Forwarded-For` was not applied (new `BackendLog.ForwardedHeaderIgnored`, AC7.9, service check in AC5.2). The log
+   is tied to the start of a lock, not to every request, so a client cannot flood the log with it (one line per five failures at most).
+   A start-up warning was weighed and dropped: without a request the service cannot know that a proxy sits in front of it.
+2. **Global lockout can be provoked** — accepted. The trade-off and the recovery path (a restart of the container clears the in-memory
+   counts; the per-client lock ends after 15 minutes, the overall lock at the latest one hour after its oldest failure) are written in
+   the area document (*Failed sign-ins*), record 0105 (*Consequences*), `docs/REVERSE_PROXY.md` and `SECURITY.md`. The design is kept:
+   the cap is the only bound on guesses from a client that can change its address (0105); the 5-second gate wait is part of the same
+   trade-off and is named with it.
 
 ## Decision records
 

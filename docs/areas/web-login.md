@@ -39,7 +39,9 @@ and the option in [Configuration and secrets](configuration-and-secrets.md), the
   `vandoxd hash-password: the password must have 12 to 1024 characters and no control characters` on standard error, exit 1; nothing
   is printed to standard output.
 - It takes no argument and only `-h`/`-help` (usage to standard error, exit 0); any other argument is a usage error (exit 2). It
-  reads no configuration file and no environment variable, and never echoes the password.
+  reads no configuration file and no environment variable, and writes nothing but the hash: the password never appears on standard
+  output or standard error. It does not switch off a terminal's echo, so the password is read with `read -rs` and piped into
+  `docker run --rm -i` without `-t`, as the README shows; with `-t` the terminal shows what is typed.
 
 ### Access
 
@@ -76,33 +78,45 @@ and the option in [Configuration and secrets](configuration-and-secrets.md), the
 - Sign-out: every page shows a *Sign out* button in its header. `POST /logout` with a valid antiforgery token ends the session on the
   server, deletes the cookie and answers `303` with `Location: /login`; without a session it only redirects.
 - A live connection belongs to the session that opened it. Every event, interop call and navigation it sends is checked against the
-  session first; once the session has ended, the connection is closed and nothing it sent is processed. A page also checks its session
-  every 30 seconds and goes to `/login` when it has ended.
+  session first; once the session has ended, the connection is closed and no event, interop call or navigation it sends is processed.
+  (The data of a transfer from the server to the browser that had already started is not checked; no page uses such transfers.) A
+  page also checks its session every 30 seconds and goes to `/login` when it has ended.
 
 ### Cross-site requests
 
 - Every form post (the login form, sign-out, any form of a page) must carry an antiforgery token that matches the cookie
   `vandox_csrf` (`HttpOnly`, `SameSite=Strict`, `Path=/`, `Secure` like the session cookie). A post without a valid token is answered
   `400` and has no effect; a login post without one is not counted as an attempt.
-- A form post with a value of more than 16 KiB or with more than 64 values is refused with `400`, like a post without a token, before
-  the password is looked at.
-- The live connection's endpoints take no form posts. They need a session, and the session cookie is not sent with requests that
-  another site starts (`SameSite=Lax`), so another site cannot open a live connection in the user's name.
+- A form post whose body cannot be read as a form is refused with `400` like a post without a token, before the password is looked at
+  and without signing out: a value of more than 16 KiB, more than 64 values, a multipart body of more than 64 KiB (file parts
+  included), a malformed body, or a body the client breaks off. No part of a form is buffered in a file.
+- The live connection's endpoints take no form posts and need a session. A page of another site (another registrable domain) does not
+  get the session cookie sent along (`SameSite=Lax`). A page of the same site does: another service on the same host name or IP
+  address, on any port, is the same site. What keeps such a page out is that a live connection renders only the components named in
+  protected descriptors that the signed-in page carries, and another origin cannot read that page, just as it cannot read the
+  antiforgery token of a form. A host name of its own for the UI ([REVERSE_PROXY.md](../REVERSE_PROXY.md)) keeps other web
+  applications off the same site.
 
 ### Failed sign-ins
 
 - Attempts are counted per client. The client is the address the request came from as the service sees it (after the forwarded
   headers of a trusted proxy): an IPv4 address, an IPv4-mapped IPv6 address as its IPv4 address, an IPv6 address by its /64 network.
-  A request without an address counts as one shared client.
+  A request without an address counts as one shared client. Without `web.trusted_proxies`, every client behind a reverse proxy has
+  the proxy's address, so five wrong passwords from any of them lock all of them out for 15 minutes.
 - 5 failed attempts of a client within 15 minutes lock that client for 15 minutes from the fifth failure. While a client is locked,
   every attempt is refused without checking the password, also the right one. A successful sign-in clears the client's failures.
 - 100 failed attempts of all clients together within one hour lock the sign-in for everyone until the oldest of them is one hour old.
+  Anyone who can reach the login can provoke this lock, and while attempts keep arriving each one may wait up to 5 seconds for the
+  check; this is the price of bounding the guesses of a client that can change its address. The counts exist only in memory: restarting
+  the container clears every lock at once (and signs the user out).
 - At most 4,096 clients are tracked; when the table is full, the client with the oldest last failure is forgotten.
 - Answers to the login post: success `302` to `/`; a wrong password `401` with the page and the message *The password is not correct.*;
   a locked client, the overall lock or a check that could not start in time `429` with the message *Too many sign-in attempts. Try
   again later.* The message never repeats the password.
 - Log lines (JSON, [Backend host](backend-host.md), *Logging*): `login succeeded` (`client`), `login failed` (`client`, `failures`
-  within the window), `login locked` (`client`, `until`), `login locked for all clients` (`until`), `logged out` (`client`). The
+  within the window), `login locked` (`client`, `until`), `login locked for all clients` (`until`), `logged out` (`client`), and
+  `forwarded header ignored` (`client`, a warning) together with `login locked` when the locking request carried `X-Forwarded-For` that
+  was not used because its sender is not in `web.trusted_proxies`: a sign that the proxy's address is missing from the option. The
   password and the hash are never logged.
 
 ### Reverse proxy trust
@@ -143,7 +157,8 @@ and the option in [Configuration and secrets](configuration-and-secrets.md), the
 - A password check needs as much memory as the hash's memory parameter (at most 256 MiB); one check at a time keeps it within the
   container's limit.
 - Limits that are constants, not options: the timeouts and counts above, the 5-second wait for a check, the 30-second check of a live
-  connection, 16 sessions, 4,096 tracked clients, 16 entries in `web.trusted_proxies`.
+  connection, 16 sessions, 4,096 tracked clients, 16 entries in `web.trusted_proxies`, and the form limits (16 KiB per value, 64
+  values, 64 KiB per multipart body).
 
 ## Related decisions
 
