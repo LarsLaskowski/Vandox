@@ -36,7 +36,7 @@ How a search stays within two seconds:
 2. **Time-ordered scan only** — every request is bounded, but a rare word in a large range needs many continuation steps where the
    index answers at once.
 3. **Per request: from the index when the words are selective, otherwise a bounded time-ordered scan** — the choice reads only the
-   index (a capped count of matching row IDs), both modes are bounded (the cap, the number of examined lines), and a request that hits
+   index (a capped read of the matching row IDs, which index mode then reads by record ID, so the index is walked once), both modes are bounded (the cap, the number of examined lines), and a request that hits
    the scan bound returns how far it got.
 4. **Order by record ID, which FTS5 delivers natively and stops at the limit** — fast, but pages would not be in time order for imported
    data.
@@ -76,9 +76,19 @@ Reader slots and the scan:
     range into a set — imported lines are not in ID order, so a time-ordered chunk can span almost every ID and the set grows with
     the matches, not with the scan bound.
 
+Reading the matches and the template list (after the first benchmark run):
+
+16. **The probe keeps the matching IDs (at most the cap) and index mode reads the lines by those IDs**, or the probe only counts and
+    index mode asks the index again (the intersection of several common words is walked twice, about half of the slowest case), or an
+    empty page when the count is 0 (halves only an empty intersection; a one-line intersection still walks twice).
+17. **The template list sums the template hours per template in key order, then joins the templates**, or sums the hours of the range
+    through the index on the hour (two lookups per template hour; about 0.75 s for 374,020 template hours, against 0.03 s), or reads
+    the all-time count for the whole storable range (does not help a 30-day range). The chosen statement reads the whole table
+    whatever the range is, which is never more than the other one costs for the whole range.
+
 ## Decision
 
-Options 3, 7, 9, 10, 11, 12, 13, 14 and 15: the logs view reads every filter from its address and queries only when interactive, each query under
+Options 3, 7, 9, 10, 11, 12, 13, 14, 15, 16 and 17: the logs view reads every filter from its address and queries only when interactive, each query under
 a deadline; the store answers a page from the full-text index when the words match fewer rows than a cap and otherwise by scanning a
 bounded number of lines in time order, testing each examined line on its own, and finds a template's lines by normalizing the candidates its literal words select. External text is
 escaped and capped per field with a visible cut marker; the view runs at most two store calls at once across the service, so the

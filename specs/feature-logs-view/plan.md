@@ -221,10 +221,20 @@ Backend (`tests/Vandox.Backend.Tests`):
 - [ ] AC-19 Performance (measurement, no unit test): `tools/Vandox.StorageBenchmark --search-lines 5000000` writes 5,000,000 generated
   lines and times the first page (100 lines, scan limit `LogsView.ScanRows`) of the cases listed under *Approach*, step 6. Criterion:
   every case under 2,000 ms on the reference host (DS918+, SSD volume). The Dev runs it on the development host and records it in
-  `docs/BENCHMARKS.md`; the orchestrator asks the Product Manager to run the published tool on the reference host before step 8, and
+  `docs/BENCHMARKS.md`; the orchestrator asks the Product Manager to run the published tool on the reference host after task 20 (*Lead decision: benchmark misses*), before the review, and
   the Dev enters that row. A case over 2,000 ms on the reference host goes to the Lead (mode `decide`). Cases 5 and 12 (several common
   words with a rare or empty intersection) are blocking like every other case; when one misses, the fix is a cheaper probe (the
   rarest term's capped count first, or the probe under its own share of the deadline), never a wider cap (Devil's Advocate 4).
+- [ ] AC-22 Index mode reads the index once (*Lead decision: benchmark misses*): the selectivity probe returns the matching record IDs
+  (at most the cap), and the statement of index mode reads the lines by those IDs without the full-text table:
+  `LogFinderQueries.BuildIndex(criteria, ids)` has a query plan in which no step names `log_fts` and the step on `records` is a search by
+  its integer primary key (`SqliteStoreLogExplorerTests.FindLogsIndexModeReadsLinesByRecordId`, data rows: no filter; source,
+  program, priority and `After`; a template). The results stay those of AC-2 to AC-6 (`FindLogsReturnsTheSameLinesWithEitherStrategy`,
+  `FindLogsWithTemplateReturnsExactlyItsLines` and the other existing tests, unchanged).
+- [ ] AC-23 Template list in key order (*Lead decision: benchmark misses*): the statement of `LogExplorerQueries.Build(TemplateListQuery)`
+  has a query plan in which no step names `log_template_hours_hour` and none is `USE TEMP B-TREE FOR GROUP BY`
+  (`SqliteStoreLogExplorerTests.TemplatesSumsTemplateHoursInKeyOrder`, data rows: no filter; source and program). The results stay those
+  of AC-10 (`TemplatesCountsLinesInTheRange`, `TemplatesCountsWholeHoursOfAMidHourRange`, `TemplatesFiltersBySourceAndProgram`, unchanged).
 - [ ] AC-21 Explorer gate (`GatedLogExplorerTests.cs`, Security B3): `GatedLogExplorer` passes every `ILogExplorer` call to the inner
   explorer with at most `maxConcurrent` calls in flight across all callers; a call waits for a slot with its own token (the page's
   deadline token, so the wait counts against the deadline) and ends with `OperationCanceledException` without calling the inner
@@ -283,11 +293,12 @@ Rules of the values, each refused with `The address has an invalid value for the
 2. **Strategy** (`LogFinder`), chosen per call from the FTS index alone:
    - The search text is the user's text, plus, with a template, `TemplateTerms.SearchText(template.Template)` (joined; the combined
      text keeps the 16-term and 1,024-byte rules — the template words are cut first to fit).
-   - With a search text, count the matching rows from the index only, capped:
-     `SELECT count(*) FROM (SELECT rowid FROM log_fts WHERE log_fts MATCH $match LIMIT $selective)`.
-     **Fewer than `selectiveMatches`**: *index mode* — the existing join from `log_fts` with every filter, the position
+   - With a search text, read the matching row IDs from the index only, capped (*Lead decision: benchmark misses*):
+     `SELECT rowid FROM log_fts WHERE log_fts MATCH $match LIMIT $selective`, kept as a list of at most `selectiveMatches` IDs.
+     **Fewer than `selectiveMatches`**: *index mode* — none: an empty page without a further statement; otherwise the lines with
+     those record IDs (`r.id IN (SELECT value FROM json_each($ids))`, the index is not read again) with every filter, the position
      (`captured_at > $at OR (captured_at = $at AND id > $id)`) and `ORDER BY captured_at, id`, at most `selectiveMatches` candidates by
-     construction. **Otherwise, or without a search text**: *scan mode* — walk the log lines of the range in (capture time, ID) order
+     construction (AC-22). **Otherwise, or without a search text**: *scan mode* — walk the log lines of the range in (capture time, ID) order
      through `records_kind_source_time` (with a source) or `records_kind_time`, from the position, at most `ScanLimit` lines, and keep
      those that pass the filters and, with a search text, are in the FTS match. The membership test is the correlated
      `EXISTS (SELECT 1 FROM log_fts WHERE log_fts MATCH $match AND rowid = r.id)` per examined line, nothing else: its work per line is a
@@ -302,8 +313,9 @@ Rules of the values, each refused with `The address has an invalid value for the
 3. **Context, sources, template list, source hours** (`LogExplorerQueries`, bound SQL only): context by `records_kind_source_time`
    in both directions with row-value positions, joined to `log_lines` for log and host, examining at most `StorageLimits.ContextScanRows`
    (2,000) rows per side; sources by a loose index scan over `records_kind_source_time` (one seek per source, `LIMIT 64`); template list
-   by `log_template_hours` of the range joined to `log_templates`, grouped and ordered as AC-10 (when the range covers the whole
-   storable range the Dev may read `log_templates.count` instead, same result); source hours from `log_source_hours`.
+   by `log_template_hours` summed per template in key order (`GROUP BY template_id` with `+hour` in the range conditions, so the
+   primary key and not `log_template_hours_hour` is read) and then joined to `log_templates`, filtered and ordered as AC-10 (AC-23;
+   one statement for every range, no `log_templates.count` shortcut); source hours from `log_source_hours`.
 4. **Backend** (`src/Vandox.Backend/Logs/`): `LogsAddress` (parse and build, *Address forms*), `Severities`, `LogText` (escape runs),
    `TemplateHourSeries` (chart data), `LogsView` (constants and the user texts of AC-14/15). Components: `Components/Logs/ExternalText.razor`
    (renders runs: text nodes and `<span class="escape">`, wrapped in an element of class `external`: `unicode-bidi: isolate` and
@@ -534,6 +546,14 @@ internal static class LogFilterRules
     internal static void Validate(SourceHourQuery query);
 }
 
+internal static class LogFinderQueries   // changed by the Lead decision on the benchmark misses
+{
+    internal static (string Sql, Dictionary<string, object> Parameters) BuildProbe(string match, int selectiveMatches);   // now SELECT rowid ... LIMIT $selective
+    internal static (string Sql, Dictionary<string, object> Parameters) BuildIndex(LogCriteria criteria, IReadOnlyList<long> ids);   // replaces BuildIndex(LogCriteria, string match)
+}
+// LogFinder (private): ReadMatchesAsync(SqliteConnection, string match, int selectiveMatches, CancellationToken) : Task<List<long>> replaces
+// CountMatchesAsync; FindFromIndexAsync(SqliteConnection, LogCriteria, IReadOnlyList<long> ids, CancellationToken)
+
 internal static class LogExplorerQueries
 {
     internal static Task<LogContext> ContextAsync(SqliteConnection connection, LogContextQuery query, CancellationToken cancellationToken);
@@ -726,8 +746,8 @@ browser script changes (`js/charts.js` is reused), so `sonar.coverage.exclusions
   a message at most 16 KiB; `LogText` caps the runs per field at 256 (after decoding, on UTF-16 text); `Limit` 1 to 1,000, `ScanLimit`
   1 to 100,000, context 0 to 20 per side with 2,000 examined rows per side, sources 64, template list 1 to 1,000, source hours 1 to
   10,000, chart 2,160 points. Every query runs under the 10-second deadline; index mode is bounded by `SelectiveMatches` candidates,
-  scan mode by `ScanLimit` examined rows (the per-line `EXISTS` collects nothing); the selectivity probe reads at most
-  `SelectiveMatches` row IDs, but a text of several common words makes FTS5 walk their full doclists to find the intersection inside
+  scan mode by `ScanLimit` examined rows (the per-line `EXISTS` collects nothing); the selectivity probe reads and keeps at most
+  `SelectiveMatches` row IDs (about 96 KiB, the list index mode then reads by record ID), but a text of several common words makes FTS5 walk their full doclists to find the intersection inside
   one `xFilter`/`xNext` step, where the progress handler of `ReaderQuery` does not run: this work is bounded by the doclist sizes
   (index-only, at most 16 terms), **not** by the deadline, and measured as cases 5 and 12 of AC-19 (Security N1). At most two explorer
   calls run at once across the service (`GatedLogExplorer`), one per page.
@@ -864,3 +884,70 @@ UI contract the tests pin (Dev, `LogsPage.razor` and `LogTemplatesPage.razor`): 
 `ToQuery()`. Source rule for Dev and Tester: the formatter rewrites `\u` escapes in C# string literals into the characters themselves
 (a literal U+2028 breaks the build), so a C# source builds such characters from code points (`char.ConvertFromUtf32`, `(char)0x…`), never
 from a `\u` literal.
+
+## Lead decision: benchmark misses before the reference-host run (decide, after task 6)
+
+Situation: on the development host every AC-19 case is under 2,000 ms, but cases 12 (1,232 ms), 11 (760 ms) and 11b (732 ms; cold 0.9
+to 1.2 s) are over the 500 ms tuning target of *Approach* step 7 and are not changed by the two constants; at the reference host's 3 to
+4 times they would take about 3.7 to 4.9 s and 2.2 to 3.0 s (cold up to about 4.8 s). Case 9 (411 ms, about 1.2 to 1.6 s there) and case 5
+(173 ms) are within reach and stay as they are.
+
+Decided: **fix cases 11, 11b and 12 now, then ask the Product Manager for the one reference-host run.** These misses are predictable from
+the plan's own factor, and the run (writing 5,000,000 lines on the NAS) is the expensive step. Waiting would most likely mean two
+reference-host runs and a second decide loop anyway.
+
+1. **Index mode reads the full-text index once (AC-22, case 12 and every index-mode case).** The probe keeps the matching record IDs it
+   reads (at most `SelectiveMatches`, 12,000 IDs, about 96 KiB, plus their JSON text while the statement is bound) instead of only
+   counting them. Fewer than the cap: no IDs means an empty page without a further statement; otherwise the index-mode statement reads
+   the lines of those IDs (`json_each`, as `BuildFetch` already does) with every filter, the position and the order, and does not
+   touch `log_fts`. The planner must drive by the IDs: if the query plan uses a `records` index on time instead, the Dev writes the range
+   and source conditions with unary `+`, which AC-22's test pins either way. The doubled intersection work the Dev reported goes away, and so
+   does the second walk of case 12 (about half of its 1,232 ms). The same holds for a rare but non-empty intersection, which a zero-count
+   shortcut would not cover.
+2. **The template list sums `log_template_hours` in key order (AC-23, cases 11 and 11b).** Sum per `template_id` over the primary key with
+   `+hour` in the range conditions, then join the at most 12,914-row aggregate (here) to `log_templates`, filter by source and program,
+   order and limit as AC-10. One statement for every range; the `log_templates.count` shortcut of *Approach* step 3 is dropped. Its
+   cost is one ordered pass over the table whatever the range is (0.03 s on the development host's file, by the Dev's measurement),
+   which is never more than the old statement's cost for the whole range. A narrow range of a large table gets slower than with
+   the hour index, at most to that one pass. The storage area states it.
+
+Options weighed:
+- *Ask for the run first, fix only on a measured miss* — lost: cases 11, 11b and 12 are expected misses, and the run is the costly
+  step.
+- *Zero-count shortcut only* (empty page when the probe counts 0) — lost: it halves only the empty intersection of case 12. A
+  16-word intersection of one line still walks the doclists twice, and no benchmark case would show it.
+- *Rarest term's capped count first* (the plan's AC-19 hint) — not taken now: it decides cheaply only when one term is rare. When every
+  term is common (cases 5 and 12) it either still needs the full probe or falls back to scan mode, which turns case 5 (two common
+  words meeting in 5,000 lines) into about 12 hits per 12,000 examined lines and hundreds of *Continue* steps.
+- *The probe under its own share of the deadline* — not possible: the work runs inside one FTS5 step, where the progress handler does not
+  run (Security N1).
+- *Template list from `log_templates.count` for the whole storable range* (allowed by the plan) — does not fix 11b (30 days).
+- A wider cap or a smaller `ScanRows` — excluded by AC-19 (never a wider cap) and not the cause.
+
+If case 12 still misses on the reference host after this change, the case returns to the Lead (mode `decide`). The remaining levers
+are named now so that they do not come up as a surprise then: a smaller full-text index (`detail=column` or `none`, a schema step that
+rebuilds `log_fts`, a separate issue) or a product decision on the number of words the view accepts. Neither one is part of this change.
+
+Verification (Dev, before the review, logged): *Format*, *Build*, *Test*, *Analyzer gate*, *Coverage gate*; then the benchmark run on the
+development host again with 5,000,000 lines and the updated rows and notes in `docs/BENCHMARKS.md` (target: cases 11, 11b and 12 under
+500 ms; report any case that is not). In the same run, compare the template list of cases 11 and 11b row by row between the old and
+the new statement on the benchmark file (identical IDs, counts and order) and log the result. Only then does the orchestrator ask
+the Product Manager for task 13.
+
+Owners:
+- Dev: skeleton of the changed signatures first (`LogFinderQueries.BuildIndex(LogCriteria, IReadOnlyList<long>)` added as a stub
+  next to the old overload, which stays until the implementation), then `src/Vandox.Storage/LogFinder.cs`, `LogFinderQueries.cs` (old
+  overload removed), `LogExplorerQueries.cs`; `tools/Vandox.StorageBenchmark/SearchBenchmark.cs` if its mode probe or timing depends on
+  the changed SQL; `docs/areas/storage.md` (*Log exploration*: the probe reads the IDs and index mode reads them by record ID, index read
+  once; the template list's cost is one pass over the template hours whatever the range); `docs/BENCHMARKS.md` (results, *Tuning*,
+  *Notes* of cases 11, 11b and 12).
+- Tester: `tests/Vandox.Storage.Tests/SqliteStoreLogExplorerTests.cs`, `FindLogsIndexModeReadsLinesByRecordId` and
+  `TemplatesSumsTemplateHoursInKeyOrder` (AC-22, AC-23), written first and failing on the skeleton (the template-list test on the
+  current statement). The query-plan helper `PlanAsync` of `SqliteStoreTemplateTests.cs` is moved to a shared test helper or repeated;
+  the Tester decides. The existing AC-2 to AC-6 and AC-10 tests stay unchanged and must stay green.
+- Lead: record 0103 (options 3, 16 and 17, *Decision*), this section, `tasks.md`.
+- Security: one delta confirmation of this section (index mode now holds a list of IDs bounded by the cap; the B1 finding was about an
+  unbounded set).
+
+Deviations of the Dev reports (`LocationChanged` subscription with query dedupe on both pages, public `LogsAddress.FromFields`/`FormatTime`,
+the GET form fallback, `InternalsVisibleTo Vandox.StorageBenchmark`) are left to step 9.

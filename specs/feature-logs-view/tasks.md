@@ -18,7 +18,14 @@ Every documentation edit appears in exactly one row; the Lead's approval only to
 | 10 | `docs/ARCHITECTURE.md` (intro, components, *Log search* bullet with link to 0103) | `docs/ARCHITECTURE.md` | — | Dev | [x] |
 | 11 | `README.md`: *Explore the logs*; note in *Rebuild template statistics* | `README.md` | — | Dev | [x] |
 | 12 | `docs/BENCHMARKS.md`: *Log search* section with the development-host results | `docs/BENCHMARKS.md` | AC-19 | Dev | [x] |
-| 13 | Reference-host run of `--search-lines 5000000` by the Product Manager (requested by the orchestrator before step 8); the Dev enters the row in `docs/BENCHMARKS.md` | `docs/BENCHMARKS.md` | AC-19 | Product Manager (run), Dev (row) | [ ] |
+| 13 | Reference-host run of `--search-lines 5000000` by the Product Manager (requested by the orchestrator after task 20, before the review); the Dev enters the row in `docs/BENCHMARKS.md` | `docs/BENCHMARKS.md` | AC-19 | Product Manager (run), Dev (row) | [ ] |
 | 14 | `.squad/project.md` *Security areas* 3, 10 and 12 | `.squad/project.md` | — | Dev | [x] |
 | 15 | `.squad/project.md` *Test doubles*, row *Blazor components* | `.squad/project.md` | — | Tester | [x] |
 | 16 | Decision record 0103, the sentence in 0066, the index row | `docs/decisions/0103-logs-view-address-as-the-view-bounded-search-pages-template-lines-by-normalization.md`, `docs/decisions/0066-log-search-takes-literal-terms-only.md`, `docs/decisions/README.md` | — | Lead | [x] |
+| 17 | Skeleton of the Lead decision on the benchmark misses: `LogFinderQueries.BuildIndex(LogCriteria, IReadOnlyList<long>)` as a stub next to the old overload; *Build* passes | `src/Vandox.Storage/LogFinderQueries.cs` | — | Dev | [ ] |
+| 18 | Tests first: `FindLogsIndexModeReadsLinesByRecordId`, `TemplatesSumsTemplateHoursInKeyOrder` (fail on the skeleton; existing tests unchanged) | `tests/Vandox.Storage.Tests/SqliteStoreLogExplorerTests.cs` (and a shared plan helper if moved from `SqliteStoreTemplateTests.cs`) | AC-22, AC-23 | Tester | [ ] |
+| 19 | Probe keeps the IDs, index mode reads by record ID (empty page without IDs), old `BuildIndex` overload removed; template list summed in key order; benchmark adapted if needed | `src/Vandox.Storage/LogFinder.cs`, `LogFinderQueries.cs`, `LogExplorerQueries.cs`, `tools/Vandox.StorageBenchmark/SearchBenchmark.cs` | AC-22, AC-23, AC-19 | Dev | [ ] |
+| 20 | Benchmark again on the development host (5,000,000 lines), old and new template list compared row by row for cases 11 and 11b; results, *Tuning* and *Notes* updated; *Log exploration* updated (probe IDs, index read once, template list cost) | `docs/BENCHMARKS.md`, `docs/areas/storage.md` | AC-19 | Dev | [ ] |
+| 21 | Record 0103: options 16 and 17, option 3 wording, *Decision* | `docs/decisions/0103-logs-view-address-as-the-view-bounded-search-pages-template-lines-by-normalization.md` | — | Lead | [x] |
+
+Order: 17, 18, 19, 20 (with task 7's coverage pass after 19), then task 13. The orchestrator asks the Product Manager for the reference-host run only after task 20 (Lead decision *benchmark misses* in `plan.md`).
