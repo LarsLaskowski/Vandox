@@ -175,15 +175,21 @@ Backend (`tests/Vandox.Backend.Tests`):
 - [ ] AC-15 Templates page (`LogTemplatesPageTests.cs`): lists `TemplatesAsync` of the address (source, program, from, to; limit 200)
   with text, source, program, first seen, last seen, count and count in range (column header `LogsView.CountInRangeHeader` =
   `Lines in range (whole hours)`), escaped like AC-14.2; `template` selects one, whose
-  hourly counts are shown as a `TimeSeriesChart` whose `Title` is the fixed `LogsView.ChartTitle` (`Lines per hour`) and whose one
+  hourly counts (`ILogExplorer.TemplateHoursAsync` and `SourceHoursAsync` of the template's source, both through the gate; the page
+  injects no `ILogTemplateReader`) over the hour window `from' = max(from, to - TemplateHourSeries.MaxHours hours)`, `to`, with
+  `Limit = TemplateHourSeries.MaxHours + 1` for both queries (the store answers ascending and stops at the limit, so the window, not
+  the limit, keeps the last hours of a long range; `TemplateHourSeries.Build(hours, covered, from', to)`) are shown as a `TimeSeriesChart` whose `Title` is the fixed `LogsView.ChartTitle` (`Lines per hour`) and whose one
   series label is the fixed `LogsView.ChartSeries` (`Lines`) — no external text goes into the chart (Security N3) — and whose link
   *Show lines* is `logs?template=<id>` plus the address's `from` and `to`; its store calls run one at a time as AC-14.13; errors as
   AC-14.3/5/6/7 with `The query took longer than 10 seconds and was stopped. Narrow the time range or choose a
   source.` and `The templates could not be read. The service log has the details.` Tests:
   `TemplatesPageListsTemplatesWithFirstSeenAndCounts`, `TemplatesPageLinksATemplateToItsLines`,
-  `TemplatesPageChartsTheSelectedTemplate` (the selected template's text holds U+202E, written as `\u202e` and asserted present; the
+  `TemplatesPageChartsTheSelectedTemplate` (the selected template's text holds U+202E, built from its code point and asserted present; the
   chart element's `aria-label` is exactly `Lines per hour`), `TemplatesPageShowsErrors`, `TemplatesPageDoesNotQueryWhilePrerendering`,
-  `TemplatesPageRunsOneStoreCallAtATime`, `TemplatesPageLabelsTheRangeCountAsWholeHours`.
+  `TemplatesPageRunsOneStoreCallAtATime` (the template's hourly counts included), `TemplatesPageLabelsTheRangeCountAsWholeHours`,
+  `TemplatesPageQueriesTheLastHoursOfALongRange` (an address of 120 days: the `TemplateHourQuery` and the `SourceHourQuery` recorded by
+  `FakeLogExplorer` have template ID / source, `From` = `to` minus 2,160 hours, `To` = `to`, `Limit` 2,161; for the short range of
+  `TemplatesPageChartsTheSelectedTemplate` `From` is the address's `from`).
 - [ ] AC-16 Hourly series (`TemplateHourSeriesTests.cs`): `TemplateHourSeries.Build(hours, covered, from, to)` gives one point per
   hour from the first to the last hour of the range that holds a template hour or a covered hour, at most the last 2,160 hours: the
   template's count, 0 for a covered hour without the template, `null` (a gap) for an hour the source did not log. Tests:
@@ -202,8 +208,8 @@ Backend (`tests/Vandox.Backend.Tests`):
   `EscapeWritesSupplementaryCharactersWithEightDigits`, `RunsCutAnAllNulMessageAtTheCharacterLimit` (16,384 U+0000 with `MaxChars`:
   2,730 escapes, i.e. 16,380 characters, then the run `[cut: 13654 more characters]`; total length at most 16,384 plus the marker),
   `RunsKeepAPlainMessageOfSixteenKibibytesWhole` (16,384 ASCII letters: one plain run, no marker), `RunsNeverSplitAnEscape` (a text
-  whose cap falls inside an escape ends before it). The cases are written in the test source as `\u…` escapes and each test asserts
-  its input holds the character. `LogLineViewTests.FromCapsEveryField` (`LogLineView.From(record)` builds the runs of message,
+  whose cap falls inside an escape ends before it). The cases are built in the test source from code points (`char.ConvertFromUtf32`; the formatter turns a `\u`
+  literal into the character itself) and each test asserts its input holds the character. `LogLineViewTests.FromCapsEveryField` (`LogLineView.From(record)` builds the runs of message,
   source, host and program with the two caps and keeps no reference to the record's message). The component that renders the runs:
   `ExternalTextTests.ExternalTextRendersMarkupAsText` (`<b>` appears as `&lt;b&gt;`, an escaped run inside `<span class="escape">`).
 - [ ] AC-18 Navigation and serving: the layout has a *Logs* entry with `href="logs"` that is marked on `/logs` and `/logs/templates`
@@ -223,7 +229,7 @@ Backend (`tests/Vandox.Backend.Tests`):
   explorer with at most `maxConcurrent` calls in flight across all callers; a call waits for a slot with its own token (the page's
   deadline token, so the wait counts against the deadline) and ends with `OperationCanceledException` without calling the inner
   explorer when that token ends first; the slot is released when the inner call completes, fails or is cancelled. Tests:
-  `GatedLogExplorerRunsAtMostTheGivenNumberOfCallsAtOnce` (data rows per method: with 2 slots and 3 blocked calls the inner explorer
+  `GatedLogExplorerRunsAtMostTheGivenNumberOfCallsAtOnce` (data rows per method, all seven including `TemplateHours`: with 2 slots and 3 blocked calls the inner explorer
   sees 2), `GatedLogExplorerWaitEndsWithTheToken`, `GatedLogExplorerReleasesTheSlotAfterAFailure`,
   `GatedLogExplorerRefusesAnInvalidSlotCount` (`ArgumentOutOfRangeException` for 0 and for more than 3). With
   `LogsView.MaxConcurrentQueries` = 2, the view holds at most two of the store's four reader leases, so `/healthz` (whose
@@ -431,6 +437,7 @@ public interface ILogExplorer
     Task<LogTemplate?> TemplateAsync(long id, CancellationToken cancellationToken);
     Task<IReadOnlyList<TemplateCount>> TemplatesAsync(TemplateListQuery query, CancellationToken cancellationToken);
     Task<IReadOnlyList<DateTimeOffset>> SourceHoursAsync(SourceHourQuery query, CancellationToken cancellationToken);
+    Task<IReadOnlyList<TemplateHour>> TemplateHoursAsync(TemplateHourQuery query, CancellationToken cancellationToken);
 }
 
 public sealed class LogFilter
@@ -506,6 +513,8 @@ public const int MaxLogSources = 64;
 public const int MaxTemplateListLimit = 1000;
 
 // SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, ILogTemplateReader, ILogExplorer, IIncidentStore, IImportTracker, IAsyncDisposable
+// ILogExplorer.TemplateHoursAsync is the store's existing public TemplateHoursAsync (same signature as ILogTemplateReader's, one
+// method implements both; no new store code, it stays in #region ILogTemplateReader; covered by the existing SqliteStoreTemplateTests)
 internal Task<LogPage> FindLogsAsync(LogFilter filter, int selectiveMatches, CancellationToken cancellationToken);
 
 internal static class LogFinder
@@ -597,7 +606,8 @@ public sealed class LogLineView
 public sealed class GatedLogExplorer : ILogExplorer, IDisposable
 {
     public GatedLogExplorer(ILogExplorer inner, int maxConcurrent);   // 1 to 3, else ArgumentOutOfRangeException
-    // the six ILogExplorer methods, each: await slot (token), call inner, release in finally
+    // the seven ILogExplorer methods, each: await slot (token), call inner, release in finally
+    // instance fields: exactly one SemaphoreSlim and one ILogExplorer (ServeTests.ServeGatesTheLogExplorer reads them by type)
     public void Dispose();
 }
 
@@ -636,8 +646,8 @@ services after the build; tests only). `BackendLog`: `internal static partial vo
 - `tests/Vandox.Backend.Tests/LogsAddressTests.cs`, `SeveritiesTests.cs`, `LogTextTests.cs`, `LogLineViewTests.cs`,
   `GatedLogExplorerTests.cs`, `ExternalTextTests.cs`,
   `TemplateHourSeriesTests.cs`, `LogsPageTests.cs`, `LogTemplatesPageTests.cs`; new cases in `MainLayoutTests.cs` and `ServeTests.cs`.
-- New test doubles in `tests/Vandox.Backend.Tests`: `FakeLogExplorer` (`ILogExplorer`: scripted results per method, records every
-  query and its token, can block until the token is cancelled, can throw a scripted exception) and `RecordingNavigationManager`
+- New test doubles in `tests/Vandox.Backend.Tests`: `FakeLogExplorer` (`ILogExplorer`: scripted results per method, the template's
+  hourly counts included (method name `FakeLogExplorer.TemplateHours`), records every query and its token, can block until the token is cancelled, can throw a scripted exception) and `RecordingNavigationManager`
   (initialized with any URI, records `NavigateTo` targets and applies them as the new URI). `ComponentTestRenderer` may get an
   interactive `RendererInfo` (Tester's change, existing tests unaffected).
 
@@ -818,3 +828,39 @@ Non-blocking notes of the Security plan review, round 2 (APPROVED), verbatim for
    - Register it with `AddSingleton<ILogExplorer>(…)`, matching the existing registrations at ServeCommand.cs:148-153.
    - Have that test also assert that two DI scopes resolve the same instance.
 2. **Template-list bound:** "about 2.5 MiB" is low. Four short fields × 2,048 characters × 2 bytes × 200 rows is about 3.1 MiB. Correct the figure in the security considerations and in the web UI area text.
+
+## Lead decision: template hourly counts (decide, after tests first)
+
+Gap: the plan's `ILogExplorer` had no method for a template's hourly counts, which only `ILogTemplateReader.TemplateHoursAsync`
+offers, while `LogTemplatesPage` injects only `ILogExplorer`.
+
+Decided: **`ILogExplorer` gets `TemplateHoursAsync(TemplateHourQuery, CancellationToken)`, routed through `GatedLogExplorer`** (AC-15,
+AC-21, signatures above). Rejected: the page injects `ILogTemplateReader` directly — that call would bypass the gate, so the view could
+hold a third reader lease and break the guarantee of record 0103 (option 14: at most two store calls of the view across the service,
+the health check keeps a reader) and Security B3; the shared counter in the test double only proves one call per page, not the bound
+across circuits. No record change: 0103 already states the bound for every store call of the view, and this keeps it true.
+
+Found on the way and fixed in AC-15: the hourly queries had no window or limit in the plan; the store answers them ascending and stops
+at `Limit`, so a range longer than the limit would chart the oldest hours, contrary to AC-16 (*the last 2,160 hours*). The page now
+clips `from` to `to` minus 2,160 hours and asks for 2,161 hours (`TemplatesPageQueriesTheLastHoursOfALongRange`).
+
+Owners:
+- Dev: `src/Vandox.Storage/ILogExplorer.cs` (new member with XML docs, exceptions as `ILogTemplateReader`), `src/Vandox.Backend/Logs/GatedLogExplorer.cs`
+  (seventh method in the skeleton, then gated in task 5), `LogTemplatesPage.razor.cs` (no `ILogTemplateReader`; the window above).
+  `SqliteStore` needs no change.
+- Tester: `FakeLogExplorer.cs` (implements `TemplateHoursAsync` as `TemplateHours` through `RunAsync`, scripted result property),
+  delete `FakeTemplateReader.cs`, `LogPageHarness.cs` (registers no `ILogTemplateReader`, so a page that injects one fails to render),
+  `LogTemplatesPageTests.cs` (`TemplatesPageChartsTheSelectedTemplate` scripts the hours on `harness.Explorer`; new
+  `TemplatesPageQueriesTheLastHoursOfALongRange`; `TemplatesPageRunsOneStoreCallAtATime` covers the hourly call),
+  `GatedLogExplorerTests.cs` (data row and dispatch case `TemplateHours` in both data-row tests). `ServeTests.ServeGatesTheLogExplorer`
+  stays as written: reading the gate's `SemaphoreSlim` and inner `ILogExplorer` by type is accepted, and the Dev keeps exactly one field
+  of each type.
+- Security: one delta confirmation of this section (the B3 gate's method set changed), per the `decide` rule for a plan fix that
+  changes no scope.
+
+UI contract the tests pin (Dev, `LogsPage.razor` and `LogTemplatesPage.razor`): form fields named `q`, `source`, `program`, `severity`,
+`from`, `to`; buttons with the exact texts `Next page`, `First page`, `Continue`, `Context`; *Searched up to* written as
+`yyyy-MM-dd HH:mm:ss.fff` followed by ` UTC`; on the templates page the link text `Show lines` with `href` `logs` plus
+`ToQuery()`. Source rule for Dev and Tester: the formatter rewrites `\u` escapes in C# string literals into the characters themselves
+(a literal U+2028 breaks the build), so a C# source builds such characters from code points (`char.ConvertFromUtf32`, `(char)0x…`), never
+from a `\u` literal.
