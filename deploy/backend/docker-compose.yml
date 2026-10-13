@@ -11,8 +11,20 @@
 #                                never be world-readable:
 #                                  sudo chown 65532:65532 secrets/vandox_agent_token
 #                                  sudo chmod 0400 secrets/vandox_agent_token
+#   secrets/vandox_web_password_hash
+#                                the argon2id hash of the web UI password, a single line. Create it without
+#                                echoing the password and without a terminal for the container (no -t):
+#                                  read -rs -p 'Web UI password: ' pw && echo
+#                                  printf '%s\n' "$pw" | docker run --rm -i networlddev/vandox hash-password \
+#                                    > secrets/vandox_web_password_hash
+#                                Give it the same owner and mode as the token file. The service refuses to
+#                                start without a valid hash (docs/areas/web-login.md).
 #   import/                      directory for the log import (mounted read-only)
 #   .env (optional)              WEB_BIND_ADDRESS=<address of this host the reverse proxy reaches>
+#
+# The web UI needs a login and runs behind a TLS-terminating reverse proxy (docs/REVERSE_PROXY.md). Set
+# web.trusted_proxies in vandoxd.yaml to the proxy's address, so the client address and the HTTPS scheme it
+# reports are used.
 #
 # The web port is published on 127.0.0.1 by default, for a reverse proxy on this host. Set WEB_BIND_ADDRESS
 # for a proxy on another host. The binding is defense in depth, not the access control: depending on the
@@ -36,6 +48,7 @@ services:
     mem_limit: 512m
     environment:
       VANDOX_AGENT_TOKEN_FILE: /run/secrets/vandox_agent_token
+      VANDOX_WEB_PASSWORD_HASH_FILE: /run/secrets/vandox_web_password_hash
     # Longer than the 10 s shutdown deadline of vandoxd, so Docker's SIGKILL never cuts it short.
     stop_grace_period: 30s
     ports:
@@ -47,8 +60,8 @@ services:
       - ./vandoxd.yaml:/etc/vandox/vandoxd.yaml:ro
     secrets:
       - vandox_agent_token
-      # Issue #25: the password hash of the web UI. Issue #60: the Telegram bot token.
-      # - vandox_web_password_hash
+      - vandox_web_password_hash
+      # Issue #60: the Telegram bot token.
       # - vandox_telegram_bot_token
     read_only: true
     # SQLite's temporary files.
@@ -70,7 +83,7 @@ volumes:
 secrets:
   vandox_agent_token:
     file: ./secrets/vandox_agent_token
-  # vandox_web_password_hash:
-  #   file: ./secrets/vandox_web_password_hash
+  vandox_web_password_hash:
+    file: ./secrets/vandox_web_password_hash
   # vandox_telegram_bot_token:
   #   file: ./secrets/vandox_telegram_bot_token

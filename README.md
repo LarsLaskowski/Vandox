@@ -72,6 +72,7 @@ the value.
 | Key | Default | Description |
 | --- | ------- | ----------- |
 | `web.listen` | `:8080` | Address of the web UI as `[host]:port`. |
+| `web.trusted_proxies` | empty | Addresses or networks of the reverse proxies whose `X-Forwarded-For` and `X-Forwarded-Proto` headers are trusted, comma-separated, at most 16 entries such as `172.18.0.1` or `172.18.0.0/16` (IPv4 prefix 8 to 32, IPv6 prefix 16 to 128, no host bits set). Without it, all clients behind a proxy share the proxy's address and its sign-in lockout (see *Run the backend with Docker Compose* and `docs/REVERSE_PROXY.md`). |
 | `ingest.listen` | `:8081` | Address of the ingest endpoint, on a port other than `web.listen`. |
 | `storage.directory` | `/data` | Directory of the backend's data, an absolute and clean path. |
 | `log.level` | `info` | `debug`, `info`, `warn` or `error`. |
@@ -88,7 +89,7 @@ the value.
 | Variable | File variant | Binary | Required | Rule |
 | -------- | ------------ | ------ | -------- | ---- |
 | `VANDOX_AGENT_TOKEN` | `VANDOX_AGENT_TOKEN_FILE` | agent, backend | agent: yes, backend: no | At least 32 printable ASCII characters without spaces, e.g. `openssl rand -hex 32`. |
-| `VANDOX_WEB_PASSWORD_HASH` | `VANDOX_WEB_PASSWORD_HASH_FILE` | backend | no | Printable ASCII without spaces, 1 to 4096 characters. |
+| `VANDOX_WEB_PASSWORD_HASH` | `VANDOX_WEB_PASSWORD_HASH_FILE` | backend | no at load, but the service refuses to start without it | The argon2id hash of the web UI password in the form `$argon2id$v=19$m=...,t=...,p=...$<salt>$<hash>`, created with `vandoxd hash-password` (see *Run the backend with Docker Compose* and `docs/areas/web-login.md`). |
 | `VANDOX_TELEGRAM_BOT_TOKEN` | `VANDOX_TELEGRAM_BOT_TOKEN_FILE` | backend | no | Printable ASCII without spaces, 1 to 4096 characters. |
 
 Set either the variable or its `_FILE` form, not both. The `_FILE` value is an absolute path to a regular
@@ -214,6 +215,22 @@ a memory limit of 512 MiB. Copy it and `deploy/backend/vandoxd.yaml` into one di
   sudo chmod 0400 secrets/vandox_agent_token
   ```
 
+- `secrets/vandox_web_password_hash`, the argon2id hash of the web UI password. Create it with `vandoxd hash-password`, which
+  reads the password from the first line of standard input and prints the hash. The command does not switch off a terminal's echo, so
+  read the password silently with `read -rs` and pipe it in; start the container with `-i` and **never with `-t`**, because a
+  terminal shows what is typed:
+
+  ```
+  read -rs -p 'Web UI password: ' pw && echo
+  printf '%s\n' "$pw" | docker run --rm -i networlddev/vandox hash-password > secrets/vandox_web_password_hash
+  unset pw
+  sudo chown 65532:65532 secrets/vandox_web_password_hash
+  sudo chmod 0400 secrets/vandox_web_password_hash
+  ```
+
+  The password has 12 to 1024 characters and no control characters. The service refuses to start without a valid hash. To change the
+  password, create the file again and recreate the container.
+
 - `import/`, the directory for the log import (mounted read-only).
 - optionally `.env` with `WEB_BIND_ADDRESS=<address>` (default `127.0.0.1`).
 
@@ -229,7 +246,13 @@ The web port is published on `127.0.0.1:8080` for a reverse proxy on the same ho
 the database is reachable and `unavailable` (503) otherwise; use it through the proxy for monitoring. The
 loopback binding is defense in depth, not the access control: depending on the Docker Engine version and the
 host firewall, hosts on the LAN may reach a published container port directly. The login of the web UI is
-the access control (record 0060).
+the access control (records 0060 and 0103).
+
+The web UI asks for the password at `/login` (one administrator, no user name) and ends a session after 1 hour without activity or
+12 hours after the sign-in. Five wrong passwords lock a client out for 15 minutes. TLS and the certificate are the reverse proxy's
+job: `docs/REVERSE_PROXY.md` explains the proxy settings, the certificate and the built-in proxies of Synology and QNAP. Set
+`web.trusted_proxies` in `vandoxd.yaml` to the proxy's address as the container sees it; without it, the cookies are never `Secure`
+and every client behind the proxy shares one lockout.
 
 The ingest port (8081) is not published yet: the ingest API arrives with issue #40, which adds the binding on
 the host's tailnet address. The database lives in the named volume `vandox-data` (`/data` in the container,

@@ -10,6 +10,7 @@ using Microsoft.Extensions.Logging;
 using Vandox.Backend.Cli;
 using Vandox.Backend.Components;
 using Vandox.Backend.Logging;
+using Vandox.Backend.Security;
 using Vandox.Core.Configuration;
 using Vandox.Storage;
 
@@ -24,6 +25,11 @@ internal static class ServeCommand
     #region Constants
 
     private const int MaxHeaderBytes = 16 << 10;
+
+    /// <summary>
+    /// The name of the environment variable that holds the secret of the web login, for the log line that reports it missing; it names the variable, never a value.
+    /// </summary>
+    private const string HashSecretVariable = "VANDOX_WEB_PASSWORD_HASH";
 
     #endregion // Constants
 
@@ -55,6 +61,13 @@ internal static class ServeCommand
 
         logger.Starting(version, configPath, config.Web.Listen, config.Ingest.Listen, config.Storage.Directory);
 
+        var verifier = CheckPasswordHash(config, logger);
+
+        if (verifier is null)
+        {
+            return 1;
+        }
+
         SqliteStore store;
 
         try
@@ -80,11 +93,51 @@ internal static class ServeCommand
 
             logger.DatabaseOpened(databasePath, store.Created);
 
-            var code = await ServeAsync(config, loggerFactory, hooks, store, cancellationToken).ConfigureAwait(false);
+            var code = await ServeAsync(config, loggerFactory, hooks, store, verifier, cancellationToken).ConfigureAwait(false);
 
             logger.Stopped();
 
             return code;
+        }
+    }
+
+    /// <summary>
+    /// Checks that the web password hash is set and in the accepted form.
+    /// </summary>
+    /// <param name="config">The configuration</param>
+    /// <param name="logger">The logger</param>
+    /// <returns>The hash; <c>null</c> when it is missing or refused, with the reason logged</returns>
+    private static PasswordHash? CheckPasswordHash(BackendConfig config, ILogger logger)
+    {
+        var secret = config.Secrets.WebPasswordHash;
+
+        if (secret.IsSet)
+        {
+            return ParsePasswordHash(secret.Reveal(), logger);
+        }
+
+        logger.WebPasswordHashMissing(HashSecretVariable);
+
+        return null;
+    }
+
+    /// <summary>
+    /// Parses the web password hash.
+    /// </summary>
+    /// <param name="text">The hash text</param>
+    /// <param name="logger">The logger</param>
+    /// <returns>The hash; <c>null</c> when it is refused, with the reason logged</returns>
+    private static PasswordHash? ParsePasswordHash(string text, ILogger logger)
+    {
+        try
+        {
+            return PasswordHash.Parse(text);
+        }
+        catch (PasswordHashException exception)
+        {
+            logger.WebPasswordHashInvalid(exception.Message);
+
+            return null;
         }
     }
 
@@ -95,15 +148,16 @@ internal static class ServeCommand
     /// <param name="loggerFactory">The logger factory</param>
     /// <param name="hooks">Replaces the listeners in tests</param>
     /// <param name="store">The open database</param>
+    /// <param name="verifier">The check of the web password</param>
     /// <param name="cancellationToken">Stops the service</param>
     /// <returns>A task that returns the exit code</returns>
-    private static async Task<int> ServeAsync(BackendConfig config, ILoggerFactory loggerFactory, ServeHooks hooks, SqliteStore store, CancellationToken cancellationToken)
+    private static async Task<int> ServeAsync(BackendConfig config, ILoggerFactory loggerFactory, ServeHooks hooks, SqliteStore store, PasswordHash verifier, CancellationToken cancellationToken)
     {
         var logger = loggerFactory.CreateLogger("vandoxd");
 
         try
         {
-            await using var app = Build(config, loggerFactory, hooks, store);
+            await using var app = Build(config, loggerFactory, hooks, store, verifier);
 
             await app.StartAsync(cancellationToken).ConfigureAwait(false);
             Announce(app, config, hooks, logger);
@@ -135,8 +189,9 @@ internal static class ServeCommand
     /// <param name="loggerFactory">The logger factory</param>
     /// <param name="hooks">Replaces the listeners in tests</param>
     /// <param name="store">The open database</param>
+    /// <param name="verifier">The check of the web password</param>
     /// <returns>The application, not yet started</returns>
-    private static WebApplication Build(BackendConfig config, ILoggerFactory loggerFactory, ServeHooks hooks, SqliteStore store)
+    private static WebApplication Build(BackendConfig config, ILoggerFactory loggerFactory, ServeHooks hooks, SqliteStore store, PasswordHash verifier)
     {
         var builder = WebApplication.CreateSlimBuilder(new WebApplicationOptions
                                                        {
@@ -153,17 +208,29 @@ internal static class ServeCommand
         builder.Services.AddSingleton<IImportTracker>(store);
         builder.Services.Configure<HostOptions>(options => options.ShutdownTimeout = _shutdownTimeout);
         builder.Services.AddRazorComponents().AddInteractiveServerComponents();
+        WebAuthentication.AddServices(builder.Services, verifier, hooks.Clock ?? TimeProvider.System, loggerFactory);
         builder.WebHost.UseStaticWebAssets();
         builder.WebHost.ConfigureKestrel(options => Listen(options, config, hooks));
 
         var app = builder.Build();
         var checker = new PingChecker(store.PingAsync, _pingTimeout);
 
+        var forwarded = ForwardedHeadersSetup.CreateOptions(config.Web.GetTrustedProxies());
+
         app.UseMiddleware<PortRoutingMiddleware>();
+
+        if (forwarded is not null)
+        {
+            app.UseForwardedHeaders(forwarded);
+        }
+
         app.UseMiddleware<SecurityHeadersMiddleware>();
+        app.UseAuthentication();
+        app.UseAuthorization();
         app.UseAntiforgery();
-        app.MapStaticAssets();
+        app.MapStaticAssets().AllowAnonymous();
         HealthEndpoint.Map(app, checker, loggerFactory.CreateLogger("health"));
+        WebAuthentication.MapLogout(app);
         app.MapRazorComponents<App>().AddInteractiveServerRenderMode(options => options.ContentSecurityFrameAncestorsPolicy = null);
 
         return app;

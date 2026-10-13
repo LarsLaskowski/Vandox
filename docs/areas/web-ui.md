@@ -5,7 +5,8 @@
 The pages `vandoxd` serves on its web listener: render mode, layout and navigation, theme, brand files, static assets, charts, and the
 security headers of the web listener together with what the UI framework needs from them. The user relies on it to look at the
 monitored server in a browser in the home network; the views (overview, history, logs, incidents) build on it. The listeners, port
-routing and `/healthz` are in [Backend host](backend-host.md); the login and the reverse proxy setup are not implemented yet (#25).
+routing and `/healthz` are in [Backend host](backend-host.md); the login, sessions and the reverse proxy trust are in
+[Web login](web-login.md), the setup of a proxy in [REVERSE_PROXY.md](../REVERSE_PROXY.md).
 
 ## Behavior
 
@@ -14,6 +15,8 @@ routing and `/healthz` are in [Backend host](backend-host.md); the login and the
 - The web UI is a Blazor Web App. Every page is prerendered on the server and then runs in the **Interactive Server** render mode: it
   holds one live connection (SignalR: WebSocket, HTTP as fallback) to the same origin while it is open.
 - The page sets `<base href="/">`, a `viewport` meta element for device width, and loads only the files listed under *Static assets*.
+- The sign-in page (`/login`) is the one page without a live connection: it is rendered on the server as a plain HTML form and does not
+  load the framework script `_framework/blazor.web.js`; every other page loads it ([Web login](web-login.md), *Access*).
 - When the live connection is lost, the page shows its own reconnect dialog (the element `components-reconnect-modal`) with the states
   reconnecting, failed and rejected, and a way to retry or reload; it shows its own error banner (`blazor-error-ui`) on an unhandled
   error. Both are styled by the style sheet, not by the framework.
@@ -24,6 +27,7 @@ routing and `/healthz` are in [Backend host](backend-host.md); the login and the
 ### Layout and navigation
 
 - Every page has a header with the horizontal logo, the main navigation and the theme switch, and a main area with the page content.
+  A signed-in user also sees a *Sign out* button in the header ([Web login](web-login.md), *Sessions*).
 - The navigation lists the existing pages; the entry of the current page is marked. Today it has one entry, *Overview* (`/`); each view
   adds its own.
 - The layout works from desktop width down to phone width (360 CSS pixels) without horizontal scrolling of the page: on narrow screens
@@ -115,9 +119,9 @@ The ingest listener serves none of this: every UI path, static file and the live
   path.
 - A browser without CSP Level 3 matching of `ws:`/`wss:` falls back to HTTP for the live connection or cannot connect.
 - The reverse proxy must pass WebSocket upgrades for the live connection.
-- Until the login exists (#25), whoever reaches the web port can load the page and open a live connection; the live connection
-  does not check the `Origin` header, and the service does not filter the `Host` header. The login decides whether a live
-  connection may start before authentication.
+- A live connection needs a session ([Web login](web-login.md), *Access*): without one, the `/_blazor` endpoints answer `401`. The
+  live connection does not check the `Origin` header, and the service does not filter the `Host` header; the session and the
+  protected component descriptors of the signed-in page decide who may use it.
 - Opened directly as a document, the favicon's own `<style>` element is blocked by the policy and the icon shows without its colors; as
   an icon or image it is not affected.
 
@@ -133,7 +137,8 @@ The ingest listener serves none of this: every UI path, static file and the live
 - Listeners, port routing, `/healthz`, the container and exposure: [Backend host](backend-host.md).
 - Who may reach the web UI: [Network and security model](network-and-security-model.md).
 - Logo files and color tokens: [BRANDING.md](../BRANDING.md).
-- Login, sessions, CSRF and the reverse proxy setup: not implemented yet (#25).
+- Login, sessions, CSRF, the failed-sign-in limits and the trust in a reverse proxy: [Web login](web-login.md). The setup of a proxy:
+  [REVERSE_PROXY.md](../REVERSE_PROXY.md).
 
 ## Implementation
 

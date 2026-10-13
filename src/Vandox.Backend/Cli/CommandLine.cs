@@ -21,6 +21,7 @@ public static class CommandLine
     private const string IncidentsName = "incidents";
     private const string TemplatesName = "templates";
     private const string ReportName = "report";
+    private const string HashPasswordName = "hash-password";
     private const string ConfigName = "config";
     private const string LanguageName = "lang";
 
@@ -81,12 +82,17 @@ public static class CommandLine
             return $"Usage of {BinaryName} templates [-config file]:\n  -config string\n    \tpath of the configuration file\n";
         }
 
+        if (usageFor == HashPasswordName)
+        {
+            return $"Usage of {BinaryName} hash-password:\n  reads the password from the first line of standard input and prints its argon2id hash\n";
+        }
+
         if (usageFor == ReportName)
         {
             return $"Usage of {BinaryName} report [-config file] [-lang en|de]:\n  -config string\n    \tpath of the configuration file\n  -lang string\n    \tlanguage of the report: en or de (default \"en\")\n";
         }
 
-        return $"Usage of {BinaryName}:\n  -config string\n    \tpath of the configuration file (default \"{ConfigConstants.DefaultBackendFile}\")\n  -healthcheck\n    \tprobe /healthz of the running service and exit 0 when it is healthy\n  -version\n    \tprint the version and exit\n\nSub-command:\n  {BinaryName} [flags] import [-config file] <path>\n    \timport the log directory, archive or file at <path>\n  {BinaryName} [flags] incidents [-config file]\n    \trebuild the incidents from the stored data\n  {BinaryName} [flags] templates [-config file]\n    \trebuild the log template statistics from the stored log lines\n  {BinaryName} [flags] report [-config file] [-lang en|de]\n    \twrite the forensics report of the stored data as Markdown\n";
+        return $"Usage of {BinaryName}:\n  -config string\n    \tpath of the configuration file (default \"{ConfigConstants.DefaultBackendFile}\")\n  -healthcheck\n    \tprobe /healthz of the running service and exit 0 when it is healthy\n  -version\n    \tprint the version and exit\n\nSub-command:\n  {BinaryName} [flags] import [-config file] <path>\n    \timport the log directory, archive or file at <path>\n  {BinaryName} [flags] incidents [-config file]\n    \trebuild the incidents from the stored data\n  {BinaryName} [flags] templates [-config file]\n    \trebuild the log template statistics from the stored log lines\n  {BinaryName} [flags] report [-config file] [-lang en|de]\n    \twrite the forensics report of the stored data as Markdown\n  {BinaryName} hash-password\n    \tread a password from standard input and print its argon2id hash\n";
     }
 
     /// <summary>
@@ -97,13 +103,17 @@ public static class CommandLine
     /// <param name="index">The position of the argument</param>
     private static void ParseArgument(CommandOptions options, IReadOnlyList<string> args, int index)
     {
-        if (options.Healthcheck || args[index] is not (ImportName or IncidentsName or TemplatesName or ReportName))
+        if (options.Healthcheck || args[index] is not (ImportName or IncidentsName or TemplatesName or ReportName or HashPasswordName))
         {
             options.Error = $"unexpected argument {Terminal.Quote(args[index])}";
         }
         else if (args[index] == ImportName)
         {
             ParseImport(options, args, index + 1);
+        }
+        else if (args[index] == HashPasswordName)
+        {
+            ParseHashPassword(options, args, index + 1);
         }
         else
         {
@@ -290,6 +300,41 @@ public static class CommandLine
         else
         {
             options.Error = $"{BinaryName} import: exactly one path is required";
+        }
+    }
+
+    /// <summary>
+    /// Parses the arguments of the sub-command <c>hash-password</c>: only the help flag, no other flag and no argument.
+    /// </summary>
+    /// <param name="options">The options</param>
+    /// <param name="args">The arguments</param>
+    /// <param name="start">The position after the sub-command</param>
+    private static void ParseHashPassword(CommandOptions options, IReadOnlyList<string> args, int start)
+    {
+        var index = start;
+
+        options.UsageFor = HashPasswordName;
+        options.HashPassword = true;
+
+        if (index < args.Count && IsFlag(args[index]))
+        {
+            var name = Split(args[index]).Name;
+
+            if (name is "h" or "help")
+            {
+                options.Help = true;
+            }
+            else
+            {
+                options.Error = NotDefined(name);
+            }
+
+            return;
+        }
+
+        if (index < args.Count)
+        {
+            options.Error = $"{BinaryName} {HashPasswordName}: no argument is expected";
         }
     }
 
