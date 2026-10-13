@@ -46,7 +46,7 @@ and the option in [Configuration and secrets](configuration-and-secrets.md), the
 ### Access
 
 - Every request on the web listener needs a session, except:
-  - `GET` and `HEAD /login` and the post of the login form;
+  - `GET /login` and the post of the login form (a `HEAD /login` without a session is answered like an unknown path, `302` to `/login`);
   - `GET` and `HEAD /healthz` ([Backend host](backend-host.md), *Health*);
   - the static files of the web UI (style sheets, scripts, brand images and the framework script; the same files for every
     installation, without data);

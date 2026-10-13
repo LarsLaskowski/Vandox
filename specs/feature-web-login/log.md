@@ -19,3 +19,4 @@ are quoted in full.
 | 2026-10-13 19:41 | 6 Coverage pass | squad-tester | AC4.3 RoutesTests added plus session/store/login page tests; Coverage gate PASS (new 98.4 %, overall 98.2 %); exception boilerplate ctors left uncovered (sonnet/medium · 117,072 tokens · 19 tool uses · 870 s) |
 | 2026-10-13 19:47 | 7 Code check | Orchestrator | All gates pass on 4d9ad9e: format, analyzer, test, coverage 98.4 %/98.2 %, scope, decisions |
 | 2026-10-13 19:50 | 8 Review round 1 | squad-security | APPROVED on 4d9ad9e; 1 non-blocking: web-login.md Sessions wording (render acks and later UpdateRootComponents not closed at once) (opus/medium · 112,635 tokens · 25 tool uses · 189 s) |
+| 2026-10-13 19:54 | 8 Review round 1 | squad-reviewer | BLOCKING 2, NON-BLOCKING 1 on 4d9ad9e: header antiforgery token + oversized form -> 500 (fix HeaderName = null); verbatim web-login.md HEAD /login; logged out written without session (opus/medium · 151,162 tokens · 34 tool uses · 301 s) |
