@@ -42,8 +42,10 @@ The options of the configuration file are in [Configuration and secrets](configu
 - The service opens two listeners from `web.listen` and `ingest.listen`. Every connection carries the label of the listener that
   accepted it, and **a request reaches only the endpoints of its own listener**. A request on a connection with no label or on the
   wrong listener is answered `404` (fail closed).
-- The web listener serves the web UI and `/healthz`. The ingest listener serves only the ingest endpoint; **until that exists it answers
-  `404` to everything, `/healthz` included**.
+- The web listener serves the web UI, its static files and `/healthz`, and every web response carries the security headers of the
+  [Web UI](web-ui.md) area (`Hosting/SecurityHeadersMiddleware`, after the port routing). The ingest listener serves only the ingest endpoint; **until that exists it answers
+  `404` to everything, `/healthz` included**: static files and the endpoints of the web UI's live connection are web endpoints too, so
+  they answer `404` there, and the ingest listener's answer carries none of the security headers.
 - The server sends no `Server` header and limits a request's header read to 5 seconds, its header size to 16 KiB and the idle keep-alive
   to 120 seconds.
 - The web UI is a Blazor Web App in the *Interactive Server* render mode: every open page holds one live connection to the server.
@@ -140,10 +142,11 @@ deadline and the health timeout are constants, not options.
 - The configuration file and the secrets: [Configuration and secrets](configuration-and-secrets.md).
 - The import sub-command: [Log import](log-import.md). The incident reconstruction itself: [Detection, alerts and reports](detection-and-reports.md).
 - The database: [Storage](storage.md). The batch format: [Wire format](wire-format.md).
+- The pages, layout, theme, static files, charts and security headers of the web UI: [Web UI](web-ui.md).
 - The Tailscale ACL and the security model of the monitored server: the network area.
 
 ## Implementation
 
-`Vandox.Backend` (`Cli/CommandLine`, `Hosting/BackendApp`, `ServeCommand`, `ListenerRoutes`, `PortRoutingMiddleware`, `HealthEndpoint`,
+`Vandox.Backend` (`Cli/CommandLine`, `Hosting/BackendApp`, `ServeCommand`, `ListenerRoutes`, `PortRoutingMiddleware`, `SecurityHeadersMiddleware`, `HealthEndpoint`,
 `PingChecker`, `Cli/HealthCheckCommand`, `Cli/StoreCommand`, `Cli/TemplatesCommand`, `Logging/JsonLineLogger`), `deploy/backend/` (Dockerfile, compose file, example
 configuration), `.github/scripts/smoke-test-backend.sh`.

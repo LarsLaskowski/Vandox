@@ -32,7 +32,7 @@ way, and agents of the hosting provider are never disabled or changed
   mail accounts. Each collector runs in its own goroutine under a deadline and is abandoned when the
   deadline passes, so a hanging collector or database never blocks the agent; a missed sample is recorded
   as a gap, and a collector that is still stuck is not started again.
-- `src/Vandox.Backend` — `vandoxd` (rules: [Backend host](areas/backend-host.md)), .NET 10 (ASP.NET Core with a Blazor Web App, Interactive Server render mode),
+- `src/Vandox.Backend` — `vandoxd` (rules: [Backend host](areas/backend-host.md), [Web UI](areas/web-ui.md)), .NET 10 (ASP.NET Core with a Blazor Web App, Interactive Server render mode),
   one container on the backend host: ingest API, SQLite storage, analysis, rules, Telegram notifier, reports and
   web UI. Without arguments it runs the service; `-healthcheck` probes its `/healthz`; `vandoxd import <path>`
   imports logs saved on the backend host
@@ -41,7 +41,9 @@ way, and agents of the hosting provider are never disabled or changed
   rebuilds the log template statistics from the stored log lines
   ([0095](decisions/0095-log-templates-token-rules-statistics-in-the-write-path-usual-level-from-covered-hours.md)). Two Kestrel listeners serve
   the web and the ingest port; a middleware routes each request by the label of its listener, and logs are JSON
-  lines ([0081](decisions/0081-backend-host-two-listeners-json-logs-blazor-interactive-server.md)).
+  lines ([0081](decisions/0081-backend-host-two-listeners-json-logs-blazor-interactive-server.md)). The web UI loads only its own
+  static assets and sends one self-only Content-Security-Policy ([0098](decisions/0098-web-ui-serves-only-its-own-static-web-assets.md),
+  [0099](decisions/0099-web-listener-security-headers-one-self-only-csp.md)).
 - The backend's libraries, one project each with a test project under `tests/`
   ([0073](decisions/0073-backend-in-dotnet-10-with-blazor-agent-stays-go.md)):
   `Vandox.Core` (data model and validation, the wire decoder, configuration and secrets, safe file access, the

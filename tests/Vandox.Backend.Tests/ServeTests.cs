@@ -192,6 +192,211 @@ public class ServeTests
         Assert.AreEqual(HttpStatusCode.OK, healthy.StatusCode, "healthy");
         Assert.AreEqual(0, code, "the run ends cleanly");
         Assert.IsTrue(broken.StatusCode is HttpStatusCode.OK or HttpStatusCode.ServiceUnavailable, "the check answers after the database file is gone");
+        Assert.AreSequenceEqual(new[] { SecurityHeadersMiddleware.ContentTypeOptions }, HeaderValues(broken, "X-Content-Type-Options"), "exactly one content type options value on the second answer");
+        Assert.AreSequenceEqual(new[] { SecurityHeadersMiddleware.ContentSecurityPolicy }, HeaderValues(broken, "Content-Security-Policy"), "exactly one policy on the second answer");
+    }
+
+    /// <summary>
+    /// The page on the web port loads only local resources and holds no inline code, and it carries the elements of the shell.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task ServeServesPageWithLocalResourcesAndNoInlineCode()
+    {
+        // Arrange
+        using var fixture = new BackendFixture();
+        using var stop = CancellationTokenSource.CreateLinkedTokenSource(TestContext.CancellationToken);
+
+        var run = await StartAsync(fixture, stop.Token);
+
+        using var client = CreateClient();
+
+        // Act
+        using var response = await client.GetAsync($"http://127.0.0.1:{fixture.WebPort}/", TestContext.CancellationToken);
+
+        var html = await response.Content.ReadAsStringAsync(TestContext.CancellationToken);
+
+        await stop.CancelAsync();
+        await run.WaitAsync(TimeSpan.FromSeconds(20), TestContext.CancellationToken);
+
+        // Assert
+        Assert.AreEqual(HttpStatusCode.OK, response.StatusCode, "page status");
+        Assert.IsEmpty(WebSourceScanner.FindInMarkup(html), "rule ids found in the served page");
+        Assert.Contains("<base href=\"/\">", html, "base element");
+        Assert.Contains("name=\"viewport\"", html, "viewport meta element");
+        Assert.Contains("<link rel=\"icon\"", html, "icon link");
+        Assert.Contains("href=\"brand/vandox-favicon.svg\"", html, "icon file");
+        Assert.Contains("<script src=\"js/app.js\">", html, "own script");
+        Assert.Contains("<script src=\"_framework/blazor.web.js\">", html, "framework script");
+        Assert.Contains("<!--Blazor:{\"type\":\"server\"", html, "interactive server marker");
+        Assert.Contains("id=\"components-reconnect-modal\"", html, "reconnect element");
+        Assert.Contains("id=\"blazor-error-ui\"", html, "error banner");
+    }
+
+    /// <summary>
+    /// Every response of the web port carries exactly one value of each security header.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task ServeSetsSecurityHeadersOnWebResponses()
+    {
+        // Arrange
+        using var fixture = new BackendFixture();
+        using var stop = CancellationTokenSource.CreateLinkedTokenSource(TestContext.CancellationToken);
+
+        var run = await StartAsync(fixture, stop.Token);
+
+        using var client = CreateClient();
+
+        var paths = new[] { "/", "/app.css", "/_framework/blazor.web.js", "/healthz", "/nothing-here" };
+        var problems = new List<string>();
+
+        // Act
+        foreach (var path in paths)
+        {
+            using var response = await client.GetAsync($"http://127.0.0.1:{fixture.WebPort}{path}", TestContext.CancellationToken);
+
+            AddHeaderProblems(problems, path, response, "Content-Security-Policy", SecurityHeadersMiddleware.ContentSecurityPolicy);
+            AddHeaderProblems(problems, path, response, "X-Content-Type-Options", SecurityHeadersMiddleware.ContentTypeOptions);
+            AddHeaderProblems(problems, path, response, "Referrer-Policy", SecurityHeadersMiddleware.ReferrerPolicy);
+            AddHeaderProblems(problems, path, response, "X-Frame-Options", SecurityHeadersMiddleware.FrameOptions);
+        }
+
+        await stop.CancelAsync();
+        await run.WaitAsync(TimeSpan.FromSeconds(20), TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsEmpty(problems, $"header problems: {string.Join("; ", problems)}");
+    }
+
+    /// <summary>
+    /// The static files and the live connection are served on the web port from the build output and are not served on the ingest port.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task ServeServesWebAssetsOnlyOnWebPort()
+    {
+        // Arrange
+        using var fixture = new BackendFixture();
+        using var stop = CancellationTokenSource.CreateLinkedTokenSource(TestContext.CancellationToken);
+
+        var run = await StartAsync(fixture, stop.Token);
+
+        using var client = CreateClient();
+
+        var paths = new[]
+                    {
+                        "/_framework/blazor.web.js",
+                        "/app.css",
+                        "/js/app.js",
+                        "/js/charts.js",
+                        "/lib/uplot/uPlot.esm.js",
+                        "/lib/uplot/uPlot.min.css",
+                        "/brand/vandox-favicon.svg",
+                        "/brand/vandox-logo-horizontal.svg",
+                        "/brand/vandox-logo-horizontal-dark.svg"
+                    };
+        var problems = new List<string>();
+
+        // Act
+        foreach (var path in paths)
+        {
+            using var web = await client.GetAsync($"http://127.0.0.1:{fixture.WebPort}{path}", TestContext.CancellationToken);
+            using var ingest = await client.GetAsync($"http://127.0.0.1:{fixture.IngestPort}{path}", TestContext.CancellationToken);
+
+            AddStatusProblem(problems, $"GET web {path}", HttpStatusCode.OK, web);
+            AddStatusProblem(problems, $"GET ingest {path}", HttpStatusCode.NotFound, ingest);
+        }
+
+        const string negotiate = "/_blazor/negotiate?negotiateVersion=1";
+
+        using var webNegotiate = await client.PostAsync($"http://127.0.0.1:{fixture.WebPort}{negotiate}", new ByteArrayContent([]), TestContext.CancellationToken);
+        using var ingestNegotiate = await client.PostAsync($"http://127.0.0.1:{fixture.IngestPort}{negotiate}", new ByteArrayContent([]), TestContext.CancellationToken);
+
+        AddStatusProblem(problems, "POST web negotiate", HttpStatusCode.OK, webNegotiate);
+        AddStatusProblem(problems, "POST ingest negotiate", HttpStatusCode.NotFound, ingestNegotiate);
+
+        await stop.CancelAsync();
+        await run.WaitAsync(TimeSpan.FromSeconds(20), TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsEmpty(problems, $"status problems: {string.Join("; ", problems)}");
+    }
+
+    /// <summary>
+    /// Creates a client with a short timeout.
+    /// </summary>
+    /// <returns>The client</returns>
+    private static HttpClient CreateClient()
+    {
+        return new HttpClient
+               {
+                   Timeout = TimeSpan.FromSeconds(10)
+               };
+    }
+
+    /// <summary>
+    /// Reads the values of a response header.
+    /// </summary>
+    /// <param name="response">The response</param>
+    /// <param name="name">The name of the header</param>
+    /// <returns>The values, empty when the header is absent</returns>
+    private static string[] HeaderValues(HttpResponseMessage response, string name)
+    {
+        return response.Headers.TryGetValues(name, out var values) ? values.ToArray() : [];
+    }
+
+    /// <summary>
+    /// Adds a problem when a header does not have exactly the one expected value.
+    /// </summary>
+    /// <param name="problems">The problems</param>
+    /// <param name="path">The requested path</param>
+    /// <param name="response">The response</param>
+    /// <param name="name">The name of the header</param>
+    /// <param name="expected">The expected value</param>
+    private static void AddHeaderProblems(List<string> problems, string path, HttpResponseMessage response, string name, string expected)
+    {
+        var values = HeaderValues(response, name);
+
+        if (values.Length != 1 || values[0] != expected)
+        {
+            problems.Add($"{path} {name}: [{string.Join(" | ", values)}]");
+        }
+    }
+
+    /// <summary>
+    /// Adds a problem when a response does not have the expected status.
+    /// </summary>
+    /// <param name="problems">The problems</param>
+    /// <param name="request">The description of the request</param>
+    /// <param name="expected">The expected status</param>
+    /// <param name="response">The response</param>
+    private static void AddStatusProblem(List<string> problems, string request, HttpStatusCode expected, HttpResponseMessage response)
+    {
+        if (response.StatusCode != expected)
+        {
+            problems.Add($"{request} answered {(int)response.StatusCode}, expected {(int)expected}");
+        }
+    }
+
+    /// <summary>
+    /// Starts the service of the fixture and waits until it listens.
+    /// </summary>
+    /// <param name="fixture">The fixture</param>
+    /// <param name="stop">Stops the run</param>
+    /// <returns>A task that returns the task of the run</returns>
+    private async Task<Task<int>> StartAsync(BackendFixture fixture, CancellationToken stop)
+    {
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var hooks = new ServeHooks
+                    {
+                        Started = _ => started.TrySetResult()
+                    };
+        var run = fixture.RunAsync([], hooks, stop);
+
+        await started.Task.WaitAsync(TimeSpan.FromSeconds(20), TestContext.CancellationToken);
+
+        return run;
     }
 
     #endregion // Methods

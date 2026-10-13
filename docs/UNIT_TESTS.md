@@ -82,7 +82,10 @@ the same measure as SonarQube's "coverage on new code". Both values are set in `
 with a coverage debt and is only ever raised. Check it locally before a push with *Test with coverage* and the
 *Coverage gate* from [`.squad/stack.md`](../.squad/stack.md). Lines that genuinely
 cannot be covered by a unit test (for example `main` wiring) need an explicit, recorded decision. The
-measure covers Go and C# together (`*.go`, `*.cs`, `*.razor`; `.squad/tools/squad_settings.py`). In C#,
+measure covers Go and C# together (`*.go`, `*.cs`, `*.razor`; `.squad/tools/squad_settings.py`). The own
+browser scripts (`src/Vandox.Backend/wwwroot/js/`) have no unit tests, as the project has no Node build;
+SonarQube Cloud analyzes them but excludes them from its coverage measure (`sonar.coverage.exclusions`,
+[0098](decisions/0098-web-ui-serves-only-its-own-static-web-assets.md)). In C#,
 `Program.cs` only hands the process boundaries (arguments, environment, standard streams, cancellation) to a
 testable entry method, and that top-level wiring is the accepted uncovered code
 ([0074](decisions/0074-two-language-toolchain-and-combined-quality-gates.md)). In Go, a

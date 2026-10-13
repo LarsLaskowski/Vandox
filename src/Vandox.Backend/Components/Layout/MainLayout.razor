@@ -1,8 +1,19 @@
 @inherits LayoutComponentBase
 
 <header class="top">
-    <img src="favicon.svg" alt="" width="28" height="28" />
-    <span class="brand">Vandox</span>
+    <a class="logo" href="">
+        <img src="brand/vandox-logo-horizontal.svg" alt="Vandox" class="logo-light" width="110" height="32" />
+        <img src="brand/vandox-logo-horizontal-dark.svg" alt="Vandox" class="logo-dark" width="110" height="32" />
+    </a>
+    <button type="button" class="theme-toggle" data-theme-toggle>
+        <span class="theme-label">Theme</span>
+        <span class="theme-system">System</span>
+        <span class="theme-light">Light</span>
+        <span class="theme-dark">Dark</span>
+    </button>
+    <nav aria-label="Main">
+        <NavLink href="" Match="NavLinkMatch.All">Overview</NavLink>
+    </nav>
 </header>
 
 <main>
