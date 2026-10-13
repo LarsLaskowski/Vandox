@@ -809,3 +809,12 @@ Verdict CHANGES_REQUIRED (plan); every finding addressed:
 - Skipping hours without lines of a program in scan mode through the template statistics — only if AC-19 shows the program-only case
   (6) needs it; then a Lead decision.
 - The login (#25) before v0.1.0 is released.
+
+## Challenge notes
+
+Non-blocking notes of the Security plan review, round 2 (APPROVED), verbatim for the Dev and Reviewer:
+
+1. **Gate lifetime (most important):** Approach step 4 says `ServeCommand.Build` registers `ILogExplorer` "as a factory `_ => new GatedLogExplorer(store, …)`" but never says singleton. Registered as scoped or transient, every circuit would get its own semaphore, and the limit across the service, which is the whole point of B3, would quietly fail. As described, `ServeTests.ServeGatesTheLogExplorer` only checks the type and the slot count, so it would not catch this.
+   - Register it with `AddSingleton<ILogExplorer>(…)`, matching the existing registrations at ServeCommand.cs:148-153.
+   - Have that test also assert that two DI scopes resolve the same instance.
+2. **Template-list bound:** "about 2.5 MiB" is low. Four short fields × 2,048 characters × 2 bytes × 200 rows is about 3.1 MiB. Correct the figure in the security considerations and in the web UI area text.
