@@ -68,12 +68,17 @@ in.
    - wrap the body in a HEREDOC so the formatting survives
 9. **Keep it a draft until green** (`.squad/routing.md`, *Draft until green*).
    Subscribe to the PR's activity (`subscribe_pr_activity` when available;
-   otherwise check the results yourself before finishing) and wait until every
+   otherwise check the results yourself before finishing). On every look at the
+   PR, read its mergeability first (`pull_request_read`, method `get`): a
+   conflict with the base branch (`mergeable: false`, `mergeable_state:
+   "dirty"`) blocks CI from starting, so merge `origin/main` into the branch,
+   resolve it, rerun step 4 on the merged files and push before waiting for
+   anything else (`.squad/routing.md`, *Merge conflicts*). Then wait until every
    CI check on the head has finished. Fix each failing check and every new
    issue the CI code analysis (e.g. SonarQube Cloud) reports — a passed quality
    gate with open new issues is still rework — rerun step 4 on the fix, commit
    once per round and push. Only when all checks are green and the code
-   analysis lists no new issue on the head, mark the PR ready for review
+   analysis lists no new issue on the head and the PR merges cleanly, mark it ready for review
    (`update_pull_request` with `draft: false`). If a failure lies outside the
    change or the code analysis cannot be read, leave it a draft and tell the
    user what blocks it.
