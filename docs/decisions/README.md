@@ -129,4 +129,7 @@ once in the [area document](../areas/README.md) of the record's area, and the re
 | 0100 | The forensics report is written as Markdown by `vandoxd report`, computed on demand in bounded passes; the web page follows separately | Accepted | 2026-10-13 |
 | 0101 | Recurrence and correlation rules compare the share of outages with the share of observed system-log hours and decide by a binomial tail | Accepted | 2026-10-13 |
 | 0102 | The report language comes from the flag `-lang` (`en` by default, or `de`); the texts are tables in code, not .NET resources or cultures | Accepted | 2026-10-13 |
+| 0103 | Web login: one password, server-side sessions in memory, a static login page, live connections bound to the session | Proposed | 2026-10-13 |
+| 0104 | The password hash is argon2id in strict PHC form within bounds, verified with Konscious.Security.Cryptography.Argon2; `vandoxd hash-password` creates it | Proposed | 2026-10-13 |
+| 0105 | Forwarded headers only from `web.trusted_proxies`; failed sign-ins locked per client and capped overall; the loopback binding stays defense in depth | Proposed | 2026-10-13 |
 <!-- project:end index -->
