@@ -62,6 +62,12 @@ public sealed class GatedLogExplorer : ILogExplorer, IDisposable
         throw new NotImplementedException();
     }
 
+    /// <inheritdoc />
+    public Task<IReadOnlyList<TemplateHour>> TemplateHoursAsync(TemplateHourQuery query, CancellationToken cancellationToken)
+    {
+        throw new NotImplementedException();
+    }
+
     #endregion // ILogExplorer
 
     #region IDisposable
