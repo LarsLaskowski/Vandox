@@ -450,8 +450,8 @@ every rule was decided. Program names and victim commands are written as Markdow
 The text is UTF-8 without a byte order mark whatever the locale of the container is.
 
 The command reads every stored log line and every stored process snapshot (one query each) and the incidents twice, so on
-a large database it can take minutes; its memory use is bounded (about 60 MB at most) and does not grow with the
-database. The progress goes to standard error as JSON lines. Exit code 0 when the report is written, 1 when the
+a large database it can take minutes; its memory does not grow with the database: it keeps about 60 MB at most across the
+run, plus the one log page, process snapshot or incident it is reading. The log goes to standard error as JSON lines (`report started`, and `report failed` or `report interrupted`); the command logs no progress while it reads. Exit code 0 when the report is written, 1 when the
 configuration is invalid, the database cannot be opened, the store failed or the run was interrupted (standard output
 then holds an incomplete report: discard it), 2 for a usage error. Details, rules and limits are in
 `docs/areas/detection-and-reports.md`.

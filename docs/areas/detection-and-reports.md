@@ -543,7 +543,7 @@ distinguishable from the escape of a real U+202E (`\u202e`).
   plus a sorted copy of the panel memory of 8 MB for the threshold and, while the rules are evaluated, 4 MB of counts),
   **10,000 boots** (80 KB), **100,000 runs** of consecutive observed hours (about 1.6 MB), **4,096 programs** (their names, short
   texts of at most 1,024 bytes, about 8 MiB at most, plus about 80 bytes of counters each), and 24 hour counts.
-  The incidents add only counters. With all caps full the report holds about 60 MB at its peak.
+  The incidents add only counters. With all caps full the report keeps about 60 MB across the run, plus the one log page, process snapshot or incident it is reading.
 - **Over a cap** the statements that need the data are unknown: more snapshots make backup and panel unknown, more boots the boot,
   more runs of observed hours backup, boot and panel (their base rate). The time of day counts every observed hour and has no cap.
   The notes name the cap that was hit. An outage's own activity follows the same rule: past a cap of the data it needs, a yes stays
