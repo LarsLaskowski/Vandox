@@ -41,10 +41,14 @@ The orchestrator tells you which **mode** to run:
    assigns to you (`README.md`, `docs/`, the area documents). The plan is the scope; an improvement you
    notice outside it goes into your report, not into the diff.
 2. Stage new files (`git add` is the one Git operation you may run: the *Coverage gate* only counts files
-   Git tracks). Run *Build*, *Test with coverage* and the *Coverage gate* from `stack.md`. Report the coverage
-   result; uncovered changed lines go to the Tester, or you make them testable (code that is hard to test is
-   a design signal — seams, injected dependencies — not a reason to skip coverage; a genuinely untestable
-   line, e.g. process startup glue, needs a Lead decision).
+   Git tracks). Run *Build*, *Test with coverage* and the *Coverage gate* from `stack.md`. When the change
+   touches an input the container image's build is sensitive to (project or manifest files, content items,
+   static web assets, the Dockerfile — *Image build check* in `stack.md` names them), also run the *Image
+   build check* in the Dockerfile's own order and report its result; a build or publish from the full
+   working tree does not replace it (*Criteria verified only in CI* in `.squad/routing.md`). Report the
+   coverage result; uncovered changed lines go to the Tester, or you make them testable (code that is hard
+   to test is a design signal — seams, injected dependencies — not a reason to skip coverage; a genuinely
+   untestable line, e.g. process startup glue, needs a Lead decision).
 3. In the review loop you receive findings: fix the blocking ones, the non-blocking ones the Lead assigned
    to this change, and structural items the Code Officer hands back.
 

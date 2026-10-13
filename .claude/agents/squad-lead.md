@@ -54,6 +54,13 @@ The orchestrator tells you which **mode** to run:
   - for a change without production or test code: the declaration that steps 4, 5 and the *Coverage gate*
     are not applicable, with a *Verification without tests* section naming, per acceptance criterion, where
     and by whom it is verified instead;
+  - for a change that touches an input the container image's build is sensitive to (project or manifest
+    files, content items, static web assets, the Dockerfile; *Image build check* in `.squad/stack.md` names
+    them): the *Image build check* as the verification of that criterion, run by the Dev before the review
+    (*Criteria verified only in CI* in `.squad/routing.md`);
+  - the files of the change no unit test can cover (a browser script without a test runner, a generated
+    file), each with the reason — or "none" — so the exclusion from the coverage measure is decided now
+    and not after the PR (*Code a unit test cannot cover* in `.squad/routing.md`);
   - for a guard against bypasses (a validation or allow-list on input that a parser or tool consumes): the
     forms that parser really accepts, enumerated from its source or documentation, and the guard's behavior
     on each — not only the example the issue names;
@@ -77,11 +84,13 @@ The orchestrator tells you which **mode** to run:
   a fixture) is rendered or exercised once, and a mismatch between the literal content and the evident
   intent becomes an escalation question now, not at approval time; a claim about the contents of an
   artifact (an image, a build output, a file system) is checked against the artifact or marked
-  *unverified*. Files you write under `specs/` and `docs/` carry no control character — write an escape such
-  as `U+202E` as text (`scope-check.py` reports the character itself). A plan table or fixture whose cases
-  are escapes (`\u0041`, an escaped surrogate pair) is written with doubled backslashes and checked on disk
-  (*Escapes in files* in `.squad/team.md`); a criterion about an escape names the guard that fails when the
-  test input has lost its backslash.
+  *unverified* — a build output against the build the artifact really gets (the image's own restore order,
+  *Image build check* in `.squad/stack.md`), never against a build from the full working tree. Files you
+  write under `specs/` and `docs/` carry no control character — write an escape such as `U+202E` as text
+  (`scope-check.py` reports the character itself). A plan table or fixture whose cases are escapes
+  (`\u0041`, an escaped surrogate pair) is written with doubled backslashes and checked on disk (*Escapes in
+  files* in `.squad/team.md`); a criterion about an escape names the guard that fails when the test input
+  has lost its backslash.
 
   For every decision that meets the threshold in `docs/decisions/README.md`, create a `Proposed` record
   from `docs/decisions/_template.md`, add its row to the index in `docs/decisions/README.md` with status

@@ -16,7 +16,10 @@ Each factual claim of the issue, checked against the code: confirmed or refuted.
 
 Content the issue supplies verbatim (an image, SVG, configuration, a fixture) was rendered or exercised once
 before "identical to the issue" became a criterion; a mismatch with the evident intent is an escalation
-question here. A criterion that fixes an error text names the exact text the tests compare.
+question here. A criterion that fixes an error text names the exact text the tests compare. A criterion
+about a container image or another build output names the *Image build check* from `.squad/stack.md` as its
+verification, run by the Dev before the review (*Criteria verified only in CI* in `.squad/routing.md`) — a
+build from the full working tree verifies nothing about the image.
 
 ## Verification without tests
 
@@ -49,6 +52,10 @@ Named strictly by the convention in *Layout* of [`.squad/stack.md`](../../.squad
 
 Existing test code that calls a changed signature (factories, helpers): the call sites and who adapts them
 (`.squad/routing.md`, *Loop limits*) — or "none".
+
+Files of the change no unit test can cover (a browser script without a test runner, a generated file), each
+with the reason and the coverage exclusion that follows (`.squad/routing.md`, *Code a unit test cannot
+cover*) — or "none".
 
 ## Areas
 

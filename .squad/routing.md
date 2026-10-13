@@ -126,6 +126,34 @@ skipped steps with a pointer to that section. The Reviewer checks that the state
 every acceptance criterion and that the diff really contains no production or test code — otherwise the
 skip is a blocking finding. If production or test code changes after all, steps 4–6 apply again.
 
+### Criteria verified only in CI
+
+A criterion that only CI can verify in full — a container image the sandbox cannot build, a release build
+on another platform — is still checked here as far as the sandbox allows, before the review and not after
+the PR. A change that touches an input the image build is sensitive to (the project or manifest files, a
+content item the SDK discovers at restore time, a static web asset, the Dockerfile itself; *Image build
+check* in `.squad/stack.md` names them for the stack) runs the *Image build check* from `stack.md`, which
+reproduces the Dockerfile's own order — manifests first, restore, then the sources, build or publish
+without a restore — and the plan names that check as the criterion's verification with the Dev as its
+owner. A build or publish from the full working tree does not count: it restores with every source present
+and can hold an output the image's restore from the project files alone never produces (Vandox#24: a
+framework script the plan had seen in a full-tree publish was missing from the image, and only the CI
+release build caught it after the PR was open). A red CI on such a criterion after that check is worked in
+step 11 as usual.
+
+### Code a unit test cannot cover
+
+A file of the change that no unit test can cover — a browser script the stack has no test runner for, a
+generated file, process startup glue — is found in the plan, not after the PR: the Lead lists such files in
+`plan.md` with the reason, the Tester confirms or contests the list in its report, and the Lead's decision
+is a decision record. Such a file is excluded from the coverage **measure** only, in every place that
+computes it (`sonar.coverage.exclusions` for the CI code analysis, and `COVERAGE_EXCLUDES` in
+`.squad/tools/squad_settings.py` where `COVERAGE_PATHSPECS` includes the file; *Coverage exclusions* in
+`.squad/stack.md` names where the repository sets them) — never from the analysis (`sonar.exclusions`, a
+suppression): its rules still apply, and those no local gate reports arrive in step 11 (Vandox#24: own
+browser scripts without a Node build counted as new code without coverage, 66.8 %, and failed the CI
+quality gate after the PR was open).
+
 ## Pipeline
 
 | # | Step | Owner | Exit condition |
@@ -140,7 +168,7 @@ skip is a blocking finding. If production or test code changes after all, steps 
 | 8 | Review | Reviewer (+ Security on `security`) | They get the code SHA and the orchestrator's gate output of step 7 (they do not re-run the gates); later commits during the round may touch only `specs/` and do not make it stale. No blocking findings → 9; blocking → owner fixes (Dev: code, Tester: tests), back to 6, then a mandatory delta round — except a finding, blocking or not, whose fix is a verbatim documentation edit: the orchestrator applies it (*Verbatim documentation fixes*), no launch, no build, no delta round |
 | 9 | PR approval | Orchestrator, Lead when needed | The orchestrator checks: the latest review round is clean and covers every change to production code, tests and `docs/` since it ran (only `specs/` bookkeeping and the verbatim documentation fixes of that round, *Verbatim documentation fixes*, may follow it); the gates of step 7 pass on the head; the area documents and documentation updates the plan names are in the diff; then sets each `Proposed` record of this change and its index row to `Accepted` (`decision-check.py` passes). The Lead is launched in mode `approve-pr` only after this checklist passed in full (a due delta round runs first) and only when a decision is open: a plan deviation in a member's report, a Lead decision recorded during steps 3–8 (loop limit, dispute, accepted gap, finding accepted unfixed), non-blocking findings that touch code and are not yet decided, or a change to `docs/ARCHITECTURE.md` or `.squad/project.md` that the plan does not name or the Reviewer did not find consistent. Otherwise "approved by checklist" is logged → 10 |
 | 10 | Pull request | Orchestrator | Working record posted as comment (a long `plan.md` may be given as a permalink to the last commit that contains it plus a summary), `specs/<folder>/` removed and `scope-check.py --no-specs` clean, PR opened **as a draft** (*Draft until green*; merged later with *Squash and merge*) |
-| 11 | After the PR | Dev, Code Officer, Reviewer | CI green and the CI code analysis (e.g. SonarQube Cloud) passed with no new issue on the head, then the PR marked ready for review (*Draft until green*); review comments worked |
+| 11 | After the PR | Dev, Code Officer, Reviewer | No merge conflict with the base (*Merge conflicts*), CI green and the CI code analysis (e.g. SonarQube Cloud) passed with no new issue on the head, then the PR marked ready for review (*Draft until green*); review comments worked |
 | 12 | Wrap-up | Orchestrator | Squad lessons filed as one issue per destination (*Squad lessons*), or "no lessons" logged; run metrics (launches with their continuations, tokens, tool uses and seconds per role, plus the Orchestrator row: wall time, time not covered by launches, gate runs — `squad-log.py --summary`; exit code 3 names launch rows still without usage, which are amended first with `--amend-last`, `--step` for an earlier row, or marked `--unreported`; the table is posted as printed, never summed by hand or left out) appended to the working record and reported to the user |
 
 A change without production or test code (tier `docs`, or any other tier whose plan declares it, see
@@ -172,11 +200,16 @@ Every pull request — from the squad skills, `create-pr` or `adopt-template` �
 (`draft: true`). It stays a draft while anything on its head is still to be fixed, and is marked ready for
 review (`update_pull_request` with `draft: false`) only when all of this holds on the current head:
 
+- the pull request merges cleanly into its base branch (*Merge conflicts* below);
 - every CI check run and commit status has finished, and none failed or was cancelled (a pending check is
   waited for, not counted as passed);
-- the CI code analysis (e.g. SonarQube Cloud) has reported on this head, its quality gate passed and it lists
-  **no new issue** on the pull request — a passed gate with open new issues (bugs, code smells, security
-  hotspots to review) is still rework, worked like a failing check;
+- the CI code analysis (e.g. SonarQube Cloud) has reported on **this** head, its quality gate passed and it
+  lists **no new issue** on the pull request — a passed gate with open new issues (bugs, code smells,
+  security hotspots to review) is still rework, worked like a failing check. "This head" is checked, not
+  assumed: the commit SHA of the analysis (SonarQube Cloud: `api/project_pull_requests/list?project=<key>`,
+  or the `head_sha` of its check run) equals the PR head; a `Quality Gate passed` comment or an issue list
+  without that match may belong to an earlier head while the newest analysis still runs, and settles
+  nothing about this one;
 - no commit for a known failure or finding is still to be pushed, and after a fix in the squad skills the
   re-approval of step 9 has passed on this head.
 
@@ -184,6 +217,26 @@ Each failure is fixed on the branch as step 11 describes, and the check starts a
 a check fails for reasons outside the change (red on the base branch too), or the code analysis cannot be
 read, the PR stays a draft and the user is told what blocks it. Once ready, the PR is not turned back into
 a draft; review comments and later CI failures are worked as before.
+
+### Merge conflicts
+
+A pull request with a conflict against its base branch gets no merge commit, so CI usually never starts on
+it: its checks stay missing or pending and waiting for them waits forever. Every look at the PR — after
+opening it, on each PR event, on each check-in and before marking it ready — therefore reads its
+mergeability first (`pull_request_read`, method `get`): `mergeable: false` or `mergeable_state: "dirty"` is a
+conflict; `mergeable: null` means GitHub is still computing it, so read it again shortly instead of counting
+it as clean. Checks that have not started a few minutes after a push are a reason to read it again, not to
+keep waiting.
+
+A conflict is fixed before anything else on the PR: fetch the base (`git fetch origin main`), merge it into
+the work branch (`git merge origin/main`, never a rebase or force-push), resolve each conflict keeping the
+intent of both sides, regenerate lockfiles and generated files with the stack's tooling instead of editing
+them by hand, run the gates the merged files need (*Gates of a patch* names them by kind of file) and push
+the merge commit. In the squad skills the orchestrator runs the merge and commits; a conflict in production
+or test code is resolved by the member that owns it (Dev or Tester), and a resolution that rewrites code
+rather than taking both sides unchanged is a fix that goes through steps 7–8 again. When both sides changed
+the same logic and either choice loses behavior, the Lead decides (the user, outside the squad skills). The
+check of *Draft until green* then starts again on the new head.
 
 ## Plan challenge
 
@@ -271,7 +324,9 @@ told so.
   and the item goes to the Dev (or Tester for tests), then the code check runs again. Not counted
   against a loop limit.
 - **Coverage gate fails:** Dev and Tester iterate; lines that cannot be covered by a unit test go to the
-  Lead, whose decision is recorded in `log.md`.
+  Lead, whose decision is recorded in `log.md`. A whole file no unit test can cover was listed in the plan
+  (*Code a unit test cannot cover*); one that surfaces only here, or only in the CI code analysis, is a
+  plan defect the Lead records with the decision.
 - **After the PR (step 11):** CI or quality-gate failures and review comments are fixed on the same
   branch and go through steps 7–8 again (delta review). The same limit of 2 fix rounds applies per
   failure; after that the Lead decides.

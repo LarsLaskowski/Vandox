@@ -246,7 +246,9 @@ action yourself — including follow-up issues the Lead decides on.
     without a real external system, say so.
 11. **After the PR.** Subscribe to the PR's activity right after opening it (`subscribe_pr_activity` when
     available; otherwise check the CI and code-analysis (e.g. SonarQube Cloud) results yourself before finishing) — a session
-    that ends with an unwatched PR has not completed this step. Stay with the PR until CI is green and the
+    that ends with an unwatched PR has not completed this step. On every look at the PR, read its mergeability
+    first: a conflict with the base branch keeps CI from starting and is merged and resolved before anything
+    else (`.squad/routing.md`, *Merge conflicts*). Stay with the PR until it merges cleanly, CI is green and the
     code analysis (e.g. SonarQube Cloud) passed with no new issue on the head, then mark it ready for review
     (`update_pull_request` with `draft: false`) — never earlier, and after a fix only once its re-approval
     (step 9) has passed on the new head, see `.squad/routing.md`, *Draft until green*:
@@ -257,10 +259,16 @@ action yourself — including follow-up issues the Lead decides on.
     Continue the member that made the change and the reviewer of the last round where their agent ids are
     still known (*Continue a member*). Each fix goes through steps 7–8 again (delta review; `scope-check.py --no-specs` from now on), with at
     most 2 fix rounds per failure before the Lead decides. A re-approval (step 9) runs the same checklist once
-    CI on the new head has finished and passes. When the plan's acceptance criteria can only be verified in CI
-    (for example a container image the sandbox cannot build), a red CI on exactly those criteria is a normal
-    outcome of this step: the plan names the owner (Dev for Dockerfile, compose and workflow files), and every
-    fix gets a delta review round. The work folder is gone by now: give the Reviewer, Security and the Lead the plan (tiers
+    CI on the new head has finished and passes. Before you decide that a code-analysis finding persists or is
+    fixed, or that its quality gate passed, match the analysis to the head: compare the commit SHA of the
+    SonarQube analysis (`api/project_pull_requests/list?project=<key>`, or the `head_sha` of its check run)
+    with the PR head (`.squad/routing.md`, *Draft until green*). A `Quality Gate passed` comment or an open
+    issue list can belong to an earlier head while the analysis of the newest head is still running; it is
+    no evidence either way — wait for the analysis of the current head. When the plan's acceptance criteria
+    can only be verified in CI (for example a container image the sandbox cannot build), a red CI on exactly
+    those criteria is a normal outcome of this step once the *Image build check* ran before the review
+    (`.squad/routing.md`, *Criteria verified only in CI*): the plan names the owner (Dev for Dockerfile,
+    compose and workflow files), and every fix gets a delta review round. The work folder is gone by now: give the Reviewer, Security and the Lead the plan (tiers
     `docs` and `patch`: the first log row; features:
     also `spec.md` and `tasks.md`) from the "Squad working record" comment, or via
     `git show <commit-before-removal>:specs/<folder>/<file>`, and record each log row by editing that

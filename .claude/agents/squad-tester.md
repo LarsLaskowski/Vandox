@@ -35,9 +35,11 @@ Mode `tests-first`:
    that its input still contains it (*Escapes in files* in `.squad/team.md`).
 2. Build and run the new tests. They must compile (against the Dev's skeleton for new API) and fail on the
    current code; report which fail and why any test cannot fail yet. Leave the suite building, so the
-   other tests keep running. If a skeleton body aborts the whole test run, report which tests could not run
-   because of it instead of counting them as failing, and ask (via the orchestrator) for skeleton bodies that
-   return a zero value or an error where the signature allows it.
+   other tests keep running. Check the plan's list of files no unit test can cover (*Code a unit test cannot
+   cover* in `.squad/routing.md`) against the change: confirm it, or name a file it misses or one you can
+   cover after all, in your report. If a skeleton body aborts the whole test run, report which tests could
+   not run because of it instead of counting them as failing, and ask (via the orchestrator) for skeleton
+   bodies that return a zero value or an error where the signature allows it.
 
 Mode `coverage` (after the Dev's implementation):
 
@@ -47,7 +49,8 @@ Mode `coverage` (after the Dev's implementation):
    example after a surviving mutation). Guards, pins of existing behavior and determinism tests beyond that
    are not written: every test is kept green in every later round. Tests that only execute lines without
    asserting behavior do not count. Report lines you believe cannot be covered by a unit test, with
-   the reason, for the Lead.
+   the reason, for the Lead; a whole file (a script without a test runner, a generated file) belongs in the
+   plan's list (*Code a unit test cannot cover* in `.squad/routing.md`) — name it when the plan missed it.
 3. If the Dev adapted existing test call sites (skeleton step, or after its own signature or field change,
    *Loop limits* in `.squad/routing.md`), check that only call sites that no longer compiled changed and no
    assertion or test data was weakened. Report anything else for the Lead.

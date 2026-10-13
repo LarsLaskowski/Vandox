@@ -45,6 +45,7 @@ repository (record 0074): keep it true when the build changes.
 | *Test with coverage* | `rm -rf TestResults coverage.out && go test ./... -race -coverprofile=coverage.out && python3 .squad/tools/go-coverage-to-cobertura.py && dotnet test Vandox.slnx --settings coverlet.runsettings --results-directory TestResults` (clears the results first) |
 | *Coverage gate* | `python3 .squad/tools/coverage-check.py` |
 | *Analyzer gate* | `python3 .squad/tools/analyzer-check.py` |
+| *Image build check* | .NET: `docker build -f deploy/backend/Dockerfile .` where Docker runs, otherwise the restore-order reproduction under *Image build check* below (`.squad/routing.md`, *Criteria verified only in CI*); Go: none, the agent builds no image |
 
 `reihitsu-format` needs `DOTNET_ROOT` when it runs as a global tool outside the SDK's directory (for example
 `DOTNET_ROOT=/usr/lib/dotnet`), for *Format* and *Format check* alike. Without `--force` it asks for confirmation
@@ -104,6 +105,11 @@ analysis (the gate of a `patch` that touches only scripts, workflows or Dockerfi
 Other SonarQube Cloud findings (further rules, duplication, hotspots) have no local equivalent and arrive in
 squad step 11.
 
+Own browser scripts (`src/Vandox.Backend/wwwroot/js/*.js`, no Node build) have no local analyzer: SonarQube
+Cloud's JavaScript rules report on them only in squad step 11, so write them to those rules from the start. The
+one that bit (`javascript:S2486`): a `catch` block that ignores the exception holds exactly one whole-line
+comment and nothing else — a comment before a `return` inside the block is still flagged.
+
 Changed shell scripts (`*.sh`), GitHub workflows (`.github/workflows/*.yml`) and Dockerfiles are checked with
 `shellcheck`, `actionlint` and `hadolint`; the SessionStart hook installs the three as pinned, checksum-verified
 binaries (`.claude/hooks/install-linters.sh`), and the gate reports NOT RUN for one that is missing (a refused
@@ -122,7 +128,7 @@ locally, <authoritative check>" once in `log.md` and does not repeat it as an op
 | ------ | --------------- | ---------------- | ------------------- |
 | shell scripts (`.github/scripts/*.sh`, `deploy/**/*.sh`) | `shfmt` (`shellcheck` runs in the *Analyzer gate*) | `bash -n <script>`; the *Analyzer gate* runs shellcheck and checks the shell pitfalls below | SonarQube Cloud (`shelldre:*`, step 11) and the CI step that runs the script |
 | workflows (`.github/workflows/*.yml`) | a GitHub Actions runner (`actionlint` runs in the *Analyzer gate*) | the *Analyzer gate* (actionlint) | the workflow's own run on the pull request |
-| `deploy/backend/Dockerfile`, `docker-compose.yml`, `.dockerignore`, image contents | a Docker daemon (`hadolint` runs in the *Analyzer gate* on the Dockerfile) | `.github/scripts/check-base-image-pinning.sh`, `.github/scripts/check-builder-dotnet-version.sh`, `bash -n` on the smoke script | CI job *Release build check*, steps "Build and verify image" and "Smoke test backend container" |
+| `deploy/backend/Dockerfile`, `docker-compose.yml`, `.dockerignore`, image contents | a Docker daemon (`hadolint` runs in the *Analyzer gate* on the Dockerfile) | the *Image build check* (restore-order reproduction below), `.github/scripts/check-base-image-pinning.sh`, `.github/scripts/check-builder-dotnet-version.sh`, `bash -n` on the smoke script | CI job *Release build check*, steps "Build and verify image" and "Smoke test backend container" |
 | own browser scripts and style sheets (`src/Vandox.Backend/wwwroot/js/*.js`, `wwwroot/*.css`) | a JavaScript and CSS analyzer | `WebUiContentTests` (`WebSourceScanner` rules) | SonarQube Cloud (step 11) |
 | known vulnerabilities (Go) | `govulncheck` (the proxy blocks `vuln.go.dev`, HTTP 403) | none | CI job *Vulnerability scan* |
 
@@ -140,12 +146,55 @@ returns or a small `Require`-style helper; never a workaround such as `== defaul
 IDE0046 (prefer a conditional expression over an `if` that returns) collides with S3358 (no nested ternaries)
 and stays silent (record 0087): an `if` with an early return is the accepted form.
 
+## Image build check
+
+Only the backend builds an image (`deploy/backend/Dockerfile`); the agent is installed as a release binary
+(`deploy/agent/`), so the Go side has no image build check. The Dockerfile copies the solution and build files
+and the four `.csproj` files first, restores `src/Vandox.Backend/Vandox.Backend.csproj`, then copies `src/` and
+publishes with `--no-restore`. The .NET SDK decides at restore time what the publish output holds (content
+items, static web assets, the `_framework/` scripts of a Blazor app), so a publish from the full working tree
+can contain files the image never gets (Vandox#24: `_framework/blazor.web.js` was in the local publish and
+missing from the image, because no `.razor` file existed at restore time). Where Docker runs, build the image.
+Where it does not (the cloud sessions), reproduce the Dockerfile's order in a scratch directory; every change
+to a `.csproj`, `Directory.*.props`, `Vandox.slnx`, `global.json`, a `.razor` or other content item, a static
+web asset under `wwwroot/` or the Dockerfile runs it before the review:
+
+```bash
+scratch="$(mktemp -d)"
+git ls-files -z -- .editorconfig global.json Directory.Build.props Directory.Packages.props Vandox.slnx 'src/*.csproj' \
+  | xargs -0 -I{} cp --parents {} "$scratch"
+(cd "$scratch" && dotnet restore src/Vandox.Backend/Vandox.Backend.csproj)
+git ls-files -z -- src/ | xargs -0 -I{} cp --parents {} "$scratch"
+(cd "$scratch" && dotnet publish src/Vandox.Backend/Vandox.Backend.csproj -c Release --no-restore -o ./publish \
+  -p:UseAppHost=false -p:DebugType=none)
+ls "$scratch"/publish/wwwroot/_framework "$scratch"/publish/wwwroot/js
+```
+
+Keep the first copy equal to the `COPY` lines before `RUN dotnet restore` in the Dockerfile and the second to
+`COPY src/ src/` (`.dockerignore` lets nothing else into the build context). A `--no-restore` publish that
+fails, or an output that is missing, is the defect the CI job *Release build check* would report after the PR
+is open.
+
 ## Coverage gate
 
 `coverage-check.py` merges every `TestResults/**/coverage.cobertura.xml`: coverlet's report of each .NET test
 project and `TestResults/go/coverage.cobertura.xml`, which `go-coverage-to-cobertura.py` writes from
 `coverage.out`. Production code is every `*.go`, `*.cs` and `*.razor` file outside `tests/` and `*_test.go`
 (`.squad/tools/squad_settings.py`). The thresholds are 80 % on new/changed code and 80 % overall.
+
+## Coverage exclusions
+
+Two places compute coverage and must agree (`.squad/routing.md`, *Code a unit test cannot cover*): the
+*Coverage gate* reads `COVERAGE_PATHSPECS` and `COVERAGE_EXCLUDES` in `.squad/tools/squad_settings.py` (`*.go`,
+`*.cs` and `*.razor` outside `tests/`, `*_test.go` and `obj/`, so own browser scripts do not count locally), and
+SonarQube Cloud reads `sonar.coverage.exclusions`, passed as `/d:sonar.coverage.exclusions=…` in the
+`dotnet-sonarscanner begin` step of `.github/workflows/ci.yml` (there is no `sonar-project.properties`: the
+scanner for .NET refuses one; the Go profile reaches it as `sonar.go.coverage.reportPaths=coverage.out`). Today
+it excludes `.squad/**`, `.claude/**` and `src/Vandox.Backend/wwwroot/js/**` (record 0098). A file no unit test
+can cover (`wwwroot/js/**`, a generated file) is added to that argument, and to `COVERAGE_EXCLUDES` where
+`COVERAGE_PATHSPECS` includes it, with a decision record — never to `sonar.exclusions`, which would drop it
+from the analysis too. Process startup wiring is not excluded: a Go `main` and `Program.Main` stay thin and are
+the accepted uncovered lines (`docs/UNIT_TESTS.md`, records 0072 and 0074).
 
 ## Writing code
 
