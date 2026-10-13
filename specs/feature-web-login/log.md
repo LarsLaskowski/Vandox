@@ -12,3 +12,4 @@ are quoted in full.
 | 2026-10-13 18:08 | 3 Plan revision | squad-lead | RESULT: DONE; B1-B3, N1-N5 and both DA minors accepted; tier stays security (opus/medium · 109,122 tokens · 47 tool uses · 323 s) |
 | 2026-10-13 18:09 | 3 Plan security review (delta) | squad-security | APPROVED; B1-B3 resolved, N1-N5 addressed, no new findings (opus/medium · 30,586 tokens · 6 tool uses · 46 s · continued) |
 | 2026-10-13 18:13 | 4 Skeleton | squad-dev | Skeleton built (Konscious 1.3.1, WebConfig, TrustedProxyList, Security/*, HashPasswordCommand, BackendLog 41-48, Login/RedirectToLogin stubs); Build 0 warnings (sonnet/medium · 140,113 tokens · 18 tool uses · 237 s) |
+| 2026-10-13 18:47 | 5 Tests first | squad-tester | Tests for AC1-AC9 written; confirmed: build ok, 142 Backend + 59 Core tests fail on skeleton; RoutesTests (AC4.3) deferred to coverage (passes on skeleton) (sonnet/medium · 426,882 tokens · 100 tool uses · 2014 s) |

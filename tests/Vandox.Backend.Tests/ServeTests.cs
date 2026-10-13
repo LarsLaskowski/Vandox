@@ -2,8 +2,10 @@ using System.Net;
 using System.Net.Sockets;
 
 using Microsoft.AspNetCore.Server.Kestrel.Core;
+using Microsoft.Extensions.Time.Testing;
 
 using Vandox.Backend.Hosting;
+using Vandox.Backend.Security;
 
 namespace Vandox.Backend.Tests;
 
@@ -14,6 +16,29 @@ namespace Vandox.Backend.Tests;
 [OSCondition(OperatingSystems.Linux)]
 public class ServeTests
 {
+    #region Constants
+
+    private const string Negotiate = "/_blazor/negotiate?negotiateVersion=1";
+    private const string WrongPassword = "wrong-password-marker-1";
+
+    #endregion // Constants
+
+    #region Fields
+
+    private static readonly string[] _webAssets = [
+                                                      "/_framework/blazor.web.js",
+                                                      "/app.css",
+                                                      "/js/app.js",
+                                                      "/js/charts.js",
+                                                      "/lib/uplot/uPlot.esm.js",
+                                                      "/lib/uplot/uPlot.min.css",
+                                                      "/brand/vandox-favicon.svg",
+                                                      "/brand/vandox-logo-horizontal.svg",
+                                                      "/brand/vandox-logo-horizontal-dark.svg"
+                                                  ];
+
+    #endregion // Fields
+
     #region Properties
 
     /// <summary>
@@ -45,10 +70,8 @@ public class ServeTests
 
         await started.Task.WaitAsync(TimeSpan.FromSeconds(20), TestContext.CancellationToken);
 
-        using var client = new HttpClient
-                           {
-                               Timeout = TimeSpan.FromSeconds(10)
-                           };
+        using var client = CreateClient();
+
         var web = $"http://127.0.0.1:{fixture.WebPort}";
         var ingest = $"http://127.0.0.1:{fixture.IngestPort}";
 
@@ -71,10 +94,10 @@ public class ServeTests
         Assert.AreEqual("no-store", health.Headers.CacheControl?.ToString(), "health cache control");
         Assert.AreEqual("nosniff", health.Headers.GetValues("X-Content-Type-Options").Single(), "health content type options");
         Assert.AreEqual(HttpStatusCode.OK, head.StatusCode, "HEAD health status");
-        Assert.AreEqual(HttpStatusCode.OK, home.StatusCode, "home status");
-        Assert.Contains("Vandox backend", await home.Content.ReadAsStringAsync(TestContext.CancellationToken), "the web UI page is served");
+        Assert.AreEqual(HttpStatusCode.Found, home.StatusCode, "an anonymous visitor of the home page is redirected");
+        Assert.AreEqual("/login", LoginTestClient.LocationOf(home), "the redirect goes to the login page");
         Assert.IsFalse(home.Headers.Contains("Server"), "no server header");
-        Assert.AreEqual(HttpStatusCode.NotFound, missing.StatusCode, "an unknown route is not found");
+        Assert.AreEqual(HttpStatusCode.Found, missing.StatusCode, "an unknown route is redirected to the login page too");
         Assert.AreEqual(HttpStatusCode.NotFound, ingestHealth.StatusCode, "no health check on the ingest port");
         Assert.AreEqual(HttpStatusCode.NotFound, ingestRoot.StatusCode, "no web UI on the ingest port");
         Assert.AreEqual(0, probe, "the health probe of the image passes");
@@ -209,10 +232,12 @@ public class ServeTests
 
         var run = await StartAsync(fixture, stop.Token);
 
-        using var client = CreateClient();
+        using var client = new LoginTestClient(fixture.WebPort);
+
+        await SignInAsync(client);
 
         // Act
-        using var response = await client.GetAsync($"http://127.0.0.1:{fixture.WebPort}/", TestContext.CancellationToken);
+        using var response = await client.GetAsync("/", TestContext.CancellationToken);
 
         var html = await response.Content.ReadAsStringAsync(TestContext.CancellationToken);
 
@@ -248,7 +273,7 @@ public class ServeTests
 
         using var client = CreateClient();
 
-        var paths = new[] { "/", "/app.css", "/_framework/blazor.web.js", "/healthz", "/nothing-here" };
+        var paths = new[] { "/", "/login", "/app.css", "/_framework/blazor.web.js", "/healthz", "/nothing-here" };
         var problems = new List<string>();
 
         // Act
@@ -270,7 +295,7 @@ public class ServeTests
     }
 
     /// <summary>
-    /// The static files and the live connection are served on the web port from the build output and are not served on the ingest port.
+    /// The static files are served on the web port from the build output without a session, the live connection needs one, and none of them is served on the ingest port.
     /// </summary>
     /// <returns>A task that completes when the test is done</returns>
     [TestMethod]
@@ -282,39 +307,32 @@ public class ServeTests
 
         var run = await StartAsync(fixture, stop.Token);
 
-        using var client = CreateClient();
+        using var client = new LoginTestClient(fixture.WebPort);
+        using var ingestClient = CreateClient();
 
-        var paths = new[]
-                    {
-                        "/_framework/blazor.web.js",
-                        "/app.css",
-                        "/js/app.js",
-                        "/js/charts.js",
-                        "/lib/uplot/uPlot.esm.js",
-                        "/lib/uplot/uPlot.min.css",
-                        "/brand/vandox-favicon.svg",
-                        "/brand/vandox-logo-horizontal.svg",
-                        "/brand/vandox-logo-horizontal-dark.svg"
-                    };
         var problems = new List<string>();
 
         // Act
-        foreach (var path in paths)
+        foreach (var path in _webAssets)
         {
-            using var web = await client.GetAsync($"http://127.0.0.1:{fixture.WebPort}{path}", TestContext.CancellationToken);
-            using var ingest = await client.GetAsync($"http://127.0.0.1:{fixture.IngestPort}{path}", TestContext.CancellationToken);
+            using var web = await client.GetAsync(path, TestContext.CancellationToken);
+            using var ingest = await ingestClient.GetAsync($"http://127.0.0.1:{fixture.IngestPort}{path}", TestContext.CancellationToken);
 
             AddStatusProblem(problems, $"GET web {path}", HttpStatusCode.OK, web);
             AddStatusProblem(problems, $"GET ingest {path}", HttpStatusCode.NotFound, ingest);
         }
 
-        const string negotiate = "/_blazor/negotiate?negotiateVersion=1";
+        using var anonymousNegotiate = await client.SendAsync(HttpMethod.Post, Negotiate, new ByteArrayContent([]), null, TestContext.CancellationToken);
+        using var ingestNegotiate = await ingestClient.PostAsync($"http://127.0.0.1:{fixture.IngestPort}{Negotiate}", new ByteArrayContent([]), TestContext.CancellationToken);
 
-        using var webNegotiate = await client.PostAsync($"http://127.0.0.1:{fixture.WebPort}{negotiate}", new ByteArrayContent([]), TestContext.CancellationToken);
-        using var ingestNegotiate = await client.PostAsync($"http://127.0.0.1:{fixture.IngestPort}{negotiate}", new ByteArrayContent([]), TestContext.CancellationToken);
-
-        AddStatusProblem(problems, "POST web negotiate", HttpStatusCode.OK, webNegotiate);
+        AddStatusProblem(problems, "POST web negotiate without a session", HttpStatusCode.Unauthorized, anonymousNegotiate);
         AddStatusProblem(problems, "POST ingest negotiate", HttpStatusCode.NotFound, ingestNegotiate);
+
+        await SignInAsync(client);
+
+        using var signedInNegotiate = await client.SendAsync(HttpMethod.Post, Negotiate, new ByteArrayContent([]), null, TestContext.CancellationToken);
+
+        AddStatusProblem(problems, "POST web negotiate with a session", HttpStatusCode.OK, signedInNegotiate);
 
         await stop.CancelAsync();
         await run.WaitAsync(TimeSpan.FromSeconds(20), TestContext.CancellationToken);
@@ -324,12 +342,537 @@ public class ServeTests
     }
 
     /// <summary>
-    /// Creates a client with a short timeout.
+    /// Without the hash of the web password the service logs the missing variable, exits with code 1 and creates no database.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task ServeRefusesMissingPasswordHash()
+    {
+        // Arrange
+        using var fixture = new BackendFixture();
+        using var stop = CancellationTokenSource.CreateLinkedTokenSource(TestContext.CancellationToken);
+
+        var hooks = new ServeHooks
+                    {
+                        Started = _ => stop.Cancel()
+                    };
+
+        // Act
+        var code = await fixture.RunAsync([], hooks, stop.Token, new KeyValuePair<string, string>("LANG", "C")).WaitAsync(TimeSpan.FromSeconds(30), TestContext.CancellationToken);
+
+        // Assert
+        var entries = fixture.LogEntries().Where(entry => entry.GetValueOrDefault("msg") == "web password hash missing").ToArray();
+
+        Assert.AreEqual(1, code, "exit code");
+        Assert.HasCount(1, entries, "one refusal is logged");
+        Assert.AreEqual("ERROR", entries[0].GetValueOrDefault("level"), "level");
+        Assert.AreEqual(BackendFixture.HashVariable, entries[0].GetValueOrDefault("variable"), "the variable is named");
+        Assert.IsFalse(File.Exists(Path.Combine(fixture.Storage, "vandox.db")), "no database was created");
+    }
+
+    /// <summary>
+    /// A hash outside the accepted form or bounds is refused with the exact reason, and the log does not contain the hash.
+    /// </summary>
+    /// <param name="kind">The kind of hash</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [DataRow("weak reference vector")]
+    [DataRow("argon2i string")]
+    public async Task ServeRefusesInvalidPasswordHash(string kind)
+    {
+        // Arrange
+        var (hash, reason) = kind == "argon2i string" ? (ReferenceVectors.InBounds().First().Hash.Replace("$argon2id$", "$argon2i$", StringComparison.Ordinal), PasswordHash.ReasonForm) : ReferenceVectors.OutOfBounds().First();
+
+        using var fixture = new BackendFixture();
+        using var stop = CancellationTokenSource.CreateLinkedTokenSource(TestContext.CancellationToken);
+
+        var hooks = new ServeHooks
+                    {
+                        Started = _ => stop.Cancel()
+                    };
+
+        // Act
+        var code = await fixture.RunAsync([], hooks, stop.Token, new KeyValuePair<string, string>(BackendFixture.HashVariable, hash)).WaitAsync(TimeSpan.FromSeconds(30), TestContext.CancellationToken);
+
+        // Assert
+        var entries = fixture.LogEntries().Where(entry => entry.GetValueOrDefault("msg") == "web password hash invalid").ToArray();
+        var log = fixture.Error.ToString();
+
+        Assert.AreEqual(1, code, "exit code");
+        Assert.HasCount(1, entries, "one refusal is logged");
+        Assert.AreEqual("ERROR", entries[0].GetValueOrDefault("level"), "level");
+        Assert.AreEqual(reason, entries[0].GetValueOrDefault("reason"), "the exact reason");
+        Assert.DoesNotContain(hash, log, "the hash is not logged");
+        Assert.DoesNotContain(hash.Split('$')[^1], log, "the hash part is not logged");
+        Assert.IsFalse(File.Exists(Path.Combine(fixture.Storage, "vandox.db")), "no database was created");
+    }
+
+    /// <summary>
+    /// Every route needs a session except the login page, the health check and the static files; the ingest port is unchanged; a signed-in user gets the pages.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task ServeRequiresSessionForEveryRouteExceptLoginHealthAndAssets()
+    {
+        // Arrange
+        using var fixture = new BackendFixture();
+        using var stop = CancellationTokenSource.CreateLinkedTokenSource(TestContext.CancellationToken);
+
+        var run = await StartAsync(fixture, stop.Token);
+
+        using var client = new LoginTestClient(fixture.WebPort);
+        using var ingestClient = CreateClient();
+
+        var problems = new List<string>();
+
+        // Act
+        using var home = await client.GetAsync("/", TestContext.CancellationToken);
+        using var missing = await client.GetAsync("/nothing-here", TestContext.CancellationToken);
+        using var head = await client.SendAsync(HttpMethod.Head, "/", null, null, TestContext.CancellationToken);
+        using var negotiate = await client.SendAsync(HttpMethod.Post, Negotiate, new ByteArrayContent([]), null, TestContext.CancellationToken);
+        using var login = await client.GetAsync("/login", TestContext.CancellationToken);
+        using var health = await client.GetAsync("/healthz", TestContext.CancellationToken);
+
+        AddStatusProblem(problems, "anonymous GET /", HttpStatusCode.Found, home);
+        AddLocationProblem(problems, "anonymous GET /", "/login", home);
+        AddStatusProblem(problems, "anonymous GET /nothing-here", HttpStatusCode.Found, missing);
+        AddLocationProblem(problems, "anonymous GET /nothing-here", "/login", missing);
+        AddStatusProblem(problems, "anonymous HEAD /", HttpStatusCode.Found, head);
+        AddStatusProblem(problems, "anonymous POST negotiate", HttpStatusCode.Unauthorized, negotiate);
+        AddStatusProblem(problems, "anonymous GET /login", HttpStatusCode.OK, login);
+        AddStatusProblem(problems, "anonymous GET /healthz", HttpStatusCode.OK, health);
+
+        if (await health.Content.ReadAsStringAsync(TestContext.CancellationToken) != "ok\n")
+        {
+            problems.Add("GET /healthz did not answer ok");
+        }
+
+        foreach (var path in _webAssets)
+        {
+            using var asset = await client.GetAsync(path, TestContext.CancellationToken);
+
+            AddStatusProblem(problems, $"anonymous GET {path}", HttpStatusCode.OK, asset);
+        }
+
+        foreach (var path in _webAssets.Concat(["/", "/login", "/healthz", "/nothing-here"]))
+        {
+            using var ingest = await ingestClient.GetAsync($"http://127.0.0.1:{fixture.IngestPort}{path}", TestContext.CancellationToken);
+
+            AddStatusProblem(problems, $"GET ingest {path}", HttpStatusCode.NotFound, ingest);
+        }
+
+        await SignInAsync(client);
+
+        using var signedHome = await client.GetAsync("/", TestContext.CancellationToken);
+        using var signedMissing = await client.GetAsync("/nothing-here", TestContext.CancellationToken);
+        using var signedNegotiate = await client.SendAsync(HttpMethod.Post, Negotiate, new ByteArrayContent([]), null, TestContext.CancellationToken);
+        using var signedLogin = await client.GetAsync("/login", TestContext.CancellationToken);
+
+        AddStatusProblem(problems, "signed-in GET /", HttpStatusCode.OK, signedHome);
+        AddStatusProblem(problems, "signed-in GET /nothing-here", HttpStatusCode.NotFound, signedMissing);
+        AddStatusProblem(problems, "signed-in POST negotiate", HttpStatusCode.OK, signedNegotiate);
+        AddStatusProblem(problems, "signed-in GET /login", HttpStatusCode.Found, signedLogin);
+        AddLocationProblem(problems, "signed-in GET /login", "/", signedLogin);
+
+        var html = await signedHome.Content.ReadAsStringAsync(TestContext.CancellationToken);
+
+        await stop.CancelAsync();
+        await run.WaitAsync(TimeSpan.FromSeconds(20), TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsEmpty(problems, $"problems: {string.Join("; ", problems)}");
+        Assert.Contains("Vandox backend", html, "the signed-in user gets the page");
+    }
+
+    /// <summary>
+    /// The cookies are <c>Secure</c> exactly when a trusted proxy says the request was HTTPS, and always <c>HttpOnly</c> with their <c>SameSite</c> value.
+    /// </summary>
+    /// <param name="trustedProxies">The value of <c>web.trusted_proxies</c></param>
+    /// <param name="trusted">Whether the peer address of the test is trusted</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [DataRow("", false)]
+    [DataRow("127.0.0.2", false)]
+    [DataRow("127.0.0.1", true)]
+    public async Task ServeSetsCookieFlagsFromTrustedProxyOnly(string trustedProxies, bool trusted)
+    {
+        // Arrange
+        using var fixture = new BackendFixture();
+        using var stop = CancellationTokenSource.CreateLinkedTokenSource(TestContext.CancellationToken);
+
+        fixture.UseTrustedProxies(trustedProxies);
+
+        var run = await StartAsync(fixture, stop.Token);
+        var forwarded = new Dictionary<string, string>
+                        {
+                            ["X-Forwarded-Proto"] = "https"
+                        };
+        var cases = new (string Label, IReadOnlyDictionary<string, string>? Headers, bool Secure)[]
+                    {
+                        ("forwarded as HTTPS", forwarded, trusted),
+                        ("direct", null, false)
+                    };
+        var problems = new List<string>();
+
+        // Act
+        foreach (var (label, headers, secure) in cases)
+        {
+            using var client = new LoginTestClient(fixture.WebPort);
+            using var page = await client.GetAsync("/login", TestContext.CancellationToken, headers);
+
+            var fields = LoginTestClient.HiddenFields(await page.Content.ReadAsStringAsync(TestContext.CancellationToken));
+
+            fields[LoginTestClient.PasswordField] = BackendFixture.Password;
+
+            using var post = await client.PostFormAsync("/login", fields, TestContext.CancellationToken, headers);
+
+            AddCookieProblems(problems, $"{label}: {LoginTestClient.AntiforgeryCookie}", LoginTestClient.SetCookie(page, LoginTestClient.AntiforgeryCookie), "strict", secure, false);
+            AddStatusProblem(problems, $"{label}: sign-in", HttpStatusCode.Found, post);
+            AddCookieProblems(problems, $"{label}: {LoginTestClient.SessionCookie}", LoginTestClient.SetCookie(post, LoginTestClient.SessionCookie), "lax", secure, true);
+        }
+
+        await stop.CancelAsync();
+        await run.WaitAsync(TimeSpan.FromSeconds(20), TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsEmpty(problems, $"cookie problems: {string.Join("; ", problems)}");
+    }
+
+    /// <summary>
+    /// The client address of the lockout is taken from <c>X-Forwarded-For</c> only when the peer is a trusted proxy, otherwise the proxy's address is the client and the log says that the header was ignored.
+    /// </summary>
+    /// <param name="trustedProxies">The value of <c>web.trusted_proxies</c></param>
+    /// <param name="trusted">Whether the peer address of the test is trusted</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [DataRow("127.0.0.1", true)]
+    [DataRow("127.0.0.2", false)]
+    [DataRow("", false)]
+    public async Task ServeTakesClientAddressFromTrustedProxyOnly(string trustedProxies, bool trusted)
+    {
+        // Arrange
+        using var fixture = new BackendFixture();
+        using var stop = CancellationTokenSource.CreateLinkedTokenSource(TestContext.CancellationToken);
+
+        fixture.UseTrustedProxies(trustedProxies);
+
+        var run = await StartAsync(fixture, stop.Token);
+        var first = new Dictionary<string, string>
+                    {
+                        ["X-Forwarded-For"] = "198.51.100.7"
+                    };
+        var second = new Dictionary<string, string>
+                     {
+                         ["X-Forwarded-For"] = "198.51.100.8"
+                     };
+        var problems = new List<string>();
+
+        using var client = new LoginTestClient(fixture.WebPort);
+
+        // Act
+        for (var count = 0; count < LoginThrottle.MaxFailures; count++)
+        {
+            using var wrong = await client.PostLoginAsync(WrongPassword, TestContext.CancellationToken, first);
+
+            AddStatusProblem(problems, $"wrong password {count + 1}", HttpStatusCode.Unauthorized, wrong);
+        }
+
+        using var lockedFirst = await client.PostLoginAsync(BackendFixture.Password, TestContext.CancellationToken, first);
+        using var otherClient = await client.PostLoginAsync(BackendFixture.Password, TestContext.CancellationToken, second);
+
+        AddStatusProblem(problems, "right password of the locked client", HttpStatusCode.TooManyRequests, lockedFirst);
+        AddStatusProblem(problems, "right password of the other client", trusted ? HttpStatusCode.Found : HttpStatusCode.TooManyRequests, otherClient);
+
+        await stop.CancelAsync();
+        await run.WaitAsync(TimeSpan.FromSeconds(20), TestContext.CancellationToken);
+
+        // Assert
+        var entries = fixture.LogEntries();
+        var hints = entries.Where(entry => entry.GetValueOrDefault("msg") == "forwarded header ignored").ToArray();
+
+        Assert.IsEmpty(problems, $"status problems: {string.Join("; ", problems)}");
+
+        if (trusted)
+        {
+            Assert.IsNotEmpty(entries.Where(entry => entry.GetValueOrDefault("client") == "198.51.100.7").ToArray(), "the forwarded address is the client in the log");
+            Assert.IsEmpty(hints, "no hint when the header is used");
+        }
+        else
+        {
+            Assert.HasCount(1, hints, "the hint is logged once");
+            Assert.AreEqual("127.0.0.1", hints[0].GetValueOrDefault("client"), "the peer is the client");
+        }
+    }
+
+    /// <summary>
+    /// A form post without a valid antiforgery token, or whose body cannot be read as a form, is answered 400 without an effect and without counting as a sign-in attempt, and never causes a 500 or an error in the log.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task ServeRejectsFormPostsWithoutValidAntiforgeryToken()
+    {
+        // Arrange
+        const int mebibyte = 1 << 20;
+
+        using var fixture = new BackendFixture();
+        using var stop = CancellationTokenSource.CreateLinkedTokenSource(TestContext.CancellationToken);
+
+        var run = await StartAsync(fixture, stop.Token);
+
+        using var client = new LoginTestClient(fixture.WebPort);
+        using var foreign = new LoginTestClient(fixture.WebPort);
+
+        var problems = new List<string>();
+        var valid = await client.ReadFormFieldsAsync("/login", TestContext.CancellationToken);
+        var foreignToken = (await foreign.ReadFormFieldsAsync("/login", TestContext.CancellationToken))[LoginTestClient.TokenField];
+        var withoutToken = new Dictionary<string, string>
+                           {
+                               [LoginTestClient.HandlerField] = "login",
+                               [LoginTestClient.PasswordField] = WrongPassword
+                           };
+        var otherCookie = new Dictionary<string, string>(valid)
+                          {
+                              [LoginTestClient.TokenField] = foreignToken,
+                              [LoginTestClient.PasswordField] = WrongPassword
+                          };
+        var oversized = new Dictionary<string, string>(valid)
+                        {
+                            [LoginTestClient.PasswordField] = new string('p', 20 * 1024)
+                        };
+        var multipart = new Dictionary<string, string>(valid)
+                        {
+                            [LoginTestClient.PasswordField] = WrongPassword
+                        };
+
+        // Act
+        for (var round = 0; round < 2; round++)
+        {
+            using var noToken = await client.PostFormAsync("/login", withoutToken, TestContext.CancellationToken);
+            using var foreignToken2 = await client.PostFormAsync("/login", otherCookie, TestContext.CancellationToken);
+
+            AddRefusedProblems(problems, "login without a token", noToken);
+            AddRefusedProblems(problems, "login with the token of another cookie", foreignToken2);
+        }
+
+        using var big = await client.PostFormAsync("/login", oversized, TestContext.CancellationToken);
+        using var file = await client.PostMultipartAsync("/login", multipart, mebibyte, TestContext.CancellationToken);
+
+        AddRefusedProblems(problems, "login with a 20 KiB password", big);
+        AddRefusedProblems(problems, "multipart login with a 1 MiB file part", file);
+
+        valid[LoginTestClient.PasswordField] = BackendFixture.Password;
+
+        using var signIn = await client.PostFormAsync("/login", valid, TestContext.CancellationToken);
+
+        AddStatusProblem(problems, "sign-in after six refused posts", HttpStatusCode.Found, signIn);
+
+        var signed = await client.ReadFormFieldsAsync("/", TestContext.CancellationToken);
+        var oversizedLogout = new Dictionary<string, string>(signed)
+                              {
+                                  ["big"] = new string('v', 20 * 1024)
+                              };
+        var manyValues = new Dictionary<string, string>(signed);
+
+        for (var index = 0; index < 65; index++)
+        {
+            manyValues[$"value{index}"] = "x";
+        }
+
+        using var logoutWithoutToken = await client.PostFormAsync("/logout", new Dictionary<string, string>(), TestContext.CancellationToken);
+
+        AddRefusedProblems(problems, "logout without a token", logoutWithoutToken, false);
+        await AddSignedInProblemsAsync(problems, "after logout without a token", client);
+
+        using var pageWithoutToken = await client.PostFormAsync("/", new Dictionary<string, string>(), TestContext.CancellationToken);
+
+        AddRefusedProblems(problems, "page post without a token", pageWithoutToken, false);
+        await AddSignedInProblemsAsync(problems, "after page post without a token", client);
+
+        using var logoutBig = await client.PostFormAsync("/logout", oversizedLogout, TestContext.CancellationToken);
+
+        AddRefusedProblems(problems, "logout with a 20 KiB value", logoutBig, false);
+        await AddSignedInProblemsAsync(problems, "after logout with a 20 KiB value", client);
+
+        using var logoutMany = await client.PostFormAsync("/logout", manyValues, TestContext.CancellationToken);
+
+        AddRefusedProblems(problems, "logout with 65 values", logoutMany, false);
+        await AddSignedInProblemsAsync(problems, "after logout with 65 values", client);
+
+        using var logoutFile = await client.PostMultipartAsync("/logout", signed, mebibyte, TestContext.CancellationToken);
+
+        AddRefusedProblems(problems, "multipart logout with a 1 MiB file part", logoutFile, false);
+        await AddSignedInProblemsAsync(problems, "after multipart logout", client);
+
+        await stop.CancelAsync();
+        await run.WaitAsync(TimeSpan.FromSeconds(20), TestContext.CancellationToken);
+
+        // Assert
+        problems.AddRange(fixture.LogEntries().Where(entry => entry.GetValueOrDefault("level") == "ERROR").Select(entry => $"error in the log: {entry.GetValueOrDefault("msg")}"));
+
+        Assert.IsEmpty(problems, $"problems: {string.Join("; ", problems)}");
+    }
+
+    /// <summary>
+    /// Five wrong passwords lock the client, the sixth attempt gets 429 also with the right password, and after 15 minutes the client can sign in; the log has the lines and never the password.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task ServeLocksOutClientAfterFiveFailedSignIns()
+    {
+        // Arrange
+        using var fixture = new BackendFixture();
+        using var stop = CancellationTokenSource.CreateLinkedTokenSource(TestContext.CancellationToken);
+
+        var clock = new FakeTimeProvider();
+        var run = await StartAsync(fixture, stop.Token, clock);
+        var problems = new List<string>();
+
+        using var client = new LoginTestClient(fixture.WebPort);
+
+        // Act
+        for (var count = 0; count < LoginThrottle.MaxFailures; count++)
+        {
+            using var wrong = await client.PostLoginAsync(WrongPassword, TestContext.CancellationToken);
+
+            AddStatusProblem(problems, $"wrong password {count + 1}", HttpStatusCode.Unauthorized, wrong);
+
+            AddTextProblem(problems, $"wrong password {count + 1}", await wrong.Content.ReadAsStringAsync(TestContext.CancellationToken), "The password is not correct.");
+        }
+
+        using var locked = await client.PostLoginAsync(BackendFixture.Password, TestContext.CancellationToken);
+
+        AddStatusProblem(problems, "right password while locked", HttpStatusCode.TooManyRequests, locked);
+
+        AddTextProblem(problems, "right password while locked", await locked.Content.ReadAsStringAsync(TestContext.CancellationToken), "Too many sign-in attempts. Try again later.");
+
+        clock.Advance(TimeSpan.FromMinutes(15));
+
+        using var unlocked = await client.PostLoginAsync(BackendFixture.Password, TestContext.CancellationToken);
+
+        AddStatusProblem(problems, "right password after 15 minutes", HttpStatusCode.Found, unlocked);
+        AddLocationProblem(problems, "right password after 15 minutes", "/", unlocked);
+
+        await stop.CancelAsync();
+        await run.WaitAsync(TimeSpan.FromSeconds(20), TestContext.CancellationToken);
+
+        // Assert
+        var entries = fixture.LogEntries();
+        var log = fixture.Error.ToString();
+
+        Assert.IsEmpty(problems, $"problems: {string.Join("; ", problems)}");
+        Assert.AreEqual(5, entries.Count(entry => entry.GetValueOrDefault("msg") == "login failed"), "login failed");
+        Assert.ContainsSingle(entries.Where(entry => entry.GetValueOrDefault("msg") == "login locked"), "login locked");
+        Assert.ContainsSingle(entries.Where(entry => entry.GetValueOrDefault("msg") == "login succeeded"), "login succeeded");
+        Assert.DoesNotContain(WrongPassword, log, "the wrong password is not logged");
+        Assert.DoesNotContain(BackendFixture.Password, log, "the right password is not logged");
+    }
+
+    /// <summary>
+    /// A session ends after an hour without activity and 12 hours after the sign-in even with activity.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task ServeEndsSessionAfterIdleAndAbsoluteTimeout()
+    {
+        // Arrange
+        using var fixture = new BackendFixture();
+        using var stop = CancellationTokenSource.CreateLinkedTokenSource(TestContext.CancellationToken);
+
+        var clock = new FakeTimeProvider();
+        var run = await StartAsync(fixture, stop.Token, clock);
+        var problems = new List<string>();
+
+        using var idle = new LoginTestClient(fixture.WebPort);
+        using var active = new LoginTestClient(fixture.WebPort);
+
+        // Act
+        await SignInAsync(idle);
+        await AddSignedInProblemsAsync(problems, "just signed in", idle);
+
+        clock.Advance(TimeSpan.FromMinutes(61));
+
+        using var afterIdle = await idle.GetAsync("/", TestContext.CancellationToken);
+
+        AddStatusProblem(problems, "after 61 idle minutes", HttpStatusCode.Found, afterIdle);
+        AddLocationProblem(problems, "after 61 idle minutes", "/login", afterIdle);
+
+        await SignInAsync(active);
+
+        for (var count = 0; count < 14; count++)
+        {
+            clock.Advance(TimeSpan.FromMinutes(50));
+            await AddSignedInProblemsAsync(problems, $"active session after {(count + 1) * 50} minutes", active);
+        }
+
+        clock.Advance(TimeSpan.FromMinutes(30));
+
+        using var afterLifetime = await active.GetAsync("/", TestContext.CancellationToken);
+
+        AddStatusProblem(problems, "12 hours 10 minutes after the sign-in", HttpStatusCode.Found, afterLifetime);
+        AddLocationProblem(problems, "12 hours 10 minutes after the sign-in", "/login", afterLifetime);
+
+        await stop.CancelAsync();
+        await run.WaitAsync(TimeSpan.FromSeconds(20), TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsEmpty(problems, $"problems: {string.Join("; ", problems)}");
+    }
+
+    /// <summary>
+    /// Signing out ends the session on the server, so a copy of its cookie is no longer accepted.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task ServeLogoutEndsSessionOnServer()
+    {
+        // Arrange
+        using var fixture = new BackendFixture();
+        using var stop = CancellationTokenSource.CreateLinkedTokenSource(TestContext.CancellationToken);
+
+        var run = await StartAsync(fixture, stop.Token);
+        var problems = new List<string>();
+
+        using var client = new LoginTestClient(fixture.WebPort);
+        using var copy = new LoginTestClient(fixture.WebPort);
+
+        await SignInAsync(client);
+        copy.CopyCookiesFrom(client);
+        await AddSignedInProblemsAsync(problems, "the copy before sign-out", copy);
+
+        // Act
+        using var logout = await client.PostLogoutAsync(TestContext.CancellationToken);
+        using var home = await copy.GetAsync("/", TestContext.CancellationToken);
+        using var negotiate = await copy.SendAsync(HttpMethod.Post, Negotiate, new ByteArrayContent([]), null, TestContext.CancellationToken);
+
+        await stop.CancelAsync();
+        await run.WaitAsync(TimeSpan.FromSeconds(20), TestContext.CancellationToken);
+
+        // Assert
+        AddStatusProblem(problems, "POST /logout", HttpStatusCode.SeeOther, logout);
+        AddLocationProblem(problems, "POST /logout", "/login", logout);
+        AddStatusProblem(problems, "GET / with the copied cookie", HttpStatusCode.Found, home);
+        AddLocationProblem(problems, "GET / with the copied cookie", "/login", home);
+        AddStatusProblem(problems, "negotiate with the copied cookie", HttpStatusCode.Unauthorized, negotiate);
+
+        var deleted = LoginTestClient.SetCookie(logout, LoginTestClient.SessionCookie);
+
+        Assert.IsEmpty(problems, $"problems: {string.Join("; ", problems)}");
+        Assert.IsNotNull(deleted, "the response deletes the session cookie");
+        Assert.IsTrue(deleted.StartsWith(LoginTestClient.SessionCookie + "=;", StringComparison.Ordinal), $"the deleted cookie has no value: {deleted}");
+        Assert.IsFalse(client.HasSession, "the client dropped the cookie");
+        Assert.ContainsSingle(fixture.LogEntries().Where(entry => entry.GetValueOrDefault("msg") == "logged out"), "logged out is logged once");
+    }
+
+    /// <summary>
+    /// Creates a client with a short timeout that does not follow redirects.
     /// </summary>
     /// <returns>The client</returns>
     private static HttpClient CreateClient()
     {
-        return new HttpClient
+        return new HttpClient(new HttpClientHandler
+                              {
+                                  AllowAutoRedirect = false
+                              })
                {
                    Timeout = TimeSpan.FromSeconds(10)
                };
@@ -380,23 +923,135 @@ public class ServeTests
     }
 
     /// <summary>
+    /// Adds a problem when a response does not redirect to the expected place.
+    /// </summary>
+    /// <param name="problems">The problems</param>
+    /// <param name="request">The description of the request</param>
+    /// <param name="expected">The expected <c>Location</c></param>
+    /// <param name="response">The response</param>
+    private static void AddLocationProblem(List<string> problems, string request, string expected, HttpResponseMessage response)
+    {
+        var actual = LoginTestClient.LocationOf(response);
+
+        if (actual != expected)
+        {
+            problems.Add($"{request} redirected to {actual ?? "nowhere"}, expected {expected}");
+        }
+    }
+
+    /// <summary>
+    /// Adds a problem when a page does not contain a text.
+    /// </summary>
+    /// <param name="problems">The problems</param>
+    /// <param name="label">The description of the request</param>
+    /// <param name="body">The page</param>
+    /// <param name="expected">The text that must be in it</param>
+    private static void AddTextProblem(List<string> problems, string label, string body, string expected)
+    {
+        if (body.Contains(expected, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        problems.Add($"{label}: the text \"{expected}\" is missing");
+    }
+
+    /// <summary>
+    /// Adds the problems of a <c>Set-Cookie</c> header: flags that are missing, and a <c>Secure</c> flag that does not match.
+    /// </summary>
+    /// <param name="problems">The problems</param>
+    /// <param name="label">The description of the cookie</param>
+    /// <param name="setCookie">The header value, <c>null</c> when there was none</param>
+    /// <param name="sameSite">The expected <c>SameSite</c> value, lower case</param>
+    /// <param name="secure">Whether the cookie must be <c>Secure</c></param>
+    /// <param name="session">Whether it is the session cookie, which must have no expiry</param>
+    private static void AddCookieProblems(List<string> problems, string label, string? setCookie, string sameSite, bool secure, bool session)
+    {
+        if (setCookie is null)
+        {
+            problems.Add($"{label}: no Set-Cookie header");
+
+            return;
+        }
+
+        var attributes = LoginTestClient.CookieAttributes(setCookie);
+
+        foreach (var required in new[] { "httponly", $"samesite={sameSite}", "path=/" })
+        {
+            if (attributes.Contains(required))
+            {
+                continue;
+            }
+
+            problems.Add($"{label}: {required} is missing in [{setCookie}]");
+        }
+
+        if (attributes.Contains("secure") != secure)
+        {
+            problems.Add($"{label}: secure should be {secure} in [{setCookie}]");
+        }
+
+        if (session && attributes.Any(attribute => attribute.StartsWith("expires=", StringComparison.Ordinal) || attribute.StartsWith("max-age=", StringComparison.Ordinal)))
+        {
+            problems.Add($"{label}: the cookie has an expiry in [{setCookie}]");
+        }
+    }
+
+    /// <summary>
+    /// Adds the problems of a refused form post: not 400, an error status, or a session cookie.
+    /// </summary>
+    /// <param name="problems">The problems</param>
+    /// <param name="label">The description of the post</param>
+    /// <param name="response">The response</param>
+    /// <param name="anonymous">Whether the poster has no session, so that no session cookie may be set</param>
+    private static void AddRefusedProblems(List<string> problems, string label, HttpResponseMessage response, bool anonymous = true)
+    {
+        AddStatusProblem(problems, label, HttpStatusCode.BadRequest, response);
+
+        if (anonymous && LoginTestClient.SetCookie(response, LoginTestClient.SessionCookie) is not null)
+        {
+            problems.Add($"{label}: a session cookie was set");
+        }
+    }
+
+    /// <summary>
+    /// Adds a problem when the client no longer gets the home page.
+    /// </summary>
+    /// <param name="problems">The problems</param>
+    /// <param name="label">The description of the moment</param>
+    /// <param name="client">The client</param>
+    /// <returns>A task that completes when the check is done</returns>
+    private async Task AddSignedInProblemsAsync(List<string> problems, string label, LoginTestClient client)
+    {
+        using var home = await client.GetAsync("/", TestContext.CancellationToken);
+
+        AddStatusProblem(problems, $"GET / {label}", HttpStatusCode.OK, home);
+    }
+
+    /// <summary>
     /// Starts the service of the fixture and waits until it listens.
     /// </summary>
     /// <param name="fixture">The fixture</param>
     /// <param name="stop">Stops the run</param>
+    /// <param name="clock">The clock of the service, <c>null</c> for the real one</param>
     /// <returns>A task that returns the task of the run</returns>
-    private async Task<Task<int>> StartAsync(BackendFixture fixture, CancellationToken stop)
+    private Task<Task<int>> StartAsync(BackendFixture fixture, CancellationToken stop, TimeProvider? clock = null)
     {
-        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var hooks = new ServeHooks
-                    {
-                        Started = _ => started.TrySetResult()
-                    };
-        var run = fixture.RunAsync([], hooks, stop);
+        return fixture.StartServiceAsync(stop, TestContext.CancellationToken, clock);
+    }
 
-        await started.Task.WaitAsync(TimeSpan.FromSeconds(20), TestContext.CancellationToken);
+    /// <summary>
+    /// Signs in with the password of the fixture and expects the redirect to the home page.
+    /// </summary>
+    /// <param name="client">The client</param>
+    /// <returns>A task that completes when the client is signed in</returns>
+    private async Task SignInAsync(LoginTestClient client)
+    {
+        using var response = await client.PostLoginAsync(BackendFixture.Password, TestContext.CancellationToken);
 
-        return run;
+        Assert.AreEqual(HttpStatusCode.Found, response.StatusCode, "the sign-in is answered with a redirect");
+        Assert.AreEqual("/", LoginTestClient.LocationOf(response), "the redirect goes to the home page");
+        Assert.IsTrue(client.HasSession, "the client holds a session cookie");
     }
 
     #endregion // Methods

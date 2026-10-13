@@ -382,6 +382,39 @@ public class CommandLineTests
     }
 
     /// <summary>
+    /// The sub-command hash-password takes no flag but the help flag and no argument, and its usage says what it does.
+    /// </summary>
+    /// <param name="arguments">The arguments, joined with a bar</param>
+    /// <param name="hashPassword">The expected sub-command flag</param>
+    /// <param name="help">The expected help flag</param>
+    /// <param name="error">The expected error</param>
+    [TestMethod]
+    [DataRow("hash-password", true, false, "")]
+    [DataRow("hash-password|-h", true, true, "")]
+    [DataRow("hash-password|--help", true, true, "")]
+    [DataRow("hash-password|extra", true, false, "vandoxd hash-password: no argument is expected")]
+    [DataRow("hash-password|-config|x", true, false, "flag provided but not defined: -config")]
+    [DataRow("hash-password|-config=x", true, false, "flag provided but not defined: -config")]
+    [DataRow("-healthcheck|hash-password", false, false, "unexpected argument \"hash-password\"")]
+    public void CommandLineParsesHashPassword(string arguments, bool hashPassword, bool help, string error)
+    {
+        // Act
+        var options = CommandLine.Parse(arguments.Split('|'));
+
+        // Assert
+        Assert.AreEqual(hashPassword, options.HashPassword, "the sub-command is set");
+        Assert.AreEqual(help, options.Help, "the help flag");
+        Assert.AreEqual(error, options.Error, "error");
+
+        if (hashPassword)
+        {
+            Assert.AreEqual("hash-password", options.UsageFor, "usage of the sub-command");
+        }
+
+        Assert.AreEqual("Usage of vandoxd hash-password:\n  reads the password from the first line of standard input and prints its argon2id hash\n", CommandLine.Usage("hash-password"), "usage of the sub-command");
+    }
+
+    /// <summary>
     /// Builds a text from code points.
     /// </summary>
     /// <param name="codePoints">The code points</param>
