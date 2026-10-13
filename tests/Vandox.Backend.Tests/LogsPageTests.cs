@@ -328,7 +328,7 @@ public partial class LogsPageTests
         Assert.AreEqual(0, onSecond.Next, "a page ended by the scan bound does not offer Next page");
         Assert.AreEqual(1, onSecond.Continue, "a page ended by the scan bound offers Continue");
         Assert.AreEqual(1, onSecond.First, "the later page offers First page");
-        Assert.Contains(Enc(Format(LogsView.SearchedUpToFormat, Shown(second.CapturedAt))), onSecond.Html, "the time up to which the search went");
+        Assert.Contains(Enc(Format(LogsView.SearchedUpToFormat, $"{Shown(second.CapturedAt)} UTC")), onSecond.Html, "the time up to which the search went");
         Assert.AreEqual(0, onThird.Next + onThird.Continue, "the last page offers neither");
         Assert.HasCount(4, filters, "four searches");
         Assert.IsNull(filters[0].After, "the first search starts at the beginning");

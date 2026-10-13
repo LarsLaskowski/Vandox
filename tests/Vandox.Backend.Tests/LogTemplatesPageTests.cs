@@ -135,7 +135,7 @@ public partial class LogTemplatesPageTests
         harness.Explorer.TemplateResult = template;
         harness.Explorer.TemplateList = [Counted(template, 321)];
         harness.Explorer.Hours = [hour, hour.AddHours(1), hour.AddHours(2)];
-        harness.TemplateReader.Hours = [HourCount(hour, 3), HourCount(hour.AddHours(2), 5)];
+        harness.Explorer.TemplateHourList = [HourCount(hour, 3), HourCount(hour.AddHours(2), 5)];
 
         // Act
         await harness.AddAsync<LogTemplatesPage>();
@@ -153,6 +153,49 @@ public partial class LogTemplatesPageTests
         Assert.AreEqual(LogsView.ChartTitle, create[0].Arguments[1], "the title passed to the chart");
         Assert.AreSequenceEqual([LogsView.ChartSeries], (string[])create[0].Arguments[2]!, "the one series label");
         Assert.DoesNotContain(call => call.Arguments.Any(argument => argument is string text && text.Contains("secretname", StringComparison.Ordinal)), harness.Runtime.Calls, "no template text reaches the chart script");
+    }
+
+    /// <summary>
+    /// For a range longer than 2,160 hours, the hourly queries ask for the last hours only, with one hour more than the chart shows.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task TemplatesPageQueriesTheLastHoursOfALongRange()
+    {
+        // Arrange
+        var template = Template(7, "user failed", 987);
+        var to = new DateTimeOffset(2026, 10, 12, 0, 0, 0, TimeSpan.Zero);
+        var from = to.AddHours(-5000);
+
+        await using var longRange = new LogPageHarness($"{Address}?template=7&source=syslog&from={Uri.EscapeDataString(from.ToString("yyyy-MM-ddTHH:mm", System.Globalization.CultureInfo.InvariantCulture))}&to={Uri.EscapeDataString(to.ToString("yyyy-MM-ddTHH:mm", System.Globalization.CultureInfo.InvariantCulture))}");
+        await using var shortRange = new LogPageHarness($"{Address}?template=7&source=syslog&{Range}");
+
+        foreach (var harness in new[] { longRange, shortRange })
+        {
+            harness.Explorer.TemplateResult = template;
+            harness.Explorer.TemplateList = [Counted(template, 321)];
+        }
+
+        // Act
+        await longRange.AddAsync<LogTemplatesPage>();
+        await shortRange.AddAsync<LogTemplatesPage>();
+
+        // Assert
+        var hours = longRange.Explorer.Queries<TemplateHourQuery>(FakeLogExplorer.TemplateHours).Single();
+        var sourceHours = longRange.Explorer.Queries<SourceHourQuery>(FakeLogExplorer.SourceHours).Single();
+        var shortHours = shortRange.Explorer.Queries<TemplateHourQuery>(FakeLogExplorer.TemplateHours).Single();
+        var window = to.AddHours(-TemplateHourSeries.MaxHours);
+
+        Assert.AreEqual(7L, hours.TemplateId, "the template");
+        Assert.AreEqual(window, hours.From, "from is the end minus 2160 hours");
+        Assert.AreEqual(to, hours.To, "to is the end of the address");
+        Assert.AreEqual(TemplateHourSeries.MaxHours + 1, hours.Limit, "limit is 2161");
+        Assert.AreEqual(2161, hours.Limit, "limit is 2161 hours");
+        Assert.AreEqual(window, sourceHours.From, "source hours from");
+        Assert.AreEqual(to, sourceHours.To, "source hours to");
+        Assert.AreEqual(2161, sourceHours.Limit, "source hours limit");
+        Assert.AreEqual(_from, shortHours.From, "a short range keeps the from of the address");
+        Assert.AreEqual(_to, shortHours.To, "a short range keeps the to of the address");
     }
 
     /// <summary>
@@ -260,6 +303,7 @@ public partial class LogTemplatesPageTests
 
         // Assert
         Assert.IsGreaterThanOrEqualTo(3, sequential.Explorer.Calls.Count, "the list, the template and its hours were read");
+        Assert.Contains(call => call.Method == FakeLogExplorer.TemplateHours, sequential.Explorer.Calls, "the hourly counts of the template were read, in the same sequence");
         Assert.AreEqual(1, sequential.Explorer.MaxInFlight, "never more than one call in flight");
         Assert.IsTrue(cancelled, "the new action cancelled the running call");
         Assert.AreEqual(1, startedWhileRunning, "the next call waits for the end of the cancelled one");

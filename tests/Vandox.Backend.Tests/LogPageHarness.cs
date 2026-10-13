@@ -41,7 +41,6 @@ internal sealed class LogPageHarness : IAsyncDisposable
     internal LogPageHarness(string uri)
     {
         Explorer = new FakeLogExplorer();
-        TemplateReader = new FakeTemplateReader(Explorer);
         Navigation = new RecordingNavigationManager(uri);
         Clock = new FakeTimeProvider(new DateTimeOffset(2026, 10, 13, 12, 0, 0, TimeSpan.Zero));
         Logger = new ListLogger();
@@ -49,7 +48,6 @@ internal sealed class LogPageHarness : IAsyncDisposable
 
         _services = new ServiceCollection().AddLogging(builder => builder.AddProvider(new ListLoggerProvider(Logger)))
                                            .AddSingleton<ILogExplorer>(Explorer)
-                                           .AddSingleton<ILogTemplateReader>(TemplateReader)
                                            .AddSingleton<NavigationManager>(Navigation)
                                            .AddSingleton<TimeProvider>(Clock)
                                            .AddSingleton<IJSRuntime>(Runtime)
@@ -66,11 +64,6 @@ internal sealed class LogPageHarness : IAsyncDisposable
     /// Gets the explorer the pages get.
     /// </summary>
     internal FakeLogExplorer Explorer { get; }
-
-    /// <summary>
-    /// Gets the template reader the pages get.
-    /// </summary>
-    internal FakeTemplateReader TemplateReader { get; }
 
     /// <summary>
     /// Gets the navigation manager.

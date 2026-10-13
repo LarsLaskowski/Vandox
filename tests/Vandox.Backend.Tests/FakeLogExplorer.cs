@@ -40,6 +40,11 @@ internal sealed class FakeLogExplorer : ILogExplorer
     /// </summary>
     internal const string SourceHours = "SourceHours";
 
+    /// <summary>
+    /// The name of <see cref="TemplateHoursAsync"/> in <see cref="Calls"/>.
+    /// </summary>
+    internal const string TemplateHours = "TemplateHours";
+
     #endregion // Constants
 
     #region Fields
@@ -98,6 +103,11 @@ internal sealed class FakeLogExplorer : ILogExplorer
     /// Gets or sets the result of <see cref="SourceHoursAsync"/>.
     /// </summary>
     internal IReadOnlyList<DateTimeOffset> Hours { get; set; } = [];
+
+    /// <summary>
+    /// Gets or sets the result of <see cref="TemplateHoursAsync"/>.
+    /// </summary>
+    internal IReadOnlyList<TemplateHour> TemplateHourList { get; set; } = [];
 
     /// <summary>
     /// Gets the exceptions that a method throws (after <see cref="Before"/>), by method name.
@@ -322,6 +332,20 @@ internal sealed class FakeLogExplorer : ILogExplorer
                    };
 
         return RunAsync(SourceHours, copy, () => Hours, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public Task<IReadOnlyList<TemplateHour>> TemplateHoursAsync(TemplateHourQuery query, CancellationToken cancellationToken)
+    {
+        var copy = new TemplateHourQuery
+                   {
+                       TemplateId = query.TemplateId,
+                       From = query.From,
+                       To = query.To,
+                       Limit = query.Limit
+                   };
+
+        return RunAsync(TemplateHours, copy, () => TemplateHourList, cancellationToken);
     }
 
     #endregion // ILogExplorer

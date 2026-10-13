@@ -38,6 +38,7 @@ public class GatedLogExplorerTests
     [DataRow(FakeLogExplorer.Template)]
     [DataRow(FakeLogExplorer.Templates)]
     [DataRow(FakeLogExplorer.SourceHours)]
+    [DataRow(FakeLogExplorer.TemplateHours)]
     public async Task GatedLogExplorerRunsAtMostTheGivenNumberOfCallsAtOnce(string method)
     {
         // Arrange
@@ -78,6 +79,7 @@ public class GatedLogExplorerTests
     [DataRow(FakeLogExplorer.Template)]
     [DataRow(FakeLogExplorer.Templates)]
     [DataRow(FakeLogExplorer.SourceHours)]
+    [DataRow(FakeLogExplorer.TemplateHours)]
     public async Task GatedLogExplorerWaitEndsWithTheToken(string method)
     {
         // Arrange
@@ -187,6 +189,7 @@ public class GatedLogExplorerTests
                    FakeLogExplorer.Template => explorer.TemplateAsync(1, cancellationToken),
                    FakeLogExplorer.Templates => explorer.TemplatesAsync(new TemplateListQuery(), cancellationToken),
                    FakeLogExplorer.SourceHours => explorer.SourceHoursAsync(new SourceHourQuery(), cancellationToken),
+                   FakeLogExplorer.TemplateHours => explorer.TemplateHoursAsync(new TemplateHourQuery(), cancellationToken),
                    _ => throw new ArgumentOutOfRangeException(nameof(method), method, "unknown method")
                };
     }

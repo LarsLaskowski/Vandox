@@ -20,5 +20,5 @@ Every documentation edit appears in exactly one row; the Lead's approval only to
 | 12 | `docs/BENCHMARKS.md`: *Log search* section with the development-host results | `docs/BENCHMARKS.md` | AC-19 | Dev | [ ] |
 | 13 | Reference-host run of `--search-lines 5000000` by the Product Manager (requested by the orchestrator before step 8); the Dev enters the row in `docs/BENCHMARKS.md` | `docs/BENCHMARKS.md` | AC-19 | Product Manager (run), Dev (row) | [ ] |
 | 14 | `.squad/project.md` *Security areas* 3, 10 and 12 | `.squad/project.md` | — | Dev | [ ] |
-| 15 | `.squad/project.md` *Test doubles*, row *Blazor components* | `.squad/project.md` | — | Tester | [ ] |
+| 15 | `.squad/project.md` *Test doubles*, row *Blazor components* | `.squad/project.md` | — | Tester | [x] |
 | 16 | Decision record 0103, the sentence in 0066, the index row | `docs/decisions/0103-logs-view-address-as-the-view-bounded-search-pages-template-lines-by-normalization.md`, `docs/decisions/0066-log-search-takes-literal-terms-only.md`, `docs/decisions/README.md` | — | Lead | [x] |
