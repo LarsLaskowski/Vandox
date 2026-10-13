@@ -26,6 +26,11 @@ internal static class ServeCommand
 
     private const int MaxHeaderBytes = 16 << 10;
 
+    /// <summary>
+    /// The name of the environment variable that holds the secret of the web login, for the log line that reports it missing; it names the variable, never a value.
+    /// </summary>
+    private const string HashSecretVariable = "VANDOX_WEB_PASSWORD_HASH";
+
     #endregion // Constants
 
     #region Fields
@@ -111,7 +116,7 @@ internal static class ServeCommand
             return ParsePasswordHash(secret.Reveal(), logger);
         }
 
-        logger.WebPasswordHashMissing(ConfigConstants.EnvWebPasswordHash);
+        logger.WebPasswordHashMissing(HashSecretVariable);
 
         return null;
     }
