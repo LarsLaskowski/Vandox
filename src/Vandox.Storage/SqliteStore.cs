@@ -10,7 +10,7 @@ namespace Vandox.Storage;
 /// bounded number of query-only readers, so a committed batch is durable and reads (and the health check) do not wait for
 /// a write.
 /// </summary>
-public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, ILogTemplateReader, IIncidentStore, IImportTracker, IAsyncDisposable
+public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, ILogTemplateReader, ILogExplorer, IIncidentStore, IImportTracker, IAsyncDisposable
 {
     #region Constants
 
@@ -523,6 +523,63 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
     }
 
     #endregion // ILogTemplateReader
+
+    #region ILogExplorer
+
+#pragma warning disable RH2003
+    /// <inheritdoc />
+    public Task<LogPage> FindLogsAsync(LogFilter filter, CancellationToken cancellationToken)
+    {
+        return FindLogsAsync(filter, LogFinder.SelectiveMatches, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public Task<LogContext> LogContextAsync(LogContextQuery query, CancellationToken cancellationToken)
+    {
+        throw new NotImplementedException();
+    }
+
+    /// <inheritdoc />
+    public Task<IReadOnlyList<string>> LogSourcesAsync(CancellationToken cancellationToken)
+    {
+        throw new NotImplementedException();
+    }
+
+    /// <inheritdoc />
+    public Task<LogTemplate?> TemplateAsync(long id, CancellationToken cancellationToken)
+    {
+        throw new NotImplementedException();
+    }
+
+    /// <inheritdoc />
+    public Task<IReadOnlyList<TemplateCount>> TemplatesAsync(TemplateListQuery query, CancellationToken cancellationToken)
+    {
+        throw new NotImplementedException();
+    }
+
+    /// <inheritdoc />
+    public Task<IReadOnlyList<DateTimeOffset>> SourceHoursAsync(SourceHourQuery query, CancellationToken cancellationToken)
+    {
+        throw new NotImplementedException();
+    }
+
+    /// <summary>
+    /// Returns one page of the log lines matching every filter with an explicit selectivity bound.
+    /// </summary>
+    /// <param name="filter">The filters</param>
+    /// <param name="selectiveMatches">The index match count below which a text search runs from the index</param>
+    /// <param name="cancellationToken">Cancels the call</param>
+    /// <returns>A task that returns the page</returns>
+    /// <exception cref="InvalidQueryException">A filter breaks a rule</exception>
+#pragma warning disable S2325
+    internal Task<LogPage> FindLogsAsync(LogFilter filter, int selectiveMatches, CancellationToken cancellationToken)
+    {
+        throw new NotImplementedException();
+    }
+#pragma warning restore S2325
+#pragma warning restore RH2003
+
+    #endregion // ILogExplorer
 
     #region IIncidentStore
 

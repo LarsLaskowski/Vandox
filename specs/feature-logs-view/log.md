@@ -12,3 +12,4 @@ are quoted in full.
 | 2026-10-13 18:01 | 3 Plan revise | Lead | RESULT: DONE; all B1-B3, N1-N4 and DA 1-4 accepted: EXISTS-only scan, LogText caps with cut marker, GatedLogExplorer max 2 + one call per page (AC-21), address-form rows, fixed chart texts, DNS rebinding residual (opus/medium · 104,063 tokens · 47 tool uses · 402 s) |
 | 2026-10-13 18:02 | 3 Follow-up | Orchestrator | Posted Lead's note on #25 (Host allow-list against DNS rebinding, circuit bound): issuecomment-6151911711 |
 | 2026-10-13 18:02 | 3 Plan security delta | Security | APPROVED; 2 non-blocking notes appended to plan.md (gate singleton + same-instance test; template-list bound ~3.1 MiB) (opus/medium · 23,062 tokens · 5 tool uses · 41 s · continued) |
+| 2026-10-13 18:07 | 4 Skeleton | Dev | Done: storage + backend Logs/ signatures, pages, ExternalText, ServeHooks.Built, BackendLog 41, ValidateWindow overload (implemented); build 0 warnings; nav/Home/registrations/css left for task 5 |

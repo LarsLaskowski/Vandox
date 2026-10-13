@@ -278,5 +278,13 @@ internal static partial class BackendLog
     [LoggerMessage(EventId = 40, Level = LogLevel.Error, Message = "report failed {Error}")]
     internal static partial void ReportFailed(this ILogger logger, Exception exception, string error);
 
+    /// <summary>
+    /// Logs a failed read of the logs view.
+    /// </summary>
+    /// <param name="logger">The logger</param>
+    /// <param name="exception">The failure</param>
+    [LoggerMessage(EventId = 41, Level = LogLevel.Error, Message = "logs view: reading failed")]
+    internal static partial void LogsReadFailed(this ILogger logger, Exception exception);
+
     #endregion // Methods
 }
