@@ -1,6 +1,6 @@
 # 0100: The report language comes from the flag `-lang` (`en` by default, or `de`); the texts are tables in code, not .NET resources or cultures
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-13
 - **Area:** Detection, alerts and reports
 - **Source:** Issue #28

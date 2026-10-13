@@ -1,6 +1,6 @@
 # 0099: Recurrence and correlation rules compare the share of outages with the share of observed system-log hours and decide by a binomial tail
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-13
 - **Area:** Detection, alerts and reports
 - **Source:** Issue #28

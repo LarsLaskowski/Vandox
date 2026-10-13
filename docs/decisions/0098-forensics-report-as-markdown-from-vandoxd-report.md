@@ -1,6 +1,6 @@
 # 0098: The forensics report is written as Markdown by `vandoxd report`, computed on demand in bounded passes; the web page follows separately
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-13
 - **Area:** Detection, alerts and reports
 - **Source:** Issue #28
