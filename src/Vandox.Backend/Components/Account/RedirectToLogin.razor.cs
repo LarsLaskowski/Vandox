@@ -2,19 +2,27 @@ using Microsoft.AspNetCore.Components;
 
 namespace Vandox.Backend.Components.Account;
 
-#pragma warning disable RH2003, S2325
-
 /// <summary>
 /// Sends the browser to the login page with a full page load.
 /// </summary>
 public sealed partial class RedirectToLogin
 {
+    #region Properties
+
+    /// <summary>
+    /// Gets or sets the navigation.
+    /// </summary>
+    [Inject]
+    private NavigationManager Navigation { get; set; } = null!;
+
+    #endregion // Properties
+
     #region ComponentBase
 
     /// <inheritdoc/>
     protected override void OnInitialized()
     {
-        throw new NotImplementedException();
+        Navigation.NavigateTo("login", true);
     }
 
     #endregion // ComponentBase

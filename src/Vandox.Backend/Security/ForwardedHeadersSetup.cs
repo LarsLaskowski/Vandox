@@ -4,8 +4,6 @@ using Microsoft.AspNetCore.Builder;
 
 namespace Vandox.Backend.Security;
 
-#pragma warning disable RH2003, S2325
-
 /// <summary>
 /// Builds the options of the forwarded-headers middleware from the trusted proxies.
 /// </summary>
@@ -20,7 +18,26 @@ internal static class ForwardedHeadersSetup
     /// <returns>The options; <c>null</c> when the list is empty, so no middleware is added</returns>
     internal static ForwardedHeadersOptions? CreateOptions(IReadOnlyList<IPNetwork> trustedProxies)
     {
-        throw new NotImplementedException();
+        if (trustedProxies.Count == 0)
+        {
+            return null;
+        }
+
+        var options = new ForwardedHeadersOptions
+                      {
+                          ForwardedHeaders = Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedFor | Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedProto,
+                          ForwardLimit = 1
+                      };
+
+        options.KnownProxies.Clear();
+        options.KnownIPNetworks.Clear();
+
+        foreach (var network in trustedProxies)
+        {
+            options.KnownIPNetworks.Add(network);
+        }
+
+        return options;
     }
 
     #endregion // Methods

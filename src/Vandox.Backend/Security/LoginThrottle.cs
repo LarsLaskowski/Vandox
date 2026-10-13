@@ -1,8 +1,7 @@
 using System.Net;
+using System.Net.Sockets;
 
 namespace Vandox.Backend.Security;
-
-#pragma warning disable RH2003, S2325
 
 /// <summary>
 /// Counts failed sign-ins per client and overall, and tells which clients are locked out.
@@ -50,6 +49,11 @@ internal sealed class LoginThrottle
     /// </summary>
     internal static readonly TimeSpan GlobalWindow = TimeSpan.FromHours(1);
 
+    private readonly TimeProvider _timeProvider;
+    private readonly Lock _lock = new();
+    private readonly Dictionary<string, LoginClient> _clients = new(StringComparer.Ordinal);
+    private readonly Queue<DateTimeOffset> _globalFailures = new();
+
     #endregion // Fields
 
     #region Constructors
@@ -60,7 +64,7 @@ internal sealed class LoginThrottle
     /// <param name="timeProvider">The clock</param>
     internal LoginThrottle(TimeProvider timeProvider)
     {
-        throw new NotImplementedException();
+        _timeProvider = timeProvider;
     }
 
     #endregion // Constructors
@@ -70,7 +74,16 @@ internal sealed class LoginThrottle
     /// <summary>
     /// Gets the number of tracked clients.
     /// </summary>
-    internal int TrackedClients => throw new NotImplementedException();
+    internal int TrackedClients
+    {
+        get
+        {
+            lock (_lock)
+            {
+                return _clients.Count;
+            }
+        }
+    }
 
     #endregion // Properties
 
@@ -83,7 +96,26 @@ internal sealed class LoginThrottle
     /// <returns>The key</returns>
     internal static string ClientKey(IPAddress? address)
     {
-        throw new NotImplementedException();
+        if (address is null)
+        {
+            return UnknownClient;
+        }
+
+        if (address.IsIPv4MappedToIPv6)
+        {
+            return address.MapToIPv4().ToString();
+        }
+
+        if (address.AddressFamily != AddressFamily.InterNetworkV6)
+        {
+            return address.ToString();
+        }
+
+        var bytes = new byte[16];
+
+        address.GetAddressBytes().AsSpan(0, 8).CopyTo(bytes);
+
+        return new IPAddress(bytes) + "/64";
     }
 
     /// <summary>
@@ -93,7 +125,19 @@ internal sealed class LoginThrottle
     /// <returns><c>true</c> when sign-ins are not checked</returns>
     internal bool IsLockedOut(string clientKey)
     {
-        throw new NotImplementedException();
+        var now = _timeProvider.GetUtcNow();
+
+        lock (_lock)
+        {
+            Prune(_globalFailures, now, GlobalWindow);
+
+            if (_globalFailures.Count >= MaxGlobalFailures)
+            {
+                return true;
+            }
+
+            return _clients.TryGetValue(clientKey, out var client) && client.LockedUntil > now;
+        }
     }
 
     /// <summary>
@@ -103,7 +147,33 @@ internal sealed class LoginThrottle
     /// <returns>The failure count and the locks the failure started</returns>
     internal LoginFailure RecordFailure(string clientKey)
     {
-        throw new NotImplementedException();
+        var now = _timeProvider.GetUtcNow();
+
+        lock (_lock)
+        {
+            var allLockedUntil = RecordGlobalFailure(now);
+            var client = FindOrAdd(clientKey);
+
+            if (client.LockedUntil <= now)
+            {
+                client.Failures.Clear();
+                client.LockedUntil = null;
+            }
+
+            Prune(client.Failures, now, FailureWindow);
+            client.Failures.Enqueue(now);
+            client.LastFailure = now;
+
+            DateTimeOffset? clientLockedUntil = null;
+
+            if (client.Failures.Count >= MaxFailures && client.LockedUntil is null)
+            {
+                clientLockedUntil = now + LockoutDuration;
+                client.LockedUntil = clientLockedUntil;
+            }
+
+            return new LoginFailure(client.Failures.Count, clientLockedUntil, allLockedUntil);
+        }
     }
 
     /// <summary>
@@ -112,7 +182,67 @@ internal sealed class LoginThrottle
     /// <param name="clientKey">The key of the client</param>
     internal void RecordSuccess(string clientKey)
     {
-        throw new NotImplementedException();
+        lock (_lock)
+        {
+            _clients.Remove(clientKey);
+        }
+    }
+
+    /// <summary>
+    /// Removes the times that are not younger than the window.
+    /// </summary>
+    /// <param name="times">The times, oldest first</param>
+    /// <param name="now">The current time</param>
+    /// <param name="window">The window</param>
+    private static void Prune(Queue<DateTimeOffset> times, DateTimeOffset now, TimeSpan window)
+    {
+        while (times.Count > 0 && now - times.Peek() >= window)
+        {
+            times.Dequeue();
+        }
+    }
+
+    /// <summary>
+    /// Adds a failure to the overall queue.
+    /// </summary>
+    /// <param name="now">The time of the failure</param>
+    /// <returns>The end of the overall lock when this failure reached the limit; otherwise <c>null</c></returns>
+    private DateTimeOffset? RecordGlobalFailure(DateTimeOffset now)
+    {
+        Prune(_globalFailures, now, GlobalWindow);
+        _globalFailures.Enqueue(now);
+
+        while (_globalFailures.Count > MaxGlobalFailures)
+        {
+            _globalFailures.Dequeue();
+        }
+
+        return _globalFailures.Count >= MaxGlobalFailures ? _globalFailures.Peek() + GlobalWindow : null;
+    }
+
+    /// <summary>
+    /// Returns the state of a client, adding it and forgetting the client with the oldest failure when the table is full.
+    /// </summary>
+    /// <param name="clientKey">The key of the client</param>
+    /// <returns>The state</returns>
+    private LoginClient FindOrAdd(string clientKey)
+    {
+        if (_clients.TryGetValue(clientKey, out var client))
+        {
+            return client;
+        }
+
+        if (_clients.Count >= MaxClients)
+        {
+            var oldest = _clients.MinBy(pair => pair.Value.LastFailure).Key;
+
+            _clients.Remove(oldest);
+        }
+
+        client = new LoginClient();
+        _clients.Add(clientKey, client);
+
+        return client;
     }
 
     #endregion // Methods

@@ -1,13 +1,19 @@
+using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Components.Authorization;
+using Microsoft.AspNetCore.Components.Server.Circuits;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 
 namespace Vandox.Backend.Security;
-
-#pragma warning disable RH2003, S2325
 
 /// <summary>
 /// Wires the login of the web UI: cookie authentication, sessions, antiforgery, form limits and the sign-out endpoint.
@@ -51,6 +57,10 @@ internal static class WebAuthentication
     /// </summary>
     internal const int MaxMultipartBodyLength = 65536;
 
+    private const string BlazorPath = "/_blazor";
+
+    private const string LoggerCategory = "login";
+
     #endregion // Constants
 
     #region Methods
@@ -64,7 +74,34 @@ internal static class WebAuthentication
     /// <param name="loggerFactory">The logger factory</param>
     internal static void AddServices(IServiceCollection services, IPasswordVerifier verifier, TimeProvider timeProvider, ILoggerFactory loggerFactory)
     {
-        throw new NotImplementedException();
+        var sessions = new SessionStore(timeProvider);
+        var throttle = new LoginThrottle(timeProvider);
+
+        services.AddDataProtection().UseEphemeralDataProtectionProvider();
+        services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme).AddCookie(options => ConfigureCookie(options, sessions, timeProvider));
+        services.AddAuthorizationBuilder().SetFallbackPolicy(new AuthorizationPolicyBuilder().RequireAuthenticatedUser().Build());
+        services.AddCascadingAuthenticationState();
+        services.AddScoped<AuthenticationStateProvider, SessionRevalidatingStateProvider>();
+        services.TryAddEnumerable(ServiceDescriptor.Scoped<CircuitHandler, SessionCircuitHandler>());
+        services.AddAntiforgery(options =>
+                                {
+                                    options.Cookie.Name = AntiforgeryCookieName;
+                                    options.Cookie.HttpOnly = true;
+                                    options.Cookie.SameSite = SameSiteMode.Strict;
+                                    options.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
+                                    options.Cookie.Path = "/";
+                                });
+        services.Configure<FormOptions>(options =>
+                                        {
+                                            options.ValueLengthLimit = MaxFormValueLength;
+                                            options.ValueCountLimit = MaxFormValueCount;
+                                            options.MultipartBodyLengthLimit = MaxMultipartBodyLength;
+                                            options.MemoryBufferThreshold = MaxMultipartBodyLength;
+                                        });
+        services.AddSingleton(sessions);
+        services.AddSingleton(throttle);
+        services.AddSingleton(verifier);
+        services.AddSingleton(_ => new LoginService(verifier, throttle, timeProvider, loggerFactory.CreateLogger(LoggerCategory)));
     }
 
     /// <summary>
@@ -73,7 +110,7 @@ internal static class WebAuthentication
     /// <param name="endpoints">The endpoints</param>
     internal static void MapLogout(IEndpointRouteBuilder endpoints)
     {
-        throw new NotImplementedException();
+        endpoints.MapPost(LogoutPath, LogoutAsync).WithMetadata(RequiredAntiforgery.Instance).AllowAnonymous();
     }
 
     /// <summary>
@@ -82,9 +119,20 @@ internal static class WebAuthentication
     /// <param name="context">The request</param>
     /// <param name="loginService">The login service</param>
     /// <returns>A task that completes when the response is written</returns>
-    internal static Task LogoutAsync(HttpContext context, LoginService loginService)
+    internal static async Task LogoutAsync(HttpContext context, LoginService loginService)
     {
-        throw new NotImplementedException();
+        var feature = context.Features.Get<IAntiforgeryValidationFeature>();
+
+        if (feature is { IsValid: true })
+        {
+            await loginService.SignOutAsync(context).ConfigureAwait(false);
+            context.Response.StatusCode = StatusCodes.Status303SeeOther;
+            context.Response.Headers.Location = LoginPath;
+
+            return;
+        }
+
+        context.Response.StatusCode = StatusCodes.Status400BadRequest;
     }
 
     /// <summary>
@@ -94,7 +142,51 @@ internal static class WebAuthentication
     /// <returns>A task that completes when the response is set</returns>
     internal static Task RedirectToLoginAsync(RedirectContext<CookieAuthenticationOptions> context)
     {
-        throw new NotImplementedException();
+        var request = context.Request;
+        var safeMethod = HttpMethods.IsGet(request.Method) || HttpMethods.IsHead(request.Method);
+
+        if (safeMethod && request.Path.StartsWithSegments(BlazorPath))
+        {
+            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+        }
+        else if (safeMethod)
+        {
+            context.Response.StatusCode = StatusCodes.Status302Found;
+            context.Response.Headers.Location = LoginPath;
+        }
+        else
+        {
+            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+        }
+
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Sets the options of the session cookie.
+    /// </summary>
+    /// <param name="options">The options</param>
+    /// <param name="sessions">The sessions</param>
+    /// <param name="timeProvider">The clock</param>
+    private static void ConfigureCookie(CookieAuthenticationOptions options, SessionStore sessions, TimeProvider timeProvider)
+    {
+        options.Cookie.Name = CookieName;
+        options.Cookie.HttpOnly = true;
+        options.Cookie.SameSite = SameSiteMode.Lax;
+        options.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
+        options.Cookie.Path = "/";
+        options.Cookie.IsEssential = true;
+        options.ExpireTimeSpan = SessionStore.AbsoluteLifetime;
+        options.SlidingExpiration = false;
+        options.SessionStore = sessions;
+        options.TimeProvider = timeProvider;
+        options.Events.OnRedirectToLogin = RedirectToLoginAsync;
+        options.Events.OnRedirectToAccessDenied = context =>
+                                                  {
+                                                      context.Response.StatusCode = StatusCodes.Status403Forbidden;
+
+                                                      return Task.CompletedTask;
+                                                  };
     }
 
     #endregion // Methods

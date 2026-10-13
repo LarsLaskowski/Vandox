@@ -4,8 +4,6 @@ using Microsoft.Extensions.Logging;
 
 namespace Vandox.Backend.Security;
 
-#pragma warning disable RH2003, S2325
-
 /// <summary>
 /// Provides the authentication state of a circuit and revalidates the session at an interval.
 /// </summary>
@@ -17,6 +15,8 @@ internal sealed class SessionRevalidatingStateProvider : RevalidatingServerAuthe
     /// The interval of the revalidation.
     /// </summary>
     internal static readonly TimeSpan Interval = TimeSpan.FromSeconds(30);
+
+    private readonly SessionStore _sessions;
 
     #endregion // Fields
 
@@ -30,7 +30,7 @@ internal sealed class SessionRevalidatingStateProvider : RevalidatingServerAuthe
     public SessionRevalidatingStateProvider(ILoggerFactory loggerFactory, SessionStore sessions)
         : base(loggerFactory)
     {
-        throw new NotImplementedException();
+        _sessions = sessions;
     }
 
     #endregion // Constructors
@@ -44,7 +44,7 @@ internal sealed class SessionRevalidatingStateProvider : RevalidatingServerAuthe
     /// <returns><c>true</c> when the session is active</returns>
     internal bool IsValid(AuthenticationState authenticationState)
     {
-        throw new NotImplementedException();
+        return _sessions.IsActive(authenticationState.User);
     }
 
     #endregion // Methods
@@ -52,12 +52,12 @@ internal sealed class SessionRevalidatingStateProvider : RevalidatingServerAuthe
     #region RevalidatingServerAuthenticationStateProvider
 
     /// <inheritdoc/>
-    protected override TimeSpan RevalidationInterval => throw new NotImplementedException();
+    protected override TimeSpan RevalidationInterval => Interval;
 
     /// <inheritdoc/>
     protected override Task<bool> ValidateAuthenticationStateAsync(AuthenticationState authenticationState, CancellationToken cancellationToken)
     {
-        throw new NotImplementedException();
+        return Task.FromResult(IsValid(authenticationState));
     }
 
     #endregion // RevalidatingServerAuthenticationStateProvider

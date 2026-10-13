@@ -3,13 +3,18 @@ using Microsoft.AspNetCore.Components.Server.Circuits;
 
 namespace Vandox.Backend.Security;
 
-#pragma warning disable RH2003, S2325
-
 /// <summary>
 /// Ends a live connection whose session has ended: no inbound activity is processed after that.
 /// </summary>
 internal sealed class SessionCircuitHandler : CircuitHandler
 {
+    #region Fields
+
+    private readonly AuthenticationStateProvider _authenticationStateProvider;
+    private readonly SessionStore _sessions;
+
+    #endregion // Fields
+
     #region Constructors
 
     /// <summary>
@@ -19,7 +24,8 @@ internal sealed class SessionCircuitHandler : CircuitHandler
     /// <param name="sessions">The sessions</param>
     public SessionCircuitHandler(AuthenticationStateProvider authenticationStateProvider, SessionStore sessions)
     {
-        throw new NotImplementedException();
+        _authenticationStateProvider = authenticationStateProvider;
+        _sessions = sessions;
     }
 
     #endregion // Constructors
@@ -31,9 +37,16 @@ internal sealed class SessionCircuitHandler : CircuitHandler
     /// </summary>
     /// <returns>A task that completes when the session is active</returns>
     /// <exception cref="SessionEndedException">The session has ended</exception>
-    internal Task CheckSessionAsync()
+    internal async Task CheckSessionAsync()
     {
-        throw new NotImplementedException();
+        var state = await _authenticationStateProvider.GetAuthenticationStateAsync().ConfigureAwait(false);
+
+        if (_sessions.Touch(state.User))
+        {
+            return;
+        }
+
+        throw new SessionEndedException("The session of the live connection has ended");
     }
 
     #endregion // Methods
@@ -43,7 +56,11 @@ internal sealed class SessionCircuitHandler : CircuitHandler
     /// <inheritdoc/>
     public override Func<CircuitInboundActivityContext, Task> CreateInboundActivityHandler(Func<CircuitInboundActivityContext, Task> next)
     {
-        throw new NotImplementedException();
+        return async context =>
+               {
+                   await CheckSessionAsync().ConfigureAwait(false);
+                   await next(context).ConfigureAwait(false);
+               };
     }
 
     #endregion // CircuitHandler

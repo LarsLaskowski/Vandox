@@ -2,8 +2,6 @@ using System.Net;
 
 namespace Vandox.Core.Configuration;
 
-#pragma warning disable RH2003, S2325
-
 /// <summary>
 /// The options of the web UI listener and of the reverse proxy in front of it.
 /// </summary>
@@ -34,7 +32,12 @@ public sealed class WebConfig
     /// <exception cref="InvalidOperationException">The option does not parse</exception>
     public IReadOnlyList<IPNetwork> GetTrustedProxies()
     {
-        throw new NotImplementedException();
+        if (TrustedProxyList.TryParse(TrustedProxies, out var networks))
+        {
+            return networks;
+        }
+
+        throw new InvalidOperationException("web.trusted_proxies is not a valid list of IP addresses and networks");
     }
 
     #endregion // Methods

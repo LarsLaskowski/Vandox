@@ -1,6 +1,10 @@
-namespace Vandox.Backend.Security;
+using System.Globalization;
+using System.Security.Cryptography;
+using System.Text;
 
-#pragma warning disable RH2003, S2325
+using Konscious.Security.Cryptography;
+
+namespace Vandox.Backend.Security;
 
 /// <summary>
 /// An argon2id password hash in the PHC string form: it parses and checks the hash and creates new ones.
@@ -124,7 +128,41 @@ internal sealed class PasswordHash : IPasswordVerifier
     /// </summary>
     internal const string ReasonHash = "hash must be 16 to 64 bytes";
 
+    private const string Identifier = "argon2id";
+
+    private const int Version = 19;
+
+    private const int MaxDigits = 10;
+
     #endregion // Constants
+
+    #region Fields
+
+    private readonly byte[] _salt;
+    private readonly byte[] _hash;
+
+    #endregion // Fields
+
+    #region Constructors
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="PasswordHash"/> class.
+    /// </summary>
+    /// <param name="memoryKiB">The memory in KiB</param>
+    /// <param name="iterations">The iterations</param>
+    /// <param name="parallelism">The parallelism</param>
+    /// <param name="salt">The salt</param>
+    /// <param name="hash">The expected hash</param>
+    private PasswordHash(int memoryKiB, int iterations, int parallelism, byte[] salt, byte[] hash)
+    {
+        MemoryKiB = memoryKiB;
+        Iterations = iterations;
+        Parallelism = parallelism;
+        _salt = salt;
+        _hash = hash;
+    }
+
+    #endregion // Constructors
 
     #region Properties
 
@@ -146,12 +184,12 @@ internal sealed class PasswordHash : IPasswordVerifier
     /// <summary>
     /// Gets the salt length in bytes.
     /// </summary>
-    internal int SaltLength { get; }
+    internal int SaltLength => _salt.Length;
 
     /// <summary>
     /// Gets the hash length in bytes.
     /// </summary>
-    internal int HashLength { get; }
+    internal int HashLength => _hash.Length;
 
     #endregion // Properties
 
@@ -165,7 +203,31 @@ internal sealed class PasswordHash : IPasswordVerifier
     /// <exception cref="PasswordHashException">The text is not an accepted hash; the message is one of the Reason texts</exception>
     internal static PasswordHash Parse(string text)
     {
-        throw new NotImplementedException();
+        var parts = text.Split('$');
+
+        Require(HasShape(parts), ReasonForm);
+
+        var hasVersion = parts.Length == 6;
+
+        var offset = hasVersion ? 3 : 2;
+        long? version = hasVersion ? ParseDecimal(parts[2].AsSpan(2)) : null;
+        var (memory, iterations, parallelism) = ParseParameters(parts[offset]);
+
+        var salt = DecodeBase64(parts[offset + 1]);
+        var hash = DecodeBase64(parts[offset + 2]);
+
+        if (version != Version)
+        {
+            throw new PasswordHashException(ReasonVersion);
+        }
+
+        Require(memory is >= MinMemoryKiB and <= MaxMemoryKiB, ReasonMemory);
+        Require(iterations is >= MinIterations and <= MaxIterations, ReasonIterations);
+        Require(parallelism is >= MinParallelism and <= MaxParallelism, ReasonParallelism);
+        Require(salt.Length is >= MinSaltBytes and <= MaxSaltBytes, ReasonSalt);
+        Require(hash.Length is >= MinHashBytes and <= MaxHashBytes, ReasonHash);
+
+        return new PasswordHash((int)memory, (int)iterations, (int)parallelism, salt, hash);
     }
 
     /// <summary>
@@ -175,7 +237,9 @@ internal sealed class PasswordHash : IPasswordVerifier
     /// <returns>The hash in the PHC string form</returns>
     internal static string Create(string password)
     {
-        throw new NotImplementedException();
+        var salt = RandomNumberGenerator.GetBytes(DefaultSaltBytes);
+
+        return Create(password, salt, DefaultMemoryKiB, DefaultIterations, DefaultParallelism, DefaultHashBytes);
     }
 
     /// <summary>
@@ -190,7 +254,172 @@ internal sealed class PasswordHash : IPasswordVerifier
     /// <returns>The hash in the PHC string form</returns>
     internal static string Create(string password, ReadOnlySpan<byte> salt, int memoryKiB, int iterations, int parallelism, int hashBytes)
     {
-        throw new NotImplementedException();
+        var saltBytes = salt.ToArray();
+        var hash = Compute(password, saltBytes, memoryKiB, iterations, parallelism, hashBytes);
+
+        return string.Create(CultureInfo.InvariantCulture, $"$argon2id$v={Version}$m={memoryKiB},t={iterations},p={parallelism}${EncodeBase64(saltBytes)}${EncodeBase64(hash)}");
+    }
+
+    /// <summary>
+    /// Computes the argon2id hash of a password.
+    /// </summary>
+    /// <param name="password">The password; not empty</param>
+    /// <param name="salt">The salt</param>
+    /// <param name="memoryKiB">The memory in KiB</param>
+    /// <param name="iterations">The iterations</param>
+    /// <param name="parallelism">The parallelism</param>
+    /// <param name="hashBytes">The hash length in bytes</param>
+    /// <returns>The hash</returns>
+    private static byte[] Compute(string password, byte[] salt, int memoryKiB, int iterations, int parallelism, int hashBytes)
+    {
+        var bytes = Encoding.UTF8.GetBytes(password);
+
+        try
+        {
+            using var argon2 = new Argon2id(bytes)
+                               {
+                                   Salt = salt,
+                                   MemorySize = memoryKiB,
+                                   Iterations = iterations,
+                                   DegreeOfParallelism = parallelism
+                               };
+
+            return argon2.GetBytes(hashBytes);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(bytes);
+        }
+    }
+
+    /// <summary>
+    /// Tells whether the parts of a hash text have the shape <c>$argon2id[$v=n]$params$salt$hash</c>.
+    /// </summary>
+    /// <param name="parts">The text split at <c>$</c></param>
+    /// <returns><c>true</c> when they have</returns>
+    private static bool HasShape(string[] parts)
+    {
+        var count = parts.Length;
+
+        return parts is ["", Identifier, ..] && (count == 5 || (count == 6 && parts[2].StartsWith("v=", StringComparison.Ordinal)));
+    }
+
+    /// <summary>
+    /// Throws the reason when a condition does not hold.
+    /// </summary>
+    /// <param name="condition">The condition</param>
+    /// <param name="reason">The reason</param>
+    /// <exception cref="PasswordHashException">The condition does not hold</exception>
+    private static void Require(bool condition, string reason)
+    {
+        if (condition)
+        {
+            return;
+        }
+
+        throw new PasswordHashException(reason);
+    }
+
+    /// <summary>
+    /// Parses <c>m=&lt;memory&gt;,t=&lt;iterations&gt;,p=&lt;parallelism&gt;</c>.
+    /// </summary>
+    /// <param name="text">The parameters</param>
+    /// <returns>The three values</returns>
+    /// <exception cref="PasswordHashException">The text is not in the form</exception>
+    private static (long Memory, long Iterations, long Parallelism) ParseParameters(string text)
+    {
+        var parts = text.Split(',');
+
+        Require(parts is [['m', '=', ..], ['t', '=', ..], ['p', '=', ..]], ReasonForm);
+
+        return (ParseDecimal(parts[0].AsSpan(2)), ParseDecimal(parts[1].AsSpan(2)), ParseDecimal(parts[2].AsSpan(2)));
+    }
+
+    /// <summary>
+    /// Parses an ASCII decimal of at most 10 digits without a leading zero.
+    /// </summary>
+    /// <param name="text">The digits</param>
+    /// <returns>The value</returns>
+    /// <exception cref="PasswordHashException">The text is not such a decimal</exception>
+    private static long ParseDecimal(ReadOnlySpan<char> text)
+    {
+        if (text.Length is 0 or > MaxDigits || (text.Length > 1 && text[0] == '0'))
+        {
+            throw new PasswordHashException(ReasonForm);
+        }
+
+        long value = 0;
+
+        foreach (var digit in text)
+        {
+            if (digit is < '0' or > '9')
+            {
+                throw new PasswordHashException(ReasonForm);
+            }
+
+            value = (value * 10) + (digit - '0');
+        }
+
+        return value;
+    }
+
+    /// <summary>
+    /// Decodes standard base64 without padding, whose length is not 1 modulo 4 and whose unused trailing bits are zero.
+    /// </summary>
+    /// <param name="text">The text</param>
+    /// <returns>The bytes</returns>
+    /// <exception cref="PasswordHashException">The text is not in that form</exception>
+    private static byte[] DecodeBase64(string text)
+    {
+        var remainder = text.Length % 4;
+
+        Require(remainder != 1 && text.All(IsBase64Character), ReasonForm);
+
+        if (remainder != 0)
+        {
+            var unusedBits = remainder == 2 ? 0b1111 : 0b11;
+
+            Require((Base64Value(text[^1]) & unusedBits) == 0, ReasonForm);
+        }
+
+        return Convert.FromBase64String(text + new string('=', (4 - remainder) % 4));
+    }
+
+    /// <summary>
+    /// Encodes bytes as standard base64 without padding.
+    /// </summary>
+    /// <param name="bytes">The bytes</param>
+    /// <returns>The text</returns>
+    private static string EncodeBase64(byte[] bytes)
+    {
+        return Convert.ToBase64String(bytes).TrimEnd('=');
+    }
+
+    /// <summary>
+    /// Tells whether a character belongs to the standard base64 alphabet.
+    /// </summary>
+    /// <param name="character">The character</param>
+    /// <returns><c>true</c> when it does</returns>
+    private static bool IsBase64Character(char character)
+    {
+        return character is (>= 'A' and <= 'Z') or (>= 'a' and <= 'z') or (>= '0' and <= '9') or '+' or '/';
+    }
+
+    /// <summary>
+    /// Returns the value of a base64 character.
+    /// </summary>
+    /// <param name="character">The character, from the alphabet</param>
+    /// <returns>The value 0 to 63</returns>
+    private static int Base64Value(char character)
+    {
+        return character switch
+               {
+                   >= 'A' and <= 'Z' => character - 'A',
+                   >= 'a' and <= 'z' => character - 'a' + 26,
+                   >= '0' and <= '9' => character - '0' + 52,
+                   '+' => 62,
+                   _ => 63
+               };
     }
 
     #endregion // Methods
@@ -200,7 +429,14 @@ internal sealed class PasswordHash : IPasswordVerifier
     /// <inheritdoc/>
     public bool Verify(string password)
     {
-        throw new NotImplementedException();
+        if (password.Length is 0 or > MaxPasswordLength)
+        {
+            return false;
+        }
+
+        var computed = Compute(password, _salt, MemoryKiB, Iterations, Parallelism, _hash.Length);
+
+        return CryptographicOperations.FixedTimeEquals(computed, _hash);
     }
 
     #endregion // IPasswordVerifier
