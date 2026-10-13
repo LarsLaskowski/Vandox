@@ -527,3 +527,22 @@ Follow-up issue for the orchestrator to create (PM decision 1):
 
 Not in this change: time zones other than UTC, a language option in the configuration, a time range, the agent's records (#53),
 backup programs beyond `pzstd` (#36), retention (#46).
+
+## Challenge notes
+
+Devil's Advocate: OBJECTIONS 0 major, 3 minor. Security plan review: APPROVED, 6 non-blocking points. None changes the tier or the acceptance criteria; Dev and Tester take them with the plan.
+
+Devil's Advocate (minor):
+
+1. **Standard output encoding is not pinned.** The area document says "the text is UTF-8", and the German headings (`Übersicht`) and `—` / `–` are non-ASCII. `Program.cs:43` passes the unmodified `Console.Out` to `BackendApp.RunAsync`, so its encoding comes from the locale (for example `LANG=…ISO-8859-1`). Nothing in the plan or the tests sets or checks the encoding. `incidents` output goes through `Terminal.Quote`, which is probably ASCII, so this is new here. The Dev should either write bytes as UTF-8 without a BOM in `ReportCommand`/`Program` (for example a `StreamWriter` over `Console.OpenStandardOutput()`), or state in the README next to the `> forensics.md` example that the report is UTF-8 whatever the locale. `ReportCommandTests` could then assert that a `de` report written to a stream has no `?` in place of `Ü`.
+2. **A stale incident table is silent.** The report reads whatever `vandoxd incidents` last stored. If logs were imported after that run, the outage list and the rules are out of date, and only the docs ask the operator to run `incidents` first. The two-pass count check does not catch this. The Dev could add a note to the report's Notes or Head, for example the newest log line or snapshot time against the last incident's `UpdatedAt`. If the Lead rejects that, the README sentence must say it clearly.
+3. **Snapshots are read one per query, with no cost statement.** `SnapshotPage = 1` means up to 1,000,000 keyset queries (the `MaxSnapshots` cap) plus a full pass over the log lines. That is consistent with `IncidentReconstructor`'s `SnapshotPage`. The Dev should still add one sentence to the README or the notes saying the run reads every stored snapshot and line and can take minutes.
+
+Security (non-blocking):
+
+1. **Incident counts must stay counters.** The doc comment of `ForensicsAnalysis.AddIncident` in the skeleton (plan lines 354-366) must state that it keeps only counters (24 hour counts, per-activity yes/known counts, first/last outage, kill sum, saturating); a per-incident list, which forged kills can grow, breaks the memory claim in area *Limits of the report* and record 0098 option 6.
+2. **The table rule needs a test.** `WriterPutsExternalTextOnlyInCodeSpans` must also assert that no line holding external text starts with `|`, and that the writer leaves a blank line before every table.
+3. **Boot ordering is unstated.** If `ForensicsAnalysis.AddBoot` assumes ascending order for a binary search, sort the boots or state their order; the analysis's `ArgumentException` is deliberately not caught.
+4. **The backslash statement is wrong.** Record 0098 (lines 83-84) and the area text (lines 533-534) say a literal backslash-u202e in a name "reads like an escape in the rendered text". Backslash escapes do not apply inside code spans, so the rendered output shows two backslashes, which is distinguishable from a real U+202E. Only the wording needs fixing.
+5. **Unquoted flag names in errors (existing defect).** `ParseSubFlags` and `ApplyFlag` print the unknown flag's name without quoting (`CommandLine.cs:153` and `:274`); `ParseArgument` already uses `Terminal.Quote`. This change rewrites `ParseSubFlags`, so quote there too.
+6. **The retained-memory figure is incomplete.** The area document gives about 24 MB for 1,000,000 snapshot points; a list of a 32-byte struct reaches roughly 33 MiB at that capacity and about 50 MiB while it is copied to grow. State the figure including the program-name bound (4,096 programs, about 8 MiB of strings plus counters).
