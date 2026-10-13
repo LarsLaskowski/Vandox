@@ -1072,6 +1072,107 @@ public class SqliteStoreLogExplorerTests
 
     #endregion // AC-11 Interruption
 
+    #region AC-22 and AC-23 Query plans
+
+    /// <summary>
+    /// Index mode reads the lines by the record IDs of the probe: no step reads the full-text table, and records is searched by its integer primary key.
+    /// </summary>
+    /// <param name="filterSet">The name of the filter set</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [DataRow("no filter")]
+    [DataRow("source program priority after")]
+    [DataRow("template")]
+    public async Task FindLogsIndexModeReadsLinesByRecordId(string filterSet)
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+
+        var filter = Filter();
+        LogTemplate? template = null;
+
+        switch (filterSet)
+        {
+            case "source program priority after":
+                {
+                    filter.Source = "syslog";
+                    filter.Program = "sshd";
+                    filter.MaxPriority = 4;
+                    filter.After = new LogPosition
+                                   {
+                                       CapturedAt = Sec(5),
+                                       Id = 3
+                                   };
+                }
+                break;
+
+            case "template":
+                {
+                    filter.TemplateId = 1;
+                    template = new LogTemplate
+                               {
+                                   Id = 1,
+                                   Source = "syslog",
+                                   Program = "sshd",
+                                   Template = "alpha started"
+                               };
+                }
+                break;
+        }
+
+        var criteria = LogCriteria.Create(filter, template);
+
+        Assert.IsNotNull(criteria, "the criteria of the filter set");
+
+        var (sql, parameters) = LogFinderQueries.BuildIndex(criteria, [1L, 2L, 3L]);
+
+        // Act
+        var plan = await PlanAsync(directory.Path, sql, parameters);
+
+        // Assert
+        var details = string.Join("; ", plan.Select(step => step.Detail));
+
+        Assert.DoesNotContain(step => step.Detail.Contains("log_fts", StringComparison.Ordinal), plan, $"no step reads the full-text table: {details}");
+        Assert.Contains(step => step.Detail.StartsWith("SEARCH r USING INTEGER PRIMARY KEY", StringComparison.Ordinal), plan, $"records is searched by its primary key: {details}");
+    }
+
+    /// <summary>
+    /// The template list sums the hours in key order: the hour index is not read and no temporary tree groups the rows.
+    /// </summary>
+    /// <param name="filterSet">The name of the filter set</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [DataRow("no filter")]
+    [DataRow("source and program")]
+    public async Task TemplatesSumsTemplateHoursInKeyOrder(string filterSet)
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+
+        var query = TemplateQuery(Hour(0), Hour(5), 200);
+
+        if (filterSet == "source and program")
+        {
+            query.Source = "syslog";
+            query.Program = "sshd";
+        }
+
+        var (sql, parameters) = LogExplorerQueries.Build(query);
+
+        // Act
+        var plan = await PlanAsync(directory.Path, sql, parameters);
+
+        // Assert
+        var details = string.Join("; ", plan.Select(step => step.Detail));
+
+        Assert.DoesNotContain(step => step.Detail.Contains("log_template_hours_hour", StringComparison.Ordinal), plan, $"the hour index is not read: {details}");
+        Assert.DoesNotContain(step => step.Detail == "USE TEMP B-TREE FOR GROUP BY", plan, $"no temporary tree for the grouping: {details}");
+    }
+
+    #endregion // AC-22 and AC-23 Query plans
+
     #region Helpers
 
     /// <summary>
@@ -1611,6 +1712,41 @@ public class SqliteStoreLogExplorerTests
         var pages = await PagesAsync(store, filter, selectiveMatches);
 
         return pages.SelectMany(page => page.Lines).ToList();
+    }
+
+    /// <summary>
+    /// Reads the query plan of a statement.
+    /// </summary>
+    /// <param name="directory">The database directory</param>
+    /// <param name="sql">The statement</param>
+    /// <param name="parameters">The parameters of the statement</param>
+    /// <returns>A task that returns the steps of the plan</returns>
+    private async Task<List<(int Id, int Parent, string Detail)>> PlanAsync(string directory, string sql, Dictionary<string, object> parameters)
+    {
+        await using var connection = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={Path.Combine(directory, StorageLimits.FileName)};Mode=ReadOnly;Pooling=False");
+
+        await connection.OpenAsync(TestContext.CancellationToken);
+
+        await using var command = connection.CreateCommand();
+
+#pragma warning disable CA2100
+        command.CommandText = $"EXPLAIN QUERY PLAN {sql}";
+#pragma warning restore CA2100
+
+        foreach (var (name, value) in parameters)
+        {
+            command.Parameters.AddWithValue(name, value);
+        }
+
+        await using var reader = await command.ExecuteReaderAsync(TestContext.CancellationToken);
+        var plan = new List<(int Id, int Parent, string Detail)>();
+
+        while (await reader.ReadAsync(TestContext.CancellationToken))
+        {
+            plan.Add((reader.GetInt32(0), reader.GetInt32(1), reader.GetString(3)));
+        }
+
+        return plan;
     }
 
     /// <summary>
