@@ -1,4 +1,4 @@
-# 0100: The report language comes from the flag `-lang` (`en` by default, or `de`); the texts are tables in code, not .NET resources or cultures
+# 0102: The report language comes from the flag `-lang` (`en` by default, or `de`); the texts are tables in code, not .NET resources or cultures
 
 - **Status:** Accepted
 - **Date:** 2026-10-13
@@ -8,7 +8,7 @@
 
 ## Context
 
-The Product Manager wants the forensics report ([0098](0098-forensics-report-as-markdown-from-vandoxd-report.md)) in the user's
+The Product Manager wants the forensics report ([0100](0100-forensics-report-as-markdown-from-vandoxd-report.md)) in the user's
 language, German or English to begin with. The repository has no localization: every output of `vandoxd` is English, the web UI
 declares `lang="en"`, and the build sets `InvariantGlobalization` (all projects, `Directory.Build.props`) and
 `SatelliteResourceLanguages` to `en` (`src/Vandox.Backend/Vandox.Backend.csproj`). In globalization-invariant mode .NET 8 and later

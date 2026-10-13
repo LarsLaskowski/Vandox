@@ -32,7 +32,7 @@ way, and agents of the hosting provider are never disabled or changed
   mail accounts. Each collector runs in its own goroutine under a deadline and is abandoned when the
   deadline passes, so a hanging collector or database never blocks the agent; a missed sample is recorded
   as a gap, and a collector that is still stuck is not started again.
-- `src/Vandox.Backend` — `vandoxd` (rules: [Backend host](areas/backend-host.md)), .NET 10 (ASP.NET Core with a Blazor Web App, Interactive Server render mode),
+- `src/Vandox.Backend` — `vandoxd` (rules: [Backend host](areas/backend-host.md), [Web UI](areas/web-ui.md)), .NET 10 (ASP.NET Core with a Blazor Web App, Interactive Server render mode),
   one container on the backend host: ingest API, SQLite storage, analysis, rules, Telegram notifier, reports and
   web UI. Without arguments it runs the service; `-healthcheck` probes its `/healthz`; `vandoxd import <path>`
   imports logs saved on the backend host
@@ -41,9 +41,11 @@ way, and agents of the hosting provider are never disabled or changed
   rebuilds the log template statistics from the stored log lines
   ([0095](decisions/0095-log-templates-token-rules-statistics-in-the-write-path-usual-level-from-covered-hours.md)); `vandoxd report`
   writes the forensics report of the stored data as Markdown to standard output
-  ([0098](decisions/0098-forensics-report-as-markdown-from-vandoxd-report.md)). Two Kestrel listeners serve
+  ([0100](decisions/0100-forensics-report-as-markdown-from-vandoxd-report.md)). Two Kestrel listeners serve
   the web and the ingest port; a middleware routes each request by the label of its listener, and logs are JSON
-  lines ([0081](decisions/0081-backend-host-two-listeners-json-logs-blazor-interactive-server.md)).
+  lines ([0081](decisions/0081-backend-host-two-listeners-json-logs-blazor-interactive-server.md)). The web UI loads only its own
+  static assets and sends one self-only Content-Security-Policy ([0098](decisions/0098-web-ui-serves-only-its-own-static-web-assets.md),
+  [0099](decisions/0099-web-listener-security-headers-one-self-only-csp.md)).
 - The backend's libraries, one project each with a test project under `tests/`
   ([0073](decisions/0073-backend-in-dotnet-10-with-blazor-agent-stays-go.md)):
   `Vandox.Core` (data model and validation, the wire decoder, configuration and secrets, safe file access, the
@@ -143,9 +145,9 @@ hours and boots), every process snapshot (backups, panel memory, memory consumer
 keeps only capped series, compares the share of outages with a time of day, a backup, a boot or high panel memory against the share
 of observed hours with it, and writes the result in English or German as Markdown to standard output, all times in UTC. The rules
 are in [Detection, alerts and reports](areas/detection-and-reports.md) (*Forensics report*)
-([0098](decisions/0098-forensics-report-as-markdown-from-vandoxd-report.md),
-[0099](decisions/0099-forensics-rules-share-of-outages-against-observed-hours-binomial-tail.md),
-[0100](decisions/0100-report-language-from-a-flag-english-default-text-tables-in-code.md)).
+([0100](decisions/0100-forensics-report-as-markdown-from-vandoxd-report.md),
+[0101](decisions/0101-forensics-rules-share-of-outages-against-observed-hours-binomial-tail.md),
+[0102](decisions/0102-report-language-from-a-flag-english-default-text-tables-in-code.md)).
 
 Records: [0006](decisions/0006-agent-connects-outbound-only.md),
 [0007](decisions/0007-sqlite-with-fts5-no-external-database.md),
@@ -165,9 +167,9 @@ Records: [0006](decisions/0006-agent-connects-outbound-only.md),
 [0094](decisions/0094-log-signatures-embedded-yaml-linear-patterns-on-stored-lines.md),
 [0095](decisions/0095-log-templates-token-rules-statistics-in-the-write-path-usual-level-from-covered-hours.md),
 [0096](decisions/0096-outage-incidents-rebuilt-from-stored-data-merged-by-overlapping-windows.md),
-[0098](decisions/0098-forensics-report-as-markdown-from-vandoxd-report.md),
-[0099](decisions/0099-forensics-rules-share-of-outages-against-observed-hours-binomial-tail.md),
-[0100](decisions/0100-report-language-from-a-flag-english-default-text-tables-in-code.md).
+[0100](decisions/0100-forensics-report-as-markdown-from-vandoxd-report.md),
+[0101](decisions/0101-forensics-rules-share-of-outages-against-observed-hours-binomial-tail.md),
+[0102](decisions/0102-report-language-from-a-flag-english-default-text-tables-in-code.md).
 
 ## Network
 

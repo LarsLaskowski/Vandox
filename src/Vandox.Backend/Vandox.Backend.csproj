@@ -13,6 +13,10 @@
     <ServerGarbageCollector>false</ServerGarbageCollector>
     <ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
     <IsTransformWebConfigDisabled>true</IsTransformWebConfigDisabled>
+    <!-- The SDK adds the package with the framework's static web assets (_framework/blazor.web.js) at restore only
+         when it finds a .razor file. The image build restores from the project file alone, before any source is
+         copied, so the package would be missing from the image; this makes the restore independent of the sources. -->
+    <RequiresAspNetWebAssets>true</RequiresAspNetWebAssets>
   </PropertyGroup>
 
   <ItemGroup>

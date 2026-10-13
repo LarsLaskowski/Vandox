@@ -2,7 +2,7 @@
 # Smoke test of the backend container started from deploy/backend/docker-compose.yml (record 0060).
 # Usage: smoke-test-backend.sh <image>   (the image must exist locally, for example vandox:local)
 #
-# Checks the health check, the port bindings, the resource limits, the owner and mode of /data in the image
+# Checks the health check, the web UI's static files and security policy, the port bindings, the resource limits, the owner and mode of /data in the image
 # (65532:65532, 0700; /data is the only entry the image adds that is owned by the container user, apart from
 # the base image's /home/nonroot), the graceful stop and that the database survives re-creating the container.
 # Reads no repository secret, pushes nothing and uses no network beyond
@@ -79,6 +79,40 @@ compose up -d
 wait_healthy
 
 [[ "$(curl -fsS http://127.0.0.1:8080/healthz)" = "ok" ]] || fail "/healthz on the web port did not answer ok"
+
+# Reads the policy from the ContentSecurityPolicy constant of the middleware, so the script keeps no copy of it.
+# The constant must be declared on exactly one line.
+read_policy() {
+  local file="$repo/src/Vandox.Backend/Hosting/SecurityHeadersMiddleware.cs"
+  local pattern='public const string ContentSecurityPolicy = "([^"]*)";'
+  local -a lines
+  mapfile -t lines < <(grep -F 'public const string ContentSecurityPolicy = "' "$file" | tr -d '\r')
+  [[ "${#lines[@]}" -eq 1 ]] || fail "found ${#lines[@]} declarations of ContentSecurityPolicy in $file, want exactly 1"
+  [[ "${lines[0]}" =~ $pattern ]] || fail "could not read the policy from: ${lines[0]}"
+  printf '%s' "${BASH_REMATCH[1]}"
+}
+
+# Checks what the unit tests cannot see because they run the build output: the published image serves the web
+# UI's static files and the page carries exactly one Content-Security-Policy header with the documented value.
+check_web_ui() {
+  local want="$1"
+  local path code headers got
+  local -a found
+  for path in /_framework/blazor.web.js /app.css /lib/uplot/uPlot.esm.js; do
+    code="$(curl -sS -o /dev/null -w '%{http_code}' "http://127.0.0.1:8080$path")"
+    [[ "$code" == "200" ]] || fail "GET $path on the web port answered $code, want 200"
+  done
+  headers="$(curl -fsS -D - -o /dev/null http://127.0.0.1:8080/ | tr -d '\r')"
+  mapfile -t found < <(grep -i '^content-security-policy:' <<<"$headers")
+  [[ "${#found[@]}" -eq 1 ]] || fail "GET / carries ${#found[@]} Content-Security-Policy headers, want exactly 1"
+  got="${found[0]#*:}"
+  got="${got# }"
+  [[ "$got" == "$want" ]] || fail "Content-Security-Policy is '$got', want '$want'"
+}
+
+policy="$(read_policy)"
+[[ -n "$policy" ]] || fail "the policy read from the middleware is empty"
+check_web_ui "$policy"
 
 ingest="$(inspect '{{json (index .NetworkSettings.Ports "8081/tcp")}}')"
 case "$ingest" in

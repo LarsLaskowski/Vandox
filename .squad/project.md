@@ -151,8 +151,8 @@ files or endpoints.
     padded or Cf-bearing look-alike, is a usage error that shows it only through `Terminal.Quote`, and the unknown flag names of `CommandLine` are escaped the
     same way. Forged kill lines make forged incidents
     (a documented limitation, record 0096); forged boot lines, `pzstd` or `sw-engi*` processes shift the report's activities and rates, and forged process names can
-    take the 4,096 program places first (records 0098, 0099). Records 0048, 0049, 0066, 0069, 0076, 0078, 0079, 0084,
-    0085, 0086, 0088, 0091, 0092, 0093, 0094, 0095, 0096, 0097, 0098, 0099, 0100.
+    take the 4,096 program places first (records 0100, 0101). Records 0048, 0049, 0066, 0069, 0076, 0078, 0079, 0084,
+    0085, 0086, 0088, 0091, 0092, 0093, 0094, 0095, 0096, 0097, 0100, 0101, 0102.
 11. **Outbound calls** (Telegram, external checks, the optional AI service of the nightly report, the
     agent's connection to the backend): *Goal:* every call has a timeout, goes only to its configured
     destination and leaves encrypted to a verified peer. The agent's only destination is the ingest port,
@@ -167,7 +167,13 @@ files or endpoints.
     AI-written report): *Goal:* they cannot inject into log output (control characters, newlines), into the
     web UI (HTML is escaped) or into Telegram messages (escaped for the parse mode used, or sent as plain
     text without a parse mode). Record 0031 for Telegram; Razor escapes HTML by default in the web UI (record
-    0081).
+    0081). Every web response carries one self-only Content-Security-Policy (`default-src 'none'`, no inline code,
+    no external origin), `X-Content-Type-Options`, `Referrer-Policy` and `X-Frame-Options`, set by
+    `SecurityHeadersMiddleware` (record 0099); `WebUiContentTests` checks the sources with `WebSourceScanner`: the
+    own scripts (`wwwroot/js`) contain none of its HTML sinks, no `eval`/`Function`/string timer and no
+    `setAttribute`; component markup and code contain no `MarkupString` or `AddMarkupContent`, so external text
+    never reaches the page as raw HTML. What only the policy covers is listed in the Web UI area (*Limits and
+    errors*). Records 0098, 0099.
     Configuration error texts never echo document text other than schema or safe key names
     (`decodeStrict`, `StrictYamlDecoder`), never a `_FILE` value or path or an unsafe variable name
     (`readSecret`/`SecretReader`, `checkEnviron`). Configuration values are free of Cc, Cf, Zl and Zp characters but
@@ -188,7 +194,7 @@ files or endpoints.
     private-use, unassigned and invalid characters as the escapes of `Terminal.Quote` (`\u202e`), a fence longer than any backtick run, padding spaces, an empty
     text as a dash; a code span keeps inline HTML, entities, links, autolinks and emphasis literal, no external text stands in a table or a heading, and the
     report's own labels, numbers and times come from `ReportText`; the `-lang` value in the usage error and an unknown flag name go through `Terminal.Quote`;
-    standard output is UTF-8 without a byte order mark (`Program`). Records 0072, 0081, 0095, 0096, 0098.
+    standard output is UTF-8 without a byte order mark (`Program`). Records 0072, 0081, 0095, 0096, 0100.
 13. **Release pipeline and published artifacts** (`.github/workflows/release.yml`,
     `.github/workflows/base-image-digests.yml`, `.github/scripts/`, `deploy/backend/Dockerfile`,
     `.dockerignore`, `dotnet-tools.json`, the GitHub environment `release`; the smoke script
@@ -215,6 +221,9 @@ files or endpoints.
     digests, SBOM generator pin) holds only `contents: read` and `issues: write`, runs its lookups (registries,
     syft's Git tags) without a token, writes only regex-checked image, tag and digest values into its own
     issue, and never writes to the repository. Records 0027, 0037, 0041.
+    Vendored browser code (`src/Vandox.Backend/wwwroot/lib/uplot/`, uPlot 1.6.32) is copied by hand from the release
+    tag, pinned by SHA-256 in `WebUiContentTests`, not loaded from a CDN and excluded from the code analysis, not
+    from review (record 0098).
     The cloud sessions have no Docker daemon: a change to the Dockerfile, compose file, `.dockerignore` or the smoke
     script is verified by the CI job *Release build check* on the pull request head, not locally (the local
     substitutes are listed in `.squad/stack.md`, *Not checkable in a cloud session*).
@@ -258,6 +267,13 @@ change with it.
 - where it is wired up: `cmd/vandox-agent`, or `src/Vandox.Backend` (`Hosting`, `Cli`, `Program.cs`)
 - the test double used by the tests of its callers
 - the component list in `docs/ARCHITECTURE.md`
+
+**A new web UI page, component or static asset** touches:
+- a page: the navigation in `src/Vandox.Backend/Components/Layout/MainLayout.razor`
+- a file the browser loads: the *Static assets* list in `docs/areas/web-ui.md` and `ServeTests.ServeServesWebAssetsOnlyOnWebPort`
+  (served on the web port, `404` on the ingest port)
+- the rules of record 0099, checked by `WebUiContentTests` (no inline code, no external URL, no raw HTML)
+- a brand file: the byte copy of `docs/assets/` in `wwwroot/brand/`
 
 **A new log parser** touches:
 - its type in `src/` (implementing `ILogParser`, with a type accepted by `ParserTypes.IsValid`)
@@ -313,6 +329,7 @@ double under this name and changes the status.
 | database (C#) | `FakeImportStore` for `IImportStore` (in-memory import state and records, base lookup, scripted begin, find and write failures, `AfterBatch` hook; also records line hashes with scripted failures and emulates attempts and containment as the store does; `tests/Vandox.Import.Tests`); a scripted ping delegate for `PingChecker` (`tests/Vandox.Backend.Tests`); the SQLite store itself is tested against a real database file in a `TempDirectory` (implemented); the incident reconstruction is tested against the real store with `IncidentSamples` (records written through the store, `tests/Vandox.Backend.Tests`) and hand-written decorators around it (`RecordingRecordReader`, `RepeatingRecordReader`, `RecordingTemplateReader`, `RefusingIncidentStore`), a logger that keeps its messages (`ListLogger`) and a writer that cancels the run (`CancellingWriter`) (implemented); the forensics report tests add two decorators for `IIncidentStore` in `tests/Vandox.Backend.Tests`: `RecordingIncidentStore` (passes every call to another store and keeps a copy of every incident query, for the limit and start of each page) and `ScriptedIncidentStore` (answers the incident queries with scripted pages, optionally repeating the last one, and stops a runaway loop; for the page checks and the changed count between the two passes), next to `RecordingRecordReader` and `RepeatingRecordReader` for the record pages (implemented) |
 | log parsers (C#) | `FakeParser` (scripted `Detect` and `Parse`) in `tests/Vandox.Core.Tests`, `LineParser` and `ProbeParser` (counts starts and completions, can stop reading early) in `tests/Vandox.Import.Tests`; `RecordingEmitter` (records, skips and warnings, validates every record like the importer except the payload size, optional failure and observer), `CountingEmitter` (validates like `RecordingEmitter`, so also except the payload size, keeps no record, counts per event, priority and warnings), `JournalExportBuilder` (text and binary fields as bytes), `MariaDbSamples` (records, journal entries, syslog lines and the feeds of the error log fixture for the MariaDB line tests), `PatternStream` (lazily generated input for the heap-bound tests), `LegacyMonitorSamples` (summary lines, rows, sockets and snapshots of the legacy monitoring log as text) and `SegmentStream` (byte segments repeated lazily, for the heap-bound tests of the legacy monitoring log parser), `SignatureSamples` (log line records, catalog texts and a detector run for the signature tests) and `DiscardingEventCollection` (counts the detected events and keeps none, for the heap-bound test) in `tests/Vandox.Core.Tests` (implemented) |
 | files (C#) | `TempDirectory` helper per test project (a unique directory below the temp path, removed on dispose); `RepositoryFiles.Path` for fixtures such as `testdata/` and `deploy/` |
+| Blazor components (C#) | `RecordingJsRuntime` (`IJSRuntime`: records identifier, arguments and token of every call in `RecordedJsCall` entries, hands out `RecordingJsObjectReference` instances for `import` (module) and `create` (chart), and throws an exception scripted with `Fail(target, identifier, exception)`), `RecordingJsObjectReference` (`IJSObjectReference`: records its calls and its `DisposeAsync` in the call list of its runtime), `TestNavigationManager` (`NavigationManager` initialized with `http://localhost/`, for `NavLink` under `HtmlRenderer`) and `ComponentTestRenderer` (a `Renderer` subclass that renders a root component, runs `OnAfterRenderAsync`, re-renders it with new parameters and collects the exceptions the components hand to the renderer; no bUnit), all in `tests/Vandox.Backend.Tests`; static markup through `HtmlRenderer` as in `HomePageTests`; the web sources (`.razor`, scripts, style sheets) are checked by `WebSourceScanner` in `WebUiContentTests` (implemented) |
 | Telegram Bot API | fake Telegram client (records sent messages, returns scripted updates; no network) |
 | Tailscale network | none in code (0017: `vandoxd` embeds no Tailscale); the agent's sender is tested against a `net/http/httptest` server standing in for the ingest port; the ACL itself is deployment configuration, reviewed, not unit-tested |
 | time | Go: injectable clock (spool age, live/backfill classification, deadlines); C#: `TimeProvider` with `FakeTimeProvider` (`Microsoft.Extensions.TimeProvider.Testing`) |

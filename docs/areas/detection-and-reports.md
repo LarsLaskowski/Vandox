@@ -590,12 +590,12 @@ level of the mail services (process state, ports, logs), never individual mail a
   hours the source logged.
 - [0096](../decisions/0096-outage-incidents-rebuilt-from-stored-data-merged-by-overlapping-windows.md) — why incidents are rebuilt by a
   sub-command, matched by overlapping windows, given a structured hypothesis from fixed rules and bounded in memory and size.
-- [0098](../decisions/0098-forensics-report-as-markdown-from-vandoxd-report.md) — why the forensics report is Markdown from a
+- [0100](../decisions/0100-forensics-report-as-markdown-from-vandoxd-report.md) — why the forensics report is Markdown from a
   sub-command, computed on demand in bounded passes, with external text in code spans, and why the web page comes separately.
-- [0099](../decisions/0099-forensics-rules-share-of-outages-against-observed-hours-binomial-tail.md) — why the report's rules compare
+- [0101](../decisions/0101-forensics-rules-share-of-outages-against-observed-hours-binomial-tail.md) — why the report's rules compare
   outages with observed system-log hours, judge activities over the lookback, decide by a binomial tail, and how panel use and
   permanent and transient consumers are defined.
-- [0100](../decisions/0100-report-language-from-a-flag-english-default-text-tables-in-code.md) — why the report's language is a
+- [0102](../decisions/0102-report-language-from-a-flag-english-default-text-tables-in-code.md) — why the report's language is a
   flag with English as default and its texts are tables in code.
 
 ## Not here

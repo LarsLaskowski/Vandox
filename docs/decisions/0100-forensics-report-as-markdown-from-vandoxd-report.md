@@ -1,4 +1,4 @@
-# 0098: The forensics report is written as Markdown by `vandoxd report`, computed on demand in bounded passes; the web page follows separately
+# 0100: The forensics report is written as Markdown by `vandoxd report`, computed on demand in bounded passes; the web page follows separately
 
 - **Status:** Accepted
 - **Date:** 2026-10-13

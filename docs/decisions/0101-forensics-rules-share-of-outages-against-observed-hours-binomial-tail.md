@@ -1,4 +1,4 @@
-# 0099: Recurrence and correlation rules compare the share of outages with the share of observed system-log hours and decide by a binomial tail
+# 0101: Recurrence and correlation rules compare the share of outages with the share of observed system-log hours and decide by a binomial tail
 
 - **Status:** Accepted
 - **Date:** 2026-10-13
@@ -8,7 +8,7 @@
 
 ## Context
 
-The forensics report ([0098](0098-forensics-report-as-markdown-from-vandoxd-report.md)) has to say whether outages recur at a time
+The forensics report ([0100](0100-forensics-report-as-markdown-from-vandoxd-report.md)) has to say whether outages recur at a time
 of day and whether they follow a backup, a boot or use of the Plesk panel, and which programs are the largest permanent and transient
 memory consumers. The Product Manager fixed the frame: fixed, tested rules, each comparing its share of incidents with the base rate
 over the whole period; missing data counts as unknown, never as "no" ([0028](0028-data-gaps-are-always-recorded.md)); detection is
