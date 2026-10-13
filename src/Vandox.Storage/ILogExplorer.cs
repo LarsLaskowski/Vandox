@@ -59,5 +59,14 @@ public interface ILogExplorer
     /// <exception cref="InvalidQueryException">The query breaks a rule</exception>
     Task<IReadOnlyList<DateTimeOffset>> SourceHoursAsync(SourceHourQuery query, CancellationToken cancellationToken);
 
+    /// <summary>
+    /// Returns the counts per UTC hour of a template, ordered by hour.
+    /// </summary>
+    /// <param name="query">The query</param>
+    /// <param name="cancellationToken">Cancels the call</param>
+    /// <returns>A task that returns the hourly counts</returns>
+    /// <exception cref="InvalidQueryException">The query breaks a rule</exception>
+    Task<IReadOnlyList<TemplateHour>> TemplateHoursAsync(TemplateHourQuery query, CancellationToken cancellationToken);
+
     #endregion // Methods
 }
