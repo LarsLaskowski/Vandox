@@ -530,19 +530,24 @@ autolink:
   one space on each side (which Markdown removes again); a text of spaces only has its spaces written as `\u0020`;
 - an empty text is written as `—`, not as a code span.
 
-The report's own words, numbers and times are not external. A literal backslash sequence in a name (the six characters `\u202e`)
-reads in the rendered report like the escape of a real U+202E; the raw text differs (`\\u202e`).
+The report's own words, numbers and times are not external. Backslash escapes do not apply inside a code span, so a literal
+backslash sequence in a name (the six characters `\u202e`) is rendered with its backslash doubled (`\\u202e`) and stays
+distinguishable from the escape of a real U+202E (`\u202e`).
 
 ### Limits of the report
 
 - **Memory** does not grow with the number of lines, snapshots or incidents beyond fixed caps: one page of up to 1,000 log lines and
   one signature detector (as *Limits of incidents*), one process snapshot at a time (the largest single read is the same as there),
   one incident at a time (up to 8 MiB of JSON), and kept across the run: at most **1,000,000 snapshot points** (time, panel memory,
-  backup present; about 24 MB, plus a sorted copy of the panel memory of 8 MB for the threshold), **10,000 boots**, **100,000 runs**
-  of consecutive observed hours, **4,096 programs**, and 24 hour counts.
+  count of snapshots with a backup program: 24 bytes each, so about 24 MB kept and about 36 MB while the list grows by doubling,
+  plus a sorted copy of the panel memory of 8 MB for the threshold and, while the rules are evaluated, 4 MB of counts),
+  **10,000 boots** (80 KB), **100,000 runs** of consecutive observed hours (about 1.6 MB), **4,096 programs** (their names, short
+  texts of at most 1,024 bytes, about 8 MiB at most, plus about 80 bytes of counters each), and 24 hour counts.
+  The incidents add only counters. With all caps full the report holds about 60 MB at its peak.
 - **Over a cap** the statements that need the data are unknown: more snapshots make backup and panel unknown, more boots the boot,
   more runs of observed hours backup, boot and panel (their base rate). The time of day counts every observed hour and has no cap.
-  The notes name the cap that was hit.
+  The notes name the cap that was hit. An outage's own activity follows the same rule: past a cap of the data it needs, a yes stays
+  a yes and a no becomes unknown.
 - **Time** grows with all stored lines, snapshots and incidents (the incidents are read twice, the base rate evaluates every observed
   hour). The command runs off any request path.
 - **Forged data shifts the result**: forged kills make forged outages (*Limits of incidents*), and forged boot lines, `pzstd` or
@@ -550,6 +555,11 @@ reads in the rendered report like the escape of a real U+202E; the raw text diff
 - A cluster of outages that straddles an hour boundary is split between two hours of the day.
 - An activity of an outage near the start of the snapshots, or under memory pressure when the legacy log missed its samples, is
   unknown rather than no.
+- The incidents are those `vandoxd incidents` last stored. The report cannot tell that log lines were imported after that run
+  (the incidents carry the time they were saved, the lines the time they were logged), so `vandoxd incidents` is run again after every
+  import.
+- A run reads every stored log line and every stored process snapshot (one query each), so on a large archive it can take minutes.
+- Standard output is UTF-8 without a byte order mark whatever the locale is (`Program.cs` opens it that way).
 - On exit 1 (interrupted, store failure) standard output holds an incomplete report, which is to be discarded.
 
 ## Nightly report
@@ -608,6 +618,6 @@ level of the mail services (process state, ports, logs), never individual mail a
 `BackupPrograms`, `IncidentSignatures`, `IncidentLimits`, `IncidentJson`); `Vandox.Storage` (`IIncidentStore`, `IncidentRepository`,
 `SqliteStore`); `Vandox.Backend` (`Incidents/IncidentReconstructor`, `Incidents/RecordPager`, `Cli/IncidentsCommand`, `Cli/IncidentSummaryWriter`).
 `Vandox.Core.Reports` (`ForensicsAnalysis`, `ObservedHours`, `SnapshotSeries`, `ConsumerTracker`, `RecurrenceRules`, `PanelPrograms`,
-`ReportLimits` and the result types) for the forensics report's analysis; `Vandox.Backend` (`Reports/ForensicsReporter`,
+`ReportLimits`, `ProgramStatistics` and the result types) for the forensics report's analysis; `Vandox.Backend` (`Reports/ForensicsReporter`,
 `Reports/MarkdownReportWriter`, `Reports/MarkdownText`, `Reports/ReportText`, `Cli/ReportCommand`) for reading the store and writing
 the Markdown.

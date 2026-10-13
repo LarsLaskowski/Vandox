@@ -8,7 +8,7 @@ using Vandox.Storage;
 namespace Vandox.Backend.Cli;
 
 /// <summary>
-/// The shared start-up of the sub-commands that work on the store: <c>incidents</c> and <c>templates</c>.
+/// The shared start-up of the sub-commands that work on the store: <c>incidents</c>, <c>templates</c> and <c>report</c>.
 /// </summary>
 internal static class StoreCommand
 {

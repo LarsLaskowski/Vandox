@@ -21,8 +21,8 @@ service; `-config <file>` names its configuration file (default `/etc/vandox/van
 `-healthcheck` probes `/healthz` of a running service and exits 0 when it is healthy (the image's Docker
 `HEALTHCHECK` uses it). `vandoxd import <path>` imports a directory, an archive or a log file into the
 database, see *Import logs* below, `vandoxd incidents` rebuilds the outage incidents from the stored data, see
-*Reconstruct incidents* below, and `vandoxd templates` rebuilds the log template statistics, see *Rebuild template
-statistics* below.
+*Reconstruct incidents* below, `vandoxd templates` rebuilds the log template statistics, see *Rebuild template
+statistics* below, and `vandoxd report` writes the forensics report as Markdown, see *Write the forensics report* below.
 
 ## Layout
 
@@ -80,7 +80,7 @@ the value.
 | `import.nginx_error_log` | `/var/log/nginx/error.log` | Server path of the nginx error log. |
 | `import.apache_error_log` | `/var/log/apache2/error.log` | Server path of the Apache error log (Debian and Ubuntu); on RHEL-family servers (AlmaLinux, Rocky Linux, CentOS) it is `/var/log/httpd/error_log`. |
 | `import.time_zone` | none | IANA time zone of the server the imported logs come from, e.g. `Europe/Berlin` or `UTC`. Required to import traditional syslog files, MariaDB error logs, Dovecot log files, the Plesk panel, nginx and Apache error logs and the legacy `top`/`lsof` monitoring log (see *Import logs*). |
-| `incidents.window_before` | `1h` | How long before an OOM kill an incident starts: one to four digits and `m` (minutes) or `h` (hours), from `1m` to `24h`, such as `30m` or `1h` (see *Reconstruct incidents*). |
+| `incidents.window_before` | `1h` | How long before an OOM kill an incident starts: one to four digits and `m` (minutes) or `h` (hours), from `1m` to `24h`, such as `30m` or `1h` (see *Reconstruct incidents*); also the lookback of the forensics report (see *Write the forensics report*). |
 | `incidents.window_after` | `30m` | How long after an OOM kill an incident ends; same format and range. |
 
 **Secrets**
@@ -419,6 +419,42 @@ refused (each is logged as a warning on standard error). Exit code 0 when the ru
 invalid, the database cannot be opened, the store failed or the run was interrupted (run it again to complete it), 2 for a
 usage error. The log goes to standard error as JSON lines. The command reads every stored log line, so it takes a while on
 a large database; details and limits are in `docs/areas/detection-and-reports.md`.
+
+### Write the forensics report
+
+`vandoxd report` writes a forensics report over the whole stored period as Markdown to standard output. Run it after
+`vandoxd incidents`, and run `vandoxd incidents` again after every import: the report lists the incidents as they were
+last stored and cannot tell that log lines were imported since. Run it in the container without `-t` (a terminal turns
+the line feeds into CR LF) and redirect the output:
+
+```
+docker exec vandoxd /vandoxd report > forensics.md
+docker exec vandoxd /vandoxd report -lang de > forensics.md
+```
+
+The report is in English; `-lang de` writes it in German (`-lang en|de`, anything else is a usage error). It holds:
+
+- the head: when it was made, the number of log lines and process snapshots with their first and last time, and the
+  lookback (`incidents.window_before`);
+- the summary: the number of outages and OOM kills, the first and last outage, one line for each recurring pattern found
+  and the rules that could not be decided;
+- the recurring patterns: whether outages cluster in one hour of the day, and whether they follow a running backup
+  (`pzstd`), a boot or high memory use of the Plesk panel (`sw-engine`), each compared with how often that was the case in
+  the hours the system log was observed;
+- the memory consumers: the programs that are in at least 90 % of the process snapshots and the largest others;
+- every outage with its victims and its hypothesis (growth candidates, largest consumers, backup, boot, panel memory).
+
+All times are UTC. "Unknown" is never "no": a rule or an activity without enough data, such as fewer than three outages
+or hours without a system log, is written as unknown with its reason, and "no recurring pattern" is stated only when
+every rule was decided. Program names and victim commands are written as Markdown code spans, so they show literally.
+The text is UTF-8 without a byte order mark whatever the locale of the container is.
+
+The command reads every stored log line and every stored process snapshot (one query each) and the incidents twice, so on
+a large database it can take minutes; its memory use is bounded (about 60 MB at most) and does not grow with the
+database. The progress goes to standard error as JSON lines. Exit code 0 when the report is written, 1 when the
+configuration is invalid, the database cannot be opened, the store failed or the run was interrupted (standard output
+then holds an incomplete report: discard it), 2 for a usage error. Details, rules and limits are in
+`docs/areas/detection-and-reports.md`.
 
 ### Rebuild template statistics
 

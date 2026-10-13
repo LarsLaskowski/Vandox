@@ -2,8 +2,6 @@ using Vandox.Core.Incidents;
 
 namespace Vandox.Core.Reports;
 
-#pragma warning disable RH2003, S2325
-
 /// <summary>
 /// Recognizes the programs of the hosting panel.
 /// </summary>
@@ -27,7 +25,7 @@ public static class PanelPrograms
     /// <returns><c>true</c> for a panel program</returns>
     public static bool IsPanel(string program)
     {
-        throw new NotImplementedException();
+        return program.StartsWith(Prefix, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -37,7 +35,17 @@ public static class PanelPrograms
     /// <returns>The summed RSS in bytes</returns>
     public static ulong RssBytes(IReadOnlyDictionary<string, ProgramUsage> programs)
     {
-        throw new NotImplementedException();
+        var sum = 0UL;
+
+        foreach (var (name, usage) in programs)
+        {
+            if (IsPanel(name))
+            {
+                sum = ulong.MaxValue - sum < usage.RssBytes ? ulong.MaxValue : sum + usage.RssBytes;
+            }
+        }
+
+        return sum;
     }
 
     #endregion // Methods

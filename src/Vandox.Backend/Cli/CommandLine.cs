@@ -1,10 +1,12 @@
+using Vandox.Backend.Reports;
 using Vandox.Core.Configuration;
 
 namespace Vandox.Backend.Cli;
 
 /// <summary>
-/// Parses the command line: <c>vandoxd [flags]</c> and <c>vandoxd [flags] import [-config file] path</c>. A flag may start
-/// with one or two dashes and take its value as the next argument or after an equals sign.
+/// Parses the command line: <c>vandoxd [flags]</c> and the sub-commands <c>vandoxd [flags] import [-config file] path</c>,
+/// <c>incidents</c>, <c>templates</c> and <c>report [-config file] [-lang en|de]</c>. A flag may start with one or two dashes and
+/// take its value as the next argument or after an equals sign.
 /// </summary>
 public static class CommandLine
 {
@@ -18,6 +20,9 @@ public static class CommandLine
     private const string ImportName = "import";
     private const string IncidentsName = "incidents";
     private const string TemplatesName = "templates";
+    private const string ReportName = "report";
+    private const string ConfigName = "config";
+    private const string LanguageName = "lang";
 
     #endregion // Constants
 
@@ -57,7 +62,7 @@ public static class CommandLine
     /// <summary>
     /// Returns the usage text.
     /// </summary>
-    /// <param name="usageFor">The sub-command the usage is for: <c>import</c>, <c>incidents</c>, <c>templates</c>, or anything else for the main command</param>
+    /// <param name="usageFor">The sub-command the usage is for: <c>import</c>, <c>incidents</c>, <c>templates</c>, <c>report</c>, or anything else for the main command</param>
     /// <returns>The text</returns>
     public static string Usage(string usageFor)
     {
@@ -76,7 +81,12 @@ public static class CommandLine
             return $"Usage of {BinaryName} templates [-config file]:\n  -config string\n    \tpath of the configuration file\n";
         }
 
-        return $"Usage of {BinaryName}:\n  -config string\n    \tpath of the configuration file (default \"{ConfigConstants.DefaultBackendFile}\")\n  -healthcheck\n    \tprobe /healthz of the running service and exit 0 when it is healthy\n  -version\n    \tprint the version and exit\n\nSub-command:\n  {BinaryName} [flags] import [-config file] <path>\n    \timport the log directory, archive or file at <path>\n  {BinaryName} [flags] incidents [-config file]\n    \trebuild the incidents from the stored data\n  {BinaryName} [flags] templates [-config file]\n    \trebuild the log template statistics from the stored log lines\n";
+        if (usageFor == ReportName)
+        {
+            return $"Usage of {BinaryName} report [-config file] [-lang en|de]:\n  -config string\n    \tpath of the configuration file\n  -lang string\n    \tlanguage of the report: en or de (default \"en\")\n";
+        }
+
+        return $"Usage of {BinaryName}:\n  -config string\n    \tpath of the configuration file (default \"{ConfigConstants.DefaultBackendFile}\")\n  -healthcheck\n    \tprobe /healthz of the running service and exit 0 when it is healthy\n  -version\n    \tprint the version and exit\n\nSub-command:\n  {BinaryName} [flags] import [-config file] <path>\n    \timport the log directory, archive or file at <path>\n  {BinaryName} [flags] incidents [-config file]\n    \trebuild the incidents from the stored data\n  {BinaryName} [flags] templates [-config file]\n    \trebuild the log template statistics from the stored log lines\n  {BinaryName} [flags] report [-config file] [-lang en|de]\n    \twrite the forensics report of the stored data as Markdown\n";
     }
 
     /// <summary>
@@ -87,7 +97,7 @@ public static class CommandLine
     /// <param name="index">The position of the argument</param>
     private static void ParseArgument(CommandOptions options, IReadOnlyList<string> args, int index)
     {
-        if (options.Healthcheck || args[index] is not (ImportName or IncidentsName or TemplatesName))
+        if (options.Healthcheck || args[index] is not (ImportName or IncidentsName or TemplatesName or ReportName))
         {
             options.Error = $"unexpected argument {Terminal.Quote(args[index])}";
         }
@@ -144,13 +154,13 @@ public static class CommandLine
                 }
                 break;
 
-            case "config":
+            case ConfigName:
                 {
                     return ReadConfigValue(options, args, ref index, value);
                 }
             default:
                 {
-                    options.Error = $"flag provided but not defined: -{name}";
+                    options.Error = NotDefined(name);
 
                     return false;
                 }
@@ -169,24 +179,81 @@ public static class CommandLine
     /// <returns><c>true</c> when the flag has a value</returns>
     private static bool ReadConfigValue(CommandOptions options, IReadOnlyList<string> args, ref int index, string? inline)
     {
+        var value = ReadValue(options, args, ref index, inline, ConfigName);
+
+        if (value is not null)
+        {
+            options.ConfigPath = value;
+        }
+
+        return value is not null;
+    }
+
+    /// <summary>
+    /// Reads the value of a <c>-lang</c> flag: exactly <c>en</c> or <c>de</c>, compared ordinally.
+    /// </summary>
+    /// <param name="options">The options</param>
+    /// <param name="args">The arguments</param>
+    /// <param name="index">The position after the flag</param>
+    /// <param name="inline">The value after an equals sign, if any</param>
+    /// <returns><c>true</c> when the flag has a valid value</returns>
+    private static bool ReadLanguageValue(CommandOptions options, IReadOnlyList<string> args, ref int index, string? inline)
+    {
+        var value = ReadValue(options, args, ref index, inline, LanguageName);
+
+        if (value is null)
+        {
+            return false;
+        }
+
+        if (ReportText.For(value) is null)
+        {
+            options.Error = $"{BinaryName} {ReportName}: unknown language {Terminal.Quote(value)} (expected en or de)";
+
+            return false;
+        }
+
+        options.Language = value;
+
+        return true;
+    }
+
+    /// <summary>
+    /// Takes the value of a flag: the text after an equals sign, or the next argument, whatever it looks like.
+    /// </summary>
+    /// <param name="options">The options</param>
+    /// <param name="args">The arguments</param>
+    /// <param name="index">The position after the flag</param>
+    /// <param name="inline">The value after an equals sign, if any</param>
+    /// <param name="flag">The name of the flag</param>
+    /// <returns>The value; <c>null</c> when the flag has none, with the error set</returns>
+    private static string? ReadValue(CommandOptions options, IReadOnlyList<string> args, ref int index, string? inline, string flag)
+    {
         if (inline is not null)
         {
-            options.ConfigPath = inline;
-
-            return true;
+            return inline;
         }
 
         if (index < args.Count)
         {
-            options.ConfigPath = args[index];
-            index++;
-
-            return true;
+            return args[index++];
         }
 
-        options.Error = "flag needs an argument: -config";
+        options.Error = $"flag needs an argument: -{flag}";
 
-        return false;
+        return null;
+    }
+
+    /// <summary>
+    /// Writes the error of a flag that the command does not know. The name is escaped like every text from the command line.
+    /// </summary>
+    /// <param name="name">The name of the flag, without dashes</param>
+    /// <returns>The error text</returns>
+    private static string NotDefined(string name)
+    {
+        var quoted = Terminal.Quote(name);
+
+        return $"flag provided but not defined: -{quoted[1..^1]}";
     }
 
     /// <summary>
@@ -227,7 +294,7 @@ public static class CommandLine
     }
 
     /// <summary>
-    /// Parses the arguments of the sub-command <c>incidents</c> or <c>templates</c>.
+    /// Parses the arguments of the sub-command <c>incidents</c>, <c>templates</c> or <c>report</c>.
     /// </summary>
     /// <param name="options">The options</param>
     /// <param name="args">The arguments</param>
@@ -240,6 +307,7 @@ public static class CommandLine
         options.UsageFor = name;
         options.Incidents = name == IncidentsName;
         options.Templates = name == TemplatesName;
+        options.Report = name == ReportName;
 
         if (ParseSubFlags(options, args, ref index) && index < args.Count)
         {
@@ -248,7 +316,7 @@ public static class CommandLine
     }
 
     /// <summary>
-    /// Parses the flags of a sub-command: <c>-config</c> and <c>-h</c>.
+    /// Parses the flags of a sub-command: <c>-config</c>, <c>-h</c> and, for <c>report</c> only, <c>-lang</c>.
     /// </summary>
     /// <param name="options">The options</param>
     /// <param name="args">The arguments</param>
@@ -269,14 +337,14 @@ public static class CommandLine
                 return false;
             }
 
-            if (name != "config")
-            {
-                options.Error = $"flag provided but not defined: -{name}";
+            var read = name switch
+                       {
+                           ConfigName => ReadConfigValue(options, args, ref index, value),
+                           LanguageName when options.Report => ReadLanguageValue(options, args, ref index, value),
+                           _ => Undefined(options, name)
+                       };
 
-                return false;
-            }
-
-            if (ReadConfigValue(options, args, ref index, value))
+            if (read)
             {
                 continue;
             }
@@ -285,6 +353,19 @@ public static class CommandLine
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// Sets the error of a flag that the sub-command does not know.
+    /// </summary>
+    /// <param name="options">The options</param>
+    /// <param name="name">The name of the flag</param>
+    /// <returns>Always <c>false</c></returns>
+    private static bool Undefined(CommandOptions options, string name)
+    {
+        options.Error = NotDefined(name);
+
+        return false;
     }
 
     /// <summary>

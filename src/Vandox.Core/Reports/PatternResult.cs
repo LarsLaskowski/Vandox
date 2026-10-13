@@ -1,7 +1,5 @@
 namespace Vandox.Core.Reports;
 
-#pragma warning disable RH2003, S2325
-
 /// <summary>
 /// The result of one recurrence rule.
 /// </summary>
@@ -42,12 +40,12 @@ public sealed class PatternResult
     /// <summary>
     /// Gets the share of matching outages; <c>null</c> when no outage is known.
     /// </summary>
-    public double? Share => throw new NotImplementedException();
+    public double? Share => Known > 0 ? (double)Matching / Known : null;
 
     /// <summary>
     /// Gets the share of matching observed hours; <c>null</c> when no hour is observed.
     /// </summary>
-    public double? BaseShare => throw new NotImplementedException();
+    public double? BaseShare => BaseKnown > 0 ? (double)BaseMatching / BaseKnown : null;
 
     #endregion // Properties
 }

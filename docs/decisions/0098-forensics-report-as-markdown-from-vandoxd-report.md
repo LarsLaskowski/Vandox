@@ -80,7 +80,8 @@ inside a code span. The command, its exit codes and the report's content, format
   discards it.
 - The web page renders the same analysis (the summary and the incidents read one at a time) and offers the same Markdown; the
   analysis lives outside the command so the page can call it.
-- Shown as Markdown, a program name is monospaced and an invisible character is visible as its escape; a literal backslash
-  sequence in a name reads like an escape in the rendered text (the raw text differs).
+- Shown as Markdown, a program name is monospaced and an invisible character is visible as its escape. Backslash escapes do not
+  apply inside a code span, so a literal backslash sequence in a name (the six characters `\u202e`) is rendered with its backslash
+  doubled (`\\u202e`) and stays distinguishable from the escape of a real U+202E (`\u202e`).
 - Over a cap (1,000,000 snapshots, 10,000 boots, 100,000 runs of observed hours, 4,096 programs) the dependent statements are
   unknown or incomplete, as the report's notes say; to revisit if a real archive reaches one.

@@ -1,7 +1,5 @@
 namespace Vandox.Backend.Reports;
 
-#pragma warning disable RH2003, S2325
-
 /// <summary>
 /// The labels of the forensics report in one language.
 /// </summary>
@@ -12,17 +10,165 @@ public sealed class ReportText
     /// <summary>
     /// Gets the English table.
     /// </summary>
-    public static ReportText English => throw new NotImplementedException();
+    public static ReportText English { get; } = new()
+                                                {
+                                                    Language = "en",
+                                                    DecimalSeparator = '.',
+                                                    Title = "Vandox forensics report",
+                                                    SummaryHeading = "Summary",
+                                                    PatternsHeading = "Recurring patterns",
+                                                    TimeOfDayHeading = "Time of day (UTC)",
+                                                    ActivitiesHeading = "Activities before the outages",
+                                                    MemoryHeading = "Memory consumers",
+                                                    PermanentHeading = "Permanent consumers",
+                                                    TransientHeading = "Transient consumers",
+                                                    OutagesHeading = "Outages",
+                                                    OutageHeading = "Outage #{0} at {1}",
+                                                    NotesHeading = "Notes",
+                                                    Detected = "detected",
+                                                    NotDetected = "not detected",
+                                                    Unknown = "unknown",
+                                                    Yes = "yes",
+                                                    No = "no",
+                                                    None = "none",
+                                                    GeneratedAt = "Generated",
+                                                    LogLines = "Log lines",
+                                                    ObservedHours = "Observed hours",
+                                                    Snapshots = "Process snapshots",
+                                                    Lookback = "Lookback in minutes",
+                                                    AllTimesUtc = "All times are UTC.",
+                                                    CountWithRange = "{0} (first {1}, last {2})",
+                                                    Outages = "Outages: {0}, OOM kills: {1}",
+                                                    FirstOutage = "First outage: {0}",
+                                                    LastOutage = "Last outage: {0}",
+                                                    PatternLine = "{0}: {1} of {2} outages ({3}) against {4} of the observed hours",
+                                                    UnknownRules = "Rules without a result: {0}",
+                                                    NoPattern = "No recurring pattern detected",
+                                                    NoPatternAmongDecided = "No recurring pattern detected among the decided rules",
+                                                    TimeOfDay = "Time of day",
+                                                    Hour = "Hour",
+                                                    OutageCount = "Outages",
+                                                    OutageShare = "Share of outages",
+                                                    BaseShare = "Share of observed hours",
+                                                    Result = "Result",
+                                                    Activity = "Activity",
+                                                    OutagesWith = "Outages with it",
+                                                    Known = "Outages known",
+                                                    Reason = "Reason",
+                                                    PanelThreshold = "Panel memory threshold: {0}",
+                                                    Backup = "Backup running",
+                                                    Boot = "Boot",
+                                                    PanelHigh = "Panel memory high",
+                                                    ReasonTooFewIncidents = "too few outages",
+                                                    ReasonNoBaseData = "no observed hour",
+                                                    ReasonTooManySnapshots = "too many process snapshots",
+                                                    ReasonTooManyBoots = "too many boots",
+                                                    ReasonTooManyObservedRuns = "too many runs of observed hours",
+                                                    ReasonNoPanelMemory = "no panel memory",
+                                                    Window = "Window",
+                                                    Kills = "Kills",
+                                                    Victims = "Victims",
+                                                    KillsNotKept = "Kills not kept",
+                                                    Growth = "Growth candidates",
+                                                    Consumers = "Largest consumers",
+                                                    Activities = "Activities before the outage",
+                                                    ServiceEvents = "Service events in the lookback",
+                                                    LastBoot = "last boot {0}",
+                                                    ConsumerPermanent = "{0}: in {1} of the snapshots, mean {2} MiB, peak {3} MiB",
+                                                    ConsumerTransient = "{0}: in {1} of the snapshots, peak {2} MiB at {3}",
+                                                    NoSnapshots = "No process snapshot is stored, so the consumers are unknown.",
+                                                    NoOutages = "No outage is stored; run vandoxd incidents first.",
+                                                    RulesNote = "A pattern is reported when at least 2 of at least 3 known outages share a property, their share is above the share of the observed hours and the probability of that many by chance is at most 1 % (1 % / 24 for one hour of the day). Observed hours are UTC hours with a line of the system log (journal or syslog); an activity is judged over the lookback before the first kill. A rule that cannot be decided is shown as unknown with its reason, never as not detected.",
+                                                    CapSnapshotsNote = "The report keeps at most {0} process snapshot points; the later snapshots were not used, so backup and panel memory are unknown.",
+                                                    CapBootsNote = "The report keeps at most {0} boots; the later boots were not used, so the boot rule is unknown.",
+                                                    CapRunsNote = "The report keeps at most {0} runs of consecutive observed hours; the later hours were not used, so backup, boot and panel memory are unknown.",
+                                                    UntrackedNote = "{0} program entries were not tracked because the report tracks at most {1} programs.",
+                                                    IncidentsChangedNote = "The number of incidents changed between the two passes over the stored incidents, so the rules and the list of outages may not match; run vandoxd incidents and the report again.",
+                                                };
 
     /// <summary>
     /// Gets the German table.
     /// </summary>
-    public static ReportText German => throw new NotImplementedException();
+    public static ReportText German { get; } = new()
+                                               {
+                                                   Language = "de",
+                                                   DecimalSeparator = ',',
+                                                   Title = "Vandox-Forensikbericht",
+                                                   SummaryHeading = "Übersicht",
+                                                   PatternsHeading = "Wiederkehrende Muster",
+                                                   TimeOfDayHeading = "Tageszeit (UTC)",
+                                                   ActivitiesHeading = "Aktivitäten vor den Ausfällen",
+                                                   MemoryHeading = "Speicherverbraucher",
+                                                   PermanentHeading = "Dauerhafte Verbraucher",
+                                                   TransientHeading = "Vorübergehende Verbraucher",
+                                                   OutagesHeading = "Ausfälle",
+                                                   OutageHeading = "Ausfall #{0} am {1}",
+                                                   NotesHeading = "Hinweise",
+                                                   Detected = "erkannt",
+                                                   NotDetected = "nicht erkannt",
+                                                   Unknown = "unbekannt",
+                                                   Yes = "ja",
+                                                   No = "nein",
+                                                   None = "keine",
+                                                   GeneratedAt = "Erstellt",
+                                                   LogLines = "Logzeilen",
+                                                   ObservedHours = "Beobachtete Stunden",
+                                                   Snapshots = "Prozess-Snapshots",
+                                                   Lookback = "Rückblick in Minuten",
+                                                   AllTimesUtc = "Alle Zeiten sind UTC.",
+                                                   CountWithRange = "{0} (erste {1}, letzte {2})",
+                                                   Outages = "Ausfälle: {0}, OOM-Kills: {1}",
+                                                   FirstOutage = "Erster Ausfall: {0}",
+                                                   LastOutage = "Letzter Ausfall: {0}",
+                                                   PatternLine = "{0}: {1} von {2} Ausfällen ({3}) gegenüber {4} der beobachteten Stunden",
+                                                   UnknownRules = "Regeln ohne Ergebnis: {0}",
+                                                   NoPattern = "Kein wiederkehrendes Muster erkannt",
+                                                   NoPatternAmongDecided = "Kein wiederkehrendes Muster unter den entschiedenen Regeln erkannt",
+                                                   TimeOfDay = "Tageszeit",
+                                                   Hour = "Stunde",
+                                                   OutageCount = "Ausfälle",
+                                                   OutageShare = "Anteil der Ausfälle",
+                                                   BaseShare = "Anteil der beobachteten Stunden",
+                                                   Result = "Ergebnis",
+                                                   Activity = "Aktivität",
+                                                   OutagesWith = "Ausfälle damit",
+                                                   Known = "Ausfälle bekannt",
+                                                   Reason = "Grund",
+                                                   PanelThreshold = "Schwelle für hohen Panel-Speicher: {0}",
+                                                   Backup = "Backup läuft",
+                                                   Boot = "Neustart",
+                                                   PanelHigh = "Panel-Speicher hoch",
+                                                   ReasonTooFewIncidents = "zu wenige Ausfälle",
+                                                   ReasonNoBaseData = "keine beobachtete Stunde",
+                                                   ReasonTooManySnapshots = "zu viele Prozess-Snapshots",
+                                                   ReasonTooManyBoots = "zu viele Neustarts",
+                                                   ReasonTooManyObservedRuns = "zu viele Abschnitte beobachteter Stunden",
+                                                   ReasonNoPanelMemory = "kein Panel-Speicher",
+                                                   Window = "Zeitfenster",
+                                                   Kills = "Kills",
+                                                   Victims = "Opfer",
+                                                   KillsNotKept = "Nicht gespeicherte Kills",
+                                                   Growth = "Wachstumskandidaten",
+                                                   Consumers = "Größte Verbraucher",
+                                                   Activities = "Aktivitäten vor dem Ausfall",
+                                                   ServiceEvents = "Dienstereignisse im Rückblick",
+                                                   LastBoot = "letzter Neustart {0}",
+                                                   ConsumerPermanent = "{0}: in {1} der Snapshots, Mittel {2} MiB, Spitze {3} MiB",
+                                                   ConsumerTransient = "{0}: in {1} der Snapshots, Spitze {2} MiB am {3}",
+                                                   NoSnapshots = "Es ist kein Prozess-Snapshot gespeichert, daher sind die Verbraucher unbekannt.",
+                                                   NoOutages = "Es ist kein Ausfall gespeichert; zuerst vandoxd incidents ausführen.",
+                                                   RulesNote = "Ein Muster wird gemeldet, wenn mindestens 2 von mindestens 3 bekannten Ausfällen eine Eigenschaft teilen, ihr Anteil über dem Anteil der beobachteten Stunden liegt und die Wahrscheinlichkeit für so viele Ausfälle durch Zufall höchstens 1 % beträgt (1 % / 24 für eine Stunde des Tages). Beobachtete Stunden sind UTC-Stunden mit einer Zeile des Systemlogs (journal oder syslog); eine Aktivität wird über den Rückblick vor dem ersten Kill beurteilt. Eine Regel, die nicht entschieden werden kann, steht als unbekannt mit ihrem Grund da, nie als nicht erkannt.",
+                                                   CapSnapshotsNote = "Der Bericht behält höchstens {0} Prozess-Snapshot-Punkte; die späteren Snapshots wurden nicht verwendet, daher sind Backup und Panel-Speicher unbekannt.",
+                                                   CapBootsNote = "Der Bericht behält höchstens {0} Neustarts; die späteren Neustarts wurden nicht verwendet, daher ist die Neustart-Regel unbekannt.",
+                                                   CapRunsNote = "Der Bericht behält höchstens {0} Abschnitte aufeinanderfolgender beobachteter Stunden; die späteren Stunden wurden nicht verwendet, daher sind Backup, Neustart und Panel-Speicher unbekannt.",
+                                                   UntrackedNote = "{0} Programmeinträge wurden nicht verfolgt, weil der Bericht höchstens {1} Programme verfolgt.",
+                                                   IncidentsChangedNote = "Die Zahl der Vorfälle hat sich zwischen den beiden Durchläufen über die gespeicherten Vorfälle geändert, daher passen Regeln und Ausfallliste möglicherweise nicht zusammen; vandoxd incidents und den Bericht erneut ausführen.",
+                                               };
 
     /// <summary>
     /// Gets the language codes, <c>en</c> and <c>de</c>.
     /// </summary>
-    public static IReadOnlyList<string> Languages => throw new NotImplementedException();
+    public static IReadOnlyList<string> Languages { get; } = ["en", "de"];
 
     /// <summary>
     /// Gets the language code of this table.
@@ -150,27 +296,32 @@ public sealed class ReportText
     public string AllTimesUtc { get; init; } = string.Empty;
 
     /// <summary>
-    /// Gets the summary line: outage and kill counts.
+    /// Gets the head text of a count with its first time as {1} and last time as {2}, the count as {0}.
+    /// </summary>
+    public string CountWithRange { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets the summary line: outage and kill counts, with the outages as {0} and the kills as {1}.
     /// </summary>
     public string Outages { get; init; } = string.Empty;
 
     /// <summary>
-    /// Gets the summary line: first outage.
+    /// Gets the summary line: first outage, with the time as {0}.
     /// </summary>
     public string FirstOutage { get; init; } = string.Empty;
 
     /// <summary>
-    /// Gets the summary line: last outage.
+    /// Gets the summary line: last outage, with the time as {0}.
     /// </summary>
     public string LastOutage { get; init; } = string.Empty;
 
     /// <summary>
-    /// Gets the summary line: one detected pattern.
+    /// Gets the summary line of one detected pattern: the rule as {0}, the outages with it as {1}, the known outages as {2}, their share as {3} and the share of observed hours as {4}.
     /// </summary>
     public string PatternLine { get; init; } = string.Empty;
 
     /// <summary>
-    /// Gets the summary line: rules that are unknown.
+    /// Gets the summary line: the rules without a result, as {0}.
     /// </summary>
     public string UnknownRules { get; init; } = string.Empty;
 
@@ -183,6 +334,11 @@ public sealed class ReportText
     /// Gets the summary line: no pattern among the decided rules.
     /// </summary>
     public string NoPatternAmongDecided { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets the name of the time of day rule.
+    /// </summary>
+    public string TimeOfDay { get; init; } = string.Empty;
 
     /// <summary>
     /// Gets the table column: hour.
@@ -215,6 +371,11 @@ public sealed class ReportText
     public string Activity { get; init; } = string.Empty;
 
     /// <summary>
+    /// Gets the table column: outages with the activity.
+    /// </summary>
+    public string OutagesWith { get; init; } = string.Empty;
+
+    /// <summary>
     /// Gets the table column: outages known.
     /// </summary>
     public string Known { get; init; } = string.Empty;
@@ -225,7 +386,7 @@ public sealed class ReportText
     public string Reason { get; init; } = string.Empty;
 
     /// <summary>
-    /// Gets the line: panel memory threshold.
+    /// Gets the line: panel memory threshold, with the value as {0}.
     /// </summary>
     public string PanelThreshold { get; init; } = string.Empty;
 
@@ -315,17 +476,17 @@ public sealed class ReportText
     public string ServiceEvents { get; init; } = string.Empty;
 
     /// <summary>
-    /// Gets the outage line: time of the last boot.
+    /// Gets the text of the last boot, with the time as {0}.
     /// </summary>
     public string LastBoot { get; init; } = string.Empty;
 
     /// <summary>
-    /// Gets the consumer line of a permanent consumer.
+    /// Gets the consumer line of a permanent consumer: the program as {0}, the share of snapshots as {1}, the mean as {2} and the peak as {3} in MiB.
     /// </summary>
     public string ConsumerPermanent { get; init; } = string.Empty;
 
     /// <summary>
-    /// Gets the consumer line of a transient consumer.
+    /// Gets the consumer line of a transient consumer: the program as {0}, the share of snapshots as {1}, the peak in MiB as {2} and its time as {3}.
     /// </summary>
     public string ConsumerTransient { get; init; } = string.Empty;
 
@@ -345,12 +506,22 @@ public sealed class ReportText
     public string RulesNote { get; init; } = string.Empty;
 
     /// <summary>
-    /// Gets the note: a cap was hit.
+    /// Gets the note: the snapshot cap was hit, with the cap as {0}.
     /// </summary>
-    public string CapNote { get; init; } = string.Empty;
+    public string CapSnapshotsNote { get; init; } = string.Empty;
 
     /// <summary>
-    /// Gets the note: program entries not tracked.
+    /// Gets the note: the boot cap was hit, with the cap as {0}.
+    /// </summary>
+    public string CapBootsNote { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets the note: the cap of runs of observed hours was hit, with the cap as {0}.
+    /// </summary>
+    public string CapRunsNote { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets the note: program entries not tracked, with the entries as {0} and the cap as {1}.
     /// </summary>
     public string UntrackedNote { get; init; } = string.Empty;
 
@@ -370,7 +541,12 @@ public sealed class ReportText
     /// <returns>The table; <c>null</c> for any other value</returns>
     public static ReportText? For(string language)
     {
-        throw new NotImplementedException();
+        return language switch
+               {
+                   "en" => English,
+                   "de" => German,
+                   _ => null
+               };
     }
 
     #endregion // Methods

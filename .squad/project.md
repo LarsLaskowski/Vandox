@@ -140,9 +140,19 @@ files or endpoints.
     candidates, 20 + 20 templates and two program maps of at most 4,096 entries (`Vandox.Core.Incidents`: `IncidentLimits`); `IncidentReconstructor` reads log lines and
     metrics in pages of 1,000 and process and connection snapshots one per page, pages by capture time and record ID (`RecordQuery.AfterId`) and fails a page that does not
     lead past the previous one; `RecordQueries.ReadJson` reads the payload as UTF-8 bytes so that one forged maximum process snapshot of an earlier build peaks near 240 MiB (this version stores no payload of more than 16 MiB of JSON: `StorageLimits.MaxPayloadBytes`, checked by `RecordRules.CheckPayloadSize` in the importer's `RecordEmitter` and by `BatchWriter` while it serializes with `PayloadJson` into a `BoundedBufferWriter`, which drops the bytes above the limit); `IncidentRepository` refuses an
-    incident of more than 8 MiB of serialized JSON (`InvalidIncidentException`), which the reconstructor skips and counts, and reads stored incident data as UTF-8 bytes. `vandoxd templates` (`SqliteStore.RebuildTemplatesAsync`, `TemplateRebuilder`) reads stored log lines in batches of 10,000 by record ID up to the high-water ID fixed when the tables are emptied, one transaction each, with the write path's normalizer and tally, so a batch's tally holds at most `batchLines` keys of source (at most 128 UTF-8 bytes), program (at most 1,024) and template (at most 1,024), plus as many source hours, each with its own source string (about 46 MB of UTF-16 strings at 10,000, plus dictionary overhead), and reads one message (at most 16 KiB) at a time; every counting transaction checks the run marker in `meta`, so a run superseded by a later one counts nothing more and fails; the transaction that empties the tables grows with the statistics. Forged kill lines make forged incidents
-    (a documented limitation, record 0096). Records 0048, 0049, 0066, 0069, 0076, 0078, 0079, 0084,
-    0085, 0086, 0088, 0091, 0092, 0093, 0094, 0095, 0096, 0097.
+    incident of more than 8 MiB of serialized JSON (`InvalidIncidentException`), which the reconstructor skips and counts, and reads stored incident data as UTF-8 bytes. `vandoxd templates` (`SqliteStore.RebuildTemplatesAsync`, `TemplateRebuilder`) reads stored log lines in batches of 10,000 by record ID up to the high-water ID fixed when the tables are emptied, one transaction each, with the write path's normalizer and tally, so a batch's tally holds at most `batchLines` keys of source (at most 128 UTF-8 bytes), program (at most 1,024) and template (at most 1,024), plus as many source hours, each with its own source string (about 46 MB of UTF-16 strings at 10,000, plus dictionary overhead), and reads one message (at most 16 KiB) at a time; every counting transaction checks the run marker in `meta`, so a run superseded by a later one counts nothing more and fails; the transaction that empties the tables grows with the statistics. The forensics report (`vandoxd report`:
+    `ForensicsReporter` in `src/Vandox.Backend/Reports`, `ForensicsAnalysis` and `ReportLimits` in `src/Vandox.Core/Reports`) reads every stored
+    log line in pages of 1,000 through `RecordPager` and every process snapshot one per page, and the incidents one at a time (`IncidentQuery.Limit` 1, each page
+    starting at the end of the previous incident's window, a page that does not lead past it is `store: reading incidents: page did not advance`), twice; it keeps
+    only counters for the incidents and, across the run, at most 1,000,000 snapshot points (24 bytes each), 10,000 boots, 100,000 runs of consecutive observed hours and
+    4,096 programs (`ReportLimits`; the caps count decoded, stored items, never bytes), so its memory does not grow with the database (about 60 MB at the
+    caps); over a cap the statements that need the data are unknown and the notes name the cap. The `-lang` flag of `vandoxd report` is the one CLI value
+    that selects behavior: `CommandLine` compares it ordinally with exactly `en` and `de` (`ReportText.For`), any other value, also another case, `de-DE`, a
+    padded or Cf-bearing look-alike, is a usage error that shows it only through `Terminal.Quote`, and the unknown flag names of `CommandLine` are escaped the
+    same way. Forged kill lines make forged incidents
+    (a documented limitation, record 0096); forged boot lines, `pzstd` or `sw-engi*` processes shift the report's activities and rates, and forged process names can
+    take the 4,096 program places first (records 0098, 0099). Records 0048, 0049, 0066, 0069, 0076, 0078, 0079, 0084,
+    0085, 0086, 0088, 0091, 0092, 0093, 0094, 0095, 0096, 0097, 0098, 0099, 0100.
 11. **Outbound calls** (Telegram, external checks, the optional AI service of the nightly report, the
     agent's connection to the backend): *Goal:* every call has a timeout, goes only to its configured
     destination and leaves encrypted to a verified peer. The agent's only destination is the ingest port,
@@ -172,7 +182,13 @@ files or endpoints.
     keeps format characters (Cf, e.g. U+202E, which reverses the display direction, and U+200B), `<`, `&` and any other markup, so whoever shows a template escapes it
     like any log line and handles format characters. `vandoxd incidents` prints the victim command of an incident's first kill through `Terminal.Quote`
     (`IncidentSummaryWriter`); its log lines carry only the store's text and the first kill time, no input text, and the texts of a stored incident (kill victims and hosts,
-    timeline texts, programs, commands, templates) are external text for whoever shows them. Records 0072, 0081, 0095, 0096.
+    timeline texts, programs, commands, templates) are external text for whoever shows them. `vandoxd report` writes the victim commands and program names of
+    the report (`IncidentKill.VictimCommand`, `ProgramGrowth.Program`, `ProgramUsage.Program`, `ConsumerSummary.Program`) only through `MarkdownText.Code`
+    (`src/Vandox.Backend/Reports`), as Markdown code spans: backslashes doubled, line feed, carriage return and tab as `\n`, `\r`, `\t`, other Cc, Cf, Zl, Zp,
+    private-use, unassigned and invalid characters as the escapes of `Terminal.Quote` (`\u202e`), a fence longer than any backtick run, padding spaces, an empty
+    text as a dash; a code span keeps inline HTML, entities, links, autolinks and emphasis literal, no external text stands in a table or a heading, and the
+    report's own labels, numbers and times come from `ReportText`; the `-lang` value in the usage error and an unknown flag name go through `Terminal.Quote`;
+    standard output is UTF-8 without a byte order mark (`Program`). Records 0072, 0081, 0095, 0096, 0098.
 13. **Release pipeline and published artifacts** (`.github/workflows/release.yml`,
     `.github/workflows/base-image-digests.yml`, `.github/scripts/`, `deploy/backend/Dockerfile`,
     `.dockerignore`, `dotnet-tools.json`, the GitHub environment `release`; the smoke script

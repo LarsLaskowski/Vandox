@@ -34,6 +34,29 @@ public static class Terminal
     }
 
     /// <summary>
+    /// Tells whether a character is written as an escape: a control, format, line or paragraph separator, private use, unassigned
+    /// or invalid character.
+    /// </summary>
+    /// <param name="rune">The character</param>
+    /// <returns><c>true</c> when the character is escaped</returns>
+    internal static bool NeedsEscape(Rune rune)
+    {
+        var category = Rune.GetUnicodeCategory(rune);
+
+        return category is UnicodeCategory.Control or UnicodeCategory.Format or UnicodeCategory.LineSeparator or UnicodeCategory.ParagraphSeparator or UnicodeCategory.PrivateUse or UnicodeCategory.OtherNotAssigned || rune == Rune.ReplacementChar;
+    }
+
+    /// <summary>
+    /// Writes a character as <c>\u</c> and four lower-case hex digits, or <c>\U</c> and eight above U+FFFF.
+    /// </summary>
+    /// <param name="rune">The character</param>
+    /// <returns>The escape</returns>
+    internal static string HexEscape(Rune rune)
+    {
+        return rune.Value > 0xFFFF ? $"\\U{rune.Value:x8}" : $"\\u{rune.Value:x4}";
+    }
+
+    /// <summary>
     /// Appends one character, escaped when needed.
     /// </summary>
     /// <param name="builder">The builder</param>
@@ -74,16 +97,7 @@ public static class Terminal
                 }
         }
 
-        var category = Rune.GetUnicodeCategory(rune);
-
-        if (category is UnicodeCategory.Control or UnicodeCategory.Format or UnicodeCategory.LineSeparator or UnicodeCategory.ParagraphSeparator or UnicodeCategory.PrivateUse or UnicodeCategory.OtherNotAssigned || rune == Rune.ReplacementChar)
-        {
-            builder.Append(rune.Value > 0xFFFF ? $"\\U{rune.Value:x8}" : $"\\u{rune.Value:x4}");
-        }
-        else
-        {
-            builder.Append(rune.ToString());
-        }
+        builder.Append(NeedsEscape(rune) ? HexEscape(rune) : rune.ToString());
     }
 
     #endregion // Methods
