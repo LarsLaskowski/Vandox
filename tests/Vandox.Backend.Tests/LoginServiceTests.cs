@@ -1,4 +1,5 @@
 using System.Net;
+using System.Security.Claims;
 using System.Text.RegularExpressions;
 
 using Microsoft.AspNetCore.Http;
@@ -158,6 +159,34 @@ public partial class LoginServiceTests
         Assert.AreEqual(0, logged[^2], "not logged before the last failure");
         Assert.AreEqual(1, logged[^1], "logged by the failure that reaches the limit");
         Assert.AreEqual(LoginOutcome.Throttled, next, "even the right password is throttled afterwards");
+    }
+
+    /// <summary>
+    /// Signing out logs <c>logged out</c> only when a user with a session is signed out; an anonymous request ends nothing and logs nothing.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task LoginServiceLogsLogoutOnlyWhenSessionEnded()
+    {
+        // Arrange
+        using var fixture = new LoginServiceFixture();
+        var anonymous = LoginServiceFixture.NewContext("192.0.2.1");
+        var signedIn = LoginServiceFixture.NewContext("192.0.2.2");
+
+        signedIn.Context.User = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.Name, "admin"), new Claim(SessionStore.SessionClaimType, SessionStore.NewSessionId())], "test"));
+
+        // Act
+        await fixture.Service.SignOutAsync(anonymous.Context);
+
+        var afterAnonymous = fixture.Logger.Messages.Count(message => message.StartsWith("logged out ", StringComparison.Ordinal));
+
+        await fixture.Service.SignOutAsync(signedIn.Context);
+
+        var afterSignedIn = fixture.Logger.Messages.Count(message => message.StartsWith("logged out ", StringComparison.Ordinal));
+
+        // Assert
+        Assert.AreEqual(0, afterAnonymous, "an anonymous logout writes no line");
+        Assert.AreEqual(1, afterSignedIn, "a signed-in logout writes one line");
     }
 
     /// <summary>

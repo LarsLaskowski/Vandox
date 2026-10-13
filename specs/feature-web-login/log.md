@@ -21,3 +21,4 @@ are quoted in full.
 | 2026-10-13 19:50 | 8 Review round 1 | squad-security | APPROVED on 4d9ad9e; 1 non-blocking: web-login.md Sessions wording (render acks and later UpdateRootComponents not closed at once) (opus/medium · 112,635 tokens · 25 tool uses · 189 s) |
 | 2026-10-13 19:54 | 8 Review round 1 | squad-reviewer | BLOCKING 2, NON-BLOCKING 1 on 4d9ad9e: header antiforgery token + oversized form -> 500 (fix HeaderName = null); verbatim web-login.md HEAD /login; logged out written without session (opus/medium · 151,162 tokens · 34 tool uses · 301 s) |
 | 2026-10-13 19:54 | 8 Verbatim fix | Orchestrator | Reviewer verbatim fix applied to docs/areas/web-login.md (Access, HEAD /login); doc gates pass |
+| 2026-10-13 19:56 | 8 Fix round 1 tests | squad-tester | Failing tests: ServeRejectsFormPostsWithoutValidAntiforgeryToken (header token row), WebAuthenticationReadsAntiforgeryTokenOnlyFromForm, LoginServiceLogsLogoutOnlyWhenSessionEnded |

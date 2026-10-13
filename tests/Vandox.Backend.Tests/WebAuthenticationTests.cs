@@ -117,6 +117,30 @@ public class WebAuthenticationTests
     }
 
     /// <summary>
+    /// The antiforgery token is only accepted from the form, never from a header, so that validation always reads the form.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task WebAuthenticationReadsAntiforgeryTokenOnlyFromForm()
+    {
+        // Arrange
+        using var verifier = new ScriptedPasswordVerifier("password");
+        var services = new ServiceCollection();
+
+        services.AddLogging();
+        WebAuthentication.AddServices(services, verifier, new FakeTimeProvider(), NullLoggerFactory.Instance);
+
+        await using var provider = services.BuildServiceProvider();
+
+        // Act
+        var options = provider.GetRequiredService<IOptions<AntiforgeryOptions>>().Value;
+
+        // Assert
+        Assert.IsNull(options.HeaderName, "no header carries the token");
+        Assert.AreEqual("__RequestVerificationToken", options.FormFieldName, "the form field");
+    }
+
+    /// <summary>
     /// <c>POST /logout</c> is mapped with antiforgery validation required, and the endpoint is open to a request without a session.
     /// </summary>
     /// <returns>A task that completes when the test is done</returns>

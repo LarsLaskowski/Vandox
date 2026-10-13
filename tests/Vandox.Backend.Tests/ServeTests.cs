@@ -658,13 +658,23 @@ public class ServeTests
         using var file = await client.PostMultipartAsync("/login", multipart, mebibyte, TestContext.CancellationToken);
 
         AddRefusedProblems(problems, "login with a 20 KiB password", big);
+
+        using var bigWithHeader = await client.PostFormAsync("/login",
+                                                             oversized,
+                                                             TestContext.CancellationToken,
+                                                             new Dictionary<string, string>
+                                                             {
+                                                                 ["RequestVerificationToken"] = valid[LoginTestClient.TokenField]
+                                                             });
+
+        AddRefusedProblems(problems, "login with a 20 KiB password and the token in the header", bigWithHeader);
         AddRefusedProblems(problems, "multipart login with a 1 MiB file part", file);
 
         valid[LoginTestClient.PasswordField] = BackendFixture.Password;
 
         using var signIn = await client.PostFormAsync("/login", valid, TestContext.CancellationToken);
 
-        AddStatusProblem(problems, "sign-in after six refused posts", HttpStatusCode.Found, signIn);
+        AddStatusProblem(problems, "sign-in after seven refused posts", HttpStatusCode.Found, signIn);
 
         var signed = await client.ReadFormFieldsAsync("/", TestContext.CancellationToken);
         var oversizedLogout = new Dictionary<string, string>(signed)
