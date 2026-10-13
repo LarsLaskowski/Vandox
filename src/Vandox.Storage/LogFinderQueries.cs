@@ -36,6 +36,19 @@ internal static class LogFinderQueries
     }
 
     /// <summary>
+    /// Builds the statement of the index mode that reads the lines by the record IDs the probe found, without the full-text table.
+    /// </summary>
+    /// <param name="criteria">The criteria</param>
+    /// <param name="ids">The record IDs the probe found</param>
+    /// <returns>The SQL and its parameters</returns>
+#pragma warning disable RH2003
+    internal static (string Sql, Dictionary<string, object> Parameters) BuildIndex(LogCriteria criteria, IReadOnlyList<long> ids)
+    {
+        throw new NotImplementedException();
+    }
+#pragma warning restore RH2003
+
+    /// <summary>
     /// Builds the statement of the index mode: the lines the index finds, filtered and in order.
     /// </summary>
     /// <param name="criteria">The criteria</param>
