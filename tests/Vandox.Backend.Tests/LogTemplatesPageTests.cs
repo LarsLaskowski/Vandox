@@ -332,6 +332,145 @@ public partial class LogTemplatesPageTests
     }
 
     /// <summary>
+    /// Submitting the form navigates to the address of the entered values, and the page then lists what that address says.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task TemplatesPageSubmitNavigatesToTheAddress()
+    {
+        // Arrange
+        await using var harness = new LogPageHarness($"{Address}?program=old");
+
+        await harness.AddAsync<LogTemplatesPage>();
+
+        var expected = new LogsAddress
+                       {
+                           Source = "syslog",
+                           Program = "sshd",
+                           From = _from,
+                           To = _to
+                       };
+
+        // Act
+        await harness.EnterAsync(("source", "syslog"), ("program", "sshd"), ("from", "2026-10-01T10:00"), ("to", "2026-10-02T11:30"));
+        await harness.Renderer.SubmitAsync(harness.Form());
+
+        var targets = harness.Navigation.Targets.ToArray();
+
+        await harness.UpdateAsync();
+
+        // Assert
+        var queries = harness.Explorer.Queries<TemplateListQuery>(FakeLogExplorer.Templates);
+
+        Assert.AreSequenceEqual([$"logs/templates{expected.ToQuery()}"], targets, "one navigation to the templates with the query of the entered values");
+        Assert.HasCount(2, queries, "the first listing and the listing of the new address");
+        Assert.AreEqual("syslog", queries[1].Source, "source of the new address");
+        Assert.AreEqual("sshd", queries[1].Program, "program of the new address");
+        Assert.AreEqual(_from, queries[1].From, "from of the new address");
+        Assert.AreEqual(_to, queries[1].To, "to of the new address");
+    }
+
+    /// <summary>
+    /// Entered values that are not valid show the error and navigate nowhere.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task TemplatesPageSubmitWithInvalidValuesShowsTheError()
+    {
+        // Arrange
+        await using var harness = new LogPageHarness($"{Address}?program=old");
+
+        await harness.AddAsync<LogTemplatesPage>();
+
+        // Act
+        await harness.EnterAsync(("from", "nonsense"));
+        await harness.Renderer.SubmitAsync(harness.Form());
+
+        // Assert
+        Assert.Contains(Enc(Format(LogsView.AddressInvalidValueFormat, "from")), harness.Html(), "the error of the address");
+        Assert.IsEmpty(harness.Navigation.Targets, "no navigation");
+        Assert.HasCount(1, harness.Explorer.Queries<TemplateListQuery>(FakeLogExplorer.Templates), "no further listing");
+    }
+
+    /// <summary>
+    /// A navigation to another page is not listed, and once the page is disposed the navigation manager no longer reaches it.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task TemplatesPageDetachesTheLocationHandlerOnDispose()
+    {
+        // Arrange
+        await using var harness = new LogPageHarness($"{Address}?program=one");
+
+        await harness.AddAsync<LogTemplatesPage>();
+
+        // Act
+        harness.Navigation.NavigateTo("logs/templates-more?program=other");
+        harness.Navigation.NavigateTo("logs?program=other");
+
+        var otherPages = harness.Explorer.Queries<TemplateListQuery>(FakeLogExplorer.Templates).Count;
+
+        harness.Navigation.NavigateTo("logs/templates?program=two#top");
+
+        var thisPage = harness.Explorer.Queries<TemplateListQuery>(FakeLogExplorer.Templates).Count;
+
+        await harness.Renderer.DisposeAllAsync();
+
+        harness.Navigation.NavigateTo("logs/templates?program=three");
+
+        var afterDispose = harness.Explorer.Queries<TemplateListQuery>(FakeLogExplorer.Templates).Count;
+
+        // Assert
+        Assert.AreEqual(1, otherPages, "other pages, also one that starts with the path, are not listed");
+        Assert.AreEqual(2, thisPage, "the address of this page is listed");
+        Assert.AreEqual(2, afterDispose, "after the dispose no handler reaches the page");
+    }
+
+    /// <summary>
+    /// An unknown template says so and reads no hourly counts.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task TemplatesPageWithUnknownTemplateSaysSo()
+    {
+        // Arrange
+        await using var harness = new LogPageHarness($"{Address}?template=7&{Range}");
+
+        harness.Explorer.TemplateResult = null;
+
+        // Act
+        await harness.AddAsync<LogTemplatesPage>();
+
+        // Assert
+        Assert.Contains(Enc(LogsView.TemplateUnknown), harness.Html(), "the text of an unknown template");
+        Assert.IsEmpty(harness.Explorer.Queries<TemplateHourQuery>(FakeLogExplorer.TemplateHours), "no hourly counts of an unknown template");
+    }
+
+    /// <summary>
+    /// A range that starts after its end reads no hourly counts and shows the template without a chart.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task TemplatesPageWithEmptyHourRangeShowsNoChart()
+    {
+        // Arrange
+        var template = Template(7, "user failed", 987);
+
+        await using var harness = new LogPageHarness($"{Address}?template=7&from=2030-01-01T00:00");
+
+        harness.Explorer.TemplateResult = template;
+        harness.Explorer.TemplateList = [Counted(template, 0)];
+
+        // Act
+        await harness.AddAsync<LogTemplatesPage>();
+
+        // Assert
+        Assert.Contains("Template 7", harness.Html(), "the template is shown");
+        Assert.IsEmpty(harness.Explorer.Queries<TemplateHourQuery>(FakeLogExplorer.TemplateHours), "no hourly counts for an empty range");
+        Assert.IsEmpty(harness.Renderer.Elements(LogPageHarness.RootId).Where(element => element.Classes.Contains("chart")).ToArray(), "no chart");
+    }
+
+    /// <summary>
     /// Creates the count of a template in an hour.
     /// </summary>
     /// <param name="hour">The start of the hour</param>

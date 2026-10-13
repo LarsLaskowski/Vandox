@@ -1173,6 +1173,142 @@ public class SqliteStoreLogExplorerTests
 
     #endregion // AC-22 and AC-23 Query plans
 
+    #region Edge cases
+
+    /// <summary>
+    /// A template that belongs to another source or program than the filter names matches no line, with either strategy.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task FindLogsWithTemplateAndContradictingFilterReturnsEmptyPage()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+
+        await WriteAsync(store,
+                         Line("syslog", "sshd", Sec(1), "disk error on sda", null),
+                         Line("journal", "cron", Sec(2), "disk error on sdb", null));
+
+        var template = await store.FindTemplateAsync("syslog", "sshd", "disk error on sda", TestContext.CancellationToken);
+
+        // Act
+        var matching = await store.FindLogsAsync(Change(Filter(), filter => (filter.TemplateId, filter.Source, filter.Program) = (template!.Id, "syslog", "sshd")), Scan, TestContext.CancellationToken);
+        var otherSource = await store.FindLogsAsync(Change(Filter(), filter => (filter.TemplateId, filter.Source) = (template!.Id, "journal")), Scan, TestContext.CancellationToken);
+        var otherProgram = await store.FindLogsAsync(Change(Filter(), filter => (filter.TemplateId, filter.Program) = (template!.Id, "cron")), Index, TestContext.CancellationToken);
+
+        // Assert
+        Assert.AreSequenceEqual(["disk error on sda"], Messages(matching), "a filter that agrees with the template keeps its line");
+        Assert.IsEmpty(otherSource.Lines, "another source than the template's");
+        Assert.IsNull(otherSource.Next, "no next page for another source");
+        Assert.IsFalse(otherSource.ScanLimitReached, "nothing was scanned for another source");
+        Assert.IsEmpty(otherProgram.Lines, "another program than the template's");
+        Assert.IsNull(otherProgram.Next, "no next page for another program");
+    }
+
+    /// <summary>
+    /// A text that no line contains returns an empty page without a next position.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task FindLogsWithTextOfNoLineReturnsEmptyPage()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+
+        await WriteAsync(store, Line("syslog", "sshd", Sec(1), "disk error", null));
+
+        // Act
+        var scanned = await store.FindLogsAsync(Change(Filter(), filter => filter.Text = "nosuchword"), Scan, TestContext.CancellationToken);
+        var indexed = await store.FindLogsAsync(Change(Filter(), filter => filter.Text = "nosuchword"), Index, TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsEmpty(scanned.Lines, "no line with the word, strategy scan");
+        Assert.IsNull(scanned.Next, "no next page, strategy scan");
+        Assert.IsFalse(scanned.ScanLimitReached, "no scan limit, strategy scan");
+        Assert.IsEmpty(indexed.Lines, "no line with the word, strategy index");
+        Assert.IsNull(indexed.Next, "no next page, strategy index");
+    }
+
+    /// <summary>
+    /// When the words of the user already fill the term limit, the words of the template are not added, but the template still decides which lines are returned.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task FindLogsWithTemplateAndFullTermLimitStillChecksTheTemplate()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+
+        var words = string.Join(' ', Enumerable.Range(1, 16).Select(number => $"term{number:00}"));
+
+        await WriteAsync(store,
+                         Line("syslog", "app", Sec(1), $"{words} failed 5", null),
+                         Line("syslog", "app", Sec(2), $"{words} failed 77", null),
+                         Line("syslog", "app", Sec(3), $"{words} other 5", null));
+
+        var template = await store.FindTemplateAsync("syslog", "app", $"{words} failed 5", TestContext.CancellationToken);
+
+        // Act
+        var scanned = await store.FindLogsAsync(Change(Filter(), filter => (filter.TemplateId, filter.Text) = (template!.Id, words)), Scan, TestContext.CancellationToken);
+        var indexed = await store.FindLogsAsync(Change(Filter(), filter => (filter.TemplateId, filter.Text) = (template!.Id, words)), Index, TestContext.CancellationToken);
+
+        // Assert
+        Assert.AreSequenceEqual([$"{words} failed 5", $"{words} failed 77"], Messages(scanned), "the lines of the template, by scanning");
+        Assert.AreSequenceEqual([$"{words} failed 5", $"{words} failed 77"], Messages(indexed), "the lines of the template, from the index");
+    }
+
+    /// <summary>
+    /// A database error while reading logs becomes a store error with the database error as the cause.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task FindLogsWithBrokenDatabaseThrowsStoreException()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+
+        await WriteAsync(store, Line("syslog", "sshd", Sec(1), "disk error", null));
+
+        var template = await store.FindTemplateAsync("syslog", "sshd", "disk error", TestContext.CancellationToken);
+
+        await ExecuteAsync(Path.Combine(directory.Path, StorageLimits.FileName), "DROP TABLE log_source_hours; DROP TABLE log_template_hours; DROP TABLE log_templates");
+
+        // Act
+        var exception = await Assert.ThrowsExactlyAsync<StoreException>(() => store.FindLogsAsync(Change(Filter(), filter => filter.TemplateId = template!.Id), TestContext.CancellationToken));
+
+        // Assert
+        Assert.StartsWith("store: reading templates: ", exception.Message, "the operation of the failing query is named");
+        Assert.IsInstanceOfType<Microsoft.Data.Sqlite.SqliteException>(exception.InnerException, "the cause");
+    }
+
+    /// <summary>
+    /// A database error inside the search itself becomes a store error that names the reading of logs.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task FindLogsWithBrokenSearchIndexThrowsStoreException()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+
+        await WriteAsync(store, Line("syslog", "sshd", Sec(1), "disk error", null));
+        await ExecuteAsync(Path.Combine(directory.Path, StorageLimits.FileName), "DROP TABLE log_fts");
+
+        // Act
+        var exception = await Assert.ThrowsExactlyAsync<StoreException>(() => store.FindLogsAsync(Change(Filter(), filter => filter.Text = "disk"), TestContext.CancellationToken));
+
+        // Assert
+        Assert.StartsWith("store: reading logs: ", exception.Message, "the operation is named");
+        Assert.IsInstanceOfType<Microsoft.Data.Sqlite.SqliteException>(exception.InnerException, "the cause");
+    }
+
+    #endregion // Edge cases
+
     #region Helpers
 
     /// <summary>
@@ -1802,6 +1938,27 @@ public class SqliteStoreLogExplorerTests
         }
 
         return rows;
+    }
+
+    /// <summary>
+    /// Runs a statement on the database file through its own connection.
+    /// </summary>
+    /// <param name="path">The database file</param>
+    /// <param name="sql">The statement</param>
+    /// <returns>A task that completes when the statement ran</returns>
+    private async Task ExecuteAsync(string path, string sql)
+    {
+        await using var connection = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={path};Pooling=False");
+
+        await connection.OpenAsync(TestContext.CancellationToken);
+
+        using var command = connection.CreateCommand();
+
+#pragma warning disable CA2100
+        command.CommandText = sql;
+#pragma warning restore CA2100
+
+        await command.ExecuteNonQueryAsync(TestContext.CancellationToken);
     }
 
     #endregion // Helpers

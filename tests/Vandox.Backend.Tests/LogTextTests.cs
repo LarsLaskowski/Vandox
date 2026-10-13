@@ -56,6 +56,31 @@ public partial class LogTextTests
     }
 
     /// <summary>
+    /// A lone surrogate, high or low, becomes an escape of the code unit, and a valid pair stays one character.
+    /// </summary>
+    /// <param name="unit">The code unit of the lone surrogate; the test builds it from the number, as the format tool would turn an escape in the source into a character</param>
+    /// <param name="expected">The escape text</param>
+    [TestMethod]
+    [DataRow(0xd800, "\\ud800")]
+    [DataRow(0xdfff, "\\udfff")]
+    public void RunsEscapeLoneSurrogates(int unit, string expected)
+    {
+        // Arrange
+        var text = $"a{(char)unit}b{char.ConvertFromUtf32(0x1f600)}";
+
+        // Act
+        var runs = LogText.Runs(text, LogText.MaxChars);
+
+        // Assert
+        Assert.AreEqual(unit, text[1], "the input holds the lone surrogate");
+        Assert.HasCount(3, runs, "plain, escaped, plain");
+        Assert.AreEqual(expected, runs[1].Text, "the escape of the code unit");
+        Assert.IsTrue(runs[1].Escaped, "the escape is marked");
+        Assert.AreEqual($"b{char.ConvertFromUtf32(0x1f600)}", runs[2].Text, "the valid pair after it stays");
+        Assert.AreEqual(expected, LogText.Escape($"{(char)unit}", LogText.MaxChars), "the string form agrees");
+    }
+
+    /// <summary>
     /// Line feed and tab stay, and markup is left to Razor.
     /// </summary>
     [TestMethod]

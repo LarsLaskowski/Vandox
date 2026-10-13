@@ -524,6 +524,102 @@ public partial class LogsPageTests
     }
 
     /// <summary>
+    /// A warning line gets the class warning and an error line the class severe, a notice gets neither.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task LogsPageMarksSeverityClasses()
+    {
+        // Arrange
+        await using var harness = new LogPageHarness($"{Address}?q=x");
+
+        harness.Explorer.FindPage = Page(null, false, Line(1, Time, "warn line", 4), Line(2, Time.AddSeconds(1), "error line", 3), Line(3, Time.AddSeconds(2), "info line", 6));
+
+        // Act
+        await harness.AddAsync<LogsPage>();
+
+        var cells = harness.Renderer.Elements(LogPageHarness.RootId).Where(element => element.Tag == "td" && element.Text.Trim() is "warning" or "err" or "info").ToArray();
+
+        // Assert
+        Assert.HasCount(3, cells, "one severity cell per line");
+        Assert.Contains("warning", cells[0].Classes, "class of a warning");
+        Assert.DoesNotContain("severe", cells[0].Classes, "a warning is not severe");
+        Assert.Contains("severe", cells[1].Classes, "class of an error");
+        Assert.IsFalse(cells[2].Classes.Contains("warning") || cells[2].Classes.Contains("severe"), "a notice has no severity class");
+    }
+
+    /// <summary>
+    /// Clicking Context on the hit that shows its context hides the context again without asking the store.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task LogsPageHidesTheContextOfAShownHit()
+    {
+        // Arrange
+        var hit = Line(11, Time, "hit one");
+
+        await using var harness = new LogPageHarness($"{Address}?q=hit");
+
+        harness.Explorer.FindPage = Page(null, false, hit);
+        harness.Explorer.ContextResult = new LogContext
+                                         {
+                                             Line = hit,
+                                             Before = [Line(9, Time.AddSeconds(-2), "before-a")],
+                                             After = [Line(20, Time.AddSeconds(1), "after-a")]
+                                         };
+
+        await harness.AddAsync<LogsPage>();
+
+        // Act
+        await harness.Renderer.ClickAsync(harness.Buttons("Context")[0]);
+
+        var shown = harness.Html();
+
+        await harness.Renderer.ClickAsync(harness.Buttons("Context")[0]);
+
+        var hidden = harness.Html();
+
+        // Assert
+        Assert.Contains("before-a", shown, "the context is shown after the first click");
+        Assert.DoesNotContain("before-a", hidden, "the context is hidden after the second click");
+        Assert.DoesNotContain("after-a", hidden, "the lines after the hit are hidden too");
+        Assert.HasCount(1, harness.Explorer.Queries<LogContextQuery>(FakeLogExplorer.LogContext), "hiding asks the store nothing");
+    }
+
+    /// <summary>
+    /// A navigation to another page is not searched, and once the page is disposed the navigation manager no longer reaches it.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task LogsPageDetachesTheLocationHandlerOnDispose()
+    {
+        // Arrange
+        await using var harness = new LogPageHarness($"{Address}?q=one");
+
+        await harness.AddAsync<LogsPage>();
+
+        // Act
+        harness.Navigation.NavigateTo("logs/templates?q=other");
+
+        var otherPage = harness.Explorer.Queries<LogFilter>(FakeLogExplorer.FindLogs).Count;
+
+        harness.Navigation.NavigateTo("logs?q=two#top");
+
+        var thisPage = harness.Explorer.Queries<LogFilter>(FakeLogExplorer.FindLogs).Count;
+
+        await harness.Renderer.DisposeAllAsync();
+
+        harness.Navigation.NavigateTo("logs?q=three");
+
+        var afterDispose = harness.Explorer.Queries<LogFilter>(FakeLogExplorer.FindLogs).Count;
+
+        // Assert
+        Assert.AreEqual(1, otherPage, "another page, even one that starts with the path, is not searched");
+        Assert.AreEqual(2, thisPage, "the address of this page is searched");
+        Assert.AreEqual(2, afterDispose, "after the dispose no handler reaches the page");
+    }
+
+    /// <summary>
     /// Creates a hook that blocks the first search until its token ends.
     /// </summary>
     /// <param name="explorer">The explorer that runs the hook</param>
