@@ -33,5 +33,10 @@ public sealed class ServeHooks
     /// </summary>
     public TimeProvider? Clock { get; set; }
 
+    /// <summary>
+    /// Gets or sets the standard input of <c>hash-password</c>; <see cref="Console.In"/> when <c>null</c>.
+    /// </summary>
+    public TextReader? Input { get; set; }
+
     #endregion // Properties
 }
