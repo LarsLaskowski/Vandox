@@ -105,6 +105,11 @@ analysis (the gate of a `patch` that touches only scripts, workflows or Dockerfi
 Other SonarQube Cloud findings (further rules, duplication, hotspots) have no local equivalent and arrive in
 squad step 11.
 
+Own browser scripts (`src/Vandox.Backend/wwwroot/js/*.js`, no Node build) have no local analyzer: SonarQube
+Cloud's JavaScript rules report on them only in squad step 11, so write them to those rules from the start. The
+one that bit (`javascript:S2486`): a `catch` block that ignores the exception holds exactly one whole-line
+comment and nothing else — a comment before a `return` inside the block is still flagged.
+
 Changed shell scripts (`*.sh`), GitHub workflows (`.github/workflows/*.yml`) and Dockerfiles are checked with
 `shellcheck`, `actionlint` and `hadolint`; the SessionStart hook installs the three as pinned, checksum-verified
 binaries (`.claude/hooks/install-linters.sh`), and the gate reports NOT RUN for one that is missing (a refused
@@ -186,9 +191,10 @@ SonarQube Cloud reads `sonar.coverage.exclusions`, passed as `/d:sonar.coverage.
 `dotnet-sonarscanner begin` step of `.github/workflows/ci.yml` (there is no `sonar-project.properties`: the
 scanner for .NET refuses one; the Go profile reaches it as `sonar.go.coverage.reportPaths=coverage.out`). Today
 it excludes `.squad/**`, `.claude/**` and `src/Vandox.Backend/wwwroot/js/**` (record 0098). A file no unit test
-can cover (`wwwroot/js/**`, a generated file, `main.go` startup glue) is added to that argument, and to
-`COVERAGE_EXCLUDES` where `COVERAGE_PATHSPECS` includes it, with a decision record — never to
-`sonar.exclusions`, which would drop it from the analysis too.
+can cover (`wwwroot/js/**`, a generated file) is added to that argument, and to `COVERAGE_EXCLUDES` where
+`COVERAGE_PATHSPECS` includes it, with a decision record — never to `sonar.exclusions`, which would drop it
+from the analysis too. Process startup wiring is not excluded: a Go `main` and `Program.Main` stay thin and are
+the accepted uncovered lines (`docs/UNIT_TESTS.md`, records 0072 and 0074).
 
 ## Writing code
 
