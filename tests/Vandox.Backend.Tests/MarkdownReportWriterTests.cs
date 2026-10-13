@@ -495,6 +495,59 @@ public class MarkdownReportWriterTests
     }
 
     /// <summary>
+    /// Every reason a rule can be unknown is written with the text of the language, in the row of the rule.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task WriterWritesTheReasonOfEveryUnknownRule()
+    {
+        // Arrange
+        foreach (var text in new[] { ReportText.English, ReportText.German })
+        {
+            var summary = Summary(Undecided(UnknownReason.NoBaseData),
+                                  Unknown(UnknownReason.TooManySnapshots),
+                                  Unknown(UnknownReason.TooManyBoots),
+                                  Unknown(UnknownReason.TooManyObservedRuns));
+            var noPanel = Summary(Undecided(UnknownReason.NoBaseData), Decided(), Decided(), Unknown(UnknownReason.NoPanelMemory));
+
+            // Act
+            var output = await WriteAllAsync(text, summary);
+            var panelOutput = await WriteAllAsync(text, noPanel);
+            var rows = output.Split('\n').Where(line => line.StartsWith('|')).ToList();
+            var panelRows = panelOutput.Split('\n').Where(line => line.StartsWith('|')).ToList();
+
+            // Assert
+            Assert.IsGreaterThan(0, text.ReasonNoBaseData.Length, "the reason text exists");
+            Assert.Contains(text.ReasonNoBaseData, output, "the time of day without an observed hour");
+            AssertRows(rows, text.Backup, text.ReasonTooManySnapshots);
+            AssertRows(rows, text.Boot, text.ReasonTooManyBoots);
+            AssertRows(rows, text.PanelHigh, text.ReasonTooManyObservedRuns);
+            AssertRows(panelRows, text.PanelHigh, text.ReasonNoPanelMemory);
+        }
+    }
+
+    /// <summary>
+    /// An outage with no kept kill lists its victims as unknown.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task WriterListsAnOutageWithoutKeptKillsAsUnknownVictims()
+    {
+        // Arrange
+        var text = ReportText.English;
+        var incident = Outage(_kill, 5, "mariadbd");
+
+        incident.Kills = [];
+
+        // Act
+        var output = await WriteIncidentAsync(text, Stored(1, incident), Activities(Indicator.Yes, Indicator.No, Indicator.Yes));
+
+        // Assert
+        AssertAnyLine(output, text.Victims, text.Unknown);
+        Assert.DoesNotContain("` mariadbd `", output, "no victim is invented");
+    }
+
+    /// <summary>
     /// Tells whether a line is the first row of a table.
     /// </summary>
     /// <param name="lines">The lines</param>
@@ -605,6 +658,20 @@ public class MarkdownReportWriterTests
                    Known = 12,
                    BaseMatching = 2,
                    BaseKnown = 50
+               };
+    }
+
+    /// <summary>
+    /// Creates an unknown result with a reason.
+    /// </summary>
+    /// <param name="reason">The reason</param>
+    /// <returns>The result</returns>
+    private static PatternResult Unknown(UnknownReason reason)
+    {
+        return new PatternResult
+               {
+                   Outcome = PatternOutcome.Unknown,
+                   Reason = reason
                };
     }
 

@@ -46,6 +46,26 @@ public class SnapshotSeriesTests
     }
 
     /// <summary>
+    /// A snapshot earlier than the previous one is refused, an equal time is accepted.
+    /// </summary>
+    [TestMethod]
+    public void SnapshotSeriesRefusesATimeEarlierThanThePreviousOne()
+    {
+        // Arrange
+        var series = new SnapshotSeries();
+
+        series.Add(_start.AddMinutes(5), Usage(("sw-engine", Mib)));
+        series.Add(_start.AddMinutes(5), Usage(("sw-engine", Mib)));
+
+        // Act
+        var exception = Assert.ThrowsExactly<ArgumentException>(() => series.Add(_start.AddMinutes(4), Usage(("sw-engine", Mib))), "an earlier time");
+
+        // Assert
+        Assert.StartsWith("snapshot series: a time is earlier than the previous one", exception.Message, "message");
+        Assert.AreEqual(2, series.Count, "the refused snapshot is not kept");
+    }
+
+    /// <summary>
     /// Without any panel memory the threshold is zero, and with a zero threshold the panel is unknown.
     /// </summary>
     [TestMethod]

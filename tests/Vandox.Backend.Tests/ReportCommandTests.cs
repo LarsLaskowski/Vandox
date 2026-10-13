@@ -1,5 +1,6 @@
 using Microsoft.Data.Sqlite;
 
+using Vandox.Backend.Hosting;
 using Vandox.Core.Model;
 using Vandox.Storage;
 
@@ -140,6 +141,30 @@ public class ReportCommandTests
         // Assert
         Assert.AreEqual(1, code, "exit code");
         Assert.Contains("report interrupted", fixture.Error.ToString(), "the interruption is logged");
+    }
+
+    /// <summary>
+    /// A token that is cancelled after the start was logged logs the interruption, writes no report and exits with 1.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task ReportCommandExitsOneWhenInterruptedDuringRun()
+    {
+        // Arrange
+        using var fixture = new BackendFixture();
+        using var cancelled = new CancellationTokenSource();
+        await using var error = new CancelOnTextWriter(cancelled, "report started");
+
+        await StoreKillAsync(fixture.Storage);
+
+        // Act
+        var code = await BackendApp.RunAsync(["-config", fixture.ConfigPath, "report"], [], fixture.Out, error, new ServeHooks(), cancelled.Token);
+
+        // Assert
+        Assert.AreEqual(1, code, "exit code");
+        Assert.Contains("report started", error.ToString(), "the start was logged");
+        Assert.Contains("report interrupted", error.ToString(), "the interruption is logged");
+        Assert.DoesNotContain("### Outage #", fixture.Out.ToString(), "no outage was written");
     }
 
     /// <summary>

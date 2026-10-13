@@ -369,6 +369,37 @@ public class ForensicsAnalysisTests
     }
 
     /// <summary>
+    /// Lines, boots, snapshots and a second seal after the seal, and incidents, activities and the summary before it, are refused.
+    /// </summary>
+    [TestMethod]
+    public void ForensicsAnalysisRefusesCallsOutOfOrder()
+    {
+        // Arrange
+        var open = new ForensicsAnalysis(_hour);
+        var sealedAnalysis = new ForensicsAnalysis(_hour);
+
+        sealedAnalysis.Seal();
+
+        // Act
+        var addIncident = Assert.ThrowsExactly<InvalidOperationException>(() => open.AddIncident(Outage(_base, 1)), "an incident before the seal");
+        var activities = Assert.ThrowsExactly<InvalidOperationException>(() => open.Activities(Outage(_base, 1)), "activities before the seal");
+        var summarize = Assert.ThrowsExactly<InvalidOperationException>(() => open.Summarize(_now), "the summary before the seal");
+        var line = Assert.ThrowsExactly<InvalidOperationException>(() => sealedAnalysis.AddLogLine(_base, "syslog"), "a line after the seal");
+        var boot = Assert.ThrowsExactly<InvalidOperationException>(() => sealedAnalysis.AddBoot(_base), "a boot after the seal");
+        var snapshot = Assert.ThrowsExactly<InvalidOperationException>(() => sealedAnalysis.AddProcessSnapshot(_base, Snapshot(("mariadbd", Mib))), "a snapshot after the seal");
+        var seal = Assert.ThrowsExactly<InvalidOperationException>(() => sealedAnalysis.Seal(), "a second seal");
+
+        // Assert
+        Assert.AreEqual("forensics analysis: not sealed yet", addIncident.Message, "message of an incident before the seal");
+        Assert.AreEqual("forensics analysis: not sealed yet", activities.Message, "message of activities before the seal");
+        Assert.AreEqual("forensics analysis: not sealed yet", summarize.Message, "message of the summary before the seal");
+        Assert.AreEqual("forensics analysis: already sealed", line.Message, "message of a line after the seal");
+        Assert.AreEqual("forensics analysis: already sealed", boot.Message, "message of a boot after the seal");
+        Assert.AreEqual("forensics analysis: already sealed", snapshot.Message, "message of a snapshot after the seal");
+        Assert.AreEqual("forensics analysis: already sealed", seal.Message, "message of a second seal");
+    }
+
+    /// <summary>
     /// Adds 72 observed hours (a log line at minute 30 of each), the snapshots at minute 20 of the hours that have one, the boots, and seals the analysis.
     /// </summary>
     /// <param name="analysis">The analysis</param>

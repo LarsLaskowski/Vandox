@@ -2,6 +2,7 @@ using Microsoft.Extensions.Time.Testing;
 
 using Vandox.Backend.Reports;
 using Vandox.Core.Incidents;
+using Vandox.Core.Model;
 using Vandox.Core.Signatures;
 using Vandox.Storage;
 
@@ -111,6 +112,60 @@ public class ForensicsReporterTests
         Assert.AreEqual(incidents[0].End, queries[5].From, "the second pass pages the same way");
         Assert.AreEqual(incidents[2].End, queries[7].From, "the second pass ends the same way");
         Assert.IsTrue(queries.All(query => query.To == queries[0].To), "the same end of the range");
+    }
+
+    /// <summary>
+    /// No incident query asks for more than one incident, however many incidents are stored.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task ForensicsReporterKeepsOneIncidentAtATime()
+    {
+        // Arrange
+        const int count = 12;
+
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+        var recording = new RecordingIncidentStore(store);
+        var incidents = Enumerable.Range(0, count).Select(day => Outage(IncidentSamples.Base.AddDays(day), "mariadbd")).ToArray();
+
+        await SaveAsync(store, incidents);
+
+        // Act
+        var (_, result) = await RunAsync(store, recording);
+
+        var queries = recording.Queries;
+
+        // Assert
+        Assert.AreEqual(count, result.IncidentsListed, "incidents listed");
+        Assert.HasCount(2 * (count + 1), queries, "each pass asks once per incident and once for the empty page");
+        Assert.AreEqual(1, queries.Max(query => query.Limit), "no query asks for more than one incident");
+        Assert.AreEqual(1, queries.Min(query => query.Limit), "no query is unbounded");
+    }
+
+    /// <summary>
+    /// An incident whose window ends at the latest storable time is the last one, and no further page is asked for.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task ForensicsReporterStopsAtAnIncidentEndingAtTheLatestStorableTime()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+        var incident = Outage(IncidentSamples.Base, "mariadbd");
+
+        incident.End = StorableTime.Max;
+
+        var scripted = new ScriptedIncidentStore([[Stored(1, incident)]], true);
+
+        // Act
+        var (output, result) = await RunAsync(store, scripted);
+
+        // Assert
+        Assert.AreEqual(1, result.IncidentsListed, "the incident is listed once");
+        Assert.AreEqual(2, scripted.Calls, "one query for each pass");
+        Assert.Contains("### Outage #1 at 2026-10-02 04:59 UTC", output, "the outage section");
     }
 
     /// <summary>
