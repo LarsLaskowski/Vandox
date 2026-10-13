@@ -13,7 +13,7 @@ public class SnapshotSeriesTests
 
     private const ulong Mib = 1048576;
 
-    private static readonly DateTimeOffset Start = new(2026, 10, 2, 0, 0, 0, TimeSpan.Zero);
+    private static readonly DateTimeOffset _start = new(2026, 10, 2, 0, 0, 0, TimeSpan.Zero);
 
     #endregion // Constants
 
@@ -31,10 +31,10 @@ public class SnapshotSeriesTests
 
         for (var index = 10; index >= 1; index--)
         {
-            ten.Add(Start.AddMinutes(10 - index), Usage(("sw-engine", (ulong)index * 10 * Mib), ("mariadbd", 5 * Mib)));
+            ten.Add(_start.AddMinutes(10 - index), Usage(("sw-engine", (ulong)index * 10 * Mib), ("mariadbd", 5 * Mib)));
         }
 
-        one.Add(Start, Usage(("sw-engi", 7 * Mib)));
+        one.Add(_start, Usage(("sw-engi", 7 * Mib)));
 
         // Act
         var tenThreshold = ten.PanelThresholdBytes();
@@ -55,13 +55,13 @@ public class SnapshotSeriesTests
         var empty = new SnapshotSeries();
         var withoutPanel = new SnapshotSeries();
 
-        withoutPanel.Add(Start, Usage(("mariadbd", 100 * Mib)));
-        withoutPanel.Add(Start.AddMinutes(1), Usage(("pzstd", 100 * Mib)));
+        withoutPanel.Add(_start, Usage(("mariadbd", 100 * Mib)));
+        withoutPanel.Add(_start.AddMinutes(1), Usage(("pzstd", 100 * Mib)));
 
         // Act
         var emptyThreshold = empty.PanelThresholdBytes();
         var threshold = withoutPanel.PanelThresholdBytes();
-        var high = withoutPanel.PanelHigh(Start, Start.AddHours(1), threshold);
+        var high = withoutPanel.PanelHigh(_start, _start.AddHours(1), threshold);
 
         // Assert
         Assert.AreEqual(0UL, emptyThreshold, "no snapshot");
@@ -81,13 +81,13 @@ public class SnapshotSeriesTests
         // Act
         for (var index = 0; index < 3; index++)
         {
-            series.Add(Start.AddMinutes(index), Usage(("sw-engine", Mib)));
+            series.Add(_start.AddMinutes(index), Usage(("sw-engine", Mib)));
         }
 
         var atCapacity = series.Truncated;
 
-        series.Add(Start.AddMinutes(3), Usage(("sw-engine", Mib)));
-        series.Add(Start.AddMinutes(4), Usage(("sw-engine", Mib)));
+        series.Add(_start.AddMinutes(3), Usage(("sw-engine", Mib)));
+        series.Add(_start.AddMinutes(4), Usage(("sw-engine", Mib)));
 
         // Assert
         Assert.IsFalse(atCapacity, "a series at its capacity is not truncated");
@@ -104,16 +104,16 @@ public class SnapshotSeriesTests
         // Arrange
         var series = new SnapshotSeries();
 
-        series.Add(Start.AddMinutes(10), Usage(("mariadbd", Mib)));
-        series.Add(Start.AddMinutes(20), Usage(("mariadbd", Mib), ("pzstd", Mib)));
-        series.Add(Start.AddMinutes(40), Usage(("mariadbd", Mib)));
+        series.Add(_start.AddMinutes(10), Usage(("mariadbd", Mib)));
+        series.Add(_start.AddMinutes(20), Usage(("mariadbd", Mib), ("pzstd", Mib)));
+        series.Add(_start.AddMinutes(40), Usage(("mariadbd", Mib)));
 
         // Act and Assert
-        Assert.AreEqual(Indicator.Unknown, series.Backup(Start.AddMinutes(41), Start.AddMinutes(60)), "no snapshot in the period");
-        Assert.AreEqual(Indicator.Yes, series.Backup(Start.AddMinutes(15), Start.AddMinutes(25)), "a snapshot with pzstd");
-        Assert.AreEqual(Indicator.No, series.Backup(Start.AddMinutes(30), Start.AddMinutes(45)), "snapshots without pzstd");
-        Assert.AreEqual(Indicator.Yes, series.Backup(Start.AddMinutes(20), Start.AddMinutes(21)), "the start is inclusive");
-        Assert.AreEqual(Indicator.Unknown, series.Backup(Start.AddMinutes(21), Start.AddMinutes(40)), "the end is exclusive");
+        Assert.AreEqual(Indicator.Unknown, series.Backup(_start.AddMinutes(41), _start.AddMinutes(60)), "no snapshot in the period");
+        Assert.AreEqual(Indicator.Yes, series.Backup(_start.AddMinutes(15), _start.AddMinutes(25)), "a snapshot with pzstd");
+        Assert.AreEqual(Indicator.No, series.Backup(_start.AddMinutes(30), _start.AddMinutes(45)), "snapshots without pzstd");
+        Assert.AreEqual(Indicator.Yes, series.Backup(_start.AddMinutes(20), _start.AddMinutes(21)), "the start is inclusive");
+        Assert.AreEqual(Indicator.Unknown, series.Backup(_start.AddMinutes(21), _start.AddMinutes(40)), "the end is exclusive");
     }
 
     /// <summary>
@@ -125,16 +125,16 @@ public class SnapshotSeriesTests
         // Arrange
         var series = new SnapshotSeries();
 
-        series.Add(Start.AddMinutes(10), Usage(("sw-engine", 50 * Mib)));
-        series.Add(Start.AddMinutes(20), Usage(("sw-engine", 60 * Mib), ("sw-engine-fpm", 40 * Mib)));
-        series.Add(Start.AddMinutes(40), Usage(("mariadbd", Mib)));
+        series.Add(_start.AddMinutes(10), Usage(("sw-engine", 50 * Mib)));
+        series.Add(_start.AddMinutes(20), Usage(("sw-engine", 60 * Mib), ("sw-engine-fpm", 40 * Mib)));
+        series.Add(_start.AddMinutes(40), Usage(("mariadbd", Mib)));
 
         // Act and Assert
-        Assert.AreEqual(Indicator.Yes, series.PanelHigh(Start.AddMinutes(15), Start.AddMinutes(25), 100 * Mib), "the sum of 100 MiB reaches the threshold");
-        Assert.AreEqual(Indicator.No, series.PanelHigh(Start.AddMinutes(5), Start.AddMinutes(15), 100 * Mib), "50 MiB is below the threshold");
-        Assert.AreEqual(Indicator.No, series.PanelHigh(Start.AddMinutes(35), Start.AddMinutes(45), 100 * Mib), "a snapshot without panel programs");
-        Assert.AreEqual(Indicator.Unknown, series.PanelHigh(Start.AddMinutes(45), Start.AddMinutes(55), 100 * Mib), "no snapshot in the period");
-        Assert.AreEqual(Indicator.Unknown, series.PanelHigh(Start.AddMinutes(15), Start.AddMinutes(25), 0), "no threshold");
+        Assert.AreEqual(Indicator.Yes, series.PanelHigh(_start.AddMinutes(15), _start.AddMinutes(25), 100 * Mib), "the sum of 100 MiB reaches the threshold");
+        Assert.AreEqual(Indicator.No, series.PanelHigh(_start.AddMinutes(5), _start.AddMinutes(15), 100 * Mib), "50 MiB is below the threshold");
+        Assert.AreEqual(Indicator.No, series.PanelHigh(_start.AddMinutes(35), _start.AddMinutes(45), 100 * Mib), "a snapshot without panel programs");
+        Assert.AreEqual(Indicator.Unknown, series.PanelHigh(_start.AddMinutes(45), _start.AddMinutes(55), 100 * Mib), "no snapshot in the period");
+        Assert.AreEqual(Indicator.Unknown, series.PanelHigh(_start.AddMinutes(15), _start.AddMinutes(25), 0), "no threshold");
     }
 
     /// <summary>
@@ -144,7 +144,14 @@ public class SnapshotSeriesTests
     /// <returns>The programs</returns>
     private static Dictionary<string, ProgramUsage> Usage(params (string Program, ulong Rss)[] programs)
     {
-        return programs.ToDictionary(entry => entry.Program, entry => new ProgramUsage { Program = entry.Program, RssBytes = entry.Rss, Count = 1 }, StringComparer.Ordinal);
+        return programs.ToDictionary(entry => entry.Program,
+                                     entry => new ProgramUsage
+                                              {
+                                                  Program = entry.Program,
+                                                  RssBytes = entry.Rss,
+                                                  Count = 1
+                                              },
+                                     StringComparer.Ordinal);
     }
 
     #endregion // Methods

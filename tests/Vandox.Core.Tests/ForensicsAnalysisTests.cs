@@ -14,11 +14,11 @@ public class ForensicsAnalysisTests
 
     private const ulong Mib = 1048576;
 
-    private static readonly DateTimeOffset Base = new(2026, 9, 1, 0, 0, 0, TimeSpan.Zero);
+    private static readonly DateTimeOffset _base = new(2026, 9, 1, 0, 0, 0, TimeSpan.Zero);
 
-    private static readonly DateTimeOffset Now = new(2026, 10, 3, 12, 0, 0, TimeSpan.Zero);
+    private static readonly DateTimeOffset _now = new(2026, 10, 3, 12, 0, 0, TimeSpan.Zero);
 
-    private static readonly TimeSpan Hour = TimeSpan.FromHours(1);
+    private static readonly TimeSpan _hour = TimeSpan.FromHours(1);
 
     #endregion // Constants
 
@@ -31,25 +31,25 @@ public class ForensicsAnalysisTests
     public void ForensicsAnalysisObservesOnlySystemLogSources()
     {
         // Arrange
-        var analysis = new ForensicsAnalysis(Hour);
+        var analysis = new ForensicsAnalysis(_hour);
 
         // Act
-        analysis.AddLogLine(Base.AddMinutes(10), "journal");
-        analysis.AddLogLine(Base.AddHours(1).AddMinutes(10), "syslog");
-        analysis.AddLogLine(Base.AddHours(2).AddMinutes(10), "nginx");
-        analysis.AddLogLine(Base.AddHours(3).AddMinutes(10), "mariadb");
+        analysis.AddLogLine(_base.AddMinutes(10), "journal");
+        analysis.AddLogLine(_base.AddHours(1).AddMinutes(10), "syslog");
+        analysis.AddLogLine(_base.AddHours(2).AddMinutes(10), "nginx");
+        analysis.AddLogLine(_base.AddHours(3).AddMinutes(10), "mariadb");
         analysis.Seal();
 
-        var summary = analysis.Summarize(Now);
+        var summary = analysis.Summarize(_now);
 
         // Assert
         Assert.AreSequenceEqual(["journal", "syslog"], ForensicsAnalysis.SystemLogSources, "the sources of the system log");
         Assert.AreEqual(2, summary.ObservedHours, "only the hours of the journal and the syslog line");
         Assert.AreEqual(4, summary.LogLines, "every line is counted");
-        Assert.AreEqual(Base.AddMinutes(10), summary.FirstLogLineAt, "first line");
-        Assert.AreEqual(Base.AddHours(3).AddMinutes(10), summary.LastLogLineAt, "last line");
-        Assert.AreEqual(Now, summary.GeneratedAt, "generation time");
-        Assert.AreEqual(Hour, summary.Lookback, "lookback");
+        Assert.AreEqual(_base.AddMinutes(10), summary.FirstLogLineAt, "first line");
+        Assert.AreEqual(_base.AddHours(3).AddMinutes(10), summary.LastLogLineAt, "last line");
+        Assert.AreEqual(_now, summary.GeneratedAt, "generation time");
+        Assert.AreEqual(_hour, summary.Lookback, "lookback");
     }
 
     /// <summary>
@@ -59,8 +59,8 @@ public class ForensicsAnalysisTests
     public void ForensicsAnalysisDetectsTimeOfDayCluster()
     {
         // Arrange
-        var analysis = Prepared(new ForensicsAnalysis(Hour), _ => null, []);
-        var times = new[] { Base.AddHours(2).AddMinutes(10), Base.AddDays(1).AddHours(2).AddMinutes(20), Base.AddDays(2).AddHours(2).AddMinutes(40) };
+        var analysis = Prepared(new ForensicsAnalysis(_hour), _ => null, []);
+        var times = new[] { _base.AddHours(2).AddMinutes(10), _base.AddDays(1).AddHours(2).AddMinutes(20), _base.AddDays(2).AddHours(2).AddMinutes(40) };
 
         // Act
         var summary = Summarized(analysis, times, 2, 1, 4);
@@ -96,8 +96,8 @@ public class ForensicsAnalysisTests
     public void ForensicsAnalysisDoesNotDetectSpreadOutages()
     {
         // Arrange
-        var analysis = Prepared(new ForensicsAnalysis(Hour), _ => null, []);
-        var times = new[] { Base.AddHours(2).AddMinutes(10), Base.AddDays(1).AddHours(9).AddMinutes(20), Base.AddDays(2).AddHours(17).AddMinutes(40) };
+        var analysis = Prepared(new ForensicsAnalysis(_hour), _ => null, []);
+        var times = new[] { _base.AddHours(2).AddMinutes(10), _base.AddDays(1).AddHours(9).AddMinutes(20), _base.AddDays(2).AddHours(17).AddMinutes(40) };
 
         // Act
         var summary = Summarized(analysis, times, 1, 1, 1);
@@ -114,8 +114,8 @@ public class ForensicsAnalysisTests
     public void ForensicsAnalysisTimeOfDayIsUnknownWithTwoOutages()
     {
         // Arrange
-        var analysis = Prepared(new ForensicsAnalysis(Hour), _ => null, []);
-        var times = new[] { Base.AddHours(2).AddMinutes(10), Base.AddDays(1).AddHours(2).AddMinutes(20) };
+        var analysis = Prepared(new ForensicsAnalysis(_hour), _ => null, []);
+        var times = new[] { _base.AddHours(2).AddMinutes(10), _base.AddDays(1).AddHours(2).AddMinutes(20) };
 
         // Act
         var summary = Summarized(analysis, times, 1, 1);
@@ -133,7 +133,7 @@ public class ForensicsAnalysisTests
     public void ForensicsAnalysisBinsTimeOfDayInUtc()
     {
         // Arrange
-        var analysis = Prepared(new ForensicsAnalysis(Hour), _ => null, []);
+        var analysis = Prepared(new ForensicsAnalysis(_hour), _ => null, []);
         var offset = TimeSpan.FromHours(2);
         var times = new[] { new DateTimeOffset(2026, 9, 1, 4, 10, 0, offset), new DateTimeOffset(2026, 9, 2, 4, 20, 0, offset), new DateTimeOffset(2026, 9, 3, 4, 40, 0, offset) };
 
@@ -153,9 +153,9 @@ public class ForensicsAnalysisTests
     {
         // Arrange
         var analysis = new ForensicsAnalysis(TimeSpan.FromMinutes(5));
-        var yes = Base.AddHours(1).AddMinutes(10);
-        var no = Base.AddHours(2).AddMinutes(10);
-        var unknown = Base.AddHours(3).AddMinutes(10);
+        var yes = _base.AddHours(1).AddMinutes(10);
+        var no = _base.AddHours(2).AddMinutes(10);
+        var unknown = _base.AddHours(3).AddMinutes(10);
 
         analysis.AddProcessSnapshot(yes.AddMinutes(-3), Snapshot(("web", Mib), ("pzstd", Mib)));
         analysis.AddProcessSnapshot(no.AddMinutes(-3), Snapshot(("web", Mib)));
@@ -180,14 +180,14 @@ public class ForensicsAnalysisTests
     {
         // Arrange
         var analysis = new ForensicsAnalysis(TimeSpan.FromMinutes(5));
-        var yes = Base.AddHours(1).AddMinutes(10);
-        var no = Base.AddHours(2).AddMinutes(10);
-        var unobserved = Base.AddHours(7).AddMinutes(10);
-        var straddling = Base.AddHours(6).AddMinutes(2);
+        var yes = _base.AddHours(1).AddMinutes(10);
+        var no = _base.AddHours(2).AddMinutes(10);
+        var unobserved = _base.AddHours(7).AddMinutes(10);
+        var straddling = _base.AddHours(6).AddMinutes(2);
 
         for (var hour = 0; hour <= 5; hour++)
         {
-            analysis.AddLogLine(Base.AddHours(hour).AddMinutes(30), "syslog");
+            analysis.AddLogLine(_base.AddHours(hour).AddMinutes(30), "syslog");
         }
 
         analysis.AddBoot(yes.AddMinutes(-4));
@@ -221,18 +221,18 @@ public class ForensicsAnalysisTests
 
         for (var rank = 1; rank <= 10; rank++)
         {
-            analysis.AddProcessSnapshot(Base.AddMinutes(10 * rank), Snapshot(("sw-engine", (ulong)rank * 10 * Mib), ("mariadbd", Mib)));
+            analysis.AddProcessSnapshot(_base.AddMinutes(10 * rank), Snapshot(("sw-engine", (ulong)rank * 10 * Mib), ("mariadbd", Mib)));
         }
 
-        withoutPanel.AddProcessSnapshot(Base.AddMinutes(10), Snapshot(("mariadbd", Mib)));
+        withoutPanel.AddProcessSnapshot(_base.AddMinutes(10), Snapshot(("mariadbd", Mib)));
         analysis.Seal();
         withoutPanel.Seal();
 
         // Act
-        var high = analysis.Activities(Outage(Base.AddMinutes(92)));
-        var low = analysis.Activities(Outage(Base.AddMinutes(82)));
-        var none = analysis.Activities(Outage(Base.AddMinutes(107)));
-        var noThreshold = withoutPanel.Activities(Outage(Base.AddMinutes(12)));
+        var high = analysis.Activities(Outage(_base.AddMinutes(92)));
+        var low = analysis.Activities(Outage(_base.AddMinutes(82)));
+        var none = analysis.Activities(Outage(_base.AddMinutes(107)));
+        var noThreshold = withoutPanel.Activities(Outage(_base.AddMinutes(12)));
 
         // Assert
         Assert.AreEqual(Indicator.Yes, high.PanelHigh, "90 MiB reaches the threshold of 90 MiB");
@@ -248,7 +248,7 @@ public class ForensicsAnalysisTests
     public void ForensicsAnalysisDetectsBackupCorrelation()
     {
         // Arrange
-        var analysis = Prepared(new ForensicsAnalysis(Hour), hour => hour % 24 == 2 ? Snapshot(("web", Mib), ("pzstd", Mib)) : Snapshot(("web", Mib)), []);
+        var analysis = Prepared(new ForensicsAnalysis(_hour), hour => hour % 24 == 2 ? Snapshot(("web", Mib), ("pzstd", Mib)) : Snapshot(("web", Mib)), []);
 
         // Act
         var summary = Summarized(analysis, DailyAt(2, 50), 1, 1, 1);
@@ -268,8 +268,8 @@ public class ForensicsAnalysisTests
     public void ForensicsAnalysisCountsMissingSnapshotsAsUnknown()
     {
         // Arrange
-        var none = Prepared(new ForensicsAnalysis(Hour), _ => null, []);
-        var some = Prepared(new ForensicsAnalysis(Hour), hour => hour is 2 or 26 ? Snapshot(("web", Mib)) : null, []);
+        var none = Prepared(new ForensicsAnalysis(_hour), _ => null, []);
+        var some = Prepared(new ForensicsAnalysis(_hour), hour => hour is 2 or 26 ? Snapshot(("web", Mib)) : null, []);
 
         // Act
         var withoutSnapshots = Summarized(none, DailyAt(2, 50), 1, 1, 1);
@@ -292,7 +292,7 @@ public class ForensicsAnalysisTests
     public void ForensicsAnalysisDetectsBootCorrelation()
     {
         // Arrange
-        var analysis = Prepared(new ForensicsAnalysis(Hour), _ => null, DailyAt(2, 10));
+        var analysis = Prepared(new ForensicsAnalysis(_hour), _ => null, DailyAt(2, 10));
 
         // Act
         var summary = Summarized(analysis, DailyAt(2, 50), 1, 1, 1);
@@ -312,7 +312,7 @@ public class ForensicsAnalysisTests
     public void ForensicsAnalysisDetectsPanelCorrelation()
     {
         // Arrange
-        var analysis = Prepared(new ForensicsAnalysis(Hour), hour => Snapshot(("sw-engine", hour % 24 == 2 ? 1000 * Mib : (ulong)(hour + 1) * Mib)), []);
+        var analysis = Prepared(new ForensicsAnalysis(_hour), hour => Snapshot(("sw-engine", hour % 24 == 2 ? 1000 * Mib : (ulong)(hour + 1) * Mib)), []);
 
         // Act
         var summary = Summarized(analysis, DailyAt(2, 50), 1, 1, 1);
@@ -332,20 +332,20 @@ public class ForensicsAnalysisTests
     public void ForensicsAnalysisMarksActivitiesUnknownOverCaps()
     {
         // Arrange
-        var boots = new ForensicsAnalysis(Hour, ReportLimits.MaxSnapshots, 2, ReportLimits.MaxObservedRuns, ReportLimits.MaxPrograms);
-        var snapshots = new ForensicsAnalysis(Hour, 2, ReportLimits.MaxBoots, ReportLimits.MaxObservedRuns, ReportLimits.MaxPrograms);
-        var runs = new ForensicsAnalysis(Hour, ReportLimits.MaxSnapshots, ReportLimits.MaxBoots, 2, ReportLimits.MaxPrograms);
+        var boots = new ForensicsAnalysis(_hour, ReportLimits.MaxSnapshots, 2, ReportLimits.MaxObservedRuns, ReportLimits.MaxPrograms);
+        var snapshots = new ForensicsAnalysis(_hour, 2, ReportLimits.MaxBoots, ReportLimits.MaxObservedRuns, ReportLimits.MaxPrograms);
+        var runs = new ForensicsAnalysis(_hour, ReportLimits.MaxSnapshots, ReportLimits.MaxBoots, 2, ReportLimits.MaxPrograms);
 
         Prepared(boots, _ => null, DailyAt(2, 10));
         Prepared(snapshots, hour => Snapshot(("sw-engine", (ulong)(hour + 1) * Mib)), []);
 
         foreach (var hour in new[] { 0, 2, 4 })
         {
-            runs.AddLogLine(Base.AddHours(hour).AddMinutes(30), "syslog");
-            runs.AddProcessSnapshot(Base.AddHours(hour).AddMinutes(20), Snapshot(("sw-engine", (ulong)(hour + 1) * Mib), ("pzstd", Mib)));
+            runs.AddLogLine(_base.AddHours(hour).AddMinutes(30), "syslog");
+            runs.AddProcessSnapshot(_base.AddHours(hour).AddMinutes(20), Snapshot(("sw-engine", (ulong)(hour + 1) * Mib), ("pzstd", Mib)));
         }
 
-        runs.AddBoot(Base.AddHours(2).AddMinutes(10));
+        runs.AddBoot(_base.AddHours(2).AddMinutes(10));
         runs.Seal();
 
         // Act
@@ -379,13 +379,13 @@ public class ForensicsAnalysisTests
     {
         for (var hour = 0; hour < 72; hour++)
         {
-            analysis.AddLogLine(Base.AddHours(hour).AddMinutes(30), "syslog");
+            analysis.AddLogLine(_base.AddHours(hour).AddMinutes(30), "syslog");
 
             var snapshot = snapshotOf(hour);
 
             if (snapshot is not null)
             {
-                analysis.AddProcessSnapshot(Base.AddHours(hour).AddMinutes(20), snapshot);
+                analysis.AddProcessSnapshot(_base.AddHours(hour).AddMinutes(20), snapshot);
             }
         }
 
@@ -406,14 +406,14 @@ public class ForensicsAnalysisTests
     /// <param name="times">The times of the first kills</param>
     /// <param name="kills">The kill counts of the outages, one for each time</param>
     /// <returns>The summary</returns>
-    private static ForensicsSummary Summarized(ForensicsAnalysis analysis, IReadOnlyList<DateTimeOffset> times, params long[] kills)
+    private static ForensicsSummary Summarized(ForensicsAnalysis analysis, DateTimeOffset[] times, params long[] kills)
     {
-        for (var index = 0; index < times.Count; index++)
+        for (var index = 0; index < times.Length; index++)
         {
             analysis.AddIncident(Outage(times[index], kills[index]));
         }
 
-        return analysis.Summarize(Now);
+        return analysis.Summarize(_now);
     }
 
     /// <summary>
@@ -424,7 +424,7 @@ public class ForensicsAnalysisTests
     /// <returns>The three times</returns>
     private static DateTimeOffset[] DailyAt(int hour, int minute)
     {
-        return [Base.AddHours(hour).AddMinutes(minute), Base.AddDays(1).AddHours(hour).AddMinutes(minute), Base.AddDays(2).AddHours(hour).AddMinutes(minute)];
+        return [_base.AddHours(hour).AddMinutes(minute), _base.AddDays(1).AddHours(hour).AddMinutes(minute), _base.AddDays(2).AddHours(hour).AddMinutes(minute)];
     }
 
     /// <summary>
@@ -437,7 +437,7 @@ public class ForensicsAnalysisTests
     {
         return new Incident
                {
-                   Start = firstKillAt - Hour,
+                   Start = firstKillAt - _hour,
                    End = firstKillAt + TimeSpan.FromMinutes(30),
                    FirstKillAt = firstKillAt,
                    LastKillAt = firstKillAt,

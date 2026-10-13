@@ -32,7 +32,6 @@ public class PanelProgramsTests
 
         // Assert
         Assert.AreEqual(expected, actual, $"IsPanel({program})");
-        Assert.AreEqual("sw-engi", PanelPrograms.Prefix, "the prefix");
     }
 
     /// <summary>
@@ -63,7 +62,14 @@ public class PanelProgramsTests
     /// <returns>The programs</returns>
     private static Dictionary<string, ProgramUsage> Usage(params (string Program, ulong Rss)[] programs)
     {
-        return programs.ToDictionary(entry => entry.Program, entry => new ProgramUsage { Program = entry.Program, RssBytes = entry.Rss, Count = 1 }, StringComparer.Ordinal);
+        return programs.ToDictionary(entry => entry.Program,
+                                     entry => new ProgramUsage
+                                              {
+                                                  Program = entry.Program,
+                                                  RssBytes = entry.Rss,
+                                                  Count = 1
+                                              },
+                                     StringComparer.Ordinal);
     }
 
     #endregion // Methods

@@ -10,7 +10,7 @@ public class ObservedHoursTests
 {
     #region Constants
 
-    private static readonly DateTimeOffset Day = new(2026, 10, 2, 0, 0, 0, TimeSpan.Zero);
+    private static readonly DateTimeOffset _day = new(2026, 10, 2, 0, 0, 0, TimeSpan.Zero);
 
     #endregion // Constants
 
@@ -26,10 +26,10 @@ public class ObservedHoursTests
         var hours = new ObservedHours();
 
         // Act
-        hours.Add(Day.AddHours(2).AddMinutes(5));
-        hours.Add(Day.AddHours(2).AddMinutes(50));
-        hours.Add(Day.AddHours(3));
-        hours.Add(Day.AddHours(26).AddMinutes(1));
+        hours.Add(_day.AddHours(2).AddMinutes(5));
+        hours.Add(_day.AddHours(2).AddMinutes(50));
+        hours.Add(_day.AddHours(3));
+        hours.Add(_day.AddHours(26).AddMinutes(1));
         hours.Add(new DateTimeOffset(2026, 10, 3, 6, 30, 0, TimeSpan.FromHours(2)));
 
         // Assert
@@ -76,18 +76,18 @@ public class ObservedHoursTests
         // Arrange
         var hours = new ObservedHours();
 
-        hours.Add(Day.AddHours(10).AddMinutes(30));
-        hours.Add(Day.AddHours(11).AddMinutes(10));
-        hours.Add(Day.AddHours(13).AddMinutes(10));
+        hours.Add(_day.AddHours(10).AddMinutes(30));
+        hours.Add(_day.AddHours(11).AddMinutes(10));
+        hours.Add(_day.AddHours(13).AddMinutes(10));
 
         // Act and Assert
-        Assert.IsTrue(hours.Covers(Day.AddHours(10).AddMinutes(15), Day.AddHours(10).AddMinutes(45)), "inside one observed hour");
-        Assert.IsTrue(hours.Covers(Day.AddHours(10).AddMinutes(15), Day.AddHours(12)), "two observed hours, the end is exclusive");
-        Assert.IsFalse(hours.Covers(Day.AddHours(10).AddMinutes(15), Day.AddHours(12).AddTicks(1)), "the hour 12 overlaps and is not observed");
-        Assert.IsFalse(hours.Covers(Day.AddHours(9).AddMinutes(59), Day.AddHours(10).AddMinutes(30)), "the hour 9 is not observed");
-        Assert.IsFalse(hours.Covers(Day.AddHours(11), Day.AddHours(14)), "a gap in the middle");
-        Assert.AreSequenceEqual([Day.AddHours(11), Day.AddHours(12), Day.AddHours(14)], hours.Ends().ToList(), "the end of every observed hour, ascending");
-        Assert.ThrowsExactly<ArgumentException>(() => hours.Covers(Day.AddHours(10), Day.AddHours(10)), "an empty period is refused");
+        Assert.IsTrue(hours.Covers(_day.AddHours(10).AddMinutes(15), _day.AddHours(10).AddMinutes(45)), "inside one observed hour");
+        Assert.IsTrue(hours.Covers(_day.AddHours(10).AddMinutes(15), _day.AddHours(12)), "two observed hours, the end is exclusive");
+        Assert.IsFalse(hours.Covers(_day.AddHours(10).AddMinutes(15), _day.AddHours(12).AddTicks(1)), "the hour 12 overlaps and is not observed");
+        Assert.IsFalse(hours.Covers(_day.AddHours(9).AddMinutes(59), _day.AddHours(10).AddMinutes(30)), "the hour 9 is not observed");
+        Assert.IsFalse(hours.Covers(_day.AddHours(11), _day.AddHours(14)), "a gap in the middle");
+        Assert.AreSequenceEqual([_day.AddHours(11), _day.AddHours(12), _day.AddHours(14)], hours.Ends().ToList(), "the end of every observed hour, ascending");
+        Assert.ThrowsExactly<ArgumentException>(() => hours.Covers(_day.AddHours(10), _day.AddHours(10)), "an empty period is refused");
     }
 
     /// <summary>
@@ -100,18 +100,19 @@ public class ObservedHoursTests
         var hours = new ObservedHours(2);
 
         // Act
-        hours.Add(Day.AddHours(0).AddMinutes(10));
-        hours.Add(Day.AddHours(1).AddMinutes(10));
-        hours.Add(Day.AddHours(3).AddMinutes(10));
+        hours.Add(_day.AddHours(0).AddMinutes(10));
+        hours.Add(_day.AddHours(1).AddMinutes(10));
+        hours.Add(_day.AddHours(3).AddMinutes(10));
+
         var beforeThird = hours.Truncated;
 
-        hours.Add(Day.AddHours(5).AddMinutes(10));
-        hours.Add(Day.AddHours(7).AddMinutes(10));
+        hours.Add(_day.AddHours(5).AddMinutes(10));
+        hours.Add(_day.AddHours(7).AddMinutes(10));
 
         // Assert
         Assert.IsFalse(beforeThird, "two runs fit");
         Assert.IsTrue(hours.Truncated, "a third run does not");
-        Assert.AreSequenceEqual([Day.AddHours(1), Day.AddHours(2), Day.AddHours(4)], hours.Ends().ToList(), "only the hours of the two kept runs");
+        Assert.AreSequenceEqual([_day.AddHours(1), _day.AddHours(2), _day.AddHours(4)], hours.Ends().ToList(), "only the hours of the two kept runs");
     }
 
     /// <summary>
@@ -123,11 +124,11 @@ public class ObservedHoursTests
         // Arrange
         var hours = new ObservedHours();
 
-        hours.Add(Day.AddHours(5));
+        hours.Add(_day.AddHours(5));
 
         // Act and Assert
-        Assert.ThrowsExactly<ArgumentException>(() => hours.Add(Day.AddHours(4)), "an earlier hour");
-        Assert.ThrowsExactly<ArgumentException>(() => hours.Add(Day.AddHours(5).AddTicks(-1)), "an earlier time in the same hour");
+        Assert.ThrowsExactly<ArgumentException>(() => hours.Add(_day.AddHours(4)), "an earlier hour");
+        Assert.ThrowsExactly<ArgumentException>(() => hours.Add(_day.AddHours(5).AddTicks(-1)), "an earlier time in the same hour");
     }
 
     #endregion // Methods

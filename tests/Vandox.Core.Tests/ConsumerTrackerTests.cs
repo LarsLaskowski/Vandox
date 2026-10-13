@@ -11,7 +11,7 @@ public class ConsumerTrackerTests
 {
     #region Constants
 
-    private static readonly DateTimeOffset Start = new(2026, 10, 2, 0, 0, 0, TimeSpan.Zero);
+    private static readonly DateTimeOffset _start = new(2026, 10, 2, 0, 0, 0, TimeSpan.Zero);
 
     #endregion // Constants
 
@@ -28,7 +28,10 @@ public class ConsumerTrackerTests
 
         for (var index = 0; index < 10; index++)
         {
-            var programs = new List<(string, ulong)> { ("always", 10) };
+            var programs = new List<(string, ulong)>
+                           {
+                               ("always", 10)
+                           };
 
             if (index != 3)
             {
@@ -40,7 +43,7 @@ public class ConsumerTrackerTests
                 programs.Add(("eight", 30));
             }
 
-            tracker.Add(Start.AddMinutes(index), Usage(programs.ToArray()));
+            tracker.Add(_start.AddMinutes(index), Usage(programs.ToArray()));
         }
 
         // Act
@@ -85,6 +88,7 @@ public class ConsumerTrackerTests
                         programs.Add(("x2", 80));
                     }
                     break;
+
                 case 4:
                     {
                         programs.Add(("peak", 500));
@@ -92,6 +96,7 @@ public class ConsumerTrackerTests
                         programs.Add(("x4", 70));
                     }
                     break;
+
                 case 5:
                     {
                         programs.Add(("peak", 400));
@@ -101,7 +106,7 @@ public class ConsumerTrackerTests
                     break;
             }
 
-            tracker.Add(Start.AddMinutes(index), Usage(programs.ToArray()));
+            tracker.Add(_start.AddMinutes(index), Usage(programs.ToArray()));
         }
 
         // Act
@@ -116,7 +121,7 @@ public class ConsumerTrackerTests
         Assert.AreEqual(2UL, permanent[3].PeakRssBytes, "peak of the permanent program");
         Assert.AreSequenceEqual(["peak", "x1", "x2", "x3", "x4"], transient.Select(consumer => consumer.Program).ToList(), "by peak, then by name, at most the count");
         Assert.AreEqual(500UL, transient[0].PeakRssBytes, "peak RSS");
-        Assert.AreEqual(Start.AddMinutes(3), transient[0].PeakAt, "the first snapshot that reached the peak");
+        Assert.AreEqual(_start.AddMinutes(3), transient[0].PeakAt, "the first snapshot that reached the peak");
         Assert.AreEqual(3, transient[0].Snapshots, "three snapshots hold the program");
         Assert.AreEqual(466UL, transient[0].MeanRssBytes, "the mean 1400 / 3 is rounded down");
     }
@@ -130,8 +135,8 @@ public class ConsumerTrackerTests
         // Arrange
         var tracker = new ConsumerTracker();
 
-        tracker.Add(Start, Usage(("/usr/sbin/mariadbd", 100)));
-        tracker.Add(Start.AddMinutes(1), Usage(("mariadbd", 300)));
+        tracker.Add(_start, Usage(("/usr/sbin/mariadbd", 100)));
+        tracker.Add(_start.AddMinutes(1), Usage(("mariadbd", 300)));
 
         // Act
         var permanent = tracker.Permanent(5);
@@ -153,9 +158,9 @@ public class ConsumerTrackerTests
         // Arrange
         var tracker = new ConsumerTracker(2);
 
-        tracker.Add(Start, Usage(("a", 10), ("b", 20)));
-        tracker.Add(Start.AddMinutes(1), Usage(("a", 10), ("b", 20), ("c", 30)));
-        tracker.Add(Start.AddMinutes(2), Usage(("c", 30)));
+        tracker.Add(_start, Usage(("a", 10), ("b", 20)));
+        tracker.Add(_start.AddMinutes(1), Usage(("a", 10), ("b", 20), ("c", 30)));
+        tracker.Add(_start.AddMinutes(2), Usage(("c", 30)));
 
         // Act
         var names = tracker.Permanent(10).Concat(tracker.Transient(10)).Select(consumer => consumer.Program).Order(StringComparer.Ordinal).ToList();
@@ -173,7 +178,14 @@ public class ConsumerTrackerTests
     /// <returns>The programs</returns>
     private static Dictionary<string, ProgramUsage> Usage(params (string Program, ulong Rss)[] programs)
     {
-        return programs.ToDictionary(entry => entry.Program, entry => new ProgramUsage { Program = entry.Program, RssBytes = entry.Rss, Count = 1 }, StringComparer.Ordinal);
+        return programs.ToDictionary(entry => entry.Program,
+                                     entry => new ProgramUsage
+                                              {
+                                                  Program = entry.Program,
+                                                  RssBytes = entry.Rss,
+                                                  Count = 1
+                                              },
+                                     StringComparer.Ordinal);
     }
 
     #endregion // Methods
