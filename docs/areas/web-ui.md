@@ -79,7 +79,7 @@ The parameters, written in this order and each percent-encoded, with empty ones 
 | `source` | one source, exact |
 | `program` | one program, exact |
 | `severity` | `emerg`, `alert`, `crit`, `err`, `warning`, `notice`, `info` or `debug` (lower case); shows lines with that priority or a more severe one, and no line without a priority |
-| `template` | a template number (1 to 18 digits), on `/logs` only |
+| `template` | a template number (1 to 18 digits): on `/logs` the lines of that template, on `/logs/templates` the template whose chart is shown |
 | `from`, `to` | `yyyy-MM-ddTHH:mm` or `yyyy-MM-ddTHH:mm:ss` in ASCII digits, read as **UTC**; `from` is inclusive, `to` exclusive |
 
 - `q`, `source` and `program` are valid UTF-16 of at most 1,024 UTF-8 bytes after decoding and hold no character of category Cc, Cf, Zl or
@@ -105,8 +105,7 @@ The parameters, written in this order and each percent-encoded, with empty ones 
   *Continue*, which searches on from there; the bound is 12,000 examined lines per request. The page may then hold fewer than 100 lines,
   or none. **The page position is not in the address**: *Next page*, *First page* and *Continue* add no history entry, so the browser's
   back button leaves the search, not the page, and a reloaded or shared address opens the first page.
-- *Context* on a line shows the 5 lines before and the 5 lines after it from the same log of the same source and host (line, time and
-  program, message), at most 11 lines; opening another replaces it. Lines of other logs of the source are skipped, and each side looks
+- *Context* on a line shows the 5 lines before and the 5 lines after it from the same log of the same source and host (time, program and message of each), at most 10 lines around a marker for the hit; opening another replaces it. Lines of other logs of the source are skipped, and each side looks
   at no more than 2,000 lines of the source.
 - With `template` the page shows the template (text, source, program, first and last seen, its number of lines) above the lines, which are
   the lines of that template, and a link to remove the filter. A template number the store does not know (templates are renumbered when

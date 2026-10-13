@@ -233,8 +233,7 @@ error that names the rule.
   The count is kept per UTC hour, so a range that starts or ends inside an hour counts that **whole hour**. A template is fetched by its
   number. The rules and error texts are in the storage area (*Log exploration*); the logs view is in the web UI area (*Logs view*).
 - **Lines of a template:** the stored log lines of the template's source and program whose message normalizes to the template's text,
-  found by normalizing candidates that the template's literal words select (storage area, *Log exploration*), so the result is exactly the
-  lines the statistics counted, whatever rules were in force when they were counted; after a change of the rules without a rebuild, the
+  found by normalizing candidates that the template's literal words select (storage area, *Log exploration*), so the result is exactly the lines the statistics counted as long as the normalization rules have not changed since they were counted; after a change of the rules without a rebuild, the
   lines of an old template are those that normalize to its text under the **current** rules, and may differ from its count.
 - **Templates above their usual level:** for every template and hour that starts in the range (at most **744 hours**, 31 days,
   from `from` to `to`; the first hour is the one that holds `from`, so the hours counted can reach 745), optionally of one source:

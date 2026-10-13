@@ -207,10 +207,9 @@ position `After` (capture time and record ID), a page size `Limit` and a bound `
   **12,000** (`SelectiveMatches`), without looking at the lines. None: the page is empty and nothing more is read. Fewer than the cap:
   **index mode**, which reads the lines with exactly those record IDs (a lookup by primary key; the index is not read again), applies the
   filters and sorts them (at most the cap, by construction). The cap or more, or no text: **scan mode**, which walks the log
-  lines of the range in capture-time order from the position (through the indexes on kind, source and time, or kind and time, with a
-  source) and keeps the lines that pass the filters and, with a text, are in the full-text match. The match is tested for each examined
+  lines of the range in capture-time order from the position (through the index on kind, source and time with a source, or the index on kind and time without one) and keeps the lines that pass the filters and, with a text, are in the full-text match. The match is tested for each examined
   line on its own, one lookup per term, and nothing is collected, so scan mode holds at most the page and its work grows with the
-  examined lines, not with the matches. The result of a request does not depend on the strategy.
+  examined lines, not with the matches. The lines found, followed through `Next` until it is empty, do not depend on the strategy; only scan mode can end a page early at the scan bound.
 - **The scan bound:** scan mode examines at most `ScanLimit` log lines (1 to 100,000; the logs view uses **12,000**), counted whether or not
   they match. When the bound ends the request before the page is full, `ScanLimitReached` is set and `Next` is the position of the last
   examined line, also when the page is empty: a request with `After` set to it searches on, so continuing until `Next` is empty
