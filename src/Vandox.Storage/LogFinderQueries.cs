@@ -19,7 +19,7 @@ internal static class LogFinderQueries
     #region Methods
 
     /// <summary>
-    /// Builds the statement that counts the index matches of a text up to a bound.
+    /// Builds the statement that reads the record IDs of the index matches of a text up to a bound.
     /// </summary>
     /// <param name="match">The FTS5 expression</param>
     /// <param name="selectiveMatches">The bound</param>
@@ -32,7 +32,7 @@ internal static class LogFinderQueries
                              ["$selective"] = (long)selectiveMatches
                          };
 
-        return ("SELECT count(*) FROM (SELECT rowid FROM log_fts WHERE log_fts MATCH $match LIMIT $selective)", parameters);
+        return ("SELECT rowid FROM log_fts WHERE log_fts MATCH $match LIMIT $selective", parameters);
     }
 
     /// <summary>
@@ -41,28 +41,15 @@ internal static class LogFinderQueries
     /// <param name="criteria">The criteria</param>
     /// <param name="ids">The record IDs the probe found</param>
     /// <returns>The SQL and its parameters</returns>
-#pragma warning disable RH2003
     internal static (string Sql, Dictionary<string, object> Parameters) BuildIndex(LogCriteria criteria, IReadOnlyList<long> ids)
-    {
-        throw new NotImplementedException();
-    }
-#pragma warning restore RH2003
-
-    /// <summary>
-    /// Builds the statement of the index mode: the lines the index finds, filtered and in order.
-    /// </summary>
-    /// <param name="criteria">The criteria</param>
-    /// <param name="match">The FTS5 expression</param>
-    /// <returns>The SQL and its parameters</returns>
-    internal static (string Sql, Dictionary<string, object> Parameters) BuildIndex(LogCriteria criteria, string match)
     {
         var parameters = new Dictionary<string, object>
                          {
-                             ["$match"] = match
+                             ["$ids"] = "[" + string.Join(',', ids.Select(id => id.ToString(CultureInfo.InvariantCulture))) + "]"
                          };
         var sql = new StringBuilder(RecordQueries.SelectColumns(false, true));
 
-        sql.Append(" FROM log_fts JOIN log_lines l ON l.record_id = log_fts.rowid JOIN records r ON r.id = l.record_id WHERE log_fts MATCH $match");
+        sql.Append(" FROM records r JOIN log_lines l ON l.record_id = r.id WHERE r.id IN (SELECT value FROM json_each($ids))");
         AppendRange(sql, parameters, criteria);
 
         if (criteria.Program is not null)

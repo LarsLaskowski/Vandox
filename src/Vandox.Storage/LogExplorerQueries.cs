@@ -109,21 +109,27 @@ internal static class LogExplorerQueries
                              ["$to"] = StorageTime.ToNanoseconds(query.To),
                              ["$limit"] = (long)query.Limit
                          };
-        var sql = "SELECT t.id, t.source, t.program, t.template, t.first_seen, t.last_seen, t.count, sum(h.count) AS in_range FROM log_template_hours h JOIN log_templates t ON t.id = h.template_id WHERE h.hour >= $fromHour AND h.hour < $to";
+        var sql = "SELECT t.id, t.source, t.program, t.template, t.first_seen, t.last_seen, t.count, a.in_range FROM (SELECT template_id, sum(count) AS in_range FROM log_template_hours WHERE +hour >= $fromHour AND +hour < $to GROUP BY template_id) a JOIN log_templates t ON t.id = a.template_id";
+        var where = new List<string>();
 
         if (query.Source.Length > 0)
         {
-            sql += " AND t.source = $source";
+            where.Add("t.source = $source");
             parameters["$source"] = query.Source;
         }
 
         if (query.Program.Length > 0)
         {
-            sql += " AND t.program = $program";
+            where.Add("t.program = $program");
             parameters["$program"] = query.Program;
         }
 
-        return (sql + " GROUP BY t.id ORDER BY in_range DESC, t.id LIMIT $limit", parameters);
+        if (where.Count > 0)
+        {
+            sql += " WHERE " + string.Join(" AND ", where);
+        }
+
+        return (sql + " ORDER BY a.in_range DESC, t.id LIMIT $limit", parameters);
     }
 
     /// <summary>

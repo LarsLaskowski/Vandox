@@ -41,42 +41,60 @@ internal static class LogFinder
 
         var match = criteria.Text.Length > 0 ? FtsQuery.Build(criteria.Text) : null;
 
-        if (match is not null && await CountMatchesAsync(connection, match, selectiveMatches, cancellationToken).ConfigureAwait(false) < selectiveMatches)
+        if (match is not null)
         {
-            return await FindFromIndexAsync(connection, criteria, match, cancellationToken).ConfigureAwait(false);
+            var ids = await ReadMatchesAsync(connection, match, selectiveMatches, cancellationToken).ConfigureAwait(false);
+
+            if (ids.Count == 0)
+            {
+                return new LogPage();
+            }
+
+            if (ids.Count < selectiveMatches)
+            {
+                return await FindFromIndexAsync(connection, criteria, ids, cancellationToken).ConfigureAwait(false);
+            }
         }
 
         return await ScanAsync(connection, criteria, match, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
-    /// Counts the index matches of a text up to a bound.
+    /// Reads the record IDs of the index matches of a text up to a bound.
     /// </summary>
     /// <param name="connection">The connection</param>
     /// <param name="match">The FTS5 expression</param>
     /// <param name="selectiveMatches">The bound</param>
     /// <param name="cancellationToken">Cancels the call</param>
-    /// <returns>A task that returns the number of matches, at most the bound</returns>
-    private static async Task<long> CountMatchesAsync(SqliteConnection connection, string match, int selectiveMatches, CancellationToken cancellationToken)
+    /// <returns>A task that returns the record IDs, at most the bound</returns>
+    private static async Task<List<long>> ReadMatchesAsync(SqliteConnection connection, string match, int selectiveMatches, CancellationToken cancellationToken)
     {
         var (sql, parameters) = LogFinderQueries.BuildProbe(match, selectiveMatches);
 
-        using var command = CreateCommand(connection, sql, parameters);
+        var ids = new List<long>();
 
-        return Convert.ToInt64(await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false), System.Globalization.CultureInfo.InvariantCulture);
+        using var command = CreateCommand(connection, sql, parameters);
+        using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            ids.Add(reader.GetInt64(0));
+        }
+
+        return ids;
     }
 
     /// <summary>
-    /// Finds a page from the matches of the index.
+    /// Finds a page from the record IDs the index matched.
     /// </summary>
     /// <param name="connection">The connection</param>
     /// <param name="criteria">The criteria</param>
-    /// <param name="match">The FTS5 expression</param>
+    /// <param name="ids">The record IDs the index matched</param>
     /// <param name="cancellationToken">Cancels the call</param>
     /// <returns>A task that returns the page</returns>
-    private static async Task<LogPage> FindFromIndexAsync(SqliteConnection connection, LogCriteria criteria, string match, CancellationToken cancellationToken)
+    private static async Task<LogPage> FindFromIndexAsync(SqliteConnection connection, LogCriteria criteria, List<long> ids, CancellationToken cancellationToken)
     {
-        var (sql, parameters) = LogFinderQueries.BuildIndex(criteria, match);
+        var (sql, parameters) = LogFinderQueries.BuildIndex(criteria, ids);
 
         var lines = new List<StoredRecord>();
 

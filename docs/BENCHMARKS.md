@@ -181,32 +181,34 @@ mode the search ran in (`index` or `scan`, found by repeating the selectivity pr
 ### Results
 
 Development host (4 vCPU, Intel Xeon 2.10 GHz, Ubuntu 24.04, .NET 10.0.12), 5,000,000 lines written in 259 s (19,289 lines per second), database file
-1,852 MiB, 12,914 templates. Times in milliseconds: the first run, then the slowest of the three:
+1,852 MiB, 12,914 templates, after the changes of the notes below (the index mode reads the lines by the IDs of the probe; the template list sums in key
+order). Times in milliseconds: the first run, then the slowest of the three:
 
 | Case | Mode | Result | First run | Slowest |
 | ---- | ---- | ------ | --------: | ------: |
-| 1 rare word | index | 100 lines | 30 | 30 |
-| 2 word in 1 % | scan | 100 lines | 169 | 177 |
-| 2b word in 0.33 % | scan | 40 lines, scan bound reached | 168 | 168 |
-| 3 word in 33 % | scan | 100 lines | 6 | 6 |
-| 4 with program and severity | scan | 100 lines | 8 | 8 |
-| 4b with a source | scan | 100 lines | 6 | 6 |
-| 5 two words, rare combination | index | 100 lines | 173 | 173 |
+| 1 rare word | index | 100 lines | 32 | 32 |
+| 2 word in 1 % | scan | 100 lines | 182 | 201 |
+| 2b word in 0.33 % | scan | 40 lines, scan bound reached | 214 | 214 |
+| 3 word in 33 % | scan | 100 lines | 14 | 14 |
+| 4 with program and severity | scan | 100 lines | 14 | 14 |
+| 4b with a source | scan | 100 lines | 10 | 10 |
+| 5 two words, rare combination | index | 100 lines | 279 | 279 |
 | 6 program only (4 %) | scan | 100 lines | 3 | 3 |
-| 6b rare program | scan | 1 line, scan bound reached | 6 | 7 |
-| 6c rare program in one source | scan | 2 lines, scan bound reached | 11 | 11 |
-| 7 one-day range | scan | 100 lines | 8 | 8 |
-| 8 most frequent template | scan | 100 lines | 61 | 61 |
-| 8b rare template | scan | 0 lines, scan bound reached | 150 | 150 |
+| 6b rare program | scan | 1 line, scan bound reached | 9 | 9 |
+| 6c rare program in one source | scan | 2 lines, scan bound reached | 15 | 15 |
+| 7 one-day range | scan | 100 lines | 31 | 31 |
+| 8 most frequent template | scan | 100 lines | 77 | 77 |
+| 8b rare template | scan | 0 lines, scan bound reached | 151 | 197 |
 | 9 scan bound, no match | scan | 0 lines, scan bound reached | 411 | 411 |
-| 10 context | — | 5 + 5 lines | 11 | 11 |
-| 11 template list, whole data | — | 200 templates | 760 | 760 |
-| 11b template list, 30 days | — | 200 templates | 716 | 732 |
-| 12 16 words, empty intersection | index | 0 lines | 1,232 | 1,232 |
+| 10 context | n/a | 5 + 5 lines | 23 | 23 |
+| 11 template list, whole data | n/a | 200 templates | 40 | 43 |
+| 11b template list, 30 days | n/a | 200 templates | 30 | 30 |
+| 12 16 words, empty intersection | index | 0 lines | 729 | 729 |
 
-**Verdict on the development host: every case is under 2,000 ms (slowest 1,232 ms).** Cases 11, 11b and 12 are over the 500 ms of the tuning target
-and are not changed by the two constants (notes below). Reference host (DS918+, SSD volume, Celeron J3455): **not yet measured**; the Product Manager runs
-the procedure above and the row is entered here.
+**Verdict on the development host: every case is under 2,000 ms (slowest 729 ms).** Cases 11 and 11b are now far under the 500 ms target; case 12 is
+729 ms on the first run and 440 ms on the later ones, so only its cold first run is above the target. Before the changes of the notes the slowest case
+was 12 with 1,232 ms and cases 11 and 11b took 760 and 716 ms. Reference host (DS918+, SSD volume, Celeron J3455): **not yet measured**; the
+Product Manager runs the procedure above and the row is entered here.
 
 | Host | Date | Slowest case | Verdict |
 | ---- | ---- | ------------ | ------- |
@@ -217,18 +219,19 @@ the procedure above and the row is entered here.
 The first run used a scan bound of 50,000 and a cap of 20,000. With them the scan-bound case 9 took 1,758 to 1,970 ms (about 35 microseconds per examined
 line, since every line of a common word's range is looked up in that word's index entry), the rare template 8b 611 to 688 ms and the case just below the cap
 (2b, 16,667 lines, then in index mode) 291 to 327 ms for its first page, about 20 microseconds per candidate. A bound and a cap of 12,000 bring the
-scan-bound case to 411 ms and every text search under 500 ms. A smaller bound makes a search over a large range with few matches continue more often
+scan-bound case to 411 ms and every text search except case 12 under 500 ms; the later change of the index mode and the template list (notes) left the two values as they are. A smaller bound makes a search over a large range with few matches continue more often
 (case 2b finds 40 lines per 12,000 examined); the plan's lower limit for both values is 5,000 and 10,000.
 
 ### Notes
 
-- **Case 12** costs about 1.2 s on the first run. The selectivity probe has to walk the index entries of all 16 words (each in 1,250,000 lines) to find that no line
-  holds all of them, about 0.5 s inside the full-text module, where the deadline cannot interrupt it; because the probe found 0, the index query then walks them
-  again. This is the shape of risk named in record 0103; a cap on the cost needs a cheaper probe, not a larger cap. On the reference host this case is the most
-  likely to exceed 2,000 ms.
-- **Cases 11 and 11b** sum the template hours of the range (374,020 template hours here) through the index on the hour and look each one up in the table:
-  about 0.7 s warm, 0.9 to 1.2 s cold. A rewritten statement took 0.03 s (200 rows) when the aggregate ran over the table in key order (`GROUP BY template_id` over
-  `log_template_hours` with `+hour` in the conditions, then the join to `log_templates` for the 200 rows), measured with the SQLite command-line library on the same
-  file; that reads the whole table whatever the range is, so it is a trade-off for a narrow range of a large table.
+- **Case 12** probes the index for the record IDs of 16 words that each occur in 1,250,000 lines and have no line in common. FTS5 has to walk their whole
+  entries to find that (about 0.45 s inside the full-text module, where the deadline cannot interrupt it). Before the change the index query then
+  walked the entries a second time (1,232 ms); now the probe returns the IDs, an empty result ends the call, and a non-empty one reads the lines by those IDs
+  without the full-text table (729 ms first run, 440 ms warm). The probe itself is the remaining cost and is bounded by the sizes of the entries, not by the deadline.
+- **Cases 11 and 11b:** the statement summed 374,020 template hours through the index on the hour with a lookup per row (0.65 to 0.9 s warm, up to 1.2 s cold). It now sums over
+  the table in key order (`+hour` in the range conditions) and joins the 12,914 templates afterwards: 30 to 43 ms. It reads the whole table whatever the range
+  (a one-day range took 12 ms against 21 ms before, in the SQLite library on the same file), so its cost grows with the stored template hours, not with the range.
+  For all range, source and program combinations that were compared (whole data, 30 days, one day; no filter, a source, a source and a program; limits 200 and
+  1,000; 18 combinations) the old and the new statement returned identical rows in identical order.
 - The scan modes rely on the planner reading `records(kind, source, captured_at)` or `records(kind, captured_at)` in order without a hint; the times of cases 3 to 9
   (a few milliseconds for a page that needs a few hundred lines) show that it does, also with a source (cases 4b and 6c).

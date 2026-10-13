@@ -203,9 +203,10 @@ position `After` (capture time and record ID), a page size `Limit` and a bound `
 - A page holds at most `Limit` lines. `Next` is the position (capture time, record ID) of the page's last line when the page is full,
   and a request with `After` set to it continues with the next line, without a gap or a repeat, also across lines with the same capture
   time. `Next` is empty at the end of the range.
-- **Two strategies, chosen per request from the full-text index alone.** First the matching rows are counted in the index up to a cap of
-  **12,000** (`SelectiveMatches`), without looking at the lines. Fewer than the cap: **index mode**, which joins the matches with the lines
-  and the filters and sorts them (at most the cap, by construction). The cap or more, or no text: **scan mode**, which walks the log
+- **Two strategies, chosen per request from the full-text index alone.** First the record IDs of the matching rows are read from the index up to a cap of
+  **12,000** (`SelectiveMatches`), without looking at the lines. None: the page is empty and nothing more is read. Fewer than the cap:
+  **index mode**, which reads the lines with exactly those record IDs (a lookup by primary key; the index is not read again), applies the
+  filters and sorts them (at most the cap, by construction). The cap or more, or no text: **scan mode**, which walks the log
   lines of the range in capture-time order from the position (through the indexes on kind, source and time, or kind and time, with a
   source) and keeps the lines that pass the filters and, with a text, are in the full-text match. The match is tested for each examined
   line on its own, one lookup per term, and nothing is collected, so scan mode holds at most the page and its work grows with the
@@ -226,7 +227,7 @@ position `After` (capture time and record ID), a page size `Limit` and a bound `
   bytes`, `program is longer than 1024 bytes`, `priority must be between 0 and 7`, `template ID must not be negative`, `after must be within
   the storable range`, `after id must be positive`, and the rules of *Log search* for a non-empty text.
 - **Cost.** Index mode reads at most the cap of matches. Scan mode reads at most `ScanLimit` lines and does one index lookup per term for
-  each. The count of matches runs inside the full-text module: **a text of several common words makes it walk their whole entries to find
+  each. The read of the matching IDs runs inside the full-text module: **a text of several common words makes it walk their whole entries to find
   the words' intersection in one step, which the deadline cannot interrupt** (*Database file and connections*). That work is bounded by
   the size of the words' index entries (index only, at most 16 terms), not by the deadline, and is measured in `docs/BENCHMARKS.md`
   (*Log search*). A search without a text and with a program or source that few lines have examines up to `ScanLimit` lines per request
@@ -244,7 +245,7 @@ examines at most **2,000** lines of the source and returns fewer when that bound
 - `TemplatesAsync`: the templates with at least one line in the hours that start in the range, optionally of one source and one program,
   each with its number of lines in those hours, most lines first, then lowest number, at most `Limit` (1 to 1,000: `limit must be
   between 1 and 1000`; the window and length rules as above). The count is kept per UTC hour, so a `From` or `To` inside an hour counts that
-  **whole hour**. It reads the template hours of the range, so its cost grows with the number of templates and hours in it.
+  **whole hour**. The hours are summed per template in key order (the range conditions are on the hour column without using the index on it), then joined to the templates, so the statement reads the whole table of template hours whatever the range is: its cost grows with the stored template hours (about 0.03 s for 374,000 template hours), not with the range.
 - `SourceHoursAsync`: the start of every hour in the range in which a source has lines, ascending (`source is required`; limit 1 to 10,000,
   `limit must be between 1 and 10000`); `TemplateHoursAsync`: a template's hourly counts, as the template reader's hourly counts.
   Both come from the template statistics, so lines stored before them (a database upgraded from schema 7) have none until `vandoxd
