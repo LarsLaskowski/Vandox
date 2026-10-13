@@ -163,7 +163,7 @@ Indexes: a unique index on `records(agent_id, seq)` for origin `agent`; `records
   (template of a line, hourly counts, new templates, templates above their usual level), with the same time range and limit rules,
   on a reader connection. The cost of the usual-level query is not bounded by its range or limit; a cancelled token or deadline interrupts it
   (*Database file and connections*; *Limits of templates* there).
-- Callers depend on small interfaces (record writer, record reader, log searcher, log template reader, incident store, import tracker). The real store is tested against
+- Callers depend on small interfaces (record writer, record reader, log searcher, log explorer, log template reader, incident store, import tracker). The real store is tested against
   real files; a consumer whose behavior depends on the store's semantics (such as "a resent batch is stored once") is tested against
   the real store. Fakes for other consumers only record calls and return what the test scripts.
 
@@ -182,7 +182,77 @@ A search takes literal terms only; the text is never passed to FTS5 as a query.
 - A violated rule is an error that names the rule and never contains the search text.
 - The cost of a search is not bounded by the time range or the limit: SQLite runs the `MATCH` over the whole retention first and filters
   by time and source afterwards. The bound is time: a cancelled token or a passed deadline interrupts the
-  running search (*Database file and connections*), so every caller that serves a user must pass a deadline.
+  running search (*Database file and connections*), so every caller that serves a user must pass a deadline. The logs view does not
+  use this search: it searches through *Log exploration* below, which bounds the work of every request.
+
+### Log exploration
+
+The logs view ([Web UI](web-ui.md), *Logs view*) reads through a second interface, `ILogExplorer`, which `SqliteStore` implements next to the
+log search above; the log search keeps its rules for its other callers. Every method runs on a reader connection and is interrupted by a
+cancelled token or a passed deadline (*Database file and connections*), with no partial result, except for the one case below that the
+deadline cannot interrupt. Null strings are an `ArgumentNullException`; a broken rule is an `InvalidQueryException` (a `StoreException`)
+whose message is `store: invalid query: ` and the rule, and never contains the search text.
+
+**Finding lines.** A request has a text, a source, a program, a highest priority, a template number, a time range `[From, To)`, an optional
+position `After` (capture time and record ID), a page size `Limit` and a bound `ScanLimit`.
+
+- Every filter given must hold: all words of the text (the rules of *Log search*), the source (exact), the program (exact, ordinal), the
+  priority at most the given one (a line without a priority is then not returned), the capture time in the range. An empty text applies the
+  other filters only. The lines come **oldest first, by capture time, then record ID**: that is the order of the log, not of the record
+  IDs, because imported lines are not stored in time order.
+- A page holds at most `Limit` lines. `Next` is the position (capture time, record ID) of the page's last line when the page is full,
+  and a request with `After` set to it continues with the next line, without a gap or a repeat, also across lines with the same capture
+  time. `Next` is empty at the end of the range.
+- **Two strategies, chosen per request from the full-text index alone.** First the matching rows are counted in the index up to a cap of
+  **12,000** (`SelectiveMatches`), without looking at the lines. Fewer than the cap: **index mode**, which joins the matches with the lines
+  and the filters and sorts them (at most the cap, by construction). The cap or more, or no text: **scan mode**, which walks the log
+  lines of the range in capture-time order from the position (through the indexes on kind, source and time, or kind and time, with a
+  source) and keeps the lines that pass the filters and, with a text, are in the full-text match. The match is tested for each examined
+  line on its own, one lookup per term, and nothing is collected, so scan mode holds at most the page and its work grows with the
+  examined lines, not with the matches. The result of a request does not depend on the strategy.
+- **The scan bound:** scan mode examines at most `ScanLimit` log lines (1 to 100,000; the logs view uses **12,000**), counted whether or not
+  they match. When the bound ends the request before the page is full, `ScanLimitReached` is set and `Next` is the position of the last
+  examined line, also when the page is empty: a request with `After` set to it searches on, so continuing until `Next` is empty
+  returns every matching line exactly once. A full page ends the scan at its last line (`ScanLimitReached` not set).
+- **Template lines:** with a template number the lines are those of the template's source and program whose message normalizes (the rules of
+  [Detection, alerts and reports](detection-and-reports.md), *Log templates*) to the template's text, exactly. The words of the template
+  that contain no placeholder narrow the candidates: they are added to the text as search terms (at most 16 terms and 1,024 bytes in all,
+  the user's words first; a template longer than 1,020 bytes loses its last word, which a cut may have split; a template without such a
+  word uses scan mode). Every candidate's message is normalized and kept only when it equals the template's text; in scan mode a rejected
+  line counts as examined. A source or program filter that differs from the template's gives no lines. An unknown number is
+  `store: invalid query: unknown template`.
+- **Rules**, each refused with `store: invalid query: ` and: `from and to are required`, `from and to must be within the storable range`,
+  `from must be before to`, `limit must be between 1 and 1000`, `scan limit must be between 1 and 100000`, `source is longer than 1024
+  bytes`, `program is longer than 1024 bytes`, `priority must be between 0 and 7`, `template ID must not be negative`, `after must be within
+  the storable range`, `after id must be positive`, and the rules of *Log search* for a non-empty text.
+- **Cost.** Index mode reads at most the cap of matches. Scan mode reads at most `ScanLimit` lines and does one index lookup per term for
+  each. The count of matches runs inside the full-text module: **a text of several common words makes it walk their whole entries to find
+  the words' intersection in one step, which the deadline cannot interrupt** (*Database file and connections*). That work is bounded by
+  the size of the words' index entries (index only, at most 16 terms), not by the deadline, and is measured in `docs/BENCHMARKS.md`
+  (*Log search*). A search without a text and with a program or source that few lines have examines up to `ScanLimit` lines per request
+  and says how far it got.
+
+**Context.** `LogContextAsync` returns a line and up to `Before` lines before and `After` lines after it (0 to 20 each) with the same
+source, log name and host, in capture-time order, whatever their other fields; lines of other logs of the source are skipped. Each side
+examines at most **2,000** lines of the source and returns fewer when that bound or the data ends. Errors: `record ID must be positive`,
+`context lines must be between 0 and 20`, `unknown log line` (an ID that is not a stored log line).
+
+**Sources, templates, hours.**
+
+- `LogSourcesAsync`: the distinct sources of stored log lines in ordinal order, at most 64 (one index seek per source).
+- `TemplateAsync(id)`: the template or none (`template ID must be positive`).
+- `TemplatesAsync`: the templates with at least one line in the hours that start in the range, optionally of one source and one program,
+  each with its number of lines in those hours, most lines first, then lowest number, at most `Limit` (1 to 1,000: `limit must be
+  between 1 and 1000`; the window and length rules as above). The count is kept per UTC hour, so a `From` or `To` inside an hour counts that
+  **whole hour**. It reads the template hours of the range, so its cost grows with the number of templates and hours in it.
+- `SourceHoursAsync`: the start of every hour in the range in which a source has lines, ascending (`source is required`; limit 1 to 10,000,
+  `limit must be between 1 and 10000`); `TemplateHoursAsync`: a template's hourly counts, as the template reader's hourly counts.
+  Both come from the template statistics, so lines stored before them (a database upgraded from schema 7) have none until `vandoxd
+  templates` has run.
+
+**Storage layout.** No table, column or index was added for this; scan mode relies on the indexes `records(kind, source, captured_at)` and
+`records(kind, captured_at)` serving the order of the scan, so a statement plan that stops using them would turn a page into a sort of
+every log line of the range (the benchmark shows it).
 
 ## Retention (planned)
 
@@ -209,6 +279,7 @@ weakened silently, and `synchronous=FULL` stays unless the Product Manager decid
 - [0095](../decisions/0095-log-templates-token-rules-statistics-in-the-write-path-usual-level-from-covered-hours.md) — why the write path keeps the template statistics in the batch's transaction.
 - [0096](../decisions/0096-outage-incidents-rebuilt-from-stored-data-merged-by-overlapping-windows.md) — why incidents are matched by overlapping windows, kept per number and saved one transaction each, and why the record query pages by ID.
 - [0097](../decisions/0097-reader-statements-interrupted-by-a-progress-handler-bound-to-the-token.md) — why a progress handler interrupts reader statements and why the interruption is an `OperationCanceledException`.
+- [0103](../decisions/0103-logs-view-address-as-the-view-bounded-search-pages-template-lines-by-normalization.md) — why the logs view's search chooses between the index and a bounded scan and finds a template's lines by normalizing candidates.
 
 ## Not here
 
@@ -218,4 +289,4 @@ weakened silently, and `synchronous=FULL` stays unless the Product Manager decid
 
 ## Implementation
 
-`Vandox.Storage` (`SqliteStore`, `SchemaMigrator`, `BatchWriter`, `BatchValidator`, `FtsQuery`, `TemplateTally`, `TemplateRebuilder`, `TemplateQueries`, `IncidentRepository`, `ReaderQuery`, `StorageLimits`).
+`Vandox.Storage` (`SqliteStore`, `SchemaMigrator`, `BatchWriter`, `BatchValidator`, `FtsQuery`, `TemplateTally`, `TemplateRebuilder`, `TemplateQueries`, `IncidentRepository`, `ReaderQuery`, `LogFinder`, `LogFinderQueries`, `LogCriteria`, `LogFilterRules`, `LogExplorerQueries`, `TemplateTerms`, `StorageLimits`).

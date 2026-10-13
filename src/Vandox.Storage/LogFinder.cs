@@ -15,7 +15,7 @@ internal static class LogFinder
     /// <summary>
     /// The number of index matches below which a text search runs from the index.
     /// </summary>
-    internal const int SelectiveMatches = 20000;
+    internal const int SelectiveMatches = 12000;
 
     #endregion // Constants
 

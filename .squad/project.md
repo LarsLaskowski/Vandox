@@ -31,7 +31,13 @@ files or endpoints.
    expire, are invalidated on logout and travel only in `HttpOnly`, `Secure`, `SameSite` cookies; every
    state-changing request is CSRF-protected; failed logins are rate-limited; forwarded headers
    (`X-Forwarded-For`, `X-Forwarded-Proto`) are trusted only from the configured reverse proxy, and the UI
-   port is reachable only by that proxy. Records 0016, 0023.
+   port is reachable only by that proxy. Until it exists (#25), the logs view (`/logs`, `/logs/templates`) is readable by whoever
+   reaches the web port: the host has no `Host`-header allow-list (`WebApplication.CreateSlimBuilder` in `ServeCommand`, no `AllowedHosts`),
+   so through DNS rebinding a website the operator's browser visits can read the logs when the reverse proxy forwards unknown `Host` headers
+   or the web port is reachable from the LAN, and the number of circuits, each holding up to about 5 MiB of capped log text, is not bounded;
+   the login's reverse-proxy trust must include a `Host` allow-list (#25), and v0.1.0 is not released without the login. The logs view
+   reads through `GatedLogExplorer` (two concurrent calls across the service, so two of the four reader connections stay free for
+   `/healthz`). Records 0016, 0023, 0103.
 4. **Command signing for remote actions** (later, not part of v0.1.0): *Goal:* the agent executes only
    commands with a valid signature that name an action from its local fixed list and were confirmed by the
    user; a forged, altered or replayed command is rejected; the signing key exists only on the backend
@@ -132,7 +138,20 @@ files or endpoints.
     range or limit (it evaluates every template hour of the range that reaches the minimum count); a cancelled token or
     deadline interrupts a running reader statement (`ReaderQuery`: a progress handler on every reader connection, checked every
     1,000 instructions), which then ends with `OperationCanceledException`, so a caller that serves a user bounds it with a deadline
-    (records 0095, 0097). The backend options `incidents.window_before` and
+    (records 0095, 0097). The logs view (record 0103) takes every filter from the address: `LogsAddress` (`Parse`, `Validate`, `ToQuery`; the
+    query string is decoded by `QueryHelpers.ParseQuery` and the page passes `new Uri(NavigationManager.Uri).Query`, so no fragment) refuses a repeated
+    parameter, and a `q`, `source` or `program` of more than 1,024 UTF-8 bytes or with a character of category Cc, Cf, Zl or Zp or invalid UTF-16, a `severity` that is not one
+    of the eight names (`Severities`), a `template` that is not 1 to 18 ASCII digits, and a `from` or `to` that is not `yyyy-MM-ddTHH:mm[:ss]` in ASCII digits within the
+    storable range, with texts that name only the parameter, and writes an address only from validated values (`ToQuery` throws otherwise). The values then reach
+    only `FtsQuery`, bound SQL parameters or `long` and `DateTimeOffset.ParseExact` with fixed formats. The explorer (`ILogExplorer`, `SqliteStore`; `LogFilterRules`,
+    `LogCriteria`, `LogFinder`, `LogFinderQueries`, `LogExplorerQueries`, `TemplateTerms`) bounds every request: a page of 1 to 1,000 lines, a scan of at most
+    `ScanLimit` (1 to 100,000; the page uses 12,000) examined lines whose full-text test is a per-line `EXISTS` that collects nothing, a selectivity probe that reads at most
+    12,000 row IDs, a context of 0 to 20 lines per side examining at most 2,000 rows per side, 64 sources, a template list of 1 to 1,000 templates, source hours of 1 to
+    10,000; the template words reach the search only through `FtsQuery` (at most 16 terms and 1,024 bytes joined with the user's) and the candidates are compared with
+    the template by `LogTemplateNormalizer`. A text of several common words makes FTS5 walk their doclists inside one step that the progress handler cannot interrupt:
+    that work is bounded by the doclist sizes, not by the deadline, and measured as cases 5 and 12 of `tools/Vandox.StorageBenchmark --search-lines`
+    (`docs/BENCHMARKS.md`). Each page runs one store call at a time under a 10-second deadline, and `GatedLogExplorer` lets two calls run at once across the service
+    (a wait counts against the deadline). The backend options `incidents.window_before` and
     `incidents.window_after` (`BackendConfigLoader`, `ConfigDuration`) accept exactly one to four ASCII digits and `m` or `h` by an ordinal scan (no parsing API, no culture, sign,
     white space, other digit script or second unit), within 1 minute to 24 hours, the value never shown in an error. The incident reconstruction (`vandoxd incidents`)
     reads stored external text, including forged lines, under bounds it must keep: `KillClusterer` keeps 16 kills per incident and ignores a kill at the last storable
@@ -152,7 +171,7 @@ files or endpoints.
     same way. Forged kill lines make forged incidents
     (a documented limitation, record 0096); forged boot lines, `pzstd` or `sw-engi*` processes shift the report's activities and rates, and forged process names can
     take the 4,096 program places first (records 0100, 0101). Records 0048, 0049, 0066, 0069, 0076, 0078, 0079, 0084,
-    0085, 0086, 0088, 0091, 0092, 0093, 0094, 0095, 0096, 0097, 0100, 0101, 0102.
+    0085, 0086, 0088, 0091, 0092, 0093, 0094, 0095, 0096, 0097, 0100, 0101, 0102, 0103.
 11. **Outbound calls** (Telegram, external checks, the optional AI service of the nightly report, the
     agent's connection to the backend): *Goal:* every call has a timeout, goes only to its configured
     destination and leaves encrypted to a verified peer. The agent's only destination is the ingest port,
@@ -173,7 +192,12 @@ files or endpoints.
     own scripts (`wwwroot/js`) contain none of its HTML sinks, no `eval`/`Function`/string timer and no
     `setAttribute`; component markup and code contain no `MarkupString` or `AddMarkupContent`, so external text
     never reaches the page as raw HTML. What only the policy covers is listed in the Web UI area (*Limits and
-    errors*). Records 0098, 0099.
+    errors*). The logs view shows log lines and templates only through `ExternalText` and `LogText`: Razor's text encoding, every character of category Cc (except
+    line feed and tab), Cf, Zl, Zp, Co, Cn and U+FFFD written as a visible `\uXXXX` escape in a span of its own, at most 256 runs per field, a cap of 16,384 characters
+    for a message and 2,048 for source, host, program and template text with a visible `[cut: <n> more characters]` marker (`LogLineView` builds the capped runs, so a page
+    keeps no `StoredRecord`), `unicode-bidi: isolate` per field, no `MarkupString`; links are the fixed paths `logs` and `logs/templates` plus the `ToQuery()` of a validated
+    address, and the chart (`TimeSeriesChart`) gets only the fixed texts `LogsView.ChartTitle` and `LogsView.ChartSeries`, never external text. Forged lines appear in the view
+    like real ones. Records 0098, 0099, 0103.
     Configuration error texts never echo document text other than schema or safe key names
     (`decodeStrict`, `StrictYamlDecoder`), never a `_FILE` value or path or an unsafe variable name
     (`readSecret`/`SecretReader`, `checkEnviron`). Configuration values are free of Cc, Cf, Zl and Zp characters but

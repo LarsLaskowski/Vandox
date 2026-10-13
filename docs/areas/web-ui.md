@@ -24,8 +24,8 @@ routing and `/healthz` are in [Backend host](backend-host.md); the login and the
 ### Layout and navigation
 
 - Every page has a header with the horizontal logo, the main navigation and the theme switch, and a main area with the page content.
-- The navigation lists the existing pages; the entry of the current page is marked. Today it has one entry, *Overview* (`/`); each view
-  adds its own.
+- The navigation lists the existing pages; the entry of the current page is marked. Today it has two entries, *Overview* (`/`) and
+  *Logs* (`logs`); each view adds its own. *Logs* is marked on `/logs` and on `/logs/templates`, *Overview* only on `/`.
 - The layout works from desktop width down to phone width (360 CSS pixels) without horizontal scrolling of the page: on narrow screens
   the navigation moves below the logo and the theme switch. It needs no script.
 
@@ -62,6 +62,96 @@ routing and `/healthz` are in [Backend host](backend-host.md); the login and the
 - A chart takes its width from its container and follows its resizing; its colors come from the theme tokens and follow a theme change
   (the chart is redrawn with the same data; it keeps one resize observer for its lifetime).
   Labels and titles are written as text, never as HTML.
+
+### Logs view
+
+Two pages read the stored log lines: the search (`/logs`) and the template list (`/logs/templates`). Both show the links *Search* and
+*Templates*, work on the same address parameters, and are served on the web listener only (the ingest listener answers `404`). Until the
+login exists (#25) whoever reaches the web port can read every stored log line (*Limits and errors*). The store behind them is described
+in [Storage](storage.md) (*Log exploration*), the templates in [Detection, alerts and reports](detection-and-reports.md) (*Log templates*).
+
+**Address.** Every filter is in the address, so a search can be bookmarked, shared and used with the browser's back and forward buttons.
+The parameters, written in this order and each percent-encoded, with empty ones left out:
+
+| Parameter | Value |
+| --------- | ----- |
+| `q` | the search text (the literal-term rules of [Storage](storage.md), *Log search*) |
+| `source` | one source, exact |
+| `program` | one program, exact |
+| `severity` | `emerg`, `alert`, `crit`, `err`, `warning`, `notice`, `info` or `debug` (lower case); shows lines with that priority or a more severe one, and no line without a priority |
+| `template` | a template number (1 to 18 digits), on `/logs` only |
+| `from`, `to` | `yyyy-MM-ddTHH:mm` or `yyyy-MM-ddTHH:mm:ss` in ASCII digits, read as **UTC**; `from` is inclusive, `to` exclusive |
+
+- `q`, `source` and `program` are valid UTF-16 of at most 1,024 UTF-8 bytes after decoding and hold no character of category Cc, Cf, Zl or
+  Zp (white space other than U+0020 included). A key is matched without regard to ASCII case and may be percent-encoded; any other key is
+  ignored. A parameter given more than once, even with an empty value, is refused with `The address gives the parameter <name> more
+  than once.` A value that breaks its rule is refused with `The address has an invalid value for the parameter <name>.`, and `from` not
+  before `to` with `The address has a start time that is not before its end time.` An error text names the parameter, never the value.
+  An address with an error calls no store method. The part of the address after `#` is never read.
+- Without `from` and `to` the whole stored range is searched. A time field the user leaves empty is left out of the address. The
+  filter form is a GET form to the same page, so it also works without script; with script it validates the entered values first and
+  shows the same error texts instead of navigating.
+- The page follows every change of its address (submitting the form, a link, back and forward) and then searches what the new address
+  says; the results always come from the address.
+
+**Search page.**
+
+- The page lists the matching lines **oldest first**, 100 per page: time (UTC, `yyyy-MM-dd HH:mm:ss.fff`), source, host, program,
+  process ID, severity name (`-` when the line has no priority) and message. There is no total count of the matches.
+- It queries only once the page is interactive. Prerendered (the first response) it shows the filters and `Searching…` and queries
+  nothing, so a search runs once per page load.
+- A page that is full offers *Next page* (the next 100 lines) and *First page*. A search that stops at the examined-lines bound before
+  it has a full page (a common word or a filter that few lines pass, in a large range) shows `Searched up to <time> UTC.` with
+  *Continue*, which searches on from there; the bound is 12,000 examined lines per request. The page may then hold fewer than 100 lines,
+  or none. **The page position is not in the address**: *Next page*, *First page* and *Continue* add no history entry, so the browser's
+  back button leaves the search, not the page, and a reloaded or shared address opens the first page.
+- *Context* on a line shows the 5 lines before and the 5 lines after it from the same log of the same source and host (line, time and
+  program, message), at most 11 lines; opening another replaces it. Lines of other logs of the source are skipped, and each side looks
+  at no more than 2,000 lines of the source.
+- With `template` the page shows the template (text, source, program, first and last seen, its number of lines) above the lines, which are
+  the lines of that template, and a link to remove the filter. A template number the store does not know (templates are renumbered when
+  `vandoxd templates` rebuilds the statistics) shows `This template does not exist. Template numbers change when the statistics are
+  rebuilt.` and searches nothing.
+- The source list of the form holds the stored sources (at most 64); a source of the address that is not in it stays selectable.
+
+**Template page.**
+
+- It lists the templates with lines in the range, optionally of one source and one program, most lines first, at most 200: template
+  text, source, program, first and last seen (UTC), lines in total and **lines in range**. The range count is counted in **whole
+  hours**: a `from` or `to` inside an hour counts that hour completely, and the column is labelled `Lines in range (whole hours)`.
+  Template numbers and counts change when the statistics are rebuilt.
+- *Chart* selects a template (`template` on this page): it is shown above the list with a link *Show lines* to `logs?template=<id>` with
+  the same `from` and `to`, and a chart of its lines per hour for the last 2,160 hours of the range (`to` minus 2,160 hours at the
+  earliest). The chart has one point per hour from the first to the last hour of the range that holds a line of the template or is
+  covered by the template's source: the count, **0** for an hour in which the source logged but the template did not, and a **gap** for
+  an hour in which the source logged nothing (unknown, never zero). Its title (`Lines per hour`) and series label (`Lines`) are fixed
+  texts; no log text goes into the chart.
+
+**External text.** Source, host, program, message and template text come from log files and agents and are shown through one component
+that writes them as text, never as markup, in an element that isolates the text direction and keeps line feeds and tabs.
+
+- Every character of category Cc other than line feed and tab, every format character (Cf, among them the direction controls such as
+  U+202E and U+200B), the line and paragraph separators, private-use characters, unassigned code points and U+FFFD is written as a visible
+  escape (`\u202e`, `\U000e0001` above U+FFFF, lower-case hex), styled apart from the text; consecutive escapes share one element.
+- A field holds at most 256 runs; the rest of the field is written as one escaped text in the last run.
+- **Per-field caps:** a message is shown up to 16,384 characters and every other field (source, host, program, template text) up to 2,048,
+  counted in UTF-16 characters of the displayed text, an escape counting as written. A longer field ends at the last whole character or
+  escape that fits, followed by the marker `[cut: <n> more characters]`, `<n>` being the characters of the field not shown. The caps leave
+  every field within the stored limits (source 128 bytes, host 1,024, program 1,024, message 16,384) whole unless it holds characters that
+  are escaped, which are longer when written out.
+
+**Calls and deadline.**
+
+- Each page has at most one store call running: the calls of one action (opening an address, *Next page*, *Continue*, *Context*) run one
+  after another, and a new action cancels the running call and waits for its end before the next one starts. Leaving the page cancels it.
+- Every call runs under a deadline of **10 seconds**, which includes the wait for a free slot below. The search page then shows `The
+  search took longer than 10 seconds and was stopped. Narrow the time range or add filters.`, the template page `The query took longer
+  than 10 seconds and was stopped. Narrow the time range or choose a source.`
+- **At most two log-view calls run at once across the whole service**, whatever the number of pages and users open; a third waits for a
+  slot within its own deadline. The store has four reader connections, so two stay free for `/healthz` and every other reader.
+- A search the store refuses shows `The search cannot run: <rule>.` (the store's rule, which never contains the search text, for
+  example that the text has more than 16 terms). Any other error shows `The logs could not be read. The service log has the
+  details.` (templates: `The templates could not be read. The service log has the details.`); the details are only in the service log.
 
 ### Security headers
 
@@ -118,6 +208,21 @@ The ingest listener serves none of this: every UI path, static file and the live
 - Until the login exists (#25), whoever reaches the web port can load the page and open a live connection; the live connection
   does not check the `Origin` header, and the service does not filter the `Host` header. The login decides whether a live
   connection may start before authentication.
+- **The logs view is readable by whoever reaches the web port until #25.** The compose file publishes the web port on `127.0.0.1` only.
+  The host has no `Host`-header allow-list, so through **DNS rebinding** a website that the operator's browser visits can read the logs
+  through a rebound name when the reverse proxy forwards unknown `Host` headers or the web port is reachable from the LAN. The login
+  and its reverse-proxy trust (#25) have to include a `Host` allow-list; v0.1.0 is not released without them.
+- **Memory per circuit and the number of circuits.** The search page holds the capped text of its lines, not the stored records: a
+  line holds up to 16,384 characters of message and up to 2,048 characters in each of source, host, program, about 45 KiB, so a page
+  of 100 lines with an expanded context of 11 lines is about **5 MiB** in the worst case (a typical line is a few hundred bytes), and the
+  template page, with up to 200 rows of four capped short fields and a chart of at most 2,160 points, about **3.1 MiB**. The render batch
+  that sends the page to the browser holds the same text once more, for a moment. The **number of circuits is not bounded** before
+  #25 (the framework keeps up to 100 disconnected circuits for 3 minutes, *Pages and render mode*), and the container has 512 MB, so
+  many open log pages can exhaust the memory of the service.
+- Template numbers change when `vandoxd templates` rebuilds the statistics, so a stored template link can point to another template or
+  to none; the page reports an unknown number. Every stored source can be chosen in the form, because the data model allows a source only
+  letters, digits and `. _ : / @ + -` and at most 128 bytes, which the address rules accept; a source in the address that the store
+  does not know finds no lines.
 - Opened directly as a document, the favicon's own `<style>` element is blocked by the policy and the icon shows without its colors; as
   an icon or image it is not affected.
 
@@ -127,6 +232,7 @@ The ingest listener serves none of this: every UI path, static file and the live
 - [0051](../decisions/0051-brand-assets-in-docs-assets-web-ui-and-telegram-with-their-features.md) — why `docs/assets/` is the single source of the logo.
 - [0098](../decisions/0098-web-ui-serves-only-its-own-static-web-assets.md) — why own static web assets only, brand copies, vendored uPlot and a script-set theme.
 - [0099](../decisions/0099-web-listener-security-headers-one-self-only-csp.md) — why one self-only policy set by the application.
+- [0103](../decisions/0103-logs-view-address-as-the-view-bounded-search-pages-template-lines-by-normalization.md) — why the logs view takes its filters from the address, searches in bounded pages and caps external text.
 
 ## Not here
 
@@ -137,6 +243,7 @@ The ingest listener serves none of this: every UI path, static file and the live
 
 ## Implementation
 
-`Vandox.Backend` (`Components/App.razor`, `Components/Layout/MainLayout.razor`, `Components/Charts`, `Hosting/SecurityHeadersMiddleware`,
+`Vandox.Backend` (`Components/App.razor`, `Components/Layout/MainLayout.razor`, `Components/Charts`, `Components/Pages/LogsPage` and
+`LogTemplatesPage`, `Components/Logs/ExternalText`, `Logs/` (`LogsAddress`, `LogText`, `LogLineView`, `GatedLogExplorer`, `TemplateHourSeries`, `LogsView`), `Hosting/SecurityHeadersMiddleware`,
 `Hosting/ServeCommand`, `wwwroot/`, and `Vandox.Backend.csproj`, whose `RequiresAspNetWebAssets` makes the restore add the framework
 script independently of the sources, as the image build restores before copying them; record 0098).

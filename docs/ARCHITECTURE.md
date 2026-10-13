@@ -7,8 +7,8 @@ backend with web UI, runs as a Docker container on any Docker host in the home n
 
 This document describes the target architecture; as of now the binaries' `--version`, the data model and wire format
 (Go: `internal/model`, `internal/wire`; backend: `src/Vandox.Core`), the configuration loading (`internal/config` for the agent,
-`Vandox.Core.Configuration` for `vandoxd`), the backend service skeleton, the log import framework and the log signature catalog with its detector (`Vandox.Core.Signatures`; the service does not call it yet), the log templates with their statistics and queries (`Vandox.Core.Templates`, `Vandox.Storage`; nothing shows them yet), the outage reconstruction (`vandoxd incidents`, `Vandox.Core.Incidents`), the forensics report as Markdown (`vandoxd report`, `Vandox.Core.Reports`; the web UI shows neither yet) exist (`vandoxd import`, with the parsers for the journal export, the MariaDB error log, Dovecot's own log file, `syslog` and `kern.log`, the Plesk panel log, the nginx, `sw-cp-server` and Apache error logs and the legacy `top`/`lsof` monitoring log): `vandoxd` loads its configuration, opens and migrates its SQLite database (schema, batched writes, queries and log search
-exist as the storage layer; the service does not call it yet, `vandoxd import` writes through it), listens on the
+`Vandox.Core.Configuration` for `vandoxd`), the backend service skeleton, the log import framework and the log signature catalog with its detector (`Vandox.Core.Signatures`; the service does not call it yet), the log templates with their statistics and queries (`Vandox.Core.Templates`, `Vandox.Storage`), the logs view of the web UI (search, context, template list and chart; `Vandox.Backend`), the outage reconstruction (`vandoxd incidents`, `Vandox.Core.Incidents`), the forensics report as Markdown (`vandoxd report`, `Vandox.Core.Reports`; the web UI shows neither yet) exist (`vandoxd import`, with the parsers for the journal export, the MariaDB error log, Dovecot's own log file, `syslog` and `kern.log`, the Plesk panel log, the nginx, `sw-cp-server` and Apache error logs and the legacy `top`/`lsof` monitoring log): `vandoxd` loads its configuration, opens and migrates its SQLite database (schema, batched writes, queries and log search
+exist as the storage layer; the service reads it through the logs view only, `vandoxd import` writes through it), listens on the
 web and ingest ports, answers `/healthz` and shuts down gracefully, and ships as a container with a health
 check. Sections are marked as implemented as features land. The decisions behind it are recorded in
 [`docs/decisions/`](decisions/README.md); each section links the records it rests on. Vandox is an own
@@ -45,7 +45,9 @@ way, and agents of the hosting provider are never disabled or changed
   the web and the ingest port; a middleware routes each request by the label of its listener, and logs are JSON
   lines ([0081](decisions/0081-backend-host-two-listeners-json-logs-blazor-interactive-server.md)). The web UI loads only its own
   static assets and sends one self-only Content-Security-Policy ([0098](decisions/0098-web-ui-serves-only-its-own-static-web-assets.md),
-  [0099](decisions/0099-web-listener-security-headers-one-self-only-csp.md)).
+  [0099](decisions/0099-web-listener-security-headers-one-self-only-csp.md)). The logs view (`/logs`, `/logs/templates`) searches the
+  stored log lines, shows the context of a hit and the templates with their hourly chart, takes every filter from the address and reads
+  the store through a gate of two concurrent calls ([0103](decisions/0103-logs-view-address-as-the-view-bounded-search-pages-template-lines-by-normalization.md)).
 - The backend's libraries, one project each with a test project under `tests/`
   ([0073](decisions/0073-backend-in-dotnet-10-with-blazor-agent-stays-go.md)):
   `Vandox.Core` (data model and validation, the wire decoder, configuration and secrets, safe file access, the
@@ -285,8 +287,12 @@ Implemented by `src/Vandox.Storage`:
   The search text is taken as literal terms only (no FTS5 operators, bounded length and term count). The cost
   of a search grows with the stored lines that contain its terms, so callers bound it with a deadline, which interrupts
   the running statement on the reader connection ([0097](decisions/0097-reader-statements-interrupted-by-a-progress-handler-bound-to-the-token.md)).
+  The logs view does not use this search directly: it searches in bounded pages, from the full-text index when the words match fewer
+  than a cap of rows and otherwise by a time-ordered scan of at most a fixed number of lines, and finds a template's lines by
+  normalizing the candidates its words select ([0103](decisions/0103-logs-view-address-as-the-view-bounded-search-pages-template-lines-by-normalization.md);
+  rules in [Storage](areas/storage.md), *Log exploration*).
 - **Interfaces** ([0077](decisions/0077-storage-on-microsoft-data-sqlite-same-schema-and-rules.md)):
-  `IRecordWriter`, `IRecordReader` (with a keyset on the record ID for paging), `ILogSearcher`, `ILogTemplateReader`,
+  `IRecordWriter`, `IRecordReader` (with a keyset on the record ID for paging), `ILogSearcher`, `ILogExplorer` (the logs view), `ILogTemplateReader`,
   `IImportTracker` and `IIncidentStore`; a consumer that depends on the store's semantics is tested against the real store.
 - **Write throughput** ([0077](decisions/0077-storage-on-microsoft-data-sqlite-same-schema-and-rules.md)):
   measured by a benchmark, see [`BENCHMARKS.md`](BENCHMARKS.md).

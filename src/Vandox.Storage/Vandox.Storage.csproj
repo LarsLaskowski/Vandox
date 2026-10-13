@@ -10,6 +10,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Vandox.Storage.Tests" />
+    <InternalsVisibleTo Include="Vandox.StorageBenchmark" />
   </ItemGroup>
 
 </Project>

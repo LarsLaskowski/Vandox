@@ -674,7 +674,7 @@ browser script changes (`js/charts.js` is reused), so `sonar.coverage.exclusions
   *Limits and errors*: the logs are readable by whoever reaches the web port until #25; until #25 the host has no Host-header
   allow-list (`CreateSlimBuilder`, no `AllowedHosts`), so through DNS rebinding a website the operator's browser visits can read the
   logs when the reverse proxy forwards unknown Host headers or the web port is reachable from the LAN; the memory per circuit (about
-  5 MiB worst case for the search page, 111 lines at the caps, and 2.5 MiB for the template list, plus a transient render batch of
+  5 MiB worst case for the search page, 111 lines at the caps, and 3.1 MiB for the template list, plus a transient render batch of
   the same order) and that the number of circuits (and the framework's retained disconnected circuits) is not bounded before #25;
   template numbers change on a rebuild, no total count, a source with an escaped character cannot be chosen; *Layout and
   navigation*: the *Logs* entry.
@@ -735,7 +735,7 @@ browser script changes (`js/charts.js` is reused), so `sonar.coverage.exclusions
   `LogText.MaxChars` (16,384) UTF-16 characters plus the cut marker and source, host and program at most `LogText.MaxShortChars`
   (2,048) each, about 45 KiB; 100 lines plus a context of 11 come to about 5 MiB worst case (a typical line is a few hundred
   bytes). The render tree references the same strings; the render batch serializes them once more, transiently, for SignalR. The
-  template page holds at most 200 rows of four capped short fields (about 2.5 MiB worst case) and one chart of 2,160 points. Before
+  template page holds at most 200 rows of four capped short fields (about 3.1 MiB worst case) and one chart of 2,160 points. Before
   #25 the number of circuits is not bounded (container limit 512 MB, `deploy/backend/docker-compose.yml:36`): a residual stated in the
   web UI area and 0103.
 - [x] Exceptions that reach the user: `InvalidQueryException` → `The search cannot run: <rule>.` (the store's rule text, which never

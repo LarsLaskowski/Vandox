@@ -32,11 +32,11 @@ public static class Program
     /// <summary>
     /// Runs the measurement.
     /// </summary>
-    /// <param name="args">The directory for the temporary database, then optionally <c>--batches N</c>, <c>--size N</c> and <c>--warmup</c>, or <c>--log-lines N</c> with optionally <c>--size N</c></param>
+    /// <param name="args">The directory for the temporary database, then optionally <c>--batches N</c>, <c>--size N</c> and <c>--warmup</c>, or <c>--log-lines N</c> or <c>--search-lines N</c> with optionally <c>--size N</c></param>
     /// <returns>The exit code: 0 on success, 1 on a failure, 2 on a usage error</returns>
     public static async Task<int> Main(string[] args)
     {
-        if (TryParse(args, out var directory, out var batches, out var size, out var warmup, out var logLines))
+        if (TryParse(args, out var directory, out var batches, out var size, out var warmup, out var logLines, out var searchLines))
         {
             using var stop = new CancellationTokenSource();
 
@@ -48,7 +48,11 @@ public static class Program
 
             try
             {
-                if (logLines > 0)
+                if (searchLines > 0)
+                {
+                    await SearchBenchmark.RunAsync(directory, searchLines, size, stop.Token).ConfigureAwait(false);
+                }
+                else if (logLines > 0)
                 {
                     await TemplateBenchmark.RunAsync(directory, logLines, size, stop.Token).ConfigureAwait(false);
                 }
@@ -73,7 +77,7 @@ public static class Program
             }
         }
 
-        await Console.Error.WriteLineAsync("usage: Vandox.StorageBenchmark <existing directory on the volume to measure> [--batches N] [--size N] [--warmup] | --log-lines N [--size N]").ConfigureAwait(false);
+        await Console.Error.WriteLineAsync("usage: Vandox.StorageBenchmark <existing directory on the volume to measure> [--batches N] [--size N] [--warmup] | --log-lines N [--size N] | --search-lines N [--size N]").ConfigureAwait(false);
 
         return UsageError;
     }
@@ -87,14 +91,16 @@ public static class Program
     /// <param name="size">The number of records per batch</param>
     /// <param name="warmup">Whether a small batch that is not counted runs first</param>
     /// <param name="logLines">The number of log lines of the log template measurement, 0 for the metric measurement</param>
+    /// <param name="searchLines">The number of log lines of the log search measurement, 0 when it does not run</param>
     /// <returns><c>true</c> when the arguments are valid</returns>
-    private static bool TryParse(string[] args, out string directory, out int batches, out int size, out bool warmup, out int logLines)
+    private static bool TryParse(string[] args, out string directory, out int batches, out int size, out bool warmup, out int logLines, out int searchLines)
     {
         directory = args.Length > 0 ? args[0] : string.Empty;
         batches = DefaultBatches;
         size = DefaultSize;
         warmup = false;
         logLines = 0;
+        searchLines = 0;
 
         var index = 1;
         var metricOptions = 0;
@@ -110,30 +116,56 @@ public static class Program
                 continue;
             }
 
-            var valid = index + 1 < args.Length && int.TryParse(args[index + 1], NumberStyles.None, CultureInfo.InvariantCulture, out var value) && value > 0;
+            var number = ReadNumber(args, index);
 
-            if (valid && args[index] == "--batches")
+            switch (args[index])
             {
-                batches = int.Parse(args[index + 1], CultureInfo.InvariantCulture);
-                metricOptions++;
-            }
-            else if (valid && args[index] == "--log-lines")
-            {
-                logLines = int.Parse(args[index + 1], CultureInfo.InvariantCulture);
-            }
-            else if (valid && args[index] == "--size")
-            {
-                size = int.Parse(args[index + 1], CultureInfo.InvariantCulture);
-            }
-            else
-            {
-                return false;
+                case "--batches" when number > 0:
+                    {
+                        batches = number;
+                        metricOptions++;
+                    }
+                    break;
+
+                case "--log-lines" when number > 0:
+                    {
+                        logLines = number;
+                    }
+                    break;
+
+                case "--search-lines" when number > 0:
+                    {
+                        searchLines = number;
+                    }
+                    break;
+
+                case "--size" when number > 0:
+                    {
+                        size = number;
+                    }
+                    break;
+
+                default:
+                    {
+                        return false;
+                    }
             }
 
             index += 2;
         }
 
-        return directory.Length > 0 && Directory.Exists(directory) && size <= StorageLimits.MaxBatchRecords && logLines <= MaxLogLines && (logLines == 0 || metricOptions == 0);
+        return directory.Length > 0 && Directory.Exists(directory) && size <= StorageLimits.MaxBatchRecords && logLines <= MaxLogLines && searchLines <= MaxLogLines && (logLines == 0 || metricOptions == 0) && (searchLines == 0 || (metricOptions == 0 && logLines == 0));
+    }
+
+    /// <summary>
+    /// Reads the number after an option.
+    /// </summary>
+    /// <param name="args">The arguments</param>
+    /// <param name="index">The index of the option</param>
+    /// <returns>The number, 0 when it is missing or not a positive integer</returns>
+    private static int ReadNumber(string[] args, int index)
+    {
+        return index + 1 < args.Length && int.TryParse(args[index + 1], NumberStyles.None, CultureInfo.InvariantCulture, out var value) ? value : 0;
     }
 
     /// <summary>

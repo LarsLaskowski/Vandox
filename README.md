@@ -31,7 +31,7 @@ cmd/vandox-agent/   entry point of the agent (Go)
 internal/           the agent's Go packages: config, model, wire (batch encoder), cli, version
 src/Vandox.Backend/ the backend vandoxd: host, command line, Blazor web UI
 src/Vandox.Core/    record model, wire decoder, configuration, safe file access, log parser framework, log signatures
-src/Vandox.Storage/ SQLite store: schema, migrations, batched writes, queries, log search
+src/Vandox.Storage/ SQLite store: schema, migrations, batched writes, queries, log search and exploration
 src/Vandox.Import/  log import: scanner, archives, resumable batches
 tests/              one test project per project under src/
 tools/              console programs for developers, e.g. the storage write benchmark (docs/BENCHMARKS.md)
@@ -380,6 +380,26 @@ leap year) are skipped with a reason, as is a year-less line in a file without a
 report (an OOM kill, a `cut here` warning) becomes one record. Ubuntu's rsyslog writes every kernel line to both
 `syslog` and `kern.log`, so importing both stores the kernel lines twice.
 
+### Explore the logs
+
+The web UI shows the stored log lines under *Logs* (`/logs`) and the log templates under *Templates* (`/logs/templates`). All times are
+**UTC**, in the filters and in the lists.
+
+- **Search** (`/logs`): the lines come oldest first, 100 per page. Filter by text (all words must occur; words are literal, no
+  operators), source, program, severity (a line with that priority or a more severe one) and a time range (`from` inclusive, `to`
+  exclusive). *Next page* shows the next 100 lines. A search over a large range that finds few matches may stop after examining
+  12,000 lines and say `Searched up to <time>.`; *Continue* searches on from there. A search that takes longer than 10 seconds is
+  stopped: narrow the range or add filters. *Context* on a line shows the 5 lines before and after it from the same log.
+- **Templates** (`/logs/templates`): the message patterns of a range with their first and last seen time, their lines in total and
+  their lines in the range (counted in whole hours), most lines first, optionally of one source and program. *Chart* shows a template's
+  lines per hour (gaps where the source logged nothing); *Show lines* opens the search for the lines of the template.
+- **The address is the view.** Every filter is in the address (`logs?q=oom&source=journal&severity=err&from=2026-10-01T00:00&to=2026-10-02T00:00`
+  and `logs?template=12`), so a search can be bookmarked and shared. The page position is not part of it: a shared address opens the
+  first page.
+- Template numbers change when the template statistics are rebuilt (*Rebuild template statistics* below); a link to a template then
+  shows another template or says that the template does not exist.
+- Until the login exists (issue #25), whoever reaches the web port can read every stored log line.
+
 ### Reconstruct incidents
 
 `vandoxd incidents` rebuilds the outage incidents from everything stored, so run it after each import (it needs no
@@ -462,7 +482,9 @@ The log template statistics count every stored log line under its template per h
 stores lines, so lines stored before the statistics existed (a database upgraded from before schema version 8) and lines
 counted under older normalization rules are missing or outdated. `vandoxd templates` empties the statistics and counts
 every stored log line again under the current rules. Run it after upgrading such a database and after a release that changes
-the normalization rules, then run `vandoxd incidents` again:
+the normalization rules, then run `vandoxd incidents` again. The template numbers that the web UI shows (and the `template`
+parameter of a saved link) belong to the statistics: after a rebuild they identify other templates, so links saved before it
+may show another template or none:
 
 ```
 docker exec -it vandoxd /vandoxd templates
