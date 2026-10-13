@@ -85,6 +85,7 @@ internal static class WebAuthentication
         services.TryAddEnumerable(ServiceDescriptor.Scoped<CircuitHandler, SessionCircuitHandler>());
         services.AddAntiforgery(options =>
                                 {
+                                    options.HeaderName = null;
                                     options.Cookie.Name = AntiforgeryCookieName;
                                     options.Cookie.HttpOnly = true;
                                     options.Cookie.SameSite = SameSiteMode.Strict;

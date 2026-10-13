@@ -78,15 +78,18 @@ and the option in [Configuration and secrets](configuration-and-secrets.md), the
 - Sign-out: every page shows a *Sign out* button in its header. `POST /logout` with a valid antiforgery token ends the session on the
   server, deletes the cookie and answers `303` with `Location: /login`; without a session it only redirects.
 - A live connection belongs to the session that opened it. Every event, interop call and navigation it sends is checked against the
-  session first; once the session has ended, the connection is closed and no event, interop call or navigation it sends is processed.
-  (The data of a transfer from the server to the browser that had already started is not checked; no page uses such transfers.) A
-  page also checks its session every 30 seconds and goes to `/login` when it has ended.
+  session first; once the session has ended, an event, interop call or navigation it sends ends the connection and is not processed.
+  Not checked: the acknowledgement of a render (the framework discards the handler's result, so it is only dropped), calls that
+  update root components (they bypass the inbound-activity handlers; the pages do not send them with global interactive routing)
+  and the data of a transfer from the server to the browser that had already started (no page uses such transfers). A page also
+  checks its session every 30 seconds and goes to `/login` when it has ended, which bounds that window.
 
 ### Cross-site requests
 
 - Every form post (the login form, sign-out, any form of a page) must carry an antiforgery token that matches the cookie
   `vandox_csrf` (`HttpOnly`, `SameSite=Strict`, `Path=/`, `Secure` like the session cookie). A post without a valid token is answered
-  `400` and has no effect; a login post without one is not counted as an attempt.
+  `400` and has no effect; a login post without one is not counted as an attempt. The token is read only from the form field
+  `__RequestVerificationToken`, never from a request header, so the body of every post is read as a form and checked first.
 - A form post whose body cannot be read as a form is refused with `400` like a post without a token, before the password is looked at
   and without signing out: a value of more than 16 KiB, more than 64 values, a multipart body of more than 64 KiB (file parts
   included), a malformed body, or a body the client breaks off. No part of a form is buffered in a file.

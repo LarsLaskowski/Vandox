@@ -101,11 +101,16 @@ internal sealed class LoginService : IDisposable
     /// <returns>A task that completes when the session is ended</returns>
     internal async Task SignOutAsync(HttpContext context)
     {
+        var hadSession = context.User.Identity?.IsAuthenticated is true;
+
         await context.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme).ConfigureAwait(false);
 
-        var client = ClientText(context);
+        if (hadSession)
+        {
+            var client = ClientText(context);
 
-        _logger.LoggedOut(client);
+            _logger.LoggedOut(client);
+        }
     }
 
     /// <summary>
