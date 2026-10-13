@@ -20,9 +20,9 @@ Every documentation edit appears in exactly one row; the Lead's approval only to
 | 12 | Wire `ServeCommand` (hash check before the database, pipeline order, services), `HealthEndpoint` anonymous; components (`App`, `Routes`, `MainLayout`, `Login`, `RedirectToLogin`, `Pages/_Imports`), `app.css` | `src/Vandox.Backend/Hosting/*`, `src/Vandox.Backend/Components/*`, `src/Vandox.Backend/wwwroot/app.css` | AC1, AC4, AC5.1, AC5.2, AC6, AC7.8, AC8.2, AC8.3, AC9 | Dev | [x] |
 | 13 | Deployment: compose file hash secret; example `trusted_proxies`; smoke script (hash via `hash-password`, login checks; `bash -n`, *Analyzer gate* `--lint-only`) | `deploy/backend/docker-compose.yml`, `deploy/backend/vandoxd.yaml`, `.github/scripts/smoke-test-backend.sh` | AC5.5 (example), AC10.2 | Dev | [x] |
 | 14 | *Image build check* (restore-order reproduction), result in `log.md` | — | AC10.1 | Dev | [x] |
-| 15 | Area documents of other areas | `docs/areas/web-ui.md`, `backend-host.md`, `configuration-and-secrets.md`, `network-and-security-model.md` | — | Dev | [ ] |
-| 16 | Operator guide | `docs/REVERSE_PROXY.md` (new) | — | Dev | [ ] |
-| 17 | README, SECURITY.md, ARCHITECTURE.md | `README.md`, `SECURITY.md`, `docs/ARCHITECTURE.md` | — | Dev | [ ] |
-| 18 | Project knowledge: security areas 3 and 8 — area 3 implemented; goal restated: cookies `HttpOnly`, `SameSite`, and `Secure` whenever the request reached the proxy over HTTPS; the UI port published for the proxy only, as defense in depth (0060) | `.squad/project.md` (*Security areas*) | — | Dev | [ ] |
+| 15 | Area documents of other areas | `docs/areas/web-ui.md`, `backend-host.md`, `configuration-and-secrets.md`, `network-and-security-model.md` | — | Dev | [x] |
+| 16 | Operator guide | `docs/REVERSE_PROXY.md` (new) | — | Dev | [x] |
+| 17 | README, SECURITY.md, ARCHITECTURE.md | `README.md`, `SECURITY.md`, `docs/ARCHITECTURE.md` | — | Dev | [x] |
+| 18 | Project knowledge: security areas 3 and 8 — area 3 implemented; goal restated: cookies `HttpOnly`, `SameSite`, and `Secure` whenever the request reached the proxy over HTTPS; the UI port published for the proxy only, as defense in depth (0060) | `.squad/project.md` (*Security areas*) | — | Dev | [x] |
 | 19 | Project knowledge: test doubles row | `.squad/project.md` (*Test doubles*) | — | Tester | [x] |
 | 20 | Coverage pass until the *Coverage gate* passes | tests | all | Tester | [ ] |

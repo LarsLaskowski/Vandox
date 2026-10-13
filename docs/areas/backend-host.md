@@ -14,7 +14,10 @@ The options of the configuration file are in [Configuration and secrets](configu
   `-version` and `-h`. `-version` wins over the other flags and prints the version line to standard output. `-h` prints the usage to
   standard error and exits 0.
 - The first positional argument `import` starts the import sub-command, `incidents` the incident reconstruction, `templates` the template rebuild,
-  `report` the forensics report; any other positional argument is a usage error.
+  `report` the forensics report, `hash-password` the password hash; any other positional argument is a usage error.
+- `vandoxd hash-password` reads a password from standard input and prints its argon2id hash for the secret
+  `VANDOX_WEB_PASSWORD_HASH` ([Web login](web-login.md), *Creating the hash*). It takes no flag but `-h`/`-help`, reads no configuration
+  and is not combined with `-healthcheck`.
 - `vandoxd [flags] incidents [-config file]` rebuilds the incidents from the stored data (*Incidents* in [Detection, alerts and
   reports](detection-and-reports.md)). Its flags are `-config` and `-h`/`-help` (usage to standard error, exit 0); any positional
   argument after `incidents` is a usage error (`vandoxd incidents: no argument is expected`, exit 2), and it is not combined with
@@ -48,6 +51,7 @@ The options of the configuration file are in [Configuration and secrets](configu
   opened, or serving fails; **2** for a usage error (unknown flag, flag without value, unexpected argument), with the message and the
   usage on standard error.
 - A service start logs one line with the version, the configuration path, both listen addresses and the storage directory, then
+  checks the web password hash (a missing or refused hash is logged and exits 1, [Web login](web-login.md), *Password*), then
   opens (and, if needed, creates and migrates) the database, then starts both listeners.
 
 ## Listeners and routing
@@ -55,6 +59,9 @@ The options of the configuration file are in [Configuration and secrets](configu
 - The service opens two listeners from `web.listen` and `ingest.listen`. Every connection carries the label of the listener that
   accepted it, and **a request reaches only the endpoints of its own listener**. A request on a connection with no label or on the
   wrong listener is answered `404` (fail closed).
+- The port routing runs first. On the web listener the forwarded headers of trusted proxies (only when `web.trusted_proxies` is set),
+  the security headers and then the login follow, so the ingest listener answers `404` before any authentication is looked at
+  ([Web login](web-login.md), *Access*).
 - The web listener serves the web UI, its static files and `/healthz`, and every web response carries the security headers of the
   [Web UI](web-ui.md) area (`Hosting/SecurityHeadersMiddleware`, after the port routing). The ingest listener serves only the ingest endpoint; **until that exists it answers
   `404` to everything, `/healthz` included**: static files and the endpoints of the web UI's live connection are web endpoints too, so
@@ -71,7 +78,7 @@ The options of the configuration file are in [Configuration and secrets](configu
   `X-Content-Type-Options: nosniff`. A failure is logged at warning level with the exception type name; the response never contains
   an error text. At most one database check is in flight at a time: requests wait for it or for their own 2-second timeout, so a hung
   volume leaves no pile of stuck work.
-- The web UI login must leave `/healthz` outside the login. Reading the schema version, not merely holding a connection, is the
+- `/healthz` is outside the login ([Web login](web-login.md), *Access*). Reading the schema version, not merely holding a connection, is the
   check, because it makes SQLite read the file.
 - `vandoxd -healthcheck` is the container's health probe: it loads the configuration file **without the environment** (no secret is
   read and no `VANDOX_` variable is checked, so an unreadable secret file does not turn a running container unhealthy), derives
@@ -117,6 +124,9 @@ deadline and the health timeout are constants, not options.
   container and the file starts on every Docker host regardless of Tailscale.
 - Volumes: the named volume `vandox-data` at `/data` (Docker copies the image's ownership into a new volume), `./import` read-only at
   `/import`, the configuration file read-only at `/etc/vandox/vandoxd.yaml`.
+- The web password hash is a **file secret** the same way (`VANDOX_WEB_PASSWORD_HASH_FILE=/run/secrets/vandox_web_password_hash`),
+  created with `vandoxd hash-password` ([Web login](web-login.md), *Creating the hash*); the file has the owner and mode of the token
+  file, and the service refuses to start without a valid hash.
 - The agent token is a **file secret** (`VANDOX_AGENT_TOKEN_FILE=/run/secrets/vandox_agent_token`). The operator creates
   `secrets/vandox_agent_token` owned by `65532:65532` with mode `0400` or `0600`, never world-readable; Compose does not apply owner
   or mode to file secrets, and the service does not enforce them.
@@ -129,11 +139,12 @@ deadline and the health timeout are constants, not options.
 ## Exposure and trust
 
 - **TLS for the web UI is terminated by a reverse proxy**; the service speaks plain HTTP to the proxy and contains no certificate code.
-  The UI port must be reachable only by the proxy. Running behind a proxy (forwarded headers, secure cookies) is part of the login
-  work and is **not implemented yet**.
+  The UI port is published for that proxy only, as defense in depth. Behind a proxy, `X-Forwarded-For` and `X-Forwarded-Proto` are
+  used only from the addresses in `web.trusted_proxies` (default: none), and the session cookies are `Secure` when the request reached
+  the proxy over HTTPS ([Web login](web-login.md), *Reverse proxy trust*; setup in [REVERSE_PROXY.md](../REVERSE_PROXY.md)).
 - **The loopback binding is not a security boundary.** Depending on the Docker Engine version and the host's firewall, a host on the
   same network may reach a published port or the container's address directly. The access control of the web UI is its login, which
-  must protect every route except `/healthz` and must not treat the peer address, loopback or `X-Forwarded-*` headers as proof of
+  protects every route except `/healthz` and does not treat the peer address, loopback or `X-Forwarded-*` headers as proof of
   having passed the proxy. Likewise the ingest token, not the network binding, is the boundary of the ingest endpoint.
 - **The ingest path is not routed through the proxy.** Agents reach it over Tailscale at the backend host's tailnet address and the
   published ingest port; the backend does not embed Tailscale and holds no Tailscale key. The port binding must stay on the tailnet
@@ -149,6 +160,7 @@ deadline and the health timeout are constants, not options.
 - [0060](../decisions/0060-compose-file-port-bindings-volumes-and-memory-limit.md) — why these port bindings, volumes and limits.
 - [0072](../decisions/0072-vandoxd-import-sub-command-output-and-exit-codes.md) — why no arguments run the service and a JSON log handler.
 - [0081](../decisions/0081-backend-host-two-listeners-json-logs-blazor-interactive-server.md) — why two labelled listeners, JSON logs and Blazor Interactive Server.
+- [0103](../decisions/0103-web-login-server-side-sessions-static-login-page-circuits-bound-to-session.md), [0104](../decisions/0104-argon2id-password-hash-konscious-strict-phc-form-hash-password-command.md) and [0105](../decisions/0105-forwarded-headers-only-from-trusted-proxies-failed-logins-locked-per-client-and-capped.md) — the login, the password hash and the proxy trust.
 
 ## Not here
 
@@ -156,6 +168,7 @@ deadline and the health timeout are constants, not options.
 - The import sub-command: [Log import](log-import.md). The incident reconstruction itself: [Detection, alerts and reports](detection-and-reports.md).
 - The database: [Storage](storage.md). The batch format: [Wire format](wire-format.md).
 - The pages, layout, theme, static files, charts and security headers of the web UI: [Web UI](web-ui.md).
+- Passwords, sessions, the failed-sign-in limits and the proxy trust: [Web login](web-login.md).
 - The Tailscale ACL and the security model of the monitored server: the network area.
 
 ## Implementation

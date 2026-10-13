@@ -26,12 +26,16 @@ files or endpoints.
    `deploy/backend/docker-compose.yml` publishes the web port on `127.0.0.1` by default (defense in depth, not
    the boundary) and publishes no ingest port yet (issue #40); the Dockerfile has no `EXPOSE`. Records 0010,
    0016, 0017, 0059, 0060.
-3. **Web UI login** (not implemented yet): password hashing, sessions, CSRF, rate limiting, reverse-proxy
+3. **Web UI login** (implemented): password hashing, sessions, CSRF, rate limiting, reverse-proxy
    trust. *Goal:* the password is stored only as a salted, deliberately slow hash; session IDs are random,
-   expire, are invalidated on logout and travel only in `HttpOnly`, `Secure`, `SameSite` cookies; every
-   state-changing request is CSRF-protected; failed logins are rate-limited; forwarded headers
-   (`X-Forwarded-For`, `X-Forwarded-Proto`) are trusted only from the configured reverse proxy, and the UI
-   port is reachable only by that proxy. Records 0016, 0023.
+   expire, are invalidated on logout and travel only in `HttpOnly`, `SameSite` cookies that are `Secure`
+   whenever the request reached the proxy over HTTPS; every state-changing request is CSRF-protected;
+   failed logins are rate-limited; forwarded headers (`X-Forwarded-For`, `X-Forwarded-Proto`) are trusted
+   only from the configured reverse proxy, and the UI port is published for that proxy only, as defense in
+   depth (0060). In `src/Vandox.Backend/Security` (`PasswordHash`, `LoginService`, `LoginThrottle`,
+   `SessionStore`, `SessionCircuitHandler`, `SessionRevalidatingStateProvider`, `ForwardedHeadersSetup`,
+   `WebAuthentication`), `Components/Account/Login.razor` and `Vandox.Core` `TrustedProxyList`; the hash
+   uses the dependency Konscious.Security.Cryptography.Argon2. Records 0016, 0023, 0060, 0103, 0104, 0105.
 4. **Command signing for remote actions** (later, not part of v0.1.0): *Goal:* the agent executes only
    commands with a valid signature that name an action from its local fixed list and were confirmed by the
    user; a forged, altered or replayed command is rejected; the signing key exists only on the backend
@@ -64,9 +68,10 @@ files or endpoints.
    key): *Goal:* secrets are read only from environment variables or Docker secrets, never from the
    configuration file or the command line; never logged, shown in the UI, written to the spool or put into
    error messages; a secret checked against input (ingest token, later TOTP codes) is compared in constant
-   time, the UI password through its hash function's comparison. Implemented for the agent in `internal/config`
+   time, the UI password through its hash function's comparison (`PasswordHash`, `CryptographicOperations.FixedTimeEquals`; the
+   hash is checked at start-up and the password is never logged, echoed or stored). Implemented for the agent in `internal/config`
    (`readSecret`, `checkEnviron`, `Secret`) and for the backend in `src/Vandox.Core/Configuration`
-   (`SecretReader`, `Secret`, `BackendSecrets`). Records 0032, 0050, 0078.
+   (`SecretReader`, `Secret`, `BackendSecrets`). Records 0032, 0050, 0078, 0104.
 9. **File writes and paths derived from external input** (log import, the agent's on-disk spool, database
    backups): *Goal:* no write outside the configured directories (no path traversal), the spool is
    size-bounded, files are created with restrictive permissions. The database file `vandox.db`
