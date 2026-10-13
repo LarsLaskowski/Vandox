@@ -1,6 +1,6 @@
 # 0105: Forwarded headers only from `web.trusted_proxies`; failed sign-ins locked per client and capped overall; the loopback binding stays defense in depth
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-13
 - **Area:** Web login
 - **Source:** Issue #25

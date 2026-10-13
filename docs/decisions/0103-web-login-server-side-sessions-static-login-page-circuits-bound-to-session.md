@@ -1,6 +1,6 @@
 # 0103: Web login: one password, server-side sessions in memory, a static login page, live connections bound to the session
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-13
 - **Area:** Web login
 - **Source:** Issue #25

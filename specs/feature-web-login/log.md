@@ -24,3 +24,6 @@ are quoted in full.
 | 2026-10-13 19:56 | 8 Fix round 1 tests | squad-tester | Failing tests: ServeRejectsFormPostsWithoutValidAntiforgeryToken (header token row), WebAuthenticationReadsAntiforgeryTokenOnlyFromForm, LoginServiceLogsLogoutOnlyWhenSessionEnded (sonnet/medium · 11,470 tokens · 5 tool uses · 130 s · continued) |
 | 2026-10-13 20:07 | 8 Fix round 1 | squad-dev | HeaderName = null; LoggedOut only for an authenticated user; web-login.md Cross-site requests and Sessions wording (sonnet/medium · 4,178 tokens · 4 tool uses · 317 s) |
 | 2026-10-13 20:07 | 8 Code check (fix round 1) | Orchestrator | All gates pass on 0c52aa3: format, analyzer, tests (Backend 512), coverage 98.4 %/98.2 %, scope, decisions |
+| 2026-10-13 20:08 | 8 Review round 2 | squad-security | APPROVED on 0c52aa3; no open findings (opus/medium · 9,924 tokens · 4 tool uses · 28 s · continued) |
+| 2026-10-13 20:08 | 8 Review round 2 | squad-reviewer | APPROVE on 0c52aa3; all round-1 findings fixed, no new defects (opus/medium · 7,803 tokens · 3 tool uses · 30 s · continued) |
+| 2026-10-13 20:08 | 9 PR approval | Orchestrator | Checklist: latest round clean on 0c52aa3, only specs changed since; gates pass; area docs and named docs in diff; records 0103-0105 set to Accepted; Lead approve-pr launched for plan deviations |

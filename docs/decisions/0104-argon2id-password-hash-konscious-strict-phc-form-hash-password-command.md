@@ -1,6 +1,6 @@
 # 0104: The password hash is argon2id in strict PHC form within bounds, verified with Konscious.Security.Cryptography.Argon2; `vandoxd hash-password` creates it
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-13
 - **Area:** Web login
 - **Source:** Issue #25
