@@ -63,19 +63,39 @@ The view:
     external text in the page), or no prerender for these pages (every page is prerendered).
 12. **Invisible and direction-changing characters as visible escapes**, isolation of the direction only (U+202E still reverses the rest
     of its line), or removing them (loses evidence).
+13. **The escaped text of a field capped, with a visible cut marker**, or every escape written out — a 16 KiB message of control
+    characters escapes to about 98,000 characters, roughly 192 KiB per field and 20 MB for one page with its context, while the number
+    of circuits is not bounded before the login.
+
+Reader slots and the scan:
+
+14. **At most two explorer calls at once across the service, one per page**, no limit (four tabs hold the four reader connections the
+    health check also needs, so it fails for up to the deadline, again and again), or a separate reader pool for the view (changes
+    the store's reader bound for one consumer).
+15. **The scan tests each examined line against the full-text match on its own**, or collects the matches of the chunk's record-ID
+    range into a set — imported lines are not in ID order, so a time-ordered chunk can span almost every ID and the set grows with
+    the matches, not with the scan bound.
 
 ## Decision
 
-Options 3, 7, 9, 10, 11 and 12: the logs view reads every filter from its address and queries only when interactive, each query under
+Options 3, 7, 9, 10, 11, 12, 13, 14 and 15: the logs view reads every filter from its address and queries only when interactive, each query under
 a deadline; the store answers a page from the full-text index when the words match fewer rows than a cap and otherwise by scanning a
-bounded number of lines in time order, and finds a template's lines by normalizing the candidates its literal words select. The rules
+bounded number of lines in time order, testing each examined line on its own, and finds a template's lines by normalizing the candidates its literal words select. External text is
+escaped and capped per field with a visible cut marker; the view runs at most two store calls at once across the service, so the
+health check keeps a reader. The rules
 — address parameters, limits, modes, texts and the display of external text — are in [Web UI](../areas/web-ui.md) (*Logs view*) and
 [Storage](../areas/storage.md) (*Log exploration*).
 
 ## Consequences
 
 - Every request does bounded work; a common word over a large range is answered page by page, and a request that ends at the scan
-  bound says up to which time it searched and offers to continue. There is no total hit count.
+  bound says up to which time it searched and offers to continue. There is no total hit count. The page position is not in the
+  address: a shared address opens the first page.
+- The full-text work of several common words with a rare or empty intersection runs inside one FTS5 step, which the deadline cannot
+  interrupt; it is bounded by the size of the words' index entries and measured as its own benchmark cases.
+- The template list counts whole hours: a range that starts or ends inside an hour counts that hour completely.
+- A line made mostly of invisible characters is shown cut, with the number of characters not shown.
+- Two tabs with slow searches make a third wait for a slot (within its deadline); the health check is not affected.
 - Search operators stay unavailable (0066); results are oldest first within the range.
 - The literal-term search of 0066 stays as it is for its existing callers; the view uses the new explorer interface.
 - A template link breaks when `vandoxd templates` rebuilds the statistics (numbers change); the page says so.
@@ -84,6 +104,10 @@ bounded number of lines in time order, and finds a template's lines by normalizi
   already is; the selectivity cap and the scan bound may be tuned from the measurement without a new decision.
 - Until the login (#25) exists, whoever reaches the web port can read every stored log line through the view; the compose file publishes
   the web port on loopback only ([0060](0060-compose-file-port-bindings-volumes-and-memory-limit.md)), and v0.1.0 is not released
-  without the login. Forged lines are shown like real ones.
+  without the login. Forged lines are shown like real ones. Until then the number of circuits is not bounded either (a page holds
+  up to about 5 MiB of capped text in the worst case, the container 512 MB), and the host has no Host-header allow-list, so through
+  DNS rebinding a website the operator's browser visits can read the logs when a reverse proxy forwards unknown Host headers or the
+  web port is reachable from the LAN; the login's reverse-proxy trust (#25) has to include a Host allow-list. Nothing from `main` is
+  published before a release tag.
 - A program-only filter over a large range scans; skipping hours without lines of the program through the template statistics is left
   to a measurement that needs it.

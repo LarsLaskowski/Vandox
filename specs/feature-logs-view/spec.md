@@ -28,16 +28,17 @@ The web UI gets two pages under one navigation entry *Logs*:
    - The source is one of the sources that hold log lines (the importer's parser types such as `journal`, `syslog`,
      `mariadb`); the program is matched exactly (for example `postfix/smtpd`, `mariadbd`).
    - Results are listed oldest first within the range, 100 per page, with time (UTC, milliseconds), source, host, program and
-     process ID, severity and the message. *Next page* and *First page* move through them. Without a range the whole stored
-     data is searched.
+     process ID, severity and the message. *Next page* and *First page* move through them; the page position is not part of the
+     address, so an opened or shared address shows the first page and browser back returns to the previous search, not to the
+     previous page. Without a range the whole stored data is searched.
    - A search over a very large range with a common word does not run until it has seen every line: one request examines a
      bounded number of lines, and when that bound ends the request before the page is full, the page says up to which time it
      has searched and offers *Continue*.
    - Each hit can be expanded to show up to 5 lines before and after it from the same log (same source, log file name and
      host), whatever the filters; one hit is expanded at a time.
 2. **Templates** (`/logs/templates`): the templates of a time range (optionally of one source and one program) with their
-   text, source, program, first seen, last seen, total number of lines and number of lines in the range, the most frequent
-   first. Selecting a template shows its hourly counts as a chart (an hour in which the source logged but the template did not
+   text, source, program, first seen, last seen, total number of lines and number of lines in the range (counted in whole
+   hours: a start or end inside an hour counts that whole hour), the most frequent first. Selecting a template shows its hourly counts as a chart (an hour in which the source logged but the template did not
    is 0; an hour in which the source logged nothing is a gap, unknown) and a link *Show lines* that opens the search page with
    that template as a filter, which lists exactly the lines that have this template.
 
@@ -46,7 +47,9 @@ Common to both:
 - Every filter is in the address. An address with an invalid or repeated filter shows an error that names the parameter and
   runs no query; unknown parameters are ignored.
 - Log text (messages, templates, programs, hosts, sources) is shown as text, never as markup; invisible and direction-changing
-  characters are shown as visible escapes such as `\u202e`, so a forged line cannot rearrange or hide what is displayed.
+  characters are shown as visible escapes such as `\u202e`, so a forged line cannot rearrange or hide what is displayed. A field
+  whose escaped text would grow beyond a fixed size (a message made mostly of invisible characters) is cut with a visible marker
+  that says how many characters are not shown.
 - A query that takes longer than 10 seconds is stopped with a message that asks to narrow the range or add filters. A rule the
   store refuses (for example more than 16 words) is shown with its rule, never with the text.
 - Nothing is queried before the page is interactive; the prerendered page shows the filters and "Searching…".
