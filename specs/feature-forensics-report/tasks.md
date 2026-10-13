@@ -16,5 +16,5 @@ Every documentation edit appears in exactly one row; the Lead's approval only to
 | 8 | README: *Binaries* paragraph, section *Write the forensics report* (example without `-t`), `incidents.window_before` description | `README.md` | — | Dev | [x] |
 | 9 | `.squad/project.md` *Security areas* 10 and 12 (report reads, caps, `MarkdownText.Code`, `-lang` error through `Terminal.Quote`, records 0098–0100) | `.squad/project.md` | — | Dev | [x] |
 | 10 | `.squad/project.md` *Test doubles*, database (C#) row: the decorators the report tests add | `.squad/project.md` | — | Tester | [x] |
-| 11 | Coverage pass (step 6): uncovered lines from the gate, plus the resource bound `ForensicsReporterTests.ForensicsReporterKeepsOneIncidentAtATime` | `tests/Vandox.Backend.Tests/ForensicsReporterTests.cs` and others as the gate reports | AC4 | Tester | [ ] |
+| 11 | Coverage pass (step 6): uncovered lines from the gate, plus the resource bound `ForensicsReporterTests.ForensicsReporterKeepsOneIncidentAtATime` | `tests/Vandox.Backend.Tests/ForensicsReporterTests.cs` and others as the gate reports | AC4 | Tester | [x] |
 | 12 | Records 0098–0100 and their index rows to `Accepted` | `docs/decisions/` | — | Orchestrator (step 9) / Lead | [ ] |
