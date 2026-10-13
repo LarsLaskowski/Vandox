@@ -173,6 +173,27 @@ public class CommandLineTests
     }
 
     /// <summary>
+    /// The name of an unknown flag is escaped in the error, so it cannot inject control or format characters into the terminal.
+    /// </summary>
+    /// <param name="arguments">The arguments, joined with a bar</param>
+    /// <param name="error">The expected error</param>
+    [TestMethod]
+    [DataRow("-\u202echar", "flag provided but not defined: -\\u202echar")]
+    [DataRow("report|--\u202e=x", "flag provided but not defined: -\\u202e")]
+    [DataRow("incidents|-a\nb", "flag provided but not defined: -a\\nb")]
+    [DataRow("templates|-\u001b[31mred", "flag provided but not defined: -\\u001b[31mred")]
+    [DataRow("import|-x\u0085y|a", "flag provided but not defined: -x\\u0085y")]
+    public void CommandLineParseEscapesTheNameOfAnUnknownFlag(string arguments, string error)
+    {
+        // Act
+        var options = CommandLine.Parse(arguments.Split('|'));
+
+        // Assert
+        Assert.AreEqual(error, options.Error, "error with the escaped name");
+        Assert.DoesNotContain(character => char.GetUnicodeCategory(character) is System.Globalization.UnicodeCategory.Control or System.Globalization.UnicodeCategory.Format, options.Error, "no control or format character in the error");
+    }
+
+    /// <summary>
     /// The help flag is recognized for both commands, and the usage texts name the flags.
     /// </summary>
     [TestMethod]

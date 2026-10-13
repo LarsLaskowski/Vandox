@@ -400,6 +400,35 @@ public class ForensicsAnalysisTests
     }
 
     /// <summary>
+    /// Over the snapshot and boot caps a no becomes unknown, since the dropped data may hold the activity, and a yes stays a yes.
+    /// </summary>
+    [TestMethod]
+    public void ForensicsAnalysisTurnsANoIntoUnknownOverTheCaps()
+    {
+        // Arrange
+        var capped = CappedByData(new ForensicsAnalysis(_hour, 2, 1, ReportLimits.MaxObservedRuns, ReportLimits.MaxPrograms));
+        var uncapped = CappedByData(new ForensicsAnalysis(_hour));
+        var quiet = Outage(_base.AddHours(10).AddMinutes(40));
+        var busy = Outage(_base.AddDays(1).AddHours(10).AddMinutes(40));
+
+        // Act
+        var cappedQuiet = capped.Activities(quiet);
+        var cappedBusy = capped.Activities(busy);
+        var uncappedQuiet = uncapped.Activities(quiet);
+
+        // Assert
+        Assert.AreEqual(Indicator.No, uncappedQuiet.Backup, "without caps: no backup in the lookback");
+        Assert.AreEqual(Indicator.No, uncappedQuiet.PanelHigh, "without caps: no high panel memory in the lookback");
+        Assert.AreEqual(Indicator.No, uncappedQuiet.Boot, "without caps: no boot in the lookback");
+        Assert.AreEqual(Indicator.Unknown, cappedQuiet.Backup, "over the snapshot cap: backup unknown");
+        Assert.AreEqual(Indicator.Unknown, cappedQuiet.PanelHigh, "over the snapshot cap: panel unknown");
+        Assert.AreEqual(Indicator.Unknown, cappedQuiet.Boot, "over the boot cap: boot unknown");
+        Assert.AreEqual(Indicator.Yes, cappedBusy.Backup, "a kept backup stays yes");
+        Assert.AreEqual(Indicator.Yes, cappedBusy.PanelHigh, "a kept high panel memory stays yes");
+        Assert.AreEqual(Indicator.Yes, cappedBusy.Boot, "a kept boot stays yes");
+    }
+
+    /// <summary>
     /// Adds 72 observed hours (a log line at minute 30 of each), the snapshots at minute 20 of the hours that have one, the boots, and seals the analysis.
     /// </summary>
     /// <param name="analysis">The analysis</param>
@@ -425,6 +454,30 @@ public class ForensicsAnalysisTests
             analysis.AddBoot(boot);
         }
 
+        analysis.Seal();
+
+        return analysis;
+    }
+
+    /// <summary>
+    /// Adds 72 observed hours, three snapshots at 10:20 of the days (low panel memory, then a backup with high panel memory twice),
+    /// two boots at 10:10 of the second and third day, and seals the analysis. A cap of two snapshots or one boot drops the third
+    /// snapshot or the second boot.
+    /// </summary>
+    /// <param name="analysis">The analysis</param>
+    /// <returns>The analysis</returns>
+    private static ForensicsAnalysis CappedByData(ForensicsAnalysis analysis)
+    {
+        for (var hour = 0; hour < 72; hour++)
+        {
+            analysis.AddLogLine(_base.AddHours(hour).AddMinutes(30), "syslog");
+        }
+
+        analysis.AddProcessSnapshot(_base.AddHours(10).AddMinutes(20), Snapshot(("sw-engine", 10 * Mib)));
+        analysis.AddProcessSnapshot(_base.AddDays(1).AddHours(10).AddMinutes(20), Snapshot(("sw-engine", 100 * Mib), ("pzstd", Mib)));
+        analysis.AddProcessSnapshot(_base.AddDays(2).AddHours(10).AddMinutes(20), Snapshot(("sw-engine", 100 * Mib), ("pzstd", Mib)));
+        analysis.AddBoot(_base.AddDays(1).AddHours(10).AddMinutes(10));
+        analysis.AddBoot(_base.AddDays(2).AddHours(10).AddMinutes(10));
         analysis.Seal();
 
         return analysis;
