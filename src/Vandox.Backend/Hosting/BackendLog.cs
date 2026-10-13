@@ -255,5 +255,28 @@ internal static partial class BackendLog
     [LoggerMessage(EventId = 37, Level = LogLevel.Information, Message = "template rebuild progress {Lines}")]
     internal static partial void TemplateRebuildProgress(this ILogger logger, long lines);
 
+    /// <summary>
+    /// Logs the start of a forensics report.
+    /// </summary>
+    /// <param name="logger">The logger</param>
+    [LoggerMessage(EventId = 38, Level = LogLevel.Information, Message = "report started")]
+    internal static partial void ReportStarted(this ILogger logger);
+
+    /// <summary>
+    /// Logs an interrupted forensics report.
+    /// </summary>
+    /// <param name="logger">The logger</param>
+    [LoggerMessage(EventId = 39, Level = LogLevel.Warning, Message = "report interrupted; the report on standard output is incomplete")]
+    internal static partial void ReportInterrupted(this ILogger logger);
+
+    /// <summary>
+    /// Logs a failed forensics report.
+    /// </summary>
+    /// <param name="logger">The logger</param>
+    /// <param name="exception">The failure</param>
+    /// <param name="error">The text of the failure</param>
+    [LoggerMessage(EventId = 40, Level = LogLevel.Error, Message = "report failed {Error}")]
+    internal static partial void ReportFailed(this ILogger logger, Exception exception, string error);
+
     #endregion // Methods
 }
