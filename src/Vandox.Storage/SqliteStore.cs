@@ -26,6 +26,11 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
     /// </summary>
     private const string TemplatesContext = "store: reading templates";
 
+    /// <summary>
+    /// The operation named in the error of a log read.
+    /// </summary>
+    private const string LogsContext = "store: reading logs";
+
     private const string CommonPragmas = "PRAGMA busy_timeout=5000; PRAGMA foreign_keys=1; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;";
 
     // The writer connection holds up to 16 MiB of pages (the default is 2 MiB), so a large transaction does not spill pages to the
@@ -352,6 +357,28 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
     }
 
     /// <summary>
+    /// Runs an action on a leased reader connection; a SQLite error ends in the exception the store throws.
+    /// </summary>
+    /// <typeparam name="T">The type of the result</typeparam>
+    /// <param name="action">The action</param>
+    /// <param name="context">The operation named in an error message</param>
+    /// <param name="cancellationToken">Cancels the wait for a reader</param>
+    /// <returns>A task that returns the result of the action</returns>
+    private async Task<T> ReadAsync<T>(Func<SqliteConnection, Task<T>> action, string context, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await using var lease = await LeaseReaderAsync(cancellationToken).ConfigureAwait(false);
+
+            return await action(lease.Connection).ConfigureAwait(false);
+        }
+        catch (SqliteException exception)
+        {
+            throw ReaderQuery.Translate(exception, context, cancellationToken);
+        }
+    }
+
+    /// <summary>
     /// Runs a template lookup and returns its first row.
     /// </summary>
     /// <param name="sql">The SQL</param>
@@ -526,7 +553,6 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
 
     #region ILogExplorer
 
-#pragma warning disable RH2003
     /// <inheritdoc />
     public Task<LogPage> FindLogsAsync(LogFilter filter, CancellationToken cancellationToken)
     {
@@ -536,31 +562,47 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
     /// <inheritdoc />
     public Task<LogContext> LogContextAsync(LogContextQuery query, CancellationToken cancellationToken)
     {
-        throw new NotImplementedException();
+        LogFilterRules.Validate(query);
+
+        return ReadAsync(connection => LogExplorerQueries.ContextAsync(connection, query, cancellationToken), LogsContext, cancellationToken);
     }
 
     /// <inheritdoc />
     public Task<IReadOnlyList<string>> LogSourcesAsync(CancellationToken cancellationToken)
     {
-        throw new NotImplementedException();
+        var (sql, parameters) = LogExplorerQueries.BuildSources();
+
+        return QueryAsync(sql, parameters, reader => reader.GetString(0), LogsContext, cancellationToken);
     }
 
     /// <inheritdoc />
     public Task<LogTemplate?> TemplateAsync(long id, CancellationToken cancellationToken)
     {
-        throw new NotImplementedException();
+        RecordQueries.Require(id > 0, "template ID must be positive");
+
+        var (sql, parameters) = TemplateQueries.BuildById(id);
+
+        return FindFirstAsync(sql, parameters, cancellationToken);
     }
 
     /// <inheritdoc />
     public Task<IReadOnlyList<TemplateCount>> TemplatesAsync(TemplateListQuery query, CancellationToken cancellationToken)
     {
-        throw new NotImplementedException();
+        LogFilterRules.Validate(query);
+
+        var (sql, parameters) = LogExplorerQueries.Build(query);
+
+        return QueryAsync(sql, parameters, LogExplorerQueries.ReadTemplateCount, TemplatesContext, cancellationToken);
     }
 
     /// <inheritdoc />
     public Task<IReadOnlyList<DateTimeOffset>> SourceHoursAsync(SourceHourQuery query, CancellationToken cancellationToken)
     {
-        throw new NotImplementedException();
+        LogFilterRules.Validate(query);
+
+        var (sql, parameters) = LogExplorerQueries.Build(query);
+
+        return QueryAsync(sql, parameters, reader => StorageTime.FromNanoseconds(reader.GetInt64(0)), LogsContext, cancellationToken);
     }
 
     /// <summary>
@@ -571,13 +613,19 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
     /// <param name="cancellationToken">Cancels the call</param>
     /// <returns>A task that returns the page</returns>
     /// <exception cref="InvalidQueryException">A filter breaks a rule</exception>
-#pragma warning disable S2325
     internal Task<LogPage> FindLogsAsync(LogFilter filter, int selectiveMatches, CancellationToken cancellationToken)
     {
-        throw new NotImplementedException();
+        LogFilterRules.Validate(filter);
+
+        return ReadAsync(async connection =>
+                         {
+                             var template = filter.TemplateId > 0 ? await LogExplorerQueries.TemplateAsync(connection, filter.TemplateId, cancellationToken).ConfigureAwait(false) : null;
+
+                             return await LogFinder.FindAsync(connection, filter, template, selectiveMatches, cancellationToken).ConfigureAwait(false);
+                         },
+                         LogsContext,
+                         cancellationToken);
     }
-#pragma warning restore S2325
-#pragma warning restore RH2003
 
     #endregion // ILogExplorer
 

@@ -3,3 +3,174 @@
 <PageTitle>Logs</PageTitle>
 
 <h1>Logs</h1>
+
+<nav class="subnav" aria-label="Logs">
+    <a href="logs" class="active">Search</a>
+    <a href="@TemplatesHref">Templates</a>
+</nav>
+
+<form class="filters" method="get" action="logs" @onsubmit="Submit" @onsubmit:preventDefault>
+    <label>Text
+        <input type="search" name="q" @bind="_text" />
+    </label>
+    <label>Source
+        <select name="source" @bind="_source">
+            <option value="">All sources</option>
+            @foreach (var source in SourceOptions)
+            {
+                <option value="@source">@source</option>
+            }
+        </select>
+    </label>
+    <label>Program
+        <input type="text" name="program" @bind="_program" />
+    </label>
+    <label>Severity
+        <select name="severity" @bind="_severity">
+            <option value="">Any severity</option>
+            @for (byte priority = 0; priority < 8; priority++)
+            {
+                var name = Severities.Name(priority);
+                <option value="@name">@name or more severe</option>
+            }
+        </select>
+    </label>
+    <label>From (UTC)
+        <input type="datetime-local" name="from" value="@_from" @onchange="args => _from = args.Value?.ToString() ?? string.Empty" />
+    </label>
+    <label>To (UTC)
+        <input type="datetime-local" name="to" value="@_to" @onchange="args => _to = args.Value?.ToString() ?? string.Empty" />
+    </label>
+    @if (_address.TemplateId > 0)
+    {
+        <input type="hidden" name="template" value="@_address.TemplateId" />
+    }
+    <button type="submit">Search</button>
+</form>
+
+@if (_error.Length > 0)
+{
+    <p class="error" role="alert">@_error</p>
+}
+
+@if (_failure.Length > 0)
+{
+    <p class="error" role="alert">@_failure</p>
+}
+
+@if (_templateUnknown)
+{
+    <p class="error" role="alert">@LogsView.TemplateUnknown</p>
+}
+
+@if (_template is not null)
+{
+    <section class="template-info" aria-label="Template">
+        <h2>Template @_template.Id</h2>
+        <p class="template-text"><ExternalText Runs="_templateText" /></p>
+        <dl>
+            <dt>Source</dt>
+            <dd><ExternalText Runs="_templateSource" /></dd>
+            <dt>Program</dt>
+            <dd><ExternalText Runs="_templateProgram" /></dd>
+            <dt>First seen</dt>
+            <dd>@LogsView.ShowSeconds(_template.FirstSeen) UTC</dd>
+            <dt>Last seen</dt>
+            <dd>@LogsView.ShowSeconds(_template.LastSeen) UTC</dd>
+            <dt>Lines</dt>
+            <dd>@_template.Count</dd>
+        </dl>
+        <p><a href="@WithoutTemplateHref">Remove the template filter</a></p>
+    </section>
+}
+
+@if (_searching)
+{
+    <p class="status">@LogsView.Searching</p>
+}
+
+@if (_lines.Count > 0)
+{
+    <div class="table-scroll">
+        <table class="logs">
+            <thead>
+                <tr>
+                    <th>Time (UTC)</th>
+                    <th>Source</th>
+                    <th>Host</th>
+                    <th>Program</th>
+                    <th>PID</th>
+                    <th>Severity</th>
+                    <th>Message</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var line in _lines)
+                {
+                    <tr>
+                        <td class="time">@LogsView.ShowTime(line.CapturedAt)</td>
+                        <td><ExternalText Runs="line.Source" /></td>
+                        <td><ExternalText Runs="line.Host" /></td>
+                        <td><ExternalText Runs="line.Program" /></td>
+                        <td>@(line.Pid > 0 ? line.Pid : string.Empty)</td>
+                        <td class="@SeverityClass(line.Severity)">@line.Severity</td>
+                        <td class="message"><ExternalText Runs="line.Message" /></td>
+                        <td><button type="button" @onclick="() => ToggleContextAsync(line.Id)">Context</button></td>
+                    </tr>
+                    @if (_contextId == line.Id)
+                    {
+                        <tr class="context">
+                            <td colspan="8">
+                                <ol class="context-lines">
+                                    @foreach (var before in _contextBefore)
+                                    {
+                                        <li>
+                                            <span class="time">@LogsView.ShowTime(before.CapturedAt)</span>
+                                            <ExternalText Runs="before.Program" />
+                                            <ExternalText Runs="before.Message" />
+                                        </li>
+                                    }
+                                    <li class="hit">The line above</li>
+                                    @foreach (var after in _contextAfter)
+                                    {
+                                        <li>
+                                            <span class="time">@LogsView.ShowTime(after.CapturedAt)</span>
+                                            <ExternalText Runs="after.Program" />
+                                            <ExternalText Runs="after.Message" />
+                                        </li>
+                                    }
+                                </ol>
+                            </td>
+                        </tr>
+                    }
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@if (_empty)
+{
+    <p class="status">No log lines match.</p>
+}
+
+@if (_continueFrom is not null)
+{
+    <p class="status">@LogsView.Format(LogsView.SearchedUpToFormat, LogsView.ShowTime(_continueFrom.CapturedAt) + " UTC")</p>
+}
+
+<p class="pager">
+    @if (_position is not null)
+    {
+        <button type="button" @onclick="FirstPageAsync">First page</button>
+    }
+    @if (_nextPage is not null)
+    {
+        <button type="button" @onclick="NextPageAsync">Next page</button>
+    }
+    @if (_continueFrom is not null)
+    {
+        <button type="button" @onclick="ContinueAsync">Continue</button>
+    }
+</p>

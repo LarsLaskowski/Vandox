@@ -1,7 +1,5 @@
 namespace Vandox.Backend.Logs;
 
-#pragma warning disable RH2003, S2325
-
 /// <summary>
 /// A run of external text, either plain or escaped.
 /// </summary>
@@ -16,7 +14,10 @@ public sealed class TextRun
     /// <param name="escaped">Whether the run holds escapes</param>
     public TextRun(string text, bool escaped)
     {
-        throw new NotImplementedException();
+        ArgumentNullException.ThrowIfNull(text);
+
+        Text = text;
+        Escaped = escaped;
     }
 
     #endregion // Constructors

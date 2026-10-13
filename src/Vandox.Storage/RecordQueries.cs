@@ -215,7 +215,7 @@ internal static class RecordQueries
     /// <param name="metric">Whether the metric table is joined</param>
     /// <param name="logLine">Whether the log line table is joined</param>
     /// <returns>The column list</returns>
-    private static string SelectColumns(bool metric, bool logLine)
+    internal static string SelectColumns(bool metric, bool logLine)
     {
         if (logLine)
         {

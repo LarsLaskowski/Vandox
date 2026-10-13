@@ -1,3 +1,5 @@
+using Vandox.Storage;
+
 namespace Vandox.Backend.Logs;
 
 /// <summary>
@@ -112,4 +114,95 @@ public static class LogsView
     public static readonly TimeSpan Deadline = TimeSpan.FromSeconds(10);
 
     #endregion // Fields
+
+    #region Methods
+
+    /// <summary>
+    /// Writes a time the way the pages show times: UTC with milliseconds.
+    /// </summary>
+    /// <param name="time">The time</param>
+    /// <returns>The text</returns>
+    public static string ShowTime(DateTimeOffset time)
+    {
+        return time.UtcDateTime.ToString("yyyy-MM-dd HH:mm:ss.fff", System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    /// <summary>
+    /// Writes a time the way the pages show first and last seen: UTC with seconds.
+    /// </summary>
+    /// <param name="time">The time</param>
+    /// <returns>The text</returns>
+    public static string ShowSeconds(DateTimeOffset time)
+    {
+        return time.UtcDateTime.ToString("yyyy-MM-dd HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    /// <summary>
+    /// Formats a user text of this class with one argument.
+    /// </summary>
+    /// <param name="format">The format</param>
+    /// <param name="argument">The argument</param>
+    /// <returns>The text</returns>
+    public static string Format(string format, string argument)
+    {
+        return string.Format(System.Globalization.CultureInfo.InvariantCulture, format, argument);
+    }
+
+    /// <summary>
+    /// Gets the text for a query that the store refused: the rule without the prefix of the store.
+    /// </summary>
+    /// <param name="exception">The refusal</param>
+    /// <returns>The user text</returns>
+    public static string Refused(InvalidQueryException exception)
+    {
+        ArgumentNullException.ThrowIfNull(exception);
+
+        const string prefix = "store: invalid query: ";
+
+        var message = exception.Message;
+
+        return Format(SearchRefusedFormat, message.StartsWith(prefix, StringComparison.Ordinal) ? message[prefix.Length..] : message);
+    }
+
+    /// <summary>
+    /// Lists the sources a form can offer: the stored ones that an address can name, and the one the address names now.
+    /// </summary>
+    /// <param name="sources">The stored sources</param>
+    /// <param name="current">The source of the address, or an empty text</param>
+    /// <returns>The sources in order</returns>
+    public static IReadOnlyList<string> SourceOptions(IReadOnlyList<string> sources, string current)
+    {
+        ArgumentNullException.ThrowIfNull(sources);
+
+        var options = sources.Where(IsOffered).ToList();
+
+        if (current.Length > 0 && options.Contains(current))
+        {
+            return options;
+        }
+
+        if (current.Length > 0)
+        {
+            options.Add(current);
+        }
+
+        return options;
+    }
+
+    /// <summary>
+    /// Tells whether an address can name a source.
+    /// </summary>
+    /// <param name="source">The source</param>
+    /// <returns><c>true</c> when the source passes the rules of the address</returns>
+    private static bool IsOffered(string source)
+    {
+        var address = new LogsAddress
+                      {
+                          Source = source
+                      };
+
+        return address.Validate().Length == 0;
+    }
+
+    #endregion // Methods
 }

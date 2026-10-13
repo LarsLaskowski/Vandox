@@ -1,8 +1,7 @@
+using Vandox.Core.Model;
 using Vandox.Storage;
 
 namespace Vandox.Backend.Logs;
-
-#pragma warning disable RH2003, S2325
 
 /// <summary>
 /// A log line prepared for display: its external text is already escaped and capped.
@@ -62,7 +61,21 @@ public sealed class LogLineView
     /// <returns>The view</returns>
     public static LogLineView From(StoredRecord record)
     {
-        throw new NotImplementedException();
+        ArgumentNullException.ThrowIfNull(record);
+
+        var line = record.Record.Data as LogLine ?? new LogLine();
+
+        return new LogLineView
+               {
+                   Id = record.Id,
+                   CapturedAt = record.Record.CapturedAt,
+                   Severity = line.Priority is { } priority and <= 7 ? Severities.Name(priority) : "-",
+                   Pid = line.Pid,
+                   Source = LogText.Runs(record.Record.Source, LogText.MaxShortChars),
+                   Host = LogText.Runs(line.Host, LogText.MaxShortChars),
+                   Program = LogText.Runs(line.Program, LogText.MaxShortChars),
+                   Message = LogText.Runs(line.Message, LogText.MaxChars)
+               };
     }
 
     #endregion // Methods

@@ -2,13 +2,25 @@ using Vandox.Storage;
 
 namespace Vandox.Backend.Logs;
 
-#pragma warning disable RH2003, S2325
-
 /// <summary>
 /// Limits the explorer calls in flight across all callers.
 /// </summary>
 public sealed class GatedLogExplorer : ILogExplorer, IDisposable
 {
+    #region Constants
+
+    private const int MaxSlots = 3;
+
+    #endregion // Constants
+
+    #region Fields
+
+    private readonly ILogExplorer _inner;
+
+    private readonly SemaphoreSlim _slots;
+
+    #endregion // Fields
+
     #region Constructors
 
     /// <summary>
@@ -19,53 +31,83 @@ public sealed class GatedLogExplorer : ILogExplorer, IDisposable
     /// <exception cref="ArgumentOutOfRangeException">The slot count is not 1 to 3</exception>
     public GatedLogExplorer(ILogExplorer inner, int maxConcurrent)
     {
-        throw new NotImplementedException();
+        ArgumentNullException.ThrowIfNull(inner);
+        ArgumentOutOfRangeException.ThrowIfLessThan(maxConcurrent, 1);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(maxConcurrent, MaxSlots);
+
+        _inner = inner;
+        _slots = new SemaphoreSlim(maxConcurrent, maxConcurrent);
     }
 
     #endregion // Constructors
+
+    #region Methods
+
+    /// <summary>
+    /// Waits for a slot with the token of the call, runs the call and gives the slot back.
+    /// </summary>
+    /// <typeparam name="TResult">The type of the result</typeparam>
+    /// <param name="call">The call of the inner explorer</param>
+    /// <param name="cancellationToken">Ends the wait for a slot</param>
+    /// <returns>A task that returns the result of the call</returns>
+    private async Task<TResult> RunAsync<TResult>(Func<Task<TResult>> call, CancellationToken cancellationToken)
+    {
+        await _slots.WaitAsync(cancellationToken).ConfigureAwait(false);
+
+        try
+        {
+            return await call().ConfigureAwait(false);
+        }
+        finally
+        {
+            _slots.Release();
+        }
+    }
+
+    #endregion // Methods
 
     #region ILogExplorer
 
     /// <inheritdoc />
     public Task<LogPage> FindLogsAsync(LogFilter filter, CancellationToken cancellationToken)
     {
-        throw new NotImplementedException();
+        return RunAsync(() => _inner.FindLogsAsync(filter, cancellationToken), cancellationToken);
     }
 
     /// <inheritdoc />
     public Task<LogContext> LogContextAsync(LogContextQuery query, CancellationToken cancellationToken)
     {
-        throw new NotImplementedException();
+        return RunAsync(() => _inner.LogContextAsync(query, cancellationToken), cancellationToken);
     }
 
     /// <inheritdoc />
     public Task<IReadOnlyList<string>> LogSourcesAsync(CancellationToken cancellationToken)
     {
-        throw new NotImplementedException();
+        return RunAsync(() => _inner.LogSourcesAsync(cancellationToken), cancellationToken);
     }
 
     /// <inheritdoc />
     public Task<LogTemplate?> TemplateAsync(long id, CancellationToken cancellationToken)
     {
-        throw new NotImplementedException();
+        return RunAsync(() => _inner.TemplateAsync(id, cancellationToken), cancellationToken);
     }
 
     /// <inheritdoc />
     public Task<IReadOnlyList<TemplateCount>> TemplatesAsync(TemplateListQuery query, CancellationToken cancellationToken)
     {
-        throw new NotImplementedException();
+        return RunAsync(() => _inner.TemplatesAsync(query, cancellationToken), cancellationToken);
     }
 
     /// <inheritdoc />
     public Task<IReadOnlyList<DateTimeOffset>> SourceHoursAsync(SourceHourQuery query, CancellationToken cancellationToken)
     {
-        throw new NotImplementedException();
+        return RunAsync(() => _inner.SourceHoursAsync(query, cancellationToken), cancellationToken);
     }
 
     /// <inheritdoc />
     public Task<IReadOnlyList<TemplateHour>> TemplateHoursAsync(TemplateHourQuery query, CancellationToken cancellationToken)
     {
-        throw new NotImplementedException();
+        return RunAsync(() => _inner.TemplateHoursAsync(query, cancellationToken), cancellationToken);
     }
 
     #endregion // ILogExplorer
@@ -75,7 +117,7 @@ public sealed class GatedLogExplorer : ILogExplorer, IDisposable
     /// <inheritdoc />
     public void Dispose()
     {
-        throw new NotImplementedException();
+        _slots.Dispose();
     }
 
     #endregion // IDisposable

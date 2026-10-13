@@ -10,6 +10,7 @@ using Microsoft.Extensions.Logging;
 using Vandox.Backend.Cli;
 using Vandox.Backend.Components;
 using Vandox.Backend.Logging;
+using Vandox.Backend.Logs;
 using Vandox.Core.Configuration;
 using Vandox.Storage;
 
@@ -150,6 +151,8 @@ internal static class ServeCommand
         builder.Services.AddSingleton<IRecordReader>(store);
         builder.Services.AddSingleton<ILogSearcher>(store);
         builder.Services.AddSingleton<ILogTemplateReader>(store);
+        builder.Services.AddSingleton<ILogExplorer>(_ => new GatedLogExplorer(store, LogsView.MaxConcurrentQueries));
+        builder.Services.AddSingleton(hooks.Clock ?? TimeProvider.System);
         builder.Services.AddSingleton<IImportTracker>(store);
         builder.Services.Configure<HostOptions>(options => options.ShutdownTimeout = _shutdownTimeout);
         builder.Services.AddRazorComponents().AddInteractiveServerComponents();
@@ -157,6 +160,9 @@ internal static class ServeCommand
         builder.WebHost.ConfigureKestrel(options => Listen(options, config, hooks));
 
         var app = builder.Build();
+
+        hooks.Built?.Invoke(app.Services);
+
         var checker = new PingChecker(store.PingAsync, _pingTimeout);
 
         app.UseMiddleware<PortRoutingMiddleware>();
