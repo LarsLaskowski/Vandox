@@ -43,6 +43,16 @@ public sealed class CommandOptions
     public bool Templates { get; set; }
 
     /// <summary>
+    /// Gets or sets a value indicating whether the sub-command <c>report</c> was given.
+    /// </summary>
+    public bool Report { get; set; }
+
+    /// <summary>
+    /// Gets or sets the language of the report: <c>en</c> or <c>de</c>.
+    /// </summary>
+    public string Language { get; set; } = "en";
+
+    /// <summary>
     /// Gets or sets what is wrong with the command line; empty when it is valid.
     /// </summary>
     public string Error { get; set; } = string.Empty;

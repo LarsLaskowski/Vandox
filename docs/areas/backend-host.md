@@ -13,8 +13,8 @@ The options of the configuration file are in [Configuration and secrets](configu
 - `vandoxd` without a sub-command runs the service. Flags: `-config <file>` (default `/etc/vandox/vandoxd.yaml`), `-healthcheck`,
   `-version` and `-h`. `-version` wins over the other flags and prints the version line to standard output. `-h` prints the usage to
   standard error and exits 0.
-- The first positional argument `import` starts the import sub-command, `incidents` the incident reconstruction, `templates` the template rebuild; any other
-  positional argument is a usage error.
+- The first positional argument `import` starts the import sub-command, `incidents` the incident reconstruction, `templates` the template rebuild,
+  `report` the forensics report; any other positional argument is a usage error.
 - `vandoxd [flags] incidents [-config file]` rebuilds the incidents from the stored data (*Incidents* in [Detection, alerts and
   reports](detection-and-reports.md)). Its flags are `-config` and `-h`/`-help` (usage to standard error, exit 0); any positional
   argument after `incidents` is a usage error (`vandoxd incidents: no argument is expected`, exit 2), and it is not combined with
@@ -31,6 +31,19 @@ The options of the configuration file are in [Configuration and secrets](configu
   **0** when the run completed; **1** when it was interrupted (`template rebuild interrupted`: the statistics are incomplete until a
   run completes; run again, it starts over) or the store failed (`template rebuild failed`, including `superseded by another
   rebuild` when a second run started meanwhile; the other run continues), without the summary.
+- `vandoxd [flags] report [-config file] [-lang en|de]` writes the forensics report of the stored data as Markdown to standard
+  output (*Forensics report* in [Detection, alerts and reports](detection-and-reports.md)). Its flags are `-config`, `-lang` and
+  `-h`/`-help` (usage to standard error, exit 0), each also after `report`, in the forms `-lang de`, `-lang=de`, `--lang de` and
+  `--lang=de`; a repeated flag takes its last value. `-lang` accepts exactly `en` (the default) or `de`, compared ordinally: any
+  other value (`EN`, `de-DE`, an empty value) is a usage error, `vandoxd report: unknown language "<value>" (expected en or de)` with
+  the value quoted like every value in a usage error, exit 2; `-lang` without a value is `flag needs an argument: -lang`, exit 2.
+  `-lang` belongs to `report` only: before the sub-command or with another one it is `flag provided but not defined: -lang`. Any
+  positional argument after `report` is a usage error (`vandoxd report: no argument is expected`, exit 2), and it is not combined with
+  `-healthcheck`. It starts like `incidents` (invalid configuration or database that cannot be opened: exit 1), logs `report started`
+  to standard error as a JSON line, and writes nothing but the report to standard output. Exit **0** when the report is complete;
+  **1** when the run was interrupted (`report interrupted`) or the store failed (`report failed` with the store's text), with an
+  incomplete report on standard output that is to be discarded. Apart from the migration every sub-command runs when it opens the
+  database, it writes nothing to the store.
 - Exit codes: **0** after a clean shutdown, a printed version or help; **1** when the configuration or the database cannot be loaded or
   opened, or serving fails; **2** for a usage error (unknown flag, flag without value, unexpected argument), with the message and the
   usage on standard error.

@@ -1,5 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.InteropServices;
+using System.Text;
 
 using Vandox.Backend.Hosting;
 
@@ -26,6 +27,11 @@ public static class Program
                                      .Select(entry => new KeyValuePair<string, string>((string)entry.Key, (string?)entry.Value ?? string.Empty))
                                      .ToList();
 
+        // Standard output is UTF-8 without a byte order mark whatever the locale is: the forensics report holds non-ASCII text.
+        await using var stdout = new StreamWriter(Console.OpenStandardOutput(), new UTF8Encoding(false))
+                                 {
+                                     AutoFlush = true
+                                 };
         using var stop = new CancellationTokenSource();
         var registrations = new List<PosixSignalRegistration>();
 
@@ -40,7 +46,7 @@ public static class Program
         registrations.Add(PosixSignalRegistration.Create(PosixSignal.SIGTERM, OnSignal));
         registrations.Add(PosixSignalRegistration.Create(PosixSignal.SIGINT, OnSignal));
 
-        return await BackendApp.RunAsync(args, environment, Console.Out, Console.Error, new ServeHooks(), stop.Token).ConfigureAwait(false);
+        return await BackendApp.RunAsync(args, environment, stdout, Console.Error, new ServeHooks(), stop.Token).ConfigureAwait(false);
     }
 
     #endregion // Methods

@@ -1,3 +1,5 @@
+using System.Globalization;
+
 using Vandox.Backend.Cli;
 
 namespace Vandox.Backend.Tests;
@@ -171,6 +173,27 @@ public class CommandLineTests
     }
 
     /// <summary>
+    /// The name of an unknown flag is escaped in the error, so it cannot inject control or format characters into the terminal.
+    /// </summary>
+    /// <param name="arguments">The arguments, joined with a bar</param>
+    /// <param name="error">The expected error</param>
+    [TestMethod]
+    [DataRow("-\u202echar", "flag provided but not defined: -\\u202echar")]
+    [DataRow("report|--\u202e=x", "flag provided but not defined: -\\u202e")]
+    [DataRow("incidents|-a\nb", "flag provided but not defined: -a\\nb")]
+    [DataRow("templates|-\u001b[31mred", "flag provided but not defined: -\\u001b[31mred")]
+    [DataRow("import|-x\u0085y|a", "flag provided but not defined: -x\\u0085y")]
+    public void CommandLineParseEscapesTheNameOfAnUnknownFlag(string arguments, string error)
+    {
+        // Act
+        var options = CommandLine.Parse(arguments.Split('|'));
+
+        // Assert
+        Assert.AreEqual(error, options.Error, "error with the escaped name");
+        Assert.DoesNotContain(character => char.GetUnicodeCategory(character) is System.Globalization.UnicodeCategory.Control or System.Globalization.UnicodeCategory.Format, options.Error, "no control or format character in the error");
+    }
+
+    /// <summary>
     /// The help flag is recognized for both commands, and the usage texts name the flags.
     /// </summary>
     [TestMethod]
@@ -218,6 +241,144 @@ public class CommandLineTests
 
         // Assert
         Assert.AreEqual("vandoxd dev (commit unknown, built unknown)", line, "a local build has no injected information");
+    }
+
+    /// <summary>
+    /// The sub-command report takes its own config and language flags and no argument.
+    /// </summary>
+    [TestMethod]
+    public void CommandLineParsesReportSubCommand()
+    {
+        // Act
+        var plain = CommandLine.Parse(["report"]);
+        var inherited = CommandLine.Parse(["-config", "x", "report"]);
+        var own = CommandLine.Parse(["report", "-config", "x"]);
+        var inline = CommandLine.Parse(["report", "-config=x"]);
+        var help = CommandLine.Parse(["report", "-h"]);
+        var extra = CommandLine.Parse(["report", "extra"]);
+        var unknown = CommandLine.Parse(["report", "-verbose"]);
+        var withHealthcheck = CommandLine.Parse(["-healthcheck", "report"]);
+        var missing = CommandLine.Parse(["report", "-config"]);
+        var missingLanguage = CommandLine.Parse(["report", "-lang"]);
+        var german = CommandLine.Parse(["report", "-lang", "de"]);
+        var singleDash = CommandLine.Parse(["report", "-lang=de"]);
+        var doubleDash = CommandLine.Parse(["report", "--lang", "de"]);
+        var doubleDashInline = CommandLine.Parse(["report", "--lang=de"]);
+        var tripleDash = CommandLine.Parse(["report", "---lang", "de"]);
+        var lastWins = CommandLine.Parse(["report", "-lang", "de", "-lang", "en"]);
+        var lastWinsInline = CommandLine.Parse(["report", "-lang=en", "--lang", "de"]);
+        var both = CommandLine.Parse(["-config", "main", "report", "-lang", "de", "-config", "own"]);
+
+        // Assert
+        Assert.IsTrue(plain.Report, "the sub-command is set");
+        Assert.IsFalse(plain.Incidents, "not the incidents sub-command");
+        Assert.AreEqual("report", plain.UsageFor, "usage of the sub-command");
+        Assert.AreEqual("/etc/vandox/vandoxd.yaml", plain.ConfigPath, "default config path");
+        Assert.AreEqual("en", plain.Language, "English by default");
+        Assert.AreEqual(string.Empty, plain.Error, "no error");
+        Assert.IsNull(plain.ImportPath, "no import");
+        Assert.AreEqual("x", inherited.ConfigPath, "the main flag is inherited");
+        Assert.IsTrue(inherited.Report, "the sub-command after a main flag");
+        Assert.AreEqual("x", own.ConfigPath, "the sub-command flag");
+        Assert.AreEqual("x", inline.ConfigPath, "the sub-command flag with an equals sign");
+        Assert.IsTrue(help.Help, "the help flag");
+        Assert.AreEqual("report", help.UsageFor, "help shows the usage of the sub-command");
+        Assert.AreEqual("vandoxd report: no argument is expected", extra.Error, "an argument is refused");
+        Assert.AreEqual("flag provided but not defined: -verbose", unknown.Error, "an unknown flag");
+        Assert.AreEqual("unexpected argument \"report\"", withHealthcheck.Error, "not together with the health check");
+        Assert.AreEqual("flag needs an argument: -config", missing.Error, "a config flag without value");
+        Assert.AreEqual("flag needs an argument: -lang", missingLanguage.Error, "a language flag without value");
+        Assert.AreEqual("de", german.Language, "-lang de");
+        Assert.AreEqual("de", singleDash.Language, "-lang=de");
+        Assert.AreEqual("de", doubleDash.Language, "--lang de");
+        Assert.AreEqual("de", doubleDashInline.Language, "--lang=de");
+        Assert.AreEqual("de", tripleDash.Language, "any number of dashes");
+        Assert.AreEqual("en", lastWins.Language, "the last value wins");
+        Assert.AreEqual("de", lastWinsInline.Language, "the last value wins also with an equals sign");
+        Assert.AreEqual("own", both.ConfigPath, "the config flag of the sub-command wins");
+        Assert.AreEqual("de", both.Language, "the language beside the config flag");
+        Assert.AreEqual(string.Empty, both.Error, "no error");
+    }
+
+    /// <summary>
+    /// Any language other than the exact names en and de is refused with the quoted value.
+    /// </summary>
+    /// <param name="language">The language value</param>
+    /// <param name="quoted">The value as the error shows it</param>
+    [TestMethod]
+    [DataRow("fr", "\"fr\"")]
+    [DataRow("EN", "\"EN\"")]
+    [DataRow("De", "\"De\"")]
+    [DataRow("de-DE", "\"de-DE\"")]
+    [DataRow("de_DE", "\"de_DE\"")]
+    [DataRow("", "\"\"")]
+    [DataRow(" de", "\" de\"")]
+    [DataRow("de\n", "\"de\\n\"")]
+    [DataRow("-x", "\"-x\"")]
+    [DataRow("de=x", "\"de=x\"")]
+    [DataRow("\u202e", "\"\\u202e\"")]
+    public void CommandLineRefusesReportLanguagesOtherThanEnAndDe(string language, string quoted)
+    {
+        // Arrange
+        var expected = $"vandoxd report: unknown language {quoted} (expected en or de)";
+
+        // Act
+        var separate = CommandLine.Parse(["report", "-lang", language]);
+        var inline = CommandLine.Parse(["report", $"-lang={language}"]);
+        var doubleDash = CommandLine.Parse(["report", "--lang", language]);
+
+        // Assert
+        Assert.AreEqual(expected, separate.Error, "-lang value");
+        Assert.AreEqual(expected, inline.Error, "-lang=value");
+        Assert.AreEqual(expected, doubleDash.Error, "--lang value");
+
+        if (language.Length == 1 && language[0] > 127)
+        {
+            Assert.AreEqual(UnicodeCategory.Format, CharUnicodeInfo.GetUnicodeCategory(language, 0), "the arranged input is one character of the category Format");
+            Assert.AreEqual(6, quoted.Length - 2, "the quoted value shows six ASCII characters between the quotes");
+            Assert.IsTrue(quoted.All(character => character < 128), "the error text is ASCII");
+        }
+    }
+
+    /// <summary>
+    /// The language flag is known to the sub-command report only.
+    /// </summary>
+    [TestMethod]
+    public void CommandLineTakesLanguageOnlyForReport()
+    {
+        // Act
+        var beforeReport = CommandLine.Parse(["-lang", "de", "report"]);
+        var beforeInline = CommandLine.Parse(["-lang=de", "report"]);
+        var main = CommandLine.Parse(["-lang", "de"]);
+        var incidents = CommandLine.Parse(["incidents", "-lang", "de"]);
+        var templates = CommandLine.Parse(["templates", "-lang=de"]);
+        var import = CommandLine.Parse(["import", "-lang", "de", "/logs"]);
+        var accepted = CommandLine.Parse(["report", "-lang", "de"]);
+
+        // Assert
+        Assert.AreEqual(string.Empty, accepted.Error, "after the sub-command report the flag is known");
+        Assert.AreEqual("flag provided but not defined: -lang", beforeReport.Error, "before the sub-command");
+        Assert.AreEqual("flag provided but not defined: -lang", beforeInline.Error, "before the sub-command with an equals sign");
+        Assert.AreEqual("flag provided but not defined: -lang", main.Error, "for the main command");
+        Assert.AreEqual("flag provided but not defined: -lang", incidents.Error, "for incidents");
+        Assert.AreEqual("flag provided but not defined: -lang", templates.Error, "for templates");
+        Assert.AreEqual("flag provided but not defined: -lang", import.Error, "for import");
+        Assert.IsFalse(beforeReport.Report, "the sub-command is not set after the error");
+    }
+
+    /// <summary>
+    /// The usage of the sub-command report names both flags, and the general usage names the sub-command.
+    /// </summary>
+    [TestMethod]
+    public void CommandLineUsageNamesReportSubCommand()
+    {
+        // Act
+        var usage = CommandLine.Usage("report");
+        var general = CommandLine.Usage(string.Empty);
+
+        // Assert
+        Assert.AreEqual("Usage of vandoxd report [-config file] [-lang en|de]:\n  -config string\n    \tpath of the configuration file\n  -lang string\n    \tlanguage of the report: en or de (default \"en\")\n", usage, "usage of the sub-command");
+        Assert.Contains("  vandoxd [flags] report [-config file] [-lang en|de]\n    \twrite the forensics report of the stored data as Markdown\n", general, "the general usage names the sub-command");
     }
 
     /// <summary>

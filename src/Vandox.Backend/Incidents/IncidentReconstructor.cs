@@ -130,15 +130,17 @@ public sealed class IncidentReconstructor
             closed.Clear();
         }
 
-        await PageAsync(lines,
-                        LinePage,
-                        async record =>
-                        {
-                            result.LinesRead++;
-                            detector.Add(record.Id, record.Record, closed);
-                            await DrainAsync().ConfigureAwait(false);
-                        },
-                        cancellationToken).ConfigureAwait(false);
+        await RecordPager.PageAsync(_records,
+                                    lines,
+                                    LinePage,
+                                    async record =>
+                                    {
+                                        result.LinesRead++;
+                                        detector.Add(record.Id, record.Record, closed);
+                                        await DrainAsync().ConfigureAwait(false);
+                                    },
+                                    cancellationToken)
+                         .ConfigureAwait(false);
         detector.Complete(closed);
         await DrainAsync().ConfigureAwait(false);
         await OnClusterAsync(clusterer.Complete()).ConfigureAwait(false);
@@ -195,56 +197,6 @@ public sealed class IncidentReconstructor
     }
 
     /// <summary>
-    /// Reads a range page by page, by capture time and record ID. A full page must lead to a position after the previous one.
-    /// </summary>
-    /// <param name="range">The kind and the range</param>
-    /// <param name="limit">The page size</param>
-    /// <param name="handle">Called for every record</param>
-    /// <param name="cancellationToken">The cancellation token</param>
-    /// <returns>A task that completes when the range is read</returns>
-    private async Task PageAsync(RecordQuery range, int limit, Func<StoredRecord, Task> handle, CancellationToken cancellationToken)
-    {
-        var from = range.From;
-        var after = 0L;
-
-        while (true)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-
-            var page = await _records.RecordsAsync(new RecordQuery
-                                                   {
-                                                       Kind = range.Kind,
-                                                       From = from,
-                                                       To = range.To,
-                                                       Limit = limit,
-                                                       AfterId = after
-                                                   },
-                                                   cancellationToken)
-                                     .ConfigureAwait(false);
-
-            foreach (var record in page)
-            {
-                await handle(record).ConfigureAwait(false);
-            }
-
-            if (page.Count < limit)
-            {
-                return;
-            }
-
-            var last = page[^1];
-
-            if (last.Record.CapturedAt < from || (last.Record.CapturedAt == from && last.Id <= after))
-            {
-                throw new StoreException("store: reading records: page did not advance");
-            }
-
-            from = last.Record.CapturedAt;
-            after = last.Id;
-        }
-    }
-
-    /// <summary>
     /// Builds and saves the incident of a cluster.
     /// </summary>
     /// <param name="cluster">The cluster</param>
@@ -296,56 +248,64 @@ public sealed class IncidentReconstructor
         var detector = new SignatureDetector(_catalog);
         var closed = new List<DetectedEvent>();
 
-        await PageAsync(Range(RecordKind.LogLine, cluster),
-                        LinePage,
-                        record =>
-                        {
-                            detector.Add(record.Id, record.Record, closed);
-                            closed.ForEach(builder.AddEvent);
-                            closed.Clear();
+        await RecordPager.PageAsync(_records,
+                                    Range(RecordKind.LogLine, cluster),
+                                    LinePage,
+                                    record =>
+                                    {
+                                        detector.Add(record.Id, record.Record, closed);
+                                        closed.ForEach(builder.AddEvent);
+                                        closed.Clear();
 
-                            return Task.CompletedTask;
-                        },
-                        cancellationToken).ConfigureAwait(false);
+                                        return Task.CompletedTask;
+                                    },
+                                    cancellationToken)
+                         .ConfigureAwait(false);
         detector.Complete(closed);
         closed.ForEach(builder.AddEvent);
 
-        await PageAsync(Range(RecordKind.ProcessSnapshot, cluster),
-                        SnapshotPage,
-                        record =>
-                        {
-                            if (record.Record.Data is ProcessSnapshot snapshot)
-                            {
-                                builder.AddProcessSnapshot(record.Id, record.Record.CapturedAt, snapshot);
-                            }
+        await RecordPager.PageAsync(_records,
+                                    Range(RecordKind.ProcessSnapshot, cluster),
+                                    SnapshotPage,
+                                    record =>
+                                    {
+                                        if (record.Record.Data is ProcessSnapshot snapshot)
+                                        {
+                                            builder.AddProcessSnapshot(record.Id, record.Record.CapturedAt, snapshot);
+                                        }
 
-                            return Task.CompletedTask;
-                        },
-                        cancellationToken).ConfigureAwait(false);
-        await PageAsync(Range(RecordKind.ConnectionSnapshot, cluster),
-                        SnapshotPage,
-                        record =>
-                        {
-                            if (record.Record.Data is ConnectionSnapshot snapshot)
-                            {
-                                builder.AddConnectionSnapshot(record.Id, record.Record.CapturedAt, snapshot);
-                            }
+                                        return Task.CompletedTask;
+                                    },
+                                    cancellationToken)
+                         .ConfigureAwait(false);
+        await RecordPager.PageAsync(_records,
+                                    Range(RecordKind.ConnectionSnapshot, cluster),
+                                    SnapshotPage,
+                                    record =>
+                                    {
+                                        if (record.Record.Data is ConnectionSnapshot snapshot)
+                                        {
+                                            builder.AddConnectionSnapshot(record.Id, record.Record.CapturedAt, snapshot);
+                                        }
 
-                            return Task.CompletedTask;
-                        },
-                        cancellationToken).ConfigureAwait(false);
-        await PageAsync(Range(RecordKind.Metric, cluster),
-                        MetricPage,
-                        record =>
-                        {
-                            if (record.Record.Data is MetricPoint metric)
-                            {
-                                builder.AddMetric(record.Record.Source, record.Record.CapturedAt, metric);
-                            }
+                                        return Task.CompletedTask;
+                                    },
+                                    cancellationToken)
+                         .ConfigureAwait(false);
+        await RecordPager.PageAsync(_records,
+                                    Range(RecordKind.Metric, cluster),
+                                    MetricPage,
+                                    record =>
+                                    {
+                                        if (record.Record.Data is MetricPoint metric)
+                                        {
+                                            builder.AddMetric(record.Record.Source, record.Record.CapturedAt, metric);
+                                        }
 
-                            return Task.CompletedTask;
-                        },
-                        cancellationToken).ConfigureAwait(false);
+                                        return Task.CompletedTask;
+                                    },
+                                    cancellationToken)
+                         .ConfigureAwait(false);
     }
 
     /// <summary>
