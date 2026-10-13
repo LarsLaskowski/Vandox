@@ -129,4 +129,5 @@ once in the [area document](../areas/README.md) of the record's area, and the re
 | 0100 | The forensics report is written as Markdown by `vandoxd report`, computed on demand in bounded passes; the web page follows separately | Accepted | 2026-10-13 |
 | 0101 | Recurrence and correlation rules compare the share of outages with the share of observed system-log hours and decide by a binomial tail | Accepted | 2026-10-13 |
 | 0102 | The report language comes from the flag `-lang` (`en` by default, or `de`); the texts are tables in code, not .NET resources or cultures | Accepted | 2026-10-13 |
+| 0103 | The logs view takes every filter from the address, searches in bounded pages from the index or by a time-ordered scan, and finds a template's lines by normalizing candidates | Proposed | 2026-10-13 |
 <!-- project:end index -->
