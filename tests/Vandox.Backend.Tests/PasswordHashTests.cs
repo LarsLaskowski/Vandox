@@ -72,6 +72,8 @@ public partial class PasswordHashTests
                 ("$argon2id$v=19$m=65536,t=2,p=1$c29tZXNhbHQ=$CTFhFdXPJO1aFaMaO6Mm5c8y7cJHAph8ArZWb2GRPPc", PasswordHash.ReasonForm),
                 ("$argon2id$v=19$m=65536,t=2,p=1$c29tZXNhbHR$CTFhFdXPJO1aFaMaO6Mm5c8y7cJHAph8ArZWb2GRPPc", PasswordHash.ReasonForm),
                 ("$argon2id$v=19$m=65536,t=2,p=1$c29tZXNhbHQxx$CTFhFdXPJO1aFaMaO6Mm5c8y7cJHAph8ArZWb2GRPPc", PasswordHash.ReasonForm),
+                ("$argon2id$v=19$m=65536,t=2,p=1$c29tZXNhb+$CTFhFdXPJO1aFaMaO6Mm5c8y7cJHAph8ArZWb2GRPPc", PasswordHash.ReasonForm),
+                ("$argon2id$v=19$m=65536,t=2,p=1$c29tZXNhbG/$CTFhFdXPJO1aFaMaO6Mm5c8y7cJHAph8ArZWb2GRPPc", PasswordHash.ReasonForm),
                 (differentPassword, PasswordHash.ReasonForm),
                 ("$argon2id$v=19$m=65536,t=2,p=1$c29tZXNhbA$CTFhFdXPJO1aFaMaO6Mm5c8y7cJHAph8ArZWb2GRPPc", PasswordHash.ReasonSalt),
                 ($"$argon2id$v=19$m=65536,t=2,p=1${salt65}$CTFhFdXPJO1aFaMaO6Mm5c8y7cJHAph8ArZWb2GRPPc", PasswordHash.ReasonSalt),

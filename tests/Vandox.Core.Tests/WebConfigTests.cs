@@ -34,5 +34,24 @@ public class WebConfigTests
         Assert.AreEqual("172.18.0.1/32|10.0.0.0/8|2001:db8::/32", string.Join('|', networks.Select(network => $"{network.BaseAddress}/{network.PrefixLength}")), "networks");
     }
 
+    /// <summary>
+    /// A value that is not a list of addresses and networks is refused with the name of the option.
+    /// </summary>
+    [TestMethod]
+    public void WebConfigRefusesInvalidTrustedProxies()
+    {
+        // Arrange
+        var config = new WebConfig
+                     {
+                         TrustedProxies = "not-an-address"
+                     };
+
+        // Act
+        var exception = Assert.ThrowsExactly<InvalidOperationException>(() => config.GetTrustedProxies(), "invalid list");
+
+        // Assert
+        Assert.AreEqual("web.trusted_proxies is not a valid list of IP addresses and networks", exception.Message, "message");
+    }
+
     #endregion // Methods
 }

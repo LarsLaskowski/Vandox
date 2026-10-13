@@ -25,4 +25,4 @@ Every documentation edit appears in exactly one row; the Lead's approval only to
 | 17 | README, SECURITY.md, ARCHITECTURE.md | `README.md`, `SECURITY.md`, `docs/ARCHITECTURE.md` | — | Dev | [x] |
 | 18 | Project knowledge: security areas 3 and 8 — area 3 implemented; goal restated: cookies `HttpOnly`, `SameSite`, and `Secure` whenever the request reached the proxy over HTTPS; the UI port published for the proxy only, as defense in depth (0060) | `.squad/project.md` (*Security areas*) | — | Dev | [x] |
 | 19 | Project knowledge: test doubles row | `.squad/project.md` (*Test doubles*) | — | Tester | [x] |
-| 20 | Coverage pass until the *Coverage gate* passes | tests | all | Tester | [ ] |
+| 20 | Coverage pass until the *Coverage gate* passes | tests | all | Tester | [x] |

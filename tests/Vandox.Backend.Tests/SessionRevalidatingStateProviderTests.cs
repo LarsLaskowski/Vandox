@@ -59,6 +59,33 @@ public class SessionRevalidatingStateProviderTests
     }
 
     /// <summary>
+    /// The revalidation of the circuit asks the session store: true for an active session, false after the session was removed.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task SessionRevalidatingStateProviderRevalidatesThroughSessionStore()
+    {
+        // Arrange
+        var sessions = new SessionStore(new FakeTimeProvider());
+        var provider = new SessionRevalidatingStateProvider(NullLoggerFactory.Instance, sessions);
+        var ticket = NewTicket();
+        var key = await sessions.StoreAsync(ticket);
+        var method = typeof(SessionRevalidatingStateProvider).GetMethod("ValidateAuthenticationStateAsync", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        var state = new AuthenticationState(ticket.Principal);
+
+        // Act
+        var whileActive = await (Task<bool>)method.Invoke(provider, [state, CancellationToken.None])!;
+
+        await sessions.RemoveAsync(key);
+
+        var afterRemoval = await (Task<bool>)method.Invoke(provider, [state, CancellationToken.None])!;
+
+        // Assert
+        Assert.IsTrue(whileActive, "the circuit stays while the session is active");
+        Assert.IsFalse(afterRemoval, "the circuit is ended after the session was removed");
+    }
+
+    /// <summary>
     /// Creates a ticket with a new session claim.
     /// </summary>
     /// <returns>The ticket</returns>

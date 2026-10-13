@@ -188,6 +188,69 @@ public class SessionStoreTests
     }
 
     /// <summary>
+    /// Storing a ticket with a known session claim replaces the ticket, and a session that has ended is dropped when another one is stored.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task SessionStoreReplacesKnownSessionAndDropsEndedOnes()
+    {
+        // Arrange
+        var clock = new FakeTimeProvider();
+        var store = new SessionStore(clock);
+        var first = NewTicket(out var id);
+        var second = new AuthenticationTicket(new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.Name, "replaced"), new Claim(SessionStore.SessionClaimType, id)], "test")), "test");
+
+        // Act
+        await store.StoreAsync(first);
+        await store.StoreAsync(second);
+
+        var replaced = await store.RetrieveAsync(id);
+        var countAfterReplace = store.Count;
+
+        clock.Advance(TimeSpan.FromMinutes(61));
+
+        var other = await store.StoreAsync(NewTicket(out _));
+
+        // Assert
+        Assert.AreEqual(1, countAfterReplace, "the same claim is one session");
+        Assert.AreEqual("replaced", replaced?.Principal.FindFirstValue(ClaimTypes.Name), "the second ticket replaced the first");
+        Assert.AreEqual(1, store.Count, "the ended session was dropped on the next store");
+        Assert.IsNotNull(await store.RetrieveAsync(other), "the new session stays");
+        Assert.IsNull(await store.RetrieveAsync(id), "the ended session is gone");
+    }
+
+    /// <summary>
+    /// Renewing replaces the ticket of a known session without extending its idle time, and an unknown key stores nothing.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task SessionStoreRenewReplacesTicketOfKnownSessionOnly()
+    {
+        // Arrange
+        var clock = new FakeTimeProvider();
+        var store = new SessionStore(clock);
+        var key = await store.StoreAsync(NewTicket(out var id));
+        var renewed = new AuthenticationTicket(new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.Name, "renewed"), new Claim(SessionStore.SessionClaimType, id)], "test")), "test");
+
+        // Act
+        clock.Advance(TimeSpan.FromMinutes(59));
+
+        await store.RenewAsync(key, renewed);
+        await store.RenewAsync("unknown-key", renewed);
+
+        var retrieved = await store.RetrieveAsync(key);
+
+        clock.Advance(TimeSpan.FromMinutes(61));
+
+        var afterIdle = await store.RetrieveAsync(key);
+
+        // Assert
+        Assert.AreEqual("renewed", retrieved?.Principal.FindFirstValue(ClaimTypes.Name), "the ticket was replaced");
+        Assert.IsNull(afterIdle, "renewing the ticket is not activity of the user");
+        Assert.AreEqual(0, store.Count, "an unknown key stored nothing");
+    }
+
+    /// <summary>
     /// Creates a ticket with a new session claim.
     /// </summary>
     /// <param name="id">The session identifier</param>

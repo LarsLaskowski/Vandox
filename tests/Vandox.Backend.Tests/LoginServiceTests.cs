@@ -132,6 +132,35 @@ public partial class LoginServiceTests
     }
 
     /// <summary>
+    /// The failure that reaches the global limit logs the lock for all clients once, and the next attempt is throttled.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task LoginServiceLogsLockForAllClientsAtGlobalLimit()
+    {
+        // Arrange
+        using var fixture = new LoginServiceFixture();
+        var logged = new List<int>();
+
+        // Act
+        for (var count = 0; count < LoginThrottle.MaxGlobalFailures; count++)
+        {
+            var context = LoginServiceFixture.NewContext($"10.0.{count / 250}.{(count % 250) + 1}").Context;
+
+            await fixture.Service.SignInAsync(context, "a wrong password", TestContext.CancellationToken);
+
+            logged.Add(fixture.Logger.Messages.Count(message => message.StartsWith("login locked for all clients ", StringComparison.Ordinal)));
+        }
+
+        var next = await fixture.Service.SignInAsync(LoginServiceFixture.NewContext("192.0.2.200").Context, LoginServiceFixture.Accepted, TestContext.CancellationToken);
+
+        // Assert
+        Assert.AreEqual(0, logged[^2], "not logged before the last failure");
+        Assert.AreEqual(1, logged[^1], "logged by the failure that reaches the limit");
+        Assert.AreEqual(LoginOutcome.Throttled, next, "even the right password is throttled afterwards");
+    }
+
+    /// <summary>
     /// Two attempts never run the check at the same time, and an attempt that waits more than 5 seconds is throttled without a recorded failure.
     /// </summary>
     /// <returns>A task that completes when the test is done</returns>

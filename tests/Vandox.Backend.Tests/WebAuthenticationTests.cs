@@ -88,6 +88,35 @@ public class WebAuthenticationTests
     }
 
     /// <summary>
+    /// A signed-in user who is refused gets 403 and no redirect.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task WebAuthenticationAnswersAccessDeniedWith403()
+    {
+        // Arrange
+        using var verifier = new ScriptedPasswordVerifier("password");
+        var services = new ServiceCollection();
+
+        services.AddLogging();
+        WebAuthentication.AddServices(services, verifier, new FakeTimeProvider(), NullLoggerFactory.Instance);
+
+        await using var provider = services.BuildServiceProvider();
+
+        var options = provider.GetRequiredService<IOptionsMonitor<CookieAuthenticationOptions>>().Get(CookieAuthenticationDefaults.AuthenticationScheme);
+        var context = new DefaultHttpContext();
+        var scheme = new AuthenticationScheme(CookieAuthenticationDefaults.AuthenticationScheme, null, typeof(CookieAuthenticationHandler));
+        var denied = new RedirectContext<CookieAuthenticationOptions>(context, scheme, options, new AuthenticationProperties(), "/AccessDenied");
+
+        // Act
+        await options.Events.OnRedirectToAccessDenied(denied);
+
+        // Assert
+        Assert.AreEqual(403, context.Response.StatusCode, "status");
+        Assert.AreEqual(string.Empty, context.Response.Headers.Location.ToString(), "no redirect");
+    }
+
+    /// <summary>
     /// <c>POST /logout</c> is mapped with antiforgery validation required, and the endpoint is open to a request without a session.
     /// </summary>
     /// <returns>A task that completes when the test is done</returns>
