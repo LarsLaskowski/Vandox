@@ -620,6 +620,38 @@ public partial class LogsPageTests
     }
 
     /// <summary>
+    /// Submitting the form without changing a value navigates to the same address and searches again, exactly once, with the same filter.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task LogsPageSubmitWithUnchangedValuesSearchesAgain()
+    {
+        // Arrange
+        var expected = new LogsAddress
+                       {
+                           Text = "hit",
+                           Source = "syslog"
+                       };
+
+        await using var harness = new LogPageHarness($"{Address}{expected.ToQuery()}");
+
+        await harness.AddAsync<LogsPage>();
+
+        // Act
+        await harness.Renderer.SubmitAsync(harness.Form());
+
+        // Assert
+        var filters = harness.Explorer.Queries<LogFilter>(FakeLogExplorer.FindLogs);
+
+        Assert.AreSequenceEqual([$"logs{expected.ToQuery()}"], harness.Navigation.Targets.ToArray(), "one navigation to the same address");
+        Assert.HasCount(2, filters, "the first search and exactly one more");
+        Assert.AreEqual(filters[0].Text, filters[1].Text, "same text");
+        Assert.AreEqual(filters[0].Source, filters[1].Source, "same source");
+        Assert.AreEqual(filters[0].From, filters[1].From, "same from");
+        Assert.AreEqual(filters[0].To, filters[1].To, "same to");
+    }
+
+    /// <summary>
     /// Creates a hook that blocks the first search until its token ends.
     /// </summary>
     /// <param name="explorer">The explorer that runs the hook</param>

@@ -471,6 +471,40 @@ public partial class LogTemplatesPageTests
     }
 
     /// <summary>
+    /// Submitting the form without changing a value navigates to the same address and lists again, exactly once, with the same filter.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task TemplatesPageSubmitWithUnchangedValuesSearchesAgain()
+    {
+        // Arrange
+        var expected = new LogsAddress
+                       {
+                           Source = "syslog",
+                           Program = "sshd",
+                           From = _from,
+                           To = _to
+                       };
+
+        await using var harness = new LogPageHarness($"{Address}{expected.ToQuery()}");
+
+        await harness.AddAsync<LogTemplatesPage>();
+
+        // Act
+        await harness.Renderer.SubmitAsync(harness.Form());
+
+        // Assert
+        var queries = harness.Explorer.Queries<TemplateListQuery>(FakeLogExplorer.Templates);
+
+        Assert.AreSequenceEqual([$"logs/templates{expected.ToQuery()}"], harness.Navigation.Targets.ToArray(), "one navigation to the same address");
+        Assert.HasCount(2, queries, "the first listing and exactly one more");
+        Assert.AreEqual(queries[0].Source, queries[1].Source, "same source");
+        Assert.AreEqual(queries[0].Program, queries[1].Program, "same program");
+        Assert.AreEqual(queries[0].From, queries[1].From, "same from");
+        Assert.AreEqual(queries[0].To, queries[1].To, "same to");
+    }
+
+    /// <summary>
     /// Creates the count of a template in an hour.
     /// </summary>
     /// <param name="hour">The start of the hour</param>
