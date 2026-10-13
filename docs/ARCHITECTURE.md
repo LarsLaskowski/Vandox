@@ -7,7 +7,7 @@ backend with web UI, runs as a Docker container on any Docker host in the home n
 
 This document describes the target architecture; as of now the binaries' `--version`, the data model and wire format
 (Go: `internal/model`, `internal/wire`; backend: `src/Vandox.Core`), the configuration loading (`internal/config` for the agent,
-`Vandox.Core.Configuration` for `vandoxd`), the backend service skeleton, the log import framework and the log signature catalog with its detector (`Vandox.Core.Signatures`; the service does not call it yet), the log templates with their statistics and queries (`Vandox.Core.Templates`, `Vandox.Storage`; nothing shows them yet), the outage reconstruction (`vandoxd incidents`, `Vandox.Core.Incidents`; nothing shows the incidents yet) exist (`vandoxd import`, with the parsers for the journal export, the MariaDB error log, Dovecot's own log file, `syslog` and `kern.log`, the Plesk panel log, the nginx, `sw-cp-server` and Apache error logs and the legacy `top`/`lsof` monitoring log): `vandoxd` loads its configuration, opens and migrates its SQLite database (schema, batched writes, queries and log search
+`Vandox.Core.Configuration` for `vandoxd`), the backend service skeleton, the log import framework and the log signature catalog with its detector (`Vandox.Core.Signatures`; the service does not call it yet), the log templates with their statistics and queries (`Vandox.Core.Templates`, `Vandox.Storage`; nothing shows them yet), the outage reconstruction (`vandoxd incidents`, `Vandox.Core.Incidents`), the forensics report as Markdown (`vandoxd report`, `Vandox.Core.Reports`; the web UI shows neither yet) exist (`vandoxd import`, with the parsers for the journal export, the MariaDB error log, Dovecot's own log file, `syslog` and `kern.log`, the Plesk panel log, the nginx, `sw-cp-server` and Apache error logs and the legacy `top`/`lsof` monitoring log): `vandoxd` loads its configuration, opens and migrates its SQLite database (schema, batched writes, queries and log search
 exist as the storage layer; the service does not call it yet, `vandoxd import` writes through it), listens on the
 web and ingest ports, answers `/healthz` and shuts down gracefully, and ships as a container with a health
 check. Sections are marked as implemented as features land. The decisions behind it are recorded in
@@ -39,7 +39,9 @@ way, and agents of the hosting provider are never disabled or changed
   ([0072](decisions/0072-vandoxd-import-sub-command-output-and-exit-codes.md)); `vandoxd incidents` rebuilds the incidents from the
   stored data ([0096](decisions/0096-outage-incidents-rebuilt-from-stored-data-merged-by-overlapping-windows.md)); `vandoxd templates`
   rebuilds the log template statistics from the stored log lines
-  ([0095](decisions/0095-log-templates-token-rules-statistics-in-the-write-path-usual-level-from-covered-hours.md)). Two Kestrel listeners serve
+  ([0095](decisions/0095-log-templates-token-rules-statistics-in-the-write-path-usual-level-from-covered-hours.md)); `vandoxd report`
+  writes the forensics report of the stored data as Markdown to standard output
+  ([0098](decisions/0098-forensics-report-as-markdown-from-vandoxd-report.md)). Two Kestrel listeners serve
   the web and the ingest port; a middleware routes each request by the label of its listener, and logs are JSON
   lines ([0081](decisions/0081-backend-host-two-listeners-json-logs-blazor-interactive-server.md)).
 - The backend's libraries, one project each with a test project under `tests/`
@@ -51,7 +53,7 @@ way, and agents of the hosting provider are never disabled or changed
   (found by content or by a configured path, unreadable lines kept as raw lines), the legacy `top`/`lsof` monitoring log (snapshots
   into metrics, process and connection snapshots), and the classification of Postfix and Dovecot lines; the log signatures, an embedded
   catalog, and the detector that matches them on stored log lines; the normalizer that turns a message into a log template; the
-  incident model and the rules that build an incident from the records of its window),
+  incident model and the rules that build an incident from the records of its window; the analysis of the forensics report),
   `Vandox.Storage` (the SQLite database, see [Storage](areas/storage.md): schema, migrations, writing batches, queries, log search and
   the log template statistics) and
   `Vandox.Import` (reads a directory, archive or file as streams, detects the parser per file, hashes the
@@ -136,6 +138,15 @@ matched to the stored incidents by overlapping windows, so a re-run after a furt
 duplicating them. The rules are in [Detection, alerts and reports](areas/detection-and-reports.md) (*Incidents*)
 ([0096](decisions/0096-outage-incidents-rebuilt-from-stored-data-merged-by-overlapping-windows.md)).
 
+The forensics report works on the stored data as well and stores nothing. `vandoxd report` reads every stored log line (observed
+hours and boots), every process snapshot (backups, panel memory, memory consumers) and every stored incident (twice, one at a time),
+keeps only capped series, compares the share of outages with a time of day, a backup, a boot or high panel memory against the share
+of observed hours with it, and writes the result in English or German as Markdown to standard output, all times in UTC. The rules
+are in [Detection, alerts and reports](areas/detection-and-reports.md) (*Forensics report*)
+([0098](decisions/0098-forensics-report-as-markdown-from-vandoxd-report.md),
+[0099](decisions/0099-forensics-rules-share-of-outages-against-observed-hours-binomial-tail.md),
+[0100](decisions/0100-report-language-from-a-flag-english-default-text-tables-in-code.md)).
+
 Records: [0006](decisions/0006-agent-connects-outbound-only.md),
 [0007](decisions/0007-sqlite-with-fts5-no-external-database.md),
 [0008](decisions/0008-deterministic-detection-and-alerting.md),
@@ -153,7 +164,10 @@ Records: [0006](decisions/0006-agent-connects-outbound-only.md),
 [0093](decisions/0093-legacy-monitoring-log-snapshots-by-header-zone-and-whole-snapshot-validity.md),
 [0094](decisions/0094-log-signatures-embedded-yaml-linear-patterns-on-stored-lines.md),
 [0095](decisions/0095-log-templates-token-rules-statistics-in-the-write-path-usual-level-from-covered-hours.md),
-[0096](decisions/0096-outage-incidents-rebuilt-from-stored-data-merged-by-overlapping-windows.md).
+[0096](decisions/0096-outage-incidents-rebuilt-from-stored-data-merged-by-overlapping-windows.md),
+[0098](decisions/0098-forensics-report-as-markdown-from-vandoxd-report.md),
+[0099](decisions/0099-forensics-rules-share-of-outages-against-observed-hours-binomial-tail.md),
+[0100](decisions/0100-report-language-from-a-flag-english-default-text-tables-in-code.md).
 
 ## Network
 

@@ -124,4 +124,7 @@ once in the [area document](../areas/README.md) of the record's area, and the re
 | 0095 | Log templates: fixed token rules, statistics kept by the write path per source and program, the usual level from the hours the source logged | Accepted | 2026-10-12 |
 | 0096 | Outage incidents are rebuilt from the stored data by `vandoxd incidents`: OOM-kill windows merged by overlap, an incident's identity kept by overlap, a structured cause hypothesis from fixed rules | Accepted | 2026-10-12 |
 | 0097 | A cancelled token interrupts a running reader statement through a progress handler; the interruption is an OperationCanceledException | Accepted | 2026-10-12 |
+| 0098 | The forensics report is written as Markdown by `vandoxd report`, computed on demand in bounded passes; the web page follows separately | Proposed | 2026-10-13 |
+| 0099 | Recurrence and correlation rules compare the share of outages with the share of observed system-log hours and decide by a binomial tail | Proposed | 2026-10-13 |
+| 0100 | The report language comes from the flag `-lang` (`en` by default, or `de`); the texts are tables in code, not .NET resources or cultures | Proposed | 2026-10-13 |
 <!-- project:end index -->
