@@ -788,6 +788,28 @@ Devil's Advocate (0 major, 2 minor), each objection answered:
    the cap is the only bound on guesses from a client that can change its address (0105); the 5-second gate wait is part of the same
    trade-off and is named with it.
 
+## Deviations accepted at approval
+
+Lead, step 9 (approve-pr), on 0c52aa3:
+
+- `LoginClient`, `StoredSession`, `RequiredAntiforgery` as top-level internal types and `App.razor.cs` code-behind (RH2101/RH2109):
+  structure only, accepted.
+- `RequiredAntiforgery : IAntiforgeryMetadata` (`RequiresValidation` true) on `POST /logout` instead of
+  `RequireAntiforgeryTokenAttribute(true)`: the same metadata the middleware reads (Security confirmed), accepted; record 0103 names the
+  mechanism (endpoint metadata), not the type.
+- `TrustedProxyList` refuses prefixes shorter than /8 (IPv4) and /16 (IPv6): written in record 0105 and
+  `configuration-and-secrets.md`, consistent with the guard table above (`/7` and `/15` refused), accepted.
+- Antiforgery `HeaderName = null` (review round 1): the token is read only from the form field, so the middleware always reads the body
+  as a form and catches its failures (no `500`). The behavior is in `web-login.md` (*Cross-site requests*); it applies the mechanism
+  record 0103 already gives the reason for, so the record is not extended.
+- `logged out` only when a session existed (review round 1, non-blocking): fixed now with a test and covered by the round-2 delta
+  review, confirmed.
+- Smoke script reads the CSP header from `/login` (an anonymous `/` is now a redirect); `.top-actions` header wrapper;
+  `LoginService : IDisposable` (disposes its gate; the singleton is disposed by the container); `AddAuthorizationBuilder()
+  .SetFallbackPolicy` (ASP0025, same policy): accepted.
+- `web-login.md` does not repeat the prefix bounds: the option format is written once in `configuration-and-secrets.md`, which
+  `web-login.md` links; no change.
+
 ## Decision records
 
 - `docs/decisions/0103-web-login-server-side-sessions-static-login-page-circuits-bound-to-session.md` (Proposed)
