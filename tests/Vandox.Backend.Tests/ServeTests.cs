@@ -1,9 +1,13 @@
 using System.Net;
 using System.Net.Sockets;
+using System.Reflection;
 
 using Microsoft.AspNetCore.Server.Kestrel.Core;
+using Microsoft.Extensions.DependencyInjection;
 
 using Vandox.Backend.Hosting;
+using Vandox.Backend.Logs;
+using Vandox.Storage;
 
 namespace Vandox.Backend.Tests;
 
@@ -321,6 +325,94 @@ public class ServeTests
 
         // Assert
         Assert.IsEmpty(problems, $"status problems: {string.Join("; ", problems)}");
+    }
+
+    /// <summary>
+    /// The two log pages answer 200 with the security headers on the web port and 404 on the ingest port, with the real store wired.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task ServeServesTheLogPagesOnlyOnWebPort()
+    {
+        // Arrange
+        using var fixture = new BackendFixture();
+        using var stop = CancellationTokenSource.CreateLinkedTokenSource(TestContext.CancellationToken);
+
+        var run = await StartAsync(fixture, stop.Token);
+
+        using var client = CreateClient();
+
+        var paths = new[] { "/logs", "/logs/templates" };
+        var problems = new List<string>();
+
+        // Act
+        foreach (var path in paths)
+        {
+            using var web = await client.GetAsync($"http://127.0.0.1:{fixture.WebPort}{path}", TestContext.CancellationToken);
+            using var ingest = await client.GetAsync($"http://127.0.0.1:{fixture.IngestPort}{path}", TestContext.CancellationToken);
+
+            AddStatusProblem(problems, $"GET web {path}", HttpStatusCode.OK, web);
+            AddStatusProblem(problems, $"GET ingest {path}", HttpStatusCode.NotFound, ingest);
+            AddHeaderProblems(problems, path, web, "Content-Security-Policy", SecurityHeadersMiddleware.ContentSecurityPolicy);
+            AddHeaderProblems(problems, path, web, "X-Content-Type-Options", SecurityHeadersMiddleware.ContentTypeOptions);
+            AddHeaderProblems(problems, path, web, "Referrer-Policy", SecurityHeadersMiddleware.ReferrerPolicy);
+            AddHeaderProblems(problems, path, web, "X-Frame-Options", SecurityHeadersMiddleware.FrameOptions);
+        }
+
+        await stop.CancelAsync();
+        await run.WaitAsync(TimeSpan.FromSeconds(20), TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsEmpty(problems, $"problems: {string.Join("; ", problems)}");
+    }
+
+    /// <summary>
+    /// The explorer the pages get is one gated explorer with the stated slots over the store, the same for every scope, and the pages get the system clock.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task ServeGatesTheLogExplorer()
+    {
+        // Arrange
+        using var fixture = new BackendFixture();
+        using var stop = CancellationTokenSource.CreateLinkedTokenSource(TestContext.CancellationToken);
+
+        IServiceProvider? services = null;
+
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var hooks = new ServeHooks
+                    {
+                        Built = provider => services = provider,
+                        Started = _ => started.TrySetResult()
+                    };
+        var run = fixture.RunAsync([], hooks, stop.Token);
+
+        await started.Task.WaitAsync(TimeSpan.FromSeconds(20), TestContext.CancellationToken);
+
+        Assert.IsNotNull(services, "the Built hook ran before the service started");
+
+        // Act
+        var root = services.GetRequiredService<ILogExplorer>();
+
+        using var first = services.CreateScope();
+        using var second = services.CreateScope();
+
+        var inFirst = first.ServiceProvider.GetRequiredService<ILogExplorer>();
+        var inSecond = second.ServiceProvider.GetRequiredService<ILogExplorer>();
+        var clock = services.GetRequiredService<TimeProvider>();
+        var store = services.GetRequiredService<ILogSearcher>();
+        var fields = typeof(GatedLogExplorer).GetFields(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public).Select(field => field.GetValue(root)).ToArray();
+
+        await stop.CancelAsync();
+        await run.WaitAsync(TimeSpan.FromSeconds(20), TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsInstanceOfType<GatedLogExplorer>(root, "the explorer is gated");
+        Assert.AreSame(root, inFirst, "the first scope gets the same explorer, so the slots count across circuits");
+        Assert.AreSame(root, inSecond, "the second scope gets the same explorer");
+        Assert.AreEqual(LogsView.MaxConcurrentQueries, fields.OfType<SemaphoreSlim>().Single().CurrentCount, "the slots of an idle gate");
+        Assert.AreSame<object>(store, fields.OfType<ILogExplorer>().Single(), "the gate wraps the store");
+        Assert.AreSame(TimeProvider.System, clock, "the pages get the system clock");
     }
 
     /// <summary>

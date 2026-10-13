@@ -63,6 +63,41 @@ public partial class MainLayoutTests
         Assert.IsTrue(BodyInMain().IsMatch(html), "the body is inside main");
     }
 
+    /// <summary>
+    /// The Logs entry points to the logs and is marked on both log pages, but not on the overview.
+    /// </summary>
+    /// <param name="address">The current address</param>
+    /// <param name="marked">Whether the Logs entry is marked</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [DataRow("http://localhost/logs", true)]
+    [DataRow("http://localhost/logs?q=disk", true)]
+    [DataRow("http://localhost/logs/templates", true)]
+    [DataRow("http://localhost/", false)]
+    public async Task MainLayoutMarksLogsOnTheLogPages(string address, bool marked)
+    {
+        // Arrange
+        await using var services = new ServiceCollection().AddLogging().AddSingleton<NavigationManager>(new RecordingNavigationManager(address)).BuildServiceProvider();
+        await using var renderer = new HtmlRenderer(services, services.GetRequiredService<ILoggerFactory>());
+
+        RenderFragment body = builder => builder.AddMarkupContent(0, "<p>BODY-MARKER</p>");
+
+        var parameters = ParameterView.FromDictionary(new Dictionary<string, object?>
+                                                      {
+                                                          [nameof(LayoutComponentBase.Body)] = body
+                                                      });
+
+        // Act
+        var html = await renderer.Dispatcher.InvokeAsync(async () => (await renderer.RenderComponentAsync<MainLayout>(parameters)).ToHtmlString());
+
+        // Assert
+        var link = LogsLink().Match(html);
+
+        Assert.IsTrue(link.Success, "the Logs link");
+        Assert.Contains("href=\"logs\"", link.Groups[1].Value, "the Logs link points to logs");
+        Assert.AreEqual(marked, ActiveClass().IsMatch(link.Groups[1].Value), $"the Logs link is marked: {marked}");
+    }
+
     #endregion // Methods
 
     #region Patterns
@@ -75,6 +110,9 @@ public partial class MainLayoutTests
 
     [GeneratedRegex("<a\\b([^>]*)>\\s*Overview\\s*</a>")]
     private static partial Regex OverviewLink();
+
+    [GeneratedRegex("<a\\b([^>]*)>\\s*Logs\\s*</a>")]
+    private static partial Regex LogsLink();
 
     [GeneratedRegex("<button type=\"button\"([^>]*)>(.*?)</button>", RegexOptions.Singleline)]
     private static partial Regex ThemeButton();

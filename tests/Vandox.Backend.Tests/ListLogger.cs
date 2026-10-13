@@ -19,6 +19,11 @@ internal sealed class ListLogger : ILogger
     /// </summary>
     internal List<(LogLevel Level, EventId EventId)> Entries { get; } = [];
 
+    /// <summary>
+    /// Gets the exception of each message, or <c>null</c>, in the order of <see cref="Messages"/>.
+    /// </summary>
+    internal List<Exception?> Exceptions { get; } = [];
+
     #endregion // Properties
 
     #region ILogger
@@ -41,6 +46,7 @@ internal sealed class ListLogger : ILogger
     {
         Messages.Add(formatter(state, exception));
         Entries.Add((logLevel, eventId));
+        Exceptions.Add(exception);
     }
 
     #endregion // ILogger
