@@ -951,3 +951,67 @@ Owners:
 
 Deviations of the Dev reports (`LocationChanged` subscription with query dedupe on both pages, public `LogsAddress.FromFields`/`FormatTime`,
 the GET form fallback, `InternalsVisibleTo Vandox.StorageBenchmark`) are left to step 9.
+
+## Lead decision: non-blocking code findings of review round 1 (decide, step 8)
+
+**Finding 1, repeated submit runs no search — fix now.** Confirmed on both pages: `Submit` navigates to `PagePath + address.ToQuery()`
+(`LogsPage.razor.cs:357`, `LogTemplatesPage.razor.cs:309`), and `LoadAddressAsync` searches only when `query != _handledQuery`
+(`LogsPage.razor.cs:193`, `LogTemplatesPage.razor.cs:159`). Submitting unchanged values navigates to the same address, so after an import
+the only refresh is a browser reload. Blazor's internal navigation (`blazor.web.js` of the 10.0 framework assets) pushes the history entry
+and notifies the location change whether or not the address changed, so `OnLocationChanged` does run; only the dedupe stops the search.
+A refresh is the evident purpose of pressing *Search* again, and the area document already promises that the page follows "submitting the
+form".
+
+Fix: in `Submit` of both pages, after validation succeeded and before `Navigation.NavigateTo`, set `_handledQuery = null`. No signature
+changes. The dedupe stays for every other location change (a link, back and forward to the same address, the handler's own re-entry), which
+is what it was added for. One store call at a time and the cancellation of a running search (AC tests `LogsPageRunsOneStoreCallAtATime`,
+`TemplatesPageRunsOneStoreCallAtATime`, `LogsPageCancelsTheRunningSearch`) are unchanged: the repeated search goes through the same runner.
+
+Acceptance criterion (AC-24): submitting the form with values that give the current address runs the search again, exactly once, on both
+pages; a submit with invalid values still runs none.
+
+Options weighed:
+- *Say in the web-ui area that a repeated submit does not search again* — lost: it documents a defect the user hits after every import
+  and leaves *Search* without an effect.
+- *Search directly from `Submit` when the address is unchanged* — lost: the location change still arrives, so it would need a second
+  guard against a double search; clearing the dedupe keeps one path (address change → search).
+
+**Finding 2, `SearchBenchmark.ScanRows` can drift from `LogsView.ScanRows` — document the pairing now.** The benchmark tool references
+only `Vandox.Core` and `Vandox.Storage`, not the backend, so it cannot print or read `LogsView.ScanRows`. The tuning of the value happens in
+`docs/BENCHMARKS.md`, *Tuning*, which is where a changer reads first.
+
+Fix: one sentence in `docs/BENCHMARKS.md`, *Tuning*, at the end of the paragraph: "`SearchBenchmark.ScanRows` in the benchmark tool is a
+copy of `LogsView.ScanRows` (the tool does not reference the backend); a change of the bound changes both in the same pull request."
+
+Options weighed:
+- *Have `Program` print both values* — lost: needs a project reference from the tool to the web host, which pulls ASP.NET Core into the
+  tool for one constant.
+- *Move the constant to `Vandox.Storage` and have `LogsView` use it* — lost: the scan bound is the page's policy, not the store's (the
+  store takes any `ScanLimit` from 1 to 100,000, storage area), and it changes production code for a non-blocking finding.
+- *Note in the storage area* (the reviewer's wording) — not taken: the storage area states the store's range, not the view's bound
+  pairing with a tool; `docs/BENCHMARKS.md` names both constants already (*Log search*) and holds the tuning.
+
+No decision record: neither finding is accepted unfixed or split off, and neither choice meets the threshold of
+`docs/decisions/README.md`; record 0103 is unaffected.
+
+Owners:
+- Tester (first, failing on the current code): `tests/Vandox.Backend.Tests/LogsPageTests.cs`,
+  `LogsPageSubmitWithUnchangedValuesSearchesAgain`; `tests/Vandox.Backend.Tests/LogTemplatesPageTests.cs`,
+  `TemplatesPageSubmitWithUnchangedValuesSearchesAgain`. Each: open the page on an address, wait for the first search, submit the form
+  without changing a field; assert one navigation to the same address and exactly two store calls of the search method (`FindLogs`,
+  respectively the template-list method), the second with the same filter as the first.
+- Dev: `src/Vandox.Backend/Components/Pages/LogsPage.razor.cs` and `LogTemplatesPage.razor.cs` (`Submit`, as above);
+  `docs/areas/web-ui.md`, the bullet "The page follows every change of its address": add "submitting the form searches again even when
+  the address is unchanged, which refreshes the results"; `docs/BENCHMARKS.md`, *Tuning*, the sentence above.
+- Code Officer: *Format* and *Analyzer gate* on the changed files.
+- Lead: this section, `tasks.md`.
+
+Verification: step 6 gates (*Format*, *Build*, *Test*, *Analyzer gate*, *Coverage gate*), then a Reviewer delta round over the change
+(production code, tests and `docs/` changed after round 1). Security: the change touches the web UI pages of a `security` change; the
+orchestrator runs the Security delta confirmation as routing prescribes for a code change after the Security diff approval (expected
+trivial: no new input, the address parsing is unchanged).
+
+For step 9 (recorded now): the five plan deviations the Reviewer assessed (the `LocationChanged` subscription with query dedupe, public
+`LogsAddress.FromFields`/`FormatTime`, the GET form fallback, `InternalsVisibleTo Vandox.StorageBenchmark`, `ScanRows` and
+`SelectiveMatches` of 12,000 within the plan's ranges) are accepted; the DS918+ row of `docs/BENCHMARKS.md` stays blocking until the
+Product Manager's run (task 13).
