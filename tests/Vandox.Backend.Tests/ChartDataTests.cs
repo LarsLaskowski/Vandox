@@ -80,6 +80,30 @@ public class ChartDataTests
     }
 
     /// <summary>
+    /// A stacked chart refuses a series that has no value at a point and says which one, a line chart still accepts a gap, and the flag tells the two apart.
+    /// </summary>
+    [TestMethod]
+    public void ChartDataStackedRefusesMissingValues()
+    {
+        // Arrange
+        var times = new[] { _start, _start.AddSeconds(1), _start.AddSeconds(2) };
+        var complete = new ChartSeries("complete", [1.0, 2.0, 3.0]);
+        var gap = new ChartSeries("with gap", [1.0, null, 3.0]);
+
+        // Act
+        var exception = Assert.ThrowsExactly<ArgumentException>(() => new ChartData(times, [complete, gap], true), "a stacked series with a gap");
+        var stacked = new ChartData(times, [complete], true);
+        var lines = new ChartData(times, [gap], false);
+        var plain = new ChartData(times, [gap]);
+
+        // Assert
+        Assert.StartsWith("The stacked series 'with gap' has no value at point 1.", exception.Message, "the message names the series and the point");
+        Assert.IsTrue(stacked.Stacked, "a complete stacked chart is accepted");
+        Assert.IsFalse(lines.Stacked, "a line chart with a gap is accepted");
+        Assert.IsFalse(plain.Stacked, "a chart made without the flag is not stacked");
+    }
+
+    /// <summary>
     /// A null argument or label is refused with an <see cref="ArgumentNullException"/>.
     /// </summary>
     [TestMethod]

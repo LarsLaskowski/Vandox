@@ -69,7 +69,7 @@ internal sealed class RecordingJsRuntime : IJSRuntime
         var name = identifier switch
                    {
                        "import" => "module",
-                       "create" => "chart",
+                       "create" or "createStacked" => "chart",
                        _ => identifier
                    };
         var reference = new RecordingJsObjectReference(this, name);
