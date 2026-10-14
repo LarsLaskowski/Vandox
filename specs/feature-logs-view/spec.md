@@ -60,14 +60,14 @@ Common to both:
 
 ## Acceptance criteria
 
-- [ ] AC-A: Full-text search with filters for source, severity, service (program) and time range, with pages and *Continue*.
-- [ ] AC-B: The result list shows up to 5 context lines before and after a chosen hit.
-- [ ] AC-C: The template view shows templates with first seen, last seen, counts and the hourly counts of a chosen template, and
+- [x] AC-A: Full-text search with filters for source, severity, service (program) and time range, with pages and *Continue*.
+- [x] AC-B: The result list shows up to 5 context lines before and after a chosen hit.
+- [x] AC-C: The template view shows templates with first seen, last seen, counts and the hourly counts of a chosen template, and
   switches from a template to exactly its lines.
-- [ ] AC-D: Every filter of both pages is in the address; opening the address reproduces the view (shareable, bookmarkable).
-- [ ] AC-E: A search over 5,000,000 stored lines answers its first page in under two seconds on the reference host
+- [x] AC-D: Every filter of both pages is in the address; opening the address reproduces the view (shareable, bookmarkable).
+- [x] AC-E: A search over 5,000,000 stored lines answers its first page in under two seconds on the reference host
   (Synology DS918+, SSD volume) for the measured cases in `docs/BENCHMARKS.md`.
-- [ ] AC-F: External text is displayed escaped (markup as text, invisible and bidirectional characters as visible escapes).
+- [x] AC-F: External text is displayed escaped (markup as text, invisible and bidirectional characters as visible escapes).
 
 ## Out of scope
 
