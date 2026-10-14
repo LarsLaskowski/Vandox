@@ -39,3 +39,4 @@ are quoted in full.
 | 2026-10-13 21:29 | 7 Code check (delta) | Orchestrator | On 94497eb: Format check 0/541; Analyzer gate PASS; Coverage 99.9%/98.4% PASS; Backend Release 549 green; scope/decision PASS |
 | 2026-10-13 21:30 | 8 Review delta (round 2) | Reviewer | APPROVE on 94497eb; verbatim fixes in place, resubmit fix resolves the finding, no new defects; DS918+ row still open (opus/medium · 7,067 tokens · 2 tool uses · 18 s · continued) |
 | 2026-10-13 21:30 | 8 Security diff delta | Security | APPROVED on 94497eb; resubmit fix weakens no guard, doc wording only (opus/medium · 3,355 tokens · 3 tool uses · 22 s · continued) |
+| 2026-10-14 05:24 | 6 Task 13 DS918+ run | Product Manager | Run 1 on DS918+ (SSD, .NET 10.0.10): AC-19 NOT met — case 9 (scan bound, 12,000 rows) 2,141 ms, case 12 (16 common words) 2,229 ms; all others under 2 s (2: 1,021, 2b: 1,081, 8b: 889, 11/11b: 125); output in ds918-run-1.txt |
