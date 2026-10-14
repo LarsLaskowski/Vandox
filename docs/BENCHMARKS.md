@@ -172,7 +172,7 @@ work and the memory of one match small. The budgets, the bound, the chunk and th
   `MATCH` with `rowid = ?`, 375 ms for a four-part phrase of a word every line holds, 2.3 s for twenty parts and 8.1 s for sixty (case 15 did not finish in 10 s). The cause is that
   `rowid = …` does not bound the full-text work to one line: an AND of terms or a phrase walks on to the next matching row or the end of the index. The scan now tests every one-part
   word on its own (0.36 ms per line for the 16 words) and the terms of several parts in a private in-memory index of at most 64 examined lines, and its page ends at 1.5 s, so
-  cases 12 and 15 end in 0.8 to 0.94 s even when the index check is stopped (measured on both hosts; run 2 on the DS918+: 938 and 813 ms).
+  cases 12 and 15 end in under 1 s even when the index check is stopped (0.7 to 0.8 s on the development host; run 2 on the DS918+: 938 and 813 ms).
 - **The 234-second run of case 12** was the scan of the earlier build: the index check was stopped at its budget on the cold first run, and the scan then examined 500 lines (8,000 divided by 16)
   at about 470 ms each, about 235 seconds. The benchmark of that moment passed no deadline (`CancellationToken.None`); the 10-second deadline of the page in `SearchBenchmark` was added
   right after, in the next run, which is why the same case 15 then reported "stopped by the 10 s deadline".

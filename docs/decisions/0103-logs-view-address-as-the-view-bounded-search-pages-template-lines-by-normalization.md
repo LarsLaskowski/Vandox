@@ -1,6 +1,6 @@
 # 0103: The logs view takes every filter from the address, searches in bounded pages from the index or by a time-ordered scan, and finds a template's lines by normalizing candidates
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-13
 - **Area:** Web UI
 - **Source:** Issue #26
