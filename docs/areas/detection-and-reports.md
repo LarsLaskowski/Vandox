@@ -157,7 +157,8 @@ bounded by those limits and not by the input.
 A **template** is the message of a log line with its variable parts replaced by placeholders, so that lines which differ only in
 numbers, IDs, addresses or paths share one template. The backend keeps, per template, when it was first and last seen and how many
 lines it had in each hour, and answers two questions from that: which templates are **new** in a time range, and which hours of a
-template are **above its usual level**. No command or view shows them yet.
+template are **above its usual level**. The logs view shows them (*Templates of a range*, *Lines of a template*); no command shows
+the new templates or the usual-level hours yet.
 
 ### Normalization
 
@@ -217,7 +218,8 @@ told from a placeholder; a template is a grouping key, not a reversible form of 
 ### Queries
 
 Every query except the template of a line takes a time range `from` to `to` (both required, within the storable range, `from` before
-`to`) and a limit of 1 to 10,000 results; a broken rule is an error that names the rule.
+`to`) and a limit of 1 to 10,000 results (1 to 1,000 for the templates of a range and the lines of a template); a broken rule is an
+error that names the rule.
 
 - **Template of a line:** given a source, a program and a message of at most 16,384 UTF-8 bytes (the longest message a log line
   can have; a longer one is an error), the template the message normalizes to, with its first and last seen time and count, or none.
@@ -226,6 +228,13 @@ Every query except the template of a line takes a time range `from` to `to` (bot
 - **New templates:** the templates whose first-seen time lies in the range and whose source has a template first seen before `from`,
   optionally of one source, ordered by first-seen time, then by identity. A template of a source without earlier lines is not new but
   unknown, and is not returned: the first import of a source makes nothing "new".
+- **Templates of a range:** the templates with at least one line in the hours that start in the range, optionally of one source and one
+  program, each with its number of lines in those hours, most lines first, then by identity, at most 1,000 (the logs view asks for 200).
+  The count is kept per UTC hour, so a range that starts or ends inside an hour counts that **whole hour**. A template is fetched by its
+  number. The rules and error texts are in the storage area (*Log exploration*); the logs view is in the web UI area (*Logs view*).
+- **Lines of a template:** the stored log lines of the template's source and program whose message normalizes to the template's text,
+  found by normalizing candidates that the template's literal words select (storage area, *Log exploration*), so the result is exactly the lines the statistics counted as long as the normalization rules have not changed since they were counted; after a change of the rules without a rebuild, the
+  lines of an old template are those that normalize to its text under the **current** rules, and may differ from its count.
 - **Templates above their usual level:** for every template and hour that starts in the range (at most **744 hours**, 31 days,
   from `from` to `to`; the first hour is the one that holds `from`, so the hours counted can reach 745), optionally of one source:
   - the **baseline window** is the `baseline hours` before the hour (default **168**, one week; 1 to 2,160), clipped to the storable

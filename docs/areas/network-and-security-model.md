@@ -19,8 +19,11 @@ host area; the agent's own rights are in the agent area; secrets are in [Configu
 
 - The web UI is reachable **in the home LAN only** and requires a **login**. It is not exposed to the internet and is not offered on the
   tailnet to the monitored server.
-- Authentication and sessions are a security area. TLS is terminated by a reverse proxy (backend host area). Access from outside the
-  home needs a separate, deliberate decision.
+- The login is one administrator password, stored only as an argon2id hash, with server-side sessions, protection against cross-site
+  requests and limits on failed sign-ins; the service trusts `X-Forwarded-For` and `X-Forwarded-Proto` only from the proxy addresses
+  the operator lists, and never takes the network position of a request as proof of having passed the proxy. The rules are in the
+  [Web login](web-login.md) area, the setup of the proxy in [REVERSE_PROXY.md](../REVERSE_PROXY.md).
+- TLS is terminated by a reverse proxy (backend host area). Access from outside the home needs a separate, deliberate decision.
 
 ## MariaDB access
 

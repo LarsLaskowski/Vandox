@@ -5,14 +5,23 @@
         <img src="brand/vandox-logo-horizontal.svg" alt="Vandox" class="logo-light" width="110" height="32" />
         <img src="brand/vandox-logo-horizontal-dark.svg" alt="Vandox" class="logo-dark" width="110" height="32" />
     </a>
-    <button type="button" class="theme-toggle" data-theme-toggle>
-        <span class="theme-label">Theme</span>
-        <span class="theme-system">System</span>
-        <span class="theme-light">Light</span>
-        <span class="theme-dark">Dark</span>
-    </button>
+    <div class="top-actions">
+        <button type="button" class="theme-toggle" data-theme-toggle>
+            <span class="theme-label">Theme</span>
+            <span class="theme-system">System</span>
+            <span class="theme-light">Light</span>
+            <span class="theme-dark">Dark</span>
+        </button>
+        <AuthorizeView>
+            <form method="post" action="logout" class="sign-out">
+                <AntiforgeryToken />
+                <button type="submit">Sign out</button>
+            </form>
+        </AuthorizeView>
+    </div>
     <nav aria-label="Main">
         <NavLink href="" Match="NavLinkMatch.All">Overview</NavLink>
+        <NavLink href="logs" Match="NavLinkMatch.Prefix">Logs</NavLink>
     </nav>
 </header>
 

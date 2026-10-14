@@ -278,5 +278,79 @@ internal static partial class BackendLog
     [LoggerMessage(EventId = 40, Level = LogLevel.Error, Message = "report failed {Error}")]
     internal static partial void ReportFailed(this ILogger logger, Exception exception, string error);
 
+    /// <summary>
+    /// Logs a failed read of the logs view.
+    /// </summary>
+    /// <param name="logger">The logger</param>
+    /// <param name="exception">The failure</param>
+    [LoggerMessage(EventId = 49, Level = LogLevel.Error, Message = "logs view: reading failed")]
+    internal static partial void LogsReadFailed(this ILogger logger, Exception exception);
+
+    /// <summary>
+    /// Logs that the web password hash is not set.
+    /// </summary>
+    /// <param name="logger">The logger</param>
+    /// <param name="variable">The variable that holds the hash</param>
+    [LoggerMessage(EventId = 41, Level = LogLevel.Error, Message = "web password hash missing {Variable}")]
+    internal static partial void WebPasswordHashMissing(this ILogger logger, string variable);
+
+    /// <summary>
+    /// Logs that the web password hash is not an accepted argon2id hash.
+    /// </summary>
+    /// <param name="logger">The logger</param>
+    /// <param name="reason">Why the hash is refused</param>
+    [LoggerMessage(EventId = 42, Level = LogLevel.Error, Message = "web password hash invalid {Reason}")]
+    internal static partial void WebPasswordHashInvalid(this ILogger logger, string reason);
+
+    /// <summary>
+    /// Logs a successful sign-in.
+    /// </summary>
+    /// <param name="logger">The logger</param>
+    /// <param name="client">The client address</param>
+    [LoggerMessage(EventId = 43, Level = LogLevel.Information, Message = "login succeeded {Client}")]
+    internal static partial void LoginSucceeded(this ILogger logger, string client);
+
+    /// <summary>
+    /// Logs a failed sign-in.
+    /// </summary>
+    /// <param name="logger">The logger</param>
+    /// <param name="client">The client address</param>
+    /// <param name="failures">The failures of the client within the window</param>
+    [LoggerMessage(EventId = 44, Level = LogLevel.Warning, Message = "login failed {Client} {Failures}")]
+    internal static partial void LoginFailed(this ILogger logger, string client, int failures);
+
+    /// <summary>
+    /// Logs that a client is locked out.
+    /// </summary>
+    /// <param name="logger">The logger</param>
+    /// <param name="client">The client address</param>
+    /// <param name="until">The end of the lock, UTC RFC 3339</param>
+    [LoggerMessage(EventId = 45, Level = LogLevel.Warning, Message = "login locked {Client} {Until}")]
+    internal static partial void LoginLocked(this ILogger logger, string client, string until);
+
+    /// <summary>
+    /// Logs that every client is locked out.
+    /// </summary>
+    /// <param name="logger">The logger</param>
+    /// <param name="until">The end of the lock, UTC RFC 3339</param>
+    [LoggerMessage(EventId = 46, Level = LogLevel.Warning, Message = "login locked for all clients {Until}")]
+    internal static partial void LoginLockedForAll(this ILogger logger, string until);
+
+    /// <summary>
+    /// Logs a sign-out.
+    /// </summary>
+    /// <param name="logger">The logger</param>
+    /// <param name="client">The client address</param>
+    [LoggerMessage(EventId = 47, Level = LogLevel.Information, Message = "logged out {Client}")]
+    internal static partial void LoggedOut(this ILogger logger, string client);
+
+    /// <summary>
+    /// Logs that the request carried an <c>X-Forwarded-For</c> header that was not applied.
+    /// </summary>
+    /// <param name="logger">The logger</param>
+    /// <param name="client">The client address</param>
+    [LoggerMessage(EventId = 48, Level = LogLevel.Warning, Message = "forwarded header ignored {Client}")]
+    internal static partial void ForwardedHeaderIgnored(this ILogger logger, string client);
+
     #endregion // Methods
 }

@@ -52,8 +52,7 @@ interval, scope, granularity and the exception — are in [Storage](../areas/sto
 
 - A deadline is now a real bound for the log search, the template queries (the usual-level one included) and every other
   reader query; a caller that serves a user bounds them with a deadline and gets no partial result when it passes.
-- Work inside one virtual-machine instruction (for example one call into the FTS5 module) finishes before the handler runs;
-  the bound is the time between two checks, not zero.
+- Work inside one virtual-machine instruction finishes before the handler runs; the FTS5 module reads its index through statements of its own, on which the handler runs as well, so a `MATCH` is interrupted too; the bound is the time between two checks, not zero.
 - Reader calls with a token that can be cancelled pay one callback per 1,000 instructions; the query times in
   `docs/BENCHMARKS.md` were measured before this change.
 - The store calls `SQLitePCL.raw` (the native binding Microsoft.Data.Sqlite brings) directly; a change of that binding's

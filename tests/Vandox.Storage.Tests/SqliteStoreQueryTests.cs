@@ -274,6 +274,83 @@ public class SqliteStoreQueryTests
     }
 
     /// <summary>
+    /// The word parts of a text are the runs of letters, numbers and private-use characters; everything else separates them.
+    /// </summary>
+    /// <param name="template">The text; <c>{E9}</c> and <c>{E000}</c> stand for the characters U+00E9 and U+E000, because the format tool turns escapes in the source into characters</param>
+    /// <param name="expected">The number of word parts</param>
+    [TestMethod]
+    [DataRow("error", 1)]
+    [DataRow("10.0.0.1", 4)]
+    [DataRow("postfix/smtpd connect", 3)]
+    [DataRow("a_b", 2)]
+    [DataRow("{E9}-x", 2)]
+    [DataRow("{E000}", 1)]
+    [DataRow("{E000}a{E000}", 1)]
+    [DataRow("---", 0)]
+    [DataRow("", 0)]
+    [DataRow("  one   two  ", 2)]
+    public void FtsQueryCountTokensCountsTheTokenizerParts(string template, int expected)
+    {
+        // Arrange
+        var text = template.Replace("{E9}", char.ConvertFromUtf32(0xE9), StringComparison.Ordinal).Replace("{E000}", char.ConvertFromUtf32(0xE000), StringComparison.Ordinal);
+
+        // Act
+        var count = FtsQuery.CountTokens(text);
+
+        // Assert
+        Assert.AreEqual(expected, count, $"the word parts of '{template}'");
+    }
+
+    /// <summary>
+    /// Each term is quoted as the whole expression quotes it, and the expression is the terms joined with one space.
+    /// </summary>
+    /// <param name="text">The search text</param>
+    /// <param name="first">The first quoted term</param>
+    /// <param name="second">The second quoted term, or an empty text</param>
+    [TestMethod]
+    [DataRow("error", "\"error\"", "")]
+    [DataRow("a \"b", "\"a\"", "\"\"\"b\"")]
+    [DataRow("10.0.0.1 smtpd", "\"10.0.0.1\"", "\"smtpd\"")]
+    public void FtsQueryBuildTermsQuotesEachTerm(string text, string first, string second)
+    {
+        // Arrange
+        string[] expected = second.Length == 0 ? [first] : [first, second];
+
+        // Act
+        var terms = FtsQuery.BuildTerms(text);
+
+        // Assert
+        Assert.AreSequenceEqual(expected, terms.ToArray(), "the quoted terms in order");
+        Assert.AreEqual(FtsQuery.Build(text), string.Join(' ', terms), "the expression is the terms joined with one space");
+    }
+
+    /// <summary>
+    /// The terms are validated as the whole expression is, with the same message.
+    /// </summary>
+    /// <param name="change">The name of the broken text</param>
+    [TestMethod]
+    [DataRow("17 terms")]
+    [DataRow("no terms")]
+    [DataRow("term without letter")]
+    public void FtsQueryBuildTermsRejectsWhatBuildRejects(string change)
+    {
+        // Arrange
+        var text = change switch
+                   {
+                       "17 terms" => string.Join(' ', Enumerable.Range(1, 17).Select(number => $"t{number}")),
+                       "no terms" => "   ",
+                       _ => "alpha --"
+                   };
+
+        // Act
+        var expected = Assert.ThrowsExactly<InvalidQueryException>(() => FtsQuery.Build(text), $"Build refuses '{change}'");
+        var actual = Assert.ThrowsExactly<InvalidQueryException>(() => FtsQuery.BuildTerms(text), $"BuildTerms refuses '{change}'");
+
+        // Assert
+        Assert.AreEqual(expected.Message, actual.Message, "the same message");
+    }
+
+    /// <summary>
     /// A search text with a lone surrogate cannot be encoded as UTF-8 and is refused.
     /// </summary>
     [TestMethod]

@@ -16,6 +16,7 @@ public static class BackendConfigLoader
     #region Constants
 
     private const string KeyIngestListen = "ingest.listen";
+    private const string TrustedProxiesReason = "must be a comma-separated list of at most 16 IP addresses or networks, such as 172.18.0.1 or 172.18.0.0/16";
     private const string ListenReason = "must be [host]:port with an empty host or an IP address and a port of 1 to 65535";
     private const int MaxPortDigits = 5;
     private const string WindowReason = "must be a whole number of minutes or hours from 1m to 24h, such as 30m or 1h";
@@ -163,6 +164,8 @@ public static class BackendConfigLoader
         var webPort = ParseListenPort(config.Web.Listen);
 
         Require(webPort > 0, file, lines, "web.listen", ListenReason);
+
+        Require(TrustedProxyList.TryParse(config.Web.TrustedProxies, out _), file, lines, "web.trusted_proxies", TrustedProxiesReason);
 
         var ingestPort = ParseListenPort(config.Ingest.Listen);
 

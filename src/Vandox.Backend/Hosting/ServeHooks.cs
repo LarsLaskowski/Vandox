@@ -33,5 +33,15 @@ public sealed class ServeHooks
     /// </summary>
     public TimeProvider? Clock { get; set; }
 
+    /// <summary>
+    /// Gets or sets an action that is called with the services of the application right after it is built; tests only.
+    /// </summary>
+    public Action<IServiceProvider>? Built { get; set; }
+
+    /// <summary>
+    /// Gets or sets the standard input of <c>hash-password</c>; <see cref="Console.In"/> when <c>null</c>.
+    /// </summary>
+    public TextReader? Input { get; set; }
+
     #endregion // Properties
 }

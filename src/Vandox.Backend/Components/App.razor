@@ -10,11 +10,11 @@
     <link rel="icon" type="image/svg+xml" href="brand/vandox-favicon.svg" />
     <link rel="stylesheet" href="lib/uplot/uPlot.min.css" />
     <link rel="stylesheet" href="app.css" />
-    <HeadOutlet @rendermode="InteractiveServer" />
+    <HeadOutlet @rendermode="PageRenderMode" />
 </head>
 
 <body>
-    <Routes @rendermode="InteractiveServer" />
+    <Routes @rendermode="PageRenderMode" />
 
     <div id="components-reconnect-modal">
         <div class="reconnect-box" role="alert">
@@ -34,7 +34,10 @@
         <button type="button" class="dismiss" aria-label="Dismiss">Dismiss</button>
     </div>
 
-    <script src="_framework/blazor.web.js"></script>
+    @if (PageRenderMode is not null)
+    {
+        <script src="_framework/blazor.web.js"></script>
+    }
 </body>
 
 </html>

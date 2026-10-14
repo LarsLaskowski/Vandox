@@ -25,6 +25,17 @@ internal static class FtsQuery
     /// <exception cref="InvalidQueryException">The text breaks a rule; the message never contains the text</exception>
     internal static string Build(string text)
     {
+        return string.Join(' ', BuildTerms(text));
+    }
+
+    /// <summary>
+    /// Builds the quoted terms of a search text; <see cref="Build"/> joins them with a space.
+    /// </summary>
+    /// <param name="text">The search text</param>
+    /// <returns>The quoted terms</returns>
+    /// <exception cref="InvalidQueryException">The text breaks a rule; the message never contains the text</exception>
+    internal static IReadOnlyList<string> BuildTerms(string text)
+    {
         Require(IsValidUtf16(text), "search text is not valid UTF-8");
         Require(Encoding.UTF8.GetByteCount(text) <= StorageLimits.MaxSearchBytes, $"search text is longer than {StorageLimits.MaxSearchBytes} bytes");
         Require(HasNoControlCharacters(text), "search text contains a control or format character");
@@ -39,7 +50,28 @@ internal static class FtsQuery
             Require(HasLetterOrDigit(term), "every search term needs a letter or a digit");
         }
 
-        return string.Join(' ', terms.Select(term => $"\"{term.Replace("\"", "\"\"", StringComparison.Ordinal)}\""));
+        return terms.Select(term => $"\"{term.Replace("\"", "\"\"", StringComparison.Ordinal)}\"").ToList();
+    }
+
+    /// <summary>
+    /// Counts the word parts of a search text: the runs of letters, numbers and private-use characters the tokenizer splits it into.
+    /// </summary>
+    /// <param name="text">The search text</param>
+    /// <returns>The number of word parts</returns>
+    internal static int CountTokens(string text)
+    {
+        var count = 0;
+        var previous = false;
+
+        foreach (var rune in text.EnumerateRunes())
+        {
+            var part = Rune.IsLetter(rune) || Rune.IsNumber(rune) || Rune.GetUnicodeCategory(rune) == UnicodeCategory.PrivateUse;
+
+            count += part && previous != part ? 1 : 0;
+            previous = part;
+        }
+
+        return count;
     }
 
     /// <summary>

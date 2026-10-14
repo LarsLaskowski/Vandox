@@ -21,7 +21,7 @@ internal static class HealthEndpoint
     /// <param name="logger">Receives the failures of the check</param>
     internal static void Map(IEndpointRouteBuilder endpoints, PingChecker checker, ILogger logger)
     {
-        endpoints.MapMethods("/healthz", ["GET", "HEAD"], context => HandleAsync(context, checker, logger));
+        endpoints.MapMethods("/healthz", ["GET", "HEAD"], context => HandleAsync(context, checker, logger)).AllowAnonymous();
     }
 
     /// <summary>

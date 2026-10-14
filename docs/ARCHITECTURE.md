@@ -7,9 +7,9 @@ backend with web UI, runs as a Docker container on any Docker host in the home n
 
 This document describes the target architecture; as of now the binaries' `--version`, the data model and wire format
 (Go: `internal/model`, `internal/wire`; backend: `src/Vandox.Core`), the configuration loading (`internal/config` for the agent,
-`Vandox.Core.Configuration` for `vandoxd`), the backend service skeleton, the log import framework and the log signature catalog with its detector (`Vandox.Core.Signatures`; the service does not call it yet), the log templates with their statistics and queries (`Vandox.Core.Templates`, `Vandox.Storage`; nothing shows them yet), the outage reconstruction (`vandoxd incidents`, `Vandox.Core.Incidents`), the forensics report as Markdown (`vandoxd report`, `Vandox.Core.Reports`; the web UI shows neither yet) exist (`vandoxd import`, with the parsers for the journal export, the MariaDB error log, Dovecot's own log file, `syslog` and `kern.log`, the Plesk panel log, the nginx, `sw-cp-server` and Apache error logs and the legacy `top`/`lsof` monitoring log): `vandoxd` loads its configuration, opens and migrates its SQLite database (schema, batched writes, queries and log search
-exist as the storage layer; the service does not call it yet, `vandoxd import` writes through it), listens on the
-web and ingest ports, answers `/healthz` and shuts down gracefully, and ships as a container with a health
+`Vandox.Core.Configuration` for `vandoxd`), the backend service skeleton, the log import framework and the log signature catalog with its detector (`Vandox.Core.Signatures`; the service does not call it yet), the log templates with their statistics and queries (`Vandox.Core.Templates`, `Vandox.Storage`), the logs view of the web UI (search, context, template list and chart; `Vandox.Backend`), the outage reconstruction (`vandoxd incidents`, `Vandox.Core.Incidents`), the forensics report as Markdown (`vandoxd report`, `Vandox.Core.Reports`; the web UI shows neither yet) exist (`vandoxd import`, with the parsers for the journal export, the MariaDB error log, Dovecot's own log file, `syslog` and `kern.log`, the Plesk panel log, the nginx, `sw-cp-server` and Apache error logs and the legacy `top`/`lsof` monitoring log): `vandoxd` loads its configuration, opens and migrates its SQLite database (schema, batched writes, queries and log search
+exist as the storage layer; the service reads it through the logs view only, `vandoxd import` writes through it), listens on the
+web and ingest ports, protects the web UI with a login (one password, server-side sessions, limits on failed sign-ins and the trust in a reverse proxy; `Vandox.Backend` `Security`), answers `/healthz` and shuts down gracefully, and ships as a container with a health
 check. Sections are marked as implemented as features land. The decisions behind it are recorded in
 [`docs/decisions/`](decisions/README.md); each section links the records it rests on. Vandox is an own
 project rather than an off-the-shelf stack ([0004](decisions/0004-own-project-instead-of-off-the-shelf-stack.md)).
@@ -45,7 +45,9 @@ way, and agents of the hosting provider are never disabled or changed
   the web and the ingest port; a middleware routes each request by the label of its listener, and logs are JSON
   lines ([0081](decisions/0081-backend-host-two-listeners-json-logs-blazor-interactive-server.md)). The web UI loads only its own
   static assets and sends one self-only Content-Security-Policy ([0098](decisions/0098-web-ui-serves-only-its-own-static-web-assets.md),
-  [0099](decisions/0099-web-listener-security-headers-one-self-only-csp.md)).
+  [0099](decisions/0099-web-listener-security-headers-one-self-only-csp.md)). The logs view (`/logs`, `/logs/templates`) searches the
+  stored log lines, shows the context of a hit and the templates with their hourly chart, takes every filter from the address and reads
+  the store through a gate of two concurrent calls ([0106](decisions/0106-logs-view-address-as-the-view-bounded-search-pages-template-lines-by-normalization.md)).
 - The backend's libraries, one project each with a test project under `tests/`
   ([0073](decisions/0073-backend-in-dotnet-10-with-blazor-agent-stays-go.md)):
   `Vandox.Core` (data model and validation, the wire decoder, configuration and secrets, safe file access, the
@@ -184,7 +186,11 @@ encrypted by Tailscale. Telegram is contacted only by the backend, never by the 
 The compose file `deploy/backend/docker-compose.yml` publishes the web port on `127.0.0.1` by default, for the
 reverse proxy on the same host. This is defense in depth, not the access control: depending on the Docker
 Engine version and the host firewall, hosts on the LAN may reach a published container port directly, so the
-web login is the boundary. The ingest port is not published until the ingest API exists (issue #40), which
+web login is the boundary. The login uses one administrator password stored as an argon2id hash, sessions that live only in the
+service's memory, and a cookie that carries just a protected reference to its session; failed sign-ins are limited per client and
+overall. The service trusts `X-Forwarded-For` and `X-Forwarded-Proto` only from the addresses in `web.trusted_proxies` (default:
+none) and never takes the peer address as proof of having passed the proxy; the operator guide for the proxy is
+[REVERSE_PROXY.md](REVERSE_PROXY.md) and the rules are in [Web login](areas/web-login.md). The ingest port is not published until the ingest API exists (issue #40), which
 binds it to the backend host's tailnet address as described above
 ([0060](decisions/0060-compose-file-port-bindings-volumes-and-memory-limit.md)).
 
@@ -209,7 +215,10 @@ flowchart LR
 Records: [0010](decisions/0010-tailscale-with-strict-acl.md),
 [0016](decisions/0016-web-ui-in-home-lan-with-login.md),
 [0017](decisions/0017-ingest-via-tailnet-address-and-published-port.md),
-[0023](decisions/0023-tls-through-a-reverse-proxy.md).
+[0023](decisions/0023-tls-through-a-reverse-proxy.md),
+[0103](decisions/0103-web-login-server-side-sessions-static-login-page-circuits-bound-to-session.md),
+[0104](decisions/0104-argon2id-password-hash-konscious-strict-phc-form-hash-password-command.md),
+[0105](decisions/0105-forwarded-headers-only-from-trusted-proxies-failed-logins-locked-per-client-and-capped.md).
 
 ## Offline behavior and backfill
 
@@ -285,8 +294,12 @@ Implemented by `src/Vandox.Storage`:
   The search text is taken as literal terms only (no FTS5 operators, bounded length and term count). The cost
   of a search grows with the stored lines that contain its terms, so callers bound it with a deadline, which interrupts
   the running statement on the reader connection ([0097](decisions/0097-reader-statements-interrupted-by-a-progress-handler-bound-to-the-token.md)).
+  The logs view does not use this search directly: it searches in bounded pages, from the full-text index when the words match fewer
+  than a cap of rows and otherwise by a time-ordered scan of at most a fixed number of lines, and finds a template's lines by
+  normalizing the candidates its words select ([0106](decisions/0106-logs-view-address-as-the-view-bounded-search-pages-template-lines-by-normalization.md);
+  rules in [Storage](areas/storage.md), *Log exploration*).
 - **Interfaces** ([0077](decisions/0077-storage-on-microsoft-data-sqlite-same-schema-and-rules.md)):
-  `IRecordWriter`, `IRecordReader` (with a keyset on the record ID for paging), `ILogSearcher`, `ILogTemplateReader`,
+  `IRecordWriter`, `IRecordReader` (with a keyset on the record ID for paging), `ILogSearcher`, `ILogExplorer` (the logs view), `ILogTemplateReader`,
   `IImportTracker` and `IIncidentStore`; a consumer that depends on the store's semantics is tested against the real store.
 - **Write throughput** ([0077](decisions/0077-storage-on-microsoft-data-sqlite-same-schema-and-rules.md)):
   measured by a benchmark, see [`BENCHMARKS.md`](BENCHMARKS.md).
@@ -332,7 +345,9 @@ error behavior are in [Configuration and secrets](areas/configuration-and-secret
 
 The agent and the backend communicate only over a private Tailscale network. The agent connects outbound
 only and never listens on a port, and the Tailscale ACL lets the monitored server reach only the ingest port
-on the backend host. The web UI is protected by a login and runs behind a reverse proxy. The Telegram token
+on the backend host. The web UI is protected by a login (argon2id password hash, server-side sessions, antiforgery tokens, limited
+failed sign-ins) and runs behind a reverse proxy whose forwarded headers are trusted only from `web.trusted_proxies`
+([Web login](areas/web-login.md)). The Telegram token
 exists only on the backend host. The agent reads MariaDB over the local socket as the user `vandox-agent`, identified
 via `unix_socket` and granted only `PROCESS`. Log data is not pseudonymized. Secrets are never logged. The agent runs as the
 dedicated user `vandox-agent`, never as root, with only the groups and capabilities listed in `deploy/agent/`

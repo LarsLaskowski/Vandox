@@ -2,7 +2,7 @@
 # Smoke test of the backend container started from deploy/backend/docker-compose.yml (record 0060).
 # Usage: smoke-test-backend.sh <image>   (the image must exist locally, for example vandox:local)
 #
-# Checks the health check, the web UI's static files and security policy, the port bindings, the resource limits, the owner and mode of /data in the image
+# Checks the health check, the login (the hash comes from the image's own hash-password), the web UI's static files and security policy, the port bindings, the resource limits, the owner and mode of /data in the image
 # (65532:65532, 0700; /data is the only entry the image adds that is owned by the container user, apart from
 # the base image's /home/nonroot), the graceful stop and that the database survives re-creating the container.
 # Reads no repository secret, pushes nothing and uses no network beyond
@@ -41,6 +41,12 @@ mkdir "$dir/secrets" "$dir/import"
 openssl rand -hex 32 >"$dir/secrets/vandox_agent_token"
 sudo chown 65532:65532 "$dir/secrets/vandox_agent_token"
 sudo chmod 0400 "$dir/secrets/vandox_agent_token"
+# The web password: the hash is created by the image itself, as the README tells the operator.
+password="$(openssl rand -hex 16)"
+printf '%s\n' "$password" | docker run --rm -i "$image" hash-password >"$dir/secrets/vandox_web_password_hash"
+[[ -s "$dir/secrets/vandox_web_password_hash" ]] || fail "hash-password printed no hash"
+sudo chown 65532:65532 "$dir/secrets/vandox_web_password_hash"
+sudo chmod 0400 "$dir/secrets/vandox_web_password_hash"
 cat >"$dir/docker-compose.override.yml" <<OVERRIDE
 services:
   vandoxd:
@@ -93,7 +99,7 @@ read_policy() {
 }
 
 # Checks what the unit tests cannot see because they run the build output: the published image serves the web
-# UI's static files and the page carries exactly one Content-Security-Policy header with the documented value.
+# UI's static files and the login page carries exactly one Content-Security-Policy header with the documented value.
 check_web_ui() {
   local want="$1"
   local path code headers got
@@ -102,17 +108,37 @@ check_web_ui() {
     code="$(curl -sS -o /dev/null -w '%{http_code}' "http://127.0.0.1:8080$path")"
     [[ "$code" == "200" ]] || fail "GET $path on the web port answered $code, want 200"
   done
-  headers="$(curl -fsS -D - -o /dev/null http://127.0.0.1:8080/ | tr -d '\r')"
+  headers="$(curl -fsS -D - -o /dev/null http://127.0.0.1:8080/login | tr -d '\r')"
   mapfile -t found < <(grep -i '^content-security-policy:' <<<"$headers")
-  [[ "${#found[@]}" -eq 1 ]] || fail "GET / carries ${#found[@]} Content-Security-Policy headers, want exactly 1"
+  [[ "${#found[@]}" -eq 1 ]] || fail "GET /login carries ${#found[@]} Content-Security-Policy headers, want exactly 1"
   got="${found[0]#*:}"
   got="${got# }"
   [[ "$got" == "$want" ]] || fail "Content-Security-Policy is '$got', want '$want'"
 }
 
+# Checks the login: an anonymous page load is sent to the login page, the login form posts with its antiforgery
+# token, and the session cookie it sets opens the start page.
+check_login() {
+  local pass="$1"
+  local jar="$dir/cookies.txt"
+  local base="http://127.0.0.1:8080"
+  local code redirect html token
+  local base_url="$base/"
+  read -r code redirect < <(curl -sS -o /dev/null -w '%{http_code} %{redirect_url}\n' "$base_url")
+  [[ "$code" == "302" && "$redirect" == */login ]] || fail "anonymous GET / answered $code ($redirect), want 302 to /login"
+  html="$(curl -fsS -c "$jar" "$base/login")"
+  token="$(grep -oE 'name="__RequestVerificationToken"[^>]*value="[^"]*"' <<<"$html" | head -n 1 | sed -E 's/.*value="([^"]*)"/\1/')"
+  [[ -n "$token" ]] || fail "the login page has no antiforgery token"
+  code="$(curl -sS -b "$jar" -c "$jar" -o /dev/null -w '%{http_code}' --data-urlencode "__RequestVerificationToken=$token" --data-urlencode "_handler=login" --data-urlencode "password=$pass" "$base/login")"
+  [[ "$code" == "302" ]] || fail "POST /login with the right password answered $code, want 302"
+  code="$(curl -sS -b "$jar" -o /dev/null -w '%{http_code}' "$base_url")"
+  [[ "$code" == "200" ]] || fail "GET / with the session answered $code, want 200"
+}
+
 policy="$(read_policy)"
 [[ -n "$policy" ]] || fail "the policy read from the middleware is empty"
 check_web_ui "$policy"
+check_login "$password"
 
 ingest="$(inspect '{{json (index .NetworkSettings.Ports "8081/tcp")}}')"
 case "$ingest" in

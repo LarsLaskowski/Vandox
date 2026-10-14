@@ -112,5 +112,35 @@ public static class StorageLimits
     /// </summary>
     public const int TemplateRebuildBatchLines = 10000;
 
+    /// <summary>
+    /// The largest limit of a log exploration page.
+    /// </summary>
+    public const int MaxFindLimit = 1000;
+
+    /// <summary>
+    /// The largest scan limit of a log exploration call.
+    /// </summary>
+    public const int MaxScanRows = 100000;
+
+    /// <summary>
+    /// The largest number of context lines on each side of a log line.
+    /// </summary>
+    public const int MaxContextLines = 20;
+
+    /// <summary>
+    /// The largest number of log lines examined on each side of a context.
+    /// </summary>
+    public const int ContextScanRows = 2000;
+
+    /// <summary>
+    /// The largest number of sources the source list returns.
+    /// </summary>
+    public const int MaxLogSources = 64;
+
+    /// <summary>
+    /// The largest limit of a template list.
+    /// </summary>
+    public const int MaxTemplateListLimit = 1000;
+
     #endregion // Constants
 }

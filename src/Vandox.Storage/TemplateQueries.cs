@@ -199,6 +199,19 @@ internal static class TemplateQueries
     }
 
     /// <summary>
+    /// Builds the statement that reads a template by its ID.
+    /// </summary>
+    /// <param name="id">The template ID</param>
+    /// <returns>The SQL and its parameters</returns>
+    internal static (string Sql, Dictionary<string, object> Parameters) BuildById(long id)
+    {
+        return ($"SELECT {TemplateColumns} FROM log_templates t WHERE t.id = $id", new Dictionary<string, object>
+                                                                                   {
+                                                                                       ["$id"] = id
+                                                                                   });
+    }
+
+    /// <summary>
     /// Reads the template columns of the current row.
     /// </summary>
     /// <param name="reader">The reader</param>

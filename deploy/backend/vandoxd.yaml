@@ -10,7 +10,9 @@
 # variable or its _FILE form, not both:
 #
 #   VANDOX_AGENT_TOKEN           token the agents present (at least 32 printable ASCII characters)
-#   VANDOX_WEB_PASSWORD_HASH     password hash of the web UI (printable ASCII, for example an argon2id PHC string)
+#   VANDOX_WEB_PASSWORD_HASH     password hash of the web UI, required: an argon2id hash in the PHC form
+#                                $argon2id$v=19$m=...,t=...,p=...$<salt>$<hash>, created with
+#                                `vandoxd hash-password` (docs/areas/web-login.md)
 #   VANDOX_TELEGRAM_BOT_TOKEN    token of the Telegram bot used for alerts
 #   (each also as VANDOX_..._FILE)
 
@@ -21,6 +23,12 @@ web:
   # Address of the web UI as [host]:port. The host is empty (all interfaces) or an IP address, the port is
   # 1 to 65535 and differs from the ingest port. Default: :8080
   listen: :8080
+  # Addresses or networks of the reverse proxies whose X-Forwarded-For and X-Forwarded-Proto headers are
+  # trusted, comma-separated: at most 16 entries such as 172.18.0.1 or 172.18.0.0/16 (IPv4 prefix 8 to 32,
+  # IPv6 prefix 16 to 128, no host bits set). Empty trusts no proxy: the client is the peer address, and all
+  # clients behind a proxy then share the proxy's address and its sign-in lockout. Trusting an address means
+  # trusting everyone who connects from it. See docs/REVERSE_PROXY.md. Default: empty
+  trusted_proxies: ""
 
 ingest:
   # Address of the ingest endpoint the agents send to, same format as web.listen. Default: :8081

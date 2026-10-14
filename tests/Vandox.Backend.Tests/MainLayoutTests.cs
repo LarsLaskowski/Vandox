@@ -1,6 +1,9 @@
+using System.Security.Claims;
 using System.Text.RegularExpressions;
 
 using Microsoft.AspNetCore.Components;
+using Microsoft.AspNetCore.Components.Authorization;
+using Microsoft.AspNetCore.Components.Forms;
 using Microsoft.AspNetCore.Components.Web;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -24,19 +27,8 @@ public partial class MainLayoutTests
     [TestMethod]
     public async Task MainLayoutRendersHeaderNavigationAndThemeSwitch()
     {
-        // Arrange
-        await using var services = new ServiceCollection().AddLogging().AddSingleton<NavigationManager>(new TestNavigationManager()).BuildServiceProvider();
-        await using var renderer = new HtmlRenderer(services, services.GetRequiredService<ILoggerFactory>());
-
-        RenderFragment body = builder => builder.AddMarkupContent(0, "<p>BODY-MARKER</p>");
-
-        var parameters = ParameterView.FromDictionary(new Dictionary<string, object?>
-                                                      {
-                                                          [nameof(LayoutComponentBase.Body)] = body
-                                                      });
-
-        // Act
-        var html = await renderer.Dispatcher.InvokeAsync(async () => (await renderer.RenderComponentAsync<MainLayout>(parameters)).ToHtmlString());
+        // Arrange / Act
+        var html = await RenderAsync(new ClaimsPrincipal(new ClaimsIdentity()));
 
         // Assert
         var light = LightLogo().Match(html);
@@ -63,9 +55,99 @@ public partial class MainLayoutTests
         Assert.IsTrue(BodyInMain().IsMatch(html), "the body is inside main");
     }
 
+    /// <summary>
+    /// The Logs entry points to the logs and is marked on both log pages, but not on the overview.
+    /// </summary>
+    /// <param name="address">The current address</param>
+    /// <param name="marked">Whether the Logs entry is marked</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [DataRow("http://localhost/logs", true)]
+    [DataRow("http://localhost/logs?q=disk", true)]
+    [DataRow("http://localhost/logs/templates", true)]
+    [DataRow("http://localhost/", false)]
+    public async Task MainLayoutMarksLogsOnTheLogPages(string address, bool marked)
+    {
+        // Act
+        var html = await RenderAsync(new ClaimsPrincipal(new ClaimsIdentity()), address);
+
+        // Assert
+        var link = LogsLink().Match(html);
+
+        Assert.IsTrue(link.Success, "the Logs link");
+        Assert.Contains("href=\"logs\"", link.Groups[1].Value, "the Logs link points to logs");
+        Assert.AreEqual(marked, ActiveClass().IsMatch(link.Groups[1].Value), $"the Logs link is marked: {marked}");
+    }
+
+    /// <summary>
+    /// The sign-out form is shown to a signed-in user only: a form that posts to <c>logout</c> with an antiforgery token.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task MainLayoutShowsSignOutOnlyWhenSignedIn()
+    {
+        // Arrange
+        var signedIn = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.Name, "admin")], "test"));
+        var anonymous = new ClaimsPrincipal(new ClaimsIdentity());
+
+        // Act
+        var signedInHtml = await RenderAsync(signedIn);
+        var anonymousHtml = await RenderAsync(anonymous);
+
+        // Assert
+        var form = SignOutForm().Match(signedInHtml);
+
+        Assert.IsTrue(form.Success, "the signed-in layout has a form");
+        Assert.IsTrue(MethodPost().IsMatch(form.Value), "the form posts");
+        Assert.IsTrue(ActionLogout().IsMatch(form.Value), "the form posts to logout");
+        Assert.IsTrue(AntiforgeryInput().IsMatch(form.Value), "the form carries the antiforgery token");
+        Assert.Contains("Sign out", form.Value, "the button says Sign out");
+        Assert.DoesNotContain("Sign out", anonymousHtml, "the anonymous layout has no sign-out button");
+        Assert.DoesNotContain("action=\"logout\"", anonymousHtml, "the anonymous layout has no sign-out form");
+    }
+
+    /// <summary>
+    /// Renders the layout for a user.
+    /// </summary>
+    /// <param name="user">The user</param>
+    /// <param name="address">The current address</param>
+    /// <returns>A task that returns the markup</returns>
+    private static async Task<string> RenderAsync(ClaimsPrincipal user, string address = "http://localhost/")
+    {
+        await using var services = new ServiceCollection().AddLogging()
+                                                          .AddSingleton<NavigationManager>(new RecordingNavigationManager(address))
+                                                          .AddAuthorizationCore()
+                                                          .AddCascadingAuthenticationState()
+                                                          .AddSingleton<AuthenticationStateProvider>(new FixedAuthenticationStateProvider(user))
+                                                          .AddSingleton<AntiforgeryStateProvider, FixedAntiforgeryStateProvider>()
+                                                          .BuildServiceProvider();
+        await using var renderer = new HtmlRenderer(services, services.GetRequiredService<ILoggerFactory>());
+
+        RenderFragment body = builder => builder.AddMarkupContent(0, "<p>BODY-MARKER</p>");
+
+        var parameters = ParameterView.FromDictionary(new Dictionary<string, object?>
+                                                      {
+                                                          [nameof(LayoutComponentBase.Body)] = body
+                                                      });
+
+        return await renderer.Dispatcher.InvokeAsync(async () => (await renderer.RenderComponentAsync<MainLayout>(parameters)).ToHtmlString());
+    }
+
     #endregion // Methods
 
     #region Patterns
+
+    [GeneratedRegex("<form\\b[^>]*>.*?</form>", RegexOptions.Singleline)]
+    private static partial Regex SignOutForm();
+
+    [GeneratedRegex("\\bmethod=\"post\"")]
+    private static partial Regex MethodPost();
+
+    [GeneratedRegex("\\baction=\"logout\"")]
+    private static partial Regex ActionLogout();
+
+    [GeneratedRegex("<input\\b[^>]*\\bname=\"__RequestVerificationToken\"[^>]*\\bvalue=\"fixed-antiforgery-token\"|<input\\b[^>]*\\bvalue=\"fixed-antiforgery-token\"[^>]*\\bname=\"__RequestVerificationToken\"")]
+    private static partial Regex AntiforgeryInput();
 
     [GeneratedRegex("<img src=\"brand/vandox-logo-horizontal\\.svg\"[^>]*>")]
     private static partial Regex LightLogo();
@@ -75,6 +157,9 @@ public partial class MainLayoutTests
 
     [GeneratedRegex("<a\\b([^>]*)>\\s*Overview\\s*</a>")]
     private static partial Regex OverviewLink();
+
+    [GeneratedRegex("<a\\b([^>]*)>\\s*Logs\\s*</a>")]
+    private static partial Regex LogsLink();
 
     [GeneratedRegex("<button type=\"button\"([^>]*)>(.*?)</button>", RegexOptions.Singleline)]
     private static partial Regex ThemeButton();

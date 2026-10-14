@@ -31,7 +31,7 @@ cmd/vandox-agent/   entry point of the agent (Go)
 internal/           the agent's Go packages: config, model, wire (batch encoder), cli, version
 src/Vandox.Backend/ the backend vandoxd: host, command line, Blazor web UI
 src/Vandox.Core/    record model, wire decoder, configuration, safe file access, log parser framework, log signatures
-src/Vandox.Storage/ SQLite store: schema, migrations, batched writes, queries, log search
+src/Vandox.Storage/ SQLite store: schema, migrations, batched writes, queries, log search and exploration
 src/Vandox.Import/  log import: scanner, archives, resumable batches
 tests/              one test project per project under src/
 tools/              console programs for developers, e.g. the storage write benchmark (docs/BENCHMARKS.md)
@@ -72,6 +72,7 @@ the value.
 | Key | Default | Description |
 | --- | ------- | ----------- |
 | `web.listen` | `:8080` | Address of the web UI as `[host]:port`. |
+| `web.trusted_proxies` | empty | Addresses or networks of the reverse proxies whose `X-Forwarded-For` and `X-Forwarded-Proto` headers are trusted, comma-separated, at most 16 entries such as `172.18.0.1` or `172.18.0.0/16` (IPv4 prefix 8 to 32, IPv6 prefix 16 to 128, no host bits set). Without it, all clients behind a proxy share the proxy's address and its sign-in lockout (see *Run the backend with Docker Compose* and `docs/REVERSE_PROXY.md`). |
 | `ingest.listen` | `:8081` | Address of the ingest endpoint, on a port other than `web.listen`. |
 | `storage.directory` | `/data` | Directory of the backend's data, an absolute and clean path. |
 | `log.level` | `info` | `debug`, `info`, `warn` or `error`. |
@@ -88,7 +89,7 @@ the value.
 | Variable | File variant | Binary | Required | Rule |
 | -------- | ------------ | ------ | -------- | ---- |
 | `VANDOX_AGENT_TOKEN` | `VANDOX_AGENT_TOKEN_FILE` | agent, backend | agent: yes, backend: no | At least 32 printable ASCII characters without spaces, e.g. `openssl rand -hex 32`. |
-| `VANDOX_WEB_PASSWORD_HASH` | `VANDOX_WEB_PASSWORD_HASH_FILE` | backend | no | Printable ASCII without spaces, 1 to 4096 characters. |
+| `VANDOX_WEB_PASSWORD_HASH` | `VANDOX_WEB_PASSWORD_HASH_FILE` | backend | no at load, but the service refuses to start without it | The argon2id hash of the web UI password in the form `$argon2id$v=19$m=...,t=...,p=...$<salt>$<hash>`, created with `vandoxd hash-password` (see *Run the backend with Docker Compose* and `docs/areas/web-login.md`). |
 | `VANDOX_TELEGRAM_BOT_TOKEN` | `VANDOX_TELEGRAM_BOT_TOKEN_FILE` | backend | no | Printable ASCII without spaces, 1 to 4096 characters. |
 
 Set either the variable or its `_FILE` form, not both. The `_FILE` value is an absolute path to a regular
@@ -214,6 +215,22 @@ a memory limit of 512 MiB. Copy it and `deploy/backend/vandoxd.yaml` into one di
   sudo chmod 0400 secrets/vandox_agent_token
   ```
 
+- `secrets/vandox_web_password_hash`, the argon2id hash of the web UI password. Create it with `vandoxd hash-password`, which
+  reads the password from the first line of standard input and prints the hash. The command does not switch off a terminal's echo, so
+  read the password silently with `read -rs` and pipe it in; start the container with `-i` and **never with `-t`**, because a
+  terminal shows what is typed:
+
+  ```
+  read -rs -p 'Web UI password: ' pw && echo
+  printf '%s\n' "$pw" | docker run --rm -i networlddev/vandox hash-password > secrets/vandox_web_password_hash
+  unset pw
+  sudo chown 65532:65532 secrets/vandox_web_password_hash
+  sudo chmod 0400 secrets/vandox_web_password_hash
+  ```
+
+  The password has 12 to 1024 characters and no control characters. The service refuses to start without a valid hash. To change the
+  password, create the file again and recreate the container.
+
 - `import/`, the directory for the log import (mounted read-only).
 - optionally `.env` with `WEB_BIND_ADDRESS=<address>` (default `127.0.0.1`).
 
@@ -229,7 +246,13 @@ The web port is published on `127.0.0.1:8080` for a reverse proxy on the same ho
 the database is reachable and `unavailable` (503) otherwise; use it through the proxy for monitoring. The
 loopback binding is defense in depth, not the access control: depending on the Docker Engine version and the
 host firewall, hosts on the LAN may reach a published container port directly. The login of the web UI is
-the access control (record 0060).
+the access control (records 0060 and 0103).
+
+The web UI asks for the password at `/login` (one administrator, no user name) and ends a session after 1 hour without activity or
+12 hours after the sign-in. Five wrong passwords lock a client out for 15 minutes. TLS and the certificate are the reverse proxy's
+job: `docs/REVERSE_PROXY.md` explains the proxy settings, the certificate and the built-in proxies of Synology and QNAP. Set
+`web.trusted_proxies` in `vandoxd.yaml` to the proxy's address as the container sees it; without it, the cookies are never `Secure`
+and every client behind the proxy shares one lockout.
 
 The ingest port (8081) is not published yet: the ingest API arrives with issue #40, which adds the binding on
 the host's tailnet address. The database lives in the named volume `vandox-data` (`/data` in the container,
@@ -380,6 +403,26 @@ leap year) are skipped with a reason, as is a year-less line in a file without a
 report (an OOM kill, a `cut here` warning) becomes one record. Ubuntu's rsyslog writes every kernel line to both
 `syslog` and `kern.log`, so importing both stores the kernel lines twice.
 
+### Explore the logs
+
+The web UI shows the stored log lines under *Logs* (`/logs`) and the log templates under *Templates* (`/logs/templates`). All times are
+**UTC**, in the filters and in the lists.
+
+- **Search** (`/logs`): the lines come oldest first, 100 per page. Filter by text (all words must occur; words are literal, no
+  operators), source, program, severity (a line with that priority or a more severe one) and a time range (`from` inclusive, `to`
+  exclusive). *Next page* shows the next 100 lines. A search over a large range that finds few matches may stop after examining
+  8,000 lines and say `Searched up to <time>.`; *Continue* searches on from there. A search of very common words may say that it goes through the time range step by step: narrow the time range for a complete answer. A search that takes longer than 10 seconds is
+  stopped: narrow the range or add filters. *Context* on a line shows the 5 lines before and after it from the same log.
+- **Templates** (`/logs/templates`): the message patterns of a range with their first and last seen time, their lines in total and
+  their lines in the range (counted in whole hours), most lines first, optionally of one source and program. *Chart* shows a template's
+  lines per hour (gaps where the source logged nothing); *Show lines* opens the search for the lines of the template.
+- **The address is the view.** Every filter is in the address (`logs?q=oom&source=journal&severity=err&from=2026-10-01T00:00&to=2026-10-02T00:00`
+  and `logs?template=12`), so a search can be bookmarked and shared. The page position is not part of it: a shared address opens the
+  first page.
+- Template numbers change when the template statistics are rebuilt (*Rebuild template statistics* below); a link to a template then
+  shows another template or says that the template does not exist.
+- The log pages need the web login like every page; a signed-in user can read every stored log line.
+
 ### Reconstruct incidents
 
 `vandoxd incidents` rebuilds the outage incidents from everything stored, so run it after each import (it needs no
@@ -462,7 +505,9 @@ The log template statistics count every stored log line under its template per h
 stores lines, so lines stored before the statistics existed (a database upgraded from before schema version 8) and lines
 counted under older normalization rules are missing or outdated. `vandoxd templates` empties the statistics and counts
 every stored log line again under the current rules. Run it after upgrading such a database and after a release that changes
-the normalization rules, then run `vandoxd incidents` again:
+the normalization rules, then run `vandoxd incidents` again. The template numbers that the web UI shows (and the `template`
+parameter of a saved link) belong to the statistics: after a rebuild they identify other templates, so links saved before it
+may show another template or none:
 
 ```
 docker exec -it vandoxd /vandoxd templates
