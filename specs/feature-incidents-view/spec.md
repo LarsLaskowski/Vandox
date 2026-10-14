@@ -44,7 +44,8 @@ connections did in the window, and the log lines of any moment of it — and to 
 - **Connections:** the stored connection peak (time, sockets, snapshots, the three processes with the most sockets).
 - **Metrics and templates:** the stored metric extremes, new templates and template spikes.
 - **Every time on the page is a link to the logs of that moment**: the logs view (`/logs`) with the range from 30 seconds
-  before to 5 minutes after it.
+  before to 5 minutes after it. Exception (Lead decision at PR approval): the header's *built* and *last changed* times are
+  times of the analysis, not moments of the monitored server, and are plain text.
 - **Notes:** a free-text note per incident (up to 1,800 characters), saved with a *Save note* button; an empty note
   removes it, and leading line breaks are not kept. Notes survive every re-run of `vandoxd incidents`; when incidents are merged, the notes of the merged ones
   move to the incident that remains and are shown there, each with the number it was written for.
