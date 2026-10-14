@@ -96,10 +96,7 @@ Bounding the index check (after the first run on the reference host):
     the page says so** — the handler does run while FTS5 reads its index pages (measured with the project's SQLite 3.53.3 on the
     development host: at most 29 ms apart for a 200-part term and at most 31 ms for a 511-part term, and an interrupted probe ended
     at 0.71 s), so the index check is bounded by the budget plus one such gap, measured and not proven for every shape. The page after
-    a stopped check is a scan page whose time is bounded by the line bound, not by the clock: the per-line test of some terms was
-    measured at 0.4 s per line (sixteen common words that never meet) and over 2 s per line (a phrase of twenty parts of a word that
-    every line holds), so "every page answers in about two seconds" holds for the index check only (`docs/BENCHMARKS.md`, *Log
-    search*). The cost is that such a search may give no final empty answer until the range is narrowed (the Product Manager's
+    a stopped check is a scan page, bounded as option 19 describes. The cost is that such a search may give no final empty answer until the range is narrowed (the Product Manager's
     choice). Rejected: the probe in record-ID slices (measured: slices do not make a phrase of common parts cheaper, 58 s
     in all for a 200-part term); a second thread calling `sqlite3_interrupt` (checked at the same points, no earlier stop); a separate
     connection for the probe (breaks the reader bound of option 14); keeping the final answer and capping the word parts instead
@@ -107,11 +104,27 @@ Bounding the index check (after the first run on the reference host):
     searches, an IP address alone has four parts); a full-text index without positions (cannot answer terms of several parts) or a
     tokenizer that keeps `.` and `/` inside words (changes what a word matches, needs a rebuild).
 
+Bounding the scan's per-line test (after the development-host run of option 18):
+
+19. **One full-text test per one-part word, the terms of several parts tested in a private in-memory index of the examined lines,
+    and a page clock of 1.5 s that always examines at least one line** — `rowid = r.id` does not bound the full-text work to the line:
+    an AND of terms or a phrase walks on to the next matching row or the end of the index (measured with SQLite 3.53.3: a four-part
+    phrase 36 ms per line at the start of a 300,000-line index, 0.2 ms at its end; on 5,000,000 lines 375 ms, and 8.1 s for 60
+    parts; sixteen words that never meet 497 ms as one test, 0.36 ms as sixteen), while one token stops at its seek. The in-memory
+    index uses the same library, tokenizer and expression on the same stored message, so the result is exact, and its work is bounded
+    by the text of a chunk of at most 64 lines; it is a separate connection that reads no database file, so the reader bound of option
+    14 holds. The clock makes "every page answers in about two seconds" true for the scan too, and the line bound stays the
+    deterministic upper bound. Rejected: one test per term alone (a phrase still walks); a scan clock alone (one line of a long phrase
+    outlasts the deadline, so the rule "at least one line" fails and *Continue* could not advance without it); the matches of the
+    chunk's record-ID range as a set (walks to the end like one line, and a time-ordered chunk spans arbitrary IDs); the match decided
+    by a copy of the tokenizer in C# (index and scan mode could return different lines); a temporary table on the leased reader
+    connection (a failure leaves state in a shared connection).
+
 ## Decision
 
-Options 3, 7, 9, 10, 11, 12, 13, 14, 15, 16, 17 and 18: the logs view reads every filter from its address and queries only when interactive, each query under
+Options 3, 7, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18 and 19: the logs view reads every filter from its address and queries only when interactive, each query under
 a deadline; the store answers a page from the full-text index when the words match fewer rows than a cap and otherwise by scanning a
-bounded number of lines in time order, testing each examined line on its own, and falls back to the scan when the index check does not end within its time budget, and finds a template's lines by normalizing the candidates its literal words select. External text is
+bounded number of lines in time order, testing each examined line on its own (one-part words in the index, longer terms in an in-memory index of the examined lines), ending a scan page after about 1.5 s, and falls back to the scan when the index check does not end within its time budget, and finds a template's lines by normalizing the candidates its literal words select. External text is
 escaped and capped per field with a visible cut marker; the view runs at most two store calls at once across the service, so the
 health check keeps a reader. The rules
 — address parameters, limits, modes, texts and the display of external text — are in [Web UI](../areas/web-ui.md) (*Logs view*) and
@@ -126,7 +139,10 @@ health check keeps a reader. The rules
   terms: the 16-term rule does not bound them) times the size of their index entries; it runs under the deadline and the probe's
   time budget, both stopped through the progress handler at its next call. A search whose index check runs out of the budget is
   answered page by page with *Continue*, every page paying the budget again, and may give no final empty answer until the range is
-  narrowed; on a loaded host more searches take this path, the lines found do not change.
+  narrowed; on a loaded host more searches take this path, the lines found do not change. A scan page ends after 1.5 s at the
+  latest (plus one line or one chunk of at most 64 lines), the probe's budget included, so on a slow host a page may end sooner
+  with *Continue*. A scan with a term of several parts opens one private in-memory connection per call and holds at most 64 messages
+  and their index in it.
 - The template list counts whole hours: a range that starts or ends inside an hour counts that hour completely.
 - A line made mostly of invisible characters is shown cut, with the number of characters not shown.
 - Two tabs with slow searches make a third wait for a slot (within its deadline); the health check is not affected.

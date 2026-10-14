@@ -1312,3 +1312,171 @@ Verification:
 4. The second DS918+ run (task 31), which decides AC-19.
 
 Files no unit test can cover: unchanged (`SearchBenchmark.cs`, `[ExcludeFromCodeCoverage]`).
+
+## Lead decision: the scan after a stopped index check (decide, after task 36)
+
+The Dev's development-host run of the AC-25/AC-26 build: the probe budget works (stopped at about 0.71 s, handler gaps at most 31 ms
+for 4 to 511 parts), but the scan page after a stopped probe is not bounded for some texts. Dev measurements per examined line of the
+scan's single `EXISTS (... MATCH $match AND rowid = r.id)` on the 5,000,000-line benchmark file: case 12 (16 words that never meet)
+497 ms; a phrase of a word every line holds, 4 parts 375 ms, 20 parts 2.3 s, 60 parts 8.1 s; case 15 (511 parts) does not finish
+its 15 lines within the 10 s deadline; one word or the 8 words of case 13 0.3 ms; the 16 words of case 12 as 16 separate `EXISTS`
+0.36 ms. Case 12's probe takes 2.2 s on the DS918+, so there it is always stopped and always reaches this scan.
+
+### Root cause (checked in a scratch copy, development host)
+
+`rowid = r.id` does not bound the full-text work to one line. FTS5 seeks every token iterator of the expression to the first row at
+or after the line, and an AND of terms or a phrase then keeps advancing **until it finds the next matching row or the end of the
+index**; only then is the result compared with the rowid bound. A single token stops at its seek. Measured with the project's
+SQLite 3.53.3 (`libe_sqlite3.so` of `SQLitePCLRaw.lib.e_sqlite3` 2.1.12, loaded into Python's `sqlite3`), 300,000 lines, every line
+holding `ww` three times, `aa`/`bb` in alternate lines:
+
+| Per-line test at rowid | 1,000 | 150,000 | 299,000 |
+| ---------------------- | ----: | ------: | ------: |
+| phrase of 4 `ww` (no line holds it) | 36.1 ms | 18.0 ms | 0.22 ms |
+| phrase of 20 `ww` | 166 ms | 83 ms | 1.1 ms |
+| `"aa" "bb"` (never meet), one `MATCH` | 5.4 ms | 5.4 ms | 5.3 ms |
+| `"aa"` alone | 0.02 ms | 0.02 ms | 0.14 ms |
+
+The phrase's cost falls with the rows left after the line: it walks to the end of the index. `"aa" AND "bb"` as two `EXISTS` costs
+0.027 ms instead of 5.4 ms. The same 16-word shape as case 12 (all pairs meet, the 16 never do): 37 ms per line at 300,000 rows, and
+500 lines of it with 16 separate `EXISTS` 100 ms. The progress handler ran during these walks at most 15 ms apart (40 examined lines:
+2,828 to 3,148 calls), so the deadline does interrupt them. A probe of the chunk's record-ID range (`rowid BETWEEN 1,000 AND 9,000`)
+cost 36 ms, the same as one line: it walks to the end too.
+
+**The 234 s cold run** is this scan: case 12's probe was stopped at the budget, then 500 examined lines (8,000 / 16) at about 470 ms
+each ≈ 235 s. Why the 10 s deadline did not end it is **unverified**: the handler runs during the walk (above), and the benchmark's
+10 s page deadline (`SearchBenchmark._pageDeadline`) arrived in the same commit as the budget (02775cf), so the run most likely came
+from a working state without it. The Dev confirms from the run's notes; the test `FindLogsCancelledDuringTheScanAfterAStoppedProbeThrows`
+below pins that the deadline ends the scan after a stopped probe.
+
+### Options weighed
+
+- **(a) One `EXISTS` per term (an AND of terms), alone — rejected.** It removes the AND walk (case 12: 497 → 0.36 ms per line), but a
+  term of several parts is a phrase, which walks on its own (375 ms to 8.1 s per line above). IP addresses and paths are such terms.
+- **(b) A time budget for the scan, alone — rejected.** "At least one line is examined" is needed so *Continue* advances, and one line
+  of a 60-part phrase costs 8.1 s on the development host (about 40 s on the DS918+): the page would end at the deadline with an error,
+  not with a position. Without that rule a page could end with no line examined and *Continue* would never advance.
+- **(c1) The full-text match of the chunk's record-ID range collected into a set — rejected.** Measured: the range query walks to the
+  end of the index like one line (36 ms against 36 ms), and Security B1 still holds (a time-ordered chunk spans arbitrary record IDs).
+- **(c2) Candidate IDs from a bounded full-text probe — rejected.** That is the probe the budget has just stopped.
+- **(c3) The match decided in C# by a copy of the tokenizer — rejected.** `unicode61` uses SQLite's own Unicode tables, case folding
+  and diacritics rules; an approximation would let index mode and scan mode return different lines (AC-2 to AC-6 require the same).
+- **(c4) A temporary table on the reader connection — rejected.** It writes to the leased reader's temp schema; a failure between
+  create and drop leaves state in a pooled connection that the health check and the search share.
+- **Chosen: (a) for one-part terms + a line index for terms of several parts + (b) as the page's clock.**
+  1. The scan tests each term that `FtsQuery.CountTokens` counts as at most one part with its own `EXISTS (... MATCH $wordN AND rowid
+     = r.id)` (an AND of those). A single token stops at its seek (0.02 to 0.36 ms per line above and in the Dev's run).
+  2. The terms of two or more parts are tested in a **line index**: a private in-memory SQLite connection (not a reader of the
+     database file, no reader lease, so AC-21 and record 0103 option 14 hold) with one FTS5 table of the same tokenizer as `log_fts`.
+     The scan collects the examined lines that pass every other test (program, severity, one-part terms) with their message, in chunks
+     of at most `LineIndex.ChunkLines` (64), inserts the chunk, runs the `MATCH` of the multi-part terms against it, and empties the
+     table. The same library, tokenizer arguments and expression decide on the same token sequence of the same stored message, so the
+     result is exact; the work is bounded by the chunk's text, not by the index. Scratch, 8,000 lines of about 60 bytes: inserting
+     20 to 36 ms, the `MATCH` 0.3 ms (two words), 2.3 ms (4-part phrase), 226 ms (511-part phrase); with AC-25's divided bound a
+     511-part term examines 15 lines. Memory: at most 64 messages of at most 16 KiB (`ModelLimits.MaxTextBytes`) and their index, per
+     call, with at most two calls at once (AC-21).
+  3. **The page clock:** the scan ends after the examined line (flushing the pending chunk first) at which the time since the call
+     began reaches `LogFinder.PageBudget` (1.5 s), and at least one line is always examined. It then returns `ScanLimitReached` with
+     `Next` at the last examined line, as at the line bound. The probe's budget is part of the same 1.5 s. On the DS918+: 1.5 s, plus
+     one line or one chunk (at most 64 lines, 1 MiB of text), plus the read of at most 100 lines, is about 1.6 to 1.7 s. The record's
+     earlier objection to a scan clock (no clock in the store, the reach depends on the load) no longer holds for the first part, and
+     the second is the Product Manager's accepted cost of option A: the line bound stays the deterministic upper bound, the clock only
+     ends a page earlier, and the lines found by following `Next` to the end do not change.
+  AC-25's division of the bound by the parts stays: it keeps the work per request about constant and keeps a chunk small for many parts.
+
+**Option A's promise:** unchanged; this is what makes it true. Seen by the user: on a slow or loaded host a page of a common or
+many-part search may end sooner with *Searched up to ..., Continue*, which is the page-by-page search option A describes. No new text.
+No escalation.
+
+### AC-27
+
+- [ ] AC-27 The scan's per-line work is bounded by the line, and every scan page ends by the page clock.
+  - `FtsQuery.BuildTerms` quotes each term as `Build` does and `Build` is their join with one space; it validates as `Build` does
+    (`SqliteStoreQueryTests.FtsQueryBuildTermsQuotesEachTerm`, data rows: `error` → `"error"`; `a "b` → `"a"`, `"""b"`; `10.0.0.1 smtpd` →
+    `"10.0.0.1"`, `"smtpd"`; each row also asserts `Build(text) == string.Join(' ', BuildTerms(text))`; and
+    `FtsQueryBuildTermsRejectsWhatBuildRejects`, one row of 17 terms, `InvalidQueryException`).
+  - `LogCriteria` splits the user's text: one-part terms into `ScanWords`, the others joined into `ScanPhrases`
+    (`SqliteStoreLogExplorerTests.LogCriteriaSplitsTheScanTextIntoWordsAndPhrases`, rows: `mail 10.0.0.1 smtpd` → words `"mail"`,
+    `"smtpd"`, phrases `"10.0.0.1"`; `mail` → words `"mail"`, phrases null; no text → no words, phrases null; a template without a text →
+    no words, phrases null).
+  - The scan statement has one `EXISTS` per word and no `$match` (`SqliteStoreLogExplorerTests.LogFinderQueriesBuildScanTestsEachWordOnItsOwn`:
+    words `"a"`, `"b"` → the SQL contains `MATCH $word0` and `MATCH $word1`, both parameters bound to the quoted words, and no `$match`).
+  - The line index matches only the lines of the call and uses the tokenizer of `log_fts`
+    (`LineIndexTests.LineIndexMatchReturnsOnlyTheLinesOfTheCall`: lines (1, `ww ww`), (2, `ww x ww`), match `"ww ww"` → {1}; then lines
+    (3, `ww x`), match `"ww"` → {3}; `LineIndexTests.LineIndexUsesTheTokenizerOfTheIndex`: the `CREATE VIRTUAL TABLE log_fts` text in
+    `sqlite_master` of a migrated store contains `tokenize='` + `LineIndex.Tokenizer` + `'`; `LineIndexTests.LineIndexMatchWithACancelledTokenThrows`:
+    `OperationCanceledException`).
+  - Scan and index mode find the same lines for terms of several parts
+    (`SqliteStoreLogExplorerTests.FindLogsScanFindsThePhraseLinesTheIndexFinds`, lines: 1 `ww x ww`, 2 `ww ww`, 3 `Café-Bar open`,
+    4 `cafe bar`, 5 `mail ww.ww`; rows: `ww.ww` → 2, 5; `CAFE-bar` → 3, 4; `mail ww.ww` → 5; each row in scan mode (probe budget zero)
+    and in index mode (budget one minute, clock not advanced), both equal to the expected lines; `é` is written as U+00E9 from its
+    code point).
+  - Chunks: 150 lines, the phrase `ww.ww` in lines 10, 70 and 140, `ScanLimit` 1,000, probe budget zero: the page returns exactly those
+    three lines, `Next` null, `ScanLimitReached` false; with `Limit` 2 the page returns 10 and 70 with `Next` at 70, and the page from
+    that `Next` returns 140 (`SqliteStoreLogExplorerTests.FindLogsScanChecksPhrasesInChunks`).
+  - The page clock: with a `FakeTimeProvider` whose `AutoAdvanceAmount` makes the page budget run out within the range, 20 lines without a
+    match, `ScanLimit` 20, the page has no lines, `ScanLimitReached` true and `Next` before line 20; the page from that `Next` starts after
+    it (`SqliteStoreLogExplorerTests.FindLogsScanStopsAtThePageBudget`; the Tester sizes the advance). With a page budget of zero the
+    scan examines exactly one line: `Next` at line 1, `ScanLimitReached` true, and line 1 returned when it matches
+    (`FindLogsScanExaminesOneLineWhenThePageBudgetIsUsedUp`, two data rows: line 1 matching, not matching).
+  - A deadline that ends during the scan after a budget-stopped probe ends the call with `OperationCanceledException`
+    (`SqliteStoreLogExplorerTests.FindLogsCancelledDuringTheScanAfterAStoppedProbeThrows`: `FakeTimeProvider` auto-advance, probe stopped
+    by its budget, the token source on the same provider cancelled during the scan; the Tester sizes it). Also with a term of two parts,
+    so the cancellation can fall into the line index (a second data row).
+  - The existing tests of AC-2 to AC-6, AC-22, AC-25 and AC-26 stay unchanged and green: the existing internal `FindLogsAsync` overloads
+    run without a page clock.
+- AC-19 is unchanged. Cases 12, 14 and 15 are expected to end within 2,000 ms on the DS918+ through the probe budget and the page
+  clock; the development-host run names every case that ends by the clock (benchmark: `scan bound or page budget reached`, Dev's wording
+  is free) and shows case 15 under 2,000 ms. The 350 ms development-host target applies to the cases that end by a full page, the line
+  bound or the range.
+
+### Signatures (Dev's skeleton; *Build* passes)
+
+- `src/Vandox.Storage/FtsQuery.cs`: `internal static IReadOnlyList<string> BuildTerms(string text)`; `Build` returns
+  `string.Join(' ', BuildTerms(text))`.
+- `src/Vandox.Storage/LogCriteria.cs`: `internal IReadOnlyList<string> ScanWords { get; private init; }` (the quoted terms of the user's
+  text that `FtsQuery.CountTokens` counts as at most one part) and `internal string? ScanPhrases { get; private init; }` (the other terms,
+  quoted and joined with one space, or null). `ScanText` and `ExaminedLines` stay.
+- `src/Vandox.Storage/LogFinderQueries.cs`: `internal static (string Sql, Dictionary<string, object> Parameters) BuildScan(LogCriteria criteria)`
+  (replaces `BuildScan(LogCriteria, string?)`; parameters `$word0` ... ; the message column is read when the line passes and a template or
+  `ScanPhrases` needs it). The constant `Exists` goes.
+- `src/Vandox.Storage/LineIndex.cs` (new): `internal sealed class LineIndex : IDisposable` with
+  `internal const int ChunkLines = 64;`, `internal const string Tokenizer = "unicode61 remove_diacritics 2";`,
+  `internal static LineIndex Open(CancellationToken cancellationToken)` (opens `Data Source=:memory:`, `Pooling=false`, creates
+  `CREATE VIRTUAL TABLE line_fts USING fts5(message, tokenize='…')` with `Tokenizer`, installs `ReaderQuery.Attach` with the token),
+  `internal Task<HashSet<long>> MatchAsync(IReadOnlyList<(long Id, string Message)> lines, string match, CancellationToken cancellationToken)`
+  (inserts, matches, deletes every row before it returns or throws) and `public void Dispose()`.
+- `src/Vandox.Storage/LogFinder.cs`: `internal static readonly TimeSpan PageBudget = TimeSpan.FromMilliseconds(1500);`;
+  `FindAsync(SqliteConnection connection, LogFilter filter, LogTemplate? template, int selectiveMatches, TimeSpan probeBudget, TimeSpan pageBudget, TimeProvider timeProvider, CancellationToken cancellationToken)`;
+  `Timeout.InfiniteTimeSpan` as `pageBudget` means no page clock. The start timestamp is taken at the call's start.
+- `src/Vandox.Storage/SqliteStore.cs`: new `internal Task<LogPage> FindLogsAsync(LogFilter filter, int selectiveMatches, TimeSpan probeBudget, TimeSpan pageBudget, TimeProvider timeProvider, CancellationToken cancellationToken)`;
+  the existing internal overloads delegate with `Timeout.InfiniteTimeSpan`; the public `ILogExplorer.FindLogsAsync` passes
+  `LogFinder.PageBudget`.
+- Final files, unchanged: `ReaderQuery.cs`, `LogPage.cs`, the backend (`LogsView`, `LogsPage`).
+
+### Owners
+
+- **Tester (first, failing on the skeleton):** the tests of AC-27 in `tests/Vandox.Storage.Tests/SqliteStoreQueryTests.cs`,
+  `tests/Vandox.Storage.Tests/SqliteStoreLogExplorerTests.cs` and the new `tests/Vandox.Storage.Tests/LineIndexTests.cs`.
+  No existing test call site changes (`BuildScan` has none in the tests; the internal `FindLogsAsync` overloads keep their signatures).
+- **Dev:** the skeleton; then `FtsQuery.cs`, `LogCriteria.cs`, `LogFinderQueries.cs`, `LineIndex.cs`, `LogFinder.cs`, `SqliteStore.cs`;
+  `tools/Vandox.StorageBenchmark/SearchBenchmark.cs` (the mode text for a page ended by the clock, if it can tell); the development-host
+  run (cases 1 to 15, case 12 also with a cold cache once, the cause of the 234 s run confirmed or corrected in the notes);
+  `docs/areas/storage.md` (*Log exploration*: one test per one-part term, the line index for terms of several parts with its chunk and
+  memory bound, the page clock of 1.5 s, at least one line, the probe's budget inside it; *Cost*: `rowid = …` does not bound an AND or a
+  phrase); `docs/areas/web-ui.md` (a page may end at the time budget with *Searched up to …*); `docs/BENCHMARKS.md` (the new results,
+  the 234 s note replaced by its cause, *Tuning*: the page budget and the chunk size).
+- **Code Officer:** *Format* and *Analyzer gate* on the changed files.
+- **Lead:** this section, `tasks.md`, record 0103 (option 19, *Decision*, *Consequences*, option 18's sentence on the scan page).
+- **Security:** a plan delta on this section before the skeleton (a second, private in-memory connection; its memory bound; the deadline
+  on it; the page clock and the "at least one line" rule as the bound of a request), then the diff delta.
+- **Reviewer:** the delta round over everything changed since 94497eb, as planned.
+
+Verification: step 6 gates; the development-host run; Reviewer delta and Security diff delta; then the second DS918+ run (task 31),
+which **still waits** and runs on this build: it decides AC-19 with cases 12, 14 and 15 expected under 2,000 ms.
+
+Files no unit test can cover: unchanged (`SearchBenchmark.cs`, `[ExcludeFromCodeCoverage]`). `LineIndex.cs` is covered by its tests.
+
+The section *Lead revision: the index check under a time budget*, *Limits, stated honestly*, said the scan page after a stopped probe is
+bounded by the line bound, not by the clock; this section replaces that sentence (the page clock), and its page-time estimate of
+"about 1 ms per examined line" for 16 parts holds only with one test per word (measured above).
