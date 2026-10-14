@@ -35,6 +35,8 @@ internal sealed class ComponentTestRenderer : Renderer
 
     private readonly RendererInfo _rendererInfo;
 
+    private TaskCompletionSource _rendered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
     #endregion // Fields
 
     #region Properties
@@ -91,6 +93,26 @@ internal sealed class ComponentTestRenderer : Renderer
         }
 
         return builder.ToString();
+    }
+
+    /// <summary>
+    /// Waits until a condition holds, checking it on the dispatcher after each render; a condition that never holds ends the wait after 10 seconds.
+    /// </summary>
+    /// <param name="condition">The condition</param>
+    /// <returns>A task that completes when the condition holds</returns>
+    internal async Task WaitUntilAsync(Func<bool> condition)
+    {
+        while (true)
+        {
+            var next = Volatile.Read(ref _rendered).Task;
+
+            if (await Dispatcher.InvokeAsync(condition))
+            {
+                return;
+            }
+
+            await next.WaitAsync(TimeSpan.FromSeconds(10));
+        }
     }
 
     /// <summary>
@@ -357,6 +379,8 @@ internal sealed class ComponentTestRenderer : Renderer
     /// <inheritdoc />
     protected override Task UpdateDisplayAsync(in RenderBatch renderBatch)
     {
+        Interlocked.Exchange(ref _rendered, new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)).TrySetResult();
+
         return Task.CompletedTask;
     }
 

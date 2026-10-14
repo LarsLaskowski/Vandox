@@ -3,21 +3,17 @@ using Vandox.Storage;
 namespace Vandox.Backend.Logs;
 
 /// <summary>
-/// Limits the explorer calls in flight across all callers.
+/// Limits the explorer calls in flight across all callers, through a gate of its own or one shared with other web views.
 /// </summary>
 public sealed class GatedLogExplorer : ILogExplorer, IDisposable
 {
-    #region Constants
-
-    private const int MaxSlots = 3;
-
-    #endregion // Constants
-
     #region Fields
 
     private readonly ILogExplorer _inner;
 
-    private readonly SemaphoreSlim _slots;
+    private readonly WebReaderGate _gate;
+
+    private readonly bool _ownsGate;
 
     #endregion // Fields
 
@@ -32,11 +28,24 @@ public sealed class GatedLogExplorer : ILogExplorer, IDisposable
     public GatedLogExplorer(ILogExplorer inner, int maxConcurrent)
     {
         ArgumentNullException.ThrowIfNull(inner);
-        ArgumentOutOfRangeException.ThrowIfLessThan(maxConcurrent, 1);
-        ArgumentOutOfRangeException.ThrowIfGreaterThan(maxConcurrent, MaxSlots);
 
         _inner = inner;
-        _slots = new SemaphoreSlim(maxConcurrent, maxConcurrent);
+        _gate = new WebReaderGate(maxConcurrent);
+        _ownsGate = true;
+    }
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="GatedLogExplorer"/> class that shares a gate it does not own.
+    /// </summary>
+    /// <param name="inner">The explorer to call</param>
+    /// <param name="gate">The gate of the reads</param>
+    public GatedLogExplorer(ILogExplorer inner, WebReaderGate gate)
+    {
+        ArgumentNullException.ThrowIfNull(inner);
+        ArgumentNullException.ThrowIfNull(gate);
+
+        _inner = inner;
+        _gate = gate;
     }
 
     #endregion // Constructors
@@ -50,18 +59,9 @@ public sealed class GatedLogExplorer : ILogExplorer, IDisposable
     /// <param name="call">The call of the inner explorer</param>
     /// <param name="cancellationToken">Ends the wait for a slot</param>
     /// <returns>A task that returns the result of the call</returns>
-    private async Task<TResult> RunAsync<TResult>(Func<Task<TResult>> call, CancellationToken cancellationToken)
+    private Task<TResult> RunAsync<TResult>(Func<Task<TResult>> call, CancellationToken cancellationToken)
     {
-        await _slots.WaitAsync(cancellationToken).ConfigureAwait(false);
-
-        try
-        {
-            return await call().ConfigureAwait(false);
-        }
-        finally
-        {
-            _slots.Release();
-        }
+        return _gate.RunAsync(call, cancellationToken);
     }
 
     #endregion // Methods
@@ -117,7 +117,10 @@ public sealed class GatedLogExplorer : ILogExplorer, IDisposable
     /// <inheritdoc />
     public void Dispose()
     {
-        _slots.Dispose();
+        if (_ownsGate)
+        {
+            _gate.Dispose();
+        }
     }
 
     #endregion // IDisposable

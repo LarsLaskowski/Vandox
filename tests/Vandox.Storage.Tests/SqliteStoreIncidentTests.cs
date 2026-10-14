@@ -388,6 +388,112 @@ public class SqliteStoreIncidentTests
     }
 
     /// <summary>
+    /// An updated and an unchanged save leave the notes of the incident as they are.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task SqliteStoreSaveIncidentKeepsNotesWhenUpdatedOrUnchanged()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+        var firstSave = Samples.Base.AddDays(1);
+        var created = await store.SaveIncidentAsync(Sample(0, 2), firstSave, TestContext.CancellationToken);
+        var noteTime = firstSave.AddMinutes(1);
+
+        await store.SaveIncidentNoteAsync(new IncidentNoteEdit
+                                          {
+                                              IncidentId = created.Id,
+                                              WrittenFor = created.Id,
+                                              Text = "found the cause",
+                                              SavedAt = noteTime
+                                          },
+                                          TestContext.CancellationToken);
+
+        var changed = Sample(0, 2);
+
+        changed.KillCount = 2;
+
+        // Act
+        var unchanged = await store.SaveIncidentAsync(Sample(0, 2), firstSave.AddMinutes(5), TestContext.CancellationToken);
+        var afterUnchanged = await store.IncidentNotesAsync(created.Id, TestContext.CancellationToken);
+        var updated = await store.SaveIncidentAsync(changed, firstSave.AddMinutes(10), TestContext.CancellationToken);
+        var afterUpdate = await store.IncidentNotesAsync(created.Id, TestContext.CancellationToken);
+
+        // Assert
+        Assert.AreEqual(IncidentSaveOutcome.Unchanged, unchanged.Outcome, "an equal save");
+        Assert.HasCount(1, afterUnchanged.Notes, "the note survives an unchanged save");
+        Assert.AreEqual(IncidentSaveOutcome.Updated, updated.Outcome, "a changed save");
+        Assert.AreEqual(created.Id, updated.Id, "the number is kept");
+        Assert.HasCount(1, afterUpdate.Notes, "the note survives an update");
+        Assert.AreEqual("found the cause", afterUpdate.Notes[0].Text, "the text of the note");
+        Assert.AreEqual(created.Id, afterUpdate.Notes[0].IncidentId, "the note still belongs to the incident");
+        Assert.AreEqual(noteTime, afterUpdate.Notes[0].UpdatedAt, "the note is not touched by the update");
+    }
+
+    /// <summary>
+    /// A save that merges incidents moves the notes of every incident it deletes to the kept one, each note keeping the number it was written for.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task SqliteStoreSaveIncidentMovesNotesOfMergedIncidents()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+        var saved = Samples.Base.AddDays(1);
+        var first = await store.SaveIncidentAsync(Sample(0, 2), saved, TestContext.CancellationToken);
+        var second = await store.SaveIncidentAsync(Sample(3, 5), saved, TestContext.CancellationToken);
+        var third = await store.SaveIncidentAsync(Sample(6, 8), saved, TestContext.CancellationToken);
+        var untouched = await store.SaveIncidentAsync(Sample(20, 22), saved, TestContext.CancellationToken);
+        var noteTime = saved.AddMinutes(1);
+
+        foreach (var incident in new[] { first, second, third, untouched })
+        {
+            await store.SaveIncidentNoteAsync(new IncidentNoteEdit
+                                              {
+                                                  IncidentId = incident.Id,
+                                                  WrittenFor = incident.Id,
+                                                  Text = $"note of {incident.Id}",
+                                                  SavedAt = noteTime
+                                              },
+                                              TestContext.CancellationToken);
+        }
+
+        var bridge = Sample(1, 7);
+
+        bridge.KillCount = 2;
+
+        // Act
+        var merged = await store.SaveIncidentAsync(bridge, saved.AddMinutes(2), TestContext.CancellationToken);
+        var kept = await store.IncidentNotesAsync(first.Id, TestContext.CancellationToken);
+        var gone = await store.IncidentNotesAsync(second.Id, TestContext.CancellationToken);
+        var other = await store.IncidentNotesAsync(untouched.Id, TestContext.CancellationToken);
+        var edited = await store.SaveIncidentNoteAsync(new IncidentNoteEdit
+                                                       {
+                                                           IncidentId = first.Id,
+                                                           WrittenFor = third.Id,
+                                                           Text = "edited after the merge",
+                                                           SavedAt = noteTime.AddMinutes(1)
+                                                       },
+                                                       TestContext.CancellationToken);
+        var afterEdit = await store.IncidentNotesAsync(first.Id, TestContext.CancellationToken);
+
+        // Assert
+        Assert.AreEqual(2L, merged.Merged, "two incidents merged away");
+        Assert.AreEqual(first.Id, merged.Id, "the oldest number is kept");
+        Assert.AreSequenceEqual(new[] { first.Id, second.Id, third.Id }, kept.Notes.Select(note => note.WrittenFor).ToArray(), "the kept incident holds the notes written for the three incidents");
+        Assert.IsTrue(kept.Notes.All(note => note.IncidentId == first.Id), "every note belongs to the kept incident");
+        Assert.AreSequenceEqual(new[] { $"note of {first.Id}", $"note of {second.Id}", $"note of {third.Id}" }, kept.Notes.Select(note => note.Text).ToArray(), "no text is lost or joined");
+        Assert.IsTrue(kept.Notes.All(note => note.UpdatedAt == noteTime), "the move does not touch the time of a note");
+        Assert.IsEmpty(gone.Notes, "the deleted incident holds no note");
+        Assert.AreEqual($"note of {untouched.Id}", other.Notes.Single().Text, "the note of an incident that is not merged stays");
+        Assert.AreEqual(untouched.Id, other.Notes.Single().IncidentId, "its owner is unchanged");
+        Assert.AreEqual(IncidentNoteOutcome.Saved, edited, "a moved note is changed through the incident it belongs to now");
+        Assert.AreEqual("edited after the merge", afterEdit.Notes.Single(note => note.WrittenFor == third.Id).Text, "the changed text");
+    }
+
+    /// <summary>
     /// Returns a time in hours after the base time of the samples.
     /// </summary>
     /// <param name="hours">The hours</param>

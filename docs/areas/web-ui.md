@@ -2,8 +2,8 @@
 
 ## Scope
 
-The pages `vandoxd` serves on its web listener: render mode, layout and navigation, theme, brand files, static assets, charts, and the
-security headers of the web listener together with what the UI framework needs from them. The user relies on it to look at the
+The pages `vandoxd` serves on its web listener: render mode, layout and navigation, theme, brand files, static assets, charts, the logs
+view, the incidents view and the security headers of the web listener together with what the UI framework needs from them. The user relies on it to look at the
 monitored server in a browser in the home network; the views (overview, history, logs, incidents) build on it. The listeners, port
 routing and `/healthz` are in [Backend host](backend-host.md); the login, sessions and the reverse proxy trust are in
 [Web login](web-login.md), the setup of a proxy in [REVERSE_PROXY.md](../REVERSE_PROXY.md).
@@ -28,8 +28,9 @@ routing and `/healthz` are in [Backend host](backend-host.md); the login, sessio
 
 - Every page has a header with the horizontal logo, the main navigation and the theme switch, and a main area with the page content.
   A signed-in user also sees a *Sign out* button in the header ([Web login](web-login.md), *Sessions*).
-- The navigation lists the existing pages; the entry of the current page is marked. Today it has two entries, *Overview* (`/`) and
-  *Logs* (`logs`); each view adds its own. *Logs* is marked on `/logs` and on `/logs/templates`, *Overview* only on `/`.
+- The navigation lists the existing pages; the entry of the current page is marked. Today it has three entries, *Overview* (`/`),
+  *Logs* (`logs`) and *Incidents* (`incidents`); each view adds its own. *Logs* is marked on `/logs` and on `/logs/templates`,
+  *Incidents* on `/incidents` and on `/incidents/<number>`, *Overview* only on `/`.
 - The layout works from desktop width down to phone width (360 CSS pixels) without horizontal scrolling of the page: on narrow screens
   the navigation moves below the logo and the theme switch. It needs no script.
 
@@ -65,7 +66,14 @@ routing and `/healthz` are in [Backend host](backend-host.md); the login, sessio
   or no series is refused as a programming error before anything reaches the browser.
 - A chart takes its width from its container and follows its resizing; its colors come from the theme tokens and follow a theme change
   (the chart is redrawn with the same data; it keeps one resize observer for its lifetime).
-  Labels and titles are written as text, never as HTML.
+  Labels and titles are written as text, never as HTML: uPlot sets a title and a label through `textContent` (read in the vendored
+  file), so a label that holds external text, such as a program name, carries no markup; the page escapes it first as described under
+  *Incidents view*.
+- A **stacked chart** (`createStacked` in `js/charts.js`, chosen by `ChartData` with `stacked: true`) draws the cumulative sums of its
+  series as filled areas, each band between a series and the one below, and shows the value of each series itself in the legend. Every
+  series of a stacked chart has a value at every time (a gap is refused as a programming error: `The stacked series '<label>' has no
+  value at point <i>.`). The series colors are six custom properties, `--vandox-chart-1` to `--vandox-chart-6`, in the light and the
+  dark values; the series after the sixth reuse them in order.
 
 ### Logs view
 
@@ -157,10 +165,86 @@ that writes them as text, never as markup, in an element that isolates the text 
   search took longer than 10 seconds and was stopped. Narrow the time range or add filters.`, the template page `The query took longer
   than 10 seconds and was stopped. Narrow the time range or choose a source.`
 - **At most two log-view calls run at once across the whole service**, whatever the number of pages and users open; a third waits for a
-  slot within its own deadline. The store has four reader connections, so two stay free for `/healthz` and every other reader.
+  slot within its own deadline. The store has four reader connections, so two stay free for `/healthz` and every other reader. The
+  incidents view reads through the same two slots (*Incidents view*), so the bound covers both views together.
 - A search the store refuses shows `The search cannot run: <rule>.` (the store's rule, which never contains the search text, for
   example that the text has more than 16 terms). Any other error shows `The logs could not be read. The service log has the
   details.` (templates: `The templates could not be read. The service log has the details.`); the details are only in the service log.
+
+### Incidents view
+
+**List page (`/incidents`).**
+
+- The page lists the stored incidents **newest first** (by window start, then number), **20 per page**: the number (a link to its
+  page), the time of the first kill (a link to the logs of that moment, below), the duration, the kills, the victim, the cause and
+  the backup state, and a marker for an incident that has a note. The duration runs from the first to the last kill (`H:MM:SS`, hours
+  not bounded, `0:00:00` for one kill; the window's length is mostly the configured padding and is shown on the incident page).
+  The victim is the command of the first kill, followed by `and further kills` when there are more. The cause is the programs that
+  grew most in the window (`+<n> MiB` each, rounded half away from zero), `none` when the growth is known and no program grew, and
+  `unknown` when it could not be told; the backup is `running`, `not running` or `unknown`.
+- It queries only once the page is interactive. Prerendered it shows its title and `Loading…` and queries nothing.
+- A full page offers *Older incidents* (the next 20, after the last row), a later page offers *Newest incidents* (the first page
+  again). An older page without a row shows `No older incidents.`; an empty store shows `No incidents are stored. Run vandoxd incidents
+  after an import.` The position of the page is not in the address.
+- The page reads summaries, not whole incidents: the store returns the columns of an incident and a few fields of its document
+  (first victim, last kill, hypothesis), decoded row by row, so a page of 20 holds one document's bytes at a time
+  ([Storage](storage.md), *Reading*).
+
+**Incident page (`/incidents/<number>`).**
+
+- Header: the window, the first and the last kill (each a link to the logs of that moment), the duration from the first to the last kill, the number of kills, and when the incident was built and last changed (UTC). Then the kills
+  kept in the document (time, host, victim, process ID, anonymous memory, OOM score adjustment; at most 16, the page says how many
+  more exist), the hypothesis (programs that grew, largest consumers, backup state and programs, the last boot, the number of process
+  snapshots and service events), the timeline in stored order with the number of events the document left out, the connection peak
+  (time, sockets, the number of connection snapshots in the window, the commands with the most sockets), the metric extremes (value, source, time) and the new templates and template
+  spikes. A growth the incident could not tell is shown as `unknown`.
+- A timeline row of the type `oom_kill`, `boot`, `backup_first_seen` or `backup_last_seen` carries the class `mark-oom`, `mark-boot`
+  or `mark-backup` from this fixed map; no other type gets a class, whatever its text, and it is shown as escaped text.
+- **Every time links to the logs of that moment**: the link is `logs` with `from` and `to` of the logs view's address ([Logs view](#logs-view)):
+  `from` is the time floored to the whole second minus 30 seconds, `to` that second plus 5 minutes, both clipped to the first and last
+  whole second of the storable range, so the moment is at the top of the first page of the logs view. It is not a click inside a chart.
+  Times link on the kills, the first and last kill, the timeline entries, the last boot, the metric extremes, the connection peak and
+  the templates, and are shown as `yyyy-MM-dd HH:mm:ss` UTC.
+- A number that no incident has (also one that is not positive, which reads nothing) shows `This incident does not exist. It may have been
+  merged into another one by vandoxd incidents.` and no note form.
+- **Charts of the window**, read from the records of `[start, end)` after the incident is shown, each from its own source: *Memory per
+  program (MiB, stacked)* (one point per process snapshot of the source of the earliest process snapshot in the window; the five programs
+  with the highest peak, ties by name, and `Other programs`; a program absent from a snapshot counts 0; at most 4,096 programs are told
+  apart, the rest are summed into `Other programs`), *Available memory and swap (MiB)* (`mem_available_bytes` and `swap_used_bytes`
+  read from the source of the incident's stored extreme of that metric, at most 1,000 points each, at the union of their times with a gap
+  where a series has no point or a value that is not finite; a metric without a stored extreme has no series) and *Connections* (the sum
+  of the state counts of each connection snapshot of the source of the earliest one in the window). A chart is cut after 300 snapshots
+  and the page says `The chart shows the first 300 snapshots, up to <time> UTC.` A window without any of them shows `No snapshot or
+  metric was stored in this window.` A chart takes its source per query, so live agent data, whose sources are collector names, charts as
+  well as a legacy import with one source for all kinds.
+- Chart labels are program names through `LogText.Escape` capped at 64 characters; titles and the other series labels are fixed texts.
+- **Notes.** The page shows one form for the incident's own note and one for each note that was moved to it from an incident merged into
+  it (`Written for incident #<n>`), at most 64 (`Further notes of merged incidents exist and are not shown.` beyond). A form is a plain
+  `POST` to `incidents/<number>/notes` with the antiforgery token, the number the note was written for as a hidden field and a text area of
+  at most 1,800 characters; `Save note` stores it, an empty text deletes the note.
+
+**The note endpoint (`POST /incidents/<number>/notes`).**
+
+- It needs a session (anonymous: `401`) and a valid antiforgery token ([Web login](web-login.md), *Cross-site requests*). The antiforgery
+  validation result is checked first (missing or invalid: `400`, the form is not read); then the number of the route (not positive: `404`);
+  then the form: exactly one `note` and one `written_for` **from the form only**, never from the query string or the route (a field missing
+  or given twice, also in another letter case, is refused with `400`). The text has its line ends converted to line feeds, **leading line
+  feeds removed** (a text area drops the first line feed of its content, so a re-saved text stays equal), and a text of only white space is
+  empty. More than 1,800 UTF-16 characters, or any U+0000, is refused with `400`; `written_for` is 1 to 18 ASCII digits above 0.
+- `Saved` and `Deleted` are answered with `303` and `Location: /incidents/<number>` built from the parsed number, `NotFound` (an unknown
+  incident, or a note that does not belong to it) with `404`, a note the store itself refuses with `400`, a store error with `500`, all
+  without a body. **The log never holds a note text**: a failed save is logged with the exception only (`incidents view: saving a note
+  failed`), never the text, a form value or the number from the request. A refused post stores nothing.
+- The 1,800 characters count after decoding and line-end conversion; the worst case a browser sends under `maxlength` is 1,800 characters of
+  three bytes written as `%XX`, 16,200 bytes, which stays under the 16 KiB form value limit of the service.
+
+**Calls and deadline.** The incident and its notes are read in one action, the data of the window in a second one after it; each action
+runs under the 10-second deadline of the logs view and a new action cancels the running one. A list or incident read that runs into it shows
+`Reading the incidents took longer than 10 seconds and was stopped.`, a window read `Reading the data of the window took longer than 10
+seconds and was stopped.` (the rest of the page stays); a store error shows `The incidents could not be read. The service log has the
+details.` or `The data of the window could not be read. The service log has the details.` and is logged (`incidents view: reading failed`).
+The incident and window reads take the **same gate as the logs view**: at most two calls of the logs and incidents views run at once across the
+service, the gate is held per store call (a window read of many snapshots takes it once per snapshot), and saving a note does not use it.
 
 ### Security headers
 
@@ -226,6 +310,16 @@ The ingest listener serves none of this: every UI path, static file and the live
   that sends the page to the browser holds the same text once more, for a moment. The **number of circuits is not bounded** (the framework keeps up to 100 disconnected circuits for 3 minutes, *Pages and render mode*), and the container has 512 MB, so
   many open log pages can exhaust the memory of the service. Only a signed-in client can open a circuit ([Web login](web-login.md), *Access*),
   so this needs the password or a session.
+- **The incidents view is behind the login** like the logs view (`/incidents` and `/incidents/<number>` carry the same `[Authorize]`, and the note
+  endpoint has no `AllowAnonymous`, so the fallback policy demands a session). It adds the first write of the web UI, a note, under the
+  token rule of [Web login](web-login.md).
+- **Memory per circuit (incidents view).** The list holds 20 summaries. The incident page decodes one incident (up to 8 MiB of JSON, for the
+  moment of the read) and keeps only capped text: up to 1,000 timeline entries with texts of at most 512 characters and every other field at most
+  2,048, at most 64 notes of 1,800 characters, and charts of at most 300 points of six series, two series of 1,000 points and 300 points; while the
+  window is read it holds one snapshot at a time and at most 4,096 programs times 300 snapshots of values (about 10 MB). These amounts are
+  **per circuit**, not across the service: the gate is held per store call, so many open incident pages can each build at once, as with the
+  5 MiB of a logs page. The number of circuits is not bounded ([Pages and render mode](#pages-and-render-mode)) and the container has 512 MB; only a signed-in client can
+  open a circuit.
 - Template numbers change when `vandoxd templates` rebuilds the statistics, so a stored template link can point to another template or
   to none; the page reports an unknown number. Every stored source can be chosen in the form, because the data model allows a source only
   letters, digits and `. _ : / @ + -` and at most 128 bytes, which the address rules accept; a source in the address that the store
@@ -240,6 +334,7 @@ The ingest listener serves none of this: every UI path, static file and the live
 - [0098](../decisions/0098-web-ui-serves-only-its-own-static-web-assets.md) — why own static web assets only, brand copies, vendored uPlot and a script-set theme.
 - [0099](../decisions/0099-web-listener-security-headers-one-self-only-csp.md) — why one self-only policy set by the application.
 - [0106](../decisions/0106-logs-view-address-as-the-view-bounded-search-pages-template-lines-by-normalization.md) — why the logs view takes its filters from the address, searches in bounded pages and caps external text.
+- [0107](../decisions/0107-incidents-view-summaries-notes-per-incident-number-time-links-to-the-logs.md) — why the incidents view reads summaries and the window's own records, saves notes by a form post and links every time to the logs.
 
 ## Not here
 
@@ -252,6 +347,7 @@ The ingest listener serves none of this: every UI path, static file and the live
 ## Implementation
 
 `Vandox.Backend` (`Components/App.razor`, `Components/Layout/MainLayout.razor`, `Components/Charts`, `Components/Pages/LogsPage` and
-`LogTemplatesPage`, `Components/Logs/ExternalText`, `Logs/` (`LogsAddress`, `LogText`, `LogLineView`, `GatedLogExplorer`, `TemplateHourSeries`, `LogsView`), `Hosting/SecurityHeadersMiddleware`,
+`LogTemplatesPage`, `Components/Pages/IncidentsPage` and `IncidentPage`, `Components/Incidents/IncidentNoteForm`, `Components/Logs/ExternalText`, `Logs/` (`LogsAddress`, `LogText`, `LogLineView`, `GatedLogExplorer`, `WebReaderGate`, `TemplateHourSeries`, `LogsView`),
+`Incidents/` (`IncidentsView`, `IncidentRowView`, `IncidentDetailView`, `IncidentWindowReader`, `ProgramMemorySeries`, `GatedIncidentBrowser`, `GatedRecordReader`, `IncidentNoteText`, `IncidentNoteEndpoint`), `Hosting/SecurityHeadersMiddleware`,
 `Hosting/ServeCommand`, `wwwroot/`, and `Vandox.Backend.csproj`, whose `RequiresAspNetWebAssets` makes the restore add the framework
 script independently of the sources, as the image build restores before copying them; record 0098).

@@ -7,8 +7,8 @@ backend with web UI, runs as a Docker container on any Docker host in the home n
 
 This document describes the target architecture; as of now the binaries' `--version`, the data model and wire format
 (Go: `internal/model`, `internal/wire`; backend: `src/Vandox.Core`), the configuration loading (`internal/config` for the agent,
-`Vandox.Core.Configuration` for `vandoxd`), the backend service skeleton, the log import framework and the log signature catalog with its detector (`Vandox.Core.Signatures`; the service does not call it yet), the log templates with their statistics and queries (`Vandox.Core.Templates`, `Vandox.Storage`), the logs view of the web UI (search, context, template list and chart; `Vandox.Backend`), the outage reconstruction (`vandoxd incidents`, `Vandox.Core.Incidents`), the forensics report as Markdown (`vandoxd report`, `Vandox.Core.Reports`; the web UI shows neither yet) exist (`vandoxd import`, with the parsers for the journal export, the MariaDB error log, Dovecot's own log file, `syslog` and `kern.log`, the Plesk panel log, the nginx, `sw-cp-server` and Apache error logs and the legacy `top`/`lsof` monitoring log): `vandoxd` loads its configuration, opens and migrates its SQLite database (schema, batched writes, queries and log search
-exist as the storage layer; the service reads it through the logs view only, `vandoxd import` writes through it), listens on the
+`Vandox.Core.Configuration` for `vandoxd`), the backend service skeleton, the log import framework and the log signature catalog with its detector (`Vandox.Core.Signatures`; the service does not call it yet), the log templates with their statistics and queries (`Vandox.Core.Templates`, `Vandox.Storage`), the logs view of the web UI (search, context, template list and chart; `Vandox.Backend`), the outage reconstruction (`vandoxd incidents`, `Vandox.Core.Incidents`), the forensics report as Markdown (`vandoxd report`, `Vandox.Core.Reports`; the web UI does not show it yet), the incidents view of the web UI (list, incident page with charts of the window, notes; `Vandox.Backend`) exist (`vandoxd import`, with the parsers for the journal export, the MariaDB error log, Dovecot's own log file, `syslog` and `kern.log`, the Plesk panel log, the nginx, `sw-cp-server` and Apache error logs and the legacy `top`/`lsof` monitoring log): `vandoxd` loads its configuration, opens and migrates its SQLite database (schema, batched writes, queries and log search
+exist as the storage layer; the service reads it through the logs and incidents views and writes only the notes of incidents, `vandoxd import` writes through it), listens on the
 web and ingest ports, protects the web UI with a login (one password, server-side sessions, limits on failed sign-ins and the trust in a reverse proxy; `Vandox.Backend` `Security`), answers `/healthz` and shuts down gracefully, and ships as a container with a health
 check. Sections are marked as implemented as features land. The decisions behind it are recorded in
 [`docs/decisions/`](decisions/README.md); each section links the records it rests on. Vandox is an own
@@ -48,6 +48,10 @@ way, and agents of the hosting provider are never disabled or changed
   [0099](decisions/0099-web-listener-security-headers-one-self-only-csp.md)). The logs view (`/logs`, `/logs/templates`) searches the
   stored log lines, shows the context of a hit and the templates with their hourly chart, takes every filter from the address and reads
   the store through a gate of two concurrent calls ([0106](decisions/0106-logs-view-address-as-the-view-bounded-search-pages-template-lines-by-normalization.md)).
+  The incidents view (`/incidents`, `/incidents/<number>`) lists bounded summaries of the stored incidents, shows one incident with
+  charts read from the records of its window, links every time to the logs of that moment and saves a note per incident through a
+  form post with the antiforgery token; it reads through the same gate of two calls
+  ([0107](decisions/0107-incidents-view-summaries-notes-per-incident-number-time-links-to-the-logs.md)).
 - The backend's libraries, one project each with a test project under `tests/`
   ([0073](decisions/0073-backend-in-dotnet-10-with-blazor-agent-stays-go.md)):
   `Vandox.Core` (data model and validation, the wire decoder, configuration and secrets, safe file access, the
@@ -263,7 +267,7 @@ Implemented by `src/Vandox.Storage`:
   2^63 - 1.
 - **Migrations** ([0077](decisions/0077-storage-on-microsoft-data-sqlite-same-schema-and-rules.md)): at
   start-up every step above the stored `meta.schema_version` runs in its own transaction; a database with a
-  newer version is refused. Schema version 3 adds the table `import_files`, version 4 the column `log_lines.host`, version 5 the column `log_lines.event`, version 6 the head key and the continuation point of `import_files`, version 7 the line hashes (`import_line_hashes`) and the import attempts of `import_files`, version 8 the log template statistics, version 9 the table `incidents`.
+  newer version is refused. Schema version 3 adds the table `import_files`, version 4 the column `log_lines.host`, version 5 the column `log_lines.event`, version 6 the head key and the continuation point of `import_files`, version 7 the line hashes (`import_line_hashes`) and the import attempts of `import_files`, version 8 the log template statistics, version 9 the table `incidents`, version 10 the table `incident_notes`.
 - **Imports** ([0069](decisions/0069-log-import-idempotent-per-file-content-hash-with-resumable-batches.md)):
   `import_files` holds one row per imported file content (SHA-256 of the decompressed content, size, the name
   and modification time the parser got, the source type, the number of records stored so far and whether the
@@ -285,7 +289,9 @@ Implemented by `src/Vandox.Storage`:
 - **Incidents** ([0096](decisions/0096-outage-incidents-rebuilt-from-stored-data-merged-by-overlapping-windows.md)):
   one row per incident with its window, its first kill, its number of kills and the incident itself as a JSON document; numbers
   are never reused. Saving an incident takes over the oldest stored incident whose window overlaps it, merges the other
-  overlapping ones into it and leaves an unchanged one untouched. The rules are in [Storage](areas/storage.md).
+  overlapping ones into it and leaves an unchanged one untouched. The notes of incidents are rows of their own, one per incident
+  number they were written for; a merge moves the notes of the merged incidents to the kept one in its transaction
+  ([0107](decisions/0107-incidents-view-summaries-notes-per-incident-number-time-links-to-the-logs.md)). The rules are in [Storage](areas/storage.md).
 - **Connections** ([0077](decisions/0077-storage-on-microsoft-data-sqlite-same-schema-and-rules.md)): one writer connection (immediate transactions, one batch per transaction) and a pool
   of query-only readers, in WAL mode with `synchronous=FULL`, so a committed batch is durable and reads (and
   `/healthz`) do not wait for a write.
@@ -300,7 +306,7 @@ Implemented by `src/Vandox.Storage`:
   rules in [Storage](areas/storage.md), *Log exploration*).
 - **Interfaces** ([0077](decisions/0077-storage-on-microsoft-data-sqlite-same-schema-and-rules.md)):
   `IRecordWriter`, `IRecordReader` (with a keyset on the record ID for paging), `ILogSearcher`, `ILogExplorer` (the logs view), `ILogTemplateReader`,
-  `IImportTracker` and `IIncidentStore`; a consumer that depends on the store's semantics is tested against the real store.
+  `IImportTracker`, `IIncidentStore` and `IIncidentBrowser` (the incidents view: summaries, one incident, notes); a consumer that depends on the store's semantics is tested against the real store.
 - **Write throughput** ([0077](decisions/0077-storage-on-microsoft-data-sqlite-same-schema-and-rules.md)):
   measured by a benchmark, see [`BENCHMARKS.md`](BENCHMARKS.md).
 

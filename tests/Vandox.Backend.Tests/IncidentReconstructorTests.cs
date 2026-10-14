@@ -207,6 +207,61 @@ public class IncidentReconstructorTests
     }
 
     /// <summary>
+    /// Notes stay with their incident when the run is repeated over the same data, when an incident is updated, and when a later run merges incidents, where the note of the incident that goes moves to the one that stays.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task IncidentReconstructorKeepsNotesAcrossReruns()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+        var clock = new FakeTimeProvider(IncidentSamples.Base.AddDays(1));
+        var first = new List<SavedIncident>();
+
+        await IncidentSamples.WriteAsync(store, TestContext.CancellationToken, IncidentSamples.Kill(At(0)), IncidentSamples.Kill(At(180)), IncidentSamples.Kill(At(270)));
+        await RunAsync(store, store, clock, first);
+
+        var ids = first.Select(item => item.Result.Id).ToArray();
+
+        await SaveNoteAsync(store, ids[0], ids[0], "note of the first incident");
+        await SaveNoteAsync(store, ids[2], ids[2], "note of the third incident");
+        clock.Advance(TimeSpan.FromDays(1));
+
+        // Act
+        var unchanged = await RunAsync(store, store, clock, []);
+        var firstAfterUnchanged = await store.IncidentNotesAsync(ids[0], TestContext.CancellationToken);
+        var thirdAfterUnchanged = await store.IncidentNotesAsync(ids[2], TestContext.CancellationToken);
+
+        await IncidentSamples.WriteAsync(store, TestContext.CancellationToken, IncidentSamples.Kill(At(20)), IncidentSamples.Kill(At(195)));
+        clock.Advance(TimeSpan.FromDays(1));
+
+        var merged = await RunAsync(store, store, clock, []);
+        var firstAfterMerge = await store.IncidentNotesAsync(ids[0], TestContext.CancellationToken);
+        var secondAfterMerge = await store.IncidentNotesAsync(ids[1], TestContext.CancellationToken);
+        var thirdAfterMerge = await store.IncidentNotesAsync(ids[2], TestContext.CancellationToken);
+
+        clock.Advance(TimeSpan.FromDays(1));
+
+        var repeated = await RunAsync(store, store, clock, []);
+        var secondAfterRepeat = await store.IncidentNotesAsync(ids[1], TestContext.CancellationToken);
+
+        // Assert
+        Assert.AreEqual(3L, unchanged.Unchanged, "the second run leaves the three incidents unchanged");
+        Assert.AreEqual("note of the first incident", firstAfterUnchanged.Notes.Single().Text, "the note of the first incident survives an unchanged run");
+        Assert.AreEqual("note of the third incident", thirdAfterUnchanged.Notes.Single().Text, "the note of the third incident survives an unchanged run");
+        Assert.AreEqual(1L, merged.Merged, "the third run merges the second and the third incident");
+        Assert.AreEqual(2L, merged.Updated, "both rebuilt incidents update a stored one");
+        Assert.AreEqual("note of the first incident", firstAfterMerge.Notes.Single().Text, "the note of an updated incident stays");
+        Assert.AreEqual(ids[1], secondAfterMerge.Notes.Single().IncidentId, "the note of the merged incident now belongs to the one that stays");
+        Assert.AreEqual(ids[2], secondAfterMerge.Notes.Single().WrittenFor, "it keeps the number it was written for");
+        Assert.AreEqual("note of the third incident", secondAfterMerge.Notes.Single().Text, "its text is unchanged");
+        Assert.IsEmpty(thirdAfterMerge.Notes, "the incident that went holds no note");
+        Assert.AreEqual(2L, repeated.Unchanged, "the fourth run changes nothing");
+        Assert.AreEqual("note of the third incident", secondAfterRepeat.Notes.Single().Text, "the moved note survives another run");
+    }
+
+    /// <summary>
     /// A stored incident that no rebuilt incident overlaps is kept as it is and counted.
     /// </summary>
     /// <returns>A task that completes when the test is done</returns>
@@ -441,6 +496,28 @@ public class IncidentReconstructorTests
                                         Limit = 100
                                     },
                                     TestContext.CancellationToken);
+    }
+
+    /// <summary>
+    /// Saves a note.
+    /// </summary>
+    /// <param name="store">The store</param>
+    /// <param name="incidentId">The incident</param>
+    /// <param name="writtenFor">The number the note is written for</param>
+    /// <param name="text">The text</param>
+    /// <returns>A task that completes when the note is saved</returns>
+    private async Task SaveNoteAsync(SqliteStore store, long incidentId, long writtenFor, string text)
+    {
+        var outcome = await store.SaveIncidentNoteAsync(new IncidentNoteEdit
+                                                        {
+                                                            IncidentId = incidentId,
+                                                            WrittenFor = writtenFor,
+                                                            Text = text,
+                                                            SavedAt = IncidentSamples.Base.AddDays(1).AddMinutes(1)
+                                                        },
+                                                        TestContext.CancellationToken);
+
+        Assert.AreEqual(IncidentNoteOutcome.Saved, outcome, "the note is saved");
     }
 
     #endregion // Methods

@@ -1,0 +1,15 @@
+<form method="post" action="@Action" class="note-form">
+    <AntiforgeryToken />
+    <input type="hidden" name="written_for" value="@WrittenFor" />
+    <label>
+        <span class="note-label">@Label</span>
+        <textarea name="note" maxlength="@StorageLimits.MaxNoteChars" rows="6">@Text</textarea>
+    </label>
+    <p class="note-actions">
+        <button type="submit">@IncidentsView.SaveNote</button>
+        @if (UpdatedAt is not null)
+        {
+            <span class="note-saved">Saved @LogsView.ShowSeconds(UpdatedAt.Value) UTC</span>
+        }
+    </p>
+</form>

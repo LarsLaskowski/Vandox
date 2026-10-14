@@ -17,6 +17,8 @@ public class ChartInteropTests
 
     private static readonly string[] _labels = ["load", "memory"];
 
+    private static readonly string[] _stackedSequence = ["import", "createStacked", "update", "import", "create"];
+
     private static readonly string[] _createSequence = ["import", "create", "update"];
 
     private static readonly string[] _disposeSequence = ["chart.destroy", "chart.DisposeAsync", "module.DisposeAsync"];
@@ -65,6 +67,39 @@ public class ChartInteropTests
         Assert.AreSequenceEqual(_labels, (string[])runtime.Calls[1].Arguments[2]!, "labels");
         Assert.IsInstanceOfType<double?[][]>(runtime.Calls[1].Arguments[3], "columns are arrays of nullable numbers");
         AssertColumns(data.ToColumns(), (double?[][])runtime.Calls[1].Arguments[3]!);
+    }
+
+    /// <summary>
+    /// A stacked chart is created with the module function createStacked and the same four arguments, a later render updates it, and a line chart is still created with create.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task ChartInteropCreatesStackedChartWithCreateStacked()
+    {
+        // Arrange
+        var runtime = new RecordingJsRuntime();
+        var host = new ElementReference("host-1");
+        var stacked = new ChartData([_start, _start.AddSeconds(1)], [new ChartSeries("load", [1.0, 2.0]), new ChartSeries("memory", [3.0, 4.0])], true);
+        var lines = CreateData(1.0);
+        using var source = new CancellationTokenSource();
+
+        await using var interop = new ChartInterop(runtime);
+        await using var lineInterop = new ChartInterop(runtime);
+
+        // Act
+        await interop.RenderAsync(host, "Memory per program", stacked, source.Token);
+        await interop.RenderAsync(host, "Memory per program", stacked, source.Token);
+        await lineInterop.RenderAsync(host, "Load", lines, source.Token);
+
+        // Assert
+        Assert.AreSequenceEqual(_stackedSequence, runtime.Calls.Select(call => call.Identifier).ToArray(), "a stacked chart is created with createStacked and updated, a line chart with create");
+        Assert.AreEqual("module", runtime.Calls[1].Target, "createStacked goes to the module");
+        Assert.HasCount(4, runtime.Calls[1].Arguments, "the same four arguments as create");
+        Assert.AreEqual(host, runtime.Calls[1].Arguments[0], "host element");
+        Assert.AreEqual("Memory per program", runtime.Calls[1].Arguments[1], "title");
+        Assert.AreSequenceEqual(_labels, (string[])runtime.Calls[1].Arguments[2]!, "labels");
+        AssertColumns(stacked.ToColumns(), (double?[][])runtime.Calls[1].Arguments[3]!);
+        Assert.AreEqual("chart", runtime.Calls[2].Target, "the update goes to the stacked chart object");
     }
 
     /// <summary>

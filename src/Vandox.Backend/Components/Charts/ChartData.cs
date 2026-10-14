@@ -21,14 +21,26 @@ public sealed class ChartData
     /// <param name="times">The points in time, strictly ascending</param>
     /// <param name="series">The series, each with one value per point in time</param>
     public ChartData(IReadOnlyList<DateTimeOffset> times, IReadOnlyList<ChartSeries> series)
+        : this(times, series, false)
+    {
+    }
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="ChartData"/> class.
+    /// </summary>
+    /// <param name="times">The points in time, strictly ascending</param>
+    /// <param name="series">The series, each with one value per point in time</param>
+    /// <param name="stacked">Whether the series are drawn stacked; a stacked series has a value at every point</param>
+    public ChartData(IReadOnlyList<DateTimeOffset> times, IReadOnlyList<ChartSeries> series, bool stacked)
     {
         ArgumentNullException.ThrowIfNull(times);
         ArgumentNullException.ThrowIfNull(series);
 
         _times = [.. times];
         _series = [.. series];
+        Stacked = stacked;
 
-        Validate(_times, _series);
+        Validate(_times, _series, stacked);
     }
 
     #endregion // Constructors
@@ -44,6 +56,11 @@ public sealed class ChartData
     /// Gets the series.
     /// </summary>
     public IReadOnlyList<ChartSeries> Series => _series;
+
+    /// <summary>
+    /// Gets a value indicating whether the series are drawn stacked.
+    /// </summary>
+    public bool Stacked { get; }
 
     #endregion // Properties
 
@@ -72,8 +89,9 @@ public sealed class ChartData
     /// </summary>
     /// <param name="times">The points in time</param>
     /// <param name="series">The series</param>
-    /// <exception cref="ArgumentException">There is no series, a series has another length than the times, the times do not ascend strictly or a value is not a finite number</exception>
-    private static void Validate(DateTimeOffset[] times, ChartSeries[] series)
+    /// <param name="stacked">Whether the series are drawn stacked, so that every series needs a value at every point</param>
+    /// <exception cref="ArgumentException">There is no series, a series has another length than the times, the times do not ascend strictly, a value is not a finite number or a stacked series has a gap</exception>
+    private static void Validate(DateTimeOffset[] times, ChartSeries[] series, bool stacked)
     {
         if (series.Length == 0)
         {
@@ -98,6 +116,27 @@ public sealed class ChartData
             if (item.Values.Any(value => value is double.NaN or double.PositiveInfinity or double.NegativeInfinity))
             {
                 throw new ArgumentException($"The series '{item.Label}' holds a value that is not a finite number.", nameof(series));
+            }
+
+            if (stacked)
+            {
+                RequireValues(item);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Checks that a series to be stacked has a value at every point.
+    /// </summary>
+    /// <param name="item">The series</param>
+    /// <exception cref="ArgumentException">The series has a gap</exception>
+    private static void RequireValues(ChartSeries item)
+    {
+        for (var index = 0; index < item.Values.Count; index++)
+        {
+            if (item.Values[index] is null)
+            {
+                throw new ArgumentException($"The stacked series '{item.Label}' has no value at point {index}.", nameof(item));
             }
         }
     }

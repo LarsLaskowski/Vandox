@@ -15,7 +15,7 @@ public static class StorageLimits
     /// <summary>
     /// The database schema version this build reads and writes.
     /// </summary>
-    public const int SchemaVersion = 9;
+    public const int SchemaVersion = 10;
 
     /// <summary>
     /// The largest size of the serialized data of one incident in UTF-8 bytes.
@@ -141,6 +141,21 @@ public static class StorageLimits
     /// The largest limit of a template list.
     /// </summary>
     public const int MaxTemplateListLimit = 1000;
+
+    /// <summary>
+    /// The largest number of UTF-16 characters of an incident note.
+    /// </summary>
+    public const int MaxNoteChars = 1800;
+
+    /// <summary>
+    /// The largest limit of an incident list page.
+    /// </summary>
+    public const int MaxIncidentListLimit = 100;
+
+    /// <summary>
+    /// The largest number of notes read for one incident.
+    /// </summary>
+    public const int MaxNotesRead = 64;
 
     #endregion // Constants
 }

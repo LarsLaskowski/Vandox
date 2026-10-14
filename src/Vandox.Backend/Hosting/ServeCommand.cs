@@ -9,6 +9,7 @@ using Microsoft.Extensions.Logging;
 
 using Vandox.Backend.Cli;
 using Vandox.Backend.Components;
+using Vandox.Backend.Incidents;
 using Vandox.Backend.Logging;
 using Vandox.Backend.Logs;
 using Vandox.Backend.Security;
@@ -206,7 +207,10 @@ internal static class ServeCommand
         builder.Services.AddSingleton<IRecordReader>(store);
         builder.Services.AddSingleton<ILogSearcher>(store);
         builder.Services.AddSingleton<ILogTemplateReader>(store);
-        builder.Services.AddSingleton<ILogExplorer>(_ => new GatedLogExplorer(store, LogsView.MaxConcurrentQueries));
+        builder.Services.AddSingleton(_ => new WebReaderGate(LogsView.MaxConcurrentQueries));
+        builder.Services.AddSingleton<ILogExplorer>(provider => new GatedLogExplorer(store, provider.GetRequiredService<WebReaderGate>()));
+        builder.Services.AddSingleton<IIncidentBrowser>(provider => new GatedIncidentBrowser(store, provider.GetRequiredService<WebReaderGate>()));
+        builder.Services.AddSingleton(provider => new IncidentWindowReader(new GatedRecordReader(store, provider.GetRequiredService<WebReaderGate>())));
         builder.Services.AddSingleton(hooks.Clock ?? TimeProvider.System);
         builder.Services.AddSingleton<IImportTracker>(store);
         builder.Services.Configure<HostOptions>(options => options.ShutdownTimeout = _shutdownTimeout);
@@ -237,6 +241,7 @@ internal static class ServeCommand
         app.MapStaticAssets().AllowAnonymous();
         HealthEndpoint.Map(app, checker, loggerFactory.CreateLogger("health"));
         WebAuthentication.MapLogout(app);
+        IncidentNoteEndpoint.Map(app);
         app.MapRazorComponents<App>().AddInteractiveServerRenderMode(options => options.ContentSecurityFrameAncestorsPolicy = null);
 
         return app;

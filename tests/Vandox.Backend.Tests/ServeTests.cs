@@ -7,6 +7,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Time.Testing;
 
 using Vandox.Backend.Hosting;
+using Vandox.Backend.Incidents;
 using Vandox.Backend.Logs;
 using Vandox.Backend.Security;
 using Vandox.Storage;
@@ -971,9 +972,78 @@ public class ServeTests
         Assert.IsInstanceOfType<GatedLogExplorer>(root, "the explorer is gated");
         Assert.AreSame(root, inFirst, "the first scope gets the same explorer, so the slots count across circuits");
         Assert.AreSame(root, inSecond, "the second scope gets the same explorer");
-        Assert.AreEqual(LogsView.MaxConcurrentQueries, fields.OfType<SemaphoreSlim>().Single().CurrentCount, "the slots of an idle gate");
+        Assert.AreEqual(LogsView.MaxConcurrentQueries, fields.OfType<SemaphoreSlim>().Concat(fields.OfType<WebReaderGate>().SelectMany(FieldValues).OfType<SemaphoreSlim>()).Single().CurrentCount, "the slots of an idle gate, held by the explorer or by the gate it shares");
         Assert.AreSame<object>(store, fields.OfType<ILogExplorer>().Single(), "the gate wraps the store");
         Assert.AreSame(TimeProvider.System, clock, "the pages get the system clock");
+    }
+
+    /// <summary>
+    /// The logs explorer, the incident browser and the reader of the incident window are built on one gate of the stated slots over the store, the same for every scope.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task ServeSharesOneReaderGateBetweenLogsAndIncidents()
+    {
+        // Arrange
+        using var fixture = new BackendFixture();
+        using var stop = CancellationTokenSource.CreateLinkedTokenSource(TestContext.CancellationToken);
+
+        IServiceProvider? services = null;
+
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var hooks = new ServeHooks
+                    {
+                        Built = provider => services = provider,
+                        Started = _ => started.TrySetResult()
+                    };
+        var run = fixture.RunAsync([], hooks, stop.Token);
+
+        await started.Task.WaitAsync(TimeSpan.FromSeconds(20), TestContext.CancellationToken);
+
+        Assert.IsNotNull(services, "the Built hook ran before the service started");
+
+        // Act
+        var explorer = services.GetRequiredService<ILogExplorer>();
+        var browser = services.GetRequiredService<IIncidentBrowser>();
+        var window = services.GetRequiredService<IncidentWindowReader>();
+        var gate = services.GetRequiredService<WebReaderGate>();
+        var store = services.GetRequiredService<ILogSearcher>();
+
+        using var scope = services.CreateScope();
+
+        var browserInScope = scope.ServiceProvider.GetRequiredService<IIncidentBrowser>();
+        var windowInScope = scope.ServiceProvider.GetRequiredService<IncidentWindowReader>();
+        var gateInScope = scope.ServiceProvider.GetRequiredService<WebReaderGate>();
+        var records = FieldValues(window).OfType<IRecordReader>().ToArray();
+
+        await stop.CancelAsync();
+        await run.WaitAsync(TimeSpan.FromSeconds(20), TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsInstanceOfType<GatedLogExplorer>(explorer, "the explorer is gated");
+        Assert.IsInstanceOfType<GatedIncidentBrowser>(browser, "the browser is gated");
+        Assert.AreSame(browser, browserInScope, "the browser is the same for every scope");
+        Assert.AreSame(window, windowInScope, "the window reader is the same for every scope");
+        Assert.AreSame(gate, gateInScope, "the gate is the same for every scope");
+        Assert.AreSame(gate, FieldValues(explorer).OfType<WebReaderGate>().Single(), "the explorer uses the gate");
+        Assert.AreSame(gate, FieldValues(browser).OfType<WebReaderGate>().Single(), "the browser uses the same gate");
+        Assert.HasCount(1, records, "the window reader holds one record reader");
+        Assert.IsInstanceOfType<GatedRecordReader>(records[0], "the record reader of the window reader is gated");
+        Assert.AreSame(gate, FieldValues(records[0]).OfType<WebReaderGate>().Single(), "the record reader uses the same gate");
+        Assert.AreEqual(LogsView.MaxConcurrentQueries, FieldValues(gate).OfType<SemaphoreSlim>().Single().CurrentCount, "the slots of the idle gate");
+        Assert.AreSame<object>(store, FieldValues(explorer).OfType<ILogExplorer>().Single(), "the explorer wraps the store");
+        Assert.AreSame<object>(store, FieldValues(browser).OfType<IIncidentBrowser>().Single(), "the browser wraps the store");
+        Assert.AreSame<object>(store, FieldValues(records[0]).OfType<IRecordReader>().Single(), "the record reader wraps the store");
+    }
+
+    /// <summary>
+    /// Reads the values of the instance fields of an object.
+    /// </summary>
+    /// <param name="instance">The object</param>
+    /// <returns>The values</returns>
+    private static object?[] FieldValues(object instance)
+    {
+        return instance.GetType().GetFields(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public).Select(field => field.GetValue(instance)).ToArray();
     }
 
     /// <summary>

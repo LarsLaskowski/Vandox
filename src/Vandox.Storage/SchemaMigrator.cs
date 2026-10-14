@@ -152,6 +152,18 @@ internal static class SchemaMigrator
                                                               ) STRICT
                                                               """,
                                                               "CREATE INDEX incidents_started_at ON incidents(started_at)"
+                                                          ]),
+                                                      new(10,
+                                                          [
+                                                              """
+                                                              CREATE TABLE incident_notes (
+                                                                written_for INTEGER PRIMARY KEY,
+                                                                incident_id INTEGER NOT NULL REFERENCES incidents(id),
+                                                                text TEXT NOT NULL CHECK (length(CAST(text AS BLOB)) BETWEEN 1 AND 5400),
+                                                                updated_at INTEGER NOT NULL
+                                                              ) STRICT
+                                                              """,
+                                                              "CREATE INDEX incident_notes_incident ON incident_notes(incident_id, written_for)"
                                                           ])
                                                   ];
 

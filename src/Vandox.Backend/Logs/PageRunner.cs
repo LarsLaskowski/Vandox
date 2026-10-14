@@ -12,7 +12,7 @@ internal sealed class PageRunner : IDisposable
 
     private readonly ActionSequence _actions;
 
-    private readonly ILogger _logger;
+    private readonly Action<Exception> _logFailure;
 
     private readonly string _deadlineText;
 
@@ -34,8 +34,29 @@ internal sealed class PageRunner : IDisposable
     /// <param name="fail">Shows a text on the page</param>
     internal PageRunner(TimeProvider clock, ILogger logger, string deadlineText, string failureText, Action<string> fail)
     {
+        ArgumentNullException.ThrowIfNull(logger);
+
         _actions = new ActionSequence(clock);
-        _logger = logger;
+        _logFailure = logger.LogsReadFailed;
+        _deadlineText = deadlineText;
+        _failureText = failureText;
+        _fail = fail;
+    }
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="PageRunner"/> class that reports a failure through a callback.
+    /// </summary>
+    /// <param name="clock">The clock of the deadlines</param>
+    /// <param name="logFailure">Logs the failure of the store</param>
+    /// <param name="deadlineText">The text shown when an action runs into the deadline</param>
+    /// <param name="failureText">The text shown when the store fails</param>
+    /// <param name="fail">Shows a text on the page</param>
+    internal PageRunner(TimeProvider clock, Action<Exception> logFailure, string deadlineText, string failureText, Action<string> fail)
+    {
+        ArgumentNullException.ThrowIfNull(logFailure);
+
+        _actions = new ActionSequence(clock);
+        _logFailure = logFailure;
         _deadlineText = deadlineText;
         _failureText = failureText;
         _fail = fail;
@@ -79,7 +100,7 @@ internal sealed class PageRunner : IDisposable
                 return;
             }
 
-            _logger.LogsReadFailed(exception);
+            _logFailure(exception);
             Report(run, _failureText);
         }
     }

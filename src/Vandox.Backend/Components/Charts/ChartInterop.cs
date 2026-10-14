@@ -87,7 +87,7 @@ public sealed class ChartInterop : IAsyncDisposable
 
             var labels = data.Series.Select(series => series.Label).ToArray();
 
-            _chart = await _module.InvokeAsync<IJSObjectReference>("create", cancellationToken, [host, title, labels, columns]).ConfigureAwait(false);
+            _chart = await _module.InvokeAsync<IJSObjectReference>(data.Stacked ? "createStacked" : "create", cancellationToken, [host, title, labels, columns]).ConfigureAwait(false);
         }
         finally
         {

@@ -33,7 +33,7 @@ readable by the next, whichever language implements it, so the schema below is p
 
 ## Schema
 
-The schema version is stored in `meta.schema_version`; the current version is 9 (step 9 adds the table `incidents` with its index, empty; step 8 adds the tables `log_templates`,
+The schema version is stored in `meta.schema_version`; the current version is 10 (step 10 adds the table `incident_notes` with its index, empty; step 9 adds the table `incidents` with its index, empty; step 8 adds the tables `log_templates`,
 `log_template_hours` and `log_source_hours` with their indexes, empty, so log lines stored before it have no template statistics until `vandoxd templates` rebuilds them; step 7 adds `import_files.attempt`, `INTEGER NOT NULL DEFAULT 0`, and `import_files.hashes_attempt`, `INTEGER`, and the table `import_line_hashes`, so existing rows get attempt 0 and no line hashes; step 6 adds `import_files.head_sha256`, `continues_id` and `start_offset` and the index `import_files_head`; step 4 adds `log_lines.host`, `TEXT NOT NULL DEFAULT ''`, so lines stored before it get an empty host; step 5 adds `log_lines.event`, `TEXT NOT NULL DEFAULT ''`, so lines stored before it get an empty event). Times are Unix nanoseconds in `INTEGER` columns.
 All tables are `STRICT`.
 
@@ -49,11 +49,12 @@ All tables are `STRICT`.
 | `log_template_hours` | `template_id`, `hour` (the start of a UTC hour), `count` (the template's stored lines in that hour, at least 1); primary key `(template_id, hour)`, without row ID |
 | `log_source_hours` | `source`, `hour`, `count` (the stored log lines of the source in that hour, at least 1); primary key `(source, hour)`, without row ID |
 | `incidents` | one row per incident: `id` (`AUTOINCREMENT`, so a number that was merged away is never given again), `started_at` and `ended_at` (the window, `ended_at > started_at`), `first_kill_at`, `kill_count` (at least 1), `created_at`, `updated_at` and `data` (the incident as JSON, at most 8,388,608 UTF-8 bytes) |
+| `incident_notes` | the notes of the incidents: `written_for` (the incident number the note was written for, the primary key; numbers are never reused), `incident_id` (the incident the note belongs to now, a foreign key to `incidents(id)` with no `ON DELETE` action, so a delete of an incident that still has notes fails), `text` (`CHECK (length(CAST(text AS BLOB)) BETWEEN 1 AND 5400)`: 1 to 5,400 UTF-8 bytes, the size of 1,800 UTF-16 characters at most, counted in bytes because SQLite's `length()` of a text stops at the first U+0000) and `updated_at` |
 | `import_line_hashes` | rows of line hashes of an imported content: `file_id`, `attempt`, `first_offset`, `last_offset` and `hashes` (a blob of 16-byte entries, 1 to 4,096, in ascending order of their line ends); the primary key `(file_id, attempt, last_offset)` is its index |
 
 Indexes: a unique index on `records(agent_id, seq)` for origin `agent`; `records(kind, source, captured_at)`;
 `records(kind, captured_at)`; `metrics(source, name, captured_at)`; `import_files(head_sha256, source_type, size)` for complete rows with a head key (`import_files_head`);
-`log_templates(source, first_seen)` (`log_templates_source_first_seen`); `log_template_hours(hour)` (`log_template_hours_hour`); `incidents(started_at)` (`incidents_started_at`).
+`log_templates(source, first_seen)` (`log_templates_source_first_seen`); `log_template_hours(hour)` (`log_template_hours_hour`); `incidents(started_at)` (`incidents_started_at`); `incident_notes(incident_id, written_for)` (`incident_notes_incident`).
 
 - `agent_id`, `seq`, `boot_id` and `clock_offset_ns` are `NULL` when absent (`seq` for any origin other than `agent`). `source` and
   `captured_at` of a metric are copied from `records`, so one index serves a time series in order.
@@ -138,9 +139,23 @@ Indexes: a unique index on `records(agent_id, seq)` for origin `agent`; `records
   is also what the incident builder measures its timeline with. The stored incidents whose window overlaps the new one (`started_at <
   end` and `ended_at > start`, so windows that only touch do not overlap) are selected oldest number first: none inserts a row
   (`created_at = updated_at =` the save time); otherwise the lowest number is kept and the others are deleted (the number of deleted
-  ones is reported as merged), and when nothing was deleted and window, first kill, kill count and data are equal the row is left
-  untouched (`unchanged`, `updated_at` too), else every column but `id` and `created_at` is replaced. A null incident is an argument
-  error.
+  ones is reported as merged; **the notes of each deleted incident are first moved to the kept one in the same transaction, each keeping
+  its `written_for`**, see *Incident notes*), and when nothing was deleted and window, first kill, kill count and data are equal the row is left
+  untouched (`unchanged`, `updated_at` too), else every column but `id` and `created_at` is replaced; an update and an unchanged save keep
+  the notes of the incident. A null incident is an argument error.
+- **Incident notes:** `SaveIncidentNoteAsync` takes the writer lock and one immediate transaction, the first write of the web UI. The incident
+  must exist, else the outcome is `NotFound` and nothing changes. A note is written for one incident number (`written_for`) and belongs to one
+  incident (`incident_id`); the note of an incident is the one with `written_for` equal to its number, and the notes moved to it by a merge are the
+  others. A non-empty text with `written_for` equal to the incident upserts (`INSERT … ON CONFLICT(written_for) DO UPDATE … WHERE
+  incident_notes.incident_id = excluded.incident_id`; a conflict with the row of another incident updates nothing and is `NotFound`), with another
+  `written_for` it updates only a row of that incident, else `NotFound`. An **empty text deletes** the row of `written_for` and the incident (`Deleted`,
+  also when there was none for the incident's own number). The edit is validated first, with these exact errors (`InvalidNoteException`, a
+  `StoreException`): `store: invalid note: incident ID must be positive`, `written for must be positive`, `text is longer than 1800 characters` (UTF-16
+  characters, 1,800 accepted), `text must not contain U+0000`, `text is not valid UTF-16` and `saved at must be within the storable range`; a null
+  edit or text is an argument error. U+0000 is refused because `length()` ends at it, so a character check of the table would let a NUL hide
+  characters; the table checks the bytes whatever the text holds. A database error is `store: saving note: …`. A note of an incident survives every
+  re-run of `vandoxd incidents` that updates or keeps the incident, and follows it when it is merged; retention (#46) must move or keep notes, as an
+  incident with notes cannot be deleted.
 
 ## Reading
 
@@ -159,12 +174,23 @@ Indexes: a unique index on `records(agent_id, seq)` for origin `agent`; `records
   of the record query, and counted; a `data` value that does not decode (including bytes that are not valid UTF-8 in a member the incident reads; such bytes in an unknown member are skipped unchecked) is `store: reading incidents: decoding incident data`.
   The `data` column is read from its UTF-8 bytes, like a payload. A page holds every returned incident decoded at once: in the worst
   case up to 10,000 incidents per page, each decoded from up to 8 MiB of JSON, so the memory of a read grows with the limit. A caller
-  that serves a user pages with a small limit (open limit for #27, which adds the first caller).
+  that serves a user does not page through this read: the web UI reads *incident summaries*, *one incident* and *incident notes* below.
+- **Incident summaries** (`IncidentSummariesAsync`) return incidents newest first (window start descending, then number descending), at most
+  `limit` of 1 to 100 per call, continuing after a position (`Before`: a start and a number; a row follows when its start is earlier, or equal and
+  its number lower, so equal starts neither repeat nor skip). A summary carries the columns (number, window, first and last kill, number of kills,
+  created and updated), the first victim, the hypothesis and whether the incident has notes; the first victim, last kill and hypothesis are
+  read from the document by a projection that skips every other member (timeline, metrics, templates), one row's bytes at a time, so a page
+  holds one document's bytes at once. The exact errors: `store: invalid query: limit must be between 1 and 100`, `before must be within the
+  storable range`, `before id must be positive`; undecodable data is `store: reading incidents: decoding incident data`.
+- **One incident** (`IncidentAsync`) returns the stored incident of a number decoded whole (up to 8 MiB of JSON), or `null`; a number that is not
+  positive is `store: invalid query: incident ID must be positive`.
+- **Incident notes** (`IncidentNotesAsync`) return the notes that belong to an incident by `written_for`, at most 64, with `More` set when a 65th
+  exists; the same rule for the incident ID.
 - The template statistics are read by the queries of *Log templates* in [Detection, alerts and reports](detection-and-reports.md)
   (template of a line, hourly counts, new templates, templates above their usual level), with the same time range and limit rules,
   on a reader connection. The cost of the usual-level query is not bounded by its range or limit; a cancelled token or deadline interrupts it
   (*Database file and connections*; *Limits of templates* there).
-- Callers depend on small interfaces (record writer, record reader, log searcher, log explorer, log template reader, incident store, import tracker). The real store is tested against
+- Callers depend on small interfaces (record writer, record reader, log searcher, log explorer, log template reader, incident store, incident browser, import tracker). The real store is tested against
   real files; a consumer whose behavior depends on the store's semantics (such as "a resent batch is stored once") is tested against
   the real store. Fakes for other consumers only record calls and return what the test scripts.
 
@@ -288,7 +314,7 @@ every log line of the range (the benchmark shows it).
 ## Retention (planned)
 
 Raw data is kept 30 days, 5-minute rollups 1 year, hourly rollups 3 years (the template statistics count as hourly rollups), incidents
-unlimited, logs 90 days, process and connection snapshots 30 days. Incidents are kept without limit, and an incident that no rebuilt one overlaps is kept as it is (*Incidents* in [Detection, alerts and reports](detection-and-reports.md)). Open limit for #46: once retention deletes lines, a re-run rebuilds an incident whose window lines have partly expired from what is left and replaces the richer stored one (fewer kills, a shorter timeline); retention must prevent that (keep the data of incident windows, or stop rebuilding incidents older than the log retention). Forged incidents (up to 8 MiB each) outlive the lines they came from, so retention must bound them, too. Open limit for #46: a template rebuild counts only the lines still stored, so after retention it would lose the history of expired lines (retention must make the rebuild refuse or keep that history). Retention and rollups are the backend's own job and **are not implemented yet**; deleting log lines must also remove
+unlimited, logs 90 days, process and connection snapshots 30 days. Incidents are kept without limit, and an incident that no rebuilt one overlaps is kept as it is (*Incidents* in [Detection, alerts and reports](detection-and-reports.md)). Open limit for #46: once retention deletes lines, a re-run rebuilds an incident whose window lines have partly expired from what is left and replaces the richer stored one (fewer kills, a shorter timeline); retention must prevent that (keep the data of incident windows, or stop rebuilding incidents older than the log retention). Forged incidents (up to 8 MiB each) outlive the lines they came from, so retention must bound them, too. Open limit for #46: an incident with notes cannot be deleted (the foreign key of `incident_notes` has no cascade), so retention must move or keep the notes before it deletes an incident. Open limit for #46: a template rebuild counts only the lines still stored, so after retention it would lose the history of expired lines (retention must make the rebuild refuse or keep that history). Retention and rollups are the backend's own job and **are not implemented yet**; deleting log lines must also remove
 their `log_fts` entries (the FTS5 `delete` command with the old message).
 
 ## Write throughput
@@ -311,6 +337,7 @@ weakened silently, and `synchronous=FULL` stays unless the Product Manager decid
 - [0096](../decisions/0096-outage-incidents-rebuilt-from-stored-data-merged-by-overlapping-windows.md) — why incidents are matched by overlapping windows, kept per number and saved one transaction each, and why the record query pages by ID.
 - [0097](../decisions/0097-reader-statements-interrupted-by-a-progress-handler-bound-to-the-token.md) — why a progress handler interrupts reader statements and why the interruption is an `OperationCanceledException`.
 - [0106](../decisions/0106-logs-view-address-as-the-view-bounded-search-pages-template-lines-by-normalization.md) — why the logs view's search chooses between the index and a bounded scan and finds a template's lines by normalizing candidates.
+- [0107](../decisions/0107-incidents-view-summaries-notes-per-incident-number-time-links-to-the-logs.md) — why notes are rows per incident number moved in the merge, and why the incidents view reads summaries.
 
 ## Not here
 
@@ -320,4 +347,4 @@ weakened silently, and `synchronous=FULL` stays unless the Product Manager decid
 
 ## Implementation
 
-`Vandox.Storage` (`SqliteStore`, `SchemaMigrator`, `BatchWriter`, `BatchValidator`, `FtsQuery`, `TemplateTally`, `TemplateRebuilder`, `TemplateQueries`, `IncidentRepository`, `ReaderQuery`, `LogFinder`, `LogFinderQueries`, `LogCriteria`, `LogFilterRules`, `LogExplorerQueries`, `TemplateTerms`, `StorageLimits`).
+`Vandox.Storage` (`SqliteStore`, `SchemaMigrator`, `BatchWriter`, `BatchValidator`, `FtsQuery`, `TemplateTally`, `TemplateRebuilder`, `TemplateQueries`, `IncidentRepository`, `IncidentNoteRepository`, `ReaderQuery`, `LogFinder`, `LogFinderQueries`, `LogCriteria`, `LogFilterRules`, `LogExplorerQueries`, `TemplateTerms`, `StorageLimits`).

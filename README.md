@@ -463,6 +463,25 @@ invalid, the database cannot be opened, the store failed or the run was interrup
 usage error. The log goes to standard error as JSON lines. The command reads every stored log line, so it takes a while on
 a large database; details and limits are in `docs/areas/detection-and-reports.md`.
 
+### Look at incidents
+
+After `vandoxd incidents` the web UI shows the stored incidents under *Incidents* (`/incidents`). All times are **UTC**.
+
+- **The list** (`/incidents`) shows the incidents newest first, 20 per page: the number, the time of the first kill, the duration from
+  the first to the last kill, the number of kills, the victim, the programs that grew most (or `unknown` / `none`), whether a backup ran
+  and a marker for an incident with a note. *Older incidents* shows the next 20, *Newest incidents* goes back to the first page.
+- **An incident** (`/incidents/<number>`) shows its window, its kills, the hypothesis, the timeline (a kill, a boot and the backup
+  start and end are marked), the connection peak, the metric extremes and the new and unusually frequent log templates. Three charts
+  show the memory per program (stacked, the five largest programs and the rest), the available memory and swap, and the number of
+  connections over the window. A chart holds at most 300 snapshots and says where it stops; a window without stored snapshots or metrics shows
+  no chart. An incident that does not exist (for example one that a re-run merged into another) says so.
+- **Every time links to the logs of that moment**: a time on the incident page opens *Logs* with the range from 30 seconds before to
+  5 minutes after it, so the moment is at the top of the first page.
+- **A note per incident** (up to 1,800 characters): write it in the text area and press *Save note*; saving an empty text removes it.
+  A note stays with its incident when `vandoxd incidents` runs again, and when incidents are merged the notes of the merged ones are
+  shown on the incident that remains, each marked `Written for incident #<n>`.
+- The incident pages need the web login like every page, and saving a note needs the session and the form's token, as signing out does.
+
 ### Write the forensics report
 
 `vandoxd report` writes a forensics report over the whole stored period as Markdown to standard output. Run it after

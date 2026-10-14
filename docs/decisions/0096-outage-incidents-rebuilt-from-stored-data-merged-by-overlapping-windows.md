@@ -138,7 +138,8 @@ duplicating. The rules, defaults and limits are in [Detection, alerts and report
 ## Consequences
 
 - An incident's number is stable across re-runs as long as its window keeps overlapping; merging two incidents keeps
-  the older number. Anything attached to an incident later (notes, #27) has to follow a merge.
+  the older number. The notes of the incidents view (#27) follow a merge: they are moved to the kept incident in the
+  merge's transaction ([0107](0107-incidents-view-summaries-notes-per-incident-number-time-links-to-the-logs.md)).
 - The reconstruction reads every stored log line on each run; its time grows with the stored lines, its memory does
   not. The template spike query it calls is not bounded by its range (0095); the sub-command runs off any request
   path.
@@ -151,8 +152,8 @@ duplicating. The rules, defaults and limits are in [Detection, alerts and report
   ([0063](0063-storage-schema-records-table-typed-metric-and-log-tables-json-payloads.md)), so the import skips such a
   snapshot and only a database written by an earlier build can hold one.
 - `IncidentsAsync` returns every incident of a page decoded at once, up to the query limit of 10,000, each from up to
-  8 MiB of JSON; it has no product caller yet. Its first caller, the incidents view (#27), pages with a small limit
-  instead of relying on the store (#213).
+  8 MiB of JSON. The incidents view (#27) does not page through it: it reads summaries 20 at a time and one incident by
+  its number (#213, [0107](0107-incidents-view-summaries-notes-per-incident-number-time-links-to-the-logs.md)).
 - A reboot without a stored boot line is not seen; snapshots before it then count as the growth baseline.
 - Backups are recognized only by the program name `pzstd`; another backup program shows as growth or consumer, not as
   a backup. To revisit with #36 or with real snapshots.

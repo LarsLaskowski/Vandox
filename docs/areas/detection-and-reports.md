@@ -290,7 +290,8 @@ covered hours than the minimum no usual level is known and nothing is reported.
 
 An **incident** is one outage reconstructed from the stored data: the OOM kills whose windows overlap, a timeline of the events of the
 window, a structured hypothesis about the cause, metric extremes, the connection peak and the log templates of the window. It is
-stored (see the storage area, *Incidents*) and kept without limit.
+stored (see the storage area, *Incidents*) and kept without limit. The web UI shows them: a list and a page per incident, with charts of the window,
+every time linked to the logs of that moment, and a note per incident ([Web UI](web-ui.md), *Incidents view*).
 
 ### When incidents are built
 
@@ -355,6 +356,10 @@ connection snapshot gives no peak (`connections` null).
 - A rebuilt incident is matched to the stored ones whose window overlaps it (storage area, *Writing*, *Incidents*): the oldest number
   keeps the incident and takes the new content, the other overlapped ones are merged into it, an incident without overlap is added,
   and an unchanged one is left untouched. A number that was merged away is never reused.
+- **Notes stay with the incident.** The note a user wrote for an incident ([Web UI](web-ui.md), *Incidents view*) survives every re-run that
+  updates or keeps the incident (the number is kept), and a note of an incident that a re-run merges away is moved to the incident that
+  survives, in the same transaction, keeping the number it was written for (storage area, *Writing*, *Incident notes*). A re-run never
+  deletes or rewrites a note.
 - A stored incident that no rebuilt one overlaps is **kept** as it is, because its lines may have expired.
 - Every incident is saved in its own transaction: an interrupted run keeps what it saved, and the next run completes it.
 - An incident the store refuses (a rule of the storage area, such as the 8 MiB bound) is **skipped**: it is logged as a warning with
@@ -599,6 +604,7 @@ level of the mail services (process state, ports, logs), never individual mail a
   hours the source logged.
 - [0096](../decisions/0096-outage-incidents-rebuilt-from-stored-data-merged-by-overlapping-windows.md) — why incidents are rebuilt by a
   sub-command, matched by overlapping windows, given a structured hypothesis from fixed rules and bounded in memory and size.
+- [0107](../decisions/0107-incidents-view-summaries-notes-per-incident-number-time-links-to-the-logs.md) — why notes follow an incident through updates and merges and how the web UI shows incidents.
 - [0100](../decisions/0100-forensics-report-as-markdown-from-vandoxd-report.md) — why the forensics report is Markdown from a
   sub-command, computed on demand in bounded passes, with external text in code spans, and why the web page comes separately.
 - [0101](../decisions/0101-forensics-rules-share-of-outages-against-observed-hours-binomial-tail.md) — why the report's rules compare
@@ -612,7 +618,7 @@ level of the mail services (process state, ports, logs), never individual mail a
 - Telegram delivery and who may receive messages: the notification area.
 - How gaps are recorded and how batches are identified: the agent area and the wire format.
 - Where records are stored, and the tables of the template statistics: the storage area.
-- Storing events, the incidents view (issue #27) and the web page of the forensics report ("[Web] Forensics report page"): later
+- Storing events and the web page of the forensics report ("[Web] Forensics report page"): later
   changes.
 - Live incidents from the agent's records: issue #53.
 

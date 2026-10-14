@@ -1,0 +1,332 @@
+@page "/incidents/{Id:long}"
+
+<PageTitle>Incident #@Id</PageTitle>
+
+<h1>Incident #@Id</h1>
+
+<p class="back"><a href="incidents">All incidents</a></p>
+
+@if (_failure.Length > 0)
+{
+    <p class="error" role="alert">@_failure</p>
+}
+
+@if (_loading)
+{
+    <p class="status">@IncidentsView.Loading</p>
+}
+
+@if (_unknown)
+{
+    <p class="status">@IncidentsView.UnknownIncident</p>
+}
+
+@if (_detail is not null)
+{
+    <section class="incident-header" aria-label="Summary">
+        <dl>
+            <dt>Window start (UTC)</dt>
+            <dd>@LogsView.ShowSeconds(_detail.Start)</dd>
+            <dt>Window end (UTC)</dt>
+            <dd>@LogsView.ShowSeconds(_detail.End)</dd>
+            <dt>First kill (UTC)</dt>
+            <dd><a href="@IncidentsView.LogsHref(_detail.FirstKillAt)">@LogsView.ShowSeconds(_detail.FirstKillAt)</a></dd>
+            <dt>Last kill (UTC)</dt>
+            <dd><a href="@IncidentsView.LogsHref(_detail.LastKillAt)">@LogsView.ShowSeconds(_detail.LastKillAt)</a></dd>
+            <dt>Duration</dt>
+            <dd>@_detail.Duration</dd>
+            <dt>Kills</dt>
+            <dd>@_detail.KillCount</dd>
+            <dt>Built (UTC)</dt>
+            <dd>@LogsView.ShowSeconds(_detail.CreatedAt)</dd>
+            <dt>Last changed (UTC)</dt>
+            <dd>@LogsView.ShowSeconds(_detail.UpdatedAt)</dd>
+        </dl>
+    </section>
+
+    <section aria-label="Kills">
+        <h2>Kills</h2>
+        <div class="table-scroll">
+            <table class="incident-kills">
+                <thead>
+                    <tr>
+                        <th>Time (UTC)</th>
+                        <th>Host</th>
+                        <th>Victim</th>
+                        <th>PID</th>
+                        <th>Anonymous memory</th>
+                        <th>OOM score adjustment</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var kill in _detail.Kills)
+                    {
+                        <tr>
+                            <td class="time"><a href="@kill.LogsHref">@LogsView.ShowSeconds(kill.At)</a></td>
+                            <td><ExternalText Runs="kill.Host" /></td>
+                            <td><ExternalText Runs="kill.Victim" /></td>
+                            <td>@kill.Pid</td>
+                            <td>@kill.AnonRss</td>
+                            <td>@kill.OomScoreAdj</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+        @if (_detail.KillCount > _detail.Kills.Count)
+        {
+            <p class="status">@(_detail.KillCount - _detail.Kills.Count) further kills are not listed.</p>
+        }
+    </section>
+
+    <section aria-label="Hypothesis">
+        <h2>Hypothesis</h2>
+        <dl>
+            <dt>Programs that grew</dt>
+            <dd>
+                @if (_detail.GrowthState.Length > 0)
+                {
+                    <span>@_detail.GrowthState</span>
+                }
+                @foreach (var growth in _detail.Growth)
+                {
+                    <span class="growth"><ExternalText Runs="growth.Program" /> <span>@growth.Amount</span></span>
+                }
+            </dd>
+            <dt>Largest consumers</dt>
+            <dd>
+                @foreach (var consumer in _detail.Consumers)
+                {
+                    <span class="growth"><ExternalText Runs="consumer.Program" /> <span>@consumer.Amount</span></span>
+                }
+            </dd>
+            <dt>Backup</dt>
+            <dd>
+                <span>@_detail.Backup</span>
+                @foreach (var program in _detail.BackupPrograms)
+                {
+                    <span class="growth"><ExternalText Runs="program" /></span>
+                }
+            </dd>
+            @if (_detail.RecentBootAt is not null)
+            {
+                <dt>Last boot (UTC)</dt>
+                <dd><a href="@IncidentsView.LogsHref(_detail.RecentBootAt.Value)">@LogsView.ShowSeconds(_detail.RecentBootAt.Value)</a></dd>
+            }
+            <dt>Process snapshots</dt>
+            <dd>@_detail.SnapshotCount</dd>
+            <dt>Service events</dt>
+            <dd>@_detail.ServiceEvents</dd>
+        </dl>
+    </section>
+
+    <section aria-label="Timeline">
+        <h2>Timeline</h2>
+        <div class="table-scroll">
+            <table class="incident-timeline">
+                <thead>
+                    <tr>
+                        <th>Time (UTC)</th>
+                        <th>Type</th>
+                        <th>Host</th>
+                        <th>Details</th>
+                        <th>Log lines</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var entry in _detail.Timeline)
+                    {
+                        <tr class="@(entry.Marker.Length > 0 ? entry.Marker : null)">
+                            <td class="time"><a href="@entry.LogsHref">@LogsView.ShowSeconds(entry.At)</a></td>
+                            <td><ExternalText Runs="entry.Type" /></td>
+                            <td><ExternalText Runs="entry.Host" /></td>
+                            <td>
+                                @foreach (var text in entry.Texts)
+                                {
+                                    <span class="detail"><ExternalText Runs="text" /></span>
+                                }
+                            </td>
+                            <td>@entry.LineCount</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+        @if (_detail.TimelineOmitted > 0)
+        {
+            <p class="status">@_detail.TimelineOmitted further events were not kept in the timeline.</p>
+        }
+    </section>
+
+    @if (_detail.PeakAt is not null)
+    {
+        <section aria-label="Connections">
+            <h2>Connection peak</h2>
+            <dl>
+                <dt>Time (UTC)</dt>
+                <dd><a href="@IncidentsView.LogsHref(_detail.PeakAt.Value)">@LogsView.ShowSeconds(_detail.PeakAt.Value)</a></dd>
+                <dt>Sockets</dt>
+                <dd>@_detail.PeakSockets</dd>
+                <dt>Snapshots</dt>
+                <dd>@_detail.PeakSnapshots</dd>
+                <dt>Commands with the most sockets</dt>
+                <dd>
+                    @foreach (var process in _detail.PeakProcesses)
+                    {
+                        <span class="growth"><ExternalText Runs="process.Program" /> <span>@process.Amount</span></span>
+                    }
+                </dd>
+            </dl>
+        </section>
+    }
+
+    @if (_detail.Extremes.Count > 0)
+    {
+        <section aria-label="Metric extremes">
+            <h2>Metric extremes</h2>
+            <div class="table-scroll">
+                <table class="incident-extremes">
+                    <thead>
+                        <tr>
+                            <th>Metric</th>
+                            <th>Extreme</th>
+                            <th>Value</th>
+                            <th>Source</th>
+                            <th>Time (UTC)</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var extreme in _detail.Extremes)
+                        {
+                            <tr>
+                                <td><ExternalText Runs="extreme.Name" /></td>
+                                <td><ExternalText Runs="extreme.Extreme" /></td>
+                                <td>@extreme.Value</td>
+                                <td><ExternalText Runs="extreme.Source" /></td>
+                                <td class="time"><a href="@extreme.LogsHref">@LogsView.ShowSeconds(extreme.At)</a></td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    }
+
+    @if (_detail.NewTemplates.Count > 0)
+    {
+        <section aria-label="New log templates">
+            <h2>New log templates</h2>
+            <div class="table-scroll">
+                <table class="incident-templates">
+                    <thead>
+                        <tr>
+                            <th>First seen (UTC)</th>
+                            <th>Source</th>
+                            <th>Program</th>
+                            <th>Template</th>
+                            <th>Lines</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var template in _detail.NewTemplates)
+                        {
+                            <tr>
+                                <td class="time"><a href="@template.LogsHref">@LogsView.ShowSeconds(template.At)</a></td>
+                                <td><ExternalText Runs="template.Source" /></td>
+                                <td><ExternalText Runs="template.Program" /></td>
+                                <td><ExternalText Runs="template.Template" /></td>
+                                <td>@template.Count</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    }
+
+    @if (_detail.TemplateSpikes.Count > 0)
+    {
+        <section aria-label="Template spikes">
+            <h2>Template spikes</h2>
+            <div class="table-scroll">
+                <table class="incident-templates">
+                    <thead>
+                        <tr>
+                            <th>Hour (UTC)</th>
+                            <th>Source</th>
+                            <th>Program</th>
+                            <th>Template</th>
+                            <th>Lines</th>
+                            <th>Usual level</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var spike in _detail.TemplateSpikes)
+                        {
+                            <tr>
+                                <td class="time"><a href="@spike.LogsHref">@LogsView.ShowSeconds(spike.At)</a></td>
+                                <td><ExternalText Runs="spike.Source" /></td>
+                                <td><ExternalText Runs="spike.Program" /></td>
+                                <td><ExternalText Runs="spike.Template" /></td>
+                                <td>@spike.Count</td>
+                                <td>@spike.UsualLevel</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    }
+
+    <section aria-label="Charts">
+        <h2>Charts</h2>
+        @if (_windowFailure.Length > 0)
+        {
+            <p class="error" role="alert">@_windowFailure</p>
+        }
+        @if (_windowLoading)
+        {
+            <p class="status">@IncidentsView.Loading</p>
+        }
+        @if (_window is not null)
+        {
+            @if (_window.Memory is not null)
+            {
+                <TimeSeriesChart Title="@IncidentsView.MemoryChartTitle" Data="_window.Memory" />
+                @if (MemoryCut.Length > 0)
+                {
+                    <p class="status">@MemoryCut</p>
+                }
+            }
+            @if (_window.MemoryAndSwap is not null)
+            {
+                <TimeSeriesChart Title="@IncidentsView.MemorySwapChartTitle" Data="_window.MemoryAndSwap" />
+            }
+            @if (_window.Connections is not null)
+            {
+                <TimeSeriesChart Title="@IncidentsView.ConnectionsChartTitle" Data="_window.Connections" />
+                @if (ConnectionsCut.Length > 0)
+                {
+                    <p class="status">@ConnectionsCut</p>
+                }
+            }
+            @if (NoWindowData)
+            {
+                <p class="status">@IncidentsView.NoWindowData</p>
+            }
+        }
+    </section>
+
+    <section aria-label="Notes">
+        <h2>Notes</h2>
+        <IncidentNoteForm IncidentId="Id" WrittenFor="Id" Text="@_ownText" UpdatedAt="_ownUpdatedAt" Merged="false" />
+        @foreach (var note in _moved)
+        {
+            <IncidentNoteForm IncidentId="Id" WrittenFor="note.WrittenFor" Text="@note.Text" UpdatedAt="note.UpdatedAt" Merged="true" />
+        }
+        @if (_moreNotes)
+        {
+            <p class="status">@IncidentsView.NotesHidden</p>
+        }
+    </section>
+}

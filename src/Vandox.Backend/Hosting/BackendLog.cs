@@ -352,5 +352,21 @@ internal static partial class BackendLog
     [LoggerMessage(EventId = 48, Level = LogLevel.Warning, Message = "forwarded header ignored {Client}")]
     internal static partial void ForwardedHeaderIgnored(this ILogger logger, string client);
 
+    /// <summary>
+    /// Logs a failed read of the incidents view.
+    /// </summary>
+    /// <param name="logger">The logger</param>
+    /// <param name="exception">The failure</param>
+    [LoggerMessage(EventId = 50, Level = LogLevel.Error, Message = "incidents view: reading failed")]
+    internal static partial void IncidentsReadFailed(this ILogger logger, Exception exception);
+
+    /// <summary>
+    /// Logs a failed save of an incident note; the note text and the form values stay out of the log.
+    /// </summary>
+    /// <param name="logger">The logger</param>
+    /// <param name="exception">The failure</param>
+    [LoggerMessage(EventId = 51, Level = LogLevel.Error, Message = "incidents view: saving a note failed")]
+    internal static partial void IncidentNoteSaveFailed(this ILogger logger, Exception exception);
+
     #endregion // Methods
 }
