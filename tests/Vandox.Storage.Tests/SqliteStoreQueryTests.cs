@@ -302,6 +302,55 @@ public class SqliteStoreQueryTests
     }
 
     /// <summary>
+    /// Each term is quoted as the whole expression quotes it, and the expression is the terms joined with one space.
+    /// </summary>
+    /// <param name="text">The search text</param>
+    /// <param name="first">The first quoted term</param>
+    /// <param name="second">The second quoted term, or an empty text</param>
+    [TestMethod]
+    [DataRow("error", "\"error\"", "")]
+    [DataRow("a \"b", "\"a\"", "\"\"\"b\"")]
+    [DataRow("10.0.0.1 smtpd", "\"10.0.0.1\"", "\"smtpd\"")]
+    public void FtsQueryBuildTermsQuotesEachTerm(string text, string first, string second)
+    {
+        // Arrange
+        string[] expected = second.Length == 0 ? [first] : [first, second];
+
+        // Act
+        var terms = FtsQuery.BuildTerms(text);
+
+        // Assert
+        Assert.AreSequenceEqual(expected, terms.ToArray(), "the quoted terms in order");
+        Assert.AreEqual(FtsQuery.Build(text), string.Join(' ', terms), "the expression is the terms joined with one space");
+    }
+
+    /// <summary>
+    /// The terms are validated as the whole expression is, with the same message.
+    /// </summary>
+    /// <param name="change">The name of the broken text</param>
+    [TestMethod]
+    [DataRow("17 terms")]
+    [DataRow("no terms")]
+    [DataRow("term without letter")]
+    public void FtsQueryBuildTermsRejectsWhatBuildRejects(string change)
+    {
+        // Arrange
+        var text = change switch
+                   {
+                       "17 terms" => string.Join(' ', Enumerable.Range(1, 17).Select(number => $"t{number}")),
+                       "no terms" => "   ",
+                       _ => "alpha --"
+                   };
+
+        // Act
+        var expected = Assert.ThrowsExactly<InvalidQueryException>(() => FtsQuery.Build(text), $"Build refuses '{change}'");
+        var actual = Assert.ThrowsExactly<InvalidQueryException>(() => FtsQuery.BuildTerms(text), $"BuildTerms refuses '{change}'");
+
+        // Assert
+        Assert.AreEqual(expected.Message, actual.Message, "the same message");
+    }
+
+    /// <summary>
     /// A search text with a lone surrogate cannot be encoded as UTF-8 and is refused.
     /// </summary>
     [TestMethod]
