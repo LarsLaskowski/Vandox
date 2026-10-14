@@ -131,6 +131,7 @@ locally, <authoritative check>" once in `log.md` and does not repeat it as an op
 | `deploy/backend/Dockerfile`, `docker-compose.yml`, `.dockerignore`, image contents | a Docker daemon (`hadolint` runs in the *Analyzer gate* on the Dockerfile) | the *Image build check* (restore-order reproduction below), `.github/scripts/check-base-image-pinning.sh`, `.github/scripts/check-builder-dotnet-version.sh`, `bash -n` on the smoke script | CI job *Release build check*, steps "Build and verify image" and "Smoke test backend container" |
 | own browser scripts and style sheets (`src/Vandox.Backend/wwwroot/js/*.js`, `wwwroot/*.css`) | a JavaScript and CSS analyzer | `WebUiContentTests` (`WebSourceScanner` rules) | SonarQube Cloud (step 11) |
 | known vulnerabilities (Go) | `govulncheck` (the proxy blocks `vuln.go.dev`, HTTP 403) | none | CI job *Vulnerability scan* |
+| values passed to a logger or other sink (CodeQL "Clear text storage of sensitive information") | CodeQL runs only in CI | the logger-argument rule below, checked by grepping the new logger calls | CodeQL code scanning on the pull request |
 
 When the *Analyzer gate* reports shellcheck, actionlint or hadolint as NOT RUN (a refused download), that tool is
 missing locally for the session: note it in `log.md` as above, and parse a changed workflow as YAML instead
@@ -139,6 +140,18 @@ missing locally for the session: note it in `log.md` as above, and parse a chang
 Shell pitfalls that shellcheck does not report and the *Analyzer gate* checks itself (SonarQube Cloud reports
 them too): use `[[ … ]]`, never `[ … ]` (`shelldre:S7688`), and assign every positional parameter to a named
 `local` variable before using it inside a function (`shelldre:S7679`).
+
+Logger arguments: the C# CodeQL query treats a variable, property or constant as sensitive when its name, ignoring
+case, contains `password`, `passwd` or `trusted`, `account` or `accnt` followed by `id` or `key`, `license` or
+`licence` followed by `key`, or `voucher` followed by `code`, unless the name also contains `hashed`,
+`encrypted`, `crypt` or `invalid`. It does so even when the value is only a name (a failed run: `logger.WebPasswordHashMissing(ConfigConstants.EnvWebPasswordHash)` logged just the
+environment variable's name). No local gate reports this. A value passed to a `[LoggerMessage]` method must not come
+from an expression named that way; log such a name through a neutrally named constant whose value a test pins
+(`ServeCommand.HashSecretVariable`, pinned by `ServeRefusesMissingPasswordHash`). Before the pull request, grep the
+arguments of the new logger calls for those names. In Go the query flags names containing `secret`,
+`trusted`, `passwd`, `password`, `passcode`, `passphrase`, `username`, `userid` or `puid`, and keys such as `authKey`,
+`apiKey` and `secretKey`, unless the name also contains `hash`, `crypt`, `code`, `mask`, `test` or `redact`; avoid those
+in logger arguments of the agent too.
 
 Two analyzer rules collide and are settled once (record 0074): RH3001 forbids the negation operator `!`,
 S1125 forbids comparing a boolean with a literal (`== false`, `is false`). Write positive conditions, early
