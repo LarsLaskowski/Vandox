@@ -48,6 +48,7 @@ Backend:
 | Key | Default | Rule |
 | --- | ------- | ---- |
 | `web.listen` | `:8080` | `[host]:port` |
+| `web.trusted_proxies` | empty | a comma-separated list of at most 16 IP addresses or networks (see below) |
 | `ingest.listen` | `:8081` | `[host]:port`, a port different from `web.listen` |
 | `storage.directory` | `/data` | absolute, clean path |
 | `log.level` | `info` | `debug`, `info`, `warn` or `error` |
@@ -62,6 +63,15 @@ Backend:
 - A listen address is a host and a port separated by a colon. The host is empty (all interfaces) or an IP literal
   (an IPv6 literal in brackets); a host name is rejected, because binding to a name is ambiguous. The port is one to
   five ASCII digits and 1 to 65535; a sign or a space is not accepted (`:+80` is rejected).
+- `web.trusted_proxies` lists the reverse proxies whose `X-Forwarded-For` and `X-Forwarded-Proto` the web listener trusts ([Web login](web-login.md),
+  *Reverse proxy trust*). Entries are separated by `,` and trimmed of spaces (U+0020 only); each is `address` or `address/prefix`. An
+  IPv4 address is dotted decimal with four parts 0 to 255 without leading zeros; an IPv6 address has no zone and no brackets. The prefix
+  is one to three digits without leading zero, 8 to 32 for IPv4 and 16 to 128 for IPv6; without a prefix the entry is a single
+  address. Host bits below the prefix must be zero, so `172.18.0.1/16` is refused (write `172.18.0.0/16`). Refused: the unspecified
+  address, an IPv4-mapped IPv6 address (write the IPv4 form), short or hexadecimal forms such as `127.1` or `0x7f.0.0.1`, host names,
+  ports, an empty entry, and more than 16 entries. An empty value trusts no proxy. The error reads `config: <file>:<line>:
+  web.trusted_proxies: must be a comma-separated list of at most 16 IP addresses or networks, such as 172.18.0.1 or 172.18.0.0/16`
+  and never contains the value. It is an option, not a secret: an environment variable cannot set it.
 - A duration (`incidents.window_before`, `incidents.window_after`) is one to four ASCII digits followed by `m` (minutes) or `h` (hours),
   nothing before or after, and from 1 minute to 24 hours (`30m`, `1h`, `24h`, `1440m`). A sign, a space, a fraction, another digit
   script, a second unit (`1h30m`), a missing unit (`60`) and any other unit (`1d`, `1s`) are rejected. The error reads
@@ -111,6 +121,9 @@ Backend:
   Telegram stays off without its token. This is what lets the backend run for log import without agents or Telegram.
 - Every environment variable that starts with `VANDOX_` (in any letter case) must be known to the binary and may
   appear once; otherwise loading fails, so a typo cannot silently disable a feature.
+- The web UI password hash must also be in the form of [Web login](web-login.md) (*Password*): an argon2id hash in the PHC form. The
+  service checks that form at start-up, after the configuration is loaded; a hash that passes the secret rules above but not that form
+  stops the service with exit 1 and one of the reasons listed there.
 - A secret is never logged, shown in the web UI, written to the spool or put into an error text. A value that is
   compared with input (the ingest token an agent presents) is compared in constant time; the web UI password is
   checked through the comparison of its hash function.
@@ -141,6 +154,7 @@ Backend:
 - [0049](../decisions/0049-strict-configuration-file-schema-and-errors.md) — why the file is strict and errors never echo values.
 - [0050](../decisions/0050-secret-sources-rules-and-redaction.md) — why `*_FILE`, strict value rules and unknown `VANDOX_` variables.
 - [0078](../decisions/0078-configuration-and-secrets-in-the-backend-with-yamldotnet.md) — why the backend implements the same rules with YamlDotNet.
+- [0104](../decisions/0104-argon2id-password-hash-konscious-strict-phc-form-hash-password-command.md) and [0105](../decisions/0105-forwarded-headers-only-from-trusted-proxies-failed-logins-locked-per-client-and-capped.md) — why the hash form is checked on top of the secret rules and why `web.trusted_proxies` is a comma-separated string.
 
 ## Not here
 

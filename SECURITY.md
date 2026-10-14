@@ -47,7 +47,18 @@ host that runs the reverse proxy). That binding is defense in depth, not an acce
 Docker Engine version and the host firewall, hosts on the LAN may reach a published container port directly,
 so use a current Docker Engine and a host firewall where that matters. The ingest port is not published until
 the ingest API exists. The agent token file (`secrets/vandox_agent_token`) must be owned by UID 65532 with mode
-`0400`, never world-readable, because Compose sets no owner or mode on file secrets outside Swarm.
+`0400`, never world-readable, because Compose sets no owner or mode on file secrets outside Swarm. The same holds for the
+web password hash file (`secrets/vandox_web_password_hash`, created with `vandoxd hash-password` as the README shows, without `-t`
+so the terminal does not echo the password); the hash is argon2id, but a copied file still allows offline guessing.
+
+The web UI login needs `web.trusted_proxies` to know who is who behind the reverse proxy. Set it to the proxy's address only (as the
+container sees it), because every connection from a listed address may choose its own client address with `X-Forwarded-For`; use a
+current Docker Engine (28.3.3 or later) so that no neighbor host reaches the published port through that address. Without the
+option, all clients behind the proxy share the proxy's address: five wrong passwords from any of them lock all of them out for 15
+minutes, and the cookies are never `Secure`. Independent of that option, 100 failed sign-ins within an hour lock the sign-in for
+everyone, and anyone who can reach the login can provoke it; restarting the container clears the lock (and ends all sessions). Give the
+UI a host name of its own (`docs/REVERSE_PROXY.md`). Whether the Docker Engines of Synology and QNAP expose a port published on
+`127.0.0.1` to the LAN is not verified; the login does not depend on it.
 
 ## Scope
 

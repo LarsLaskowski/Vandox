@@ -5,7 +5,8 @@
 The pages `vandoxd` serves on its web listener: render mode, layout and navigation, theme, brand files, static assets, charts, and the
 security headers of the web listener together with what the UI framework needs from them. The user relies on it to look at the
 monitored server in a browser in the home network; the views (overview, history, logs, incidents) build on it. The listeners, port
-routing and `/healthz` are in [Backend host](backend-host.md); the login and the reverse proxy setup are not implemented yet (#25).
+routing and `/healthz` are in [Backend host](backend-host.md); the login, sessions and the reverse proxy trust are in
+[Web login](web-login.md), the setup of a proxy in [REVERSE_PROXY.md](../REVERSE_PROXY.md).
 
 ## Behavior
 
@@ -14,6 +15,8 @@ routing and `/healthz` are in [Backend host](backend-host.md); the login and the
 - The web UI is a Blazor Web App. Every page is prerendered on the server and then runs in the **Interactive Server** render mode: it
   holds one live connection (SignalR: WebSocket, HTTP as fallback) to the same origin while it is open.
 - The page sets `<base href="/">`, a `viewport` meta element for device width, and loads only the files listed under *Static assets*.
+- The sign-in page (`/login`) is the one page without a live connection: it is rendered on the server as a plain HTML form and does not
+  load the framework script `_framework/blazor.web.js`; every other page loads it ([Web login](web-login.md), *Access*).
 - When the live connection is lost, the page shows its own reconnect dialog (the element `components-reconnect-modal`) with the states
   reconnecting, failed and rejected, and a way to retry or reload; it shows its own error banner (`blazor-error-ui`) on an unhandled
   error. Both are styled by the style sheet, not by the framework.
@@ -24,6 +27,7 @@ routing and `/healthz` are in [Backend host](backend-host.md); the login and the
 ### Layout and navigation
 
 - Every page has a header with the horizontal logo, the main navigation and the theme switch, and a main area with the page content.
+  A signed-in user also sees a *Sign out* button in the header ([Web login](web-login.md), *Sessions*).
 - The navigation lists the existing pages; the entry of the current page is marked. Today it has two entries, *Overview* (`/`) and
   *Logs* (`logs`); each view adds its own. *Logs* is marked on `/logs` and on `/logs/templates`, *Overview* only on `/`.
 - The layout works from desktop width down to phone width (360 CSS pixels) without horizontal scrolling of the page: on narrow screens
@@ -66,8 +70,8 @@ routing and `/healthz` are in [Backend host](backend-host.md); the login and the
 ### Logs view
 
 Two pages read the stored log lines: the search (`/logs`) and the template list (`/logs/templates`). Both show the links *Search* and
-*Templates*, work on the same address parameters, and are served on the web listener only (the ingest listener answers `404`). Until the
-login exists (#25) whoever reaches the web port can read every stored log line (*Limits and errors*). The store behind them is described
+*Templates*, work on the same address parameters, and are served on the web listener only (the ingest listener answers `404`). Like every
+page they need a session ([Web login](web-login.md)); a signed-in user can read every stored log line (*Limits and errors*). The store behind them is described
 in [Storage](storage.md) (*Log exploration*), the templates in [Detection, alerts and reports](detection-and-reports.md) (*Log templates*).
 
 **Address.** Every filter is in the address, so a search can be bookmarked, shared and used with the browser's back and forward buttons.
@@ -210,20 +214,20 @@ The ingest listener serves none of this: every UI path, static file and the live
   path.
 - A browser without CSP Level 3 matching of `ws:`/`wss:` falls back to HTTP for the live connection or cannot connect.
 - The reverse proxy must pass WebSocket upgrades for the live connection.
-- Until the login exists (#25), whoever reaches the web port can load the page and open a live connection; the live connection
-  does not check the `Origin` header, and the service does not filter the `Host` header. The login decides whether a live
-  connection may start before authentication.
-- **The logs view is readable by whoever reaches the web port until #25.** The compose file publishes the web port on `127.0.0.1` only.
-  The host has no `Host`-header allow-list, so through **DNS rebinding** a website that the operator's browser visits can read the logs
-  through a rebound name when the reverse proxy forwards unknown `Host` headers or the web port is reachable from the LAN. The login
-  and its reverse-proxy trust (#25) have to include a `Host` allow-list; v0.1.0 is not released without them.
+- A live connection needs a session ([Web login](web-login.md), *Access*): without one, the `/_blazor` endpoints answer `401`. The
+  live connection does not check the `Origin` header, and the service does not filter the `Host` header; the session and the
+  protected component descriptors of the signed-in page decide who may use it.
+- **The logs view is behind the login** ([Web login](web-login.md)): `/logs` and `/logs/templates` carry the same `[Authorize]` as every page
+  below `Components/Pages`, and an anonymous request is redirected to the login page. The host still has no `Host`-header allow-list; a
+  page reached through a **DNS-rebound** name is another site than the real host name, so the session cookie is not sent to it and it
+  cannot read the logs.
 - **Memory per circuit and the number of circuits.** The search page holds the capped text of its lines, not the stored records: a
   line holds up to 16,384 characters of message and up to 2,048 characters in each of source, host, program, about 45 KiB, so a page
   of 100 lines with an expanded context of 11 lines is about **5 MiB** in the worst case (a typical line is a few hundred bytes), and the
   template page, with up to 200 rows of four capped short fields and a chart of at most 2,160 points, about **3.1 MiB**. The render batch
-  that sends the page to the browser holds the same text once more, for a moment. The **number of circuits is not bounded** before
-  #25 (the framework keeps up to 100 disconnected circuits for 3 minutes, *Pages and render mode*), and the container has 512 MB, so
-  many open log pages can exhaust the memory of the service.
+  that sends the page to the browser holds the same text once more, for a moment. The **number of circuits is not bounded** (the framework keeps up to 100 disconnected circuits for 3 minutes, *Pages and render mode*), and the container has 512 MB, so
+  many open log pages can exhaust the memory of the service. Only a signed-in client can open a circuit ([Web login](web-login.md), *Access*),
+  so this needs the password or a session.
 - Template numbers change when `vandoxd templates` rebuilds the statistics, so a stored template link can point to another template or
   to none; the page reports an unknown number. Every stored source can be chosen in the form, because the data model allows a source only
   letters, digits and `. _ : / @ + -` and at most 128 bytes, which the address rules accept; a source in the address that the store
@@ -237,14 +241,15 @@ The ingest listener serves none of this: every UI path, static file and the live
 - [0051](../decisions/0051-brand-assets-in-docs-assets-web-ui-and-telegram-with-their-features.md) — why `docs/assets/` is the single source of the logo.
 - [0098](../decisions/0098-web-ui-serves-only-its-own-static-web-assets.md) — why own static web assets only, brand copies, vendored uPlot and a script-set theme.
 - [0099](../decisions/0099-web-listener-security-headers-one-self-only-csp.md) — why one self-only policy set by the application.
-- [0103](../decisions/0103-logs-view-address-as-the-view-bounded-search-pages-template-lines-by-normalization.md) — why the logs view takes its filters from the address, searches in bounded pages and caps external text.
+- [0106](../decisions/0106-logs-view-address-as-the-view-bounded-search-pages-template-lines-by-normalization.md) — why the logs view takes its filters from the address, searches in bounded pages and caps external text.
 
 ## Not here
 
 - Listeners, port routing, `/healthz`, the container and exposure: [Backend host](backend-host.md).
 - Who may reach the web UI: [Network and security model](network-and-security-model.md).
 - Logo files and color tokens: [BRANDING.md](../BRANDING.md).
-- Login, sessions, CSRF and the reverse proxy setup: not implemented yet (#25).
+- Login, sessions, CSRF, the failed-sign-in limits and the trust in a reverse proxy: [Web login](web-login.md). The setup of a proxy:
+  [REVERSE_PROXY.md](../REVERSE_PROXY.md).
 
 ## Implementation
 

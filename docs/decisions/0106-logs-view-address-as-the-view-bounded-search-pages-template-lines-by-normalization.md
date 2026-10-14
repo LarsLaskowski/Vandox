@@ -1,4 +1,4 @@
-# 0103: The logs view takes every filter from the address, searches in bounded pages from the index or by a time-ordered scan, and finds a template's lines by normalizing candidates
+# 0106: The logs view takes every filter from the address, searches in bounded pages from the index or by a time-ordered scan, and finds a template's lines by normalizing candidates
 
 - **Status:** Accepted
 - **Date:** 2026-10-13
@@ -24,8 +24,8 @@ deduplication of the ingest security area. Log text is external and may be forge
 policy ([0098](0098-web-ui-serves-only-its-own-static-web-assets.md),
 [0099](0099-web-listener-security-headers-one-self-only-csp.md)), but direction-changing characters (U+202E) survive HTML escaping. Every
 page is prerendered and then runs in the Interactive Server mode
-([0081](0081-backend-host-two-listeners-json-logs-blazor-interactive-server.md)), so a query in the page's start-up runs twice. The login
-(#25) is not built yet.
+([0081](0081-backend-host-two-listeners-json-logs-blazor-interactive-server.md)), so a query in the page's start-up runs twice. The web UI is behind the login of
+[0103](0103-web-login-server-side-sessions-static-login-page-circuits-bound-to-session.md): every page below `Components/Pages` needs a session.
 
 ## Options considered
 
@@ -65,7 +65,7 @@ The view:
     of its line), or removing them (loses evidence).
 13. **The escaped text of a field capped, with a visible cut marker**, or every escape written out — a 16 KiB message of control
     characters escapes to about 98,000 characters, roughly 192 KiB per field and 20 MB for one page with its context, while the number
-    of circuits is not bounded before the login.
+    of circuits is not bounded (only a signed-in client can open one).
 
 Reader slots and the scan:
 
@@ -154,12 +154,11 @@ health check keeps a reader. The rules
 - The criterion is measured with `tools/Vandox.StorageBenchmark --search-lines` on the reference host (`docs/BENCHMARKS.md`). The
   benchmark program asserts nothing and is excluded from the coverage measure with `[ExcludeFromCodeCoverage]`, as the template benchmark
   already is; the selectivity cap and the scan bound may be tuned from the measurement without a new decision.
-- Until the login (#25) exists, whoever reaches the web port can read every stored log line through the view; the compose file publishes
-  the web port on loopback only ([0060](0060-compose-file-port-bindings-volumes-and-memory-limit.md)), and v0.1.0 is not released
-  without the login. Forged lines are shown like real ones. Until then the number of circuits is not bounded either (a page holds
-  up to about 5 MiB of capped text in the worst case, the container 512 MB), and the host has no Host-header allow-list, so through
-  DNS rebinding a website the operator's browser visits can read the logs when a reverse proxy forwards unknown Host headers or the
-  web port is reachable from the LAN; the login's reverse-proxy trust (#25) has to include a Host allow-list. Nothing from `main` is
-  published before a release tag.
+- The view is readable by a signed-in session only (0103): the pages carry `[Authorize]` through `Components/Pages/_Imports.razor`, an
+  anonymous request is redirected to `/login`, and the live connection needs a session. Forged lines are shown like real ones. The
+  number of circuits is still not bounded (a page holds up to about 5 MiB of capped text in the worst case, the container 512 MB), but
+  only a signed-in client can open one. The host has no Host-header allow-list ([0103](0103-web-login-server-side-sessions-static-login-page-circuits-bound-to-session.md)
+  does not add one); a page reached through a DNS-rebound name is another site and gets no session cookie, so it cannot read the logs.
+  Nothing from `main` is published before a release tag.
 - A program-only filter over a large range scans; skipping hours without lines of the program through the template statistics is left
   to a measurement that needs it.

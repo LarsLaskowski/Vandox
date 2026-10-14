@@ -332,6 +332,55 @@ public class BackendConfigLoaderTests
     }
 
     /// <summary>
+    /// The option <c>web.trusted_proxies</c> is empty by default and is read as the networks it names.
+    /// </summary>
+    [TestMethod]
+    public void BackendConfigLoaderReadsTrustedProxies()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        var absent = directory.Write("absent.yaml", "web:\n  listen: :9000\n");
+        var empty = directory.Write("empty.yaml", "web:\n  trusted_proxies: \"\"\n");
+        var set = directory.Write("set.yaml", "web:\n  listen: :9000\n  trusted_proxies: \"172.18.0.1, 10.0.0.0/8\"\n");
+
+        // Act
+        var absentConfig = BackendConfigLoader.Load(absent, []);
+        var emptyConfig = BackendConfigLoader.Load(empty, []);
+        var setConfig = BackendConfigLoader.Load(set, []);
+
+        // Assert
+        Assert.AreEqual(string.Empty, absentConfig.Web.TrustedProxies, "empty by default");
+        Assert.IsEmpty(absentConfig.Web.GetTrustedProxies(), "no network by default");
+        Assert.IsEmpty(emptyConfig.Web.GetTrustedProxies(), "no network for an empty value");
+        Assert.AreEqual("172.18.0.1, 10.0.0.0/8", setConfig.Web.TrustedProxies, "the value as written");
+        Assert.AreEqual("172.18.0.1/32|10.0.0.0/8", string.Join('|', setConfig.Web.GetTrustedProxies().Select(network => $"{network.BaseAddress}/{network.PrefixLength}")), "networks");
+    }
+
+    /// <summary>
+    /// An invalid <c>web.trusted_proxies</c> is refused at the line of its key with the fixed message, which does not contain the value.
+    /// </summary>
+    /// <param name="value">The raw YAML value</param>
+    /// <param name="marker">The part of the value that must not appear in the message</param>
+    [TestMethod]
+    [DataRow("\"proxy.leak-marker\"", "leak-marker")]
+    [DataRow("\"172.18.0.1/16\"", "172.18.0.1/16")]
+    [DataRow("\"10.0.0.1, ,10.0.0.2\"", "10.0.0.2")]
+    [DataRow("\"10.0.0.1,10.0.0.2,10.0.0.3,10.0.0.4,10.0.0.5,10.0.0.6,10.0.0.7,10.0.0.8,10.0.0.9,10.0.0.10,10.0.0.11,10.0.0.12,10.0.0.13,10.0.0.14,10.0.0.15,10.0.0.16,10.0.0.17\"", "10.0.0.17")]
+    public void BackendConfigLoaderRefusesInvalidTrustedProxiesWithoutValue(string value, string marker)
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        var path = directory.Write("vandoxd.yaml", $"web:\n  listen: \":9999\"\n  trusted_proxies: {value}\n");
+
+        // Act
+        var exception = Assert.ThrowsExactly<ConfigException>(() => BackendConfigLoader.Load(path, []), "invalid option");
+
+        // Assert
+        Assert.AreEqual($"config: {path}:3: web.trusted_proxies: must be a comma-separated list of at most 16 IP addresses or networks, such as 172.18.0.1 or 172.18.0.0/16", exception.Message, "message");
+        Assert.DoesNotContain(marker, exception.Message, "the message does not contain the value");
+    }
+
+    /// <summary>
     /// The port of a listen address is parsed, or 0 is returned.
     /// </summary>
     /// <param name="value">The address</param>
@@ -440,7 +489,7 @@ public class BackendConfigLoaderTests
     [DataRow("VANDOX_AGENT_TOKEN", "short", "config: VANDOX_AGENT_TOKEN: must be at least 32 characters")]
     [DataRow("VANDOX_WEB_PASSWORD_HASH", "", "config: VANDOX_WEB_PASSWORD_HASH: is empty")]
     [DataRow("VANDOX_WEB_PASSWORD_HASH", "has space", "config: VANDOX_WEB_PASSWORD_HASH: must consist of printable ASCII characters without spaces")]
-    [DataRow("VANDOX_TELEGRAM_BOT_TOKEN", "äbc", "config: VANDOX_TELEGRAM_BOT_TOKEN: must consist of printable ASCII characters without spaces")]
+    [DataRow("VANDOX_TELEGRAM_BOT_TOKEN", "\u00E4bc", "config: VANDOX_TELEGRAM_BOT_TOKEN: must consist of printable ASCII characters without spaces")]
     [DataRow("VANDOX_TELEGRAM_BOT_TOKEN_FILE", "relative/path", "config: VANDOX_TELEGRAM_BOT_TOKEN_FILE: must be an absolute path")]
     [DataRow("VANDOX_TELEGRAM_BOT_TOKEN_FILE", "/nonexistent/secret", "config: VANDOX_TELEGRAM_BOT_TOKEN_FILE: cannot read the file: no such file or directory")]
     [DataRow("VANDOX_OTHER", "x", "config: VANDOX_OTHER: unknown VANDOX_ variable")]
@@ -620,7 +669,7 @@ public class BackendConfigLoaderTests
         var keys = BackendConfig.Keys();
 
         // Assert
-        Assert.AreSequenceEqual(["web.listen", "ingest.listen", "storage.directory", "log.level", "import.plesk_panel_log", "import.sw_cp_server_error_log", "import.nginx_error_log", "import.apache_error_log", "import.time_zone", "incidents.window_before", "incidents.window_after"], keys, "keys in order");
+        Assert.AreSequenceEqual(["web.listen", "web.trusted_proxies", "ingest.listen", "storage.directory", "log.level", "import.plesk_panel_log", "import.sw_cp_server_error_log", "import.nginx_error_log", "import.apache_error_log", "import.time_zone", "incidents.window_before", "incidents.window_after"], keys, "keys in order");
     }
 
     /// <summary>
