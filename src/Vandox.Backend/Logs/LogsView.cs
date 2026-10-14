@@ -104,6 +104,11 @@ public static class LogsView
     /// </summary>
     public const string TemplatesReadFailed = "The templates could not be read. The service log has the details.";
 
+    /// <summary>
+    /// The text shown above the position of a search that goes through the time range step by step.
+    /// </summary>
+    public const string SearchStepwise = "These words are too common to look up at once, so the search goes through the time range step by step. Narrow the time range to get a complete answer.";
+
     #endregion // Constants
 
     #region Fields

@@ -22,5 +22,10 @@ public sealed class LogPage
     /// </summary>
     public bool ScanLimitReached { get; set; }
 
+    /// <summary>
+    /// Gets or sets a value indicating whether the index check ran out of its time budget, so the page comes from the scan.
+    /// </summary>
+    public bool IndexCheckStopped { get; set; }
+
     #endregion // Properties
 }

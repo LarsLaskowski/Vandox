@@ -19,6 +19,15 @@ internal static class LogFinder
 
     #endregion // Constants
 
+    #region Fields
+
+    /// <summary>
+    /// The time the index check of one request may take before the request runs in scan mode.
+    /// </summary>
+    internal static readonly TimeSpan ProbeBudget = TimeSpan.FromMilliseconds(700);
+
+    #endregion // Fields
+
     #region Methods
 
     /// <summary>
@@ -58,6 +67,35 @@ internal static class LogFinder
 
         return await ScanAsync(connection, criteria, match, cancellationToken).ConfigureAwait(false);
     }
+
+#pragma warning disable RH2003
+    /// <summary>
+    /// Finds one page of log lines; an index check that outlasts the budget turns the request into a scan.
+    /// </summary>
+    /// <param name="connection">The open reader connection</param>
+    /// <param name="filter">The validated filters</param>
+    /// <param name="template">The template of <see cref="LogFilter.TemplateId"/>, or <c>null</c></param>
+    /// <param name="selectiveMatches">The index match count below which the index is used</param>
+    /// <param name="probeBudget">The time the index check may take</param>
+    /// <param name="timeProvider">The clock of the budget</param>
+    /// <param name="cancellationToken">Cancels the call</param>
+    /// <returns>A task that returns the page</returns>
+    internal static Task<LogPage> FindAsync(SqliteConnection connection, LogFilter filter, LogTemplate? template, int selectiveMatches, TimeSpan probeBudget, TimeProvider timeProvider, CancellationToken cancellationToken)
+    {
+        throw new NotImplementedException();
+    }
+
+    /// <summary>
+    /// Returns the number of lines a scan examines for a search text.
+    /// </summary>
+    /// <param name="scanLimit">The scan bound of the call</param>
+    /// <param name="tokens">The number of word parts of the search text</param>
+    /// <returns>The scan bound for 0 or 1 parts, otherwise the bound divided by the parts, at least 1</returns>
+    internal static int ExaminedLines(int scanLimit, int tokens)
+    {
+        throw new NotImplementedException();
+    }
+#pragma warning restore RH2003
 
     /// <summary>
     /// Reads the record IDs of the index matches of a text up to a bound.

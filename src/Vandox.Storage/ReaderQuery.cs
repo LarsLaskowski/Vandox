@@ -104,6 +104,21 @@ internal static class ReaderQuery
         return new StoreException($"{context}: {exception.Message}", exception);
     }
 
+#pragma warning disable RH2003
+    /// <summary>
+    /// Installs a progress handler that interrupts the running statement when the token is cancelled or the time budget, counted
+    /// from this call, is used up.
+    /// </summary>
+    /// <param name="connection">The open reader connection</param>
+    /// <param name="timeProvider">The clock of the budget</param>
+    /// <param name="budget">The time the statement may take</param>
+    /// <param name="cancellationToken">The token whose cancellation interrupts the statement</param>
+    internal static void AttachBudget(SqliteConnection connection, TimeProvider timeProvider, TimeSpan budget, CancellationToken cancellationToken)
+    {
+        throw new NotImplementedException();
+    }
+#pragma warning restore RH2003
+
     /// <summary>
     /// The progress callback of SQLite: asks it to stop the running statement once the token is cancelled. It must never
     /// throw, because SQLite calls it from native code.

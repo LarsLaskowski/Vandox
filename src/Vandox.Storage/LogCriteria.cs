@@ -66,6 +66,18 @@ internal sealed class LogCriteria
     /// </summary>
     internal LogTemplate? Template { get; private init; }
 
+#pragma warning disable RH2003, S2325
+    /// <summary>
+    /// Gets the user's search text without the words of a template; the scan tests only this text.
+    /// </summary>
+    internal string ScanText => throw new NotImplementedException();
+
+    /// <summary>
+    /// Gets the number of lines a scan examines at most.
+    /// </summary>
+    internal int ExaminedLines => throw new NotImplementedException();
+#pragma warning restore RH2003, S2325
+
     #endregion // Properties
 
     #region Methods

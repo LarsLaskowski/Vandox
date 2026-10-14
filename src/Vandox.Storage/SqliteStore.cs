@@ -627,6 +627,23 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
                          cancellationToken);
     }
 
+    /// <summary>
+    /// Returns one page of the log lines matching every filter with explicit bounds of the index check.
+    /// </summary>
+    /// <param name="filter">The filters</param>
+    /// <param name="selectiveMatches">The index match count below which a text search runs from the index</param>
+    /// <param name="probeBudget">The time the index check may take</param>
+    /// <param name="timeProvider">The clock of the budget</param>
+    /// <param name="cancellationToken">Cancels the call</param>
+    /// <returns>A task that returns the page</returns>
+    /// <exception cref="InvalidQueryException">A filter breaks a rule</exception>
+#pragma warning disable RH2003, S2325
+    internal Task<LogPage> FindLogsAsync(LogFilter filter, int selectiveMatches, TimeSpan probeBudget, TimeProvider timeProvider, CancellationToken cancellationToken)
+    {
+        throw new NotImplementedException();
+    }
+#pragma warning restore RH2003, S2325
+
     #endregion // ILogExplorer
 
     #region IIncidentStore

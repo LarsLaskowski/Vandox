@@ -42,6 +42,18 @@ internal static class FtsQuery
         return string.Join(' ', terms.Select(term => $"\"{term.Replace("\"", "\"\"", StringComparison.Ordinal)}\""));
     }
 
+#pragma warning disable RH2003
+    /// <summary>
+    /// Counts the word parts of a search text: the runs of letters, numbers and private-use characters the tokenizer splits it into.
+    /// </summary>
+    /// <param name="text">The search text</param>
+    /// <returns>The number of word parts</returns>
+    internal static int CountTokens(string text)
+    {
+        throw new NotImplementedException();
+    }
+#pragma warning restore RH2003
+
     /// <summary>
     /// Throws an error for a rejected query unless the condition holds.
     /// </summary>
