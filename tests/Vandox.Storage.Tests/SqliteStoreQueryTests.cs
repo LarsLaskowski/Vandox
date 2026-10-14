@@ -274,6 +274,34 @@ public class SqliteStoreQueryTests
     }
 
     /// <summary>
+    /// The word parts of a text are the runs of letters, numbers and private-use characters; everything else separates them.
+    /// </summary>
+    /// <param name="template">The text; <c>{E9}</c> and <c>{E000}</c> stand for the characters U+00E9 and U+E000, because the format tool turns escapes in the source into characters</param>
+    /// <param name="expected">The number of word parts</param>
+    [TestMethod]
+    [DataRow("error", 1)]
+    [DataRow("10.0.0.1", 4)]
+    [DataRow("postfix/smtpd connect", 3)]
+    [DataRow("a_b", 2)]
+    [DataRow("{E9}-x", 2)]
+    [DataRow("{E000}", 1)]
+    [DataRow("{E000}a{E000}", 1)]
+    [DataRow("---", 0)]
+    [DataRow("", 0)]
+    [DataRow("  one   two  ", 2)]
+    public void FtsQueryCountTokensCountsTheTokenizerParts(string template, int expected)
+    {
+        // Arrange
+        var text = template.Replace("{E9}", char.ConvertFromUtf32(0xE9), StringComparison.Ordinal).Replace("{E000}", char.ConvertFromUtf32(0xE000), StringComparison.Ordinal);
+
+        // Act
+        var count = FtsQuery.CountTokens(text);
+
+        // Assert
+        Assert.AreEqual(expected, count, $"the word parts of '{template}'");
+    }
+
+    /// <summary>
     /// A search text with a lone surrogate cannot be encoded as UTF-8 and is refused.
     /// </summary>
     [TestMethod]

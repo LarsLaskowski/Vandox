@@ -1,3 +1,5 @@
+using Microsoft.Extensions.Time.Testing;
+
 using Vandox.Core.Model;
 using Vandox.Core.Templates;
 
@@ -1173,6 +1175,228 @@ public class SqliteStoreLogExplorerTests
 
     #endregion // AC-22 and AC-23 Query plans
 
+    #region AC-25 Scan bound by word parts
+
+    /// <summary>
+    /// A scan examines the bound for no or one word part and the bound divided by the parts otherwise, and at least one line.
+    /// </summary>
+    /// <param name="scanLimit">The bound of the call</param>
+    /// <param name="tokens">The number of word parts</param>
+    /// <param name="expected">The number of examined lines</param>
+    [TestMethod]
+    [DataRow(8000, 0, 8000)]
+    [DataRow(8000, 1, 8000)]
+    [DataRow(8000, 2, 4000)]
+    [DataRow(8000, 16, 500)]
+    [DataRow(5, 16, 1)]
+    [DataRow(1, 512, 1)]
+    public void LogFinderExaminedLinesDividesTheBoundByTheParts(int scanLimit, int tokens, int expected)
+    {
+        // Arrange and Act
+        var examined = LogFinder.ExaminedLines(scanLimit, tokens);
+
+        // Assert
+        Assert.AreEqual(expected, examined, $"lines examined for bound {scanLimit} and {tokens} parts");
+    }
+
+    /// <summary>
+    /// A scan with a text of two word parts examines half of the bound, and reports the bound reached with the position of the last examined line.
+    /// </summary>
+    /// <param name="text">The search text</param>
+    /// <param name="message">The start of the message of every line</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [DataRow("alpha beta", "alpha beta")]
+    [DataRow("alpha.beta", "alpha.beta")]
+    public async Task FindLogsScanDividesTheBoundByTheParts(string text, string message)
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+
+        await WriteAsync(store, Enumerable.Range(0, 100).Select(index => Line("syslog", "app", Sec(index), $"{message} line {index}", null)).ToArray());
+
+        var ids = await IdsAsync(directory.Path);
+
+        // Act
+        var twoParts = await store.FindLogsAsync(Change(Filter(), filter => (filter.Text, filter.ScanLimit) = (text, 10)), Scan, TestContext.CancellationToken);
+        var oneWord = await store.FindLogsAsync(Change(Filter(), filter => (filter.Text, filter.ScanLimit) = ("line", 10)), Scan, TestContext.CancellationToken);
+
+        // Assert
+        Assert.HasCount(5, twoParts.Lines, "half of the bound is examined, and every examined line matches");
+        Assert.IsTrue(twoParts.ScanLimitReached, "the divided bound is reached");
+        Assert.AreEqual(ids[4], twoParts.Next?.Id, "Next is the last examined line");
+        Assert.AreEqual(Sec(4), twoParts.Next?.CapturedAt, "Next has the time of the last examined line");
+        Assert.HasCount(10, oneWord.Lines, "one word part examines the whole bound");
+        Assert.AreEqual(ids[9], oneWord.Next?.Id, "Next is the last examined line of the whole bound");
+    }
+
+    /// <summary>
+    /// A scan of a template's lines without a text examines the whole bound, whatever the number of words in the template, and returns exactly the template's lines.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task FindLogsWithTemplateScanUsesOnlyTheUserText()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+
+        await WriteAsync(store, Enumerable.Range(0, 40).Select(index => Line("syslog", "app", Sec(index), index % 2 == 0 ? $"alpha beta gamma delta {index}" : $"alpha beta gamma delta epsilon {index}", null)).ToArray());
+
+        var ids = await IdsAsync(directory.Path);
+        var template = await store.FindTemplateAsync("syslog", "app", "alpha beta gamma delta 0", TestContext.CancellationToken);
+
+        // Act
+        var page = await store.FindLogsAsync(Change(Filter(), filter => (filter.TemplateId, filter.ScanLimit) = (template!.Id, 24)), Scan, TestContext.CancellationToken);
+
+        // Assert
+        Assert.AreSequenceEqual(Enumerable.Range(0, 24).Where(index => index % 2 == 0).Select(index => $"alpha beta gamma delta {index}").ToArray(), Messages(page), "the template's lines among the 24 examined lines, and only those");
+        Assert.IsTrue(page.ScanLimitReached, "the whole bound is examined");
+        Assert.AreEqual(ids[23], page.Next?.Id, "Next is the 24th line: the template words do not divide the bound");
+    }
+
+    #endregion // AC-25 Scan bound by word parts
+
+    #region AC-26 Probe budget
+
+    /// <summary>
+    /// With a budget of zero the store does not probe: the page is a scan page that says the index check was stopped.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task FindLogsScansWhenTheProbeBudgetIsUsedUp()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+
+        await WriteAsync(store, NeedleLines());
+
+        var ids = await IdsAsync(directory.Path);
+        var clock = new FakeTimeProvider();
+
+        // Act
+        var page = await store.FindLogsAsync(Change(Filter(), filter => (filter.Text, filter.ScanLimit) = ("needle", 5)), Index, TimeSpan.Zero, clock, TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsEmpty(page.Lines, "the word is in line 15 only, beyond the bound");
+        Assert.IsTrue(page.ScanLimitReached, "the scan bound ends the page");
+        Assert.AreEqual(ids[4], page.Next?.Id, "Next is line 5");
+        Assert.IsTrue(page.IndexCheckStopped, "the page says the index check was stopped");
+    }
+
+    /// <summary>
+    /// Within the budget the index check ends and the page comes from the index.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task FindLogsUsesTheIndexWithinTheProbeBudget()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+
+        await WriteAsync(store, NeedleLines());
+
+        var clock = new FakeTimeProvider();
+
+        // Act
+        var page = await store.FindLogsAsync(Change(Filter(), filter => (filter.Text, filter.ScanLimit) = ("needle", 5)), Index, TimeSpan.FromMinutes(1), clock, TestContext.CancellationToken);
+
+        // Assert
+        Assert.AreSequenceEqual(["line 15 needle"], Messages(page), "line 15 is read in index mode, beyond the scan bound");
+        Assert.IsFalse(page.IndexCheckStopped, "the index check was not stopped");
+        Assert.IsFalse(page.ScanLimitReached, "no scan bound was reached");
+        Assert.IsNull(page.Next, "the range is exhausted");
+    }
+
+    /// <summary>
+    /// A probe that is running when the budget ends is stopped, the request goes on in scan mode on the same connection, and the connection works normally afterwards.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task FindLogsBudgetStopsARunningProbe()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+
+        await WriteAsync(store, Lines("syslog", "app", "common word", 1, 4000));
+
+        var ids = await IdsAsync(directory.Path);
+        var clock = new FakeTimeProvider
+                    {
+                        AutoAdvanceAmount = TimeSpan.FromSeconds(2)
+                    };
+        var filter = Change(Filter(), change => (change.Text, change.ScanLimit) = ("common", 5));
+
+        // Act
+        var stopped = await store.FindLogsAsync(filter, Index, TimeSpan.FromSeconds(1), clock, TestContext.CancellationToken);
+        var scanned = await store.FindLogsAsync(filter, Scan, CancellationToken.None);
+        var indexed = await store.FindLogsAsync(Change(filter, change => change.ScanLimit = 100000), Index, CancellationToken.None);
+
+        // Assert
+        Assert.IsTrue(stopped.IndexCheckStopped, "the probe was stopped by the budget");
+        Assert.HasCount(5, stopped.Lines, "the scan page follows on the same connection");
+        Assert.IsTrue(stopped.ScanLimitReached, "the scan bound ends the page");
+        Assert.AreEqual(ids[4], stopped.Next?.Id, "Next is line 5");
+        Assert.HasCount(5, scanned.Lines, "a later scan works: the ordinary handler is back or the handler is cleared");
+        Assert.IsFalse(scanned.IndexCheckStopped, "the ordinary scan page does not claim a stopped index check");
+        Assert.HasCount(1000, indexed.Lines, "a later index search works too");
+    }
+
+    /// <summary>
+    /// A deadline that ends during the probe ends the call with a cancellation, not with a scan page, even when the budget ran out at the same time.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task FindLogsCancelledDuringTheProbeThrows()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+
+        await WriteAsync(store, Lines("syslog", "app", "common word", 1, 4000));
+
+        var clock = new FakeTimeProvider
+                    {
+                        AutoAdvanceAmount = TimeSpan.FromSeconds(2)
+                    };
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(1), clock);
+
+        // Act
+        var exception = await Assert.ThrowsAsync<OperationCanceledException>(() => store.FindLogsAsync(Change(Filter(), filter => (filter.Text, filter.ScanLimit) = ("common", 5)), Index, TimeSpan.FromSeconds(1), clock, deadline.Token));
+
+        // Assert
+        Assert.IsNotNull(exception, "the deadline wins over the budget");
+        Assert.IsTrue(deadline.IsCancellationRequested, "the deadline ended");
+    }
+
+    /// <summary>
+    /// A database error during the probe is a store error, not a scan page: only the stop by the budget turns into a scan.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task FindLogsWithBrokenIndexDuringTheProbeStillThrowsStoreException()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+
+        await WriteAsync(store, NeedleLines());
+        await ExecuteAsync(Path.Combine(directory.Path, StorageLimits.FileName), "DROP TABLE log_fts");
+
+        // Act
+        var exception = await Assert.ThrowsExactlyAsync<StoreException>(() => store.FindLogsAsync(Change(Filter(), filter => filter.Text = "needle"), Index, TimeSpan.FromMinutes(1), new FakeTimeProvider(), TestContext.CancellationToken));
+
+        // Assert
+        Assert.StartsWith("store: reading logs: ", exception.Message, "the operation is named");
+        Assert.IsInstanceOfType<Microsoft.Data.Sqlite.SqliteException>(exception.InnerException, "the cause is the database error");
+    }
+
+    #endregion // AC-26 Probe budget
+
     #region Edge cases
 
     /// <summary>
@@ -1372,6 +1596,15 @@ public class SqliteStoreLogExplorerTests
                               Message = message
                           }
                };
+    }
+
+    /// <summary>
+    /// Creates 20 lines one second apart of which only line 15 (the 15th, number 14 counted from zero) holds the word needle.
+    /// </summary>
+    /// <returns>The records</returns>
+    private static DataRecord[] NeedleLines()
+    {
+        return Enumerable.Range(1, 20).Select(number => Line("syslog", "app", Sec(number), number == 15 ? $"line {number} needle" : $"line {number} hay", null)).ToArray();
     }
 
     /// <summary>

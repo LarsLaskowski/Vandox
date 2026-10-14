@@ -652,6 +652,47 @@ public partial class LogsPageTests
     }
 
     /// <summary>
+    /// The page says that the search goes step by step above the line of how far it went, only for a page ended by the scan bound after a stopped index check.
+    /// </summary>
+    /// <param name="indexCheckStopped">Whether the store stopped the index check</param>
+    /// <param name="scanLimitReached">Whether the scan bound ended the page</param>
+    /// <param name="shown">Whether the text is expected</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [DataRow(true, true, true)]
+    [DataRow(false, true, false)]
+    [DataRow(true, false, false)]
+    public async Task LogsPageSaysWhenTheSearchGoesStepByStep(bool indexCheckStopped, bool scanLimitReached, bool shown)
+    {
+        // Arrange
+        var position = Position(Time.AddMinutes(30), 90);
+        var page = Page(scanLimitReached ? position : null, scanLimitReached, Line(11, Time, "one"));
+
+        page.IndexCheckStopped = indexCheckStopped;
+
+        await using var harness = new LogPageHarness($"{Address}?q=x");
+
+        harness.Explorer.FindPage = page;
+
+        // Act
+        await harness.AddAsync<LogsPage>();
+
+        var html = harness.Html();
+        var status = harness.Renderer.Elements(LogPageHarness.RootId).Where(element => element.Tag == "p" && element.Classes.Contains("status")).Select(element => element.Text.Trim()).ToArray();
+
+        // Assert
+        Assert.AreEqual(shown, html.Contains(Enc(LogsView.SearchStepwise), StringComparison.Ordinal), "the text is shown only for a stopped index check with the scan bound reached");
+        Assert.AreEqual(shown, status.Contains(LogsView.SearchStepwise), "the text is a status paragraph");
+
+        if (shown)
+        {
+            var searchedUp = Enc(Format(LogsView.SearchedUpToFormat, $"{Shown(position.CapturedAt)} UTC"));
+
+            Assert.IsLessThan(html.IndexOf(searchedUp, StringComparison.Ordinal), html.IndexOf(Enc(LogsView.SearchStepwise), StringComparison.Ordinal), "the text is above the line of how far the search went");
+        }
+    }
+
+    /// <summary>
     /// Creates a hook that blocks the first search until its token ends.
     /// </summary>
     /// <param name="explorer">The explorer that runs the hook</param>
