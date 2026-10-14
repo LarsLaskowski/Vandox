@@ -82,6 +82,10 @@ public class IncidentPageTests
         Assert.Contains(IncidentsView.Mib(7400UL * Mib), html, "the anonymous resident memory of the first victim");
         Assert.Contains("200", html, "the oom score of the second victim");
         Assert.Contains(LogsView.ShowSeconds(IncidentViewSamples.FirstKill), html, "the time of the first kill");
+        AssertLabelled(html, "Duration", IncidentsView.Duration(IncidentViewSamples.LastKill - IncidentViewSamples.FirstKill), "the duration from the first to the last kill");
+        AssertLabelled(html, "Built (UTC)", LogsView.ShowSeconds(IncidentViewSamples.Start.AddDays(1)), "when the incident was built");
+        AssertLabelled(html, "Last changed (UTC)", LogsView.ShowSeconds(IncidentViewSamples.Start.AddDays(1).AddMinutes(5)), "when the incident was last changed");
+        AssertLabelled(html, "Snapshots", "9", "the snapshots of the connection peak");
         Assert.Contains("37", html, "the number of timeline entries that were not kept");
         Assert.IsTrue(order.All(index => index >= 0), "every timeline entry is shown");
         Assert.AreSequenceEqual(order.Order().ToArray(), order, "the timeline is in stored order");
@@ -460,6 +464,21 @@ public class IncidentPageTests
             Assert.Contains("web-1", shown, "the rest of the page stays");
             Assert.DoesNotContain(Enc(IncidentsView.ListDeadline), shown, "the incident was read");
         }
+    }
+
+    /// <summary>
+    /// Asserts that a label of the page is followed, within its own entry, by a value.
+    /// </summary>
+    /// <param name="html">The markup of the page</param>
+    /// <param name="label">The label</param>
+    /// <param name="value">The value</param>
+    /// <param name="what">What is checked</param>
+    private static void AssertLabelled(string html, string label, string value, string what)
+    {
+        var index = html.IndexOf(label, StringComparison.Ordinal);
+
+        Assert.IsGreaterThanOrEqualTo(0, index, $"the label {label} is shown: {what}");
+        Assert.Contains(Enc(value), html[index..Math.Min(html.Length, index + 300)], $"the value follows the label {label}: {what}");
     }
 
     /// <summary>
