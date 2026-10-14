@@ -33,8 +33,14 @@
             <dd><a href="@IncidentsView.LogsHref(_detail.FirstKillAt)">@LogsView.ShowSeconds(_detail.FirstKillAt)</a></dd>
             <dt>Last kill (UTC)</dt>
             <dd><a href="@IncidentsView.LogsHref(_detail.LastKillAt)">@LogsView.ShowSeconds(_detail.LastKillAt)</a></dd>
+            <dt>Duration</dt>
+            <dd>@_detail.Duration</dd>
             <dt>Kills</dt>
             <dd>@_detail.KillCount</dd>
+            <dt>Built (UTC)</dt>
+            <dd>@LogsView.ShowSeconds(_detail.CreatedAt)</dd>
+            <dt>Last changed (UTC)</dt>
+            <dd>@LogsView.ShowSeconds(_detail.UpdatedAt)</dd>
         </dl>
     </section>
 
@@ -161,6 +167,8 @@
                 <dd><a href="@IncidentsView.LogsHref(_detail.PeakAt.Value)">@LogsView.ShowSeconds(_detail.PeakAt.Value)</a></dd>
                 <dt>Sockets</dt>
                 <dd>@_detail.PeakSockets</dd>
+                <dt>Snapshots</dt>
+                <dd>@_detail.PeakSnapshots</dd>
                 <dt>Commands with the most sockets</dt>
                 <dd>
                     @foreach (var process in _detail.PeakProcesses)

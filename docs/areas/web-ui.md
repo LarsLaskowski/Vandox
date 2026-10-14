@@ -192,11 +192,11 @@ that writes them as text, never as markup, in an element that isolates the text 
 
 **Incident page (`/incidents/<number>`).**
 
-- Header: the window, the first and the last kill (each a link to the logs of that moment) and the number of kills. Then the kills
+- Header: the window, the first and the last kill (each a link to the logs of that moment), the duration from the first to the last kill, the number of kills, and when the incident was built and last changed (UTC). Then the kills
   kept in the document (time, host, victim, process ID, anonymous memory, OOM score adjustment; at most 16, the page says how many
   more exist), the hypothesis (programs that grew, largest consumers, backup state and programs, the last boot, the number of process
   snapshots and service events), the timeline in stored order with the number of events the document left out, the connection peak
-  (time, sockets, the commands with the most sockets), the metric extremes (value, source, time) and the new templates and template
+  (time, sockets, the number of connection snapshots it was found in, the commands with the most sockets), the metric extremes (value, source, time) and the new templates and template
   spikes. A growth the incident could not tell is shown as `unknown`.
 - A timeline row of the type `oom_kill`, `boot`, `backup_first_seen` or `backup_last_seen` carries the class `mark-oom`, `mark-boot`
   or `mark-backup` from this fixed map; no other type gets a class, whatever its text, and it is shown as escaped text.

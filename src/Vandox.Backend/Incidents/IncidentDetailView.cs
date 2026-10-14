@@ -34,6 +34,21 @@ public sealed class IncidentDetailView
     public DateTimeOffset FirstKillAt { get; init; }
 
     /// <summary>
+    /// Gets the duration from the first to the last kill as text.
+    /// </summary>
+    public string Duration { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets the time the incident was first stored.
+    /// </summary>
+    public DateTimeOffset CreatedAt { get; init; }
+
+    /// <summary>
+    /// Gets the time the incident was last changed.
+    /// </summary>
+    public DateTimeOffset UpdatedAt { get; init; }
+
+    /// <summary>
     /// Gets the time of the last kill.
     /// </summary>
     public DateTimeOffset LastKillAt { get; init; }
@@ -109,6 +124,11 @@ public sealed class IncidentDetailView
     public long PeakSockets { get; init; }
 
     /// <summary>
+    /// Gets the number of connection snapshots the peak was found in.
+    /// </summary>
+    public long PeakSnapshots { get; init; }
+
+    /// <summary>
     /// Gets the commands with the most sockets at the peak.
     /// </summary>
     public IReadOnlyList<ProgramAmountView> PeakProcesses { get; init; } = [];
@@ -153,6 +173,9 @@ public sealed class IncidentDetailView
                    End = incident.End,
                    FirstKillAt = incident.FirstKillAt,
                    LastKillAt = incident.LastKillAt,
+                   Duration = IncidentsView.Duration(incident.LastKillAt - incident.FirstKillAt),
+                   CreatedAt = stored.CreatedAt,
+                   UpdatedAt = stored.UpdatedAt,
                    KillCount = incident.KillCount,
                    Kills = incident.Kills.Select(Kill).ToList(),
                    Growth = growth,
@@ -167,6 +190,7 @@ public sealed class IncidentDetailView
                    TimelineOmitted = incident.TimelineOmitted,
                    PeakAt = peak?.At,
                    PeakSockets = peak?.Sockets ?? 0,
+                   PeakSnapshots = peak?.Snapshots ?? 0,
                    PeakProcesses = peak?.Processes.Select(process => Amount(process.Command, Number(process.Count))).ToList() ?? [],
                    Extremes = incident.Metrics.Select(Extreme).ToList(),
                    NewTemplates = incident.NewTemplates.Select(template => Template(template.Source, template.Program, template.Template, template.FirstSeen, template.Count, string.Empty)).ToList(),
