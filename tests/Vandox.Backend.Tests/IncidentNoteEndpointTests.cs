@@ -210,6 +210,30 @@ public class IncidentNoteEndpointTests
     }
 
     /// <summary>
+    /// A body that is no form, and a form body the form reader cannot read, are refused with 400 even when the validation feature says the token is valid, and nothing is stored.
+    /// </summary>
+    /// <param name="contentType">The content type</param>
+    /// <param name="body">The body</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [DataRow("text/plain", "note=hello&written_for=5")]
+    [DataRow(FormType, "note=a%00b&written_for=5")]
+    public async Task IncidentNoteEndpointRefusesABodyThatIsNoReadableForm(string contentType, string body)
+    {
+        // Arrange
+        var browser = new FakeIncidentBrowser();
+        var clock = new FakeTimeProvider(new DateTimeOffset(2026, 10, 13, 12, 0, 0, TimeSpan.Zero));
+        var context = Request(body, contentType);
+
+        // Act
+        await IncidentNoteEndpoint.SaveAsync(context, 5, browser, clock, Factory(new ListLogger()));
+
+        // Assert
+        Assert.AreEqual(StatusCodes.Status400BadRequest, context.Response.StatusCode, "refused");
+        Assert.IsEmpty(browser.Calls, "nothing is stored");
+    }
+
+    /// <summary>
     /// A note of 1,800 characters of three bytes each, which is 16,200 bytes in a form, passes the form limits of the service and is stored.
     /// </summary>
     /// <returns>A task that completes when the test is done</returns>

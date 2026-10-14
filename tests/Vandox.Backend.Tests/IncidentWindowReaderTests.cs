@@ -182,6 +182,35 @@ public class IncidentWindowReaderTests
     }
 
     /// <summary>
+    /// Available memory and swap read at most 1,000 points each.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task IncidentWindowReaderReadsAtMostAThousandMetricPoints()
+    {
+        // Arrange
+        var records = new ScriptedRecordReader();
+        var incident = Window(TimeSpan.FromHours(6));
+
+        incident.Metrics.Add(Extreme("mem_available_bytes", MemInfo));
+        incident.Metrics.Add(Extreme("swap_used_bytes", MemInfo));
+
+        for (var index = 0; index < 1005; index++)
+        {
+            records.AddMetric(MemInfo, _start.AddSeconds(index), "mem_available_bytes", 5d * Mib);
+            records.AddMetric(MemInfo, _start.AddSeconds(index), "swap_used_bytes", 1d * Mib);
+        }
+
+        // Act
+        var data = await new IncidentWindowReader(records).ReadAsync(incident, TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsNotNull(data.MemoryAndSwap, "the chart");
+        Assert.HasCount(IncidentsView.MaxMetricPoints, data.MemoryAndSwap.Times, "1,000 points");
+        Assert.IsTrue(data.MemoryAndSwap.Series.All(series => series.Values.Count(value => value is not null) == IncidentsView.MaxMetricPoints), "1,000 points in each series");
+    }
+
+    /// <summary>
     /// Without data in the window no chart is built, and without a stored extreme of a metric the metric is not read.
     /// </summary>
     /// <returns>A task that completes when the test is done</returns>

@@ -520,6 +520,33 @@ public class SqliteStoreIncidentBrowserTests
     }
 
     /// <summary>
+    /// A database error in a note save becomes a store error with the database error as the cause, and an invalid note error can carry a cause.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task SqliteStoreSaveIncidentNoteWrapsDatabaseErrors()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+
+        await SaveIncidentAsync(store, 0, 2);
+        await ExecuteAsync(Path.Combine(directory.Path, StorageLimits.FileName), "DROP TABLE incident_notes");
+
+        var cause = new InvalidOperationException("cause");
+
+        // Act
+        var failure = await Assert.ThrowsExactlyAsync<StoreException>(() => store.SaveIncidentNoteAsync(Edit(1, 1, "text"), TestContext.CancellationToken), "save without the table");
+        var invalid = new InvalidNoteException("store: invalid note: x", cause);
+
+        // Assert
+        Assert.StartsWith("store: saving note: ", failure.Message, "message of the save");
+        Assert.IsInstanceOfType<SqliteException>(failure.InnerException, "cause of the save");
+        Assert.AreSame(cause, invalid.InnerException, "the cause of an invalid note error");
+        Assert.AreEqual("store: invalid note: x", invalid.Message, "its message");
+    }
+
+    /// <summary>
     /// Returns a time in hours after the base time of the samples.
     /// </summary>
     /// <param name="hours">The hours</param>

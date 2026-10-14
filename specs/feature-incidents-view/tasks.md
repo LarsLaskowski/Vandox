@@ -14,7 +14,7 @@ Every documentation edit appears in exactly one row; the Lead's approval only to
 | 6 | View helpers and view models, list page, incident page, note form, navigation entry, incident styles and mark classes | `IncidentsView`, `IncidentRowView`, `IncidentDetailView`, `IncidentsPage`, `IncidentPage`, `IncidentNoteForm`, `PageRunner`, `MainLayout.razor`, `BackendLog`, `app.css` | AC5, AC6, AC9, AC10, AC12, AC13 | Dev | [x] |
 | 7 | Note endpoint (antiforgery feature first, form only, U+0000 refused, log carries no note text) and note text rules | `IncidentNoteEndpoint`, `IncidentNoteText`, `ServeCommand` | AC10 | Dev | [x] |
 | 8 | *Image build check* (restore-order reproduction) before the review; result in `log.md` | — | AC14 | Dev | [x] |
-| 9 | Coverage pass: uncovered lines, the bounds the plan names (list limit, 64 notes, 300 snapshots, 1,000 metric points, 4,096 programs, 512/2,048/64 caps) | `tests/*` | — | Tester | [ ] |
+| 9 | Coverage pass: uncovered lines, the bounds the plan names (list limit, 64 notes, 300 snapshots, 1,000 metric points, 4,096 programs, 512/2,048/64 caps) | `tests/*` | — | Tester | [x] |
 | 10 | Area documents: *Incidents view* and the chart, navigation and gate changes in Web UI; schema 10, notes, reading and retention in Storage; *Re-running* in Detection; the note form under *Cross-site requests* in Web login | `docs/areas/web-ui.md`, `docs/areas/storage.md`, `docs/areas/detection-and-reports.md`, `docs/areas/web-login.md` | — | Dev | [x] |
 | 11 | README section *Look at incidents* | `README.md` | — | Dev | [x] |
 | 12 | Security areas 3, 10 and 12 | `.squad/project.md` (*Security areas*) | — | Dev | [x] |

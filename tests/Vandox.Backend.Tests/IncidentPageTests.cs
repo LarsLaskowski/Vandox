@@ -325,6 +325,36 @@ public class IncidentPageTests
     }
 
     /// <summary>
+    /// A long window of connection snapshots is cut at 300, and the page names the time of the cut.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task IncidentPageNamesTheCutOfTheConnectionChart()
+    {
+        // Arrange
+        var stored = IncidentViewSamples.Full();
+
+        stored.Incident.End = IncidentViewSamples.Start.AddHours(6);
+
+        await using var harness = Open(stored);
+
+        for (var index = 0; index < 305; index++)
+        {
+            harness.Records.AddConnections("proc.net", IncidentViewSamples.Start.AddMinutes(index), 5, 6);
+        }
+
+        var cut = Enc(string.Format(CultureInfo.InvariantCulture, _chartCut, IncidentsView.MaxChartConnections, LogsView.ShowSeconds(IncidentViewSamples.Start.AddMinutes(299))));
+
+        // Act
+        await harness.AddAsync<IncidentPage>(IncidentViewSamples.Id);
+        await harness.WaitForHtmlAsync(html => html.Contains(cut, StringComparison.Ordinal));
+
+        // Assert
+        Assert.Contains(cut, harness.Html(), "the cut of the connection chart");
+        Assert.DoesNotContain(Enc(IncidentsView.NoWindowData), harness.Html(), "a chart was drawn");
+    }
+
+    /// <summary>
     /// The page has one form for the own note and one for each note that was moved to the incident, each a post to the notes address with the antiforgery token, the number it was written for and a text area of at most 1,800 characters, and it says when notes are not shown.
     /// </summary>
     /// <returns>A task that completes when the test is done</returns>
