@@ -142,14 +142,16 @@ them too): use `[[ … ]]`, never `[ … ]` (`shelldre:S7688`), and assign every
 `local` variable before using it inside a function (`shelldre:S7679`).
 
 Logger arguments: the C# CodeQL query treats a variable, property or constant as sensitive when its name, ignoring
-case, contains `password`, `passwd` or `trusted`, or `account`, `accnt`, `license` or `licence` followed by `id` or
-`key`, unless the name also contains `hashed`, `encrypted`, `crypt` or `invalid`. It does so even when the value is
-only a name (a failed run: `logger.WebPasswordHashMissing(ConfigConstants.EnvWebPasswordHash)` logged just the
+case, contains `password`, `passwd` or `trusted`, `account` or `accnt` followed by `id` or `key`, `license` or
+`licence` followed by `key`, or `voucher` followed by `code`, unless the name also contains `hashed`,
+`encrypted`, `crypt` or `invalid`. It does so even when the value is only a name (a failed run: `logger.WebPasswordHashMissing(ConfigConstants.EnvWebPasswordHash)` logged just the
 environment variable's name). No local gate reports this. A value passed to a `[LoggerMessage]` method must not come
 from an expression named that way; log such a name through a neutrally named constant whose value a test pins
 (`ServeCommand.HashSecretVariable`, pinned by `ServeRefusesMissingPasswordHash`). Before the pull request, grep the
-arguments of the new logger calls for those names. In Go the query also flags names containing `secret`,
-`confidential` or `oauth` and authentication keys (`authKey`), so avoid those in logger arguments of the agent too.
+arguments of the new logger calls for those names. In Go the query flags names containing `secret`,
+`trusted`, `passwd`, `password`, `passcode`, `passphrase`, `username`, `userid` or `puid`, and keys such as `authKey`,
+`apiKey` and `secretKey`, unless the name also contains `hash`, `crypt`, `code`, `mask`, `test` or `redact`; avoid those
+in logger arguments of the agent too.
 
 Two analyzer rules collide and are settled once (record 0074): RH3001 forbids the negation operator `!`,
 S1125 forbids comparing a boolean with a literal (`== false`, `is false`). Write positive conditions, early
