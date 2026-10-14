@@ -749,7 +749,9 @@ browser script changes (`js/charts.js` is reused), so `sonar.coverage.exclusions
   scan mode by `ScanLimit` examined rows (the per-line `EXISTS` collects nothing); the selectivity probe reads and keeps at most
   `SelectiveMatches` row IDs (about 96 KiB, the list index mode then reads by record ID), but a text of several common words makes FTS5 walk their full doclists to find the intersection inside
   one `xFilter`/`xNext` step, where the progress handler of `ReaderQuery` does not run: this work is bounded by the doclist sizes
-  (index-only, at most 16 terms), **not** by the deadline, and measured as cases 5 and 12 of AC-19 (Security N1). At most two explorer
+  (index-only, at most 16 terms), **not** by the deadline, and measured as cases 5 and 12 of AC-19 (Security N1). *Corrected by
+  Lead revision: the index check under a time budget: the progress handler does run inside the FTS5 step, and the probe runs under
+  the deadline and a 0.7 s budget.* At most two explorer
   calls run at once across the service (`GatedLogExplorer`), one per page.
   Memory per circuit: the page keeps `LogLineView`s, not the `StoredRecord`s: per line the message runs at most
   `LogText.MaxChars` (16,384) UTF-16 characters plus the cut marker and source, host and program at most `LogText.MaxShortChars`
@@ -1089,8 +1091,8 @@ The probe runs inside one FTS5 step. Nothing in this design bounds it in time, a
 2.2 s today; case 14 and crafted multi-part terms will be slower. The choice changes what the user sees, and option B narrows the
 criterion of AC-E, so the Product Manager decides (question in the result of this decision). Options:
 
-- **A (Lead's recommendation): the index check gets a time budget.** The probe runs in record-ID slices (`rowid` ranges, each a short
-  FTS5 step, so the deadline and a budget of about 0.7 s apply between slices); when it has not finished within the budget, the
+- **A (Lead's recommendation): the index check gets a time budget.** (Mechanism as first sketched: record-ID slices; replaced by the progress
+  handler in *Lead revision: the index check under a time budget*.) when it has not finished within the budget, the
   request uses scan mode with the divided bound of item 2. Every request is bounded on any database size, and Security N1's
   residual goes away. Cost: a store clock, a new step in `LogFinder`, tests, a Security review, record 0103 updated. Seen by the user: a
   search whose index check is slow (many common words that never meet, an IP address whose parts are all common) shows "searched up to
@@ -1159,3 +1161,151 @@ Follow-up issues (orchestrator, after this decision):
   entries inside one FTS5 step, which the deadline cannot interrupt (the logs view's plan measured 5.6 s for 200 tokens on 1,000,000
   lines on the development host). Unless option B of the logs view's decision bounds the tokens in `FtsQuery`, bound them for this
   search too.
+
+## Lead revision: the index check under a time budget (Product Manager's answer: option A)
+
+The Product Manager chose **option A** of *Lead decision: reference-host run 1*: every page answers in about 2 seconds. When the index
+check (the probe) has not finished within about 0.7 s, the request runs in scan mode, the page-by-page search the view already uses for
+very common words. For such a search there may be no final "no lines" answer until the range is narrowed. Items 1 to 3 of that decision
+(ScanRows 8,000, AC-25, cases 13 and 14) stay as decided.
+
+### How the budget is enforced (checked, not assumed)
+
+The plan, Security N1 and the storage area say the deadline cannot interrupt the probe because the progress handler does not run inside
+the FTS5 step. **That claim is refuted.** The Lead checked it with the project's own SQLite (`SQLitePCLRaw.lib.e_sqlite3` 2.1.12, SQLite
+3.53.3, the linux-x64 library from the NuGet cache, loaded through `ctypes`) on the 1,000,000-line scratch file of F1/F2. The handler was
+installed as `ReaderQuery.Attach` installs it (every 1,000 instructions):
+- Probe of a 200-part term (5.6 s): the handler ran 448 times, at most 29 ms apart.
+- The same probe with a handler that returns 1 after 0.5 s ended with `SQLITE_INTERRUPT` after 505 ms.
+- 16 parts: 35 calls, at most 28 ms apart. The 16 words of case 12: 9 calls, at most 20 ms apart.
+- After the interrupted probe, the next statement on the same connection ran normally.
+
+Why: FTS5 reads its index pages through SQLite's own b-tree statements (`%_data`), and the VDBE invokes the progress handler while
+those run. So the existing mechanism (progress handler returns 1, SQLite stops with `SQLITE_INTERRUPT`) is the budget's mechanism. No
+second connection, thread or `sqlite3_interrupt` is needed.
+
+**Mechanism.** For the probe only, `LogFinder` installs a progress handler that returns 1 when the call's token is cancelled (the
+deadline, as before) **or** when the time since the probe started reaches the budget. The time is measured with the injected
+`TimeProvider`'s `GetTimestamp`/`GetElapsedTime`. After the probe, in a `finally`, the call's ordinary handler
+(`ReaderQuery.Attach(connection, cancellationToken)`) is installed again.
+- Stopped by the budget: `SQLITE_INTERRUPT` while the token is not cancelled. The IDs read so far are discarded and the request runs
+  in scan mode with the bound of AC-25, and the page has `IndexCheckStopped` set.
+- Stopped by the token: `OperationCanceledException`, as today.
+- A budget of zero or less: no probe at all, scan mode with `IndexCheckStopped`.
+- A probe that ends within the budget: as today (no IDs → empty page; fewer than the cap → index mode; the cap → scan mode, without
+  `IndexCheckStopped`).
+
+**Limits, stated honestly:**
+- The probe stops at the next handler call, not at the exact budget. Measured gaps on the development host are at most 29 ms, so
+  about 0.15 s on the reference host (factor 5).
+- No gap bound is proven for every shape. A term of the most parts the 1,024-byte rule allows (about 512) may lengthen the gap; the
+  estimate from the 200-part result is about 75 ms on the development host. Case 15 measures a crafted term on the reference host.
+- An interrupted probe's work is lost. Every page of such a search, *Continue* included, pays the budget again, because the store
+  does not remember the mode between requests. Page time ≈ 0.7 s + gap + the scan page: for 16 parts about 500 examined lines at
+  about 1 ms each on the reference host (F1 × 5), so about 1.3 s; for 200 parts 40 lines, about 1.2 s.
+- Pages from a budget-stopped probe are always scan pages, even when the words would have matched only a few lines. A rare IP
+  address whose parts are all common, over a large range, may need several *Continue* steps or a narrower range (the Product
+  Manager's accepted cost).
+- The budget is wall-clock time on the host, so on a loaded host more searches run stepwise. That changes how fast, never which
+  lines: the lines found by following `Next` to the end do not depend on the mode (AC-2 to AC-6).
+
+Options weighed for the mechanism (record 0103, option 18):
+- **Rejected: the probe in record-ID slices.** Measured: slices do not make a phrase cheaper. 50,000-ID slices for the 200-part
+  term took 58 s in all, one slice 5.6 s. For the 16 words of case 12 they took 1.7 s against 0.3 s.
+- **Rejected: a second thread calling `sqlite3_interrupt`.** SQLite checks the interrupt at the same VDBE points as the progress
+  handler, so it stops no sooner. It also needs a timer thread per probe and acts on the whole connection.
+- **Rejected: a separate connection for the probe.** It would take a second reader lease, breaking the bound of AC-21 and record 0103
+  option 14.
+- **Not taken: a cap on the parts (option B's).** With the budget it is not needed for time. Security may still ask for it against
+  CPU use (below).
+
+### AC-26
+
+- [ ] AC-26 Probe budget: with a budget of zero the store does not probe, and the page is a scan page with `IndexCheckStopped`. Data:
+  20 lines, the word in line 15 only, `ScanLimit` 5. Expected: no lines, `ScanLimitReached`, `Next` at line 5, `IndexCheckStopped`
+  (`SqliteStoreLogExplorerTests.FindLogsScansWhenTheProbeBudgetIsUsedUp`).
+  - With a budget of one minute and the clock not advanced, the same request reads line 15 in index mode, with `IndexCheckStopped`
+    unset (`FindLogsUsesTheIndexWithinTheProbeBudget`).
+  - A probe running when the budget ends is stopped and the request continues in scan mode on the same connection
+    (`FindLogsBudgetStopsARunningProbe`: `FakeTimeProvider` with an `AutoAdvanceAmount` above the budget, data large enough that the
+    probe reaches a progress callback; the Tester sizes it and asserts the scan page and `IndexCheckStopped`).
+  - A deadline that ends during the probe still ends the call with `OperationCanceledException`, not with a scan page
+    (`FindLogsCancelledDuringTheProbeThrows`: a token source on the same `FakeTimeProvider` that the auto-advance cancels at the first
+    callback).
+  - The logs page shows `LogsView.SearchStepwise` above *Searched up to* when the page has `IndexCheckStopped` and
+    `ScanLimitReached`, and not for an ordinary scan-bound page (`LogsPageTests.LogsPageSaysWhenTheSearchGoesStepByStep`, two data
+    rows).
+  - The existing tests of AC-2 to AC-6, AC-22 and AC-25 stay unchanged and green.
+- AC-19 is unchanged ("every case under 2,000 ms"); cases 12, 14 and **15** are expected to end with the index check stopped. **(15)** is
+  a term of 200 parts of a word every generated line holds, which no line holds as that phrase (the crafted case of F2). The
+  benchmark prints `scan, index check stopped` as the mode of such a case (Dev; it reads `IndexCheckStopped` from the page instead of
+  repeating the probe for that case).
+
+**User-facing text** (`LogsView.SearchStepwise`, exact):
+`These words are too common to look up at once, so the search goes through the time range step by step. Narrow the time range to get a complete answer.`
+It is shown as a `<p class="status">` directly above the *Searched up to …* line and the *Continue* button. The existing texts stay as
+they are.
+
+### Signatures (Dev's skeleton, together with those of AC-25; *Build* passes)
+
+- `src/Vandox.Storage/LogPage.cs`: `public bool IndexCheckStopped { get; set; }` (XML doc: the index check ran out of its time budget, so the
+  page comes from the scan).
+- `src/Vandox.Storage/LogFinder.cs`:
+  - `internal static readonly TimeSpan ProbeBudget = TimeSpan.FromMilliseconds(700);`
+  - `FindAsync` becomes `internal static Task<LogPage> FindAsync(SqliteConnection connection, LogFilter filter, LogTemplate? template, int selectiveMatches, TimeSpan probeBudget, TimeProvider timeProvider, CancellationToken cancellationToken)`.
+- `src/Vandox.Storage/ReaderQuery.cs`: `internal static void AttachBudget(SqliteConnection connection, TimeProvider timeProvider, TimeSpan budget, CancellationToken cancellationToken)`.
+  It takes the start timestamp when called, and its callback returns 1 on a cancelled token or a used-up budget. `Attach` is unchanged.
+- `src/Vandox.Storage/SqliteStore.cs`:
+  - new `internal Task<LogPage> FindLogsAsync(LogFilter filter, int selectiveMatches, TimeSpan probeBudget, TimeProvider timeProvider, CancellationToken cancellationToken)`;
+  - the existing internal `FindLogsAsync(LogFilter, int, CancellationToken)` stays and delegates with `LogFinder.ProbeBudget` and
+    `TimeProvider.System`, so its existing test call sites compile unchanged;
+  - the public `ILogExplorer.FindLogsAsync` passes `LogFinder.SelectiveMatches`, `LogFinder.ProbeBudget`, `TimeProvider.System`.
+- `src/Vandox.Backend/Logs/LogsView.cs`: `public const string SearchStepwise = "…";` (text above).
+- `src/Vandox.Backend/Components/Pages/LogsPage.razor.cs` and `LogsPage.razor`: a `_stepwise` field set in `Apply` from
+  `page.IndexCheckStopped && page.ScanLimitReached`, rendered as above.
+- `ILogExplorer`, `GatedLogExplorer` and `FakeLogExplorer` keep their signatures. A scripted `LogPage` sets the new property.
+- Final files, unchanged: `LogFinderQueries.cs` beyond AC-25, `LogExplorerQueries.cs`, `GatedLogExplorer.cs`, `LogTemplatesPage.*`.
+
+### Security considerations (delta) and N1 re-assessment
+
+- **N1 changes from a residual into a bound.** The probe now runs under the deadline and under the budget, both stopped through the
+  progress handler (measured above).
+- **What remains:**
+  - The overshoot is one gap between handler calls (≤ 29 ms measured on the development host; not proven for every shape; case 15
+    measures the crafted one).
+  - Every page of a stepwise search costs the budget, so a client can keep two reader slots (AC-21) busy about 0.7 s per request,
+    over and over.
+  - The CPU cost of a crafted request is bounded by budget + gap + scan page, not by the size of the index entries.
+- **Security decides** whether a cap on word parts (option B's, e.g. 64 parts) is still wanted against CPU use. The Lead's view: not
+  needed, since the gate bounds concurrent calls to two and each call to about 2 s.
+- The budget handler must never throw from the callback (same rule as `ReaderQuery.Progress`), and the ordinary handler must be
+  installed again on every path (`finally`). An interrupted statement must not leave the lease in a state that fails the next
+  statement (`FindLogsBudgetStopsARunningProbe` runs the scan on the same connection).
+- No new input and no new text from external data. `SearchStepwise` is a fixed text.
+
+### Owners
+
+- **Lead:** this section; `spec.md`; `tasks.md`; record 0103 (option 18, *Decision*, *Consequences*); the *Security considerations*
+  bullet of this plan (N1 corrected).
+- **Security:** plan delta on this section and on *Lead decision: reference-host run 1*, including the N1 re-assessment and the
+  parts-cap question; then the diff delta after the implementation.
+- **Dev:**
+  - skeleton of every signature above and of AC-25;
+  - then `LogPage.cs`, `LogFinder.cs`, `ReaderQuery.cs`, `SqliteStore.cs`, `LogsView.cs`, `LogsPage.razor`/`.razor.cs`,
+    `SearchBenchmark.cs` (case 15; mode `scan, index check stopped`);
+  - `docs/areas/storage.md`, *Log exploration* (the probe budget and its fallback, the corrected *Cost* and the *Database file and
+    connections* sentence: the progress handler does run inside the FTS5 module);
+  - `docs/areas/web-ui.md` (stepwise search and its text, the possible lack of a final answer);
+  - `docs/BENCHMARKS.md` (case 15 row and notes, the budget in *Tuning*).
+- **Tester:** the five tests of AC-26 (first, failing on the skeleton), in `tests/Vandox.Storage.Tests/SqliteStoreLogExplorerTests.cs` and
+  `tests/Vandox.Backend.Tests/LogsPageTests.cs`, with those of AC-25.
+- **Code Officer:** *Format* and *Analyzer gate* on the changed files.
+- **Reviewer:** a delta round over everything changed since 94497eb (AC-25, AC-26, cases 13 to 15, the documents).
+
+Verification:
+1. Step 6 gates.
+2. The development-host benchmark (5,000,000 lines, cases 1 to 15, target 350 ms, cases with the index check stopped named as such).
+3. Reviewer delta and Security diff delta.
+4. The second DS918+ run (task 31), which decides AC-19.
+
+Files no unit test can cover: unchanged (`SearchBenchmark.cs`, `[ExcludeFromCodeCoverage]`).

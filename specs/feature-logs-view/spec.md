@@ -33,7 +33,11 @@ The web UI gets two pages under one navigation entry *Logs*:
      previous page. Without a range the whole stored data is searched.
    - A search over a very large range with a common word does not run until it has seen every line: one request examines a
      bounded number of lines, and when that bound ends the request before the page is full, the page says up to which time it
-     has searched and offers *Continue*.
+     has searched and offers *Continue*. The same happens when the words cannot be looked up in the index within about 0.7
+     seconds (for example many common words that never occur in the same line, or an IP address whose parts are all common): the page
+     then also says "These words are too common to look up at once, so the search goes through the time range step by step. Narrow the
+     time range to get a complete answer." Such a search may give no final "no lines" answer until the range is narrowed (Product
+     Manager's decision, option A of the reference-host run 1).
    - Each hit can be expanded to show up to 5 lines before and after it from the same log (same source, log file name and
      host), whatever the filters; one hit is expanded at a time.
 2. **Templates** (`/logs/templates`): the templates of a time range (optionally of one source and one program) with their

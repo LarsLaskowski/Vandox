@@ -90,11 +90,24 @@ Reading the matches and the template list (after the first benchmark run):
     the all-time count for the whole storable range (does not help a 30-day range). The chosen statement reads the whole table
     whatever the range is, which is never more than the other one costs for the whole range.
 
+Bounding the index check (after the first run on the reference host):
+
+18. **The probe under a time budget of about 0.7 s, enforced by the progress handler; when it runs out, the request uses scan mode and
+    the page says so** — the handler does run while FTS5 reads its index pages (measured with the project's SQLite 3.53.3: at most
+    29 ms apart, an interrupted probe stops within that gap), so every page answers in about two seconds whatever the words and the
+    size of the store; the cost is that such a search may give no final empty answer until the range is narrowed (the Product
+    Manager's choice). Rejected: the probe in record-ID slices (measured: slices do not make a phrase of common parts cheaper, 58 s
+    in all for a 200-part term); a second thread calling `sqlite3_interrupt` (checked at the same points, no earlier stop); a separate
+    connection for the probe (breaks the reader bound of option 14); keeping the final answer and capping the word parts instead
+    (the probe still grows with the stored lines, several seconds on the reference host); a smaller word limit (refuses ordinary
+    searches, an IP address alone has four parts); a full-text index without positions (cannot answer terms of several parts) or a
+    tokenizer that keeps `.` and `/` inside words (changes what a word matches, needs a rebuild).
+
 ## Decision
 
-Options 3, 7, 9, 10, 11, 12, 13, 14, 15, 16 and 17: the logs view reads every filter from its address and queries only when interactive, each query under
+Options 3, 7, 9, 10, 11, 12, 13, 14, 15, 16, 17 and 18: the logs view reads every filter from its address and queries only when interactive, each query under
 a deadline; the store answers a page from the full-text index when the words match fewer rows than a cap and otherwise by scanning a
-bounded number of lines in time order, testing each examined line on its own, and finds a template's lines by normalizing the candidates its literal words select. External text is
+bounded number of lines in time order, testing each examined line on its own, and falls back to the scan when the index check does not end within its time budget, and finds a template's lines by normalizing the candidates its literal words select. External text is
 escaped and capped per field with a visible cut marker; the view runs at most two store calls at once across the service, so the
 health check keeps a reader. The rules
 — address parameters, limits, modes, texts and the display of external text — are in [Web UI](../areas/web-ui.md) (*Logs view*) and
@@ -105,9 +118,11 @@ health check keeps a reader. The rules
 - Every request does bounded work; a common word over a large range is answered page by page, and a request that ends at the scan
   bound says up to which time it searched and offers to continue. There is no total hit count. The page position is not in the
   address: a shared address opens the first page.
-- The full-text work of several common words with a rare or empty intersection runs inside one FTS5 step, which the deadline cannot
-  interrupt; it grows with the number of word parts (tokens, not terms: the 16-term rule does not bound them) times the size of their
-  index entries, and is measured as its own benchmark cases.
+- The full-text work of several common words with a rare or empty intersection grows with the number of word parts (tokens, not
+  terms: the 16-term rule does not bound them) times the size of their index entries; it runs under the deadline and the probe's
+  time budget, both stopped through the progress handler at its next call. A search whose index check runs out of the budget is
+  answered page by page with *Continue*, every page paying the budget again, and may give no final empty answer until the range is
+  narrowed; on a loaded host more searches take this path, the lines found do not change.
 - The template list counts whole hours: a range that starts or ends inside an hour counts that hour completely.
 - A line made mostly of invisible characters is shown cut, with the number of characters not shown.
 - Two tabs with slow searches make a third wait for a slot (within its deadline); the health check is not affected.
