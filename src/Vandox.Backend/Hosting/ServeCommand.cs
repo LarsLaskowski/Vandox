@@ -241,6 +241,7 @@ internal static class ServeCommand
         app.MapStaticAssets().AllowAnonymous();
         HealthEndpoint.Map(app, checker, loggerFactory.CreateLogger("health"));
         WebAuthentication.MapLogout(app);
+        IncidentNoteEndpoint.Map(app);
         app.MapRazorComponents<App>().AddInteractiveServerRenderMode(options => options.ContentSecurityFrameAncestorsPolicy = null);
 
         return app;

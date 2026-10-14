@@ -1,6 +1,7 @@
-#pragma warning disable RH2003, S2325
+using System.Globalization;
 
 using Vandox.Backend.Logs;
+using Vandox.Core.Model;
 
 namespace Vandox.Backend.Incidents;
 
@@ -211,7 +212,18 @@ public static class IncidentsView
     /// <returns>The relative address</returns>
     public static string LogsHref(DateTimeOffset moment)
     {
-        throw new NotImplementedException();
+        var floored = new DateTimeOffset(moment.UtcTicks - (moment.UtcTicks % TimeSpan.TicksPerSecond), TimeSpan.Zero);
+        var firstSecond = new DateTimeOffset(StorableTime.Min.UtcTicks + (TimeSpan.TicksPerSecond - (StorableTime.Min.UtcTicks % TimeSpan.TicksPerSecond)), TimeSpan.Zero);
+        var lastSecond = new DateTimeOffset(StorableTime.Max.UtcTicks - (StorableTime.Max.UtcTicks % TimeSpan.TicksPerSecond), TimeSpan.Zero);
+        var from = floored - LogsBefore;
+        var to = floored + LogsAfter;
+        var address = new LogsAddress
+                      {
+                          From = from < firstSecond ? firstSecond : from,
+                          To = to > lastSecond ? lastSecond : to
+                      };
+
+        return "logs" + address.ToQuery();
     }
 
     /// <summary>
@@ -221,7 +233,7 @@ public static class IncidentsView
     /// <returns>The relative address</returns>
     public static string IncidentHref(long id)
     {
-        throw new NotImplementedException();
+        return string.Create(CultureInfo.InvariantCulture, $"incidents/{id}");
     }
 
     /// <summary>
@@ -231,7 +243,7 @@ public static class IncidentsView
     /// <returns>The relative address</returns>
     public static string NoteAction(long id)
     {
-        throw new NotImplementedException();
+        return string.Create(CultureInfo.InvariantCulture, $"incidents/{id}/notes");
     }
 
     /// <summary>
@@ -241,7 +253,9 @@ public static class IncidentsView
     /// <returns>The text</returns>
     public static string Duration(TimeSpan span)
     {
-        throw new NotImplementedException();
+        var seconds = span < TimeSpan.Zero ? 0L : (long)span.TotalSeconds;
+
+        return string.Create(CultureInfo.InvariantCulture, $"{seconds / 3600}:{seconds / 60 % 60:D2}:{seconds % 60:D2}");
     }
 
     /// <summary>
@@ -251,7 +265,7 @@ public static class IncidentsView
     /// <returns>The text</returns>
     public static string Mib(ulong bytes)
     {
-        throw new NotImplementedException();
+        return string.Create(CultureInfo.InvariantCulture, $"{MebiBytes(bytes)} MiB");
     }
 
     /// <summary>
@@ -261,7 +275,17 @@ public static class IncidentsView
     /// <returns>The text</returns>
     public static string Growth(ulong bytes)
     {
-        throw new NotImplementedException();
+        return string.Create(CultureInfo.InvariantCulture, $"+{MebiBytes(bytes)} MiB");
+    }
+
+    /// <summary>
+    /// Converts bytes to whole MiB, rounded half away from zero.
+    /// </summary>
+    /// <param name="bytes">The bytes</param>
+    /// <returns>The MiB</returns>
+    private static decimal MebiBytes(ulong bytes)
+    {
+        return Math.Round(bytes / 1048576m, MidpointRounding.AwayFromZero);
     }
 
     #endregion // Methods

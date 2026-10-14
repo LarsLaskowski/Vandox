@@ -1,6 +1,9 @@
+using System.Globalization;
+
 using Microsoft.AspNetCore.Components;
 
 using Vandox.Backend.Incidents;
+using Vandox.Backend.Logs;
 
 namespace Vandox.Backend.Components.Incidents;
 
@@ -50,6 +53,11 @@ public sealed partial class IncidentNoteForm : ComponentBase
     /// Gets the address the form posts to.
     /// </summary>
     private string Action => IncidentsView.NoteAction(IncidentId);
+
+    /// <summary>
+    /// Gets the label of the text area: the number the note was written for when it was moved from a merged incident.
+    /// </summary>
+    private string Label => Merged ? LogsView.Format(IncidentsView.WrittenFor, WrittenFor.ToString(CultureInfo.InvariantCulture)) : "Note";
 
     #endregion // Properties
 }

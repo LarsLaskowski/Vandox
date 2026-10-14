@@ -1,5 +1,3 @@
-#pragma warning disable RH2003, S2325
-
 using Vandox.Core.Model;
 using Vandox.Storage;
 
@@ -25,47 +23,7 @@ internal static class RecordPager
     /// <exception cref="OperationCanceledException">The run was cancelled</exception>
     internal static async Task PageAsync(IRecordReader records, RecordQuery range, int limit, Func<StoredRecord, Task> handle, CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(records);
-        ArgumentNullException.ThrowIfNull(handle);
-
-        var from = range.From;
-        var after = 0L;
-
-        while (true)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-
-            var page = await records.RecordsAsync(new RecordQuery
-                                                  {
-                                                      Kind = range.Kind,
-                                                      From = from,
-                                                      To = range.To,
-                                                      Limit = limit,
-                                                      AfterId = after
-                                                  },
-                                                  cancellationToken)
-                                    .ConfigureAwait(false);
-
-            foreach (var record in page)
-            {
-                await handle(record).ConfigureAwait(false);
-            }
-
-            if (page.Count < limit)
-            {
-                return;
-            }
-
-            var last = page[^1];
-
-            if (last.Record.CapturedAt < from || (last.Record.CapturedAt == from && last.Id <= after))
-            {
-                throw new StoreException("store: reading records: page did not advance");
-            }
-
-            from = last.Record.CapturedAt;
-            after = last.Id;
-        }
+        await PageAsync(records, range, limit, int.MaxValue, handle, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -81,9 +39,61 @@ internal static class RecordPager
     /// <returns>A task that returns the number of records handled</returns>
     /// <exception cref="StoreException">The store failed, or a page of records did not advance</exception>
     /// <exception cref="OperationCanceledException">The run was cancelled</exception>
-    internal static Task<int> PageAsync(IRecordReader records, RecordQuery range, int limit, int maxRecords, Func<StoredRecord, Task> handle, CancellationToken cancellationToken)
+    internal static async Task<int> PageAsync(IRecordReader records, RecordQuery range, int limit, int maxRecords, Func<StoredRecord, Task> handle, CancellationToken cancellationToken)
     {
-        throw new NotImplementedException();
+        ArgumentNullException.ThrowIfNull(records);
+        ArgumentNullException.ThrowIfNull(range);
+        ArgumentNullException.ThrowIfNull(handle);
+        ArgumentOutOfRangeException.ThrowIfLessThan(maxRecords, 1);
+
+        var from = range.From;
+        var after = 0L;
+        var handled = 0;
+
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var page = await records.RecordsAsync(new RecordQuery
+                                                  {
+                                                      Kind = range.Kind,
+                                                      Source = range.Source,
+                                                      Name = range.Name,
+                                                      From = from,
+                                                      To = range.To,
+                                                      Limit = limit,
+                                                      AfterId = after
+                                                  },
+                                                  cancellationToken)
+                                    .ConfigureAwait(false);
+
+            foreach (var record in page)
+            {
+                await handle(record).ConfigureAwait(false);
+
+                handled++;
+
+                if (handled >= maxRecords)
+                {
+                    return handled;
+                }
+            }
+
+            if (page.Count < limit)
+            {
+                return handled;
+            }
+
+            var last = page[^1];
+
+            if (last.Record.CapturedAt < from || (last.Record.CapturedAt == from && last.Id <= after))
+            {
+                throw new StoreException("store: reading records: page did not advance");
+            }
+
+            from = last.Record.CapturedAt;
+            after = last.Id;
+        }
     }
 
     #endregion // Methods

@@ -1,4 +1,4 @@
-#pragma warning disable RH2003, S2325
+using Vandox.Storage;
 
 namespace Vandox.Backend.Incidents;
 
@@ -7,6 +7,12 @@ namespace Vandox.Backend.Incidents;
 /// </summary>
 public static class IncidentNoteText
 {
+    #region Constants
+
+    private const int MaxWrittenForDigits = 18;
+
+    #endregion // Constants
+
     #region Methods
 
     /// <summary>
@@ -16,7 +22,14 @@ public static class IncidentNoteText
     /// <returns>The normalized text</returns>
     public static string Normalize(string text)
     {
-        throw new NotImplementedException();
+        ArgumentNullException.ThrowIfNull(text);
+
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return string.Empty;
+        }
+
+        return text.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n').TrimStart('\n');
     }
 
     /// <summary>
@@ -26,7 +39,9 @@ public static class IncidentNoteText
     /// <returns><c>true</c> when the text can be stored</returns>
     public static bool IsAcceptable(string normalized)
     {
-        throw new NotImplementedException();
+        ArgumentNullException.ThrowIfNull(normalized);
+
+        return normalized.Length <= StorageLimits.MaxNoteChars && normalized.IndexOf('\0') < 0;
     }
 
     /// <summary>
@@ -37,7 +52,30 @@ public static class IncidentNoteText
     /// <returns><c>true</c> when the value is a valid number</returns>
     public static bool TryParseWrittenFor(string value, out long writtenFor)
     {
-        throw new NotImplementedException();
+        ArgumentNullException.ThrowIfNull(value);
+
+        writtenFor = 0;
+
+        if (value.Length is 0 or > MaxWrittenForDigits)
+        {
+            return false;
+        }
+
+        var number = 0L;
+
+        foreach (var character in value)
+        {
+            if (character is < '0' or > '9')
+            {
+                return false;
+            }
+
+            number = (number * 10) + (character - '0');
+        }
+
+        writtenFor = number;
+
+        return number > 0;
     }
 
     #endregion // Methods

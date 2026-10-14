@@ -39,5 +39,10 @@ public sealed class KillRowView
     /// </summary>
     public string AnonRss { get; init; } = string.Empty;
 
+    /// <summary>
+    /// Gets the OOM score adjustment of the victim as text.
+    /// </summary>
+    public string OomScoreAdj { get; init; } = string.Empty;
+
     #endregion // Properties
 }

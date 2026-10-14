@@ -1,5 +1,91 @@
 @page "/incidents"
 
-<PageTitle>Incidents</PageTitle>
+<PageTitle>@IncidentsView.ListTitle</PageTitle>
 
-<h1>Incidents</h1>
+<h1>@IncidentsView.ListTitle</h1>
+
+@if (_failure.Length > 0)
+{
+    <p class="error" role="alert">@_failure</p>
+}
+
+@if (_loading)
+{
+    <p class="status">@IncidentsView.Loading</p>
+}
+
+@if (_empty)
+{
+    <p class="status">@IncidentsView.EmptyList</p>
+}
+
+@if (_noOlder)
+{
+    <p class="status">@IncidentsView.NoOlderIncidents</p>
+}
+
+@if (_rows.Count > 0)
+{
+    <div class="table-scroll">
+        <table class="incidents">
+            <thead>
+                <tr>
+                    <th>Incident</th>
+                    <th>First kill (UTC)</th>
+                    <th>Duration</th>
+                    <th>Kills</th>
+                    <th>Victim</th>
+                    <th>Cause</th>
+                    <th>Backup</th>
+                    <th>Note</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var row in _rows)
+                {
+                    <tr>
+                        <td><a href="@row.Href">#@row.Id</a></td>
+                        <td class="time"><a href="@IncidentsView.LogsHref(row.FirstKillAt)">@LogsView.ShowSeconds(row.FirstKillAt)</a></td>
+                        <td>@row.Duration</td>
+                        <td>@row.KillCount</td>
+                        <td>
+                            <ExternalText Runs="row.Victim" />
+                            @if (row.MoreKills)
+                            {
+                                <span class="more">and further kills</span>
+                            }
+                        </td>
+                        <td>
+                            @if (row.GrowthState.Length > 0)
+                            {
+                                <span>@row.GrowthState</span>
+                            }
+                            @foreach (var growth in row.Growth)
+                            {
+                                <span class="growth"><ExternalText Runs="growth.Program" /> <span>@growth.Amount</span></span>
+                            }
+                        </td>
+                        <td>@row.Backup</td>
+                        <td>
+                            @if (row.HasNotes)
+                            {
+                                <span class="note-mark">Note</span>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+<p class="pager">
+    @if (_before is not null)
+    {
+        <button type="button" @onclick="NewestAsync">@IncidentsView.NewestIncidents</button>
+    }
+    @if (_rows.Count == IncidentsView.PageIncidents)
+    {
+        <button type="button" @onclick="OlderAsync">@IncidentsView.OlderIncidents</button>
+    }
+</p>

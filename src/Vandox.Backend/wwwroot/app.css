@@ -10,6 +10,8 @@
     --vandox-chart-2: #1f5fa8;
     --vandox-chart-3: #b45309;
     --vandox-chart-4: #7c3aed;
+    --vandox-chart-5: #0e7490;
+    --vandox-chart-6: #be185d;
     --vandox-chart-grid: rgba(36, 49, 66, 0.12);
 }
 
@@ -25,6 +27,8 @@
         --vandox-chart-2: #6aa9e9;
         --vandox-chart-3: #e0a458;
         --vandox-chart-4: #b79cf0;
+        --vandox-chart-5: #4cc9d8;
+        --vandox-chart-6: #f08fb3;
         --vandox-chart-grid: rgba(230, 234, 240, 0.14);
     }
 }
@@ -40,6 +44,8 @@
     --vandox-chart-2: #6aa9e9;
     --vandox-chart-3: #e0a458;
     --vandox-chart-4: #b79cf0;
+    --vandox-chart-5: #4cc9d8;
+    --vandox-chart-6: #f08fb3;
     --vandox-chart-grid: rgba(230, 234, 240, 0.14);
 }
 
@@ -54,6 +60,8 @@
     --vandox-chart-2: #1f5fa8;
     --vandox-chart-3: #b45309;
     --vandox-chart-4: #7c3aed;
+    --vandox-chart-5: #0e7490;
+    --vandox-chart-6: #be185d;
     --vandox-chart-grid: rgba(36, 49, 66, 0.12);
 }
 

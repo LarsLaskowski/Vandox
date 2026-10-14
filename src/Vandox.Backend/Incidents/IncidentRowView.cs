@@ -1,6 +1,5 @@
-#pragma warning disable RH2003, S2325
-
 using Vandox.Backend.Logs;
+using Vandox.Core.Incidents;
 using Vandox.Storage;
 
 namespace Vandox.Backend.Incidents;
@@ -78,7 +77,63 @@ public sealed class IncidentRowView
     /// <returns>The row</returns>
     public static IncidentRowView From(IncidentSummary summary)
     {
-        throw new NotImplementedException();
+        ArgumentNullException.ThrowIfNull(summary);
+
+        var hypothesis = summary.Hypothesis;
+        var growth = hypothesis.GrowthKnown
+                         ? hypothesis.Growth.Select(item => new ProgramAmountView
+                                                            {
+                                                                Program = LogText.Runs(item.Program, LogText.MaxShortChars),
+                                                                Amount = IncidentsView.Growth(item.GrowthBytes)
+                                                            })
+                                            .ToList()
+                         : [];
+
+        return new IncidentRowView
+               {
+                   Id = summary.Id,
+                   Href = IncidentsView.IncidentHref(summary.Id),
+                   FirstKillAt = summary.FirstKillAt,
+                   Duration = IncidentsView.Duration(summary.LastKillAt - summary.FirstKillAt),
+                   KillCount = summary.KillCount,
+                   Victim = LogText.Runs(summary.FirstVictim, LogText.MaxShortChars),
+                   MoreKills = summary.KillCount > 1,
+                   Growth = growth,
+                   GrowthState = GrowthText(hypothesis, growth.Count),
+                   Backup = BackupText(hypothesis),
+                   HasNotes = summary.HasNotes
+               };
+    }
+
+    /// <summary>
+    /// Gets the text of the growth state of a hypothesis.
+    /// </summary>
+    /// <param name="hypothesis">The hypothesis</param>
+    /// <param name="shown">The number of programs shown</param>
+    /// <returns>The text; empty when programs are shown</returns>
+    internal static string GrowthText(IncidentHypothesis hypothesis, int shown)
+    {
+        if (hypothesis.GrowthKnown)
+        {
+            return shown == 0 ? IncidentsView.NoGrowth : string.Empty;
+        }
+
+        return IncidentsView.Unknown;
+    }
+
+    /// <summary>
+    /// Gets the text of the backup state of a hypothesis.
+    /// </summary>
+    /// <param name="hypothesis">The hypothesis</param>
+    /// <returns>The text</returns>
+    internal static string BackupText(IncidentHypothesis hypothesis)
+    {
+        return hypothesis.BackupRunning switch
+               {
+                   true => IncidentsView.BackupRunning,
+                   false => IncidentsView.BackupNotRunning,
+                   _ => IncidentsView.Unknown
+               };
     }
 
     #endregion // Methods

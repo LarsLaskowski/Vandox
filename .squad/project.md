@@ -39,7 +39,15 @@ files or endpoints.
    every page below `Components/Pages` (`[Authorize]` in `Pages/_Imports.razor`) and reads through `GatedLogExplorer` (two concurrent
    calls across the service, so two of the four reader connections stay free for `/healthz`); the number of circuits, each holding up to
    about 5 MiB of capped log text, is not bounded, but only a signed-in client can open one, and the host has no `Host`-header
-   allow-list (a DNS-rebound name gets no session cookie, which is host-only, and still needs the password). Records 0016, 0023, 0060, 0103, 0104, 0105, 0106.
+   allow-list (a DNS-rebound name gets no session cookie, which is host-only, and still needs the password). The incidents view (`/incidents`, `/incidents/<number>`) is behind
+   the same login and reads through the same gate: `GatedIncidentBrowser` and `GatedRecordReader` (under `IncidentWindowReader`) take one `WebReaderGate` of two slots with `GatedLogExplorer`, held per
+   store call, so the bound spans both views; the number of circuits, each holding up to about 10 MB while an incident's charts are built (the per-circuit amounts of
+   the web UI area, *Limits and errors*), is not bounded, and only a signed-in client can open one. The incidents view adds the first write of the web UI, a note: `POST /incidents/<number>/notes`
+   (`IncidentNoteEndpoint`) has no `AllowAnonymous` (the fallback policy demands a session: anonymous is `401`) and carries `RequiredAntiforgery`; the handler checks the
+   antiforgery validation feature first (missing or invalid is `400`, before the form is read), then the route number, then reads `note` and `written_for` from the form only (never the
+   query string or the route; a field twice, in any letter case, is refused), refuses U+0000 and more than 1,800 UTF-16 characters (`IncidentNoteText`), builds the redirect from the
+   parsed number and logs a failed save with the exception only, **never the note text**, a form value or the written-for number (`IncidentNoteSaveFailed`). The save does not use the reader gate, and the note
+   is the service's first write outside an import (one immediate transaction under the write lock). Records 0016, 0023, 0060, 0103, 0104, 0105, 0106, 0107.
 4. **Command signing for remote actions** (later, not part of v0.1.0): *Goal:* the agent executes only
    commands with a valid signature that name an action from its local fixed list and were confirmed by the
    user; a forged, altered or replayed command is rejected; the signing key exists only on the backend
@@ -171,7 +179,13 @@ files or endpoints.
     starting at the end of the previous incident's window, a page that does not lead past it is `store: reading incidents: page did not advance`), twice; it keeps
     only counters for the incidents and, across the run, at most 1,000,000 snapshot points (24 bytes each), 10,000 boots, 100,000 runs of consecutive observed hours and
     4,096 programs (`ReportLimits`; the caps count decoded, stored items, never bytes), so its memory does not grow with the database (about 60 MB at the
-    caps); over a cap the statements that need the data are unknown and the notes name the cap. The `-lang` flag of `vandoxd report` is the one CLI value
+    caps); over a cap the statements that need the data are unknown and the notes name the cap. The incident browser (`IIncidentBrowser`, `SqliteStore`, `IncidentRepository`,
+    `IncidentNoteRepository`) bounds what the incidents view reads: a list page of 1 to 100 summaries (the web UI asks for 20) whose `data` is read as UTF-8 bytes and decoded by a
+    projection of three members, one row at a time, a keyset position (start and number) that is validated, one incident decoded whole (up to 8 MiB, transient) by a
+    positive number, at most 64 notes read (`StorageLimits.MaxNotesRead`) of at most 1,800 UTF-16 characters and 5,400 UTF-8 bytes each, the table's byte `CHECK` holding whatever
+    the text contains (U+0000 is refused before SQL because `length()` stops at it) and the foreign key without a cascade; `IncidentWindowReader` reads the window's snapshots one per
+    page with the source of the chart (`RecordPager` carries `Source` and `Name` into every page query), at most 300 process snapshots, 300 connection snapshots and 1,000 points
+    per metric series, and `ProgramMemorySeries` tells at most 4,096 programs apart (the rest is summed), so a window read holds one snapshot and about 4,096 x 300 values. The `-lang` flag of `vandoxd report` is the one CLI value
     that selects behavior: `CommandLine` compares it ordinally with exactly `en` and `de` (`ReportText.For`), any other value, also another case, `de-DE`, a
     padded or Cf-bearing look-alike, is a usage error that shows it only through `Terminal.Quote`, and the unknown flag names of `CommandLine` are escaped the
     same way. Forged kill lines make forged incidents
@@ -203,7 +217,13 @@ files or endpoints.
     for a message and 2,048 for source, host, program and template text with a visible `[cut: <n> more characters]` marker (`LogLineView` builds the capped runs, so a page
     keeps no `StoredRecord`), `unicode-bidi: isolate` per field, no `MarkupString`; links are the fixed paths `logs` and `logs/templates` plus the `ToQuery()` of a validated
     address, and the chart (`TimeSeriesChart`) gets only the fixed texts `LogsView.ChartTitle` and `LogsView.ChartSeries`, never external text. Forged lines appear in the view
-    like real ones. Records 0098, 0099, 0106.
+    like real ones. The incidents view shows the external text of a stored incident (kill hosts and victims, timeline types, hosts and texts, programs, commands, metric names
+    and sources, templates) only through `ExternalText` and `LogText` with the same escaping: timeline texts capped at 512 characters, every other field at 2,048; a timeline row's
+    CSS class comes from a fixed map (`oom_kill`, `boot`, `backup_first_seen`, `backup_last_seen` to `mark-oom`, `mark-boot`, `mark-backup`) and any other type gets none and is shown as text;
+    links are the fixed paths `incidents/<number>`, `incidents/<number>/notes` and `logs` plus the `ToQuery()` of a validated address and numbers; no `MarkupString`, no `style` attribute.
+    The program names of the stacked memory chart are chart labels: `LogText.Escape(name, 64)`, written by uPlot through `textContent` (read in the vendored file), so a label carries no
+    markup and its direction controls are visible escapes; chart titles and the other series labels are fixed texts. A note is user text, shown only as the content of a `textarea`
+    (Razor-encoded, so `</textarea>` cannot end it), and the headings of moved notes hold only numbers. Records 0098, 0099, 0106, 0107.
     Configuration error texts never echo document text other than schema or safe key names
     (`decodeStrict`, `StrictYamlDecoder`), never a `_FILE` value or path or an unsafe variable name
     (`readSecret`/`SecretReader`, `checkEnviron`). Configuration values are free of Cc, Cf, Zl and Zp characters but
