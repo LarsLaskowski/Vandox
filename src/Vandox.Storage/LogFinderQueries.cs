@@ -87,7 +87,7 @@ internal static class LogFinderQueries
         var parameters = new Dictionary<string, object>
                          {
                              ["$kind"] = RecordKind.LogLine,
-                             ["$scan"] = (long)criteria.ScanLimit
+                             ["$scan"] = (long)criteria.ExaminedLines
                          };
         var sql = new StringBuilder($"SELECT r.id AS id, r.captured_at AS ts, {Keep(criteria, match, parameters)} AS keep FROM records r JOIN log_lines l ON l.record_id = r.id WHERE r.kind = $kind");
 

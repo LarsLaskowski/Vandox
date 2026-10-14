@@ -388,7 +388,7 @@ The web UI shows the stored log lines under *Logs* (`/logs`) and the log templat
 - **Search** (`/logs`): the lines come oldest first, 100 per page. Filter by text (all words must occur; words are literal, no
   operators), source, program, severity (a line with that priority or a more severe one) and a time range (`from` inclusive, `to`
   exclusive). *Next page* shows the next 100 lines. A search over a large range that finds few matches may stop after examining
-  12,000 lines and say `Searched up to <time>.`; *Continue* searches on from there. A search that takes longer than 10 seconds is
+  8,000 lines and say `Searched up to <time>.`; *Continue* searches on from there. A search of very common words may say that it goes through the time range step by step: narrow the time range for a complete answer. A search that takes longer than 10 seconds is
   stopped: narrow the range or add filters. *Context* on a line shows the 5 lines before and after it from the same log.
 - **Templates** (`/logs/templates`): the message patterns of a range with their first and last seen time, their lines in total and
   their lines in the range (counted in whole hours), most lines first, optionally of one source and program. *Chart* shows a template's

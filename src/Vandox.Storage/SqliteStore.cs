@@ -615,16 +615,7 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
     /// <exception cref="InvalidQueryException">A filter breaks a rule</exception>
     internal Task<LogPage> FindLogsAsync(LogFilter filter, int selectiveMatches, CancellationToken cancellationToken)
     {
-        LogFilterRules.Validate(filter);
-
-        return ReadAsync(async connection =>
-                         {
-                             var template = filter.TemplateId > 0 ? await LogExplorerQueries.TemplateAsync(connection, filter.TemplateId, cancellationToken).ConfigureAwait(false) : null;
-
-                             return await LogFinder.FindAsync(connection, filter, template, selectiveMatches, cancellationToken).ConfigureAwait(false);
-                         },
-                         LogsContext,
-                         cancellationToken);
+        return FindLogsAsync(filter, selectiveMatches, LogFinder.ProbeBudget, TimeProvider.System, cancellationToken);
     }
 
     /// <summary>
@@ -637,12 +628,19 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
     /// <param name="cancellationToken">Cancels the call</param>
     /// <returns>A task that returns the page</returns>
     /// <exception cref="InvalidQueryException">A filter breaks a rule</exception>
-#pragma warning disable RH2003, S2325
     internal Task<LogPage> FindLogsAsync(LogFilter filter, int selectiveMatches, TimeSpan probeBudget, TimeProvider timeProvider, CancellationToken cancellationToken)
     {
-        throw new NotImplementedException();
+        LogFilterRules.Validate(filter);
+
+        return ReadAsync(async connection =>
+                         {
+                             var template = filter.TemplateId > 0 ? await LogExplorerQueries.TemplateAsync(connection, filter.TemplateId, cancellationToken).ConfigureAwait(false) : null;
+
+                             return await LogFinder.FindAsync(connection, filter, template, selectiveMatches, probeBudget, timeProvider, cancellationToken).ConfigureAwait(false);
+                         },
+                         LogsContext,
+                         cancellationToken);
     }
-#pragma warning restore RH2003, S2325
 
     #endregion // ILogExplorer
 

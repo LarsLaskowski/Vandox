@@ -1,5 +1,7 @@
 using Microsoft.Data.Sqlite;
 
+using SQLitePCL;
+
 using Vandox.Core.Model;
 using Vandox.Core.Templates;
 
@@ -31,45 +33,6 @@ internal static class LogFinder
     #region Methods
 
     /// <summary>
-    /// Finds one page of log lines.
-    /// </summary>
-    /// <param name="connection">The open reader connection</param>
-    /// <param name="filter">The validated filters</param>
-    /// <param name="template">The template of <see cref="LogFilter.TemplateId"/>, or <c>null</c></param>
-    /// <param name="selectiveMatches">The index match count below which the index is used</param>
-    /// <param name="cancellationToken">Cancels the call</param>
-    /// <returns>A task that returns the page</returns>
-    internal static async Task<LogPage> FindAsync(SqliteConnection connection, LogFilter filter, LogTemplate? template, int selectiveMatches, CancellationToken cancellationToken)
-    {
-        var criteria = LogCriteria.Create(filter, template);
-
-        if (criteria is null)
-        {
-            return new LogPage();
-        }
-
-        var match = criteria.Text.Length > 0 ? FtsQuery.Build(criteria.Text) : null;
-
-        if (match is not null)
-        {
-            var ids = await ReadMatchesAsync(connection, match, selectiveMatches, cancellationToken).ConfigureAwait(false);
-
-            if (ids.Count == 0)
-            {
-                return new LogPage();
-            }
-
-            if (ids.Count < selectiveMatches)
-            {
-                return await FindFromIndexAsync(connection, criteria, ids, cancellationToken).ConfigureAwait(false);
-            }
-        }
-
-        return await ScanAsync(connection, criteria, match, cancellationToken).ConfigureAwait(false);
-    }
-
-#pragma warning disable RH2003
-    /// <summary>
     /// Finds one page of log lines; an index check that outlasts the budget turns the request into a scan.
     /// </summary>
     /// <param name="connection">The open reader connection</param>
@@ -80,9 +43,41 @@ internal static class LogFinder
     /// <param name="timeProvider">The clock of the budget</param>
     /// <param name="cancellationToken">Cancels the call</param>
     /// <returns>A task that returns the page</returns>
-    internal static Task<LogPage> FindAsync(SqliteConnection connection, LogFilter filter, LogTemplate? template, int selectiveMatches, TimeSpan probeBudget, TimeProvider timeProvider, CancellationToken cancellationToken)
+    internal static async Task<LogPage> FindAsync(SqliteConnection connection, LogFilter filter, LogTemplate? template, int selectiveMatches, TimeSpan probeBudget, TimeProvider timeProvider, CancellationToken cancellationToken)
     {
-        throw new NotImplementedException();
+        var criteria = LogCriteria.Create(filter, template);
+
+        if (criteria is null)
+        {
+            return new LogPage();
+        }
+
+        var scanMatch = criteria.ScanText.Length > 0 ? FtsQuery.Build(criteria.ScanText) : null;
+
+        if (criteria.Text.Length == 0)
+        {
+            return await ScanAsync(connection, criteria, scanMatch, cancellationToken).ConfigureAwait(false);
+        }
+
+        var ids = await CheckIndexAsync(connection, FtsQuery.Build(criteria.Text), selectiveMatches, probeBudget, timeProvider, cancellationToken).ConfigureAwait(false);
+
+        if (ids is null)
+        {
+            var stepwise = await ScanAsync(connection, criteria, scanMatch, cancellationToken).ConfigureAwait(false);
+
+            stepwise.IndexCheckStopped = true;
+
+            return stepwise;
+        }
+
+        if (ids.Count == 0)
+        {
+            return new LogPage();
+        }
+
+        return ids.Count < selectiveMatches
+                   ? await FindFromIndexAsync(connection, criteria, ids, cancellationToken).ConfigureAwait(false)
+                   : await ScanAsync(connection, criteria, scanMatch, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -93,9 +88,58 @@ internal static class LogFinder
     /// <returns>The scan bound for 0 or 1 parts, otherwise the bound divided by the parts, at least 1</returns>
     internal static int ExaminedLines(int scanLimit, int tokens)
     {
-        throw new NotImplementedException();
+        return tokens <= 1 ? scanLimit : Math.Max(1, scanLimit / tokens);
     }
-#pragma warning restore RH2003
+
+    /// <summary>
+    /// Reads the record IDs of the index matches under the time budget.
+    /// </summary>
+    /// <param name="connection">The connection</param>
+    /// <param name="match">The FTS5 expression</param>
+    /// <param name="selectiveMatches">The bound of the IDs</param>
+    /// <param name="probeBudget">The time the check may take</param>
+    /// <param name="timeProvider">The clock of the budget</param>
+    /// <param name="cancellationToken">Cancels the call</param>
+    /// <returns>A task that returns the record IDs, or <c>null</c> when the budget is used up</returns>
+    private static async Task<List<long>?> CheckIndexAsync(SqliteConnection connection, string match, int selectiveMatches, TimeSpan probeBudget, TimeProvider timeProvider, CancellationToken cancellationToken)
+    {
+        if (probeBudget <= TimeSpan.Zero)
+        {
+            return null;
+        }
+
+        var state = ReaderQuery.AttachBudget(connection, timeProvider, probeBudget, cancellationToken);
+
+        try
+        {
+            return await ReadMatchesAsync(connection, match, selectiveMatches, cancellationToken).ConfigureAwait(false);
+        }
+        catch (SqliteException exception) when (StoppedByBudget(exception, state, cancellationToken))
+        {
+            return null;
+        }
+        finally
+        {
+            ReaderQuery.EndBudget(connection, cancellationToken);
+        }
+    }
+
+    /// <summary>
+    /// Tells whether an error is the stop of the probe by its budget: an interruption that the budget handler asked for while the call is not cancelled.
+    /// </summary>
+    /// <param name="exception">The error</param>
+    /// <param name="state">The state of the budget handler</param>
+    /// <param name="cancellationToken">The token of the call</param>
+    /// <returns><c>true</c> when the budget stopped the probe</returns>
+    private static bool StoppedByBudget(SqliteException exception, ProbeBudgetState state, CancellationToken cancellationToken)
+    {
+        if (cancellationToken.IsCancellationRequested)
+        {
+            return false;
+        }
+
+        return exception.SqliteErrorCode == raw.SQLITE_INTERRUPT && state.Exhausted;
+    }
 
     /// <summary>
     /// Reads the record IDs of the index matches of a text up to a bound.
@@ -179,7 +223,7 @@ internal static class LogFinder
                    };
         }
 
-        var reached = examined >= criteria.ScanLimit;
+        var reached = examined >= criteria.ExaminedLines;
 
         return new LogPage
                {

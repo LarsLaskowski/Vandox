@@ -50,184 +50,96 @@ VANDOX_BENCHMARK=1 dotnet test tests/Vandox.Storage.Tests --filter WriteThroughp
 
 ### Results
 
-| Writer | Host | CPU | Date | First batch (ms) | Later batches (ms) | Median of five (ms) |
-| ------ | ---- | --- | ---- | ---------------: | -----------------: | ------------------: |
-| before [0083](decisions/0083-storage-write-criterion-is-the-median-of-five-batches-on-the-data-volume.md) | development host (4 vCPU) | Intel Xeon 2.10 GHz | 2026-10-07 | 499–679 | 277–584 | 309–390 |
-| before 0083 | DS918+ (reference host, Linux 4.4, .NET 10.0.10, SSD volume) | Celeron J3455 | 2026-10-07 | 1480 | 890–1119 | 1085 |
-| after 0083 | development host (4 vCPU) | Intel Xeon 2.10 GHz | 2026-10-07 | 285–329 | 242–368 | 272–320 |
-| after 0083 (cached parameters, synchronous calls) | DS918+ (SSD volume) | Celeron J3455 | 2026-10-07 | 1043 | 797–1004 | 925 |
-| after 0083 (and writer page cache of 16 MiB) | DS918+ (SSD volume) | Celeron J3455 | 2026-10-07 | 1001 | 711–783 | **783** |
-| after 0083 (and writer page cache of 16 MiB) | DS918+ (HDD volume) | Celeron J3455 | 2026-10-07 | 1171 | 1079–1471 | **1171** |
-| after the log templates of [0095](decisions/0095-log-templates-token-rules-statistics-in-the-write-path-usual-level-from-covered-hours.md) (two runs; metric batches run no template statement) | development host (4 vCPU) | Intel Xeon 2.10 GHz | 2026-10-12 | 273–386 | 185–402 | 273–282 |
-
-Outcome against the restated criterion on the DS918+: **met on the SSD volume** (median 783 ms, 12,800 records/s in a steady state) and **not met on the
-HDD volume** (median 1171 ms, about 8,500 records/s). A 4 KiB write needs about 10 ms to reach the disk on the SSD and about 122 ms on the HDD: on the
-SSD the writer is CPU-bound, on the HDD the median is about 390 ms higher (1171 against 783 ms) because each commit waits for the disk. The database can be put on
-either volume; the HDD works too, with the slower writes shown here, which is far above what the agent sends (hundreds of records per minute). The
-first batch is about 250 ms slower than the later ones on the SSD (fresh file, start-up); with the unchanged writer it was 1480 ms. `ReadyToRun`
-made no difference on the development host. The FTS5 remedy of record 0063 (option c) does not apply, because this measurement writes no log lines.
-The development-host rows are not the reference host.
-
-## Log templates
-
-Criterion ([0095](decisions/0095-log-templates-token-rules-statistics-in-the-write-path-usual-level-from-covered-hours.md), from issue #22):
-**1,000,000 log lines are written with their templates in under 10 minutes on the reference host**, in batches of 10,000 lines, one
-transaction each. Writing a log line normalizes its message into a template and counts it under the template, the template's hour and the
-source's hour in the same transaction (storage area, *Log templates*), so this is the write cost on top of the log line and its full-text entry.
-The same program measures the three template queries on the written database. Only a run on the reference host counts against the criterion.
-
-### Procedure
-
-Publish the tool as above and run it on the reference host, on the volume that holds the database (the SSD volume):
-
-```bash
-dotnet publish/Vandox.StorageBenchmark.dll <existing folder on the data volume> --log-lines 1000000 [--size N]
-```
-
-`--log-lines N` (1 to 10,000,000) cannot be combined with `--batches` or `--warmup`; `--size N` is the number of lines per batch (default 10,000,
-the criterion's batch size). The lines are generated from the line index, without a random number generator, so two runs write the same lines:
-24 message shapes modeled on real formats (Postfix connection, queue and delivery lines, Dovecot logins and logouts, the kernel OOM kill lines,
-MariaDB aborted connections, nginx errors with client address and path, systemd and sshd lines, firewall lines) of the sources `syslog`,
-`journal`, `mariadb` and `nginx`, with numbers, addresses, IDs, e-mail addresses and file names that vary with the index, and capture times in
-order over 30 days (720 hours). On the development host the same measurement runs with
-`dotnet run -c Release --project tools/Vandox.StorageBenchmark -- <folder> --log-lines 1000000`.
-
-The program prints, in this order: the time to normalize the messages in memory; the write time (total, lines per second, the median, fastest and
-slowest batch); the numbers of templates, template hours and source hours; the time of the new-templates query (the last 15 days, limit 10,000); the
-usual-level query over the last 744 hours at the **default parameters** (baseline 168 hours, minimum baseline 24 hours, factor 3, minimum count
-10) and at the **widest parameters** (baseline 2,160 hours, minimum baseline 1 hour, factor 1, minimum count 1, limit 10,000), each with its number
-of **candidates** (the template hours of the range that reach the minimum count, all of which the query evaluates); the verdict for 1,000,000
-lines with the default batch size; and then the **hostile case** in a second, fresh database: 100,000 lines (or all lines if fewer) whose messages
-hold no digit and differ per line, so that every line is a template of its own and costs three upserts, with the write time and the widest
-usual-level query on it; and finally the **concentrated case** in a third, fresh database: 2,160 hourly heartbeat lines of one source followed by as many such lines as the hostile case, all of that source in the next hour, with the write time and the widest usual-level query on it.
-
-### Results
-
-| Host | CPU | Date | Lines | Write, total | Lines per second | Median batch (ms) | Templates | Template hours | Verdict |
-| ---- | --- | ---- | ----: | -----------: | ---------------: | ----------------: | --------: | -------------: | ------- |
-| development host (4 vCPU, .NET 10.0.12) | Intel Xeon 2.10 GHz | 2026-10-12 | 1,000,000 | 52.6 s | 18,995 | 504 | 2,741 | 153,923 | not the reference host |
-| DS918+ (reference host, SSD volume; Linux 4.4.302+, .NET 10.0.10, 4 CPUs) | Celeron J3455 | 2026-10-12 | 1,000,000 | 195.8 s (3.3 min) | 5,107 | 1,864 | 2,741 | 153,923 | **met** (limit 10 min) |
-
-Normalizing the 1,000,000 messages alone, without the database, took 1.4 s on the development host and 4.1 s on the reference host. The
-usual-level query ran on the same database (range of 744 hours ending after the last line). The statement used to sum the baseline per candidate;
-it now sums it with a window function per template (record 0095, option 13) and returns the same rows. The development host ran both, the
-reference host ran the first measurement with the old statement and a second one with the new statement (write time 195.5 s, 5,116 lines per
-second, so the same as in the first run):
-
-| Query | Candidates | Development host, per candidate | Development host, window | Reference host, per candidate | Reference host, window |
-| ----- | ---------: | ------------------------------: | -----------------------: | ----------------------------: | ---------------------: |
-| new templates (last 15 days, limit 10,000), 1,197 results | — | 8 ms | 9 ms | 27 ms | 35 ms |
-| usual level, default parameters, 0 results | 12,960 | 572 ms | 497 ms | 1,464 ms | 1,424 ms |
-| usual level, widest parameters, 10,000 results | 153,923 | 3,913 ms | 710 ms | **11,979 ms** | **1,963 ms** |
-| hostile case, widest parameters, 10,000 results (below) | 100,000 | 203 ms | 306 ms | 571 ms | 898 ms |
-| concentrated case, widest parameters, 10,000 results (below) | 100,743 | 275 ms | 338 ms | 970 ms | 1,009 ms |
-
-The widest query on the reference host took 12.0 s with the baseline sum per candidate, above the 10 s line issue #208 set. The window function reads
-each template's hours once instead of up to 2,160 counts per candidate and brings it to 2.0 s (6.1 times faster); the default parameters and the
-concentrated case do not change. The hostile case, where every template has a single hour, is slower with the window (0.9 s against 0.6 s)
-and stays below the 10 s line, so no cap on the candidates and no other query shape is needed.
-
-The hostile case (100,000 lines, 100,000 templates, 100,000 template hours): write time 5.1 s (19,520 lines per second, median batch 509 ms) on
-the development host and 20.4 s (4,903 lines per second, median batch 2,048 ms) on the reference host. The **concentrated case** puts the worst shape for the covered hours into one database:
-2,160 hourly heartbeat lines of one source, then 100,000 digitless lines that differ per line, all of that source in the next hour, so one source-hour
-holds 100,000 candidates with a baseline of 2,160 covered hours; the statement materializes the covered hours (`AS MATERIALIZED`), so they are
-counted once for that source-hour and not once per candidate (without it SQLite flattens the statement and counts per candidate, which took
-22.4 s on this shape). Writing took 5.1 s (20,071 lines per second) on the development host and 21.0 s (4,870 lines per second) on the reference host. The generated lines have no spikes (the counts per hour are even), so the default
-query reports nothing; its time is the cost of the candidates. The reference host is about three to four times slower on the metric write (783 ms against 272 ms for a batch of 10,000) and 3.7 times on the
-log write; the usual-level query time is not bounded by the range or the limit (detection area, *Limits of templates*), so a caller that serves a
-user still narrows the range and runs it off the request path.
-
-## Log search
-
-Criterion ([0103](decisions/0103-logs-view-address-as-the-view-bounded-search-pages-template-lines-by-normalization.md), from issue #26):
-**the first page of the logs view over 5,000,000 stored log lines answers in under 2,000 ms on the reference host**, for every case listed below,
-with the database on the SSD volume. The first page is 100 lines with the page's scan bound (`LogsView.ScanRows`, 12,000 examined lines); the
-store chooses between the full-text index and a time-ordered scan by a selectivity cap (`LogFinder.SelectiveMatches`, 12,000 matches). Both values
-were set from the development-host run below, so that every text search stays under 500 ms there (the reference host was 3 to 4 times slower than the
-development host in earlier measurements); the cases that the two values do not change are named in the notes. Only a run on the reference host counts
-against the criterion.
-
-### Procedure
-
-Publish the tool as above and run it on the reference host, on the volume that holds the database (the SSD volume); it needs about 2 GiB of free space for
-5,000,000 lines and about 5 minutes to write them on the development host (longer on the reference host):
-
-```bash
-dotnet publish/Vandox.StorageBenchmark.dll <existing folder on the data volume> --search-lines 5000000
-```
-
-`--search-lines N` (1 to 10,000,000) cannot be combined with `--batches`, `--warmup` or `--log-lines`; `--size N` is the number of lines per batch
-(default 10,000). The lines are those of the log template measurement (24 message shapes, four sources, capture times in order over 30 days) with
-generated words added, so that the words have known shares; the program prints the real count of lines per word and program. It then times each case
-three times (the first run is the one that matters for a page opened after a pause; the later ones show the warm cache) and prints, per case, the
-mode the search ran in (`index` or `scan`, found by repeating the selectivity probe), the result, the three times and whether the slowest is under
-2,000 ms. The verdict line compares the slowest time of all cases with 2,000 ms, for 5,000,000 lines only.
-
-| Case | What it asks |
-| ---- | ------------ |
-| 1 | a rare word (1,000 lines) |
-| 2, 2b | a word in about 1 % (50,000 lines), and in about 0.33 % of the lines (16,667 lines) |
-| 3 | a word in 33 % of the lines (absent in the last two days) |
-| 4, 4b | case 3 with a program and a severity filter; case 3 with a source |
-| 5 | two words in half of the lines each that meet in 5,000 lines |
-| 6, 6b, 6c | no text, a program filter only: a program of 4 % of the lines; a program of 250 lines; the same program within one source |
-| 7 | case 3 in a one-day range in the middle |
-| 8, 8b | the lines of the most frequent template (105,000 lines) and of a rare one (7 lines) |
-| 9 | case 3 in the last day, where the word does not occur: the search ends at the scan bound |
-| 10 | the context (5 and 5) of a hit |
-| 11, 11b | the template list (limit 200) of the whole data and of the 30 days |
-| 12 | 16 words in a quarter of the lines each, of which no line holds all: the selectivity probe walks their whole index entries |
-
-### Results
-
-Development host (4 vCPU, Intel Xeon 2.10 GHz, Ubuntu 24.04, .NET 10.0.12), 5,000,000 lines written in 259 s (19,289 lines per second), database file
-1,852 MiB, 12,914 templates, after the changes of the notes below (the index mode reads the lines by the IDs of the probe; the template list sums in key
-order). Times in milliseconds: the first run, then the slowest of the three:
+Reference host, **run 1** (DS918+, SSD volume `/volume20/HostData`, Linux 4.4.302+, .NET 10.0.10, 4 CPUs; scan bound and cap 12,000, before the changes of
+this section; cases 1 to 12; 5,000,000 lines written in 1,087 s, 4,600 lines per second): **criterion not met.** Slowest of three runs, in milliseconds:
 
 | Case | Mode | Result | First run | Slowest |
 | ---- | ---- | ------ | --------: | ------: |
-| 1 rare word | index | 100 lines | 32 | 32 |
-| 2 word in 1 % | scan | 100 lines | 182 | 201 |
-| 2b word in 0.33 % | scan | 40 lines, scan bound reached | 214 | 214 |
-| 3 word in 33 % | scan | 100 lines | 14 | 14 |
-| 4 with program and severity | scan | 100 lines | 14 | 14 |
-| 4b with a source | scan | 100 lines | 10 | 10 |
-| 5 two words, rare combination | index | 100 lines | 279 | 279 |
-| 6 program only (4 %) | scan | 100 lines | 3 | 3 |
-| 6b rare program | scan | 1 line, scan bound reached | 9 | 9 |
-| 6c rare program in one source | scan | 2 lines, scan bound reached | 15 | 15 |
-| 7 one-day range | scan | 100 lines | 31 | 31 |
-| 8 most frequent template | scan | 100 lines | 77 | 77 |
-| 8b rare template | scan | 0 lines, scan bound reached | 151 | 197 |
-| 9 scan bound, no match | scan | 0 lines, scan bound reached | 411 | 411 |
-| 10 context | n/a | 5 + 5 lines | 23 | 23 |
-| 11 template list, whole data | n/a | 200 templates | 40 | 43 |
-| 11b template list, 30 days | n/a | 200 templates | 30 | 30 |
-| 12 16 words, empty intersection | index | 0 lines | 729 | 729 |
+| 1 rare word | index | 100 lines | 30 | 30 |
+| 2 word in 1 % | scan | 100 lines | 1,007 | 1,021 |
+| 2b word in 0.33 % | scan | 40 lines, scan bound reached | 1,075 | 1,081 |
+| 3 word in 33 % | scan | 100 lines | 41 | 42 |
+| 4 / 4b with program and severity / with a source | scan | 100 lines | 44 / 41 | 44 / 42 |
+| 5 two words, rare combination | index | 100 lines | 170 | 172 |
+| 6 / 6b / 6c program only | scan | 100 / 1 / 2 lines | 9 / 26 / 35 | 9 / 26 / 35 |
+| 7 one-day range | scan | 100 lines | 53 | 54 |
+| 8 most frequent template | scan | 100 lines | 365 | 365 |
+| 8b rare template | scan | 0 lines, scan bound reached | 877 | 889 |
+| 9 scan bound, no match | scan | 0 lines, scan bound reached | **2,141** | **2,141** |
+| 10 context | n/a | 5 + 5 lines | 21 | 21 |
+| 11 / 11b template list (before the key-order statement) | n/a | 200 templates | 125 / 125 | 125 / 125 |
+| 12 16 words, empty intersection | index | 0 lines | **2,203** | **2,229** |
 
-**Verdict on the development host: every case is under 2,000 ms (slowest 729 ms).** Cases 11 and 11b are now far under the 500 ms target; case 12 is
-729 ms on the first run and 440 ms on the later ones, so only its cold first run is above the target. Before the changes of the notes the slowest case
-was 12 with 1,232 ms and cases 11 and 11b took 760 and 716 ms. Reference host (DS918+, SSD volume, Celeron J3455): **not yet measured**; the
-Product Manager runs the procedure above and the row is entered here.
+Cases 9 and 12 were over 2,000 ms. Case 9 (12,000 examined lines) led to the scan bound of 8,000 (2,141 ms times 8/12 is about 1,430 ms); case 12 to the
+time budget of the index check.
+
+Development host (4 vCPU, Intel Xeon 2.10 GHz, Ubuntu 24.04, .NET 10.0.12), 5,000,000 lines written in 264 s (18,915 lines per second), database file
+1,983 MiB, 12,914 templates, after the changes of this section (scan bound 8,000 divided by the word parts, the scan tests the user's text only, the index check
+under a budget of 0.7 s, the index mode reads the lines by the IDs of the probe, the template list sums in key order). Times in milliseconds: the first run, then the
+slowest of the three:
+
+| Case | Mode | Result | First run | Slowest |
+| ---- | ---- | ------ | --------: | ------: |
+| 1 rare word | index | 100 lines | 39 | 39 |
+| 2 word in 1 % | scan | 80 lines, scan bound reached | 213 | 213 |
+| 2b word in 0.33 % | scan | 27 lines, scan bound reached | 150 | 162 |
+| 3 word in 33 % | scan | 100 lines | 10 | 10 |
+| 4 with program and severity | scan | 100 lines | 12 | 12 |
+| 4b with a source | scan | 100 lines | 10 | 11 |
+| 5 two words, rare combination | index | 100 lines | 232 | 232 |
+| 6 program only (4 %) | scan | 100 lines | 3 | 3 |
+| 6b rare program | scan | 1 line, scan bound reached | 6 | 13 |
+| 6c rare program in one source | scan | 2 lines, scan bound reached | 10 | 10 |
+| 7 one-day range | scan | 100 lines | 13 | 13 |
+| 8 most frequent template | scan | 100 lines | 36 | 36 |
+| 8b rare template | scan | 0 lines, scan bound reached | 27 | 500 |
+| 9 scan bound, no match | scan | 0 lines, scan bound reached | 287 | 313 |
+| 10 context | n/a | 5 + 5 lines | 48 | 48 |
+| 11 template list, whole data | n/a | 200 templates | 93 | 93 |
+| 11b template list, 30 days | n/a | 200 templates | 30 | 30 |
+| 12 16 words, empty intersection | index | 0 lines | 621 | 621 |
+| 13 eight words together, range without them | scan | 0 lines, scan bound reached | 157 | 157 |
+| 14 four-part term of common parts | index | 0 lines | 137 | 138 |
+| **15 crafted 511-part term** | index check stopped | **stopped by the 10 s deadline of the page** | **10,116** | **10,116** |
+
+**Verdict on the development host: criterion not met, because of case 15.** Every other case is under 2,000 ms, and all but case 12 (621 ms on the first run) are under the 350 ms target (case 8b is 500 ms in one run of three). Case 15 does not end within the 10 seconds the page
+allows: its index check is stopped at the budget, but the scan page after it is not (notes). Cases 12 and 14 were not stopped in these runs (the warm index check
+ended within 0.7 s), so the scan after a stopped check was not measured for them in this table; a run in which the check of case 12 was stopped (the first
+run of case 12 of an earlier run of this build, with a cold cache) took **234 seconds**. Reference host, run 2 (DS918+, SSD volume): **not yet measured.**
 
 | Host | Date | Slowest case | Verdict |
 | ---- | ---- | ------------ | ------- |
-| DS918+ (reference host, SSD volume) | _to be entered after the Product Manager's run_ | _?_ | _?_ |
+| DS918+ (reference host, SSD volume), run 1 | 2026-10-14 | case 12, 2,229 ms | **not met** (cases 9 and 12) |
+| DS918+ (reference host, SSD volume), run 2 | _to be entered after the Product Manager's run_ | _?_ | _?_ |
 
 ### Tuning
 
-The first run used a scan bound of 50,000 and a cap of 20,000. With them the scan-bound case 9 took 1,758 to 1,970 ms (about 35 microseconds per examined
+The first development-host run used a scan bound of 50,000 and a cap of 20,000. With them the scan-bound case 9 took 1,758 to 1,970 ms (about 35 microseconds per examined
 line, since every line of a common word's range is looked up in that word's index entry), the rare template 8b 611 to 688 ms and the case just below the cap
-(2b, 16,667 lines, then in index mode) 291 to 327 ms for its first page, about 20 microseconds per candidate. A bound and a cap of 12,000 bring the
-scan-bound case to 411 ms and every text search except case 12 under 500 ms; the later change of the index mode and the template list (notes) left the two values as they are. A smaller bound makes a search over a large range with few matches continue more often
-(case 2b finds 40 lines per 12,000 examined); the plan's lower limit for both values is 5,000 and 10,000. `SearchBenchmark.ScanRows` in the benchmark tool is a copy of `LogsView.ScanRows` (the tool does not reference the backend); a change of the bound changes both in the same pull request.
+(2b, 16,667 lines, then in index mode) 291 to 327 ms for its first page, about 20 microseconds per candidate. A bound and a cap of 12,000 brought the
+scan-bound case to 411 ms and every text search except case 12 under 500 ms, on a target that assumed the reference host to be 3 to 4 times slower. **Run 1 on the
+reference host showed the factor to be 5** (case 9: 411 ms here, 2,141 ms there; case 12 warm: 440 against 2,220 ms), and the scan cost is linear in the bound, so the
+bound is now **8,000** (the plan's range is 5,000 to 100,000) and the development-host target **350 ms**; the cap stays at 12,000. The scan bound is divided by the word
+parts of the user's text, because the per-line test grows with them (in a scratch measurement 20 microseconds for one part, 99 for eight, 196 for sixteen), and the
+scan tests only the user's text, not the words of a template. A smaller bound makes a search over a large range with few matches continue more often (case 2b finds
+27 lines per 8,000 examined). `SearchBenchmark.ScanRows` in the benchmark tool is a copy of `LogsView.ScanRows` (the tool does not reference the backend): change both together.
+
+**The index check budget** is 0.7 s (`LogFinder.ProbeBudget`): the Product Manager chose that every page answers in about two seconds, so a check that has not ended by then
+is given up and the request goes through the range as a scan (case 12 on the reference host took 2.2 s). The budget, the bound and the cap are values of the code, not
+of the configuration.
 
 ### Notes
 
 - **Case 12** probes the index for the record IDs of 16 words that each occur in 1,250,000 lines and have no line in common. FTS5 has to walk their whole
-  entries to find that (about 0.45 s inside the full-text module, where the deadline cannot interrupt it). Before the change the index query then
-  walked the entries a second time (1,232 ms); now the probe returns the IDs, an empty result ends the call, and a non-empty one reads the lines by those IDs
-  without the full-text table (729 ms first run, 440 ms warm). The probe itself is the remaining cost and is bounded by the sizes of the entries, not by the deadline.
+  entries to find that (about 0.45 s inside the full-text module on the development host). The progress handler runs there (gaps of 20 to 31 ms in a scratch
+  measurement with terms of 4 to 511 parts, an interrupted probe ended at 0.71 s), so the check is stopped by the deadline or by the budget. Before the change
+  of the index mode the query then walked the entries a second time (1,232 ms). On the development host the check ends within the budget when the cache is warm (434 to 621 ms) and
+  would not on the reference host (2.2 s).
+- **The scan after a stopped check is the open problem.** It is bounded by its line bound, not by the clock, and the per-line test of the terms of the cases 12 and 15 is
+  very slow: measured in SQLite on the benchmark file, `MATCH` of the 16 words of case 12 with `rowid = ?` took 497 ms per line (500 lines at the bound of 8,000 divided
+  by 16: about 250 s; the 234 s run above), a four-part phrase of a word every line holds 375 ms per line, twenty parts 2.3 s and sixty parts 8.1 s per line (case 15:
+  15 lines at 511 parts), against 0.3 ms for one word and for the eight words that occur together (case 13). Testing the 16 words as 16 separate `EXISTS` of one
+  word each (the same rows) took 0.36 ms per line. A phrase of several tokens is not made cheaper that way.
 - **Cases 11 and 11b:** the statement summed 374,020 template hours through the index on the hour with a lookup per row (0.65 to 0.9 s warm, up to 1.2 s cold). It now sums over
   the table in key order (`+hour` in the range conditions) and joins the 12,914 templates afterwards: 30 to 43 ms. It reads the whole table whatever the range
   (a one-day range took 12 ms against 21 ms before, in the SQLite library on the same file), so its cost grows with the stored template hours, not with the range.

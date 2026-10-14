@@ -1196,8 +1196,11 @@ deadline, as before) **or** when the time since the probe started reaches the bu
   `IndexCheckStopped`).
 
 **Limits, stated honestly:**
-- The probe stops at the next handler call, not at the exact budget. Measured gaps on the development host are at most 29 ms, so
-  about 0.15 s on the reference host (factor 5).
+- The probe stops at the next handler call, not at the exact budget. Measured gaps on the development host are at most 29 ms (31 ms for
+  a 511-part term), so about 0.15 s on the reference host (factor 5). This bounds the index check only; the scan page after it is
+  bounded by the line bound, not by the clock (the Dev's measurement: 0.4 s per examined line for sixteen common words that never meet,
+  over 2 s per line for a phrase of twenty parts of a word every line holds), so the "page time" estimate below holds only for
+  terms whose per-line test is cheap.
 - No gap bound is proven for every shape. A term of the most parts the 1,024-byte rule allows (about 512) may lengthen the gap; the
   estimate from the 200-part result is about 75 ms on the development host. Case 15 measures a crafted term on the reference host.
 - An interrupted probe's work is lost. Every page of such a search, *Continue* included, pays the budget again, because the store

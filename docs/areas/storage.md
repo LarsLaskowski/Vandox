@@ -25,8 +25,9 @@ readable by the next, whichever language implements it, so the schema below is p
   handler bound to the token of its call, checked every 1,000 virtual-machine instructions, so it also stops the work SQLite does
   before the first row (a sort, an aggregate, the `MATCH` of a search). The call then ends with `OperationCanceledException` carrying
   that token and no partial result; every other SQLite error stays a `StoreException` with the message of its operation. A token
-  that cannot be cancelled installs no handler. Work inside one instruction (for example one call into the FTS5 module) finishes
-  before the next check, and the bound applies while the statement runs, not while it waits for a lock. The writer connection is never
+  that cannot be cancelled installs no handler. The handler also runs while the FTS5 module reads its index pages (it reads them through
+  SQLite's own statements), so a `MATCH` is interrupted too; the gap between two checks was at most 31 ms on the development host for
+  every shape measured, which is a measurement and not a proof. The bound applies while the statement runs, not while it waits for a lock. The writer connection is never
   interrupted: a batch, an incident save, an import step and a migration run to their commit or rollback.
 - Two processes may open the database at once.
 
@@ -189,8 +190,7 @@ A search takes literal terms only; the text is never passed to FTS5 as a query.
 
 The logs view ([Web UI](web-ui.md), *Logs view*) reads through a second interface, `ILogExplorer`, which `SqliteStore` implements next to the
 log search above; the log search keeps its rules for its other callers. Every method runs on a reader connection and is interrupted by a
-cancelled token or a passed deadline (*Database file and connections*), with no partial result, except for the one case below that the
-deadline cannot interrupt. Null strings are an `ArgumentNullException`; a broken rule is an `InvalidQueryException` (a `StoreException`)
+cancelled token or a passed deadline (*Database file and connections*), with no partial result. Null strings are an `ArgumentNullException`; a broken rule is an `InvalidQueryException` (a `StoreException`)
 whose message is `store: invalid query: ` and the rule, and never contains the search text.
 
 **Finding lines.** A request has a text, a source, a program, a highest priority, a template number, a time range `[From, To)`, an optional
@@ -204,14 +204,19 @@ position `After` (capture time and record ID), a page size `Limit` and a bound `
   and a request with `After` set to it continues with the next line, without a gap or a repeat, also across lines with the same capture
   time. `Next` is empty at the end of the range.
 - **Two strategies, chosen per request from the full-text index alone.** First the record IDs of the matching rows are read from the index up to a cap of
-  **12,000** (`SelectiveMatches`), without looking at the lines. None: the page is empty and nothing more is read. Fewer than the cap:
+  **12,000** (`SelectiveMatches`), without looking at the lines. This index check has a **time budget of 0.7 s** (`ProbeBudget`, measured with the
+  store's clock): see *The index check budget* below. None: the page is empty and nothing more is read. Fewer than the cap:
   **index mode**, which reads the lines with exactly those record IDs (a lookup by primary key; the index is not read again), applies the
   filters and sorts them (at most the cap, by construction). The cap or more, or no text: **scan mode**, which walks the log
   lines of the range in capture-time order from the position (through the index on kind, source and time with a source, or the index on kind and time without one) and keeps the lines that pass the filters and, with a text, are in the full-text match. The match is tested for each examined
-  line on its own, one lookup per term, and nothing is collected, so scan mode holds at most the page and its work grows with the
+  line on its own, one lookup per term of the user's text, and nothing is collected, so scan mode holds at most the page and its work grows with the
   examined lines, not with the matches. The lines found, followed through `Next` until it is empty, do not depend on the strategy; only scan mode can end a page early at the scan bound.
-- **The scan bound:** scan mode examines at most `ScanLimit` log lines (1 to 100,000; the logs view uses **12,000**), counted whether or not
-  they match. When the bound ends the request before the page is full, `ScanLimitReached` is set and `Next` is the position of the last
+- **The scan bound:** scan mode examines at most `ScanLimit` log lines (1 to 100,000; the logs view uses **8,000**), counted whether or not
+  they match, and for a text of several **word parts** at most the bound divided by the parts (at least 1): `ScanLimit` for no text or a
+  text of one part, `ScanLimit / n` for `n` parts. The parts are the runs of letters, numbers and private-use characters that the
+  tokenizer splits the user's text into (`10.0.0.1` has 4, `postfix/smtpd connect` 3), because the work of the per-line test grows with them.
+  The scan tests only the **user's text**: the words of a template narrow the index check only, since the normalization decides which lines are
+  the template's. When the bound ends the request before the page is full, `ScanLimitReached` is set and `Next` is the position of the last
   examined line, also when the page is empty: a request with `After` set to it searches on, so continuing until `Next` is empty
   returns every matching line exactly once. A full page ends the scan at its last line (`ScanLimitReached` not set).
 - **Template lines:** with a template number the lines are those of the template's source and program whose message normalizes (the rules of
@@ -225,11 +230,21 @@ position `After` (capture time and record ID), a page size `Limit` and a bound `
   `from must be before to`, `limit must be between 1 and 1000`, `scan limit must be between 1 and 100000`, `source is longer than 1024
   bytes`, `program is longer than 1024 bytes`, `priority must be between 0 and 7`, `template ID must not be negative`, `after must be within
   the storable range`, `after id must be positive`, and the rules of *Log search* for a non-empty text.
-- **Cost.** Index mode reads at most the cap of matches. Scan mode reads at most `ScanLimit` lines and does one index lookup per term for
-  each. The read of the matching IDs runs inside the full-text module: **a text of several common words makes it walk their whole entries to find
-  the words' intersection in one step, which the deadline cannot interrupt** (*Database file and connections*). That work is bounded by
-  the size of the words' index entries (index only, at most 16 terms), not by the deadline, and is measured in `docs/BENCHMARKS.md`
-  (*Log search*). A search without a text and with a program or source that few lines have examines up to `ScanLimit` lines per request
+- **The index check budget.** The check runs under a progress handler that stops it when the call's token is cancelled (the deadline: the call
+  then ends with `OperationCanceledException`, as everywhere) or when the time since the check started reaches the budget, measured with the
+  store's clock. A check that is stopped by the budget discards its IDs and the request runs in scan mode with the bound above; the page has
+  `IndexCheckStopped` set. A budget of zero or less skips the check the same way. A check that ends within the budget works as before (no IDs: an
+  empty page; fewer than the cap: index mode; the cap: scan mode, `IndexCheckStopped` not set). Any other database error of the check is a
+  `StoreException`. The handler of the call is installed again after the check on every path. The budget is wall-clock time of the host, so on a
+  loaded host more searches go the stepwise way; which lines are found, followed to the end through `Next`, does not depend on it. Every page of
+  such a search pays the budget again, because the store does not remember the mode between requests, and the search may have no final "no
+  lines" answer until the range is narrowed.
+- **Cost.** Index mode reads at most the cap of matches. Scan mode reads at most the divided bound of lines and does one index lookup per word part
+  of the user's text for each. The index check is bounded by the budget plus one gap between two checks of the handler (31 ms at most in the
+  measurements). The scan page after a stopped check is bounded by its line bound, **not by the clock**: the per-line test of a text of sixteen
+  common words that never occur together took about 0.5 s per line on the development host, and that of a phrase of common parts of a word every
+  line holds from 0.4 s (four parts) to over 2 s (twenty parts) per line, so such a page can reach the deadline of its caller
+  (`docs/BENCHMARKS.md`, *Log search*). A search without a text and with a program or source that few lines have examines up to `ScanLimit` lines per request
   and says how far it got.
 
 **Context.** `LogContextAsync` returns a line and up to `Before` lines before and `After` lines after it (0 to 20 each) with the same

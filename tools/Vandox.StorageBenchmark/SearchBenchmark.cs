@@ -23,7 +23,7 @@ internal static class SearchBenchmark
     /// <summary>
     /// The scan limit of the logs view page, kept equal to <c>LogsView.ScanRows</c> in the backend.
     /// </summary>
-    private const int ScanRows = 12000;
+    private const int ScanRows = 8000;
 
     private const int PageLines = 100;
     private const int Runs = 3;
@@ -54,6 +54,10 @@ internal static class SearchBenchmark
     private const string PercentWord = "onepercent";
     private const string NearCapWord = "nearcapword";
     private const string CommonWord = "commonword";
+    private const string TogetherPrefix = "tog";
+    private const string EveryLineWord = "q";
+    private const int TogetherWords = 8;
+    private const int CraftedParts = 511;
     private const string PairFirst = "pairalpha";
     private const string PairSecond = "pairbeta";
     private const string MassPrefix = "mass";
@@ -65,6 +69,8 @@ internal static class SearchBenchmark
     #endregion // Constants
 
     #region Fields
+
+    private static readonly TimeSpan _pageDeadline = TimeSpan.FromSeconds(10);
 
     private static readonly DateTimeOffset _start = new(2026, 9, 1, 0, 0, 0, TimeSpan.Zero);
 
@@ -173,7 +179,7 @@ internal static class SearchBenchmark
     {
         Print($"log lines: {TemplateBenchmark.Count(folder, "SELECT count(*) FROM log_lines")}; templates: {TemplateBenchmark.Count(folder, "SELECT count(*) FROM log_templates")}");
 
-        foreach (var word in new[] { RareWord, PercentWord, NearCapWord, CommonWord, PairFirst, PairSecond, $"{PairFirst} {PairSecond}", $"{MassPrefix}01", $"{MassPrefix}09" })
+        foreach (var word in new[] { RareWord, PercentWord, NearCapWord, CommonWord, PairFirst, PairSecond, $"{PairFirst} {PairSecond}", $"{MassPrefix}01", $"{MassPrefix}09", $"{TogetherPrefix}01" })
         {
             Print($"lines with '{word}': {TemplateBenchmark.Count(folder, $"SELECT count(*) FROM log_fts WHERE log_fts MATCH '{word.Replace(" ", " AND ", StringComparison.Ordinal)}'")}");
         }
@@ -205,7 +211,10 @@ internal static class SearchBenchmark
                         new("6c program filter only, in one source (rare program)", PageFilter(string.Empty, program: RareProgram, source: SharedSource)),
                         new("7  case 3 in a one-day range in the middle", PageFilter(CommonWord, start.AddDays(15), start.AddDays(16))),
                         new("9  case 3 in a range without the word (scan bound)", PageFilter(CommonWord, lastDay, start.AddDays(31))),
-                        new("12 16 common words, empty intersection", PageFilter(string.Join(' ', Enumerable.Range(1, MassWordsPerResidue * MassResidues).Select(index => $"{MassPrefix}{index:D2}"))))
+                        new("12 16 common words, empty intersection", PageFilter(string.Join(' ', Enumerable.Range(1, MassWordsPerResidue * MassResidues).Select(index => $"{MassPrefix}{index:D2}")))),
+                        new("13 eight common words together, range without them", PageFilter(string.Join(' ', TogetherList()), lastDay, start.AddDays(31))),
+                        new("14 four-part term of common parts, never that phrase", PageFilter($"{MassPrefix}04.{MassPrefix}03.{MassPrefix}02.{MassPrefix}01")),
+                        new("15 crafted term of 511 parts of a word every line holds", PageFilter(string.Join('.', Enumerable.Repeat(EveryLineWord, CraftedParts))))
                     };
 
         var templates = await store.TemplatesAsync(TemplateListQuery(TemplateCandidateLimit), cancellationToken).ConfigureAwait(false);
@@ -287,20 +296,40 @@ internal static class SearchBenchmark
     {
         var times = new List<double>();
         var result = string.Empty;
+        var stopped = false;
 
         for (var run = 0; run < Runs; run++)
         {
+            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+
+            deadline.CancelAfter(_pageDeadline);
+
             var watch = Stopwatch.StartNew();
 
-            result = await ExecuteAsync(store, item, cancellationToken).ConfigureAwait(false);
+            try
+            {
+                (result, stopped) = await ExecuteAsync(store, item, deadline.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                result = "stopped by the 10 s deadline of the page";
+            }
+
             watch.Stop();
             times.Add(watch.Elapsed.TotalMilliseconds);
         }
 
         var slowest = times.Max();
-        var mode = item.Filter is null ? "-" : await ModeAsync(store, folder, item.Filter, cancellationToken).ConfigureAwait(false);
+        var mode = "-";
 
-        Print($"{item.Name,-56} mode {mode,-6} {result,-40} first {times[0]:F0} ms, runs {string.Join(", ", times.Select(time => time.ToString("F0", CultureInfo.InvariantCulture)))} ms: {(slowest < CriterionMilliseconds ? "under" : "OVER")} {CriterionMilliseconds:F0} ms");
+        if (item.Filter is not null)
+        {
+            mode = stopped ? "scan, index check stopped" : await ModeAsync(store, folder, item.Filter, cancellationToken).ConfigureAwait(false);
+        }
+
+        Print($"{item.Name,-56} mode {mode,-26} {result,-40} first {times[0]:F0} ms, runs {string.Join(", ", times.Select(time => time.ToString("F0", CultureInfo.InvariantCulture)))} ms: {(slowest < CriterionMilliseconds ? "under" : "OVER")} {CriterionMilliseconds:F0} ms");
 
         return slowest;
     }
@@ -311,19 +340,19 @@ internal static class SearchBenchmark
     /// <param name="store">The store</param>
     /// <param name="item">The case</param>
     /// <param name="cancellationToken">Cancels the call</param>
-    /// <returns>A short description of the result</returns>
-    private static async Task<string> ExecuteAsync(SqliteStore store, SearchCase item, CancellationToken cancellationToken)
+    /// <returns>A short description of the result and whether the index check of a search was stopped by its budget</returns>
+    private static async Task<(string Result, bool Stopped)> ExecuteAsync(SqliteStore store, SearchCase item, CancellationToken cancellationToken)
     {
         if (item.Filter is not null)
         {
             var page = await store.FindLogsAsync(item.Filter, cancellationToken).ConfigureAwait(false);
 
-            return $"{page.Lines.Count} lines{(page.ScanLimitReached ? ", scan limit reached" : string.Empty)}";
+            return ($"{page.Lines.Count} lines{(page.ScanLimitReached ? ", scan limit reached" : string.Empty)}", page.IndexCheckStopped);
         }
 
         if (item.Templates is not null)
         {
-            return $"{(await store.TemplatesAsync(item.Templates, cancellationToken).ConfigureAwait(false)).Count} templates";
+            return ($"{(await store.TemplatesAsync(item.Templates, cancellationToken).ConfigureAwait(false)).Count} templates", false);
         }
 
         var query = new LogContextQuery
@@ -334,7 +363,7 @@ internal static class SearchBenchmark
                     };
         var context = await store.LogContextAsync(query, cancellationToken).ConfigureAwait(false);
 
-        return $"{context.Before.Count} before, {context.After.Count} after";
+        return ($"{context.Before.Count} before, {context.After.Count} after", false);
     }
 
     /// <summary>
@@ -417,7 +446,17 @@ internal static class SearchBenchmark
         AddIf(words, index % RarePeriod == RareRemainder, RareWord);
         AddIf(words, index % PercentPeriod == PercentRemainder, PercentWord);
         AddIf(words, index % NearCapPeriod == NearCapRemainder, NearCapWord);
-        AddIf(words, index % CommonPeriod == 0 && index < lines - (lines / CommonFreeShare), CommonWord);
+
+        var common = index % CommonPeriod == 0 && index < lines - (lines / CommonFreeShare);
+
+        AddIf(words, common, CommonWord);
+
+        if (common)
+        {
+            words.AddRange(TogetherList());
+        }
+
+        words.Add(EveryLineWord);
         AddIf(words, phase < PairHalf, PairFirst);
         AddIf(words, phase >= PairHalf - 1, PairSecond);
 
@@ -427,6 +466,15 @@ internal static class SearchBenchmark
         }
 
         return string.Concat(words.Select(word => $" {word}"));
+    }
+
+    /// <summary>
+    /// Lists the eight words that occur together in the lines of the common word.
+    /// </summary>
+    /// <returns>The words</returns>
+    private static List<string> TogetherList()
+    {
+        return Enumerable.Range(1, TogetherWords).Select(number => string.Create(CultureInfo.InvariantCulture, $"{TogetherPrefix}{number:D2}")).ToList();
     }
 
     /// <summary>

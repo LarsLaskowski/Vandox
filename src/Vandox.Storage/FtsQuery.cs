@@ -42,7 +42,6 @@ internal static class FtsQuery
         return string.Join(' ', terms.Select(term => $"\"{term.Replace("\"", "\"\"", StringComparison.Ordinal)}\""));
     }
 
-#pragma warning disable RH2003
     /// <summary>
     /// Counts the word parts of a search text: the runs of letters, numbers and private-use characters the tokenizer splits it into.
     /// </summary>
@@ -50,9 +49,19 @@ internal static class FtsQuery
     /// <returns>The number of word parts</returns>
     internal static int CountTokens(string text)
     {
-        throw new NotImplementedException();
+        var count = 0;
+        var previous = false;
+
+        foreach (var rune in text.EnumerateRunes())
+        {
+            var part = Rune.IsLetter(rune) || Rune.IsNumber(rune) || Rune.GetUnicodeCategory(rune) == UnicodeCategory.PrivateUse;
+
+            count += part && previous != part ? 1 : 0;
+            previous = part;
+        }
+
+        return count;
     }
-#pragma warning restore RH2003
 
     /// <summary>
     /// Throws an error for a rejected query unless the condition holds.

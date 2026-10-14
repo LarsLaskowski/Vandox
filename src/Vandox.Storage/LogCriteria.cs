@@ -57,26 +57,19 @@ internal sealed class LogCriteria
     internal int Limit { get; private init; }
 
     /// <summary>
-    /// Gets the number of lines a scan examines.
-    /// </summary>
-    internal int ScanLimit { get; private init; }
-
-    /// <summary>
     /// Gets the template the lines must normalize to, or <c>null</c>.
     /// </summary>
     internal LogTemplate? Template { get; private init; }
 
-#pragma warning disable RH2003, S2325
     /// <summary>
     /// Gets the user's search text without the words of a template; the scan tests only this text.
     /// </summary>
-    internal string ScanText => throw new NotImplementedException();
+    internal string ScanText { get; private init; } = string.Empty;
 
     /// <summary>
     /// Gets the number of lines a scan examines at most.
     /// </summary>
-    internal int ExaminedLines => throw new NotImplementedException();
-#pragma warning restore RH2003, S2325
+    internal int ExaminedLines { get; private init; }
 
     #endregion // Properties
 
@@ -98,9 +91,13 @@ internal sealed class LogCriteria
         var from = StorageTime.ToNanoseconds(filter.From);
         var after = filter.After is null ? (long?)null : StorageTime.ToNanoseconds(filter.After.CapturedAt);
 
+        var scanText = string.Join(' ', Split(filter.Text));
+
         return new LogCriteria
                {
                    Text = Combine(filter.Text, template),
+                   ScanText = scanText,
+                   ExaminedLines = LogFinder.ExaminedLines(filter.ScanLimit, FtsQuery.CountTokens(scanText)),
                    Source = template?.Source ?? Optional(filter.Source),
                    Program = template?.Program ?? Optional(filter.Program),
                    MaxPriority = filter.MaxPriority,
@@ -109,7 +106,6 @@ internal sealed class LogCriteria
                    AfterNs = after,
                    AfterId = filter.After?.Id ?? 0,
                    Limit = filter.Limit,
-                   ScanLimit = filter.ScanLimit,
                    Template = template
                };
     }

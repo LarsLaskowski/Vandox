@@ -93,10 +93,14 @@ Reading the matches and the template list (after the first benchmark run):
 Bounding the index check (after the first run on the reference host):
 
 18. **The probe under a time budget of about 0.7 s, enforced by the progress handler; when it runs out, the request uses scan mode and
-    the page says so** — the handler does run while FTS5 reads its index pages (measured with the project's SQLite 3.53.3: at most
-    29 ms apart, an interrupted probe stops within that gap), so every page answers in about two seconds whatever the words and the
-    size of the store; the cost is that such a search may give no final empty answer until the range is narrowed (the Product
-    Manager's choice). Rejected: the probe in record-ID slices (measured: slices do not make a phrase of common parts cheaper, 58 s
+    the page says so** — the handler does run while FTS5 reads its index pages (measured with the project's SQLite 3.53.3 on the
+    development host: at most 29 ms apart for a 200-part term and at most 31 ms for a 511-part term, and an interrupted probe ended
+    at 0.71 s), so the index check is bounded by the budget plus one such gap, measured and not proven for every shape. The page after
+    a stopped check is a scan page whose time is bounded by the line bound, not by the clock: the per-line test of some terms was
+    measured at 0.4 s per line (sixteen common words that never meet) and over 2 s per line (a phrase of twenty parts of a word that
+    every line holds), so "every page answers in about two seconds" holds for the index check only (`docs/BENCHMARKS.md`, *Log
+    search*). The cost is that such a search may give no final empty answer until the range is narrowed (the Product Manager's
+    choice). Rejected: the probe in record-ID slices (measured: slices do not make a phrase of common parts cheaper, 58 s
     in all for a 200-part term); a second thread calling `sqlite3_interrupt` (checked at the same points, no earlier stop); a separate
     connection for the probe (breaks the reader bound of option 14); keeping the final answer and capping the word parts instead
     (the probe still grows with the stored lines, several seconds on the reference host); a smaller word limit (refuses ordinary

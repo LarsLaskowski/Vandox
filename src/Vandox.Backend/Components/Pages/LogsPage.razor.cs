@@ -67,6 +67,8 @@ public sealed partial class LogsPage : ComponentBase, IDisposable
 
     private LogPosition? _continueFrom;
 
+    private bool _stepwise;
+
     private long _contextId;
 
     private IReadOnlyList<LogLineView> _contextBefore = [];
@@ -184,6 +186,7 @@ public sealed partial class LogsPage : ComponentBase, IDisposable
             _templateUnknown = false;
             _nextPage = null;
             _continueFrom = null;
+            _stepwise = false;
 
             return;
         }
@@ -230,6 +233,7 @@ public sealed partial class LogsPage : ComponentBase, IDisposable
                                     _lines = [];
                                     _nextPage = null;
                                     _continueFrom = null;
+                                    _stepwise = false;
                                     _contextId = 0;
                                     StateHasChanged();
 
@@ -315,6 +319,7 @@ public sealed partial class LogsPage : ComponentBase, IDisposable
         _position = after;
         _searching = false;
         _empty = page.Lines.Count == 0 && page.Next is null;
+        _stepwise = page.IndexCheckStopped && page.ScanLimitReached;
 
         if (page.ScanLimitReached)
         {

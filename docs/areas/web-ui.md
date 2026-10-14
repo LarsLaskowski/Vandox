@@ -102,8 +102,14 @@ The parameters, written in this order and each percent-encoded, with empty ones 
   nothing, so a search runs once per page load.
 - A page that is full offers *Next page* (the next 100 lines) and *First page*. A search that stops at the examined-lines bound before
   it has a full page (a common word or a filter that few lines pass, in a large range) shows `Searched up to <time> UTC.` with
-  *Continue*, which searches on from there; the bound is 12,000 examined lines per request. The page may then hold fewer than 100 lines,
-  or none. **The page position is not in the address**: *Next page*, *First page* and *Continue* add no history entry, so the browser's
+  *Continue*, which searches on from there; the bound is 8,000 examined lines per request, fewer for a text of several word parts (8,000 divided by the parts, so an IP
+  address of four parts examines 2,000). The page may then hold fewer than 100 lines, or none.
+- When the store could not finish its index check within 0.7 s (a text of many common words, or of a term of several common parts such
+  as an IP address, over a large range), the search goes through the time range step by step the same way and the page says so above
+  *Searched up to* with `These words are too common to look up at once, so the search goes through the time range step by step. Narrow the
+  time range to get a complete answer.` Such a search may give no final "no lines" answer until the time range is narrowed, and every
+  *Continue* pays the 0.7 s again. The text is shown only for a page that stopped at the bound after a stopped index check, not for an
+  ordinary bound page. How long such a page takes depends on the words; it ends at the 10-second deadline at the latest. **The page position is not in the address**: *Next page*, *First page* and *Continue* add no history entry, so the browser's
   back button leaves the search, not the page, and a reloaded or shared address opens the first page.
 - *Context* on a line shows the 5 lines before and the 5 lines after it from the same log of the same source and host (time, program and message of each), at most 10 lines around a marker for the hit; opening another replaces it. Lines of other logs of the source are skipped, and each side looks
   at no more than 2,000 lines of the source.

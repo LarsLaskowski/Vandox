@@ -17,7 +17,7 @@ public static class LogsView
     /// <summary>
     /// The scan bound of one search call.
     /// </summary>
-    public const int ScanRows = 12000;
+    public const int ScanRows = 8000;
 
     /// <summary>
     /// The number of context lines on each side of a hit.

@@ -155,6 +155,11 @@
     <p class="status">No log lines match.</p>
 }
 
+@if (_stepwise)
+{
+    <p class="status">@LogsView.SearchStepwise</p>
+}
+
 @if (_continueFrom is not null)
 {
     <p class="status">@LogsView.Format(LogsView.SearchedUpToFormat, LogsView.ShowTime(_continueFrom.CapturedAt) + " UTC")</p>

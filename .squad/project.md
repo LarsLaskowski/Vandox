@@ -145,12 +145,13 @@ files or endpoints.
     storable range, with texts that name only the parameter, and writes an address only from validated values (`ToQuery` throws otherwise). The values then reach
     only `FtsQuery`, bound SQL parameters or `long` and `DateTimeOffset.ParseExact` with fixed formats. The explorer (`ILogExplorer`, `SqliteStore`; `LogFilterRules`,
     `LogCriteria`, `LogFinder`, `LogFinderQueries`, `LogExplorerQueries`, `TemplateTerms`) bounds every request: a page of 1 to 1,000 lines, a scan of at most
-    `ScanLimit` (1 to 100,000; the page uses 12,000) examined lines whose full-text test is a per-line `EXISTS` that collects nothing, a selectivity probe that reads at most
-    12,000 row IDs, a context of 0 to 20 lines per side examining at most 2,000 rows per side, 64 sources, a template list of 1 to 1,000 templates, source hours of 1 to
+    `ScanLimit` (1 to 100,000; the page uses 8,000, divided by the word parts of the user's text, `FtsQuery.CountTokens`) examined lines whose full-text test (of the user's text only) is a per-line `EXISTS` that collects nothing, a selectivity probe that reads at most
+    12,000 row IDs under a 0.7 s time budget (`LogFinder.ProbeBudget`, `ReaderQuery.AttachBudget`), a context of 0 to 20 lines per side examining at most 2,000 rows per side, 64 sources, a template list of 1 to 1,000 templates, source hours of 1 to
     10,000; the template words reach the search only through `FtsQuery` (at most 16 terms and 1,024 bytes joined with the user's) and the candidates are compared with
-    the template by `LogTemplateNormalizer`. A text of several common words makes FTS5 walk their doclists inside one step that the progress handler cannot interrupt:
-    that work is bounded by the doclist sizes, not by the deadline, and measured as cases 5 and 12 of `tools/Vandox.StorageBenchmark --search-lines`
-    (`docs/BENCHMARKS.md`). Each page runs one store call at a time under a 10-second deadline, and `GatedLogExplorer` lets two calls run at once across the service
+    the template by `LogTemplateNormalizer`. A text of several common words makes FTS5 walk their doclists, but the progress handler does run inside FTS5 (measured, gaps of at most 31 ms), so
+    the probe is stopped by the deadline or by its budget; a stopped probe turns the request into a scan (`LogPage.IndexCheckStopped`), whose time is bounded
+    by the line bound and not by the clock (the per-line test of some terms took 0.4 s to over 2 s per line on the development host: cases 12, 14 and 15 of
+    `tools/Vandox.StorageBenchmark --search-lines`, `docs/BENCHMARKS.md`). Each page runs one store call at a time under a 10-second deadline, and `GatedLogExplorer` lets two calls run at once across the service
     (a wait counts against the deadline). The backend options `incidents.window_before` and
     `incidents.window_after` (`BackendConfigLoader`, `ConfigDuration`) accept exactly one to four ASCII digits and `m` or `h` by an ordinal scan (no parsing API, no culture, sign,
     white space, other digit script or second unit), within 1 minute to 24 hours, the value never shown in an error. The incident reconstruction (`vandoxd incidents`)
