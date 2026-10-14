@@ -1,11 +1,15 @@
 using System.Net;
 using System.Net.Sockets;
+using System.Reflection;
 
 using Microsoft.AspNetCore.Server.Kestrel.Core;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Time.Testing;
 
 using Vandox.Backend.Hosting;
+using Vandox.Backend.Logs;
 using Vandox.Backend.Security;
+using Vandox.Storage;
 
 namespace Vandox.Backend.Tests;
 
@@ -871,6 +875,105 @@ public class ServeTests
         Assert.IsTrue(deleted.StartsWith(LoginTestClient.SessionCookie + "=;", StringComparison.Ordinal), $"the deleted cookie has no value: {deleted}");
         Assert.IsFalse(client.HasSession, "the client dropped the cookie");
         Assert.ContainsSingle(fixture.LogEntries().Where(entry => entry.GetValueOrDefault("msg") == "logged out"), "logged out is logged once");
+    }
+
+    /// <summary>
+    /// The two log pages need a session on the web port (anonymous requests are redirected to the login page), answer 200 with the security headers to a signed-in user and 404 on the ingest port, with the real store wired.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task ServeServesTheLogPagesOnlyOnWebPort()
+    {
+        // Arrange
+        using var fixture = new BackendFixture();
+        using var stop = CancellationTokenSource.CreateLinkedTokenSource(TestContext.CancellationToken);
+
+        var run = await StartAsync(fixture, stop.Token);
+
+        using var client = new LoginTestClient(fixture.WebPort);
+        using var ingestClient = CreateClient();
+
+        var paths = new[] { "/logs", "/logs/templates" };
+        var problems = new List<string>();
+
+        // Act
+        foreach (var path in paths)
+        {
+            using var anonymous = await client.GetAsync(path, TestContext.CancellationToken);
+
+            AddStatusProblem(problems, $"anonymous GET {path}", HttpStatusCode.Found, anonymous);
+            AddLocationProblem(problems, $"anonymous GET {path}", "/login", anonymous);
+        }
+
+        await SignInAsync(client);
+
+        foreach (var path in paths)
+        {
+            using var web = await client.GetAsync(path, TestContext.CancellationToken);
+            using var ingest = await ingestClient.GetAsync($"http://127.0.0.1:{fixture.IngestPort}{path}", TestContext.CancellationToken);
+
+            AddStatusProblem(problems, $"signed-in GET web {path}", HttpStatusCode.OK, web);
+            AddStatusProblem(problems, $"GET ingest {path}", HttpStatusCode.NotFound, ingest);
+            AddHeaderProblems(problems, path, web, "Content-Security-Policy", SecurityHeadersMiddleware.ContentSecurityPolicy);
+            AddHeaderProblems(problems, path, web, "X-Content-Type-Options", SecurityHeadersMiddleware.ContentTypeOptions);
+            AddHeaderProblems(problems, path, web, "Referrer-Policy", SecurityHeadersMiddleware.ReferrerPolicy);
+            AddHeaderProblems(problems, path, web, "X-Frame-Options", SecurityHeadersMiddleware.FrameOptions);
+        }
+
+        await stop.CancelAsync();
+        await run.WaitAsync(TimeSpan.FromSeconds(20), TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsEmpty(problems, $"problems: {string.Join("; ", problems)}");
+    }
+
+    /// <summary>
+    /// The explorer the pages get is one gated explorer with the stated slots over the store, the same for every scope, and the pages get the system clock.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task ServeGatesTheLogExplorer()
+    {
+        // Arrange
+        using var fixture = new BackendFixture();
+        using var stop = CancellationTokenSource.CreateLinkedTokenSource(TestContext.CancellationToken);
+
+        IServiceProvider? services = null;
+
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var hooks = new ServeHooks
+                    {
+                        Built = provider => services = provider,
+                        Started = _ => started.TrySetResult()
+                    };
+        var run = fixture.RunAsync([], hooks, stop.Token);
+
+        await started.Task.WaitAsync(TimeSpan.FromSeconds(20), TestContext.CancellationToken);
+
+        Assert.IsNotNull(services, "the Built hook ran before the service started");
+
+        // Act
+        var root = services.GetRequiredService<ILogExplorer>();
+
+        using var first = services.CreateScope();
+        using var second = services.CreateScope();
+
+        var inFirst = first.ServiceProvider.GetRequiredService<ILogExplorer>();
+        var inSecond = second.ServiceProvider.GetRequiredService<ILogExplorer>();
+        var clock = services.GetRequiredService<TimeProvider>();
+        var store = services.GetRequiredService<ILogSearcher>();
+        var fields = typeof(GatedLogExplorer).GetFields(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public).Select(field => field.GetValue(root)).ToArray();
+
+        await stop.CancelAsync();
+        await run.WaitAsync(TimeSpan.FromSeconds(20), TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsInstanceOfType<GatedLogExplorer>(root, "the explorer is gated");
+        Assert.AreSame(root, inFirst, "the first scope gets the same explorer, so the slots count across circuits");
+        Assert.AreSame(root, inSecond, "the second scope gets the same explorer");
+        Assert.AreEqual(LogsView.MaxConcurrentQueries, fields.OfType<SemaphoreSlim>().Single().CurrentCount, "the slots of an idle gate");
+        Assert.AreSame<object>(store, fields.OfType<ILogExplorer>().Single(), "the gate wraps the store");
+        Assert.AreSame(TimeProvider.System, clock, "the pages get the system clock");
     }
 
     /// <summary>

@@ -64,10 +64,23 @@ internal static class RecordQueries
     /// <exception cref="InvalidQueryException">The range or the limit breaks a rule</exception>
     internal static void ValidateWindow(DateTimeOffset from, DateTimeOffset to, int limit)
     {
+        ValidateWindow(from, to, limit, StorageLimits.MaxQueryLimit);
+    }
+
+    /// <summary>
+    /// Checks the time range and the limit against a largest limit.
+    /// </summary>
+    /// <param name="from">The start of the range</param>
+    /// <param name="to">The end of the range</param>
+    /// <param name="limit">The limit</param>
+    /// <param name="maxLimit">The largest allowed limit</param>
+    /// <exception cref="InvalidQueryException">The range or the limit breaks a rule</exception>
+    internal static void ValidateWindow(DateTimeOffset from, DateTimeOffset to, int limit, int maxLimit)
+    {
         Require(from != default && to != default, "from and to are required");
         Require(StorageTime.InStorableRange(from) && StorageTime.InStorableRange(to), "from and to must be within the storable range");
         Require(from < to, "from must be before to");
-        Require(limit is >= 1 and <= StorageLimits.MaxQueryLimit, $"limit must be between 1 and {StorageLimits.MaxQueryLimit}");
+        Require(limit >= 1 && limit <= maxLimit, $"limit must be between 1 and {maxLimit}");
     }
 
     /// <summary>
@@ -202,7 +215,7 @@ internal static class RecordQueries
     /// <param name="metric">Whether the metric table is joined</param>
     /// <param name="logLine">Whether the log line table is joined</param>
     /// <returns>The column list</returns>
-    private static string SelectColumns(bool metric, bool logLine)
+    internal static string SelectColumns(bool metric, bool logLine)
     {
         if (logLine)
         {

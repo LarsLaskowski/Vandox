@@ -1,0 +1,112 @@
+@page "/logs/templates"
+
+<PageTitle>Log templates</PageTitle>
+
+<h1>Log templates</h1>
+
+<nav class="subnav" aria-label="Logs">
+    <a href="logs">Search</a>
+    <a href="logs/templates" class="active">Templates</a>
+</nav>
+
+<form class="filters" method="get" action="logs/templates" @onsubmit="Submit" @onsubmit:preventDefault>
+    <label>Source
+        <select name="source" @bind="_source">
+            <option value="">All sources</option>
+            @foreach (var source in SourceOptions)
+            {
+                <option value="@source">@source</option>
+            }
+        </select>
+    </label>
+    <label>Program
+        <input type="text" name="program" @bind="_program" />
+    </label>
+    <label>From (UTC)
+        <input type="datetime-local" name="from" value="@_from" @onchange="args => _from = args.Value?.ToString() ?? string.Empty" />
+    </label>
+    <label>To (UTC)
+        <input type="datetime-local" name="to" value="@_to" @onchange="args => _to = args.Value?.ToString() ?? string.Empty" />
+    </label>
+    <button type="submit">Show templates</button>
+</form>
+
+@if (_error.Length > 0)
+{
+    <p class="error" role="alert">@_error</p>
+}
+
+@if (_failure.Length > 0)
+{
+    <p class="error" role="alert">@_failure</p>
+}
+
+@if (_searching)
+{
+    <p class="status">@LogsView.Searching</p>
+}
+
+@if (_selectedUnknown)
+{
+    <p class="error" role="alert">@LogsView.TemplateUnknown</p>
+}
+
+@if (_selected is not null)
+{
+    <section class="template-info" aria-label="Template">
+        <h2>Template @_selected.Id</h2>
+        <p class="template-text"><ExternalText Runs="_selected.Text" /></p>
+        <dl>
+            <dt>Source</dt>
+            <dd><ExternalText Runs="_selected.Source" /></dd>
+            <dt>Program</dt>
+            <dd><ExternalText Runs="_selected.Program" /></dd>
+            <dt>First seen</dt>
+            <dd>@LogsView.ShowSeconds(_selected.FirstSeen) UTC</dd>
+            <dt>Last seen</dt>
+            <dd>@LogsView.ShowSeconds(_selected.LastSeen) UTC</dd>
+            <dt>Lines</dt>
+            <dd>@_selected.Count</dd>
+        </dl>
+        <p><a href="@ShowLinesHref">Show lines</a></p>
+        @if (_chart is not null)
+        {
+            <TimeSeriesChart Title="@LogsView.ChartTitle" Data="_chart" />
+        }
+    </section>
+}
+
+@if (_rows.Count > 0)
+{
+    <div class="table-scroll">
+        <table class="templates">
+            <thead>
+                <tr>
+                    <th>Template</th>
+                    <th>Source</th>
+                    <th>Program</th>
+                    <th>First seen (UTC)</th>
+                    <th>Last seen (UTC)</th>
+                    <th>Lines</th>
+                    <th>@LogsView.CountInRangeHeader</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var row in _rows)
+                {
+                    <tr>
+                        <td class="message"><ExternalText Runs="row.Text" /></td>
+                        <td><ExternalText Runs="row.Source" /></td>
+                        <td><ExternalText Runs="row.Program" /></td>
+                        <td class="time">@LogsView.ShowSeconds(row.FirstSeen)</td>
+                        <td class="time">@LogsView.ShowSeconds(row.LastSeen)</td>
+                        <td class="number">@row.Count</td>
+                        <td class="number">@row.CountInRange</td>
+                        <td><a href="@SelectHref(row.Id)">Chart</a></td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}

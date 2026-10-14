@@ -56,6 +56,30 @@ public partial class MainLayoutTests
     }
 
     /// <summary>
+    /// The Logs entry points to the logs and is marked on both log pages, but not on the overview.
+    /// </summary>
+    /// <param name="address">The current address</param>
+    /// <param name="marked">Whether the Logs entry is marked</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [DataRow("http://localhost/logs", true)]
+    [DataRow("http://localhost/logs?q=disk", true)]
+    [DataRow("http://localhost/logs/templates", true)]
+    [DataRow("http://localhost/", false)]
+    public async Task MainLayoutMarksLogsOnTheLogPages(string address, bool marked)
+    {
+        // Act
+        var html = await RenderAsync(new ClaimsPrincipal(new ClaimsIdentity()), address);
+
+        // Assert
+        var link = LogsLink().Match(html);
+
+        Assert.IsTrue(link.Success, "the Logs link");
+        Assert.Contains("href=\"logs\"", link.Groups[1].Value, "the Logs link points to logs");
+        Assert.AreEqual(marked, ActiveClass().IsMatch(link.Groups[1].Value), $"the Logs link is marked: {marked}");
+    }
+
+    /// <summary>
     /// The sign-out form is shown to a signed-in user only: a form that posts to <c>logout</c> with an antiforgery token.
     /// </summary>
     /// <returns>A task that completes when the test is done</returns>
@@ -86,11 +110,12 @@ public partial class MainLayoutTests
     /// Renders the layout for a user.
     /// </summary>
     /// <param name="user">The user</param>
+    /// <param name="address">The current address</param>
     /// <returns>A task that returns the markup</returns>
-    private static async Task<string> RenderAsync(ClaimsPrincipal user)
+    private static async Task<string> RenderAsync(ClaimsPrincipal user, string address = "http://localhost/")
     {
         await using var services = new ServiceCollection().AddLogging()
-                                                          .AddSingleton<NavigationManager>(new TestNavigationManager())
+                                                          .AddSingleton<NavigationManager>(new RecordingNavigationManager(address))
                                                           .AddAuthorizationCore()
                                                           .AddCascadingAuthenticationState()
                                                           .AddSingleton<AuthenticationStateProvider>(new FixedAuthenticationStateProvider(user))
@@ -132,6 +157,9 @@ public partial class MainLayoutTests
 
     [GeneratedRegex("<a\\b([^>]*)>\\s*Overview\\s*</a>")]
     private static partial Regex OverviewLink();
+
+    [GeneratedRegex("<a\\b([^>]*)>\\s*Logs\\s*</a>")]
+    private static partial Regex LogsLink();
 
     [GeneratedRegex("<button type=\"button\"([^>]*)>(.*?)</button>", RegexOptions.Singleline)]
     private static partial Regex ThemeButton();

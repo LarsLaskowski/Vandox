@@ -105,6 +105,58 @@ internal static class ReaderQuery
     }
 
     /// <summary>
+    /// Installs a progress handler that interrupts the running statement when the token is cancelled or the time budget, counted
+    /// from this call, is used up.
+    /// </summary>
+    /// <param name="connection">The open reader connection</param>
+    /// <param name="timeProvider">The clock of the budget</param>
+    /// <param name="budget">The time the statement may take</param>
+    /// <param name="cancellationToken">The token whose cancellation interrupts the statement</param>
+    /// <returns>The state of the handler, which records whether the budget was used up</returns>
+    internal static ProbeBudgetState AttachBudget(SqliteConnection connection, TimeProvider timeProvider, TimeSpan budget, CancellationToken cancellationToken)
+    {
+        var state = new ProbeBudgetState(timeProvider, budget, cancellationToken);
+
+        raw.sqlite3_progress_handler(connection.Handle, ProgressInstructions, BudgetProgress, state);
+
+        return state;
+    }
+
+    /// <summary>
+    /// Removes the budget handler and installs the ordinary handler of the call again (none for a token that cannot be cancelled).
+    /// </summary>
+    /// <param name="connection">The open reader connection</param>
+    /// <param name="cancellationToken">The token of the call</param>
+    internal static void EndBudget(SqliteConnection connection, CancellationToken cancellationToken)
+    {
+        raw.sqlite3_progress_handler(connection.Handle, 0, null, null);
+        Attach(connection, cancellationToken);
+    }
+
+    /// <summary>
+    /// The progress callback of the budget: asks SQLite to stop the running statement once the token is cancelled or the budget is
+    /// used up, and records the second case. It must never throw, because SQLite calls it from native code.
+    /// </summary>
+    /// <param name="state">The state of the handler</param>
+    /// <returns>1 to interrupt the statement, 0 to continue</returns>
+    private static int BudgetProgress(object state)
+    {
+        if (state is not ProbeBudgetState budget || budget.CancellationToken.IsCancellationRequested)
+        {
+            return 1;
+        }
+
+        if (budget.TimeProvider.GetElapsedTime(budget.Start) < budget.Budget)
+        {
+            return 0;
+        }
+
+        budget.Exhausted = true;
+
+        return 1;
+    }
+
+    /// <summary>
     /// The progress callback of SQLite: asks it to stop the running statement once the token is cancelled. It must never
     /// throw, because SQLite calls it from native code.
     /// </summary>

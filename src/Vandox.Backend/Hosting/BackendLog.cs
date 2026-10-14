@@ -279,6 +279,14 @@ internal static partial class BackendLog
     internal static partial void ReportFailed(this ILogger logger, Exception exception, string error);
 
     /// <summary>
+    /// Logs a failed read of the logs view.
+    /// </summary>
+    /// <param name="logger">The logger</param>
+    /// <param name="exception">The failure</param>
+    [LoggerMessage(EventId = 49, Level = LogLevel.Error, Message = "logs view: reading failed")]
+    internal static partial void LogsReadFailed(this ILogger logger, Exception exception);
+
+    /// <summary>
     /// Logs that the web password hash is not set.
     /// </summary>
     /// <param name="logger">The logger</param>

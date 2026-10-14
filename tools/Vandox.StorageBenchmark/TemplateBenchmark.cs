@@ -195,6 +195,81 @@ internal static class TemplateBenchmark
     }
 
     /// <summary>
+    /// Generates a line from its index: one of 24 shapes modeled on real log formats, with numbers, addresses, IDs and e-mail
+    /// addresses that vary with the index.
+    /// </summary>
+    /// <param name="index">The index of the line</param>
+    /// <param name="lines">The number of lines</param>
+    /// <returns>The source, program and message</returns>
+    internal static (string Source, string Program, string Message) Line(int index, int lines)
+    {
+        var shape = index % ShapeCount;
+        var seed = (ulong)index * 0x9E3779B97F4A7C15UL;
+        var number = (int)((seed >> 33) % 100000);
+        var other = (int)((seed >> 13) % 60000);
+        var ip = string.Create(CultureInfo.InvariantCulture, $"{20 + ((seed >> 56) % 200)}.{(seed >> 48) % 256}.{(seed >> 40) % 256}.{((seed >> 32) % 254) + 1}");
+        var id = (seed >> 20).ToString("X10", CultureInfo.InvariantCulture);
+        var session = Session(seed);
+        var user = _users[(int)((seed >> 24) % (ulong)_users.Length)];
+        var file = _files[(int)((seed >> 28) % (ulong)_files.Length)];
+        var seconds = index * SecondsInThirtyDays / lines;
+
+        return shape switch
+               {
+                   0 => (SyslogSource, PostfixSmtpdProgram, $"connect from unknown[{ip}]"),
+                   1 => (SyslogSource, PostfixSmtpdProgram, $"disconnect from unknown[{ip}] ehlo=1 mail=1 rcpt=0/1 quit=1 commands={number % 5}/4"),
+                   2 => (SyslogSource, PostfixSmtpdProgram, $"{id}: client=unknown[{ip}]"),
+                   3 => (SyslogSource, "postfix/qmgr", $"{id}: from=<{user}@example.org>, size={number}, nrcpt=1 (queue active)"),
+                   4 => (SyslogSource, "postfix/smtp", $"{id}: to=<{user}@example.net>, relay=mx.example.net[{ip}]:25, delay={number % 90}, delays=0.1/0/0.5/0.2, dsn=2.0.0, status=sent (250 2.0.0 Ok: queued as {id})"),
+                   5 => (SyslogSource, PostfixSmtpdProgram, $"warning: unknown[{ip}]: SASL LOGIN authentication failed: UGFzc3dvcmQ6"),
+                   6 => (JournalSource, "dovecot", $"imap-login: Login: user=<{user}>, method=PLAIN, rip={ip}, lip=10.0.0.5, mpid={other}, TLS, session=<{session}>"),
+                   7 => (JournalSource, "dovecot", $"imap({user})<{other}><{session}>: Disconnected: Logged out in={number} out={other}"),
+                   8 => (JournalSource, "kernel", $"Out of memory: Killed process {other} (mariadbd) total-vm:{number}kB, anon-rss:{other}kB, file-rss:0kB, shmem-rss:0kB, UID:{number % 1000} pgtables:{number}kB oom_score_adj:0"),
+                   9 => (JournalSource, "kernel", $"oom-kill:constraint=CONSTRAINT_NONE,nodemask=(null),cpuset=/,mems_allowed=0,global_oom,task_memcg=/system.slice/mariadb.service,task=mariadbd,pid={other},uid={number % 1000}"),
+                   10 => ("mariadb", "mariadbd", $"2026-09-{1 + (seconds / 86400 % 30):D2} 10:{seconds / 60 % 60:D2}:{seconds % 60:D2} {other} [Warning] Aborted connection {number} to db: 'wordpress' user: 'wpuser' host: '{ip}' (Got timeout reading communication packets)"),
+                   11 => ("mariadb", "mariadbd", $"[Warning] Access denied for user '{user}'@'{ip}' (using password: YES)"),
+                   12 => (NginxSource, NginxProgram, $"{other}#{other}: *{number} open() \"/var/www/html/{file}.php\" failed (2: No such file or directory), client: {ip}, server: example.org, request: \"GET /{file}.php HTTP/1.1\", host: \"example.org\""),
+                   13 => (NginxSource, NginxProgram, $"{other}#{other}: *{number} upstream timed out (110: Connection timed out) while reading response header from upstream, client: {ip}, server: example.org, request: \"POST /{file}.php HTTP/1.1\", upstream: \"fastcgi://unix:/run/php/php8.2-fpm.sock:\", host: \"example.org\""),
+                   14 => (JournalSource, SystemdProgram, $"Started Session {number} of User {user}."),
+                   15 => (JournalSource, SystemdProgram, $"Stopping User Manager for UID {number % 1000}..."),
+                   16 => (JournalSource, SystemdProgram, $"session-{number}.scope: Deactivated successfully."),
+                   17 => (SyslogSource, "sshd", $"Failed password for invalid user {user} from {ip} port {other} ssh2"),
+                   18 => (SyslogSource, "sshd", $"Accepted publickey for root from {ip} port {other} ssh2: RSA SHA256:{session}{id}"),
+                   19 => (SyslogSource, "CRON", "(root) CMD (/usr/lib/php/sessionclean)"),
+                   20 => (JournalSource, SystemdProgram, "Starting Cleanup of Temporary Directories..."),
+                   21 => (SyslogSource, "kernel", $"[UFW BLOCK] IN=eth0 OUT= MAC=00:1a:2b:3c:4d:5e SRC={ip} DST=10.0.0.5 LEN={number % 1500} TOS=0x00 PREC=0x00 TTL={number % 64} ID={other} DF PROTO=TCP SPT={other} DPT=22"),
+                   22 => (JournalSource, "systemd-logind", $"New session {number} of user {user}."),
+                   _ => (SyslogSource, "plesk", $"Disk usage warning: /var/lib/psa/dumps is {number % 100}% full")
+               };
+    }
+
+    /// <summary>
+    /// Runs a counting query on the database file.
+    /// </summary>
+    /// <param name="folder">The folder of the database</param>
+    /// <param name="sql">The query</param>
+    /// <returns>The count</returns>
+    internal static long Count(string folder, string sql)
+    {
+        var builder = new SqliteConnectionStringBuilder
+                      {
+                          DataSource = Path.Combine(folder, StorageLimits.FileName),
+                          Mode = SqliteOpenMode.ReadOnly,
+                          Pooling = false
+                      };
+
+        using var connection = new SqliteConnection(builder.ToString());
+
+        connection.Open();
+
+        using var command = connection.CreateCommand();
+
+        command.CommandText = sql;
+
+        return Convert.ToInt64(command.ExecuteScalar(), CultureInfo.InvariantCulture);
+    }
+
+    /// <summary>
     /// Prints a line with the invariant culture.
     /// </summary>
     /// <param name="text">The text</param>
@@ -376,32 +451,6 @@ internal static class TemplateBenchmark
     }
 
     /// <summary>
-    /// Runs a counting query on the database file.
-    /// </summary>
-    /// <param name="folder">The folder of the database</param>
-    /// <param name="sql">The query</param>
-    /// <returns>The count</returns>
-    private static long Count(string folder, string sql)
-    {
-        var builder = new SqliteConnectionStringBuilder
-                      {
-                          DataSource = Path.Combine(folder, StorageLimits.FileName),
-                          Mode = SqliteOpenMode.ReadOnly,
-                          Pooling = false
-                      };
-
-        using var connection = new SqliteConnection(builder.ToString());
-
-        connection.Open();
-
-        using var command = connection.CreateCommand();
-
-        command.CommandText = sql;
-
-        return Convert.ToInt64(command.ExecuteScalar(), CultureInfo.InvariantCulture);
-    }
-
-    /// <summary>
     /// Builds a batch of generated log lines.
     /// </summary>
     /// <param name="first">The index of the first line</param>
@@ -479,55 +528,6 @@ internal static class TemplateBenchmark
         }
 
         return (NginxSource, NginxProgram, $"client {string.Join(' ', words)} sent an invalid host header");
-    }
-
-    /// <summary>
-    /// Generates a line from its index: one of 24 shapes modeled on real log formats, with numbers, addresses, IDs and e-mail
-    /// addresses that vary with the index.
-    /// </summary>
-    /// <param name="index">The index of the line</param>
-    /// <param name="lines">The number of lines</param>
-    /// <returns>The source, program and message</returns>
-    private static (string Source, string Program, string Message) Line(int index, int lines)
-    {
-        var shape = index % ShapeCount;
-        var seed = (ulong)index * 0x9E3779B97F4A7C15UL;
-        var number = (int)((seed >> 33) % 100000);
-        var other = (int)((seed >> 13) % 60000);
-        var ip = string.Create(CultureInfo.InvariantCulture, $"{20 + ((seed >> 56) % 200)}.{(seed >> 48) % 256}.{(seed >> 40) % 256}.{((seed >> 32) % 254) + 1}");
-        var id = (seed >> 20).ToString("X10", CultureInfo.InvariantCulture);
-        var session = Session(seed);
-        var user = _users[(int)((seed >> 24) % (ulong)_users.Length)];
-        var file = _files[(int)((seed >> 28) % (ulong)_files.Length)];
-        var seconds = index * SecondsInThirtyDays / lines;
-
-        return shape switch
-               {
-                   0 => (SyslogSource, PostfixSmtpdProgram, $"connect from unknown[{ip}]"),
-                   1 => (SyslogSource, PostfixSmtpdProgram, $"disconnect from unknown[{ip}] ehlo=1 mail=1 rcpt=0/1 quit=1 commands={number % 5}/4"),
-                   2 => (SyslogSource, PostfixSmtpdProgram, $"{id}: client=unknown[{ip}]"),
-                   3 => (SyslogSource, "postfix/qmgr", $"{id}: from=<{user}@example.org>, size={number}, nrcpt=1 (queue active)"),
-                   4 => (SyslogSource, "postfix/smtp", $"{id}: to=<{user}@example.net>, relay=mx.example.net[{ip}]:25, delay={number % 90}, delays=0.1/0/0.5/0.2, dsn=2.0.0, status=sent (250 2.0.0 Ok: queued as {id})"),
-                   5 => (SyslogSource, PostfixSmtpdProgram, $"warning: unknown[{ip}]: SASL LOGIN authentication failed: UGFzc3dvcmQ6"),
-                   6 => (JournalSource, "dovecot", $"imap-login: Login: user=<{user}>, method=PLAIN, rip={ip}, lip=10.0.0.5, mpid={other}, TLS, session=<{session}>"),
-                   7 => (JournalSource, "dovecot", $"imap({user})<{other}><{session}>: Disconnected: Logged out in={number} out={other}"),
-                   8 => (JournalSource, "kernel", $"Out of memory: Killed process {other} (mariadbd) total-vm:{number}kB, anon-rss:{other}kB, file-rss:0kB, shmem-rss:0kB, UID:{number % 1000} pgtables:{number}kB oom_score_adj:0"),
-                   9 => (JournalSource, "kernel", $"oom-kill:constraint=CONSTRAINT_NONE,nodemask=(null),cpuset=/,mems_allowed=0,global_oom,task_memcg=/system.slice/mariadb.service,task=mariadbd,pid={other},uid={number % 1000}"),
-                   10 => ("mariadb", "mariadbd", $"2026-09-{1 + (seconds / 86400 % 30):D2} 10:{seconds / 60 % 60:D2}:{seconds % 60:D2} {other} [Warning] Aborted connection {number} to db: 'wordpress' user: 'wpuser' host: '{ip}' (Got timeout reading communication packets)"),
-                   11 => ("mariadb", "mariadbd", $"[Warning] Access denied for user '{user}'@'{ip}' (using password: YES)"),
-                   12 => (NginxSource, NginxProgram, $"{other}#{other}: *{number} open() \"/var/www/html/{file}.php\" failed (2: No such file or directory), client: {ip}, server: example.org, request: \"GET /{file}.php HTTP/1.1\", host: \"example.org\""),
-                   13 => (NginxSource, NginxProgram, $"{other}#{other}: *{number} upstream timed out (110: Connection timed out) while reading response header from upstream, client: {ip}, server: example.org, request: \"POST /{file}.php HTTP/1.1\", upstream: \"fastcgi://unix:/run/php/php8.2-fpm.sock:\", host: \"example.org\""),
-                   14 => (JournalSource, SystemdProgram, $"Started Session {number} of User {user}."),
-                   15 => (JournalSource, SystemdProgram, $"Stopping User Manager for UID {number % 1000}..."),
-                   16 => (JournalSource, SystemdProgram, $"session-{number}.scope: Deactivated successfully."),
-                   17 => (SyslogSource, "sshd", $"Failed password for invalid user {user} from {ip} port {other} ssh2"),
-                   18 => (SyslogSource, "sshd", $"Accepted publickey for root from {ip} port {other} ssh2: RSA SHA256:{session}{id}"),
-                   19 => (SyslogSource, "CRON", "(root) CMD (/usr/lib/php/sessionclean)"),
-                   20 => (JournalSource, SystemdProgram, "Starting Cleanup of Temporary Directories..."),
-                   21 => (SyslogSource, "kernel", $"[UFW BLOCK] IN=eth0 OUT= MAC=00:1a:2b:3c:4d:5e SRC={ip} DST=10.0.0.5 LEN={number % 1500} TOS=0x00 PREC=0x00 TTL={number % 64} ID={other} DF PROTO=TCP SPT={other} DPT=22"),
-                   22 => (JournalSource, "systemd-logind", $"New session {number} of user {user}."),
-                   _ => (SyslogSource, "plesk", $"Disk usage warning: /var/lib/psa/dumps is {number % 100}% full")
-               };
     }
 
     /// <summary>
