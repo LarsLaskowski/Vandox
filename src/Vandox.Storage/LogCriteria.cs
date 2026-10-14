@@ -71,6 +71,16 @@ internal sealed class LogCriteria
     /// </summary>
     internal int ExaminedLines { get; private init; }
 
+    /// <summary>
+    /// Gets the quoted one-part terms of the user's text; the scan tests each on its own.
+    /// </summary>
+    internal IReadOnlyList<string> ScanWords { get; private init; } = [];
+
+    /// <summary>
+    /// Gets the quoted multi-part terms of the user's text joined with a space, or <c>null</c> when there are none.
+    /// </summary>
+    internal string? ScanPhrases { get; private init; }
+
     #endregion // Properties
 
     #region Methods
@@ -97,6 +107,7 @@ internal sealed class LogCriteria
                {
                    Text = Combine(filter.Text, template),
                    ScanText = scanText,
+                   ScanPhrases = null,
                    ExaminedLines = LogFinder.ExaminedLines(filter.ScanLimit, FtsQuery.CountTokens(scanText)),
                    Source = template?.Source ?? Optional(filter.Source),
                    Program = template?.Program ?? Optional(filter.Program),

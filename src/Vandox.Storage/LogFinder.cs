@@ -28,6 +28,11 @@ internal static class LogFinder
     /// </summary>
     internal static readonly TimeSpan ProbeBudget = TimeSpan.FromMilliseconds(700);
 
+    /// <summary>
+    /// The time one page of a scan may take before it ends with the lines found so far.
+    /// </summary>
+    internal static readonly TimeSpan PageBudget = TimeSpan.FromMilliseconds(1500);
+
     #endregion // Fields
 
     #region Methods
@@ -79,6 +84,25 @@ internal static class LogFinder
                    ? await FindFromIndexAsync(connection, criteria, ids, cancellationToken).ConfigureAwait(false)
                    : await ScanAsync(connection, criteria, scanMatch, cancellationToken).ConfigureAwait(false);
     }
+
+#pragma warning disable RH2003, S107, S2325
+    /// <summary>
+    /// Finds one page of log lines under an index check budget and a page budget.
+    /// </summary>
+    /// <param name="connection">The open reader connection</param>
+    /// <param name="filter">The validated filters</param>
+    /// <param name="template">The template of <see cref="LogFilter.TemplateId"/>, or <c>null</c></param>
+    /// <param name="selectiveMatches">The index match count below which the index is used</param>
+    /// <param name="probeBudget">The time the index check may take</param>
+    /// <param name="pageBudget">The time a scan page may take; <see cref="Timeout.InfiniteTimeSpan"/> for no limit</param>
+    /// <param name="timeProvider">The clock of the budgets</param>
+    /// <param name="cancellationToken">Cancels the call</param>
+    /// <returns>A task that returns the page</returns>
+    internal static Task<LogPage> FindAsync(SqliteConnection connection, LogFilter filter, LogTemplate? template, int selectiveMatches, TimeSpan probeBudget, TimeSpan pageBudget, TimeProvider timeProvider, CancellationToken cancellationToken)
+    {
+        throw new NotImplementedException();
+    }
+#pragma warning restore RH2003, S107, S2325
 
     /// <summary>
     /// Returns the number of lines a scan examines for a search text.

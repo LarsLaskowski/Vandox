@@ -63,6 +63,19 @@ internal static class FtsQuery
         return count;
     }
 
+#pragma warning disable RH2003, S2325
+    /// <summary>
+    /// Builds the quoted terms of a search text; <see cref="Build"/> joins them with a space.
+    /// </summary>
+    /// <param name="text">The search text</param>
+    /// <returns>The quoted terms</returns>
+    /// <exception cref="InvalidQueryException">The text breaks a rule; the message never contains the text</exception>
+    internal static IReadOnlyList<string> BuildTerms(string text)
+    {
+        throw new NotImplementedException();
+    }
+#pragma warning restore RH2003, S2325
+
     /// <summary>
     /// Throws an error for a rejected query unless the condition holds.
     /// </summary>

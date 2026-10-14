@@ -103,6 +103,18 @@ internal static class LogFinderQueries
         return ($"SELECT x.id, x.ts, x.keep, CASE WHEN x.keep = 1 THEN m.message END FROM ({sql}) x LEFT JOIN log_lines m ON m.record_id = x.id LIMIT $scan", parameters);
     }
 
+#pragma warning disable RH2003, S2325
+    /// <summary>
+    /// Builds the scan statement with one test per word of the user's text and no FTS5 match.
+    /// </summary>
+    /// <param name="criteria">The criteria</param>
+    /// <returns>The SQL and its parameters</returns>
+    internal static (string Sql, Dictionary<string, object> Parameters) BuildScan(LogCriteria criteria)
+    {
+        throw new NotImplementedException();
+    }
+#pragma warning restore RH2003, S2325
+
     /// <summary>
     /// Builds the statement that reads the lines with the given record IDs in order.
     /// </summary>
