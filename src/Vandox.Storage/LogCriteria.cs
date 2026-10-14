@@ -102,12 +102,15 @@ internal sealed class LogCriteria
         var after = filter.After is null ? (long?)null : StorageTime.ToNanoseconds(filter.After.CapturedAt);
 
         var scanText = string.Join(' ', Split(filter.Text));
+        var terms = scanText.Length > 0 ? FtsQuery.BuildTerms(scanText) : [];
+        var phrases = terms.Where(term => FtsQuery.CountTokens(term) > 1).ToList();
 
         return new LogCriteria
                {
                    Text = Combine(filter.Text, template),
                    ScanText = scanText,
-                   ScanPhrases = null,
+                   ScanWords = terms.Where(term => FtsQuery.CountTokens(term) <= 1).ToList(),
+                   ScanPhrases = phrases.Count > 0 ? string.Join(' ', phrases) : null,
                    ExaminedLines = LogFinder.ExaminedLines(filter.ScanLimit, FtsQuery.CountTokens(scanText)),
                    Source = template?.Source ?? Optional(filter.Source),
                    Program = template?.Program ?? Optional(filter.Program),

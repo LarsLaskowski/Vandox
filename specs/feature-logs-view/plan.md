@@ -1196,6 +1196,10 @@ deadline, as before) **or** when the time since the probe started reaches the bu
   `IndexCheckStopped`).
 
 **Limits, stated honestly:**
+- **Residual of the line index (Security):** one `MATCH` inside a line-index chunk is not interrupted before it ends. With crafted messages (one word repeated
+  in 64 lines or 256 KiB of characters, a phrase of many parts of it) it keeps a chunk busy for about 0.3 s on the development host and about 1.5 s on the
+  DS918+, so a page can take up to about 3 s (budget + clock + chunk); the deadline of the caller still ends the call. The Dev ends a chunk at 262,144
+  characters of messages as well as at 64 lines (`LineIndex.ChunkCharacters`).
 - The probe stops at the next handler call, not at the exact budget. Measured gaps on the development host are at most 29 ms (31 ms for
   a 511-part term), so about 0.15 s on the reference host (factor 5). This bounds the index check only; the scan page after it is
   bounded by the line bound, not by the clock (the Dev's measurement: 0.4 s per examined line for sixteen common words that never meet,

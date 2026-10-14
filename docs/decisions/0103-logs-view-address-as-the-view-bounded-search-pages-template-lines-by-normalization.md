@@ -142,7 +142,9 @@ health check keeps a reader. The rules
   narrowed; on a loaded host more searches take this path, the lines found do not change. A scan page ends after 1.5 s at the
   latest (plus one line or one chunk of at most 64 lines), the probe's budget included, so on a slow host a page may end sooner
   with *Continue*. A scan with a term of several parts opens one private in-memory connection per call and holds at most 64 messages
-  and their index in it.
+  (or 256 KiB of characters) and their index in it. The residual: one `MATCH` inside a chunk of the line index runs to its end, so crafted messages (any local
+  process can write log lines) can keep a chunk busy for about 0.3 s on the development host and about 1.5 s on the reference host, and a page can take up to about 3 s; the
+  deadline of the call still ends it.
 - The template list counts whole hours: a range that starts or ends inside an hour counts that hour completely.
 - A line made mostly of invisible characters is shown cut, with the number of characters not shown.
 - Two tabs with slow searches make a third wait for a slot (within its deadline); the health check is not affected.

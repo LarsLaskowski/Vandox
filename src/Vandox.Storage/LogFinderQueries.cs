@@ -10,12 +10,6 @@ namespace Vandox.Storage;
 /// </summary>
 internal static class LogFinderQueries
 {
-    #region Constants
-
-    private const string Exists = "EXISTS (SELECT 1 FROM log_fts WHERE log_fts MATCH $match AND rowid = r.id)";
-
-    #endregion // Constants
-
     #region Methods
 
     /// <summary>
@@ -76,25 +70,24 @@ internal static class LogFinderQueries
     }
 
     /// <summary>
-    /// Builds the statement of the scan mode: for each of the first lines of the range in order, its ID, capture time and whether it passes every filter
-    /// (and, with a template, its message when it does).
+    /// Builds the scan statement with one test per word of the user's text and no FTS5 match of the whole text: for each of the first lines of
+    /// the range in order, its ID, capture time, whether it passes every filter and, when a template or a phrase needs it, its message.
     /// </summary>
     /// <param name="criteria">The criteria</param>
-    /// <param name="match">The FTS5 expression, or <c>null</c> without a text</param>
     /// <returns>The SQL and its parameters</returns>
-    internal static (string Sql, Dictionary<string, object> Parameters) BuildScan(LogCriteria criteria, string? match)
+    internal static (string Sql, Dictionary<string, object> Parameters) BuildScan(LogCriteria criteria)
     {
         var parameters = new Dictionary<string, object>
                          {
                              ["$kind"] = RecordKind.LogLine,
                              ["$scan"] = (long)criteria.ExaminedLines
                          };
-        var sql = new StringBuilder($"SELECT r.id AS id, r.captured_at AS ts, {Keep(criteria, match, parameters)} AS keep FROM records r JOIN log_lines l ON l.record_id = r.id WHERE r.kind = $kind");
+        var sql = new StringBuilder($"SELECT r.id AS id, r.captured_at AS ts, {Keep(criteria, parameters)} AS keep FROM records r JOIN log_lines l ON l.record_id = r.id WHERE r.kind = $kind");
 
         AppendRange(sql, parameters, criteria);
         sql.Append(" ORDER BY r.captured_at, r.id LIMIT $scan");
 
-        if (criteria.Template is null)
+        if (criteria.Template is null && criteria.ScanPhrases is null)
         {
             return (sql.ToString(), parameters);
         }
@@ -102,18 +95,6 @@ internal static class LogFinderQueries
         // The outer LIMIT keeps SQLite from flattening the subquery, which would evaluate the filter expression a second time for the message.
         return ($"SELECT x.id, x.ts, x.keep, CASE WHEN x.keep = 1 THEN m.message END FROM ({sql}) x LEFT JOIN log_lines m ON m.record_id = x.id LIMIT $scan", parameters);
     }
-
-#pragma warning disable RH2003, S2325
-    /// <summary>
-    /// Builds the scan statement with one test per word of the user's text and no FTS5 match.
-    /// </summary>
-    /// <param name="criteria">The criteria</param>
-    /// <returns>The SQL and its parameters</returns>
-    internal static (string Sql, Dictionary<string, object> Parameters) BuildScan(LogCriteria criteria)
-    {
-        throw new NotImplementedException();
-    }
-#pragma warning restore RH2003, S2325
 
     /// <summary>
     /// Builds the statement that reads the lines with the given record IDs in order.
@@ -160,10 +141,9 @@ internal static class LogFinderQueries
     /// Builds the expression of a scan that tells whether a line passes the filters the range does not apply.
     /// </summary>
     /// <param name="criteria">The criteria</param>
-    /// <param name="match">The FTS5 expression, or <c>null</c></param>
     /// <param name="parameters">The parameters</param>
     /// <returns>The expression, 1 or 0</returns>
-    private static string Keep(LogCriteria criteria, string? match, Dictionary<string, object> parameters)
+    private static string Keep(LogCriteria criteria, Dictionary<string, object> parameters)
     {
         var conditions = new List<string>();
 
@@ -179,10 +159,10 @@ internal static class LogFinderQueries
             parameters["$maxPriority"] = (long)criteria.MaxPriority.Value;
         }
 
-        if (match is not null)
+        for (var index = 0; index < criteria.ScanWords.Count; index++)
         {
-            conditions.Add(Exists);
-            parameters["$match"] = match;
+            conditions.Add($"EXISTS (SELECT 1 FROM log_fts WHERE log_fts MATCH $word{index} AND rowid = r.id)");
+            parameters[$"$word{index}"] = criteria.ScanWords[index];
         }
 
         return conditions.Count == 0 ? "1" : $"CASE WHEN {string.Join(" AND ", conditions)} THEN 1 ELSE 0 END";

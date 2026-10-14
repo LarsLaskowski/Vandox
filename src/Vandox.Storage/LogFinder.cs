@@ -38,18 +38,17 @@ internal static class LogFinder
     #region Methods
 
     /// <summary>
-    /// Finds one page of log lines; an index check that outlasts the budget turns the request into a scan.
+    /// Finds one page of log lines; an index check that outlasts the budget turns the request into a scan, and a scan ends with the page budget.
     /// </summary>
     /// <param name="connection">The open reader connection</param>
     /// <param name="filter">The validated filters</param>
     /// <param name="template">The template of <see cref="LogFilter.TemplateId"/>, or <c>null</c></param>
-    /// <param name="selectiveMatches">The index match count below which the index is used</param>
-    /// <param name="probeBudget">The time the index check may take</param>
-    /// <param name="timeProvider">The clock of the budget</param>
+    /// <param name="options">The bounds and the clock of the call</param>
     /// <param name="cancellationToken">Cancels the call</param>
     /// <returns>A task that returns the page</returns>
-    internal static async Task<LogPage> FindAsync(SqliteConnection connection, LogFilter filter, LogTemplate? template, int selectiveMatches, TimeSpan probeBudget, TimeProvider timeProvider, CancellationToken cancellationToken)
+    internal static async Task<LogPage> FindAsync(SqliteConnection connection, LogFilter filter, LogTemplate? template, LogFindOptions options, CancellationToken cancellationToken)
     {
+        var start = options.TimeProvider.GetTimestamp();
         var criteria = LogCriteria.Create(filter, template);
 
         if (criteria is null)
@@ -57,18 +56,16 @@ internal static class LogFinder
             return new LogPage();
         }
 
-        var scanMatch = criteria.ScanText.Length > 0 ? FtsQuery.Build(criteria.ScanText) : null;
-
         if (criteria.Text.Length == 0)
         {
-            return await ScanAsync(connection, criteria, scanMatch, cancellationToken).ConfigureAwait(false);
+            return await ScanAsync(connection, criteria, options, start, cancellationToken).ConfigureAwait(false);
         }
 
-        var ids = await CheckIndexAsync(connection, FtsQuery.Build(criteria.Text), selectiveMatches, probeBudget, timeProvider, cancellationToken).ConfigureAwait(false);
+        var ids = await CheckIndexAsync(connection, FtsQuery.Build(criteria.Text), options, cancellationToken).ConfigureAwait(false);
 
         if (ids is null)
         {
-            var stepwise = await ScanAsync(connection, criteria, scanMatch, cancellationToken).ConfigureAwait(false);
+            var stepwise = await ScanAsync(connection, criteria, options, start, cancellationToken).ConfigureAwait(false);
 
             stepwise.IndexCheckStopped = true;
 
@@ -80,29 +77,10 @@ internal static class LogFinder
             return new LogPage();
         }
 
-        return ids.Count < selectiveMatches
+        return ids.Count < options.SelectiveMatches
                    ? await FindFromIndexAsync(connection, criteria, ids, cancellationToken).ConfigureAwait(false)
-                   : await ScanAsync(connection, criteria, scanMatch, cancellationToken).ConfigureAwait(false);
+                   : await ScanAsync(connection, criteria, options, start, cancellationToken).ConfigureAwait(false);
     }
-
-#pragma warning disable RH2003, S107, S2325
-    /// <summary>
-    /// Finds one page of log lines under an index check budget and a page budget.
-    /// </summary>
-    /// <param name="connection">The open reader connection</param>
-    /// <param name="filter">The validated filters</param>
-    /// <param name="template">The template of <see cref="LogFilter.TemplateId"/>, or <c>null</c></param>
-    /// <param name="selectiveMatches">The index match count below which the index is used</param>
-    /// <param name="probeBudget">The time the index check may take</param>
-    /// <param name="pageBudget">The time a scan page may take; <see cref="Timeout.InfiniteTimeSpan"/> for no limit</param>
-    /// <param name="timeProvider">The clock of the budgets</param>
-    /// <param name="cancellationToken">Cancels the call</param>
-    /// <returns>A task that returns the page</returns>
-    internal static Task<LogPage> FindAsync(SqliteConnection connection, LogFilter filter, LogTemplate? template, int selectiveMatches, TimeSpan probeBudget, TimeSpan pageBudget, TimeProvider timeProvider, CancellationToken cancellationToken)
-    {
-        throw new NotImplementedException();
-    }
-#pragma warning restore RH2003, S107, S2325
 
     /// <summary>
     /// Returns the number of lines a scan examines for a search text.
@@ -120,23 +98,21 @@ internal static class LogFinder
     /// </summary>
     /// <param name="connection">The connection</param>
     /// <param name="match">The FTS5 expression</param>
-    /// <param name="selectiveMatches">The bound of the IDs</param>
-    /// <param name="probeBudget">The time the check may take</param>
-    /// <param name="timeProvider">The clock of the budget</param>
+    /// <param name="options">The bound of the IDs, the time the check may take and the clock</param>
     /// <param name="cancellationToken">Cancels the call</param>
     /// <returns>A task that returns the record IDs, or <c>null</c> when the budget is used up</returns>
-    private static async Task<List<long>?> CheckIndexAsync(SqliteConnection connection, string match, int selectiveMatches, TimeSpan probeBudget, TimeProvider timeProvider, CancellationToken cancellationToken)
+    private static async Task<List<long>?> CheckIndexAsync(SqliteConnection connection, string match, LogFindOptions options, CancellationToken cancellationToken)
     {
-        if (probeBudget <= TimeSpan.Zero)
+        if (options.ProbeBudget <= TimeSpan.Zero)
         {
             return null;
         }
 
-        var state = ReaderQuery.AttachBudget(connection, timeProvider, probeBudget, cancellationToken);
+        var state = ReaderQuery.AttachBudget(connection, options.TimeProvider, options.ProbeBudget, cancellationToken);
 
         try
         {
-            return await ReadMatchesAsync(connection, match, selectiveMatches, cancellationToken).ConfigureAwait(false);
+            return await ReadMatchesAsync(connection, match, options.SelectiveMatches, cancellationToken).ConfigureAwait(false);
         }
         catch (SqliteException exception) when (StoppedByBudget(exception, state, cancellationToken))
         {
@@ -229,13 +205,16 @@ internal static class LogFinder
     /// </summary>
     /// <param name="connection">The connection</param>
     /// <param name="criteria">The criteria</param>
-    /// <param name="match">The FTS5 expression, or <c>null</c></param>
+    /// <param name="options">The page budget and the clock</param>
+    /// <param name="start">The timestamp of the start of the call</param>
     /// <param name="cancellationToken">Cancels the call</param>
     /// <returns>A task that returns the page</returns>
-    private static async Task<LogPage> ScanAsync(SqliteConnection connection, LogCriteria criteria, string? match, CancellationToken cancellationToken)
+    private static async Task<LogPage> ScanAsync(SqliteConnection connection, LogCriteria criteria, LogFindOptions options, long start, CancellationToken cancellationToken)
     {
-        var (kept, last, examined) = await WalkAsync(connection, criteria, match, cancellationToken).ConfigureAwait(false);
+        using var index = criteria.ScanPhrases is null ? null : LineIndex.Open(cancellationToken);
 
+        var state = await WalkAsync(connection, criteria, index, options, start, cancellationToken).ConfigureAwait(false);
+        var kept = state.Kept;
         var lines = kept.Count > 0 ? await FetchAsync(connection, kept, cancellationToken).ConfigureAwait(false) : [];
 
         if (kept.Count >= criteria.Limit)
@@ -247,51 +226,140 @@ internal static class LogFinder
                    };
         }
 
-        var reached = examined >= criteria.ExaminedLines;
+        var reached = state.Examined >= criteria.ExaminedLines || state.ClockStopped;
 
         return new LogPage
                {
                    Lines = lines,
-                   Next = reached ? last : null,
+                   Next = reached ? state.Last : null,
                    ScanLimitReached = reached
                };
     }
 
     /// <summary>
-    /// Walks the examined lines until the page is full or the bound ends the walk.
+    /// Walks the examined lines until the page is full, the bound ends the walk or the page budget is used up; at least one line is examined.
     /// </summary>
     /// <param name="connection">The connection</param>
     /// <param name="criteria">The criteria</param>
-    /// <param name="match">The FTS5 expression, or <c>null</c></param>
+    /// <param name="index">The line index for multi-part terms, or <c>null</c></param>
+    /// <param name="options">The page budget and the clock</param>
+    /// <param name="start">The timestamp of the start of the call</param>
     /// <param name="cancellationToken">Cancels the call</param>
-    /// <returns>A task that returns the positions of the lines to return, the position of the last examined line and the number of examined lines</returns>
-    private static async Task<(List<LogPosition> Kept, LogPosition? Last, int Examined)> WalkAsync(SqliteConnection connection, LogCriteria criteria, string? match, CancellationToken cancellationToken)
+    /// <returns>A task that returns what the walk found</returns>
+    private static async Task<ScanState> WalkAsync(SqliteConnection connection, LogCriteria criteria, LineIndex? index, LogFindOptions options, long start, CancellationToken cancellationToken)
     {
-        var (sql, parameters) = LogFinderQueries.BuildScan(criteria, match);
+        var (sql, parameters) = LogFinderQueries.BuildScan(criteria);
 
-        var kept = new List<LogPosition>();
-        LogPosition? last = null;
-        var examined = 0;
+        var state = new ScanState();
 
         using var command = CreateCommand(connection, sql, parameters);
         using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
 
-        while (kept.Count < criteria.Limit && await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        while (state.Kept.Count < criteria.Limit && await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
         {
-            examined++;
-            last = new LogPosition
-                   {
-                       CapturedAt = StorageTime.FromNanoseconds(reader.GetInt64(1)),
-                       Id = reader.GetInt64(0)
-                   };
+            state.Examined++;
+            state.Last = new LogPosition
+                         {
+                             CapturedAt = StorageTime.FromNanoseconds(reader.GetInt64(1)),
+                             Id = reader.GetInt64(0)
+                         };
 
-            if (reader.GetInt64(2) == 1 && (criteria.Template is null || IsLineOf(criteria.Template, reader.GetString(3))))
+            if (reader.GetInt64(2) == 1)
             {
-                kept.Add(last);
+                await AddAsync(state, criteria, index, reader, cancellationToken).ConfigureAwait(false);
+            }
+
+            if (PageBudgetUsedUp(options, start))
+            {
+                state.ClockStopped = true;
+
+                break;
             }
         }
 
-        return (kept, last, examined);
+        await FlushAsync(state, criteria, index, cancellationToken).ConfigureAwait(false);
+
+        return state;
+    }
+
+    /// <summary>
+    /// Tells whether the page budget is used up.
+    /// </summary>
+    /// <param name="options">The page budget and the clock</param>
+    /// <param name="start">The timestamp of the start of the call</param>
+    /// <returns><c>true</c> when a page budget is set and the time since the start has reached it</returns>
+    private static bool PageBudgetUsedUp(LogFindOptions options, long start)
+    {
+        return options.PageBudget >= TimeSpan.Zero && options.TimeProvider.GetElapsedTime(start) >= options.PageBudget;
+    }
+
+    /// <summary>
+    /// Handles a line that passes the filters and the one-part terms: the template decides at once, the multi-part terms wait for the line index.
+    /// </summary>
+    /// <param name="state">The state of the scan</param>
+    /// <param name="criteria">The criteria</param>
+    /// <param name="index">The line index, or <c>null</c></param>
+    /// <param name="reader">The reader at the line</param>
+    /// <param name="cancellationToken">Cancels the call</param>
+    /// <returns>A task that completes when the line is handled</returns>
+    private static async Task AddAsync(ScanState state, LogCriteria criteria, LineIndex? index, SqliteDataReader reader, CancellationToken cancellationToken)
+    {
+        var position = state.Last!;
+        var message = criteria.Template is null && index is null ? string.Empty : reader.GetString(3);
+
+        if (criteria.Template is null || IsLineOf(criteria.Template, message))
+        {
+            await KeepAsync(state, criteria, index, (position, message), cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Keeps a line of the template at once, or lets it wait for the line index when the user's text has multi-part terms; a full chunk is matched.
+    /// </summary>
+    /// <param name="state">The state of the scan</param>
+    /// <param name="criteria">The criteria</param>
+    /// <param name="index">The line index, or <c>null</c></param>
+    /// <param name="line">The position and message of the line</param>
+    /// <param name="cancellationToken">Cancels the call</param>
+    /// <returns>A task that completes when the line is handled</returns>
+    private static async Task KeepAsync(ScanState state, LogCriteria criteria, LineIndex? index, (LogPosition Position, string Message) line, CancellationToken cancellationToken)
+    {
+        if (index is null)
+        {
+            state.Kept.Add(line.Position);
+
+            return;
+        }
+
+        state.Pending.Add(line);
+        state.PendingCharacters += line.Message.Length;
+
+        if (state.Pending.Count >= LineIndex.ChunkLines || state.PendingCharacters >= LineIndex.ChunkCharacters)
+        {
+            await FlushAsync(state, criteria, index, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Matches the waiting lines against the multi-part terms and keeps those that match, up to the page size.
+    /// </summary>
+    /// <param name="state">The state of the scan</param>
+    /// <param name="criteria">The criteria</param>
+    /// <param name="index">The line index, or <c>null</c></param>
+    /// <param name="cancellationToken">Cancels the call</param>
+    /// <returns>A task that completes when the chunk is matched</returns>
+    private static async Task FlushAsync(ScanState state, LogCriteria criteria, LineIndex? index, CancellationToken cancellationToken)
+    {
+        if (index is null || state.Pending.Count == 0)
+        {
+            return;
+        }
+
+        var matched = await index.MatchAsync(state.Pending.Select(line => (line.Position.Id, line.Message)).ToList(), criteria.ScanPhrases!, cancellationToken).ConfigureAwait(false);
+
+        state.Kept.AddRange(state.Pending.Where(line => matched.Contains(line.Position.Id)).Select(line => line.Position).Take(criteria.Limit - state.Kept.Count));
+        state.Pending.Clear();
+        state.PendingCharacters = 0;
     }
 
     /// <summary>

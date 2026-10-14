@@ -556,7 +556,7 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
     /// <inheritdoc />
     public Task<LogPage> FindLogsAsync(LogFilter filter, CancellationToken cancellationToken)
     {
-        return FindLogsAsync(filter, LogFinder.SelectiveMatches, cancellationToken);
+        return FindLogsAsync(filter, LogFinder.SelectiveMatches, LogFinder.ProbeBudget, LogFinder.PageBudget, TimeProvider.System, cancellationToken);
     }
 
     /// <inheritdoc />
@@ -615,7 +615,7 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
     /// <exception cref="InvalidQueryException">A filter breaks a rule</exception>
     internal Task<LogPage> FindLogsAsync(LogFilter filter, int selectiveMatches, CancellationToken cancellationToken)
     {
-        return FindLogsAsync(filter, selectiveMatches, LogFinder.ProbeBudget, TimeProvider.System, cancellationToken);
+        return FindLogsAsync(filter, selectiveMatches, LogFinder.ProbeBudget, Timeout.InfiniteTimeSpan, TimeProvider.System, cancellationToken);
     }
 
     /// <summary>
@@ -630,19 +630,9 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
     /// <exception cref="InvalidQueryException">A filter breaks a rule</exception>
     internal Task<LogPage> FindLogsAsync(LogFilter filter, int selectiveMatches, TimeSpan probeBudget, TimeProvider timeProvider, CancellationToken cancellationToken)
     {
-        LogFilterRules.Validate(filter);
-
-        return ReadAsync(async connection =>
-                         {
-                             var template = filter.TemplateId > 0 ? await LogExplorerQueries.TemplateAsync(connection, filter.TemplateId, cancellationToken).ConfigureAwait(false) : null;
-
-                             return await LogFinder.FindAsync(connection, filter, template, selectiveMatches, probeBudget, timeProvider, cancellationToken).ConfigureAwait(false);
-                         },
-                         LogsContext,
-                         cancellationToken);
+        return FindLogsAsync(filter, selectiveMatches, probeBudget, Timeout.InfiniteTimeSpan, timeProvider, cancellationToken);
     }
 
-#pragma warning disable RH2003, S2325
     /// <summary>
     /// Returns one page of the log lines matching every filter with explicit bounds of the index check and of the page.
     /// </summary>
@@ -656,9 +646,25 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
     /// <exception cref="InvalidQueryException">A filter breaks a rule</exception>
     internal Task<LogPage> FindLogsAsync(LogFilter filter, int selectiveMatches, TimeSpan probeBudget, TimeSpan pageBudget, TimeProvider timeProvider, CancellationToken cancellationToken)
     {
-        throw new NotImplementedException();
+        LogFilterRules.Validate(filter);
+
+        var options = new LogFindOptions
+                      {
+                          SelectiveMatches = selectiveMatches,
+                          ProbeBudget = probeBudget,
+                          PageBudget = pageBudget,
+                          TimeProvider = timeProvider
+                      };
+
+        return ReadAsync(async connection =>
+                         {
+                             var template = filter.TemplateId > 0 ? await LogExplorerQueries.TemplateAsync(connection, filter.TemplateId, cancellationToken).ConfigureAwait(false) : null;
+
+                             return await LogFinder.FindAsync(connection, filter, template, options, cancellationToken).ConfigureAwait(false);
+                         },
+                         LogsContext,
+                         cancellationToken);
     }
-#pragma warning restore RH2003, S2325
 
     #endregion // ILogExplorer
 

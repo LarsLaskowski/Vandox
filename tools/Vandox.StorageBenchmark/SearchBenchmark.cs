@@ -347,7 +347,7 @@ internal static class SearchBenchmark
         {
             var page = await store.FindLogsAsync(item.Filter, cancellationToken).ConfigureAwait(false);
 
-            return ($"{page.Lines.Count} lines{(page.ScanLimitReached ? ", scan limit reached" : string.Empty)}", page.IndexCheckStopped);
+            return ($"{page.Lines.Count} lines{(page.ScanLimitReached ? ", scan bound or page budget reached" : string.Empty)}", page.IndexCheckStopped);
         }
 
         if (item.Templates is not null)

@@ -209,8 +209,11 @@ position `After` (capture time and record ID), a page size `Limit` and a bound `
   **index mode**, which reads the lines with exactly those record IDs (a lookup by primary key; the index is not read again), applies the
   filters and sorts them (at most the cap, by construction). The cap or more, or no text: **scan mode**, which walks the log
   lines of the range in capture-time order from the position (through the index on kind, source and time with a source, or the index on kind and time without one) and keeps the lines that pass the filters and, with a text, are in the full-text match. The match is tested for each examined
-  line on its own, one lookup per term of the user's text, and nothing is collected, so scan mode holds at most the page and its work grows with the
-  examined lines, not with the matches. The lines found, followed through `Next` until it is empty, do not depend on the strategy; only scan mode can end a page early at the scan bound.
+  line on its own and nothing is collected over the range, so scan mode holds at most the page and its work grows with the examined lines, not with the matches:
+  every term of the user's text that is **one word part** has its own `EXISTS` on the full-text index (a single token stops at its seek), and the terms of **several
+  parts** (an IP address, a path, `a.b`) are tested in the **line index** below. A test of the whole text in one `MATCH` is not used, because `rowid = …` does not bound the
+  full-text work to one line: an AND of terms or a phrase walks on to the next matching row or to the end of the index (a four-part phrase took 375 ms per line on
+  5,000,000 lines, sixteen words that never meet 497 ms, against 0.36 ms as sixteen tests of one word each). The lines found, followed through `Next` until it is empty, do not depend on the strategy; only scan mode can end a page early at the scan bound.
 - **The scan bound:** scan mode examines at most `ScanLimit` log lines (1 to 100,000; the logs view uses **8,000**), counted whether or not
   they match, and for a text of several **word parts** at most the bound divided by the parts (at least 1): `ScanLimit` for no text or a
   text of one part, `ScanLimit / n` for `n` parts. The parts are the runs of letters, numbers and private-use characters that the
@@ -219,6 +222,17 @@ position `After` (capture time and record ID), a page size `Limit` and a bound `
   the template's. When the bound ends the request before the page is full, `ScanLimitReached` is set and `Next` is the position of the last
   examined line, also when the page is empty: a request with `After` set to it searches on, so continuing until `Next` is empty
   returns every matching line exactly once. A full page ends the scan at its last line (`ScanLimitReached` not set).
+- **The line index.** The examined lines that pass every other test are collected in chunks of at most **64 lines** (and at most 262,144 characters of
+  messages, whichever comes first), inserted into a private `:memory:` SQLite database with one FTS5 table of the same tokenizer as `log_fts`
+  (`unicode61 remove_diacritics 2`), matched against the terms of several parts (the same quoted expression as the stored index) and emptied again; a
+  line is kept when it matches. The same library, tokenizer and expression decide on the same stored message, so scan mode and index mode return the same lines.
+  The connection is opened only for a text with such terms, once per call, reads no database file and takes no reader lease (so the reader bound of the web
+  view holds), carries the call's token as a progress handler, and is disposed on every path. Messages are bound parameters only. The work is bounded by the
+  text of one chunk: at most 64 messages of 16,384 bytes (1 MiB; 256 KiB of characters ends a chunk earlier) and their index in memory, with at most two calls at once.
+- **The page clock.** A scan ends after the examined line (or the matched chunk) at which **1.5 s** (`PageBudget`) have passed since the start of the call, the index check's
+  budget included, measured with the store's clock; at least one line is always examined. It then returns `ScanLimitReached` and `Next` at the last examined
+  line, as at the line bound, so *Continue* always advances. The line bound stays the deterministic upper bound; the clock only ends a page earlier, and the lines found by
+  following `Next` to the end do not depend on it. The calls that pass no page budget (the internal overloads used by the tests) have no clock.
 - **Template lines:** with a template number the lines are those of the template's source and program whose message normalizes (the rules of
   [Detection, alerts and reports](detection-and-reports.md), *Log templates*) to the template's text, exactly. The words of the template
   that contain no placeholder narrow the candidates: they are added to the text as search terms (at most 16 terms and 1,024 bytes in all,
@@ -241,10 +255,12 @@ position `After` (capture time and record ID), a page size `Limit` and a bound `
   lines" answer until the range is narrowed.
 - **Cost.** Index mode reads at most the cap of matches. Scan mode reads at most the divided bound of lines and does one index lookup per word part
   of the user's text for each. The index check is bounded by the budget plus one gap between two checks of the handler (31 ms at most in the
-  measurements). The scan page after a stopped check is bounded by its line bound, **not by the clock**: the per-line test of a text of sixteen
-  common words that never occur together took about 0.5 s per line on the development host, and that of a phrase of common parts of a word every
-  line holds from 0.4 s (four parts) to over 2 s (twenty parts) per line, so such a page can reach the deadline of its caller
-  (`docs/BENCHMARKS.md`, *Log search*). A search without a text and with a program or source that few lines have examines up to `ScanLimit` lines per request
+  measurements). A scan page ends by the line bound or the page clock, whichever comes first: its time is the clock (1.5 s) plus
+  the examined line or chunk that was running when it ran out, and the read of at most 100 lines. **The residual:** one `MATCH` inside the line
+  index runs to its end, so a chunk of crafted messages (long runs of one repeated word and a phrase of many parts of it, 64 lines or 256 KiB of
+  characters) can keep one chunk busy for about 0.3 s on the development host and about 1.5 s on the reference host (an estimate of the security review, not a measurement), and a page for up to about 3 s;
+  the deadline of the caller still ends the call. A stored message is bounded (16,384 bytes) but not trusted: any local process can write such lines (security area 12).
+  The per-line tests are cheap otherwise (`docs/BENCHMARKS.md`, *Log search*). A search without a text and with a program or source that few lines have examines up to `ScanLimit` lines per request
   and says how far it got.
 
 **Context.** `LogContextAsync` returns a line and up to `Before` lines before and `After` lines after it (0 to 20 each) with the same

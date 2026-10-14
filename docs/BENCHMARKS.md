@@ -73,39 +73,39 @@ this section; cases 1 to 12; 5,000,000 lines written in 1,087 s, 4,600 lines per
 Cases 9 and 12 were over 2,000 ms. Case 9 (12,000 examined lines) led to the scan bound of 8,000 (2,141 ms times 8/12 is about 1,430 ms); case 12 to the
 time budget of the index check.
 
-Development host (4 vCPU, Intel Xeon 2.10 GHz, Ubuntu 24.04, .NET 10.0.12), 5,000,000 lines written in 264 s (18,915 lines per second), database file
-1,983 MiB, 12,914 templates, after the changes of this section (scan bound 8,000 divided by the word parts, the scan tests the user's text only, the index check
-under a budget of 0.7 s, the index mode reads the lines by the IDs of the probe, the template list sums in key order). Times in milliseconds: the first run, then the
-slowest of the three:
+Development host (4 vCPU, Intel Xeon 2.10 GHz, Ubuntu 24.04, .NET 10.0.12), 5,000,000 lines written in 270 s (18,520 lines per second), database file
+1,983 MiB, after the changes of this section (scan bound 8,000 divided by the word parts, one test per one-part word, the line index for terms of several parts, the page clock
+of 1.5 s, the index check under a budget of 0.7 s, the index mode reads the lines by the IDs of the probe, the template list sums in key order). Times in milliseconds: the
+first run, then the slowest of the three. `bound or clock` means that the page ended at the scan bound or at the page budget:
 
 | Case | Mode | Result | First run | Slowest |
 | ---- | ---- | ------ | --------: | ------: |
-| 1 rare word | index | 100 lines | 39 | 39 |
-| 2 word in 1 % | scan | 80 lines, scan bound reached | 213 | 213 |
-| 2b word in 0.33 % | scan | 27 lines, scan bound reached | 150 | 162 |
-| 3 word in 33 % | scan | 100 lines | 10 | 10 |
+| 1 rare word | index | 100 lines | 41 | 41 |
+| 2 word in 1 % | scan | 80 lines, bound or clock | 193 | 201 |
+| 2b word in 0.33 % | scan | 27 lines, bound or clock | 145 | 177 |
+| 3 word in 33 % | scan | 100 lines | 9 | 9 |
 | 4 with program and severity | scan | 100 lines | 12 | 12 |
-| 4b with a source | scan | 100 lines | 10 | 11 |
-| 5 two words, rare combination | index | 100 lines | 232 | 232 |
+| 4b with a source | scan | 100 lines | 19 | 19 |
+| 5 two words, rare combination | index | 100 lines | 139 | 139 |
 | 6 program only (4 %) | scan | 100 lines | 3 | 3 |
-| 6b rare program | scan | 1 line, scan bound reached | 6 | 13 |
-| 6c rare program in one source | scan | 2 lines, scan bound reached | 10 | 10 |
+| 6b rare program | scan | 1 line, bound or clock | 7 | 7 |
+| 6c rare program in one source | scan | 2 lines, bound or clock | 11 | 11 |
 | 7 one-day range | scan | 100 lines | 13 | 13 |
-| 8 most frequent template | scan | 100 lines | 36 | 36 |
-| 8b rare template | scan | 0 lines, scan bound reached | 27 | 500 |
-| 9 scan bound, no match | scan | 0 lines, scan bound reached | 287 | 313 |
-| 10 context | n/a | 5 + 5 lines | 48 | 48 |
+| 8 most frequent template | scan | 100 lines | 34 | 34 |
+| 8b rare template | scan | 0 lines, bound or clock | 27 | 419 |
+| 9 scan bound, no match | scan | 0 lines, bound or clock | 287 | 319 |
+| 10 context | n/a | 5 + 5 lines | 18 | 18 |
 | 11 template list, whole data | n/a | 200 templates | 93 | 93 |
-| 11b template list, 30 days | n/a | 200 templates | 30 | 30 |
-| 12 16 words, empty intersection | index | 0 lines | 621 | 621 |
-| 13 eight words together, range without them | scan | 0 lines, scan bound reached | 157 | 157 |
-| 14 four-part term of common parts | index | 0 lines | 137 | 138 |
-| **15 crafted 511-part term** | index check stopped | **stopped by the 10 s deadline of the page** | **10,116** | **10,116** |
+| 11b template list, 30 days | n/a | 200 templates | 30 | 33 |
+| 12 16 words, empty intersection | index | 0 lines | 752 | 752 |
+| 13 eight words together, range without them | scan | 0 lines, bound or clock | 59 | 59 |
+| 14 four-part term of common parts | index | 0 lines | 155 | 155 |
+| 15 crafted 511-part term | scan, index check stopped | 0 lines, bound or clock | 752 | 752 |
 
-**Verdict on the development host: criterion not met, because of case 15.** Every other case is under 2,000 ms, and all but case 12 (621 ms on the first run) are under the 350 ms target (case 8b is 500 ms in one run of three). Case 15 does not end within the 10 seconds the page
-allows: its index check is stopped at the budget, but the scan page after it is not (notes). Cases 12 and 14 were not stopped in these runs (the warm index check
-ended within 0.7 s), so the scan after a stopped check was not measured for them in this table; a run in which the check of case 12 was stopped (the first
-run of case 12 of an earlier run of this build, with a cold cache) took **234 seconds**. Reference host, run 2 (DS918+, SSD volume): **not yet measured.**
+**Verdict on the development host: every case is under 2,000 ms (slowest 752 ms), and every case but 12 and 15 is under the 350 ms target** (the 419 ms of case 8b is one run of three).
+Cases 12 and 15 are over the target because the index check of case 12 takes up to its 0.7 s budget and case 15 is stopped by it. Case 12 with a **cold cache** (the file cache dropped with
+`echo 3 > /proc/sys/vm/drop_caches` before each of two runs): 796 and 759 ms, in both the index check stopped by the budget and the scan page of sixteen one-word tests ended at its bound; the
+third, warm run took 605 ms with the index check finishing in time. Case 15 and a 60-part term, cold: 771 and 715 ms. Reference host, run 2 (DS918+, SSD volume): **not yet measured.**
 
 | Host | Date | Slowest case | Verdict |
 | ---- | ---- | ------------ | ------- |
@@ -125,8 +125,10 @@ scan tests only the user's text, not the words of a template. A smaller bound ma
 27 lines per 8,000 examined). `SearchBenchmark.ScanRows` in the benchmark tool is a copy of `LogsView.ScanRows` (the tool does not reference the backend): change both together.
 
 **The index check budget** is 0.7 s (`LogFinder.ProbeBudget`): the Product Manager chose that every page answers in about two seconds, so a check that has not ended by then
-is given up and the request goes through the range as a scan (case 12 on the reference host took 2.2 s). The budget, the bound and the cap are values of the code, not
-of the configuration.
+is given up and the request goes through the range as a scan (case 12 on the reference host took 2.2 s). **The page budget** is 1.5 s (`LogFinder.PageBudget`), counted from the start of the
+call and including the index check: a scan page ends after the line or chunk at which it runs out, with at least one line examined. **The chunk of the line index** is 64 lines or 262,144 characters
+of messages: a chunk is inserted into an in-memory index and matched in a few milliseconds for ordinary lines (about 2.3 ms for a four-part phrase in 8,000 lines of 60 bytes, in a scratch measurement), and the limit keeps the
+work and the memory of one match small. The budgets, the bound, the chunk and the cap are values of the code, not of the configuration.
 
 ### Notes
 
@@ -135,11 +137,16 @@ of the configuration.
   measurement with terms of 4 to 511 parts, an interrupted probe ended at 0.71 s), so the check is stopped by the deadline or by the budget. Before the change
   of the index mode the query then walked the entries a second time (1,232 ms). On the development host the check ends within the budget when the cache is warm (434 to 621 ms) and
   would not on the reference host (2.2 s).
-- **The scan after a stopped check is the open problem.** It is bounded by its line bound, not by the clock, and the per-line test of the terms of the cases 12 and 15 is
-  very slow: measured in SQLite on the benchmark file, `MATCH` of the 16 words of case 12 with `rowid = ?` took 497 ms per line (500 lines at the bound of 8,000 divided
-  by 16: about 250 s; the 234 s run above), a four-part phrase of a word every line holds 375 ms per line, twenty parts 2.3 s and sixty parts 8.1 s per line (case 15:
-  15 lines at 511 parts), against 0.3 ms for one word and for the eight words that occur together (case 13). Testing the 16 words as 16 separate `EXISTS` of one
-  word each (the same rows) took 0.36 ms per line. A phrase of several tokens is not made cheaper that way.
+- **The scan after a stopped check** was measured in an earlier build of this section to cost, per examined line in SQLite on the benchmark file, 497 ms for the 16 words of case 12 as one
+  `MATCH` with `rowid = ?`, 375 ms for a four-part phrase of a word every line holds, 2.3 s for twenty parts and 8.1 s for sixty (case 15 did not finish in 10 s). The cause is that
+  `rowid = …` does not bound the full-text work to one line: an AND of terms or a phrase walks on to the next matching row or the end of the index. The scan now tests every one-part
+  word on its own (0.36 ms per line for the 16 words) and the terms of several parts in a private in-memory index of at most 64 examined lines, and its page ends at 1.5 s, so
+  cases 12 and 15 end in 0.8 s even when the index check is stopped.
+- **The 234-second run of case 12** was the scan of the earlier build: the index check was stopped at its budget on the cold first run, and the scan then examined 500 lines (8,000 divided by 16)
+  at about 470 ms each, about 235 seconds. The benchmark of that moment passed no deadline (`CancellationToken.None`); the 10-second deadline of the page in `SearchBenchmark` was added
+  right after, in the next run, which is why the same case 15 then reported "stopped by the 10 s deadline".
+- **Residual:** one `MATCH` in a chunk of the line index runs to its end; crafted messages can keep a chunk busy for about 0.3 s on the development host and about 1.5 s on the DS918+ (an estimate of the
+  security review), so a page can take up to about 3 s. The benchmark generates no such lines.
 - **Cases 11 and 11b:** the statement summed 374,020 template hours through the index on the hour with a lookup per row (0.65 to 0.9 s warm, up to 1.2 s cold). It now sums over
   the table in key order (`+hour` in the range conditions) and joins the 12,914 templates afterwards: 30 to 43 ms. It reads the whole table whatever the range
   (a one-day range took 12 ms against 21 ms before, in the SQLite library on the same file), so its cost grows with the stored template hours, not with the range.

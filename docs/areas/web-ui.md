@@ -109,7 +109,7 @@ The parameters, written in this order and each percent-encoded, with empty ones 
   *Searched up to* with `These words are too common to look up at once, so the search goes through the time range step by step. Narrow the
   time range to get a complete answer.` Such a search may give no final "no lines" answer until the time range is narrowed, and every
   *Continue* pays the 0.7 s again. The text is shown only for a page that stopped at the bound after a stopped index check, not for an
-  ordinary bound page. How long such a page takes depends on the words; it ends at the 10-second deadline at the latest. **The page position is not in the address**: *Next page*, *First page* and *Continue* add no history entry, so the browser's
+  ordinary bound page. A scan page, with or without the stepwise text, also ends when **1.5 seconds** have passed since the request began (the 0.7 s of the index check included) with `Searched up to … Continue`, so on a slow or loaded host a search of a very common word may end sooner than its line bound; at least one line is always examined, so *Continue* advances. The deadline of 10 seconds stays the outer limit. **The page position is not in the address**: *Next page*, *First page* and *Continue* add no history entry, so the browser's
   back button leaves the search, not the page, and a reloaded or shared address opens the first page.
 - *Context* on a line shows the 5 lines before and the 5 lines after it from the same log of the same source and host (time, program and message of each), at most 10 lines around a marker for the hit; opening another replaces it. Lines of other logs of the source are skipped, and each side looks
   at no more than 2,000 lines of the source.
