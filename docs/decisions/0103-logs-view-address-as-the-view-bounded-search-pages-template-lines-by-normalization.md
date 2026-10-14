@@ -12,7 +12,7 @@ v0.1.0 is the forensics release ([0020](0020-analysis-before-alerting-forensics-
 explorable in the web UI, with filters for source, severity, service and time range, context lines around a hit, a template view with
 first seen and hourly counts that leads to a template's lines, every filter in the URL, and a search over several million lines that
 answers in under two seconds on the backend host (a Celeron J3455 NAS, 3 to 4 times slower than the development host in
-`docs/BENCHMARKS.md`).
+`docs/BENCHMARKS.md`; about 5 times for the search work of this view in its first run there).
 
 The store's search ([0066](0066-log-search-takes-literal-terms-only.md)) joins every FTS5 match with the line and record tables and
 sorts by capture time before the limit, so its cost grows with the number of stored lines that contain the words, not with the range
@@ -72,9 +72,13 @@ Reader slots and the scan:
 14. **At most two explorer calls at once across the service, one per page**, no limit (four tabs hold the four reader connections the
     health check also needs, so it fails for up to the deadline, again and again), or a separate reader pool for the view (changes
     the store's reader bound for one consumer).
-15. **The scan tests each examined line against the full-text match on its own**, or collects the matches of the chunk's record-ID
-    range into a set — imported lines are not in ID order, so a time-ordered chunk can span almost every ID and the set grows with
-    the matches, not with the scan bound.
+15. **The scan tests each examined line against the full-text match of the user's words on its own, and examines fewer lines the more
+    word parts the text has**, or collects the matches of the chunk's record-ID range into a set — imported lines are not in ID order,
+    so a time-ordered chunk can span almost every ID and the set grows with the matches, not with the scan bound. The per-line test
+    opens one index iterator per word part (a term such as an IP address or a path has several), so its cost grows with the parts;
+    dividing the bound by them keeps the work of a request about constant, and a fixed bound would let a text of many common parts in
+    a range without them run into the deadline. A template's words are left out of the scan's test: its source and program are
+    filters and the normalization decides exactly, so they would only make the scan of a template's lines shorter.
 
 Reading the matches and the template list (after the first benchmark run):
 
@@ -102,7 +106,8 @@ health check keeps a reader. The rules
   bound says up to which time it searched and offers to continue. There is no total hit count. The page position is not in the
   address: a shared address opens the first page.
 - The full-text work of several common words with a rare or empty intersection runs inside one FTS5 step, which the deadline cannot
-  interrupt; it is bounded by the size of the words' index entries and measured as its own benchmark cases.
+  interrupt; it grows with the number of word parts (tokens, not terms: the 16-term rule does not bound them) times the size of their
+  index entries, and is measured as its own benchmark cases.
 - The template list counts whole hours: a range that starts or ends inside an hour counts that hour completely.
 - A line made mostly of invisible characters is shown cut, with the number of characters not shown.
 - Two tabs with slow searches make a third wait for a slot (within its deadline); the health check is not affected.

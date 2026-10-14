@@ -347,9 +347,9 @@ Rules of the values, each refused with `The address has an invalid value for the
    most frequent template and of a rare one, (9) case 3 in a range where the word does not occur (the scan bound, one call), (10) the
    context (5 and 5) of a hit, (11) the template list of the whole data and of 30 days (limit 200), (12) 16 words of at least 25 % each
    whose intersection is empty (the probe walks their doclists inside one FTS5 step, which the deadline cannot interrupt; Security
-   N1). It prints the mode each text case
+   N1); (13) and (14) as in *Lead decision: reference-host run 1*. It prints the mode each text case
    ran in, the time and the verdict against 2,000 ms for N = 5,000,000.
-7. **Tuning**: the Dev may set `LogFinder.SelectiveMatches` (5,000 to 50,000) and `LogsView.ScanRows` (10,000 to 100,000) from the
+7. **Tuning**: the Dev may set `LogFinder.SelectiveMatches` (5,000 to 50,000) and `LogsView.ScanRows` (5,000 to 100,000, *Lead decision: reference-host run 1*) from the
    development-host run so that every case stays under 500 ms there (the reference host was 3 to 4 times slower in the earlier
    measurements); the final values go into the storage and web UI areas and `docs/BENCHMARKS.md`. No test depends on them (the tests
    pass explicit values).
@@ -1015,3 +1015,147 @@ For step 9 (recorded now): the five plan deviations the Reviewer assessed (the `
 `LogsAddress.FromFields`/`FormatTime`, the GET form fallback, `InternalsVisibleTo Vandox.StorageBenchmark`, `ScanRows` and
 `SelectiveMatches` of 12,000 within the plan's ranges) are accepted; the DS918+ row of `docs/BENCHMARKS.md` stays blocking until the
 Product Manager's run (task 13).
+
+## Lead decision: reference-host run 1 (decide, after task 13)
+
+Run 1 on the DS918+ (`ds918-run-1.txt`, SSD volume, .NET 10.0.10, 4 CPUs, ScanRows and cap 12,000): AC-19 **not met**. Case 9 (scan
+bound, one word, 12,000 examined lines) 2,043 to 2,141 ms, case 12 (16 common words, empty intersection, index mode) 2,203 to 2,229 ms;
+near misses 2b (1,075 to 1,081), 2 (998 to 1,021), 8b (837 to 889); every other case at most 365 ms. The reference host is about **5
+times** the development host for scan and probe work (case 9: 411 to 2,141 ms; case 12 warm: 440 to 2,220 ms), not the 3 to 4 times
+*Approach* step 7 assumed; the warm runs there are not faster than the first ones.
+
+### Checked on the way (scratch experiment, development host)
+
+Reading could not settle how the two costs grow with the text, so the Lead measured them once in a scratch copy (Python `sqlite3`,
+SQLite 3.45.1, the same `fts5(message, content=…, tokenize='unicode61 remove_diacritics 2')` table, 1,000,000 lines written in batches of
+10,000; not a substitute for the Dev's or the reference-host runs):
+
+- **F1, the scan's per-line test grows with the number of word parts.** Per examined line, a range where the words do not occur: 1
+  part 20 µs, 4 parts 55 µs, 8 parts 99 µs, 16 parts 196 µs. Every quoted term opens one iterator per token, so a text of several common
+  words that always occur together (words copied from one frequent message), searched in a range where they do not occur, costs about
+  10 times case 9 per examined line. On the reference host that is about 14 to 20 s for one request at 8,000 to 12,000 lines, so the
+  page ends at the 10-second deadline. No benchmark case measures it.
+- **F2, the index check (probe) grows with the word parts, not with the terms.** The 16-term rule of `FtsQuery` counts whitespace
+  separated terms; a single term with separators (`10.0.0.1`, `/var/log/mail.log`, `a.b.c…`) is a phrase of several tokens, and up to
+  1,024 bytes allow about 512 of them. The probe for a phrase of one word that every line holds, which no line holds as that phrase: 4
+  tokens 93 ms, 16 tokens 429 ms, 64 tokens 1.8 s, 200 tokens 5.6 s on 1,000,000 lines; the cost grows with the lines that hold all
+  the parts, so at 5,000,000 lines on the reference host it is about 25 times that (a crafted 200-part term: minutes, inside one FTS5
+  step the deadline cannot interrupt). The plan's and the storage area's bound for this work, "index only, at most 16 terms" (Security
+  N1, *Security considerations*, `docs/areas/storage.md` *Cost*), is therefore wrong: the work is bounded by the number of tokens times
+  their index entries, and the 1,024-byte rule allows hundreds of tokens. A realistic case is an IP address or path whose parts are all
+  common.
+- After `INSERT INTO log_fts(log_fts) VALUES('optimize')` (one index segment) the per-line test took 7.9 µs for one part and 19.9 µs
+  for eight, and the 16-word probe 86 ms instead of 121 ms. Index maintenance changes the write path and its criterion (0083): a
+  follow-up issue, not this change.
+
+### Decided now (independent of the question below)
+
+1. **Case 9: `LogsView.ScanRows` and `SearchBenchmark.ScanRows` 12,000 → 8,000.** Scan cost is linear in the bound (2,141 ms × 8/12 ≈
+   1,430 ms on the reference host, 2b about 720 ms with about 27 lines per page, 8b about 590 ms), which leaves about 25 % for run-to-run
+   and load variation on the NAS. The plan's range for `ScanRows` becomes **5,000 to 100,000** (*Approach* step 7), and the development-host
+   tuning target becomes **350 ms** (factor 5). Record 0103 already allows tuning the bound without a new decision.
+2. **F1: the scan bound is divided by the word parts of the user's text, and the scan tests only the user's text (AC-25).**
+   - Scan mode examines at most `LogFinder.ExaminedLines(ScanLimit, tokens)` lines: `ScanLimit` when `tokens` is 0 or 1, otherwise
+     `Math.Max(1, ScanLimit / tokens)`; `tokens` is `FtsQuery.CountTokens` of the user's text. With 8,000: one word 8,000 lines, an IP
+     address (4 parts) 2,000, 16 parts 500. `ScanLimitReached` and `Next` refer to that bound. The work per request is then about
+     constant in the number of parts (F1 grows a little less than linearly, so the division is conservative).
+   - The template's words narrow only the probe (index mode, as today). In scan mode the per-line `EXISTS` uses the user's text alone
+     (none without one): the template's source and program are filters already, and the normalization decides exactly
+     (record 0103, option 7), so dropping the template words from the scan changes no result. Without this, the division would shrink the
+     scan of a template's lines by its up to 16 words (case 8 would no longer fill its page).
+   - `FtsQuery.CountTokens(text)`: the number of maximal runs of runes whose Unicode general category is a letter (L*), a number (N*) or
+     private use (Co), the token characters of the `unicode61` tokenizer by default (SQLite FTS5 documentation, `categories` option);
+     `remove_diacritics` changes no count. It is a cost weight, not a match rule, so an approximation of the tokenizer cannot change a
+     result.
+3. **Benchmark cases 13 and 14** (Dev, `SearchBenchmark.cs`; the generator may add words to the lines that carry `commonword`):
+   (13) eight words that always occur together in a third of the lines, in the range where they do not occur (scan bound, many parts,
+   F1); (14) one term of four parts joined by dots, each part in at least 25 % of the lines, which never occurs as that phrase (for
+   example `mass04.mass03.mass02.mass01`; probe of a phrase of common parts, F2). Both count against AC-19 like every case. The new rows
+   go into the case table of `docs/BENCHMARKS.md`.
+4. **A second reference-host run is needed** (task 13 again) after the changes above and the answer to the question below are built
+   and the development-host run (Dev) shows every case under 350 ms or names the ones that are not. Only one more run: both parts
+   go into the same build.
+
+Options weighed for case 9:
+- *A time budget for the scan instead of a line bound* — lost for now: the store has no clock (`TimeProvider`) and the page's
+  reach would depend on the host's load; the line bound divided by the parts is deterministic and testable. It returns if option A
+  below is chosen, which needs a clock in the store anyway.
+- *ScanRows 10,000, inside the old range* — lost: about 1,780 ms, 11 % margin, against a run-to-run spread of 5 % on an idle NAS.
+- *Reduce the index segments (`optimize`)* — follow-up: changes the write path (0083); measured gain 2.5 to 5 times per line.
+
+### Open: the index check of many or multi-part words (case 12 and F2) — Product Manager
+
+The probe runs inside one FTS5 step. Nothing in this design bounds it in time, and the cost grows with the stored lines. Case 12 is
+2.2 s today; case 14 and crafted multi-part terms will be slower. The choice changes what the user sees, and option B narrows the
+criterion of AC-E, so the Product Manager decides (question in the result of this decision). Options:
+
+- **A (Lead's recommendation): the index check gets a time budget.** The probe runs in record-ID slices (`rowid` ranges, each a short
+  FTS5 step, so the deadline and a budget of about 0.7 s apply between slices); when it has not finished within the budget, the
+  request uses scan mode with the divided bound of item 2. Every request is bounded on any database size, and Security N1's
+  residual goes away. Cost: a store clock, a new step in `LogFinder`, tests, a Security review, record 0103 updated. Seen by the user: a
+  search whose index check is slow (many common words that never meet, an IP address whose parts are all common) shows "searched up to
+  …, Continue" pages instead of a final answer; narrowing the range gives the final answer.
+- **B: keep the final answer, bound the parts, narrow the criterion.** `FtsQuery` refuses more than 16 tokens in all (the parts of an
+  IP address or path count; this also applies to the existing search of 0066), which bounds the crafted case to about 16 times the
+  per-token cost (several seconds on the reference host at 5,000,000 lines, still not interruptible). AC-E and AC-19 then exclude
+  the probe cases 12 and 14, which are documented with their times and the note that they grow with the stored lines.
+- **C: a smaller word limit (for example 6 parts) as well as B.** Brings the measured probe cases under 2 s at 5,000,000 lines, but an IP
+  address uses 4 of the 6, it refuses many real searches, and the cost still grows with the stored lines. Not recommended.
+- Rejected without a question: a full-text index without positions (`detail=column` or `none`) — it cannot answer multi-part terms
+  (phrases) at all, so IP addresses and paths could no longer be searched; a tokenizer that keeps `.`, `/`, `@` inside tokens — changes
+  what a word matches (`smtpd` would no longer find `postfix/smtpd`) and needs an index rebuild, a separate issue.
+
+After the answer the Lead revises this plan (signatures, criterion and tests of the chosen option, record 0103 *Options considered*
+and *Decision*); the Tester and the Dev start on the chosen option only then. Items 1 to 3 may start now.
+
+### AC-25 (items 1 and 2)
+
+- [ ] AC-25 Scan bound by word parts: `FtsQuery.CountTokens` counts letter, number and private-use runs
+  (`SqliteStoreQueryTests.FtsQueryCountTokensCountsTheTokenizerParts`, data rows: `error` 1; `10.0.0.1` 4; `postfix/smtpd connect` 3;
+  `a_b` 2; `é-x` 2; a private-use character U+E000 alone 1; `---` 0; built from code points where a row needs a non-ASCII character);
+  `LogFinder.ExaminedLines` returns the bound for 0 and 1 parts and the bound divided by the parts, at least 1, otherwise
+  (`SqliteStoreLogExplorerTests.LogFinderExaminedLinesDividesTheBoundByTheParts`, data rows (8000, 0) 8000, (8000, 1) 8000, (8000, 16)
+  500, (5, 16) 1, (1, 512) 1); a scan with a two-part text examines at most half of `ScanLimit` lines and reports `ScanLimitReached` with
+  `Next` at the last line it examined (`SqliteStoreLogExplorerTests.FindLogsScanDividesTheBoundByTheParts`); a template's lines in scan
+  mode without a text examine the full `ScanLimit` and return exactly the template's lines
+  (`SqliteStoreLogExplorerTests.FindLogsWithTemplateScanUsesOnlyTheUserText`). The existing tests of AC-2 to AC-6 stay unchanged and
+  green, and `LogsPageTests` (the page passes `LogsView.ScanRows`) needs no change.
+
+Signatures (Dev's skeleton first, *Build* passes):
+- `src/Vandox.Storage/FtsQuery.cs`: `internal static int CountTokens(string text)`.
+- `src/Vandox.Storage/LogFinder.cs`: `internal static int ExaminedLines(int scanLimit, int tokens)`.
+- `src/Vandox.Storage/LogCriteria.cs`: `internal string ScanText { get; private init; }` (the user's text, without template words) and
+  `internal int ExaminedLines { get; private init; }` (`LogFinder.ExaminedLines(filter.ScanLimit, FtsQuery.CountTokens(filter.Text))`);
+  `LogFinderQueries.BuildScan` binds `$scan` to `ExaminedLines`, `ScanAsync` compares `examined` with it, and `FindAsync` builds the scan's
+  match from `ScanText`.
+- `src/Vandox.Backend/Logs/LogsView.cs`: `public const int ScanRows = 8000;`; `tools/Vandox.StorageBenchmark/SearchBenchmark.cs`:
+  `private const int ScanRows = 8000;`.
+
+Owners:
+- Tester (first, failing on the skeleton): the four tests above in `tests/Vandox.Storage.Tests/SqliteStoreQueryTests.cs` and
+  `SqliteStoreLogExplorerTests.cs`.
+- Dev: the signatures, then `FtsQuery.cs`, `LogFinder.cs`, `LogCriteria.cs`, `LogFinderQueries.cs`, `LogsView.cs`, `SearchBenchmark.cs`
+  (value, cases 13 and 14); `docs/areas/storage.md` (*Log exploration*: the scan bound divided by the word parts, the scan's test of the
+  user's text only, the template words narrowing the probe only, and *Cost* corrected: the probe's work grows with the word parts times
+  their index entries, the 16-term rule does not bound the parts); `docs/areas/web-ui.md` (the bound is 8,000 examined lines per request,
+  fewer for a text of several word parts); `docs/BENCHMARKS.md` (*Log search*: values, cases 13 and 14, the DS918+ run 1 as a row with
+  its verdict, *Tuning* with the factor 5 and the 350 ms target, the development-host results of the rerun).
+- Code Officer: *Format* and *Analyzer gate* on the changed files.
+- Lead: this section, `tasks.md`, record 0103 (*Context*: the measured factor; option 15: the per-line test of the user's text with the
+  bound divided by the parts; *Consequences*: the probe's bound corrected).
+- Security: a delta confirmation of this section. F2 corrects the bound N1 was accepted on, so Security re-assesses N1 with the
+  numbers above; the bound in option A or B follows the Product Manager's answer.
+
+Verification: step 6 gates (*Format*, *Build*, *Test*, *Analyzer gate*, *Coverage gate*), the development-host benchmark run (5,000,000
+lines, all cases including 13 and 14), a Reviewer delta round and the Security delta, then the second reference-host run (task 13).
+
+Follow-up issues (orchestrator, after this decision):
+- *[storage] Measure and reduce the full-text index segments for search speed* — body: in a scratch measurement one segment
+  (`optimize`) cut the per-line test of the logs view's scan by 2.5 to 5 times and the probe of 16 common words by 30 %; measure the
+  segment count after 5,000,000 lines, compare `automerge`/`crisismerge` settings and incremental `merge` steps against the write
+  criterion of 0083 on the reference host.
+- *[storage] The existing log search (0066) runs a phrase of many common tokens without a bound* — body: `RecordQueries` passes
+  `FtsQuery.Build` to a `MATCH` that sorts every match; a single term of hundreds of tokens (up to 1,024 bytes) walks their index
+  entries inside one FTS5 step, which the deadline cannot interrupt (the logs view's plan measured 5.6 s for 200 tokens on 1,000,000
+  lines on the development host). Unless option B of the logs view's decision bounds the tokens in `FtsQuery`, bound them for this
+  search too.
