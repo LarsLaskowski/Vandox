@@ -39,7 +39,7 @@ files or endpoints.
    every page below `Components/Pages` (`[Authorize]` in `Pages/_Imports.razor`) and reads through `GatedLogExplorer` (two concurrent
    calls across the service, so two of the four reader connections stay free for `/healthz`); the number of circuits, each holding up to
    about 5 MiB of capped log text, is not bounded, but only a signed-in client can open one, and the host has no `Host`-header
-   allow-list (a DNS-rebound name is another site and gets no session cookie). Records 0016, 0023, 0060, 0103, 0104, 0105, 0106.
+   allow-list (a DNS-rebound name gets no session cookie, which is host-only, and still needs the password). Records 0016, 0023, 0060, 0103, 0104, 0105, 0106.
 4. **Command signing for remote actions** (later, not part of v0.1.0): *Goal:* the agent executes only
    commands with a valid signature that name an action from its local fixed list and were confirmed by the
    user; a forged, altered or replayed command is rejected; the signing key exists only on the backend

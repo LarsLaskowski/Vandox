@@ -158,7 +158,7 @@ health check keeps a reader. The rules
   anonymous request is redirected to `/login`, and the live connection needs a session. Forged lines are shown like real ones. The
   number of circuits is still not bounded (a page holds up to about 5 MiB of capped text in the worst case, the container 512 MB), but
   only a signed-in client can open one. The host has no Host-header allow-list ([0103](0103-web-login-server-side-sessions-static-login-page-circuits-bound-to-session.md)
-  does not add one); a page reached through a DNS-rebound name is another site and gets no session cookie, so it cannot read the logs.
+  does not add one); a page reached through a DNS-rebound name gets no session cookie, because the cookie is host-only (no `Domain` attribute) and the browser sends it only to the host name the user signed in at, so it reaches the login page but cannot read the logs without the password.
   Nothing from `main` is published before a release tag.
 - A program-only filter over a large range scans; skipping hours without lines of the program through the template statistics is left
   to a measurement that needs it.

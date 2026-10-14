@@ -218,9 +218,7 @@ The ingest listener serves none of this: every UI path, static file and the live
   live connection does not check the `Origin` header, and the service does not filter the `Host` header; the session and the
   protected component descriptors of the signed-in page decide who may use it.
 - **The logs view is behind the login** ([Web login](web-login.md)): `/logs` and `/logs/templates` carry the same `[Authorize]` as every page
-  below `Components/Pages`, and an anonymous request is redirected to the login page. The host still has no `Host`-header allow-list; a
-  page reached through a **DNS-rebound** name is another site than the real host name, so the session cookie is not sent to it and it
-  cannot read the logs.
+  below `Components/Pages`, and an anonymous request is redirected to the login page. The host still has no `Host`-header allow-list. A page reached through a **DNS-rebound** name does not get the session: the session cookie has no `Domain` attribute, so the browser sends it only to the host name the user signed in at, never to another name that resolves to the same address (this holds whatever `SameSite` says). Such a page reaches only what needs no session — `/login`, where the failed-sign-in limits apply, the static files and `/healthz` — and cannot read the logs without the password.
 - **Memory per circuit and the number of circuits.** The search page holds the capped text of its lines, not the stored records: a
   line holds up to 16,384 characters of message and up to 2,048 characters in each of source, host, program, about 45 KiB, so a page
   of 100 lines with an expanded context of 11 lines is about **5 MiB** in the worst case (a typical line is a few hundred bytes), and the
