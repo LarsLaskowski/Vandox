@@ -46,7 +46,7 @@ connections did in the window, and the log lines of any moment of it — and to 
 - **Every time on the page is a link to the logs of that moment**: the logs view (`/logs`) with the range from 30 seconds
   before to 5 minutes after it.
 - **Notes:** a free-text note per incident (up to 1,800 characters), saved with a *Save note* button; an empty note
-  removes it. Notes survive every re-run of `vandoxd incidents`; when incidents are merged, the notes of the merged ones
+  removes it, and leading line breaks are not kept. Notes survive every re-run of `vandoxd incidents`; when incidents are merged, the notes of the merged ones
   move to the incident that remains and are shown there, each with the number it was written for.
 
 ### Everything

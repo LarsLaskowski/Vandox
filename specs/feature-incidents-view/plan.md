@@ -1,7 +1,7 @@
 # Plan: Incidents view
 
 Source: Issue #27 | [spec.md](spec.md)
-Status: Draft
+Status: Revised (1)
 Tier: security — the change adds the first user write of the web UI (a note posted behind the login with an antiforgery
 token, security area 3), shows stored external text (victims, programs, hosts, timeline texts, templates) in new pages and
 in chart labels (area 12), adds a schema step and changes the incident merge transaction (storage, area 10 bounds on
@@ -64,7 +64,10 @@ Each criterion names its tests (the Tester writes exactly these first; files und
 - [ ] **AC2 — notes are stored (issue AC 3).** `SaveIncidentNoteAsync` stores, reads back, replaces and (with an empty text)
   deletes the note of an incident; the note written for a merged incident can be changed only through the incident it now
   belongs to; an unknown incident or a foreign note gives `NotFound` and changes nothing; every rule is refused with its exact
-  text (*Rules* below), a text of 1,800 UTF-16 characters is accepted, 1,801 refused.
+  text (*Rules* below), a text of 1,800 UTF-16 characters is accepted, 1,801 refused, a text holding U+0000 (leading or
+  embedded) is refused with `store: invalid note: text must not contain U+0000`; the table itself refuses a text of more than
+  5,400 UTF-8 bytes or of none (a row inserted by SQL past the store, checked in the same test); an upsert that conflicts with a
+  row of another incident updates nothing and is `NotFound`.
   Tests: `SqliteStoreIncidentBrowserTests.SqliteStoreSaveIncidentNoteStoresReadsAndReplacesNote`,
   `SqliteStoreSaveIncidentNoteWithEmptyTextDeletesNote`, `SqliteStoreSaveIncidentNoteForUnknownIncidentOrForeignNoteIsNotFound`,
   `SqliteStoreSaveIncidentNoteRefusesInvalidEdits` (one `DataRow` per rule), `SqliteStoreIncidentNotesReadsAtMostSixtyFour`
@@ -99,8 +102,8 @@ Each criterion names its tests (the Tester writes exactly these first; files und
   Tests: `IncidentsViewTests.IncidentsViewLogsHrefSpansThirtySecondsBeforeToFiveMinutesAfter` (`DataRow`s: whole second,
   fractional second, near the minimum, near the maximum), `IncidentPageTests.IncidentPageLinksEveryTimeToTheLogsOfThatMoment`.
 - [ ] **AC7 — memory per program in the window (issue AC 1).** `IncidentWindowReader` reads the process snapshots of
-  `[start, end)` of one source (the source of the earliest process snapshot in the window, else of the earliest metric record)
-  and `ProgramMemorySeries` turns them into a stacked chart: one point per snapshot, the five programs with the highest peak RSS
+  `[start, end)` of one source (the source of the earliest process snapshot in the window; every page query of the paging
+  carries that source) and `ProgramMemorySeries` turns them into a stacked chart: one point per snapshot, the five programs with the highest peak RSS
   in the window (ties by ordinal name) and `Other programs`, values in MiB, a program absent from a snapshot is 0, labels are
   `LogText.Escape(program, 64)`, title `Memory per program (MiB, stacked)`; snapshots before the start, at the end and of
   another source are not used; a snapshot not later than the previous one is skipped; more than 4,096 programs go to
@@ -111,15 +114,22 @@ Each criterion names its tests (the Tester writes exactly these first; files und
   `ProgramMemorySeriesTests.ProgramMemorySeriesSkipsSnapshotsThatDoNotAdvance`,
   `ProgramMemorySeriesTests.ProgramMemorySeriesCountsProgramsBeyondTheCapAsOther`,
   `IncidentWindowReaderTests.IncidentWindowReaderChartsMemoryPerProgramWithinTheWindow`,
-  `IncidentWindowReaderTests.IncidentWindowReaderUsesTheSourceOfTheFirstSnapshot`,
+  `IncidentWindowReaderTests.IncidentWindowReaderUsesTheSourceOfTheFirstSnapshot` (two sources in the window, more than one
+  page of each, so a page query without the source would mix them),
   `IncidentWindowReaderTests.IncidentWindowReaderStopsAtTheSnapshotCap`,
   `IncidentPageTests.IncidentPageRendersTheMemoryChartWithFixedTitleAndStackedData`.
-- [ ] **AC8 — available memory, swap and connections of the window (spec AC-S5).** The second chart has the series
+- [ ] **AC8 — available memory, swap and connections of the window (spec AC-S5).** Each chart takes its source per query:
+  a metric series reads the source of the incident's stored extreme of that metric (`MetricExtreme.Source` of
+  `mem_available_bytes` or `swap_used_bytes`; no extreme → no series), the connection chart the source of the earliest
+  connection snapshot in the window — so live agent data, whose sources are collector names, charts as well as a legacy import
+  with one source for every kind. The second chart has the series
   `Available memory` and `Swap used` (MiB) at the union of their times, `null` where a series has no point and for a value
   that is not finite, at most 1,000 points per series; the third chart has `Sockets` (sum of the state counts) per connection
   snapshot, at most 300; no data gives no chart and the text `No snapshot or metric was stored in this window.`
   Tests: `IncidentWindowReaderTests.IncidentWindowReaderChartsAvailableMemorySwapAndConnections`,
-  `IncidentWindowReaderTests.IncidentWindowReaderReturnsNoChartsWithoutData`.
+  `IncidentWindowReaderTests.IncidentWindowReaderReturnsNoChartsWithoutData`,
+  `IncidentWindowReaderTests.IncidentWindowReaderTakesTheSourceOfEachChartPerQuery` (`ScriptedRecordReader`: process snapshots
+  of `legacy-monitor`, metrics of `proc.meminfo`, connections of `proc.net`; every query carries the expected source).
 - [ ] **AC9 — the incident page content (spec AC-S5, AC-S6).** Header, kills, hypothesis (unknown where the incident says
   so), timeline in stored order with `timeline_omitted`, connection peak, metric extremes and templates; the row of an
   `oom_kill`, `boot`, `backup_first_seen` or `backup_last_seen` entry gets the class `mark-oom`, `mark-boot` or
@@ -133,9 +143,11 @@ Each criterion names its tests (the Tester writes exactly these first; files und
 - [ ] **AC10 — notes on the page and the note endpoint (spec AC-S6).** The page shows one form for the incident's own note
   and one for each note moved to it (labelled `Written for incident #<n>`), each a plain `POST` to `incidents/<id>/notes` with
   `<AntiforgeryToken />`, a hidden `written_for` and a `textarea name="note" maxlength="1800"`; `POST /incidents/{id}/notes`
-  needs a session (anonymous: `401`) and a valid token (`400`), reads exactly one `note` and one `written_for` (1 to 18 ASCII
-  digits), normalizes line ends (CR LF and CR to LF) and treats blank text as empty, refuses more than 1,800 characters
-  (`400`), answers `303` with `Location: /incidents/<id>` on `Saved`/`Deleted`, `404` on `NotFound` and for an ID ≤ 0, `500`
+  needs a session (anonymous: `401`) and first a present and valid antiforgery validation feature (missing or invalid:
+  `400`, before the form is read — the middleware marks an unreadable form invalid), then reads exactly one `note` and one
+  `written_for` (1 to 18 ASCII digits) **from the form only** (never from the query string or the route), normalizes line ends
+  (CR LF and CR to LF), removes leading line feeds (HTML drops the first line feed of a `textarea`, so a re-save keeps the text
+  equal) and treats blank text as empty, refuses more than 1,800 characters and any U+0000 (`400`), answers `303` with `Location: /incidents/<id>` on `Saved`/`Deleted`, `404` on `NotFound` and for an ID ≤ 0, `500`
   with no text on a store error (logged); a refused post stores nothing.
   Tests: `IncidentPageTests.IncidentPageShowsNoteFormsWithAntiforgeryToken`,
   `IncidentNoteEndpointTests.IncidentNoteEndpointSavesNoteAndRedirects`,
@@ -143,7 +155,8 @@ Each criterion names its tests (the Tester writes exactly these first; files und
   `IncidentNoteEndpointTests.IncidentNoteEndpointRefusesInvalidFields` (`DataRow`s in *Security considerations*),
   `IncidentNoteEndpointTests.IncidentNoteEndpointAcceptsTheLongestNoteInTheWorstEncoding` (1,800 × `€` URL-encoded),
   `IncidentNoteEndpointTests.IncidentNoteEndpointAnswersNotFoundForUnknownIncident`,
-  `IncidentNoteTextTests.IncidentNoteTextNormalizesLineEndsAndBlankText`,
+  `IncidentNoteTextTests.IncidentNoteTextNormalizesLineEndsAndBlankText` (`DataRow`s include a text starting with `\n` and with
+  `\r\n\r\n`, which lose their leading line feeds, and one holding U+0000, which `IsAcceptable` refuses),
   `IncidentNoteTextTests.IncidentNoteTextAcceptsOnlyPlainDigitsForWrittenFor`.
 - [ ] **AC11 — one reader gate for the logs and incidents views.** `WebReaderGate` runs at most its slot count (1–3) of calls
   at once, a wait ends with the token, a failed call frees its slot; `GatedIncidentBrowser` and `GatedRecordReader` take reads
@@ -177,18 +190,22 @@ Each criterion names its tests (the Tester writes exactly these first; files und
   CREATE TABLE incident_notes (
     written_for INTEGER PRIMARY KEY,
     incident_id INTEGER NOT NULL REFERENCES incidents(id),
-    text TEXT NOT NULL CHECK (length(text) BETWEEN 1 AND 1800),
+    text TEXT NOT NULL CHECK (length(CAST(text AS BLOB)) BETWEEN 1 AND 5400),
     updated_at INTEGER NOT NULL
   ) STRICT
   CREATE INDEX incident_notes_incident ON incident_notes(incident_id, written_for)
   ```
   `written_for` is the incident number the note was written for (numbers are never reused, `AUTOINCREMENT`); `incident_id` is
-  the incident it belongs to now. No `ON DELETE` action: a delete of an incident that still has notes fails.
+  the incident it belongs to now. No `ON DELETE` action: a delete of an incident that still has notes fails. The check counts
+  bytes, not characters: SQLite's `length()` of a text stops at the first U+0000, so a character check would pass an embedded
+  NUL; 5,400 bytes is the UTF-8 size of 1,800 UTF-16 characters at most, and U+0000 itself is refused by the store's
+  validation before any SQL runs.
 - `IncidentRepository.SaveAsync`: for each overlapped incident it deletes, first
   `UPDATE incident_notes SET incident_id = $kept WHERE incident_id = $other`, then the `DELETE` — same transaction.
 - `IncidentNoteRepository` (new, internal static): validation, save (one immediate writer transaction under the write lock:
   incident must exist, else `NotFound`; empty text deletes the row `written_for = $w AND incident_id = $i` → `Deleted`, also
-  when there was none and `$w = $i`; non-empty with `$w = $i` upserts (`INSERT … ON CONFLICT(written_for) DO UPDATE`),
+  when there was none and `$w = $i`; non-empty with `$w = $i` upserts (`INSERT … ON CONFLICT(written_for) DO UPDATE SET … WHERE incident_notes.incident_id =
+  excluded.incident_id`; a conflict that updates nothing is `NotFound`),
   with `$w ≠ $i` updates only a row of that incident, else `NotFound`), read (`… WHERE incident_id = $id ORDER BY written_for
   LIMIT 65`, 64 returned, `More` when the 65th exists).
 - Summaries: `SELECT i.id, i.started_at, i.ended_at, i.first_kill_at, i.kill_count, i.created_at, i.updated_at, i.data,
@@ -206,11 +223,13 @@ Each criterion names its tests (the Tester writes exactly these first; files und
   store with the same gate. `ServeCommand.Build` registers one `WebReaderGate(LogsView.MaxConcurrentQueries)` singleton and
   builds `ILogExplorer`, `IIncidentBrowser` and `IncidentWindowReader` (over a `GatedRecordReader`) on it, and maps
   `IncidentNoteEndpoint`.
-- `IncidentWindowReader.ReadAsync(start, end)`: source = `RecordsAsync(kind process_snapshot, [start,end), Limit 1)` first
-  record's source, else `RecordsAsync(kind metric, …, Limit 1)`; none → empty data. Process snapshots of that source one per
-  page through `RecordPager` (new overload with a record cap) up to 300, fed to `ProgramMemorySeries`
-  (`MemoryAnalysis.Programs`); `mem_available_bytes` and `swap_used_bytes` as series queries (source + name, one page of
-  1,000 each); connection snapshots of the source one per page up to 300, summing `States` counts. A page that does not lead
+- `IncidentWindowReader.ReadAsync(incident)` over `[incident.Start, incident.End)`: memory source =
+  `RecordsAsync(kind process_snapshot, Limit 1)`'s first record; its snapshots one per page through `RecordPager` (new overload
+  with a record cap that copies **`Source` and `Name`** of the range into every page query — the existing loop, lines 38–45,
+  copies only kind, times, limit and `AfterId`) up to 300, fed to `ProgramMemorySeries` (`MemoryAnalysis.Programs`);
+  `mem_available_bytes` and `swap_used_bytes` as series queries with the source of the incident's extreme of that name (one page
+  of 1,000 each; no extreme, no series); connection source = the earliest connection snapshot of the window, its snapshots one
+  per page up to 300, summing `States` counts. The gate is taken per store call, not for the whole read. A page that does not lead
   past the previous one is the existing `store: reading records: page did not advance`.
 - `ProgramMemorySeries`: per-program RSS arrays for at most 4,096 programs (others summed into one "other" array), times
   strictly ascending, then top five by peak (ties by ordinal name) and `Other programs` (everything else summed), in MiB
@@ -226,8 +245,10 @@ Each criterion names its tests (the Tester writes exactly these first; files und
   page. View models `IncidentRowView`, `IncidentDetailView` build capped `TextRun` lists from the stored incident, which the
   page then drops. `IncidentNoteForm` component renders one note form.
 - `IncidentNoteEndpoint`: `MapPost("/incidents/{id:long}/notes", SaveAsync).WithMetadata(RequiredAntiforgery.Instance)` (no
-  `AllowAnonymous`, so the fallback policy demands a session); handler as in AC10; `IncidentNoteText` normalizes and checks
-  the fields. Failures are logged with `IncidentNoteSaveFailed`.
+  `AllowAnonymous`, so the fallback policy demands a session); handler as in AC10, in this order: antiforgery feature present
+  and valid (as `WebAuthentication.LogoutAsync`), ID > 0, then `Request.Form` only; `IncidentNoteText` normalizes and checks
+  the fields. Failures are logged with `IncidentNoteSaveFailed`, which carries the exception only — never the note text, a form
+  value or the written-for number from the request.
 - `MainLayout.razor`: `<NavLink href="incidents" Match="NavLinkMatch.Prefix">Incidents</NavLink>` after *Logs*.
 
 **Fixed texts** (in `IncidentsView`, compared by the tests): page titles `Incidents` and `Incident #<n>`; `Loading…`; empty
@@ -352,11 +373,11 @@ public sealed class GatedRecordReader : IRecordReader { public GatedRecordReader
 public sealed class IncidentWindowReader
 {
     public IncidentWindowReader(IRecordReader records);
-    public Task<IncidentWindowData> ReadAsync(DateTimeOffset start, DateTimeOffset end, CancellationToken cancellationToken);
+    public Task<IncidentWindowData> ReadAsync(Incident incident, CancellationToken cancellationToken);
 }
 public sealed class IncidentWindowData
 {
-    public string Source { get; init; } = string.Empty;
+    public string MemorySource { get; init; } = string.Empty; public string ConnectionsSource { get; init; } = string.Empty;
     public ChartData? Memory { get; init; } public ChartData? MemoryAndSwap { get; init; } public ChartData? Connections { get; init; }
     public DateTimeOffset? MemoryCutAt { get; init; } public DateTimeOffset? ConnectionsCutAt { get; init; }
 }
@@ -386,7 +407,8 @@ public sealed class IncidentRowView { public static IncidentRowView From(Inciden
 public sealed class IncidentDetailView { public static IncidentDetailView From(StoredIncident stored); /* header, kills, hypothesis, timeline rows with Marker, peak, extremes, templates — all external text as IReadOnlyList<TextRun> */ }
 public static class IncidentNoteText
 {
-    public static string Normalize(string text);                                 // CR LF and CR to LF; blank to ""
+    public static string Normalize(string text);                                 // CR LF and CR to LF; leading LFs removed; blank to ""
+    public static bool IsAcceptable(string normalized);                          // at most 1,800 UTF-16 characters, no U+0000
     public static bool TryParseWrittenFor(string value, out long writtenFor);    // 1..18 ASCII digits, > 0
 }
 internal static class IncidentNoteEndpoint
@@ -410,7 +432,7 @@ the next free ones.
 **Rules** (exact texts): list — `store: invalid query: limit must be between 1 and 100`, `store: invalid query: before must be
 within the storable range`, `store: invalid query: before id must be positive`; one incident and notes — `store: invalid query:
 incident ID must be positive`; note — `store: invalid note: incident ID must be positive`, `written for must be positive`,
-`text is longer than 1800 characters`, `text is not valid UTF-16`, `saved at must be within the storable range`; a null query,
+`text is longer than 1800 characters`, `text must not contain U+0000`, `text is not valid UTF-16`, `saved at must be within the storable range`; a null query,
 edit or text is an `ArgumentNullException`; database errors are `store: saving note: …` and `store: reading incidents: …`.
 
 ## Test files
@@ -489,13 +511,15 @@ and covered by the tests above.
   reachable by a request that skipped the endpoint's own checks) is `400`.
 - [ ] **Guard on `written_for`** (the form reader's forms): the value is matched by an ordinal scan of 1 to 18 ASCII digits and
   must be above 0. Refused (`400`): empty, `0`, `-1`, `+1`, ` 1`, `1 `, `１` (fullwidth digit), `٣` (Arabic-Indic), `1e3`, `0x1`,
-  19 digits. The form reader matches keys **ignoring case** and joins repeated keys, so `written_for` and `WRITTEN_FOR` (or
+  19 digits; a note starting with or holding U+0000 (`%00`); a body that is not a form (`text/plain`), a value of 16,385 bytes,
+  65 values (these three as `400` from the antiforgery feature, before the form is read); `note` and `written_for` given only in
+  the query string of a valid form post (`400`: the form lacks them, the query string is never read). The form reader matches keys **ignoring case** and joins repeated keys, so `written_for` and `WRITTEN_FOR` (or
   `note` and `NOTE`) together are two values and refused; a missing field is refused. Multipart bodies reach the same reader and
   the same checks. Test: `IncidentNoteEndpointRefusesInvalidFields` (one `DataRow` per form above).
 - [ ] **Route value `{id:long}`**: the route constraint accepts `01`, `+1` and `-1` (invariant `long` parsing); the endpoint and
   the page use only the parsed value, an ID ≤ 0 is `404` / *does not exist*, and the redirect is built from the number
   (`/incidents/<n>`), never from the request path. Test rows in `IncidentNoteEndpointAnswersNotFoundForUnknownIncident`.
-- [ ] Note text: any characters are stored (the form decoder already replaced invalid UTF-8 with U+FFFD; the store refuses a
+- [ ] Note text: any character but U+0000 is stored (U+0000 is refused by the endpoint and the store, B1; the form decoder already replaced invalid UTF-8 with U+FFFD; the store refuses a
   lone surrogate as a backstop); the note is shown in the `textarea` (Razor-encoded, so `</textarea>` cannot end it) and the
   merged notes' headings use only numbers.
 - [ ] External text (victims, hosts, programs, commands, timeline keys and values, templates, sources, metric labels) only
@@ -505,12 +529,50 @@ and covered by the tests above.
 - [ ] Memory: the list holds 20 summaries; the incident page decodes one incident (up to 8 MiB of JSON, transient) and keeps
   only capped runs (1,000 timeline entries with texts of at most 512 characters, other fields 2,048), at most 64 notes of 1,800
   characters and charts of at most 300 × 6, 2 × 1,000 and 300 points; the window read holds one snapshot at a time plus at most
-  4,096 × 300 program values (about 10 MB) while it builds. The Dev states the per-circuit worst case in the web UI area.
+  4,096 × 300 program values (about 10 MB) while it builds. These amounts are **per circuit**, not across the service: the gate
+  is held per store call, so many open incident pages can each build at once, like the logs view's 5 MiB per page; the number of
+  circuits is not bounded and only a signed-in client opens one. The Dev states this in the web UI area and security area 3.
 
 ## Decision records
 
 - [`docs/decisions/0107-incidents-view-summaries-notes-per-incident-number-time-links-to-the-logs.md`](../../docs/decisions/0107-incidents-view-summaries-notes-per-incident-number-time-links-to-the-logs.md) (Proposed)
 - [`docs/decisions/0096-…`](../../docs/decisions/0096-outage-incidents-rebuilt-from-stored-data-merged-by-overlapping-windows.md) — unreleased, two consequences edited in place (notes follow a merge; the view does not page `IncidentsAsync`).
+
+## Challenge
+
+Devil's Advocate, round 1 (0 major, 3 minor), answered with the Security findings in revision 1:
+
+1. *`RecordPager` drops `Source` and `Name` from its page queries (lines 38–45).* **Accepted.** The new overload copies both into
+   every page query; `IncidentWindowReaderUsesTheSourceOfTheFirstSnapshot` now writes two sources with more than one page each.
+2. *One source for all three charts fails for live agent data, whose sources are collector names.* **Accepted.** Each chart
+   takes its source per query: the memory chart from the earliest process snapshot, each metric series from the incident's stored
+   extreme of that metric (`MetricExtreme.Source`), the connection chart from the earliest connection snapshot. `ReadAsync` takes
+   the incident; `IncidentWindowData` names the memory and connection sources; new test
+   `IncidentWindowReaderTakesTheSourceOfEachChartPerQuery`. Record 0107 updated.
+3. *HTML drops the first line feed after `<textarea>`, so a note starting with one loses it on each save.* **Accepted** with the
+   first choice: `IncidentNoteText.Normalize` removes leading line feeds, so the stored text equals what the next form shows; a
+   `DataRow` covers it. Emitting an extra line feed was rejected because the interactive renderer sets a `textarea`'s value as a
+   property, where the parser rule does not apply, so the two render paths would differ.
+
+## Security review
+
+Plan review, round 1 (`CHANGES_REQUIRED`):
+
+- **B1 (blocking) — `length()` stops at U+0000.** **Fixed.** The store refuses any U+0000 with `store: invalid note: text must
+  not contain U+0000` before SQL runs; the endpoint refuses it with `400` (`IncidentNoteText.IsAcceptable`); the schema check
+  counts bytes, `CHECK (length(CAST(text AS BLOB)) BETWEEN 1 AND 5400)`, which bounds the stored size whatever the text holds.
+  `DataRow`s for a leading and an embedded U+0000 in `SqliteStoreSaveIncidentNoteRefusesInvalidEdits` and
+  `IncidentNoteEndpointRefusesInvalidFields`; the store test also inserts a 5,401-byte row past the store to pin the check.
+- **N1 — endpoint order.** **Accepted.** The antiforgery feature is checked first (missing = invalid), the form is read only
+  after it, and `note`/`written_for` come from the form only. `400` rows added: `text/plain` body, a 16,385-byte value, 65 values,
+  fields only in the query string.
+- **N2 — upsert guard.** **Accepted.** `ON CONFLICT(written_for) DO UPDATE … WHERE incident_notes.incident_id =
+  excluded.incident_id`; a conflict that updates nothing is `NotFound` (AC2).
+- **N3 — memory is per circuit.** **Accepted.** The gate is held per store call; the plan and the web UI area and security area 3
+  (Dev) state the window build (about 10 MB) and the page's runs as per-circuit amounts, the number of circuits unbounded but
+  only for a signed-in client.
+- **N4 — what the save failure logs.** **Accepted.** `IncidentNoteSaveFailed` carries the exception only, never note text, form
+  values or the written-for number; the Dev writes the rule into the web UI area.
 
 ## Out of scope / follow-ups
 

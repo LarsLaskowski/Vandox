@@ -54,8 +54,8 @@ What the list reads:
 
 Chart data and its labels:
 
-12. **The window's own process snapshots and the two metric series of one source (the source of the window's first process
-    snapshot, else of its first metric), capped at 300 snapshots and 1,000 points per series, the five programs with the
+12. **The window's own process snapshots, connection snapshots and the two metric series, each from its own source (the
+    earliest process or connection snapshot of the window, the source of the incident's stored extreme of the metric), capped at 300 snapshots and 1,000 points per series, the five programs with the
     highest peak plus the rest as one series, stacked; program names escaped and capped as chart labels** (chosen) — the
     document has no series; uPlot writes labels and title as text (read in the vendored source), so an escaped name carries no
     markup and its direction controls are visible.
@@ -86,10 +86,12 @@ with the antiforgery token and moved to the surviving incident when `vandoxd inc
   (the clear transaction of `vandoxd templates`) a note save can hit the busy timeout and fails with an error page; nothing is
   half-written.
 - An incident with notes cannot be deleted without moving its notes; retention (#46) has to move or keep them.
-- Notes are bounded per row (1,800 characters), and there is at most one row per incident number ever given, so their size
+- Notes are bounded per row (1,800 characters, no U+0000, at most 5,400 bytes checked by the table itself), and there is at most one row per incident number ever given, so their size
   grows with incidents, not with requests; the incident page shows at most 64 notes of an incident.
 - Chart labels may now carry external text, escaped and capped; titles and the other labels stay fixed texts.
-- A chart covers at most 300 snapshots and says where it stops; a window with data of several sources is charted for one.
+- A chart covers at most 300 snapshots and says where it stops. Each chart takes its source per query, because live agent
+  data names its collector as the source (the legacy import uses one source for every kind); a window with process snapshots of
+  several sources is charted for the earliest one.
 - A time inside a chart is not clickable, and kills are not drawn into the charts; the times of the page are the links.
 - The list's duration is 0:00:00 for an incident with one kill; it says how long the kills went on, not how long the service
   was down, which the stored data does not tell.
