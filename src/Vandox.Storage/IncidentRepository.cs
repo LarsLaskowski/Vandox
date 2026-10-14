@@ -1,5 +1,3 @@
-#pragma warning disable RH2003, S2325
-
 using System.Text;
 using System.Text.Json;
 
@@ -17,6 +15,8 @@ internal static class IncidentRepository
     #region Constants
 
     private const string Prefix = "store: invalid incident: ";
+    private const string QueryPrefix = "store: invalid query: ";
+    private const string DecodingMessage = "store: reading incidents: decoding incident data";
     private const string Columns = "SELECT id, started_at, ended_at, first_kill_at, kill_count, created_at, updated_at, data FROM incidents";
 
     #endregion // Constants
@@ -83,6 +83,8 @@ internal static class IncidentRepository
 
         foreach (var other in ids.Skip(1))
         {
+            await IncidentNoteRepository.MoveAsync(connection, transaction, other, ids[0], cancellationToken).ConfigureAwait(false);
+
             using var delete = Command(connection, transaction, "DELETE FROM incidents WHERE id = $id");
 
             delete.Parameters.AddWithValue("$id", other);
@@ -148,13 +150,13 @@ internal static class IncidentRepository
         }
         catch (JsonException exception)
         {
-            throw new StoreException("store: reading incidents: decoding incident data", exception);
+            throw new StoreException(DecodingMessage, exception);
         }
 
         return new StoredIncident
                {
                    Id = reader.GetInt64(0),
-                   Incident = incident ?? throw new StoreException("store: reading incidents: decoding incident data"),
+                   Incident = incident ?? throw new StoreException(DecodingMessage),
                    CreatedAt = StorageTime.FromNanoseconds(reader.GetInt64(5)),
                    UpdatedAt = StorageTime.FromNanoseconds(reader.GetInt64(6))
                };
@@ -167,7 +169,27 @@ internal static class IncidentRepository
     /// <exception cref="InvalidQueryException">The query breaks a rule</exception>
     internal static void ValidateList(IncidentListQuery query)
     {
-        throw new NotImplementedException();
+        ArgumentNullException.ThrowIfNull(query);
+
+        RequireQuery(query.Limit >= 1 && query.Limit <= StorageLimits.MaxIncidentListLimit, $"limit must be between 1 and {StorageLimits.MaxIncidentListLimit}");
+
+        if (query.Before is null)
+        {
+            return;
+        }
+
+        RequireQuery(StorageTime.InStorableRange(query.Before.StartedAt), "before must be within the storable range");
+        RequireQuery(query.Before.Id > 0, "before id must be positive");
+    }
+
+    /// <summary>
+    /// Validates the number of an incident or of the incident whose notes are read.
+    /// </summary>
+    /// <param name="id">The number</param>
+    /// <exception cref="InvalidQueryException">The number is not positive</exception>
+    internal static void ValidateId(long id)
+    {
+        RequireQuery(id > 0, "incident ID must be positive");
     }
 
     /// <summary>
@@ -177,7 +199,22 @@ internal static class IncidentRepository
     /// <returns>The SQL and its parameters</returns>
     internal static (string Sql, Dictionary<string, object> Parameters) BuildList(IncidentListQuery query)
     {
-        throw new NotImplementedException();
+        var parameters = new Dictionary<string, object>
+                         {
+                             ["$limit"] = (long)query.Limit
+                         };
+        var filter = string.Empty;
+
+        if (query.Before is not null)
+        {
+            filter = " WHERE i.started_at < $before OR (i.started_at = $before AND i.id < $beforeId)";
+            parameters["$before"] = StorageTime.ToNanoseconds(query.Before.StartedAt);
+            parameters["$beforeId"] = query.Before.Id;
+        }
+
+        var sql = $"SELECT i.id, i.started_at, i.ended_at, i.first_kill_at, i.kill_count, i.created_at, i.updated_at, i.data, EXISTS (SELECT 1 FROM incident_notes n WHERE n.incident_id = i.id) FROM incidents i{filter} ORDER BY i.started_at DESC, i.id DESC LIMIT $limit";
+
+        return (sql, parameters);
     }
 
     /// <summary>
@@ -188,7 +225,36 @@ internal static class IncidentRepository
     /// <exception cref="StoreException">The data is not an incident</exception>
     internal static IncidentSummary ReadSummary(SqliteDataReader reader)
     {
-        throw new NotImplementedException();
+        IncidentSummaryData? data;
+
+        try
+        {
+            data = JsonSerializer.Deserialize<IncidentSummaryData>(reader.GetFieldValue<byte[]>(7), IncidentJson.Options);
+        }
+        catch (JsonException exception)
+        {
+            throw new StoreException(DecodingMessage, exception);
+        }
+
+        if (data is null)
+        {
+            throw new StoreException(DecodingMessage);
+        }
+
+        return new IncidentSummary
+               {
+                   Id = reader.GetInt64(0),
+                   Start = StorageTime.FromNanoseconds(reader.GetInt64(1)),
+                   End = StorageTime.FromNanoseconds(reader.GetInt64(2)),
+                   FirstKillAt = StorageTime.FromNanoseconds(reader.GetInt64(3)),
+                   LastKillAt = data.LastKillAt,
+                   KillCount = reader.GetInt64(4),
+                   FirstVictim = data.Kills.Count > 0 ? data.Kills[0].VictimCommand : string.Empty,
+                   Hypothesis = data.Hypothesis,
+                   HasNotes = reader.GetInt64(8) != 0,
+                   CreatedAt = StorageTime.FromNanoseconds(reader.GetInt64(5)),
+                   UpdatedAt = StorageTime.FromNanoseconds(reader.GetInt64(6))
+               };
     }
 
     /// <summary>
@@ -198,7 +264,12 @@ internal static class IncidentRepository
     /// <returns>The SQL and its parameters</returns>
     internal static (string Sql, Dictionary<string, object> Parameters) BuildOne(long id)
     {
-        throw new NotImplementedException();
+        var parameters = new Dictionary<string, object>
+                         {
+                             ["$id"] = id
+                         };
+
+        return (Columns + " WHERE id = $id", parameters);
     }
 
     /// <summary>
@@ -214,6 +285,21 @@ internal static class IncidentRepository
         }
 
         throw new InvalidIncidentException(Prefix + rule);
+    }
+
+    /// <summary>
+    /// Throws a query error unless the condition holds.
+    /// </summary>
+    /// <param name="condition">The rule</param>
+    /// <param name="rule">What must hold</param>
+    private static void RequireQuery(bool condition, string rule)
+    {
+        if (condition)
+        {
+            return;
+        }
+
+        throw new InvalidQueryException(QueryPrefix + rule);
     }
 
     /// <summary>

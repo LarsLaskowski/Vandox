@@ -1,5 +1,3 @@
-#pragma warning disable RH2003, S2325
-
 using Microsoft.Data.Sqlite;
 
 using Vandox.Core.Incidents;
@@ -32,6 +30,11 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
     /// The operation named in the error of a log read.
     /// </summary>
     private const string LogsContext = "store: reading logs";
+
+    /// <summary>
+    /// The operation named in the error of an incident read.
+    /// </summary>
+    private const string IncidentsContext = "store: reading incidents";
 
     private const string CommonPragmas = "PRAGMA busy_timeout=5000; PRAGMA foreign_keys=1; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;";
 
@@ -706,7 +709,7 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
 
         var (sql, parameters) = IncidentRepository.Build(query);
 
-        return await QueryAsync(sql, parameters, IncidentRepository.Read, "store: reading incidents", cancellationToken).ConfigureAwait(false);
+        return await QueryAsync(sql, parameters, IncidentRepository.Read, IncidentsContext, cancellationToken).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
@@ -723,7 +726,7 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
         }
         catch (SqliteException exception)
         {
-            throw ReaderQuery.Translate(exception, "store: reading incidents", cancellationToken);
+            throw ReaderQuery.Translate(exception, IncidentsContext, cancellationToken);
         }
     }
 
@@ -732,27 +735,67 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
     #region IIncidentBrowser
 
     /// <inheritdoc />
-    public Task<IReadOnlyList<IncidentSummary>> IncidentSummariesAsync(IncidentListQuery query, CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<IncidentSummary>> IncidentSummariesAsync(IncidentListQuery query, CancellationToken cancellationToken)
     {
-        throw new NotImplementedException();
+        IncidentRepository.ValidateList(query);
+
+        var (sql, parameters) = IncidentRepository.BuildList(query);
+
+        return await QueryAsync(sql, parameters, IncidentRepository.ReadSummary, IncidentsContext, cancellationToken).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
-    public Task<StoredIncident?> IncidentAsync(long id, CancellationToken cancellationToken)
+    public async Task<StoredIncident?> IncidentAsync(long id, CancellationToken cancellationToken)
     {
-        throw new NotImplementedException();
+        IncidentRepository.ValidateId(id);
+
+        var (sql, parameters) = IncidentRepository.BuildOne(id);
+
+        var rows = await QueryAsync(sql, parameters, IncidentRepository.Read, IncidentsContext, cancellationToken).ConfigureAwait(false);
+
+        return rows.Count == 0 ? null : rows[0];
     }
 
     /// <inheritdoc />
-    public Task<IncidentNotePage> IncidentNotesAsync(long incidentId, CancellationToken cancellationToken)
+    public async Task<IncidentNotePage> IncidentNotesAsync(long incidentId, CancellationToken cancellationToken)
     {
-        throw new NotImplementedException();
+        IncidentRepository.ValidateId(incidentId);
+
+        var (sql, parameters) = IncidentNoteRepository.BuildRead(incidentId);
+
+        var rows = await QueryAsync(sql, parameters, IncidentNoteRepository.Read, IncidentsContext, cancellationToken).ConfigureAwait(false);
+
+        return new IncidentNotePage
+               {
+                   Notes = rows.Take(StorageLimits.MaxNotesRead).ToList(),
+                   More = rows.Count > StorageLimits.MaxNotesRead
+               };
     }
 
     /// <inheritdoc />
-    public Task<IncidentNoteOutcome> SaveIncidentNoteAsync(IncidentNoteEdit edit, CancellationToken cancellationToken)
+    public async Task<IncidentNoteOutcome> SaveIncidentNoteAsync(IncidentNoteEdit edit, CancellationToken cancellationToken)
     {
-        throw new NotImplementedException();
+        IncidentNoteRepository.Validate(edit);
+
+        await _writeLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+
+        try
+        {
+            await using var transaction = (SqliteTransaction)await _writer.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, cancellationToken).ConfigureAwait(false);
+            var outcome = await IncidentNoteRepository.SaveAsync(_writer, transaction, edit, cancellationToken).ConfigureAwait(false);
+
+            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+
+            return outcome;
+        }
+        catch (SqliteException exception)
+        {
+            throw new StoreException($"store: saving note: {exception.Message}", exception);
+        }
+        finally
+        {
+            _writeLock.Release();
+        }
     }
 
     #endregion // IIncidentBrowser

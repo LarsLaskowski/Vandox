@@ -1,4 +1,4 @@
-#pragma warning disable RH2003, S2325
+#pragma warning disable RH2003, S2325, S4487
 
 using Vandox.Core.Incidents;
 using Vandox.Storage;
@@ -10,6 +10,12 @@ namespace Vandox.Backend.Incidents;
 /// </summary>
 public sealed class IncidentWindowReader
 {
+    #region Fields
+
+    private readonly IRecordReader _records;
+
+    #endregion // Fields
+
     #region Constructors
 
     /// <summary>
@@ -18,7 +24,9 @@ public sealed class IncidentWindowReader
     /// <param name="records">The reader of stored records</param>
     public IncidentWindowReader(IRecordReader records)
     {
-        throw new NotImplementedException();
+        ArgumentNullException.ThrowIfNull(records);
+
+        _records = records;
     }
 
     #endregion // Constructors

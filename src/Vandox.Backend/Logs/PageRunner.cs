@@ -1,5 +1,3 @@
-#pragma warning disable RH2003, S2325
-
 using Vandox.Backend.Hosting;
 using Vandox.Storage;
 
@@ -14,7 +12,7 @@ internal sealed class PageRunner : IDisposable
 
     private readonly ActionSequence _actions;
 
-    private readonly ILogger _logger;
+    private readonly Action<Exception> _logFailure;
 
     private readonly string _deadlineText;
 
@@ -36,8 +34,10 @@ internal sealed class PageRunner : IDisposable
     /// <param name="fail">Shows a text on the page</param>
     internal PageRunner(TimeProvider clock, ILogger logger, string deadlineText, string failureText, Action<string> fail)
     {
+        ArgumentNullException.ThrowIfNull(logger);
+
         _actions = new ActionSequence(clock);
-        _logger = logger;
+        _logFailure = logger.LogsReadFailed;
         _deadlineText = deadlineText;
         _failureText = failureText;
         _fail = fail;
@@ -53,7 +53,13 @@ internal sealed class PageRunner : IDisposable
     /// <param name="fail">Shows a text on the page</param>
     internal PageRunner(TimeProvider clock, Action<Exception> logFailure, string deadlineText, string failureText, Action<string> fail)
     {
-        throw new NotImplementedException();
+        ArgumentNullException.ThrowIfNull(logFailure);
+
+        _actions = new ActionSequence(clock);
+        _logFailure = logFailure;
+        _deadlineText = deadlineText;
+        _failureText = failureText;
+        _fail = fail;
     }
 
     #endregion // Constructors
@@ -94,7 +100,7 @@ internal sealed class PageRunner : IDisposable
                 return;
             }
 
-            _logger.LogsReadFailed(exception);
+            _logFailure(exception);
             Report(run, _failureText);
         }
     }

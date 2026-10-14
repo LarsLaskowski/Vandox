@@ -1,5 +1,3 @@
-#pragma warning disable RH2003, S2325
-
 namespace Vandox.Backend.Logs;
 
 /// <summary>
@@ -7,6 +5,18 @@ namespace Vandox.Backend.Logs;
 /// </summary>
 public sealed class WebReaderGate : IDisposable
 {
+    #region Constants
+
+    private const int MaxSlots = 3;
+
+    #endregion // Constants
+
+    #region Fields
+
+    private readonly SemaphoreSlim _slots;
+
+    #endregion // Fields
+
     #region Constructors
 
     /// <summary>
@@ -16,7 +26,10 @@ public sealed class WebReaderGate : IDisposable
     /// <exception cref="ArgumentOutOfRangeException">The slot count is not 1 to 3</exception>
     public WebReaderGate(int maxConcurrent)
     {
-        throw new NotImplementedException();
+        ArgumentOutOfRangeException.ThrowIfLessThan(maxConcurrent, 1);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(maxConcurrent, MaxSlots);
+
+        _slots = new SemaphoreSlim(maxConcurrent, maxConcurrent);
     }
 
     #endregion // Constructors
@@ -30,9 +43,20 @@ public sealed class WebReaderGate : IDisposable
     /// <param name="call">The call</param>
     /// <param name="cancellationToken">Ends the wait for a slot</param>
     /// <returns>A task that returns the result of the call</returns>
-    public Task<TResult> RunAsync<TResult>(Func<Task<TResult>> call, CancellationToken cancellationToken)
+    public async Task<TResult> RunAsync<TResult>(Func<Task<TResult>> call, CancellationToken cancellationToken)
     {
-        throw new NotImplementedException();
+        ArgumentNullException.ThrowIfNull(call);
+
+        await _slots.WaitAsync(cancellationToken).ConfigureAwait(false);
+
+        try
+        {
+            return await call().ConfigureAwait(false);
+        }
+        finally
+        {
+            _slots.Release();
+        }
     }
 
     #endregion // Methods
@@ -42,7 +66,7 @@ public sealed class WebReaderGate : IDisposable
     /// <inheritdoc />
     public void Dispose()
     {
-        throw new NotImplementedException();
+        _slots.Dispose();
     }
 
     #endregion // IDisposable
