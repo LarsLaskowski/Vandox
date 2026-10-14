@@ -1,3 +1,5 @@
+#pragma warning disable RH2003, S2325
+
 namespace Vandox.Backend.Components.Charts;
 
 /// <summary>
@@ -31,6 +33,17 @@ public sealed class ChartData
         Validate(_times, _series);
     }
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="ChartData"/> class.
+    /// </summary>
+    /// <param name="times">The points in time, strictly ascending</param>
+    /// <param name="series">The series, each with one value per point in time</param>
+    /// <param name="stacked">Whether the series are drawn stacked; a stacked series has a value at every point</param>
+    public ChartData(IReadOnlyList<DateTimeOffset> times, IReadOnlyList<ChartSeries> series, bool stacked)
+    {
+        throw new NotImplementedException();
+    }
+
     #endregion // Constructors
 
     #region Properties
@@ -44,6 +57,11 @@ public sealed class ChartData
     /// Gets the series.
     /// </summary>
     public IReadOnlyList<ChartSeries> Series => _series;
+
+    /// <summary>
+    /// Gets a value indicating whether the series are drawn stacked.
+    /// </summary>
+    public bool Stacked => throw new NotImplementedException();
 
     #endregion // Properties
 

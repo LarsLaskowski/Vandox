@@ -1,3 +1,5 @@
+#pragma warning disable RH2003, S2325
+
 using Vandox.Storage;
 
 namespace Vandox.Backend.Logs;
@@ -37,6 +39,16 @@ public sealed class GatedLogExplorer : ILogExplorer, IDisposable
 
         _inner = inner;
         _slots = new SemaphoreSlim(maxConcurrent, maxConcurrent);
+    }
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="GatedLogExplorer"/> class that shares a gate it does not own.
+    /// </summary>
+    /// <param name="inner">The explorer to call</param>
+    /// <param name="gate">The gate of the reads</param>
+    public GatedLogExplorer(ILogExplorer inner, WebReaderGate gate)
+    {
+        throw new NotImplementedException();
     }
 
     #endregion // Constructors

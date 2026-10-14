@@ -91,3 +91,7 @@ export function create(element, title, labels, columns) {
         }
     };
 }
+
+export function createStacked(element, title, labels, columns) {
+    throw new Error("not implemented");
+}

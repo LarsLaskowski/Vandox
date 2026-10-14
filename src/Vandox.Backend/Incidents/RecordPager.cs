@@ -1,3 +1,5 @@
+#pragma warning disable RH2003, S2325
+
 using Vandox.Core.Model;
 using Vandox.Storage;
 
@@ -64,6 +66,24 @@ internal static class RecordPager
             from = last.Record.CapturedAt;
             after = last.Id;
         }
+    }
+
+    /// <summary>
+    /// Reads a range page by page like the other overload, with the source and the name of the range in every page query, and
+    /// stops after a number of records.
+    /// </summary>
+    /// <param name="records">The reader of stored records</param>
+    /// <param name="range">The kind, the source, the name and the range</param>
+    /// <param name="limit">The page size</param>
+    /// <param name="maxRecords">The most records handled</param>
+    /// <param name="handle">Called for every record</param>
+    /// <param name="cancellationToken">The cancellation token</param>
+    /// <returns>A task that returns the number of records handled</returns>
+    /// <exception cref="StoreException">The store failed, or a page of records did not advance</exception>
+    /// <exception cref="OperationCanceledException">The run was cancelled</exception>
+    internal static Task<int> PageAsync(IRecordReader records, RecordQuery range, int limit, int maxRecords, Func<StoredRecord, Task> handle, CancellationToken cancellationToken)
+    {
+        throw new NotImplementedException();
     }
 
     #endregion // Methods

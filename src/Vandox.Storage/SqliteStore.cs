@@ -1,3 +1,5 @@
+#pragma warning disable RH2003, S2325
+
 using Microsoft.Data.Sqlite;
 
 using Vandox.Core.Incidents;
@@ -10,7 +12,7 @@ namespace Vandox.Storage;
 /// bounded number of query-only readers, so a committed batch is durable and reads (and the health check) do not wait for
 /// a write.
 /// </summary>
-public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, ILogTemplateReader, ILogExplorer, IIncidentStore, IImportTracker, IAsyncDisposable
+public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, ILogTemplateReader, ILogExplorer, IIncidentStore, IIncidentBrowser, IImportTracker, IAsyncDisposable
 {
     #region Constants
 
@@ -726,6 +728,34 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
     }
 
     #endregion // IIncidentStore
+
+    #region IIncidentBrowser
+
+    /// <inheritdoc />
+    public Task<IReadOnlyList<IncidentSummary>> IncidentSummariesAsync(IncidentListQuery query, CancellationToken cancellationToken)
+    {
+        throw new NotImplementedException();
+    }
+
+    /// <inheritdoc />
+    public Task<StoredIncident?> IncidentAsync(long id, CancellationToken cancellationToken)
+    {
+        throw new NotImplementedException();
+    }
+
+    /// <inheritdoc />
+    public Task<IncidentNotePage> IncidentNotesAsync(long incidentId, CancellationToken cancellationToken)
+    {
+        throw new NotImplementedException();
+    }
+
+    /// <inheritdoc />
+    public Task<IncidentNoteOutcome> SaveIncidentNoteAsync(IncidentNoteEdit edit, CancellationToken cancellationToken)
+    {
+        throw new NotImplementedException();
+    }
+
+    #endregion // IIncidentBrowser
 
     #region IImportTracker
 

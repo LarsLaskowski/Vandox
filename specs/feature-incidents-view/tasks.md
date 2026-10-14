@@ -6,7 +6,7 @@ Every documentation edit appears in exactly one row; the Lead's approval only to
 
 | # | Task | Files | Tests (AC) | Owner | Done |
 | - | ---- | ----- | ---------- | ----- | ---- |
-| 1 | Skeleton: storage types and `IIncidentBrowser` on `SqliteStore`, schema constants; backend gate, gated wrappers, window reader, series, view types, note text and endpoint, `RecordPager`/`PageRunner`/`GatedLogExplorer`/`ChartData` overloads, two log messages, empty pages and note form; *Build* passes | `src/Vandox.Storage/*`, `src/Vandox.Backend/*` as in *Signatures* | — | Dev | [ ] |
+| 1 | Skeleton: storage types and `IIncidentBrowser` on `SqliteStore`, schema constants; backend gate, gated wrappers, window reader, series, view types, note text and endpoint, `RecordPager`/`PageRunner`/`GatedLogExplorer`/`ChartData` overloads, two log messages, empty pages and note form; *Build* passes | `src/Vandox.Storage/*`, `src/Vandox.Backend/*` as in *Signatures* | — | Dev | [x] |
 | 2 | Tests first: the tests named in AC1–AC13, the doubles `FakeIncidentBrowser`, `ScriptedRecordReader`, `IncidentPageHarness`; adapt the migration chains of `SqliteStoreOpenTests` | `tests/Vandox.Storage.Tests/*`, `tests/Vandox.Backend.Tests/*` | AC1–AC13 | Tester | [ ] |
 | 3 | Schema step 10, note repository, note move in the merge, summaries, one incident, notes read | `SchemaMigrator`, `StorageLimits`, `IncidentRepository`, `IncidentNoteRepository`, `SqliteStore` | AC1–AC4 | Dev | [ ] |
 | 4 | Reader gate shared by logs and incidents, gated browser and record reader, wiring in `ServeCommand` | `WebReaderGate`, `GatedLogExplorer`, `GatedIncidentBrowser`, `GatedRecordReader`, `ServeCommand` | AC11 | Dev | [ ] |

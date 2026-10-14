@@ -1,3 +1,5 @@
+#pragma warning disable RH2003, S2325
+
 using System.Text;
 using System.Text.Json;
 
@@ -156,6 +158,47 @@ internal static class IncidentRepository
                    CreatedAt = StorageTime.FromNanoseconds(reader.GetInt64(5)),
                    UpdatedAt = StorageTime.FromNanoseconds(reader.GetInt64(6))
                };
+    }
+
+    /// <summary>
+    /// Validates a list query.
+    /// </summary>
+    /// <param name="query">The query</param>
+    /// <exception cref="InvalidQueryException">The query breaks a rule</exception>
+    internal static void ValidateList(IncidentListQuery query)
+    {
+        throw new NotImplementedException();
+    }
+
+    /// <summary>
+    /// Builds the statement that reads a page of the incident list.
+    /// </summary>
+    /// <param name="query">The validated query</param>
+    /// <returns>The SQL and its parameters</returns>
+    internal static (string Sql, Dictionary<string, object> Parameters) BuildList(IncidentListQuery query)
+    {
+        throw new NotImplementedException();
+    }
+
+    /// <summary>
+    /// Reads a row of the incident list.
+    /// </summary>
+    /// <param name="reader">The reader, positioned on a row of <see cref="BuildList"/></param>
+    /// <returns>The summary</returns>
+    /// <exception cref="StoreException">The data is not an incident</exception>
+    internal static IncidentSummary ReadSummary(SqliteDataReader reader)
+    {
+        throw new NotImplementedException();
+    }
+
+    /// <summary>
+    /// Builds the statement that reads one incident.
+    /// </summary>
+    /// <param name="id">The number</param>
+    /// <returns>The SQL and its parameters</returns>
+    internal static (string Sql, Dictionary<string, object> Parameters) BuildOne(long id)
+    {
+        throw new NotImplementedException();
     }
 
     /// <summary>

@@ -1,3 +1,5 @@
+#pragma warning disable RH2003, S2325
+
 using Vandox.Backend.Hosting;
 using Vandox.Storage;
 
@@ -39,6 +41,19 @@ internal sealed class PageRunner : IDisposable
         _deadlineText = deadlineText;
         _failureText = failureText;
         _fail = fail;
+    }
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="PageRunner"/> class that reports a failure through a callback.
+    /// </summary>
+    /// <param name="clock">The clock of the deadlines</param>
+    /// <param name="logFailure">Logs the failure of the store</param>
+    /// <param name="deadlineText">The text shown when an action runs into the deadline</param>
+    /// <param name="failureText">The text shown when the store fails</param>
+    /// <param name="fail">Shows a text on the page</param>
+    internal PageRunner(TimeProvider clock, Action<Exception> logFailure, string deadlineText, string failureText, Action<string> fail)
+    {
+        throw new NotImplementedException();
     }
 
     #endregion // Constructors
