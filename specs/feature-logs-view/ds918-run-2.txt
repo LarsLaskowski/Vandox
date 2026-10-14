@@ -1,0 +1,38 @@
+Linux 4.4.302+ #86009 SMP Wed Nov 26 18:45:32 CST 2025; .NET 10.0.10; 4 logical CPUs
+database below /volume20/HostData; 5000000 log lines in batches of 10000 over 30 days; page of 100 lines, scan limit 8000, selectivity cap 12000
+wrote 5000000 log lines in 1147 s (4358 lines/s); database 1983 MiB
+log lines: 5000000; templates: 12914
+lines with 'rarequartz': 1000
+lines with 'onepercent': 50000
+lines with 'nearcapword': 16667
+lines with 'commonword': 1555556
+lines with 'pairalpha': 2500000
+lines with 'pairbeta': 2505000
+lines with 'pairalpha pairbeta': 5000
+lines with 'mass01': 1250000
+lines with 'mass09': 1250000
+lines with 'tog01': 1555556
+lines of program backupd: 250; of program plesk: 208250
+1000 templates listed (limit 1000); most frequent 105000 lines, last listed 7 lines
+1  rare word                                             mode index                      100 lines                                first 28 ms, runs 28, 17, 17 ms: under 2000 ms
+2  word in about 1 % of the lines                        mode scan                       80 lines, scan bound or page budget reached first 1037 ms, runs 1037, 1056, 1024 ms: under 2000 ms
+2b word in about 0.33 % of the lines                     mode scan                       27 lines, scan bound or page budget reached first 938 ms, runs 938, 927, 933 ms: under 2000 ms
+3  word in 33 % of the lines                             mode scan                       100 lines                                first 47 ms, runs 47, 48, 47 ms: under 2000 ms
+4  case 3 with program and severity                      mode scan                       100 lines                                first 49 ms, runs 49, 50, 49 ms: under 2000 ms
+4b case 3 with a source (index by source)                mode scan                       100 lines                                first 48 ms, runs 48, 49, 48 ms: under 2000 ms
+5  two common words, rare combination                    mode index                      100 lines                                first 169 ms, runs 169, 172, 175 ms: under 2000 ms
+6  program filter only (4 % of the lines)                mode scan                       100 lines                                first 10 ms, runs 10, 9, 9 ms: under 2000 ms
+6b program filter only (rare program)                    mode scan                       1 lines, scan bound or page budget reached first 20 ms, runs 20, 20, 20 ms: under 2000 ms
+6c program filter only, in one source (rare program)     mode scan                       2 lines, scan bound or page budget reached first 27 ms, runs 27, 28, 28 ms: under 2000 ms
+7  case 3 in a one-day range in the middle               mode scan                       100 lines                                first 65 ms, runs 65, 64, 65 ms: under 2000 ms
+8  lines of the most frequent template                   mode scan                       100 lines                                first 79 ms, runs 79, 72, 82 ms: under 2000 ms
+8b lines of a rare template                              mode scan                       0 lines, scan bound or page budget reached first 87 ms, runs 87, 89, 94 ms: under 2000 ms
+9  case 3 in a range without the word (scan bound)       mode scan                       0 lines, scan bound or page budget reached first 1502 ms, runs 1502, 1502, 1502 ms: under 2000 ms
+12 16 common words, empty intersection                   mode scan, index check stopped  0 lines, scan bound or page budget reached first 938 ms, runs 938, 940, 914 ms: under 2000 ms
+13 eight common words together, range without them       mode scan                       0 lines, scan bound or page budget reached first 241 ms, runs 241, 217, 216 ms: under 2000 ms
+14 four-part term of common parts, never that phrase     mode index                      0 lines                                  first 623 ms, runs 623, 644, 627 ms: under 2000 ms
+15 crafted term of 511 parts of a word every line holds  mode scan, index check stopped  0 lines, scan bound or page budget reached first 813 ms, runs 813, 837, 803 ms: under 2000 ms
+10 context (5 and 5) of a hit                            mode -                          5 before, 5 after                        first 21 ms, runs 21, 12, 13 ms: under 2000 ms
+11 template list, whole data (limit 200)                 mode -                          200 templates                            first 123 ms, runs 123, 124, 126 ms: under 2000 ms
+11b template list, 30 days (limit 200)                   mode -                          200 templates                            first 125 ms, runs 125, 126, 125 ms: under 2000 ms
+slowest case 1502 ms (over the 500 ms of the development-host tuning target); criterion of AC-19 (every case under 2000 ms): met on this host; only a run on the reference host (DS918+, SSD volume) counts
