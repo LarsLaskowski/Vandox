@@ -105,12 +105,43 @@ first run, then the slowest of the three. `bound or clock` means that the page e
 **Verdict on the development host: every case is under 2,000 ms (slowest 752 ms), and every case but 12 and 15 is under the 350 ms target** (the 419 ms of case 8b is one run of three).
 Cases 12 and 15 are over the target because the index check of case 12 takes up to its 0.7 s budget and case 15 is stopped by it. Case 12 with a **cold cache** (the file cache dropped with
 `echo 3 > /proc/sys/vm/drop_caches` before each of two runs): 796 and 759 ms, in both the index check stopped by the budget and the scan page of sixteen one-word tests ended at its bound; the
-third, warm run took 605 ms with the index check finishing in time. Case 15 and a 60-part term, cold: 771 and 715 ms. Reference host, run 2 (DS918+, SSD volume): **not yet measured.**
+third, warm run took 605 ms with the index check finishing in time. Case 15 and a 60-part term, cold: 771 and 715 ms.
 
 | Host | Date | Slowest case | Verdict |
 | ---- | ---- | ------------ | ------- |
 | DS918+ (reference host, SSD volume), run 1 | 2026-10-14 | case 12, 2,229 ms | **not met** (cases 9 and 12) |
-| DS918+ (reference host, SSD volume), run 2 | _to be entered after the Product Manager's run_ | _?_ | _?_ |
+| DS918+ (reference host, SSD volume), run 2 | 2026-10-14 | case 9, 1,502 ms | **met** (every case under 2,000 ms) |
+
+Reference host, **run 2** (DS918+, SSD volume `/volume20/HostData`, Linux 4.4.302+, .NET 10.0.10, 4 CPUs; build 38cc9a8 with scan bound 8,000, cap 12,000, probe budget 0.7 s, page
+budget 1.5 s; cases 1 to 15; 5,000,000 lines written in 1,147 s, 4,358 lines per second; database 1,983 MiB). Run 1 above missed because of cases 9 (scan bound of 12,000 lines, 2,141 ms) and 12
+(index check of 16 common words, 2,229 ms); this run is the one that counts against the criterion. Times in milliseconds, first run then slowest of three:
+
+| Case | Mode | Result | First run | Slowest |
+| ---- | ---- | ------ | --------: | ------: |
+| 1 rare word | index | 100 lines | 28 | 28 |
+| 2 word in 1 % | scan | 80 lines, bound or clock | 1,037 | 1,056 |
+| 2b word in 0.33 % | scan | 27 lines, bound or clock | 938 | 938 |
+| 3 word in 33 % | scan | 100 lines | 47 | 48 |
+| 4 with program and severity | scan | 100 lines | 49 | 50 |
+| 4b with a source | scan | 100 lines | 48 | 49 |
+| 5 two words, rare combination | index | 100 lines | 169 | 175 |
+| 6 program only (4 %) | scan | 100 lines | 10 | 10 |
+| 6b rare program | scan | 1 line, bound or clock | 20 | 20 |
+| 6c rare program in one source | scan | 2 lines, bound or clock | 27 | 28 |
+| 7 one-day range | scan | 100 lines | 65 | 65 |
+| 8 most frequent template | scan | 100 lines | 79 | 82 |
+| 8b rare template | scan | 0 lines, bound or clock | 87 | 94 |
+| 9 scan bound, no match | scan | 0 lines, bound or clock | **1,502** | **1,502** |
+| 10 context | n/a | 5 + 5 lines | 21 | 21 |
+| 11 template list, whole data | n/a | 200 templates | 123 | 126 |
+| 11b template list, 30 days | n/a | 200 templates | 125 | 126 |
+| 12 16 words, empty intersection | scan, index check stopped | 0 lines, bound or clock | 938 | 940 |
+| 13 eight words together, range without them | scan | 0 lines, bound or clock | 241 | 241 |
+| 14 four-part term of common parts | index | 0 lines | 623 | 644 |
+| 15 crafted 511-part term | scan, index check stopped | 0 lines, bound or clock | 813 | 837 |
+
+**Verdict on the reference host: criterion met.** Every case is under 2,000 ms; the slowest is case 9 (1,502 ms, the page clock of 1.5 s ending the scan of a common word's range where it does
+not occur). Cases 12 and 15 ran as `scan, index check stopped`: the index check was given up at its 0.7 s budget and the scan page ended in 0.8 to 0.94 s in all. Case 14 stayed in index mode and took 623 ms.
 
 ### Tuning
 
@@ -135,13 +166,13 @@ work and the memory of one match small. The budgets, the bound, the chunk and th
 - **Case 12** probes the index for the record IDs of 16 words that each occur in 1,250,000 lines and have no line in common. FTS5 has to walk their whole
   entries to find that (about 0.45 s inside the full-text module on the development host). The progress handler runs there (gaps of 20 to 31 ms in a scratch
   measurement with terms of 4 to 511 parts, an interrupted probe ended at 0.71 s), so the check is stopped by the deadline or by the budget. Before the change
-  of the index mode the query then walked the entries a second time (1,232 ms). On the development host the check ends within the budget when the cache is warm (434 to 621 ms) and
-  would not on the reference host (2.2 s).
+  of the index mode the query then walked the entries a second time (1,232 ms). On the development host the check ends within the budget when the cache is warm (434 to 621 ms); on the reference host it did not (2.2 s in run 1), and in run 2 it was stopped at the budget
+  and the scan page answered in 938 ms.
 - **The scan after a stopped check** was measured in an earlier build of this section to cost, per examined line in SQLite on the benchmark file, 497 ms for the 16 words of case 12 as one
   `MATCH` with `rowid = ?`, 375 ms for a four-part phrase of a word every line holds, 2.3 s for twenty parts and 8.1 s for sixty (case 15 did not finish in 10 s). The cause is that
   `rowid = …` does not bound the full-text work to one line: an AND of terms or a phrase walks on to the next matching row or the end of the index. The scan now tests every one-part
   word on its own (0.36 ms per line for the 16 words) and the terms of several parts in a private in-memory index of at most 64 examined lines, and its page ends at 1.5 s, so
-  cases 12 and 15 end in 0.8 s even when the index check is stopped.
+  cases 12 and 15 end in 0.8 to 0.94 s even when the index check is stopped (measured on both hosts; run 2 on the DS918+: 938 and 813 ms).
 - **The 234-second run of case 12** was the scan of the earlier build: the index check was stopped at its budget on the cold first run, and the scan then examined 500 lines (8,000 divided by 16)
   at about 470 ms each, about 235 seconds. The benchmark of that moment passed no deadline (`CancellationToken.None`); the 10-second deadline of the page in `SearchBenchmark` was added
   right after, in the next run, which is why the same case 15 then reported "stopped by the 10 s deadline".
