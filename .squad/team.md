@@ -69,12 +69,14 @@ reports the need in its result instead.
 the same run instead of starting a fresh one (`.squad/routing.md`, *Pipeline*). A continued member keeps
 its role and its limits: the Dev still does not edit tests, the Reviewer and Security still review only the
 commit SHA they are given, and nothing it remembers from an earlier round replaces reading the delta. Its
-task notification reports the agent's totals since the first launch; the orchestrator logs the round with
-`--continued`, so the record carries the round's share.
+task notification reports the agent's tokens since the first launch (tool uses and duration for the round
+alone); the orchestrator logs the round with `--continued` (or `--continued-from "<step>"` for an agent that
+is not the member's last fresh launch), so the record carries the round's share.
 
 **Escapes in files.** The Write and Edit tools turn a single-backslash escape such as `\u0041` into the
 character it names, so a plan table or a test fixture whose cases are about escapes silently loses them. Write
 each such escape with a doubled backslash in the tool input, or generate the file with a script; either way
 check the bytes on disk (`grep -n '\\u' <file>`) and confirm every escape is there exactly as the case needs
-before reporting the file done. A test whose case is about an escape also asserts that its input still
+before reporting the file done — again after *Format*, since a formatter may do the same to string literals
+(*Known pitfalls* in `.squad/stack.md`). A test whose case is about an escape also asserts that its input still
 contains the backslash, so a lost escape fails the run instead of testing the wrong input.

@@ -29,7 +29,9 @@ Advocate challenges the same plan at the same time, so stay with security. A sec
 the Lead's revision: review the plan's change since your round plus whether your findings are resolved. Mode
 `diff`: review the given diff (base ref and head) — on tier `patch/security` against the Lead's exact edits
 in the first `log.md` row, as the only review of the change; from round 2 on, review only the delta since the
-previous round plus whether your earlier findings are resolved. A verification the Dev reported with its
+previous round plus whether your earlier findings are resolved. In mode `diff` you also run the Reviewer's
+*Logger arguments* check (`.claude/agents/squad-reviewer.md`) on the changed log calls: a name that matches
+the stack's sensitive-name list is a blocking finding. A verification the Dev reported with its
 cases and output is evidence: read it against the diff and re-run only what bears on a security area and
 you doubt, instead of repeating the whole comparison.
 
@@ -38,7 +40,11 @@ consumes, read that parser or consumer once, enumerate every form it accepts (ca
 continuation lines, comment styles, BOM, directives, encodings) and report all bypass classes the guard
 misses in this one round, so the plan loop needs no further `CHANGES_REQUIRED` for a sibling form. When a
 plan claims a resource bound (memory, size, time), ask what retains derived values and expect the Tester's
-test that pins the claim.
+test that pins the claim. A security property that rests on a claim about measured or library behavior (a
+deadline that interrupts a query step, a limit a parser enforces, a timeout that cancels a call) is verified
+once with a scratch measurement in a scratch `git worktree` before you accept it — in mode `plan` by you, in
+mode `diff` against the Dev's measurement — and an unverified claim of that kind is a blocking finding, so it
+is never repeated into records and documentation before anyone measured it.
 
 Rules:
 

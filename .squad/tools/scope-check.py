@@ -19,6 +19,10 @@ included; BASE_REF from `.squad/tools/squad_settings.py`, default origin/main):
 - with `--tier patch`: the files outside `specs/` change by at most PATCH_MAX_LINES lines in all (added plus
   removed, an untracked file with every line; default 30, `squad_settings.py`), and no binary file changes.
 
+When BASE_REF is not an ancestor of HEAD (a stale local copy in a fresh session, or a base that moved on), the
+script prints a warning above the result: the file list may then include changes that are not this branch's, so
+fetch the base (`git fetch origin main`) and merge it first. The warning does not change the exit code.
+
 The script takes only these two options, so nothing user-supplied reaches git or the filesystem.
 
 Usage, from the repository root:
@@ -34,7 +38,7 @@ import sys
 import unicodedata
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from analyzer_common import git, merge_base, settings  # noqa: E402  (shared helpers next to this script)
+from analyzer_common import BASE_REF, git, merge_base, settings  # noqa: E402  (shared helpers next to this script)
 
 SQUAD_FILES_ALLOWED = {".squad/stack.md", ".squad/project.md"}
 INSTRUCTION_FILES = {"CLAUDE.md", ".github/copilot-instructions.md"}
@@ -146,6 +150,12 @@ def check(files, base, tier, no_specs):
     return errors + (patch_errors(base) if tier == "patch" else [])
 
 
+def base_is_stale():
+    """True when BASE_REF is not an ancestor of HEAD, so the diff against the merge base may show foreign files."""
+    result = subprocess.run(["git", "merge-base", "--is-ancestor", BASE_REF, "HEAD"], capture_output=True, check=False)
+    return result.returncode == 1
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--tier", choices=["docs", "patch", "trivial", "standard", "security"])
@@ -155,6 +165,9 @@ def main():
     base = merge_base()
     files = changed_files(base)
     errors = check(files, base, args.tier, args.no_specs)
+    if base_is_stale():
+        print(f"WARNING: {BASE_REF} is not an ancestor of HEAD: fetch it (git fetch origin main) and merge it, or "
+              "the changed files below may include changes of the base branch")
     for error in errors:
         print(f"ERROR: {error}")
     print(f"\nChecked {len(files)} changed files: {'PASS' if not errors else 'FAIL'}")

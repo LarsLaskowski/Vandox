@@ -33,8 +33,11 @@ action yourself — including follow-up issues the Lead decides on.
   member*). Keep the agent id of each member's last launch. Launch fresh for the first launch of a mode,
   after a session restart, and when the previous launch ended on an API error. Log a continuation as a
   launch of that member with its notification's usage and `--continued`: the usage block reports the agent's
-  totals since its first launch, the script writes this round's share and marks the trailer. A continued
-  member keeps its role's limits (`.squad/team.md`).
+  tokens since its first launch (tool uses and duration for the round alone), the script writes this round's
+  share and marks the trailer. When the agent you continue is not the member's last fresh launch (a member
+  ran several task groups), use `--continued-from "<step cell of that launch>"` instead. After five
+  continuations of one agent or once its reported tokens pass 300,000, launch the member fresh with a short
+  hand-over (*Continuing a member*). A continued member keeps its role's limits (`.squad/team.md`).
 - **The squad does not change itself in a product PR.** An issue or feature PR never touches `.squad/`
   (`team.md`, `routing.md`, tools), `.claude/`, `CLAUDE.md` or `.github/copilot-instructions.md`. Lessons about the squad are filed in step 12 as `.squad/routing.md`,
   *Squad lessons*, says — template-managed files in the template repository, project knowledge here. If the
@@ -76,9 +79,11 @@ action yourself — including follow-up issues the Lead decides on.
 
 1. **Intake.** Read the issue in full, including comments; note the reported environment (versions of the
    software involved, image tag or release, host OS, configuration). If it is closed, stop and report that. Start
-   from a clean working tree on a new branch off the latest `main`, e.g.
+   from a clean working tree on a new branch off the latest `main` (run `git fetch origin main` first: a
+   stale local `origin/main` makes `scope-check.py` report files that are not yours), e.g.
    `fix-issue-<number>-<short-slug>` (or the branch the session prescribes). Create
-   `specs/issue-<number>/log.md` from `specs/_template/log.md`, commit and push it. Only you (the
+   `specs/issue-<number>/log.md` from `specs/_template/log.md`, commit and push it (the first `squad-log.py` row replaces the heading placeholder with
+   the work folder's name). Only you (the
    orchestrator) write `log.md`, one row per step, always with
    `python3 .squad/tools/squad-log.py issue-<number> "<step>" "<member>" "<result>"` — it keeps the line
    ending, escapes pipes and control characters, and stamps the row with date and time of day (UTC), so the
@@ -88,11 +93,19 @@ action yourself — including follow-up issues the Lead decides on.
    overrode them). The three numbers come from the usage block of the launch's **task notification**, not
    from the member's hand-back message, and that notification may arrive after you have already read the
    report: write the row as soon as the report is in, **without any metric option** (no `--agent`,
-   `--tokens`, `--tool-uses` or `--seconds`), and add the metrics when the notification arrives with
+   `--tokens`, `--tool-uses` or `--seconds`). `--agent` (or `--launch`) is rejected without `--tokens`,
+   `--tool-uses` and `--seconds`, so the first row of a launch carries none of them; model and effort are
+   recorded by the later `--amend-last`. Never use placeholder numbers to get past that check. Add the
+   metrics when the notification arrives with
    `python3 .squad/tools/squad-log.py issue-<number> --amend-last "<member>" --agent squad-<role> --tokens …
    --tool-uses … --seconds …` — `--amend-last` is the only way to add them later, never editing `log.md` by
-   hand or placeholder numbers (the script refuses fewer than 1,000 tokens). A trailer with wrong numbers is corrected with `--replace-last "<member>"` and the
-   same options, never with an extra row, which would count the launch twice. One row per launch, also for
+   hand or placeholder numbers (the script refuses fewer than 1,000 tokens). **Every number you pass is
+   copied from the usage block of a task notification you have in front of you** — never an estimate, a
+   figure from memory, a round number or one from the member's hand-back; without that notification, write
+   the row without any metric option and wait, or mark it `--unreported` once it cannot come. A trailer with wrong numbers is corrected with `--replace-last "<member>"` and the
+   same options, never with an extra row, which would count the launch twice. The Product Manager's answer
+   or a result the user produced (a measurement on their host) is a row with the member cell
+   `Product Manager` or `User` and no metric option; like your own `Orchestrator` rows it is no launch. One row per launch, also for
    two members that ran in parallel: the script refuses a member cell that names two, because `--amend-last`
    could not tell their usage apart. When the notification of a parallel launch arrives after you have
    written a later row of that member (the Security plan review's notification after its delta row, the
@@ -101,7 +114,7 @@ action yourself — including follow-up issues the Lead decides on.
    A notification that never arrives (the launch ended on an error, the session was resumed) is marked with
    `--amend-last "<member>" --unreported --agent squad-<role>` and no numbers, so the summary counts the
    launch and names it instead of refusing the table. A continued launch (*Continue a member*) is logged
-   with the same options plus `--continued`. The wrap-up sums the trailers per role. After every member's report, commit and push the files it left in the work
+   with the same options plus `--continued` (or `--continued-from "<step>"`, see there). The wrap-up sums the trailers per role. After every member's report, commit and push the files it left in the work
    folder (the Lead's records, the Tester's tests) yourself, so the next report does not list them as
    untracked noise.
 2. **Plan.** Launch `squad-lead` in mode `plan` with the issue text and the work folder. It returns one of:
@@ -153,7 +166,8 @@ action yourself — including follow-up issues the Lead decides on.
    production and test code — see *Changes without production or test code* in `.squad/routing.md`, which also
    skips step 5 and the *Coverage gate* in step 6 and requires the plan's *Verification without tests* section;
    log the skipped steps and run the verification named there instead). Launch `squad-dev` in mode `skeleton`: the planned
-   signatures built as *Skeleton* in `.squad/stack.md` describes (bodies fail when called), plus the existing
+   signatures built as *Skeleton* in `.squad/stack.md` describes (the profile's body is the default; a zero-value stub only where it would break a passing
+   test, with the new tests still failing on it, reported by the Dev as a deviation), plus the existing
    test call sites the plan assigns to the Dev for an incompatible signature change, so the tests of step 5
    compile.
 5. **Tests first** (skipped for `trivial`). Launch `squad-tester` in mode `tests-first`: only the tests the
@@ -173,7 +187,10 @@ action yourself — including follow-up issues the Lead decides on.
    its test, or a reviewer asks for a test — and pass that reason; if the gate already passes and the only
    uncovered lines are accepted gaps, skip the pass and log why in `log.md`. Repeat Dev/Tester until the gate passes. Lines reported as not unit-testable go to
    `squad-lead` in mode `decide`; an accepted gap is recorded in `log.md`.
-7. **Code check.** Run the gates yourself first, with the commands from `.squad/stack.md`: *Format check*,
+7. **Code check.** Before the first review round, fetch `main` and merge it when the work branch lacks its
+   latest commit (`git merge-base --is-ancestor origin/main HEAD` fails), as *Merge conflicts* in
+   `.squad/routing.md` says — renumber a decision record whose number `main` took meanwhile, with its index row
+   and every link to it. Then run the gates yourself first, with the commands from `.squad/stack.md`: *Format check*,
    the *Analyzer gate* (no diagnostic of any severity in a changed file), *Test*, the *Coverage gate* (not
    for a change without production or test code) and `python3 .squad/tools/scope-check.py`. Keep the output:
    the reviewers get it in step 8. If everything passes, step 7 is done without launching anyone. Dev and
@@ -216,7 +233,10 @@ action yourself — including follow-up issues the Lead decides on.
    review round is clean and nothing but `specs/` bookkeeping and the verbatim documentation fixes of that
    round (step 8, logged) changed since it ran — when a delta round is
    due, run it first, never launch the Lead to find that out; the gates of step 7 pass on this head;
-   the area documents and documentation updates the plan names are in the diff. Then set each `Proposed`
+   the area documents and documentation updates the plan names are in the diff; `main` has not moved since
+   the merge of step 7, or it is merged again first (*Merge conflicts* in `.squad/routing.md`: the gates of
+   step 7 again, and steps 7–8 for a resolution that rewrote code or a statement the merge made untrue).
+   Then set each `Proposed`
    decision record of this change and its index row in `docs/decisions/README.md` (the Lead added it with
    the record) to `Accepted` and run `python3 .squad/tools/decision-check.py` (bookkeeping, like `log.md`). Launch `squad-lead` in mode
    `approve-pr` — with the base ref, the gate output, the review outcome and the open points — only when a
@@ -255,6 +275,11 @@ action yourself — including follow-up issues the Lead decides on.
     - code-analysis findings → `squad-code-officer` (structural ones → `squad-dev`);
     - failing build or tests → `squad-dev` (test defects → `squad-tester`);
     - review comments (human, automated, `review-pr`) → `squad-dev`, worked in this PR, blocking or not.
+
+    While a member is running, wait for its hand-back before ending your turn: after the PR every push costs a
+    CI cycle. When a stop hook still forces a commit and push of a half-finished tree, log that head as work in
+    progress (a row naming the SHA) and do not judge CI or the code analysis on it; the commit that closes the
+    round is the head to judge.
 
     Continue the member that made the change and the reviewer of the last round where their agent ids are
     still known (*Continue a member*). Each fix goes through steps 7–8 again (delta review; `scope-check.py --no-specs` from now on), with at

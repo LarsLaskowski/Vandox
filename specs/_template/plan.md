@@ -21,6 +21,11 @@ about a container image or another build output names the *Image build check* fr
 verification, run by the Dev before the review (*Criteria verified only in CI* in `.squad/routing.md`) — a
 build from the full working tree verifies nothing about the image.
 
+## Behavior coverage
+
+For a feature: each bullet of `spec.md`'s *Behavior* mapped to the acceptance criterion that covers it, or
+"out of scope" — the Tester checks that every field a criterion names is asserted. Otherwise delete this section.
+
 ## Verification without tests
 
 Only when the change touches no production or test code, in any tier: steps 4, 5 and the *Coverage gate*

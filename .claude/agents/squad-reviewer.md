@@ -139,6 +139,14 @@ hold in every repository:
   check it against the tier and against what `SECURITY.md` promises.
 - **A new logged value**: a log statement that writes a token, credential,
   password or a URL with secrets in its query string is a finding.
+- **Logger arguments**: when the diff adds or changes a log call, grep the
+  names of its arguments (variables, fields, properties, constants) against
+  the sensitive-name list in *Logger arguments* of `.squad/stack.md`. A match
+  is a blocking finding even when only a harmless name or label is logged:
+  the CI code scanning (e.g. CodeQL) judges by the name and reports it only
+  after the PR is open, where no local gate sees it. The remedy is the one
+  that section names (a neutral name for the value); a stack without the
+  section has nothing to check here.
 - **A new dependency** follows *Dependencies* in `.squad/stack.md` (e.g. a
   central version file); a version outside that mechanism is blocking.
 - **A change to project conventions** touches `CLAUDE.md`,
