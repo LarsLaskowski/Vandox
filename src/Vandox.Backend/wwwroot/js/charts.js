@@ -59,9 +59,9 @@ function withAlpha(color, alpha) {
     }
 
     const digits = hex[1].length === 3 ? hex[1].replace(/./g, "$&$&") : hex[1];
-    const red = parseInt(digits.slice(0, 2), 16);
-    const green = parseInt(digits.slice(2, 4), 16);
-    const blue = parseInt(digits.slice(4, 6), 16);
+    const red = Number.parseInt(digits.slice(0, 2), 16);
+    const green = Number.parseInt(digits.slice(2, 4), 16);
+    const blue = Number.parseInt(digits.slice(4, 6), 16);
 
     return "rgba(" + red + ", " + green + ", " + blue + ", " + alpha + ")";
 }

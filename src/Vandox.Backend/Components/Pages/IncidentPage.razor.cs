@@ -26,6 +26,8 @@ public sealed partial class IncidentPage : ComponentBase, IDisposable
 
     private long? _loadedId;
 
+    private Incident? _stored;
+
     private IncidentDetailView? _detail;
 
     private IncidentWindowData? _window;
@@ -131,8 +133,6 @@ public sealed partial class IncidentPage : ComponentBase, IDisposable
             return;
         }
 
-        Incident? incident = null;
-
         await _runner.RunAsync(async token =>
                                {
                                    var stored = await Browser.IncidentAsync(id, token).ConfigureAwait(true);
@@ -151,11 +151,10 @@ public sealed partial class IncidentPage : ComponentBase, IDisposable
 
                                    token.ThrowIfCancellationRequested();
                                    Apply(stored, notes);
-                                   incident = stored.Incident;
                                })
                      .ConfigureAwait(true);
 
-        if (incident is not null && _loadedId == id)
+        if (_stored is { } incident && _loadedId == id)
         {
             await ReadWindowAsync(incident).ConfigureAwait(true);
         }
@@ -191,6 +190,7 @@ public sealed partial class IncidentPage : ComponentBase, IDisposable
     {
         var own = notes.Notes.FirstOrDefault(note => note.WrittenFor == stored.Id);
 
+        _stored = stored.Incident;
         _detail = IncidentDetailView.From(stored);
         _ownText = own?.Text ?? string.Empty;
         _ownUpdatedAt = own?.UpdatedAt;
@@ -204,6 +204,7 @@ public sealed partial class IncidentPage : ComponentBase, IDisposable
     /// </summary>
     private void Reset()
     {
+        _stored = null;
         _detail = null;
         _window = null;
         _moved = [];
