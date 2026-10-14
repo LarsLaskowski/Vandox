@@ -473,7 +473,7 @@ After `vandoxd incidents` the web UI shows the stored incidents under *Incidents
 - **An incident** (`/incidents/<number>`) shows its window, its kills, the hypothesis, the timeline (a kill, a boot and the backup
   start and end are marked), the connection peak, the metric extremes and the new and unusually frequent log templates. Three charts
   show the memory per program (stacked, the five largest programs and the rest), the available memory and swap, and the number of
-  connections over the window. A chart holds at most 300 snapshots and says where it stops; a window without stored snapshots shows
+  connections over the window. A chart holds at most 300 snapshots and says where it stops; a window without stored snapshots or metrics shows
   no chart. An incident that does not exist (for example one that a re-run merged into another) says so.
 - **Every time links to the logs of that moment**: a time on the incident page opens *Logs* with the range from 30 seconds before to
   5 minutes after it, so the moment is at the top of the first page.
