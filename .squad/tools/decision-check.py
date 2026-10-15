@@ -48,6 +48,7 @@ INDEX_NUMBER = re.compile(r"^\d{4}$")
 RECORD_LINK = re.compile(r"\[(\d{4})\]\([^)]*\)")
 LINK_TARGET = re.compile(r"\]\(<?([^)\s>]+)>?(?:\s+\"[^\"]*\")?\)")
 RELEASE_TAGS = "v*"
+INDEX_FILE = "README.md"
 
 
 def plain(text):
@@ -112,9 +113,9 @@ def check_record_links(root, records, errors):
     """Every relative Markdown link from a record or the index to a record file must name an existing file."""
     decisions = os.path.join(root, DECISIONS_DIR)
     sources = [(record["rel"], record["text"]) for record in records.values()]
-    index = os.path.join(decisions, "README.md")
+    index = os.path.join(decisions, INDEX_FILE)
     if os.path.isfile(index):
-        sources.append((f"{DECISIONS_DIR}/README.md".replace(os.sep, "/"), read_text(index)))
+        sources.append((f"{DECISIONS_DIR}/{INDEX_FILE}".replace(os.sep, "/"), read_text(index)))
     for rel, text in sources:
         for target in LINK_TARGET.findall(text):
             path = target.split("#", 1)[0]
@@ -135,7 +136,7 @@ def parse_index_row(line):
 
 
 def check_index(root, records, errors):
-    path = os.path.join(root, DECISIONS_DIR, "README.md")
+    path = os.path.join(root, DECISIONS_DIR, INDEX_FILE)
     if not os.path.isfile(path):
         if records:
             errors.append(f"{DECISIONS_DIR}/README.md is missing")
@@ -178,7 +179,7 @@ def parse_area_row(line):
 
 def load_areas(root, errors):
     """Area name -> document for the areas `docs/areas/README.md` lists; empty without a list."""
-    path = os.path.join(root, AREAS_DIR, "README.md")
+    path = os.path.join(root, AREAS_DIR, INDEX_FILE)
     block = AREA_INDEX_BLOCK.search(read_text(path)) if os.path.isfile(path) else None
     areas = {}
     for line in block.group(1).splitlines() if block else []:

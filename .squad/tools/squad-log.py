@@ -129,7 +129,9 @@ def trailer(launch, tokens, tool_uses, seconds, continued=False, origin=None):
     launch = cell(launch)
     if tokens is None:
         return f"({launch} · {UNREPORTED})"
-    mark = (f" · continued from {cell(origin)}" if origin else " · continued") if continued else ""
+    mark = ""
+    if continued:
+        mark = f" · continued from {cell(origin)}" if origin else " · continued"
     return f"({launch} · {tokens:,} tokens · {tool_uses} tool uses · {seconds} s{mark})"
 
 
