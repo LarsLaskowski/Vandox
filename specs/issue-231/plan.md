@@ -423,3 +423,11 @@ run single across the service.
 - A remembered language preference across visits (record 0108, options 10 and 11).
 - A report run in the background with a stored result (option 17).
 - An *Overview* page link to the report (the home page text is not changed by this issue).
+
+## Challenge notes
+
+Devil's Advocate verdict: OBJECTIONS 0 major, 2 minor.
+
+**Minor 1: wrong line reference.** The plan says `ActionRun.Start` fixes the deadline "at `LogsView.Deadline` (`Logs/ActionRun.cs:180`)". `src/Vandox.Backend/Logs/ActionRun.cs` has only 152 lines. The deadline is set at `ActionRun.cs:109`, as `new CancellationTokenSource(LogsView.Deadline, _clock)`. The claim itself is true. The Dev should use line 109 as the place to add the deadline overload. `LogsView.Deadline` is defined at `LogsView.cs:119`.
+
+**Minor 2: the page and the command show different content.** The page's own wording says it "shows the same content as `vandoxd report`", but AC8 limits it to 50 outages per page, while the command and the download list all of them. AC1 only compares the page with the Markdown for samples of at most 50 outages. The Dev and Reviewer should state this difference in the area document's *Report page* section, so the issue's "same content" criterion is read as "same content per outage page". The AC1/AC8 split is otherwise consistent, and the issue's "outages are read one at a time" is met by `Limit 1`.
