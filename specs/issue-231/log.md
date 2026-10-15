@@ -24,3 +24,4 @@ are quoted in full.
 | 2026-10-15 19:49 | 8 Fix round 1 tests (diagnose) | squad-tester | Test double bug in StartingResponseBody (re-entrant sync override), not production; fixed; 43/43 in affected classes (sonnet/medium · 12,701 tokens · 11 tool uses · 429 s · continued) |
 | 2026-10-15 19:54 | 7 Code check (after review 1) | Orchestrator | Format 0/671, analyzer gate PASS, tests all pass (Backend 928), coverage 100% changed / 98.4% overall, scope and decision checks PASS |
 | 2026-10-15 19:54 | 8 Review round 2 (delta) | squad-reviewer | VERDICT: APPROVE on 8569e9f; blocking finding and pager finding fixed (opus/medium · 12,709 tokens · 3 tool uses · 22 s · continued) |
+| 2026-10-15 19:56 | 8 Security diff (delta) | squad-security | VERDICT: CHANGES_REQUIRED on 8569e9f: failure before first byte answers 200+abort on Kestrel (await using disposal flush starts response); 503/500 never reach a real client; test double hides it |
