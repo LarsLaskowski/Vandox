@@ -73,16 +73,25 @@ How long and how many runs:
 
 How the download writes to the response (the server refuses synchronous I/O):
 
-18. **A `StreamWriter` over the response body without `AutoFlush`, disposed with `await using`, and the Markdown writer flushing each
-    part with `FlushAsync`** (chosen) — in the test against the running service (Kestrel) every download answered `500` while the writer
-    was created with `AutoFlush = true`: setting that property flushes at once and synchronously, before anything is written, and the
-    response body refuses synchronous I/O. Without it the writer only writes and flushes asynchronously, and its asynchronous disposal
-    flushes asynchronously too (measured in a scratch program: a stream that throws on `Write` and `Flush` sees neither). Each part of the
-    report still reaches the client when it is written, because the Markdown writer flushes after each part.
+18. **A `StreamWriter` over the response body without `AutoFlush`, flushed and disposed only after a complete run, and the Markdown
+    writer flushing each part with `FlushAsync`** (chosen) — in the test against the running service (Kestrel) every download answered
+    `500` while the writer was created with `AutoFlush = true`: setting that property flushes at once and synchronously, before anything
+    is written, and the response body refuses synchronous I/O. Without it the writer only writes and flushes asynchronously (measured in
+    a scratch program: a stream that throws on `Write` and `Flush` sees neither). Each part of the report still reaches the client when
+    it is written, because the Markdown writer flushes after each part. The writer is not disposed with `await using`: its disposal
+    flushes the response body even when nothing was written, and on Kestrel a flush starts the response (status `200` and the file
+    headers; measured with a scratch Kestrel program: after the disposal `HasStarted` is true and the client receives `200` with
+    `Content-Disposition`, then a reset). A run that fails before its first part would then abort instead of answering `503` or `500`.
+    So nothing flushes the body before the first part is written; on a failed run the writer is left undisposed (it holds no
+    unmanaged resource and leaves the response body open), on a complete run it is flushed and disposed asynchronously.
 19. **`AllowSynchronousIO` on the server** — allows blocking writes for every request instead of keeping the writer asynchronous.
-20. **The writer flushed but never disposed** — an undisposed writer the analyzers report, kept alive only by the response.
+20. **The writer flushed but never disposed** — an undisposed writer on the path that succeeds, kept alive only by the response; option
+    18 leaves it undisposed only on a failed run, where the disposal would start the response.
 21. **A write-only wrapper of the response body whose synchronous `Flush()` does nothing** (with `AutoFlush = true`) — a new type and its
     tests only to absorb the synchronous flush that the `AutoFlush` setter makes; removing the setter removes the cause.
+22. **Every failed download run aborts the connection** (keeping `await using`) — simpler, but a deadline or a store failure before the
+    first part, including the wait for the run slot, would reach the client as a reset after `200` instead of `503` or `500`, and a
+    browser cannot tell a busy service from a broken one.
 
 ## Decision
 
@@ -99,7 +108,8 @@ Options 1, 5, 9, 12, 15 and 18. The page `/report` and the download `/report/mar
   time of a run on a large database is measured once and written into the area document.
 - A second user, or the download next to an open page, waits for the running report within its own deadline.
 - A failure before the first byte of the download removes the file headers and sets only the status; it never clears the response, so
-  the security headers and `Cache-Control: no-store` stay.
+  the security headers and `Cache-Control: no-store` stay. Nothing flushes the response body before the first part of the report, because
+  a flush starts the response on the server; the test double of the response body starts the response on a flush as Kestrel does.
 - The incident store of the web refuses to save with a faulted task, so callers that await it see the refusal as from any store.
 - Another site can make a signed-in browser open the page or the download and so start a run; it changes nothing and is bounded by
   the run limit and the deadline.

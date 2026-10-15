@@ -287,8 +287,9 @@ service, the gate is held per store call (a window read of many snapshots takes 
   without a byte order mark. The response carries `Content-Type: text/markdown; charset=utf-8`, `Content-Disposition: attachment;
   filename="vandox-report-<language>.md"` and `Cache-Control: no-store`, besides the security headers of every response (`X-Content-Type-Options:
   nosniff` keeps a browser from reading the Markdown as HTML). The report is written to the response as it is made; it is not held in memory.
-- A run that reaches its deadline before anything is written is answered with `503`, a store failure before it with `500` (logged with the exception
-  only: `report download: making the report failed`), both without a body and without the headers of the file (`Cache-Control: no-store` and the security headers stay). Once the first byte is written the status
+- A run that reaches its deadline before anything is written (also while it waits for the run slot) is answered with `503`, a store failure before it with `500` (logged with the exception
+  only: `report download: making the report failed`), both without a body and without the headers of the file (`Cache-Control: no-store` and the security headers stay). Nothing is flushed to the response before the first part of the report, since a flush
+  starts the response on the server. Once the first byte is written the status
   cannot change: a failure then aborts the connection, so that no truncated file looks complete (a deadline is not logged, as in the views). A client
   that closes the connection ends the run silently.
 

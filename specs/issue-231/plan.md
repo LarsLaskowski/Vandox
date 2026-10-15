@@ -182,7 +182,7 @@ The issue's requirements mapped to the criteria:
    Disposing cancels the run.
 8. **`ReportDownloadEndpoint`** (`GET /report/markdown`, no `AllowAnonymous`): parses the request's query string with `ReportAddress.Parse`
    (`400` without body on an error, before any run); sets the headers of AC2; runs `ReportService` into a `MarkdownReportWriter` over a
-   `StreamWriter(Response.Body, new UTF8Encoding(false), 1024, leaveOpen: true)` without `AutoFlush` (disposed with `await using`; D4) under a `CancellationTokenSource(ReportsView.Deadline, clock)` linked with
+   `StreamWriter(Response.Body, new UTF8Encoding(false), 1024, leaveOpen: true)` without `AutoFlush` (flushed and disposed only after a complete run, never with `await using`; D4, D6) under a `CancellationTokenSource(ReportsView.Deadline, clock)` linked with
    `RequestAborted`; flushes. Failures as AC6: before `Response.HasStarted` → status `503` (deadline) or `500` (store failure, logged), after
    it → `Abort()` (store failure logged; deadline not logged, like the views). A cancellation by the client ends silently. Before the first
    byte a failure removes `Content-Disposition` and `Content-Type` and sets only the status (no `Response.Clear()`; `Cache-Control: no-store`
@@ -496,6 +496,30 @@ Devil's Advocate verdict: OBJECTIONS 0 major, 2 minor.
   - **Lead** (done): `docs/areas/web-ui.md` (*Outages in pages of 50*).
 - **D4/D5 review:** both change production code after Security's approval on c5de9c0 (D4 the download path of a `security` change), so the
   next review round is a delta round of the Reviewer and a Security delta confirmation on the download endpoint.
+
+- **D6 — decide after Security's delta round on 8569e9f (fix round 2, final), blocking finding: no flush before the first part.** The
+  Lead re-ran Security's Kestrel probe (scratch `flushprobe/Program.cs`): a `StreamWriter` disposed with `await using` before any write
+  calls `Response.Body.FlushAsync()`, after which `HasStarted` is true and curl receives `200` with `Content-Disposition`, then a reset.
+  So with the current `await using` in `ReportDownloadEndpoint.WriteAsync` every failure before the first part (deadline while waiting
+  for the run slot or in the first pass, store failure before the summary) aborts on a real server instead of answering `503`/`500`
+  (AC6); the tests passed only because `StartingResponseBody.FlushAsync` never starts the response. Option (a) is taken: nothing flushes
+  the response body before the first part; option (b) (every failure aborts) is rejected as 0108 option 22. AC6 and its test names are
+  unchanged. Owners:
+  - **Dev**, `src/Vandox.Backend/Reports/ReportDownloadEndpoint.cs`, `WriteAsync`: replace `await using var writer = ...` with
+    `var writer = new StreamWriter(context.Response.Body, new UTF8Encoding(false), BufferChars, true);`, then unchanged
+    `RunAsync(...)` and `await writer.FlushAsync(cancellationToken)`, then `await writer.DisposeAsync().ConfigureAwait(false);` as the
+    last statement (no `try`/`finally`, no `using`). Doc comment of `WriteAsync`: add that the writer is flushed and disposed only after
+    a complete run, because its disposal flushes the body and a flush starts the response on the server, so a failed run leaves it
+    undisposed (no unmanaged resource, body left open). Signatures unchanged. `MarkdownReportWriter` unchanged.
+  - **Tester** (first, the two tests turn red on 8569e9f), `tests/Vandox.Backend.Tests/StartingResponseBody.cs`: `FlushAsync` sets
+    `_feature.Started = true` before returning when its token is not cancelled (Kestrel starts the response on any flush, also of
+    zero bytes); the class summary and `StartingResponseFeature`'s summary say "with the first byte or the first flush".
+    `ReportDownloadEndpointTests.ReportDownloadEndpointAnswers503AtTheDeadline` and
+    `ReportDownloadEndpointAnswers500WhenTheStoreFailsBeforeWriting` stay as they are and now exercise the real path (they fail with
+    `await using`, pass with the Dev's change); every other download test stays green unchanged.
+  - **Lead** (done): record 0108 option 18 rewritten, option 20 reworded, option 22 added, *Consequences*; `docs/areas/web-ui.md`
+    (*Report page*, download failures: the wait for the run slot, nothing flushed before the first part); this plan.
+  - Next: Reviewer delta round and Security delta confirmation on the download endpoint.
 
 ## Security plan review notes
 
