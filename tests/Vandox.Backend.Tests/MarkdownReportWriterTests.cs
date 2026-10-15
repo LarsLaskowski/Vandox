@@ -1,3 +1,5 @@
+using System.Text;
+
 using Vandox.Backend.Reports;
 using Vandox.Core.Incidents;
 using Vandox.Core.Reports;
@@ -53,6 +55,38 @@ public class MarkdownReportWriterTests
 
         // Assert
         Assert.AreEqual(expected, buffer.ToString().Replace("\r\n", "\n", StringComparison.Ordinal), "the report equals the golden file");
+    }
+
+    /// <summary>
+    /// Each part reaches the stream when it is written, even when the buffer of the writer is far larger than the part.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task MarkdownReportWriterFlushesEachPart()
+    {
+        // Arrange
+        var outages = RichOutages();
+        var stream = new MemoryStream();
+
+        await using var buffer = new StreamWriter(stream, new UTF8Encoding(false), 65536, true);
+
+        var writer = new MarkdownReportWriter(buffer, ReportText.English);
+        var lengths = new List<long>();
+
+        // Act
+        await writer.WriteSummaryAsync(RichSummary());
+        lengths.Add(stream.Length);
+
+        await writer.WriteIncidentAsync(outages[0].Stored, outages[0].Activities);
+        lengths.Add(stream.Length);
+
+        await writer.WriteNotesAsync(RichSummary(), outages.Count);
+        lengths.Add(stream.Length);
+
+        // Assert
+        Assert.IsGreaterThan(0L, lengths[0], "the summary reached the stream");
+        Assert.IsGreaterThan(lengths[0], lengths[1], "the outage reached the stream");
+        Assert.IsGreaterThan(lengths[1], lengths[2], "the notes reached the stream");
     }
 
     /// <summary>

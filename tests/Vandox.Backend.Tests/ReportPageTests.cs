@@ -279,6 +279,53 @@ public class ReportPageTests
     }
 
     /// <summary>
+    /// When the stored outages shrink to a few while the second page is shown, the page offers no outage and no range but the way back, and the first outages show the few that are left.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task ReportPageOffersTheFirstOutagesWhenTheOutagesShrink()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+
+        await SaveOutagesAsync(store, 51);
+
+        var shrinking = new ShrinkableIncidentStore(store);
+
+        await using var harness = new ReportPageHarness(Address, store, shrinking);
+
+        await harness.AddAsync<ReportPage>().WaitAsync(TimeSpan.FromSeconds(20), TestContext.CancellationToken);
+
+        shrinking.LastId = 3;
+
+        // Act
+        await harness.Renderer.ClickAsync(harness.Actions(ReportsView.NextOutages).Single());
+        await harness.WaitForHtmlAsync(html => html.Contains(Enc(ReportsView.FirstOutages), StringComparison.Ordinal))
+                     .WaitAsync(TimeSpan.FromSeconds(10), TestContext.CancellationToken);
+
+        var shrunkPieces = harness.Pieces();
+        var shrunkHtml = harness.Html();
+        var shrunkNext = harness.Actions(ReportsView.NextOutages);
+        var shrunkFirst = harness.Actions(ReportsView.FirstOutages);
+
+        await harness.Renderer.ClickAsync(shrunkFirst.Single());
+        await harness.WaitForHtmlAsync(html => html.Contains(Enc("Outage #3 at"), StringComparison.Ordinal))
+                     .WaitAsync(TimeSpan.FromSeconds(10), TestContext.CancellationToken);
+
+        var back = harness.Pieces();
+
+        // Assert
+        Assert.DoesNotContain(piece => piece.StartsWith("Outage #", StringComparison.Ordinal), shrunkPieces, "no outage is listed on the second page");
+        Assert.DoesNotContain("Outages 51 to", shrunkHtml, "no range line");
+        Assert.IsEmpty(shrunkNext, "no next outages");
+        Assert.HasCount(1, shrunkFirst, "the first outages are offered");
+        Assert.HasCount(3, back.Where(piece => piece.StartsWith("Outage #", StringComparison.Ordinal)).ToList(), "the three outages that are left");
+        Assert.IsEmpty(harness.Actions(ReportsView.NextOutages), "no pager next");
+        Assert.IsEmpty(harness.Actions(ReportsView.FirstOutages), "no pager first");
+    }
+
+    /// <summary>
     /// The page links both languages and the download of the language that is shown, and the download link carries the download attribute.
     /// </summary>
     /// <param name="language">The language of the address</param>

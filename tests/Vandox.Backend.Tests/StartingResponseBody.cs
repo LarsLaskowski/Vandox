@@ -1,10 +1,16 @@
 namespace Vandox.Backend.Tests;
 
 /// <summary>
-/// A response body in memory that starts its <see cref="StartingResponseFeature"/> with the first byte.
+/// A response body in memory that starts its <see cref="StartingResponseFeature"/> with the first byte and refuses synchronous I/O as the server does.
 /// </summary>
 internal sealed class StartingResponseBody : MemoryStream
 {
+    #region Constants
+
+    private const string SynchronousRefusal = "Synchronous operations are disallowed.";
+
+    #endregion // Constants
+
     #region Fields
 
     private readonly StartingResponseFeature _feature;
@@ -36,33 +42,55 @@ internal sealed class StartingResponseBody : MemoryStream
     #region Stream
 
     /// <inheritdoc />
+    public override void Flush()
+    {
+        throw new InvalidOperationException(SynchronousRefusal);
+    }
+
+    /// <inheritdoc />
     public override void Write(byte[] buffer, int offset, int count)
     {
-        _feature.Started = _feature.Started || count > 0;
-        base.Write(buffer, offset, count);
+        throw new InvalidOperationException(SynchronousRefusal);
     }
 
     /// <inheritdoc />
     public override void Write(ReadOnlySpan<byte> buffer)
     {
-        _feature.Started = _feature.Started || buffer.Length > 0;
-        base.Write(buffer);
+        throw new InvalidOperationException(SynchronousRefusal);
+    }
+
+    /// <inheritdoc />
+    public override Task FlushAsync(CancellationToken cancellationToken)
+    {
+        return cancellationToken.IsCancellationRequested ? Task.FromCanceled(cancellationToken) : Task.CompletedTask;
     }
 
     /// <inheritdoc />
     public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
     {
-        _feature.Started = _feature.Started || buffer.Length > 0;
+        if (cancellationToken.IsCancellationRequested)
+        {
+            return ValueTask.FromCanceled(cancellationToken);
+        }
 
-        return base.WriteAsync(buffer, cancellationToken);
+        _feature.Started = _feature.Started || buffer.Length > 0;
+        base.Write(buffer.Span);
+
+        return ValueTask.CompletedTask;
     }
 
     /// <inheritdoc />
     public override Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
     {
-        _feature.Started = _feature.Started || count > 0;
+        if (cancellationToken.IsCancellationRequested)
+        {
+            return Task.FromCanceled(cancellationToken);
+        }
 
-        return base.WriteAsync(buffer, offset, count, cancellationToken);
+        _feature.Started = _feature.Started || count > 0;
+        base.Write(buffer, offset, count);
+
+        return Task.CompletedTask;
     }
 
     #endregion // Stream
