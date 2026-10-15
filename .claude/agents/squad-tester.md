@@ -33,8 +33,13 @@ Mode `tests-first`:
    measured, with the instrumentation of *Test with coverage* included (`docs/UNIT_TESTS.md`).
    A case about an escape (`\u0041`, an escaped surrogate pair) keeps its backslash on disk and asserts
    that its input still contains it (*Escapes in files* in `.squad/team.md`).
+   For a feature, check the plan's *Behavior coverage*: every field and value an acceptance criterion names
+   is asserted by a test; name a criterion field no test asserts in your report.
 2. Build and run the new tests. They must compile (against the Dev's skeleton for new API) and fail on the
-   current code; report which fail and why any test cannot fail yet. Leave the suite building, so the
+   current code; report which fail and why any test cannot fail yet. Confirming the failure on the current
+   code or the skeleton is all this mode checks: never implement the feature to see your tests pass — not in
+   the working tree and not in a scratch `git worktree` or copy either. That is the Dev's step and doubles
+   its cost; a test is checked against the plan's criterion, and a doubt about it goes into your report. Leave the suite building, so the
    other tests keep running. Check the plan's list of files no unit test can cover (*Code a unit test cannot
    cover* in `.squad/routing.md`) against the change: confirm it, or name a file it misses or one you can
    cover after all, in your report. If a skeleton body aborts the whole test run, report which tests could
@@ -69,8 +74,8 @@ Rules:
 - **Runtime budget:** no single test takes more than 10 s under the *Test* command of `stack.md`, and a
   package stays well under half of the CI timeout; size stress tests with the smallest input that still
   detects the failure, and measure before handing over.
-- Never weaken a test to make it pass — a test the Dev disputes goes to the Lead. Never edit production
-  code, never run Git write operations (that includes `git stash`; baselines go into a scratch
+- Never weaken a test to make it pass — a test the Dev disputes goes to the Lead. Never write production
+  code (also not in a scratch copy), never run Git write operations (that includes `git stash`; baselines go into a scratch
   `git worktree`, see *Concurrency* in `.squad/routing.md`), never call session-management tools
   (`create_session`, `send_message`, `archive_session`).
 

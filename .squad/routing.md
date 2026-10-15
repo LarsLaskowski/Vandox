@@ -9,7 +9,8 @@ launch with its model and effort (`--agent`) and the usage its task notification
 added later with `--amend-last` when the notification follows the hand-back (`--step "<step>"` reaches a row
 that is no longer the member's last, as after parallel launches; `--unreported` marks a launch whose
 notification never came), corrected with `--replace-last` and reduced to the round's share with `--continued`
-for a continued member — (after step 10, in the "Squad working record" comment that replaces it). Step numbers below are the ones the skills use.
+for a continued member (`--continued-from "<step>"` when the agent continued is not the member's last fresh
+launch) — (after step 10, in the "Squad working record" comment that replaces it). Step numbers below are the ones the skills use.
 
 ## Work folder
 
@@ -183,8 +184,16 @@ or the Agent tool's resume) with the findings and the new head SHA, instead of a
 `CLAUDE.md`, `stack.md`, `project.md`, the plan and the code. A fresh launch stays the rule for the first
 launch of a mode, after a session restart (the agent id is gone) and when the previous launch ended on an
 API error. The log records a continuation as a launch of that member (`squad-log.py … --continued`): the
-notification reports the agent's totals since its first launch, the script writes this round's share and
-marks the trailer, so the summary counts every token once and shows how many launches were continuations.
+notification reports the agent's tokens since its first launch but its tool uses and duration for the round
+alone, so the script subtracts the earlier tokens only, writes this round's share and marks the trailer; the
+summary counts every token once and shows how many launches were continuations. When a member ran several
+task groups in fresh launches and the agent of an earlier one is continued, log it with
+`--continued-from "<step cell of that launch>"`, so the tokens of the right agent are subtracted.
+
+Each continuation reloads the agent's whole conversation, so its cost grows with every round. Once an agent
+has been continued five times or its reported tokens pass 300,000, the next round is a fresh launch with a
+short hand-over instead — the plan or task group, what the earlier rounds settled, the open findings and the
+head SHA — which is cheaper than another continuation.
 
 Commits and pushes to the work branch happen right after intake (`specs/<folder>/log.md`, so a stop hook
 or a crashed session finds no untracked files) and after every further completed step; with *Squash and
@@ -192,7 +201,9 @@ merge* only the PR title and description reach `main`, so intermediate commits m
 They never contain secrets. A stop hook may demand a commit while a member is still working; that interim
 commit ("Work in progress: …") is fine, and the commit that closes the round gets a final subject. Before
 the PR such commits cost nothing; after it every push re-triggers CI and the code analysis, so edits are
-batched and committed once per round.
+batched and committed once per round. After the PR the orchestrator waits for the running member's hand-back
+before it ends its turn; when a hook still forces a push of a half-finished tree, that head is logged as work in
+progress and neither CI nor the code analysis is judged on it.
 
 ### Draft until green
 
@@ -237,6 +248,21 @@ or test code is resolved by the member that owns it (Dev or Tester), and a resol
 rather than taking both sides unchanged is a fix that goes through steps 7–8 again. When both sides changed
 the same logic and either choice loses behavior, the Lead decides (the user, outside the squad skills). The
 check of *Draft until green* then starts again on the new head.
+
+While a merge waits for the owning member's resolution, the working tree holds conflict markers and is not
+committed: a stop hook that asks for a commit meanwhile is answered with that explanation (merge in progress,
+resolution pending with the named member), and the merge commit follows once the conflicts are resolved and
+the gates pass. A record number that `main` took in the meantime is renumbered on the work branch — the
+record file, its index row and every link to it, in records, area documents and the docs — and
+`decision-check.py` must pass on the merged head (it reports a number used twice and a link to a record file
+that does not exist).
+
+A long run does not wait for the PR to meet a moved base: before the first review round (step 7) and again
+before PR approval (step 9), the orchestrator fetches `main` and merges it when the work branch lacks its
+latest commit (`git merge-base --is-ancestor origin/main HEAD` fails), so the reviewers see the merged code and
+the security statements of the change are checked against what `main` holds now. A merge that took both sides
+unchanged needs the gates of step 7 again, not a new review round; a resolution that rewrote code, or a
+statement of the change that the merged `main` made untrue, goes through steps 7–8 as a fix.
 
 ## Plan challenge
 

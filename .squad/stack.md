@@ -270,6 +270,9 @@ return a zero value or an error (`errors.New("not implemented")`) where the sign
 `panic("not implemented")` only where it does not (a `panic` aborts the whole test binary), so the module
 builds and the tests compile and fail. C#: new types and members with their full signature and XML
 documentation, bodies `throw new NotImplementedException();`, so the solution builds and the tests compile and fail.
+Constructors store their arguments and never throw: a test harness builds these types, so only member bodies
+fail. The skeleton body above is the default; a zero-value stub is allowed only where it would break a test that
+exists and passes today: the new tests must still fail on the stub, and the Dev reports it as a deviation.
 New skeleton files follow the C# layout in *Writing code* (no final newline); run *Format* on them before *Build*.
 Reihitsu `RH2003` forbids `NotImplementedException` and Sonar `S2325` flags instance members that do not use `this`,
 so every skeleton file carries `#pragma warning disable RH2003, S2325` before its type and the Dev
@@ -307,3 +310,8 @@ collide on `obj/` and `bin/`.
   version (`go 1.27` -> `go1.27.0`). `go tool govulncheck ./...` can then report standard-library
   vulnerabilities that the current patch, the one CI uses, already fixes. Select the current patch
   (`GOTOOLCHAIN=go1.27.<n>`) before trusting a local scan.
+- `reihitsu-format` rewrites a `\u` escape in a C# string literal into the character it names, so a literal
+  U+2028 then breaks the compilation and a test about an escape tests the wrong input. After *Format*, check
+  the escapes of the changed files on disk (`grep -n '\\u' <file>`, *Escapes in files* in `.squad/team.md`);
+  where the formatter keeps rewriting one, build the character at run time (`char.ConvertFromUtf32(0x2028)`)
+  instead of writing it as an escape in a literal.

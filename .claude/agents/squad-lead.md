@@ -46,11 +46,17 @@ The orchestrator tells you which **mode** to run:
   - acceptance criteria the Tester can turn into unit tests, each with the name of its test (one or a few
     per criterion) — the Tester writes exactly those first, so a criterion without a testable statement is
     a plan defect;
+  - for a feature, the **Behavior coverage**: every bullet of `spec.md`'s *Behavior* mapped to the acceptance
+    criterion that covers it, or marked "out of scope" — a bullet no criterion names is never asserted by the
+    Tester and never built by the Dev;
   - the exact **signatures** of every new or changed member (for the Dev's skeleton) and the existing files
     the skeleton must rewrite — a file you call final is one you read and found so;
   - the **test files**, named strictly by *Layout* in `.squad/stack.md` and `docs/UNIT_TESTS.md`, and the
     existing test call sites a changed signature affects, with who adapts them (*Loop limits* in
     `.squad/routing.md`);
+  - for a change that only a CI run can exercise (a workflow, an external API such as another repository's
+    GitHub API that the session cannot reach): the runtime details no one can verify beforehand, each named
+    up front, with a design that fails closed as the default;
   - for a change without production or test code: the declaration that steps 4, 5 and the *Coverage gate*
     are not applicable, with a *Verification without tests* section naming, per acceptance criterion, where
     and by whom it is verified instead;
@@ -61,6 +67,10 @@ The orchestrator tells you which **mode** to run:
   - the files of the change no unit test can cover (a browser script without a test runner, a generated
     file), each with the reason — or "none" — so the exclusion from the coverage measure is decided now
     and not after the PR (*Code a unit test cannot cover* in `.squad/routing.md`);
+  - for a security property that rests on measured or library behavior (a deadline that interrupts a query
+    step, a limit a parser enforces): the claim marked *unverified* with the scratch measurement that
+    settles it, run once by the Dev before the claim goes into a record, an area document or the docs;
+    Security verifies it in its review. A claim no one measured is never repeated as fact;
   - for a guard against bypasses (a validation or allow-list on input that a parser or tool consumes): the
     forms that parser really accepts, enumerated from its source or documentation, and the guard's behavior
     on each — not only the example the issue names;

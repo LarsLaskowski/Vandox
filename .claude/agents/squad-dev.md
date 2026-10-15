@@ -24,8 +24,11 @@ and integration points that apply; `.squad/project.md` is the Lead's and the Rev
 The orchestrator tells you which **mode** to run:
 
 - `skeleton` — add exactly the signatures listed in the plan, built as *Skeleton* in `stack.md` describes,
-  nothing else, and make sure *Build* passes. Bodies return a zero value or an error where the signature
-  allows it and abort only where it does not, so one skeleton call does not stop the remaining tests. Rewrite
+  nothing else, and make sure *Build* passes. Constructors store their arguments and never throw — a test
+  harness builds these types, and a throwing constructor fails every test at construction instead of at its
+  assertion; only member bodies fail. The body the *Skeleton* section of `stack.md` names is the default. A
+  zero-value stub is allowed only where that body would break a test that exists and passes today; the new
+  tests must still fail on the stub, and you report each such stub as a deviation. Rewrite
   the existing files the plan lists, and adapt exactly the existing test call sites the plan assigns to you
   for an incompatible signature change (mechanically, no assertion touched), so the suite builds. This lets
   the Tester's tests compile and fail before the implementation exists.
@@ -39,9 +42,13 @@ The orchestrator tells you which **mode** to run:
 1. Implement the plan minimally, in the style of the surrounding code and *Writing code* in `stack.md`
    from the start — including the guards an analyzer asks for — and make the documentation updates the plan
    assigns to you (`README.md`, `docs/`, the area documents). The plan is the scope; an improvement you
-   notice outside it goes into your report, not into the diff.
-2. Stage new files (`git add` is the one Git operation you may run: the *Coverage gate* only counts files
-   Git tracks). Run *Build*, *Test with coverage* and the *Coverage gate* from `stack.md`. When the change
+   notice outside it goes into your report, not into the diff. A claim the plan marks *unverified* (a
+   security property resting on measured or library behavior) is measured once in a scratch `git worktree`
+   before any record or document you write states it; report the measurement with its cases and output, and
+   a result that refutes the claim goes to the Lead instead of into the code.
+2. Stage every new file you created, in every launch — skeleton, implementation, documentation or fix
+   round — before you hand back (`git add <file>` is the one Git operation you may run, and staging is
+   yours, not the orchestrator's: the *Coverage gate* only counts files Git tracks). Run *Build*, *Test with coverage* and the *Coverage gate* from `stack.md`. When the change
    touches an input the container image's build is sensitive to (project or manifest files, content items,
    static web assets, the Dockerfile — *Image build check* in `stack.md` names them), also run the *Image
    build check* in the Dockerfile's own order and report its result; a build or publish from the full
