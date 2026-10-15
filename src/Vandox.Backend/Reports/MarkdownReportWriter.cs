@@ -11,7 +11,7 @@ namespace Vandox.Backend.Reports;
 /// Writes the forensics report as Markdown. Victim commands and program names are external text and are written only through
 /// <see cref="MarkdownText.Code"/>; the other text comes from the <see cref="ReportText"/> table, the numbers and the times.
 /// </summary>
-public sealed class MarkdownReportWriter
+public sealed class MarkdownReportWriter : IReportWriter
 {
     #region Constants
 
@@ -47,113 +47,6 @@ public sealed class MarkdownReportWriter
     #endregion // Constructors
 
     #region Methods
-
-    /// <summary>
-    /// Writes the head, the summary, the patterns, the consumers and the heading of the outages.
-    /// </summary>
-    /// <param name="summary">The whole-period result</param>
-    /// <returns>A task that completes when the part is written</returns>
-    public async Task WriteSummaryAsync(ForensicsSummary summary)
-    {
-        ArgumentNullException.ThrowIfNull(summary);
-
-        var builder = new StringBuilder();
-
-        AppendHead(builder, summary);
-        AppendSummary(builder, summary);
-        AppendPatterns(builder, summary);
-        AppendConsumers(builder, summary);
-        builder.Append("## ").Append(_text.OutagesHeading).Append("\n\n");
-
-        if (summary.Incidents == 0)
-        {
-            builder.Append(_text.NoOutages).Append("\n\n");
-        }
-
-        await _writer.WriteAsync(builder.ToString()).ConfigureAwait(false);
-    }
-
-    /// <summary>
-    /// Writes the section of one outage.
-    /// </summary>
-    /// <param name="stored">The stored incident</param>
-    /// <param name="activities">The activities before the outage</param>
-    /// <returns>A task that completes when the section is written</returns>
-    public async Task WriteIncidentAsync(StoredIncident stored, IncidentActivities activities)
-    {
-        ArgumentNullException.ThrowIfNull(stored);
-        ArgumentNullException.ThrowIfNull(activities);
-
-        var incident = stored.Incident;
-        var hypothesis = incident.Hypothesis;
-        var builder = new StringBuilder();
-
-        builder.Append("### ").Append(string.Format(CultureInfo.InvariantCulture, _text.OutageHeading, stored.Id, Time(incident.FirstKillAt))).Append("\n\n");
-        Item(builder, _text.Window, $"{Time(incident.Start)} {RangeDash} {Time(incident.End)}");
-        Item(builder, _text.Kills, Number(incident.KillCount));
-        Item(builder, _text.Victims, Victims(incident));
-
-        var notKept = incident.KillCount - incident.Kills.Count;
-
-        if (notKept > 0)
-        {
-            Item(builder, _text.KillsNotKept, Number(notKept));
-        }
-
-        Item(builder, _text.Growth, Growth(hypothesis));
-        Item(builder, _text.Consumers, Consumers(hypothesis));
-        builder.Append("- ").Append(_text.Activities).Append(":\n");
-        Item(builder, _text.Backup, Word(activities.Backup), "  ");
-        Item(builder, _text.Boot, BootText(activities), "  ");
-        Item(builder, _text.PanelHigh, Word(activities.PanelHigh), "  ");
-        Item(builder, _text.ServiceEvents, Number(hypothesis.ServiceEvents));
-        builder.Append('\n');
-
-        await _writer.WriteAsync(builder.ToString()).ConfigureAwait(false);
-    }
-
-    /// <summary>
-    /// Writes the notes.
-    /// </summary>
-    /// <param name="summary">The whole-period result</param>
-    /// <param name="listed">The number of incidents of the second pass</param>
-    /// <returns>A task that completes when the notes are written</returns>
-    public async Task WriteNotesAsync(ForensicsSummary summary, long listed)
-    {
-        ArgumentNullException.ThrowIfNull(summary);
-
-        var builder = new StringBuilder();
-
-        builder.Append("## ").Append(_text.NotesHeading).Append("\n\n");
-        builder.Append("- ").Append(_text.RulesNote).Append('\n');
-
-        if (summary.SnapshotsTruncated)
-        {
-            builder.Append("- ").Append(Format(_text.CapSnapshotsNote, Number(ReportLimits.MaxSnapshots))).Append('\n');
-        }
-
-        if (summary.BootsTruncated)
-        {
-            builder.Append("- ").Append(Format(_text.CapBootsNote, Number(ReportLimits.MaxBoots))).Append('\n');
-        }
-
-        if (summary.ObservedHoursTruncated)
-        {
-            builder.Append("- ").Append(Format(_text.CapRunsNote, Number(ReportLimits.MaxObservedRuns))).Append('\n');
-        }
-
-        if (summary.UntrackedProgramEntries > 0)
-        {
-            builder.Append("- ").Append(Format(_text.UntrackedNote, Number(summary.UntrackedProgramEntries), Number(ReportLimits.MaxPrograms))).Append('\n');
-        }
-
-        if (listed != summary.Incidents)
-        {
-            builder.Append("- ").Append(_text.IncidentsChangedNote).Append('\n');
-        }
-
-        await _writer.WriteAsync(builder.ToString()).ConfigureAwait(false);
-    }
 
     /// <summary>
     /// Formats a time as the UTC instant, to the minute.
@@ -647,4 +540,101 @@ public sealed class MarkdownReportWriter
     }
 
     #endregion // Methods
+
+    #region IReportWriter
+
+    /// <inheritdoc />
+    public async Task WriteSummaryAsync(ForensicsSummary summary)
+    {
+        ArgumentNullException.ThrowIfNull(summary);
+
+        var builder = new StringBuilder();
+
+        AppendHead(builder, summary);
+        AppendSummary(builder, summary);
+        AppendPatterns(builder, summary);
+        AppendConsumers(builder, summary);
+        builder.Append("## ").Append(_text.OutagesHeading).Append("\n\n");
+
+        if (summary.Incidents == 0)
+        {
+            builder.Append(_text.NoOutages).Append("\n\n");
+        }
+
+        await _writer.WriteAsync(builder.ToString()).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async Task WriteIncidentAsync(StoredIncident stored, IncidentActivities activities)
+    {
+        ArgumentNullException.ThrowIfNull(stored);
+        ArgumentNullException.ThrowIfNull(activities);
+
+        var incident = stored.Incident;
+        var hypothesis = incident.Hypothesis;
+        var builder = new StringBuilder();
+
+        builder.Append("### ").Append(string.Format(CultureInfo.InvariantCulture, _text.OutageHeading, stored.Id, Time(incident.FirstKillAt))).Append("\n\n");
+        Item(builder, _text.Window, $"{Time(incident.Start)} {RangeDash} {Time(incident.End)}");
+        Item(builder, _text.Kills, Number(incident.KillCount));
+        Item(builder, _text.Victims, Victims(incident));
+
+        var notKept = incident.KillCount - incident.Kills.Count;
+
+        if (notKept > 0)
+        {
+            Item(builder, _text.KillsNotKept, Number(notKept));
+        }
+
+        Item(builder, _text.Growth, Growth(hypothesis));
+        Item(builder, _text.Consumers, Consumers(hypothesis));
+        builder.Append("- ").Append(_text.Activities).Append(":\n");
+        Item(builder, _text.Backup, Word(activities.Backup), "  ");
+        Item(builder, _text.Boot, BootText(activities), "  ");
+        Item(builder, _text.PanelHigh, Word(activities.PanelHigh), "  ");
+        Item(builder, _text.ServiceEvents, Number(hypothesis.ServiceEvents));
+        builder.Append('\n');
+
+        await _writer.WriteAsync(builder.ToString()).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async Task WriteNotesAsync(ForensicsSummary summary, long listed)
+    {
+        ArgumentNullException.ThrowIfNull(summary);
+
+        var builder = new StringBuilder();
+
+        builder.Append("## ").Append(_text.NotesHeading).Append("\n\n");
+        builder.Append("- ").Append(_text.RulesNote).Append('\n');
+
+        if (summary.SnapshotsTruncated)
+        {
+            builder.Append("- ").Append(Format(_text.CapSnapshotsNote, Number(ReportLimits.MaxSnapshots))).Append('\n');
+        }
+
+        if (summary.BootsTruncated)
+        {
+            builder.Append("- ").Append(Format(_text.CapBootsNote, Number(ReportLimits.MaxBoots))).Append('\n');
+        }
+
+        if (summary.ObservedHoursTruncated)
+        {
+            builder.Append("- ").Append(Format(_text.CapRunsNote, Number(ReportLimits.MaxObservedRuns))).Append('\n');
+        }
+
+        if (summary.UntrackedProgramEntries > 0)
+        {
+            builder.Append("- ").Append(Format(_text.UntrackedNote, Number(summary.UntrackedProgramEntries), Number(ReportLimits.MaxPrograms))).Append('\n');
+        }
+
+        if (listed != summary.Incidents)
+        {
+            builder.Append("- ").Append(_text.IncidentsChangedNote).Append('\n');
+        }
+
+        await _writer.WriteAsync(builder.ToString()).ConfigureAwait(false);
+    }
+
+    #endregion // IReportWriter
 }

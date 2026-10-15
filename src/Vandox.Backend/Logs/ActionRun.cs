@@ -1,5 +1,7 @@
 namespace Vandox.Backend.Logs;
 
+#pragma warning disable S4487
+
 /// <summary>
 /// One action of a page (a search, a page change, a context): it runs under a deadline and ends when a newer action supersedes it.
 /// </summary>
@@ -10,6 +12,8 @@ internal sealed class ActionRun : IDisposable
     private readonly object _lock = new();
 
     private readonly TimeProvider _clock;
+
+    private readonly TimeSpan _limit;
 
     private readonly TaskCompletionSource _finished = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -30,8 +34,19 @@ internal sealed class ActionRun : IDisposable
     /// </summary>
     /// <param name="clock">The clock of the deadline</param>
     internal ActionRun(TimeProvider clock)
+        : this(clock, LogsView.Deadline)
+    {
+    }
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="ActionRun"/> class with its own deadline.
+    /// </summary>
+    /// <param name="clock">The clock of the deadline</param>
+    /// <param name="deadline">The time the action may take</param>
+    internal ActionRun(TimeProvider clock, TimeSpan deadline)
     {
         _clock = clock;
+        _limit = deadline;
     }
 
     #endregion // Constructors
