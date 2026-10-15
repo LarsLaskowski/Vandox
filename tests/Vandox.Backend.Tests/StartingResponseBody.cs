@@ -15,6 +15,8 @@ internal sealed class StartingResponseBody : MemoryStream
 
     private readonly StartingResponseFeature _feature;
 
+    private bool _storing;
+
     #endregion // Fields
 
     #region Constructors
@@ -39,6 +41,41 @@ internal sealed class StartingResponseBody : MemoryStream
 
     #endregion // Properties
 
+    #region Methods
+
+    /// <summary>
+    /// Refuses a synchronous call that does not come from the asynchronous write of this stream.
+    /// </summary>
+    private void Refuse()
+    {
+        if (_storing)
+        {
+            return;
+        }
+
+        throw new InvalidOperationException(SynchronousRefusal);
+    }
+
+    /// <summary>
+    /// Stores the bytes of an asynchronous write; the memory stream below reaches its own virtual write members for this type.
+    /// </summary>
+    /// <param name="store">The write below</param>
+    private void Store(Action store)
+    {
+        _storing = true;
+
+        try
+        {
+            store();
+        }
+        finally
+        {
+            _storing = false;
+        }
+    }
+
+    #endregion // Methods
+
     #region Stream
 
     /// <inheritdoc />
@@ -50,13 +87,15 @@ internal sealed class StartingResponseBody : MemoryStream
     /// <inheritdoc />
     public override void Write(byte[] buffer, int offset, int count)
     {
-        throw new InvalidOperationException(SynchronousRefusal);
+        Refuse();
+        base.Write(buffer, offset, count);
     }
 
     /// <inheritdoc />
     public override void Write(ReadOnlySpan<byte> buffer)
     {
-        throw new InvalidOperationException(SynchronousRefusal);
+        Refuse();
+        base.Write(buffer);
     }
 
     /// <inheritdoc />
@@ -74,7 +113,7 @@ internal sealed class StartingResponseBody : MemoryStream
         }
 
         _feature.Started = _feature.Started || buffer.Length > 0;
-        base.Write(buffer.Span);
+        Store(() => base.Write(buffer.Span));
 
         return ValueTask.CompletedTask;
     }
@@ -88,7 +127,7 @@ internal sealed class StartingResponseBody : MemoryStream
         }
 
         _feature.Started = _feature.Started || count > 0;
-        base.Write(buffer, offset, count);
+        Store(() => base.Write(buffer, offset, count));
 
         return Task.CompletedTask;
     }
