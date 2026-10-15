@@ -66,5 +66,28 @@ public class ReportTextTests
         Assert.IsNull(text, $"language {language}");
     }
 
+    /// <summary>
+    /// The consumer templates of both tables start with the program, so that the program can be set as code in front of the rest.
+    /// </summary>
+    /// <param name="language">The language</param>
+    [TestMethod]
+    [DataRow("en")]
+    [DataRow("de")]
+    public void ReportTextConsumerLinesStartWithTheProgram(string language)
+    {
+        // Arrange
+        var text = ReportText.For(language);
+
+        // Act
+        var permanent = text?.ConsumerPermanent ?? string.Empty;
+        var transient = text?.ConsumerTransient ?? string.Empty;
+
+        // Assert
+        Assert.StartsWith("{0}", permanent, $"the permanent consumer template of {language} starts with the program");
+        Assert.StartsWith("{0}", transient, $"the transient consumer template of {language} starts with the program");
+        Assert.DoesNotContain("{0}", permanent[3..], $"the program appears once in the permanent template of {language}");
+        Assert.DoesNotContain("{0}", transient[3..], $"the program appears once in the transient template of {language}");
+    }
+
     #endregion // Methods
 }

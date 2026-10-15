@@ -184,7 +184,7 @@ public class ReportDownloadEndpointTests
     {
         // Arrange
         var records = new ScriptedRecordReader();
-        var (context, response) = Request(query);
+        var (context, response, _) = Request(query);
 
         using var service = Service(records, new ScriptedIncidentStore([], false));
 
@@ -211,7 +211,7 @@ public class ReportDownloadEndpointTests
                           Before = (_, token) => Task.Delay(Timeout.Infinite, token)
                       };
         var logger = new ListLogger();
-        var (context, response) = Request("?lang=en");
+        var (context, response, lifetime) = Request("?lang=en");
 
         using var service = Service(records, new ScriptedIncidentStore([], false));
 
@@ -231,7 +231,9 @@ public class ReportDownloadEndpointTests
         Assert.IsTrue(records.Tokens[0].IsCancellationRequested, "the store call in flight is cancelled at the deadline");
         Assert.AreEqual(StatusCodes.Status503ServiceUnavailable, context.Response.StatusCode, "service unavailable");
         Assert.AreEqual(0L, response.Length, "no body");
-        Assert.IsFalse(context.RequestAborted.IsCancellationRequested, "the connection is not aborted");
+        Assert.IsFalse(lifetime.Aborted, "the connection is not aborted");
+        Assert.IsFalse(context.Response.Headers.ContainsKey("Content-Disposition"), "the answer is not saved as a report");
+        Assert.AreEqual("no-store", context.Response.Headers.CacheControl.ToString(), "cache control");
     }
 
     /// <summary>
@@ -248,7 +250,7 @@ public class ReportDownloadEndpointTests
                           Failure = failure
                       };
         var logger = new ListLogger();
-        var (context, response) = Request("?lang=en");
+        var (context, response, lifetime) = Request("?lang=en");
 
         using var service = Service(records, new ScriptedIncidentStore([], false));
 
@@ -260,6 +262,9 @@ public class ReportDownloadEndpointTests
 
         Assert.AreEqual(StatusCodes.Status500InternalServerError, context.Response.StatusCode, "internal server error");
         Assert.AreEqual(0L, response.Length, "no body, so no detail of the store");
+        Assert.IsFalse(lifetime.Aborted, "the connection is not aborted");
+        Assert.IsFalse(context.Response.Headers.ContainsKey("Content-Disposition"), "the answer is not saved as a report");
+        Assert.AreEqual("no-store", context.Response.Headers.CacheControl.ToString(), "cache control");
         Assert.HasCount(1, logged, "one entry with the event ID 53");
         Assert.AreEqual(LogLevel.Error, logged[0].entry.Level, "logged as an error");
         Assert.AreEqual("report download: making the report failed", logger.Messages[logged[0].index], "the message");
@@ -281,7 +286,7 @@ public class ReportDownloadEndpointTests
                             Failure = failure
                         };
         var logger = new ListLogger();
-        var (context, response) = Request("?lang=en");
+        var (context, response, lifetime) = Request("?lang=en");
 
         using var service = Service(new ScriptedRecordReader(), incidents);
 
@@ -295,28 +300,64 @@ public class ReportDownloadEndpointTests
         Assert.IsGreaterThan(0L, response.Length, "the report was started before the failure");
         Assert.IsTrue(response.Started, "the response has started");
         Assert.AreEqual(StatusCodes.Status200OK, context.Response.StatusCode, "the status of the started response is not changed");
-        Assert.IsTrue(context.RequestAborted.IsCancellationRequested, "the connection is aborted");
+        Assert.IsTrue(lifetime.Aborted, "the connection is aborted");
+        Assert.IsTrue(context.RequestAborted.IsCancellationRequested, "the request is aborted");
         Assert.HasCount(1, logged, "one entry with the event ID 53");
         Assert.AreSame(failure, logger.Exceptions[logged[0].index], "the exception only");
+    }
+
+    /// <summary>
+    /// A client that closes the connection while the report is read ends the run silently: no status change, no log entry and no abort by the handler.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task ReportDownloadEndpointEndsSilentlyWhenTheClientCloses()
+    {
+        // Arrange
+        var records = new ScriptedRecordReader
+                      {
+                          Before = (_, token) => Task.Delay(Timeout.Infinite, token)
+                      };
+        var logger = new ListLogger();
+        var (context, response, lifetime) = Request("?lang=en");
+
+        using var service = Service(records, new ScriptedIncidentStore([], false));
+
+        var download = ReportDownloadEndpoint.DownloadAsync(context, service, new FakeTimeProvider(_now), Factory(logger));
+
+        await records.WaitForCallsAsync(1);
+
+        // Act
+        lifetime.Close();
+
+        await download.WaitAsync(TimeSpan.FromSeconds(20), TestContext.CancellationToken);
+
+        // Assert
+        Assert.AreEqual(StatusCodes.Status200OK, context.Response.StatusCode, "the status is not changed to 500 or 503");
+        Assert.AreEqual(0L, response.Length, "no body");
+        Assert.DoesNotContain(entry => entry.EventId.Id == 53, logger.Entries, "nothing is logged as a failure");
+        Assert.IsFalse(lifetime.Aborted, "the handler does not abort the connection");
     }
 
     /// <summary>
     /// Creates a request context for the download whose response reports when the first byte was written.
     /// </summary>
     /// <param name="query">The query string</param>
-    /// <returns>The context and the response body</returns>
-    private static (DefaultHttpContext Context, StartingResponseBody Response) Request(string query)
+    /// <returns>The context, the response body and the lifetime of the request</returns>
+    private static (DefaultHttpContext Context, StartingResponseBody Response, AbortableRequestLifetime Lifetime) Request(string query)
     {
+        var lifetime = new AbortableRequestLifetime();
         var feature = new StartingResponseFeature();
         var body = new StartingResponseBody(feature);
         var context = new DefaultHttpContext();
 
         context.Features.Set<IHttpResponseFeature>(feature);
+        context.Features.Set<IHttpRequestLifetimeFeature>(lifetime);
         context.Request.Method = HttpMethods.Get;
         context.Request.QueryString = new QueryString(query);
         context.Response.Body = body;
 
-        return (context, body);
+        return (context, body, lifetime);
     }
 
     /// <summary>

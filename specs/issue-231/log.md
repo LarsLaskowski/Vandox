@@ -13,3 +13,4 @@ are quoted in full.
 | 2026-10-15 18:01 | 5 Tests first (check) | Orchestrator | Backend tests build against skeleton: 87 fail, 822 pass of 909; failures are the new tests |
 | 2026-10-15 18:51 | 6 Implement | squad-dev | DONE: 908/909 pass, coverage 98.1% changed lines, image build check pass; 1 test disputed; deviations: AsyncOnlyStream, GatedIncidentStore returns faulted task (sonnet/medium · 353,329 tokens · 104 tool uses · 2975 s) |
 | 2026-10-15 18:53 | 6 Decide | squad-lead | DECIDED: test wrong (Tester adds lifetime feature to Request()); AsyncOnlyStream, faulted-task Save, Fail headers accepted and recorded in 0108/plan; Tester adds AsyncOnlyStream, client-abort, AC12 and header tests in coverage mode (opus/medium · 59,470 tokens · 12 tool uses · 107 s) |
+| 2026-10-15 19:08 | 6 Coverage | squad-tester | DONE: 915 backend tests pass, coverage 98.4% overall, AsyncOnlyStream and ReportDownloadEndpoint 100%; disputed test fixed via lifetime feature |
