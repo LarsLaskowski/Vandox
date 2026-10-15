@@ -1,7 +1,7 @@
 namespace Vandox.Backend.Tests;
 
 /// <summary>
-/// A response body in memory that starts its <see cref="StartingResponseFeature"/> with the first byte and refuses synchronous I/O as the server does.
+/// A response body in memory that starts its <see cref="StartingResponseFeature"/> with the first byte or the first flush and refuses synchronous I/O as the server does.
 /// </summary>
 internal sealed class StartingResponseBody : MemoryStream
 {
@@ -35,7 +35,7 @@ internal sealed class StartingResponseBody : MemoryStream
     #region Properties
 
     /// <summary>
-    /// Gets a value indicating whether bytes were written.
+    /// Gets a value indicating whether bytes were written or the body was flushed.
     /// </summary>
     internal bool Started => _feature.Started;
 
@@ -101,7 +101,14 @@ internal sealed class StartingResponseBody : MemoryStream
     /// <inheritdoc />
     public override Task FlushAsync(CancellationToken cancellationToken)
     {
-        return cancellationToken.IsCancellationRequested ? Task.FromCanceled(cancellationToken) : Task.CompletedTask;
+        if (cancellationToken.IsCancellationRequested)
+        {
+            return Task.FromCanceled(cancellationToken);
+        }
+
+        _feature.Started = true;
+
+        return Task.CompletedTask;
     }
 
     /// <inheritdoc />
