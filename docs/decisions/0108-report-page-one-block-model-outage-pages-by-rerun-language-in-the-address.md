@@ -71,9 +71,18 @@ How long and how many runs:
 17. **A background run whose result is kept for every viewer** — no deadline on a request, but 60 MB kept and a result that goes stale
     after `vandoxd incidents`.
 
+How the download writes to the response (the server refuses synchronous I/O):
+
+18. **A `StreamWriter` disposed with `await using` over a write-only wrapper of the response body** (chosen) — in the test against the
+    running service (Kestrel), `await using` alone answered every download with `500`, because the disposal reached the synchronous
+    `Flush()` of the response body; the wrapper makes that `Flush()` a no-op (it buffers nothing), passes the asynchronous writes and
+    flushes through, and refuses a synchronous write, so synchronous I/O stays disallowed.
+19. **`AllowSynchronousIO` on the server** — allows blocking writes for every request to save one wrapper.
+20. **The writer flushed but never disposed** — an undisposed writer the analyzers report, kept alive only by the response.
+
 ## Decision
 
-Options 1, 5, 9, 12 and 15. The page `/report` and the download `/report/markdown` are described in [Web UI](../areas/web-ui.md)
+Options 1, 5, 9, 12, 15 and 18. The page `/report` and the download `/report/markdown` are described in [Web UI](../areas/web-ui.md)
 (*Report page*), the report itself in [Detection, alerts and reports](../areas/detection-and-reports.md) (*Forensics report*).
 
 ## Consequences
@@ -85,5 +94,8 @@ Options 1, 5, 9, 12 and 15. The page `/report` and the download `/report/markdow
 - An archive whose run takes longer than 2 minutes cannot be shown or downloaded in the web UI; `vandoxd report` remains for it. The
   time of a run on a large database is measured once and written into the area document.
 - A second user, or the download next to an open page, waits for the running report within its own deadline.
+- A failure before the first byte of the download removes the file headers and sets only the status; it never clears the response, so
+  the security headers and `Cache-Control: no-store` stay.
+- The incident store of the web refuses to save with a faulted task, so callers that await it see the refusal as from any store.
 - Another site can make a signed-in browser open the page or the download and so start a run; it changes nothing and is bounded by
   the run limit and the deadline.

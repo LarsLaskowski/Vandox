@@ -110,7 +110,7 @@ Fixed texts the tests compare (page chrome is English, like the rest of the web 
 - [ ] **AC7 — the page reads through `ForensicsReporter`, one report at a time, through the gate of the web views**: `ReportService`
   runs at most one report across the service (page and download share it; a second waits within its own deadline and stops waiting
   when cancelled); its record and incident reads go through `WebReaderGate` (`GatedRecordReader`, `GatedIncidentStore`), every incident
-  query has `Limit` 1, and `GatedIncidentStore.SaveIncidentAsync` throws `NotSupportedException` without calling the store. Tests:
+  query has `Limit` 1, and `GatedIncidentStore.SaveIncidentAsync` returns a task faulted with `NotSupportedException` without calling the store. Tests:
   `ReportServiceTests.ReportServiceRunsOneReportAtATime`, `ReportServiceStopsWaitingForTheRunWhenCancelled`,
   `ReportServiceReadsIncidentsOneAtATime`; `GatedIncidentStoreTests.GatedIncidentStoreReadsThroughTheGate`,
   `GatedIncidentStoreRefusesToSave`.
@@ -182,9 +182,11 @@ The issue's requirements mapped to the criteria:
    Disposing cancels the run.
 8. **`ReportDownloadEndpoint`** (`GET /report/markdown`, no `AllowAnonymous`): parses the request's query string with `ReportAddress.Parse`
    (`400` without body on an error, before any run); sets the headers of AC2; runs `ReportService` into a `MarkdownReportWriter` over a
-   `StreamWriter(Response.Body, new UTF8Encoding(false))` under a `CancellationTokenSource(ReportsView.Deadline, clock)` linked with
+   `StreamWriter(new AsyncOnlyStream(Response.Body), new UTF8Encoding(false), 1024, leaveOpen: true)` (disposed with `await using`) under a `CancellationTokenSource(ReportsView.Deadline, clock)` linked with
    `RequestAborted`; flushes. Failures as AC6: before `Response.HasStarted` → status `503` (deadline) or `500` (store failure, logged), after
-   it → `Abort()` (store failure logged; deadline not logged, like the views). A cancellation by the client ends silently.
+   it → `Abort()` (store failure logged; deadline not logged, like the views). A cancellation by the client ends silently. Before the first
+   byte a failure removes `Content-Disposition` and `Content-Type` and sets only the status (no `Response.Clear()`; `Cache-Control: no-store`
+   and the security headers stay).
 9. Navigation entry *Report* in `MainLayout.razor`; styles for `article.report` tables and `code` in `wwwroot/app.css` (no `url()`, no
    backslash).
 
@@ -210,6 +212,7 @@ keeps the web away from the write as well, and AC7 pins it.
 | Vandox.Backend | `Reports/ReportDocument.cs`, `Reports/ReportViewBuilder.cs` | new |
 | Vandox.Backend | `Reports/ReportService.cs`, `Reports/GatedIncidentStore.cs` | new |
 | Vandox.Backend | `Reports/ReportAddress.cs`, `Reports/ReportsView.cs`, `Reports/ReportDownloadEndpoint.cs` | new |
+| Vandox.Backend | `Reports/AsyncOnlyStream.cs` | new (Lead decision D2a: write-only wrapper of the response body) |
 | Vandox.Backend | `Components/Reports/ReportContent.razor` (+ `.razor.cs`) | new |
 | Vandox.Backend | `Components/Pages/ReportPage.razor` (+ `.razor.cs`) | new |
 | Vandox.Backend | `Components/Layout/MainLayout.razor` | *Report* entry |
@@ -293,7 +296,7 @@ public sealed class ReportService : IDisposable
 public sealed class GatedIncidentStore : IIncidentStore
 {
     public GatedIncidentStore(IIncidentStore inner, WebReaderGate gate);
-    // SaveIncidentAsync throws NotSupportedException; IncidentsAsync and CountIncidentsAsync through the gate
+    // SaveIncidentAsync returns a task faulted with NotSupportedException; IncidentsAsync and CountIncidentsAsync through the gate
 }
 
 public sealed class ReportAddress
@@ -312,6 +315,13 @@ public static class ReportsView
     public static string PageHref(string language);      // "report?lang=<language>"
     public static string DownloadHref(string language);  // "report/markdown?lang=<language>"
     public static string FileName(string language);      // "vandox-report-<language>.md"
+}
+
+internal sealed class AsyncOnlyStream : Stream
+{
+    internal AsyncOnlyStream(Stream inner);
+    // CanRead/CanSeek false, CanWrite true; Flush() does nothing; FlushAsync and both WriteAsync overloads go to inner;
+    // Length, Position, Read, Seek, SetLength and the synchronous Write throw NotSupportedException
 }
 
 internal static class ReportDownloadEndpoint
@@ -347,7 +357,7 @@ internal static partial void ReportDownloadFailed(this ILogger logger, Exception
 In `tests/Vandox.Backend.Tests` (mirroring the class under test):
 
 - new: `ReportContentTests.cs`, `ReportPageTests.cs`, `ReportViewBuilderTests.cs`, `ReportServiceTests.cs`, `GatedIncidentStoreTests.cs`,
-  `ReportAddressTests.cs`, `ReportsViewTests.cs`, `ReportDownloadEndpointTests.cs`;
+  `ReportAddressTests.cs`, `ReportsViewTests.cs`, `ReportDownloadEndpointTests.cs`, `AsyncOnlyStreamTests.cs` (D2a);
 - extended: `MarkdownReportWriterTests.cs` (golden), `ReportTextTests.cs`, `MainLayoutTests.cs`, `ActionRunTests.cs`, `PageRunnerTests.cs`;
 - helpers: `ReportSamples.cs` (the hand-built summary and incidents, moved from `MarkdownReportWriterTests`), `ReportPieces.cs`,
   `ReportPageHarness.cs` (renderer, `ReportService` over a store or doubles, `FakeTimeProvider`, `ListLogger`, `RecordingNavigationManager`);
@@ -431,6 +441,36 @@ Devil's Advocate verdict: OBJECTIONS 0 major, 2 minor.
 **Minor 1: wrong line reference.** The plan says `ActionRun.Start` fixes the deadline "at `LogsView.Deadline` (`Logs/ActionRun.cs:180`)". `src/Vandox.Backend/Logs/ActionRun.cs` has only 152 lines. The deadline is set at `ActionRun.cs:109`, as `new CancellationTokenSource(LogsView.Deadline, _clock)`. The claim itself is true. The Dev should use line 109 as the place to add the deadline overload. `LogsView.Deadline` is defined at `LogsView.cs:119`.
 
 **Minor 2: the page and the command show different content.** The page's own wording says it "shows the same content as `vandoxd report`", but AC8 limits it to 50 outages per page, while the command and the download list all of them. AC1 only compares the page with the Markdown for samples of at most 50 outages. The Dev and Reviewer should state this difference in the area document's *Report page* section, so the issue's "same content" criterion is read as "same content per outage page". The AC1/AC8 split is otherwise consistent, and the issue's "outages are read one at a time" is met by `Limit 1`.
+
+## Lead decisions (decide, after step 6)
+
+- **D1 — `ReportDownloadEndpointAbortsWhenTheStoreFailsAfterWriting`: the test is wrong, not the handler.** `DefaultHttpContext.Abort()`
+  calls `IHttpRequestLifetimeFeature.Abort()`; the default feature (`HttpRequestLifetimeFeature`) has an empty `Abort()` and a
+  `RequestAborted` that nothing cancels, so on the test's context the assertion can never hold (the Dev's scratch run: no throw,
+  cancelled `False`). Kestrel's feature cancels `RequestAborted` on `Abort()`, so `context.Abort()` in `Fail` is the right call. Owner:
+  **Tester**, `tests/Vandox.Backend.Tests/ReportDownloadEndpointTests.cs` — `Request()` also sets a hand-written
+  `IHttpRequestLifetimeFeature` whose `RequestAborted` is the token of its own `CancellationTokenSource` and whose `Abort()` cancels it
+  (and records that it was called); the test may assert either. The 503 and 500 tests keep asserting that it was not aborted.
+- **D2a — accepted: `Reports/AsyncOnlyStream.cs`.** With `await using` alone every real download (AC2, Kestrel) answered `500`: the
+  disposal reached the synchronous `Flush()` of the response body, which refuses synchronous I/O. The wrapper keeps synchronous I/O
+  disallowed on the server (enabling `AllowSynchronousIO` was not an option), makes `Flush()` a no-op (nothing is buffered in it) and
+  refuses a synchronous `Write` with `NotSupportedException`, so a synchronous write fails loudly instead of blocking. Recorded in 0108.
+- **D2b — accepted: `GatedIncidentStore.SaveIncidentAsync` returns a faulted task.** Callers await it, so the refusal is the same for
+  them, and a `Task`-returning member does not throw synchronously; the store is still never called. AC7 reworded; the existing
+  `GatedIncidentStoreRefusesToSave` (`Assert.ThrowsAsync`) covers it unchanged.
+- **D2c — accepted: `Fail` before the first byte removes `Content-Disposition` and `Content-Type` and sets only the status.** This is
+  approach step 8 and Security note 3 (no `Response.Clear()`, which would drop the security headers); without the file headers an empty
+  error answer is not saved as a report. `Cache-Control: no-store` stays (harmless on an error). Already written in
+  `docs/areas/web-ui.md`; the Lead added the `Cache-Control` clause there.
+- **D3 — coverage mode, owner Tester:** (1) `AsyncOnlyStreamTests.cs`: `AsyncOnlyStreamWritesAsynchronouslyToTheInnerStream` (both
+  `WriteAsync` overloads, `FlushAsync` reaches the inner stream, the inner stream stays open after the wrapper is disposed),
+  `AsyncOnlyStreamFlushDoesNothing`, `AsyncOnlyStreamRefusesSynchronousAndSeekingMembers` (DataRows or one assert per member: `Write`,
+  `Read`, `Seek`, `SetLength`, `Length`, `Position` get and set → `NotSupportedException`; `CanRead`/`CanSeek` false, `CanWrite` true);
+  (2) `ReportDownloadEndpointTests.ReportDownloadEndpointEndsSilentlyWhenTheClientCloses` (the lifetime feature of D1 cancelled while the
+  record reader waits: the task completes, status not changed to 500/503, no EventId 53, not aborted by the handler); (3) the AC12 test
+  `ReportTextTests.ReportTextConsumerLinesStartWithTheProgram` is a plan criterion, not optional: written now (it passes on the current
+  tables; it guards them); (4) in the 500 and 503 tests, assert that `Content-Disposition` is absent and `Cache-Control` is `no-store`
+  (D2c).
 
 ## Security plan review notes
 
