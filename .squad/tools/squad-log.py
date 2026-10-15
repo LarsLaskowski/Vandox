@@ -429,7 +429,8 @@ def build_parser():
 def launch_metrics(parser, root, args):
     """(model/effort, tokens, tool uses, seconds) from the options, or None when no metric option is given; an
     incomplete set is a usage error, an unknown agent file ends the run with exit code 1."""
-    if not (args.agent or args.launch or args.tokens is not None):
+    if not (args.agent or args.launch or args.tokens is not None or args.tool_uses is not None
+            or args.seconds is not None):
         return None
     model = args.launch or (agent_launch(root, args.agent) if args.agent else None)
     if args.agent and not args.launch and model is None:
@@ -520,7 +521,8 @@ def main():
             return 3 if missing_usage(parse_rows(handle.read())) else 0
     target = args.amend_last or args.replace_last or args.member
     uses_metrics = args.amend_last or args.replace_last or args.unreported or args.agent or args.launch \
-        or args.tokens is not None or args.continued or args.continued_from is not None
+        or args.tokens is not None or args.tool_uses is not None or args.seconds is not None or args.continued \
+        or args.continued_from is not None
     if target is not None and is_not_launch(target) and uses_metrics:
         parser.error(f"'{target}' is no launch: its rows are written without any metric option and never "
                      "amended, and the summary asks no usage for them")
