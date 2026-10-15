@@ -59,7 +59,9 @@ launched only for analyzer diagnostics or style findings that need reading. Suba
 to GitHub — the `PreToolUse` hook `.claude/hooks/git-guard.py`, declared in every `squad-*.md`, denies them
 (`git add` and a scratch `git worktree` for experiments stay allowed, `.squad/routing.md`, *Concurrency*);
 the orchestrator commits and pushes to the work branch at any time (see `CLAUDE.md`, golden rules) and
-opens the pull request only after the Lead's approval.
+opens the pull request only after the Lead's approval. Because the orchestrator may commit an interim state
+while a member works (a stop hook demands it), a clean `git status` at hand-back is no sign of lost work: a
+member reports its changes against the head SHA it was given (`git diff <sha>`).
 
 Session-management tools (`create_session`, `send_message`, `archive_session` and the other remote-session
 tools) belong to the orchestrator alone: a member never calls them, also not to "hand over" work — it
@@ -72,6 +74,13 @@ commit SHA they are given, and nothing it remembers from an earlier round replac
 task notification reports the agent's tokens since the first launch (tool uses and duration for the round
 alone); the orchestrator logs the round with `--continued` (or `--continued-from "<step>"` for an agent that
 is not the member's last fresh launch), so the record carries the round's share.
+
+**Test doubles that model a real component.** A test double that copies the behavior of a library, framework
+or server (a response stream where a flush starts the response, a client that retries, a parser that stops at
+a limit) is only as good as that copy, and every gate and test passes on a wrong one. A claim about such
+behavior that a double encodes is checked once against the real component — a scratch measurement in a
+scratch `git worktree`, or the component's source — before the tests rely on it, and the hand-back names the
+measurement. Security's plan review asks for that measurement when the plan relies on such behavior.
 
 **Escapes in files.** The Write and Edit tools turn a single-backslash escape such as `\u0041` into the
 character it names, so a plan table or a test fixture whose cases are about escapes silently loses them. Write

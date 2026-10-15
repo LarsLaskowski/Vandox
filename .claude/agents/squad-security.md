@@ -44,7 +44,10 @@ test that pins the claim. A security property that rests on a claim about measur
 deadline that interrupts a query step, a limit a parser enforces, a timeout that cancels a call) is verified
 once with a scratch measurement in a scratch `git worktree` before you accept it — in mode `plan` by you, in
 mode `diff` against the Dev's measurement — and an unverified claim of that kind is a blocking finding, so it
-is never repeated into records and documentation before anyone measured it.
+is never repeated into records and documentation before anyone measured it. When the plan's tests will rest
+on a test double that copies such behavior (a response stream, a server's flush or close semantics), the plan
+names the measurement of the real component that confirms the double; a plan that does not is a finding
+(*Test doubles that model a real component* in `.squad/team.md`).
 
 Rules:
 

@@ -12,6 +12,9 @@ commit/push rules and the orchestrator role are identical to the `squad-issue` s
 - **Step 1 — work folder and branch:** `specs/feature-<short-slug>/` with `log.md` from
   `specs/_template/log.md`; branch `feature-<short-slug>` off the latest `main` (or the branch the session
   prescribes); run `git fetch origin main` first (`scope-check.py` compares against the local `origin/main`).
+  Log rows exactly as `squad-issue` step 1 says: a launch row is written without any metric option — no
+  `--agent` either, which `squad-log.py` rejects without numbers — and completed with `--amend-last` once
+  the task notification is in; never with placeholder numbers.
 - **Step 2 — plan:** `squad-lead` in mode `plan` writes `spec.md` (behavior, acceptance criteria, out of
   scope), `plan.md` and `tasks.md`, launched with the agent file's model and effort like every other Lead
   launch (log it with `--agent squad-lead`): the plan challenge and, on `security`, the Security plan review

@@ -113,8 +113,12 @@ action yourself — including follow-up issues the Lead decides on.
    launch's row: `--amend-last "<member>" --step "<step>" …` amends that row instead of the member's last one.
    A notification that never arrives (the launch ended on an error, the session was resumed) is marked with
    `--amend-last "<member>" --unreported --agent squad-<role>` and no numbers, so the summary counts the
-   launch and names it instead of refusing the table. A continued launch (*Continue a member*) is logged
-   with the same options plus `--continued` (or `--continued-from "<step>"`, see there). The wrap-up sums the trailers per role. After every member's report, commit and push the files it left in the work
+   launch and names it instead of refusing the table; when that notification turns up after all, the row
+   already carries a trailer, so a second `--amend-last` refuses it ("without a launch trailer") and
+   `--replace-last "<member>"` with the numbers turns the mark into the full trailer. A continued launch
+   (*Continue a member*) is logged with the same options plus `--continued` (or `--continued-from "<step>"`,
+   see there), with the notification's numbers copied unchanged: they are cumulative, and the script
+   computes the round's share. The wrap-up sums the trailers per role. After every member's report, commit and push the files it left in the work
    folder (the Lead's records, the Tester's tests) yourself, so the next report does not list them as
    untracked noise.
 2. **Plan.** Launch `squad-lead` in mode `plan` with the issue text and the work folder. It returns one of:
@@ -166,8 +170,8 @@ action yourself — including follow-up issues the Lead decides on.
    production and test code — see *Changes without production or test code* in `.squad/routing.md`, which also
    skips step 5 and the *Coverage gate* in step 6 and requires the plan's *Verification without tests* section;
    log the skipped steps and run the verification named there instead). Launch `squad-dev` in mode `skeleton`: the planned
-   signatures built as *Skeleton* in `.squad/stack.md` describes (the profile's body is the default; a zero-value stub only where it would break a passing
-   test, with the new tests still failing on it, reported by the Dev as a deviation), plus the existing
+   signatures built as *Skeleton* in `.squad/stack.md` describes (its body is the default; whether a zero-value
+   stub is allowed is decided there alone, and a stub the Dev writes is reported as a deviation), plus the existing
    test call sites the plan assigns to the Dev for an incompatible signature change, so the tests of step 5
    compile.
 5. **Tests first** (skipped for `trivial`). Launch `squad-tester` in mode `tests-first`: only the tests the
@@ -254,7 +258,11 @@ action yourself — including follow-up issues the Lead decides on.
     plus a summary of the tier, acceptance criteria, decisions and challenge outcome instead; that commit
     stays reachable through the PR's history. Then `git rm -r specs/issue-<number>/`, confirm with
     `python3 .squad/tools/scope-check.py --no-specs`, commit ("Remove squad working record"), and push. Later
-    log rows (steps 11–12) are appended by editing that comment. Then open the PR **as a draft**
+    log rows (steps 11–12) are appended by editing that comment. In a cloud session the work branch may
+    already have a pull request created for it automatically: list the open PRs for the head branch first
+    (`list_pull_requests` with `head: "<owner>:<branch>"`) and, if there is one, update its title and body
+    (`update_pull_request`, with `draft: true` when it is not a draft) instead of creating a second one, which
+    fails with "A pull request already exists". Otherwise open the PR **as a draft**
     (`draft: true`, `.squad/routing.md`, *Draft until green*) from
     [`.github/pull_request_template.md`](../../../.github/pull_request_template.md): title per
     `docs/CONTRIBUTING.md` — `[area] Description`, where `area` is one of the areas
