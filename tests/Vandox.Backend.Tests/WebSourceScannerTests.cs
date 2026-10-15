@@ -163,6 +163,8 @@ public class WebSourceScannerTests
     [DataRow("if (!isFinite(n)) {}", "global-number-function")]
     [DataRow("const n = window.parseInt(s, 10);", "global-number-function")]
     [DataRow("const n = globalThis.parseFloat(s);", "global-number-function")]
+    [DataRow("values.map(parseFloat);", "global-number-function")]
+    [DataRow("if (self.isNaN(n)) {}", "global-number-function")]
     [TestMethod]
     public void WebSourceScannerScriptFindsForbiddenForms(string script, string rule)
     {
