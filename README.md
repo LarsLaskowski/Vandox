@@ -511,12 +511,29 @@ or hours without a system log, is written as unknown with its reason, and "no re
 every rule was decided. Program names and victim commands are written as Markdown code spans, so they show literally.
 The text is UTF-8 without a byte order mark whatever the locale of the container is.
 
-The command reads every stored log line and every stored process snapshot (one query each) and the incidents twice, so on
-a large database it can take minutes; its memory does not grow with the database: it keeps about 60 MB at most across the
+The command reads every stored log line (one query per page of 1,000 lines) and every stored process snapshot (one query per snapshot) and the
+incidents twice, so on a large database it can take minutes; its memory does not grow with the database: it keeps about 60 MB at most across the
 run, plus the one log page, process snapshot or incident it is reading. The log goes to standard error as JSON lines (`report started`, and `report failed` or `report interrupted`); the command logs no progress while it reads. Exit code 0 when the report is written, 1 when the
 configuration is invalid, the database cannot be opened, the store failed or the run was interrupted (standard output
 then holds an incomplete report: discard it), 2 for a usage error. Details, rules and limits are in
 `docs/areas/detection-and-reports.md`.
+
+### Read the forensics report in the web UI
+
+The web UI shows the same report under *Report* (`/report`), behind the web login. All times are **UTC**.
+
+- **English or German**: the page is English; *Deutsch* (`report?lang=de`) shows the report in German and *English* (`report?lang=en`) goes back. The language is
+  in the address only, so it can be bookmarked; any other value in the address shows an error text and makes no report.
+- **The report is made when the page opens**: it reads every stored log line, so on a large database it takes a while (the page says
+  `Making the report…`). A run is stopped after **2 minutes**, and **one report runs at a time**: a second page, or a download started meanwhile, waits for the running
+  one within its own 2 minutes. On a very large archive that does not fit, use `vandoxd report` (above), which has no limit. Like the command, the page shows the incidents as
+  `vandoxd incidents` last stored them.
+- **Outages 50 at a time**: with more than 50 outages the page shows `Outages 1 to 50 of 51.`, and *Next outages* makes the report again and shows the following 50 (*First
+  outages* goes back). The summary, the patterns, the consumers and the notes are those of the whole period on every page.
+- **Download Markdown** (`report/markdown?lang=<language>`) saves the whole report as `vandox-report-<language>.md`: the same bytes as `vandoxd report -lang <language>` writes,
+  all outages, UTF-8 without a byte order mark. It needs the web login too and has the same limit of 2 minutes; a report that cannot be made is answered with an error status, and
+  one that fails after it has started breaks the connection, so a truncated file is never saved as if it were complete.
+- Program names and victim commands are shown as plain text in a `code` element, with invisible characters written out and very long texts cut.
 
 ### Rebuild template statistics
 

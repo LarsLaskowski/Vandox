@@ -1,1 +1,49 @@
-<article class="report"></article>
+@using Vandox.Backend.Reports
+
+<article class="report">
+    @foreach (var group in Groups())
+    {
+        switch (group[0].Kind)
+        {
+            case ReportBlockKind.Heading:
+                @Heading(group[0])
+                break;
+            case ReportBlockKind.Paragraph:
+                <p>@Text(group[0])</p>
+                break;
+            case ReportBlockKind.Item:
+                <ul>
+                    @foreach (var entry in Entries(group))
+                    {
+                        <li>@Text(entry.Item)@if (entry.Nested.Count > 0){<ul>@foreach (var nested in entry.Nested){<li>@Text(nested)</li>}</ul>}</li>
+                    }
+                </ul>
+                break;
+            default:
+                <div class="table-scroll">
+                    <table>
+                        <thead>
+                            <tr>
+                                @for (var column = 0; column < group[0].Rows[0].Count; column++)
+                                {
+                                    <th class="@CellClass(group[0], column)">@group[0].Rows[0][column]</th>
+                                }
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var row in group[0].Rows.Skip(1))
+                            {
+                                <tr>
+                                    @for (var column = 0; column < row.Count; column++)
+                                    {
+                                        <td class="@CellClass(group[0], column)">@row[column]</td>
+                                    }
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+                break;
+        }
+    }
+</article>

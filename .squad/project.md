@@ -47,7 +47,13 @@ files or endpoints.
    antiforgery validation feature first (missing or invalid is `400`, before the form is read), then the route number, then reads `note` and `written_for` from the form only (never the
    query string or the route; a field twice, in any letter case, is refused), refuses U+0000 and more than 1,800 UTF-16 characters (`IncidentNoteText`), builds the redirect from the
    parsed number and logs a failed save with the exception only, **never the note text**, a form value or the written-for number (`IncidentNoteSaveFailed`). The save does not use the reader gate, and the note
-   is the service's first write outside an import (one immediate transaction under the write lock). Records 0016, 0023, 0060, 0103, 0104, 0105, 0106, 0107.
+   is the service's first write outside an import (one immediate transaction under the write lock). The report page (`/report`, `Pages/ReportPage`) is behind the same login, and so is its
+   download `GET /report/markdown` (`ReportDownloadEndpoint`, no `AllowAnonymous`: anonymous is redirected to the login, and the ingest listener answers `404`). Both run
+   `ReportService`, which allows one report at a time across the service (a second one waits within its own deadline of 2 minutes, `ReportsView.Deadline`, and stops waiting when cancelled) and reads
+   through `GatedRecordReader` and `GatedIncidentStore` of the shared `WebReaderGate`; `GatedIncidentStore.SaveIncidentAsync` refuses, so the web cannot write an incident. The
+   page keeps a document of at most 50 outages per circuit (about 6.6 MB of capped text in the worst case, the web UI area, *Limits and errors*); the run keeps up to about 60 MB once for the whole
+   service. The session cookie is `SameSite=Lax`, so another site can make a signed-in browser start a run; it reveals nothing to that site and is bounded by the run slot and the deadline.
+   Records 0016, 0023, 0060, 0103, 0104, 0105, 0106, 0107, 0108.
 4. **Command signing for remote actions** (later, not part of v0.1.0): *Goal:* the agent executes only
    commands with a valid signature that name an action from its local fixed list and were confirmed by the
    user; a forged, altered or replayed command is rejected; the signing key exists only on the backend
@@ -188,10 +194,15 @@ files or endpoints.
     per metric series, and `ProgramMemorySeries` tells at most 4,096 programs apart (the rest is summed), so a window read holds one snapshot and about 4,096 x 300 values. The `-lang` flag of `vandoxd report` is the one CLI value
     that selects behavior: `CommandLine` compares it ordinally with exactly `en` and `de` (`ReportText.For`), any other value, also another case, `de-DE`, a
     padded or Cf-bearing look-alike, is a usage error that shows it only through `Terminal.Quote`, and the unknown flag names of `CommandLine` are escaped the
-    same way. Forged kill lines make forged incidents
+    same way. The report page and its download take the same choice from the address: `ReportAddress.Parse` reads `new Uri(NavigationManager.Uri).Query` (the page) or the request's query
+    string (the download), so never the fragment, through `QueryHelpers.ParseQuery`, and accepts a `lang` only when its decoded value is exactly `en` or `de` (`ReportText.For`, ordinal);
+    `DE`, `de-DE`, an empty value, `lang` without `=`, a value with a space, a control or format character, a percent-encoded look-alike such as `%E2%80%AEde` or `en%00`, and a key given twice
+    (in any letter case, with any value) are refused with a fixed text that names only the parameter, a refused address runs nothing (the download answers `400` without a body before any
+    store call), other keys are ignored, and the address is written only from the validated language (`ToQuery`, `ReportsView.PageHref`, `DownloadHref`, `FileName`); the `Content-Disposition`
+    of the download carries only that fixed file name. Forged kill lines make forged incidents
     (a documented limitation, record 0096); forged boot lines, `pzstd` or `sw-engi*` processes shift the report's activities and rates, and forged process names can
     take the 4,096 program places first (records 0100, 0101). Records 0048, 0049, 0066, 0069, 0076, 0078, 0079, 0084,
-    0085, 0086, 0088, 0091, 0092, 0093, 0094, 0095, 0096, 0097, 0100, 0101, 0102, 0106.
+    0085, 0086, 0088, 0091, 0092, 0093, 0094, 0095, 0096, 0097, 0100, 0101, 0102, 0106, 0108.
 11. **Outbound calls** (Telegram, external checks, the optional AI service of the nightly report, the
     agent's connection to the backend): *Goal:* every call has a timeout, goes only to its configured
     destination and leaves encrypted to a verified peer. The agent's only destination is the ingest port,
@@ -223,7 +234,13 @@ files or endpoints.
     links are the fixed paths `incidents/<number>`, `incidents/<number>/notes` and `logs` plus the `ToQuery()` of a validated address and numbers; no `MarkupString`, no `style` attribute.
     The program names of the stacked memory chart are chart labels: `LogText.Escape(name, 64)`, written by uPlot through `textContent` (read in the vendored file), so a label carries no
     markup and its direction controls are visible escapes; chart titles and the other series labels are fixed texts. A note is user text, shown only as the content of a `textarea`
-    (Razor-encoded, so `</textarea>` cannot end it), and the headings of moved notes hold only numbers. Records 0098, 0099, 0106, 0107.
+    (Razor-encoded, so `</textarea>` cannot end it), and the headings of moved notes hold only numbers. The report page (`Components/Reports/ReportContent`) shows the victim commands
+    and program names of the forensics report only as `<code><ExternalText Runs="…" /></code>` with runs of `LogText.Runs(text, LogText.MaxShortChars)` (Razor's text encoding, the visible
+    escapes, 2,048 displayed characters, 256 runs, the `[cut: <n> more characters]` marker, `unicode-bidi: isolate`); external text is only ever a piece of a paragraph or list item
+    (`ReportPiece.Code`), never of a heading or a table cell, an empty text is the plain dash `—`, the labels, numbers and times are plain text from `ReportText` and the composer, and the page
+    uses no `MarkupString`, no `style` attribute and only the fixed links `report?lang=<en|de>` and `report/markdown?lang=<en|de>`. The Markdown of the download writes the same external text through
+    `MarkdownText.Code` (backslashes doubled, invisible characters as `\uXXXX`, a fence longer than any backtick run), and the log of a failed run holds the exception only.
+    Records 0098, 0099, 0106, 0107, 0108.
     Configuration error texts never echo document text other than schema or safe key names
     (`decodeStrict`, `StrictYamlDecoder`), never a `_FILE` value or path or an unsafe variable name
     (`readSecret`/`SecretReader`, `checkEnviron`). Configuration values are free of Cc, Cf, Zl and Zp characters but

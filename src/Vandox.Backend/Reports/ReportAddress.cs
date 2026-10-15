@@ -1,12 +1,22 @@
-namespace Vandox.Backend.Reports;
+using Microsoft.AspNetCore.WebUtilities;
 
-#pragma warning disable RH2003, S2325
+namespace Vandox.Backend.Reports;
 
 /// <summary>
 /// The language the address of the report page or the download asks for.
 /// </summary>
 public sealed class ReportAddress
 {
+    #region Constants
+
+    private const string LanguageName = "lang";
+
+    private const string RepeatedText = "The address gives the parameter lang more than once.";
+
+    private const string InvalidText = "The address has an invalid value for the parameter lang.";
+
+    #endregion // Constants
+
     #region Properties
 
     /// <summary>
@@ -30,7 +40,28 @@ public sealed class ReportAddress
     /// <returns>The address</returns>
     public static ReportAddress Parse(string query)
     {
-        throw new NotImplementedException();
+        ArgumentNullException.ThrowIfNull(query);
+
+        var address = new ReportAddress();
+        var values = QueryHelpers.ParseQuery(query);
+
+        if (values.TryGetValue(LanguageName, out var found))
+        {
+            if (found.Count > 1)
+            {
+                address.Error = RepeatedText;
+            }
+            else if (found[0] is { } language && ReportText.For(language) is not null)
+            {
+                address.Language = language;
+            }
+            else
+            {
+                address.Error = InvalidText;
+            }
+        }
+
+        return address;
     }
 
     /// <summary>
@@ -39,7 +70,7 @@ public sealed class ReportAddress
     /// <returns>The query string with the leading question mark</returns>
     public string ToQuery()
     {
-        throw new NotImplementedException();
+        return $"?{LanguageName}={Language}";
     }
 
     #endregion // Methods

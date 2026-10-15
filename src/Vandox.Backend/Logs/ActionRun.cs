@@ -1,7 +1,5 @@
 namespace Vandox.Backend.Logs;
 
-#pragma warning disable S4487
-
 /// <summary>
 /// One action of a page (a search, a page change, a context): it runs under a deadline and ends when a newer action supersedes it.
 /// </summary>
@@ -121,7 +119,7 @@ internal sealed class ActionRun : IDisposable
                 return;
             }
 
-            _deadline = new CancellationTokenSource(LogsView.Deadline, _clock);
+            _deadline = new CancellationTokenSource(_limit, _clock);
             _token = _deadline.Token;
         }
     }

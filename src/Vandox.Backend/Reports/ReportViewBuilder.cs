@@ -3,8 +3,6 @@ using Vandox.Storage;
 
 namespace Vandox.Backend.Reports;
 
-#pragma warning disable RH2003, S2325, S4487, S2372
-
 /// <summary>
 /// Collects a report run into a <see cref="ReportDocument"/>: the summary, the outages of one page and the notes.
 /// </summary>
@@ -12,11 +10,13 @@ public sealed class ReportViewBuilder : IReportWriter
 {
     #region Fields
 
-    private readonly ReportText _text;
+    private readonly ReportComposer _composer;
 
     private readonly long _firstOutage;
 
     private readonly int _maxOutages;
+
+    private readonly List<IReadOnlyList<ReportBlock>> _outages = [];
 
     #endregion // Fields
 
@@ -30,9 +30,19 @@ public sealed class ReportViewBuilder : IReportWriter
     /// <param name="maxOutages">The number of outages to keep, 1 or more</param>
     public ReportViewBuilder(ReportText text, long firstOutage, int maxOutages)
     {
-        _text = text;
+        ArgumentNullException.ThrowIfNull(text);
+        ArgumentOutOfRangeException.ThrowIfNegative(firstOutage);
+        ArgumentOutOfRangeException.ThrowIfLessThan(maxOutages, 1);
+
+        _composer = new ReportComposer(text);
         _firstOutage = firstOutage;
         _maxOutages = maxOutages;
+        Document = new ReportDocument
+                   {
+                       Language = text.Language,
+                       FirstOutage = firstOutage,
+                       Outages = _outages
+                   };
     }
 
     #endregion // Constructors
@@ -42,7 +52,7 @@ public sealed class ReportViewBuilder : IReportWriter
     /// <summary>
     /// Gets the document the run built.
     /// </summary>
-    public ReportDocument Document => throw new NotImplementedException();
+    public ReportDocument Document { get; }
 
     #endregion // Properties
 
@@ -51,19 +61,39 @@ public sealed class ReportViewBuilder : IReportWriter
     /// <inheritdoc />
     public Task WriteSummaryAsync(ForensicsSummary summary)
     {
-        throw new NotImplementedException();
+        ArgumentNullException.ThrowIfNull(summary);
+
+        Document.Summary = _composer.Summary(summary);
+
+        return Task.CompletedTask;
     }
 
     /// <inheritdoc />
     public Task WriteIncidentAsync(StoredIncident stored, IncidentActivities activities)
     {
-        throw new NotImplementedException();
+        ArgumentNullException.ThrowIfNull(stored);
+        ArgumentNullException.ThrowIfNull(activities);
+
+        var index = Document.OutagesListed;
+
+        if (index >= _firstOutage && index < _firstOutage + _maxOutages)
+        {
+            _outages.Add(_composer.Incident(stored, activities));
+        }
+
+        Document.OutagesListed = index + 1;
+
+        return Task.CompletedTask;
     }
 
     /// <inheritdoc />
     public Task WriteNotesAsync(ForensicsSummary summary, long listed)
     {
-        throw new NotImplementedException();
+        ArgumentNullException.ThrowIfNull(summary);
+
+        Document.Notes = _composer.Notes(summary, listed);
+
+        return Task.CompletedTask;
     }
 
     #endregion // IReportWriter

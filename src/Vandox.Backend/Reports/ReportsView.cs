@@ -1,7 +1,5 @@
 namespace Vandox.Backend.Reports;
 
-#pragma warning disable RH2003, S2325
-
 /// <summary>
 /// The fixed texts, limits and paths of the report page and its download.
 /// </summary>
@@ -54,6 +52,10 @@ public static class ReportsView
     /// </summary>
     public const string OutageRange = "Outages {0} to {1} of {2}.";
 
+    private const string PagePath = "report";
+
+    private const string DownloadPath = "report/markdown";
+
     #endregion // Constants
 
     #region Fields
@@ -74,7 +76,7 @@ public static class ReportsView
     /// <returns>The relative address</returns>
     public static string PageHref(string language)
     {
-        throw new NotImplementedException();
+        return $"{PagePath}?lang={language}";
     }
 
     /// <summary>
@@ -84,7 +86,7 @@ public static class ReportsView
     /// <returns>The relative address</returns>
     public static string DownloadHref(string language)
     {
-        throw new NotImplementedException();
+        return $"{DownloadPath}?lang={language}";
     }
 
     /// <summary>
@@ -94,7 +96,7 @@ public static class ReportsView
     /// <returns>The file name</returns>
     public static string FileName(string language)
     {
-        throw new NotImplementedException();
+        return $"vandox-report-{language}.md";
     }
 
     #endregion // Methods

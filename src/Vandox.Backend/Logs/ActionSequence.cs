@@ -1,7 +1,5 @@
 namespace Vandox.Backend.Logs;
 
-#pragma warning disable S4487
-
 /// <summary>
 /// Runs the actions of a page one after another: a new action supersedes the running one and starts only after it has ended.
 /// </summary>
@@ -49,7 +47,7 @@ internal sealed class ActionSequence : IDisposable
     /// <returns>A task that returns the run, which is superseded when a still newer action arrived while it waited</returns>
     internal async Task<ActionRun> BeginAsync()
     {
-        var run = new ActionRun(_clock);
+        var run = new ActionRun(_clock, _limit);
         var previous = _current;
 
         _current = run;

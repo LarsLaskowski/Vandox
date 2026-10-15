@@ -1,12 +1,16 @@
 namespace Vandox.Backend.Reports;
 
-#pragma warning disable RH2003, S2325
-
 /// <summary>
 /// A piece of the text of a block: plain text of the report or external text as stored.
 /// </summary>
 public sealed class ReportPiece
 {
+    #region Constants
+
+    private const string EmptyText = "—";
+
+    #endregion // Constants
+
     #region Properties
 
     /// <summary>
@@ -30,7 +34,12 @@ public sealed class ReportPiece
     /// <returns>The piece</returns>
     public static ReportPiece Plain(string text)
     {
-        throw new NotImplementedException();
+        ArgumentNullException.ThrowIfNull(text);
+
+        return new ReportPiece
+               {
+                   Text = text
+               };
     }
 
     /// <summary>
@@ -40,7 +49,15 @@ public sealed class ReportPiece
     /// <returns>The piece</returns>
     public static ReportPiece Code(string text)
     {
-        throw new NotImplementedException();
+        ArgumentNullException.ThrowIfNull(text);
+
+        return text.Length == 0
+                   ? Plain(EmptyText)
+                   : new ReportPiece
+                     {
+                         Text = text,
+                         External = true
+                     };
     }
 
     #endregion // Methods

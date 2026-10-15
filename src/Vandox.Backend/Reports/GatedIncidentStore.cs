@@ -4,8 +4,6 @@ using Vandox.Storage;
 
 namespace Vandox.Backend.Reports;
 
-#pragma warning disable RH2003, S2325, S4487
-
 /// <summary>
 /// Reads the incidents through the shared gate of the web views; saving is refused.
 /// </summary>
@@ -28,6 +26,9 @@ public sealed class GatedIncidentStore : IIncidentStore
     /// <param name="gate">The gate of the reads</param>
     public GatedIncidentStore(IIncidentStore inner, WebReaderGate gate)
     {
+        ArgumentNullException.ThrowIfNull(inner);
+        ArgumentNullException.ThrowIfNull(gate);
+
         _inner = inner;
         _gate = gate;
     }
@@ -39,19 +40,19 @@ public sealed class GatedIncidentStore : IIncidentStore
     /// <inheritdoc />
     public Task<IncidentSaveResult> SaveIncidentAsync(Incident incident, DateTimeOffset savedAt, CancellationToken cancellationToken)
     {
-        throw new NotImplementedException();
+        return Task.FromException<IncidentSaveResult>(new NotSupportedException("the web does not save incidents"));
     }
 
     /// <inheritdoc />
     public Task<IReadOnlyList<StoredIncident>> IncidentsAsync(IncidentQuery query, CancellationToken cancellationToken)
     {
-        throw new NotImplementedException();
+        return _gate.RunAsync(() => _inner.IncidentsAsync(query, cancellationToken), cancellationToken);
     }
 
     /// <inheritdoc />
     public Task<long> CountIncidentsAsync(CancellationToken cancellationToken)
     {
-        throw new NotImplementedException();
+        return _gate.RunAsync(() => _inner.CountIncidentsAsync(cancellationToken), cancellationToken);
     }
 
     #endregion // IIncidentStore

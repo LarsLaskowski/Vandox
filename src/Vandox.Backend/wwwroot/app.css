@@ -468,3 +468,45 @@ tr.context td {
     border-left: 4px solid var(--vandox-color-brand);
     border-radius: 0.375rem;
 }
+
+/* Report page: the forensics report as headings, lists and tables. */
+article.report {
+    max-width: 60rem;
+}
+
+article.report h2 {
+    margin: 1.5rem 0 0.5rem;
+}
+
+article.report h3 {
+    margin: 1.25rem 0 0.5rem;
+}
+
+article.report ul {
+    margin: 0 0 1rem;
+    padding-left: 1.25rem;
+}
+
+article.report table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.875rem;
+}
+
+article.report th,
+article.report td {
+    padding: 0.25rem 0.5rem;
+    text-align: left;
+    vertical-align: top;
+    border-bottom: 1px solid var(--vandox-line);
+}
+
+article.report th.num,
+article.report td.num {
+    text-align: right;
+}
+
+article.report code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.875em;
+}
