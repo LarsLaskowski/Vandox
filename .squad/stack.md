@@ -131,6 +131,7 @@ locally, <authoritative check>" once in `log.md` and does not repeat it as an op
 | `deploy/backend/Dockerfile`, `docker-compose.yml`, `.dockerignore`, image contents | a Docker daemon (`hadolint` runs in the *Analyzer gate* on the Dockerfile) | the *Image build check* (restore-order reproduction below), `.github/scripts/check-base-image-pinning.sh`, `.github/scripts/check-builder-dotnet-version.sh`, `bash -n` on the smoke script | CI job *Release build check*, steps "Build and verify image" and "Smoke test backend container" |
 | own browser scripts and style sheets (`src/Vandox.Backend/wwwroot/js/*.js`, `wwwroot/*.css`) | a JavaScript and CSS analyzer | `WebUiContentTests` (`WebSourceScanner` rules) | SonarQube Cloud (step 11) |
 | known vulnerabilities (Go) | `govulncheck` (the proxy blocks `vuln.go.dev`, HTTP 403) | none | CI job *Vulnerability scan* |
+| C# conditions on a local that a lambda assigns (SonarQube Cloud `csharpsquid:S2583`, "condition always evaluates to False", and the other symbolic-execution rules) | the local SonarAnalyzer.CSharp build does not report them (run #27: the quality gate failed in CI with a C reliability rating on a local assigned only inside a callback passed to `PageRunner.RunAsync`) | the captured-local rule under *Writing code*, checked by reading every new lambda that assigns an outer local | SonarQube Cloud (step 11) |
 | values passed to a logger or other sink (CodeQL "Clear text storage of sensitive information") | CodeQL runs only in CI | the logger-argument rule below, checked by grepping the new logger calls | CodeQL code scanning on the pull request |
 
 When the *Analyzer gate* reports shellcheck, actionlint or hadolint as NOT RUN (a refused download), that tool is
@@ -229,6 +230,9 @@ C# (backend): follow the surrounding code and the analyzers; in particular
 - nullable reference types on, `CancellationToken` as the last parameter of anything that does I/O or can
   block, and honored;
 - logging through `[LoggerMessage]` methods (`BackendLog`), never string interpolation in a log call;
+- a local that a callback assigns is not tested after the call: SonarQube Cloud's flow analysis does not
+  follow the assignment into the lambda and reports the test as always false (`S2583`), and the local
+  build stays silent. Pass the value out through the callback's return value or a field instead;
 - exceptions carry context in their message and are never swallowed; `Program.Main` and similar wiring stay
   thin and hold no logic (record 0074);
 - the backend prints its build information from the assembly metadata set by `-p:VandoxVersion`,
@@ -310,6 +314,9 @@ collide on `obj/` and `bin/`.
   version (`go 1.27` -> `go1.27.0`). `go tool govulncheck ./...` can then report standard-library
   vulnerabilities that the current patch, the one CI uses, already fixes. Select the current patch
   (`GOTOOLCHAIN=go1.27.<n>`) before trusting a local scan.
+- A stale Razor or compiler build server reports bogus `RZ1021`/`RZ9981` errors on a clean or Release build,
+  also in files nobody changed. When a Razor error names an untouched file, run `dotnet build-server shutdown`
+  first and then *Build* again; only an error that survives the restart is real.
 - `reihitsu-format` rewrites a `\u` escape in a C# string literal into the character it names, so a literal
   U+2028 then breaks the compilation and a test about an escape tests the wrong input. After *Format*, check
   the escapes of the changed files on disk (`grep -n '\\u' <file>`, *Escapes in files* in `.squad/team.md`);

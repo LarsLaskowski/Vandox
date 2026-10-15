@@ -5,7 +5,8 @@ namespace Vandox.Backend.Tests;
 
 /// <summary>
 /// Finds forms in the sources of the web UI that the content security policy must never have to catch: inline code, external URLs,
-/// raw HTML sinks. A text scanner, not a parser; every method returns the distinct rule ids it found.
+/// raw HTML sinks, and in own scripts the global number functions SonarQube Cloud reports
+/// (<c>S7773</c>). A text scanner, not a parser; every method returns the distinct rule ids it found.
 /// </summary>
 internal static partial class WebSourceScanner
 {
@@ -101,6 +102,7 @@ internal static partial class WebSourceScanner
         Add(rules, DynamicCode().IsMatch(script) || StringTimer().IsMatch(script), "dynamic-code");
         Add(rules, HtmlSink().IsMatch(script), "html-sink");
         Add(rules, SetAttribute().IsMatch(script), "set-attribute");
+        Add(rules, GlobalNumberFunction().IsMatch(script), "global-number-function");
 
         return rules;
     }
@@ -436,6 +438,9 @@ internal static partial class WebSourceScanner
 
     [GeneratedRegex("\\bsetAttribute", RegexOptions.CultureInvariant)]
     private static partial Regex SetAttribute();
+
+    [GeneratedRegex("(?<![\\w$.])(?:(?:window|globalThis|self)\\s*\\.\\s*)?(?:parseInt|parseFloat|isNaN|isFinite)(?![\\w$])", RegexOptions.CultureInvariant)]
+    private static partial Regex GlobalNumberFunction();
 
     [GeneratedRegex("image-set\\s*\\(", Options)]
     private static partial Regex ImageSet();

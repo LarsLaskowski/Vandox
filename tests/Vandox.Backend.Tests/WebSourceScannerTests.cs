@@ -157,6 +157,14 @@ public class WebSourceScannerTests
     [DataRow("el.setAttribute( \"STYLE\" , s);", "set-attribute")]
     [DataRow("el.setAttribute(`onclick`, s);", "set-attribute")]
     [DataRow("el.setAttributeNS(null, \"href\", s);", "set-attribute")]
+    [DataRow("const n = parseInt(s, 10);", "global-number-function")]
+    [DataRow("const n = parseFloat (s);", "global-number-function")]
+    [DataRow("if (isNaN(n)) {}", "global-number-function")]
+    [DataRow("if (!isFinite(n)) {}", "global-number-function")]
+    [DataRow("const n = window.parseInt(s, 10);", "global-number-function")]
+    [DataRow("const n = globalThis.parseFloat(s);", "global-number-function")]
+    [DataRow("values.map(parseFloat);", "global-number-function")]
+    [DataRow("if (self.isNaN(n)) {}", "global-number-function")]
     [TestMethod]
     public void WebSourceScannerScriptFindsForbiddenForms(string script, string rule)
     {
@@ -185,6 +193,12 @@ public class WebSourceScannerTests
     [DataRow("el.removeAttribute(\"data-theme\");")]
     [DataRow("function evaluate() { return 1; }")]
     [DataRow("el.textContent = s;")]
+    [DataRow("const n = Number.parseInt(s, 16);")]
+    [DataRow("const n = Number.parseFloat(s);")]
+    [DataRow("if (Number.isNaN(n)) {}")]
+    [DataRow("if (Number.isFinite(n)) {}")]
+    [DataRow("const n = reader.parseInt(s);")]
+    [DataRow("function parseIntoRows(s) { return s; }")]
     [TestMethod]
     public void WebSourceScannerScriptAcceptsAllowedForms(string script)
     {
