@@ -73,12 +73,16 @@ How long and how many runs:
 
 How the download writes to the response (the server refuses synchronous I/O):
 
-18. **A `StreamWriter` disposed with `await using` over a write-only wrapper of the response body** (chosen) — in the test against the
-    running service (Kestrel), `await using` alone answered every download with `500`, because the disposal reached the synchronous
-    `Flush()` of the response body; the wrapper makes that `Flush()` a no-op (it buffers nothing), passes the asynchronous writes and
-    flushes through, and refuses a synchronous write, so synchronous I/O stays disallowed.
-19. **`AllowSynchronousIO` on the server** — allows blocking writes for every request to save one wrapper.
+18. **A `StreamWriter` over the response body without `AutoFlush`, disposed with `await using`, and the Markdown writer flushing each
+    part with `FlushAsync`** (chosen) — in the test against the running service (Kestrel) every download answered `500` while the writer
+    was created with `AutoFlush = true`: setting that property flushes at once and synchronously, before anything is written, and the
+    response body refuses synchronous I/O. Without it the writer only writes and flushes asynchronously, and its asynchronous disposal
+    flushes asynchronously too (measured in a scratch program: a stream that throws on `Write` and `Flush` sees neither). Each part of the
+    report still reaches the client when it is written, because the Markdown writer flushes after each part.
+19. **`AllowSynchronousIO` on the server** — allows blocking writes for every request instead of keeping the writer asynchronous.
 20. **The writer flushed but never disposed** — an undisposed writer the analyzers report, kept alive only by the response.
+21. **A write-only wrapper of the response body whose synchronous `Flush()` does nothing** (with `AutoFlush = true`) — a new type and its
+    tests only to absorb the synchronous flush that the `AutoFlush` setter makes; removing the setter removes the cause.
 
 ## Decision
 

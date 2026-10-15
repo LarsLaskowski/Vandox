@@ -182,7 +182,7 @@ The issue's requirements mapped to the criteria:
    Disposing cancels the run.
 8. **`ReportDownloadEndpoint`** (`GET /report/markdown`, no `AllowAnonymous`): parses the request's query string with `ReportAddress.Parse`
    (`400` without body on an error, before any run); sets the headers of AC2; runs `ReportService` into a `MarkdownReportWriter` over a
-   `StreamWriter(new AsyncOnlyStream(Response.Body), new UTF8Encoding(false), 1024, leaveOpen: true)` (disposed with `await using`) under a `CancellationTokenSource(ReportsView.Deadline, clock)` linked with
+   `StreamWriter(Response.Body, new UTF8Encoding(false), 1024, leaveOpen: true)` without `AutoFlush` (disposed with `await using`; D4) under a `CancellationTokenSource(ReportsView.Deadline, clock)` linked with
    `RequestAborted`; flushes. Failures as AC6: before `Response.HasStarted` → status `503` (deadline) or `500` (store failure, logged), after
    it → `Abort()` (store failure logged; deadline not logged, like the views). A cancellation by the client ends silently. Before the first
    byte a failure removes `Content-Disposition` and `Content-Type` and sets only the status (no `Response.Clear()`; `Cache-Control: no-store`
@@ -207,12 +207,11 @@ keeps the web away from the write as well, and AC7 pins it.
 | Vandox.Backend | `Reports/IReportWriter.cs` | new |
 | Vandox.Backend | `Reports/ReportBlockKind.cs`, `Reports/ReportPiece.cs`, `Reports/ReportBlock.cs` | new |
 | Vandox.Backend | `Reports/ReportComposer.cs` | new (the composing code moved out of `MarkdownReportWriter`) |
-| Vandox.Backend | `Reports/MarkdownReportWriter.cs` | rewritten on the blocks, implements `IReportWriter`; public members unchanged |
+| Vandox.Backend | `Reports/MarkdownReportWriter.cs` | rewritten on the blocks, implements `IReportWriter`; public members unchanged; each part is flushed with `FlushAsync` (D4) |
 | Vandox.Backend | `Reports/ForensicsReporter.cs` | `RunAsync` takes `IReportWriter` |
 | Vandox.Backend | `Reports/ReportDocument.cs`, `Reports/ReportViewBuilder.cs` | new |
 | Vandox.Backend | `Reports/ReportService.cs`, `Reports/GatedIncidentStore.cs` | new |
 | Vandox.Backend | `Reports/ReportAddress.cs`, `Reports/ReportsView.cs`, `Reports/ReportDownloadEndpoint.cs` | new |
-| Vandox.Backend | `Reports/AsyncOnlyStream.cs` | new (Lead decision D2a: write-only wrapper of the response body) |
 | Vandox.Backend | `Components/Reports/ReportContent.razor` (+ `.razor.cs`) | new |
 | Vandox.Backend | `Components/Pages/ReportPage.razor` (+ `.razor.cs`) | new |
 | Vandox.Backend | `Components/Layout/MainLayout.razor` | *Report* entry |
@@ -317,12 +316,6 @@ public static class ReportsView
     public static string FileName(string language);      // "vandox-report-<language>.md"
 }
 
-internal sealed class AsyncOnlyStream : Stream
-{
-    internal AsyncOnlyStream(Stream inner);
-    // CanRead/CanSeek false, CanWrite true; Flush() does nothing; FlushAsync and both WriteAsync overloads go to inner;
-    // Length, Position, Read, Seek, SetLength and the synchronous Write throw NotSupportedException
-}
 
 internal static class ReportDownloadEndpoint
 {
@@ -357,7 +350,7 @@ internal static partial void ReportDownloadFailed(this ILogger logger, Exception
 In `tests/Vandox.Backend.Tests` (mirroring the class under test):
 
 - new: `ReportContentTests.cs`, `ReportPageTests.cs`, `ReportViewBuilderTests.cs`, `ReportServiceTests.cs`, `GatedIncidentStoreTests.cs`,
-  `ReportAddressTests.cs`, `ReportsViewTests.cs`, `ReportDownloadEndpointTests.cs`, `AsyncOnlyStreamTests.cs` (D2a);
+  `ReportAddressTests.cs`, `ReportsViewTests.cs`, `ReportDownloadEndpointTests.cs`;
 - extended: `MarkdownReportWriterTests.cs` (golden), `ReportTextTests.cs`, `MainLayoutTests.cs`, `ActionRunTests.cs`, `PageRunnerTests.cs`;
 - helpers: `ReportSamples.cs` (the hand-built summary and incidents, moved from `MarkdownReportWriterTests`), `ReportPieces.cs`,
   `ReportPageHarness.cs` (renderer, `ReportService` over a store or doubles, `FakeTimeProvider`, `ListLogger`, `RecordingNavigationManager`);
@@ -451,7 +444,7 @@ Devil's Advocate verdict: OBJECTIONS 0 major, 2 minor.
   **Tester**, `tests/Vandox.Backend.Tests/ReportDownloadEndpointTests.cs` — `Request()` also sets a hand-written
   `IHttpRequestLifetimeFeature` whose `RequestAborted` is the token of its own `CancellationTokenSource` and whose `Abort()` cancels it
   (and records that it was called); the test may assert either. The 503 and 500 tests keep asserting that it was not aborted.
-- **D2a — accepted: `Reports/AsyncOnlyStream.cs`.** With `await using` alone every real download (AC2, Kestrel) answered `500`: the
+- **D2a — superseded by D4 (named the wrong cause): `Reports/AsyncOnlyStream.cs`.** With `await using` alone every real download (AC2, Kestrel) answered `500`: the
   disposal reached the synchronous `Flush()` of the response body, which refuses synchronous I/O. The wrapper keeps synchronous I/O
   disallowed on the server (enabling `AllowSynchronousIO` was not an option), makes `Flush()` a no-op (nothing is buffered in it) and
   refuses a synchronous `Write` with `NotSupportedException`, so a synchronous write fails loudly instead of blocking. Recorded in 0108.
@@ -462,7 +455,7 @@ Devil's Advocate verdict: OBJECTIONS 0 major, 2 minor.
   approach step 8 and Security note 3 (no `Response.Clear()`, which would drop the security headers); without the file headers an empty
   error answer is not saved as a report. `Cache-Control: no-store` stays (harmless on an error). Already written in
   `docs/areas/web-ui.md`; the Lead added the `Cache-Control` clause there.
-- **D3 — coverage mode, owner Tester:** (1) `AsyncOnlyStreamTests.cs`: `AsyncOnlyStreamWritesAsynchronouslyToTheInnerStream` (both
+- **D3 — coverage mode, owner Tester:** (1) (removed by D4) `AsyncOnlyStreamTests.cs`: `AsyncOnlyStreamWritesAsynchronouslyToTheInnerStream` (both
   `WriteAsync` overloads, `FlushAsync` reaches the inner stream, the inner stream stays open after the wrapper is disposed),
   `AsyncOnlyStreamFlushDoesNothing`, `AsyncOnlyStreamRefusesSynchronousAndSeekingMembers` (DataRows or one assert per member: `Write`,
   `Read`, `Seek`, `SetLength`, `Length`, `Position` get and set → `NotSupportedException`; `CanRead`/`CanSeek` false, `CanWrite` true);
@@ -471,6 +464,38 @@ Devil's Advocate verdict: OBJECTIONS 0 major, 2 minor.
   `ReportTextTests.ReportTextConsumerLinesStartWithTheProgram` is a plan criterion, not optional: written now (it passes on the current
   tables; it guards them); (4) in the 500 and 503 tests, assert that `Content-Disposition` is absent and `Cache-Control` is `no-store`
   (D2c).
+
+- **D4 — decide after review round 1 (c5de9c0), blocking finding: remove `AutoFlush = true` and `AsyncOnlyStream`.** The 500s came from
+  the `AutoFlush = true` initializer at `ReportDownloadEndpoint.cs:106` (the setter calls the synchronous `Flush` of the stream before any
+  write), not from the disposal; the Lead re-ran the reviewer's probe (scratch `sw/Program.cs`): with `AutoFlush` the initializer throws
+  `sync flush`; without it `WriteAsync`, `FlushAsync` and the `await using` disposal never touch a synchronous member. The simpler option
+  is taken; the plan's requirement that every part reaches the client when it is written (AC6, `...AbortsWhenTheStoreFailsAfterWriting`
+  needs bytes in `Response.Body` before the second pass, and a summary under 1,024 characters would otherwise sit in the writer's buffer)
+  is kept by an explicit flush per part. Record 0108 option 18 rewritten, the wrapper is option 21 (rejected). Owners:
+  - **Dev**, `src/Vandox.Backend/Reports/ReportDownloadEndpoint.cs`: `new StreamWriter(context.Response.Body, new UTF8Encoding(false),
+    BufferChars, true)` without the initializer, still `await using` and the final `FlushAsync`; the doc comment of `WriteAsync` keeps
+    "every part reaches the client when it is written". `src/Vandox.Backend/Reports/MarkdownReportWriter.cs`: in `WriteSummaryAsync`,
+    `WriteIncidentAsync` and `WriteNotesAsync`, `await _writer.FlushAsync().ConfigureAwait(false);` after the `WriteAsync` (the CLI's
+    standard output then also shows each part as it is made; its bytes do not change). Delete `src/Vandox.Backend/Reports/AsyncOnlyStream.cs`.
+  - **Tester**, delete `tests/Vandox.Backend.Tests/AsyncOnlyStreamTests.cs` and `tests/Vandox.Backend.Tests/FlushCountingStream.cs`;
+    `tests/Vandox.Backend.Tests/StartingResponseBody.cs`: override `Flush()`, `Write(byte[], int, int)` and `Write(ReadOnlySpan<byte>)` to
+    throw `InvalidOperationException("Synchronous operations are disallowed.")` as Kestrel does, so every download test fails (500 instead of
+    200) if a synchronous flush or write comes back. `MemoryStream`'s own `WriteAsync` and `FlushAsync` call the virtual `Write`/`Flush`,
+    so the two `WriteAsync` overrides store through a non-virtual `base.Write(...)` and return a completed task, and `FlushAsync` is
+    overridden to return a completed task (cancelled when its token is); a test where these hooks are wrong shows up as 500 everywhere; new `MarkdownReportWriterTests.MarkdownReportWriterFlushesEachPart` (a `StreamWriter`
+    with a 65,536-character buffer over a `MemoryStream`: after each of the three methods the stream's length has grown).
+  - **Lead** (done): record 0108 option 18/21, `docs/areas/web-ui.md` (*Implementation* no longer lists `AsyncOnlyStream`), this plan.
+- **D5 — non-blocking finding (pager hidden when the stored outages shrink): fixed now.** On page 2 a run that lists 50 or fewer outages
+  hides the whole pager, leaving no way back but the language links. Owners:
+  - **Dev**, `src/Vandox.Backend/Components/Pages/ReportPage.razor`: render the pager block when
+    `_document.OutagesListed > ReportsView.PageOutages || _document.FirstOutage > 0`; inside it the `OutageRange` line only when
+    `_document.Outages.Count > 0` (otherwise it would read "Outages 51 to 50 of 3."); the button conditions stay.
+  - **Tester**, `tests/Vandox.Backend.Tests/ReportPageTests.cs`: `ReportPageOffersTheFirstOutagesWhenTheOutagesShrink` — a store with 51
+    incidents for the first run and 3 for the second; after *Next outages*: no outage, no range line, no *Next outages*, *First outages*
+    present; after *First outages*: the 3 outages and no pager.
+  - **Lead** (done): `docs/areas/web-ui.md` (*Outages in pages of 50*).
+- **D4/D5 review:** both change production code after Security's approval on c5de9c0 (D4 the download path of a `security` change), so the
+  next review round is a delta round of the Reviewer and a Security delta confirmation on the download endpoint.
 
 ## Security plan review notes
 

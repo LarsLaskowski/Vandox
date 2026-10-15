@@ -269,7 +269,8 @@ service, the gate is held per store call (a window read of many snapshots takes 
   few minutes on a large database.` and reads nothing. Leaving the page, or a new address, cancels the run in the store.
 - **Outages in pages of 50.** A run keeps only the outages of its page, counted in the order of the stored windows. With more than 50 outages the
   page says `Outages <first> to <last> of <total>.` and offers *Next outages* (a new run that shows the following 50) and, on a later page,
-  *First outages* (a new run from the first). The position is not in the address. A new run reads the store again, so the outages of a
+  *First outages* (a new run from the first). A later page whose run finds fewer outages than its start (the stored outages shrank since the
+  previous page) shows no range and no outages but still offers *First outages*. The position is not in the address. A new run reads the store again, so the outages of a
   page are those `vandoxd incidents` stored at that time.
 - **External text** (victim commands and program names) is shown only as the text of an `ExternalText` inside a `code` element, capped at
   2,048 displayed characters per text with the marker of the logs view, with invisible characters as visible escapes; an empty text is the dash `—` as
@@ -421,7 +422,7 @@ The ingest listener serves none of this: every UI path, static file and the live
 
 `Vandox.Backend` (`Components/App.razor`, `Components/Layout/MainLayout.razor`, `Components/Charts`, `Components/Pages/LogsPage` and
 `LogTemplatesPage`, `Components/Pages/IncidentsPage` and `IncidentPage`, `Components/Incidents/IncidentNoteForm`, `Components/Pages/ReportPage`, `Components/Reports/ReportContent`, `Components/Logs/ExternalText`, `Logs/` (`LogsAddress`, `LogText`, `LogLineView`, `GatedLogExplorer`, `WebReaderGate`, `TemplateHourSeries`, `LogsView`),
-`Reports/` (`ReportService`, `ReportViewBuilder`, `ReportDocument`, `ReportAddress`, `ReportsView`, `ReportDownloadEndpoint`, `GatedIncidentStore`, `AsyncOnlyStream`, and the blocks `ReportComposer`, `ReportBlock`, `ReportPiece`), `Logs/ActionRun`, `Logs/ActionSequence` and `Logs/PageRunner` (the deadline of an action),
+`Reports/` (`ReportService`, `ReportViewBuilder`, `ReportDocument`, `ReportAddress`, `ReportsView`, `ReportDownloadEndpoint`, `GatedIncidentStore`, and the blocks `ReportComposer`, `ReportBlock`, `ReportPiece`), `Logs/ActionRun`, `Logs/ActionSequence` and `Logs/PageRunner` (the deadline of an action),
 `Incidents/` (`IncidentsView`, `IncidentRowView`, `IncidentDetailView`, `IncidentWindowReader`, `ProgramMemorySeries`, `GatedIncidentBrowser`, `GatedRecordReader`, `IncidentNoteText`, `IncidentNoteEndpoint`), `Hosting/SecurityHeadersMiddleware`,
 `Hosting/ServeCommand`, `wwwroot/`, and `Vandox.Backend.csproj`, whose `RequiresAspNetWebAssets` makes the restore add the framework
 script independently of the sources, as the image build restores before copying them; record 0098).
