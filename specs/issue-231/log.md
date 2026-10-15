@@ -10,3 +10,4 @@ are quoted in full.
 | 2026-10-15 17:14 | 3 Plan security review | squad-security | VERDICT: APPROVED, 4 non-blocking notes appended to plan.md (opus/medium · 80,346 tokens · 22 tool uses · 197 s) |
 | 2026-10-15 17:24 | 4 Skeleton | squad-dev | DONE: signatures built, build 0 warnings, 820 backend tests pass, Format clean; deviations: extra skeleton pragmas, stored _limit in ActionRun/ActionSequence (sonnet/medium · 122,629 tokens · 34 tool uses · 578 s) |
 | 2026-10-15 17:59 | 5 Tests first | squad-tester | DONE: 86 new tests fail on skeleton, 822 pass; golden files from unchanged writer; AC12 guard and golden pin pass on skeleton (deferred) (sonnet/medium · 351,095 tokens · 103 tool uses · 2053 s) |
+| 2026-10-15 18:01 | 5 Tests first (check) | Orchestrator | Backend tests build against skeleton: 87 fail, 822 pass of 909; failures are the new tests |
