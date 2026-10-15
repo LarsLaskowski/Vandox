@@ -199,7 +199,9 @@ Commits and pushes to the work branch happen right after intake (`specs/<folder>
 or a crashed session finds no untracked files) and after every further completed step; with *Squash and
 merge* only the PR title and description reach `main`, so intermediate commits may describe the step.
 They never contain secrets. A stop hook may demand a commit while a member is still working; that interim
-commit ("Work in progress: …") is fine, and the commit that closes the round gets a final subject. Before
+commit ("Work in progress: …") is fine, and the commit that closes the round gets a final subject. A member
+whose edits were committed that way finds a clean `git status` when it hands back; that is expected, and it
+reports its changes against the head SHA it was given (`git diff <sha>`), not against the working tree. Before
 the PR such commits cost nothing; after it every push re-triggers CI and the code analysis, so edits are
 batched and committed once per round. After the PR the orchestrator waits for the running member's hand-back
 before it ends its turn; when a hook still forces a push of a half-finished tree, that head is logged as work in
@@ -336,7 +338,11 @@ told so.
   confirmation of the fix (a further rejection then goes to the Product Manager).
 - **Review ↔ Dev (steps 6–8):** review pass 1 is a full review; at most **2 further fix-and-review
   rounds**, each reviewing only the delta. Blocking findings still open after that go to the Lead, who
-  decides: accept with justification, split into a follow-up issue, abort, or escalate.
+  decides: accept with justification, split into a follow-up issue, abort, or escalate. A round is counted
+  per review round that returned blocking findings, not per launch: everything done to resolve that round's
+  findings — the Dev's fix, and a test or test double the Tester repairs because the fix exposed it as wrong —
+  is one fix round, followed by one delta review. A defect a reviewer finds in a test is a finding of its
+  round like any other and counts the same way.
 - **Existing tests affected by a signature change:** the plan lists the existing test call sites of a
   changed signature (factories, helpers) and who adapts them. The **Dev** adapts them in step 4 when the
   old signature goes away (so *Build* passes before the Tester starts), and in any later step when a call

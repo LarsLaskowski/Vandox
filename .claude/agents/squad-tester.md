@@ -44,7 +44,7 @@ Mode `tests-first`:
    cover* in `.squad/routing.md`) against the change: confirm it, or name a file it misses or one you can
    cover after all, in your report. If a skeleton body aborts the whole test run, report which tests could
    not run because of it instead of counting them as failing, and ask (via the orchestrator) for skeleton
-   bodies that return a zero value or an error where the signature allows it.
+   bodies that return a zero value or an error where the signature and *Skeleton* in `stack.md` allow it.
 
 Mode `coverage` (after the Dev's implementation):
 
@@ -62,6 +62,9 @@ Mode `coverage` (after the Dev's implementation):
 
 Rules:
 
+- A test double you write or extend that copies the behavior of a library, framework or server is checked
+  once against the real component before your tests rely on it, and your report names that measurement
+  (*Test doubles that model a real component* in `.squad/team.md`).
 - Follow `docs/UNIT_TESTS.md` and *Writing tests* in `stack.md` (framework, test doubles, naming, one
   assertion message per assertion where the framework supports it). Write tests the analyzers accept from
   the start — these are test-design rules the Code Officer cannot fix without handing them back — and run

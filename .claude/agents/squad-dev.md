@@ -26,9 +26,10 @@ The orchestrator tells you which **mode** to run:
 - `skeleton` — add exactly the signatures listed in the plan, built as *Skeleton* in `stack.md` describes,
   nothing else, and make sure *Build* passes. Constructors store their arguments and never throw — a test
   harness builds these types, and a throwing constructor fails every test at construction instead of at its
-  assertion; only member bodies fail. The body the *Skeleton* section of `stack.md` names is the default. A
-  zero-value stub is allowed only where that body would break a test that exists and passes today; the new
-  tests must still fail on the stub, and you report each such stub as a deviation. Rewrite
+  assertion; only member bodies fail. The body the *Skeleton* section of `stack.md` names is the default;
+  whether a zero-value stub is allowed instead, and where, is decided there alone. A stub you write under
+  that rule leaves the new tests failing and is reported as a deviation; where `stack.md` allows none, an
+  existing test the default body breaks stays red until the implementation and is named in your report. Rewrite
   the existing files the plan lists, and adapt exactly the existing test call sites the plan assigns to you
   for an incompatible signature change (mechanically, no assertion touched), so the suite builds. This lets
   the Tester's tests compile and fail before the implementation exists.

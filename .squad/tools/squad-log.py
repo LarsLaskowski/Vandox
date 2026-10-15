@@ -46,6 +46,8 @@ mechanics out of the orchestrator's hands:
   summed by hand or left out. `--replace-last` with the real numbers turns it into a full trailer later;
 - rows of the Orchestrator, the Product Manager and the User (an answer, a measurement the user ran) are
   not launches: write them with that member cell and no metric option, the summary does not ask for usage;
+  a metric option, `--amend-last`, `--replace-last` or `--unreported` for such a member is refused, since no
+  task notification exists for it;
 - the metrics are what a launch really cost: fewer than 1,000 tokens (every launch loads its agent file and
   instructions first, so `--tokens 0` or `--tokens 1` can only be a placeholder) and negative numbers are
   refused, so a placeholder cannot be logged by accident. A row for a launch whose notification has not
@@ -332,11 +334,16 @@ def covered_seconds(rows, first, last):
     return covered
 
 
+def is_not_launch(member):
+    """True for the Orchestrator, the Product Manager and the User, whose rows are never launches."""
+    return member.strip().lower() in NOT_LAUNCHES
+
+
 def missing_usage(rows):
     """(stamp, step, member) of every launch row — a member other than the Orchestrator, the Product Manager and
     the User — without a trailer; a launch marked as unreported has one."""
     return [(stamp, step, member) for stamp, step, member, result in rows
-            if member.lower() not in NOT_LAUNCHES and not ANY_TRAILER.search(result)]
+            if not is_not_launch(member) and not ANY_TRAILER.search(result)]
 
 
 def unreported_usage(rows):
@@ -434,7 +441,9 @@ def launch_metrics(parser, root, args):
                          "or --continued")
         return (model, None, None, None)
     if not model or None in (args.tokens, args.tool_uses, args.seconds):
-        parser.error("--agent (or --launch), --tokens, --tool-uses and --seconds go together")
+        parser.error("--agent (or --launch), --tokens, --tool-uses and --seconds go together; a launch whose "
+                     "notification has not arrived yet is logged without any metric option (no --agent either) "
+                     "and completed with --amend-last")
     if args.tokens < MIN_TOKENS or args.tool_uses < 0 or args.seconds < 0:
         parser.error(f"--tokens must be at least {MIN_TOKENS:,} and --tool-uses and --seconds not negative; a launch "
                      "whose notification has not arrived yet is logged without any metric option and completed with "
@@ -470,7 +479,9 @@ def amend_command(parser, path, folder, member, launch, replace, continued, step
     if row is None:
         state = "with" if replace else "without"
         where = f"of step '{step}' " if step is not None else ""
-        print(f"No row of {member} {where}{state} a launch trailer in {folder}")
+        hint = "" if replace else " (a row that already carries one, also the unreported mark, is corrected " \
+                                  "with --replace-last)"
+        print(f"No row of {member} {where}{state} a launch trailer in {folder}{hint}")
         return 1
     print(row)
     return 0
@@ -507,6 +518,12 @@ def main():
         print(summary(path))
         with open(path, encoding="utf-8-sig") as handle:
             return 3 if missing_usage(parse_rows(handle.read())) else 0
+    target = args.amend_last or args.replace_last or args.member
+    uses_metrics = args.amend_last or args.replace_last or args.unreported or args.agent or args.launch \
+        or args.tokens is not None or args.continued or args.continued_from is not None
+    if target is not None and is_not_launch(target) and uses_metrics:
+        parser.error(f"'{target}' is no launch: its rows are written without any metric option and never "
+                     "amended, and the summary asks no usage for them")
     launch = launch_metrics(parser, root, args)
     args.continued = args.continued or args.continued_from is not None
     if args.amend_last and args.replace_last:
