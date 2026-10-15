@@ -33,9 +33,12 @@
 
 @if (_document is not null)
 {
-    @if (_document.OutagesListed > ReportsView.PageOutages)
+    @if (_document.OutagesListed > ReportsView.PageOutages || _document.FirstOutage > 0)
     {
-        <p class="status">@string.Format(System.Globalization.CultureInfo.InvariantCulture, ReportsView.OutageRange, _document.FirstOutage + 1, _document.FirstOutage + _document.Outages.Count, _document.OutagesListed)</p>
+        @if (_document.Outages.Count > 0)
+        {
+            <p class="status">@string.Format(System.Globalization.CultureInfo.InvariantCulture, ReportsView.OutageRange, _document.FirstOutage + 1, _document.FirstOutage + _document.Outages.Count, _document.OutagesListed)</p>
+        }
         <p class="pager">
             @if (_document.FirstOutage > 0)
             {

@@ -101,10 +101,7 @@ internal static class ReportDownloadEndpoint
     /// <returns>A task that completes when the report is written and flushed</returns>
     private static async Task WriteAsync(HttpContext context, ReportService reports, ReportText text, CancellationToken cancellationToken)
     {
-        await using var writer = new StreamWriter(new AsyncOnlyStream(context.Response.Body), new UTF8Encoding(false), BufferChars, true)
-                                 {
-                                     AutoFlush = true
-                                 };
+        await using var writer = new StreamWriter(context.Response.Body, new UTF8Encoding(false), BufferChars, true);
 
         await reports.RunAsync(new MarkdownReportWriter(writer, text), cancellationToken).ConfigureAwait(false);
         await writer.FlushAsync(cancellationToken).ConfigureAwait(false);

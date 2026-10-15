@@ -154,6 +154,7 @@ public sealed class MarkdownReportWriter : IReportWriter
         ArgumentNullException.ThrowIfNull(summary);
 
         await _writer.WriteAsync(Serialize(_composer.Summary(summary), true)).ConfigureAwait(false);
+        await _writer.FlushAsync().ConfigureAwait(false);
     }
 
     /// <inheritdoc />
@@ -163,6 +164,7 @@ public sealed class MarkdownReportWriter : IReportWriter
         ArgumentNullException.ThrowIfNull(activities);
 
         await _writer.WriteAsync(Serialize(_composer.Incident(stored, activities), true)).ConfigureAwait(false);
+        await _writer.FlushAsync().ConfigureAwait(false);
     }
 
     /// <inheritdoc />
@@ -171,6 +173,7 @@ public sealed class MarkdownReportWriter : IReportWriter
         ArgumentNullException.ThrowIfNull(summary);
 
         await _writer.WriteAsync(Serialize(_composer.Notes(summary, listed), false)).ConfigureAwait(false);
+        await _writer.FlushAsync().ConfigureAwait(false);
     }
 
     #endregion // IReportWriter
