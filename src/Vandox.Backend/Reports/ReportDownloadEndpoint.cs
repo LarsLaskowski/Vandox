@@ -93,6 +93,7 @@ internal static class ReportDownloadEndpoint
 
     /// <summary>
     /// Runs the report into the body of the response; every part reaches the client when it is written.
+    /// The writer is flushed and disposed only after a complete run, because its disposal flushes the body and a flush starts the response on the server, so a failed run leaves it undisposed (no unmanaged resource, body left open).
     /// </summary>
     /// <param name="context">The request</param>
     /// <param name="reports">The report service</param>
@@ -101,10 +102,11 @@ internal static class ReportDownloadEndpoint
     /// <returns>A task that completes when the report is written and flushed</returns>
     private static async Task WriteAsync(HttpContext context, ReportService reports, ReportText text, CancellationToken cancellationToken)
     {
-        await using var writer = new StreamWriter(context.Response.Body, new UTF8Encoding(false), BufferChars, true);
+        var writer = new StreamWriter(context.Response.Body, new UTF8Encoding(false), BufferChars, true);
 
         await reports.RunAsync(new MarkdownReportWriter(writer, text), cancellationToken).ConfigureAwait(false);
         await writer.FlushAsync(cancellationToken).ConfigureAwait(false);
+        await writer.DisposeAsync().ConfigureAwait(false);
     }
 
     /// <summary>
