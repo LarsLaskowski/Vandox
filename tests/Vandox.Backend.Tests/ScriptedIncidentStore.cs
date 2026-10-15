@@ -44,6 +44,16 @@ internal sealed class ScriptedIncidentStore : IIncidentStore
     /// </summary>
     internal int Calls { get; private set; }
 
+    /// <summary>
+    /// Gets or sets the number of the query that fails; 0 for none.
+    /// </summary>
+    internal int FailAtCall { get; set; }
+
+    /// <summary>
+    /// Gets or sets the failure of the query <see cref="FailAtCall"/>; a store exception when <c>null</c>.
+    /// </summary>
+    internal Exception? Failure { get; set; }
+
     #endregion // Properties
 
     #region IIncidentStore
@@ -62,6 +72,11 @@ internal sealed class ScriptedIncidentStore : IIncidentStore
         if (Calls > MaxCalls)
         {
             throw new InvalidOperationException("the reader asked for more pages than the script has");
+        }
+
+        if (Calls == FailAtCall)
+        {
+            throw Failure ?? new StoreException("store: reading incidents: scripted failure");
         }
 
         if (Calls <= _pages.Count)

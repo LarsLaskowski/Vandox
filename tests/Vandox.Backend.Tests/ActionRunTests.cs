@@ -45,6 +45,37 @@ public class ActionRunTests
     }
 
     /// <summary>
+    /// A run with its own deadline ends at that deadline and not at the one of the logs.
+    /// </summary>
+    [TestMethod]
+    public void ActionRunUsesTheGivenDeadline()
+    {
+        // Arrange
+        var clock = new FakeTimeProvider();
+        var deadline = TimeSpan.FromMinutes(2);
+        using var run = new ActionRun(clock, deadline);
+
+        run.Start();
+
+        // Act
+        clock.Advance(LogsView.Deadline);
+
+        var atTheDeadlineOfTheLogs = run.Token.IsCancellationRequested;
+
+        clock.Advance(deadline - LogsView.Deadline - TimeSpan.FromMilliseconds(1));
+
+        var justBefore = run.Token.IsCancellationRequested;
+
+        clock.Advance(TimeSpan.FromMilliseconds(1));
+
+        // Assert
+        Assert.IsFalse(atTheDeadlineOfTheLogs, "the deadline of the logs does not end the run");
+        Assert.IsFalse(justBefore, "the token is open before the given deadline");
+        Assert.IsTrue(run.Token.IsCancellationRequested, "the token ends at the given deadline");
+        Assert.IsTrue(run.DeadlineExceeded, "the deadline ended the action");
+    }
+
+    /// <summary>
     /// A superseded run has an ended token, and the end is not reported as the deadline.
     /// </summary>
     [TestMethod]

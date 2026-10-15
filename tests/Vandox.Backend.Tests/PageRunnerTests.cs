@@ -95,6 +95,45 @@ public class PageRunnerTests
     }
 
     /// <summary>
+    /// A runner with its own deadline lets the action run past the deadline of the logs, ends it at the given deadline and shows the deadline text.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task PageRunnerUsesTheGivenDeadline()
+    {
+        // Arrange
+        var clock = new FakeTimeProvider();
+        var deadline = TimeSpan.FromMinutes(2);
+        var shown = new List<string>();
+        var endedAtTheDeadlineOfTheLogs = true;
+        var endedJustBefore = true;
+        using var runner = new PageRunner(clock,
+                                          _ =>
+                                          {
+                                          },
+                                          deadline,
+                                          DeadlineText,
+                                          FailureText,
+                                          shown.Add);
+
+        // Act
+        await runner.RunAsync(async token =>
+                              {
+                                  clock.Advance(LogsView.Deadline);
+                                  endedAtTheDeadlineOfTheLogs = token.IsCancellationRequested;
+                                  clock.Advance(deadline - LogsView.Deadline - TimeSpan.FromMilliseconds(1));
+                                  endedJustBefore = token.IsCancellationRequested;
+                                  clock.Advance(TimeSpan.FromMilliseconds(1));
+                                  await Task.Delay(Timeout.Infinite, token);
+                              });
+
+        // Assert
+        Assert.IsFalse(endedAtTheDeadlineOfTheLogs, "the action is still open at the deadline of the logs");
+        Assert.IsFalse(endedJustBefore, "the action is open just before the given deadline");
+        Assert.AreSequenceEqual([DeadlineText], shown, "the deadline text at the given deadline");
+    }
+
+    /// <summary>
     /// An action that is cancelled by a newer one shows nothing, not even when it ends with a failure of the store, and the newer action runs after it.
     /// </summary>
     /// <returns>A task that completes when the test is done</returns>

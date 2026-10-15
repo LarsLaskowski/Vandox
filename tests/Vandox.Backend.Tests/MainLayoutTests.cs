@@ -104,6 +104,30 @@ public partial class MainLayoutTests
     }
 
     /// <summary>
+    /// The Report entry points to the report and is marked on the report page, with or without a language, but not on the incidents or the overview.
+    /// </summary>
+    /// <param name="address">The current address</param>
+    /// <param name="marked">Whether the Report entry is marked</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [DataRow("http://localhost/report", true)]
+    [DataRow("http://localhost/report?lang=de", true)]
+    [DataRow("http://localhost/incidents", false)]
+    [DataRow("http://localhost/", false)]
+    public async Task MainLayoutMarksReportOnTheReportPage(string address, bool marked)
+    {
+        // Act
+        var html = await RenderAsync(new ClaimsPrincipal(new ClaimsIdentity()), address);
+
+        // Assert
+        var link = ReportLink().Match(html);
+
+        Assert.IsTrue(link.Success, "the Report link");
+        Assert.Contains("href=\"report\"", link.Groups[1].Value, "the Report link points to report");
+        Assert.AreEqual(marked, ActiveClass().IsMatch(link.Groups[1].Value), $"the Report link is marked: {marked}");
+    }
+
+    /// <summary>
     /// The sign-out form is shown to a signed-in user only: a form that posts to <c>logout</c> with an antiforgery token.
     /// </summary>
     /// <returns>A task that completes when the test is done</returns>
@@ -187,6 +211,9 @@ public partial class MainLayoutTests
 
     [GeneratedRegex("<a\\b([^>]*)>\\s*Incidents\\s*</a>")]
     private static partial Regex IncidentsLink();
+
+    [GeneratedRegex("<a\\b([^>]*)>\\s*Report\\s*</a>")]
+    private static partial Regex ReportLink();
 
     [GeneratedRegex("<button type=\"button\"([^>]*)>(.*?)</button>", RegexOptions.Singleline)]
     private static partial Regex ThemeButton();

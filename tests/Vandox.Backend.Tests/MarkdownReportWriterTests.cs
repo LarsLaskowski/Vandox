@@ -3,6 +3,8 @@ using Vandox.Core.Incidents;
 using Vandox.Core.Reports;
 using Vandox.Storage;
 
+using static Vandox.Backend.Tests.ReportSamples;
+
 namespace Vandox.Backend.Tests;
 
 /// <summary>
@@ -13,11 +15,7 @@ public class MarkdownReportWriterTests
 {
     #region Constants
 
-    private const ulong Mib = 1048576;
-
     private static readonly string[] _caps = ["1000000", "10000", "100000", "4096"];
-
-    private static readonly DateTimeOffset _kill = new(2026, 10, 2, 8, 59, 59, TimeSpan.FromHours(2));
 
     #endregion // Constants
 
@@ -33,6 +31,31 @@ public class MarkdownReportWriterTests
     #region Methods
 
     /// <summary>
+    /// The report of the rich sample is, byte for byte, the report the writer made before it composed its output as blocks: the golden files were made by the unchanged writer.
+    /// </summary>
+    /// <param name="language">The language</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [DataRow("en")]
+    [DataRow("de")]
+    public async Task MarkdownReportWriterWritesTheGoldenReport(string language)
+    {
+        // Arrange
+        var text = ReportText.For(language);
+
+        Assert.IsNotNull(text, "the language has a table");
+
+        var buffer = new StringWriter();
+        var expected = (await File.ReadAllTextAsync(RepositoryFiles.Path($"testdata/report/forensics-{language}.md"), TestContext.CancellationToken)).Replace("\r\n", "\n", StringComparison.Ordinal);
+
+        // Act
+        await WriteAsync(new MarkdownReportWriter(buffer, text), RichSummary(), RichOutages());
+
+        // Assert
+        Assert.AreEqual(expected, buffer.ToString().Replace("\r\n", "\n", StringComparison.Ordinal), "the report equals the golden file");
+    }
+
+    /// <summary>
     /// Unknown parts of the hypothesis are written as unknown, and a known empty list of growth candidates as none.
     /// </summary>
     /// <returns>A task that completes when the test is done</returns>
@@ -41,8 +64,8 @@ public class MarkdownReportWriterTests
     {
         // Arrange
         var text = ReportText.English;
-        var unknown = Stored(1, Outage(_kill, 1, "mariadbd"));
-        var known = Stored(2, Outage(_kill, 1, "mariadbd"));
+        var unknown = Stored(1, Outage(KillAt, 1, "mariadbd"));
+        var known = Stored(2, Outage(KillAt, 1, "mariadbd"));
 
         known.Incident.Hypothesis = new IncidentHypothesis
                                     {
@@ -60,7 +83,7 @@ public class MarkdownReportWriterTests
 
         // Act
         var unknownOutput = await WriteIncidentAsync(text, unknown, Activities(Indicator.Unknown, Indicator.Unknown, Indicator.Unknown));
-        var knownOutput = await WriteIncidentAsync(text, known, Activities(Indicator.Yes, Indicator.Yes, Indicator.No, _kill.AddMinutes(-9)));
+        var knownOutput = await WriteIncidentAsync(text, known, Activities(Indicator.Yes, Indicator.Yes, Indicator.No, KillAt.AddMinutes(-9)));
 
         // Assert
         AssertAnyLine(unknownOutput, text.Growth, text.Unknown);
@@ -86,7 +109,7 @@ public class MarkdownReportWriterTests
     {
         // Arrange
         var text = ReportText.English;
-        var incident = Outage(_kill, 37, "mariadbd");
+        var incident = Outage(KillAt, 37, "mariadbd");
 
         incident.Kills = [Victim("mariadbd"), Victim("nginx"), Victim("mariadbd"), Victim(string.Empty), Victim("mariadbd")];
         incident.Hypothesis = new IncidentHypothesis
@@ -103,7 +126,7 @@ public class MarkdownReportWriterTests
                                               ]
                               };
 
-        var allKept = Outage(_kill, 2, "mariadbd");
+        var allKept = Outage(KillAt, 2, "mariadbd");
 
         allKept.Kills = [Victim("mariadbd"), Victim("mariadbd")];
         allKept.Hypothesis = incident.Hypothesis;
@@ -171,7 +194,7 @@ public class MarkdownReportWriterTests
                                                  Share = 1,
                                                  MeanRssBytes = Mib,
                                                  PeakRssBytes = 2 * Mib,
-                                                 PeakAt = _kill
+                                                 PeakAt = KillAt
                                              }
                                          ],
                               transient: [
@@ -182,10 +205,10 @@ public class MarkdownReportWriterTests
                                                  Share = 0.1,
                                                  MeanRssBytes = Mib,
                                                  PeakRssBytes = Mib,
-                                                 PeakAt = _kill
+                                                 PeakAt = KillAt
                                              }
                                          ]);
-        var incident = Outage(_kill, 3, "a`b<script>");
+        var incident = Outage(KillAt, 3, "a`b<script>");
 
         incident.Kills = [Victim("a`b<script>"), Victim("evil\n## injected"), Victim("[x](http://evil) www.evil.example")];
         incident.Hypothesis = new IncidentHypothesis
@@ -327,10 +350,10 @@ public class MarkdownReportWriterTests
                                                Share = 1,
                                                MeanRssBytes = (2 * Mib) + (Mib / 2),
                                                PeakRssBytes = Mib + (Mib / 2),
-                                               PeakAt = _kill
+                                               PeakAt = KillAt
                                            }
                                        ]);
-        var incident = Outage(_kill, 1, "mariadbd");
+        var incident = Outage(KillAt, 1, "mariadbd");
 
         incident.Hypothesis = new IncidentHypothesis
                               {
@@ -383,9 +406,9 @@ public class MarkdownReportWriterTests
         // Arrange
         var offset = TimeSpan.FromHours(2);
         var summary = Mixed(generatedAt: new DateTimeOffset(2026, 10, 3, 14, 0, 59, offset), firstLogLineAt: new DateTimeOffset(2026, 9, 30, 3, 15, 30, offset), lookback: TimeSpan.FromMinutes(75));
-        var incident = Outage(_kill, 1, "mariadbd");
+        var incident = Outage(KillAt, 1, "mariadbd");
 
-        incident.Start = _kill.AddHours(-1);
+        incident.Start = KillAt.AddHours(-1);
 
         // Act
         var output = await WriteAllAsync(ReportText.English, summary, incident);
@@ -535,7 +558,7 @@ public class MarkdownReportWriterTests
     {
         // Arrange
         var text = ReportText.English;
-        var incident = Outage(_kill, 5, "mariadbd");
+        var incident = Outage(KillAt, 5, "mariadbd");
 
         incident.Kills = [];
 
@@ -646,249 +669,6 @@ public class MarkdownReportWriterTests
     }
 
     /// <summary>
-    /// Creates a decided result without a match.
-    /// </summary>
-    /// <returns>The result</returns>
-    private static PatternResult Decided()
-    {
-        return new PatternResult
-               {
-                   Outcome = PatternOutcome.NotDetected,
-                   Matching = 0,
-                   Known = 12,
-                   BaseMatching = 2,
-                   BaseKnown = 50
-               };
-    }
-
-    /// <summary>
-    /// Creates an unknown result with a reason.
-    /// </summary>
-    /// <param name="reason">The reason</param>
-    /// <returns>The result</returns>
-    private static PatternResult Unknown(UnknownReason reason)
-    {
-        return new PatternResult
-               {
-                   Outcome = PatternOutcome.Unknown,
-                   Reason = reason
-               };
-    }
-
-    /// <summary>
-    /// Creates the 24 results of the time of day.
-    /// </summary>
-    /// <param name="atTwo">The result of the hour 2</param>
-    /// <param name="others">The result of the other hours; a decided one without a match when <c>null</c></param>
-    /// <returns>The results</returns>
-    private static List<PatternResult> Hours(PatternResult atTwo, PatternResult? others = null)
-    {
-        var results = new List<PatternResult>();
-
-        for (var hour = 0; hour < 24; hour++)
-        {
-            results.Add(hour == 2 ? atTwo : others ?? Decided());
-        }
-
-        return results;
-    }
-
-    /// <summary>
-    /// Creates the 24 results of the time of day that are all unknown for one reason.
-    /// </summary>
-    /// <param name="reason">The reason</param>
-    /// <returns>The results</returns>
-    private static List<PatternResult> Undecided(UnknownReason reason)
-    {
-        return Hours(new PatternResult
-                     {
-                         Outcome = PatternOutcome.Unknown,
-                         Reason = reason
-                     },
-                     new PatternResult
-                     {
-                         Outcome = PatternOutcome.Unknown,
-                         Reason = reason
-                     });
-    }
-
-    /// <summary>
-    /// Creates a summary with fixed counts and times.
-    /// </summary>
-    /// <param name="timeOfDay">The 24 results of the time of day</param>
-    /// <param name="backup">The backup result</param>
-    /// <param name="boot">The boot result</param>
-    /// <param name="panel">The panel result</param>
-    /// <param name="generatedAt">The generation time; a fixed one when <c>null</c></param>
-    /// <param name="firstLogLineAt">The first log line; a fixed one when <c>null</c></param>
-    /// <param name="lookback">The lookback; one hour when <c>null</c></param>
-    /// <param name="panelThreshold">The panel threshold in bytes</param>
-    /// <param name="permanent">The permanent consumers; none when <c>null</c></param>
-    /// <param name="transient">The transient consumers; none when <c>null</c></param>
-    /// <param name="snapshotsTruncated">Whether the snapshot cap was hit</param>
-    /// <param name="bootsTruncated">Whether the boot cap was hit</param>
-    /// <param name="runsTruncated">Whether the cap of runs of observed hours was hit</param>
-    /// <param name="untracked">The number of program entries that were not tracked</param>
-    /// <returns>The summary</returns>
-    private static ForensicsSummary Summary(IReadOnlyList<PatternResult> timeOfDay, PatternResult backup, PatternResult boot, PatternResult panel, DateTimeOffset? generatedAt = null, DateTimeOffset? firstLogLineAt = null, TimeSpan? lookback = null, ulong panelThreshold = 68 * Mib, IReadOnlyList<ConsumerSummary>? permanent = null, IReadOnlyList<ConsumerSummary>? transient = null, bool snapshotsTruncated = false, bool bootsTruncated = false, bool runsTruncated = false, long untracked = 0)
-    {
-        return new ForensicsSummary
-               {
-                   GeneratedAt = generatedAt ?? new DateTimeOffset(2026, 10, 6, 7, 0, 0, TimeSpan.Zero),
-                   Lookback = lookback ?? TimeSpan.FromHours(1),
-                   LogLines = 123456,
-                   FirstLogLineAt = firstLogLineAt ?? new DateTimeOffset(2026, 9, 29, 0, 0, 0, TimeSpan.Zero),
-                   LastLogLineAt = new DateTimeOffset(2026, 10, 6, 6, 0, 0, TimeSpan.Zero),
-                   ObservedHours = 168,
-                   Snapshots = 2016,
-                   FirstSnapshotAt = new DateTimeOffset(2026, 9, 29, 0, 5, 0, TimeSpan.Zero),
-                   LastSnapshotAt = new DateTimeOffset(2026, 10, 6, 5, 55, 0, TimeSpan.Zero),
-                   Incidents = 13,
-                   Kills = 29,
-                   FirstOutageAt = new DateTimeOffset(2026, 9, 30, 1, 5, 0, TimeSpan.Zero),
-                   LastOutageAt = new DateTimeOffset(2026, 10, 5, 22, 40, 0, TimeSpan.Zero),
-                   TimeOfDay = timeOfDay,
-                   Backup = backup,
-                   Boot = boot,
-                   PanelHigh = panel,
-                   PanelThresholdBytes = panelThreshold,
-                   Permanent = permanent ?? [],
-                   Transient = transient ?? [],
-                   SnapshotsTruncated = snapshotsTruncated,
-                   BootsTruncated = bootsTruncated,
-                   ObservedHoursTruncated = runsTruncated,
-                   UntrackedProgramEntries = untracked
-               };
-    }
-
-    /// <summary>
-    /// Creates a summary with an unknown time of day, a detected backup, a boot that is not detected, an unknown panel and consumers of both kinds.
-    /// </summary>
-    /// <param name="generatedAt">The generation time; a fixed one when <c>null</c></param>
-    /// <param name="firstLogLineAt">The first log line; a fixed one when <c>null</c></param>
-    /// <param name="lookback">The lookback; one hour when <c>null</c></param>
-    /// <param name="backup">The backup result; a detected one when <c>null</c></param>
-    /// <param name="panelThreshold">The panel threshold in bytes</param>
-    /// <param name="permanent">The permanent consumers; one when <c>null</c></param>
-    /// <returns>The summary</returns>
-    private static ForensicsSummary Mixed(DateTimeOffset? generatedAt = null, DateTimeOffset? firstLogLineAt = null, TimeSpan? lookback = null, PatternResult? backup = null, ulong panelThreshold = 68 * Mib, IReadOnlyList<ConsumerSummary>? permanent = null)
-    {
-        return Summary(Undecided(UnknownReason.TooFewIncidents),
-                       backup ?? new PatternResult
-                                 {
-                                     Outcome = PatternOutcome.Detected,
-                                     Matching = 3,
-                                     Known = 3,
-                                     BaseMatching = 3,
-                                     BaseKnown = 72
-                                 },
-                       Decided(),
-                       new PatternResult
-                       {
-                           Outcome = PatternOutcome.Unknown,
-                           Reason = UnknownReason.NoPanelMemory
-                       },
-                       generatedAt,
-                       firstLogLineAt,
-                       lookback,
-                       panelThreshold,
-                       permanent ?? [
-                                        new ConsumerSummary
-                                        {
-                                            Program = "mariadbd",
-                                            Snapshots = 2016,
-                                            Share = 1,
-                                            MeanRssBytes = 300 * Mib,
-                                            PeakRssBytes = 400 * Mib,
-                                            PeakAt = _kill
-                                        }
-                                    ],
-                       [
-                           new ConsumerSummary
-                           {
-                               Program = "pzstd",
-                               Snapshots = 12,
-                               Share = 0.006,
-                               MeanRssBytes = 100 * Mib,
-                               PeakRssBytes = 150 * Mib,
-                               PeakAt = _kill
-                           }
-                       ]);
-    }
-
-    /// <summary>
-    /// Creates the activities of an outage.
-    /// </summary>
-    /// <param name="backup">The backup indicator</param>
-    /// <param name="boot">The boot indicator</param>
-    /// <param name="panel">The panel indicator</param>
-    /// <param name="lastBootAt">The time of the last boot, if any</param>
-    /// <returns>The activities</returns>
-    private static IncidentActivities Activities(Indicator backup, Indicator boot, Indicator panel, DateTimeOffset? lastBootAt = null)
-    {
-        return new IncidentActivities
-               {
-                   Backup = backup,
-                   Boot = boot,
-                   LastBootAt = lastBootAt,
-                   PanelHigh = panel
-               };
-    }
-
-    /// <summary>
-    /// Creates a kept kill.
-    /// </summary>
-    /// <param name="command">The victim's command</param>
-    /// <returns>The kill</returns>
-    private static IncidentKill Victim(string command)
-    {
-        return new IncidentKill
-               {
-                   At = _kill,
-                   Host = "web-1",
-                   VictimCommand = command,
-                   LineCount = 1
-               };
-    }
-
-    /// <summary>
-    /// Creates an incident of the given kill count whose one kept kill has a victim.
-    /// </summary>
-    /// <param name="firstKillAt">The time of the first kill</param>
-    /// <param name="killCount">The kill count</param>
-    /// <param name="victim">The victim's command</param>
-    /// <returns>The incident</returns>
-    private static Incident Outage(DateTimeOffset firstKillAt, long killCount, string victim)
-    {
-        return new Incident
-               {
-                   Start = firstKillAt.AddHours(-1),
-                   End = firstKillAt.AddMinutes(30),
-                   FirstKillAt = firstKillAt,
-                   LastKillAt = firstKillAt,
-                   KillCount = killCount,
-                   Kills = [Victim(victim)]
-               };
-    }
-
-    /// <summary>
-    /// Wraps an incident in a stored incident.
-    /// </summary>
-    /// <param name="id">The ID</param>
-    /// <param name="incident">The incident</param>
-    /// <returns>The stored incident</returns>
-    private static StoredIncident Stored(long id, Incident incident)
-    {
-        return new StoredIncident
-               {
-                   Id = id,
-                   Incident = incident,
-                   CreatedAt = _kill,
-                   UpdatedAt = _kill
-               };
-    }
-
-    /// <summary>
     /// Writes one incident with a new writer.
     /// </summary>
     /// <param name="text">The table</param>
@@ -931,7 +711,7 @@ public class MarkdownReportWriterTests
     {
         var buffer = new StringWriter();
         var writer = new MarkdownReportWriter(buffer, text);
-        var list = incidents.Length == 0 ? [Outage(_kill, 1, "mariadbd")] : incidents;
+        var list = incidents.Length == 0 ? [Outage(KillAt, 1, "mariadbd")] : incidents;
 
         await writer.WriteSummaryAsync(summary);
 
