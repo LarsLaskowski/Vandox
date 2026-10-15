@@ -368,5 +368,21 @@ internal static partial class BackendLog
     [LoggerMessage(EventId = 51, Level = LogLevel.Error, Message = "incidents view: saving a note failed")]
     internal static partial void IncidentNoteSaveFailed(this ILogger logger, Exception exception);
 
+    /// <summary>
+    /// Logs that making the report for the page failed.
+    /// </summary>
+    /// <param name="logger">The logger</param>
+    /// <param name="exception">The failure</param>
+    [LoggerMessage(EventId = 52, Level = LogLevel.Error, Message = "report page: making the report failed")]
+    internal static partial void ReportPageFailed(this ILogger logger, Exception exception);
+
+    /// <summary>
+    /// Logs that making the report for the download failed.
+    /// </summary>
+    /// <param name="logger">The logger</param>
+    /// <param name="exception">The failure</param>
+    [LoggerMessage(EventId = 53, Level = LogLevel.Error, Message = "report download: making the report failed")]
+    internal static partial void ReportDownloadFailed(this ILogger logger, Exception exception);
+
     #endregion // Methods
 }

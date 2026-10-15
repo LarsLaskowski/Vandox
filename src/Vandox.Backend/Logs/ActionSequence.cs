@@ -9,6 +9,8 @@ internal sealed class ActionSequence : IDisposable
 
     private readonly TimeProvider _clock;
 
+    private readonly TimeSpan _limit;
+
     private ActionRun? _current;
 
     #endregion // Fields
@@ -20,8 +22,19 @@ internal sealed class ActionSequence : IDisposable
     /// </summary>
     /// <param name="clock">The clock of the deadlines</param>
     internal ActionSequence(TimeProvider clock)
+        : this(clock, LogsView.Deadline)
+    {
+    }
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="ActionSequence"/> class with its own deadline.
+    /// </summary>
+    /// <param name="clock">The clock of the deadlines</param>
+    /// <param name="deadline">The time an action may take</param>
+    internal ActionSequence(TimeProvider clock, TimeSpan deadline)
     {
         _clock = clock;
+        _limit = deadline;
     }
 
     #endregion // Constructors
@@ -34,7 +47,7 @@ internal sealed class ActionSequence : IDisposable
     /// <returns>A task that returns the run, which is superseded when a still newer action arrived while it waited</returns>
     internal async Task<ActionRun> BeginAsync()
     {
-        var run = new ActionRun(_clock);
+        var run = new ActionRun(_clock, _limit);
         var previous = _current;
 
         _current = run;

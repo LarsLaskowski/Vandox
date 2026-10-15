@@ -1,0 +1,55 @@
+@using Vandox.Backend.Components.Reports
+@using Vandox.Backend.Reports
+
+@page "/report"
+
+<PageTitle>@ReportsView.Title</PageTitle>
+
+<h1>@ReportsView.Title</h1>
+
+<nav class="subnav" aria-label="Language">
+    <a href="@ReportsView.PageHref("en")" class="@LanguageClass("en")">English</a>
+    <a href="@ReportsView.PageHref("de")" class="@LanguageClass("de")">Deutsch</a>
+    @if (_address.Error.Length == 0)
+    {
+        <a href="@ReportsView.DownloadHref(_address.Language)" download>@ReportsView.Download</a>
+    }
+</nav>
+
+@if (_address.Error.Length > 0)
+{
+    <p class="error" role="alert">@_address.Error</p>
+}
+
+@if (_failure.Length > 0)
+{
+    <p class="error" role="alert">@_failure</p>
+}
+
+@if (_running)
+{
+    <p class="status">@ReportsView.Running</p>
+}
+
+@if (_document is not null)
+{
+    @if (_document.OutagesListed > ReportsView.PageOutages || _document.FirstOutage > 0)
+    {
+        @if (_document.Outages.Count > 0)
+        {
+            <p class="status">@string.Format(System.Globalization.CultureInfo.InvariantCulture, ReportsView.OutageRange, _document.FirstOutage + 1, _document.FirstOutage + _document.Outages.Count, _document.OutagesListed)</p>
+        }
+        <p class="pager">
+            @if (_document.FirstOutage > 0)
+            {
+                <button type="button" @onclick="FirstAsync">@ReportsView.FirstOutages</button>
+            }
+            @if (_document.FirstOutage + _document.Outages.Count < _document.OutagesListed)
+            {
+                <button type="button" @onclick="NextAsync">@ReportsView.NextOutages</button>
+            }
+        </p>
+    }
+
+    <ReportContent Document="_document" />
+}

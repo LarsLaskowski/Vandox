@@ -398,7 +398,9 @@ The **forensics report** summarizes the whole stored period: every outage incide
 recur at a time of day or follow a backup, a boot or use of the Plesk panel, and which programs use the most memory permanently and
 transiently. It is computed on demand from the stored log lines, process snapshots and incidents, stores nothing, and is written as
 Markdown to standard output by `vandoxd report` (backend host area, *Command line and exit codes*). It lists the incidents as they are
-stored, so `vandoxd incidents` is run before it. A page in the web UI follows separately ("[Web] Forensics report page").
+stored, so `vandoxd incidents` is run before it. The web UI shows the same report on the page `/report` and offers it as a Markdown download
+(*Report page* of the [Web UI](web-ui.md) area): both compose it from the same blocks as the command, so the texts, numbers and times are the same; the page
+lists the outages 50 at a time, the command and the download list all of them.
 
 **All times are UTC**, in the report and in its rules; `import.time_zone` only decides how an import reads local times.
 
@@ -572,7 +574,13 @@ distinguishable from the escape of a real U+202E (`\u202e`).
 - The incidents are those `vandoxd incidents` last stored. The report cannot tell that log lines were imported after that run
   (the incidents carry the time they were saved, the lines the time they were logged), so `vandoxd incidents` is run again after every
   import.
-- A run reads every stored log line and every stored process snapshot (one query each), so on a large archive it can take minutes.
+- A run reads every stored log line (one query per page of 1,000 lines) and every stored process snapshot (one query per snapshot), so on a large archive it can
+  take minutes. Measured on the development host (4 vCPU Intel Xeon 2.10 GHz, .NET 10) over a database of 5,000,000 log lines (1.6 GB), 43,200 process
+  snapshots and 64 incidents: 56 to 60 seconds in a Release build (two runs through the gated readers of the web UI) and 67 seconds for `vandoxd report`
+  from a Debug build. The parts that take no token and so cannot be interrupted are short: after the last record the analysis seals its series and then summarizes
+  (`ForensicsAnalysis.Seal` and `Summarize`), 14 ms and 13 ms there and, at the caps (1,000,000 snapshots over 1,000,000 observed hours, fed directly), 0.5 s and 15 ms.
+  The reference host writes about four times slower than the development host ([BENCHMARKS.md](../BENCHMARKS.md)), so the same database may take several minutes
+  there; the web UI stops a run after 2 minutes, `vandoxd report` has no limit.
 - Standard output is UTF-8 without a byte order mark whatever the locale is (`Program.cs` opens it that way).
 - On exit 1 (interrupted, store failure) standard output holds an incomplete report, which is to be discarded.
 
@@ -607,6 +615,8 @@ level of the mail services (process state, ports, logs), never individual mail a
 - [0107](../decisions/0107-incidents-view-summaries-notes-per-incident-number-time-links-to-the-logs.md) — why notes follow an incident through updates and merges and how the web UI shows incidents.
 - [0100](../decisions/0100-forensics-report-as-markdown-from-vandoxd-report.md) — why the forensics report is Markdown from a
   sub-command, computed on demand in bounded passes, with external text in code spans, and why the web page comes separately.
+- [0108](../decisions/0108-report-page-one-block-model-outage-pages-by-rerun-language-in-the-address.md) — why the Markdown writer and the web page share one block model,
+  and how the page lists the outages and limits a run.
 - [0101](../decisions/0101-forensics-rules-share-of-outages-against-observed-hours-binomial-tail.md) — why the report's rules compare
   outages with observed system-log hours, judge activities over the lookback, decide by a binomial tail, and how panel use and
   permanent and transient consumers are defined.
@@ -618,8 +628,8 @@ level of the mail services (process state, ports, logs), never individual mail a
 - Telegram delivery and who may receive messages: the notification area.
 - How gaps are recorded and how batches are identified: the agent area and the wire format.
 - Where records are stored, and the tables of the template statistics: the storage area.
-- Storing events and the web page of the forensics report ("[Web] Forensics report page"): later
-  changes.
+- Storing events: a later change.
+- The report page and the download of the web UI: [Web UI](web-ui.md), *Report page*.
 - Live incidents from the agent's records: issue #53.
 
 ## Implementation
@@ -634,5 +644,6 @@ level of the mail services (process state, ports, logs), never individual mail a
 `SqliteStore`); `Vandox.Backend` (`Incidents/IncidentReconstructor`, `Incidents/RecordPager`, `Cli/IncidentsCommand`, `Cli/IncidentSummaryWriter`).
 `Vandox.Core.Reports` (`ForensicsAnalysis`, `ObservedHours`, `SnapshotSeries`, `ConsumerTracker`, `RecurrenceRules`, `PanelPrograms`,
 `ReportLimits`, `ProgramStatistics` and the result types) for the forensics report's analysis; `Vandox.Backend` (`Reports/ForensicsReporter`,
-`Reports/MarkdownReportWriter`, `Reports/MarkdownText`, `Reports/ReportText`, `Cli/ReportCommand`) for reading the store and writing
-the Markdown.
+`Reports/IReportWriter`, `Reports/ReportComposer` with the blocks `ReportBlock`, `ReportBlockKind` and `ReportPiece`, `Reports/MarkdownReportWriter`,
+`Reports/MarkdownText`, `Reports/ReportText`, `Cli/ReportCommand`) for reading the store and writing the Markdown; the web UI adds `Reports/ReportViewBuilder` and
+`ReportDocument` (the blocks of one page of outages), `ReportService` (one run at a time), `GatedIncidentStore` and the page and download described in the Web UI area.

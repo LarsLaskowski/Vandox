@@ -78,7 +78,7 @@ public sealed class ForensicsReporter
     /// <returns>The counts</returns>
     /// <exception cref="StoreException">The store failed, or a page did not advance</exception>
     /// <exception cref="OperationCanceledException">The run was cancelled</exception>
-    public async Task<ReportResult> RunAsync(MarkdownReportWriter writer, CancellationToken cancellationToken)
+    public async Task<ReportResult> RunAsync(IReportWriter writer, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(writer);
 

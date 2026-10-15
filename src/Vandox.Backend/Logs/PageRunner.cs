@@ -62,6 +62,26 @@ internal sealed class PageRunner : IDisposable
         _fail = fail;
     }
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="PageRunner"/> class with its own deadline.
+    /// </summary>
+    /// <param name="clock">The clock of the deadlines</param>
+    /// <param name="logFailure">Logs the failure of the store</param>
+    /// <param name="deadline">The time an action may take</param>
+    /// <param name="deadlineText">The text shown when an action runs into the deadline</param>
+    /// <param name="failureText">The text shown when the store fails</param>
+    /// <param name="fail">Shows a text on the page</param>
+    internal PageRunner(TimeProvider clock, Action<Exception> logFailure, TimeSpan deadline, string deadlineText, string failureText, Action<string> fail)
+    {
+        ArgumentNullException.ThrowIfNull(logFailure);
+
+        _actions = new ActionSequence(clock, deadline);
+        _logFailure = logFailure;
+        _deadlineText = deadlineText;
+        _failureText = failureText;
+        _fail = fail;
+    }
+
     #endregion // Constructors
 
     #region Methods

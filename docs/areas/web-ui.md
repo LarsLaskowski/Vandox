@@ -3,8 +3,8 @@
 ## Scope
 
 The pages `vandoxd` serves on its web listener: render mode, layout and navigation, theme, brand files, static assets, charts, the logs
-view, the incidents view and the security headers of the web listener together with what the UI framework needs from them. The user relies on it to look at the
-monitored server in a browser in the home network; the views (overview, history, logs, incidents) build on it. The listeners, port
+view, the incidents view, the report page and the security headers of the web listener together with what the UI framework needs from them. The user relies on it to look at the
+monitored server in a browser in the home network; the views (overview, history, logs, incidents, report) build on it. The listeners, port
 routing and `/healthz` are in [Backend host](backend-host.md); the login, sessions and the reverse proxy trust are in
 [Web login](web-login.md), the setup of a proxy in [REVERSE_PROXY.md](../REVERSE_PROXY.md).
 
@@ -28,9 +28,10 @@ routing and `/healthz` are in [Backend host](backend-host.md); the login, sessio
 
 - Every page has a header with the horizontal logo, the main navigation and the theme switch, and a main area with the page content.
   A signed-in user also sees a *Sign out* button in the header ([Web login](web-login.md), *Sessions*).
-- The navigation lists the existing pages; the entry of the current page is marked. Today it has three entries, *Overview* (`/`),
-  *Logs* (`logs`) and *Incidents* (`incidents`); each view adds its own. *Logs* is marked on `/logs` and on `/logs/templates`,
-  *Incidents* on `/incidents` and on `/incidents/<number>`, *Overview* only on `/`.
+- The navigation lists the existing pages; the entry of the current page is marked. Today it has four entries, *Overview* (`/`),
+  *Logs* (`logs`), *Incidents* (`incidents`) and *Report* (`report`); each view adds its own. *Logs* is marked on `/logs` and on
+  `/logs/templates`, *Incidents* on `/incidents` and on `/incidents/<number>`, *Report* on `/report` (with or without a query),
+  *Overview* only on `/`.
 - The layout works from desktop width down to phone width (360 CSS pixels) without horizontal scrolling of the page: on narrow screens
   the navigation moves below the logo and the theme switch. It needs no script.
 
@@ -246,6 +247,64 @@ details.` or `The data of the window could not be read. The service log has the 
 The incident and window reads take the **same gate as the logs view**: at most two calls of the logs and incidents views run at once across the
 service, the gate is held per store call (a window read of many snapshots takes it once per snapshot), and saving a note does not use it.
 
+### Report page
+
+**Page (`/report`).**
+
+- The page shows the forensics report of [Detection, alerts and reports](detection-and-reports.md) (*Forensics report*) behind the login:
+  the head, the summary, the recurring patterns, the memory consumers, one section per outage and the notes, as headings, paragraphs,
+  lists and tables. The page and `vandoxd report` compose the report from the same blocks, so for the same data, clock, lookback and
+  language they show the same texts, numbers and times in the same order. **The same content per page of outages:** the page lists at most
+  **50 outages** (below), while the command and the download list all of them; the summary, the patterns, the consumers and the notes are those of
+  the whole run.
+- **The language comes from the address.** `report` is English; `report?lang=en` and `report?lang=de` choose a language, the key in any letter
+  case and percent-encoded, the value compared after decoding with exactly `en` or `de` (so `lang=%64%65` is German). Any other value (`DE`,
+  `de-DE`, an empty value, `lang` without `=`, a value with a space, a control or format character) shows `The address has an invalid value for the
+  parameter lang.`; a key given more than once, in any letter case or with an empty value, shows `The address gives the parameter lang more than
+  once.`; other keys are ignored and the fragment is never read. A refused address runs nothing and shows no report. A navigation to another
+  language runs the report again from the first outage.
+- The page offers two links to the languages (*English*, *Deutsch*, the shown one marked) and the download link *Download Markdown* for the
+  language shown (`report/markdown?lang=<language>` with the `download` attribute). All links are built from fixed paths and the validated language.
+- It runs only once the page is interactive. Prerendered it shows its title and `Making the report… It reads every stored log line, which can take a
+  few minutes on a large database.` and reads nothing. Leaving the page, or a new address, cancels the run in the store.
+- **Outages in pages of 50.** A run keeps only the outages of its page, counted in the order of the stored windows. With more than 50 outages the
+  page says `Outages <first> to <last> of <total>.` and offers *Next outages* (a new run that shows the following 50) and, on a later page,
+  *First outages* (a new run from the first). A later page whose run finds fewer outages than its start (the stored outages shrank since the
+  previous page) shows no range and no outages but still offers *First outages*. The position is not in the address. A new run reads the store again, so the outages of a
+  page are those `vandoxd incidents` stored at that time.
+- **External text** (victim commands and program names) is shown only as the text of an `ExternalText` inside a `code` element, capped at
+  2,048 displayed characters per text with the marker of the logs view, with invisible characters as visible escapes; an empty text is the dash `—` as
+  in the Markdown. No external text is in a heading or a table cell, and the page uses no `MarkupString`.
+- **Failures.** A run that reaches its deadline shows `Making the report took longer than 2 minutes and was stopped.`; a store failure shows `The report could
+  not be made. The service log has the details.` and is logged with the exception only (`report page: making the report failed`). No report is shown in
+  either case.
+
+**The download (`GET /report/markdown?lang=<language>`).**
+
+- It needs a session (anonymous: `302` to the login page) and exists on the web listener only (`404` on the ingest listener). The language is read
+  from the query string by the same rules as the page; a refused one is answered with `400` and no body before anything is read.
+- The body is, byte for byte, standard output of `vandoxd report -lang <language>` for the same data and clock: the whole report (all outages), UTF-8
+  without a byte order mark. The response carries `Content-Type: text/markdown; charset=utf-8`, `Content-Disposition: attachment;
+  filename="vandox-report-<language>.md"` and `Cache-Control: no-store`, besides the security headers of every response (`X-Content-Type-Options:
+  nosniff` keeps a browser from reading the Markdown as HTML). The report is written to the response as it is made; it is not held in memory.
+- A run that reaches its deadline before anything is written (also while it waits for the run slot) is answered with `503`, a store failure before it with `500` (logged with the exception
+  only: `report download: making the report failed`), both without a body and without the headers of the file (`Cache-Control: no-store` and the security headers stay). Nothing is flushed to the response before the first part of the report, since a flush
+  starts the response on the server. Once the first byte is written the status
+  cannot change: a failure then aborts the connection, so that no truncated file looks complete (a deadline is not logged, as in the views). A client
+  that closes the connection ends the run silently.
+
+**The run.** One report runs at a time across the service: the page and the download share one run slot, and a second request waits for it
+within its own deadline of **2 minutes**, which counts the wait for the slot and the run, and stops waiting when its page is left or its
+connection closes. The store calls of a run take the gate of the logs and incidents views (*Limits and errors*); the incidents are read
+one at a time, as by the command, and the web cannot write an incident (the incident store of the run refuses to save). The deadline cancels the store
+call in flight; the statements that take no token run to their end first: after the last page of lines the analysis seals the series and
+summarizes (about 30 ms on the database below, at most about 0.5 s with a million snapshots over a million observed hours, measured with `Seal`
+and `Summarize`), and the writer finishes the outage it is writing, so a run ends within about a second after the deadline. A run takes
+56 to 60 seconds on the development host (4 vCPU Intel Xeon 2.10 GHz, .NET 10, Release) over a database of 5,000,000 log lines (1.6 GB), 43,200 process
+snapshots and 64 incidents, and 67 seconds as `vandoxd report` (Debug build). A slower host or a larger database can exceed 2 minutes: the reference host
+wrote the 5,000,000 lines about four times slower than the development host ([BENCHMARKS.md](../BENCHMARKS.md)), so there a run of this size may take
+several minutes and is then stopped; `vandoxd report` has no deadline and remains for it.
+
 ### Security headers
 
 Every response of the web listener (pages, static files, `/healthz`, the live connection's HTTP responses) carries exactly these
@@ -320,6 +379,21 @@ The ingest listener serves none of this: every UI path, static file and the live
   **per circuit**, not across the service: the gate is held per store call, so many open incident pages can each build at once, as with the
   5 MiB of a logs page. The number of circuits is not bounded ([Pages and render mode](#pages-and-render-mode)) and the container has 512 MB; only a signed-in client can
   open a circuit.
+- **The report page is behind the login** like the other pages (`/report` carries the same `[Authorize]`, and the download endpoint has no
+  `AllowAnonymous`, so the fallback policy demands a session). It reads only: no gap, no alert and no write; the incident store of the run
+  refuses `SaveIncidentAsync`.
+- **Memory per circuit (report page).** The page keeps the document of one run: the summary, at most 50 outages and the notes, as text. External text
+  is at most 22 texts per outage (16 victims, 3 growth candidates, 3 consumers), each a stored text of at most 1,024 bytes (at most 2 KiB as
+  UTF-16) plus its runs for the page (at most 2,048 displayed characters, 4 KiB), so up to about 6 KiB each, about 130 KiB per outage and
+  **about 6.6 MB** for 50 outages, 60 KB more for the 10 consumers of the summary, plus the markup and the render tree (a typical outage holds a few hundred bytes of
+  external text); the render batch holds the text once more for a moment. This is **per circuit**. The run itself keeps up to about 60 MB once across the whole
+  service, because only one run goes at a time ([Detection, alerts and reports](detection-and-reports.md), *Limits of the report*). The number of
+  circuits is not bounded ([Pages and render mode](#pages-and-render-mode)) and the container has 512 MB; only a signed-in client can open a circuit.
+- **Cross-site opening.** The session cookie is `SameSite=Lax`, so another site can make a signed-in browser open `/report` or `/report/markdown`
+  and so start a run. It changes nothing, the other site cannot read the response of a top-level navigation, the page cannot be framed, and the
+  cost is bounded by the one run slot and the deadline of 2 minutes. A site that keeps sending such navigations keeps the run slot taken, so the report of
+  the signed-in user waits, up to 2 minutes each time; this is an availability limit only. A client that reads the download slowly is cut off only by the
+  default minimum response data rate of the server, which the service leaves unchanged.
 - Template numbers change when `vandoxd templates` rebuilds the statistics, so a stored template link can point to another template or
   to none; the page reports an unknown number. Every stored source can be chosen in the form, because the data model allows a source only
   letters, digits and `. _ : / @ + -` and at most 128 bytes, which the address rules accept; a source in the address that the store
@@ -335,6 +409,7 @@ The ingest listener serves none of this: every UI path, static file and the live
 - [0099](../decisions/0099-web-listener-security-headers-one-self-only-csp.md) — why one self-only policy set by the application.
 - [0106](../decisions/0106-logs-view-address-as-the-view-bounded-search-pages-template-lines-by-normalization.md) — why the logs view takes its filters from the address, searches in bounded pages and caps external text.
 - [0107](../decisions/0107-incidents-view-summaries-notes-per-incident-number-time-links-to-the-logs.md) — why the incidents view reads summaries and the window's own records, saves notes by a form post and links every time to the logs.
+- [0108](../decisions/0108-report-page-one-block-model-outage-pages-by-rerun-language-in-the-address.md) — why the report page renders the blocks the Markdown is written from, lists the outages in pages of 50 by a new run, takes the language from the address and runs one report at a time under 2 minutes.
 
 ## Not here
 
@@ -347,7 +422,8 @@ The ingest listener serves none of this: every UI path, static file and the live
 ## Implementation
 
 `Vandox.Backend` (`Components/App.razor`, `Components/Layout/MainLayout.razor`, `Components/Charts`, `Components/Pages/LogsPage` and
-`LogTemplatesPage`, `Components/Pages/IncidentsPage` and `IncidentPage`, `Components/Incidents/IncidentNoteForm`, `Components/Logs/ExternalText`, `Logs/` (`LogsAddress`, `LogText`, `LogLineView`, `GatedLogExplorer`, `WebReaderGate`, `TemplateHourSeries`, `LogsView`),
+`LogTemplatesPage`, `Components/Pages/IncidentsPage` and `IncidentPage`, `Components/Incidents/IncidentNoteForm`, `Components/Pages/ReportPage`, `Components/Reports/ReportContent`, `Components/Logs/ExternalText`, `Logs/` (`LogsAddress`, `LogText`, `LogLineView`, `GatedLogExplorer`, `WebReaderGate`, `TemplateHourSeries`, `LogsView`),
+`Reports/` (`ReportService`, `ReportViewBuilder`, `ReportDocument`, `ReportAddress`, `ReportsView`, `ReportDownloadEndpoint`, `GatedIncidentStore`, and the blocks `ReportComposer`, `ReportBlock`, `ReportPiece`), `Logs/ActionRun`, `Logs/ActionSequence` and `Logs/PageRunner` (the deadline of an action),
 `Incidents/` (`IncidentsView`, `IncidentRowView`, `IncidentDetailView`, `IncidentWindowReader`, `ProgramMemorySeries`, `GatedIncidentBrowser`, `GatedRecordReader`, `IncidentNoteText`, `IncidentNoteEndpoint`), `Hosting/SecurityHeadersMiddleware`,
 `Hosting/ServeCommand`, `wwwroot/`, and `Vandox.Backend.csproj`, whose `RequiresAspNetWebAssets` makes the restore add the framework
 script independently of the sources, as the image build restores before copying them; record 0098).

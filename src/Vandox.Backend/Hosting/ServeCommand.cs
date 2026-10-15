@@ -12,8 +12,10 @@ using Vandox.Backend.Components;
 using Vandox.Backend.Incidents;
 using Vandox.Backend.Logging;
 using Vandox.Backend.Logs;
+using Vandox.Backend.Reports;
 using Vandox.Backend.Security;
 using Vandox.Core.Configuration;
+using Vandox.Core.Signatures;
 using Vandox.Storage;
 
 namespace Vandox.Backend.Hosting;
@@ -212,6 +214,7 @@ internal static class ServeCommand
         builder.Services.AddSingleton<IIncidentBrowser>(provider => new GatedIncidentBrowser(store, provider.GetRequiredService<WebReaderGate>()));
         builder.Services.AddSingleton(provider => new IncidentWindowReader(new GatedRecordReader(store, provider.GetRequiredService<WebReaderGate>())));
         builder.Services.AddSingleton(hooks.Clock ?? TimeProvider.System);
+        builder.Services.AddSingleton(provider => CreateReportService(store, config, provider.GetRequiredService<WebReaderGate>(), provider.GetRequiredService<TimeProvider>()));
         builder.Services.AddSingleton<IImportTracker>(store);
         builder.Services.Configure<HostOptions>(options => options.ShutdownTimeout = _shutdownTimeout);
         builder.Services.AddRazorComponents().AddInteractiveServerComponents();
@@ -242,9 +245,23 @@ internal static class ServeCommand
         HealthEndpoint.Map(app, checker, loggerFactory.CreateLogger("health"));
         WebAuthentication.MapLogout(app);
         IncidentNoteEndpoint.Map(app);
+        ReportDownloadEndpoint.Map(app);
         app.MapRazorComponents<App>().AddInteractiveServerRenderMode(options => options.ContentSecurityFrameAncestorsPolicy = null);
 
         return app;
+    }
+
+    /// <summary>
+    /// Creates the report service: its reads of records and incidents go through the shared gate of the web views.
+    /// </summary>
+    /// <param name="store">The open database</param>
+    /// <param name="config">The configuration</param>
+    /// <param name="gate">The gate of the reads</param>
+    /// <param name="clock">The clock</param>
+    /// <returns>The service</returns>
+    private static ReportService CreateReportService(SqliteStore store, BackendConfig config, WebReaderGate gate, TimeProvider clock)
+    {
+        return new ReportService(new GatedRecordReader(store, gate), new GatedIncidentStore(store, gate), BuiltInSignatures.Catalog, config.Incidents.GetWindowBefore(), clock);
     }
 
     /// <summary>

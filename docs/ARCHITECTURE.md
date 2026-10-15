@@ -7,8 +7,8 @@ backend with web UI, runs as a Docker container on any Docker host in the home n
 
 This document describes the target architecture; as of now the binaries' `--version`, the data model and wire format
 (Go: `internal/model`, `internal/wire`; backend: `src/Vandox.Core`), the configuration loading (`internal/config` for the agent,
-`Vandox.Core.Configuration` for `vandoxd`), the backend service skeleton, the log import framework and the log signature catalog with its detector (`Vandox.Core.Signatures`; the service does not call it yet), the log templates with their statistics and queries (`Vandox.Core.Templates`, `Vandox.Storage`), the logs view of the web UI (search, context, template list and chart; `Vandox.Backend`), the outage reconstruction (`vandoxd incidents`, `Vandox.Core.Incidents`), the forensics report as Markdown (`vandoxd report`, `Vandox.Core.Reports`; the web UI does not show it yet), the incidents view of the web UI (list, incident page with charts of the window, notes; `Vandox.Backend`) exist (`vandoxd import`, with the parsers for the journal export, the MariaDB error log, Dovecot's own log file, `syslog` and `kern.log`, the Plesk panel log, the nginx, `sw-cp-server` and Apache error logs and the legacy `top`/`lsof` monitoring log): `vandoxd` loads its configuration, opens and migrates its SQLite database (schema, batched writes, queries and log search
-exist as the storage layer; the service reads it through the logs and incidents views and writes only the notes of incidents, `vandoxd import` writes through it), listens on the
+`Vandox.Core.Configuration` for `vandoxd`), the backend service skeleton, the log import framework and the log signature catalog with its detector (`Vandox.Core.Signatures`; the service does not call it yet), the log templates with their statistics and queries (`Vandox.Core.Templates`, `Vandox.Storage`), the logs view of the web UI (search, context, template list and chart; `Vandox.Backend`), the outage reconstruction (`vandoxd incidents`, `Vandox.Core.Incidents`), the forensics report as Markdown (`vandoxd report`, `Vandox.Core.Reports`) and as a page of the web UI with its Markdown download, the incidents view of the web UI (list, incident page with charts of the window, notes; `Vandox.Backend`) exist (`vandoxd import`, with the parsers for the journal export, the MariaDB error log, Dovecot's own log file, `syslog` and `kern.log`, the Plesk panel log, the nginx, `sw-cp-server` and Apache error logs and the legacy `top`/`lsof` monitoring log): `vandoxd` loads its configuration, opens and migrates its SQLite database (schema, batched writes, queries and log search
+exist as the storage layer; the service reads it through the logs and incidents views and the report page with its download and writes only the notes of incidents, `vandoxd import` writes through it), listens on the
 web and ingest ports, protects the web UI with a login (one password, server-side sessions, limits on failed sign-ins and the trust in a reverse proxy; `Vandox.Backend` `Security`), answers `/healthz` and shuts down gracefully, and ships as a container with a health
 check. Sections are marked as implemented as features land. The decisions behind it are recorded in
 [`docs/decisions/`](decisions/README.md); each section links the records it rests on. Vandox is an own
@@ -52,6 +52,10 @@ way, and agents of the hosting provider are never disabled or changed
   charts read from the records of its window, links every time to the logs of that moment and saves a note per incident through a
   form post with the antiforgery token; it reads through the same gate of two calls
   ([0107](decisions/0107-incidents-view-summaries-notes-per-incident-number-time-links-to-the-logs.md)).
+  The report page (`/report`) renders the forensics report from the same blocks the Markdown is written from, in the language of its address,
+  lists the outages in pages of 50 and offers the Markdown as a download (`/report/markdown`); one report runs at a time across the service,
+  under a deadline of 2 minutes, through the same gate
+  ([0108](decisions/0108-report-page-one-block-model-outage-pages-by-rerun-language-in-the-address.md)).
 - The backend's libraries, one project each with a test project under `tests/`
   ([0073](decisions/0073-backend-in-dotnet-10-with-blazor-agent-stays-go.md)):
   `Vandox.Core` (data model and validation, the wire decoder, configuration and secrets, safe file access, the
@@ -149,11 +153,13 @@ duplicating them. The rules are in [Detection, alerts and reports](areas/detecti
 The forensics report works on the stored data as well and stores nothing. `vandoxd report` reads every stored log line (observed
 hours and boots), every process snapshot (backups, panel memory, memory consumers) and every stored incident (twice, one at a time),
 keeps only capped series, compares the share of outages with a time of day, a backup, a boot or high panel memory against the share
-of observed hours with it, and writes the result in English or German as Markdown to standard output, all times in UTC. The rules
+of observed hours with it, and writes the result in English or German as Markdown to standard output, all times in UTC; the web UI's
+report page runs the same passes and shows the same content. The rules
 are in [Detection, alerts and reports](areas/detection-and-reports.md) (*Forensics report*)
 ([0100](decisions/0100-forensics-report-as-markdown-from-vandoxd-report.md),
 [0101](decisions/0101-forensics-rules-share-of-outages-against-observed-hours-binomial-tail.md),
-[0102](decisions/0102-report-language-from-a-flag-english-default-text-tables-in-code.md)).
+[0102](decisions/0102-report-language-from-a-flag-english-default-text-tables-in-code.md),
+[0108](decisions/0108-report-page-one-block-model-outage-pages-by-rerun-language-in-the-address.md)).
 
 Records: [0006](decisions/0006-agent-connects-outbound-only.md),
 [0007](decisions/0007-sqlite-with-fts5-no-external-database.md),

@@ -11,6 +11,8 @@ internal sealed class ActionRun : IDisposable
 
     private readonly TimeProvider _clock;
 
+    private readonly TimeSpan _limit;
+
     private readonly TaskCompletionSource _finished = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     private CancellationTokenSource? _deadline;
@@ -30,8 +32,19 @@ internal sealed class ActionRun : IDisposable
     /// </summary>
     /// <param name="clock">The clock of the deadline</param>
     internal ActionRun(TimeProvider clock)
+        : this(clock, LogsView.Deadline)
+    {
+    }
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="ActionRun"/> class with its own deadline.
+    /// </summary>
+    /// <param name="clock">The clock of the deadline</param>
+    /// <param name="deadline">The time the action may take</param>
+    internal ActionRun(TimeProvider clock, TimeSpan deadline)
     {
         _clock = clock;
+        _limit = deadline;
     }
 
     #endregion // Constructors
@@ -106,7 +119,7 @@ internal sealed class ActionRun : IDisposable
                 return;
             }
 
-            _deadline = new CancellationTokenSource(LogsView.Deadline, _clock);
+            _deadline = new CancellationTokenSource(_limit, _clock);
             _token = _deadline.Token;
         }
     }
