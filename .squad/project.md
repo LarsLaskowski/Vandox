@@ -400,3 +400,10 @@ double under this name and changes the status.
 | Telegram Bot API | fake Telegram client (records sent messages, returns scripted updates; no network) |
 | Tailscale network | none in code (0017: `vandoxd` embeds no Tailscale); the agent's sender is tested against a `net/http/httptest` server standing in for the ingest port; the ACL itself is deployment configuration, reviewed, not unit-tested |
 | time | Go: injectable clock (spool age, live/backfill classification, deadlines); C#: `TimeProvider` with `FakeTimeProvider` (`Microsoft.Extensions.TimeProvider.Testing`) |
+
+A double of an ASP.NET Core request or response stream behaves as Kestrel does: it refuses synchronous I/O, and
+a response stream starts the response on any flush, not only when a byte is written (`StartingResponseBody` is
+the reference). A
+test double hid this once: it started the response only on a written byte, and only a Security delta review with
+a Kestrel probe found the real behavior. Any other claim about server behavior that a double encodes is checked
+once against real Kestrel.

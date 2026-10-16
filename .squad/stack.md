@@ -21,6 +21,15 @@ repository (record 0074): keep it true when the build changes.
   (installs `reihitsu-format` globally if missing, unpinned, and restores the solution). Run `dotnet tool restore`
   to get the formatter version pinned in `dotnet-tools.json`.
 
+Cloud session notes (found when a cloud image lacked the .NET SDK):
+
+- Without a .NET SDK on the image, install the one `global.json` asks for (a run used SDK 10.0.401 under
+  `/opt/dotnet`) and put it on the `PATH`.
+- If clean builds fail with RZ1021 or CS8802 because the Razor build server is flaky, build with
+  `UseRazorBuildServer=false UseSharedCompilation=false` (as MSBuild properties).
+- If `reihitsu-format` is not on the `PATH`, run it as a local tool:
+  `dotnet tool run reihitsu-format --check --force src tests tools`.
+
 ## Layout
 
 - Go (agent): `cmd/vandox-agent`, `internal/` (model, wire, config, cli, version); tests colocated as
@@ -245,6 +254,12 @@ helpers, `t.TempDir()` for files, failure messages that state got and want. .NET
 class under test, Arrange/Act/Assert comments, helper classes for temporary directories and fakes. New C# test
 files follow the C# layout in *Writing code*: the Tester does not fix layout by hand but runs *Format* on the files
 it wrote before building, so *Format check* finds nothing in them.
+
+Two analyzer rules that cost a build cycle when found only by the build: nested classes are forbidden in C#
+tests too (RH2101; put a helper class in its own file, since RH7002 allows one top-level type per file), and
+CA1835 forbids calling the `WriteAsync(byte[], int, int, CancellationToken)` and
+`ReadAsync(byte[], int, int, CancellationToken)` overloads of a stream directly (use the memory overloads,
+`WriteAsync(buffer.AsMemory(), token)` and `ReadAsync(buffer.AsMemory(), token)`).
 
 Heap-bound tests (.NET) measure retention with `GC.GetTotalMemory(true)`, which Sonar `S1215` flags. The accepted
 form is one private helper in the test class that wraps exactly that call in `#pragma warning disable S1215` /
