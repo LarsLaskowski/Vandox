@@ -203,13 +203,13 @@ Procedure, with two LAN hosts: the Docker host (`NAS`, LAN address `<nas-ip>`) a
    destination of the packets must be `127.0.0.1` and the next hop the NAS (a route for `127.0.0.1/32 via <nas-ip>` on `H2`, if its
    system accepts one, since most systems treat loopback addresses as local), followed by
    `curl -sS -m 5 http://127.0.0.1:8080/healthz`; remove the route afterwards. A refused route on `H2` means this part of the test could
-   not be made, not that the port is safe; say so when reporting the result.
+   not be made, not that the port is safe; say so in your note.
 
 3. **Expected result: every `curl` fails** (connection refused or timeout). An answer `ok` means the port is reachable from the LAN:
    update Docker Engine to 28.3.3 or later, or block the port with the NAS firewall for everything but the proxy, and run the check
    again. The login still protects the UI in that case, but the lockout for a trusted gateway address is then shared with whoever
    connects.
-4. Note the engine version and the result, and report them on the issue tracker so that record 0105 can be amended.
+4. Note the engine version and the result, and run the check again after every update of Docker Engine or of the NAS system.
 
 ## The overall lock and how to recover
 
