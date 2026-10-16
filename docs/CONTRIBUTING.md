@@ -98,6 +98,9 @@ Before tagging, check that the base image digests are current (*Base image diges
 If the issue *SBOM generator pin is stale* is open, refresh the pin first (*SBOM generator* below); a stale pin
 gives a less complete SBOM, it does not stop the release.
 
+Give the release its entry in `CHANGELOG.md` in a pull request before tagging: replace `unreleased` with the date of the
+release (or add the section), and keep [`docs/INSTALL.md`](INSTALL.md) in step with what the release needs to be installed.
+
 On an up-to-date `main`:
 
 ```bash
