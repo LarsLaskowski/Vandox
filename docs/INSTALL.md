@@ -46,7 +46,8 @@ change the tag. To check the image's origin before the first start, verify its a
 
 ## 2. Configure
 
-Edit `vandoxd.yaml`. Two settings matter for this release:
+Edit `vandoxd.yaml`: uncomment `time_zone` in the existing `import:` section and set `trusted_proxies` in the existing `web:` section
+(a second `import:` or `web:` block is a duplicate key and stops the start). Two settings matter for this release:
 
 ```yaml
 import:
@@ -56,8 +57,8 @@ web:
   trusted_proxies: "172.18.0.1"  # the reverse proxy's address as the container sees it (step 5)
 ```
 
-Without `import.time_zone` the import fails at the first syslog, MariaDB, Dovecot, Plesk or web server error log line and at the
-legacy monitoring log; it can be set later and the import run again. If the Plesk server writes its panel or web server error logs to
+Without `import.time_zone` a traditional-format syslog file, a MariaDB, Dovecot, Plesk or web server error log and the legacy
+monitoring log fail at their first line without a zone (journal exports and RFC 3339 syslog files carry their offset); it can be set later and the import run again. If the Plesk server writes its panel or web server error logs to
 other paths than the defaults, set the `import.*_log` paths too (README, *Configuration*). Every other key may stay at its default.
 
 ## 3. Create the secrets
@@ -122,13 +123,14 @@ The web port is published on `127.0.0.1:8080`, for a proxy on the same host. Set
 
 ## 6. Collect the logs on the monitored server
 
-On the Plesk server, pack the logs into one archive. `tar` keeps the modification times, which the import needs to find the year of
+On the Plesk server, pack the logs into one archive. `umask 077` keeps the export and the archive readable for you alone. `tar` keeps the modification times, which the import needs to find the year of
 lines that carry none:
 
 ```
-sudo journalctl -o export > /tmp/journal.export
-sudo tar -czf ~/vandox-logs.tar.gz --exclude=var/log/journal -C / var/log -C /tmp journal.export
-sudo rm /tmp/journal.export
+umask 077
+sudo journalctl -o export > ~/journal.export
+sudo tar -czf ~/vandox-logs.tar.gz --exclude=var/log/journal -C / var/log -C ~ journal.export
+rm ~/journal.export
 sudo chown "$USER" ~/vandox-logs.tar.gz
 ```
 
@@ -156,8 +158,9 @@ sudo docker exec -it vandoxd dotnet /app/vandoxd.dll import /import/vandox-logs.
 
 The import prints its progress as JSON lines and ends with a summary of the files imported, not recognized and failed, the lines read
 and the time range stored. A large `/var/log` takes a while on a NAS; Ctrl-C stops it, and running the same command again continues
-where it stopped. A file that failed with `import.time_zone is not set` is completed by setting the option (step 2) and importing again;
-the import reads `vandoxd.yaml` itself, so the container needs no restart for it. Files no parser claims are listed with the reason; that is expected for logs Vandox does not read.
+where it stopped. A file that failed with `import.time_zone is not set` is completed by setting the option (step 2),
+restarting the container (`sudo docker compose restart`) and importing again: the container keeps seeing the file it was started
+with when an editor saves the change as a new file. Files no parser claims are listed with the reason; that is expected for logs Vandox does not read.
 
 ## 8. Reconstruct the incidents
 
@@ -172,7 +175,8 @@ journal export of the outage period were in the archive.
 ## 9. Open the first incident
 
 In the web UI, *Incidents* lists the outages newest first. An incident page shows the window around the kills, the timeline, the
-cause hypothesis, the memory, swap and pressure charts where the data has them, and a field for your own notes. *Logs* searches every
+cause hypothesis, the extremes of memory, swap, pressure and load, charts of the memory per program, the available memory and swap
+and the connections where the data has them, and a field for your own notes. *Logs* searches every
 imported line and leads from an incident's time to the lines around it. *Report* shows the forensics report over all incidents and
 offers it as Markdown; the same report comes from the command line:
 
