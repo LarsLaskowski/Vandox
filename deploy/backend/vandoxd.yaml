@@ -9,11 +9,12 @@
 # secret, from a file whose absolute path is given in the variable with the _FILE suffix). Set either the
 # variable or its _FILE form, not both:
 #
-#   VANDOX_AGENT_TOKEN           token the agents present (at least 32 printable ASCII characters)
+#   VANDOX_AGENT_TOKEN           token the agents present (at least 32 printable ASCII characters; unused until the
+#                                ingest API of v0.2.0)
 #   VANDOX_WEB_PASSWORD_HASH     password hash of the web UI, required: an argon2id hash in the PHC form
 #                                $argon2id$v=19$m=...,t=...,p=...$<salt>$<hash>, created with
 #                                `vandoxd hash-password` (docs/areas/web-login.md)
-#   VANDOX_TELEGRAM_BOT_TOKEN    token of the Telegram bot used for alerts
+#   VANDOX_TELEGRAM_BOT_TOKEN    token of the Telegram bot for the planned alerts (unused in v0.1.0)
 #   (each also as VANDOX_..._FILE)
 
 # In the container, the ports below must match the port mappings of docker-compose.yml: the container
@@ -63,8 +64,8 @@ import:
   # IANA time zone of the server the log files come from, for example Europe/Berlin or UTC. Needed to import
   # syslog and kern.log files in the traditional format, whose time stamps carry neither year nor offset, and
   # MariaDB error logs, Dovecot log files and the Plesk panel, nginx and Apache error logs, whose time stamps are
-  # local time without an offset; such a file fails with "import.time_zone is not set" until this is set (a
-  # re-run then completes it). No default.
+  # local time without an offset, and the legacy top/lsof monitoring log; such a file fails with
+  # "import.time_zone is not set" until this is set (a re-run then completes it). No default.
   # time_zone: Europe/Berlin
 
 

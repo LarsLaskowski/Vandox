@@ -22,11 +22,11 @@ The server belongs to the operator, and the data is stored only on the backend h
 ## Decision
 
 Option 2: log data is stored as it is, without pseudonymization, because it is the operator's own server
-and the data stays in the home network.
+and the data stays in the home network. The resulting rules are in the [Log import](../areas/log-import.md) area.
 
 ## Consequences
 
-- Access control of the web UI (0016), the network boundary (0010) and the retention of 90 days for
-  logs (0007) are what protect the data.
+- Access control of the web UI (0016) and the network boundary (0010) are what protect the data, and the planned retention of
+  90 days for logs (0007; not implemented yet, so v0.1.0 keeps imported logs until the operator deletes the database) limits it.
 - Sending data to external services (for example an optional AI for the report, 0008) has to take into
   account that it is not pseudonymized.

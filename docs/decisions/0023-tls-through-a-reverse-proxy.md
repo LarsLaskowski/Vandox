@@ -22,5 +22,6 @@ Option 2. The ingest path is not routed through the proxy; Tailscale encrypts it
 ## Consequences
 
 - No certificate code in the backend.
-- The UI port of the container must only be reachable by the reverse proxy, not directly from the LAN.
+- The UI port of the container is published for the reverse proxy only; that binding is defense in depth, and the login is the
+  access boundary (0060, 0105).
 - The backend must handle running behind a proxy (forwarded headers, secure cookies).

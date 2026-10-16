@@ -24,9 +24,9 @@ ports mapped on a loopback address" and "remote hosts to connect directly to a c
 CVE-2025-54388, where a firewalld reload made ports published on loopback reachable from the local network again. Such requests
 arrive at the container with the neighbor's own address. A connection that goes through Docker's userland proxy (the default for a
 published port, also for the NAS's own reverse proxy connecting to `127.0.0.1:8080`) arrives from the gateway address of the container
-network. **The engine versions shipped by Synology Container Manager and QNAP Container Station were not verified on a device** (the
-squad has neither a NAS nor a Docker daemon); they are believed to be older than 28.0.0, so the documented exposure applies to them
-until the owner checks it with the procedure in [REVERSE_PROXY.md](../REVERSE_PROXY.md) and amends this record with the result.
+network. Which engine version a Docker host runs, and whether its vendor's network settings expose a published port, depends on the
+device and its updates and cannot be known for the hosts Vandox will run on. **Vandox does not rely on the loopback binding, and
+checking it is the operator's job**, with the procedure in [REVERSE_PROXY.md](../REVERSE_PROXY.md); no result per device is recorded.
 
 ## Options considered
 
@@ -71,4 +71,5 @@ loopback nor a forwarded header ever skips the login; the forwarded headers only
   oldest failure, and a stream of attempts makes each one wait up to 5 seconds for the single check; that is accepted for a single
   user on a home network, where such a client can do worse. The recovery is a restart of the container: the counts live only in
   memory.
-- The engine versions on the NAS devices remain to be verified; the follow-up records the measured result here.
+- Whether the published port is reachable from other hosts is the operator's responsibility; the operator guide and `SECURITY.md`
+  say so and give the check.

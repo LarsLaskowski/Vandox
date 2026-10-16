@@ -26,7 +26,7 @@ The choices above. The file's contents and the smoke test are described in the [
 
 ## Consequences
 
-- An operator provides `vandoxd.yaml`, the token secret file owned by UID 65532 with mode `0400`/`0600`, and an `import/` directory; no Tailscale setup is needed before the ingest endpoint exists.
+- An operator provides `vandoxd.yaml`, the token secret file and the web password hash file (0104), each owned by UID 65532 with mode `0400`/`0600`, and an `import/` directory; no Tailscale setup is needed before the ingest endpoint exists.
 - Home monitoring reaches `/healthz` through the reverse proxy unless `WEB_BIND_ADDRESS` is changed.
 - The published container port is fixed at 8080; a changed `web.listen` port needs the matching change in the file, and the same will hold for the ingest port.
 - The ingest work must add the ingest `ports` entry on the tailnet address (0017), decide the supported Tailscale mode on the backend host, extend the smoke test and record it. Until then the Tailscale ACL (0010) is what keeps the monitored server from a userspace-mode host's loopback web port.

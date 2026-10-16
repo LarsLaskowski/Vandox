@@ -15,11 +15,11 @@ public class HomePageTests
     #region Methods
 
     /// <summary>
-    /// The home page states that the backend runs.
+    /// The home page states that the backend runs and links the existing views.
     /// </summary>
     /// <returns>A task that completes when the test is done</returns>
     [TestMethod]
-    public async Task HomePageRendersBackendIsRunning()
+    public async Task HomePageRendersBackendIsRunningAndLinksTheViews()
     {
         // Arrange
         await using var services = new ServiceCollection().AddLogging().BuildServiceProvider();
@@ -31,6 +31,10 @@ public class HomePageTests
         // Assert
         Assert.Contains("<h1>Vandox backend</h1>", html, "heading");
         Assert.Contains("The backend is running.", html, "text");
+        Assert.Contains("<a href=\"logs\">", html, "link to the logs view");
+        Assert.Contains("<a href=\"incidents\">", html, "link to the incidents view");
+        Assert.Contains("<a href=\"report\">", html, "link to the report page");
+        Assert.DoesNotContain("follow with the releases", html, "no outdated roadmap text");
     }
 
     #endregion // Methods

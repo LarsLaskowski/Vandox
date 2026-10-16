@@ -7,10 +7,11 @@ backend with web UI, runs as a Docker container on any Docker host in the home n
 
 This document describes the target architecture; as of now the binaries' `--version`, the data model and wire format
 (Go: `internal/model`, `internal/wire`; backend: `src/Vandox.Core`), the configuration loading (`internal/config` for the agent,
-`Vandox.Core.Configuration` for `vandoxd`), the backend service skeleton, the log import framework and the log signature catalog with its detector (`Vandox.Core.Signatures`; the service does not call it yet), the log templates with their statistics and queries (`Vandox.Core.Templates`, `Vandox.Storage`), the logs view of the web UI (search, context, template list and chart; `Vandox.Backend`), the outage reconstruction (`vandoxd incidents`, `Vandox.Core.Incidents`), the forensics report as Markdown (`vandoxd report`, `Vandox.Core.Reports`) and as a page of the web UI with its Markdown download, the incidents view of the web UI (list, incident page with charts of the window, notes; `Vandox.Backend`) exist (`vandoxd import`, with the parsers for the journal export, the MariaDB error log, Dovecot's own log file, `syslog` and `kern.log`, the Plesk panel log, the nginx, `sw-cp-server` and Apache error logs and the legacy `top`/`lsof` monitoring log): `vandoxd` loads its configuration, opens and migrates its SQLite database (schema, batched writes, queries and log search
+`Vandox.Core.Configuration` for `vandoxd`), the backend service skeleton, the log import framework and the log signature catalog with its detector (`Vandox.Core.Signatures`; `vandoxd incidents` uses it, the running service does not apply it to live data yet), the log templates with their statistics and queries (`Vandox.Core.Templates`, `Vandox.Storage`), the logs view of the web UI (search, context, template list and chart; `Vandox.Backend`), the outage reconstruction (`vandoxd incidents`, `Vandox.Core.Incidents`), the forensics report as Markdown (`vandoxd report`, `Vandox.Core.Reports`) and as a page of the web UI with its Markdown download, the incidents view of the web UI (list, incident page with charts of the window, notes; `Vandox.Backend`) exist (`vandoxd import`, with the parsers for the journal export, the MariaDB error log, Dovecot's own log file, `syslog` and `kern.log`, the Plesk panel log, the nginx, `sw-cp-server` and Apache error logs and the legacy `top`/`lsof` monitoring log): `vandoxd` loads its configuration, opens and migrates its SQLite database (schema, batched writes, queries and log search
 exist as the storage layer; the service reads it through the logs and incidents views and the report page with its download and writes only the notes of incidents, `vandoxd import` writes through it), listens on the
 web and ingest ports, protects the web UI with a login (one password, server-side sessions, limits on failed sign-ins and the trust in a reverse proxy; `Vandox.Backend` `Security`), answers `/healthz` and shuts down gracefully, and ships as a container with a health
-check. Sections are marked as implemented as features land. The decisions behind it are recorded in
+check. Everything else described here — the agent, the ingest API, retention, alerting, Telegram, the nightly
+report and remote actions — is planned and not implemented yet. The decisions behind it are recorded in
 [`docs/decisions/`](decisions/README.md); each section links the records it rests on. Vandox is an own
 project rather than an off-the-shelf stack ([0004](decisions/0004-own-project-instead-of-off-the-shelf-stack.md)).
 
@@ -123,8 +124,9 @@ API. The backend stores the batches in SQLite; analysis, rules, the web UI and T
 data. Detection, incident reconstruction and alerting are deterministic (rules, thresholds, log signatures);
 AI is optional and only used to write the nightly report, which is sent at 06:00, or as soon as the backfill
 has completed if the backend host was off at that time. The first release (v0.1.0) is the forensics release:
-collection, log import, spool and backfill, storage and the historical views; alerting, the nightly report
-and remote actions build on it.
+log import, storage, outage incidents, the forensics report and the web views, working from imported logs; the agent
+with its spool and backfill and the ingest API follow in v0.2.0, and alerting, the nightly report and remote actions
+build on them.
 
 ```mermaid
 flowchart LR
@@ -316,7 +318,7 @@ Implemented by `src/Vandox.Storage`:
 - **Write throughput** ([0077](decisions/0077-storage-on-microsoft-data-sqlite-same-schema-and-rules.md)):
   measured by a benchmark, see [`BENCHMARKS.md`](BENCHMARKS.md).
 
-| Data | Retention |
+| Data | Retention (planned, not implemented yet: v0.1.0 keeps everything) |
 | ---- | --------- |
 | Raw data | 30 days |
 | 5-minute rollups | 1 year |
@@ -362,7 +364,7 @@ failed sign-ins) and runs behind a reverse proxy whose forwarded headers are tru
 ([Web login](areas/web-login.md)). The Telegram token
 exists only on the backend host. The agent reads MariaDB over the local socket as the user `vandox-agent`, identified
 via `unix_socket` and granted only `PROCESS`. Log data is not pseudonymized. Secrets are never logged. The agent runs as the
-dedicated user `vandox-agent`, never as root, with only the groups and capabilities listed in `deploy/agent/`
+dedicated user `vandox-agent`, never as root, with only the groups and capabilities that its installation files under `deploy/agent/` will list (v0.2.0)
 and, from v0.6.0, a polkit rule that allows restarting only the configured units. The two capabilities it
 needs to read other users' processes (`CAP_SYS_PTRACE`, `CAP_DAC_READ_SEARCH`) give it root's read access,
 so its systemd unit denies the process-attach system calls and grants no write-side capability: a

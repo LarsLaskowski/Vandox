@@ -24,9 +24,11 @@ server's existing logs, including a legacy log written by a script that periodic
 Option 3: importing historical logs (including the legacy `top`/`lsof` log) and continuously shipping
 new log lines are core parts of Vandox, not add-ons.
 
+The resulting rules are in the [Log import](../areas/log-import.md) area.
+
 ## Consequences
 
 - Parsers for journal, syslog, MariaDB, mail, Plesk, web server and the legacy format are needed early;
   log parsing is a security area.
 - Imported historical data must be kept apart from live data so it never raises alerts (0022).
-- Logs are stored with full-text search (0007) for 90 days.
+- Logs are stored with full-text search (0007), for 90 days once retention is implemented (planned).

@@ -15,8 +15,8 @@ readable by the next, whichever language implements it, so the schema below is p
   `vandox.db`, `vandox.db-wal` or `vandox.db-shm` is refused, because SQLite would write next to the link target, outside
   `storage.directory`.
 - The database runs in WAL mode with `foreign_keys` on and **`synchronous=FULL`**: a committed batch survives a power cut. The
-  ingest path acknowledges a batch only after its commit, and the agent then deletes it from its spool, so an acknowledged batch must
-  not become a silent gap.
+  ingest path (planned with v0.2.0) is to acknowledge a batch only after its commit, and the agent then deletes it from its spool, so an
+  acknowledged batch must not become a silent gap.
 - **One writer connection**, whose transactions start with `BEGIN IMMEDIATE` (the lock is taken at the start, so the busy timeout
   applies instead of a failure in the middle of a transaction), and up to four **query-only reader connections**. Readers never wait
   for the writer. The busy timeout is 5 seconds; it matters only against another process that opens the same file, such as
@@ -34,7 +34,7 @@ readable by the next, whichever language implements it, so the schema below is p
 ## Schema
 
 The schema version is stored in `meta.schema_version`; the current version is 10 (step 10 adds the table `incident_notes` with its index, empty; step 9 adds the table `incidents` with its index, empty; step 8 adds the tables `log_templates`,
-`log_template_hours` and `log_source_hours` with their indexes, empty, so log lines stored before it have no template statistics until `vandoxd templates` rebuilds them; step 7 adds `import_files.attempt`, `INTEGER NOT NULL DEFAULT 0`, and `import_files.hashes_attempt`, `INTEGER`, and the table `import_line_hashes`, so existing rows get attempt 0 and no line hashes; step 6 adds `import_files.head_sha256`, `continues_id` and `start_offset` and the index `import_files_head`; step 4 adds `log_lines.host`, `TEXT NOT NULL DEFAULT ''`, so lines stored before it get an empty host; step 5 adds `log_lines.event`, `TEXT NOT NULL DEFAULT ''`, so lines stored before it get an empty event). Times are Unix nanoseconds in `INTEGER` columns.
+`log_template_hours` and `log_source_hours` with their indexes, empty, so log lines stored before it have no template statistics until `vandoxd templates` rebuilds them; step 7 adds `import_files.attempt`, `INTEGER NOT NULL DEFAULT 0`, and `import_files.hashes_attempt`, `INTEGER`, and the table `import_line_hashes`, so existing rows get attempt 0 and no line hashes; step 6 adds `import_files.head_sha256`, `continues_id` and `start_offset` and the index `import_files_head`; step 5 adds `log_lines.event`, `TEXT NOT NULL DEFAULT ''`, so lines stored before it get an empty event; step 4 adds `log_lines.host`, `TEXT NOT NULL DEFAULT ''`, so lines stored before it get an empty host). Times are Unix nanoseconds in `INTEGER` columns.
 All tables are `STRICT`.
 
 | Table | Content |

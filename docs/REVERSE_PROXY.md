@@ -175,8 +175,9 @@ What is known (from Docker's release notes, [0105](decisions/0105-forwarded-head
   remote hosts could connect directly to a container on its published ports.
 - **28.0.0** fixed that; **28.3.3** fixed CVE-2025-54388, where reloading firewalld made ports published on loopback reachable from the
   local network again. Run **28.3.3 or later**.
-- Which engine version Synology Container Manager and QNAP Container Station ship has **not been verified on a device**, and they are
-  believed to be older than 28.0.0. Check yours; do not assume the loopback binding protects you.
+- Which engine version your Docker host runs, and whether its vendor's network settings expose the port, depends on the device and
+  its updates; Vandox does not check it. **Checking it is your job**: run the procedure below, and do not assume the loopback binding
+  protects you.
 
 Procedure, with two LAN hosts: the Docker host (`NAS`, LAN address `<nas-ip>`) and a second host (`H2`) that is not the NAS.
 
@@ -202,13 +203,13 @@ Procedure, with two LAN hosts: the Docker host (`NAS`, LAN address `<nas-ip>`) a
    destination of the packets must be `127.0.0.1` and the next hop the NAS (a route for `127.0.0.1/32 via <nas-ip>` on `H2`, if its
    system accepts one, since most systems treat loopback addresses as local), followed by
    `curl -sS -m 5 http://127.0.0.1:8080/healthz`; remove the route afterwards. A refused route on `H2` means this part of the test could
-   not be made, not that the port is safe; say so when reporting the result.
+   not be made, not that the port is safe; say so in your note.
 
 3. **Expected result: every `curl` fails** (connection refused or timeout). An answer `ok` means the port is reachable from the LAN:
    update Docker Engine to 28.3.3 or later, or block the port with the NAS firewall for everything but the proxy, and run the check
    again. The login still protects the UI in that case, but the lockout for a trusted gateway address is then shared with whoever
    connects.
-4. Note the engine version and the result, and report them on the issue tracker so that record 0105 can be amended.
+4. Note the engine version and the result, and run the check again after every update of Docker Engine or of the NAS system.
 
 ## The overall lock and how to recover
 

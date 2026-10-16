@@ -1,4 +1,4 @@
-# 0100: The forensics report is written as Markdown by `vandoxd report`, computed on demand in bounded passes; the web page follows separately
+# 0100: The forensics report is written as Markdown by `vandoxd report`, computed on demand in bounded passes; the web page is its own record (0108)
 
 - **Status:** Accepted
 - **Date:** 2026-10-13
@@ -69,8 +69,7 @@ Options 1, 4, 6, 9 and 11: `vandoxd report` reads every stored log line, process
 time), keeps only capped compact series, and writes the report as Markdown to standard output, with every piece of external text
 inside a code span. The command, its exit codes and the report's content, formats and limits are in
 [Detection, alerts and reports](../areas/detection-and-reports.md) (*Forensics report*) and [Backend host](../areas/backend-host.md)
-(*Command line and exit codes*). The web page is a separate issue ("[Web] Forensics report page", depending on #24 and #25), on which
-#29 depends.
+(*Command line and exit codes*). The web page is a separate decision ([0108](0108-report-page-one-block-model-outage-pages-by-rerun-language-in-the-address.md), #231).
 
 ## Consequences
 

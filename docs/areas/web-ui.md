@@ -4,7 +4,7 @@
 
 The pages `vandoxd` serves on its web listener: render mode, layout and navigation, theme, brand files, static assets, charts, the logs
 view, the incidents view, the report page and the security headers of the web listener together with what the UI framework needs from them. The user relies on it to look at the
-monitored server in a browser in the home network; the views (overview, history, logs, incidents, report) build on it. The listeners, port
+monitored server in a browser in the home network; the views (logs, incidents, report; an overview and history views are planned) build on it. The listeners, port
 routing and `/healthz` are in [Backend host](backend-host.md); the login, sessions and the reverse proxy trust are in
 [Web login](web-login.md), the setup of a proxy in [REVERSE_PROXY.md](../REVERSE_PROXY.md).
 

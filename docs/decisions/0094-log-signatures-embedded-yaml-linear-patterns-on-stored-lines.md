@@ -168,8 +168,8 @@ signatures*).
 - On systemd 249 (Ubuntu 22.04) a started or stopped unit is named by its description, not its unit name, and the
   journal reader keeps no `UNIT` field, so `Started`/`Stopped` lines of scopes and timers match the service signatures
   too; newer systemd versions print the unit name, which the signatures read when present.
-- The OOM kill line of `vm.oom_kill_allocating_task` is recognized by the signature, but the kernel report grouper does
-  not end a report at it (#202).
+- The OOM kill line of `vm.oom_kill_allocating_task` is recognized by the signature, and the kernel report grouper ends a
+  report at it like at the other kill lines (#202).
 - A full disk is recognized in MariaDB's messages, nginx's file writes and PHP's write errors, and `Too many connections`
   in Postfix's and Dovecot's MySQL client errors and PHP's `mysqli` and PDO errors (#203); the Plesk panel log, Apache's
   own status texts, a custom Apache `ErrorLogFormat`, Apache 2.2, a PHP error after an earlier PHP message of the same

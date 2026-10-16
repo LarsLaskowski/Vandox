@@ -50,6 +50,105 @@ VANDOX_BENCHMARK=1 dotnet test tests/Vandox.Storage.Tests --filter WriteThroughp
 
 ### Results
 
+| Writer | Host | CPU | Date | First batch (ms) | Later batches (ms) | Median of five (ms) |
+| ------ | ---- | --- | ---- | ---------------: | -----------------: | ------------------: |
+| before [0083](decisions/0083-storage-write-criterion-is-the-median-of-five-batches-on-the-data-volume.md) | development host (4 vCPU) | Intel Xeon 2.10 GHz | 2026-10-07 | 499–679 | 277–584 | 309–390 |
+| before 0083 | DS918+ (reference host, Linux 4.4, .NET 10.0.10, SSD volume) | Celeron J3455 | 2026-10-07 | 1480 | 890–1119 | 1085 |
+| after 0083 | development host (4 vCPU) | Intel Xeon 2.10 GHz | 2026-10-07 | 285–329 | 242–368 | 272–320 |
+| after 0083 (cached parameters, synchronous calls) | DS918+ (SSD volume) | Celeron J3455 | 2026-10-07 | 1043 | 797–1004 | 925 |
+| after 0083 (and writer page cache of 16 MiB) | DS918+ (SSD volume) | Celeron J3455 | 2026-10-07 | 1001 | 711–783 | **783** |
+| after 0083 (and writer page cache of 16 MiB) | DS918+ (HDD volume) | Celeron J3455 | 2026-10-07 | 1171 | 1079–1471 | **1171** |
+| after the log templates of [0095](decisions/0095-log-templates-token-rules-statistics-in-the-write-path-usual-level-from-covered-hours.md) (two runs; metric batches run no template statement) | development host (4 vCPU) | Intel Xeon 2.10 GHz | 2026-10-12 | 273–386 | 185–402 | 273–282 |
+
+Outcome against the restated criterion on the DS918+: **met on the SSD volume** (median 783 ms, 12,800 records/s in a steady state) and **not met on the
+HDD volume** (median 1171 ms, about 8,500 records/s). A 4 KiB write needs about 10 ms to reach the disk on the SSD and about 122 ms on the HDD: on the
+SSD the writer is CPU-bound, on the HDD the median is about 390 ms higher (1171 against 783 ms) because each commit waits for the disk. The database can be put on
+either volume; the HDD works too, with the slower writes shown here, which is far above what the agent sends (hundreds of records per minute). The
+first batch is about 250 ms slower than the later ones on the SSD (fresh file, start-up); with the unchanged writer it was 1480 ms. `ReadyToRun`
+made no difference on the development host. The FTS5 remedy of record 0063 (option c) does not apply, because this measurement writes no log lines.
+The development-host rows are not the reference host.
+
+## Log templates
+
+Criterion ([0095](decisions/0095-log-templates-token-rules-statistics-in-the-write-path-usual-level-from-covered-hours.md), from issue #22):
+**1,000,000 log lines are written with their templates in under 10 minutes on the reference host**, in batches of 10,000 lines, one
+transaction each. Writing a log line normalizes its message into a template and counts it under the template, the template's hour and the
+source's hour in the same transaction (storage area, *Log templates*), so this is the write cost on top of the log line and its full-text entry.
+The same program measures the three template queries on the written database. Only a run on the reference host counts against the criterion.
+
+### Procedure
+
+Publish the tool as above and run it on the reference host, on the volume that holds the database (the SSD volume):
+
+```bash
+dotnet publish/Vandox.StorageBenchmark.dll <existing folder on the data volume> --log-lines 1000000 [--size N]
+```
+
+`--log-lines N` (1 to 10,000,000) cannot be combined with `--batches` or `--warmup`; `--size N` is the number of lines per batch (default 10,000,
+the criterion's batch size). The lines are generated from the line index, without a random number generator, so two runs write the same lines:
+24 message shapes modeled on real formats (Postfix connection, queue and delivery lines, Dovecot logins and logouts, the kernel OOM kill lines,
+MariaDB aborted connections, nginx errors with client address and path, systemd and sshd lines, firewall lines) of the sources `syslog`,
+`journal`, `mariadb` and `nginx`, with numbers, addresses, IDs, e-mail addresses and file names that vary with the index, and capture times in
+order over 30 days (720 hours). On the development host the same measurement runs with
+`dotnet run -c Release --project tools/Vandox.StorageBenchmark -- <folder> --log-lines 1000000`.
+
+The program prints, in this order: the time to normalize the messages in memory; the write time (total, lines per second, the median, fastest and
+slowest batch); the numbers of templates, template hours and source hours; the time of the new-templates query (the last 15 days, limit 10,000); the
+usual-level query over the last 744 hours at the **default parameters** (baseline 168 hours, minimum baseline 24 hours, factor 3, minimum count
+10) and at the **widest parameters** (baseline 2,160 hours, minimum baseline 1 hour, factor 1, minimum count 1, limit 10,000), each with its number
+of **candidates** (the template hours of the range that reach the minimum count, all of which the query evaluates); the verdict for 1,000,000
+lines with the default batch size; and then the **hostile case** in a second, fresh database: 100,000 lines (or all lines if fewer) whose messages
+hold no digit and differ per line, so that every line is a template of its own and costs three upserts, with the write time and the widest
+usual-level query on it; and finally the **concentrated case** in a third, fresh database: 2,160 hourly heartbeat lines of one source followed by as many such lines as the hostile case, all of that source in the next hour, with the write time and the widest usual-level query on it.
+
+### Results
+
+| Host | CPU | Date | Lines | Write, total | Lines per second | Median batch (ms) | Templates | Template hours | Verdict |
+| ---- | --- | ---- | ----: | -----------: | ---------------: | ----------------: | --------: | -------------: | ------- |
+| development host (4 vCPU, .NET 10.0.12) | Intel Xeon 2.10 GHz | 2026-10-12 | 1,000,000 | 52.6 s | 18,995 | 504 | 2,741 | 153,923 | not the reference host |
+| DS918+ (reference host, SSD volume; Linux 4.4.302+, .NET 10.0.10, 4 CPUs) | Celeron J3455 | 2026-10-12 | 1,000,000 | 195.8 s (3.3 min) | 5,107 | 1,864 | 2,741 | 153,923 | **met** (limit 10 min) |
+
+Normalizing the 1,000,000 messages alone, without the database, took 1.4 s on the development host and 4.1 s on the reference host. The
+usual-level query ran on the same database (range of 744 hours ending after the last line). The statement used to sum the baseline per candidate;
+it now sums it with a window function per template (record 0095, option 13) and returns the same rows. The development host ran both, the
+reference host ran the first measurement with the old statement and a second one with the new statement (write time 195.5 s, 5,116 lines per
+second, so the same as in the first run):
+
+| Query | Candidates | Development host, per candidate | Development host, window | Reference host, per candidate | Reference host, window |
+| ----- | ---------: | ------------------------------: | -----------------------: | ----------------------------: | ---------------------: |
+| new templates (last 15 days, limit 10,000), 1,197 results | — | 8 ms | 9 ms | 27 ms | 35 ms |
+| usual level, default parameters, 0 results | 12,960 | 572 ms | 497 ms | 1,464 ms | 1,424 ms |
+| usual level, widest parameters, 10,000 results | 153,923 | 3,913 ms | 710 ms | **11,979 ms** | **1,963 ms** |
+| hostile case, widest parameters, 10,000 results (below) | 100,000 | 203 ms | 306 ms | 571 ms | 898 ms |
+| concentrated case, widest parameters, 10,000 results (below) | 100,743 | 275 ms | 338 ms | 970 ms | 1,009 ms |
+
+The widest query on the reference host took 12.0 s with the baseline sum per candidate, above the 10 s line issue #208 set. The window function reads
+each template's hours once instead of up to 2,160 counts per candidate and brings it to 2.0 s (6.1 times faster); the default parameters and the
+concentrated case do not change. The hostile case, where every template has a single hour, is slower with the window (0.9 s against 0.6 s)
+and stays below the 10 s line, so no cap on the candidates and no other query shape is needed.
+
+The hostile case (100,000 lines, 100,000 templates, 100,000 template hours): write time 5.1 s (19,520 lines per second, median batch 509 ms) on
+the development host and 20.4 s (4,903 lines per second, median batch 2,048 ms) on the reference host. The **concentrated case** puts the worst shape for the covered hours into one database:
+2,160 hourly heartbeat lines of one source, then 100,000 digitless lines that differ per line, all of that source in the next hour, so one source-hour
+holds 100,000 candidates with a baseline of 2,160 covered hours; the statement materializes the covered hours (`AS MATERIALIZED`), so they are
+counted once for that source-hour and not once per candidate (without it SQLite flattens the statement and counts per candidate, which took
+22.4 s on this shape). Writing took 5.1 s (20,071 lines per second) on the development host and 21.0 s (4,870 lines per second) on the reference host. The generated lines have no spikes (the counts per hour are even), so the default
+query reports nothing; its time is the cost of the candidates. The reference host is about three to four times slower on the metric write (783 ms against 272 ms for a batch of 10,000) and 3.7 times on the
+log write; the usual-level query time is not bounded by the range or the limit (detection area, *Limits of templates*), so a caller that serves a
+user still narrows the range and runs it off the request path.
+
+## Log search
+
+Criterion (issue #26, decided in [0106](decisions/0106-logs-view-address-as-the-view-bounded-search-pages-template-lines-by-normalization.md)):
+**every search case of the logs view answers in under 2,000 ms on the reference host** over 5,000,000 stored log lines. The cases (rare and
+common words, filters, templates, context, the template list and crafted terms) are generated and timed by the benchmark tool, three runs each:
+
+```bash
+dotnet publish/Vandox.StorageBenchmark.dll <existing folder on the data volume> --search-lines 5000000
+```
+
+### Results
+
 Reference host, **run 1** (DS918+, SSD volume `/volume20/HostData`, Linux 4.4.302+, .NET 10.0.10, 4 CPUs; scan bound and cap 12,000, before the changes of
 this section; cases 1 to 12; 5,000,000 lines written in 1,087 s, 4,600 lines per second): **criterion not met.** Slowest of three runs, in milliseconds:
 

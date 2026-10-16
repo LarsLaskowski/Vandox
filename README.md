@@ -13,7 +13,7 @@ backend, written in .NET 10 with a Blazor web UI. Both implement the same data m
 
 | Binary | Runs on | Purpose |
 |---|---|---|
-| `vandox-agent` (Go) | the monitored Linux server | collects data and ships it to the backend |
+| `vandox-agent` (Go) | the monitored Linux server | collects data and ships it to the backend (planned for v0.2.0; v0.1.0 ships the backend only) |
 | `vandoxd` (.NET) | Docker container on any Docker host in the home network (NAS, mini PC, server) | backend with web UI |
 
 Both support `--version`, which prints version, commit and build date. `vandoxd` without arguments runs the
@@ -45,7 +45,7 @@ testdata/           fixtures for tests, shared by both languages (testdata/wire:
 
 ## Configuration
 
-Each binary reads one strict YAML file for its options. The secrets come only from the environment (or
+Each binary reads one strict YAML file for its options (the agent from v0.2.0 on: its loader exists, but the agent binary of v0.1.0 does not call it yet). The secrets come only from the environment (or
 from files named by `*_FILE` variables), never from the file
 ([0032](docs/decisions/0032-secrets-only-from-environment-or-docker-secrets.md)).
 
@@ -58,7 +58,7 @@ An unknown key, an unknown `VANDOX_` variable, a duplicate key, a second documen
 tag or an invalid value is an error at start-up. Errors name the file, the line and the key, and never
 the value.
 
-**Agent options**
+**Agent options** (read from v0.2.0 on)
 
 | Key | Default | Description |
 | --- | ------- | ----------- |
@@ -90,7 +90,7 @@ the value.
 | -------- | ------------ | ------ | -------- | ---- |
 | `VANDOX_AGENT_TOKEN` | `VANDOX_AGENT_TOKEN_FILE` | agent, backend | agent: yes, backend: no | At least 32 printable ASCII characters without spaces, e.g. `openssl rand -hex 32`. |
 | `VANDOX_WEB_PASSWORD_HASH` | `VANDOX_WEB_PASSWORD_HASH_FILE` | backend | no at load, but the service refuses to start without it | The argon2id hash of the web UI password in the form `$argon2id$v=19$m=...,t=...,p=...$<salt>$<hash>`, created with `vandoxd hash-password` (see *Run the backend with Docker Compose* and `docs/areas/web-login.md`). |
-| `VANDOX_TELEGRAM_BOT_TOKEN` | `VANDOX_TELEGRAM_BOT_TOKEN_FILE` | backend | no | Printable ASCII without spaces, 1 to 4096 characters. |
+| `VANDOX_TELEGRAM_BOT_TOKEN` | `VANDOX_TELEGRAM_BOT_TOKEN_FILE` | backend | no | Printable ASCII without spaces, 1 to 4096 characters. Read and validated, but unused until the Telegram notifier (planned). |
 
 Set either the variable or its `_FILE` form, not both. The `_FILE` value is an absolute path to a regular
 file (for example a Docker secret) whose content is the secret, with at most one trailing line ending.
@@ -131,31 +131,9 @@ dotnet publish/vandoxd.dll --version
 Releases are published from `v<major>.<minor>.<patch>` tags on `main`
 (see [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md#versioning-and-releases)).
 
-**Agent.** Download `vandox-agent-linux-amd64` and `SHA256SUMS` from the
-[GitHub release](https://github.com/LarsLaskowski/Vandox/releases), verify and install the binary (the full
-agent installation, with user and systemd unit, is described under `deploy/agent/` once it exists):
-
-```
-sha256sum -c SHA256SUMS
-gh attestation verify vandox-agent-linux-amd64 --repo LarsLaskowski/Vandox \
-  --signer-workflow LarsLaskowski/Vandox/.github/workflows/release.yml \
-  --source-ref refs/tags/vX.Y.Z --deny-self-hosted-runners
-sudo install -m 0755 vandox-agent-linux-amd64 /usr/local/bin/vandox-agent
-vandox-agent --version
-```
-
-The checksum only shows that the download is intact. `gh attestation verify` needs the GitHub CLI logged in
-(`gh auth login`) and proves that the binary was built by this repository's release workflow for that tag.
-
-The binary also has a signed SBOM. Verify it and save it with the same flags plus the SPDX predicate type:
-
-```
-gh attestation verify vandox-agent-linux-amd64 --repo LarsLaskowski/Vandox \
-  --signer-workflow LarsLaskowski/Vandox/.github/workflows/release.yml \
-  --source-ref refs/tags/vX.Y.Z --deny-self-hosted-runners \
-  --predicate-type https://spdx.dev/Document/v2.3 \
-  --format json --jq '.[0].verificationResult.statement.predicate' > vandox-agent-linux-amd64.spdx.json
-```
+**Agent.** The agent is not part of v0.1.0: collection, shipping and the ingest API arrive with v0.2.0. v0.1.0 is
+the forensics release and works from imported logs alone. A release also carries a `vandox-agent-linux-amd64` binary built
+from the current code; it has no function yet beyond `--version`, so there is nothing to install on the monitored server.
 
 **Backend.** Pull the image from Docker Hub, either by version or by the digest given in the release notes
 (`Docker image: networlddev/vandox:<X.Y.Z>@sha256:<digest>`):
@@ -190,12 +168,13 @@ gh attestation verify oci://docker.io/networlddev/vandox@sha256:<digest> --repo 
   --format json --jq '.[0].verificationResult.statement.predicate' > vandox-image.spdx.json
 ```
 
-Both SBOMs are SPDX 2.3 JSON documents generated by syft at release time. They are stored on GitHub with the
+The SBOMs are SPDX 2.3 JSON documents generated by syft at release time. They are stored on GitHub with the
 provenance attestations and are not published as release assets.
 
 Image tags: `X.Y.Z` for the release `vX.Y.Z`; `latest` is the highest stable release; a pre-release
 (`vX.Y.Z-rc.N`) is published only under its own tag `X.Y.Z-rc.N`. A published version tag is never
-overwritten. The image runs as UID/GID 65532 (non-root) on the chiseled ASP.NET runtime image (no shell, no package manager).
+overwritten. The image is built for `linux/amd64` only, so an ARM-based NAS cannot run it. It runs as UID/GID 65532 (non-root) on the
+chiseled ASP.NET runtime image (no shell, no package manager).
 
 ### Run the backend with Docker Compose
 
@@ -255,7 +234,7 @@ job: `docs/REVERSE_PROXY.md` explains the proxy settings, the certificate and th
 and every client behind the proxy shares one lockout.
 
 The ingest port (8081) is not published yet: the ingest API arrives with issue #40, which adds the binding on
-the host's tailnet address. The database lives in the named volume `vandox-data` (`/data` in the container,
+the host's tailnet address. The database lives in the named volume `vandox-data` (Docker lists it as `vandox_vandox-data`; `/data` in the container,
 owned by 65532); a bind-mounted data directory instead of the volume must be owned by 65532 as well.
 Put the data directory on fast storage, an SSD if the host has one: every committed batch waits for the disk, and on a hard disk
 writes take about 50 % longer in the measurement of 10,000 records per transaction (`docs/BENCHMARKS.md`); a hard disk works, too.
@@ -263,13 +242,13 @@ writes take about 50 % longer in the measurement of 10,000 records per transacti
 ### Import logs
 
 `vandoxd import <path>` reads logs the operator saved on the backend host and stores their records
-(origin `import`, never live, so they never raise an alert). The compose file mounts `./import` read-only at
+(origin `import`, never live, so the planned alerting will never raise an alert for them). The compose file mounts `./import` read-only at
 `/import`. Put the directory, archive or file into `import/` and run the import inside the running
 container; `-it` is needed so that Ctrl-C reaches the import (without a terminal the import keeps running
 when the client is closed):
 
 ```
-docker exec -it vandoxd /vandoxd import /import/<name>
+docker exec -it vandoxd dotnet /app/vandoxd.dll import /import/<name>
 ```
 
 The import runs as the container's user 65532 and reads only what that user may read. A copied `/var/log`
@@ -429,7 +408,7 @@ The web UI shows the stored log lines under *Logs* (`/logs`) and the log templat
 argument; run it in the container like the import):
 
 ```
-docker exec -it vandoxd /vandoxd incidents
+docker exec -it vandoxd dotnet /app/vandoxd.dll incidents
 ```
 
 An incident is built from the OOM kills in the stored log lines: kills whose windows (`incidents.window_before` before
@@ -490,8 +469,8 @@ last stored and cannot tell that log lines were imported since. Run it in the co
 the line feeds into CR LF) and redirect the output:
 
 ```
-docker exec vandoxd /vandoxd report > forensics.md
-docker exec vandoxd /vandoxd report -lang de > forensics.md
+docker exec vandoxd dotnet /app/vandoxd.dll report > forensics.md
+docker exec vandoxd dotnet /app/vandoxd.dll report -lang de > forensics.md
 ```
 
 The report is in English; `-lang de` writes it in German (`-lang en|de`, anything else is a usage error). It holds:
@@ -546,7 +525,7 @@ parameter of a saved link) belong to the statistics: after a rebuild they identi
 may show another template or none:
 
 ```
-docker exec -it vandoxd /vandoxd templates
+docker exec -it vandoxd dotnet /app/vandoxd.dll templates
 ```
 
 The command counts the lines in batches of 10,000, each in its own transaction, logs the progress to standard error as JSON

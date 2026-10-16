@@ -35,12 +35,12 @@ Vandox is meant for a private setup: `vandox-agent` runs on the monitored server
 container on a Docker host in the home network (for example a NAS), behind a TLS-terminating reverse proxy. The two communicate only
 over a private Tailscale network. An operator must not expose `vandoxd` to the internet, must protect the
 web UI with its login, and must keep secrets (tokens, keys) only in environment variables or Docker
-secrets, never in the configuration file or on the command line. The agent must run as the dedicated user
-`vandox-agent`, never as root, with only the rights listed in `deploy/agent/`, and the unit's confinement
+secrets, never in the configuration file or on the command line. Once the agent ships (v0.2.0; v0.1.0 has none), it must run as the
+dedicated user `vandox-agent`, never as root, with only the rights its installation files under `deploy/agent/` list, and the unit's confinement
 (system-call filter, no further capabilities) must be kept; its capabilities give it read access to
 everything on the server, so treat the server's credentials as readable by the agent. The Tailscale ACL must
-allow the monitored server only the ingest port on the backend host, and the Telegram user allowlist must be
-set.
+allow the monitored server only the ingest port on the backend host, and, once Telegram is added, the Telegram user
+allowlist must be set.
 
 Keep the web port as `deploy/backend/docker-compose.yml` publishes it, on `127.0.0.1` (or on the address of the
 host that runs the reverse proxy). That binding is defense in depth, not an access boundary: depending on the
@@ -57,8 +57,8 @@ current Docker Engine (28.3.3 or later) so that no neighbor host reaches the pub
 option, all clients behind the proxy share the proxy's address: five wrong passwords from any of them lock all of them out for 15
 minutes, and the cookies are never `Secure`. Independent of that option, 100 failed sign-ins within an hour lock the sign-in for
 everyone, and anyone who can reach the login can provoke it; restarting the container clears the lock (and ends all sessions). Give the
-UI a host name of its own (`docs/REVERSE_PROXY.md`). Whether the Docker Engines of Synology and QNAP expose a port published on
-`127.0.0.1` to the LAN is not verified; the login does not depend on it.
+UI a host name of its own (`docs/REVERSE_PROXY.md`). Whether a port published on `127.0.0.1` is reachable from the LAN depends on
+the Docker host and is the operator's to check (`docs/REVERSE_PROXY.md`, *Check the Docker Engine*); the login does not depend on it.
 
 ## Scope
 

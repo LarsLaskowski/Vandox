@@ -81,7 +81,7 @@ once in the [area document](../areas/README.md) of the record's area, and the re
 | 0031 | The Telegram bot talks only to allowlisted users in private chats | Accepted | 2026-10-04 |
 | 0032 | Secrets only from environment variables or Docker secrets | Accepted | 2026-10-04 |
 | 0037 | Releases: version tag only, plain tooling, tag-only token environment, secret-free attestation job, digest-pinned SBOM generator | Accepted | 2026-10-04 |
-| 0040 | Go 1.27 toolchain without a patch version in go.mod; govulncheck raised to v1.8.0 | Accepted | 2026-10-04 |
+| 0040 | Go 1.27 toolchain; `go` directive without a patch version; govulncheck raised to v1.8.0 | Accepted | 2026-10-04 |
 | 0041 | Backend image on the chiseled ASP.NET runtime; base images pinned by digest through build arguments, refreshed by hand, staleness reported weekly | Accepted | 2026-10-04 |
 | 0042 | Wire format is gzip-compressed JSON Lines, built on the standard library only | Accepted | 2026-10-04 |
 | 0043 | Wire format versioned by integer major and minor; unknown majors are rejected before parsing | Accepted | 2026-10-04 |
@@ -126,7 +126,7 @@ once in the [area document](../areas/README.md) of the record's area, and the re
 | 0097 | A cancelled token interrupts a running reader statement through a progress handler; the interruption is an OperationCanceledException | Accepted | 2026-10-12 |
 | 0098 | The web UI serves only its own static web assets: brand copies checked against docs/assets, uPlot vendored, theme and reconnect without inline code | Accepted | 2026-10-12 |
 | 0099 | The web listener sends one strict Content-Security-Policy with self-only sources and frame-ancestors 'none', set by the application | Accepted | 2026-10-12 |
-| 0100 | The forensics report is written as Markdown by `vandoxd report`, computed on demand in bounded passes; the web page follows separately | Accepted | 2026-10-13 |
+| 0100 | The forensics report is written as Markdown by `vandoxd report`, computed on demand in bounded passes; the web page is its own record (0108) | Accepted | 2026-10-13 |
 | 0101 | Recurrence and correlation rules compare the share of outages with the share of observed system-log hours and decide by a binomial tail | Accepted | 2026-10-13 |
 | 0102 | The report language comes from the flag `-lang` (`en` by default, or `de`); the texts are tables in code, not .NET resources or cultures | Accepted | 2026-10-13 |
 | 0103 | Web login: one password, server-side sessions in memory, a static login page, live connections bound to the session | Accepted | 2026-10-13 |
