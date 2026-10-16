@@ -175,8 +175,9 @@ What is known (from Docker's release notes, [0105](decisions/0105-forwarded-head
   remote hosts could connect directly to a container on its published ports.
 - **28.0.0** fixed that; **28.3.3** fixed CVE-2025-54388, where reloading firewalld made ports published on loopback reachable from the
   local network again. Run **28.3.3 or later**.
-- Which engine version Synology Container Manager and QNAP Container Station ship has **not been verified on a device**, and they are
-  believed to be older than 28.0.0. Check yours; do not assume the loopback binding protects you.
+- Which engine version your Docker host runs, and whether its vendor's network settings expose the port, depends on the device and
+  its updates; Vandox does not check it. **Checking it is your job**: run the procedure below, and do not assume the loopback binding
+  protects you.
 
 Procedure, with two LAN hosts: the Docker host (`NAS`, LAN address `<nas-ip>`) and a second host (`H2`) that is not the NAS.
 

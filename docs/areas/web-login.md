@@ -148,7 +148,8 @@ and the option in [Configuration and secrets](configuration-and-secrets.md), the
 - The compose file publishes the web port on `127.0.0.1` ([Backend host](backend-host.md), *Compose file*); this is defense in depth,
   not the access control. Docker Engine before 28.0.0 lets neighbor hosts reach ports published on loopback, and 28.0.0 to 28.3.2 do so
   again after a firewalld reload (CVE-2025-54388); such requests arrive with the neighbor's own address. The login is the boundary
-  in every case. Which engine versions the supported NAS devices run is not verified (record 0105).
+  in every case. Vandox does not rely on the binding; whether a host exposes the port is the operator's to check with the procedure
+  in `docs/REVERSE_PROXY.md` (record 0105).
 
 ## Limits and errors
 

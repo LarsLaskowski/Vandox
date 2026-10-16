@@ -57,8 +57,8 @@ current Docker Engine (28.3.3 or later) so that no neighbor host reaches the pub
 option, all clients behind the proxy share the proxy's address: five wrong passwords from any of them lock all of them out for 15
 minutes, and the cookies are never `Secure`. Independent of that option, 100 failed sign-ins within an hour lock the sign-in for
 everyone, and anyone who can reach the login can provoke it; restarting the container clears the lock (and ends all sessions). Give the
-UI a host name of its own (`docs/REVERSE_PROXY.md`). Whether the Docker Engines of Synology and QNAP expose a port published on
-`127.0.0.1` to the LAN is not verified; the login does not depend on it.
+UI a host name of its own (`docs/REVERSE_PROXY.md`). Whether a port published on `127.0.0.1` is reachable from the LAN depends on
+the Docker host and is the operator's to check (`docs/REVERSE_PROXY.md`, *Check the Docker Engine*); the login does not depend on it.
 
 ## Scope
 
