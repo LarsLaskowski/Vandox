@@ -256,9 +256,10 @@ files follow the C# layout in *Writing code*: the Tester does not fix layout by 
 it wrote before building, so *Format check* finds nothing in them.
 
 Two analyzer rules that cost a build cycle when found only by the build: nested classes are forbidden in C#
-tests too (put a helper class in its own file or next to the test class, not inside it), and CA1835 forbids
-calling the `WriteAsync(byte[], int, int, CancellationToken)` overload of a stream directly (use the
-`ReadOnlyMemory<byte>` overload, `WriteAsync(buffer.AsMemory(), token)`).
+tests too (RH2101; put a helper class in its own file, since RH7002 allows one top-level type per file), and
+CA1835 forbids calling the `WriteAsync(byte[], int, int, CancellationToken)` and
+`ReadAsync(byte[], int, int, CancellationToken)` overloads of a stream directly (use the memory overloads,
+`WriteAsync(buffer.AsMemory(), token)` and `ReadAsync(buffer.AsMemory(), token)`).
 
 Heap-bound tests (.NET) measure retention with `GC.GetTotalMemory(true)`, which Sonar `S1215` flags. The accepted
 form is one private helper in the test class that wraps exactly that call in `#pragma warning disable S1215` /
