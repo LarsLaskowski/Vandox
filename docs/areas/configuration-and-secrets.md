@@ -11,7 +11,7 @@ options and secrets do at run time is described in the area that owns the featur
 
 - Each binary reads one YAML file: `/etc/vandox/agent.yaml` for the agent and `/etc/vandox/vandoxd.yaml` for the
   backend (mounted into the container). The backend takes another path with `-config <path>`. The file is read once, at
-  start-up.
+  start-up. The agent's loader exists, but the agent binary does not call it yet (it arrives with v0.2.0; see [Agent](agent.md)).
 - The file must be a regular file of at most 1 MiB; the type is checked before it is opened, so a FIFO cannot block
   start-up. An empty file, a file with only comments, or a document that is just `---` or `~` means "defaults
   only" (for the agent, whose `agent_id` and `backend.url` have no default, that is an error naming the missing key).
@@ -89,7 +89,8 @@ Backend:
   null or only holds comments. A value that is no zone ID is refused with the key, the line and the reason "must be a
   time zone of the IANA time zone database, such as UTC or Europe/Berlin", never the value; an empty value is refused
   with the same error, a null value as "has no value" like every string option. While it is unset, `vandoxd import` fails a
-  syslog file at its first line without a year, a MariaDB error log at its first entry, a Dovecot log file at its first Dovecot line and a Plesk or web server error log at its first line of the format (see [Log import](log-import.md)); the service itself does not use it.
+  syslog file at its first line without a year, a MariaDB error log at its first entry, a Dovecot log file at its first Dovecot line, a Plesk or web server error log at its first line of the format and a legacy
+  monitoring log at its first snapshot (see [Log import](log-import.md)); the service itself does not use it.
 - The four error log paths (`import.plesk_panel_log`, `import.sw_cp_server_error_log`, `import.nginx_error_log`,
   `import.apache_error_log`) name where the server writes these logs; `vandoxd import` compares them as text with the
   names of the imported files (see [Log import](log-import.md), *Plesk and web server error logs*) and never opens
@@ -117,8 +118,8 @@ Backend:
   control characters are rejected instead of becoming part of the secret. A secret that needs other characters must
   be encoded, for example as base64. The agent token has at least 32 characters.
 - On the backend an unset secret is not an error when the configuration loads; the feature that needs it decides:
-  the web UI refuses to start without the password hash, the ingest endpoint refuses without the token, and
-  Telegram stays off without its token. This is what lets the backend run for log import without agents or Telegram.
+  the web UI refuses to start without the password hash, the planned ingest endpoint will refuse without the token, and
+  the planned Telegram notifier will stay off without its token (both tokens are read and validated, but unused in v0.1.0). This is what lets the backend run for log import without agents or Telegram.
 - Every environment variable that starts with `VANDOX_` (in any letter case) must be known to the binary and may
   appear once; otherwise loading fails, so a typo cannot silently disable a feature.
 - The web UI password hash must also be in the form of [Web login](web-login.md) (*Password*): an argon2id hash in the PHC form. The

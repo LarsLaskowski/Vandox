@@ -8,6 +8,8 @@ host area; the agent's own rights are in the agent area; secrets are in [Configu
 
 ## Agent to backend
 
+Planned with the agent and the ingest API (v0.2.0); v0.1.0 has no agent-to-backend traffic.
+
 - Agent and backend communicate **only over Tailscale**. The tailnet ACL allows the monitored server to reach **only the ingest port on
   the backend host** and nothing else, so a compromised server cannot reach the rest of the home network. The ACL is part of the
   deployment documentation and must be kept strict.

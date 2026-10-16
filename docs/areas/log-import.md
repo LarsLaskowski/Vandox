@@ -12,7 +12,7 @@ imported data is kept apart from live data (it never raises alerts) by the detec
 - `vandoxd [flags] import [-config <file>] <path>` imports the input at `<path>`. `-config` is accepted before and
   after `import`. The command takes exactly one path. `-h` prints its usage and exits 0. `-healthcheck` together
   with `import` is a usage error.
-- In the container: `docker exec -it vandoxd /vandoxd import /import/<name>`. `-it` is needed for Ctrl-C to
+- In the container: `docker exec -it vandoxd dotnet /app/vandoxd.dll import /import/<name>`. `-it` is needed for Ctrl-C to
   reach the import; stopping the container also ends it. Nothing committed is lost, and the next run resumes.
 - The import loads the configuration like the service (see *Configuration and secrets*), logs as JSON lines to
   standard error at `log.level`, opens the database next to the running service, and stops cleanly on SIGINT or

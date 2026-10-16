@@ -54,7 +54,7 @@ characters raw. The command, its output and its exit codes are described in [Log
 ## Consequences
 
 - Scripts can rely on stdout holding only the summary and on exit code 1 for any failed file.
-- The web UI (a later issue) runs the import itself and renders the summary on its own; the text format is the
+- A web UI trigger for the import (not planned for v0.1.0) would run the import itself and render the summary on its own; the text format is the
   command's, not an API.
 - `docker run networlddev/vandox` starts the service and `--version` still works for the release checks; without a
   configuration file `vandoxd` fails with a configuration error instead of printing the usage.

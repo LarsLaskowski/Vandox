@@ -313,7 +313,8 @@ appears the same way. **Wrapped parser errors are different**: the `time`, `neti
 (including the raw map keys in a type error) can carry agent text of up to `MaxLineBytes`. A consumer logs or
 displays decode errors only through the display sanitization of the project's area 12.
 
-Duties of the ingest API (#40), which this package cannot take over:
+Duties of the ingest API (#40, planned), which this package cannot take over. They are written for the Go decoder; the
+.NET ingest of the backend has the same duties with its own reader, timeouts and memory peak, which #40 states:
 
 - wrap the request body in `http.MaxBytesReader` on the **compressed** bytes before `NewDecoder` (the decoder
   bounds only the decompressed bytes);
@@ -356,7 +357,7 @@ Decompressed content of a batch of three records (the real stream is gzip-compre
 
 - How records are stored, deduplicated and searched: [Storage](storage.md).
 - How the agent spools, batches and sends: the agent area.
-- The ingest endpoint and its responses: the ingest and backend host area.
+- The ingest endpoint and its responses: the [Backend host](backend-host.md) area (the ingest API is planned, #40).
 
 ## Implementation
 

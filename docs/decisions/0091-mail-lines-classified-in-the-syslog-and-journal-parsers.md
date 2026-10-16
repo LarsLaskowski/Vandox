@@ -152,7 +152,7 @@ Which markers are read:
 15. **Also Dovecot's `Info: ` (priority 6)** — complete against Dovecot's list of log types; but Dovecot's `syslog_format`
     leaves `Info: ` out (`lib/failures.c`), so in syslog and the journal the marker never comes from Dovecot, and the
     mapping would only fire on text that merely looks like it (a journal error whose message reads `x: Info: ...`),
-    lowering the priority the source gave the line. It belongs to Dovecot's own log file, a follow-up.
+    lowering the priority the source gave the line. It belongs to Dovecot's own log file (#194, decided below).
 16. **Only the markers the daemons write to syslog** (chosen) — Postfix `warning: `, `error: `, `fatal: `, `panic: `;
     Dovecot `Debug: `, `Warning: `, `Error: `, `Fatal: `, `Panic: `. An info line keeps the priority its source gave it.
 

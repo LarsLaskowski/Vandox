@@ -6,7 +6,8 @@ How the backend turns stored records into findings: that detection is determinis
 report is sent, and what the first release does and does not do. The log signatures and their detector are implemented (*Log
 signatures*), the log templates with their statistics and queries (*Log templates*), the reconstruction of outage incidents from
 the stored data (*Incidents*) and the forensics report over the whole stored period (*Forensics report*); the alert rules and
-thresholds are **not implemented yet**, and this document fixes the principles they are held to. How records get stored is in the storage area; how gaps are recorded is in the agent area.
+thresholds, the live/backfill classification, the nightly report and the service inventory are **not implemented yet** (they
+need the agent and the ingest API of v0.2.0), and this document fixes the principles they are held to. How records get stored is in the storage area; how gaps are recorded is in the agent area.
 
 ## Principles
 
@@ -14,11 +15,13 @@ thresholds are **not implemented yet**, and this document fixes the principles t
   explained from rules and values and is covered by unit tests. A new failure pattern needs a new rule or signature.
 - **AI is optional and only writes the nightly report.** It never decides whether an alert fires. Vandox works fully without any AI
   service.
-- **Analysis comes before alerting.** The first release (v0.1.0) is the forensics release: collection, log import, spool and backfill,
-  storage and the historical views needed to reconstruct outages. Alerting, the nightly report and remote actions build on it in later
-  releases, with thresholds based on what the analysis showed. The data model must serve later rules without migration surprises.
+- **Analysis comes before alerting.** The first release (v0.1.0) is the forensics release: log import, storage, outage incidents, the
+  forensics report and the web views needed to reconstruct outages from imported logs. The agent with its spool and backfill follows in
+  v0.2.0; alerting, the nightly report and remote actions build on them in later releases, with thresholds based on what the analysis showed. The data model must serve later rules without migration surprises.
 
 ## Live data and backfill
+
+Planned with the ingest API (v0.2.0); until then every stored record is imported (origin `import`).
 
 - The backend classifies **every record as live or backfilled** from its capture time (corrected by the batch's clock offset), its
   receive time and gaps in the sequence numbers. It does not trust a flag from the agent; the batch header's live/backfill mode is only
@@ -147,8 +150,8 @@ bounded by those limits and not by the input.
   unchecked from a forwarded header (`mod_remoteip` stores a parsed address; Plesk's module is not verified). Record 0094 has
   the reasoning.
 - Real repeats with equal fields within 60 seconds are one event, whose lines are all linked and counted. On systemd 249 start and stop
-  name the description, so scopes and timers match too. The kill line of `oom_kill_allocating_task` is recognized, but its report is
-  not ended by the report grouper (issue #202).
+  name the description, so scopes and timers match too. The kill line of `oom_kill_allocating_task` is recognized and ends its kernel
+  report like the other kill lines.
 - The **text fields are external text**: they may hold control characters (the built-in patterns exclude the line feed from them) and
   showing them falls under security area 12 (*Logging and display of external data*) of `.squad/project.md`.
 
@@ -266,8 +269,8 @@ covered hours than the minimum no usual level is known and nothing is reported.
 - Templates are **external text**: the normalizer removes control characters of category Cc, but keeps format characters (Cf, such as
   U+202E, which reverses the display direction, and U+200B) and any markup; whoever shows a template escapes it like any log line and
   handles format characters (security area 12 of `.squad/project.md`).
-- The template statistics are kept as hourly rollups (3 years) and outlive the log lines (90 days): after the lines have expired, a
-  template's text is the only trace of them.
+- With the planned retention (storage, *Retention*), the template statistics are kept as hourly rollups (3 years) and outlive the log
+  lines (90 days): after the lines have expired, a template's text is the only trace of them. Until retention exists nothing expires.
 - A change of these rules changes only the templates of lines stored afterwards until the statistics are rebuilt: after a rule change
   `vandoxd templates` recounts every stored line under the current rules, then `vandoxd incidents` is run again.
 - While a rebuild runs and after an interrupted one (the `template_rebuild` row in `meta`, *Template rebuild* in the storage area), hours
@@ -586,11 +589,15 @@ distinguishable from the escape of a real U+202E (`\u202e`).
 
 ## Nightly report
 
-- The report is sent at **06:00**. If the backend host was off at that time, it is sent as soon as the backfill has completed, so it is
+Planned, not implemented yet.
+
+- The report is to be sent at **06:00**. If the backend host was off at that time, it is sent as soon as the backfill has completed, so it is
   always based on complete data. The backend therefore needs to know when a backfill is complete.
 - The backend sends the report through the Telegram bot (see the notification area); writing it may use the optional AI.
 
 ## Service inventory
+
+Planned, not implemented yet.
 
 The inventory of running services on the monitored server may suggest services that are not needed. A service is only ever **disabled
 in a reversible, documented way** (for example `systemctl disable` or `mask`; packages stay installed). Agents of the hosting provider
