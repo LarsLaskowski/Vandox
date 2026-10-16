@@ -314,7 +314,7 @@ appears the same way. **Wrapped parser errors are different**: the `time`, `neti
 displays decode errors only through the display sanitization of the project's area 12.
 
 Duties of the ingest API (#40, planned), which this package cannot take over. They are written for the Go decoder; the
-.NET ingest of the backend has the same duties with its own reader, timeouts and memory peak, which #40 states:
+.NET ingest of the backend has the same duties with its own reader, timeouts and memory peak, which #40 has to work out:
 
 - wrap the request body in `http.MaxBytesReader` on the **compressed** bytes before `NewDecoder` (the decoder
   bounds only the decompressed bytes);

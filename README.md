@@ -45,7 +45,7 @@ testdata/           fixtures for tests, shared by both languages (testdata/wire:
 
 ## Configuration
 
-Each binary reads one strict YAML file for its options. The secrets come only from the environment (or
+Each binary reads one strict YAML file for its options (the agent from v0.2.0 on: its loader exists, but the agent binary of v0.1.0 does not call it yet). The secrets come only from the environment (or
 from files named by `*_FILE` variables), never from the file
 ([0032](docs/decisions/0032-secrets-only-from-environment-or-docker-secrets.md)).
 
@@ -58,7 +58,7 @@ An unknown key, an unknown `VANDOX_` variable, a duplicate key, a second documen
 tag or an invalid value is an error at start-up. Errors name the file, the line and the key, and never
 the value.
 
-**Agent options**
+**Agent options** (read from v0.2.0 on)
 
 | Key | Default | Description |
 | --- | ------- | ----------- |
@@ -132,7 +132,7 @@ Releases are published from `v<major>.<minor>.<patch>` tags on `main`
 (see [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md#versioning-and-releases)).
 
 **Agent.** The agent is not part of v0.1.0: collection, shipping and the ingest API arrive with v0.2.0. v0.1.0 is
-the forensics release and works from imported logs alone. A release may carry a `vandox-agent-linux-amd64` binary built
+the forensics release and works from imported logs alone. A release also carries a `vandox-agent-linux-amd64` binary built
 from the current code; it has no function yet beyond `--version`, so there is nothing to install on the monitored server.
 
 **Backend.** Pull the image from Docker Hub, either by version or by the digest given in the release notes
