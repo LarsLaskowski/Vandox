@@ -11,4 +11,4 @@ are quoted in full.
 | 2026-10-17 18:33 | 3 Plan security review | squad-security | CHANGES_REQUIRED: B1 null elements in mount_points dropped by yaml, B2 import check must be allow-list; N1-N3 (opus/medium · 100,510 tokens · 25 tool uses · 384 s) |
 | 2026-10-17 18:39 | 3 Plan revision | Orchestrator | Session host note: Security's probe set kernel maxerror on the container clock; not restored (permission denied), no effect on repo |
 | 2026-10-17 18:39 | 3 Plan revision | squad-lead | revise DONE: B1 decoder rejects null list elements, B2 import allow-list, N1-N3, DA minor folded in (opus/medium · 100,317 tokens · 49 tool uses · 365 s) |
-| 2026-10-17 18:40 | 3 Plan security review (delta) | squad-security | APPROVED at 2961991 |
+| 2026-10-17 18:40 | 3 Plan security review (delta) | squad-security | APPROVED at 2961991 (opus/medium · 26,609 tokens · 5 tool uses · 60 s · continued) |
