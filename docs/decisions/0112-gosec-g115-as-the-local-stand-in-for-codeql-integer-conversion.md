@@ -31,8 +31,9 @@ Measured with only G115 enabled:
   such as `t.Fatalf` without `return` or `else`.
 
 G115 is broader than CodeQL's query: it looks at every integer conversion, not only values from `strconv`. Whether CodeQL
-reports `int(n)` of a `ParseInt(s, 10, 64)` result, which G115 accepts on 64-bit targets, is *unverified* (CodeQL cannot
-run in the session).
+reports `int(n)` of a `ParseInt(s, 10, 64)` result, which G115 accepts (measured on amd64 and with `GOARCH=386`), is
+*unverified* (CodeQL cannot run in the session); the grep for `strconv` results converted to `int` or `uint` stays in
+`.squad/stack.md` for that form.
 
 ## Options considered
 

@@ -50,7 +50,7 @@ Scratch probe (Lead; Security re-runs it in its review — a package with these 
 | 4 | `ParseUint(s, 10, 16)` then `uint16(v)` | silent |
 | 5 | `n, _ := strconv.Atoi(s); return int32(n)` | reports |
 | 6 | `Atoi`; `if n < math.MinInt32 \|\| n > math.MaxInt32 { return 0 }`; `int32(n)` | silent |
-| 7 | `ParseInt(s, 10, 64)` then `int(n)` (amd64) | silent — CodeQL's behavior here *unverified* |
+| 7 | `ParseInt(s, 10, 64)` then `int(n)` (amd64; Security: also with `GOARCH=386`) | silent — CodeQL's behavior here *unverified*; the `stack.md` grep stays for it |
 | 8 | `ParseInt(s, 10, 32)` then `int32(n)` | silent |
 | 9 | bound checked in a called function `ok(v)`, then `int64(v)` | reports (as CodeQL) |
 | 10 | `if err != nil \|\| v > maxKB { return 0 }`; `int64(v)` | silent |
@@ -71,7 +71,8 @@ G115 can see).
 ## Acceptance criteria
 
 - [ ] AC1: `.golangci.yml` enables `gosec` limited to rule G115 (`linters.settings.gosec.includes: [G115]`), with no
-  exclusion rule and no `//nolint:gosec` directive for it anywhere in the module.
+  exclusion rule and no `//nolint` directive of any form (`//nolint:gosec`, bare `//nolint`, `//nolint:all`) anywhere in
+  the module (none exists on `main` today).
 - [ ] AC2: `golangci-lint run ./...` (v2.14.0, the invocation CI's Lint step runs on the whole module) reports
   `0 issues.` on the branch, and the *Analyzer gate* passes.
 - [ ] AC3: with the branch's `.golangci.yml`, `golangci-lint run ./...` on the PR #265 tree at `68ddee1412` reports G115 on
@@ -83,7 +84,10 @@ G115 can see).
   Tests: `TestDecodeStrict_Valid` (subtest `utf-16 le bom`), `TestDecoder_SharedCases` (the `latin1` cases),
   `TestDecoder_AllocationIsBoundedForDeeplyNestedRecords` — all pass unchanged.
 - [ ] AC5: `.squad/stack.md` no longer says that no local gate reports the CodeQL query, and names G115, its scope and
-  record 0112 in the three places below; `.squad/project.md` lists 0112 among the records that constrain `.golangci.yml`.
+  record 0112 in the three places below, claims no more than was measured (G115 reported every measured CodeQL alert and
+  accepts the rule's two forms; a 64-bit parse result converted to `int`/`uint` is accepted by G115, CodeQL's view
+  unverified), and keeps the grep for `strconv` results converted to `int`/`uint` in the *Local substitute* column of
+  *Not checkable in a cloud session*; `.squad/project.md` lists 0112 among the records that constrain `.golangci.yml`.
 
 ## Verification without tests
 
@@ -93,7 +97,7 @@ whose "failing first" signal is G115 itself (it reports the three sites on `main
 
 | AC | Verified by | Who |
 | -- | ----------- | --- |
-| AC1 | reading `.golangci.yml`; `grep -rn "nolint:gosec" --include=*.go .` empty | Dev (step 6), Reviewer (step 8), Security (diff review) |
+| AC1 | reading `.golangci.yml`; `grep -rn "nolint" --include=*.go .` empty (covers `//nolint:gosec`, bare `//nolint` and `//nolint:all`) | Dev (step 6), Reviewer (step 8), Security (diff review) |
 | AC2 | `golangci-lint run ./...` from the repository root, whole module, output `0 issues.`; then the *Analyzer gate* | Dev before the review; CI step *Lint* on the PR is authoritative |
 | AC3 | download the two trees (`gh api repos/LarsLaskowski/Vandox/tarball/<sha>` into the scratchpad, extract), run `golangci-lint run --config <branch .golangci.yml> ./...` in each, compare with the lines above | Dev once before the review, log the output in `log.md`; Security re-checks in its diff review together with the scratch probe table above |
 | AC4 | *Test* from `.squad/stack.md` (`go test ./... -race`) green, the three named tests included | Tester (step 5), Dev (step 6) |
@@ -131,20 +135,26 @@ whose "failing first" signal is G115 itself (it reports the three sites on `main
 3. Dev edits `.squad/stack.md` (owner Dev; the Lead may not write under `.squad/`):
    - *Analyzer gate*, item 2: append after the sentence ending "(two existing validators are excluded by name, without
      a complexity cap, record 0047)." the text:
-     "`gosec`, limited to rule G115, stands in for CodeQL's `go/incorrect-integer-conversion` (record 0112): it reports
-     every integer conversion that can overflow without a range check in the same function — not only parsed values, so
-     it is broader than CodeQL — and accepts the two forms of the integer-conversion rule under *Writing code*. A guard
-     that ends in `t.Fatalf` needs the conversion in its `else` branch or a `return`. A G115 exclusion needs a Lead
-     decision record."
+     "`gosec`, limited to rule G115, is the local stand-in for CodeQL's `go/incorrect-integer-conversion` (record 0112):
+     it reported every CodeQL alert measured on PR #265 and accepts the two forms of the integer-conversion rule under
+     *Writing code*. It looks at integer conversions of any source, not only parsed values. It does not match CodeQL
+     everywhere: a conversion of a 64-bit parse result to `int` or `uint` is accepted by G115 (measured for `int(n)` of
+     `ParseInt(s, 10, 64)`, also with `GOARCH=386`), and whether CodeQL reports it is unverified — check such
+     conversions by hand (see *Not checkable in a cloud session*). A guard that ends in `t.Fatalf` needs the conversion in its `else` branch or a
+     `return`. A G115 exclusion needs a Lead decision record."
    - *Writing code* (Go), the integer-conversion bullet: replace "CodeQL's `go/incorrect-integer-conversion` (high
      severity) runs only in CI, no local gate reports it, and on PR #265 a bound checked elsewhere (a digit-count limit,
      a check inside a helper) did not count: five alerts on `ParseUint` results converted to `int64`." with
      "CodeQL's `go/incorrect-integer-conversion` (high severity) runs only in CI and stays authoritative; gosec G115 in
-     the *Analyzer gate* reports the same conversions locally (record 0112). On PR #265 a bound checked elsewhere (a
+     the *Analyzer gate* reported every CodeQL alert measured on PR #265 and accepts both forms below, but accepts a
+     conversion of a 64-bit parse result to `int` or `uint` whose treatment by CodeQL is unverified (record 0112). On PR #265 a bound checked elsewhere (a
      digit-count limit, a check inside a helper) did not count: five alerts on `ParseUint` results converted to `int64`."
    - *Not checkable in a cloud session*, the row "Go conversions of a parsed number …": column *Missing locally* becomes
      "CodeQL runs only in CI"; column *Local substitute* becomes "gosec G115 in the *Analyzer gate* (record 0112), which
-     is broader than the query; the integer-conversion rule under *Writing code*"; the other columns unchanged.
+     reported every measured CodeQL alert but accepts a 64-bit parse result converted to `int` or `uint` (CodeQL's view
+     unverified); the integer-conversion rule under *Writing code*, checked by grepping the new `strconv.ParseUint`,
+     `strconv.ParseInt` and `strconv.Atoi` calls and every conversion of their results to `int` or `uint`"; the other
+     columns unchanged. The grep stays: it is the only local check for the form G115 accepts and CodeQL may not.
 4. Dev edits `.squad/project.md`, *Integration surface*, the list "Among them: … 0047 (`gocognit` and its exclusions in
    `.golangci.yml`) and 0052 (image labels)" to "… 0047 (`gocognit` and its exclusions in `.golangci.yml`), 0112 (`gosec`
    limited to G115 in `.golangci.yml`, no exclusions) and 0052 (image labels)".
@@ -242,6 +252,34 @@ and 0047 (gocognit and its exclusions) are not contradicted: the gocognit settin
 ## Decision records
 
 - `docs/decisions/0112-gosec-g115-as-the-local-stand-in-for-codeql-integer-conversion.md` (Proposed, index row added).
+
+## Challenge
+
+Challenge notes (Devil's Advocate, minor), verbatim:
+
+> The rewritten latin1Stream guard puts the conversion in an else after t.Fatalf. The Dev should confirm that revive and
+> gocritic stay silent on it in the whole-module run (AC2). If one does flag it, restructure to
+> `if ok { append } else { Fatalf }` instead of adding a nolint or an exclusion.
+
+Accepted. The Tester writes the guard as under *Test files*; the Dev's whole-module run (AC2) is the check that revive
+(`indent-error-flow`, `superfluous-else`) and gocritic stay silent on it. If either reports it, the Tester restructures it
+to `if r >= 0 && r <= 0xFF { plain = append(plain, byte(r)) } else { t.Fatalf(…) }` — no `//nolint`, no exclusion
+(AC1). The Dev confirms G115 stays silent on the restructured form in the same run.
+
+## Security review
+
+Round 1 verdict: CHANGES_REQUIRED. Round 2 is a delta confirmation of the points below (plan text only; no scope change).
+
+- **B1 (blocking, wording)** — accepted. The planned `.squad/stack.md` text claimed G115 "reports every integer
+  conversion that can overflow" and "the same conversions" as CodeQL, which was not measured: probe row 7 (`int(n)` of
+  `ParseInt(s, 10, 64)`) is silent in G115, also with `GOARCH=386`, and CodeQL's view on it is unverified. All three
+  `stack.md` texts in *Approach* step 3 now say that G115 reported every measured CodeQL alert (PR #265) and accepts the
+  rule's two forms, and that a 64-bit parse result converted to `int`/`uint` is accepted by G115 with CodeQL's view
+  unverified. The grep for `strconv` results converted to `int`/`uint` stays in the *Local substitute* column of *Not
+  checkable in a cloud session*. AC5 now states this. Record 0112 already worded it this way; one sentence of its *Context* was made precise (G115's
+silence on row 7 measured on amd64 and with `GOARCH=386`, not only "on 64-bit targets"; the grep stays for that form).
+- **N1 (non-blocking)** — accepted. AC1 and its check widened to `grep -rn "nolint" --include=*.go .` (covers bare
+  `//nolint` and `//nolint:all`); the module has no `nolint` directive today.
 
 ## Out of scope / follow-ups
 
