@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 
 	"go.yaml.in/yaml/v3"
@@ -430,12 +431,42 @@ func TestReadSecret_FileVariable(t *testing.T) {
 		})
 	}
 
+	t.Run("FIFO is refused without blocking", func(t *testing.T) {
+		path := makeFifo(t)
+		err := readSecretBounded(t, path)
+		se := requireSecretError(t, err, tokenFile)
+		if se.Reason != "must name a regular file" {
+			t.Errorf("SecretError.Reason = %q, want %q", se.Reason, "must name a regular file")
+		}
+		requireNoLeak(t, err, sentinel, path)
+	})
+
+	t.Run("Unix socket is refused without blocking and without the path", func(t *testing.T) {
+		path := makeSocket(t)
+		err := readSecretBounded(t, path)
+		_ = requireSecretError(t, err, tokenFile)
+		if !errors.Is(err, syscall.ENXIO) {
+			t.Errorf("readSecret(socket) error = %v, want errors.Is syscall.ENXIO", err)
+		}
+		requireNoLeak(t, err, sentinel, path)
+	})
+
 	t.Run("symlink to a regular file is followed", func(t *testing.T) {
 		link := symlinkToFile(t, "tok\n")
 		got, err := readSecret(secretEnv(tokenFile, link), tokenVar)
 		if err != nil || got.Value() != "tok" {
 			t.Errorf("readSecret(symlink) = %q, %v, want %q, nil", got.Value(), err, "tok")
 		}
+	})
+}
+
+// readSecretBounded reads the secret from the file at path and returns the error, failing the test when the
+// call blocks.
+func readSecretBounded(t *testing.T, path string) error {
+	t.Helper()
+	return callBounded(t, "readSecret("+path+")", func() error {
+		_, err := readSecret(secretEnv(tokenFile, path), tokenVar)
+		return err
 	})
 }
 
