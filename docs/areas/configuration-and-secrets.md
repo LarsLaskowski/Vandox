@@ -10,8 +10,8 @@ options and secrets do at run time is described in the area that owns the featur
 ## Configuration file
 
 - Each binary reads one YAML file: `/etc/vandox/agent.yaml` for the agent and `/etc/vandox/vandoxd.yaml` for the
-  backend (mounted into the container). The backend takes another path with `-config <path>`. The file is read once, at
-  start-up. The agent's loader exists, but the agent binary does not call it yet (it arrives with v0.2.0; see [Agent](agent.md)).
+  backend (mounted into the container). Each binary takes another path with `-config <path>`. The file is read once, at
+  start-up (the agent's start-up is described in [Agent](agent.md), *Command line and start-up*).
 - The file must be a regular file of at most 1 MiB; the type is checked before it is opened, so a FIFO cannot block
   start-up. An empty file, a file with only comments, or a document that is just `---` or `~` means "defaults
   only" (for the agent, whose `agent_id` and `backend.url` have no default, that is an error naming the missing key).

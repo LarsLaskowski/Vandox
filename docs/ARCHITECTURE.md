@@ -10,7 +10,9 @@ This document describes the target architecture; as of now the binaries' `--vers
 `Vandox.Core.Configuration` for `vandoxd`), the backend service skeleton, the log import framework and the log signature catalog with its detector (`Vandox.Core.Signatures`; `vandoxd incidents` uses it, the running service does not apply it to live data yet), the log templates with their statistics and queries (`Vandox.Core.Templates`, `Vandox.Storage`), the logs view of the web UI (search, context, template list and chart; `Vandox.Backend`), the outage reconstruction (`vandoxd incidents`, `Vandox.Core.Incidents`), the forensics report as Markdown (`vandoxd report`, `Vandox.Core.Reports`) and as a page of the web UI with its Markdown download, the incidents view of the web UI (list, incident page with charts of the window, notes; `Vandox.Backend`) exist (`vandoxd import`, with the parsers for the journal export, the MariaDB error log, Dovecot's own log file, `syslog` and `kern.log`, the Plesk panel log, the nginx, `sw-cp-server` and Apache error logs and the legacy `top`/`lsof` monitoring log): `vandoxd` loads its configuration, opens and migrates its SQLite database (schema, batched writes, queries and log search
 exist as the storage layer; the service reads it through the logs and incidents views and the report page with its download and writes only the notes of incidents, `vandoxd import` writes through it), listens on the
 web and ingest ports, protects the web UI with a login (one password, server-side sessions, limits on failed sign-ins and the trust in a reverse proxy; `Vandox.Backend` `Security`), answers `/healthz` and shuts down gracefully, and ships as a container with a health
-check. Everything else described here — the agent, the ingest API, retention, alerting, Telegram, the nightly
+check. Of the agent, the runtime frame exists: `vandox-agent` loads its configuration, logs to the journal, runs its
+collectors under the scheduler (so far only its self-metrics) and notifies systemd; it drops what it collects until the spool exists.
+Everything else described here — the agent's collectors, spool and sender, the ingest API, retention, alerting, Telegram, the nightly
 report and remote actions — is planned and not implemented yet. The decisions behind it are recorded in
 [`docs/decisions/`](decisions/README.md); each section links the records it rests on. Vandox is an own
 project rather than an off-the-shelf stack ([0004](decisions/0004-own-project-instead-of-off-the-shelf-stack.md)).
@@ -32,7 +34,12 @@ way, and agents of the hosting provider are never disabled or changed
   an on-disk spool and sends them to the backend. It checks the state of the mail services, not individual
   mail accounts. Each collector runs in its own goroutine under a deadline and is abandoned when the
   deadline passes, so a hanging collector or database never blocks the agent; a missed sample is recorded
-  as a gap, and a collector that is still stuck is not started again.
+  as a gap, and a collector that is still stuck is not started again. The scheduler (`internal/scheduler`) runs every
+  collector at its own fixed rate, records a gap for every sample it misses (timeout, skip, panic, error, refused record,
+  late start) and offers a memory pressure mode with shorter intervals; the agent records its own resource use as metrics
+  (`internal/selfstats`), and tells systemd that it is ready, alive (a watchdog fed only while every collector runner is on
+  time) and stopping (`internal/sdnotify`, `internal/agent`)
+  ([0110](decisions/0110-agent-runtime-frame-runner-per-collector-gaps-for-every-missed-sample-hand-written-sd-notify.md)).
 - `src/Vandox.Backend` — `vandoxd` (rules: [Backend host](areas/backend-host.md), [Web UI](areas/web-ui.md)), .NET 10 (ASP.NET Core with a Blazor Web App, Interactive Server render mode),
   one container on the backend host: ingest API, SQLite storage, analysis, rules, Telegram notifier, reports and
   web UI. Without arguments it runs the service; `-healthcheck` probes its `/healthz`; `vandoxd import <path>`
@@ -115,7 +122,8 @@ Records: [0004](decisions/0004-own-project-instead-of-off-the-shelf-stack.md),
 [0042](decisions/0042-wire-format-gzip-json-lines-standard-library.md),
 [0043](decisions/0043-wire-format-major-minor-versioning.md),
 [0044](decisions/0044-batch-validated-as-a-whole-agent-records-only.md),
-[0084](decisions/0084-log-line-record-gets-an-optional-host-field.md).
+[0084](decisions/0084-log-line-record-gets-an-optional-host-field.md),
+[0110](decisions/0110-agent-runtime-frame-runner-per-collector-gaps-for-every-missed-sample-hand-written-sd-notify.md).
 
 ## Data flow
 
@@ -352,7 +360,7 @@ Both binaries are configured through one strictly parsed YAML file each (`/etc/v
 `VANDOX_*` environment variables or `*_FILE` files. Each binary implements the rules in its own language:
 `internal/config` (Go) for the agent and `Vandox.Core.Configuration` (C#) for the backend
 ([0078](decisions/0078-configuration-and-secrets-in-the-backend-with-yamldotnet.md)). `vandoxd` loads its
-configuration at start-up; the agent will call `LoadAgent` with the agent feature. The rules, the options and the
+configuration at start-up, and so does the agent (`LoadAgent`). The rules, the options and the
 error behavior are in [Configuration and secrets](areas/configuration-and-secrets.md).
 
 ## Security model

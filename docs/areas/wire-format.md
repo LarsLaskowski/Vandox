@@ -123,6 +123,14 @@ produced it. Byte values are exact integers in a double (up to 2^53 exactly), co
 | `pressure_stall_microseconds_total` | `microseconds` | `resource`, `kind` | total stall time |
 | `vmstat_total` | — | `counter`: `pswpin`, `pswpout`, `pgmajfault`, `oom_kill` | the raw counter of `/proc/vmstat` |
 | `vmstat_per_second` | `per_second` | `counter` | (value − previous value) / seconds between two samples; only when the counter did not fall |
+| `agent_rss_bytes` | `bytes` | — | resident memory of the agent itself (`VmRSS`, kB times 1,024) |
+| `agent_cpu_seconds_total` | `seconds` | — | user plus system CPU time the agent used since it started |
+| `agent_goroutines` | — | — | number of goroutines of the agent |
+| `agent_spool_bytes` | `bytes` | — | size of the agent's spool |
+| `agent_send_lag_seconds` | `seconds` | — | how far the agent's sending lags behind capture |
+
+The `agent_*` metrics are the agent's self-metrics ([Agent](agent.md), *Self-metrics*) and carry the source `agent`, as do the gaps
+the agent's scheduler records.
 
 ### `process_snapshot`
 
