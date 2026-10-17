@@ -1,7 +1,7 @@
 # Copilot instructions
 
 Project guidance for GitHub Copilot when working in this repository. These rules mirror
-[`CLAUDE.md`](/CLAUDE.md): everything from the first `##` heading on is generated from it by the template's
+[`AGENTS.md`](/AGENTS.md): everything from the first `##` heading on is generated from it by the template's
 `adopt-template` skill (Claude Code's `@` import lines aside — Copilot reads
 `.github/instructions/*.instructions.md` through their `applyTo` front matter), and
 `.squad/tools/config-check.py` fails when the two differ. Change both files together. This file is a
@@ -183,8 +183,8 @@ Project-specific workflow skills live under `.claude/skills/` and run in Claude 
 - `squad-issue` — fix a GitHub issue with the squad: the Lead plans and picks a tier
   (`docs` / `patch` / `trivial` / `standard` / `security`), the Devil's Advocate challenges `standard`/`security`
   plans that weigh options once, Security reviews plan and diff of `security` changes, the Tester writes failing tests first,
-  the Dev implements until the *Coverage gate* passes, the Code Officer clears format and analyzer
-  diagnostics, the Reviewer reviews the diff, the PR is approved by checklist (the Lead decides what is
+  the Dev implements until the *Coverage gate* passes, each member formats the files it changed, the Code
+  Officer clears analyzer diagnostics, the Reviewer reviews the diff, the PR is approved by checklist (the Lead decides what is
   open), then a PR referencing the issue is opened.
 - `squad-spec` — the same squad pipeline for a new feature, planned as `spec.md`, `plan.md` and
   `tasks.md` in a working folder under `specs/`.
@@ -203,7 +203,7 @@ way.
 
 The squad skills run a multi-role pipeline defined in [`.squad/`](/.squad/team.md) — Lead (plan, decisions,
 PR approval decisions), Devil's Advocate (one plan challenge), Security (plan and diff on the `security` tier), Tester (tests first,
-coverage), Dev, Code Officer (format, analyzers) and Reviewer — as Claude Code subagents under
+coverage), Dev, Code Officer (analyzer gate) and Reviewer — as Claude Code subagents under
 `.claude/agents/squad-*.md` (read-only where the role demands it: a hook in each agent denies Git and
 GitHub writes, so only the orchestrating session commits, pushes and posts), with the loop limits and
 escalation rules in [`.squad/routing.md`](/.squad/routing.md). Stack commands live in [`.squad/stack.md`](/.squad/stack.md),
@@ -211,8 +211,8 @@ the project's guarantees, security areas and integration surface in
 [`.squad/project.md`](/.squad/project.md). Their working records (`plan.md`, `log.md`, for features also
 `spec.md` and `tasks.md`) live under `specs/` on the work branch only; before the PR they are posted as a
 comment on the issue and removed, so `main` keeps no working records. An issue or feature PR never changes
-the squad or these instructions (`.squad/` except `stack.md` and `project.md`, `.claude/`, `CLAUDE.md`,
-`.github/copilot-instructions.md`): squad
+the squad or these instructions (`.squad/` except `stack.md` and `project.md`, `.claude/`, `AGENTS.md`,
+`CLAUDE.md`, `.github/copilot-instructions.md`): squad
 lessons are filed as GitHub issues labelled `squad` and never fixed in a product PR. The squad and these
 rules come from the template repository named in `.squad/template.json`: a lesson about a template-managed
 file becomes an issue there and is rolled out with its `adopt-template` skill; a lesson about project

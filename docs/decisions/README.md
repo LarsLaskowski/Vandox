@@ -52,7 +52,7 @@ once in the [area document](../areas/README.md) of the record's area, and the re
 | #    | Title | Status | Date |
 | ---- | ----- | ------ | ---- |
 | 0001 | Quality gates run locally before the pull request; CI builds, tests, checks the format and runs the code analysis | Accepted | 2026-10-03 |
-| 0002 | Squad working records stay off main, and product PRs never change the squad | Accepted | 2026-10-03 |
+| 0002 | Squad working records stay off main, and product PRs never change the squad | Superseded by [0109](0109-squad-working-records-off-main-and-product-prs-never-change-the-squad.md) | 2026-10-03 |
 | 0003 | Squash-merge pull requests | Accepted | 2026-10-03 |
 | 0004 | Own project instead of an off-the-shelf monitoring stack | Accepted | 2026-10-03 |
 | 0006 | The agent connects outbound only; commands are pulled | Accepted | 2026-10-03 |
@@ -135,4 +135,5 @@ once in the [area document](../areas/README.md) of the record's area, and the re
 | 0106 | The logs view takes every filter from the address, searches in bounded pages from the index or by a time-ordered scan, and finds a template's lines by normalizing candidates | Accepted | 2026-10-13 |
 | 0107 | The incidents view reads bounded summaries and the window's own records; notes are rows per incident number that follow merges, saved by a form post with the antiforgery token; every time links to the logs of that moment | Accepted | 2026-10-14 |
 | 0108 | The report page renders the blocks the Markdown is written from, lists the outages in pages of 50 by a new run, takes the language from the address, and runs one report at a time under a deadline of 2 minutes; the Markdown is a GET download | Accepted | 2026-10-15 |
+| 0109 | Squad working records stay off main, and product PRs never change the squad | Accepted | 2026-10-17 |
 <!-- project:end index -->
