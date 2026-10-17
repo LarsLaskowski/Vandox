@@ -34,7 +34,7 @@ files or endpoints.
    only from the configured reverse proxy, and the UI port is published for that proxy only, as defense in
    depth (0060). In `src/Vandox.Backend/Security` (`PasswordHash`, `LoginService`, `LoginThrottle`,
    `SessionStore`, `SessionCircuitHandler`, `SessionRevalidatingStateProvider`, `ForwardedHeadersSetup`,
-   `WebAuthentication`), `Components/Account/Login.razor` and `Vandox.Core` `TrustedProxyList`; the hash
+   `WebAuthentication`), `Components/Account/Login.razor`, `Hosting/RelativeRedirectMiddleware` and `Vandox.Core` `TrustedProxyList`; the hash
    uses the dependency Konscious.Security.Cryptography.Argon2. The logs view (`/logs`, `/logs/templates`) is behind this login like
    every page below `Components/Pages` (`[Authorize]` in `Pages/_Imports.razor`) and reads through `GatedLogExplorer` (two concurrent
    calls across the service, so two of the four reader connections stay free for `/healthz`); the number of circuits, each holding up to

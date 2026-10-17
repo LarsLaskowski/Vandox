@@ -26,8 +26,12 @@ routing and `/healthz` are in [Backend host](backend-host.md); the login, sessio
 
 ### Layout and navigation
 
-- Every page has a header with the horizontal logo, the main navigation and the theme switch, and a main area with the page content.
-  A signed-in user also sees a *Sign out* button in the header ([Web login](web-login.md), *Sessions*).
+- Every page has a header with the horizontal logo and the theme switch, and a main area with the page content. A signed-in user
+  also sees the main navigation and a *Sign out* button in the header ([Web login](web-login.md), *Sessions*); the login page shows
+  neither, since every entry would only lead back to it.
+- The login page shows the form as a card centered below the header: the heading *Sign in*, one line that asks for the password of
+  the web UI, the message of a failed attempt, the password field (focused when the page loads) and the *Sign in* button in the
+  brand color.
 - The navigation lists the existing pages; the entry of the current page is marked. Today it has four entries, *Overview* (`/`),
   *Logs* (`logs`), *Incidents* (`incidents`) and *Report* (`report`); each view adds its own. *Logs* is marked on `/logs` and on
   `/logs/templates`, *Incidents* on `/incidents` and on `/incidents/<number>`, *Report* on `/report` (with or without a query),
@@ -44,7 +48,8 @@ routing and `/healthz` are in [Backend host](backend-host.md); the login, sessio
   and dark values; a manual choice sets the same values as the system setting.
 - The choice is the `data-theme` attribute on the root element. Without it (no choice made, or the attribute lost), the style sheet
   and the charts follow the system setting.
-- The header shows `vandox-logo-horizontal.svg` in the light theme and `vandox-logo-horizontal-dark.svg` in the dark theme; the favicon
+- The header shows `vandox-logo-horizontal.svg` in the light theme and `vandox-logo-horizontal-dark.svg` in the dark theme, never both;
+  the favicon
   is `vandox-favicon.svg`, which switches its colors itself.
 
 ### Static assets
@@ -327,7 +332,8 @@ What the framework needs, and why the policy is enough:
   policy blocks, so the page brings its own dialog. Styles that scripts set through the CSSOM are not affected; `style` attributes in
   markup are, so components never use them.
 - `img-src 'self'`: the logos and the favicon. Charts draw on a canvas.
-- `base-uri 'self'` allows the page's `<base href="/">`; `form-action 'self'` allows forms that post to the own origin.
+- `base-uri 'self'` allows the page's `<base href="/">`; `form-action 'self'` allows forms that post to the own origin; it also
+  applies to the redirect after a post, which is why redirects carry the path alone ([Web login](web-login.md), *Access*).
 - `frame-ancestors 'none'` and `X-Frame-Options: DENY`: no page may be framed.
 
 The ingest listener serves none of this: every UI path, static file and the live connection's endpoints answer `404` there

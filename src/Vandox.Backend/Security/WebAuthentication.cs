@@ -59,6 +59,8 @@ internal static class WebAuthentication
 
     private const string BlazorPath = "/_blazor";
 
+    private const string HomePath = "/";
+
     private const string LoggerCategory = "login";
 
     #endregion // Constants
@@ -134,6 +136,32 @@ internal static class WebAuthentication
         }
 
         context.Response.StatusCode = StatusCodes.Status400BadRequest;
+    }
+
+    /// <summary>
+    /// Sends a post of the login form that already carries a session to the home page instead of passing it on: its antiforgery token
+    /// was issued before the sign-in and no longer matches, so the form would be refused with <c>400</c> (a second click on the
+    /// button, or a login page left open in another tab).
+    /// </summary>
+    /// <param name="context">The request</param>
+    /// <param name="next">The rest of the pipeline</param>
+    /// <returns>A task that completes when the request is handled</returns>
+    internal static Task SendSignedInLoginPostHomeAsync(HttpContext context, RequestDelegate next)
+    {
+        var request = context.Request;
+        var loginPost = HttpMethods.IsPost(request.Method)
+                        && request.Path.StartsWithSegments(LoginPath, StringComparison.OrdinalIgnoreCase, out var rest)
+                        && rest.Value is null or "" or "/";
+
+        if (loginPost && context.User.Identity?.IsAuthenticated is true)
+        {
+            context.Response.StatusCode = StatusCodes.Status302Found;
+            context.Response.Headers.Location = HomePath;
+
+            return Task.CompletedTask;
+        }
+
+        return next(context);
     }
 
     /// <summary>

@@ -238,8 +238,10 @@ internal static class ServeCommand
         }
 
         app.UseMiddleware<SecurityHeadersMiddleware>();
+        app.UseMiddleware<RelativeRedirectMiddleware>();
         app.UseAuthentication();
         app.UseAuthorization();
+        app.Use(WebAuthentication.SendSignedInLoginPostHomeAsync);
         app.UseAntiforgery();
         app.MapStaticAssets().AllowAnonymous();
         HealthEndpoint.Map(app, checker, loggerFactory.CreateLogger("health"));
