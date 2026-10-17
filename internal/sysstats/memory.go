@@ -25,14 +25,15 @@ var requiredMemFields = []string{"MemTotal", "MemFree", "MemAvailable", "Buffers
 // memLine is one line of /proc/meminfo.
 type memLine struct {
 	name  string
-	value uint64 // as written
+	value uint64 // as written, of a line without unit
 	kB    bool   // whether the line has the unit kB
+	kBVal int64  // the value of a kB line, at most maxKBValue
 }
 
 // memory is the content of /proc/meminfo.
 type memory struct {
 	lines  []memLine
-	values map[string]uint64 // the kB lines by name
+	values map[string]int64 // the kB lines by name
 }
 
 // readMeminfo reads and checks /proc/meminfo.
@@ -45,7 +46,7 @@ func readMeminfo(proc fs.FS) (*memory, error) {
 	if len(lines) > maxMeminfoLines {
 		return nil, fmt.Errorf("sysstats: meminfo: more than %d lines", maxMeminfoLines)
 	}
-	m := &memory{values: make(map[string]uint64, len(lines))}
+	m := &memory{values: make(map[string]int64, len(lines))}
 	seen := make(map[string]bool, len(lines))
 	for i, line := range lines {
 		l, ok := parseMemLine(line)
@@ -58,7 +59,7 @@ func readMeminfo(proc fs.FS) (*memory, error) {
 		seen[l.name] = true
 		m.lines = append(m.lines, l)
 		if l.kB {
-			m.values[l.name] = l.value
+			m.values[l.name] = l.kBVal
 		}
 	}
 	for _, field := range requiredMemFields {
@@ -92,8 +93,15 @@ func parseMemLine(line string) (memLine, bool) {
 		return memLine{}, false
 	}
 	v, ok := parseCounter(value[:end])
-	if !ok || (l.kB && v > maxKBValue) {
+	if !ok {
 		return memLine{}, false
+	}
+	if l.kB {
+		if v > maxKBValue {
+			return memLine{}, false
+		}
+		l.kBVal = int64(v)
+		return l, true
 	}
 	l.value = v
 	return l, true
@@ -115,8 +123,8 @@ func validMemName(name string) bool {
 
 // addTo adds the memory, swap and meminfo records, the memory values as top prints them (procps 3.3.17).
 func (m *memory) addTo(r *recorder) {
-	total, free := int64(m.values["MemTotal"]), int64(m.values["MemFree"])
-	buffCache := int64(m.values["Buffers"] + m.values["Cached"] + m.values["SReclaimable"])
+	total, free := m.values["MemTotal"], m.values["MemFree"]
+	buffCache := m.values["Buffers"] + m.values["Cached"] + m.values["SReclaimable"]
 	used := total - free - buffCache
 	if used < 0 {
 		used = total - free
@@ -127,9 +135,9 @@ func (m *memory) addTo(r *recorder) {
 		r.add("mem_used_bytes", kbBytes(used), "bytes")
 	}
 	r.add("mem_buff_cache_bytes", kbBytes(buffCache), "bytes")
-	r.add("mem_available_bytes", kbBytes(int64(m.values["MemAvailable"])), "bytes")
+	r.add("mem_available_bytes", kbBytes(m.values["MemAvailable"]), "bytes")
 
-	swapTotal, swapFree := int64(m.values["SwapTotal"]), int64(m.values["SwapFree"])
+	swapTotal, swapFree := m.values["SwapTotal"], m.values["SwapFree"]
 	r.add("swap_total_bytes", kbBytes(swapTotal), "bytes")
 	r.add("swap_free_bytes", kbBytes(swapFree), "bytes")
 	if swapFree <= swapTotal {
@@ -137,7 +145,7 @@ func (m *memory) addTo(r *recorder) {
 	}
 	for _, l := range m.lines {
 		if l.kB {
-			r.add("meminfo_bytes", kbBytes(int64(l.value)), "bytes", "field", l.name)
+			r.add("meminfo_bytes", kbBytes(l.kBVal), "bytes", "field", l.name)
 		} else {
 			r.add("meminfo", float64(l.value), "", "field", l.name)
 		}
