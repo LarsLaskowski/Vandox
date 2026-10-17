@@ -16,3 +16,5 @@ are quoted in full.
 | 2026-10-17 22:10 | 6 Implement | squad-dev | implemented; tests green, coverage 93.7% new/98.1% overall, bench 48.9 ms/273 procs (sonnet/medium · 298,318 tokens · 76 tool uses · 993 s) |
 | 2026-10-17 22:11 | 7 Code check | Orchestrator | format, go test -race, analyzer-go, scope-check, decision-check pass; coverage gate per Dev run on same head (93.7%/98.1%) |
 | 2026-10-17 22:13 | 8 Review (security diff) | squad-security | CHANGES_REQUIRED: B1 missing TestProcstats_ImportsOnlyAllowedPackages; N1 /proc/pid/mem unverified (opus/medium · 75,552 tokens · 19 tool uses · 158 s) |
+| 2026-10-17 22:18 | 8 Review (reviewer r1) | squad-reviewer | BLOCKING 1 (missing import allow-list test), NON-BLOCKING 1 (README wording, verbatim) (opus/medium · 173,027 tokens · 45 tool uses · 405 s) |
+| 2026-10-17 22:18 | 8 Verbatim fix | Orchestrator | applied reviewer's README wording fix (deploy/agent/README.md) |

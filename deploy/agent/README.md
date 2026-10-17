@@ -1,7 +1,7 @@
 # Installing the agent: rights per collector
 
 `vandox-agent` runs as the dedicated system user `vandox-agent`, **never as root**, without a login shell. The rights it holds are
-listed here, each with the collector that needs it; anything not listed is not granted. The rules behind them are in the Agent area
+listed here, each with the collector that needs it, as those collectors are implemented; the complete set is the one the Agent area names (*Rights*: `CAP_SYS_PTRACE` and `CAP_DAC_READ_SEARCH`, the groups `adm` and `systemd-journal`), and nothing beyond it is granted. The rules behind them are in the Agent area
 (`docs/areas/agent.md`, *Rights*) and the security area 6 of `.squad/project.md`. Adding a right, a capability or a group is a
 `security`-tier change. The example configuration is `agent.yaml` in this folder; the unit and the install scripts follow with the
 collectors that need them.
