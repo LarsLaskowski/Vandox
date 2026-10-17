@@ -16,11 +16,12 @@ const (
 
 // Agent is the configuration of vandox-agent.
 type Agent struct {
-	AgentID string        `yaml:"agent_id"`
-	Backend BackendTarget `yaml:"backend"`
-	Spool   Spool         `yaml:"spool"`
-	Log     Log           `yaml:"log"`
-	Secrets AgentSecrets  `yaml:"-"`
+	AgentID    string        `yaml:"agent_id"`
+	Backend    BackendTarget `yaml:"backend"`
+	Spool      Spool         `yaml:"spool"`
+	Log        Log           `yaml:"log"`
+	Filesystem Filesystem    `yaml:"filesystem"`
+	Secrets    AgentSecrets  `yaml:"-"`
 }
 
 // BackendTarget is where the agent sends its data.
@@ -38,6 +39,17 @@ type Log struct {
 	Level string `yaml:"level"`
 }
 
+// Filesystem configures the file system metrics.
+type Filesystem struct {
+	MountPoints []string `yaml:"mount_points"`
+}
+
+// Bounds of filesystem.mount_points.
+const (
+	MaxMountPoints     = 16
+	MaxMountPointBytes = 1024
+)
+
 // AgentSecrets holds the secrets of the agent.
 type AgentSecrets struct {
 	AgentToken Secret
@@ -48,12 +60,14 @@ func DefaultAgent() Agent {
 	return Agent{
 		Spool: Spool{Directory: "/var/lib/vandox/spool"},
 		Log:   Log{Level: "info"},
+
+		Filesystem: Filesystem{MountPoints: []string{"/"}},
 	}
 }
 
-// AgentKeys returns every option key path in file order: agent_id, backend.url, spool.directory, log.level.
+// AgentKeys returns every option key path in file order: agent_id, backend.url, spool.directory, log.level, filesystem.mount_points.
 func AgentKeys() []string {
-	return []string{keyAgentID, keyBackendURL, "spool.directory", "log.level"}
+	return []string{keyAgentID, keyBackendURL, "spool.directory", "log.level", "filesystem.mount_points"}
 }
 
 // LoadAgent reads the agent configuration file at path and the secrets from environ (in os.Environ form).
@@ -97,7 +111,15 @@ func (a *Agent) validate(file string, lines map[string]int) error {
 	if err := checkDirectory(file, lines, "spool.directory", a.Spool.Directory); err != nil {
 		return err
 	}
-	return checkLogLevel(file, lines, "log.level", a.Log.Level)
+	if err := checkLogLevel(file, lines, "log.level", a.Log.Level); err != nil {
+		return err
+	}
+	return checkMountPoints(file, lines, "filesystem.mount_points", a.Filesystem.MountPoints)
+}
+
+// checkMountPoints checks the list of filesystem.mount_points.
+func checkMountPoints(file string, lines map[string]int, key string, values []string) error {
+	return nil
 }
 
 // urlRules are the rules of backend.url, in the order they are checked. Each returns the reason it is

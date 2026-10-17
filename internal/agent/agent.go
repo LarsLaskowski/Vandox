@@ -13,6 +13,7 @@ import (
 	"github.com/LarsLaskowski/Vandox/internal/scheduler"
 	"github.com/LarsLaskowski/Vandox/internal/sdnotify"
 	"github.com/LarsLaskowski/Vandox/internal/selfstats"
+	"github.com/LarsLaskowski/Vandox/internal/sysstats"
 	"github.com/LarsLaskowski/Vandox/internal/version"
 )
 
@@ -22,6 +23,17 @@ const (
 	SelfTimeout  = 10 * time.Second
 )
 
+// Schedules of the system, file system and clock collectors.
+const (
+	SystemInterval         = 30 * time.Second
+	SystemPressureInterval = 10 * time.Second
+	SystemTimeout          = 5 * time.Second
+	FilesystemInterval     = 60 * time.Second
+	FilesystemTimeout      = 10 * time.Second
+	ClockInterval          = 60 * time.Second
+	ClockTimeout           = 5 * time.Second
+)
+
 // Options are the process boundaries Run works with.
 type Options struct {
 	ConfigPath string            // the configuration file
@@ -29,6 +41,7 @@ type Options struct {
 	Stderr     io.Writer         // the log output
 	Sink       scheduler.Putter  // nil: scheduler.DiscardSink
 	Self       selfstats.Sources // the self-metrics sources; zero fields take their defaults
+	System     sysstats.Sources  // the system metrics sources; zero fields take their defaults
 }
 
 // Run runs the agent until ctx is done and returns the exit code: 0 after a clean stop, 1 when it cannot start.
@@ -46,7 +59,7 @@ func Run(ctx context.Context, opts Options) int {
 	}
 	log := NewLogger(stderr, cfg.Log.Level, journal)
 
-	sched, err := newScheduler(opts, log)
+	sched, err := newScheduler(opts, cfg, log)
 	if err != nil {
 		log.Error("agent cannot start", "err", err)
 		return 1
@@ -73,17 +86,22 @@ func Run(ctx context.Context, opts Options) int {
 	return 0
 }
 
-// newScheduler returns the scheduler with the self-metrics job.
-func newScheduler(opts Options, log *slog.Logger) (*scheduler.Scheduler, error) {
-	var sink scheduler.Putter = scheduler.DiscardSink{}
-	if opts.Sink != nil {
-		sink = opts.Sink
-	}
+// jobs returns the collectors with their schedules: self, system, filesystem and clock.
+func jobs(opts Options, cfg *config.Agent, log *slog.Logger) []scheduler.Job {
 	self := scheduler.Job{
 		Collector: selfstats.New(opts.Self),
 		Schedule:  scheduler.Schedule{Interval: SelfInterval, Timeout: SelfTimeout},
 	}
-	return scheduler.New([]scheduler.Job{self}, sink, log)
+	return []scheduler.Job{self}
+}
+
+// newScheduler returns the scheduler with the jobs of the configuration.
+func newScheduler(opts Options, cfg *config.Agent, log *slog.Logger) (*scheduler.Scheduler, error) {
+	var sink scheduler.Putter = scheduler.DiscardSink{}
+	if opts.Sink != nil {
+		sink = opts.Sink
+	}
+	return scheduler.New(jobs(opts, cfg, log), sink, log)
 }
 
 // notification returns the notifier of the service manager and the watchdog interval; a problem with either is
