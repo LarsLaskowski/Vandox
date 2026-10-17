@@ -123,6 +123,17 @@ produced it. Byte values are exact integers in a double (up to 2^53 exactly), co
 | `pressure_stall_microseconds_total` | `microseconds` | `resource`, `kind` | total stall time |
 | `vmstat_total` | — | `counter`: `pswpin`, `pswpout`, `pgmajfault`, `oom_kill` | the raw counter of `/proc/vmstat` |
 | `vmstat_per_second` | `per_second` | `counter` | (value − previous value) / seconds between two samples; only when the counter did not fall |
+| `disk_reads_total`, `disk_writes_total` | — | `device`: the disk's name in `/sys/block` | reads and writes completed |
+| `disk_read_bytes_total`, `disk_written_bytes_total` | `bytes` | `device` | sectors read and written, times 512 |
+| `disk_io_time_seconds_total` | `seconds` | `device` | time with I/O in flight |
+| `disk_reads_per_second`, `disk_writes_per_second` | `per_second` | `device` | rate of the counter between two samples, as for `vmstat_per_second` |
+| `disk_read_bytes_per_second`, `disk_written_bytes_per_second` | `bytes_per_second` | `device` | rate of the byte counter between two samples |
+| `disk_busy_percent` | `percent` | `device` | increase of the time with I/O in flight as a share of the time between two samples |
+| `filesystem_size_bytes`, `filesystem_used_bytes`, `filesystem_free_bytes`, `filesystem_available_bytes` | `bytes` | `mount`: the configured mount point | size, used, free and available to unprivileged users, from `statfs` |
+| `filesystem_inodes`, `filesystem_inodes_used`, `filesystem_inodes_free` | — | `mount` | inodes in total, used and free; left out when the file system reports 0 inodes |
+| `clock_synchronized` | — | — | 1 when the kernel's maximum clock error is below 16 seconds, else 0 |
+| `clock_max_error_seconds`, `clock_estimated_error_seconds` | `seconds` | — | the kernel's maximum and estimated clock error |
+| `clock_pll_offset_seconds` | `seconds` | — | the correction the kernel's phase-locked loop still has to apply; only while the loop is on |
 | `agent_rss_bytes` | `bytes` | — | resident memory of the agent itself (`VmRSS`, kB times 1,024) |
 | `agent_cpu_seconds_total` | `seconds` | — | user plus system CPU time the agent used since it started |
 | `agent_goroutines` | — | — | number of goroutines of the agent |
@@ -130,7 +141,8 @@ produced it. Byte values are exact integers in a double (up to 2^53 exactly), co
 | `agent_send_lag_seconds` | `seconds` | — | how far the agent's sending lags behind capture |
 
 The `agent_*` metrics are the agent's self-metrics ([Agent](agent.md), *Self-metrics*) and carry the source `agent`, as do the gaps
-the agent's scheduler records.
+the agent's scheduler records. The agent's system metrics (`load*`, `cpu_percent`, `mem_*`, `swap_*`, `meminfo*`, `pressure_*`,
+`vmstat_*`, `disk_*`, `filesystem_*`, `clock_*`) carry the source `system` ([Agent](agent.md), *System metrics*).
 
 ### `process_snapshot`
 
