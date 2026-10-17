@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"reflect"
@@ -129,7 +130,7 @@ func TestDecodeStrict_Valid(t *testing.T) {
 func utf16LE(s string) []byte {
 	out := []byte{0xFF, 0xFE}
 	for _, u := range utf16.Encode([]rune(s)) {
-		out = append(out, byte(u), byte(u>>8))
+		out = binary.LittleEndian.AppendUint16(out, u)
 	}
 	return out
 }
