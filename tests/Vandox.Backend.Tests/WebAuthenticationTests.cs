@@ -1,3 +1,5 @@
+using System.Security.Claims;
+
 using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
@@ -59,6 +61,48 @@ public class WebAuthenticationTests
         // Assert
         Assert.AreEqual(status, context.Response.StatusCode, "status");
         Assert.AreEqual(location, context.Response.Headers.Location.ToString(), "location");
+    }
+
+    /// <summary>
+    /// A post of the login form with a session goes to the home page without reaching the rest of the pipeline; every other request passes on.
+    /// </summary>
+    /// <param name="method">The method</param>
+    /// <param name="path">The path</param>
+    /// <param name="signedIn">Whether the request carries a session</param>
+    /// <param name="sentHome">Whether the request is sent to the home page</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [DataRow("POST", "/login", true, true)]
+    [DataRow("POST", "/Login/", true, true)]
+    [DataRow("POST", "/login", false, false)]
+    [DataRow("GET", "/login", true, false)]
+    [DataRow("POST", "/login/other", true, false)]
+    [DataRow("POST", "/logout", true, false)]
+    [DataRow("POST", "/loginx", true, false)]
+    public async Task WebAuthenticationSendsSignedInLoginPostHome(string method, string path, bool signedIn, bool sentHome)
+    {
+        // Arrange
+        var calls = 0;
+        var context = new DefaultHttpContext();
+        var identity = signedIn ? new ClaimsIdentity([new Claim(ClaimTypes.Name, "admin")], CookieAuthenticationDefaults.AuthenticationScheme) : new ClaimsIdentity();
+
+        context.Request.Method = method;
+        context.Request.Path = path;
+        context.User = new ClaimsPrincipal(identity);
+
+        // Act
+        await WebAuthentication.SendSignedInLoginPostHomeAsync(context,
+                                                               _ =>
+                                                               {
+                                                                   calls++;
+
+                                                                   return Task.CompletedTask;
+                                                               });
+
+        // Assert
+        Assert.AreEqual(sentHome ? 0 : 1, calls, "calls of the rest of the pipeline");
+        Assert.AreEqual(sentHome ? StatusCodes.Status302Found : StatusCodes.Status200OK, context.Response.StatusCode, "status");
+        Assert.AreEqual(sentHome ? "/" : string.Empty, context.Response.Headers.Location.ToString(), "location");
     }
 
     /// <summary>

@@ -5,15 +5,17 @@
 
 <PageTitle>Sign in - Vandox</PageTitle>
 
-<h1>Sign in</h1>
-
-<form method="post" class="login" @onsubmit="SubmitAsync" @formname="login">
-    <AntiforgeryToken />
-    @if (_message is not null)
-    {
-        <p class="login-message" role="alert">@_message</p>
-    }
-    <label for="password">Password</label>
-    <input id="password" name="password" type="password" autocomplete="current-password" required />
-    <button type="submit">Sign in</button>
-</form>
+<div class="login-page">
+    <form method="post" class="login" @onsubmit="SubmitAsync" @formname="login">
+        <AntiforgeryToken />
+        <h1>Sign in</h1>
+        <p class="login-intro">Enter the password of the Vandox web UI.</p>
+        @if (_message is not null)
+        {
+            <p class="login-message" role="alert">@_message</p>
+        }
+        <label for="password">Password</label>
+        <input id="password" name="password" type="password" autocomplete="current-password" required autofocus />
+        <button type="submit" class="primary">Sign in</button>
+    </form>
+</div>

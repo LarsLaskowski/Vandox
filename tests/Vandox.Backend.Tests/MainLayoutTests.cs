@@ -21,14 +21,14 @@ public partial class MainLayoutTests
     #region Methods
 
     /// <summary>
-    /// The layout renders the logos, the main navigation, the theme switch and the body inside the main element.
+    /// The layout of a signed-in user renders the logos, the main navigation, the theme switch and the body inside the main element.
     /// </summary>
     /// <returns>A task that completes when the test is done</returns>
     [TestMethod]
     public async Task MainLayoutRendersHeaderNavigationAndThemeSwitch()
     {
         // Arrange / Act
-        var html = await RenderAsync(new ClaimsPrincipal(new ClaimsIdentity()));
+        var html = await RenderAsync(SignedIn());
 
         // Assert
         var light = LightLogo().Match(html);
@@ -69,7 +69,7 @@ public partial class MainLayoutTests
     public async Task MainLayoutMarksLogsOnTheLogPages(string address, bool marked)
     {
         // Act
-        var html = await RenderAsync(new ClaimsPrincipal(new ClaimsIdentity()), address);
+        var html = await RenderAsync(SignedIn(), address);
 
         // Assert
         var link = LogsLink().Match(html);
@@ -93,7 +93,7 @@ public partial class MainLayoutTests
     public async Task MainLayoutMarksIncidentsOnTheIncidentPages(string address, bool marked)
     {
         // Act
-        var html = await RenderAsync(new ClaimsPrincipal(new ClaimsIdentity()), address);
+        var html = await RenderAsync(SignedIn(), address);
 
         // Assert
         var link = IncidentsLink().Match(html);
@@ -117,7 +117,7 @@ public partial class MainLayoutTests
     public async Task MainLayoutMarksReportOnTheReportPage(string address, bool marked)
     {
         // Act
-        var html = await RenderAsync(new ClaimsPrincipal(new ClaimsIdentity()), address);
+        var html = await RenderAsync(SignedIn(), address);
 
         // Assert
         var link = ReportLink().Match(html);
@@ -128,14 +128,14 @@ public partial class MainLayoutTests
     }
 
     /// <summary>
-    /// The sign-out form is shown to a signed-in user only: a form that posts to <c>logout</c> with an antiforgery token.
+    /// The sign-out form and the main navigation are shown to a signed-in user only: the form posts to <c>logout</c> with an antiforgery token.
     /// </summary>
     /// <returns>A task that completes when the test is done</returns>
     [TestMethod]
-    public async Task MainLayoutShowsSignOutOnlyWhenSignedIn()
+    public async Task MainLayoutShowsSignOutAndNavigationOnlyWhenSignedIn()
     {
         // Arrange
-        var signedIn = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.Name, "admin")], "test"));
+        var signedIn = SignedIn();
         var anonymous = new ClaimsPrincipal(new ClaimsIdentity());
 
         // Act
@@ -152,6 +152,19 @@ public partial class MainLayoutTests
         Assert.Contains("Sign out", form.Value, "the button says Sign out");
         Assert.DoesNotContain("Sign out", anonymousHtml, "the anonymous layout has no sign-out button");
         Assert.DoesNotContain("action=\"logout\"", anonymousHtml, "the anonymous layout has no sign-out form");
+        Assert.Contains("<nav aria-label=\"Main\">", signedInHtml, "the signed-in layout has the main navigation");
+        Assert.DoesNotContain("<nav", anonymousHtml, "the anonymous layout has no navigation");
+        Assert.IsTrue(LightLogo().IsMatch(anonymousHtml), "the anonymous layout keeps the logo");
+        Assert.IsTrue(ThemeButton().IsMatch(anonymousHtml), "the anonymous layout keeps the theme switch");
+    }
+
+    /// <summary>
+    /// Creates a signed-in user.
+    /// </summary>
+    /// <returns>The user</returns>
+    private static ClaimsPrincipal SignedIn()
+    {
+        return new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.Name, "admin")], "test"));
     }
 
     /// <summary>

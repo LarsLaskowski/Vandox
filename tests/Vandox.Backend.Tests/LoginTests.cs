@@ -99,6 +99,49 @@ public partial class LoginTests
     }
 
     /// <summary>
+    /// The sign-in and the signed-in visits of the login page redirect to the path <c>/</c> alone, whatever host the request names, and
+    /// a second post of the same form (its token issued before the sign-in) also goes home instead of being refused.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task LoginRedirectsToRelativeHomeAlsoForSecondPost()
+    {
+        // Arrange
+        var host = new Dictionary<string, string>
+                   {
+                       ["Host"] = "vandox.home.example"
+                   };
+
+        using var fixture = new BackendFixture();
+        using var stop = CancellationTokenSource.CreateLinkedTokenSource(TestContext.CancellationToken);
+
+        var run = await fixture.StartServiceAsync(stop.Token, TestContext.CancellationToken);
+
+        using var client = new LoginTestClient(fixture.WebPort);
+
+        var fields = await client.ReadFormFieldsAsync("/login", TestContext.CancellationToken, host);
+
+        fields[LoginTestClient.PasswordField] = BackendFixture.Password;
+
+        // Act
+        using var first = await client.PostFormAsync("/login", fields, TestContext.CancellationToken, host);
+        using var second = await client.PostFormAsync("/login", fields, TestContext.CancellationToken, host);
+        using var page = await client.GetAsync("/login", TestContext.CancellationToken, host);
+
+        await stop.CancelAsync();
+        await run.WaitAsync(TimeSpan.FromSeconds(20), TestContext.CancellationToken);
+
+        // Assert
+        Assert.AreEqual(HttpStatusCode.Found, first.StatusCode, "the sign-in redirects");
+        Assert.AreEqual("/", first.Headers.Location?.OriginalString, "the sign-in redirects to the path alone");
+        Assert.IsTrue(client.HasSession, "the client holds a session cookie");
+        Assert.AreEqual(HttpStatusCode.Found, second.StatusCode, "the second post redirects instead of answering 400");
+        Assert.AreEqual("/", second.Headers.Location?.OriginalString, "the second post goes home");
+        Assert.AreEqual(HttpStatusCode.Found, page.StatusCode, "the signed-in login page redirects");
+        Assert.AreEqual("/", page.Headers.Location?.OriginalString, "the signed-in login page goes home by path");
+    }
+
+    /// <summary>
     /// Reads the values of a response header.
     /// </summary>
     /// <param name="response">The response</param>

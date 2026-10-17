@@ -55,7 +55,15 @@ and the option in [Configuration and secrets](configuration-and-secrets.md), the
   anonymous visitor cannot tell which paths exist; the login does not carry a return address, and after signing in the user lands on
   `/`. Every other request without a session, including those of the live connection (`/_blazor`), is answered `401`.
 - With a session, a path that does not exist shows the *Not found* page with status `404`; a signed-in user who opens `/login` is sent
-  to `/` (`302`).
+  to `/` (`302`). A post of the login form that carries a session is sent to `/` (`302`) as well, before its antiforgery token is
+  looked at: that token was issued before the sign-in and no longer matches, so a second click on the button or a login page left
+  open in another tab would otherwise be refused with `400`. It signs nobody in and is not counted as an attempt.
+- Every redirect names the path alone (`Location: /`, never `http://host/`): a `Location` that the framework builds as an absolute
+  address of the request's own scheme and host is cut to its path, query and fragment before the response starts. The browser so
+  stays on the scheme and host it used; behind a reverse proxy that terminates TLS the service sees `http` (unless the proxy is
+  trusted), and an absolute `http://` redirect after the login post would leave the page's origin, which `form-action 'self'`
+  blocks (the sign-in would happen, but the browser would stay on the login page). A `Location` of another scheme, host or port
+  and one whose path starts with `//` or `/\` are left as they are.
 - The login page is rendered on the server without a live connection and without the framework script: a plain HTML form that posts
   to `/login`. A live connection (Interactive Server) is only ever opened by a signed-in user.
 - The ingest listener answers `404` to everything before any of this is looked at ([Backend host](backend-host.md), *Listeners and
@@ -118,7 +126,7 @@ and the option in [Configuration and secrets](configuration-and-secrets.md), the
   check; this is the price of bounding the guesses of a client that can change its address. The counts exist only in memory: restarting
   the container clears every lock at once (and signs the user out).
 - At most 4,096 clients are tracked; when the table is full, the client with the oldest last failure is forgotten.
-- Answers to the login post: success `302` to `/`; a wrong password `401` with the page and the message *The password is not correct.*;
+- Answers to the login post: success `302` to `/` (*Access*); a wrong password `401` with the page and the message *The password is not correct.*;
   a locked client, the overall lock or a check that could not start in time `429` with the message *Too many sign-in attempts. Try
   again later.* The message never repeats the password.
 - Log lines (JSON, [Backend host](backend-host.md), *Logging*): `login succeeded` (`client`), `login failed` (`client`, `failures`
