@@ -12,8 +12,9 @@ options and secrets do at run time is described in the area that owns the featur
 - Each binary reads one YAML file: `/etc/vandox/agent.yaml` for the agent and `/etc/vandox/vandoxd.yaml` for the
   backend (mounted into the container). Each binary takes another path with `-config <path>`. The file is read once, at
   start-up (the agent's start-up is described in [Agent](agent.md), *Command line and start-up*).
-- The file must be a regular file of at most 1 MiB; the type is checked before the file is opened, so
-  a FIFO or device named as the file is refused without being opened. An empty file, a file with only comments, or a document that is just `---` or `~` means "defaults
+- The file must be a regular file of at most 1 MiB. It is opened without blocking and its type is checked on the
+  opened file, never only on the path before the open, so a FIFO or device named as the file, or swapped in while
+  it is opened, is refused without being read and cannot block start-up. An empty file, a file with only comments, or a document that is just `---` or `~` means "defaults
   only" (for the agent, whose `agent_id` and `backend.url` have no default, that is an error naming the missing key).
 - The file is **strict**. Only keys of the schema are accepted, and they are case-sensitive. These are errors:
   - an unknown key, a duplicate key, a key that is not a string;
@@ -113,7 +114,7 @@ Backend:
 - Setting both the variable and its `_FILE` form is an error, also when one of them is empty. The agent never
   receives the web or Telegram secrets: they are unknown variables there.
 - A `_FILE` path must be absolute and name a regular file (symbolic links are followed, so secret mounts work),
-  checked before it is opened. At most 4096 bytes plus a line ending are read; one trailing `\n` or `\r\n` is removed.
+  checked on the opened file as for the configuration file. At most 4096 bytes plus a line ending are read; one trailing `\n` or `\r\n` is removed.
 - A secret value has 1 to 4096 bytes of printable ASCII (`0x21` to `0x7E`). A BOM, spaces, other line endings and
   control characters are rejected instead of becoming part of the secret. A secret that needs other characters must
   be encoded, for example as base64. The agent token has at least 32 characters.
