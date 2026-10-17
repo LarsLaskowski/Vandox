@@ -22,3 +22,5 @@ are quoted in full.
 | 2026-10-17 16:20 | 5 Tests first | squad-tester | 47 tests compile and fail on skeleton (confirmed: vet ok, 45 failing top-level tests in 7 packages); fixture, docs tasks 18/19 done (sonnet/medium · 270,194 tokens · 42 tool uses · 811 s) |
 | 2026-10-17 16:20 | 6 Implement | squad-dev | launched (mode implement), tasks 9-12, 14-17 (sonnet/medium · 214,569 tokens · 33 tool uses · 590 s) |
 | 2026-10-17 16:35 | 6-7 Implement and code check | Orchestrator | Gates on head: gofmt, build, go test -race, Go analyzer (0 issues), scope-check, decision-check pass; coverage new 92.9%, overall 98.3% PASS; main already merged |
+| 2026-10-17 16:35 | 8 Review | squad-reviewer | launched round 1 |
+| 2026-10-17 16:35 | 8 Review | squad-security | launched (mode diff) |
