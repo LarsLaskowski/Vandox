@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Json;
 
 using Vandox.Core.LogParsing;
 
@@ -157,6 +158,45 @@ public class LegacyProcessNamesTests
         Assert.AreEqual(1024, Encoding.UTF8.GetByteCount(derived), "the derived name");
         Assert.AreEqual(1024, Encoding.UTF8.GetByteCount(fallback), "the fallback name");
         Assert.AreEqual(1024, Encoding.UTF8.GetByteCount(old), "the old name");
+    }
+
+    /// <summary>
+    /// The shared cases of <c>testdata/processes/names.json</c>, which the tests of the agent read too, give the same command and program.
+    /// </summary>
+    [TestMethod]
+    public void LegacyProcessNamesSharedCasesMatchAgent()
+    {
+        // Arrange
+        using var document = JsonDocument.Parse(File.ReadAllBytes(RepositoryFiles.Path("testdata/processes/names.json")));
+        var cases = document.RootElement.GetProperty("cases").EnumerateArray().ToList();
+        var mismatches = new List<string>();
+
+        // Act
+        foreach (var element in cases)
+        {
+            var name = element.GetProperty("name").GetString() ?? string.Empty;
+            var commandLine = element.GetProperty("cmdline").GetString() ?? string.Empty;
+            var fallback = element.GetProperty("fallback").GetString() ?? string.Empty;
+            var expectedCommand = element.GetProperty("command").GetString() ?? string.Empty;
+            var expectedProgram = element.GetProperty("program").GetString() ?? string.Empty;
+
+            var command = LegacyProcessNames.CommandOf(commandLine, fallback);
+            var program = LegacyProcessNames.ProgramOf(expectedCommand);
+
+            if (command != expectedCommand)
+            {
+                mismatches.Add($"{name}: CommandOf gave '{command}', want '{expectedCommand}'");
+            }
+
+            if (program != expectedProgram)
+            {
+                mismatches.Add($"{name}: ProgramOf gave '{program}', want '{expectedProgram}'");
+            }
+        }
+
+        // Assert
+        Assert.IsGreaterThanOrEqualTo(13, cases.Count, "the fixture holds the cases of the plan");
+        Assert.IsEmpty(mismatches, string.Join("; ", mismatches));
     }
 
     #endregion // Methods

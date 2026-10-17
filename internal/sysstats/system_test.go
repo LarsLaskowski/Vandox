@@ -1,7 +1,9 @@
 package sysstats_test
 
 import (
+	"log/slog"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -689,4 +691,136 @@ func TestSystem_HangingSourceIsAbandoned(t *testing.T) {
 		src := sysstats.Sources{Proc: blockingFS{FS: tr.proc, name: "meminfo", gate: g}, Sys: tr.sys}
 		return sysstats.NewSystem(src, nil)
 	})
+}
+
+// setAvailable sets MemAvailable of the meminfo of tr to kb.
+func setAvailable(t *testing.T, tr *tree, kb uint64) {
+	t.Helper()
+
+	replaceLine(t, tr.proc, "meminfo", "MemAvailable:", "MemAvailable:"+strings.Repeat(" ", 4)+strconv.FormatUint(kb, 10)+" kB")
+}
+
+// setMemorySome sets the some line of the memory pressure file of tr to the given avg10.
+func setMemorySome(t *testing.T, tr *tree, avg10 string) {
+	t.Helper()
+
+	replaceLine(t, tr.proc, "pressure/memory", "some ", "some avg10="+avg10+" avg60=0.00 avg300=0.00 total=0")
+}
+
+// modeLines returns the log lines about memory pressure mode so far.
+func modeLines(s *logStore) []logEntry {
+	var out []logEntry
+	for _, e := range s.logged() {
+		if strings.HasPrefix(e.msg, "memory pressure mode") {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// modeLog is an expected memory pressure mode log line.
+type modeLog struct {
+	msg       string
+	available uint64 // bytes
+	avg10     string // "" when the line must not carry memory_some_avg10
+}
+
+func TestSystem_SwitchesPressureOnlyOnChange(t *testing.T) {
+	const fixtureAvailableKB = memAvailKB
+	// The meminfo of the fixture holds 16479424 kB: 1000000 kB are 6 %, 2000000 kB 12 %, 3000000 kB 18 %.
+	steps := []struct {
+		name   string
+		change func(t *testing.T, tr *tree)
+		calls  []bool
+		line   *modeLog // the one new log line, nil for none
+	}{
+		{"fixture sample with plenty of memory", func(*testing.T, *tree) {}, nil, nil},
+		{"memory below 10 percent turns the mode on", func(t *testing.T, tr *tree) { setAvailable(t, tr, 1000000) },
+			[]bool{true}, &modeLog{"memory pressure mode on", 1000000 * 1024, "0"}},
+		{"the same sample again changes nothing", func(*testing.T, *tree) {}, []bool{true}, nil},
+		{"12 percent in the band keeps the mode on", func(t *testing.T, tr *tree) { setAvailable(t, tr, 2000000) }, []bool{true}, nil},
+		{"18 percent with avg10 of 6.00 keeps the mode on", func(t *testing.T, tr *tree) {
+			setAvailable(t, tr, 3000000)
+			setMemorySome(t, tr, "6.00")
+		}, []bool{true}, nil},
+		{"18 percent with avg10 of 4.99 turns the mode off", func(t *testing.T, tr *tree) { setMemorySome(t, tr, "4.99") },
+			[]bool{true, false}, &modeLog{"memory pressure mode off", 3000000 * 1024, "4.99"}},
+		{"low memory without a pressure file turns the mode on", func(t *testing.T, tr *tree) {
+			setAvailable(t, tr, 1000000)
+			delete(tr.proc, "pressure/memory")
+		}, []bool{true, false, true}, &modeLog{"memory pressure mode on", 1000000 * 1024, ""}},
+		{"a failed sample changes nothing", func(t *testing.T, tr *tree) {
+			set(tr.proc, "meminfo", text(t, tr.proc, "meminfo")+"broken\n")
+		}, []bool{true, false, true}, nil},
+		{"plenty of memory and a calm pressure file turn the mode off", func(t *testing.T, tr *tree) {
+			replaceLine(t, tr.proc, "meminfo", "broken", "")
+			setAvailable(t, tr, fixtureAvailableKB)
+			set(tr.proc, "pressure/memory", goodSome+"\n"+goodFull+"\n")
+		}, []bool{true, false, true, false}, &modeLog{"memory pressure mode off", fixtureAvailableKB * 1024, "0"}},
+		{"avg10 of 10.00 turns the mode on despite plenty of memory", func(t *testing.T, tr *tree) { setMemorySome(t, tr, "10.00") },
+			[]bool{true, false, true, false, true}, &modeLog{"memory pressure mode on", fixtureAvailableKB * 1024, "10"}},
+	}
+
+	tr := loadTree(t)
+	var calls []bool
+	store, log := newLogStore()
+	c := sysstats.NewSystem(tr.sources(), log)
+	c.SetPressureSwitch(func(high bool) { calls = append(calls, high) })
+	lines := 0
+	for i, step := range steps {
+		step.change(t, tr)
+		start := runStart.Add(time.Duration(i) * 30 * time.Second)
+
+		if step.name == "a failed sample changes nothing" {
+			if _, err := collect(c, start); err == nil {
+				t.Fatalf("step %q: Collect() error = nil, want an error from the broken meminfo", step.name)
+			}
+		} else {
+			mustCollect(t, c, start)
+		}
+
+		if !slices.Equal(calls, step.calls) {
+			t.Errorf("step %q: switch calls = %v, want %v", step.name, calls, step.calls)
+		}
+		got := modeLines(store)
+		wantLines := lines
+		if step.line != nil {
+			wantLines++
+		}
+		if len(got) != wantLines {
+			t.Fatalf("step %q: %d memory pressure mode log lines %v, want %d", step.name, len(got), got, wantLines)
+		}
+		if step.line != nil {
+			requireModeLine(t, step.name, got[len(got)-1], *step.line)
+		}
+		lines = wantLines
+	}
+}
+
+// requireModeLine checks one memory pressure mode log line against the expected one.
+func requireModeLine(t *testing.T, step string, got logEntry, w modeLog) {
+	t.Helper()
+
+	if got.level != slog.LevelInfo || got.msg != w.msg {
+		t.Errorf("step %q: log line = level %v %q, want info %q", step, got.level, got.msg, w.msg)
+	}
+	if got.attrs["collector"] != "system" {
+		t.Errorf("step %q: attribute collector = %q, want system", step, got.attrs["collector"])
+	}
+	if got.attrs["mem_available_bytes"] != strconv.FormatUint(w.available, 10) {
+		t.Errorf("step %q: attribute mem_available_bytes = %q, want %d", step, got.attrs["mem_available_bytes"], w.available)
+	}
+	v, present := got.attrs["memory_some_avg10"]
+	switch {
+	case w.avg10 == "" && present:
+		t.Errorf("step %q: attribute memory_some_avg10 = %q, want it absent (no pressure file)", step, v)
+	case w.avg10 != "" && !present:
+		t.Errorf("step %q: attribute memory_some_avg10 is absent, want %s", step, w.avg10)
+	case w.avg10 != "":
+		got, err := strconv.ParseFloat(v, 64)
+		want, _ := strconv.ParseFloat(w.avg10, 64)
+		if err != nil || !near(got, want) {
+			t.Errorf("step %q: attribute memory_some_avg10 = %q, want %s", step, v, w.avg10)
+		}
+	}
 }
