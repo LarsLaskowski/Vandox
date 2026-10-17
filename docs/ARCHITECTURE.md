@@ -419,7 +419,7 @@ Docker Hub as `networlddev/vandox` ([0027](decisions/0027-project-name-and-docke
   The image that was verified is the image that is pushed, and a published version is never overwritten.
 - The binary and the image digest get SLSA build provenance attestations and SPDX SBOM attestations (GitHub
   artifact attestations) from a separate job that holds only the signing permission and no secret; the
-  workflow verifies them before it creates the GitHub release. The SBOMs are generated in the build job by a
+  workflow verifies them before it attaches the assets to the GitHub release. The SBOMs are generated in the build job by a
   digest-pinned syft container that runs without network and without access to `dist/`. The syft pin is refreshed by
   hand; the weekly base image digest workflow reports a newer syft release or a moved digest of the pinned tag as an
   issue of its own.

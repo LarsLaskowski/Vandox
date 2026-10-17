@@ -381,11 +381,11 @@ jobs:
           fi
           gh release edit "$TAG" "${args[@]}"
 
-  # A failed release must not stay published without its assets: turn it back into a draft. The tag
+  # A failed or cancelled release must not stay published without its assets: turn it back into a draft. The tag
   # stays; publishing the draft again starts a new run (see docs/CONTRIBUTING.md, Re-running a failed release).
   withdraw-release:
     needs: [build, publish-image, attest, github-release]
-    if: failure()
+    if: failure() || cancelled()
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -398,4 +398,4 @@ jobs:
         run: |
           set -euo pipefail
           gh release edit "$TAG" --draft=true
-          echo "::warning::the release $TAG failed and was turned back into a draft"
+          echo "::warning::the release $TAG failed or was cancelled and was turned back into a draft"

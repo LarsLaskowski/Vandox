@@ -282,7 +282,7 @@ files or endpoints.
     in `SHA256SUMS`. The OIDC signing permission (`id-token: write`, `attestations: write`) is granted only
     to the `attest` job, which declares no environment, reads no secret and runs no repository code; every
     published binary and image digest gets a build provenance attestation and an SBOM attestation that the
-    workflow verifies before the GitHub release is created. The SBOM generator is a container image pinned by
+    workflow verifies before the assets are attached to the GitHub release. The SBOM generator is a container image pinned by
     index digest (form-checked in `.github/scripts/generate-sbom.sh`), run without network, capabilities,
     token or writable access to `dist/`. Each of the scheduled check's two jobs (base image
     digests, SBOM generator pin) holds only `contents: read` and `issues: write`, runs its lookups (registries,

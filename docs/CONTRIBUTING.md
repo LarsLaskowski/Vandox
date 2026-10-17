@@ -144,7 +144,8 @@ tags look like `vX.Y.Z-rc.N`. Build metadata (`+...`) is not allowed.
 7. Completes the GitHub release, only after the attestations exist and verify: attaches `vandox-agent-linux-amd64`
    and `SHA256SUMS`, generates the notes if they are empty, appends the image digest, and marks the release as latest
    exactly when the tag is the highest stable `v*.*.*` tag.
-8. If any job fails, turns the release back into a draft, so no published release lacks its assets.
+8. If any job fails or the run is cancelled, turns the release back into a draft, so no published release lacks its
+   assets.
 
 ### Verifying a release
 
@@ -246,8 +247,9 @@ one, replace the environment secret, then delete the old token on Docker Hub.
 A failed run turns the release back into a draft (job `withdraw-release`); the tag stays. A successful re-run
 publishes it again with its assets.
 
-If a job fails before the image is pushed, nothing was published: fix the cause (a setting, a secret, the
-pre-release flag) and use "Re-run all jobs", or publish the draft again, which starts a new run. A fix in the code
+If a job fails before the image is pushed, nothing was published: fix the cause and use "Re-run all jobs" for a
+setting or a secret, or publish the draft again, which starts a new run. A fix to the release itself, such as the
+pre-release flag, needs the new run: a re-run reuses the release as it was when first published. A fix in the code
 needs a new patch version, because the tag cannot be moved (or, if the tag itself was wrong, ask the repository
 admin to delete it together with the draft).
 

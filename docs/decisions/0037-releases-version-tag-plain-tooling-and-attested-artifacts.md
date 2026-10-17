@@ -102,7 +102,7 @@ Noticing a stale syft pin (issue #124):
 ## Decision
 
 Releases are created only by publishing a GitHub release with a new `vX.Y.Z` tag (`vX.Y.Z-rc.N` for a pre-release,
-marked as a pre-release) on the web page; nothing else triggers `release.yml`. The workflow is built from plain tools in four jobs: `build` verifies everything cold with read-only
+marked as a pre-release) on the web page; nothing else triggers `release.yml`. The workflow is built from plain tools in five jobs: `build` verifies everything cold with read-only
 permissions (including a vulnerability scan of the Go and NuGet dependencies), `publish-image` pushes exactly the verified image and is the only job that declares the `release`
 environment and sees the token, `attest` creates and verifies provenance and SBOM attestations for the binary and the
 image digest, and `github-release` attaches the assets and completes the notes only after the attestations verified; a failed run turns the release back into a draft (`withdraw-release`). A published version is never
