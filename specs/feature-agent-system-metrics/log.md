@@ -20,3 +20,5 @@ are quoted in full.
 | 2026-10-17 19:22 | 8 Review | squad-reviewer | round 1 at 6f9110c: BLOCKING 3 (mem_used negative case untested+undocumented, mountinfo 65536 boundary untested, escape doc wording verbatim) (opus/medium · 148,530 tokens · 36 tool uses · 378 s) |
 | 2026-10-17 19:22 | 8 Review | Orchestrator | Applied reviewer's proposed text in docs/areas/agent.md (mountinfo escape wording; mem_used_bytes left out when MemFree larger); doc only |
 | 2026-10-17 19:26 | 8 Fix round 1 | squad-tester | two review test gaps closed (mem_used negative, 65536-byte mountinfo line), mutations verified; gates re-run green (sonnet/medium · 63,046 tokens · 9 tool uses · 28 s) |
+| 2026-10-17 19:27 | 8 Review (delta) | squad-reviewer | APPROVE at 6841397; all 3 blocking resolved (opus/medium · 4,297 tokens · 3 tool uses · 30 s · continued) |
+| 2026-10-17 19:27 | 9 PR approval | Orchestrator | approved by checklist: review clean, gates pass on head, docs in diff, main not moved; record 0111 set Accepted |

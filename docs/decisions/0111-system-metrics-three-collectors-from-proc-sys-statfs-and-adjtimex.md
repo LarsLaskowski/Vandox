@@ -1,6 +1,6 @@
 # 0111: System metrics: three collectors read /proc, /sys, statfs and adjtimex; missing pressure data is logged once and never recorded as zero
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-17
 - **Area:** Agent
 - **Source:** Issue #31
