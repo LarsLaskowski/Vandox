@@ -7,7 +7,7 @@
 #   secrets/vandox_agent_token   the token the agents present: at least 32 printable ASCII characters, for
 #                                example `openssl rand -hex 32`. Compose applies no owner or mode to a file
 #                                secret outside Swarm, and the container sees the owner and mode of the host
-#                                file. The service runs as 65532, so the file must belong to it and must
+#                                file. The service runs as 65532 (or the IDs in `user:`), so the file must belong to it and must
 #                                never be world-readable:
 #                                  sudo chown 65532:65532 secrets/vandox_agent_token
 #                                  sudo chmod 0400 secrets/vandox_agent_token
@@ -33,7 +33,8 @@
 # The ingest port (8081) is deliberately not published: the ingest API arrives with issue #40, which adds
 # the binding on this host's tailnet address (record 0017). Until then the ingest listener serves nothing.
 #
-# A bind-mounted data directory (instead of the named volume) must be owned by 65532.
+# A bind-mounted data directory (instead of the named volume) must be owned by the container's user (65532,
+# or the IDs set in `user:`), and so must the secret files.
 # Prefer an SSD for the data (every committed batch waits for the disk); a hard disk works, too, with slower writes.
 # The Docker image has no Tailscale prerequisite yet.
 name: vandox
@@ -49,12 +50,16 @@ services:
     environment:
       VANDOX_AGENT_TOKEN_FILE: /run/secrets/vandox_agent_token
       VANDOX_WEB_PASSWORD_HASH_FILE: /run/secrets/vandox_web_password_hash
+    # The image runs as 65532:65532. To keep the files readable for a user of this host (on a NAS, for
+    # example), run as that user's IDs (`id <user>`) and use the bind-mounted data directory below.
+    # user: "1026:100"
     # Longer than the 10 s shutdown deadline of vandoxd, so Docker's SIGKILL never cuts it short.
     stop_grace_period: 30s
     ports:
       - "${WEB_BIND_ADDRESS:-127.0.0.1}:8080:8080"
     volumes:
-      # A new named volume takes over the owner (65532) of /data in the image.
+      # A new named volume takes over the owner (65532) of /data in the image. With `user:` above, use a
+      # data directory owned by that user instead: replace this line with `- ./data:/data`.
       - vandox-data:/data
       - ./import:/import:ro
       - ./vandoxd.yaml:/etc/vandox/vandoxd.yaml:ro
