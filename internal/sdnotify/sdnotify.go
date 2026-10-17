@@ -24,6 +24,8 @@ const WriteTimeout = time.Second
 const MinWatchdogPeriod = 100 * time.Millisecond
 
 const (
+	errPrefix = "sdnotify: "
+
 	envSocket = "NOTIFY_SOCKET"
 	envUsec   = "WATCHDOG_USEC"
 	envPID    = "WATCHDOG_PID"
@@ -56,7 +58,7 @@ func FromEnviron(environ []string) (*Notifier, error) {
 		return &Notifier{}, nil
 	}
 	if !validSocket(value) {
-		return &Notifier{}, errors.New("sdnotify: " + envSocket + ": unsupported address " +
+		return &Notifier{}, errors.New(errPrefix + envSocket + ": unsupported address " +
 			"(an absolute path of at most 107 bytes or @ and an abstract name of 1 to 107 bytes)")
 	}
 	return &Notifier{socket: value}, nil
@@ -84,7 +86,7 @@ func lookup(environ []string, key string) (string, error) {
 			continue
 		}
 		if found {
-			return "", errors.New("sdnotify: " + key + ": set more than once")
+			return "", errors.New(errPrefix + key + ": set more than once")
 		}
 		value, found = v, true
 	}
@@ -104,15 +106,15 @@ func (n *Notifier) Notify(state string) error {
 	dialer := net.Dialer{Timeout: WriteTimeout}
 	conn, err := dialer.Dial("unixgram", n.socket)
 	if err != nil {
-		return fmt.Errorf("sdnotify: %w", err)
+		return fmt.Errorf("%s%w", errPrefix, err)
 	}
 	defer func() { _ = conn.Close() }()
 
 	if err := conn.SetWriteDeadline(time.Now().Add(WriteTimeout)); err != nil {
-		return fmt.Errorf("sdnotify: %w", err)
+		return fmt.Errorf("%s%w", errPrefix, err)
 	}
 	if _, err := conn.Write([]byte(state)); err != nil {
-		return fmt.Errorf("sdnotify: %w", err)
+		return fmt.Errorf("%s%w", errPrefix, err)
 	}
 	return nil
 }
@@ -125,7 +127,7 @@ func WatchdogInterval(environ []string, pid int) (time.Duration, error) {
 	}
 	usec, ok := parseDigits(raw, maxUsecDigits, int64(MinWatchdogPeriod/time.Microsecond), maxUsec)
 	if !ok {
-		return 0, errors.New("sdnotify: " + envUsec + ": must be a number of microseconds from 100000 to 9223372036854775 in ASCII digits")
+		return 0, errors.New(errPrefix + envUsec + ": must be a number of microseconds from 100000 to 9223372036854775 in ASCII digits")
 	}
 	target, err := lookup(environ, envPID)
 	if err != nil {
@@ -134,7 +136,7 @@ func WatchdogInterval(environ []string, pid int) (time.Duration, error) {
 	if target != "" {
 		forPID, ok := parseDigits(target, maxPIDDigits, 1, maxPID)
 		if !ok {
-			return 0, errors.New("sdnotify: " + envPID + ": must be a process ID from 1 to 2147483647 in ASCII digits")
+			return 0, errors.New(errPrefix + envPID + ": must be a process ID from 1 to 2147483647 in ASCII digits")
 		}
 		if forPID != int64(pid) {
 			return 0, nil

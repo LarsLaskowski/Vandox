@@ -27,7 +27,7 @@ type Options struct {
 	ConfigPath string            // the configuration file
 	Environ    []string          // the environment, in os.Environ form
 	Stderr     io.Writer         // the log output
-	Sink       scheduler.Sink    // nil: scheduler.DiscardSink
+	Sink       scheduler.Putter  // nil: scheduler.DiscardSink
 	Self       selfstats.Sources // the self-metrics sources; zero fields take their defaults
 }
 
@@ -75,7 +75,7 @@ func Run(ctx context.Context, opts Options) int {
 
 // newScheduler returns the scheduler with the self-metrics job.
 func newScheduler(opts Options, log *slog.Logger) (*scheduler.Scheduler, error) {
-	var sink scheduler.Sink = scheduler.DiscardSink{}
+	var sink scheduler.Putter = scheduler.DiscardSink{}
 	if opts.Sink != nil {
 		sink = opts.Sink
 	}

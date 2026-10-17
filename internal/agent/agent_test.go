@@ -34,7 +34,7 @@ const (
 // journalPrefix matches the start of a line in journal mode.
 var journalPrefix = regexp.MustCompile(`^<[0-7]>`)
 
-// metricSink is a scheduler.Sink that remembers the metric names it received.
+// metricSink is a scheduler.Putter that remembers the metric names it received.
 type metricSink struct {
 	mu     sync.Mutex
 	names  map[string]bool
@@ -402,4 +402,4 @@ func TestRun_NotificationProblemsDoNotStopTheAgent(t *testing.T) {
 	}
 }
 
-var _ scheduler.Sink = (*metricSink)(nil)
+var _ scheduler.Putter = (*metricSink)(nil)

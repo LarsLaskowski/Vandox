@@ -56,14 +56,14 @@ type pressureMode struct {
 // Scheduler runs jobs.
 type Scheduler struct {
 	runners []*runner
-	sink    Sink
+	sink    Putter
 	log     *slog.Logger
 	mode    atomic.Pointer[pressureMode]
 	modeMu  sync.Mutex // serializes the writers of mode
 }
 
 // New checks jobs and returns a scheduler that puts records into sink and logs to log.
-func New(jobs []Job, sink Sink, log *slog.Logger) (*Scheduler, error) {
+func New(jobs []Job, sink Putter, log *slog.Logger) (*Scheduler, error) {
 	if sink == nil || log == nil {
 		return nil, errors.New("scheduler: a sink and a logger are required")
 	}

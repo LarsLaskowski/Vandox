@@ -94,7 +94,7 @@ type gapSeen struct {
 	gap  model.Gap
 }
 
-// recordingSink is a scheduler.Sink that records every Put; hook, when set, runs after the call was recorded and its
+// recordingSink is a scheduler.Putter that records every Put; hook, when set, runs after the call was recorded and its
 // result is the result of Put.
 type recordingSink struct {
 	mu    sync.Mutex
@@ -368,7 +368,7 @@ func TestNew_InvalidJobs(t *testing.T) {
 		return scheduler.Schedule{Interval: interval, Timeout: timeout, PressureInterval: pressure}
 	}
 	logger := slog.New(slog.DiscardHandler)
-	var sink scheduler.Sink = scheduler.DiscardSink{}
+	var sink scheduler.Putter = scheduler.DiscardSink{}
 	longName := strings.Repeat("a", 129)
 
 	const (
@@ -383,7 +383,7 @@ func TestNew_InvalidJobs(t *testing.T) {
 	tests := []struct {
 		name string
 		jobs []scheduler.Job
-		sink scheduler.Sink
+		sink scheduler.Putter
 		log  *slog.Logger
 		want string
 	}{

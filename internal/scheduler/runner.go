@@ -194,10 +194,8 @@ func (r *runner) cycle(ctx context.Context, d time.Time, seen *pressureMode) {
 func (r *runner) collect(ctx context.Context, run Run) (result, outcome) {
 	ch := make(chan result, 1)
 	wctx, cancel := context.WithTimeout(ctx, r.job.Schedule.Timeout)
-	go func() {
-		defer cancel()
-		ch <- r.invoke(wctx, run)
-	}()
+	defer cancel() // an abandoned worker's context has reached its deadline by then
+	go func() { ch <- r.invoke(wctx, run) }()
 	timer := time.NewTimer(r.job.Schedule.Timeout)
 	defer timer.Stop()
 

@@ -38,13 +38,13 @@ const statusFile = "self/status"
 // maxRSSDigits is the most digits of a VmRSS value: 999,999,999,999 kB times 1024 is below 2^53.
 const maxRSSDigits = 12
 
-// SpoolStats reports the size of the spool (implemented by the spool, #38).
-type SpoolStats interface {
+// SpoolBytesReporter reports the size of the spool (implemented by the spool, #38).
+type SpoolBytesReporter interface {
 	SpoolBytes(ctx context.Context) (int64, error)
 }
 
-// SendStats reports how far sending lags behind capture (implemented by the sender, #39).
-type SendStats interface {
+// SendLagReporter reports how far sending lags behind capture (implemented by the sender, #39).
+type SendLagReporter interface {
 	SendLag(ctx context.Context) (time.Duration, error)
 }
 
@@ -53,8 +53,8 @@ type Sources struct {
 	Proc       fs.FS                         // default os.DirFS("/proc"); self/status is read
 	CPUTime    func() (time.Duration, error) // default ProcessCPUTime
 	Goroutines func() int                    // default runtime.NumGoroutine
-	Spool      SpoolStats                    // nil: no spool metric
-	Sender     SendStats                     // nil: no send lag metric
+	Spool      SpoolBytesReporter            // nil: no spool metric
+	Sender     SendLagReporter               // nil: no send lag metric
 }
 
 // Collector collects the self-metrics; it implements scheduler.Collector.
