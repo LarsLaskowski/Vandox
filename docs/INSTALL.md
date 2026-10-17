@@ -38,11 +38,23 @@ Create one directory for Vandox on the Docker host and copy the two deployment f
 sudo mkdir -p /volume1/docker/vandox && sudo chown "$USER" /volume1/docker/vandox && cd /volume1/docker/vandox
 curl -fsSLO https://raw.githubusercontent.com/LarsLaskowski/Vandox/v0.1.0/deploy/backend/docker-compose.yml
 curl -fsSLO https://raw.githubusercontent.com/LarsLaskowski/Vandox/v0.1.0/deploy/backend/vandoxd.yaml
-mkdir -p secrets import
+mkdir -p secrets import data
 ```
 
 In `docker-compose.yml`, replace `networlddev/vandox:latest` with `networlddev/vandox:0.1.0`, so an upgrade happens only when you
 change the tag. To check the image's origin before the first start, verify its attestation as the README shows (*Install*).
+
+**Choose the user the container runs as.** The image runs as `65532:65532`, a user that exists on no host. That suits a Docker
+volume nobody looks into, but on a NAS the files in the project directory would belong to an unknown user. Run the container as a
+user of the host instead, so the files stay yours:
+
+- Find the IDs of the user that should own the files: `id <user>` prints `uid=1026(<user>) gid=100(users) …` on a Synology NAS, for
+  example. A dedicated user without login rights is the cleanest choice.
+- Set them once for the commands below: `VANDOX_USER=1026:100` (or `VANDOX_USER=65532:65532` to keep the image's user and the
+  named volume).
+- With a host user, the database goes into `data/` of the project directory: `sudo chown -R "$VANDOX_USER" data && sudo chmod 0700 data`.
+  In `docker-compose.yml`, set `user: "1026:100"` (with your IDs) and replace `vandox-data:/data` with `./data:/data`; both lines
+  are prepared there as comments.
 
 ## 2. Configure
 
@@ -63,8 +75,8 @@ other paths than the defaults, set the `import.*_log` paths too (README, *Config
 
 ## 3. Create the secrets
 
-The container runs as the user `65532`, and Compose passes file secrets with the host file's owner and mode, so each secret file
-belongs to `65532` and is readable by nobody else.
+Compose passes file secrets with the host file's owner and mode, so each secret file belongs to the container's user
+(`$VANDOX_USER` from step 1) and is readable by nobody else.
 
 **Web UI password hash.** The password has 12 to 1024 characters. Read it without echo and never give the container a terminal
 (`-i`, not `-t`), because a terminal shows what is typed:
@@ -84,7 +96,7 @@ openssl rand -hex 32 > secrets/vandox_agent_token
 Then hand both files to the container user:
 
 ```
-sudo chown 65532:65532 secrets/vandox_web_password_hash secrets/vandox_agent_token
+sudo chown "$VANDOX_USER" secrets/vandox_web_password_hash secrets/vandox_agent_token
 sudo chmod 0400 secrets/vandox_web_password_hash secrets/vandox_agent_token
 ```
 
@@ -106,17 +118,46 @@ docker-compose.yml*, then *Build*. The project shows up in the list and starts t
 (`./import`, `./vandoxd.yaml`, `./secrets/...`) with the absolute paths of step 1, because the application is stored in another
 directory. Starting it from the command line in the directory of step 1 avoids that.
 
-If the container does not become healthy, `sudo docker logs vandoxd` names the reason, for example a missing password hash or an
-invalid option in `vandoxd.yaml`.
+**Without Compose.** A single container can also be started with `docker run` (or set up the same way in a container manager's
+wizard). This is the same container as the compose file, with a host user and `data/` from step 1; replace the paths and IDs with
+yours:
+
+```
+cd /volume1/docker/vandox
+sudo docker run -d --name vandoxd --restart unless-stopped \
+  --user 1026:100 --memory 512m --read-only --tmpfs /tmp \
+  --cap-drop ALL --security-opt no-new-privileges:true --stop-timeout 30 \
+  --log-opt max-size=10m --log-opt max-file=3 \
+  -p 127.0.0.1:8080:8080 \
+  -e VANDOX_AGENT_TOKEN_FILE=/run/secrets/vandox_agent_token \
+  -e VANDOX_WEB_PASSWORD_HASH_FILE=/run/secrets/vandox_web_password_hash \
+  -v "$PWD/data:/data" \
+  -v "$PWD/import:/import:ro" \
+  -v "$PWD/vandoxd.yaml:/etc/vandox/vandoxd.yaml:ro" \
+  -v "$PWD/secrets/vandox_agent_token:/run/secrets/vandox_agent_token:ro" \
+  -v "$PWD/secrets/vandox_web_password_hash:/run/secrets/vandox_web_password_hash:ro" \
+  networlddev/vandox:0.1.0
+```
+
+In a container manager's wizard the same settings are: the image `networlddev/vandox:0.1.0`; the port `127.0.0.1:8080` → `8080`
+(or the host's LAN address, see step 5); the five folder and file mappings above, `import`, `vandoxd.yaml` and the secrets
+read-only; the two environment variables; automatic restart; a memory limit of 512 MB. Where the wizard offers them, also set the
+user, a read-only root file system, `/tmp` as tmpfs and no added capabilities; the container runs without them as well, only less
+confined. The image sets `ASPNETCORE_URLS` to an empty value on purpose: leave it empty, because the ports come from `web.listen`
+in `vandoxd.yaml`, not from that variable.
+
+If the container does not become healthy, `sudo docker logs vandoxd` names the reason, for example a missing password hash, an
+invalid option in `vandoxd.yaml`, or a data directory the container's user cannot write.
 
 ## 5. Put the web UI behind the reverse proxy
 
 The web port is published on `127.0.0.1:8080`, for a proxy on the same host. Set up the proxy as
 [REVERSE_PROXY.md](REVERSE_PROXY.md) shows, with the sections for Synology and QNAP, then:
 
-1. Find the address the proxy has as seen by the container (often the gateway of the network `vandox_default`):
-   `sudo docker network inspect vandox_default --format '{{ (index .IPAM.Config 0).Gateway }}'`.
-2. Enter it as `web.trusted_proxies` in `vandoxd.yaml` and restart: `sudo docker compose restart`.
+1. Find the address the proxy has as seen by the container (often the gateway of the container's network):
+   `sudo docker network inspect vandox_default --format '{{ (index .IPAM.Config 0).Gateway }}'` with Compose, or the same with
+   `bridge` instead of `vandox_default` for a container started with `docker run`.
+2. Enter it as `web.trusted_proxies` in `vandoxd.yaml` and restart: `sudo docker compose restart` (or `sudo docker restart vandoxd`).
 3. Open `https://<your host name>/` and sign in with the password of step 3.
 4. Check that the port is not reachable from other hosts in the LAN (*Check the Docker Engine* in REVERSE_PROXY.md). That is your
    job as the operator: Vandox does not rely on the binding, but a port open to the LAN weakens the lockout of failed sign-ins.
@@ -144,11 +185,11 @@ Copy it into the `import/` directory of step 1 and give it to the container user
 
 ```
 scp server:vandox-logs.tar.gz /volume1/docker/vandox/import/
-sudo chown 65532:65532 /volume1/docker/vandox/import/vandox-logs.tar.gz
+sudo chown "$VANDOX_USER" /volume1/docker/vandox/import/vandox-logs.tar.gz
 sudo chmod 0400 /volume1/docker/vandox/import/vandox-logs.tar.gz
 ```
 
-The archive is read as it is; nothing is extracted, so only the archive file itself must be readable by `65532`.
+The archive is read as it is; nothing is extracted, so only the archive file itself must be readable by the container's user.
 
 ## 7. Import
 
@@ -159,7 +200,8 @@ sudo docker exec -it vandoxd dotnet /app/vandoxd.dll import /import/vandox-logs.
 The import prints its progress as JSON lines and ends with a summary of the files imported, not recognized and failed, the lines read
 and the time range stored. A large `/var/log` takes a while on a NAS; Ctrl-C stops it, and running the same command again continues
 where it stopped. A file that failed with `import.time_zone is not set` is completed by setting the option (step 2),
-restarting the container (`sudo docker compose restart`) and importing again: the container keeps seeing the file it was started
+restarting the container (`sudo docker compose restart` or
+`sudo docker restart vandoxd`) and importing again: the container keeps seeing the file it was started
 with when an editor saves the change as a new file. Files no parser claims are listed with the reason; that is expected for logs Vandox does not read.
 
 ## 8. Reconstruct the incidents

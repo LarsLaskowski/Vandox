@@ -239,7 +239,10 @@ and every client behind the proxy shares one lockout.
 
 The ingest port (8081) is not published yet: the ingest API arrives with issue #40, which adds the binding on
 the host's tailnet address. The database lives in the named volume `vandox-data` (Docker lists it as `vandox_vandox-data`; `/data` in the container,
-owned by 65532); a bind-mounted data directory instead of the volume must be owned by 65532 as well.
+owned by 65532); a bind-mounted data directory instead of the volume must be owned by 65532 as well. To keep the files readable for
+a user of the host (on a NAS, for example), run the container as that user's IDs (`user:` in the compose file, `--user` for
+`docker run`) with a bind-mounted data directory, and give the secret and import files to that user instead of 65532;
+`docs/INSTALL.md` shows both, and a `docker run` command for setups without Compose.
 Put the data directory on fast storage, an SSD if the host has one: every committed batch waits for the disk, and on a hard disk
 writes take about 50 % longer in the measurement of 10,000 records per transaction (`docs/BENCHMARKS.md`); a hard disk works, too.
 
