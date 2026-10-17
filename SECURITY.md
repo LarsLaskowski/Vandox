@@ -2,8 +2,7 @@
 
 ## Supported Versions
 
-No release has been published yet, so fixes go to `main`. From the first release (v0.1.0) on, only the
-latest release receives security fixes.
+Only the latest release receives security fixes; a fix is published as a new patch release.
 
 | Version | Supported |
 | ------- | --------- |
