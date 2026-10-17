@@ -336,5 +336,5 @@ func asciiLower(s string) string {
 // ValidName reports whether s matches the name pattern of source, metric names, label keys and gap.collector
 // (1 to MaxNameBytes bytes of ^[A-Za-z0-9][A-Za-z0-9._:/@+-]*$).
 func ValidName(s string) bool {
-	return false
+	return checkName("", s) == nil
 }

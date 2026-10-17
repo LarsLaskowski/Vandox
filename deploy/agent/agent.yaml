@@ -1,7 +1,7 @@
 # Configuration of vandox-agent. Default location: /etc/vandox/agent.yaml
 #
-# The agent is not part of v0.1.0: the binary does not read this file yet (it arrives with v0.2.0). The
-# rules below describe the loader that the agent will use.
+# The agent binary reads this file at start-up (-config <file> names another path). The rules below
+# describe the loader.
 #
 # The file is parsed strictly: an unknown key, a duplicate key, a second YAML document, an anchor, a
 # custom tag or an invalid value stops the agent at start-up, and the error names the file, the line and

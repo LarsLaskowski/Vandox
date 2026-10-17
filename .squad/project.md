@@ -89,7 +89,8 @@ files or endpoints.
    time, the UI password through its hash function's comparison (`PasswordHash`, `CryptographicOperations.FixedTimeEquals`; the
    hash is checked at start-up and the password is never logged, echoed or stored). Implemented for the agent in `internal/config`
    (`readSecret`, `checkEnviron`, `Secret`) and for the backend in `src/Vandox.Core/Configuration`
-   (`SecretReader`, `Secret`, `BackendSecrets`). Records 0032, 0050, 0078, 0104.
+   (`SecretReader`, `Secret`, `BackendSecrets`). The running agent holds the token in `config.Agent` (`Secrets`) and never logs it: `internal/agent` `Run` passes
+   a logger only `agent_id`, the version and the errors of the loader and the notifier (`TestRun_DoesNotLogSecret`). Records 0032, 0050, 0078, 0104, 0110.
 9. **File writes and paths derived from external input** (log import, the agent's on-disk spool, database
    backups): *Goal:* no write outside the configured directories (no path traversal), the spool is
    size-bounded, files are created with restrictive permissions. The database file `vandox.db`
@@ -108,7 +109,11 @@ files or endpoints.
     `wire.Limits`; truncated or corrupt gzip is an error, record 0076); CLI arguments and configuration; later Telegram commands): *Goal:* malformed or hostile
     input yields an error or a skipped record, never a crash, an unbounded allocation or a hang. The
     configuration files are read by `internal/config` (`decodeStrict`, `readFile`; agent) and
-    `Vandox.Core.Configuration` (`StrictYamlDecoder`, `BackendConfigLoader`; backend). The log search text
+    `Vandox.Core.Configuration` (`StrictYamlDecoder`, `BackendConfigLoader`; backend). The agent's command line (`internal/cli` `Parse`: `-config` takes any
+    non-empty path, which the loader checks; a positional argument or an empty `-config` is a usage error) and the systemd variables it reads from the environment slice it
+    is given (`internal/sdnotify` `FromEnviron` and `WatchdogInterval`: ASCII digit guards, `NOTIFY_SOCKET` an absolute path or an abstract name within `sun_path`, `WATCHDOG_USEC`
+    at least 100 ms so a hostile value cannot make a busy loop, a variable set twice an error; `internal/agent` `journalStream`: `JOURNAL_STREAM` counts only as `<dev>:<ino>`
+    of stderr's own device and inode) never crash, hang or allocate without bound; `self/status` is read up to 64 KiB (`internal/selfstats`). The log search text
     (`SqliteStore` search, `FtsQuery`) reaches SQLite's FTS5 query parser and is reduced to quoted literal terms
     with bounded length and term count. Log files and archives reach the log import
     (`src/Vandox.Import`: `Scanner`, `FormatSniffer`, `ImportLimits`: entries, path length and batch size) and the
@@ -202,7 +207,7 @@ files or endpoints.
     of the download carries only that fixed file name. Forged kill lines make forged incidents
     (a documented limitation, record 0096); forged boot lines, `pzstd` or `sw-engi*` processes shift the report's activities and rates, and forged process names can
     take the 4,096 program places first (records 0100, 0101). Records 0048, 0049, 0066, 0069, 0076, 0078, 0079, 0084,
-    0085, 0086, 0088, 0091, 0092, 0093, 0094, 0095, 0096, 0097, 0100, 0101, 0102, 0106, 0108.
+    0085, 0086, 0088, 0091, 0092, 0093, 0094, 0095, 0096, 0097, 0100, 0101, 0102, 0106, 0108, 0110.
 11. **Outbound calls** (Telegram, external checks, the optional AI service of the nightly report, the
     agent's connection to the backend): *Goal:* every call has a timeout, goes only to its configured
     destination and leaves encrypted to a verified peer. The agent's only destination is the ingest port,
@@ -212,7 +217,8 @@ files or endpoints.
     result. Certificate verification is never switched off (no `InsecureSkipVerify`), and no secret is sent
     over an unencrypted connection. The image's health check (`HealthCheckCommand` in `src/Vandox.Backend/Cli`) calls only the
     configured web listener, on loopback for an unspecified host, with a 4 s timeout, no proxy, no redirects,
-    no credentials and no environment. Records 0006, 0008, 0010, 0012, 0017, 0023, 0059.
+    no credentials and no environment. Besides the ingest port the agent writes only to the local systemd notification socket named by `NOTIFY_SOCKET`
+    (`internal/sdnotify`: one unix datagram of the fixed states `READY=1`, `WATCHDOG=1` and `STOPPING=1`, a 1 s deadline per notification, no network). Records 0006, 0008, 0010, 0012, 0017, 0023, 0059, 0110.
 12. **Logging and display of external data** (log lines, process names and text derived from them, e.g. an
     AI-written report): *Goal:* they cannot inject into log output (control characters, newlines), into the
     web UI (HTML is escaped) or into Telegram messages (escaped for the parse mode used, or sent as plain
@@ -261,7 +267,10 @@ files or endpoints.
     private-use, unassigned and invalid characters as the escapes of `Terminal.Quote` (`\u202e`), a fence longer than any backtick run, padding spaces, an empty
     text as a dash; a code span keeps inline HTML, entities, links, autolinks and emphasis literal, no external text stands in a table or a heading, and the
     report's own labels, numbers and times come from `ReportText`; the `-lang` value in the usage error and an unknown flag name go through `Terminal.Quote`;
-    standard output is UTF-8 without a byte order mark (`Program`). Records 0072, 0081, 0095, 0096, 0100.
+    standard output is UTF-8 without a byte order mark (`Program`). The agent logs through `slog.TextHandler` on stderr (`internal/agent` `NewLogger`): values with control
+    characters are quoted and escaped, so a value cannot start a forged line; panic values and stacks of collectors are attributes, cut to 1 KiB and 4 KiB; the message and every
+    string, error or `fmt.Stringer` value are cut to 4 KiB and each line to 32 KiB, below journald's `LineMax=`, so no continuation can start with a forged `<N>` priority; the
+    configuration is never passed to a logger. Records 0072, 0081, 0095, 0096, 0100, 0110.
 13. **Release pipeline and published artifacts** (`.github/workflows/release.yml`,
     `.github/workflows/base-image-digests.yml`, `.github/scripts/`, `deploy/backend/Dockerfile`,
     `.dockerignore`, `dotnet-tools.json`, the GitHub environment `release`; the smoke script
@@ -309,7 +318,8 @@ Deliberate behavior that must not change without the Product Manager. Each one i
   cancelled, only abandoned; sources that take a context also get it); a hung source (`/proc`, `/sys`,
   D-Bus, journald, MariaDB) loses only its own sample, recorded as a gap, while the other collectors, the
   spool and the sender keep running; while a collector is still stuck it is not started again.
-  `docs/ARCHITECTURE.md` section *Components*; record 0029.
+  `docs/ARCHITECTURE.md` section *Components*; records 0029, 0110. Implemented by `internal/scheduler` (a runner goroutine and a worker goroutine per collector,
+  a gap for every timeout, skip, panic, error and late wake-up).
 - **Backfilled data never raises an alert by itself**: the backend classifies every record as live or
   backfilled from the data; alert rules run on live data only; backfill is stored and analyzed but never
   alerts. `docs/ARCHITECTURE.md` section *Offline behavior and backfill*; record 0022.

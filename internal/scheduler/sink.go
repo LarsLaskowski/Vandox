@@ -18,6 +18,6 @@ type Sink interface {
 type DiscardSink struct{}
 
 // Put drops records and returns nil.
-func (DiscardSink) Put(ctx context.Context, records []model.Record) error {
-	return errNotImplemented
+func (DiscardSink) Put(_ context.Context, _ []model.Record) error {
+	return nil
 }

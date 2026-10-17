@@ -13,7 +13,7 @@ backend, written in .NET 10 with a Blazor web UI. Both implement the same data m
 
 | Binary | Runs on | Purpose |
 |---|---|---|
-| `vandox-agent` (Go) | the monitored Linux server | collects data and ships it to the backend (planned for v0.2.0; v0.1.0 ships the backend only) |
+| `vandox-agent` (Go) | the monitored Linux server | collects data and ships it to the backend (planned for v0.2.0; v0.1.0 ships the backend only); the runtime frame (configuration, collector scheduler, self-metrics, systemd notification) exists, the collectors and the sender do not yet |
 | `vandoxd` (.NET) | Docker container on any Docker host in the home network (NAS, mini PC, server) | backend with web UI |
 
 Both support `--version`, which prints version, commit and build date. `vandoxd` without arguments runs the
@@ -45,7 +45,7 @@ testdata/           fixtures for tests, shared by both languages (testdata/wire:
 
 ## Configuration
 
-Each binary reads one strict YAML file for its options (the agent from v0.2.0 on: its loader exists, but the agent binary of v0.1.0 does not call it yet). The secrets come only from the environment (or
+Each binary reads one strict YAML file for its options (the agent from v0.2.0 on: the agent binary of v0.1.0 does not call its loader, later versions read the file at start-up, `-config <file>` names another path). The secrets come only from the environment (or
 from files named by `*_FILE` variables), never from the file
 ([0032](docs/decisions/0032-secrets-only-from-environment-or-docker-secrets.md)).
 
@@ -137,7 +137,7 @@ Releases are published from GitHub releases with `v<major>.<minor>.<patch>` tags
 
 **Agent.** The agent is not part of v0.1.0: collection, shipping and the ingest API arrive with v0.2.0. v0.1.0 is
 the forensics release and works from imported logs alone. A release also carries a `vandox-agent-linux-amd64` binary built
-from the current code; it has no function yet beyond `--version`, so there is nothing to install on the monitored server.
+from the current code; it starts with its configuration file and the agent token, schedules its own self-metrics and tells systemd that it is ready, but it collects nothing else and sends nothing yet, so there is nothing to install on the monitored server.
 
 **Backend.** Pull the image from Docker Hub, either by version or by the digest given in the release notes
 (`Docker image: networlddev/vandox:<X.Y.Z>@sha256:<digest>`):
