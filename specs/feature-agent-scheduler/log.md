@@ -27,3 +27,4 @@ are quoted in full.
 | 2026-10-17 16:38 | 8 Review | squad-security | VERDICT: APPROVED; 1 non-blocking: cutAttr calls Error()/String() without recover (typed-nil error panics out of Handle, can crash agent) (opus/medium · 54,872 tokens · 19 tool uses · 154 s) |
 | 2026-10-17 16:42 | 8 Review | squad-reviewer | round 1: BLOCKING 2 (missing tests: sink failed/recovered, Stringer cap; slog one-line pin), NON-BLOCKING 4; 3 verbatim doc fixes applied by orchestrator (README, ARCHITECTURE, stack.md) (opus/medium · 136,978 tokens · 37 tool uses · 422 s) |
 | 2026-10-17 16:43 | 8 Fix round 1 tests | squad-tester | launched (continued) for review/security findings |
+| 2026-10-17 16:44 | 8 Fix round 1 tests | squad-tester | 6 tests added; only TestNewLogger_BrokenValuesDoNotPanic fails (expected) |

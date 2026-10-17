@@ -132,6 +132,28 @@ func testLoggerPlainLines(t *testing.T) {
 	}
 }
 
+// requireControlEscapes logs a line break in the key and message and exotic characters in a value.
+func requireControlEscapes(t *testing.T, journal bool) {
+	t.Helper()
+
+	out2 := render("info", journal, func(l *slog.Logger) {
+		l.Info("m\nx", "k\ney", "a b\u2028\u202ec\xffd\x00e")
+	})
+	if got := strings.Count(out2, "\n"); got != 1 || !strings.HasSuffix(out2, "\n") {
+		t.Errorf("output %q has %d line feeds, want exactly one at the end", out2, got)
+	}
+	for _, raw := range []string{"\u2028", "\u202e", "\x00", "\xff"} {
+		if strings.Contains(out2, raw) {
+			t.Errorf("output %q holds the raw character %q, want it escaped", out2, raw)
+		}
+	}
+	for _, escaped := range []string{`k\ney`, `\u2028`, `\u202e`, `\xff`, `\x00`, `m\nx`} {
+		if !strings.Contains(out2, escaped) {
+			t.Errorf("output %q does not hold the escaped text %q", out2, escaped)
+		}
+	}
+}
+
 func testLoggerEscapes(t *testing.T) {
 	for _, m := range modes {
 		t.Run(m.name, func(t *testing.T) {
@@ -145,6 +167,7 @@ func testLoggerEscapes(t *testing.T) {
 			if strings.Contains(out, "\r") {
 				t.Errorf("output %q holds a raw carriage return, want it escaped", out)
 			}
+			requireControlEscapes(t, m.journal)
 			for _, escaped := range []string{`first\nsecond\rthird`, `x\ny\rz`, `e\nf\rg`} {
 				if !strings.Contains(out, escaped) {
 					t.Errorf("output %q does not hold the escaped text %q", out, escaped)
@@ -153,6 +176,11 @@ func testLoggerEscapes(t *testing.T) {
 		})
 	}
 }
+
+// longStringer is a fmt.Stringer over a string.
+type longStringer string
+
+func (s longStringer) String() string { return string(s) }
 
 func testLoggerValueCap(t *testing.T) {
 	long := strings.Repeat("a", 5000)
@@ -163,6 +191,7 @@ func testLoggerValueCap(t *testing.T) {
 		{"message", func(l *slog.Logger) { l.Info(long) }},
 		{"string attribute", func(l *slog.Logger) { l.Info("m", "key", long) }},
 		{"error attribute", func(l *slog.Logger) { l.Info("m", "err", errors.New(long)) }},
+		{"stringer attribute", func(l *slog.Logger) { l.Info("m", "key", longStringer(long)) }},
 	}
 	for _, tc := range tests {
 		for _, m := range modes {
@@ -280,5 +309,57 @@ func TestJournalStream(t *testing.T) {
 				t.Errorf("journalStream(%q, %T) = %v, want %v", tc.environ, tc.stderr, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestNewLogger_WithAttrsAndGroup(t *testing.T) {
+	var buf bytes.Buffer
+
+	NewLogger(&buf, "info", true).With("k", "v").WithGroup("g").Info("m", "x", "y")
+
+	out := buf.String()
+	if !strings.HasPrefix(out, "<6>") || strings.Count(out, "\n") != 1 ||
+		!strings.Contains(out, "k=v") || !strings.Contains(out, "g.x=y") {
+		t.Errorf("output = %q, want one <6> line holding k=v and g.x=y", out)
+	}
+}
+
+// nilErr is an error whose Error method dereferences its receiver.
+type nilErr struct{ msg string }
+
+func (e *nilErr) Error() string { return e.msg }
+
+// panicStringer is a fmt.Stringer whose String method panics.
+type panicStringer struct{}
+
+func (panicStringer) String() string { panic("stringer exploded") }
+
+func TestNewLogger_BrokenValuesDoNotPanic(t *testing.T) {
+	tests := []struct {
+		name  string
+		value any
+		want  string
+	}{
+		{"typed nil error", (*nilErr)(nil), "<nil>"},
+		{"panicking stringer", panicStringer{}, "PANIC"},
+	}
+
+	for _, tc := range tests {
+		for _, m := range modes {
+			t.Run(tc.name+" "+m.name, func(t *testing.T) {
+				var out string
+				defer func() {
+					if r := recover(); r != nil {
+						t.Errorf("logging a %s panicked: %v", tc.name, r)
+					}
+				}()
+
+				out = render("info", m.journal, func(l *slog.Logger) { l.Info("m", "key", tc.value) })
+
+				if !strings.Contains(out, tc.want) || strings.Count(out, "\n") != 1 {
+					t.Errorf("output = %q, want one line holding %q", out, tc.want)
+				}
+			})
+		}
 	}
 }

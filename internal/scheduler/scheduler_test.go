@@ -716,3 +716,46 @@ func TestScheduler_HealthyAcrossPressureSwitch(t *testing.T) {
 		}
 	})
 }
+
+func TestScheduler_SinkFailureLoggedOnce(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		sink := &recordingSink{hook: func(_ context.Context, n int) error {
+			if n < 3 {
+				return errors.New("spool full")
+			}
+			return nil
+		}}
+		h := start(t, []scheduler.Job{job(newScripted("x", nil), 10*time.Second, 2*time.Second)}, sink)
+
+		h.sleepTo(35 * time.Second)
+
+		h.requireLog(slog.LevelError, "sink failed", anyTime, map[string]string{"collector": "x"})
+		h.requireLog(slog.LevelInfo, "sink recovered", 30*time.Second, map[string]string{"collector": "x"})
+		if got := h.sink.gaps(""); len(got) != 0 {
+			t.Errorf("gaps for refused records = %s, want none (the sink owns that loss)", h.describe(got))
+		}
+		if got := sink.calls.Load(); got != 4 {
+			t.Errorf("Put calls over four runs = %d, want 4", got)
+		}
+	})
+}
+
+func TestScheduler_CancelWhileCollectorBlocked(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		hang := newHanging(t, "hang")
+		h := start(t, []scheduler.Job{job(hang, 10*time.Second, 2*time.Second)}, &recordingSink{})
+		h.sleepTo(time.Second)
+
+		h.cancel()
+		select {
+		case <-h.done:
+		case <-time.After(500 * time.Millisecond):
+			t.Fatalf("Run did not return before the 2s timeout after the cancel at 1s")
+		}
+
+		synctest.Wait()
+		if got := h.sink.gaps(""); len(got) != 0 {
+			t.Errorf("gaps after a stop = %s, want none", h.describe(got))
+		}
+	})
+}
