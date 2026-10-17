@@ -1412,7 +1412,11 @@ func latin1Stream(t *testing.T, lines []string) []byte {
 	var plain []byte
 	for _, line := range lines {
 		for _, r := range line {
-			plain = append(plain, byte(r))
+			if r < 0 || r > 0xFF {
+				t.Fatalf("latin1Stream: U+%04X is above U+00FF, want one byte per character", r)
+			} else {
+				plain = append(plain, byte(r))
+			}
 		}
 		plain = append(plain, '\n')
 	}
@@ -1759,8 +1763,8 @@ func TestDecoder_AllocationIsBoundedForDeeplyNestedRecords(t *testing.T) {
 			data, size := deepBatch(t, v.x, 1<<20)
 			allocated := allocatedBy(func() { readBatch(t, data, wire.DefaultLimits()) })
 			t.Logf("allocated %.1f times the batch of %d bytes", float64(allocated)/float64(size), size)
-			if limit := uint64(maxAllocFactor) * uint64(size); allocated > limit {
-				t.Errorf("decoding allocated %d bytes (%.1f times the batch of %d bytes), want at most %d times", allocated, float64(allocated)/float64(size), size, maxAllocFactor)
+			if ratio := float64(allocated) / float64(size); ratio > maxAllocFactor {
+				t.Errorf("decoding allocated %d bytes (%.1f times the batch of %d bytes), want at most %d times", allocated, ratio, size, maxAllocFactor)
 			}
 		})
 	}
