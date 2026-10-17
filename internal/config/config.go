@@ -3,6 +3,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -67,6 +68,16 @@ func requireKey(file string, lines map[string]int, key string) error {
 		return &KeyError{File: file, Key: key, Reason: "required key is missing"}
 	}
 	return nil
+}
+
+// errNotRegular reports that an opened file is not a regular file.
+var errNotRegular = errors.New("not a regular file")
+
+// openRegular opens the file at path for reading without blocking on a FIFO and without making a terminal
+// the controlling terminal, and checks on the opened descriptor that it is a regular file. A file that is not
+// regular is closed and errNotRegular returned.
+func openRegular(path string) (*os.File, error) {
+	return nil, errors.New("not implemented")
 }
 
 // readFile reads the regular file at path, at most limit bytes. The path is checked before it is opened,
