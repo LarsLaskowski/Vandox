@@ -31,11 +31,19 @@ type System struct {
 	mu          sync.Mutex
 	prev        *sample // the last successful sample
 	unavailable string  // the pressure resources last logged as unavailable, comma-separated
+	onSwitch    func(high bool)
 }
 
 // NewSystem returns the system collector reading src; a nil log logs nothing.
 func NewSystem(src Sources, log *slog.Logger) *System {
 	return &System{src: src.withDefaults(), log: logger(log)}
+}
+
+// SetPressureSwitch sets f, which is called with the new state whenever memory pressure mode changes after a sample.
+func (c *System) SetPressureSwitch(f func(high bool)) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.onSwitch = f
 }
 
 // Name returns SystemName.

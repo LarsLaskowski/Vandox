@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/LarsLaskowski/Vandox/internal/config"
+	"github.com/LarsLaskowski/Vandox/internal/procstats"
 	"github.com/LarsLaskowski/Vandox/internal/scheduler"
 	"github.com/LarsLaskowski/Vandox/internal/sdnotify"
 	"github.com/LarsLaskowski/Vandox/internal/selfstats"
@@ -34,6 +35,13 @@ const (
 	ClockTimeout           = 5 * time.Second
 )
 
+// Schedules of the process collector.
+const (
+	ProcessesInterval         = 60 * time.Second
+	ProcessesPressureInterval = 15 * time.Second
+	ProcessesTimeout          = 10 * time.Second
+)
+
 // Options are the process boundaries Run works with.
 type Options struct {
 	ConfigPath string            // the configuration file
@@ -42,6 +50,7 @@ type Options struct {
 	Sink       scheduler.Putter  // nil: scheduler.DiscardSink
 	Self       selfstats.Sources // the self-metrics sources; zero fields take their defaults
 	System     sysstats.Sources  // the system metrics sources; zero fields take their defaults
+	Processes  procstats.Sources // the process sources; zero fields take their defaults
 }
 
 // Run runs the agent until ctx is done and returns the exit code: 0 after a clean stop, 1 when it cannot start.
@@ -87,15 +96,16 @@ func Run(ctx context.Context, opts Options) int {
 }
 
 // jobs returns the collectors with their schedules: self, system, filesystem (only when a mount point is configured) and
-// clock. The system collector logs through log.
-func jobs(opts Options, cfg *config.Agent, log *slog.Logger) []scheduler.Job {
+// clock, and the system collector, which newScheduler connects to the scheduler. The collectors log through log.
+func jobs(opts Options, cfg *config.Agent, log *slog.Logger) ([]scheduler.Job, *sysstats.System) {
+	system := sysstats.NewSystem(opts.System, log)
 	list := []scheduler.Job{
 		{
 			Collector: selfstats.New(opts.Self),
 			Schedule:  scheduler.Schedule{Interval: SelfInterval, Timeout: SelfTimeout},
 		},
 		{
-			Collector: sysstats.NewSystem(opts.System, log),
+			Collector: system,
 			Schedule:  scheduler.Schedule{Interval: SystemInterval, Timeout: SystemTimeout, PressureInterval: SystemPressureInterval},
 		},
 	}
@@ -108,7 +118,12 @@ func jobs(opts Options, cfg *config.Agent, log *slog.Logger) []scheduler.Job {
 	return append(list, scheduler.Job{
 		Collector: sysstats.NewClock(opts.System),
 		Schedule:  scheduler.Schedule{Interval: ClockInterval, Timeout: ClockTimeout},
-	})
+	}), system
+}
+
+// programRules converts the configured program rules for the process collector.
+func programRules(rules []config.ProgramRule) []procstats.Rule {
+	return nil
 }
 
 // newScheduler returns the scheduler with the jobs of the configuration.
@@ -117,7 +132,8 @@ func newScheduler(opts Options, cfg *config.Agent, log *slog.Logger) (*scheduler
 	if opts.Sink != nil {
 		sink = opts.Sink
 	}
-	return scheduler.New(jobs(opts, cfg, log), sink, log)
+	list, _ := jobs(opts, cfg, log)
+	return scheduler.New(list, sink, log)
 }
 
 // notification returns the notifier of the service manager and the watchdog interval; a problem with either is

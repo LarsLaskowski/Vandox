@@ -23,6 +23,7 @@ type Agent struct {
 	Spool      Spool         `yaml:"spool"`
 	Log        Log           `yaml:"log"`
 	Filesystem Filesystem    `yaml:"filesystem"`
+	Processes  Processes     `yaml:"processes"`
 	Secrets    AgentSecrets  `yaml:"-"`
 }
 
@@ -44,6 +45,30 @@ type Log struct {
 // Filesystem configures the file system metrics.
 type Filesystem struct {
 	MountPoints []string `yaml:"mount_points"`
+}
+
+// Processes configures the process collector.
+type Processes struct {
+	Programs []ProgramRule `yaml:"programs"`
+}
+
+// ProgramRule names the program of the processes whose command and command line match.
+type ProgramRule struct {
+	Program        string `yaml:"program"`
+	Command        string `yaml:"command"`
+	CmdlinePrefix  string `yaml:"cmdline_prefix"`
+	AppendNextWord bool   `yaml:"append_next_word"`
+}
+
+// Bounds of processes.programs.
+const (
+	MaxProgramRules   = 64
+	MaxRuleMatchBytes = 256
+)
+
+// checkProgramRules checks the list of processes.programs.
+func checkProgramRules(file string, lines map[string]int, rules []ProgramRule) error {
+	return nil
 }
 
 // mountPointsRule is the reason filesystem.mount_points is refused with; it does not quote the value.

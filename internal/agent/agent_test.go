@@ -461,7 +461,7 @@ func TestJobs_Schedules(t *testing.T) {
 			cfg.Filesystem.MountPoints = tt.mountPoints
 			log := slog.New(slog.NewTextHandler(io.Discard, nil))
 
-			list := jobs(Options{Self: fixtureSources(), System: fixtureSystem()}, &cfg, log)
+			list, _ := jobs(Options{Self: fixtureSources(), System: fixtureSystem()}, &cfg, log)
 
 			if got := scheduleOf(list); !slices.Equal(got, tt.want) {
 				t.Errorf("jobs() = %+v, want %+v", got, tt.want)

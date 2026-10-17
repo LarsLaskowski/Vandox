@@ -179,6 +179,11 @@ func (d *decoder) walkField(path string, k, v *yaml.Node, field reflect.Value) e
 	return d.setLeaf(path, k, v, field)
 }
 
+// walkList handles the value v of the key k, a list of mappings that fills the slice of structs field.
+func (d *decoder) walkList(path string, k, v *yaml.Node, field reflect.Value) error {
+	return nil
+}
+
 // walkSection handles the value of a key that names a section. A null value keeps the defaults.
 func (d *decoder) walkSection(path string, k, v *yaml.Node, field reflect.Value) error {
 	if isNull(v) {
