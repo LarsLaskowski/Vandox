@@ -36,7 +36,10 @@ way, and agents of the hosting provider are never disabled or changed
   deadline passes, so a hanging collector or database never blocks the agent; a missed sample is recorded
   as a gap, and a collector that is still stuck is not started again. The scheduler (`internal/scheduler`) runs every
   collector at its own fixed rate, records a gap for every sample it misses (timeout, skip, panic, error, refused record,
-  late start) and offers a memory pressure mode with shorter intervals; the agent records its own resource use as metrics
+  late start) and offers a memory pressure mode with shorter intervals, which the system collector (`internal/sysstats`) switches
+  on low available memory or memory pressure stall and in which the process collector (`internal/procstats`) lists every process
+  instead of the top ones ([0113](decisions/0113-process-collector-pss-from-smaps-rollup-top-processes-full-snapshot-under-memory-pressure.md));
+  the agent records its own resource use as metrics
   (`internal/selfstats`), and tells systemd that it is ready, alive (a watchdog fed only while every collector runner is on
   time) and stopping (`internal/sdnotify`, `internal/agent`)
   ([0110](decisions/0110-agent-runtime-frame-runner-per-collector-gaps-for-every-missed-sample-hand-written-sd-notify.md),
