@@ -19,3 +19,5 @@ are quoted in full.
 | 2026-10-17 16:05 | 4 Skeleton | squad-dev | launched (mode skeleton), task 2 |
 | 2026-10-17 16:06 | 4 Skeleton | squad-dev | skeleton done; build/vet pass; Parse is zero-value stub, cli/main tests fail on it until task 8 (sonnet/medium · 82,672 tokens · 7 tool uses · 62 s) |
 | 2026-10-17 16:06 | 5 Tests first | squad-tester | launched (mode tests-first), tasks 3-8, 18, 19 on head 09cdec3 |
+| 2026-10-17 16:20 | 5 Tests first | squad-tester | 47 tests compile and fail on skeleton (confirmed: vet ok, 45 failing top-level tests in 7 packages); fixture, docs tasks 18/19 done (sonnet/medium · 270,194 tokens · 42 tool uses · 811 s) |
+| 2026-10-17 16:20 | 6 Implement | squad-dev | launched (mode implement), tasks 9-12, 14-17 |

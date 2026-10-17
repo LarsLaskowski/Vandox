@@ -12,8 +12,9 @@ import (
 
 const (
 	agentName   = "vandox-agent"
-	backendName = "vandoxd"
 	versionFlag = "-version"
+	configFlag  = "-config"
+	defaultPath = "/etc/vandox/agent.yaml"
 )
 
 // failingWriter is an io.Writer whose Write always fails.
@@ -27,89 +28,55 @@ func usageHeader(name string) string {
 	return "Usage of " + name + ":"
 }
 
-func TestRun(t *testing.T) {
+func TestParse(t *testing.T) {
+	usage := []string{usageHeader(agentName), configFlag, versionFlag}
 	tests := []struct {
 		name       string
-		binary     string
 		args       []string
+		wantDone   bool
 		wantCode   int
+		wantConfig string // checked when the agent is to run (done is false)
 		wantStdout string
 		// wantStderr lists substrings stderr must contain; an empty list means stderr must be empty.
 		wantStderr []string
 	}{
+		{name: "no arguments", args: nil, wantConfig: defaultPath},
+		{name: "empty arguments", args: []string{}, wantConfig: defaultPath},
+		{name: "single dash config and value", args: []string{"-config", "/x/a.yaml"}, wantConfig: "/x/a.yaml"},
+		{name: "single dash config=value", args: []string{"-config=/x/a.yaml"}, wantConfig: "/x/a.yaml"},
+		{name: "double dash config and value", args: []string{"--config", "/x/a.yaml"}, wantConfig: "/x/a.yaml"},
+		{name: "double dash config=value", args: []string{"--config=/x/a.yaml"}, wantConfig: "/x/a.yaml"},
 		{
-			name:       "single dash version",
-			binary:     agentName,
-			args:       []string{"-version"},
-			wantCode:   0,
-			wantStdout: version.String(agentName) + "\n",
+			name: "single dash version", args: []string{"-version"},
+			wantDone: true, wantStdout: version.String(agentName) + "\n",
 		},
 		{
-			name:       "double dash version",
-			binary:     backendName,
-			args:       []string{"--version"},
-			wantCode:   0,
-			wantStdout: version.String(backendName) + "\n",
+			name: "double dash version", args: []string{"--version"},
+			wantDone: true, wantStdout: version.String(agentName) + "\n",
+		},
+		{name: "version false runs the agent", args: []string{"-version=false"}, wantConfig: defaultPath},
+		{name: "-h prints usage", args: []string{"-h"}, wantDone: true, wantStderr: usage},
+		{name: "-help prints usage", args: []string{"-help"}, wantDone: true, wantStderr: usage},
+		{name: "--help prints usage", args: []string{"--help"}, wantDone: true, wantStderr: usage},
+		{
+			name: "undefined flag", args: []string{"-bogus"}, wantDone: true, wantCode: 2,
+			wantStderr: append([]string{"flag provided but not defined: -bogus"}, usage...),
 		},
 		{
-			name:       "no arguments print usage",
-			binary:     agentName,
-			args:       nil,
-			wantCode:   0,
-			wantStderr: []string{usageHeader(agentName), versionFlag},
+			name: "positional argument", args: []string{"extra"}, wantDone: true, wantCode: 2,
+			wantStderr: append([]string{agentName + ": unexpected argument"}, usage...),
 		},
 		{
-			name:       "empty arguments print usage",
-			binary:     backendName,
-			args:       []string{},
-			wantCode:   0,
-			wantStderr: []string{usageHeader(backendName), versionFlag},
+			name: "positional argument after a flag", args: []string{"-config", "/x/a.yaml", "extra"}, wantDone: true, wantCode: 2,
+			wantStderr: append([]string{agentName + ": unexpected argument"}, usage...),
 		},
 		{
-			name:       "version false prints usage",
-			binary:     agentName,
-			args:       []string{"-version=false"},
-			wantCode:   0,
-			wantStderr: []string{usageHeader(agentName), versionFlag},
+			name: "empty config", args: []string{"-config", ""}, wantDone: true, wantCode: 2,
+			wantStderr: append([]string{agentName + ": -config must not be empty"}, usage...),
 		},
 		{
-			name:       "positional argument prints usage",
-			binary:     agentName,
-			args:       []string{"extra"},
-			wantCode:   0,
-			wantStderr: []string{usageHeader(agentName), versionFlag},
-		},
-		{
-			name:       "-h prints usage",
-			binary:     agentName,
-			args:       []string{"-h"},
-			wantCode:   0,
-			wantStderr: []string{usageHeader(agentName), versionFlag},
-		},
-		{
-			name:       "-help prints usage",
-			binary:     backendName,
-			args:       []string{"-help"},
-			wantCode:   0,
-			wantStderr: []string{usageHeader(backendName), versionFlag},
-		},
-		{
-			name:       "--help prints usage",
-			binary:     agentName,
-			args:       []string{"--help"},
-			wantCode:   0,
-			wantStderr: []string{usageHeader(agentName), versionFlag},
-		},
-		{
-			name:     "undefined flag fails with exit code 2",
-			binary:   agentName,
-			args:     []string{"-bogus"},
-			wantCode: 2,
-			wantStderr: []string{
-				"flag provided but not defined: -bogus",
-				usageHeader(agentName),
-				versionFlag,
-			},
+			name: "empty config=", args: []string{"-config="}, wantDone: true, wantCode: 2,
+			wantStderr: append([]string{agentName + ": -config must not be empty"}, usage...),
 		},
 	}
 
@@ -117,61 +84,73 @@ func TestRun(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
 
-			_, gotCode, _ := cli.Parse(tc.binary, tc.args, &stdout, &stderr)
+			cmd, gotCode, gotDone := cli.Parse(agentName, tc.args, &stdout, &stderr)
 
+			if gotDone != tc.wantDone {
+				t.Errorf("Parse(%q) done = %v, want %v", tc.args, gotDone, tc.wantDone)
+			}
 			if gotCode != tc.wantCode {
-				t.Errorf("Run(%q, %q) exit code = %d, want %d", tc.binary, tc.args, gotCode, tc.wantCode)
+				t.Errorf("Parse(%q) exit code = %d, want %d", tc.args, gotCode, tc.wantCode)
+			}
+			if !tc.wantDone && cmd.ConfigPath != tc.wantConfig {
+				t.Errorf("Parse(%q) ConfigPath = %q, want %q", tc.args, cmd.ConfigPath, tc.wantConfig)
 			}
 			if stdout.String() != tc.wantStdout {
-				t.Errorf("Run(%q, %q) stdout = %q, want %q", tc.binary, tc.args, stdout.String(), tc.wantStdout)
+				t.Errorf("Parse(%q) stdout = %q, want %q", tc.args, stdout.String(), tc.wantStdout)
 			}
-			assertStderr(t, tc.binary, tc.args, stderr.String(), tc.wantStderr)
+			assertStderr(t, tc.args, stderr.String(), tc.wantStderr)
 		})
 	}
 }
 
 // assertStderr checks that stderr contains every wanted substring, or is empty when none are wanted.
-func assertStderr(t *testing.T, binary string, args []string, stderr string, want []string) {
+func assertStderr(t *testing.T, args []string, stderr string, want []string) {
 	t.Helper()
 
 	if len(want) == 0 && stderr != "" {
-		t.Errorf("Run(%q, %q) stderr = %q, want empty", binary, args, stderr)
+		t.Errorf("Parse(%q) stderr = %q, want empty", args, stderr)
 	}
 	for _, w := range want {
 		if !strings.Contains(stderr, w) {
-			t.Errorf("Run(%q, %q) stderr = %q, want it to contain %q", binary, args, stderr, w)
+			t.Errorf("Parse(%q) stderr = %q, want it to contain %q", args, stderr, w)
 		}
 	}
 }
 
-func TestRun_StdoutWriteFails(t *testing.T) {
+func TestParse_VersionWriteFails(t *testing.T) {
 	var stderr bytes.Buffer
 
-	_, got, _ := cli.Parse(agentName, []string{versionFlag}, failingWriter{}, &stderr)
+	_, gotCode, gotDone := cli.Parse(agentName, []string{versionFlag}, failingWriter{}, &stderr)
 
-	if got != 1 {
-		t.Errorf("Run(%q, [%s]) with failing stdout = %d, want 1", agentName, versionFlag, got)
+	if !gotDone || gotCode != 1 {
+		t.Errorf("Parse(%q, [%s]) with failing stdout = done %v, code %d, want done true, code 1", agentName, versionFlag, gotDone, gotCode)
 	}
 }
 
-func TestRun_NoSharedFlagState(t *testing.T) {
+func TestParse_NoSharedFlagState(t *testing.T) {
 	const calls = 3
 
 	for i := range calls {
 		var stdout, stderr bytes.Buffer
 
-		_, gotVersion, _ := cli.Parse(agentName, []string{versionFlag}, &stdout, &stderr)
-		if gotVersion != 0 || stdout.String() != version.String(agentName)+"\n" {
-			t.Fatalf("call %d: Run(%q, [%s]) = %d, stdout %q, want 0, %q",
-				i, agentName, versionFlag, gotVersion, stdout.String(), version.String(agentName)+"\n")
+		_, gotCode, gotDone := cli.Parse(agentName, []string{versionFlag}, &stdout, &stderr)
+		if !gotDone || gotCode != 0 || stdout.String() != version.String(agentName)+"\n" {
+			t.Fatalf("call %d: Parse(%q, [%s]) = done %v, code %d, stdout %q, want done, 0, %q",
+				i, agentName, versionFlag, gotDone, gotCode, stdout.String(), version.String(agentName)+"\n")
 		}
 
 		stdout.Reset()
 		stderr.Reset()
-		_, gotUsage, _ := cli.Parse(agentName, nil, &stdout, &stderr)
-		if gotUsage != 0 || stdout.Len() != 0 || !strings.Contains(stderr.String(), usageHeader(agentName)) {
-			t.Fatalf("call %d: Run(%q, nil) = %d, stdout %q, stderr %q, want 0, empty stdout, usage on stderr",
-				i, agentName, gotUsage, stdout.String(), stderr.String())
+		cmd, gotCode, gotDone := cli.Parse(agentName, []string{configFlag, "/x/a.yaml"}, &stdout, &stderr)
+		if gotDone || gotCode != 0 || cmd.ConfigPath != "/x/a.yaml" {
+			t.Fatalf("call %d: Parse(%q, [%s /x/a.yaml]) = done %v, code %d, ConfigPath %q, want not done, 0, /x/a.yaml",
+				i, agentName, configFlag, gotDone, gotCode, cmd.ConfigPath)
+		}
+
+		cmd, gotCode, gotDone = cli.Parse(agentName, nil, &stdout, &stderr)
+		if gotDone || gotCode != 0 || cmd.ConfigPath != defaultPath {
+			t.Fatalf("call %d: Parse(%q, nil) after -config = done %v, code %d, ConfigPath %q, want not done, 0, %q",
+				i, agentName, gotDone, gotCode, cmd.ConfigPath, defaultPath)
 		}
 	}
 }

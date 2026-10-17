@@ -1,0 +1,417 @@
+package scheduler_test
+
+import (
+	"context"
+	"errors"
+	"log/slog"
+	"math"
+	"slices"
+	"strings"
+	"testing"
+	"testing/synctest"
+	"time"
+
+	"github.com/LarsLaskowski/Vandox/internal/model"
+	"github.com/LarsLaskowski/Vandox/internal/scheduler"
+	"github.com/LarsLaskowski/Vandox/internal/wire"
+)
+
+func TestPanicError_Error(t *testing.T) {
+	tests := []struct {
+		name  string
+		value any
+		want  string
+	}{
+		{"string", "boom", "scheduler: collector panicked: boom"},
+		{"error value", errors.New("bad state"), "scheduler: collector panicked: bad state"},
+		{"integer", 42, "scheduler: collector panicked: 42"},
+		{"cut at 1024 bytes", strings.Repeat("a", 2000), "scheduler: collector panicked: " + strings.Repeat("a", 1024)},
+		{"exactly 1024 bytes", strings.Repeat("b", 1024), "scheduler: collector panicked: " + strings.Repeat("b", 1024)},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			e := &scheduler.PanicError{Value: tc.value}
+
+			if got := e.Error(); got != tc.want {
+				t.Errorf("PanicError (%s).Error() = %.100q (%d bytes), want %.100q (%d bytes)", tc.name, got, len(got), tc.want, len(tc.want))
+			}
+		})
+	}
+}
+
+func TestScheduler_PanicRecoveredAsGap(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		boom := newScripted("boom", func(_ context.Context, n int, _ scheduler.Run) ([]model.Record, error) {
+			if n == 0 {
+				panic("boom")
+			}
+			return []model.Record{metricRecord("boom", float64(n))}, nil
+		})
+		healthy := newScripted("healthy", nil)
+		h := start(t, []scheduler.Job{
+			job(boom, 10*time.Second, 2*time.Second),
+			job(healthy, 10*time.Second, 2*time.Second),
+		}, &recordingSink{})
+
+		h.sleepTo(15 * time.Second)
+
+		h.requireGaps("boom", []wantGap{
+			{at: 0, captured: anyTime, from: 0, to: 10 * time.Second, cause: model.GapUnknown},
+		})
+		if got := h.offsets(boom.started()); !slices.Equal(got, seconds(0, 10)) {
+			t.Errorf("run starts of the panicking collector = %v, want [0s 10s] (it runs again at its next due time)", got)
+		}
+		after := h.sink.fromSource("boom")
+		if len(after) != 1 || after[0].at.Sub(h.base) != 10*time.Second {
+			t.Errorf("records of boom = %v, want one put at 10s (the run after the panic)", after)
+		}
+		if got := h.offsets(healthy.started()); !slices.Equal(got, seconds(0, 10)) {
+			t.Errorf("run starts of the healthy collector = %v, want [0s 10s]", got)
+		}
+		h.requireLog(slog.LevelError, "collector panicked", anyTime, map[string]string{"collector": "boom", "panic": "boom"})
+		stack := h.logs.find(slog.LevelError, "collector panicked")[0].attrs["stack"]
+		if stack == "" || len(stack) > 4096 {
+			t.Errorf(`"collector panicked" stack attribute has %d bytes, want 1 to 4096 bytes`, len(stack))
+		}
+	})
+}
+
+func TestScheduler_CollectorErrorRecordsGap(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		flaky := newScripted("flaky", func(_ context.Context, n int, _ scheduler.Run) ([]model.Record, error) {
+			if n < 3 {
+				return []model.Record{metricRecord("dropped", 1)}, errors.New("disk on fire")
+			}
+			return []model.Record{metricRecord("flaky", float64(n))}, nil
+		})
+		h := start(t, []scheduler.Job{job(flaky, 10*time.Second, 2*time.Second)}, &recordingSink{})
+
+		h.sleepTo(35 * time.Second)
+
+		s := time.Second
+		h.requireGaps("flaky", []wantGap{
+			{at: 0, captured: anyTime, from: 0, to: 10 * s, cause: model.GapUnknown},
+			{at: 10 * s, captured: anyTime, from: 10 * s, to: 20 * s, cause: model.GapUnknown},
+			{at: 20 * s, captured: anyTime, from: 20 * s, to: 30 * s, cause: model.GapUnknown},
+		})
+		if dropped := h.sink.fromSource("dropped"); len(dropped) != 0 {
+			t.Errorf("records of a failed run reached the sink: %d puts, want none", len(dropped))
+		}
+		if ok := h.sink.fromSource("flaky"); len(ok) != 1 || ok[0].at.Sub(h.base) != 30*s {
+			t.Errorf("records of the successful run = %v, want one put at 30s", ok)
+		}
+		h.requireLog(slog.LevelWarn, "collector failed", anyTime, map[string]string{"collector": "flaky"})
+		h.requireLog(slog.LevelInfo, "collector recovered", 30*s, map[string]string{"collector": "flaky", "failed_runs": "3"})
+	})
+}
+
+// requireStamped checks that records are of origin agent with sequence number 0 and have the given sources.
+func requireStamped(t *testing.T, records []model.Record, sources ...string) {
+	t.Helper()
+
+	for i, want := range sources {
+		r := records[i]
+		if r.Origin != model.OriginAgent || r.Seq != 0 || r.Source != want {
+			t.Errorf("record %d meta = origin %q seq %d source %q, want origin agent seq 0 source %q",
+				i, r.Origin, r.Seq, r.Source, want)
+		}
+	}
+}
+
+func TestScheduler_RecordsGetAgentMetadata(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		explicit := time.Date(1999, time.December, 31, 23, 59, 30, 0, time.UTC)
+		meta := newScripted("meta", func(context.Context, int, scheduler.Run) ([]model.Record, error) {
+			return []model.Record{
+				{
+					Meta: model.Meta{Origin: model.OriginImport, Source: "meta.zero", Seq: 7},
+					Data: &model.MetricPoint{Name: "sample", Value: 1},
+				},
+				{
+					Meta: model.Meta{Origin: model.OriginImport, Source: "meta.set", Seq: 7, CapturedAt: explicit},
+					Data: &model.MetricPoint{Name: "sample", Value: 2},
+				},
+			}, nil
+		})
+		h := start(t, []scheduler.Job{job(meta, 10*time.Second, 2*time.Second)}, &recordingSink{})
+
+		h.sleepTo(time.Second)
+
+		runs := meta.started()
+		if len(runs) != 1 {
+			t.Fatalf("collector runs = %d, want 1", len(runs))
+		}
+		if runs[0].Start.Location() != time.UTC {
+			t.Errorf("Run.Start location = %v, want UTC", runs[0].Start.Location())
+		}
+		got := h.sink.records()
+		if len(got) != 2 {
+			t.Fatalf("records received = %d, want 2", len(got))
+		}
+		requireStamped(t, got, "meta.zero", "meta.set")
+		if !got[0].CapturedAt.Equal(runs[0].Start) {
+			t.Errorf("zero captured_at became %v, want Run.Start %v", got[0].CapturedAt, runs[0].Start)
+		}
+		if !got[1].CapturedAt.Equal(explicit) {
+			t.Errorf("set captured_at became %v, want it unchanged %v", got[1].CapturedAt, explicit)
+		}
+	})
+}
+
+// oversizedSnapshot returns a valid process snapshot whose encoded line exceeds the wire format's line limit.
+func oversizedSnapshot() *model.ProcessSnapshot {
+	snap := &model.ProcessSnapshot{Complete: true}
+	for i := range 100 {
+		snap.Processes = append(snap.Processes, model.ProcessSample{
+			PID:     int32(i + 1),
+			Command: "c",
+			Cmdline: strings.Repeat("a", model.MaxTextBytes),
+		})
+	}
+	return snap
+}
+
+// requireRefusal checks the premise of a table case: wire.CheckRecord refuses bad, with a size error only when size is set.
+func requireRefusal(t *testing.T, bad model.Record, size bool) {
+	t.Helper()
+
+	check := bad
+	check.Origin, check.Seq = model.OriginAgent, 1
+	if check.CapturedAt.IsZero() {
+		check.CapturedAt = time.Date(2026, time.March, 1, 12, 0, 0, 0, time.UTC)
+	}
+	_, err := wire.CheckRecord(&check)
+	var sizeErr *wire.RecordSizeError
+	if err == nil || errors.As(err, &sizeErr) != size {
+		t.Fatalf("test data: wire.CheckRecord(bad) = %v, want a refusal (a *wire.RecordSizeError: %v)", err, size)
+	}
+}
+
+func runInvalidRecord(t *testing.T, bad model.Record) {
+	t.Helper()
+
+	mix := newScripted("mix", func(context.Context, int, scheduler.Run) ([]model.Record, error) {
+		return []model.Record{metricRecord("first", 1), bad, metricRecord("third", 3)}, nil
+	})
+	h := start(t, []scheduler.Job{job(mix, 10*time.Second, 2*time.Second)}, &recordingSink{})
+
+	h.sleepTo(time.Second)
+
+	var sources []string
+	for _, r := range h.sink.records() {
+		if _, isGap := r.Data.(*model.Gap); !isGap {
+			sources = append(sources, r.Source)
+		}
+	}
+	if !slices.Equal(sources, []string{"first", "third"}) {
+		t.Errorf("records received (without gaps) from sources %v, want [first third]", sources)
+	}
+	h.requireGaps("mix", []wantGap{{at: 0, captured: anyTime, from: 0, to: 10 * time.Second, cause: model.GapUnknown}})
+	h.requireLog(slog.LevelWarn, "record refused", anyTime, map[string]string{"collector": "mix"})
+}
+
+func TestScheduler_InvalidRecordReplacedByGap(t *testing.T) {
+	zone := time.FixedZone("", 2*3600)
+	tests := []struct {
+		name string
+		bad  model.Record
+		size bool
+	}{
+		{
+			"NaN value",
+			model.Record{Meta: model.Meta{Source: "mix"}, Data: &model.MetricPoint{Name: "sample", Value: math.NaN()}},
+			false,
+		},
+		{
+			"log line with a non-UTC captured_at",
+			model.Record{
+				Meta: model.Meta{Source: "mix", CapturedAt: time.Date(2026, time.March, 1, 12, 0, 0, 0, zone)},
+				Data: &model.LogLine{Log: "x", Message: "m"},
+			},
+			false,
+		},
+		{
+			"process snapshot over the line limit",
+			model.Record{Meta: model.Meta{Source: "mix"}, Data: oversizedSnapshot()},
+			true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			requireRefusal(t, tc.bad, tc.size)
+			synctest.Test(t, func(t *testing.T) { runInvalidRecord(t, tc.bad) })
+		})
+	}
+}
+
+// pressureJob is the job adaptive of AC9: 60 s interval, 5 s timeout, 10 s under memory pressure.
+func pressureJob(c scheduler.Collector) scheduler.Job {
+	return scheduler.Job{Collector: c, Schedule: scheduler.Schedule{
+		Interval: 60 * time.Second, Timeout: 5 * time.Second, PressureInterval: 10 * time.Second,
+	}}
+}
+
+// pressureEvent is a call of SetPressure at an offset from the start of Run.
+type pressureEvent struct {
+	at   time.Duration
+	high bool
+}
+
+// pressureCase is one case of TestScheduler_PressureShortensInterval.
+type pressureCase struct {
+	name         string
+	withPlain    bool
+	events       []pressureEvent
+	blockFirst   time.Duration // the first Put sleeps this long
+	until        time.Duration
+	wantStarts   []time.Duration
+	wantPressure []bool
+	wantPlain    []time.Duration
+	wantGaps     []wantGap
+}
+
+func runPressureCase(t *testing.T, tc pressureCase) {
+	t.Helper()
+
+	adaptive := newScripted("adaptive", nil)
+	plain := newScripted("plain", nil)
+	jobs := []scheduler.Job{pressureJob(adaptive)}
+	if tc.withPlain {
+		jobs = append(jobs, job(plain, 60*time.Second, 5*time.Second))
+	}
+	sink := &recordingSink{}
+	if tc.blockFirst > 0 {
+		sink.hook = func(_ context.Context, n int) error {
+			if n == 0 {
+				time.Sleep(tc.blockFirst)
+			}
+			return nil
+		}
+	}
+	h := start(t, jobs, sink)
+
+	for _, e := range tc.events {
+		h.sleepTo(e.at)
+		h.sched.SetPressure(e.high)
+	}
+	h.sleepTo(tc.until)
+
+	runs := adaptive.started()
+	if got := h.offsets(runs); !slices.Equal(got, tc.wantStarts) {
+		t.Errorf("adaptive run starts = %v, want %v", got, tc.wantStarts)
+	}
+	if got := pressures(runs); !slices.Equal(got, tc.wantPressure) {
+		t.Errorf("adaptive Run.Pressure = %v, want %v", got, tc.wantPressure)
+	}
+	if tc.withPlain {
+		plainRuns := plain.started()
+		if got := h.offsets(plainRuns); !slices.Equal(got, tc.wantPlain) {
+			t.Errorf("plain run starts = %v, want %v", got, tc.wantPlain)
+		}
+		if got := pressures(plainRuns); !slices.Equal(got, []bool{false, false}) {
+			t.Errorf("plain Run.Pressure = %v, want [false false]", got)
+		}
+	}
+	h.requireGaps("adaptive", tc.wantGaps)
+}
+
+func TestScheduler_PressureShortensInterval(t *testing.T) {
+	s := time.Second
+	tests := []pressureCase{
+		{
+			name:         "switch on at 15s and off at 40s",
+			withPlain:    true,
+			events:       []pressureEvent{{15 * s, true}, {20 * s, true}, {40 * s, false}},
+			until:        100 * s,
+			wantStarts:   seconds(0, 15, 25, 35, 95),
+			wantPressure: []bool{false, true, true, true, false},
+			wantPlain:    seconds(0, 60),
+		},
+		{
+			name:         "switch long after the old grid point",
+			events:       []pressureEvent{{45 * s, true}},
+			until:        70 * s,
+			wantStarts:   seconds(0, 45, 55, 65),
+			wantPressure: []bool{false, true, true, true},
+		},
+		{
+			name:         "switch shortly after a run keeps the grid",
+			events:       []pressureEvent{{3 * s, true}},
+			until:        15 * s,
+			wantStarts:   seconds(0, 10),
+			wantPressure: []bool{false, true},
+		},
+		{
+			name:         "switch while the runner is held in Put for less than a slot",
+			events:       []pressureEvent{{24 * s, true}},
+			blockFirst:   26 * s,
+			until:        36 * s,
+			wantStarts:   seconds(0, 26, 34),
+			wantPressure: []bool{false, true, true},
+		},
+		{
+			name:         "switch while the runner is held in Put for a whole slot",
+			events:       []pressureEvent{{24 * s, true}},
+			blockFirst:   50 * s,
+			until:        52 * s,
+			wantStarts:   seconds(0, 50),
+			wantPressure: []bool{false, true},
+			wantGaps:     []wantGap{{at: 50 * s, captured: anyTime, from: 24 * s, to: 50 * s, cause: model.GapUnknown}},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) { runPressureCase(t, tc) })
+		})
+	}
+}
+
+func TestScheduler_LateWakeUpRecordsGap(t *testing.T) {
+	s := time.Second
+	tests := []struct {
+		name       string
+		block      time.Duration
+		until      time.Duration
+		wantStarts []time.Duration
+		wantGaps   []wantGap
+	}{
+		{
+			name:       "Put returns a whole slot late",
+			block:      30 * s,
+			until:      42 * s,
+			wantStarts: seconds(0, 30, 40),
+			wantGaps:   []wantGap{{at: 30 * s, captured: anyTime, from: 10 * s, to: 30 * s, cause: model.GapUnknown}},
+		},
+		{
+			name:       "Put returns inside the next slot",
+			block:      15 * s,
+			until:      22 * s,
+			wantStarts: seconds(0, 15, 20),
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				c := newScripted("late", nil)
+				sink := &recordingSink{hook: func(_ context.Context, n int) error {
+					if n == 0 {
+						time.Sleep(tc.block)
+					}
+					return nil
+				}}
+				h := start(t, []scheduler.Job{job(c, 10*time.Second, 2*time.Second)}, sink)
+
+				h.sleepTo(tc.until)
+
+				if got := h.offsets(c.started()); !slices.Equal(got, tc.wantStarts) {
+					t.Errorf("run starts = %v, want %v", got, tc.wantStarts)
+				}
+				h.requireGaps("late", tc.wantGaps)
+			})
+		})
+	}
+}

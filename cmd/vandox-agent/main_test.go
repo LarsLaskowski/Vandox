@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -37,5 +38,24 @@ func TestRun_UndefinedFlag(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), want) {
 		t.Errorf("run([-bogus]) stderr = %q, want it to contain %q", stderr.String(), want)
+	}
+}
+
+func TestRun_MissingConfigExitsOne(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	missing := filepath.Join(t.TempDir(), "none.yaml")
+
+	got := run(context.Background(), []string{"-config", missing}, nil, &stdout, &stderr)
+
+	if got != 1 {
+		t.Errorf("run([-config <missing file>]) exit code = %d, want 1", got)
+	}
+	if stdout.Len() != 0 {
+		t.Errorf("run([-config <missing file>]) stdout = %q, want empty", stdout.String())
+	}
+	for _, want := range []string{"agent cannot start", missing} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Errorf("run([-config <missing file>]) stderr = %q, want it to contain %q", stderr.String(), want)
+		}
 	}
 }
