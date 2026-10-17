@@ -45,7 +45,7 @@ Keep the web port as `deploy/backend/docker-compose.yml` publishes it, on `127.0
 host that runs the reverse proxy). That binding is defense in depth, not an access boundary: depending on the
 Docker Engine version and the host firewall, hosts on the LAN may reach a published container port directly,
 so use a current Docker Engine and a host firewall where that matters. The ingest port is not published until
-the ingest API exists. The agent token file (`secrets/vandox_agent_token`) must be owned by UID 65532 with mode
+the ingest API exists. The agent token file (`secrets/vandox_agent_token`) must be owned by the container's user (UID 65532 by default, or the IDs set with `user:` or `--user`) with mode
 `0400`, never world-readable, because Compose sets no owner or mode on file secrets outside Swarm. The same holds for the
 web password hash file (`secrets/vandox_web_password_hash`, created with `vandoxd hash-password` as the README shows, without `-t`
 so the terminal does not echo the password); the hash is argon2id, but a copied file still allows offline guessing.

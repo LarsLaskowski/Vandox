@@ -102,8 +102,9 @@ deadline and the health timeout are constants, not options.
 ## Container image
 
 - The image is built from a pinned .NET build image and runs on the pinned *chiseled* ASP.NET runtime image (no shell, no package
-  manager); both base images are referenced by digest through build arguments. The service runs as the non-root user `65532:65532`;
-  the entry point is the service itself, so `docker run networlddev/vandox` starts it and `--version` works.
+  manager); both base images are referenced by digest through build arguments. The service runs as the non-root user `65532:65532` by
+  default; the operator may run it as any other non-root user ID (`user:` in the compose file, `--user`), which then has to own the
+  data directory and the secret files. The entry point is the service itself, so `docker run networlddev/vandox` starts it and `--version` works.
 - `/data` is an empty directory owned by `65532:65532` with mode `0700`, so a new named volume mounted there is writable by the
   non-root user. Nothing else in the image is owned by that user.
 - The image declares **no `EXPOSE`** (tools that pre-fill port mappings would publish every exposed port on all interfaces) and
@@ -128,7 +129,7 @@ deadline and the health timeout are constants, not options.
   created with `vandoxd hash-password` ([Web login](web-login.md), *Creating the hash*); the file has the owner and mode of the token
   file, and the service refuses to start without a valid hash.
 - The agent token is a **file secret** (`VANDOX_AGENT_TOKEN_FILE=/run/secrets/vandox_agent_token`). The operator creates
-  `secrets/vandox_agent_token` owned by `65532:65532` with mode `0400` or `0600`, never world-readable; Compose does not apply owner
+  `secrets/vandox_agent_token` owned by the container's user (`65532:65532` by default) with mode `0400` or `0600`, never world-readable; Compose does not apply owner
   or mode to file secrets, and the service does not enforce them.
 - Hardening: read-only root file system with a `tmpfs` on `/tmp`, `cap_drop: ALL`, `no-new-privileges`, `json-file` logs limited to
   3 files of 10 MB.
