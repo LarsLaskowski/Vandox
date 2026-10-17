@@ -32,6 +32,7 @@ type System struct {
 	prev        *sample // the last successful sample
 	unavailable string  // the pressure resources last logged as unavailable, comma-separated
 	onSwitch    func(high bool)
+	high        bool // whether memory pressure mode is on; it starts off
 }
 
 // NewSystem returns the system collector reading src; a nil log logs nothing.
@@ -70,7 +71,54 @@ func (c *System) Collect(ctx context.Context, run scheduler.Run) ([]model.Record
 	c.prev, c.unavailable = s, unavailable
 	c.mu.Unlock()
 	c.logPressure(loggedUnavailable, unavailable)
+	c.updatePressureMode(s)
 	return records, nil
+}
+
+// updatePressureMode decides the memory pressure mode after the successful sample s and, when it changes, logs one line
+// and calls the switch.
+func (c *System) updatePressureMode(s *sample) {
+	reading := PressureReading{
+		MemAvailable: kBToBytes(s.mem.values["MemAvailable"]),
+		MemTotal:     kBToBytes(s.mem.values["MemTotal"]),
+	}
+	for _, f := range s.psi {
+		if f.resource == "memory" && len(f.lines) > 0 && f.lines[0].kind == "some" {
+			reading.Avg10, reading.HasAvg10 = f.lines[0].avg[0], true
+		}
+	}
+
+	c.mu.Lock()
+	next := NextPressure(c.high, reading)
+	changed := next != c.high
+	c.high = next
+	onSwitch := c.onSwitch
+	c.mu.Unlock()
+	if !changed {
+		return
+	}
+
+	msg := "memory pressure mode off"
+	if next {
+		msg = "memory pressure mode on"
+	}
+	attrs := []any{"collector", SystemName, "mem_available_bytes", reading.MemAvailable}
+	if reading.HasAvg10 {
+		attrs = append(attrs, "memory_some_avg10", reading.Avg10)
+	}
+	c.log.Info(msg, attrs...)
+	if onSwitch != nil {
+		onSwitch(next)
+	}
+}
+
+// kBToBytes returns kB kibibytes in bytes; a negative value is 0. The value of a meminfo line is at most maxKBValue, so the
+// product fits.
+func kBToBytes(kB int64) uint64 {
+	if kB < 0 || kB > maxKBValue {
+		return 0
+	}
+	return uint64(kB) * 1024
 }
 
 // read reads the sources in the order of the records. unavailable names the pressure resources the host does not offer.

@@ -44,6 +44,7 @@ Agent:
 | `spool.directory` | `/var/lib/vandox/spool` | absolute, clean path |
 | `log.level` | `info` | `debug`, `info`, `warn` or `error` |
 | `filesystem.mount_points` | `["/"]` | a list of at most 16 absolute, clean paths of at most 1,024 bytes each, every path listed once (see below) |
+| `processes.programs` | `[]` | a list of at most 64 rules, each a mapping of `program`, one of `command` and `cmdline_prefix`, and optionally `append_next_word` (see below) |
 
 Backend:
 
@@ -88,6 +89,28 @@ Backend:
   `null`, `!!null` or an empty `-`) is refused with `has no value` and the line of the element: the YAML library would otherwise drop
   it silently and an all-null list would turn into `[]` and switch the file system metrics off. A value is recorded only when it is a
   mount point in the agent's own mount namespace; otherwise the agent logs that once and leaves it out.
+- `processes.programs` names the program a process belongs to ([Agent](agent.md), *Processes*). It is a list of at most 64 rules in
+  file order; the first rule that matches a process gives its program. Each rule is a mapping with `program` (required: 1 to 128
+  characters of `A-Z a-z 0-9 . _ : / @ + -`, starting with a letter or digit), exactly one of `command` (compared with the command
+  of the process as a whole) and `cmdline_prefix` (compared literally with the start of the command line), each 1 to 256 bytes
+  without characters of the categories Cc, Cf, Zl or Zp, and `append_next_word` (true or false, default false, only with
+  `cmdline_prefix`), which appends the word after the prefix as `<program>/<word>`. A rule is a literal comparison; there is no
+  pattern language. The strict decoder walks the list like a section for each element: an unknown or duplicate key, an anchor, an
+  alias or a custom tag inside an element, a null element and an element that is not a mapping are refused with the line of the
+  element or key and the key path `processes.programs[<index>]` (and `.<key>`). The other errors read
+  `config: <file>:<line>: <key>: <reason>`:
+
+  | Key | Reason |
+  | --- | ------ |
+  | `processes.programs` (more than 64 rules) | `must be a list of at most 64 rules` |
+  | `processes.programs[<i>].program` | `must be 1 to 128 characters of [A-Za-z0-9._:/@+-], starting with a letter or digit` |
+  | `processes.programs[<i>]` (neither or both of `command` and `cmdline_prefix`) | `must set exactly one of command and cmdline_prefix` |
+  | `processes.programs[<i>].command` or `.cmdline_prefix` (empty is "not set"; more than 256 bytes) | `must be 1 to 256 bytes` |
+  | `processes.programs[<i>].append_next_word` (without `cmdline_prefix`) | `needs cmdline_prefix` |
+  | `processes.programs[<i>]` (null element) | `has no value` |
+  | `processes.programs[<i>]` (element that is not a mapping) | `must be a section (a mapping of keys)` |
+
+  No error text contains the value of a rule.
 - A directory must be absolute and clean: no trailing slash and no empty, `.` or `..` element. The loader does not
   create it.
 - Plain `http` is allowed for `backend.url`, because the tailnet encrypts and authenticates the transport. Whether
@@ -167,6 +190,7 @@ Backend:
 - [0050](../decisions/0050-secret-sources-rules-and-redaction.md) — why `*_FILE`, strict value rules and unknown `VANDOX_` variables.
 - [0078](../decisions/0078-configuration-and-secrets-in-the-backend-with-yamldotnet.md) — why the backend implements the same rules with YamlDotNet.
 - [0104](../decisions/0104-argon2id-password-hash-konscious-strict-phc-form-hash-password-command.md) and [0105](../decisions/0105-forwarded-headers-only-from-trusted-proxies-failed-logins-locked-per-client-and-capped.md) — why the hash form is checked on top of the secret rules and why `web.trusted_proxies` is a comma-separated string.
+- [0113](../decisions/0113-process-collector-pss-from-smaps-rollup-top-processes-full-snapshot-under-memory-pressure.md) — why the process grouping rules are a list of mappings of literal comparisons that the strict decoder checks.
 
 ## Not here
 

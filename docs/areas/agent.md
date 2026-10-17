@@ -7,8 +7,8 @@ how it survives a stalled data source and a missing backend, how gaps are record
 sends is in the [wire format](wire-format.md); its configuration file is in [Configuration and secrets](configuration-and-secrets.md).
 
 **Status.** The command line, the start-up with the configuration file, logging, the scheduler with its gaps and the memory pressure
-switch, the self-metrics, the system metrics and the notification of systemd exist, as do the shared data model and the wire encoder.
-The other collectors, the spool, the sender and the systemd unit are **not implemented yet**: until the spool exists, the agent
+switch, the self-metrics, the system metrics, the process collector with the memory pressure mode and the notification of systemd exist, as do
+the shared data model and the wire encoder. The other collectors, the spool, the sender and the systemd unit are **not implemented yet**: until the spool exists, the agent
 drops the records it produces after checking them (it is not released in that state; v0.2.0 waits for the spool and the sender). The
 rules below for the parts not implemented are the target the implementation is held to and the tests must check.
 
@@ -219,6 +219,135 @@ It is not a missed sample and records no gap; the backend reads it as unknown, n
 (*Scheduling*). The error texts name the file (`meminfo`, `pressure/io`, `block/sda/stat`,
 `self/mountinfo`), the line number where there is one and a fixed reason; they never contain file content or a configured path.
 
+## Processes
+
+The collector `processes` (interval 60 seconds, pressure interval 15 seconds, timeout 10 seconds, placed after `system` in the job list)
+records one `process_snapshot` record per run with source `processes` and the capture time of the run's start, in the model the legacy
+log parser writes ([wire format](wire-format.md); the legacy naming is in [Log import](log-import.md)). It is the replacement for the
+`top` script. It reads `/proc/<pid>/stat`, `status`, `cmdline` and `smaps_rollup` of every process through the replaceable file-system
+interface (and `/proc/stat` for the boot time and `/etc/passwd` for user names), starts no program, opens no socket and makes no raw
+system call; the package imports none that would.
+
+**What a snapshot holds.**
+
+- Every program is summed over **every process read**, not only the listed ones, so the `count` of the programs adds up to `total` (less
+  the processes left out below): `count`, `cpu_percent` (sum), `rss_bytes` (sum, saturating at the largest 64-bit value),
+  `pss_bytes` (sum, saturating, present only when **every** member has a PSS) and `rss_overcounted` (exactly when `count` is above 1).
+  RSS counts a shared page in every process that maps it, PSS divides it among them, so the PSS sum is the memory the program really
+  holds in the memory processes map; kernel memory and unmapped page cache are in neither sum.
+- Without pressure mode the list of processes is the union of the top 25 by memory and the top 25 by `cpu_percent` (ties by PID, lowest
+  first). Under pressure mode (the run knows it, *Scheduling*) it lists **every process read**. `total` is the number of processes seen
+  (the PID directories, less those that ended during the read), `complete` is true only when every process was read and listed and no
+  entry was left out for size or validity.
+- **One memory key for the whole run:** the PSS when every process read has one, else the RSS for all, so a process whose PSS cannot be
+  read does not put PSS beside RSS in one ranking. Processes and programs are ordered by that key descending, then processes by PID
+  and programs by name (ordinal). Without `CAP_SYS_PTRACE` the key is the RSS, as `top` ranks.
+- Per process: `pid`, `ppid`, `user` (the name of the **effective** UID from `/etc/passwd`, else the UID in decimal), `command`, `cmdline`
+  (at most 1,024 bytes; `truncated` when more was there), `state` (the `stat` state when it is one ASCII letter, else left out),
+  `started_at` (boot time plus `starttime` in clock ticks of 10 ms, UTC), `cpu_percent`, `rss_bytes`, `pss_bytes` and `swap_bytes` (`VmSwap`,
+  left out when the line is absent). `oom_score_adj` is not read. A process without address space (a kernel thread, a zombie) has
+  `rss_bytes` 0 and `pss_bytes` 0, which is the measurement; a PSS that cannot be read is left out, never 0.
+- **CPU.** With a predecessor (the same PID with the same `starttime` in the previous successful run, runs moving forward, counters not
+  fallen) `cpu_percent` is the CPU time used between the two runs' starts over the time between them; without one (first run, new or
+  reused PID, counters that fell, the clock set back) it is the average since the process started, and 0 when it has no age. The clock
+  ticks are the fixed 100 per second (`USER_HZ` of the Linux ABI on x86-64 and arm64). A failed run is no predecessor.
+
+**Names.** The `command` is the legacy derivation, pinned by the fixture `testdata/processes/names.json` that the agent and the backend's
+legacy parser both read: the text inside `[...]` when the whole command line is bracketed, else the part after the last `/` of the first
+space-separated word without one trailing `:`; when that is empty the command line; when that is empty too the cleaned `comm`; when that
+is empty too the fixed text `(unnamed)`, which holds no process text, so a `command` is never empty (a process that blanks its name
+stays in the program sums instead of hiding there). The default program is the first space-separated word of the `command`. The
+configured rules (`processes.programs`, [Configuration and secrets](configuration-and-secrets.md)) are tried first, in order; the first
+match gives the program, which is the rule's `program`, with `append_next_word` followed by `/` and the word after the prefix in the
+cleaned command line (up to the next space, cut so that the program has at most 1,024 bytes at a character boundary; an empty word
+leaves the program). The default rule list is empty, so the names match the legacy log. The titles `php-fpm: pool ...`, `spamd` and
+`amavisd` used as examples are the forms those programs document, captured through a test process, **not captured from a Plesk server**;
+the parallel run of #45 checks them.
+
+**Readers (security area 10).** Every read is bounded before it is parsed and every number is 1 to 20 ASCII digits parsed into its target
+width; nothing else is accepted:
+
+- `stat`: at most 4 KiB, read whole. The PID, a space, `(`, `comm` up to the **last** `)` of the file, a space and at least 20
+  single-space-separated fields; the state is field 3, `ppid` 4, `flags` 9, `utime` 14, `stime` 15, `starttime` 22. The PID must equal
+  the directory name; `comm` may be empty and may hold any byte but NUL (a name can hold `)`, spaces and a line feed).
+- `status`: at most 16 KiB; only lines that start with `Uid:`, `VmRSS:` and `VmSwap:` are read, each at most once. The kernel escapes a line
+  feed of the name, so no name can start such a line. `Uid:` is four tab-separated decimal values within 32 bits, the second the
+  effective UID; the sizes are digits and ` kB`, and the value times 1,024 must fit 64 bits. `VmRSS` may be absent only for a process
+  without address space.
+- `smaps_rollup`: at most 4 KiB; the first line is not read, of the rest only `Rss:` and `Pss:` are, each exactly once; `Pss_Dirty` and other
+  lines (they differ between kernel versions) are ignored. RSS comes from this block when it is readable, so RSS and PSS are comparable,
+  else from `VmRSS`.
+- `cmdline`: at most 4 KiB read per process (a larger file is not read further). Trailing NUL bytes are removed, every other NUL becomes a
+  space, every byte that does not start a valid UTF-8 sequence becomes U+FFFD, and the text is cut to 1,024 bytes at a character boundary
+  while it is built; other control characters are kept as written. `comm` is made valid UTF-8 the same way.
+- `/proc/stat`: line by line, at most 1 MiB in total; a line longer than 64 KiB (the `intr` line of a large host) is skipped to its end;
+  the line `btime`, one space and digits must occur exactly once.
+- `/etc/passwd`: at most 1 MiB, lines of at most 4 KiB; a line with fewer than 3 fields, an empty name or a UID that is not 1 to 10 digits
+  within 32 bits is skipped; the first line of a UID wins; a name is made valid UTF-8 and cut to 256 bytes. It is read once per run.
+- `started_at` must be a time before the year 10000, which the JSON encoding of a time needs; the arithmetic is checked before any
+  conversion to a signed type.
+- `/proc` is listed in chunks of 256 entries (never all names at once). A PID directory's name is the canonical decimal of a 32-bit PID
+  above 0 (1 to 10 digits, no leading zero); other names are no process and are not counted. A bounded max-heap keeps the 4,096 numerically
+  lowest PIDs while the listing streams; every other PID directory is counted in `total` and makes `complete` false.
+
+**Outcomes.** A process whose files disappear (`ENOENT`) or whose read answers `ESRCH` has ended: it is left out, not counted, and
+`complete` is unchanged. `ESRCH` on `smaps_rollup` of a kernel thread (`PF_KTHREAD` in the `stat` flags) or a zombie means no address
+space. `EACCES` or `EPERM` on `smaps_rollup` leaves `pss_bytes` out and takes `rss_bytes` from `VmRSS`. Any other read or parse error of
+one process leaves that process out and makes `complete` false; the sample goes on. The sample fails (a gap) only when `/proc` cannot be
+listed, the boot time cannot be read or no process was read. A `passwd` that cannot be read makes every user the decimal UID. Error texts
+name the file relative to `/proc` or `/etc` (`1234/stat`, `stat`, `passwd`) and a fixed reason, never file content, a `comm`, a command
+line or a user name.
+
+**Logging.** One line per change, through the collector's logger with the attribute `collector=processes`: a warning `process memory partly
+unknown` (`processes`: the number without PSS) when that number becomes positive and an info line `process memory known again` when it
+returns to 0; a warning `processes not read` (`processes`: the count, `err`: the first error) and `processes read again`; a warning `user
+names unavailable` (`err`) and `user names available`. No log line holds process text.
+
+**The record always fits and is valid on both sides.** No text a user chooses can fail the sample. Every rule the model checks per entry
+(`pid` above 0 and distinct, `ppid` not negative, `user`, `command`, `cmdline` and `program` at most 1,024 bytes of valid UTF-8, `command`
+and `program` not empty, a `state` of one letter or none, `started_at` in UTC, `cpu_percent` finite and not negative, `count` at least 1,
+at most 4,096 entries per list) holds by construction. As a second guard each entry is also validated and encoded alone, and an entry that
+fails either is left out with `complete` false (counted with the processes not read, with the fixed text `processes: entry refused`).
+The collector fills the record entry by entry within a payload budget of 1 MiB less 8 KiB of JSON: programs first, at most half of the
+budget, in their order, stopping at the first that does not fit; then the processes in theirs, stopping at the first that does not fit. The
+finished record is checked once as the producer contract of the [wire format](wire-format.md); as a safety net that the budget makes
+unused, a record that is still too long is shortened by halving its processes and then its programs, and any other error fails the sample.
+
+**Bounded memory.** A run reads one file at a time into buffers that are reused for every process, at most 4 KiB of a command line per
+process, holds per process only its numbers and three texts of at most 1,024 bytes, and lists `/proc` in chunks. One run over 4,096
+processes with maximal texts allocates at most **48 MiB in total** (garbage included, so the memory it holds at any moment is less); this
+asserted figure, checked by `TestProcesses_LargeSnapshotFitsTheLineLimit`, is the only memory figure stated here.
+
+**Hanging reads (accepted residual).** A read that blocks is abandoned by the scheduler at the timeout with a gap, and the collector is not
+started again while it hangs. A local user who holds the memory map lock of a process can make its `cmdline` or `smaps_rollup` read block; that costs process samples, as gaps, until the process moves. This
+is deliberate: a goroutine and deadline per process would cost more than the collector itself (record 0113, option 10).
+
+**Speed and cost.** A snapshot of 250 processes takes under 100 ms; the figure and the host it was measured on are in
+[Benchmarks](../BENCHMARKS.md) (*Process snapshot*), not measured on the server (kernel 5.15, 2 GB), which #44 does. Reading
+`smaps_rollup` of every process every 15 seconds under pressure is a cost nobody has measured on the server; it is an **open point for #44
+and #45**.
+
+## Memory pressure mode
+
+The `system` collector decides the memory pressure mode ([Scheduling](#scheduling)) after each successful `system` sample, from the values
+it has just read:
+
+- the mode turns **on** when `MemAvailable` is below 10 % of `MemTotal` (10 times `MemAvailable` is less than `MemTotal`) or the memory
+  `some avg10` is at least 10.00;
+- it turns **off** only when `MemAvailable` is at least 15 % of `MemTotal` (20 times `MemAvailable` is at least 3 times `MemTotal`) and
+  `some avg10` is below 5.00 or the memory pressure file is not available (a kernel without pressure stall information);
+- otherwise it keeps its mode. The products are computed exactly (128 bits, no overflow, no floating point). The thresholds are fixed, not
+  options, until the parallel run of #45 shows a reason (record 0113, option 4).
+
+The collector calls the switch (`Scheduler.SetPressure`, which the agent connects when it builds the scheduler) only when the mode changes;
+it starts off. A change logs one info line `memory pressure mode on` or `memory pressure mode off` with `collector=system`,
+`mem_available_bytes` and, when the pressure file was read, `memory_some_avg10`. A failed sample changes nothing. The effect: the `system`
+(10 seconds) and `processes` (15 seconds) collectors run at their pressure intervals and `processes` lists every process.
+
+Because the decision follows a `system` sample, the switch can lag the pressure by up to one `system` interval (30 seconds). Any local
+user can switch the mode on by allocating memory; the result is a process snapshot with every process every 15 seconds and a spool that
+grows faster until its size bound evicts older data with a recorded gap, bounded by the record budget (a stated residual).
+
 ## Service manager
 
 - When systemd started the agent with a notification socket, the agent sends `READY=1` once its collectors run, `WATCHDOG=1` while
@@ -262,6 +391,13 @@ collector timeouts and backend gap detection each emit a gap record, and each pa
   that OS user through `unix_socket` with only the `PROCESS` privilege.
 - For reading it is a member of the groups `adm` (log files) and `systemd-journal` (journal). To read other users' processes and their
   open files it holds exactly `CAP_SYS_PTRACE` and `CAP_DAC_READ_SEARCH`, as ambient capabilities with a bounding set limited to these two.
+- **Process collector.** `stat`, `status` and `cmdline` of every process are readable by any user (unless `/proc` is mounted with
+  `hidepid`); `smaps_rollup` of **another user's** process needs `CAP_SYS_PTRACE`, and `CAP_DAC_READ_SEARCH` does not replace it. Measured
+  on the development host as UID 65534 against a root process in the same namespace, without Yama or `hidepid`: `smaps_rollup` answers
+  `EACCES` without capabilities and with `CAP_DAC_READ_SEARCH` alone, and is readable with `CAP_SYS_PTRACE`. A Yama or other LSM policy,
+  and another user namespace, were not measured and can refuse the read even with the capability. Without it the collector records the
+  RSS from `status` and leaves the PSS out. `CAP_SYS_PTRACE` is the process collector's use of the capability; the list of rights per
+  collector is in `deploy/agent/README.md`.
 - As soon as the unit grants any capability, the unit is confined: `NoNewPrivileges=yes`; a system-call filter that denies `ptrace`,
   `process_vm_readv`, `process_vm_writev`, `pidfd_getfd` and `open_by_handle_at` with `EPERM` (and not `pidfd_open` or
   `pidfd_send_signal`) under `SystemCallArchitectures=native`; no write-side capability; `ProtectHome=yes` and `InaccessiblePaths=` for at
@@ -295,6 +431,10 @@ collector timeouts and backend gap detection each emit a gap record, and each pa
 - [0111](../decisions/0111-system-metrics-three-collectors-from-proc-sys-statfs-and-adjtimex.md) — why three system collectors,
   `statfs` and `adjtimex` beside `/proc` and `/sys`, the synchronization rule, the PLL offset only while the PLL is on, and absent
   values left out instead of zero.
+- [0113](../decisions/0113-process-collector-pss-from-smaps-rollup-top-processes-full-snapshot-under-memory-pressure.md) — why the process
+  collector reads `smaps_rollup` for PSS, lists the top processes and every program (every process under pressure), the `system` collector
+  switches the memory pressure mode with fixed hysteretic thresholds, names follow the legacy derivation plus literal rules, and an entry
+  that fails its check is left out.
 
 ## Not here
 
@@ -305,6 +445,7 @@ collector timeouts and backend gap detection each emit a gap record, and each pa
 ## Implementation
 
 `cmd/vandox-agent` and `internal/cli` (Go), `internal/agent` (start-up, logging, watchdog), `internal/scheduler`, `internal/selfstats`,
-`internal/sysstats` (system metrics; fixtures `testdata/proc/`, `testdata/sys/`),
+`internal/sysstats` (system metrics and the memory pressure mode; fixtures `testdata/proc/`, `testdata/sys/`),
+`internal/procstats` (process collector; fixtures `testdata/proc/<pid>/`, `testdata/etc/passwd`, `testdata/processes/names.json`),
 `internal/sdnotify`, `internal/config`, `internal/model`, `internal/wire`; `deploy/agent/` (example configuration; the unit and install
 scripts follow with the collectors).

@@ -95,8 +95,9 @@ func Run(ctx context.Context, opts Options) int {
 	return 0
 }
 
-// jobs returns the collectors with their schedules: self, system, filesystem (only when a mount point is configured) and
-// clock, and the system collector, which newScheduler connects to the scheduler. The collectors log through log.
+// jobs returns the collectors with their schedules: self, system, processes, filesystem (only when a mount point is
+// configured) and clock, and the system collector, which newScheduler connects to the scheduler. The collectors log
+// through log.
 func jobs(opts Options, cfg *config.Agent, log *slog.Logger) ([]scheduler.Job, *sysstats.System) {
 	system := sysstats.NewSystem(opts.System, log)
 	list := []scheduler.Job{
@@ -107,6 +108,10 @@ func jobs(opts Options, cfg *config.Agent, log *slog.Logger) ([]scheduler.Job, *
 		{
 			Collector: system,
 			Schedule:  scheduler.Schedule{Interval: SystemInterval, Timeout: SystemTimeout, PressureInterval: SystemPressureInterval},
+		},
+		{
+			Collector: procstats.New(opts.Processes, programRules(cfg.Processes.Programs), log),
+			Schedule:  scheduler.Schedule{Interval: ProcessesInterval, Timeout: ProcessesTimeout, PressureInterval: ProcessesPressureInterval},
 		},
 	}
 	if len(cfg.Filesystem.MountPoints) > 0 {
@@ -123,17 +128,32 @@ func jobs(opts Options, cfg *config.Agent, log *slog.Logger) ([]scheduler.Job, *
 
 // programRules converts the configured program rules for the process collector.
 func programRules(rules []config.ProgramRule) []procstats.Rule {
-	return nil
+	out := make([]procstats.Rule, 0, len(rules))
+	for _, r := range rules {
+		out = append(out, procstats.Rule{
+			Program:        r.Program,
+			Command:        r.Command,
+			CmdlinePrefix:  r.CmdlinePrefix,
+			AppendNextWord: r.AppendNextWord,
+		})
+	}
+	return out
 }
 
-// newScheduler returns the scheduler with the jobs of the configuration.
+// newScheduler returns the scheduler with the jobs of the configuration; the system collector switches its memory
+// pressure mode.
 func newScheduler(opts Options, cfg *config.Agent, log *slog.Logger) (*scheduler.Scheduler, error) {
 	var sink scheduler.Putter = scheduler.DiscardSink{}
 	if opts.Sink != nil {
 		sink = opts.Sink
 	}
-	list, _ := jobs(opts, cfg, log)
-	return scheduler.New(list, sink, log)
+	list, system := jobs(opts, cfg, log)
+	sched, err := scheduler.New(list, sink, log)
+	if err != nil {
+		return nil, err
+	}
+	system.SetPressureSwitch(sched.SetPressure)
+	return sched, nil
 }
 
 // notification returns the notifier of the service manager and the watchdog interval; a problem with either is

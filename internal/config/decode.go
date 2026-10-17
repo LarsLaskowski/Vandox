@@ -176,11 +176,45 @@ func (d *decoder) walkField(path string, k, v *yaml.Node, field reflect.Value) e
 	if field.Kind() == reflect.Struct {
 		return d.walkSection(path, k, v, field)
 	}
+	if field.Kind() == reflect.Slice && field.Type().Elem().Kind() == reflect.Struct {
+		return d.walkList(path, k, v, field)
+	}
 	return d.setLeaf(path, k, v, field)
 }
 
 // walkList handles the value v of the key k, a list of mappings that fills the slice of structs field.
+//
+// Each element is walked like a section under the path "<key>[<index>]"; the line of the key and of every element is
+// recorded. An element does not take defaults from the document, a null element and an element that is not a mapping are
+// refused with the element's line.
 func (d *decoder) walkList(path string, k, v *yaml.Node, field reflect.Value) error {
+	if isNull(v) {
+		return &KeyError{File: d.file, Line: k.Line, Key: path, Reason: "has no value"}
+	}
+	if v.Kind != yaml.SequenceNode {
+		return &KeyError{File: d.file, Line: k.Line, Key: path, Reason: "invalid value, want " + describe(field.Type())}
+	}
+	d.lines[path] = k.Line
+	list := reflect.MakeSlice(field.Type(), 0, len(v.Content))
+	for i, e := range v.Content {
+		elemPath := path + "[" + strconv.Itoa(i) + "]"
+		if err := d.checkNode(elemPath, e); err != nil {
+			return err
+		}
+		if isNull(e) {
+			return &KeyError{File: d.file, Line: e.Line, Key: elemPath, Reason: "has no value"}
+		}
+		if e.Kind != yaml.MappingNode {
+			return &KeyError{File: d.file, Line: e.Line, Key: elemPath, Reason: "must be a section (a mapping of keys)"}
+		}
+		d.lines[elemPath] = e.Line
+		elem := reflect.New(field.Type().Elem()).Elem()
+		if err := d.walkMapping(elemPath, e, elem); err != nil {
+			return err
+		}
+		list = reflect.Append(list, elem)
+	}
+	field.Set(list)
 	return nil
 }
 
