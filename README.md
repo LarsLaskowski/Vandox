@@ -132,7 +132,7 @@ dotnet publish/vandoxd.dll --version
 examples), imports the server's logs and leads to the first incident. This section is the reference behind it. What changed in each
 release is in [`CHANGELOG.md`](CHANGELOG.md).
 
-Releases are published from `v<major>.<minor>.<patch>` tags on `main`
+Releases are published from GitHub releases with `v<major>.<minor>.<patch>` tags on `main`
 (see [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md#versioning-and-releases)).
 
 **Agent.** The agent is not part of v0.1.0: collection, shipping and the ingest API arrive with v0.2.0. v0.1.0 is

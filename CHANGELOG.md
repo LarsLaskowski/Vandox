@@ -1,7 +1,7 @@
 # Changelog
 
 All notable changes to Vandox are listed here, newest release first. Versions follow [Semantic Versioning](https://semver.org/); a
-release is a `vX.Y.Z` tag on `main` ([CONTRIBUTING.md](docs/CONTRIBUTING.md#versioning-and-releases)). The GitHub release of each
+release is a GitHub release with a `vX.Y.Z` tag on `main` ([CONTRIBUTING.md](docs/CONTRIBUTING.md#versioning-and-releases)). The GitHub release of each
 tag lists the merged pull requests in detail.
 
 ## [0.1.0] - unreleased

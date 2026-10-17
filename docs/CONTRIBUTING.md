@@ -82,37 +82,44 @@ expected to arrive clean (see the decision record on quality gates in [`decision
 <!-- project:begin releases -->
 ## Versioning and releases
 
-A release is a `v<major>.<minor>.<patch>` tag created manually on `main`; it publishes the agent binary and
-the backend Docker image. A release is always created manually, and the only trigger is pushing a new tag
-such as `v0.1.0`; merging a PR, pushing to `main` or a schedule never publishes one. `release.yml`
-does not run on pull requests; `ci.yml` checks the release build there (*Release build check* below). The
+A release is a GitHub release with a new `v<major>.<minor>.<patch>` tag on `main`, created on the release
+page of the web interface; it publishes the agent binary and the backend Docker image. A release is always
+created manually, and the only trigger is publishing such a release (`release: published`), which creates the
+tag at the same time; merging a PR, pushing to `main`, pushing a tag without a release or a schedule never
+publishes one. `release.yml` does not run on pull requests; `ci.yml` checks the release build there (*Release build check* below). The
 workflow is `.github/workflows/release.yml`; the reasoning is in
 [0037](decisions/0037-releases-version-tag-plain-tooling-and-attested-artifacts.md) and
 [0041](decisions/0041-backend-image-chiseled-runtime-base-images-pinned-by-digest.md).
 
 ### Cutting a release
 
-Before tagging, check that the base image digests are current (*Base image digests* below): run the
+Before the release, check that the base image digests are current (*Base image digests* below): run the
 *Base image digests* workflow (Actions, *Run workflow*) or check that the latest `Release build check` on
 `main` has no stale-digest warning, and that no issue *Base image digests are stale* is open.
 If the issue *SBOM generator pin is stale* is open, refresh the pin first (*SBOM generator* below); a stale pin
 gives a less complete SBOM, it does not stop the release.
 
-Give the release its entry in `CHANGELOG.md` in a pull request before tagging: replace `unreleased` with the date of the
-release (or add the section), and keep [`docs/INSTALL.md`](INSTALL.md) in step with what the release needs to be installed.
+Give the release its entry in `CHANGELOG.md` in a pull request before the release: replace `unreleased` with the date of
+the release (or add the section), and keep [`docs/INSTALL.md`](INSTALL.md) in step with what the release needs to be installed.
 
-On an up-to-date `main`:
+Then, on the repository page, *Releases → Draft a new release*:
 
-```bash
-git tag -a vX.Y.Z -m "vX.Y.Z"
-git push origin vX.Y.Z
-```
+1. *Choose a tag*: type the new tag, for example `v0.1.0`, and pick *Create new tag on publish*, with `main` as the target.
+2. Title: the tag. Notes: *Generate release notes*, or leave them empty and the workflow generates them; the workflow adds
+   the image digest at the end either way.
+3. *Set as a pre-release* exactly for a pre-release tag (`vX.Y.Z-rc.N`); the workflow refuses a mismatch. Leave
+   *Set as the latest release* as it is: the workflow sets it from the tags.
+4. *Publish release*. The tag is created and the workflow starts (Actions, *Release*). The release has no assets until the
+   workflow attaches `vandox-agent-linux-amd64` and `SHA256SUMS` at the end; if the workflow fails, it turns the release
+   back into a draft.
 
-Pre-release tags look like `vX.Y.Z-rc.N`. Build metadata (`+...`) is not allowed.
+Do not *Save draft* to start a release: a draft creates no tag and starts nothing until it is published. Pre-release
+tags look like `vX.Y.Z-rc.N`. Build metadata (`+...`) is not allowed.
 
 ### What the release workflow does
 
-1. Checks that the tag is strict SemVer and that its commit is reachable from `origin/main`.
+1. Checks that the tag is strict SemVer, that the run's ref is that tag, that the release's pre-release flag matches
+   the tag, and that its commit is reachable from `origin/main`.
 2. Runs `go tool govulncheck ./...` and `dotnet list package --vulnerable --include-transitive`; a finding stops
    the release.
 3. Builds `vandox-agent` (Go, linux/amd64, static, `-trimpath`) and `SHA256SUMS`, and builds the image from
@@ -134,8 +141,10 @@ Pre-release tags look like `vX.Y.Z-rc.N`. Build metadata (`+...`) is not allowed
    which holds only `id-token: write` and `attestations: write`, has no environment and reads no secret, and
    verifies all of them with the README's flags, the SBOM ones with `--predicate-type
    https://spdx.dev/Document/v2.3` (the image by its published tag, see *Verifying a release*).
-7. Creates the GitHub release, only after the attestations exist and verify, with generated notes, the image
-   digest, `vandox-agent-linux-amd64` and `SHA256SUMS`; a pre-release is marked as such.
+7. Completes the GitHub release, only after the attestations exist and verify: attaches `vandox-agent-linux-amd64`
+   and `SHA256SUMS`, generates the notes if they are empty, appends the image digest, and marks the release as latest
+   exactly when the tag is the highest stable `v*.*.*` tag.
+8. If any job fails, turns the release back into a draft, so no published release lacks its assets.
 
 ### Verifying a release
 
@@ -195,7 +204,7 @@ repository root with `.github/scripts/check-sbom-generator-pin.sh` (needs `git`,
 
 ### Release build check on pull requests
 
-`release.yml` runs only for a version tag. Pull requests are covered by the `Release build check` job in
+`release.yml` runs only for a published release with a version tag. Pull requests are covered by the `Release build check` job in
 `ci.yml`: it runs the base image pinning and builder .NET version checks (`.github/scripts/`), builds the
 agent and the image with the version `v0.0.0-dryrun`, and verifies `--version`, the static binary and the
 image user, and generates and checks the SBOMs from that agent binary and image (*SBOM generator*). It
@@ -211,9 +220,10 @@ nothing and reads no secret.
 
 1. **Tag ruleset.** Create the ruleset `release-tags` (Settings, Rules, Rulesets, new tag ruleset) with the
    target `refs/tags/v*`, enforcement *Active*, the rules *Restrict creations*, *Restrict updates* and
-   *Restrict deletions*, and *Repository admin* as the only bypass. A tag push runs the workflow file of
-   the tagged commit, so whoever can create the tag controls what runs with the Docker Hub token. Create
-   the ruleset before storing the token.
+   *Restrict deletions*, and *Repository admin* as the only bypass. A release runs the workflow file of
+   the tagged commit, so whoever can create the tag controls what runs with the Docker Hub token. Publishing a
+   release with a new tag on the web page creates the tag with the publisher's rights, so the ruleset applies
+   there as well: only the admin can publish a release with a new tag. Create the ruleset before storing the token.
 2. **Environment.** Create the GitHub environment `release` with deployment branches and tags set to
    *Selected branches and tags*: the tag rule `v*.*.*` and no branch. Store the secret `DOCKERHUB_TOKEN`
    and the variable `DOCKERHUB_USERNAME` there. A required reviewer is optional; it is worth adding once
@@ -233,13 +243,18 @@ one, replace the environment secret, then delete the old token on Docker Hub.
 
 ### Re-running a failed release
 
-If a job fails before the image is pushed, nothing was published: fix the cause and use "Re-run all jobs"
-(or, if the tag itself was wrong, ask the repository admin to delete and recreate it).
+A failed run turns the release back into a draft (job `withdraw-release`); the tag stays. A successful re-run
+publishes it again with its assets.
+
+If a job fails before the image is pushed, nothing was published: fix the cause (a setting, a secret, the
+pre-release flag) and use "Re-run all jobs", or publish the draft again, which starts a new run. A fix in the code
+needs a new patch version, because the tag cannot be moved (or, if the tag itself was wrong, ask the repository
+admin to delete it together with the draft).
 
 If only `github-release` failed, use "Re-run failed jobs". It reruns just that job and works while the run's
-release artifact exists, that is 7 days after the tag run.
+release artifact exists, that is 7 days after the run.
 
-If `attest` failed, the image is already published and no GitHub release exists. "Re-run failed jobs" reruns
+If `attest` failed, the image is already published and the release is a draft without assets. "Re-run failed jobs" reruns
 `attest` and `github-release` within the 7-day artifact window; a second provenance or SBOM attestation for
 the same digest is harmless. After that window, cut a new patch version. If the "Verify attestations" step reports a digest
 mismatch (the version tag does not resolve to the attested digest), do not re-run it; investigate and cut a
@@ -247,8 +262,8 @@ new patch version.
 
 If `publish-image` failed after `networlddev/vandox:<version>` was pushed (it failed while pushing `latest`
 or reading the digest), a re-run stops at the never-overwrite check. Do not push by hand; cut a new patch
-version. The orphaned version tag stays on Docker Hub without a GitHub release. The same applies once the
-7-day window has passed.
+version. The orphaned version tag stays on Docker Hub; delete the draft release of the failed version. The same
+applies once the 7-day window has passed.
 
 A published image version is never replaced; a faulty release gets a new patch version.
 <!-- project:end releases -->
