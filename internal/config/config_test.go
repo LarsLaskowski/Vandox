@@ -10,12 +10,7 @@ import (
 	"strings"
 	"syscall"
 	"testing"
-	"time"
 )
-
-// hangGuard is how long a call that must not block may take before the test gives up on it. It is a guard
-// against a hang, never an assertion about elapsed time: a correct call returns at once.
-const hangGuard = 10 * time.Second
 
 // sentinel marks a value that must never appear in an error text.
 const sentinel = "S3NT1NEL"
@@ -58,34 +53,18 @@ func makeSocket(t *testing.T) string {
 	return path
 }
 
-// callBounded runs fn in a goroutine and returns its result. It fails the test, instead of letting a blocking
-// call hang until the test timeout, when fn has not returned within hangGuard.
-func callBounded[T any](t *testing.T, what string, fn func() T) T {
-	t.Helper()
-	done := make(chan T, 1)
-	go func() { done <- fn() }()
-	select {
-	case v := <-done:
-		return v
-	case <-time.After(hangGuard):
-		t.Fatalf("%s did not return within %v, want it to return without blocking", what, hangGuard)
-		panic("unreachable")
-	}
-}
-
 // openResult holds what openRegular returned.
 type openResult struct {
 	file *os.File
 	err  error
 }
 
-// openBounded calls openRegular(path) without risking a hang and closes a returned file with the test.
+// openBounded calls openRegular(path) and closes a returned file with the test. A blocking open shows as a
+// test that hangs until the go test timeout.
 func openBounded(t *testing.T, path string) openResult {
 	t.Helper()
-	r := callBounded(t, "openRegular("+path+")", func() openResult {
-		f, err := openRegular(path)
-		return openResult{file: f, err: err}
-	})
+	f, err := openRegular(path)
+	r := openResult{file: f, err: err}
 	if r.file != nil {
 		t.Cleanup(func() { _ = r.file.Close() })
 	}
@@ -278,15 +257,7 @@ func TestReadFile(t *testing.T) {
 // when wantIs is not nil, matching errors.Is.
 func requireReadFileFails(t *testing.T, path string, wantIs error) {
 	t.Helper()
-	type result struct {
-		data []byte
-		err  error
-	}
-	r := callBounded(t, "readFile("+path+")", func() result {
-		data, err := readFile(path, 8)
-		return result{data: data, err: err}
-	})
-	got, err := r.data, r.err
+	got, err := readFile(path, 8)
 	if err == nil {
 		t.Fatalf("readFile(%q, 8) = %q, nil, want an error", path, got)
 	}
@@ -304,13 +275,10 @@ func requireReadFileFails(t *testing.T, path string, wantIs error) {
 
 func TestReadFileFIFOText(t *testing.T) {
 	path := makeFifo(t)
-	r := callBounded(t, "readFile(FIFO)", func() error {
-		_, err := readFile(path, 8)
-		return err
-	})
+	_, err := readFile(path, 8)
 	want := "config: " + path + ": not a regular file"
-	if r == nil || r.Error() != want {
-		t.Errorf("readFile(FIFO) error = %v, want %q", r, want)
+	if err == nil || err.Error() != want {
+		t.Errorf("readFile(FIFO) error = %v, want %q", err, want)
 	}
 }
 

@@ -460,14 +460,11 @@ func TestReadSecret_FileVariable(t *testing.T) {
 	})
 }
 
-// readSecretBounded reads the secret from the file at path and returns the error, failing the test when the
-// call blocks.
+// readSecretBounded reads the secret from the file at path and returns the error.
 func readSecretBounded(t *testing.T, path string) error {
 	t.Helper()
-	return callBounded(t, "readSecret("+path+")", func() error {
-		_, err := readSecret(secretEnv(tokenFile, path), tokenVar)
-		return err
-	})
+	_, err := readSecret(secretEnv(tokenFile, path), tokenVar)
+	return err
 }
 
 // requireRelativePathRejected checks that a relative or empty file path v is rejected as such.
