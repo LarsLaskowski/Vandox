@@ -58,6 +58,13 @@ kernel's view of the clock synchronization from `adjtimex(2)`. Both are read-onl
 10. **Missing PSI.** Fail the sample — memory data lost on every PSI-less kernel; a gap per sample — a gap means a missed
     sample, and the log would repeat; **omit the pressure metrics and log one warning when the set of unavailable resources
     changes** (chosen); the backend reads the absence as unknown, as it does for every omitted measurement.
+11. **A null element in `filesystem.mount_points`.** Dropped, as the YAML library does on its own — `[~]` would become an
+    empty list and silently switch the file system metrics off; a check after decoding that the list kept every element —
+    unreachable with the pinned library, whose only silent drop is a null element; **refused before decoding as "has no
+    value"** (chosen), for every list option of the agent's configuration.
+12. **Proof of "no program, D-Bus or socket".** A test that forbids known program and network packages — it misses raw
+    system calls, cgo, `unsafe`, `//go:linkname` and modules such as `golang.org/x/sys/unix`; **a test that allows only a
+    fixed set of packages and of `syscall` and `os` functions** (chosen), so a new way out of the package fails the test.
 
 ## Decision
 
@@ -76,7 +83,9 @@ the names in the [wire format](../areas/wire-format.md) (*Metric names*) and the
 - The systemd unit (#42) must allow `adjtimex`: `ProtectClock=yes` denies the whole `@clock` group with `EPERM`, also for a
   read, and `@system-service` does not contain it (systemd v249 `seccomp-util.c`, `execute.c`), so an allow-list needs
   `adjtimex` named. Without it the `clock` collector fails every run and records a gap. Allowing the call grants nothing: a
-  setting change needs `CAP_SYS_TIME`, which the agent's bounding set excludes.
+  setting change needs `CAP_SYS_TIME`, which the agent's bounding set excludes (measured in the plan review: unprivileged and
+  without capabilities, `adjtimex` with modes 0 succeeds and changes nothing, `ADJ_MAXERROR` fails with `EPERM`, and `statfs`
+  works).
 - The file system values are those of the agent's mount namespace: a path the unit hides or replaces (`ProtectHome=` for
   `/home`, `InaccessiblePaths=`) reports what the agent sees. A mount point unmounted between the mount table read and
   `statfs` reports the file system below it for one sample.
@@ -84,7 +93,7 @@ the names in the [wire format](../areas/wire-format.md) (*Metric names*) and the
   point a minute: the spool (#38) is sized for this.
 - The fixtures are a capture of kernel 6.18 (the development host); the server runs Ubuntu 22.04's 5.15. The grammars the
   parsers rely on are the same in both, but no 5.15 capture was compared; the parallel run of #45 is the check.
-- The PLL offset's sign is the kernel's (the correction still to be applied; with systemd-timesyncd, reference minus local
-  clock); it is not measured here. The batch header's `clock_offset_ns` (0046) stays the spool's and the sender's (#38, #39).
+- The PLL offset is recorded with the sign the kernel reports for the correction still to be applied; what that sign means
+  relative to the reference clock is not measured (no time daemon on the development host) and is not interpreted here. The batch header's `clock_offset_ns` (0046) stays the spool's and the sender's (#38, #39).
 - Revisit if the clock offset under chrony is needed (then a reader of chrony's protocol needs its own record, against 0006),
   or if the record volume strains the spool (then a slower interval for `/proc/meminfo`).

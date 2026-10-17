@@ -106,8 +106,12 @@ in memory (`fstest.MapFS`) from the fixture's text.
   65,536 bytes is read. Not mounted: `/srv` configured but absent gives one warning `mount point not mounted` with `collector=filesystem`
   and `mount=/srv` over three samples, an info line `mount point mounted` when it appears, and a warning again when it disappears.
   Errors: `StatFS` failing with `syscall.EACCES` for mount 1 fails with exactly `sysstats: filesystem.mount_points[1]: statfs:
-  permission denied` (no path in the text); free blocks above the total and free inodes above the total fail with
-  `sysstats: filesystem.mount_points[<i>]: statfs: free above total`. Tests: `TestFilesystem_RecordsMountPoints`,
+  permission denied` (no path in the text); free blocks above the total, available blocks above the total and free inodes above the
+  total fail with `sysstats: filesystem.mount_points[<i>]: statfs: free above total`; `Blocks` × `BlockSize` above 2^64 − 1 (cases:
+  `Blocks` 2^63 with `BlockSize` 2, and `Blocks` 2^64 − 1 with `BlockSize` 4096) fails with
+  `sysstats: filesystem.mount_points[<i>]: statfs: size above 64 bits`, and `Blocks` 2^52 with `BlockSize` 4096 (exactly 2^64) fails
+  the same way, while `Blocks` 2^52 − 1 with `BlockSize` 4096 is recorded as `filesystem_size_bytes` 2^64 − 4096 (a float64 record
+  value; the test compares with `float64(uint64(1<<52-1) * 4096)`). Tests: `TestFilesystem_RecordsMountPoints`,
   `TestFilesystem_MountinfoEscapes`, `TestFilesystem_NotMountedLoggedOnChange`, `TestFilesystem_Errors`.
 - [ ] **AC8 — clock.** With a fake clock source: `MaxError` 15.999999 s gives `clock_synchronized` 1, 16 s gives 0;
   `clock_max_error_seconds` and `clock_estimated_error_seconds` in seconds; `clock_pll_offset_seconds` (seconds, sign kept: −0.25 s
@@ -122,21 +126,44 @@ in memory (`fstest.MapFS`) from the fixture's text.
   run and one per skipped run with `collector` set to the collector's name, the blocked source entered exactly once, and the scripted
   collector's records present for every interval. Tests: `TestSystem_HangingSourceIsAbandoned`,
   `TestFilesystem_HangingStatFSIsAbandoned`, `TestClock_HangingSourceIsAbandoned`.
-- [ ] **AC10 — no program, D-Bus or socket.** The non-test Go files of `internal/sysstats` import none of `os/exec`, `net`, `net/http`,
-  `net/rpc`, `plugin` and no package path containing `dbus`, and call none of `os.StartProcess`, `syscall.Exec`, `syscall.ForkExec`,
-  `syscall.StartProcess`, `syscall.Socket`, `syscall.Connect` (checked with `go/parser` over the package directory). The defaults read the
-  host: `NewSystem(Sources{}, nil)`, `NewFilesystem(Sources{}, []string{"/"}, nil)` and `NewClock(Sources{})` collect without error on
-  the test host and record `load1`, `filesystem_size_bytes` with `mount=/` and `clock_synchronized`. Tests:
-  `TestSysstats_ImportsNoProgramOrNetworkPackage`, `TestNew_DefaultsReadTheHost`.
+- [ ] **AC10 — no program, D-Bus or socket (allow-list).** Checked with `go/parser` (`parser.ParseFile` with `parser.ParseComments` on
+  every `*.go` file of the package directory that does not end in `_test.go`, regardless of build constraints):
+  - every import path is one of `bufio`, `bytes`, `context`, `errors`, `fmt`, `io`, `io/fs`, `log/slog`, `math/bits`, `os`, `slices`,
+    `strconv`, `strings`, `sync`, `syscall`, `time`, `github.com/LarsLaskowski/Vandox/internal/model`,
+    `github.com/LarsLaskowski/Vandox/internal/scheduler` (so `C`, `unsafe`, `os/exec`, `net/...`, `plugin`, `golang.org/x/sys/...` and
+    any D-Bus package fail);
+  - no import carries a name (no renamed, dot or blank import), so a selector `syscall.X` or `os.X` always means that package;
+  - of `syscall` only the selectors `Statfs`, `Statfs_t`, `Adjtimex`, `Timex`, `Errno`, `EOPNOTSUPP` are used, of `os` only `DirFS`
+    (so `syscall.Syscall*`, `RawSyscall*`, `Socket`, `Connect`, `Sendto`, `Sendmsg`, `Bind`, `Dup2`, `Exec`, `ForkExec`,
+    `os.StartProcess` fail);
+  - no comment line starts with `//go:` other than `//go:build` (so `//go:linkname`, `//go:cgo_*` fail);
+  - the directory holds no source file other than `.go` files (no `.s`, `.c`, `.h`, `.cc`, `.syso`);
+  - non-vacuity: at least one non-test file is parsed and the selectors `syscall.Statfs` and `syscall.Adjtimex` are found.
+  The test itself is checked once against a scratch copy (Tester, in step 5): a file importing `net`, one using `syscall.Syscall`, one
+  with `//go:linkname`, one with `import sc "syscall"` each make it fail. The defaults read the host: `NewSystem(Sources{}, nil)`,
+  `NewFilesystem(Sources{}, []string{"/"}, nil)` and `NewClock(Sources{})` collect without error on the test host and record `load1`,
+  `filesystem_size_bytes` with `mount=/` and `clock_synchronized`. Tests: `TestSysstats_ImportsOnlyAllowedPackages`,
+  `TestNew_DefaultsReadTheHost`.
 - [ ] **AC11 — option `filesystem.mount_points`.** Accepted: absent (default `["/"]`), block list, flow list `[/, /var]`, quoted
   elements, an empty list `[]` (no mount point), 16 entries, an entry of 1,024 bytes; the decoded list replaces the default (`[/var]`
   gives exactly `["/var"]`). Refused with exactly `config: <file>:<line>: filesystem.mount_points: must be a list of at most 16
   absolute, clean paths of at most 1024 bytes each (no trailing slash, no . or .. elements), each listed once`: 17 entries, an entry of
-  1,025 bytes, `var`, `/var/`, `/var/../etc`, `/./var`, `//var`, an empty string, `- 1`, `- ~`, `- true`, the same path twice. Refused by
-  the existing decoder rules: a scalar `filesystem.mount_points: /` and a nested list or mapping (`invalid value, want a list`), null
-  (`has no value`), an element with U+202E or a tab (`must not contain control, format or line-separating characters`), an anchor or
-  alias, a `!!binary` tag. No error text contains the value. `AgentKeys()` ends with `filesystem.mount_points`; the example file sets it
-  to the default. Tests: `TestLoadAgent_MountPoints`, `TestLoadAgent_MountPointsRejected`, `TestAgentKeys`, `TestLoadAgent_Example`.
+  1,025 bytes, `var`, `/var/`, `/var/../etc`, `/./var`, `//var`, an empty string `""`, `- !!str` (an empty string), `- "~"`, `- 1`,
+  `- true`, `- 2026-01-01`, `- 0x1F`, `- .inf`, the same path twice. Refused by the decoder before decoding, because go.yaml.in/yaml/v3
+  drops a null element of a sequence silently (v3.0.5 `decode.go` 751-754 with `null()` 554-563): a null element fails with exactly
+  `config: <file>:<line>: filesystem.mount_points: has no value`, `<line>` the line of the null element — cases (each under
+  `filesystem:` with `mount_points:` on line L): `mount_points:` followed by `    - ~` (line L+1), by `    - !!null` (L+1), by an
+  empty `    -` element (L+1), by `    - /a` and `    - null` (L+2); `mount_points: [/a, ~, /b]` (L); `mount_points: [/a, null, ""]`
+  (L, the null is refused before the `""`). Refused by the existing decoder rules: a scalar `filesystem.mount_points: /`, `""` in place
+  of the list and a nested list or mapping (`invalid value, want a list`), a null value of the key itself (`has no value`), the
+  double-quoted YAML elements `"/a\\x00"`, `"/a\\u202e"`, `"/a\\ufeff"`, `"/a\\tb"` (written here and in the Go source with a doubled
+  backslash, so the YAML text holds one backslash; were it lost, `/ax00` and the like would pass the rule and the test fail) and a
+  literal block scalar `|` element (`must not contain control, format or line-separating characters`), an anchor or alias, a `!!binary` or `!!set` tag. Accepted besides: `!!seq [/var]`, `- !!str /var`, a flow list over
+  several lines, comments between elements, a folded `>-` element whose value is `/a b`. No error text contains the value.
+  `AgentKeys()` ends with `filesystem.mount_points`; the example file sets it to the default. The decoder rule is also tested on the
+  white-box document of `decode_test.go` (field `tags`): `tags: [a, ~]`, `tags:\n  - ~`, `tags:\n  -` fail as `has no value` with the
+  element's line; `tags: [a, "~"]` decodes to `["a", "~"]`. Tests: `TestLoadAgent_MountPoints`, `TestLoadAgent_MountPointsRejected`,
+  `TestLoadAgent_MountPointsNullElement`, `TestDecodeStrict_ListElementWithoutValue`, `TestAgentKeys`, `TestLoadAgent_Example`.
 - [ ] **AC12 — the agent runs the collectors.** `jobs` returns, in order, `self` (60 s, 10 s), `system` (30 s, timeout 5 s, pressure
   interval 10 s), `filesystem` (60 s, 10 s) and `clock` (60 s, 5 s); with `filesystem.mount_points: []` the `filesystem` job is left out;
   `scheduler.New` accepts the jobs. `Run` with fixture system sources (`Options.System`) delivers `load1`, `mem_available_bytes`,
@@ -186,7 +213,9 @@ New package `internal/sysstats`, three collectors that implement `scheduler.Coll
    only at end of file (every line is checked).
 6. **System calls**: `StatFS` wraps `syscall.Statfs` (fragment size, the block size when it is 0; a negative size is an error) and
    returns the bare `syscall.Errno` (its text is "permission denied" and the like, without the path); `Filesystem.Collect` wraps it as
-   `sysstats: filesystem.mount_points[<i>]: statfs: %w`.
+   `sysstats: filesystem.mount_points[<i>]: statfs: %w`. `Filesystem.Collect` checks `BlocksFree` ≤ `Blocks`, `BlocksAvailable` ≤
+   `Blocks` and `InodesFree` ≤ `Inodes` (else `statfs: free above total`) and computes `Blocks` × `BlockSize` with `bits.Mul64` (a
+   non-zero high word is `statfs: size above 64 bits`); the free and available products then cannot overflow.
    `ReadClock` calls `syscall.Adjtimex` with a zero `Timex` (modes 0, changes nothing): `MaxError` = `Maxerror` µs, `EstimatedError` =
    `Esterror` µs, `PLLOffset` = `Offset` in ns when `Status & 0x2000` (`STA_NANO`) else µs, `PLL` = `Status & 0x0001` (`STA_PLL`); its
    error is `sysstats: adjtimex: %w`.
@@ -195,14 +224,22 @@ New package `internal/sysstats`, three collectors that implement `scheduler.Coll
 8. **Agent**: `jobs` builds the four jobs; `newScheduler` takes the loaded configuration; `Options.System` passes test sources.
 9. **Config**: `Agent.Filesystem` with `MountPoints []string` (`yaml:"mount_points"`), default `[]string{"/"}` (a new slice per
    `DefaultAgent` call), checked by `checkMountPoints` after `log.level`.
+10. **Decoder** (`internal/config/decode.go`, `setOther`): after `checkTree` and before `v.Decode`, when `v` is a sequence node, an
+    element `e` with `isNull(e)` fails with `&KeyError{File: d.file, Line: e.Line, Key: path, Reason: "has no value"}` — the element's
+    line, as `checkTree` reports an element's anchor or tag. This holds for every list option, today only `filesystem.mount_points`.
+    No count check after `Decode`: in yaml.v3 v3.0.5 the only silent drop is `null()` returning false for a non-pointer element
+    (`decode.go` 554-563); every other false return of `unmarshal` records a type error that `Decode` returns, so the check would be
+    unreachable code.
 
-Unverified claims, each settled by the Dev **once before review** in a scratch directory (never the working tree), result written in
-`log.md`:
+Settled by measurement (Security, plan review, `log.md` 2026-10-17 18:33):
 
-- *U1, unverified*: `adjtimex` with modes 0 and `statfs` work for an unprivileged user without capabilities (adjtimex(2) and statfs(2)
-  man pages). Measurement: a scratch Go program calling `syscall.Adjtimex(&syscall.Timex{})` and `syscall.Statfs("/", …)`, run under
-  `setpriv --reuid=65534 --regid=65534 --clear-groups --inh-caps=-all --bounding-set=-all`; both must return without error. If `setpriv`
-  is missing, log "not verified locally" and the record's statement stays marked as unverified.
+- *U1, measured*: unprivileged, without capabilities, `syscall.Adjtimex(&syscall.Timex{})` succeeds and changes nothing, while modes
+  `ADJ_MAXERROR` return `EPERM` without `CAP_SYS_TIME`; `syscall.Statfs` works unprivileged; `Statfs` of a missing path returns a bare
+  `syscall.Errno` whose text does not contain the path. Record 0111 and the Agent area (*Rights*) cite this; the Dev runs no
+  measurement.
+
+Unverified claims:
+
 - *U2, unverified*: the sign and meaning of the kernel's remaining PLL offset (the correction still to apply). Not measurable here (no
   time daemon in the session); the record and the area say only what adjtimex reports and do not repeat a sign interpretation as fact.
 - *U3, unverified*: the 5.15 kernel of the server prints the same grammars as the captured 6.18 (the field set of `meminfo` differs,
@@ -245,6 +282,10 @@ Weighed in record 0111 (*Options considered*), in short:
 8. Rates in the backend / **rates in the agent, raw counters kept** (chosen: as the legacy parser).
 9. Partial `system` samples / **a broken file fails the sample** (chosen: the frame cannot record a partial loss).
 10. Missing PSI as error or gap / **omitted, logged on change** (chosen).
+11. Null list elements: dropped as yaml.v3 does / a count check after decoding / **refused per element before decoding** (chosen: names
+    the element's line; the count check is unreachable with the pinned library, see *Approach* 10).
+12. Import check: a deny-list of program and network packages / **an allow-list of packages and `syscall`/`os` selectors** (chosen: a
+    deny-list misses raw system calls, cgo, `unsafe`, `//go:linkname` and indirect modules such as `golang.org/x/sys/unix`).
 
 ## Affected projects and types
 
@@ -260,6 +301,7 @@ Weighed in record 0111 (*Options considered*), in short:
 | Go agent | `internal/sysstats/mountinfo.go` (new) | line reader and escape decoding of `self/mountinfo` |
 | Go agent | `internal/sysstats/clock.go` (new) | `Clock`, `NewClock`, `ClockState`, `ReadClock` |
 | Go agent | `internal/config/agent.go` | `Filesystem` section, default, `AgentKeys`, `checkMountPoints` (read and found to need only these additions) |
+| Go agent | `internal/config/decode.go` | `setOther`: a null element of a sequence fails with `has no value` before `Decode` (*Approach* 10); nothing else changes |
 | Go agent | `internal/agent/agent.go` | schedule constants, `Options.System`, `jobs`, `newScheduler(opts, cfg, log)` |
 | Deploy | `deploy/agent/agent.yaml` | `filesystem.mount_points` at its default, commented |
 | Test data | `testdata/proc/…`, `testdata/sys/…` (new) | real captures, see *Real samples* |
@@ -394,7 +436,8 @@ func newScheduler(opts Options, cfg *config.Agent, log *slog.Logger) (*scheduler
 ## Test files
 
 - `internal/sysstats/sysstats_test.go` — shared helpers and doubles (fixture tree, `fstest.MapFS` variants, the blocking `fs.FS` wrapper,
-  the `EOPNOTSUPP` wrapper, a recording `slog.Handler`, fake `StatFS` and clock sources incl. blocking ones), AC10.
+  the `EOPNOTSUPP` wrapper, a recording `slog.Handler`, fake `StatFS` and clock sources incl. blocking ones), AC10
+  (`TestSysstats_ImportsOnlyAllowedPackages`, `TestNew_DefaultsReadTheHost`).
 - `internal/sysstats/system_test.go` — AC1, AC2, AC5 (its three tests span every source of the `system` sample), AC9 (`System`).
 - `internal/sysstats/memory_test.go` — AC3.
 - `internal/sysstats/pressure_test.go` — AC4.
@@ -402,7 +445,9 @@ func newScheduler(opts Options, cfg *config.Agent, log *slog.Logger) (*scheduler
 - `internal/sysstats/filesystem_test.go` — AC7 (records, not mounted, errors), AC9 (`Filesystem`), `TestStatFS_ReadsTheRootFilesystem`.
 - `internal/sysstats/mountinfo_test.go` — `TestFilesystem_MountinfoEscapes`.
 - `internal/sysstats/clock_test.go` — AC8, AC9 (`Clock`).
-- `internal/config/agent_test.go` — AC11.
+- `internal/config/agent_test.go` — AC11 (`TestLoadAgent_MountPoints`, `TestLoadAgent_MountPointsRejected`,
+  `TestLoadAgent_MountPointsNullElement`, `TestAgentKeys`, `TestLoadAgent_Example`).
+- `internal/config/decode_test.go` — AC11 (`TestDecodeStrict_ListElementWithoutValue`, on the existing `testDoc.Tags`).
 - `internal/agent/agent_test.go` — AC12.
 
 `cpu.go` has no test file of its own: its grammar is exercised through `System.Collect` in `system_test.go` (AC1, AC2, AC5).
@@ -433,11 +478,11 @@ Files of the change no unit test can cover: none (`StatFS` and `ReadClock` are e
 | ---- | ------ | ----- |
 | `docs/areas/agent.md` | as *Areas* | Lead (done) |
 | `docs/areas/wire-format.md` | as *Areas* | Lead (done) |
-| `docs/areas/configuration-and-secrets.md` | row `filesystem.mount_points` (default `/`, rule) and a paragraph: list of at most 16 absolute, clean, distinct paths of at most 1,024 bytes; the error text of AC11; the values must be mount points of the agent's namespace to be recorded (link to the Agent area) | Dev |
+| `docs/areas/configuration-and-secrets.md` | row `filesystem.mount_points` (default `/`, rule) and a paragraph: list of at most 16 absolute, clean, distinct paths of at most 1,024 bytes; the error text of AC11; the values must be mount points of the agent's namespace to be recorded (link to the Agent area); in *Configuration file*, the error bullet "a leaf option with no value" becomes "a leaf option or an element of a list with no value (the agent; a null element is refused, never dropped)" | Dev |
 | `README.md` | *Agent options* row `filesystem.mount_points` | Dev |
 | `deploy/agent/agent.yaml` | a `filesystem:` section with `mount_points: [/]`, commented like the others | Dev |
 | `docs/ARCHITECTURE.md` | line 13-14 "(so far only its self-metrics)" becomes "(its self-metrics and the system metrics)"; the `internal/` list names "the system metrics (`internal/sysstats`)"; the agent bullet of *Components* links 0111 after 0110 | Dev |
-| `.squad/project.md` | area 6: the unit's filter allows `adjtimex` (0111); area 10: the readers of `internal/sysstats` and their bounds (stat first line 4 KiB, loadavg 256 B, meminfo 16 KiB / 128 lines, vmstat 64 KiB, pressure 256 B, block stat 1 KiB, mountinfo lines 64 KiB streamed, at most 16 disks and 16 mount points, digits checked before conversion, no file content in errors) and the option `filesystem.mount_points` (`checkMountPoints`), records list + 0111; *Test doubles*: `/proc` row — the blocking `fs.FS` wrapper and the `EOPNOTSUPP` wrapper implemented in `internal/sysstats`; `/sys` row implemented (`testdata/sys/`); a new row *statfs and adjtimex*: fake `StatFS` and clock functions with scripted results and blocking variants (implemented, `internal/sysstats`) | Dev |
+| `.squad/project.md` | area 6: the unit's filter allows `adjtimex` (0111); area 10: the readers of `internal/sysstats` and their bounds (stat first line 4 KiB, loadavg 256 B, meminfo 16 KiB / 128 lines, vmstat 64 KiB, pressure 256 B, block stat 1 KiB, mountinfo lines 64 KiB streamed, at most 16 disks and 16 mount points, digits checked before conversion, statfs products checked for 64-bit overflow, no file content in errors), the allow-list import test of `internal/sysstats` (AC10), and the option `filesystem.mount_points` (`checkMountPoints`, null list elements refused in `decode.go`), records list + 0111; *Test doubles*: `/proc` row — the blocking `fs.FS` wrapper and the `EOPNOTSUPP` wrapper implemented in `internal/sysstats`; `/sys` row implemented (`testdata/sys/`); a new row *statfs and adjtimex*: fake `StatFS` and clock functions with scripted results and blocking variants (implemented, `internal/sysstats`) | Dev |
 | `.squad/stack.md` | *Layout*: `internal/` list gains `sysstats` | Dev |
 
 ## Architecture check
@@ -462,21 +507,67 @@ Files of the change no unit test can cover: none (`StatFS` and `ReadClock` are e
   configured path (a mount point is named by its index); the fs error texts wrapped for I/O failures name only the relative file name the
   collector opened.
 - [x] Accepted forms of the guard on `filesystem.mount_points` (YAML forms the go.yaml.in/yaml/v3 decoder turns into `[]string`, and the
-  rule's outcome for each): block and flow sequences, plain, single- and double-quoted scalars (accepted when the value passes the rule);
-  scalars of other core tags inside the list (`1`, `true`, `~`, `2026-01-01`) decode to their text or `""` and fail the rule; a scalar or
-  mapping in place of the list, a nested sequence or mapping as an element fail as `invalid value, want a list`; null fails as `has no
-  value`; anchors, aliases, merge keys and non-core tags are refused by `checkTree` before decoding; Cc/Cf/Zl/Zp characters are refused
-  per element after decoding; escapes in double-quoted YAML (`"/a\x00"`, `"/\u202e"`) are decoded by YAML first and then refused by the
-  character rule. The rule itself: `filepath.IsAbs`, `filepath.Clean(v) == v`, 1 to 1,024 bytes, at most 16 entries, no two equal.
+  outcome for each; probed by Security with the real `decodeStrict`): block and flow sequences (also over several lines, with comments,
+  with `!!seq`), plain, single- and double-quoted scalars, `!!str` elements and folded `>-` scalars (accepted when the value passes the
+  rule); scalars that would resolve to another core tag (`1`, `true`, `2026-01-01`, `0x1F`, `.inf`) decode to their text and fail the
+  rule as not absolute; a **null element** (`~`, `null`, `!!null`, an empty `-`), which yaml.v3 would drop silently, is refused by
+  `setOther` before decoding as `has no value` (*Approach* 10), so the decoded list always has one entry per element and an all-null
+  list can never turn into `[]` and silently drop the `filesystem` job; a scalar (also `""`) or mapping in place of the list, a nested
+  sequence or mapping as an element fail as `invalid value, want a list`; a null value of the key fails as `has no value`; anchors,
+  aliases, merge keys and non-core tags (`!!binary`, `!!set`) are refused by `checkTree` before decoding; Cc/Cf/Zl/Zp characters
+  (also a literal `|` element's line feed) are refused per element after decoding; escapes in double-quoted YAML (`"/a\\x00"`,
+  `"/a\\u202e"`, `"/a\\ufeff"`) are decoded by YAML first and then refused by the character rule. The rule itself: `filepath.IsAbs`,
+  `filepath.Clean(v) == v`, 1 to 1,024 bytes, at most 16 entries, no two equal.
+- [x] No program, D-Bus or socket: an allow-list of imports and of `syscall`/`os` selectors, no named imports, no `//go:` directive
+  but `//go:build`, no non-Go source file (AC10), so cgo, `unsafe`, `//go:linkname`, raw system calls and `golang.org/x/sys/unix` fail
+  the test; a deny-list was rejected (*Options considered* 12).
+- [x] `statfs` values from FUSE, NFS or CIFS are untrusted numbers: free and available above the total and a size above 64 bits fail
+  the sample with fixed texts (AC7), never a wrapped-around value.
 - [x] Mount table text is kernel output that local users influence (FUSE mount names): it is never logged, never put into a record (the
   label is the configured path) and never echoed in an error; the decoding works on bytes, so invalid UTF-8 or raw control characters in a
-  mount point simply never match a configured path.
+  mount point simply never match a configured path. A line above 64 KiB fails every `filesystem` sample while it exists (a recorded
+  gap, fail closed; Agent area).
 - [x] Disk names from `/sys/block` are kernel device names (at most 32 bytes) and become label values; the scheduler's wire check drops a
   record whose label the wire format refuses (gap with cause `unknown`).
 
 ## Decision records
 
 - `docs/decisions/0111-system-metrics-three-collectors-from-proc-sys-statfs-and-adjtimex.md` (Proposed), index row added.
+
+## Challenge
+
+- **Devil's Advocate, minor: disk selection drops `dm-*`, `md*`, `loop*`; state the limit in the Agent area so #45's legacy-parity
+  check does not read the missing device-mapper or RAID I/O as a defect.** Accepted. The Agent area is the Lead's document in this
+  change, so the Lead wrote the sentence now (*System metrics*, *Disks*: the I/O of a device-mapper, RAID or loop volume appears only
+  as that of its member disks, and #45 compares per disk). No code or criterion changes (AC6 already asserts the selection).
+
+## Security review
+
+- **B1 (blocking): null elements of `filesystem.mount_points` pass the guard.** Accepted. Root cause confirmed by reading:
+  go.yaml.in/yaml/v3 v3.0.5 `sequence` (`decode.go` 751-754) keeps an element only when `unmarshal` returns true, and `null()`
+  (554-563) returns false for a string element, so `internal/config/decode.go` `setOther` (219-238) sees the shortened slice.
+  Revision: `setOther` refuses a null element of a sequence before `Decode` with `has no value` and the element's line (*Approach* 10,
+  `decode.go` added to *Affected projects and types*); AC11 lists `- ~`, `- !!null`, an empty `-`, `[/a, ~, /b]`, `- /a` + `- null`
+  and `[/a, null, ""]` with exact texts and lines, plus a white-box `TestDecodeStrict_ListElementWithoutValue`; the *Security
+  considerations* bullet no longer claims `~` decodes to text. The whole list of accepted forms was re-checked against Security's probe:
+  every accepted and refused form it reports is now named in AC11 or the bullet (`!!seq`, `!!str`, multi-line flow, comments, `>-`
+  accepted; `|`, `\x00`, U+202E, U+FEFF, `!!set`, anchors, scalar or `""` in place of the list, nested list or mapping refused; `1`,
+  `true`, `2026-01-01`, `0x1F`, `.inf` fail as not absolute). A count check after decoding was weighed and left out as unreachable
+  (*Options considered* 11).
+- **B2 (blocking): the import check is a deny-list.** Accepted. AC10 is now an allow-list (`TestSysstats_ImportsOnlyAllowedPackages`):
+  Security's package set plus `math/bits` (pure arithmetic, needed for the overflow check of N1); `syscall` limited to `Statfs`,
+  `Statfs_t`, `Adjtimex`, `Timex`, `Errno`, `EOPNOTSUPP`; additionally `os` limited to `DirFS` (since `os.StartProcess` is in an
+  allowed package), no named imports (a renamed `syscall` would escape the selector check), no `//go:` directive but `//go:build`, no
+  non-Go source file (assembly or cgo objects), and a non-vacuity check. *Options considered* 12 records the rejected deny-list.
+- **N1 (non-blocking): `statfs` size overflow.** Accepted: `size above 64 bits` with `bits.Mul64`, available above the total joins
+  `free above total`, cases in AC7, *Approach* 6.
+- **N2 (non-blocking): a mountinfo line over 64 KiB.** Accepted: the Agent area states that such a line fails every `filesystem`
+  sample while the mount exists (a gap each time, fail closed), so a local user able to create such a mount can suppress the file
+  system values only visibly.
+- **N3 (non-blocking): record 0111 states the PLL offset's sign as fact.** Accepted: the Consequences bullet now says the sign is
+  reported as the kernel gives it and its interpretation is unmeasured (U2), as the plan does.
+- **U1**: settled by Security's measurement and cited (*Approach*, record 0111, Agent area *Rights*); the Dev's measurement task is
+  removed from `tasks.md`.
 
 ## Out of scope / follow-ups
 

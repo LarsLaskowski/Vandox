@@ -171,7 +171,8 @@ name order its five counters and, from the second sample on, its five rates.
   digits separated by spaces; of them, reads and writes completed (fields 1 and 5), sectors read and written (fields 3 and 7, in
   units of 512 bytes) and the milliseconds with I/O in flight (field 10) become `disk_reads_total`, `disk_read_bytes_total`,
   `disk_writes_total`, `disk_written_bytes_total` and `disk_io_time_seconds_total`, label `device` the entry's name. At most 1 KiB per
-  file is read.
+  file is read. The I/O of a device-mapper, RAID or loop volume (`dm-*`, `md*`, `loop*`) is therefore recorded only as the I/O of its
+  member disks; a comparison with the legacy script (#45) compares per disk and does not expect values for those volumes.
 - **Rates.** A rate (`cpu_percent`, `vmstat_per_second`, the five disk rates) compares a sample with the previous successful sample
   of the same collector: the increase divided by the seconds between the two runs' start times (`disk_busy_percent`: the increase
   of the I/O milliseconds divided by those milliseconds, times 100). There is no rate in the first sample after the agent started,
@@ -185,13 +186,15 @@ and `filesystem_inodes_free`, label `mount` the configured path.
 - A configured path counts as mounted when it is the mount point (field 5) of a line of the agent's own `/proc/self/mountinfo`, after
   decoding the kernel's escapes: a backslash and exactly three octal digits is one byte (`\040` a space, `\011` a tab, `\012` a line
   feed, `\134` a backslash). A line with fewer than 5 fields, a backslash that does not start such an escape, or a line longer than
-  64 KiB fails the sample. The table is read line by line, so its length does not bound memory.
+  64 KiB fails the sample. The table is read line by line, so its length does not bound memory. A line longer than 64 KiB thus fails
+  every `filesystem` sample for as long as that mount exists: each sample is a recorded gap, never a silent omission.
 - A path that is not mounted is left out of the sample, and the agent logs one warning `mount point not mounted` with the attribute
   `mount` when the path stops being mounted (or is not mounted at the first sample), and one info line `mount point mounted` when it
   is mounted again. `statfs` is called only for mounted paths.
 - Size, free and available are the block counts times the fragment size (the block size when the fragment size is 0); used is size
   minus free. The inode values are left out when the file system reports 0 inodes (btrfs has no fixed count). A `statfs` error,
-  free blocks above the total or free inodes above the total fail the sample; the error names the mount point by its index
+  free or available blocks above the total, free inodes above the total, or a size (blocks times fragment size) above 64 bits fail
+  the sample; the error names the mount point by its index
   (`filesystem.mount_points[1]`), never by its path.
 - The values are those of the agent's mount namespace: a path the unit hides or replaces (`ProtectHome=` for `/home`,
   `InaccessiblePaths=`) reports what the agent sees, and a mount point unmounted between the read of the table and `statfs` reports
@@ -266,7 +269,8 @@ collector timeouts and backend gap detection each emit a gap record, and each pa
   agent, which can reach the same files through another process's root in `/proc`.
 - The system metrics need no right of their own: `/proc/stat`, `/proc/loadavg`, `/proc/meminfo`, `/proc/vmstat`, `/proc/pressure`,
   the agent's own mount table and `/sys/block` are readable by any user, `statfs` needs only search permission on the directories
-  above the mount point, and `adjtimex` without a change needs no capability. The unit's system-call filter must allow `adjtimex`: `ProtectClock=yes` denies it with `EPERM` even for a
+  above the mount point, and `adjtimex` without a change needs no capability (measured: unprivileged and without capabilities,
+  `adjtimex` with modes 0 and `statfs` succeed, while an `adjtimex` that sets the maximum error fails with `EPERM`). The unit's system-call filter must allow `adjtimex`: `ProtectClock=yes` denies it with `EPERM` even for a
   read, and the group `@system-service` does not contain it, so an allow-list names it. A change of the clock still needs
   `CAP_SYS_TIME`, which the bounding set excludes.
 - For restarting units (self-healing, a later feature) a polkit rule lets this user restart only the units named in the configuration;

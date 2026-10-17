@@ -42,7 +42,8 @@ log (`mem_available_bytes`, `swap_used_bytes`, `pressure_avg10`, `load1`, ...), 
   again while stuck, and the other collectors keep recording.
 - B13: No collector starts a program, uses D-Bus or opens a socket.
 - B14: The option `filesystem.mount_points` (a list of at most 16 absolute, clean, distinct paths of at most 1,024 bytes; default `/`)
-  configures the mount points; any other value stops the agent at start-up with a fixed error that never contains the value.
+  configures the mount points; any other value, a list element with no value included, stops the agent at start-up with a fixed error
+  that never contains the value.
 - B15: A measurement the server does not offer (PSI, an unmounted path, inode counts of a file system without them, the PLL offset while
   the PLL is off, a rate without predecessor) is left out of the sample — never written as 0 and never a gap.
 - B16: Every record is a `metric` with source `system`, the names, units and labels of the wire format's *Metric names*, and passes the
