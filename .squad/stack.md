@@ -92,7 +92,8 @@ analysis (the gate of a `patch` that touches only scripts, workflows or Dockerfi
    exclusion — a rule in `.golangci.yml` or a `//nolint:gocognit` directive — needs a Lead decision record (two
    existing validators are excluded by name, without a complexity cap, record 0047). `gosec`, limited to rule G115,
    is the local stand-in for CodeQL's `go/incorrect-integer-conversion` (record 0112): it reported every CodeQL
-   alert measured on PR #265 and accepts the two forms of the integer-conversion rule under *Writing code*. It
+   alert measured on PR #265 and accepts the two forms of the integer-conversion rule under *Writing code*, but reports an upper-bound check alone
+   on a signed value (the rule's lower bound is missing). It
    looks at integer conversions of any source, not only parsed values. It does not match CodeQL everywhere: a
    conversion of a 64-bit parse result to `int` or `uint` is accepted by G115 (measured for `int(n)` of
    `ParseInt(s, 10, 64)`, also with `GOARCH=386`), and whether CodeQL reports it is unverified — check such
@@ -239,11 +240,13 @@ Go (agent):
   type, or from unsigned to signed (`int64(v)` of a `ParseUint` result, `int32(n)` of an `Atoi` result), needs
   one of two forms: an upper-bound check against a constant no larger than the target type's maximum in the
   same function, immediately before the conversion (`if v > maxKBValue { return … }`, then `int64(v)`, as in
-  `internal/sysstats/memory.go`), or a parse into the target type from the start, with the `bitSize` argument
+  `internal/sysstats/memory.go`) — for a signed value (an `Atoi` or `ParseInt` result) together with a
+  lower-bound check against the target type's minimum, zero for an unsigned target
+  (`if n < math.MinInt32 || n > math.MaxInt32 { return … }`, then `int32(n)`) — or a parse into the target type from the start, with the `bitSize` argument
   set to the target's width and the matching signedness (`strconv.ParseInt(s, 10, 64)` for an `int64`,
   `strconv.ParseUint(s, 10, 16)` for a `uint16`, as in `internal/config/config.go`). CodeQL's
   `go/incorrect-integer-conversion` (high severity) runs only in CI and stays authoritative; gosec G115 in the
-  *Analyzer gate* reported every CodeQL alert measured on PR #265 and accepts both forms below, but accepts a
+  *Analyzer gate* reported every CodeQL alert measured on PR #265 and accepts both forms above, but accepts a
   conversion of a 64-bit parse result to `int` or `uint` whose treatment by CodeQL is unverified (record 0112).
   On PR #265 a bound checked elsewhere (a digit-count limit, a check inside a helper) did not count: five
   alerts on `ParseUint` results converted to `int64`.
