@@ -23,8 +23,9 @@ source never blocks the agent (guarantee of record 0029), records every missed s
 3. `-version` keeps printing the version line; `-h` / `-help` print the usage (exit 0); an unknown flag, a positional
    argument or an empty `-config` is a usage error (exit 2).
 4. The agent logs structured lines (key=value) to standard error at the configured `log.level`; under systemd (the
-   journal stream is set) every line carries its syslog priority so the journal shows the level, and no time stamp of
-   its own. The configuration and the secret are never logged.
+   journal stream systemd names is the agent's standard error) every line carries its syslog priority so the journal
+   shows the level, and no time stamp of its own. Values and lines are cut short enough that the journal never splits an
+   entry. The configuration and the secret are never logged.
 5. Every collector has its own interval and deadline and runs in isolation; its first run starts when the agent starts,
    later runs at fixed intervals from the first.
 6. A collector that does not finish by its deadline is abandoned: the other collectors keep running at their own times,
@@ -38,14 +39,16 @@ source never blocks the agent (guarantee of record 0029), records every missed s
 9. When a collector's run starts a full interval or more late (the agent was frozen or descheduled), the missed span is
    recorded as a gap (`unknown`) and the collector runs at once.
 10. Memory pressure mode: the agent can be switched into it and out of it at run time; while it is on, collectors that
-    declare a shorter pressure interval run at that interval (starting from their last run), the others are unchanged,
-    and every collector can see whether the mode was on when its run started.
+    declare a shorter pressure interval run at that interval (counted from their last due time, but never earlier than
+    the switch), the others are unchanged, and every collector can see whether the mode was on when its run started. A
+    switch itself never records a gap.
 11. Self-metrics: the agent records its own resident memory, CPU time, number of goroutines and — once the spool and the
     sender exist — the spool size and the send lag, as ordinary metric records, through the same scheduler as every
     collector.
 12. systemd: when started by systemd with a notification socket, the agent reports `READY=1` once it runs, `WATCHDOG=1`
-    at half the watchdog period systemd set while its collector runners are on time, and `STOPPING=1` when it stops.
-    Without a notification socket, or with one it does not support, it runs the same and sends nothing.
+    at half the watchdog period systemd set (at least 100 ms, a shorter period disables the watchdog) while its
+    collector runners are on time, and `STOPPING=1` when it stops. Without a notification socket, or with one it does
+    not support, it runs the same and sends nothing.
 13. Until the spool exists (#38), the records the scheduler produces are dropped after the scheduler's checks; the agent
     is not released with this behavior (v0.2.0 waits for #38 and #39).
 

@@ -8,15 +8,15 @@ Every documentation edit appears in exactly one row; the Lead's approval only to
 | - | ---- | ----- | ---------- | ----- | ---- |
 | 1 | Area documents, architecture, decision record 0110 and its index row (written with the plan) | `docs/areas/agent.md`, `docs/areas/wire-format.md`, `docs/areas/configuration-and-secrets.md`, `docs/ARCHITECTURE.md`, `docs/decisions/0110-…md`, `docs/decisions/README.md` | — | Lead | [x] |
 | 2 | Skeleton: every signature of *Signatures*; `cli.go` and `main.go` rewritten; mechanical adaptation of the `cli.Run` call sites in `internal/cli/cli_test.go` and the `run` calls in `cmd/vandox-agent/main_test.go` (no assertion touched); *Build* passes | `internal/model/model.go`, `internal/scheduler/{scheduler,runner,sink}.go`, `internal/selfstats/selfstats.go`, `internal/sdnotify/sdnotify.go`, `internal/agent/{agent,logger,watchdog}.go`, `internal/cli/cli.go`, `cmd/vandox-agent/main.go`, `internal/cli/cli_test.go`, `cmd/vandox-agent/main_test.go` | — | Dev | [ ] |
-| 3 | Real sample: capture `testdata/proc/self/status` from a running process (`cat /proc/self/status`), check it holds no secret | `testdata/proc/self/status` | AC16, AC18, AC28 | Tester | [ ] |
+| 3 | Real sample: capture `testdata/proc/self/status` from a running process (`cat /proc/self/status`), read it whole and check it holds no secret, commit it byte for byte as captured (tests derive variants in memory) | `testdata/proc/self/status` | AC16, AC18, AC28 | Tester | [ ] |
 | 4 | Tests first for the scheduler, sink and `ValidName` | `internal/scheduler/{scheduler,runner,sink}_test.go`, `internal/model/model_test.go` | AC1–AC15 | Tester | [ ] |
 | 5 | Tests first for the self-metrics | `internal/selfstats/selfstats_test.go` | AC16–AC20 | Tester | [ ] |
 | 6 | Tests first for the notification | `internal/sdnotify/sdnotify_test.go` | AC21–AC23 | Tester | [ ] |
-| 7 | Tests first for the agent (watchdog loop, logger, end to end) | `internal/agent/{agent,logger,watchdog}_test.go` | AC24–AC31 | Tester | [ ] |
+| 7 | Tests first for the agent (watchdog loop, logger with its caps, `journalStream`, end to end) | `internal/agent/{agent,logger,watchdog}_test.go` | AC24–AC31 | Tester | [ ] |
 | 8 | Tests first for the command line (rewrite of `cli_test.go`, new test in `main_test.go`) | `internal/cli/cli_test.go`, `cmd/vandox-agent/main_test.go` | AC32–AC34 | Tester | [ ] |
 | 9 | Implement the scheduler (runner loop split below gocognit 15), sink, `ValidName` | `internal/scheduler/*.go`, `internal/model/model.go` | AC1–AC15 | Dev | [ ] |
 | 10 | Implement the self-metrics | `internal/selfstats/selfstats.go` | AC16–AC20 | Dev | [ ] |
-| 11 | Implement the notification; scratch measurement of the full-buffer write deadline, result into `log.md` (via the orchestrator) | `internal/sdnotify/sdnotify.go` | AC21–AC23 | Dev | [ ] |
+| 11 | Implement the notification (`MinWatchdogPeriod` floor) | `internal/sdnotify/sdnotify.go` | AC21–AC23 | Dev | [ ] |
 | 12 | Implement the agent, logger, watchdog loop, command line and `main` | `internal/agent/*.go`, `internal/cli/cli.go`, `cmd/vandox-agent/main.go` | AC24–AC34 | Dev | [ ] |
 | 13 | Coverage pass until the *Coverage gate* passes | test files above | — | Tester | [ ] |
 | 14 | README: *Agent* paragraph, binaries table, the loader sentence of the options section | `README.md` | — | Dev | [ ] |

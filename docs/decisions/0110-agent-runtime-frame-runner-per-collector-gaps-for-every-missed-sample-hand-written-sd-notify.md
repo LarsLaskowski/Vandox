@@ -35,21 +35,34 @@ memory pressure hook, self-metrics (RSS, CPU, goroutines, spool size, send lag) 
 7. **Watchdog.** Ping unconditionally — proves only that one goroutine runs; gate on the scheduler goroutine — misses a
    runner blocked in the sink; **ping only while every runner is within its run's deadline plus a slack of 30 seconds**
    (chosen): a stuck collector does not withhold it (its runner moves on), a blocked runner or a frozen process does, and
-   the slack keeps a briefly descheduled agent from being restarted under memory pressure.
+   the slack keeps a briefly descheduled agent from being restarted under memory pressure. For the period's lower bound:
+   none — a watchdog value of one microsecond makes a busy loop; one second — the end-to-end test would wait half a
+   second on a real timer, against 0062; **100 milliseconds** (chosen), which already rules out the busy loop.
 8. **Logging.** JSON lines — hard to read in `journalctl`; the native journal socket — a second socket for fields nobody
    queries; **text lines on standard error with the syslog priority prefix that systemd reads, when the journal stream is
-   set** (chosen).
+   standard error** (chosen). The journal stream is recognized by comparing the device and inode that `JOURNAL_STREAM`
+   names with standard error's, as systemd prescribes, not by the variable's presence, which a redirected child
+   inherits. Values are cut to 4 KiB and lines to 32 KiB, because the journal splits a line longer than its 48 KiB
+   `LineMax=` and its rest becomes an entry of its own; cutting values alone does not bound a line with many values.
 9. **Records before the spool exists.** Wait for #38 with the whole frame — blocks every collector issue; log the records —
    writes process names and log text into the journal; **a sink interface, with a sink that drops the records until #38**
    (chosen).
 10. **Spool size and send lag.** Walk the spool directory now — a second definition next to #38's; **provider interfaces
     that #38 and #39 implement** (chosen).
+11. **Memory pressure switch.** Count the next run from the last due time with the new interval even when that moment is
+    long past — the late check cannot tell the switch from a frozen agent and records a gap for a span in which nothing
+    was missed, against 0028; restart the schedule at the switch in every case — a switch just after a run samples twice
+    within the pressure interval; **the last due time plus the new interval, but never earlier than the switch**
+    (chosen): on the old grid where possible, never late because of the switch.
+12. **A sink that refuses records.** The scheduler records a gap for them — it cannot know what a failed sink kept, and the
+    gap would go into the same failing sink; **the sink owns recording the loss, the scheduler logs the error** (chosen).
 
 ## Decision
 
 The agent runs one runner per collector at a fixed rate, abandons a run at its deadline, never starts a stuck collector
 again until it returns, and records a gap for every sample it misses (timeout, skip, panic, error, refused record, late
-start); it notifies systemd with the standard library and sends `WATCHDOG=1` only while every runner is on time. The
+start, but never a memory pressure switch); it notifies systemd with the standard library and sends `WATCHDOG=1` only
+while every runner is on time. The
 rules are in the [Agent](../areas/agent.md) area (*Scheduling*, *Self-metrics*, *Service manager*, *Logging*) and the
 metric names in the [wire format](../areas/wire-format.md) (*Metric names*).
 
@@ -62,7 +75,9 @@ metric names in the [wire format](../areas/wire-format.md) (*Metric names*).
   the send lag provider.
 - A runner blocked in the sink for more than its deadline plus 30 seconds withholds the watchdog, and systemd restarts the
   agent after `WatchdogSec=`; the unit (#42) must set `Type=notify`, `WatchdogSec=` and `NotifyAccess=main`.
-- Unverified until measured (the plan names the measurement): that a datagram write to a socket whose buffer is full
-  returns at the write deadline instead of blocking.
+- The spool (#38) must record a gap for records it refuses to take; until then a sink failure is visible only in the log.
+- Two library behaviors the design rests on were measured (Go 1.27, Linux 6.18) and hold: `slog`'s text format keeps
+  every entry on one line whatever its values hold (a test pins it), and a datagram write to a socket whose queue is
+  full returns at the write deadline instead of blocking.
 - Revisit if the agent needs structured journal fields (then the native journal protocol) or if a collector needs a run
   overlapping its previous one (then the "never started again while stuck" rule of 0029 needs a superseding record).

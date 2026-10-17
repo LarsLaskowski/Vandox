@@ -27,10 +27,15 @@ rules below for the parts not implemented are the target the implementation is h
 
 - The agent writes its log to standard error, one line per entry, as `key=value` pairs at the configured `log.level`. A value that
   contains a space, a quote, a control character or any other character that is not printable is quoted with its control characters
-  escaped, so no value can start or forge a line.
-- When the journal stream is set (systemd connected standard error to the journal), every line starts with its syslog priority —
-  `<7>` debug, `<6>` info, `<4>` warn, `<3>` error — which the journal takes as the entry's priority, and carries no time stamp of its
-  own (the journal stamps every entry). Otherwise lines carry their time.
+  escaped, so no value can start or forge a line (verified for Go's `slog` text format: line breaks, `<N>` inside a value, U+2028,
+  U+202E, invalid UTF-8 and control characters in keys all stay inside one line; a test pins it).
+- The message and every text value are cut to 4 KiB, and every line, priority prefix and newline included, to 32 KiB, at a character
+  boundary — below the journal's default line limit of 48 KiB (`LineMax=`), so the journal never splits an entry into a second one.
+- When the journal stream is standard error — `JOURNAL_STREAM` is set exactly once as `<device>:<inode>` in decimal and names the
+  device and inode of the agent's standard error, as systemd documents — every line starts with its syslog priority — `<7>` debug,
+  `<6>` info, `<4>` warn, `<3>` error — which the journal takes as the entry's priority, and carries no time stamp of its own (the
+  journal stamps every entry). Otherwise (unset, malformed, set twice, or naming another stream) lines carry their time and no prefix,
+  without a warning.
 - The configuration and the agent token are never logged; the start-up line names only the agent ID and the version.
 
 ## Connection
@@ -73,24 +78,32 @@ rules below for the parts not implemented are the target the implementation is h
   due time.
 - A run that **panics** or returns an **error** loses its sample: the panic is recovered, the sample is recorded as a gap with cause
   `unknown`, and the collector runs again at its next due time. A panic is logged as an error with the collector's name, the panic
-  value (at most 1,024 bytes) and the stack (at most 8 KiB). Errors are logged at the first failure after a success, and the next
+  value (at most 1,024 bytes) and the stack (at most 4 KiB). Errors are logged at the first failure after a success, and the next
   success logs how many runs failed, so a collector failing every run does not flood the log. The records of a failed run are
   dropped, also those it returned together with its error.
 - Every record of a successful run is stamped as an agent record (origin `agent`, the capture time of the run's start where the
   collector set none) and checked against the [wire format](wire-format.md), size included, as the producer's duty of its *Producer
   size contract*. A record that fails is dropped, the sample gets one gap with cause `unknown`, and the run's other records are kept.
-- A run that starts a whole interval or more after its due time (the agent was frozen or not scheduled) records the missed span as a
-  gap with cause `unknown` and runs at once; the next run is an interval after that.
+- A run that starts a whole interval or more after its due time (the agent was frozen or not scheduled, or its previous cycle was held
+  up) records the missed span, from the due time to the actual start, as a gap with cause `unknown` and runs at once; the next run is
+  an interval after that. A run that starts late by less than an interval runs at once without a gap and keeps the grid.
 - The gap of a missed sample covers the slot the sample stands for, from its due time to one interval later, so the gaps of
   consecutive missed samples join; its `collector` names the collector and its source is `agent`. A late start's gap covers the span
-  from the missed due time to the actual start. Each gap's capture time is the moment it was recorded.
+  from the missed due time to the actual start. Each gap's capture time is the moment it was recorded, so the gap of an abandoned or
+  skipped run ends after its capture time.
 - **Memory pressure mode** is switched on and off at run time by the agent (the thresholds belong to the collectors that measure
-  pressure). While it is on, a collector with a pressure interval runs at that interval, counted from its last due time — at once
-  when that moment has passed — and returns to its interval when the mode goes off; collectors without one are unchanged. Every run
-  knows whether the mode was on when it started, so a collector can take a fuller sample under pressure.
-- A runner counts as **on time** while the current moment is not later than its run's due time plus its timeout plus 30 seconds; a
-  runner that is waiting for an abandoned run is on time (it moves on at each due time). The service manager's watchdog is fed only
-  while every runner is on time (*Service manager*).
+  pressure); switching to the mode already in force changes nothing. When the mode changes, a collector with a pressure interval
+  takes its next due time from its last due time plus the interval of the new mode, but never earlier than the moment of the switch:
+  a switch long after the last run starts a run at once, and from then on the collector keeps the new interval's grid. A switch
+  never makes a run late and never records a gap; a collector held up past the new due time by a whole interval records the span
+  from that due time as a late start. Collectors without a pressure interval are unchanged. Every run knows whether the mode was on
+  when it started, so a collector can take a fuller sample under pressure.
+- A runner counts as **on time** while the current moment is not later than the due time of the run it is in or waiting for, plus
+  its timeout plus 30 seconds; a runner that is waiting for an abandoned run is on time (it moves on at each due time), and a pressure
+  switch moves the due time with it. The service manager's watchdog is fed only while every runner is on time (*Service manager*).
+- Records go to the sink with the agent's own context, not one bounded by the run's timeout. When the sink refuses records, the
+  agent logs the error (at the first failure, and the recovery once) and records no gap itself: the sink that refuses records owns
+  recording their loss as a gap (the spool, *Spool and sending*).
 - Until the spool exists, the records that passed these checks are dropped. The spool assigns the sequence numbers (*Spool and
   sending*).
 
@@ -109,17 +122,20 @@ sample, which then becomes a gap.
 
 - When systemd started the agent with a notification socket, the agent sends `READY=1` once its collectors run, `WATCHDOG=1` while
   the watchdog is enabled, and `STOPPING=1` when it stops. Each notification is one datagram; the dial and the write of it have a
-  deadline of one second.
+  deadline of one second, so a socket whose queue is full makes the notification fail at that deadline instead of blocking the agent
+  (measured: the write returns a deadline error once about 11 datagrams are queued).
 - The socket is the one `NOTIFY_SOCKET` names: an absolute path of at most 107 bytes, or `@` and an abstract name of 1 to 107 bytes.
   Any other value (a relative path, `@` alone, a longer name, the `vsock:` forms of newer systemd versions) disables the notification
   with a warning; the agent runs the same. Unset or empty means no notification and no warning.
-- The watchdog is enabled when `WATCHDOG_USEC` holds 1 to 9,223,372,036,854,775 microseconds in ASCII digits and `WATCHDOG_PID` is
+- The watchdog is enabled when `WATCHDOG_USEC` holds 100,000 to 9,223,372,036,854,775 microseconds in ASCII digits (a period below
+  100 ms is refused, so the agent never pings in a busy loop) and `WATCHDOG_PID` is
   unset or the agent's process ID; the agent then sends `WATCHDOG=1` every half of that period while all collector runners are on
   time (*Scheduling*). When a runner is not on time, the notification is withheld and one warning is logged until it is sent again,
   so systemd restarts an agent whose runners stopped moving. A malformed value disables the watchdog with a warning.
 - For this to work the unit must use `Type=notify`, set `WatchdogSec=` and allow notifications from the main process
   (`NotifyAccess=main`); the unit is part of the installation files.
-- A variable named twice in the environment is treated as malformed.
+- `NOTIFY_SOCKET`, `WATCHDOG_USEC` or `WATCHDOG_PID` named twice in the environment is treated as malformed (*Logging* for
+  `JOURNAL_STREAM`).
 
 ## Gaps
 
@@ -137,7 +153,7 @@ collector timeouts and backend gap detection each emit a gap record, and each pa
   is persistent state of the agent.
 - The boot ID and the clock offset are kept with each spooled record, and a batch holds only records with the same boot ID and offset.
 - The spool is a file-write area of the agent: it has a size bound and defined behavior when it is full (oldest data dropped, a gap
-  recorded).
+  recorded). Records the spool refuses to take from the scheduler are its loss to record as a gap, too.
 
 ## Rights
 
