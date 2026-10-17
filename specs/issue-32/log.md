@@ -18,3 +18,4 @@ are quoted in full.
 | 2026-10-17 22:13 | 8 Review (security diff) | squad-security | CHANGES_REQUIRED: B1 missing TestProcstats_ImportsOnlyAllowedPackages; N1 /proc/pid/mem unverified (opus/medium · 75,552 tokens · 19 tool uses · 158 s) |
 | 2026-10-17 22:18 | 8 Review (reviewer r1) | squad-reviewer | BLOCKING 1 (missing import allow-list test), NON-BLOCKING 1 (README wording, verbatim) (opus/medium · 173,027 tokens · 45 tool uses · 405 s) |
 | 2026-10-17 22:18 | 8 Verbatim fix | Orchestrator | applied reviewer's README wording fix (deploy/agent/README.md) |
+| 2026-10-17 22:19 | 8 Fix: import allow-list test | squad-tester | TestProcstats_ImportsOnlyAllowedPackages added, passes; gates pass (sonnet/medium · 8,925 tokens · 5 tool uses · 62 s · continued from 5 Tests first) |
