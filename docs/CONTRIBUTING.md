@@ -145,7 +145,8 @@ tags look like `vX.Y.Z-rc.N`. Build metadata (`+...`) is not allowed.
    and `SHA256SUMS`, generates the notes if they are empty, appends the image digest, and marks the release as latest
    exactly when the tag is the highest stable `v*.*.*` tag.
 8. If any job fails or the run is cancelled, turns the release back into a draft, so no published release lacks its
-   assets. A release that already has its assets from an earlier run stays published (a republish or re-run of a
+   assets. A release that is already complete from an earlier run (both assets and the image digest in the notes)
+   stays published (a republish or re-run of a
    complete release stops at the never-overwrite check).
 
 ### Verifying a release

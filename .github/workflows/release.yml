@@ -397,10 +397,15 @@ jobs:
           TAG: ${{ github.event.release.tag_name }}
         run: |
           set -euo pipefail
-          # A release that already carries its checksum file was completed by an earlier run; a republish
-          # or re-run of it stops at the never-overwrite check and must not withdraw it.
-          if gh release view "$TAG" --json assets --jq '.assets[].name' | grep -qx SHA256SUMS; then
-            echo "::warning::the release $TAG already has its assets from an earlier run; it stays published"
+          # A complete release (both assets and the digest line, written last by github-release) was
+          # finished by an earlier run; a republish or re-run of it stops at the never-overwrite check and
+          # must not withdraw it. Read into variables first, so no pipe can fail on an early exit.
+          names="$(gh release view "$TAG" --json assets --jq '.assets[].name')"
+          body="$(gh release view "$TAG" --json body --jq .body)"
+          if printf '%s\n' "$names" | grep -qx vandox-agent-linux-amd64 &&
+            printf '%s\n' "$names" | grep -qx SHA256SUMS &&
+            printf '%s\n' "$body" | grep -q '^Docker image: networlddev/vandox:'; then
+            echo "::warning::the release $TAG is already complete from an earlier run; it stays published"
             exit 0
           fi
           gh release edit "$TAG" --draft=true
