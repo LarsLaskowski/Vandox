@@ -15,3 +15,4 @@ are quoted in full.
 | 2026-10-17 18:41 | 4 Skeleton | squad-dev | internal/sysstats, config option, agent jobs; zero-value stubs for checkMountPoints and jobs (reported deviations, tests still fail on them) (sonnet/medium · 77,859 tokens · 7 tool uses · 44 s) |
 | 2026-10-17 18:57 | 5 Tests first | squad-tester | fixtures + tests AC1-AC12 compile and fail on skeleton (sysstats 26 tests, agent 2, config 4) (sonnet/medium · 302,208 tokens · 51 tool uses · 917 s) |
 | 2026-10-17 19:09 | 6 Implement | squad-dev | tasks 4-11 done; coverage 95.7% new, 98.2% overall; deviations: mountPointsRule name, mem_used omitted if negative, Frsize/Bsize no conversion, escapes validated in field 5 only (sonnet/medium · 227,063 tokens · 40 tool uses · 708 s) |
+| 2026-10-17 19:15 | 7 Code check | Orchestrator | Format, Analyzer, Test -race, Coverage (95.7% new / 98.2% overall), scope-check all pass; main merged already |
