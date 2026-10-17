@@ -1,6 +1,6 @@
 # 0113: Process collector: PSS from smaps_rollup, top processes by memory and CPU with every program summed, a full snapshot under memory pressure that the system collector switches
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-17
 - **Area:** Agent
 - **Source:** Issue #32
