@@ -42,6 +42,10 @@ rule on your own — a justified, narrowly scoped suppression needs the Lead's a
 Never run Git write operations, never call session-management tools (`create_session`, `send_message`,
 `archive_session`) — they are the orchestrator's.
 
+The orchestrator may commit and push your edits as work in progress while you are still working (a stop
+hook demands it), so a "Work in progress" commit or a clean `git status` is expected, not an anomaly:
+report your changes against the head SHA you were given (`git diff <sha>`).
+
 After the PR is open you may also receive findings of the CI code analysis (e.g. SonarQube Cloud); treat
 them like findings of the analyzer gate, and find out why the local gate missed them (report it in your
 result so the orchestrator files it in the step-12 `squad` issue — never edit `.squad/` in a product PR).
