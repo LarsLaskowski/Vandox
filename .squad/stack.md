@@ -142,6 +142,7 @@ locally, <authoritative check>" once in `log.md` and does not repeat it as an op
 | known vulnerabilities (Go) | `govulncheck` (the proxy blocks `vuln.go.dev`, HTTP 403) | none | CI job *Vulnerability scan* |
 | C# conditions on a local that a lambda assigns (SonarQube Cloud `csharpsquid:S2583`, "condition always evaluates to False", and the other symbolic-execution rules) | the local SonarAnalyzer.CSharp build does not report them (run #27: the quality gate failed in CI with a C reliability rating on a local assigned only inside a callback passed to `PageRunner.RunAsync`) | the captured-local rule under *Writing code*, checked by reading every new lambda that assigns an outer local | SonarQube Cloud (step 11) |
 | values passed to a logger or other sink (CodeQL "Clear text storage of sensitive information") | CodeQL runs only in CI | the logger-argument rule below, checked by grepping the new logger calls | CodeQL code scanning on the pull request |
+| Go conversions of a parsed number to a narrower or signed integer type (CodeQL `go/incorrect-integer-conversion`) | CodeQL runs only in CI; `go vet` and golangci-lint do not report it | the integer-conversion rule under *Writing code*, checked by grepping the new `strconv.ParseUint`, `strconv.ParseInt` and `strconv.Atoi` calls and every conversion of their results | CodeQL code scanning on the pull request |
 
 When the *Analyzer gate* reports shellcheck, actionlint or hadolint as NOT RUN (a refused download), that tool is
 missing locally for the session: note it in `log.md` as above, and parse a changed workflow as YAML instead
@@ -227,6 +228,16 @@ Go (agent):
 - Errors are returned and wrapped with context (`fmt.Errorf("…: %w", err)`), never ignored; no `panic` in
   library code.
 - `context.Context` is the first parameter of anything that does I/O or can block, and is honored.
+- A number parsed with `strconv.ParseUint`, `strconv.ParseInt` or `strconv.Atoi` and converted to a narrower
+  type, or from unsigned to signed (`int64(v)` of a `ParseUint` result, `int32(n)` of an `Atoi` result), needs
+  one of two forms: an upper-bound check against a constant no larger than the target type's maximum in the
+  same function, immediately before the conversion (`if v > maxKBValue { return … }`, then `int64(v)`, as in
+  `internal/sysstats/memory.go`), or a parse into the target type from the start, with the `bitSize` argument
+  set to the target's width and the matching signedness (`strconv.ParseInt(s, 10, 64)` for an `int64`,
+  `strconv.ParseUint(s, 10, 16)` for a `uint16`, as in `internal/config/config.go`). CodeQL's
+  `go/incorrect-integer-conversion` (high severity) runs only in CI, no local gate reports it, and on PR #265 a
+  bound checked elsewhere (a digit-count limit, a check inside a helper) did not count: five alerts on
+  `ParseUint` results converted to `int64`.
 - The agent prints its build information through `internal/version`, set via `-ldflags`.
 
 C# (backend): follow the surrounding code and the analyzers; in particular
