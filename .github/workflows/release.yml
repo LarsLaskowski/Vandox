@@ -232,8 +232,10 @@ jobs:
           VERSION: ${{ needs.build.outputs.version }}
         run: |
           set -uo pipefail
-          err="$(docker manifest inspect "networlddev/vandox:$VERSION" 2>&1 >/dev/null)"
-          rc=$?
+          # The step shell runs with -e, so the expected non-zero status of a missing version is
+          # captured with || instead of ending the script before rc is read.
+          rc=0
+          err="$(docker manifest inspect "networlddev/vandox:$VERSION" 2>&1 >/dev/null)" || rc=$?
           if [ "$rc" -eq 0 ]; then
             echo "::error::networlddev/vandox:$VERSION already exists; published versions are never overwritten"
             exit 1
