@@ -136,4 +136,5 @@ once in the [area document](../areas/README.md) of the record's area, and the re
 | 0107 | The incidents view reads bounded summaries and the window's own records; notes are rows per incident number that follow merges, saved by a form post with the antiforgery token; every time links to the logs of that moment | Accepted | 2026-10-14 |
 | 0108 | The report page renders the blocks the Markdown is written from, lists the outages in pages of 50 by a new run, takes the language from the address, and runs one report at a time under a deadline of 2 minutes; the Markdown is a GET download | Accepted | 2026-10-15 |
 | 0109 | Squad working records stay off main, and product PRs never change the squad | Accepted | 2026-10-17 |
+| 0110 | The agent's runtime frame: one runner per collector at a fixed rate, a gap for every missed sample, sd_notify by hand with a watchdog gated on the runners, journal logging on stderr | Accepted | 2026-10-17 |
 <!-- project:end index -->

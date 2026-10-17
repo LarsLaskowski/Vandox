@@ -341,3 +341,31 @@ func TestPayload_NilReceiver(t *testing.T) {
 		})
 	}
 }
+
+func TestValidName(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want bool
+	}{
+		{"agent", "agent", true},
+		{"dotted", "proc.meminfo", true},
+		{"single letter", "a", true},
+		{"128 bytes", strings.Repeat("a", 128), true},
+		{"empty", "", false},
+		{"129 bytes", strings.Repeat("a", 129), false},
+		{"leading dash", "-a", false},
+		{"leading dot", ".a", false},
+		{"space", "a b", false},
+		{"trailing newline", "a\n", false},
+		{"non-ASCII letter", "ä", false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := model.ValidName(tc.in); got != tc.want {
+				t.Errorf("ValidName(%q) = %v, want %v", tc.in, got, tc.want)
+			}
+		})
+	}
+}

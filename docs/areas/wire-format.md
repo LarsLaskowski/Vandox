@@ -59,7 +59,7 @@ persistent or use a new agent ID (#38, #40).
 | `kind` | one of the kinds below, exact lower-case match; an unknown kind rejects the batch |
 | `source` | name pattern (collector or parser, e.g. `proc.meminfo`, `journal`) |
 | `seq` | integer > 0, strictly increasing within the batch (gaps allowed; the backend detects them, #41); the backend stores at most 2^63 - 1 ([0063](../decisions/0063-storage-schema-records-table-typed-metric-and-log-tables-json-payloads.md)) |
-| `captured_at` | RFC 3339 in UTC, written with `Z`; the time the data describes (a log line: the time stamped in the line, else when it was read; a gap: when it was recorded); the backend stores instants from 1677-09-21 to 2262-04-11 (nanoseconds in an int64, 0063) |
+| `captured_at` | RFC 3339 in UTC, written with `Z`; the time the data describes (a log line: the time stamped in the line, else when it was read; a gap: when it was recorded, which its `to` may follow, see *`gap`*); the backend stores instants from 1677-09-21 to 2262-04-11 (nanoseconds in an int64, 0063) |
 | `data` | the payload object of the kind; required, not `null` |
 
 Records of origin `import` (log importer) and `backend` exist in the model but never on the wire: a batch with
@@ -123,6 +123,14 @@ produced it. Byte values are exact integers in a double (up to 2^53 exactly), co
 | `pressure_stall_microseconds_total` | `microseconds` | `resource`, `kind` | total stall time |
 | `vmstat_total` | — | `counter`: `pswpin`, `pswpout`, `pgmajfault`, `oom_kill` | the raw counter of `/proc/vmstat` |
 | `vmstat_per_second` | `per_second` | `counter` | (value − previous value) / seconds between two samples; only when the counter did not fall |
+| `agent_rss_bytes` | `bytes` | — | resident memory of the agent itself (`VmRSS`, kB times 1,024) |
+| `agent_cpu_seconds_total` | `seconds` | — | user plus system CPU time the agent used since it started |
+| `agent_goroutines` | — | — | number of goroutines of the agent |
+| `agent_spool_bytes` | `bytes` | — | size of the agent's spool |
+| `agent_send_lag_seconds` | `seconds` | — | how far the agent's sending lags behind capture |
+
+The `agent_*` metrics are the agent's self-metrics ([Agent](agent.md), *Self-metrics*) and carry the source `agent`, as do the gaps
+the agent's scheduler records.
 
 ### `process_snapshot`
 
@@ -185,7 +193,9 @@ empty `host` and an empty `event`; the C# decoder reads a line without them as e
 sequence_missing no_data unknown`), `collector` (name pattern, required for `collector_timeout`), `first_seq`
 and `last_seq` (both omitted or both > 0 with `first_seq <= last_seq`; both required for `spool_dropped` and
 `sequence_missing`). The causes `sequence_missing` and `no_data` are set by the backend and are rejected in
-agent records.
+agent records. `from` and `to` are not bound to the record's `captured_at`: a gap the agent records for a run it abandoned
+or skipped covers the sample's slot up to one interval after the due time, so its `to` lies after its
+`captured_at` ([Agent](agent.md), *Scheduling*).
 
 ## Producer mapping for connection endpoints
 

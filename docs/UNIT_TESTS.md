@@ -60,6 +60,8 @@ covers, and the rules under *Code coverage* and the checklist apply to both.
   ([0077](decisions/0077-storage-on-microsoft-data-sqlite-same-schema-and-rules.md)).
 - Go: `t.Helper()` in helpers; `t.TempDir()` for files; no real network, no real clock (inject a clock or a
   fixture path); tests pass under `-race`. Loopback listeners, as `httptest` uses them, are the only network.
+  A unix datagram socket bound in `t.TempDir()` (or an abstract name) stands in for the systemd notification socket;
+  it is local IPC, not network, and tests on it with real timers follow decision 0062 (below).
 - Go: timeouts of `context` and `net/http` cannot be driven by an own fake clock, so
   [decision 0062](decisions/0062-timeout-tests-use-synctest-or-injected-durations.md) applies: without a
   network, test them in a `testing/synctest` bubble (fake time, `synctest.Wait`); over loopback listeners,

@@ -2,9 +2,13 @@
 package main
 
 import (
+	"context"
 	"io"
 	"os"
+	"os/signal"
+	"syscall"
 
+	"github.com/LarsLaskowski/Vandox/internal/agent"
 	"github.com/LarsLaskowski/Vandox/internal/cli"
 )
 
@@ -12,10 +16,17 @@ import (
 const binaryName = "vandox-agent"
 
 func main() {
-	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	code := run(ctx, os.Args[1:], os.Environ(), os.Stdout, os.Stderr)
+	stop()
+	os.Exit(code)
 }
 
 // run executes the command with args and returns the process exit code.
-func run(args []string, stdout, stderr io.Writer) int {
-	return cli.Run(binaryName, args, stdout, stderr)
+func run(ctx context.Context, args, environ []string, stdout, stderr io.Writer) int {
+	cmd, code, done := cli.Parse(binaryName, args, stdout, stderr)
+	if done {
+		return code
+	}
+	return agent.Run(ctx, agent.Options{ConfigPath: cmd.ConfigPath, Environ: environ, Stderr: stderr})
 }

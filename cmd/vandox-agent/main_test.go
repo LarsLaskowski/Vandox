@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"context"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -11,7 +13,7 @@ import (
 func TestRun_Version(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 
-	got := run([]string{"-version"}, &stdout, &stderr)
+	got := run(context.Background(), []string{"-version"}, nil, &stdout, &stderr)
 
 	want := version.String("vandox-agent") + "\n"
 	if got != 0 {
@@ -28,7 +30,7 @@ func TestRun_Version(t *testing.T) {
 func TestRun_UndefinedFlag(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 
-	got := run([]string{"-bogus"}, &stdout, &stderr)
+	got := run(context.Background(), []string{"-bogus"}, nil, &stdout, &stderr)
 
 	want := "Usage of vandox-agent:"
 	if got != 2 {
@@ -36,5 +38,24 @@ func TestRun_UndefinedFlag(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), want) {
 		t.Errorf("run([-bogus]) stderr = %q, want it to contain %q", stderr.String(), want)
+	}
+}
+
+func TestRun_MissingConfigExitsOne(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	missing := filepath.Join(t.TempDir(), "none.yaml")
+
+	got := run(context.Background(), []string{"-config", missing}, nil, &stdout, &stderr)
+
+	if got != 1 {
+		t.Errorf("run([-config <missing file>]) exit code = %d, want 1", got)
+	}
+	if stdout.Len() != 0 {
+		t.Errorf("run([-config <missing file>]) stdout = %q, want empty", stdout.String())
+	}
+	for _, want := range []string{"agent cannot start", missing} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Errorf("run([-config <missing file>]) stderr = %q, want it to contain %q", stderr.String(), want)
+		}
 	}
 }
