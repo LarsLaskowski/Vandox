@@ -1,6 +1,6 @@
 # 0112: gosec G115 as the local stand-in for CodeQL's integer-conversion query; enabled for the whole module, no exclusions
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-17
 - **Area:** —
 - **Source:** Issue #268
