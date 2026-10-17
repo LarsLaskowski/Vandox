@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -62,14 +63,31 @@ func cutAttr(groups []string, a slog.Attr) slog.Attr {
 	case slog.KindString:
 		a.Value = slog.StringValue(cutRunes(v.String(), MaxLogValueBytes))
 	case slog.KindAny:
-		switch x := v.Any().(type) {
-		case error:
-			a.Value = slog.StringValue(cutRunes(x.Error(), MaxLogValueBytes))
-		case fmt.Stringer:
-			a.Value = slog.StringValue(cutRunes(x.String(), MaxLogValueBytes))
+		if text, ok := anyText(v.Any()); ok {
+			a.Value = slog.StringValue(cutRunes(text, MaxLogValueBytes))
 		}
 	}
 	return a
+}
+
+// anyText returns the text of an error or fmt.Stringer value; ok is false for any other value. A value that panics
+// while it is formatted (a typed nil pointer, a faulty String method) yields "<nil>" or "!PANIC: <value>", as slog does.
+func anyText(value any) (text string, ok bool) {
+	defer func() {
+		if r := recover(); r != nil {
+			text, ok = fmt.Sprintf("!PANIC: %v", r), true
+			if rv := reflect.ValueOf(value); rv.Kind() == reflect.Pointer && rv.IsNil() {
+				text = "<nil>"
+			}
+		}
+	}()
+	switch x := value.(type) {
+	case error:
+		return x.Error(), true
+	case fmt.Stringer:
+		return x.String(), true
+	}
+	return "", false
 }
 
 // cutRunes returns s cut to at most limit bytes at a rune boundary.

@@ -30,7 +30,7 @@ rules below for the parts not implemented are the target the implementation is h
   escaped, so no value can start or forge a line (verified for Go's `slog` text format: line breaks, `<N>` inside a value, U+2028,
   U+202E, invalid UTF-8 and control characters in keys all stay inside one line; a test pins it).
 - The message and every text value are cut to 4 KiB, and every line, priority prefix and newline included, to 32 KiB, at a character
-  boundary — below the journal's default line limit of 48 KiB (`LineMax=`), so the journal never splits an entry into a second one.
+  boundary — below the journal's default line limit of 48 KiB (`LineMax=`), so the journal never splits an entry into a second one. A value whose Error or String method panics is logged as `<nil>` (a nil pointer) or `!PANIC: <value>`, as `log/slog` does.
 - When the journal stream is standard error — `JOURNAL_STREAM` is set exactly once as `<device>:<inode>` in decimal and names the
   device and inode of the agent's standard error, as systemd documents — every line starts with its syslog priority — `<7>` debug,
   `<6>` info, `<4>` warn, `<3>` error — which the journal takes as the entry's priority, and carries no time stamp of its own (the
