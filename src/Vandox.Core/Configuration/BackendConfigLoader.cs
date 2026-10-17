@@ -112,8 +112,9 @@ public static class BackendConfigLoader
     }
 
     /// <summary>
-    /// Reads the regular file at <paramref name="path"/>, at most <paramref name="limit"/> bytes. The type is checked before
-    /// the file is opened, so a FIFO cannot block the read.
+    /// Reads the regular file at <paramref name="path"/>, at most <paramref name="limit"/> bytes. The type is checked on the
+    /// opened file (<c>FileProbe.OpenRegular</c> opens without blocking), so a FIFO cannot block the read; the check
+    /// before the open only gives a missing or non-regular path its own message.
     /// </summary>
     /// <param name="path">The path</param>
     /// <param name="limit">The largest accepted size</param>

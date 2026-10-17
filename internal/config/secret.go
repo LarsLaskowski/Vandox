@@ -6,7 +6,6 @@ import (
 	"io"
 	"io/fs"
 	"log/slog"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -167,19 +166,16 @@ func secretFromValue(variable, v string) (Secret, error) {
 }
 
 // readSecretFile reads a secret from the file at path, which is the value of fileVar. Neither the path nor
-// the content is shown in an error.
+// the content is shown in an error. The file is opened without blocking and its type is then checked on the
+// opened descriptor, so a FIFO cannot block the read.
 func readSecretFile(fileVar, path string) (Secret, error) {
 	if !filepath.IsAbs(path) {
 		return Secret{}, &SecretError{Var: fileVar, Reason: "must be an absolute path"}
 	}
-	info, err := os.Stat(path)
-	if err != nil {
-		return Secret{}, fileError(fileVar, reasonUnreadable, err)
-	}
-	if !info.Mode().IsRegular() {
+	f, err := openRegular(path)
+	if errors.Is(err, errNotRegular) {
 		return Secret{}, &SecretError{Var: fileVar, Reason: "must name a regular file"}
 	}
-	f, err := os.Open(path)
 	if err != nil {
 		return Secret{}, fileError(fileVar, reasonUnreadable, err)
 	}
