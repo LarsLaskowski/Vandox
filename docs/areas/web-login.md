@@ -96,7 +96,7 @@ and the option in [Configuration and secrets](configuration-and-secrets.md), the
 
 - Every form post (the login form, sign-out, any form of a page) must carry an antiforgery token that matches the cookie
   `vandox_csrf` (`HttpOnly`, `SameSite=Strict`, `Path=/`, `Secure` like the session cookie). A post without a valid token is answered
-  `400` and has no effect; a login post without one is not counted as an attempt. The token is read only from the form field
+  `400` and has no effect (except a login post that carries a session, which is sent to `/`, *Access*); a login post without one is not counted as an attempt. The token is read only from the form field
   `__RequestVerificationToken`, never from a request header, so the body of every post is read as a form and checked first.
 - A form post whose body cannot be read as a form is refused with `400` like a post without a token, before the password is looked at
   and without signing out: a value of more than 16 KiB, more than 64 values, a multipart body of more than 64 KiB (file parts
@@ -206,4 +206,4 @@ and the option in [Configuration and secrets](configuration-and-secrets.md), the
 `Vandox.Backend` (`Security/PasswordHash`, `Security/LoginService`, `Security/LoginThrottle`, `Security/SessionStore`,
 `Security/SessionCircuitHandler`, `Security/SessionRevalidatingStateProvider`, `Security/ForwardedHeadersSetup`,
 `Security/WebAuthentication`, `Cli/HashPasswordCommand`, `Components/Account/Login.razor`, `Components/Account/RedirectToLogin.razor`,
-`Hosting/ServeCommand`, `Incidents/IncidentNoteEndpoint`), `Vandox.Core` (`Configuration/TrustedProxyList`, `Configuration/WebConfig`).
+`Hosting/ServeCommand`, `Hosting/RelativeRedirectMiddleware`, `Incidents/IncidentNoteEndpoint`), `Vandox.Core` (`Configuration/TrustedProxyList`, `Configuration/WebConfig`).
