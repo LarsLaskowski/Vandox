@@ -24,10 +24,12 @@ Measured with only G115 enabled:
 - on PR #265 after its fix (`604b950a6c`): nothing in production code — the bound check right before `int64(v)` is accepted;
 - on `main`: nothing in production code; three findings in test helpers, none on a parsed value (a deliberate low/high
   byte split, a rune already limited to U+00FF by another helper, a non-negative `int` widened to `uint64`);
-- on a scratch probe of the forms the `stack.md` rule names: silent on a same-function upper-bound check followed by
-  `return`, on `ParseUint(s, 10, 16)` into `uint16`, on `ParseInt(s, 10, 32)` into `int32` and on a two-sided check before
-  `int32(n)`; it reports a conversion whose check sits in a called function (as CodeQL does), a conversion to unsigned with
-  only an upper bound, and a signed-to-unsigned conversion without check. It does not accept a guard that ends in a call
+- on a scratch probe of the forms the `stack.md` rule names: silent on a same-function upper-bound check on an unsigned
+  value followed by `return`, on `ParseUint(s, 10, 16)` into `uint16`, on `ParseInt(s, 10, 32)` into `int32` and on a
+  two-sided check on a signed value before `int32(n)` or `uint32(n)`; it reports a conversion whose check sits in a called
+  function (as CodeQL does), a signed value converted to a narrower signed or to an unsigned type with only an upper bound,
+  and a signed-to-unsigned conversion without check. The rule's first form therefore requires, for a signed value, also a
+  lower-bound check against the target type's minimum; an upper bound alone lets a negative value wrap. It does not accept a guard that ends in a call
   such as `t.Fatalf` without `return` or `else`.
 
 G115 is broader than CodeQL's query: it looks at every integer conversion, not only values from `strconv`. Whether CodeQL

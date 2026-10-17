@@ -61,6 +61,11 @@ Scratch probe (Lead; Security re-runs it in its review — a package with these 
 | 15 | `if r < 0 \|\| r > 0xFF { t.Fatalf(…) } else { …byte(r)… }` | silent |
 | 16 | `binary.LittleEndian.AppendUint16(out, u)` (no conversion) | silent |
 | 17 | `float64(allocated) / float64(size) > maxAllocFactor` | silent |
+| 18 | `Atoi`; only `if n > math.MaxInt32 { return 0 }`; `int32(n)` | reports (Reviewer, confirmed by Lead) — a signed value needs the lower bound too |
+| 19 | `ParseInt(s, 10, 64)`; only `if n > math.MaxInt32 { return 0 }`; `int32(n)` | reports (as row 18) |
+| 20 | `ParseInt(s, 10, 64)`; `if n < math.MinInt32 \|\| n > math.MaxInt32 { return 0 }`; `int32(n)` | silent |
+| 21 | `Atoi`; `if n < 0 \|\| n > math.MaxUint32 { return 0 }`; `uint32(n)` | silent |
+| 22 | `ParseUint(s, 10, 64)`; only an upper bound (`math.MaxInt32`, `math.MaxUint16`); `int32(v)`, `uint16(v)` | silent — an unsigned value needs the upper bound only |
 
 Result: G115 reports the CodeQL alerts and no accepted bound check from `.squad/stack.md`. The issue's condition holds;
 the linter is enabled.
@@ -86,7 +91,8 @@ G115 can see).
 - [ ] AC5: `.squad/stack.md` no longer says that no local gate reports the CodeQL query, and names G115, its scope and
   record 0112 in the three places below, claims no more than was measured (G115 reported every measured CodeQL alert and
   accepts the rule's two forms; a 64-bit parse result converted to `int`/`uint` is accepted by G115, CodeQL's view
-  unverified), and keeps the grep for `strconv` results converted to `int`/`uint` in the *Local substitute* column of
+  unverified), states in the rule's first form that a signed value also needs a lower-bound check against the target
+  type's minimum (zero for an unsigned target; probe rows 18 to 22), and keeps the grep for `strconv` results converted to `int`/`uint` in the *Local substitute* column of
   *Not checkable in a cloud session*; `.squad/project.md` lists 0112 among the records that constrain `.golangci.yml`.
 
 ## Verification without tests
@@ -137,7 +143,7 @@ whose "failing first" signal is G115 itself (it reports the three sites on `main
      a complexity cap, record 0047)." the text:
      "`gosec`, limited to rule G115, is the local stand-in for CodeQL's `go/incorrect-integer-conversion` (record 0112):
      it reported every CodeQL alert measured on PR #265 and accepts the two forms of the integer-conversion rule under
-     *Writing code*. It looks at integer conversions of any source, not only parsed values. It does not match CodeQL
+     *Writing code*, but reports an upper-bound check alone on a signed value (the rule's lower bound is missing). It looks at integer conversions of any source, not only parsed values. It does not match CodeQL
      everywhere: a conversion of a 64-bit parse result to `int` or `uint` is accepted by G115 (measured for `int(n)` of
      `ParseInt(s, 10, 64)`, also with `GOARCH=386`), and whether CodeQL reports it is unverified — check such
      conversions by hand (see *Not checkable in a cloud session*). A guard that ends in `t.Fatalf` needs the conversion in its `else` branch or a
@@ -146,7 +152,7 @@ whose "failing first" signal is G115 itself (it reports the three sites on `main
      severity) runs only in CI, no local gate reports it, and on PR #265 a bound checked elsewhere (a digit-count limit,
      a check inside a helper) did not count: five alerts on `ParseUint` results converted to `int64`." with
      "CodeQL's `go/incorrect-integer-conversion` (high severity) runs only in CI and stays authoritative; gosec G115 in
-     the *Analyzer gate* reported every CodeQL alert measured on PR #265 and accepts both forms below, but accepts a
+     the *Analyzer gate* reported every CodeQL alert measured on PR #265 and accepts both forms above, but accepts a
      conversion of a 64-bit parse result to `int` or `uint` whose treatment by CodeQL is unverified (record 0112). On PR #265 a bound checked elsewhere (a
      digit-count limit, a check inside a helper) did not count: five alerts on `ParseUint` results converted to `int64`."
    - *Not checkable in a cloud session*, the row "Go conversions of a parsed number …": column *Missing locally* becomes
@@ -280,6 +286,19 @@ Round 1 verdict: CHANGES_REQUIRED. Round 2 is a delta confirmation of the points
 silence on row 7 measured on amd64 and with `GOARCH=386`, not only "on 64-bit targets"; the grep stays for that form).
 - **N1 (non-blocking)** — accepted. AC1 and its check widened to `grep -rn "nolint" --include=*.go .` (covers bare
   `//nolint` and `//nolint:all`); the module has no `nolint` directive today.
+
+## Lead decision (review round 1)
+
+Reviewer round 1, blocking: the `.squad/stack.md` texts say G115 accepts the rule's two forms, but the rule's first form
+("an upper-bound check against a constant no larger than the target type's maximum"), applied to its own example
+`int32(n)` of an `Atoi` result, is reported by G115 (probe rows 18, 19, measured again by the Lead). The defect is in the
+rule, not in the G115 sentences: an upper bound alone does not make a signed value fit a narrower type (a negative value
+below the target's minimum wraps), so G115 is right to report it. Decision: the rule's first form is corrected to
+require, for a signed value, also a lower-bound check against the target type's minimum (zero for an unsigned target);
+with that correction "accepts the two forms" holds for every case the rule names (rows 2, 3, 4, 6, 8, 20, 21, 22), and
+the Analyzer-gate sentence adds that an upper bound alone on a signed value is reported. The non-blocking finding
+("below" -> "above") is applied too. The rule text is project knowledge in `.squad/stack.md`, which this plan already
+edits (owner Dev); the scope does not change. Record 0112's *Context* is aligned (Lead). A delta review follows.
 
 ## Out of scope / follow-ups
 

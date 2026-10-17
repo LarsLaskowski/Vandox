@@ -16,3 +16,4 @@ are quoted in full.
 | 2026-10-17 20:46 | 7 Code check | Orchestrator | golangci-lint 0 issues, analyzer gate, scope/config/decision checks, gofmt pass; Coverage gate n/a (no production code) |
 | 2026-10-17 20:48 | 8 Review round 1 | Security | APPROVED, no findings (opus/medium · 33,436 tokens · 4 tool uses · 36 s) |
 | 2026-10-17 20:48 | 8 Review round 1 | Reviewer | BLOCKING 1 (stack.md claims G115 accepts rule's Atoi->int32 upper-bound-only form; it needs both bounds), NON-BLOCKING 1 verbatim ('below'->'above') (opus/medium · 43,184 tokens · 10 tool uses · 91 s) |
+| 2026-10-17 20:50 | 8 Lead decide | Lead | Lead decide: Reviewer B1 accepted — the rule's first form in stack.md is corrected to need a lower-bound check for signed values (G115 reports an upper bound alone, measured); the Analyzer-gate sentence names that; NB 'below'->'above' applied; plan probe rows 18-22, AC5 and record 0112 Context aligned; Dev edits stack.md; delta review follows. |
