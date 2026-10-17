@@ -59,9 +59,9 @@ type openResult struct {
 	err  error
 }
 
-// openBounded calls openRegular(path) and closes a returned file with the test. A blocking open shows as a
+// openForTest calls openRegular(path) and closes a returned file with the test. A blocking open shows as a
 // test that hangs until the go test timeout.
-func openBounded(t *testing.T, path string) openResult {
+func openForTest(t *testing.T, path string) openResult {
 	t.Helper()
 	f, err := openRegular(path)
 	r := openResult{file: f, err: err}
@@ -157,7 +157,7 @@ func TestKeyError_Error(t *testing.T) {
 func TestOpenRegular(t *testing.T) {
 	t.Run("regular file is opened", func(t *testing.T) {
 		path := writeTemp(t, "content")
-		r := openBounded(t, path)
+		r := openForTest(t, path)
 		if r.err != nil {
 			t.Fatalf("openRegular(%q) error = %v, want nil", path, r.err)
 		}
@@ -171,22 +171,22 @@ func TestOpenRegular(t *testing.T) {
 	})
 
 	t.Run("FIFO without a writer is refused without blocking", func(t *testing.T) {
-		requireNotRegular(t, openBounded(t, makeFifo(t)), "FIFO")
+		requireNotRegular(t, openForTest(t, makeFifo(t)), "FIFO")
 	})
 	t.Run("directory is refused", func(t *testing.T) {
-		requireNotRegular(t, openBounded(t, t.TempDir()), "directory")
+		requireNotRegular(t, openForTest(t, t.TempDir()), "directory")
 	})
 	t.Run("device file is refused", func(t *testing.T) {
-		requireNotRegular(t, openBounded(t, os.DevNull), "device file")
+		requireNotRegular(t, openForTest(t, os.DevNull), "device file")
 	})
 
 	t.Run("Unix socket is refused without blocking", func(t *testing.T) {
-		requireOpenFails(t, openBounded(t, makeSocket(t)), syscall.ENXIO, nil)
+		requireOpenFails(t, openForTest(t, makeSocket(t)), syscall.ENXIO, nil)
 	})
 
 	t.Run("missing file", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "missing.yaml")
-		requireOpenFails(t, openBounded(t, path), fs.ErrNotExist, errNotRegular)
+		requireOpenFails(t, openForTest(t, path), fs.ErrNotExist, errNotRegular)
 	})
 }
 

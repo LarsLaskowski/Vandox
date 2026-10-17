@@ -433,7 +433,7 @@ func TestReadSecret_FileVariable(t *testing.T) {
 
 	t.Run("FIFO is refused without blocking", func(t *testing.T) {
 		path := makeFifo(t)
-		err := readSecretBounded(t, path)
+		err := readSecretFromFile(t, path)
 		se := requireSecretError(t, err, tokenFile)
 		if se.Reason != "must name a regular file" {
 			t.Errorf("SecretError.Reason = %q, want %q", se.Reason, "must name a regular file")
@@ -443,7 +443,7 @@ func TestReadSecret_FileVariable(t *testing.T) {
 
 	t.Run("Unix socket is refused without blocking and without the path", func(t *testing.T) {
 		path := makeSocket(t)
-		err := readSecretBounded(t, path)
+		err := readSecretFromFile(t, path)
 		_ = requireSecretError(t, err, tokenFile)
 		if !errors.Is(err, syscall.ENXIO) {
 			t.Errorf("readSecret(socket) error = %v, want errors.Is syscall.ENXIO", err)
@@ -460,8 +460,8 @@ func TestReadSecret_FileVariable(t *testing.T) {
 	})
 }
 
-// readSecretBounded reads the secret from the file at path and returns the error.
-func readSecretBounded(t *testing.T, path string) error {
+// readSecretFromFile reads the secret from the file at path and returns the error.
+func readSecretFromFile(t *testing.T, path string) error {
 	t.Helper()
 	_, err := readSecret(secretEnv(tokenFile, path), tokenVar)
 	return err
