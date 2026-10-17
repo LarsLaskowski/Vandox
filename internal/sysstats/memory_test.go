@@ -50,6 +50,15 @@ func memoryCases() []memoryCase {
 			want: map[string]int{"mem_used_bytes": 0, "mem_buff_cache_bytes": 900},
 		},
 		{
+			name: "used is left out when free is above total",
+			edits: map[string]string{
+				"MemTotal": kbLine("MemTotal", 100), "MemFree": kbLine("MemFree", 200), "Buffers": kbLine("Buffers", 10),
+				"Cached": kbLine("Cached", 10), "SReclaimable": kbLine("SReclaimable", 10),
+			},
+			want:   map[string]int{"mem_total_bytes": 100, "mem_free_bytes": 200, "mem_buff_cache_bytes": 30},
+			absent: []string{"mem_used_bytes"},
+		},
+		{
 			name:  "swap used is total minus free",
 			edits: map[string]string{"SwapTotal": kbLine("SwapTotal", 2000), "SwapFree": kbLine("SwapFree", 500)},
 			want:  map[string]int{"swap_total_bytes": 2000, "swap_free_bytes": 500, "swap_used_bytes": 1500},

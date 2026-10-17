@@ -36,10 +36,10 @@ func TestFilesystem_MountinfoEscapes(t *testing.T) {
 	t.Run("escaped space and backslash match the configured path", requireEscapesMatch)
 	t.Run("escaped tab and line feed are read without error", requireControlEscapesRead)
 	t.Run("a bad line fails the sample", requireBadLinesFail)
-	t.Run("a line of 65535 bytes is read", func(t *testing.T) {
-		long := mountLine("/srv/" + strings.Repeat("a", 65535-len(mountLine("/srv/"))))
-		if len(long) != 65535 {
-			t.Fatalf("test line has %d bytes, want 65535", len(long))
+	t.Run("a line of 65536 bytes is read", func(t *testing.T) {
+		long := mountLine("/srv/" + strings.Repeat("a", 65536-len(mountLine("/srv/"))))
+		if len(long) != 65536 {
+			t.Fatalf("test line has %d bytes, want 65536", len(long))
 		}
 		src, _ := escapeSources(t, []string{long}, "/")
 
