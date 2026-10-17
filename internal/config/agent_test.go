@@ -9,6 +9,8 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -82,7 +84,7 @@ func TestDefaultAgent(t *testing.T) {
 
 func TestAgentKeys(t *testing.T) {
 	got := AgentKeys()
-	want := []string{"agent_id", "backend.url", "spool.directory", "log.level"}
+	want := []string{"agent_id", "backend.url", "spool.directory", "log.level", "filesystem.mount_points"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Errorf("AgentKeys() = %v, want %v", got, want)
 	}
@@ -109,6 +111,9 @@ func TestLoadAgent_Example(t *testing.T) {
 		}
 		if got.Log != def.Log {
 			t.Errorf("example Log = %+v, want the default %+v", got.Log, def.Log)
+		}
+		if !slices.Equal(got.Filesystem.MountPoints, def.Filesystem.MountPoints) {
+			t.Errorf("example Filesystem.MountPoints = %q, want the default %q", got.Filesystem.MountPoints, def.Filesystem.MountPoints)
 		}
 	})
 }
@@ -533,4 +538,201 @@ func TestLoadAgent_ErrorOrder(t *testing.T) {
 			t.Errorf("LoadAgent(no token) error = %T (%v), want a *SecretError only", err, err)
 		}
 	})
+}
+
+// mountPointsReason is the reason of every rejected value of filesystem.mount_points.
+const mountPointsReason = "must be a list of at most 16 absolute, clean paths of at most 1024 bytes each " +
+	"(no trailing slash, no . or .. elements), each listed once"
+
+// mountKey is the option key path of the mount points; mountKeyLine is its line in a document built by mountDoc.
+const (
+	mountKey     = "filesystem.mount_points"
+	mountKeyLine = 5
+)
+
+// mountDoc builds an agent file whose key filesystem.mount_points (line mountKeyLine) is followed by value, the raw
+// YAML text after the colon.
+func mountDoc(value string) string {
+	return validAgent + "filesystem:\n  mount_points:" + value + "\n"
+}
+
+// mountPaths returns n distinct paths /d00, /d01, ...
+func mountPaths(n int) []string {
+	paths := make([]string, 0, n)
+	for i := 0; i < n; i++ {
+		paths = append(paths, "/d"+strconv.Itoa(i/10)+strconv.Itoa(i%10))
+	}
+	return paths
+}
+
+// mountList returns n distinct paths as a block list below the key.
+func mountList(n int) string {
+	var b strings.Builder
+	for _, p := range mountPaths(n) {
+		b.WriteString("\n    - " + p)
+	}
+	return b.String()
+}
+
+// requireMountError loads doc and fails the test unless it is refused with exactly "config: <file>:<line>: <key>: <reason>".
+func requireMountError(t *testing.T, doc string, line int, reason string) {
+	t.Helper()
+	path := writeTemp(t, doc)
+	got, err := LoadAgent(path, agentEnv())
+	if got != nil {
+		t.Errorf("LoadAgent(%q) = %+v, want nil on error", doc, got)
+	}
+	if err == nil {
+		t.Fatalf("LoadAgent(%q) error = nil, want a *KeyError for %s at line %d", doc, mountKey, line)
+	}
+	want := "config: " + path + ":" + strconv.Itoa(line) + ": " + mountKey + ": " + reason
+	if err.Error() != want {
+		t.Errorf("LoadAgent(%q) error = %q, want %q", doc, err.Error(), want)
+	}
+}
+
+func TestLoadAgent_MountPoints(t *testing.T) {
+	long := "/" + strings.Repeat("a", 1023)
+	tests := []struct {
+		name string
+		doc  string
+		want []string
+	}{
+		{"absent takes the default", validAgent, []string{"/"}},
+		{"section without the key takes the default", validAgent + "filesystem:\n", []string{"/"}},
+		{"block list", mountDoc("\n    - /var\n    - /home"), []string{"/var", "/home"}},
+		{"flow list", mountDoc(" [/, /var]"), []string{"/", "/var"}},
+		{"quoted elements", mountDoc(` ["/var", '/home']`), []string{"/var", "/home"}},
+		{"empty list means no mount point", mountDoc(" []"), []string{}},
+		{"the list replaces the default", mountDoc(" [/var]"), []string{"/var"}},
+		{"16 entries", mountDoc(mountList(16)), mountPaths(16)},
+		{"entry of 1024 bytes", mountDoc(" [" + long + "]"), []string{long}},
+		{"seq tag", mountDoc(" !!seq [/var]"), []string{"/var"}},
+		{"str tag on an element", mountDoc("\n    - !!str /var"), []string{"/var"}},
+		{"flow list over several lines", mountDoc(" [\n    /var,\n    /home\n  ]"), []string{"/var", "/home"}},
+		{"comments between elements", mountDoc("\n    # first\n    - /var\n    # second\n    - /home"), []string{"/var", "/home"}},
+		{"folded element", mountDoc("\n    - >-\n      /a b"), []string{"/a b"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := LoadAgent(writeTemp(t, tt.doc), agentEnv())
+			if err != nil {
+				t.Fatalf("LoadAgent(%q) error = %v, want nil", tt.doc, err)
+			}
+			if !slices.Equal(got.Filesystem.MountPoints, tt.want) || (len(tt.want) == 0 && got.Filesystem.MountPoints == nil) {
+				t.Errorf("LoadAgent(%q) MountPoints = %#v, want %#v", tt.doc, got.Filesystem.MountPoints, tt.want)
+			}
+		})
+	}
+}
+
+func TestLoadAgent_MountPointsRejected(t *testing.T) {
+	long := "/" + strings.Repeat("a", 1024)
+	rule := []struct {
+		name  string
+		value string
+	}{
+		{"17 entries", mountList(17)},
+		{"entry of 1025 bytes", " [" + long + "]"},
+		{"relative path", " [var]"},
+		{"trailing slash", " [/var/]"},
+		{"dot dot element", " [/var/../etc]"},
+		{"dot element", " [/./var]"},
+		{"double slash", " [//var]"},
+		{"empty string", ` [""]`},
+		{"empty string by tag", "\n    - !!str"},
+		{"quoted tilde", "\n    - \"~\""},
+		{"integer", "\n    - 1"},
+		{"boolean", "\n    - true"},
+		{"timestamp", "\n    - 2026-01-01"},
+		{"hexadecimal", "\n    - 0x1F"},
+		{"infinity", "\n    - .inf"},
+		{"the same path twice", " [/var, /home, /var]"},
+		{"the same path twice in a block list", "\n    - /var\n    - /var"},
+		{"leak sentinel relative", " [" + sentinel + "]"},
+		{"leak sentinel with dot dot", " [/" + sentinel + "/../x]"},
+		{"leak sentinel twice", " [/" + sentinel + ", /" + sentinel + "]"},
+	}
+	for _, tt := range rule {
+		t.Run("rule "+tt.name, func(t *testing.T) {
+			requireMountError(t, mountDoc(tt.value), mountKeyLine, mountPointsReason)
+		})
+	}
+
+	form := []struct {
+		name   string
+		value  string
+		reason string
+	}{
+		{"scalar in place of the list", " /", "invalid value, want a list"},
+		{"empty string in place of the list", ` ""`, "invalid value, want a list"},
+		{"mapping in place of the list", " {a: b}", "invalid value, want a list"},
+		{"nested list", " [[/a]]", "invalid value, want a list"},
+		{"mapping element", " [{a: b}]", "invalid value, want a list"},
+		{"null value of the key", "", "has no value"},
+		{"tilde value of the key", " ~", "has no value"},
+	}
+	for _, tt := range form {
+		t.Run("form "+tt.name, func(t *testing.T) {
+			requireMountError(t, mountDoc(tt.value), mountKeyLine, tt.reason)
+		})
+	}
+
+	// The YAML texts hold one backslash each: YAML decodes the escape, and the character rule then refuses the element.
+	const charReason = "must not contain control, format or line-separating characters"
+	chars := []struct {
+		name  string
+		value string
+	}{
+		{"nul escape", " [\"/a\\x00\"]"},
+		{"right-to-left override escape", " [\"/a\\u202e\"]"},
+		{"byte order mark escape", " [\"/a\\ufeff\"]"},
+		{"tab escape", " [\"/a\\tb\"]"},
+		{"literal block scalar", "\n    - |\n      /a"},
+	}
+	for _, tt := range chars {
+		t.Run("character "+tt.name, func(t *testing.T) {
+			if strings.HasPrefix(tt.value, " [") && strings.Count(tt.value, "\\") != 1 {
+				t.Fatalf("test input %q holds %d backslashes, want exactly 1", tt.value, strings.Count(tt.value, "\\"))
+			}
+			requireMountError(t, mountDoc(tt.value), mountKeyLine, charReason)
+		})
+	}
+
+	unsupported := []struct {
+		name   string
+		value  string
+		line   int
+		reason string
+	}{
+		{"anchor on an element", "\n    - &a /x", mountKeyLine + 1, "anchors and aliases are not supported"},
+		{"alias element", "\n    - &a /x\n    - *a", mountKeyLine + 1, "anchors and aliases are not supported"},
+		{"binary tag", "\n    - !!binary YQ==", mountKeyLine + 1, "unsupported tag"},
+		{"set tag", " !!set {a}", mountKeyLine, "unsupported tag"},
+	}
+	for _, tt := range unsupported {
+		t.Run("unsupported "+tt.name, func(t *testing.T) {
+			requireMountError(t, mountDoc(tt.value), tt.line, tt.reason)
+		})
+	}
+}
+
+func TestLoadAgent_MountPointsNullElement(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+		line  int
+	}{
+		{"tilde", "\n    - ~", mountKeyLine + 1},
+		{"null tag", "\n    - !!null", mountKeyLine + 1},
+		{"empty element", "\n    -", mountKeyLine + 1},
+		{"null word after a path", "\n    - /a\n    - null", mountKeyLine + 2},
+		{"tilde in a flow list", " [/a, ~, /b]", mountKeyLine},
+		{"null before an empty string", ` [/a, null, ""]`, mountKeyLine},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			requireMountError(t, mountDoc(tt.value), tt.line, "has no value")
+		})
+	}
 }

@@ -24,7 +24,7 @@ options and secrets do at run time is described in the area that owns the featur
     `!!seq`), judged on the tag the parser resolved for the node and not on the source text, so tag re-mappings,
     verbatim tags, `!!set` and `!!omap` are rejected; a `!!null` tag on a value other than `""`, `~`, `null`,
     `Null` or `NULL` is rejected as well;
-  - a section with a non-mapping value; a leaf option with no value;
+  - a section with a non-mapping value; a leaf option or an element of a list with no value (the agent: a null element is refused, never dropped);
   - the backend also rejects nesting deeper than 64 levels.
 - A section key with a null value keeps the defaults of that section.
 - A string value must not contain characters of the Unicode categories Cc, Cf, Zl or Zp (control and format
@@ -43,6 +43,7 @@ Agent:
 | `backend.url` | none, required | URL with scheme `http` or `https`; a host that is an IP address or a name of letters, digits, `.` and `-` (checked after percent-decoding); an optional port from 1 to 65535; no user info, query, fragment or path other than `/` |
 | `spool.directory` | `/var/lib/vandox/spool` | absolute, clean path |
 | `log.level` | `info` | `debug`, `info`, `warn` or `error` |
+| `filesystem.mount_points` | `["/"]` | a list of at most 16 absolute, clean paths of at most 1,024 bytes each, every path listed once (see below) |
 
 Backend:
 
@@ -78,6 +79,15 @@ Backend:
   script, a second unit (`1h30m`), a missing unit (`60`) and any other unit (`1d`, `1s`) are rejected. The error reads
   `config: <file>:<line>: incidents.window_before: must be a whole number of minutes or hours from 1m to 24h, such as 30m or 1h`
   (and the same with `incidents.window_after`); it never contains the value.
+- `filesystem.mount_points` names the mount points whose use the agent records ([Agent](agent.md), *System metrics*). The list
+  replaces the default `["/"]`; an empty list `[]` records none and the agent does not run the file system collector. At most 16
+  entries, each an absolute, clean path (no trailing slash, no `.` or `..` element) of 1 to 1,024 bytes, no two equal; an element that
+  YAML would read as another type (`1`, `true`, `2026-01-01`) is the text it was written as and fails the rule as not absolute.
+  Anything else is refused with `config: <file>:<line>: filesystem.mount_points: must be a list of at most 16 absolute, clean paths of
+  at most 1024 bytes each (no trailing slash, no . or .. elements), each listed once`, never with the value. A null element (`~`,
+  `null`, `!!null` or an empty `-`) is refused with `has no value` and the line of the element: the YAML library would otherwise drop
+  it silently and an all-null list would turn into `[]` and switch the file system metrics off. A value is recorded only when it is a
+  mount point in the agent's own mount namespace; otherwise the agent logs that once and leaves it out.
 - A directory must be absolute and clean: no trailing slash and no empty, `.` or `..` element. The loader does not
   create it.
 - Plain `http` is allowed for `backend.url`, because the tailnet encrypts and authenticates the transport. Whether

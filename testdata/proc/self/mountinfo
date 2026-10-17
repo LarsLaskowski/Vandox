@@ -1,0 +1,5 @@
+23 28 0:22 / /proc rw,relatime - proc proc rw
+24 28 0:23 / /sys rw,relatime - sysfs sysfs rw
+25 28 0:6 / /dev rw,relatime - devtmpfs devtmpfs rw,size=8229936k,nr_inodes=2057484,mode=755
+28 1 254:0 / / rw,relatime - ext4 /dev/vda rw,discard,no_prefetch_block_bitmaps,resv_strict,resuid=65534,resgid=65534
+37 24 0:29 / /sys/fs/cgroup rw,relatime - tmpfs tmpfs rw,mode=755

@@ -223,6 +223,9 @@ func (d *decoder) setOther(path string, k, v *yaml.Node, field reflect.Value) er
 	if err := d.checkTree(path, v); err != nil {
 		return err
 	}
+	if e := nullElement(v); e != nil {
+		return &KeyError{File: d.file, Line: e.Line, Key: path, Reason: "has no value"}
+	}
 	if v.Decode(field.Addr().Interface()) != nil {
 		return fail("invalid value, want " + describe(field.Type()))
 	}
@@ -234,6 +237,20 @@ func (d *decoder) setOther(path string, k, v *yaml.Node, field reflect.Value) er
 		}
 	}
 	d.lines[path] = k.Line
+	return nil
+}
+
+// nullElement returns the first null element of the sequence v, or nil. The decoder drops such an element
+// silently, so a list option would lose it without notice.
+func nullElement(v *yaml.Node) *yaml.Node {
+	if v.Kind != yaml.SequenceNode {
+		return nil
+	}
+	for _, e := range v.Content {
+		if isNull(e) {
+			return e
+		}
+	}
 	return nil
 }
 

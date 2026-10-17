@@ -3,6 +3,8 @@ package agent
 import (
 	"bytes"
 	"context"
+	"io"
+	"log/slog"
 	"net"
 	"os"
 	"path/filepath"
@@ -15,9 +17,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/LarsLaskowski/Vandox/internal/config"
 	"github.com/LarsLaskowski/Vandox/internal/model"
 	"github.com/LarsLaskowski/Vandox/internal/scheduler"
 	"github.com/LarsLaskowski/Vandox/internal/selfstats"
+	"github.com/LarsLaskowski/Vandox/internal/sysstats"
 )
 
 const (
@@ -216,6 +220,21 @@ func fixtureSources() selfstats.Sources {
 	return selfstats.Sources{Proc: os.DirFS("../../testdata/proc")}
 }
 
+// fixtureSystem returns system metrics sources that read the fixture trees and answer statfs and adjtimex with fixed
+// values, so no agent test reads the host.
+func fixtureSystem() sysstats.Sources {
+	return sysstats.Sources{
+		Proc: os.DirFS("../../testdata/proc"),
+		Sys:  os.DirFS("../../testdata/sys"),
+		StatFS: func(string) (sysstats.FSStats, error) {
+			return sysstats.FSStats{BlockSize: 4096, Blocks: 1000, BlocksFree: 400, BlocksAvailable: 300, Inodes: 100, InodesFree: 50}, nil
+		},
+		Clock: func() (sysstats.ClockState, error) {
+			return sysstats.ClockState{MaxError: time.Millisecond, EstimatedError: time.Microsecond}, nil
+		},
+	}
+}
+
 func logLines(out string) []string {
 	return strings.Split(strings.TrimSuffix(out, "\n"), "\n")
 }
@@ -261,6 +280,7 @@ func TestRun_ReadyWatchdogAndSelfMetrics(t *testing.T) {
 		Stderr: logFile,
 		Sink:   sink,
 		Self:   fixtureSources(),
+		System: fixtureSystem(),
 	})
 
 	if first := socket.next(t, r); first != "READY=1" {
@@ -314,6 +334,7 @@ func TestRun_ConfigErrorExitsOne(t *testing.T) {
 				Environ:    []string{"VANDOX_AGENT_TOKEN=" + testToken, "NOTIFY_SOCKET=" + socket.path},
 				Stderr:     &stderr,
 				Self:       fixtureSources(),
+				System:     fixtureSystem(),
 			})
 
 			if code != 1 {
@@ -342,6 +363,7 @@ func TestRun_DoesNotLogSecret(t *testing.T) {
 		Stderr:     &stderr,
 		Sink:       sink,
 		Self:       fixtureSources(),
+		System:     fixtureSystem(),
 	})
 
 	r.waitMetrics(sink, selfstats.MetricRSS)
@@ -386,6 +408,7 @@ func TestRun_NotificationProblemsDoNotStopTheAgent(t *testing.T) {
 				Stderr:     &stderr,
 				Sink:       sink,
 				Self:       fixtureSources(),
+				System:     fixtureSystem(),
 			})
 
 			r.waitMetrics(sink, selfstats.MetricRSS)
@@ -399,6 +422,72 @@ func TestRun_NotificationProblemsDoNotStopTheAgent(t *testing.T) {
 				t.Errorf("log holds %d warning lines %q with the error %q, want 1; log:\n%s", got, tc.message, tc.wantErr, out)
 			}
 		})
+	}
+}
+
+// jobSchedule is a job's collector name and schedule.
+type jobSchedule struct {
+	name     string
+	schedule scheduler.Schedule
+}
+
+// scheduleOf returns the names and schedules of jobs in order.
+func scheduleOf(list []scheduler.Job) []jobSchedule {
+	got := make([]jobSchedule, 0, len(list))
+	for _, j := range list {
+		got = append(got, jobSchedule{name: j.Collector.Name(), schedule: j.Schedule})
+	}
+	return got
+}
+
+func TestJobs_Schedules(t *testing.T) {
+	self := jobSchedule{"self", scheduler.Schedule{Interval: 60 * time.Second, Timeout: 10 * time.Second}}
+	system := jobSchedule{"system", scheduler.Schedule{Interval: 30 * time.Second, Timeout: 5 * time.Second, PressureInterval: 10 * time.Second}}
+	filesystem := jobSchedule{"filesystem", scheduler.Schedule{Interval: 60 * time.Second, Timeout: 10 * time.Second}}
+	clock := jobSchedule{"clock", scheduler.Schedule{Interval: 60 * time.Second, Timeout: 5 * time.Second}}
+
+	tests := []struct {
+		name        string
+		mountPoints []string
+		want        []jobSchedule
+	}{
+		{"default mount point", []string{"/"}, []jobSchedule{self, system, filesystem, clock}},
+		{"two mount points", []string{"/", "/var"}, []jobSchedule{self, system, filesystem, clock}},
+		{"no mount point leaves out the filesystem job", []string{}, []jobSchedule{self, system, clock}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := config.DefaultAgent()
+			cfg.Filesystem.MountPoints = tt.mountPoints
+			log := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+			list := jobs(Options{Self: fixtureSources(), System: fixtureSystem()}, &cfg, log)
+
+			if got := scheduleOf(list); !slices.Equal(got, tt.want) {
+				t.Errorf("jobs() = %+v, want %+v", got, tt.want)
+			}
+			if _, err := scheduler.New(list, scheduler.DiscardSink{}, log); err != nil {
+				t.Errorf("scheduler.New(jobs()) error = %v, want nil", err)
+			}
+		})
+	}
+}
+
+func TestRun_RecordsSystemMetrics(t *testing.T) {
+	sink := newMetricSink()
+	r := startAgent(t, Options{
+		ConfigPath: writeConfig(t, validConfig),
+		Environ:    []string{"VANDOX_AGENT_TOKEN=" + testToken},
+		Stderr:     io.Discard,
+		Sink:       sink,
+		Self:       fixtureSources(),
+		System:     fixtureSystem(),
+	})
+
+	r.waitMetrics(sink, "load1", "mem_available_bytes", "pressure_avg10", "filesystem_size_bytes", "clock_synchronized")
+
+	if code := r.stop(); code != 0 {
+		t.Errorf("Run() = %d after the context was cancelled, want 0", code)
 	}
 }
 

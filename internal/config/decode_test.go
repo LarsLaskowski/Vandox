@@ -304,3 +304,31 @@ func TestDecodeStrict_ParserErrors(t *testing.T) {
 		})
 	}
 }
+
+func TestDecodeStrict_ListElementWithoutValue(t *testing.T) {
+	refused := []struct {
+		name string
+		doc  string
+		line int
+	}{
+		{"tilde in a flow list", "tags: [a, ~]\n", 1},
+		{"tilde in a block list", "tags:\n  - ~\n", 2},
+		{"empty element", "tags:\n  -\n", 2},
+	}
+	for _, tt := range refused {
+		t.Run(tt.name, func(t *testing.T) {
+			_, _, err := decodeDoc(t, tt.doc)
+			ke := requireKeyError(t, err, "tags", tt.line)
+			if ke.Reason != "has no value" {
+				t.Errorf("decodeStrict(%q) reason = %q, want %q", tt.doc, ke.Reason, "has no value")
+			}
+		})
+	}
+
+	t.Run("quoted tilde is text", func(t *testing.T) {
+		got := mustDecodeDoc(t, "tags: [a, \"~\"]\n")
+		if want := []string{"a", "~"}; !reflect.DeepEqual(got.Tags, want) {
+			t.Errorf("decodeStrict(quoted tilde) Tags = %q, want %q", got.Tags, want)
+		}
+	})
+}

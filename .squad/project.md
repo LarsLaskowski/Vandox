@@ -78,7 +78,8 @@ files or endpoints.
    credentials read that way may still lead to root through other services (password reuse, Plesk or
    MariaDB administration). `ProtectHome=yes` and `InaccessiblePaths=` (at least `/etc/shadow`,
    `/etc/gshadow`) are defence in depth against accidental reads only, not a limit on a compromised agent,
-   which bypasses them through `/proc/<pid>/root`. Records 0013, 0030.
+   which bypasses them through `/proc/<pid>/root`. The system call filter of the unit must allow `adjtimex`, which the `clock` collector calls
+with a zero `Timex` (mode 0, read-only; no capability needed), so the unit uses neither `ProtectClock=yes` nor an allow-list without it (#42). Records 0013, 0030, 0111.
 7. **MariaDB monitoring user**: *Goal:* the agent connects over the local socket as `vandox-agent`,
    authenticated by `unix_socket`, with only the `PROCESS` privilege: no database password exists and no
    table data is readable; the agent issues read-only status queries only. Record 0013.
@@ -206,8 +207,8 @@ files or endpoints.
     store call), other keys are ignored, and the address is written only from the validated language (`ToQuery`, `ReportsView.PageHref`, `DownloadHref`, `FileName`); the `Content-Disposition`
     of the download carries only that fixed file name. Forged kill lines make forged incidents
     (a documented limitation, record 0096); forged boot lines, `pzstd` or `sw-engi*` processes shift the report's activities and rates, and forged process names can
-    take the 4,096 program places first (records 0100, 0101). Records 0048, 0049, 0066, 0069, 0076, 0078, 0079, 0084,
-    0085, 0086, 0088, 0091, 0092, 0093, 0094, 0095, 0096, 0097, 0100, 0101, 0102, 0106, 0108, 0110.
+    take the 4,096 program places first (records 0100, 0101). The agent's readers of `/proc` and `/sys` (`internal/sysstats`) bound every read before parsing: the first line of `stat` 4 KiB, `loadavg` 256 B, `meminfo` 16 KiB and 128 lines, `vmstat` 64 KiB, a pressure file 256 B, a block `stat` 1 KiB, `self/mountinfo` streamed line by line at 64 KiB per line; at most 16 disks and 16 mount points; every number is checked as 1 to 20 ASCII digits before conversion; the products of `statfs` counts are checked for 64-bit overflow with `bits.Mul64`; no error text holds file content or a configured path (a mount point is named by its index). `TestSysstats_ImportsOnlyAllowedPackages` holds the package to an allow-list of imports and of the `syscall` and `os` selectors it uses (no program, socket, cgo, `unsafe`, raw system call or `//go:` directive but `//go:build`). The option `filesystem.mount_points` is checked by `checkMountPoints` (`internal/config`), and `decode.go` refuses a null list element before decoding because the YAML library drops it silently. Records 0048, 0049, 0066, 0069, 0076, 0078, 0079, 0084,
+    0085, 0086, 0088, 0091, 0092, 0093, 0094, 0095, 0096, 0097, 0100, 0101, 0102, 0106, 0108, 0110, 0111.
 11. **Outbound calls** (Telegram, external checks, the optional AI service of the nightly report, the
     agent's connection to the backend): *Goal:* every call has a timeout, goes only to its configured
     destination and leaves encrypted to a verified peer. The agent's only destination is the ingest port,
@@ -398,8 +399,9 @@ double under this name and changes the status.
 
 | Surface | Test double |
 | ------- | ----------- |
-| `/proc` | collectors read through an `io/fs.FS` (production `os.DirFS("/proc")`; symlink targets such as `/proc/<pid>/fd/*` through `io/fs.ReadLinkFS` (Go 1.25 and later; implemented by `os.DirFS` and `fstest.MapFS`, the blocking wrapper must implement `fs.ReadLinkFS` (`ReadLink` and `Lstat`) as well)); tests use fixtures under `testdata/proc/` (via `os.DirFS`; `testdata/proc/self/status` is a real capture read by the self-metrics, implemented for `self/status`) or `fstest.MapFS` (the variants of that file are made in memory), plus a **blocking filesystem wrapper** whose reads block until the test releases them (in `t.Cleanup`), for 0029 |
-| `/sys` | same filesystem interface and blocking wrapper; fixtures under `testdata/sys/` |
+| `/proc` | collectors read through an `io/fs.FS` (production `os.DirFS("/proc")`; symlink targets such as `/proc/<pid>/fd/*` through `io/fs.ReadLinkFS` (Go 1.25 and later; implemented by `os.DirFS` and `fstest.MapFS`, the blocking wrapper must implement `fs.ReadLinkFS` (`ReadLink` and `Lstat`) as well)); tests use fixtures under `testdata/proc/` (via `os.DirFS`; `testdata/proc/self/status` is a real capture read by the self-metrics, implemented for `self/status`) or `fstest.MapFS` (the variants of that file are made in memory), plus a **blocking filesystem wrapper** whose reads block until the test releases them (in `t.Cleanup`), for 0029, and a wrapper whose open or read answers a given error such as `syscall.EOPNOTSUPP` (implemented in `internal/sysstats`: fixtures `testdata/proc/{stat,loadavg,meminfo,vmstat,pressure,self/mountinfo}`) |
+| `/sys` | same filesystem interface and blocking wrapper; fixtures under `testdata/sys/` (implemented: `testdata/sys/block`, `internal/sysstats`) |
+| `statfs` and `adjtimex` | the collectors take function values (`Sources.StatFS`, `Sources.Clock`; production `StatFS` and `ReadClock`, both read-only system calls); tests use fake functions with scripted results and errors per path, and variants that block until the test releases them (in `t.Cleanup`), for 0029 (implemented; `internal/sysstats`) |
 | systemd notification socket | a `unixgram` socket bound in `t.TempDir()` (or an abstract `@name`) that the test reads; it is local IPC, not network. The agent's watchdog loop is tested with a recording `notifier` (records state and time of every call, optional failure) (implemented; `internal/sdnotify`, `internal/agent`) |
 | collectors and sink (scheduler) | scripted collector (per-run results, errors and panics), hanging collector (blocks ignoring its context, released in `t.Cleanup`), recording sink (records every `Put` with its time, optional blocking `Put`), recording `slog.Handler` (implemented; `internal/scheduler`) |
 | systemd D-Bus | fake systemd reader (scripted unit states and errors, and a reader that blocks until its context is cancelled, for 0029) |

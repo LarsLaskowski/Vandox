@@ -7,8 +7,8 @@ how it survives a stalled data source and a missing backend, how gaps are record
 sends is in the [wire format](wire-format.md); its configuration file is in [Configuration and secrets](configuration-and-secrets.md).
 
 **Status.** The command line, the start-up with the configuration file, logging, the scheduler with its gaps and the memory pressure
-switch, the self-metrics and the notification of systemd exist, as do the shared data model and the wire encoder. The collectors
-other than the self-metrics, the spool, the sender and the systemd unit are **not implemented yet**: until the spool exists, the agent
+switch, the self-metrics, the system metrics and the notification of systemd exist, as do the shared data model and the wire encoder.
+The other collectors, the spool, the sender and the systemd unit are **not implemented yet**: until the spool exists, the agent
 drops the records it produces after checking them (it is not released in that state; v0.2.0 waits for the spool and the sender). The
 rules below for the parts not implemented are the target the implementation is held to and the tests must check.
 
@@ -118,6 +118,107 @@ The resident memory is read from at most 64 KiB of the agent's own `/proc` statu
 1 to 12 ASCII digits, one space and `kB`; anything else, a failed read, a negative spool size or a negative send lag fails the
 sample, which then becomes a gap.
 
+## System metrics
+
+Three collectors record the state of the server as `metric` records with source `system`, through the scheduler like every
+collector. The names, units and labels are in the [wire format](wire-format.md) (*Metric names*). No collector starts a program,
+uses D-Bus or opens a socket: they read `/proc` and `/sys`, and two read-only system calls, `statfs` for the use of a file system and
+`adjtimex` for the kernel's clock discipline.
+
+| Collector | Interval | Under memory pressure | Timeout | Reads |
+| --------- | -------- | --------------------- | ------- | ----- |
+| `system` | 30 s | 10 s | 5 s | `/proc/stat`, `/proc/loadavg`, `/proc/meminfo`, `/proc/vmstat`, `/proc/pressure/{memory,cpu,io}`, `/sys/block` |
+| `filesystem` | 60 s | — | 10 s | `/proc/self/mountinfo`, `statfs` of each configured mount point |
+| `clock` | 60 s | — | 5 s | `adjtimex` without changing anything |
+
+The `filesystem` collector runs only when at least one mount point is configured (`filesystem.mount_points`, default `/`, see
+[Configuration and secrets](configuration-and-secrets.md)). Each collector's failure is its own gap, so a `statfs` that hangs on a
+stale mount loses only the file system sample.
+
+**Records of one `system` sample**, in this order: `cpu_percent` per mode (from the second sample on), `load1`, `load5`, `load15`,
+the memory and swap values as `top` prints them, one `meminfo_bytes` or `meminfo` record per line of `/proc/meminfo` in file order,
+the pressure values per resource (`memory`, `cpu`, `io`) and kind (`some`, then `full`), the four `vmstat_total` counters
+(`pswpin`, `pswpout`, `pgmajfault`, `oom_kill`), their four `vmstat_per_second` rates (from the second sample on), then per disk in
+name order its five counters and, from the second sample on, its five rates.
+
+- **CPU.** The first line of `/proc/stat` is `cpu`, one or more spaces and at least 8 counters (user, nice, system, idle, iowait,
+  irq, softirq, steal; later fields are ignored). `cpu_percent` of a mode is its increase since the previous sample divided by the
+  increase of the sum of the 8 counters, times 100. Only the first 4 KiB of the file are read; a first line longer than that fails
+  the sample.
+- **Load.** The first three fields of `/proc/loadavg`, each 1 to 10 ASCII digits, a point and 2 digits.
+- **Memory.** Every line of `/proc/meminfo` is a name of 1 to 64 characters of `A-Z a-z 0-9 _ ( )`, a colon, one or more spaces and
+  1 to 20 ASCII digits within 64 bits, optionally followed by ` kB` (the value times 1,024 must fit in 64 bits). A `kB` line is
+  `meminfo_bytes` in bytes, a line without unit `meminfo`, label `field` the name. The derived values follow procps 3.3.17, which
+  Ubuntu 22.04's `top` uses: `mem_total_bytes` = MemTotal, `mem_free_bytes` = MemFree, `mem_buff_cache_bytes` = Buffers + Cached
+  + SReclaimable, `mem_used_bytes` = MemTotal − MemFree − Buffers − Cached − SReclaimable (MemTotal − MemFree when that is
+  negative; left out when MemFree is the larger), `mem_available_bytes` = MemAvailable; `swap_total_bytes` = SwapTotal, `swap_free_bytes` = SwapFree, `swap_used_bytes`
+  = SwapTotal − SwapFree (left out when SwapFree is the larger). MemTotal, MemFree, MemAvailable, Buffers, Cached, SReclaimable,
+  SwapTotal and SwapFree must each be present as a `kB` line. At most 16 KiB and 128 lines are read; a field named twice fails the
+  sample.
+- **Fault and swap counters.** In `/proc/vmstat` the lines of `pswpin`, `pswpout`, `pgmajfault` and `oom_kill` are the name, one
+  space and 1 to 20 ASCII digits; each must be present once. Other lines are not read. At most 64 KiB are read.
+- **Pressure.** A file of `/proc/pressure` holds a `some` line and optionally a `full` line, each `some` or `full`, then
+  ` avg10=A avg60=A avg300=A total=T` with single spaces, where A is 1 to 3 ASCII digits, a point and 2 digits, at most 100.00,
+  and T 1 to 20 ASCII digits within 64 bits; anything else fails the sample. A file without `full` line (the `cpu` file before kernel
+  5.13) gives only the `some` values. At most 256 bytes per file are read.
+- **Pressure not offered.** When a pressure file does not exist (a kernel without PSI, or booted with `psi=0`) or its read answers
+  "operation not supported", that resource's pressure values are left out and the sample succeeds. The agent logs one warning
+  `pressure stall information unavailable` with the attribute `resources` (the unavailable resources, comma-separated, in the order
+  `memory`, `cpu`, `io`) when that set changes and is not empty, and one info line `pressure stall information available` when it
+  becomes empty again; a sample with an unchanged set logs nothing.
+- **Disks.** A disk is an entry of `/sys/block` that has a `device` entry (so loop, RAM, zram, device-mapper and RAID devices,
+  which have none, are left out), at most 16, the first in name order. Its `stat` file holds at least 11 fields of 1 to 20 ASCII
+  digits separated by spaces; of them, reads and writes completed (fields 1 and 5), sectors read and written (fields 3 and 7, in
+  units of 512 bytes) and the milliseconds with I/O in flight (field 10) become `disk_reads_total`, `disk_read_bytes_total`,
+  `disk_writes_total`, `disk_written_bytes_total` and `disk_io_time_seconds_total`, label `device` the entry's name. At most 1 KiB per
+  file is read. The I/O of a device-mapper, RAID or loop volume (`dm-*`, `md*`, `loop*`) is therefore recorded only as the I/O of its
+  member disks; a comparison with the legacy script (#45) compares per disk and does not expect values for those volumes.
+- **Rates.** A rate (`cpu_percent`, `vmstat_per_second`, the five disk rates) compares a sample with the previous successful sample
+  of the same collector: the increase divided by the seconds between the two runs' start times (`disk_busy_percent`: the increase
+  of the I/O milliseconds divided by those milliseconds, times 100). There is no rate in the first sample after the agent started,
+  for a counter that fell, for a disk or counter the previous sample did not have, and when the start times did not move forward
+  (the wall clock was set back). A failed sample is not a predecessor.
+
+**Records of one `filesystem` sample**, per configured mount point in configuration order: `filesystem_size_bytes`,
+`filesystem_used_bytes`, `filesystem_free_bytes`, `filesystem_available_bytes`, then `filesystem_inodes`, `filesystem_inodes_used`
+and `filesystem_inodes_free`, label `mount` the configured path.
+
+- A configured path counts as mounted when it is the mount point (field 5) of a line of the agent's own `/proc/self/mountinfo`, after
+  decoding the kernel's escapes: a backslash and exactly three octal digits is one byte (`\040` a space, `\011` a tab, `\012` a line
+  feed, `\134` a backslash). A line with fewer than 5 fields, a backslash in its mount point that does not start such an escape, or
+  a line longer than 64 KiB fails the sample; the other fields are not decoded. The table is read line by line, so its length does not bound memory. A line longer than 64 KiB thus fails
+  every `filesystem` sample for as long as that mount exists: each sample is a recorded gap, never a silent omission.
+- A path that is not mounted is left out of the sample, and the agent logs one warning `mount point not mounted` with the attribute
+  `mount` when the path stops being mounted (or is not mounted at the first sample), and one info line `mount point mounted` when it
+  is mounted again. `statfs` is called only for mounted paths.
+- Size, free and available are the block counts times the fragment size (the block size when the fragment size is 0); used is size
+  minus free. The inode values are left out when the file system reports 0 inodes (btrfs has no fixed count). A `statfs` error,
+  free or available blocks above the total, free inodes above the total, or a size (blocks times fragment size) above 64 bits fail
+  the sample; the error names the mount point by its index
+  (`filesystem.mount_points[1]`), never by its path.
+- The values are those of the agent's mount namespace: a path the unit hides or replaces (`ProtectHome=` for `/home`,
+  `InaccessiblePaths=`) reports what the agent sees, and a mount point unmounted between the read of the table and `statfs` reports
+  the file system below it for that one sample.
+
+**Records of one `clock` sample:** `clock_synchronized`, `clock_max_error_seconds`, `clock_estimated_error_seconds` and, only while
+the kernel's phase-locked loop is on, `clock_pll_offset_seconds`.
+
+- `clock_synchronized` is 1 when the kernel's maximum error is below 16 seconds and 0 otherwise — the rule `timedatectl` uses, which
+  holds for systemd-timesyncd and chrony alike (chrony keeps the kernel's "unsynchronized" flag set unless `rtcsync` is configured,
+  so the flag is not used).
+- The PLL offset is the correction the kernel still has to apply (nanoseconds when the kernel reports nanoseconds, microseconds
+  otherwise, converted to seconds). systemd-timesyncd hands its measured offset to the PLL, so there it is the remaining offset;
+  chrony switches the PLL off, so under chrony the value is left out, never written as 0. A negative error estimate or a failed call
+  fails the sample.
+
+**Absent is not zero.** A measurement the server does not offer — pressure values, a configured path that is not mounted, inode
+values of a file system without them, the PLL offset while the PLL is off, a rate without predecessor — is left out of the sample.
+It is not a missed sample and records no gap; the backend reads it as unknown, never as 0.
+
+**Errors.** A failed `system`, `filesystem` or `clock` sample becomes a gap with cause `unknown` and is logged by the scheduler
+(*Scheduling*). The error texts name the file (`meminfo`, `pressure/io`, `block/sda/stat`,
+`self/mountinfo`), the line number where there is one and a fixed reason; they never contain file content or a configured path.
+
 ## Service manager
 
 - When systemd started the agent with a notification socket, the agent sends `READY=1` once its collectors run, `WATCHDOG=1` while
@@ -166,6 +267,12 @@ collector timeouts and backend gap detection each emit a gap record, and each pa
   `pidfd_send_signal`) under `SystemCallArchitectures=native`; no write-side capability; `ProtectHome=yes` and `InaccessiblePaths=` for at
   least `/etc/shadow` and `/etc/gshadow`. The last two protect only against accidental reads; they are not a limit on a compromised
   agent, which can reach the same files through another process's root in `/proc`.
+- The system metrics need no right of their own: `/proc/stat`, `/proc/loadavg`, `/proc/meminfo`, `/proc/vmstat`, `/proc/pressure`,
+  the agent's own mount table and `/sys/block` are readable by any user, `statfs` needs only search permission on the directories
+  above the mount point, and `adjtimex` without a change needs no capability (measured: unprivileged and without capabilities,
+  `adjtimex` with modes 0 and `statfs` succeed, while an `adjtimex` that sets the maximum error fails with `EPERM`). The unit's system-call filter must allow `adjtimex`: `ProtectClock=yes` denies it with `EPERM` even for a
+  read, and the group `@system-service` does not contain it, so an allow-list names it. A change of the clock still needs
+  `CAP_SYS_TIME`, which the bounding set excludes.
 - For restarting units (self-healing, a later feature) a polkit rule lets this user restart only the units named in the configuration;
   there is no sudo and no shell.
 - Each group, capability and confinement setting is listed and justified in `deploy/agent/` when the collector that needs it is
@@ -185,6 +292,9 @@ collector timeouts and backend gap detection each emit a gap record, and each pa
 - [0110](../decisions/0110-agent-runtime-frame-runner-per-collector-gaps-for-every-missed-sample-hand-written-sd-notify.md) — why one runner per
   collector at a fixed rate, a gap for every missed sample, the notification without a library, the watchdog gated on the runners and the
   log format.
+- [0111](../decisions/0111-system-metrics-three-collectors-from-proc-sys-statfs-and-adjtimex.md) — why three system collectors,
+  `statfs` and `adjtimex` beside `/proc` and `/sys`, the synchronization rule, the PLL offset only while the PLL is on, and absent
+  values left out instead of zero.
 
 ## Not here
 
@@ -195,5 +305,6 @@ collector timeouts and backend gap detection each emit a gap record, and each pa
 ## Implementation
 
 `cmd/vandox-agent` and `internal/cli` (Go), `internal/agent` (start-up, logging, watchdog), `internal/scheduler`, `internal/selfstats`,
+`internal/sysstats` (system metrics; fixtures `testdata/proc/`, `testdata/sys/`),
 `internal/sdnotify`, `internal/config`, `internal/model`, `internal/wire`; `deploy/agent/` (example configuration; the unit and install
 scripts follow with the collectors).
