@@ -3,6 +3,9 @@ package procstats
 import (
 	"bytes"
 	"context"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"io/fs"
 	"log/slog"
 	"math"
@@ -1458,5 +1461,163 @@ func BenchmarkProcesses_Collect(b *testing.B) {
 		if _, err := c.Collect(ctx, scheduler.Run{Start: time.Now().UTC(), Pressure: true}); err != nil {
 			b.Fatalf("Collect() error = %v, want nil", err)
 		}
+	}
+}
+
+// allowedImports are the packages the non-test files of internal/procstats import (AC10): no program, socket, cgo or unsafe.
+var allowedImports = []string{
+	"bufio", "bytes", "cmp", "container/heap", "context", "encoding/json", "errors", "fmt", "io", "io/fs", "log/slog", "math", "os",
+	"slices", "strconv", "strings", "sync", "syscall", "time", "unicode/utf8",
+	"github.com/LarsLaskowski/Vandox/internal/model",
+	"github.com/LarsLaskowski/Vandox/internal/scheduler",
+	"github.com/LarsLaskowski/Vandox/internal/wire",
+}
+
+// allowedSelectors maps a package to the only selectors of it the files may use.
+var allowedSelectors = map[string][]string{
+	"syscall": {"ESRCH", "EACCES", "EPERM"},
+	"os":      {"DirFS"},
+}
+
+// foreignSuffixes are the extensions of source files other than Go (assembly, C, objects).
+var foreignSuffixes = []string{".s", ".S", ".c", ".h", ".cc", ".cpp", ".cxx", ".hh", ".hpp", ".m", ".syso", ".swig", ".swigcxx", ".f", ".F"}
+
+// checkPackageDir parses the non-test Go files of dir and returns the violations of the allow-list and the selectors it found.
+func checkPackageDir(dir string) (violations []string, selectors map[string]bool, parsed int) {
+	selectors = map[string]bool{}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return []string{"reading " + dir + ": " + err.Error()}, selectors, 0
+	}
+	for _, e := range entries {
+		name := e.Name()
+		if slices.ContainsFunc(foreignSuffixes, func(s string) bool { return strings.HasSuffix(name, s) }) {
+			violations = append(violations, name+": a source file other than Go")
+			continue
+		}
+		if !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		parsed++
+		violations = append(violations, checkGoFile(filepath.Join(dir, name), selectors)...)
+	}
+	return violations, selectors, parsed
+}
+
+// checkGoFile checks one Go file and records the selectors of the restricted packages it uses in selectors.
+func checkGoFile(path string, selectors map[string]bool) []string {
+	file, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.ParseComments)
+	if err != nil {
+		return []string{path + ": " + err.Error()}
+	}
+	violations := checkFileImports(path, file)
+	violations = append(violations, checkFileSelectors(path, file, selectors)...)
+	return append(violations, checkFileDirectives(path, file)...)
+}
+
+// checkFileImports returns the imports of file that are not allowed or carry a name.
+func checkFileImports(path string, file *ast.File) []string {
+	var violations []string
+	for _, imp := range file.Imports {
+		p, _ := strconv.Unquote(imp.Path.Value)
+		if imp.Name != nil {
+			violations = append(violations, path+": import of "+p+" carries the name "+imp.Name.Name)
+		}
+		if !slices.Contains(allowedImports, p) {
+			violations = append(violations, path+": import of "+p+" is not allowed")
+		}
+	}
+	return violations
+}
+
+// checkFileSelectors returns the uses of restricted selectors that are not allowed and records every use in selectors.
+func checkFileSelectors(path string, file *ast.File, selectors map[string]bool) []string {
+	var violations []string
+	ast.Inspect(file, func(n ast.Node) bool {
+		sel, ok := n.(*ast.SelectorExpr)
+		if !ok {
+			return true
+		}
+		id, ok := sel.X.(*ast.Ident)
+		if !ok {
+			return true
+		}
+		allowed, restricted := allowedSelectors[id.Name]
+		if !restricted {
+			return true
+		}
+		selectors[id.Name+"."+sel.Sel.Name] = true
+		if !slices.Contains(allowed, sel.Sel.Name) {
+			violations = append(violations, path+": "+id.Name+"."+sel.Sel.Name+" is not allowed")
+		}
+		return true
+	})
+	return violations
+}
+
+// checkFileDirectives returns the comment lines that start with //go: other than //go:build.
+func checkFileDirectives(path string, file *ast.File) []string {
+	var violations []string
+	for _, group := range file.Comments {
+		for _, c := range group.List {
+			for _, line := range strings.Split(c.Text, "\n") {
+				line = strings.TrimSpace(line)
+				if strings.HasPrefix(line, "//go:") && !strings.HasPrefix(line, "//go:build") {
+					violations = append(violations, path+": directive "+line)
+				}
+			}
+		}
+	}
+	return violations
+}
+
+func TestProcstats_ImportsOnlyAllowedPackages(t *testing.T) {
+	t.Run("the package", func(t *testing.T) {
+		violations, selectors, parsed := checkPackageDir(".")
+
+		for _, v := range violations {
+			t.Errorf("violation: %s", v)
+		}
+		if parsed == 0 {
+			t.Errorf("no non-test Go file was parsed, want at least one")
+		}
+		for _, want := range []string{"syscall.ESRCH", "syscall.EACCES", "os.DirFS"} {
+			if !selectors[want] {
+				t.Errorf("the package never uses %s, want it found (the check would be vacuous)", want)
+			}
+		}
+	})
+
+	probes := []struct{ name, file, want string }{
+		{"user lookup", "package p\n\nimport \"os/user\"\n\nvar _ = user.Current\n", "import of os/user is not allowed"},
+		{"program package", "package p\n\nimport \"os/exec\"\n\nvar _ = exec.ErrDot\n", "import of os/exec is not allowed"},
+		{"network package", "package p\n\nimport \"net\"\n\nvar _ = net.IPv4len\n", "import of net is not allowed"},
+		{"unsafe", "package p\n\nimport \"unsafe\"\n\nvar _ unsafe.Pointer\n", "import of unsafe is not allowed"},
+		{"cgo", "package p\n\nimport \"C\"\n", "import of C is not allowed"},
+		{"raw system call", "package p\n\nimport \"syscall\"\n\nvar _ = syscall.Syscall\n", "syscall.Syscall is not allowed"},
+		{"other errno", "package p\n\nimport \"syscall\"\n\nvar _ = syscall.EIO\n", "syscall.EIO is not allowed"},
+		{"process start", "package p\n\nimport \"os\"\n\nvar _ = os.StartProcess\n", "os.StartProcess is not allowed"},
+		{"linkname", "package p\n\n//go:linkname f runtime.f\nfunc f()\n", "directive //go:linkname"},
+		{"renamed import", "package p\n\nimport sc \"syscall\"\n\nvar _ = sc.ESRCH\n", "carries the name sc"},
+	}
+	for _, tt := range probes {
+		t.Run("detects "+tt.name, func(t *testing.T) { requireProbeRefused(t, tt.file, "x.go", tt.want) })
+	}
+	t.Run("detects an assembly file", func(t *testing.T) { requireProbeRefused(t, "TEXT f(SB),0,$0\n", "x.s", "a source file other than Go") })
+}
+
+// requireProbeRefused checks that a directory holding only the file name with content gets a violation containing want.
+func requireProbeRefused(t *testing.T, content, name, want string) {
+	t.Helper()
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600); err != nil {
+		t.Fatalf("writing the probe file: %v", err)
+	}
+
+	violations, _, _ := checkPackageDir(dir)
+
+	if !slices.ContainsFunc(violations, func(v string) bool { return strings.Contains(v, want) }) {
+		t.Errorf("violations = %q, want one containing %q", violations, want)
 	}
 }
