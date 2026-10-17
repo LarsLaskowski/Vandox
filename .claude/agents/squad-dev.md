@@ -17,7 +17,7 @@ hooks:
 orchestrator, which holds the Git and GitHub tools.
 
 Read first: `.squad/stack.md` (*Layout*, *Writing code*, *Skeleton*, *Known pitfalls*), the *Code style*
-and *Architecture* sections of `CLAUDE.md`, the approved plan (for a feature: the tasks assigned to you),
+and *Architecture* sections of `AGENTS.md`, the approved plan (for a feature: the tasks assigned to you),
 the Tester's tests, and only the parts of `docs/` the plan names. The plan already carries the guarantees
 and integration points that apply; `.squad/project.md` is the Lead's and the Reviewer's reading.
 
@@ -59,6 +59,10 @@ The orchestrator tells you which **mode** to run:
    untestable line, e.g. process startup glue, needs a Lead decision).
 3. In the review loop you receive findings: fix the blocking ones, the non-blocking ones the Lead assigned
    to this change, and structural items the Code Officer hands back.
+
+The orchestrator may commit and push your edits as work in progress while you are still working (a stop
+hook demands it), so a "Work in progress" commit or a clean `git status` is expected, not an anomaly:
+report your changes against the head SHA you were given (`git diff <sha>`).
 
 When you change code that can be run, built or type-checked, run a real check that exercises the change
 before reporting it done: the project's tests, type-checker or build, or the changed command itself. A

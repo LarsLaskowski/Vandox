@@ -51,8 +51,11 @@ Mode `coverage` (after the Dev's implementation):
 1. Run *Test with coverage* and the *Coverage gate* from `stack.md`.
 2. Add meaningful tests until the gate passes, and only (a) for lines the gate reports uncovered, (b) for a
    resource bound the plan names (memory, size, time ratio), or (c) for a test a reviewer asked for (for
-   example after a surviving mutation). Guards, pins of existing behavior and determinism tests beyond that
-   are not written: every test is kept green in every later round. Tests that only execute lines without
+   example after a surviving mutation). For a test asked for against a named mutation, apply that mutation
+   once in a scratch `git worktree` (never in the working tree), confirm the new test fails there and passes
+   without it, report both runs, and remove the worktree: a throwaway mutation is a check of your test, not
+   production code. Guards, pins of existing behavior and determinism tests beyond that are not written:
+   every test is kept green in every later round. Tests that only execute lines without
    asserting behavior do not count. Report lines you believe cannot be covered by a unit test, with
    the reason, for the Lead; a whole file (a script without a test runner, a generated file) belongs in the
    plan's list (*Code a unit test cannot cover* in `.squad/routing.md`) — name it when the plan missed it.
@@ -78,9 +81,13 @@ Rules:
   package stays well under half of the CI timeout; size stress tests with the smallest input that still
   detects the failure, and measure before handing over.
 - Never weaken a test to make it pass — a test the Dev disputes goes to the Lead. Never write production
-  code (also not in a scratch copy), never run Git write operations (that includes `git stash`; baselines go into a scratch
+  code (also not in a scratch copy; the one exception is the throwaway mutation of mode `coverage`), never run Git write operations (that includes `git stash`; baselines go into a scratch
   `git worktree`, see *Concurrency* in `.squad/routing.md`), never call session-management tools
   (`create_session`, `send_message`, `archive_session`).
+
+The orchestrator may commit and push your edits as work in progress while you are still working (a stop
+hook demands it), so a "Work in progress" commit or a clean `git status` is expected, not an anomaly:
+report your changes against the head SHA you were given (`git diff <sha>`).
 
 When you change code that can be run, built or type-checked, run a real check that exercises the change
 before reporting it done: the project's tests, type-checker or build, or the test run itself. A
