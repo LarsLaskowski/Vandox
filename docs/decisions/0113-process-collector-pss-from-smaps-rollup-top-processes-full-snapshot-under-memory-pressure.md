@@ -53,16 +53,27 @@ condition it is meant to record, and process names and command lines are text an
 10. **A read that blocks** (a process whose memory map lock is held can block reads of its `cmdline` and `smaps_rollup`). One
     goroutine and deadline per process — more goroutines and memory than the collector itself; **the frame abandons the run at
     its timeout and records a gap** (chosen, 0029), accepting that a process stuck that way costs process samples until it moves.
+    Any local user can cause it on purpose by holding the memory map lock of a process of their own; this residual is
+    deliberate.
 11. **Configuration list of rules.** A compact string syntax per rule — a second grammar to parse and to document; **a list of
     mappings checked by the strict decoder like every section** (chosen, 0049): unknown and duplicate keys in an element are
     refused with the element's index in the key path.
+12. **A process without any name** (empty command line and empty `comm`, which any local user can produce). Leave it out —
+    the model requires a non-empty command and program, but leaving the process out would let a local user hide its memory
+    from the program sums by blanking its name; **a fixed placeholder `(unnamed)` as the last fallback** (chosen), which holds
+    no process text. More generally, no text a user chooses may fail the whole sample: every field the model checks is valid
+    by construction, and an entry that still fails its check alone is left out with the snapshot marked incomplete.
+13. **Ranking key when PSS is partly missing.** PSS where present, else RSS — compares PSS of some processes with RSS of
+    others, and RSS is the larger for shared pages; **one key per run: PSS when every process (program) has one, else RSS for
+    all** (chosen), as `top` ranks without the capability.
 
 ## Decision
 
 A new collector reads every process (at most 4,096 per run) from `/proc`, sums every program and records the top processes by
 memory and CPU, or every process while memory pressure mode is on; the `system` collector switches that mode with fixed,
 hysteretic thresholds on `MemAvailable` and memory PSI. Names follow the legacy parser's rules after the configured grouping rules,
-and reading `smaps_rollup` of other users' processes needs `CAP_SYS_PTRACE` and nothing else. The rules are in the
+and reading `smaps_rollup` of other users' processes needs `CAP_SYS_PTRACE` and nothing else (measured on the development host:
+`CAP_DAC_READ_SEARCH` does not replace it; `stat`, `status` and `cmdline` need no capability). The rules are in the
 [Agent](../areas/agent.md) area (*Processes*, *Memory pressure mode*, *Rights*) and the option in
 [Configuration and secrets](../areas/configuration-and-secrets.md).
 
@@ -73,7 +84,10 @@ and reading `smaps_rollup` of other users' processes needs `CAP_SYS_PTRACE` and 
 - A PSS that cannot be read (no capability, another user namespace, an LSM) leaves that process's PSS and its program's PSS sum
   out, never 0; RSS stays.
 - Under memory pressure the process snapshot is taken every 15 seconds and lists every process, so the spool grows faster for
-  the length of the episode (#38, #44 measure it).
+  the length of the episode (#38, #44 measure it). Any local user can switch the mode on by allocating memory; the growth is
+  bounded by the record budget per snapshot and by the spool's size bound, which then evicts older data with a recorded gap.
+- A local user who holds a process's memory map lock can make a run hang; the run becomes a gap and process samples are lost
+  until the process moves (option 10).
 - The thresholds and the 100 ms bound for 250 processes are not measured on the server (Ubuntu 22.04, kernel 5.15); the
   fixtures are captures of the development host's kernel 6.18. The parallel run of #45 and the footprint test of #44 check them.
 - A grouping rule with `append_next_word` takes the word from text any local user controls, so it can create programs; their
