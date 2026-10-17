@@ -1,6 +1,6 @@
 # 0110: The agent's runtime frame: one runner per collector at a fixed rate, a gap for every missed sample, sd_notify by hand with a watchdog gated on the runners, journal logging on stderr
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-17
 - **Area:** Agent
 - **Source:** Issue #30
