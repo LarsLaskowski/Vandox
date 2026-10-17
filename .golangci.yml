@@ -6,6 +6,7 @@ linters:
     - errorlint
     - gocognit
     - gocritic
+    - gosec
     - misspell
     - revive
     - unconvert
@@ -13,6 +14,10 @@ linters:
     gocognit:
       # SonarQube's go:S3776 threshold; stricter for bare `if err != nil` checks (record 0047).
       min-complexity: 15
+    gosec:
+      # Only G115, the local stand-in for CodeQL's go/incorrect-integer-conversion (record 0112).
+      includes:
+        - G115
   exclusions:
     warn-unused: true
     rules:

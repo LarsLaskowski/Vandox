@@ -385,7 +385,8 @@ touches:
   `grep -l -i -E 'dependabot|workflow|dockerfile|compose|golangci|ci\.yml' docs/decisions/0*.md`. Among them: 0041 (base images
   pinned by digest through build arguments, no Dependabot `docker` entry, the weekly digest report in
   `base-image-digests.yml`), 0060 (the compose file, no Dependabot entry for it), 0037 (release workflow), 0047
-  (`gocognit` and its exclusions in `.golangci.yml`) and 0052 (image labels)
+  (`gocognit` and its exclusions in `.golangci.yml`), 0112 (`gosec` limited to G115 in `.golangci.yml`, no
+  exclusions) and 0052 (image labels)
 - a change that contradicts such a record is not merged as is: the record is edited (unreleased) or superseded
   (released) in the same pull request, or the change is dropped
 
