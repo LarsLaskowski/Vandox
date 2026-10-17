@@ -145,7 +145,8 @@ tags look like `vX.Y.Z-rc.N`. Build metadata (`+...`) is not allowed.
    and `SHA256SUMS`, generates the notes if they are empty, appends the image digest, and marks the release as latest
    exactly when the tag is the highest stable `v*.*.*` tag.
 8. If any job fails or the run is cancelled, turns the release back into a draft, so no published release lacks its
-   assets.
+   assets. A release that already has its assets from an earlier run stays published (a republish or re-run of a
+   complete release stops at the never-overwrite check).
 
 ### Verifying a release
 
@@ -223,8 +224,11 @@ nothing and reads no secret.
    target `refs/tags/v*`, enforcement *Active*, the rules *Restrict creations*, *Restrict updates* and
    *Restrict deletions*, and *Repository admin* as the only bypass. A release runs the workflow file of
    the tagged commit, so whoever can create the tag controls what runs with the Docker Hub token. Publishing a
-   release with a new tag on the web page creates the tag with the publisher's rights, so the ruleset applies
-   there as well: only the admin can publish a release with a new tag. Create the ruleset before storing the token.
+   release with a new tag on the web page creates the tag with the publisher's rights, so the ruleset is meant to
+   apply there as well: only the admin (and every role in the bypass list) can publish a release with a new tag.
+   Check that once: create a temporary tag ruleset for `refs/tags/rulesetprobe-*` with *Restrict creations* and no
+   bypass, try to publish a release with the new tag `rulesetprobe-1` on the web page (GitHub must refuse it), then
+   delete the ruleset and anything the attempt created. Create the ruleset before storing the token.
 2. **Environment.** Create the GitHub environment `release` with deployment branches and tags set to
    *Selected branches and tags*: the tag rule `v*.*.*` and no branch. Store the secret `DOCKERHUB_TOKEN`
    and the variable `DOCKERHUB_USERNAME` there. A required reviewer is optional; it is worth adding once

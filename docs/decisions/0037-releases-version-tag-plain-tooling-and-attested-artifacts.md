@@ -44,7 +44,8 @@ Trigger:
 - **A manually started workflow (`workflow_dispatch`) that creates tag and release at the end** — rejected: the job
   token would need a bypass of the tag ruleset, and then everyone who may start the workflow could release.
 - **Publishing a GitHub release with a new `vX.Y.Z` tag on the web page (`release: published`)** — chosen. The tag is
-  created with the publisher's rights, so the ruleset still decides; the workflow attaches the assets afterwards and
+  created with the publisher's rights, so the ruleset still decides (to be checked once with a probe ruleset, see
+  `docs/CONTRIBUTING.md`, *One-time setup*); the workflow attaches the assets afterwards and
   turns the release back into a draft if it fails. A draft triggers nothing. The pull-request dry run lives in
   `ci.yml` (`Release build check`), not in `release.yml`, so release jobs never show up as skipped in pull-request
   checks.
@@ -133,6 +134,8 @@ release exists or the pinned tag's index digest has moved. The step-by-step beha
   a draft; publishing the draft again starts a new run, and a code fix needs a new patch version.
 - Anyone with write access can publish a release for an *existing* `v*` tag that the admin created and that has no
   release; it builds exactly that tagged commit, and a version already on Docker Hub stops at the never-overwrite check.
+  Republishing a complete release runs the workflow again and stops at that check; `withdraw-release` leaves a release
+  that already has its assets published.
   A required reviewer on the environment closes that gap once a second person has write access.
 - `publish-image` is not idempotent: if it fails after the version tag was pushed to Docker Hub, a re-run stops at the never-overwrite
   check, and the recovery is a new patch version. The release artifact is kept for 7 days, so re-running `attest` or

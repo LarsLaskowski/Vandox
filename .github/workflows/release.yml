@@ -397,5 +397,11 @@ jobs:
           TAG: ${{ github.event.release.tag_name }}
         run: |
           set -euo pipefail
+          # A release that already carries its checksum file was completed by an earlier run; a republish
+          # or re-run of it stops at the never-overwrite check and must not withdraw it.
+          if gh release view "$TAG" --json assets --jq '.assets[].name' | grep -qx SHA256SUMS; then
+            echo "::warning::the release $TAG already has its assets from an earlier run; it stays published"
+            exit 0
+          fi
           gh release edit "$TAG" --draft=true
           echo "::warning::the release $TAG failed or was cancelled and was turned back into a draft"
