@@ -17,3 +17,4 @@ are quoted in full.
 | 2026-10-17 16:04 | 3 Plan security review (delta) | squad-security | launched (continued) on head b58ff10 |
 | 2026-10-17 16:05 | 3 Plan security review (delta) | squad-security | VERDICT: APPROVED; all findings resolved, no new finding (opus/medium · 12,694 tokens · 3 tool uses · 31 s · continued) |
 | 2026-10-17 16:05 | 4 Skeleton | squad-dev | launched (mode skeleton), task 2 |
+| 2026-10-17 16:06 | 4 Skeleton | squad-dev | skeleton done; build/vet pass; Parse is zero-value stub, cli/main tests fail on it until task 8 |

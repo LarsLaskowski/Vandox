@@ -2,36 +2,17 @@
 package cli
 
 import (
-	"errors"
-	"flag"
-	"fmt"
 	"io"
-
-	"github.com/LarsLaskowski/Vandox/internal/version"
 )
 
-// Run parses args (the command-line arguments without the program name) for the binary called name,
-// writes its regular output to stdout and usage and parse errors to stderr, and returns the process
-// exit code: 0 on success, on -h/-help and when only the usage is printed; 1 when writing the output
-// fails; 2 when the arguments cannot be parsed.
-func Run(name string, args []string, stdout, stderr io.Writer) int {
-	flags := flag.NewFlagSet(name, flag.ContinueOnError)
-	flags.SetOutput(stderr)
-	showVersion := flags.Bool("version", false, "print version, commit and build date and exit")
+// Command is what the command line asks the agent to run.
+type Command struct {
+	ConfigPath string // the configuration file; default config.DefaultAgentFile
+}
 
-	if err := flags.Parse(args); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			return 0
-		}
-		return 2
-	}
-
-	if !*showVersion {
-		flags.Usage()
-		return 0
-	}
-	if _, err := fmt.Fprintln(stdout, version.String(name)); err != nil {
-		return 1
-	}
-	return 0
+// Parse parses args (without the program name) for the binary called name. done reports that the process ends with
+// code without running the agent: after -version (0, or 1 when writing stdout fails), -h/-help (0), and a usage error
+// (2: an undefined flag, a positional argument, an empty -config). Usage and errors go to stderr.
+func Parse(name string, args []string, stdout, stderr io.Writer) (cmd Command, code int, done bool) {
+	return Command{}, 0, false
 }

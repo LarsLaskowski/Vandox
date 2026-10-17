@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"strings"
 	"testing"
 
@@ -11,7 +12,7 @@ import (
 func TestRun_Version(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 
-	got := run([]string{"-version"}, &stdout, &stderr)
+	got := run(context.Background(), []string{"-version"}, nil, &stdout, &stderr)
 
 	want := version.String("vandox-agent") + "\n"
 	if got != 0 {
@@ -28,7 +29,7 @@ func TestRun_Version(t *testing.T) {
 func TestRun_UndefinedFlag(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 
-	got := run([]string{"-bogus"}, &stdout, &stderr)
+	got := run(context.Background(), []string{"-bogus"}, nil, &stdout, &stderr)
 
 	want := "Usage of vandox-agent:"
 	if got != 2 {

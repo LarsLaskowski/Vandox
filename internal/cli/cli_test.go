@@ -117,7 +117,7 @@ func TestRun(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
 
-			gotCode := cli.Run(tc.binary, tc.args, &stdout, &stderr)
+			_, gotCode, _ := cli.Parse(tc.binary, tc.args, &stdout, &stderr)
 
 			if gotCode != tc.wantCode {
 				t.Errorf("Run(%q, %q) exit code = %d, want %d", tc.binary, tc.args, gotCode, tc.wantCode)
@@ -147,7 +147,7 @@ func assertStderr(t *testing.T, binary string, args []string, stderr string, wan
 func TestRun_StdoutWriteFails(t *testing.T) {
 	var stderr bytes.Buffer
 
-	got := cli.Run(agentName, []string{versionFlag}, failingWriter{}, &stderr)
+	_, got, _ := cli.Parse(agentName, []string{versionFlag}, failingWriter{}, &stderr)
 
 	if got != 1 {
 		t.Errorf("Run(%q, [%s]) with failing stdout = %d, want 1", agentName, versionFlag, got)
@@ -160,7 +160,7 @@ func TestRun_NoSharedFlagState(t *testing.T) {
 	for i := range calls {
 		var stdout, stderr bytes.Buffer
 
-		gotVersion := cli.Run(agentName, []string{versionFlag}, &stdout, &stderr)
+		_, gotVersion, _ := cli.Parse(agentName, []string{versionFlag}, &stdout, &stderr)
 		if gotVersion != 0 || stdout.String() != version.String(agentName)+"\n" {
 			t.Fatalf("call %d: Run(%q, [%s]) = %d, stdout %q, want 0, %q",
 				i, agentName, versionFlag, gotVersion, stdout.String(), version.String(agentName)+"\n")
@@ -168,7 +168,7 @@ func TestRun_NoSharedFlagState(t *testing.T) {
 
 		stdout.Reset()
 		stderr.Reset()
-		gotUsage := cli.Run(agentName, nil, &stdout, &stderr)
+		_, gotUsage, _ := cli.Parse(agentName, nil, &stdout, &stderr)
 		if gotUsage != 0 || stdout.Len() != 0 || !strings.Contains(stderr.String(), usageHeader(agentName)) {
 			t.Fatalf("call %d: Run(%q, nil) = %d, stdout %q, stderr %q, want 0, empty stdout, usage on stderr",
 				i, agentName, gotUsage, stdout.String(), stderr.String())
