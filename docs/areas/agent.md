@@ -151,7 +151,7 @@ name order its five counters and, from the second sample on, its five rates.
   `meminfo_bytes` in bytes, a line without unit `meminfo`, label `field` the name. The derived values follow procps 3.3.17, which
   Ubuntu 22.04's `top` uses: `mem_total_bytes` = MemTotal, `mem_free_bytes` = MemFree, `mem_buff_cache_bytes` = Buffers + Cached
   + SReclaimable, `mem_used_bytes` = MemTotal − MemFree − Buffers − Cached − SReclaimable (MemTotal − MemFree when that is
-  negative), `mem_available_bytes` = MemAvailable; `swap_total_bytes` = SwapTotal, `swap_free_bytes` = SwapFree, `swap_used_bytes`
+  negative; left out when MemFree is the larger), `mem_available_bytes` = MemAvailable; `swap_total_bytes` = SwapTotal, `swap_free_bytes` = SwapFree, `swap_used_bytes`
   = SwapTotal − SwapFree (left out when SwapFree is the larger). MemTotal, MemFree, MemAvailable, Buffers, Cached, SReclaimable,
   SwapTotal and SwapFree must each be present as a `kB` line. At most 16 KiB and 128 lines are read; a field named twice fails the
   sample.
@@ -185,8 +185,8 @@ and `filesystem_inodes_free`, label `mount` the configured path.
 
 - A configured path counts as mounted when it is the mount point (field 5) of a line of the agent's own `/proc/self/mountinfo`, after
   decoding the kernel's escapes: a backslash and exactly three octal digits is one byte (`\040` a space, `\011` a tab, `\012` a line
-  feed, `\134` a backslash). A line with fewer than 5 fields, a backslash that does not start such an escape, or a line longer than
-  64 KiB fails the sample. The table is read line by line, so its length does not bound memory. A line longer than 64 KiB thus fails
+  feed, `\134` a backslash). A line with fewer than 5 fields, a backslash in its mount point that does not start such an escape, or
+  a line longer than 64 KiB fails the sample; the other fields are not decoded. The table is read line by line, so its length does not bound memory. A line longer than 64 KiB thus fails
   every `filesystem` sample for as long as that mount exists: each sample is a recorded gap, never a silent omission.
 - A path that is not mounted is left out of the sample, and the agent logs one warning `mount point not mounted` with the attribute
   `mount` when the path stops being mounted (or is not mounted at the first sample), and one info line `mount point mounted` when it

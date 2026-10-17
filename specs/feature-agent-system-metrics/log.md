@@ -17,3 +17,5 @@ are quoted in full.
 | 2026-10-17 19:09 | 6 Implement | squad-dev | tasks 4-11 done; coverage 95.7% new, 98.2% overall; deviations: mountPointsRule name, mem_used omitted if negative, Frsize/Bsize no conversion, escapes validated in field 5 only (sonnet/medium · 227,063 tokens · 40 tool uses · 708 s) |
 | 2026-10-17 19:15 | 7 Code check | Orchestrator | Format, Analyzer, Test -race, Coverage (95.7% new / 98.2% overall), scope-check all pass; main merged already |
 | 2026-10-17 19:17 | 8 Review (diff) | squad-security | APPROVED at 6f9110c; non-blocking N-a (PathError carries fixed host path), N-b (project.md indentation) (opus/medium · 71,264 tokens · 15 tool uses · 110 s) |
+| 2026-10-17 19:22 | 8 Review | squad-reviewer | round 1 at 6f9110c: BLOCKING 3 (mem_used negative case untested+undocumented, mountinfo 65536 boundary untested, escape doc wording verbatim) (opus/medium · 148,530 tokens · 36 tool uses · 378 s) |
+| 2026-10-17 19:22 | 8 Review | Orchestrator | Applied reviewer's proposed text in docs/areas/agent.md (mountinfo escape wording; mem_used_bytes left out when MemFree larger); doc only |
