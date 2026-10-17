@@ -28,7 +28,7 @@ statistics* below, and `vandoxd report` writes the forensics report as Markdown,
 
 ```
 cmd/vandox-agent/   entry point of the agent (Go)
-internal/           the agent's Go packages: config, model, wire (batch encoder), cli, version
+internal/           the agent's Go packages: agent (start-up, logging, watchdog), scheduler, selfstats, sdnotify, config, model, wire (batch encoder), cli, version
 src/Vandox.Backend/ the backend vandoxd: host, command line, Blazor web UI
 src/Vandox.Core/    record model, wire decoder, configuration, safe file access, log parser framework, log signatures
 src/Vandox.Storage/ SQLite store: schema, migrations, batched writes, queries, log search and exploration
