@@ -57,7 +57,7 @@ Docker Hub token:
   access to that repository only; the maintainer's account-wide token is rejected. The user name is an environment
   variable, not a secret (masking would hide it in the image name).
 - **Who may create `v*` tags:** anyone with write access — rejected (the environment would protect nothing against a
-  collaborator). A tag ruleset `release-tags` restricting creation, update and deletion to the repository admin —
+  collaborator). A tag ruleset restricting creation, update and deletion to the repository admin —
   chosen. A required reviewer on the environment is optional and only worth it once a second person has write access.
 
 Provenance and SBOM:
@@ -107,7 +107,7 @@ marked as a pre-release) on the web page; nothing else triggers `release.yml`. T
 permissions (including a vulnerability scan of the Go and NuGet dependencies), `publish-image` pushes exactly the verified image and is the only job that declares the `release`
 environment and sees the token, `attest` creates and verifies provenance and SBOM attestations for the binary and the
 image digest, and `github-release` attaches the assets and completes the notes only after the attestations verified; a failed run turns the release back into a draft (`withdraw-release`). A published version is never
-overwritten. The token lives in the tag-only environment `release`, and the tag ruleset `release-tags` decides who can
+overwritten. The token lives in the tag-only environment `release`, and the tag ruleset decides who can
 start a release. The weekly base image digest workflow (0041) also reports, in an issue of its own, when a newer syft
 release exists or the pinned tag's index digest has moved. The step-by-step behavior, the exact checks and the maintainer setup are in `release.yml`,
 `.github/scripts/` and `docs/CONTRIBUTING.md` (*Versioning and releases*).

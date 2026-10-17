@@ -158,7 +158,7 @@ pulling that same digest, and the same commands with `--predicate-type https://s
 `--deny-self-hosted-runners` requires a GitHub-hosted runner. The image is verified and pulled by digest
 because a tag can be re-pointed (immutable tags are optional, see *One-time setup (maintainer)*, item 3). The
 workflow's own check uses the tag on purpose, to catch a tag that does not resolve to the attested digest.
-An attestation does not prove that the tagged commit is on `main`; the tag ruleset `release-tags` stays
+An attestation does not prove that the tagged commit is on `main`; the tag ruleset stays
 that boundary.
 
 ### Base image digests
@@ -221,12 +221,12 @@ nothing and reads no secret.
 
 ### One-time setup (maintainer)
 
-1. **Tag ruleset.** Create the ruleset `release-tags` (Settings, Rules, Rulesets, new tag ruleset) with the
+1. **Tag ruleset.** Create a tag ruleset (Settings, Rules, Rulesets, new tag ruleset; the name does not matter) with the
    target `refs/tags/v*`, enforcement *Active*, the rules *Restrict creations*, *Restrict updates* and
    *Restrict deletions*, and *Repository admin* as the only bypass. A release runs the workflow file of
    the tagged commit, so whoever can create the tag controls what runs with the Docker Hub token. Publishing a
    release with a new tag on the web page creates the tag with the publisher's rights, so the ruleset is meant to
-   apply there as well: only the admin (and every role in the bypass list) can publish a release with a new tag.
+   apply there as well: only the admin can publish a release with a new tag.
    Check that once: create a temporary tag ruleset for `refs/tags/rulesetprobe-*` with *Restrict creations* and no
    bypass, try to publish a release with the new tag `rulesetprobe-1` on the web page (GitHub must refuse it), then
    delete the ruleset and anything the attempt created. Create the ruleset before storing the token.

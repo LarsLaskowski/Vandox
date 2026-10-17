@@ -412,8 +412,8 @@ Docker Hub as `networlddev/vandox` ([0027](decisions/0027-project-name-and-docke
   ([0072](decisions/0072-vandoxd-import-sub-command-output-and-exit-codes.md),
   [0060](decisions/0060-compose-file-port-bindings-volumes-and-memory-limit.md)).
 - Releases are built by `.github/workflows/release.yml` only when a GitHub release with a SemVer tag on `main` is
-  published on the web page, which creates the tag. Only the repository admin may create these tags (tag ruleset
-  `release-tags`), and the workflow checks that the tagged commit is on `main`; a failed run turns the release back
+  published on the web page, which creates the tag. Only the repository admin may create these tags (tag
+  ruleset), and the workflow checks that the tagged commit is on `main`; a failed run turns the release back
   into a draft.
 - Release binaries are built from source without restored CI caches and only after `govulncheck` and the NuGet vulnerability check pass.
   The image that was verified is the image that is pushed, and a published version is never overwritten.

@@ -266,7 +266,7 @@ files or endpoints.
     `.github/workflows/base-image-digests.yml`, `.github/scripts/`, `deploy/backend/Dockerfile`,
     `.dockerignore`, `dotnet-tools.json`, the GitHub environment `release`; the smoke script
     `.github/scripts/smoke-test-backend.sh` runs on pull requests, reads no secret and pushes nothing): *Goal:* artifacts are
-    published only from a GitHub release whose SemVer tag only the repository admin can create (tag ruleset `release-tags`)
+    published only from a GitHub release whose SemVer tag only the repository admin can create (tag ruleset)
     and whose commit the workflow checks is on `main`; the ancestry check runs in code the tagger controls,
     so the ruleset is the boundary. Every action is pinned by commit SHA and every base image by
     digest (`FROM ${BASE_<NAME>_IMAGE}@${BASE_<NAME>_DIGEST}` with build-argument defaults that the release
