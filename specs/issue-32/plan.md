@@ -488,3 +488,13 @@ captures with those lines removed, stated as derived. The `php-fpm` process titl
 - `oom_score_adj` per process (one more file per process) — not asked by #32.
 - Showing PSS in the web UI and using it in `MemoryAnalysis` — #50.
 - Thresholds as options — after #45.
+
+## Challenge notes
+
+Minor objections of the Devil's Advocate (0 major), verbatim in substance:
+
+1. **Mixed ranking key (AC1/AC4).** The key is "PSS when present, else RSS". When only some processes have PSS (partial `EACCES`), PSS and RSS values are compared, and RSS is larger for shared pages. The Dev states this as a known limitation in `docs/areas/agent.md` under *Processes* (or ranks by RSS whenever any process lacks PSS); the tests include one mixed case so the order is deliberate.
+2. **Cost under pressure.** In pressure mode `smaps_rollup` of up to 4,096 processes is read every 15 s on a host already short of memory (page-table walk, mmap lock). The Dev records this in `docs/areas/agent.md` *Processes* as an open point for #44/#45 and states the process count in the benchmark note.
+3. **Detection latency.** The `system` collector samples every 30 s (10 s under pressure), so the switch to the full snapshot can take up to 30 s. The area document's *Memory pressure mode* section says so.
+4. **Config rule limit.** AC11 caps `program` at 128 bytes, while `append_next_word` can reach 1,024 bytes (AC3). Add a test that a 1,024-byte appended program passes the model's `checkRequiredShort`, and pin that the appended word is UTF-8-clean before the cut.
+5. **Sample wording.** The plan's real captures are from kernel 6.18, not a Plesk server's `php-fpm`, `spamd` or `amavisd`. Keep the sentence deferring that to #45 in the area document so the `perl`-derived title is not read as a Plesk sample.
