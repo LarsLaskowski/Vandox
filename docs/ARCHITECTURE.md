@@ -11,7 +11,7 @@ This document describes the target architecture; as of now the binaries' `--vers
 exist as the storage layer; the service reads it through the logs and incidents views and the report page with its download and writes only the notes of incidents, `vandoxd import` writes through it), listens on the
 web and ingest ports, protects the web UI with a login (one password, server-side sessions, limits on failed sign-ins and the trust in a reverse proxy; `Vandox.Backend` `Security`), answers `/healthz` and shuts down gracefully, and ships as a container with a health
 check. Of the agent, the runtime frame exists: `vandox-agent` loads its configuration, logs to the journal, runs its
-collectors under the scheduler (so far only its self-metrics) and notifies systemd; it drops what it collects until the spool exists.
+collectors under the scheduler (its self-metrics and the system metrics) and notifies systemd; it drops what it collects until the spool exists.
 Everything else described here — the agent's collectors, spool and sender, the ingest API, retention, alerting, Telegram, the nightly
 report and remote actions — is planned and not implemented yet. The decisions behind it are recorded in
 [`docs/decisions/`](decisions/README.md); each section links the records it rests on. Vandox is an own
@@ -39,7 +39,8 @@ way, and agents of the hosting provider are never disabled or changed
   late start) and offers a memory pressure mode with shorter intervals; the agent records its own resource use as metrics
   (`internal/selfstats`), and tells systemd that it is ready, alive (a watchdog fed only while every collector runner is on
   time) and stopping (`internal/sdnotify`, `internal/agent`)
-  ([0110](decisions/0110-agent-runtime-frame-runner-per-collector-gaps-for-every-missed-sample-hand-written-sd-notify.md)).
+  ([0110](decisions/0110-agent-runtime-frame-runner-per-collector-gaps-for-every-missed-sample-hand-written-sd-notify.md),
+  [0111](decisions/0111-system-metrics-three-collectors-from-proc-sys-statfs-and-adjtimex.md)).
 - `src/Vandox.Backend` — `vandoxd` (rules: [Backend host](areas/backend-host.md), [Web UI](areas/web-ui.md)), .NET 10 (ASP.NET Core with a Blazor Web App, Interactive Server render mode),
   one container on the backend host: ingest API, SQLite storage, analysis, rules, Telegram notifier, reports and
   web UI. Without arguments it runs the service; `-healthcheck` probes its `/healthz`; `vandoxd import <path>`
@@ -83,7 +84,7 @@ way, and agents of the hosting provider are never disabled or changed
   [0079](decisions/0079-log-parsing-and-import-in-the-backend-without-following-links.md)).
 - `internal/` — the agent's Go packages: data model and the versioned wire encoder (see
   [wire format](areas/wire-format.md)), version information, agent configuration loading (see
-  *Configuration*), command-line handling (`internal/cli`), start-up, logging and the watchdog loop (`internal/agent`), the collector scheduler (`internal/scheduler`), the self-metrics (`internal/selfstats`) and the systemd notification (`internal/sdnotify`). The model and the wire format exist twice, in Go
+  *Configuration*), command-line handling (`internal/cli`), start-up, logging and the watchdog loop (`internal/agent`), the collector scheduler (`internal/scheduler`), the self-metrics (`internal/selfstats`), the system metrics (`internal/sysstats`) and the systemd notification (`internal/sdnotify`). The model and the wire format exist twice, in Go
   (producer) and in C# (consumer); a golden batch produced by the Go encoder and decoded by the C# decoder keeps
   them in step ([0075](decisions/0075-wire-contract-pinned-by-golden-fixtures.md)).
 

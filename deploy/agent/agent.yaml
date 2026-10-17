@@ -33,3 +33,10 @@ spool:
 log:
   # Log level: debug, info, warn or error. Default: info
   level: info
+
+filesystem:
+  # Mount points whose size and inode use is recorded every minute: a list of at most 16 absolute,
+  # clean paths (no trailing slash, no . or .. elements) of at most 1024 bytes each, every path listed
+  # once. A path that is not a mount point of the agent is logged once and left out. An empty list [] turns
+  # the file system metrics off. Default: [/]
+  mount_points: [/]

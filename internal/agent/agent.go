@@ -86,13 +86,29 @@ func Run(ctx context.Context, opts Options) int {
 	return 0
 }
 
-// jobs returns the collectors with their schedules: self, system, filesystem and clock.
+// jobs returns the collectors with their schedules: self, system, filesystem (only when a mount point is configured) and
+// clock. The system collector logs through log.
 func jobs(opts Options, cfg *config.Agent, log *slog.Logger) []scheduler.Job {
-	self := scheduler.Job{
-		Collector: selfstats.New(opts.Self),
-		Schedule:  scheduler.Schedule{Interval: SelfInterval, Timeout: SelfTimeout},
+	list := []scheduler.Job{
+		{
+			Collector: selfstats.New(opts.Self),
+			Schedule:  scheduler.Schedule{Interval: SelfInterval, Timeout: SelfTimeout},
+		},
+		{
+			Collector: sysstats.NewSystem(opts.System, log),
+			Schedule:  scheduler.Schedule{Interval: SystemInterval, Timeout: SystemTimeout, PressureInterval: SystemPressureInterval},
+		},
 	}
-	return []scheduler.Job{self}
+	if len(cfg.Filesystem.MountPoints) > 0 {
+		list = append(list, scheduler.Job{
+			Collector: sysstats.NewFilesystem(opts.System, cfg.Filesystem.MountPoints, log),
+			Schedule:  scheduler.Schedule{Interval: FilesystemInterval, Timeout: FilesystemTimeout},
+		})
+	}
+	return append(list, scheduler.Job{
+		Collector: sysstats.NewClock(opts.System),
+		Schedule:  scheduler.Schedule{Interval: ClockInterval, Timeout: ClockTimeout},
+	})
 }
 
 // newScheduler returns the scheduler with the jobs of the configuration.

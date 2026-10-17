@@ -3,6 +3,8 @@ package config
 import (
 	"net/netip"
 	"net/url"
+	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/LarsLaskowski/Vandox/internal/wire"
@@ -43,6 +45,10 @@ type Log struct {
 type Filesystem struct {
 	MountPoints []string `yaml:"mount_points"`
 }
+
+// mountPointsRule is the reason filesystem.mount_points is refused with; it does not quote the value.
+const mountPointsRule = "must be a list of at most 16 absolute, clean paths of at most 1024 bytes each " +
+	"(no trailing slash, no . or .. elements), each listed once"
 
 // Bounds of filesystem.mount_points.
 const (
@@ -119,6 +125,14 @@ func (a *Agent) validate(file string, lines map[string]int) error {
 
 // checkMountPoints checks the list of filesystem.mount_points.
 func checkMountPoints(file string, lines map[string]int, key string, values []string) error {
+	if len(values) > MaxMountPoints {
+		return keyError(file, lines, key, mountPointsRule)
+	}
+	for i, v := range values {
+		if len(v) < 1 || len(v) > MaxMountPointBytes || !filepath.IsAbs(v) || filepath.Clean(v) != v || slices.Contains(values[:i], v) {
+			return keyError(file, lines, key, mountPointsRule)
+		}
+	}
 	return nil
 }
 

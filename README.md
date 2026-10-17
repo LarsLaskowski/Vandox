@@ -66,6 +66,7 @@ the value.
 | `backend.url` | required | Base URL of the backend ingest endpoint: `http` or `https`, a host and an optional port, no user info, path or query. |
 | `spool.directory` | `/var/lib/vandox/spool` | Directory of the local spool, an absolute and clean path. |
 | `log.level` | `info` | `debug`, `info`, `warn` or `error`. |
+| `filesystem.mount_points` | `[/]` | Mount points whose size and inode use is recorded: a list of at most 16 absolute, clean paths of at most 1024 bytes each, every path listed once. A path that is not mounted is logged and left out; `[]` turns the file system metrics off. |
 
 **Backend options**
 
