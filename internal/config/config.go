@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 )
 
 // File locations, limits and environment variables.
@@ -77,20 +78,30 @@ var errNotRegular = errors.New("not a regular file")
 // the controlling terminal, and checks on the opened descriptor that it is a regular file. A file that is not
 // regular is closed and errNotRegular returned.
 func openRegular(path string) (*os.File, error) {
-	return nil, errors.New("not implemented")
-}
-
-// readFile reads the regular file at path, at most limit bytes. The path is checked before it is opened,
-// so a FIFO cannot block the read.
-func readFile(path string, limit int64) ([]byte, error) {
-	info, err := os.Stat(path)
+	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK|syscall.O_NOCTTY, 0)
 	if err != nil {
-		return nil, fmt.Errorf("config: %w", err)
+		return nil, err
+	}
+	info, err := f.Stat()
+	if err != nil {
+		_ = f.Close()
+		return nil, err
 	}
 	if !info.Mode().IsRegular() {
+		_ = f.Close()
+		return nil, errNotRegular
+	}
+	return f, nil
+}
+
+// readFile reads the regular file at path, at most limit bytes. The file is opened without blocking and its
+// type is then checked on the opened descriptor, so a FIFO, also one swapped in after a check, cannot block
+// the read.
+func readFile(path string, limit int64) ([]byte, error) {
+	f, err := openRegular(path)
+	if errors.Is(err, errNotRegular) {
 		return nil, fmt.Errorf("config: %s: not a regular file", path)
 	}
-	f, err := os.Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("config: %w", err)
 	}
