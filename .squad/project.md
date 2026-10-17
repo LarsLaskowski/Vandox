@@ -266,7 +266,7 @@ files or endpoints.
     `.github/workflows/base-image-digests.yml`, `.github/scripts/`, `deploy/backend/Dockerfile`,
     `.dockerignore`, `dotnet-tools.json`, the GitHub environment `release`; the smoke script
     `.github/scripts/smoke-test-backend.sh` runs on pull requests, reads no secret and pushes nothing): *Goal:* artifacts are
-    published only from a SemVer tag that only the repository admin can create (tag ruleset `release-tags`)
+    published only from a GitHub release whose SemVer tag only the repository admin can create (tag ruleset)
     and whose commit the workflow checks is on `main`; the ancestry check runs in code the tagger controls,
     so the ruleset is the boundary. Every action is pinned by commit SHA and every base image by
     digest (`FROM ${BASE_<NAME>_IMAGE}@${BASE_<NAME>_DIGEST}` with build-argument defaults that the release
@@ -282,7 +282,7 @@ files or endpoints.
     in `SHA256SUMS`. The OIDC signing permission (`id-token: write`, `attestations: write`) is granted only
     to the `attest` job, which declares no environment, reads no secret and runs no repository code; every
     published binary and image digest gets a build provenance attestation and an SBOM attestation that the
-    workflow verifies before the GitHub release is created. The SBOM generator is a container image pinned by
+    workflow verifies before the assets are attached to the GitHub release. The SBOM generator is a container image pinned by
     index digest (form-checked in `.github/scripts/generate-sbom.sh`), run without network, capabilities,
     token or writable access to `dist/`. Each of the scheduled check's two jobs (base image
     digests, SBOM generator pin) holds only `contents: read` and `issues: write`, runs its lookups (registries,

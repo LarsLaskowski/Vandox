@@ -38,7 +38,7 @@ tools/              console programs for developers, e.g. the storage write benc
 Vandox.slnx         the .NET solution
 deploy/agent/       deployment files for the agent
 deploy/backend/     deployment files for the backend
-docs/               documentation
+docs/               documentation (docs/INSTALL.md: installation guide)
 docs/assets/        logo, icon and favicon, see docs/BRANDING.md
 testdata/           fixtures for tests, shared by both languages (testdata/wire: the golden batch of the wire format)
 ```
@@ -128,7 +128,11 @@ dotnet publish/vandoxd.dll --version
 
 ## Install
 
-Releases are published from `v<major>.<minor>.<patch>` tags on `main`
+**Step by step:** [`docs/INSTALL.md`](docs/INSTALL.md) installs the backend on a Docker host (with Synology and QNAP as
+examples), imports the server's logs and leads to the first incident. This section is the reference behind it. What changed in each
+release is in [`CHANGELOG.md`](CHANGELOG.md).
+
+Releases are published from GitHub releases with `v<major>.<minor>.<patch>` tags on `main`
 (see [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md#versioning-and-releases)).
 
 **Agent.** The agent is not part of v0.1.0: collection, shipping and the ingest API arrive with v0.2.0. v0.1.0 is

@@ -171,7 +171,7 @@ jobs:
   # Builds the agent and the backend image the way the release does, with a fixed
   # dry-run version, and generates and checks the SBOMs (record 0037). Nothing is uploaded or pushed and
   # no secret is read. The real
-  # release runs only on a version tag (release.yml, record 0037).
+  # release runs only when a release with a version tag is published (release.yml, record 0037).
   release-build:
     name: Release build check
     runs-on: ubuntu-latest

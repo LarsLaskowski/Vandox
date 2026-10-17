@@ -1,13 +1,14 @@
 name: Release
 
-# A SemVer tag (v*.*.*) builds, verifies and publishes the agent binary and the
-# backend image. This is the only trigger: a release is always created manually by
-# pushing a tag. Pull requests are checked by ci.yml, never by this workflow.
+# Publishing a GitHub release with a new SemVer tag (v*.*.*), created on the release page of the web
+# interface, builds, verifies and publishes the agent binary and the backend image and attaches the
+# assets to that release. This is the only trigger. If a job fails, the release is turned back into a
+# draft. Pull requests are checked by ci.yml, never by this workflow.
 # See docs/CONTRIBUTING.md (Versioning and releases) and records 0037 and 0041.
 
 on:
-  push:
-    tags: ["v*.*.*"]
+  release:
+    types: [published]
 
 permissions: {}
 
@@ -35,7 +36,9 @@ jobs:
       - name: Resolve version
         id: version
         env:
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ github.event.release.tag_name }}
+          REF: ${{ github.ref }}
+          RELEASE_PRERELEASE: ${{ github.event.release.prerelease }}
         run: |
           set -euo pipefail
           semver='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?$'
@@ -43,8 +46,16 @@ jobs:
             echo "::error::tag '$TAG' is not a strict SemVer tag (vMAJOR.MINOR.PATCH[-prerelease], no build metadata)"
             exit 1
           fi
+          if [ "$REF" != "refs/tags/$TAG" ]; then
+            echo "::error::the run's ref '$REF' is not the release tag refs/tags/$TAG"
+            exit 1
+          fi
           prerelease=false
           case "$TAG" in *-*) prerelease=true ;; esac
+          if [ "$prerelease" != "$RELEASE_PRERELEASE" ]; then
+            echo "::error::the release's pre-release flag ($RELEASE_PRERELEASE) does not match the tag '$TAG': a tag with a pre-release suffix needs 'Set as a pre-release', any other tag must not have it"
+            exit 1
+          fi
           latest=false
           if [ "$prerelease" = "false" ]; then
             highest="$(git tag -l 'v*.*.*' | grep -v -- - | sort -V | tail -n1)"
@@ -335,25 +346,67 @@ jobs:
           name: release
           path: dist
 
-      # No checkout in this job: GH_REPO tells gh which repository to use.
-      - name: Create GitHub release
+      # No checkout in this job: GH_REPO tells gh which repository to use. The release itself was
+      # published on the web page; this job attaches the assets and completes its notes.
+      - name: Complete GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           TAG: ${{ needs.build.outputs.tag }}
           VERSION: ${{ needs.build.outputs.version }}
           DIGEST: ${{ needs.publish-image.outputs.digest }}
-          PRERELEASE: ${{ needs.build.outputs.prerelease }}
           LATEST: ${{ needs.build.outputs.latest }}
         run: |
           set -euo pipefail
-          args=(--verify-tag --title "$TAG" --generate-notes
-            --notes "Docker image: networlddev/vandox:$VERSION@$DIGEST")
-          if [ "$PRERELEASE" = "true" ]; then
-            args+=(--prerelease)
+          cd dist
+          gh release upload "$TAG" vandox-agent-linux-amd64 SHA256SUMS --clobber
+          body="$(gh release view "$TAG" --json body --jq .body)"
+          if [ -z "$body" ]; then
+            body="$(gh api "repos/$GH_REPO/releases/generate-notes" -f tag_name="$TAG" --jq .body)"
           fi
-          if [ "$LATEST" != "true" ]; then
+          line="Docker image: networlddev/vandox:$VERSION@$DIGEST"
+          case "$body" in
+            *"$line"*) ;;
+            *) body="$(printf '%s\n\n%s\n' "$body" "$line")" ;;
+          esac
+          printf '%s' "$body" > ../release-notes.md
+          # The web page may have set or cleared "latest"; the highest stable tag decides. --draft=false
+          # publishes again a release that withdraw-release turned into a draft before a re-run (an
+          # edit with the job token starts no new run).
+          args=(--notes-file ../release-notes.md --draft=false)
+          if [ "$LATEST" = "true" ]; then
+            args+=(--latest=true)
+          else
             args+=(--latest=false)
           fi
-          cd dist
-          gh release create "$TAG" "${args[@]}" vandox-agent-linux-amd64 SHA256SUMS
+          gh release edit "$TAG" "${args[@]}"
+
+  # A failed or cancelled release must not stay published without its assets: turn it back into a draft. The tag
+  # stays; publishing the draft again starts a new run (see docs/CONTRIBUTING.md, Re-running a failed release).
+  withdraw-release:
+    needs: [build, publish-image, attest, github-release]
+    if: failure() || cancelled()
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Turn the release back into a draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          # A complete release (both assets and the digest line, written last by github-release) was
+          # finished by an earlier run; a republish or re-run of it stops at the never-overwrite check and
+          # must not withdraw it. Read into variables first, so no pipe can fail on an early exit.
+          names="$(gh release view "$TAG" --json assets --jq '.assets[].name')"
+          body="$(gh release view "$TAG" --json body --jq .body)"
+          if printf '%s\n' "$names" | grep -qx vandox-agent-linux-amd64 &&
+            printf '%s\n' "$names" | grep -qx SHA256SUMS &&
+            printf '%s\n' "$body" | grep -q '^Docker image: networlddev/vandox:'; then
+            echo "::warning::the release $TAG is already complete from an earlier run; it stays published"
+            exit 0
+          fi
+          gh release edit "$TAG" --draft=true
+          echo "::warning::the release $TAG failed or was cancelled and was turned back into a draft"

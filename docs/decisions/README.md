@@ -80,7 +80,7 @@ once in the [area document](../areas/README.md) of the record's area, and the re
 | 0030 | The agent runs as a dedicated user with only named rights, not as root | Accepted | 2026-10-04 |
 | 0031 | The Telegram bot talks only to allowlisted users in private chats | Accepted | 2026-10-04 |
 | 0032 | Secrets only from environment variables or Docker secrets | Accepted | 2026-10-04 |
-| 0037 | Releases: version tag only, plain tooling, tag-only token environment, secret-free attestation job, digest-pinned SBOM generator | Accepted | 2026-10-04 |
+| 0037 | Releases: a published release with a version tag only, plain tooling, tag-only token environment, secret-free attestation job, digest-pinned SBOM generator | Accepted | 2026-10-04 |
 | 0040 | Go 1.27 toolchain; `go` directive without a patch version; govulncheck raised to v1.8.0 | Accepted | 2026-10-04 |
 | 0041 | Backend image on the chiseled ASP.NET runtime; base images pinned by digest through build arguments, refreshed by hand, staleness reported weekly | Accepted | 2026-10-04 |
 | 0042 | Wire format is gzip-compressed JSON Lines, built on the standard library only | Accepted | 2026-10-04 |

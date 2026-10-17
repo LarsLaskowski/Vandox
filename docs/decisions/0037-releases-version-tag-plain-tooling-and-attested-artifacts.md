@@ -1,9 +1,9 @@
-# 0037: Releases: version tag only, plain tooling, tag-only token environment, secret-free attestation job, digest-pinned SBOM generator
+# 0037: Releases: a published release with a version tag only, plain tooling, tag-only token environment, secret-free attestation job, digest-pinned SBOM generator
 
 - **Status:** Accepted
 - **Date:** 2026-10-04
 - **Area:** —
-- **Source:** Issues #9, #104, #119 and #124, maintainer request
+- **Source:** Issues #9, #104, #119 and #124, maintainer requests (the trigger: tags can only be pushed from a Git client, a release can be created on the web page)
 - **Supersedes:** —
 
 ## Context
@@ -15,8 +15,10 @@ every base image by digest (security area 13), no `${{ }}` inside `run:` scripts
 
 Facts that shape the design:
 
-- A tag push runs the workflow file *of the tagged commit*, and an environment's deployment rule matches only the
-  ref name. Whoever can create a `v*` tag controls what runs and what it can read.
+- A tag push and a published release both run the workflow file *of the tagged commit*, and an environment's
+  deployment rule matches only the ref name. Whoever can create a `v*` tag controls what runs and what it can read.
+- The maintainer can create a tag together with a release on the web page, but can push a tag only from a Git
+  client.
 - A Docker Hub personal access token cannot be limited to one repository. A plain repository secret is readable by
   any workflow run on any branch.
 - The repository is public, so GitHub artifact attestations are available. A workflow that runs only on tags is
@@ -38,8 +40,15 @@ Tooling and build:
 Trigger:
 - **Release automatically on merge** — rejected: every merge could publish, the version would not be a decision, and
   the token would be reachable from branch runs.
-- **Only a new `vX.Y.Z` tag** — chosen. The pull-request dry run lives in `ci.yml` (`Release build check`), not in
-  `release.yml`, so release jobs never show up as skipped in pull-request checks.
+- **Only a pushed `vX.Y.Z` tag** — rejected: the tag has to be pushed from a Git client, and the web page cannot do it.
+- **A manually started workflow (`workflow_dispatch`) that creates tag and release at the end** — rejected: the job
+  token would need a bypass of the tag ruleset, and then everyone who may start the workflow could release.
+- **Publishing a GitHub release with a new `vX.Y.Z` tag on the web page (`release: published`)** — chosen. The tag is
+  created with the publisher's rights, so the ruleset still decides (to be checked once with a probe ruleset, see
+  `docs/CONTRIBUTING.md`, *One-time setup*); the workflow attaches the assets afterwards and
+  turns the release back into a draft if it fails. A draft triggers nothing. The pull-request dry run lives in
+  `ci.yml` (`Release build check`), not in `release.yml`, so release jobs never show up as skipped in pull-request
+  checks.
 
 Docker Hub token:
 - **Plain repository secret** — rejected (any branch workflow reads it). **Secret of an environment `release` with a
@@ -48,7 +57,7 @@ Docker Hub token:
   access to that repository only; the maintainer's account-wide token is rejected. The user name is an environment
   variable, not a secret (masking would hide it in the image name).
 - **Who may create `v*` tags:** anyone with write access — rejected (the environment would protect nothing against a
-  collaborator). A tag ruleset `release-tags` restricting creation, update and deletion to the repository admin —
+  collaborator). A tag ruleset restricting creation, update and deletion to the repository admin —
   chosen. A required reviewer on the environment is optional and only worth it once a second person has write access.
 
 Provenance and SBOM:
@@ -93,12 +102,12 @@ Noticing a stale syft pin (issue #124):
 
 ## Decision
 
-Releases are created only by pushing a new `vX.Y.Z` tag (`vX.Y.Z-rc.N` for a pre-release); nothing else triggers
-`release.yml`. The workflow is built from plain tools in four jobs: `build` verifies everything cold with read-only
+Releases are created only by publishing a GitHub release with a new `vX.Y.Z` tag (`vX.Y.Z-rc.N` for a pre-release,
+marked as a pre-release) on the web page; nothing else triggers `release.yml`. The workflow is built from plain tools in five jobs: `build` verifies everything cold with read-only
 permissions (including a vulnerability scan of the Go and NuGet dependencies), `publish-image` pushes exactly the verified image and is the only job that declares the `release`
 environment and sees the token, `attest` creates and verifies provenance and SBOM attestations for the binary and the
-image digest, and `github-release` runs only after the attestations verified. A published version is never
-overwritten. The token lives in the tag-only environment `release`, and the tag ruleset `release-tags` decides who can
+image digest, and `github-release` attaches the assets and completes the notes only after the attestations verified; a failed run turns the release back into a draft (`withdraw-release`). A published version is never
+overwritten. The token lives in the tag-only environment `release`, and the tag ruleset decides who can
 start a release. The weekly base image digest workflow (0041) also reports, in an issue of its own, when a newer syft
 release exists or the pinned tag's index digest has moved. The step-by-step behavior, the exact checks and the maintainer setup are in `release.yml`,
 `.github/scripts/` and `docs/CONTRIBUTING.md` (*Versioning and releases*).
@@ -121,7 +130,14 @@ release exists or the pinned tag's index digest has moved. The step-by-step beha
   drift.
 - The attestation path is exercised only by a real tag; generation and the SBOM content check run in every pull request
   through `Release build check`. `ghcr.io` must be reachable for both.
-- `publish-image` is not idempotent: if it fails after the version tag was pushed, a re-run stops at the never-overwrite
+- A published release is visible without assets while the run lasts (a few minutes). A failed run leaves the tag and
+  a draft; publishing the draft again starts a new run, and a code fix needs a new patch version.
+- Anyone with write access can publish a release for an *existing* `v*` tag that the admin created and that has no
+  release; it builds exactly that tagged commit, and a version already on Docker Hub stops at the never-overwrite check.
+  Republishing a complete release runs the workflow again and stops at that check; `withdraw-release` leaves a release
+  that already has its assets published.
+  A required reviewer on the environment closes that gap once a second person has write access.
+- `publish-image` is not idempotent: if it fails after the version tag was pushed to Docker Hub, a re-run stops at the never-overwrite
   check, and the recovery is a new patch version. The release artifact is kept for 7 days, so re-running `attest` or
   `github-release` works within that time; a second SBOM attestation for the same subject is harmless.
 - The syft pin ages until refreshed by hand (a stale syft gives a less complete SBOM, not a weaker release); the weekly
@@ -132,5 +148,5 @@ release exists or the pinned tag's index digest has moved. The step-by-step beha
   if there is none or more than one; comments and messages naming the variable do not affect it. A reassignment in any
   other form (indented, `readonly`, `+=`, a name built at run time) is invisible to it. That costs at most a wrong
   "current", because `generate-sbom.sh` checks the form of the reference it actually runs.
-- Release notes follow the PR titles. More platforms, `push-to-registry`, other release triggers, or an account-wide
+- Release notes follow the PR titles (generated on the web page or, if left empty, by the workflow). More platforms, `push-to-registry`, other release triggers, or an account-wide
   token (if Docker Hub offers neither organization tokens nor teams) each need a new record.
