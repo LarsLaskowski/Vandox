@@ -260,7 +260,7 @@ docker exec -it vandoxd dotnet /app/vandoxd.dll import /import/<name>
 
 The import runs as the container's user (65532, or the IDs set with `user:` or `--user`) and reads only what that user may read. A copied `/var/log`
 holds files such as `auth.log` and `mail.log` (`0640 root:adm`), which are listed as failed with "permission
-denied" until that user may read them. Give read access to the user 65532 only, never to everyone, because
+denied" until that user may read them. Give read access to that user only, never to everyone, because
 these files must not become readable for every local user on the host:
 
 ```
