@@ -185,3 +185,10 @@ Verdict: OBJECTIONS 0 major, 3 minor (Devil's Advocate, verbatim).
 1. (minor) In `TestOpenRegular`, "FIFO without a writer" and in `TestReadFile`, "FIFO", a regression back to a blocking open would hang the test until the Go test timeout and give no failure message. Run the call in a goroutine and fail via `select` with a short `time.After`, or open it from a helper goroutine. Do not use a real-clock sleep as the assertion. Keep any time bound to what `docs/UNIT_TESTS.md` allows.
 2. (minor) The `readFile` error text for an I/O failure on the descriptor (`f.Stat()`) is `stat <path>: ...`, which is still a path-bearing `*PathError`. For `readSecretFile`, `fileError` must keep passing only the errno, never the `*PathError` text. The Dev should check that `fileError` strips the path for errors that come from `openRegular`, as it does for `os.Open` errors today. AC6 covers the FIFO case but not this one.
 3. (minor) The new doc comments on `readFile` and `readSecretFile` should state the order as "open without blocking, then check the type on the descriptor". This applies to `secret.go` too, even though the plan marks that comment "if it states the order".
+
+## Security plan review notes
+
+Verdict: APPROVED (no blocking findings). Non-blocking, verbatim in substance:
+
+- The user-visible error texts change in two more places than the plan lists: a Unix socket at the path used to give `config: <path>: not a regular file` and now gives `config: open <path>: no such device or address` (ENXIO); for `_FILE` the reason changes from `must name a regular file` to the unreadable reason with ENXIO. A missing file changes from `config: stat <path>: ...` to `config: open <path>: ...`. Nothing leaks, nothing blocks. The Tester may add a socket subtest to pin the behavior.
+- A regression to a blocking open shows as a hung test until the `go test` timeout; accepted (matches the backend FIFO test and the no-real-clock rule).
