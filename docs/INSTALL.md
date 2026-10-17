@@ -125,9 +125,9 @@ yours:
 ```
 cd /volume1/docker/vandox
 sudo docker run -d --name vandoxd --restart unless-stopped \
-  --user 1026:100 --memory 512m --read-only --tmpfs /tmp \
+  --user "$VANDOX_USER" --memory 512m --read-only --tmpfs /tmp \
   --cap-drop ALL --security-opt no-new-privileges:true --stop-timeout 30 \
-  --log-opt max-size=10m --log-opt max-file=3 \
+  --log-driver json-file --log-opt max-size=10m --log-opt max-file=3 \
   -p 127.0.0.1:8080:8080 \
   -e VANDOX_AGENT_TOKEN_FILE=/run/secrets/vandox_agent_token \
   -e VANDOX_WEB_PASSWORD_HASH_FILE=/run/secrets/vandox_web_password_hash \
@@ -228,9 +228,11 @@ sudo docker exec vandoxd dotnet /app/vandoxd.dll report > forensics.md
 
 ## Next steps
 
-- **Upgrade:** change the image tag in `docker-compose.yml` and run `sudo docker compose up -d`. The database is migrated on start;
-  an older version refuses a newer database, so back up the volume first.
-- **Back up:** stop the container and copy the volume `vandox_vandox-data` (`vandox.db` with its `-wal` and `-shm` files).
+- **Upgrade:** change the image tag in `docker-compose.yml` and run `sudo docker compose up -d` (without Compose:
+  `sudo docker stop vandoxd && sudo docker rm vandoxd`, then the `docker run` command of step 4 with the new tag). The database is
+  migrated on start; an older version refuses a newer database, so back up the data first.
+- **Back up:** stop the container and copy the volume `vandox_vandox-data`, or the directory `data/` when the container runs as
+  a host user (`vandox.db` with its `-wal` and `-shm` files).
 - **Newer logs:** copy a newer archive of the same logs and import it: a log that grew is continued after the part imported
   before, and a rotated copy that was imported already is skipped. A newer journal export is imported as a whole, so export only
   the new period (`journalctl -o export --since ...`).

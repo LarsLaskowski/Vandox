@@ -17,8 +17,8 @@ imported data is kept apart from live data (it never raises alerts) by the detec
 - The import loads the configuration like the service (see *Configuration and secrets*), logs as JSON lines to
   standard error at `log.level`, opens the database next to the running service, and stops cleanly on SIGINT or
   SIGTERM.
-- The import runs as the container's user (65532) and reads only what that user may read; an unreadable file is listed as failed. The operator grants read
-  access to that user only (`chown -R 65532:65532` and `chmod -R u+rX`, or `setfacl -R -m u:65532:rX`) and never makes
+- The import runs as the container's user (65532 by default, or the IDs set with `user:` or `--user`) and reads only what that user may read; an unreadable file is listed as failed. The operator grants read
+  access to that user only (`chown -R` to that user's IDs and `chmod -R u+rX`, or `setfacl -R -m u:<uid>:rX`) and never makes
   the copy world-readable: a copied `/var/log` holds files such as `auth.log` and `mail.log` with mode `0640 root:adm`.
 - The backend option `import.time_zone` (IANA time zone ID, ordinal match against NodaTime's embedded database, no
   default) names the zone of the server the logs come from. It is used for year-less syslog times (see *System log
