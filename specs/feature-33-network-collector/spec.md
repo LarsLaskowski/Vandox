@@ -1,7 +1,7 @@
 # Spec: Network connection collector (replaces `lsof -ni`)
 
 Source: Issue #33
-Status: Draft
+Status: Approved by Lead
 
 ## Problem
 
@@ -15,7 +15,7 @@ many connections were open per state, which process held them, which remote addr
 on. A port that starts listening without the operator's doing (a forgotten service, a compromised account) goes unnoticed today, and
 when memory runs short the operator has no full list of who was connected at that moment. This feature reports a new listener that
 the agent sees appear while it runs; one that appears while the agent is stopped, or while a local user floods the inventory, is a
-stated residual (E14, E19).
+stated residual (E14 with #278, E19).
 
 ## Scenarios
 
@@ -120,8 +120,8 @@ in addition, every connection and every remote address. Records are those of the
   range differs gets reports for UDP sockets outside the fixed range.
 - E14: (agent restart) Given a listener that opened while the agent was stopped (an update, a crash, a reboot with a service that
   starts at boot), when the agent starts again, then its first run is the baseline (S2) and does not report that listener as new; the
-  inventories before and after the restart are both stored, and no component compares them yet (stated residual; follow-up issue for
-  the backend's comparison across agent restarts).
+  inventories before and after the restart are both stored, and no component compares them yet (stated residual; the backend's comparison
+  across agent restarts is #278).
 - E15: (mode switch during a run) Given the memory pressure mode switches while a run is in progress, when the run records its
   snapshot, then the run is regular or full according to the mode at its start (Agent area, *Scheduling*).
 - E16: (record too large) Given a snapshot whose encoded record would exceed the wire format's line limit (1 MiB), when the collector
@@ -233,7 +233,7 @@ in addition, every connection and every remote address. Records are those of the
   them): the backend reads agent events from #53 on and has no ingest before #40; this feature only makes the records storable.
 - **Unix domain sockets, raw sockets and sockets of other network namespaces**: `lsof -ni` listed none of them either (E18 says how
   their descriptors are treated).
-- **Comparing inventories across agent restarts** (E14): a backend task; follow-up issue.
+- **Comparing inventories across agent restarts** (E14): a backend task, #278.
 - **Changing the incident's connection peak to one source**: the mixed-source peak is accepted (*Compatibility*).
 - **Other connection anomalies as triggers** (a sudden rise in connections, a state count above a threshold): no threshold is known
   before the parallel run of #45; the regular snapshot's `states` already show such a rise.
@@ -316,7 +316,7 @@ Devil's Advocate, spec challenge: 1 major, 10 minor. All accepted; none narrows 
   earliest snapshot's source). The mixed-source peak is accepted and documented (*Compatibility*, Detection area); changing it is out of
   scope.
 - Minor 9 (restart baseline) — accepted: E14 names the residual (update, crash, reboot), *Problem* no longer promises more, the Agent
-  area states it, and a follow-up issue for the backend's comparison across restarts is requested (*Out of scope*).
+  area states it, and the backend's comparison across restarts is #278 (*Out of scope*).
 - Minor 10 (no real table sample) — accepted for the plan: the plan names real captured samples of all four tables, IPv6 from a host
   that has it, and escalates for them if none can be captured; the spec states no format detail that rests on a sample.
 
