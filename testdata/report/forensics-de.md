@@ -45,6 +45,22 @@ Schwelle für hohen Panel-Speicher: 68 MiB
 
 - ` pzstd `: in 0,6 % der Snapshots, Spitze 150 MiB am 2026-10-02 06:59 UTC
 
+## Neue Listener
+
+- Agent ` web-1 `: 1440 Verbindungs-Snapshots von 2026-09-29 00:05 UTC bis 2026-10-06 05:55 UTC; 4 Agentenstarts: 2 auf allen Ports verglichen, 1 nur auf Ports 1 bis 1023, 1 nicht verglichen
+- Agent ` web-2 `: 12 Verbindungs-Snapshots von 2026-10-03 08:00 UTC bis 2026-10-03 09:50 UTC; 0 Agentenstarts: 0 auf allen Ports verglichen, 0 nur auf Ports 1 bis 1023, 0 nicht verglichen
+- 2026-10-02 06:40 UTC, Agent ` web-1 `, nach einem Agentenstart (verglichen mit 2026-10-02 06:10 UTC), alle Ports: 2 neu
+  - tcp 0.0.0.0:23, PID 200 ` telnetd `
+  - tcp6 [::]:8443, kein Besitzer
+- 2026-10-04 03:12 UTC, Agent ` web-1 `, nach einem Agentenstart (verglichen mit 2026-10-04 02:42 UTC), nur Ports 1 bis 1023: 7 neu
+  - tcp 0.0.0.0:25, PID 311 ` exim4 `
+  - und 6 weitere
+- 2026-10-05 21:00 UTC, Agent ` web-1 `, nach einem Agentenstart, nicht verglichen: Ports 1 bis 1023 unvollständig
+- 2026-10-05 12:00 UTC, Agent ` web-1 `, vom Agenten gefunden, alle Ports: 1 neu
+  - tcp 0.0.0.0:2121, kein Besitzer
+- 2026-10-06 04:00 UTC, Agent ` web-2 `, vom Agenten gefunden, nur Ports 1 bis 1023: 1 neu
+  - udp 0.0.0.0:69, PID 12 `` tftp`d ``
+
 ## Ausfälle
 
 ### Ausfall #7 am 2026-10-02 06:59 UTC

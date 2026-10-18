@@ -3,8 +3,11 @@ using Microsoft.Extensions.Time.Testing;
 using Vandox.Backend.Reports;
 using Vandox.Core.Incidents;
 using Vandox.Core.Model;
+using Vandox.Core.Reports;
 using Vandox.Core.Signatures;
 using Vandox.Storage;
+
+using static Vandox.Backend.Tests.ReportSamples;
 
 namespace Vandox.Backend.Tests;
 
@@ -280,6 +283,91 @@ public class ForensicsReporterTests
     }
 
     /// <summary>
+    /// A listener that opened while the agent was stopped is in the section between the memory consumers and the outages: the store compares the first snapshot after the agent start with the one before it, and the report names the agent, both times, the ports compared and the listener with its owner.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task ForensicsReporterRunWritesListenerSectionFromStore()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+        var written = await store.WriteBatchAsync(AgentBatch("web-1",
+                                                             IncidentSamples.Base.AddDays(1),
+                                                             ConnectionRecord(1, IncidentSamples.Base, "none", Entry(Proto.Tcp, "0.0.0.0", 22, 100, "sshd")),
+                                                             ConnectionRecord(2, IncidentSamples.Base.AddHours(1), "start", Entry(Proto.Tcp, "0.0.0.0", 22, 100, "sshd"), Entry(Proto.Tcp, "0.0.0.0", 23, 200, "telnetd"))),
+                                                  TestContext.CancellationToken);
+
+        Assert.AreEqual(2, written.Stored, "both snapshots are stored");
+
+        // Act
+        var (output, _) = await RunAsync(store, store, listeners: store);
+
+        // Assert
+        var lines = output.Split('\n');
+        var consumers = Array.IndexOf(lines, "## Memory consumers");
+        var heading = Array.IndexOf(lines, "## New listeners");
+        var outages = Array.IndexOf(lines, "## Outages");
+        var section = lines[(heading + 1)..outages].Where(line => line.Length > 0).ToArray();
+
+        Assert.IsGreaterThan(consumers, heading, "the section follows the memory consumers");
+        Assert.IsGreaterThan(heading, outages, "the section precedes the outages");
+        Assert.AreSequenceEqual([
+                                    "- Agent ` web-1 `: 2 connection snapshots from 2026-10-02 04:59 UTC to 2026-10-02 05:59 UTC; 1 agent starts: 1 compared on all ports, 0 on ports 1 to 1023 only, 0 not compared",
+                                    "- 2026-10-02 05:59 UTC, agent ` web-1 `, after an agent start (compared with 2026-10-02 04:59 UTC), all ports: 1 new",
+                                    "  - tcp 0.0.0.0:23, PID 200 ` telnetd `"
+                                ],
+                                section,
+                                "the head, the finding of the start and the new listener with its owner");
+    }
+
+    /// <summary>
+    /// The section is read with one read of the tallies and one read of the findings of each kind, each of the cap of 20 findings and with the token of the run, and what the reader says about the caps reaches the notes.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task ForensicsReporterReadsListenerPagesWithTheCap()
+    {
+        // Arrange
+        var at = new DateTimeOffset(2026, 10, 5, 21, 0, 0, TimeSpan.Zero);
+        var listeners = new ScriptedListenerHistoryReader
+                        {
+                            Tallies = new ListenerTallyPage
+                                      {
+                                          Agents = [Tally("web-1", 50, at.AddDays(-4), at, 2, 1, 0, 1)],
+                                          Omitted = 3
+                                      },
+                            StartFindings = new ListenerFindingPage
+                                            {
+                                                Findings = [StartFinding("web-1", 9, at, ListenerOutcome.AllPorts, 0, Entry(Proto.Tcp, "0.0.0.0", 23, 5, "telnetd"))],
+                                                Total = 25
+                                            },
+                            AgentFindings = new ListenerFindingPage
+                                            {
+                                                Findings = [AgentFinding("web-1", 10, at.AddHours(1), ListenerOutcome.PrivilegedOnly, 0, Entry(Proto.Udp, "0.0.0.0", 69))],
+                                                Total = 1000
+                                            }
+                        };
+
+        // Act
+        var (output, _) = await RunAsync(new ScriptedRecordReader(), new ScriptedIncidentStore([], false), listeners: listeners);
+
+        // Assert
+        Assert.AreEqual(1, listeners.TallyCalls, "one read of the tallies");
+        Assert.AreEqual(TestContext.CancellationToken, listeners.TallyTokens.Single(), "the token of the run reaches the read of the tallies");
+        Assert.HasCount(2, listeners.FindingQueries, "one read of the findings of each kind");
+        Assert.ContainsSingle(query => query.Kind == ListenerFindingKind.AgentStart, listeners.FindingQueries, "one read of the findings after an agent start");
+        Assert.ContainsSingle(query => query.Kind == ListenerFindingKind.Agent, listeners.FindingQueries, "one read of the findings of the agents");
+        Assert.IsTrue(listeners.FindingQueries.All(query => query.Limit == ListenerReport.MaxFindings), "each read asks for the cap of 20 findings");
+        Assert.IsTrue(listeners.FindingTokens.All(token => token == TestContext.CancellationToken), "the token of the run reaches the reads of the findings");
+        Assert.Contains("2026-10-05 21:00 UTC, agent ` web-1 `, after an agent start (compared with 2026-10-05 20:30 UTC), all ports: 1 new", output, "the finding after an agent start");
+        Assert.Contains("2026-10-05 22:00 UTC, agent ` web-1 `, found by the agent, ports 1 to 1023 only: 1 new", output, "the finding of the agent");
+        Assert.Contains("- Only the latest 20 findings after an agent start are listed; 24 earlier ones are left out.", output, "the note of the findings after an agent start");
+        Assert.Contains("- Only the latest 20 findings of the agent are listed; 999 earlier ones are left out.", output, "the note of the findings of the agents");
+        Assert.Contains("- Only the first 64 agent IDs are listed; 3 more are left out.", output, "the note of the agent IDs");
+    }
+
+    /// <summary>
     /// Asserts that a line of the head with the label holds all the given texts.
     /// </summary>
     /// <param name="lines">The lines of the head</param>
@@ -365,11 +453,12 @@ public class ForensicsReporterTests
     /// <param name="records">The record reader</param>
     /// <param name="incidents">The incident store</param>
     /// <param name="lookback">The lookback; one hour when <c>null</c></param>
+    /// <param name="listeners">The reader of the listener history; an empty scripted one when <c>null</c></param>
     /// <returns>A task that returns the report with line feeds and the result</returns>
-    private async Task<(string Output, ReportResult Result)> RunAsync(IRecordReader records, IIncidentStore incidents, TimeSpan? lookback = null)
+    private async Task<(string Output, ReportResult Result)> RunAsync(IRecordReader records, IIncidentStore incidents, TimeSpan? lookback = null, IListenerHistoryReader? listeners = null)
     {
         var output = new StringWriter();
-        var reporter = new ForensicsReporter(records, incidents, new ScriptedListenerHistoryReader(), BuiltInSignatures.Catalog, lookback ?? TimeSpan.FromHours(1), new FakeTimeProvider(_now));
+        var reporter = new ForensicsReporter(records, incidents, listeners ?? new ScriptedListenerHistoryReader(), BuiltInSignatures.Catalog, lookback ?? TimeSpan.FromHours(1), new FakeTimeProvider(_now));
         var result = await reporter.RunAsync(new MarkdownReportWriter(output, ReportText.English), TestContext.CancellationToken);
 
         return (output.ToString().Replace("\r\n", "\n", StringComparison.Ordinal), result);

@@ -45,6 +45,22 @@ Panel memory threshold: 68 MiB
 
 - ` pzstd `: in 0.6 % of the snapshots, peak 150 MiB at 2026-10-02 06:59 UTC
 
+## New listeners
+
+- Agent ` web-1 `: 1440 connection snapshots from 2026-09-29 00:05 UTC to 2026-10-06 05:55 UTC; 4 agent starts: 2 compared on all ports, 1 on ports 1 to 1023 only, 1 not compared
+- Agent ` web-2 `: 12 connection snapshots from 2026-10-03 08:00 UTC to 2026-10-03 09:50 UTC; 0 agent starts: 0 compared on all ports, 0 on ports 1 to 1023 only, 0 not compared
+- 2026-10-02 06:40 UTC, agent ` web-1 `, after an agent start (compared with 2026-10-02 06:10 UTC), all ports: 2 new
+  - tcp 0.0.0.0:23, PID 200 ` telnetd `
+  - tcp6 [::]:8443, no owner
+- 2026-10-04 03:12 UTC, agent ` web-1 `, after an agent start (compared with 2026-10-04 02:42 UTC), ports 1 to 1023 only: 7 new
+  - tcp 0.0.0.0:25, PID 311 ` exim4 `
+  - and 6 more
+- 2026-10-05 21:00 UTC, agent ` web-1 `, after an agent start, not compared: ports 1 to 1023 not complete
+- 2026-10-05 12:00 UTC, agent ` web-1 `, found by the agent, all ports: 1 new
+  - tcp 0.0.0.0:2121, no owner
+- 2026-10-06 04:00 UTC, agent ` web-2 `, found by the agent, ports 1 to 1023 only: 1 new
+  - udp 0.0.0.0:69, PID 12 `` tftp`d ``
+
 ## Outages
 
 ### Outage #7 at 2026-10-02 06:59 UTC

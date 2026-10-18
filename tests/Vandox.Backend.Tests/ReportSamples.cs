@@ -1,5 +1,8 @@
+using System.Net;
+
 using Vandox.Backend.Reports;
 using Vandox.Core.Incidents;
+using Vandox.Core.Model;
 using Vandox.Core.Reports;
 using Vandox.Storage;
 
@@ -64,43 +67,47 @@ internal static class ReportSamples
                       });
         }
 
-        return Summary(hours,
-                       new PatternResult
-                       {
-                           Outcome = PatternOutcome.Detected,
-                           Matching = 3,
-                           Known = 3,
-                           BaseMatching = 3,
-                           BaseKnown = 72
-                       },
-                       Unknown(UnknownReason.TooManyBoots),
-                       Unknown(UnknownReason.NoPanelMemory),
-                       permanent: [
-                                      new ConsumerSummary
-                                      {
-                                          Program = "mariadbd",
-                                          Snapshots = 2016,
-                                          Share = 1,
-                                          MeanRssBytes = 300 * Mib,
-                                          PeakRssBytes = 400 * Mib,
-                                          PeakAt = KillAt
-                                      }
-                                  ],
-                       transient: [
-                                      new ConsumerSummary
-                                      {
-                                          Program = "pzstd",
-                                          Snapshots = 12,
-                                          Share = 0.006,
-                                          MeanRssBytes = 100 * Mib,
-                                          PeakRssBytes = 150 * Mib,
-                                          PeakAt = KillAt
-                                      }
-                                  ],
-                       snapshotsTruncated: true,
-                       bootsTruncated: true,
-                       runsTruncated: true,
-                       untracked: 7);
+        var summary = Summary(hours,
+                              new PatternResult
+                              {
+                                  Outcome = PatternOutcome.Detected,
+                                  Matching = 3,
+                                  Known = 3,
+                                  BaseMatching = 3,
+                                  BaseKnown = 72
+                              },
+                              Unknown(UnknownReason.TooManyBoots),
+                              Unknown(UnknownReason.NoPanelMemory),
+                              permanent: [
+                                             new ConsumerSummary
+                                             {
+                                                 Program = "mariadbd",
+                                                 Snapshots = 2016,
+                                                 Share = 1,
+                                                 MeanRssBytes = 300 * Mib,
+                                                 PeakRssBytes = 400 * Mib,
+                                                 PeakAt = KillAt
+                                             }
+                                         ],
+                              transient: [
+                                             new ConsumerSummary
+                                             {
+                                                 Program = "pzstd",
+                                                 Snapshots = 12,
+                                                 Share = 0.006,
+                                                 MeanRssBytes = 100 * Mib,
+                                                 PeakRssBytes = 150 * Mib,
+                                                 PeakAt = KillAt
+                                             }
+                                         ],
+                              snapshotsTruncated: true,
+                              bootsTruncated: true,
+                              runsTruncated: true,
+                              untracked: 7);
+
+        summary.Listeners = RichListeners();
+
+        return summary;
     }
 
     /// <summary>
@@ -182,6 +189,228 @@ internal static class ReportSamples
                    (Stored(8, second), Activities(Indicator.No, Indicator.No, Indicator.Unknown)),
                    (Stored(9, third), Activities(Indicator.Unknown, Indicator.Unknown, Indicator.Yes))
                ];
+    }
+
+    /// <summary>
+    /// Creates the listener section of the rich sample: two agents, three findings after an agent start given latest first (a comparison on all ports with a listener without an
+    /// owner, one on ports 1 to 1023 only with six more listeners than listed, and one start that was not compared) and two findings of the agents given latest first, one with
+    /// a command that holds a backtick; no cap is hit.
+    /// </summary>
+    /// <returns>The section</returns>
+    internal static ListenerReport RichListeners()
+    {
+        return new ListenerReport
+               {
+                   Agents = [
+                                Tally("web-1", 1440, new DateTimeOffset(2026, 9, 29, 0, 5, 0, TimeSpan.Zero), new DateTimeOffset(2026, 10, 6, 5, 55, 0, TimeSpan.Zero), 4, 2, 1, 1),
+                                Tally("web-2", 12, new DateTimeOffset(2026, 10, 3, 8, 0, 0, TimeSpan.Zero), new DateTimeOffset(2026, 10, 3, 9, 50, 0, TimeSpan.Zero), 0, 0, 0, 0)
+                            ],
+                   StartFindings = [
+                                       StartFinding("web-1", 500, new DateTimeOffset(2026, 10, 5, 21, 0, 0, TimeSpan.Zero), ListenerOutcome.PrivilegedIncomplete, 0),
+                                       StartFinding("web-1", 300, new DateTimeOffset(2026, 10, 4, 3, 12, 0, TimeSpan.Zero), ListenerOutcome.PrivilegedOnly, 6, Entry(Proto.Tcp, "0.0.0.0", 25, 311, "exim4")),
+                                       StartFinding("web-1", 120, new DateTimeOffset(2026, 10, 2, 6, 40, 0, TimeSpan.Zero), ListenerOutcome.AllPorts, 0, Entry(Proto.Tcp, "0.0.0.0", 23, 200, "telnetd"), Entry(Proto.Tcp6, "::", 8443))
+                                   ],
+                   StartFindingsTotal = 3,
+                   AgentFindings = [
+                                       AgentFinding("web-2", 77, new DateTimeOffset(2026, 10, 6, 4, 0, 0, TimeSpan.Zero), ListenerOutcome.PrivilegedOnly, 0, Entry(Proto.Udp, "0.0.0.0", 69, 12, "tftp`d")),
+                                       AgentFinding("web-1", 410, new DateTimeOffset(2026, 10, 5, 12, 0, 0, TimeSpan.Zero), ListenerOutcome.AllPorts, 0, Entry(Proto.Tcp, "0.0.0.0", 2121))
+                                   ],
+                   AgentFindingsTotal = 2
+               };
+    }
+
+    /// <summary>
+    /// Creates a listener section in which every cap was hit: 3 agent IDs left out, 20 of 25 findings after an agent start and 20 of 1,000 findings of the agents listed.
+    /// </summary>
+    /// <returns>The section</returns>
+    internal static ListenerReport CappedListeners()
+    {
+        var at = new DateTimeOffset(2026, 10, 1, 0, 0, 0, TimeSpan.Zero);
+
+        return new ListenerReport
+               {
+                   Agents = [Tally("web-1", 50, at, at.AddDays(1), 20, 0, 0, 20)],
+                   AgentsOmitted = 3,
+                   StartFindings = [.. Enumerable.Range(1, 20).Select(index => StartFinding("web-1", (ulong)index, at.AddMinutes(index), ListenerOutcome.NotComparable, 0))],
+                   StartFindingsTotal = 25,
+                   AgentFindings = [.. Enumerable.Range(1, 20).Select(index => AgentFinding("web-1", (ulong)index, at.AddMinutes(index), ListenerOutcome.AllPorts, 0, Entry(Proto.Tcp, "0.0.0.0", 1000 + index)))],
+                   AgentFindingsTotal = 1000
+               };
+    }
+
+    /// <summary>
+    /// Creates a summary with fixed counts whose listener section is the given one.
+    /// </summary>
+    /// <param name="listeners">The listener section</param>
+    /// <returns>The summary</returns>
+    internal static ForensicsSummary ListenerSummary(ListenerReport listeners)
+    {
+        var summary = Mixed();
+
+        summary.Listeners = listeners;
+
+        return summary;
+    }
+
+    /// <summary>
+    /// Creates a listener.
+    /// </summary>
+    /// <param name="proto">The protocol</param>
+    /// <param name="address">The local address</param>
+    /// <param name="port">The local port</param>
+    /// <param name="pid">The PID of the owner, or 0 for no owner</param>
+    /// <param name="command">The command of the owner</param>
+    /// <returns>The listener</returns>
+    internal static Listener Entry(string proto, string address, int port, int pid = 0, string command = "")
+    {
+        return new Listener
+               {
+                   Proto = proto,
+                   Local = new IPEndPoint(IPAddress.Parse(address), port),
+                   Pid = pid,
+                   Command = command
+               };
+    }
+
+    /// <summary>
+    /// Creates the counts of one agent.
+    /// </summary>
+    /// <param name="agentId">The agent ID</param>
+    /// <param name="snapshots">The number of connection snapshots</param>
+    /// <param name="first">The first capture time</param>
+    /// <param name="last">The last capture time</param>
+    /// <param name="starts">The number of agent starts</param>
+    /// <param name="comparedAll">The starts compared on all ports</param>
+    /// <param name="comparedPrivileged">The starts compared on ports 1 to 1023 only</param>
+    /// <param name="notCompared">The starts not compared</param>
+    /// <returns>The tally</returns>
+    internal static ListenerTally Tally(string agentId, long snapshots, DateTimeOffset first, DateTimeOffset last, long starts, long comparedAll, long comparedPrivileged, long notCompared)
+    {
+        return new ListenerTally
+               {
+                   AgentId = agentId,
+                   Snapshots = snapshots,
+                   FirstAt = first,
+                   LastAt = last,
+                   Starts = starts,
+                   ComparedAll = comparedAll,
+                   ComparedPrivileged = comparedPrivileged,
+                   NotCompared = notCompared
+               };
+    }
+
+    /// <summary>
+    /// Creates a finding after an agent start; a comparison that ran was made against a snapshot 30 minutes earlier.
+    /// </summary>
+    /// <param name="agentId">The agent ID</param>
+    /// <param name="seq">The sequence number of the snapshot after the start</param>
+    /// <param name="at">The capture time of the snapshot after the start</param>
+    /// <param name="outcome">The outcome</param>
+    /// <param name="omitted">The number of new listeners not listed</param>
+    /// <param name="listeners">The new listeners</param>
+    /// <returns>The finding</returns>
+    internal static ListenerFinding StartFinding(string agentId, ulong seq, DateTimeOffset at, ListenerOutcome outcome, long omitted, params Listener[] listeners)
+    {
+        return new ListenerFinding
+               {
+                   Kind = ListenerFindingKind.AgentStart,
+                   AgentId = agentId,
+                   Seq = seq,
+                   CapturedAt = at,
+                   BaseCapturedAt = outcome is ListenerOutcome.AllPorts or ListenerOutcome.PrivilegedOnly ? at.AddMinutes(-30) : null,
+                   Outcome = outcome,
+                   Listeners = listeners,
+                   Omitted = omitted
+               };
+    }
+
+    /// <summary>
+    /// Creates a finding of an agent.
+    /// </summary>
+    /// <param name="agentId">The agent ID</param>
+    /// <param name="seq">The sequence number of the snapshot</param>
+    /// <param name="at">The capture time of the snapshot</param>
+    /// <param name="outcome">The outcome, all ports or ports 1 to 1023 only</param>
+    /// <param name="omitted">The number of new listeners not listed</param>
+    /// <param name="listeners">The new listeners</param>
+    /// <returns>The finding</returns>
+    internal static ListenerFinding AgentFinding(string agentId, ulong seq, DateTimeOffset at, ListenerOutcome outcome, long omitted, params Listener[] listeners)
+    {
+        return new ListenerFinding
+               {
+                   Kind = ListenerFindingKind.Agent,
+                   AgentId = agentId,
+                   Seq = seq,
+                   CapturedAt = at,
+                   Outcome = outcome,
+                   Listeners = listeners,
+                   Omitted = omitted
+               };
+    }
+
+    /// <summary>
+    /// Creates the section of one agent with the given findings: the counts of the agent and the findings as the store would page them.
+    /// </summary>
+    /// <param name="tally">The counts of the agent</param>
+    /// <param name="starts">The findings after an agent start</param>
+    /// <param name="found">The findings of the agent</param>
+    /// <returns>The section</returns>
+    internal static ListenerReport Section(ListenerTally tally, IReadOnlyList<ListenerFinding> starts, IReadOnlyList<ListenerFinding> found)
+    {
+        return new ListenerReport
+               {
+                   Agents = [tally],
+                   StartFindings = starts,
+                   StartFindingsTotal = starts.Count,
+                   AgentFindings = found,
+                   AgentFindingsTotal = found.Count
+               };
+    }
+
+    /// <summary>
+    /// Creates an agent record of a connection snapshot with a complete inventory of all four tables.
+    /// </summary>
+    /// <param name="seq">The sequence number</param>
+    /// <param name="at">The capture time</param>
+    /// <param name="check">The listener check: <c>none</c> for a base, <c>start</c> for the first snapshot after an agent start</param>
+    /// <param name="listeners">The inventory</param>
+    /// <returns>The record</returns>
+    internal static DataRecord ConnectionRecord(ulong seq, DateTimeOffset at, string check, params Listener[] listeners)
+    {
+        return new DataRecord
+               {
+                   Origin = RecordOrigin.Agent,
+                   Source = "connections",
+                   Seq = seq,
+                   CapturedAt = at,
+                   Data = new ConnectionSnapshot
+                          {
+                              AggregatesOnly = true,
+                              ListenerCheck = check,
+                              Inventory = "all",
+                              Tables = [Proto.Tcp, Proto.Tcp6, Proto.Udp, Proto.Udp6],
+                              Listeners = [.. listeners]
+                          }
+               };
+    }
+
+    /// <summary>
+    /// Creates a batch of one agent.
+    /// </summary>
+    /// <param name="agentId">The agent ID</param>
+    /// <param name="receivedAt">The time the batch was received</param>
+    /// <param name="records">The records</param>
+    /// <returns>The batch</returns>
+    internal static RecordBatch AgentBatch(string agentId, DateTimeOffset receivedAt, params DataRecord[] records)
+    {
+        return new RecordBatch
+               {
+                   AgentId = agentId,
+                   BootId = "0123abcd-0123-0123-0123-0123456789ab",
+                   ClockOffsetNs = -5,
+                   ReceivedAt = receivedAt,
+                   Records = records
+               };
     }
 
     /// <summary>

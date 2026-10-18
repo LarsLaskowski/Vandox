@@ -8,6 +8,7 @@ using Microsoft.Extensions.Time.Testing;
 
 using Vandox.Backend.Hosting;
 using Vandox.Backend.Reports;
+using Vandox.Core.Model;
 using Vandox.Core.Signatures;
 using Vandox.Storage;
 
@@ -97,6 +98,66 @@ public class ReportDownloadEndpointTests
         Assert.AreEqual($"attachment; filename=\"vandox-report-{language}.md\"", string.Join(",", response.Content.Headers.GetValues("Content-Disposition")), "content disposition");
         Assert.AreEqual("no-store", string.Join(",", response.Headers.GetValues("Cache-Control")), "cache control");
         Assert.AreEqual("nosniff", string.Join(",", response.Headers.GetValues("X-Content-Type-Options")), "the type is not sniffed");
+    }
+
+    /// <summary>
+    /// The download of the running service holds the section of new listeners, read through the gate of the web, with the same text as the report command: the finding after the agent start with the new listener and its owner.
+    /// </summary>
+    /// <param name="language">The language</param>
+    /// <param name="heading">The heading of the section in the language</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [DataRow("en", "## New listeners")]
+    [DataRow("de", "## Neue Listener")]
+    public async Task ReportDownloadEndpointWritesTheListenerSection(string language, string heading)
+    {
+        // Arrange
+        using var fixture = new BackendFixture();
+        using var stop = CancellationTokenSource.CreateLinkedTokenSource(TestContext.CancellationToken);
+
+        var clock = new FakeTimeProvider(_now);
+
+        await using (var seeding = await SqliteStore.OpenAsync(fixture.Storage, TestContext.CancellationToken))
+        {
+            var written = await seeding.WriteBatchAsync(AgentBatch("web-1",
+                                                                   IncidentSamples.Base.AddDays(1),
+                                                                   ConnectionRecord(1, IncidentSamples.Base, "none", Entry(Proto.Tcp, "0.0.0.0", 22, 100, "sshd")),
+                                                                   ConnectionRecord(2, IncidentSamples.Base.AddHours(1), "start", Entry(Proto.Tcp, "0.0.0.0", 22, 100, "sshd"), Entry(Proto.Tcp, "0.0.0.0", 23, 200, "telnetd"))),
+                                                        TestContext.CancellationToken);
+
+            Assert.AreEqual(2, written.Stored, "both snapshots are stored");
+        }
+
+        Assert.AreEqual(0,
+                        await fixture.RunAsync(["report", "-lang", language],
+                                               new ServeHooks
+                                               {
+                                                   Clock = clock
+                                               },
+                                               TestContext.CancellationToken),
+                        "the command succeeds");
+
+        var expected = fixture.Out.ToString();
+
+        var run = await fixture.StartServiceAsync(stop.Token, TestContext.CancellationToken, clock);
+
+        using var client = new LoginTestClient(fixture.WebPort);
+
+        await SignInAsync(client);
+
+        // Act
+        using var response = await client.GetAsync($"{Path}?lang={language}", TestContext.CancellationToken);
+
+        var body = await response.Content.ReadAsStringAsync(TestContext.CancellationToken);
+
+        await stop.CancelAsync();
+        await run.WaitAsync(TimeSpan.FromSeconds(20), TestContext.CancellationToken);
+
+        // Assert
+        Assert.AreEqual(HttpStatusCode.OK, response.StatusCode, "status");
+        Assert.Contains(heading, body, "the download has the section");
+        Assert.Contains("tcp 0.0.0.0:23, PID 200 ` telnetd `", body, "the download lists the new listener with its owner");
+        Assert.AreEqual(expected, body, "the text of the report command");
     }
 
     /// <summary>

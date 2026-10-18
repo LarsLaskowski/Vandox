@@ -2,6 +2,7 @@ using Microsoft.Extensions.Time.Testing;
 
 using Vandox.Backend.Reports;
 using Vandox.Core.Model;
+using Vandox.Core.Reports;
 using Vandox.Core.Signatures;
 using Vandox.Storage;
 
@@ -141,6 +142,44 @@ public class ReportServiceTests
         Assert.HasCount(3, builder.Document.Outages, "every incident reached the writer");
         Assert.IsGreaterThanOrEqualTo(6, recording.Queries.Count, "an incident per query in each of the two passes");
         Assert.IsTrue(recording.Queries.All(query => query.Limit == 1), "every incident query asks for one incident");
+    }
+
+    /// <summary>
+    /// The listener history the service was given is read for the report: the page gets the head and the findings of the section, the agent ID and the command as external text.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task ReportServiceReadsTheListenerSection()
+    {
+        // Arrange
+        var at = new DateTimeOffset(2026, 10, 5, 21, 0, 0, TimeSpan.Zero);
+        var listeners = new ScriptedListenerHistoryReader
+                        {
+                            Tallies = new ListenerTallyPage
+                                      {
+                                          Agents = [Tally("web-1", 50, at.AddDays(-4), at, 1, 1, 0, 0)]
+                                      },
+                            StartFindings = new ListenerFindingPage
+                                            {
+                                                Findings = [StartFinding("web-1", 9, at, ListenerOutcome.AllPorts, 0, Entry(Proto.Tcp, "0.0.0.0", 23, 5, "telnetd"))],
+                                                Total = 1
+                                            }
+                        };
+        var builder = Builder();
+
+        using var service = new ReportService(new ScriptedRecordReader(), new ScriptedIncidentStore([], false), listeners, BuiltInSignatures.Catalog, TimeSpan.FromHours(1), new FakeTimeProvider(_now));
+
+        // Act
+        await service.RunAsync(builder, TestContext.CancellationToken);
+
+        // Assert
+        var blocks = builder.Document.Summary;
+
+        Assert.AreEqual(1, listeners.TallyCalls, "the tallies are read once");
+        Assert.HasCount(2, listeners.FindingQueries, "the findings of both kinds are read");
+        Assert.Contains(block => block.Kind == ReportBlockKind.Heading && block.Pieces.Any(piece => piece.Text == "New listeners"), blocks, "the page has the section");
+        Assert.Contains(block => block.Kind == ReportBlockKind.Item && block.Pieces.Any(piece => piece is { External: true, Text: "web-1" }) && block.Pieces.Any(piece => piece.Text.Contains("after an agent start", StringComparison.Ordinal)), blocks, "the finding names the agent as external text");
+        Assert.Contains(block => block.Kind == ReportBlockKind.Item && block.Level == 1 && block.Pieces.Any(piece => piece is { External: true, Text: "telnetd" }), blocks, "the listener names the command as external text");
     }
 
     /// <summary>
