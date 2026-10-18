@@ -198,3 +198,8 @@ Devil's Advocate verdict: OBJECTIONS 0 major, 2 minor (verbatim).
 
 1. **Minor.** The AC5 arithmetic is off. The plan says the message is "raw 16,352 bytes, counted 16,384", a difference of 32. The eight invalid rows in its own table add (counted minus raw) 2+2+4+6+6+8+4+4 = 36 bytes. The valid U+FFFD and `é€😀` add 0. The Tester should compute the raw and counted sizes from the final form list, not copy 16,352. The Go test must still assert that raw length is below `MaxTextBytes` and counted length equals it.
 2. **Minor.** `encodedLen` stays unexported, but the plan and 0114 tell #37 to "cut by the encoded length". #37 will then have to reimplement the rule, which risks drift. The Dev may export it as `model.EncodedLen` at no extra cost, or the plan can state why not. Either choice is acceptable.
+
+Security plan review: APPROVED. Non-blocking notes (verbatim):
+
+1. The table could add a cut-short 4-byte prefix such as `F0 9F 98` (3 replacements, 9 bytes) as an AC1 row, so a 4-byte truncation is pinned too. My measurement shows the algorithm already handles it.
+2. AC6 leaves the exact C# field path (`data.message`) for the Tester to confirm. That is fine; just make sure the test asserts the path the C# side actually reports and does not copy it from the Go side.
