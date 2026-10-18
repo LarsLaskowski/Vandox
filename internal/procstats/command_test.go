@@ -25,120 +25,134 @@ func hostileSpecs() []procSpec {
 }
 
 func TestCommandReader_MatchesProcessSnapshotNames(t *testing.T) {
-	t.Run("captured processes", func(t *testing.T) {
-		tr := newTree(t)
-		c, _ := newCollector(tr, nil)
-		snap := snapshotOf(t, c, runStart, true)
-		r := NewCommandReader(tr.proc)
+	t.Run("captured processes", commandsMatchCapturedProcesses)
 
-		if len(snap.Processes) != len(fixtureProcs) {
-			t.Fatalf("snapshot holds %d processes, want %d", len(snap.Processes), len(fixtureProcs))
-		}
-		for _, p := range snap.Processes {
-			got, err := r.Command(p.PID)
-			if err != nil || got != p.Command {
-				t.Errorf("Command(%d) = %.80q, %v, want %.80q, nil (the snapshot's command)", p.PID, got, err, p.Command)
-			}
-		}
-	})
+	t.Run("hostile names", commandsMatchHostileNames)
 
-	t.Run("hostile names", func(t *testing.T) {
-		tr := synthTree()
-		for _, s := range hostileSpecs() {
-			tr.add(s)
-		}
-		c, _ := newCollector(tr, nil)
-		snap := snapshotOf(t, c, runStart, true)
-		r := NewCommandReader(tr.proc)
+	t.Run("reused buffers leak nothing between processes", commandsDoNotLeakBetweenProcesses)
+}
 
-		if len(snap.Processes) != len(hostileSpecs()) {
-			t.Fatalf("snapshot holds %d processes, want %d", len(snap.Processes), len(hostileSpecs()))
-		}
-		for _, p := range snap.Processes {
-			got, err := r.Command(p.PID)
-			if err != nil || got != p.Command {
-				t.Errorf("Command(%d) = %.80q, %v, want %.80q, nil (the snapshot's command)", p.PID, got, err, p.Command)
-			}
-		}
-	})
+func commandsMatchCapturedProcesses(t *testing.T) {
+	tr := newTree(t)
+	c, _ := newCollector(tr, nil)
+	snap := snapshotOf(t, c, runStart, true)
+	r := NewCommandReader(tr.proc)
 
-	t.Run("reused buffers leak nothing between processes", func(t *testing.T) {
-		tr := synthTree()
-		for _, s := range hostileSpecs() {
-			tr.add(s)
+	if len(snap.Processes) != len(fixtureProcs) {
+		t.Fatalf("snapshot holds %d processes, want %d", len(snap.Processes), len(fixtureProcs))
+	}
+	for _, p := range snap.Processes {
+		got, err := r.Command(p.PID)
+		if err != nil || got != p.Command {
+			t.Errorf("Command(%d) = %.80q, %v, want %.80q, nil (the snapshot's command)", p.PID, got, err, p.Command)
 		}
-		c, _ := newCollector(tr, nil)
-		snap := snapshotOf(t, c, runStart, true)
-		r := NewCommandReader(tr.proc)
+	}
+}
 
-		// A long command line first, then the short ones, then the long one again.
-		order := []int32{105, 103, 100, 104, 105, 107, 103}
-		want := map[int32]string{}
-		for _, p := range snap.Processes {
-			want[p.PID] = p.Command
+func commandsMatchHostileNames(t *testing.T) {
+	tr := synthTree()
+	for _, s := range hostileSpecs() {
+		tr.add(s)
+	}
+	c, _ := newCollector(tr, nil)
+	snap := snapshotOf(t, c, runStart, true)
+	r := NewCommandReader(tr.proc)
+
+	if len(snap.Processes) != len(hostileSpecs()) {
+		t.Fatalf("snapshot holds %d processes, want %d", len(snap.Processes), len(hostileSpecs()))
+	}
+	for _, p := range snap.Processes {
+		got, err := r.Command(p.PID)
+		if err != nil || got != p.Command {
+			t.Errorf("Command(%d) = %.80q, %v, want %.80q, nil (the snapshot's command)", p.PID, got, err, p.Command)
 		}
-		for _, pid := range order {
-			got, err := r.Command(pid)
-			if err != nil || got != want[pid] {
-				t.Errorf("Command(%d) = %.80q, %v, want %.80q, nil", pid, got, err, want[pid])
-			}
+	}
+}
+
+func commandsDoNotLeakBetweenProcesses(t *testing.T) {
+	tr := synthTree()
+	for _, s := range hostileSpecs() {
+		tr.add(s)
+	}
+	c, _ := newCollector(tr, nil)
+	snap := snapshotOf(t, c, runStart, true)
+	r := NewCommandReader(tr.proc)
+
+	// A long command line first, then the short ones, then the long one again.
+	order := []int32{105, 103, 100, 104, 105, 107, 103}
+	want := map[int32]string{}
+	for _, p := range snap.Processes {
+		want[p.PID] = p.Command
+	}
+	for _, pid := range order {
+		got, err := r.Command(pid)
+		if err != nil || got != want[pid] {
+			t.Errorf("Command(%d) = %.80q, %v, want %.80q, nil", pid, got, err, want[pid])
 		}
-	})
+	}
 }
 
 func TestCommandReader_Command_Errors(t *testing.T) {
-	t.Run("a missing process has ended", func(t *testing.T) {
-		r := NewCommandReader(synthTree().proc)
+	t.Run("a missing process has ended", commandOfMissingProcessEnded)
 
-		got, err := r.Command(4242)
-		if err == nil || got != "" {
-			t.Fatalf("Command(4242) = %q, %v, want an empty command and an error", got, err)
-		}
-		if !Ended(err) {
-			t.Errorf("Ended(%v) = false, want true", err)
-		}
-	})
+	t.Run("a process that ends between its files has ended", commandOfProcessEndingBetweenFiles)
 
-	t.Run("a process that ends between its files has ended", func(t *testing.T) {
+	t.Run("a refused file is an error and not an ended process", commandOfRefusedFile)
+
+	t.Run("a malformed stat is an error and not an ended process", commandOfMalformedStat)
+}
+
+func commandOfMissingProcessEnded(t *testing.T) {
+	r := NewCommandReader(synthTree().proc)
+
+	got, err := r.Command(4242)
+	if err == nil || got != "" {
+		t.Fatalf("Command(4242) = %q, %v, want an empty command and an error", got, err)
+	}
+	if !Ended(err) {
+		t.Errorf("Ended(%v) = false, want true", err)
+	}
+}
+
+func commandOfProcessEndingBetweenFiles(t *testing.T) {
+	tr := synthTree()
+	tr.add(procSpec{pid: 7, comm: "x", cmdline: "x", start: 1})
+	delete(tr.procFiles, fileOf(7, "cmdline"))
+	r := NewCommandReader(tr.proc)
+
+	_, err := r.Command(7)
+	if err == nil || !Ended(err) {
+		t.Errorf("Command(7) error = %v, Ended = %v, want an error that says the process ended", err, Ended(err))
+	}
+}
+
+func commandOfRefusedFile(t *testing.T) {
+	for _, name := range []string{"stat", "cmdline"} {
 		tr := synthTree()
 		tr.add(procSpec{pid: 7, comm: "x", cmdline: "x", start: 1})
-		delete(tr.procFiles, fileOf(7, "cmdline"))
-		r := NewCommandReader(tr.proc)
-
-		_, err := r.Command(7)
-		if err == nil || !Ended(err) {
-			t.Errorf("Command(7) error = %v, Ended = %v, want an error that says the process ended", err, Ended(err))
-		}
-	})
-
-	t.Run("a refused file is an error and not an ended process", func(t *testing.T) {
-		for _, name := range []string{"stat", "cmdline"} {
-			tr := synthTree()
-			tr.add(procSpec{pid: 7, comm: "x", cmdline: "x", start: 1})
-			tr.proc.openErr[fileOf(7, name)] = syscall.EACCES
-			r := NewCommandReader(tr.proc)
-
-			got, err := r.Command(7)
-			if err == nil || got != "" || Ended(err) {
-				t.Errorf("Command(7) with %s refused = %q, %v (Ended %v), want an empty command and an error that is not an ended process", name, got, err, Ended(err))
-			}
-			if !errors.Is(err, syscall.EACCES) {
-				t.Errorf("Command(7) with %s refused error = %v, want it to wrap EACCES", name, err)
-			}
-		}
-	})
-
-	t.Run("a malformed stat is an error and not an ended process", func(t *testing.T) {
-		tr := synthTree()
-		tr.add(procSpec{pid: 7, comm: "x", cmdline: "x", start: 1})
-		setFile(tr.procFiles, fileOf(7, "stat"), "garbage without parentheses\n")
+		tr.proc.openErr[fileOf(7, name)] = syscall.EACCES
 		r := NewCommandReader(tr.proc)
 
 		got, err := r.Command(7)
 		if err == nil || got != "" || Ended(err) {
-			t.Errorf("Command(7) = %q, %v (Ended %v), want an empty command and an error that is not an ended process", got, err, Ended(err))
+			t.Errorf("Command(7) with %s refused = %q, %v (Ended %v), want an empty command and an error that is not an ended process", name, got, err, Ended(err))
 		}
-	})
+		if !errors.Is(err, syscall.EACCES) {
+			t.Errorf("Command(7) with %s refused error = %v, want it to wrap EACCES", name, err)
+		}
+	}
+}
+
+func commandOfMalformedStat(t *testing.T) {
+	tr := synthTree()
+	tr.add(procSpec{pid: 7, comm: "x", cmdline: "x", start: 1})
+	setFile(tr.procFiles, fileOf(7, "stat"), "garbage without parentheses\n")
+	r := NewCommandReader(tr.proc)
+
+	got, err := r.Command(7)
+	if err == nil || got != "" || Ended(err) {
+		t.Errorf("Command(7) = %q, %v (Ended %v), want an empty command and an error that is not an ended process", got, err, Ended(err))
+	}
 }
 
 func TestEnded(t *testing.T) {
@@ -168,52 +182,58 @@ func TestEnded(t *testing.T) {
 }
 
 func TestListPIDs_MatchesTheProcessCollector(t *testing.T) {
-	t.Run("captured processes", func(t *testing.T) {
-		tr := newTree(t)
-		want, wantSeen, wantErr := listPIDs(tr.proc)
-		if wantErr != nil || len(want) != len(fixtureProcs) {
-			t.Fatalf("test setup: listPIDs() = %v, %d, %v, want the %d captured processes", want, wantSeen, wantErr, len(fixtureProcs))
-		}
+	t.Run("captured processes", listPIDsOfCapturedProcesses)
 
-		got, seen, err := ListPIDs(tr.proc)
-		if err != nil || seen != wantSeen || !slices.Equal(got, want) {
-			t.Errorf("ListPIDs() = %v, %d, %v, want %v, %d, nil", got, seen, err, want, wantSeen)
-		}
-		if !slices.IsSorted(got) {
-			t.Errorf("ListPIDs() = %v, want ascending order", got)
-		}
-	})
+	t.Run("more than MaxProcesses and directories that are no PID", listPIDsBeyondMaxProcesses)
 
-	t.Run("more than MaxProcesses and directories that are no PID", func(t *testing.T) {
-		const processes = 4100
-		tr := synthTree()
-		for pid := int32(1); pid <= processes; pid++ {
-			setFile(tr.procFiles, fileOf(pid, "stat"), "x")
-		}
-		for _, name := range []string{"0123", "self", "thread-self", "0", "+5", "5x", "2147483648", "99999999999", "net"} {
-			setFile(tr.procFiles, name+"/stat", "x")
-		}
+	t.Run("a directory that cannot be listed fails", listPIDsOfUnlistableDirectory)
+}
 
-		got, seen, err := ListPIDs(tr.proc)
-		if err != nil || seen != processes || len(got) != MaxProcesses || !slices.IsSorted(got) || got[0] != 1 || got[len(got)-1] != MaxProcesses {
-			t.Errorf("ListPIDs() = %d PIDs, seen %d, %v, want the PIDs 1 to %d in ascending order, seen %d and nil", len(got), seen, err, MaxProcesses, processes)
-		}
-		want, wantSeen, _ := listPIDs(tr.proc)
-		if seen != wantSeen || !slices.Equal(got, want) {
-			t.Errorf("ListPIDs() differs from the process collector's listing: %d PIDs seen %d, want %d PIDs seen %d", len(got), seen, len(want), wantSeen)
-		}
-	})
+func listPIDsOfCapturedProcesses(t *testing.T) {
+	tr := newTree(t)
+	want, wantSeen, wantErr := listPIDs(tr.proc)
+	if wantErr != nil || len(want) != len(fixtureProcs) {
+		t.Fatalf("test setup: listPIDs() = %v, %d, %v, want the %d captured processes", want, wantSeen, wantErr, len(fixtureProcs))
+	}
 
-	t.Run("a directory that cannot be listed fails", func(t *testing.T) {
-		tr := synthTree()
-		tr.proc.openErr["."] = syscall.EACCES
+	got, seen, err := ListPIDs(tr.proc)
+	if err != nil || seen != wantSeen || !slices.Equal(got, want) {
+		t.Errorf("ListPIDs() = %v, %d, %v, want %v, %d, nil", got, seen, err, want, wantSeen)
+	}
+	if !slices.IsSorted(got) {
+		t.Errorf("ListPIDs() = %v, want ascending order", got)
+	}
+}
 
-		got, seen, err := ListPIDs(tr.proc)
-		if err == nil || len(got) != 0 || seen != 0 {
-			t.Errorf("ListPIDs() = %v, %d, %v, want no PIDs, 0 and an error", got, seen, err)
-		}
-		if !errors.Is(err, syscall.EACCES) {
-			t.Errorf("ListPIDs() error = %v, want it to wrap EACCES", err)
-		}
-	})
+func listPIDsBeyondMaxProcesses(t *testing.T) {
+	const processes = 4100
+	tr := synthTree()
+	for pid := int32(1); pid <= processes; pid++ {
+		setFile(tr.procFiles, fileOf(pid, "stat"), "x")
+	}
+	for _, name := range []string{"0123", "self", "thread-self", "0", "+5", "5x", "2147483648", "99999999999", "net"} {
+		setFile(tr.procFiles, name+"/stat", "x")
+	}
+
+	got, seen, err := ListPIDs(tr.proc)
+	if err != nil || seen != processes || len(got) != MaxProcesses || !slices.IsSorted(got) || got[0] != 1 || got[len(got)-1] != MaxProcesses {
+		t.Errorf("ListPIDs() = %d PIDs, seen %d, %v, want the PIDs 1 to %d in ascending order, seen %d and nil", len(got), seen, err, MaxProcesses, processes)
+	}
+	want, wantSeen, _ := listPIDs(tr.proc)
+	if seen != wantSeen || !slices.Equal(got, want) {
+		t.Errorf("ListPIDs() differs from the process collector's listing: %d PIDs seen %d, want %d PIDs seen %d", len(got), seen, len(want), wantSeen)
+	}
+}
+
+func listPIDsOfUnlistableDirectory(t *testing.T) {
+	tr := synthTree()
+	tr.proc.openErr["."] = syscall.EACCES
+
+	got, seen, err := ListPIDs(tr.proc)
+	if err == nil || len(got) != 0 || seen != 0 {
+		t.Errorf("ListPIDs() = %v, %d, %v, want no PIDs, 0 and an error", got, seen, err)
+	}
+	if !errors.Is(err, syscall.EACCES) {
+		t.Errorf("ListPIDs() error = %v, want it to wrap EACCES", err)
+	}
 }
