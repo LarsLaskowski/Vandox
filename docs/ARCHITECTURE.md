@@ -39,7 +39,7 @@ way, and agents of the hosting provider are never disabled or changed
   late start) and offers a memory pressure mode with shorter intervals, which the system collector (`internal/sysstats`) switches
   on low available memory or memory pressure stall and in which the process collector (`internal/procstats`) lists every process
   instead of the top ones ([0113](decisions/0113-process-collector-pss-from-smaps-rollup-top-processes-full-snapshot-under-memory-pressure.md)),
-  and the connection collector (`internal/connstats`) reads the socket tables of `/proc/net` with their owners from `/proc/<pid>/fd`,
+  and the connection collector (`internal/connstats`) reads the socket tables of `/proc/net` with their owners from `/proc/<pid>/fdinfo`,
   records the counts and the listener inventory every run and every connection on its first run, under memory pressure and when a
   new listener appears ([0115](decisions/0115-connection-collector-proc-net-tables-owners-from-fd-regular-and-full-snapshots-bounded-listener-check.md));
   the agent records its own resource use as metrics

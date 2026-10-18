@@ -23,7 +23,8 @@ Terms used below: a **socket** is one line of the kernel's tables `/proc/net/tcp
 namespace; two lines are two sockets, also when they share an inode number of 0 (`TIME_WAIT`, `SYN_RECV`), and such a line never
 matches a file descriptor. A **listener** is a TCP socket in state `LISTEN` or a UDP socket without a remote endpoint (remote address all zeros and
 port 0); a **connection** is a socket with a remote endpoint. The **owner** of a socket is a process that holds it among its file
-descriptors (`/proc/<pid>/fd`), matched by the socket's inode number when it is not 0. A **regular** snapshot carries the aggregates and the listener inventory; a **full** snapshot carries,
+descriptors, read from `/proc/<pid>/fdinfo/<n>`: a descriptor whose `ino:` is the socket's inode number (not 0) and whose `mnt_id:` is
+the socket file system's mount. A **regular** snapshot carries the aggregates and the listener inventory; a **full** snapshot carries,
 in addition, every connection and every remote address. Records are those of the [wire format](../../docs/areas/wire-format.md)
 (`connection_snapshot`); the collector is named `connections` and its records carry the source `connections`.
 
@@ -54,10 +55,10 @@ in addition, every connection and every remote address. Records are those of the
   everything of S1, `remotes` with every remote address, and `connections` with every connection (protocol, local endpoint, remote
   endpoint, state for TCP, PID and `command` of its owner when known), by protocol, local endpoint, remote endpoint. A reader can tell
   that it is a full snapshot and whether it holds every socket the run saw (`complete`, wire format).
-- S5: (owners of other users' sockets) Given the agent runs as the user `vandox-agent` with exactly the two capabilities the Agent
-  area names (`CAP_SYS_PTRACE`, `CAP_DAC_READ_SEARCH`) and the unit's confinement, when the collector runs, then the sockets of
-  processes of other users (MariaDB as `mysql`, nginx, `sshd` as root) carry their owner's PID and `command`, and
-  `deploy/agent/README.md` lists, for the collector `connections`, each capability with the read it is needed for.
+- S5: (owners of other users' sockets) Given the agent runs as the user `vandox-agent` with `CAP_SYS_PTRACE` and the unit's
+  confinement, when the collector runs, then the sockets of processes of other users (MariaDB as `mysql`, nginx, `sshd` as root) carry
+  their owner's PID and `command`; the collector needs no other right (not `CAP_DAC_READ_SEARCH`), and `deploy/agent/README.md` lists
+  `CAP_SYS_PTRACE` for the collector `connections` with the read it is needed for.
 - S6: (sockets without an owner) Given sockets that no process holds (TCP `TIME_WAIT`, a socket whose process ended during the run),
   when the collector runs, then they count in `states` and, as connections, in `remotes` and `connections`; their entries carry no
   PID and no `command`; they are not counted in `processes`.
@@ -91,7 +92,10 @@ in addition, every connection and every remote address. Records are those of the
 - E6: (very many descriptors) Given a process that holds hundreds of thousands of file descriptors (a hostile local user can open as
   many as the hard limit allows), when the collector runs, then the run takes longer in proportion; a run past its timeout becomes a
   gap, as in E5, and the collector is not started again while the abandoned run lasts (accepted residual, as for the process
-  collector's hanging reads).
+  collector's hanging reads). While runs are gaps, no inventory is compared, so a listener that opens during such a stall is reported
+  only if it is still open at the first successful run after it (a hostile user who keeps the collector stalled suppresses the
+  new-listener report, visible as the gaps). A run that has passed its deadline keeps nothing for later runs (no inventory, no log
+  state), so the next run compares with the last run that finished in time.
 - E7: (hostile process names) Given a process whose command line or name holds control characters, invalid UTF-8 or more than 1,024
   bytes, when it owns a socket, then its `command` follows the process collector's rules (valid UTF-8, at most 1,024 bytes, never empty,
   `(unnamed)` as the last resort) and the record is valid; no log line of the collector holds a process name, a command line or an
@@ -132,6 +136,11 @@ in addition, every connection and every remote address. Records are those of the
   `remotes`, as the kernel reports them; `remotes` does not unmap them, so one IPv4 peer connected both to a `0.0.0.0` and to a `::`
   listener is two remote entries (stated for the comparison of #45). Link-local addresses are kept without a zone (wire format,
   *Producer mapping for connection endpoints*).
+- E20: (a descriptor that only looks like a socket) Given a local user who holds files whose inode numbers equal those of sockets in
+  the tables (on a file system of their own mount namespace), when the collector runs, then such a descriptor counts only when its
+  mount is the one most of the matching descriptors are on and is not a mount the agent's own mount table lists; a user who holds more
+  such descriptors than all processes together hold socket descriptors can still make owners wrong (stated residual: owners are a
+  classification, the PID is the kernel's, the `command` is text the process chooses).
 - E18: (other network namespaces) Given containers with network namespaces of their own on the server, when the collector runs, then
   their sockets are not in the tables the agent reads and are not reported; a descriptor that points to a socket not in the four
   tables (another namespace, a Unix domain socket) is not counted in `processes` and makes its process no owner of anything.
@@ -143,7 +152,9 @@ in addition, every connection and every remote address. Records are those of the
     listeners on ports 1 to 1023 are compared: they come first in the inventory, so a flood of unprivileged listeners never cuts them
     (should the privileged part itself be cut, no comparison is made);
   - otherwise the whole inventory is compared (E11, E12).
-  The comparison basis is the last successful run's inventory as recorded, so its memory is bounded by the cap. Every snapshot says
+  The comparison basis is the last successful run's inventory as the collector kept it (at most 4,096 keys, before any cut for the
+  record's size), so its memory is bounded by the cap; a size cut of `listeners` in the record makes the aggregates incomplete but does
+  not change the comparison. Every snapshot says
   which comparison its run made (S3). A local user who keeps more than 4,096 listeners open (about 4,100 TCP listeners on unprivileged
   ports suffice) thus hides new listeners on ports from 1024 up for as long as the flood lasts, which the snapshots show as "privileged
   ports only" (stated residual); the flood alone causes no report and no full snapshot.
@@ -152,16 +163,20 @@ in addition, every connection and every remote address. Records are those of the
 
 - **Schedule:** collector `connections`, interval 60 seconds, pressure interval 15 seconds, timeout 10 seconds, placed after
   `processes` in the job list.
-- **What it reads:** `/proc/net/tcp`, `tcp6`, `udp`, `udp6`, the `/proc` directory, `/proc/<pid>/fd` and what the process collector
-  reads to derive a `command` (`stat`, `cmdline`), through the replaceable file-system interface (Agent area, *Collecting*). It starts no
+- **What it reads:** `/proc/net/tcp`, `tcp6`, `udp`, `udp6`, the `/proc` directory, `/proc/<pid>/fdinfo` and its files (the first
+  lines only), the agent's own `/proc/self/mountinfo` and what the process collector reads to derive a `command` (`stat`, `cmdline`), through the replaceable file-system interface (Agent area, *Collecting*). It starts no
   program, opens no socket (no netlink socket diagnostics) and makes no raw system call.
-- **Rights:** no right beyond the two capabilities the Agent area already names; the collector works without them as E1 describes. The
-  rights the collector needs are listed and justified in `deploy/agent/README.md`. This feature adds to the Agent area (*Rights*) that
+- **Rights:** only `CAP_SYS_PTRACE`, which the agent already holds for the process collector; not `CAP_DAC_READ_SEARCH`, which would
+  let the whole agent read every file on the server (measured by Security: listing `/proc/<pid>/fd` needs it, reading
+  `/proc/<pid>/fdinfo` does not). The collector works without the capability as E1 describes. The right is listed and justified in
+  `deploy/agent/README.md`. This feature adds to the Agent area (*Rights*) that
   the unit, still to be written, must not give the agent a network namespace of its own (no `PrivateNetwork=`, no
   `NetworkNamespacePath=`), must not set `ProcSubset=pid` (it hides `/proc/net`) and must leave `ProtectProc=` at `default`.
-- **Memory and time:** "never make the memory situation worse" (issue): the memory one run allocates has a fixed upper bound that does
-  not depend on the number of sockets or descriptors beyond the caps of E5, stated in the Agent area and asserted by a test; tables and
-  descriptor directories are read in bounded pieces, never whole. The time of a run over a stated number of sockets and processes is
+- **Memory and time:** "never make the memory situation worse" (issue): the data a run keeps (its live memory) has a fixed upper bound
+  that does not depend on the number of sockets or descriptors beyond the caps of E5, stated in the Agent area and asserted by a test;
+  tables and descriptor directories are read in bounded pieces, never whole. Reading a table line allocates nothing that stays; reading
+  one descriptor allocates a small fixed amount of garbage (the file-system interface's cost per file), so the garbage of a run grows
+  with the number of descriptors and is reclaimed by the Go runtime (accepted, the per-descriptor figure stated in the Agent area). The time of a run over a stated number of sockets and processes is
   measured and stated in `docs/BENCHMARKS.md`; the cost on the server itself is measured by #44.
 - **Size:** every record passes the wire format's producer check (*Producer size contract*), size included, before it leaves the
   collector.
@@ -200,16 +215,17 @@ in addition, every connection and every remote address. Records are those of the
   still reported; with a line left out or a different set of tables in either run, nothing is compared or reported (E19).
 - [ ] AC4: sockets without an owner count in `states`, `remotes` and `connections` without PID and `command` and are not in
   `processes`; several lines with inode 0 are several sockets; a socket held by several processes counts once, owned by the lowest
-  PID, and once per holder in `processes`; a descriptor of a socket not in the four tables counts nowhere (S6, E8, E9, E18).
-- [ ] AC5: running as a user other than the sockets' owners with exactly `CAP_SYS_PTRACE` and `CAP_DAC_READ_SEARCH`, the collector
-  finds the owner of another user's socket, measured on a host, and the measurement with what each capability is needed for is
-  recorded in the Agent area and `deploy/agent/README.md`; without them the sockets of unreadable processes carry no owner, the sample
+  PID, and once per holder in `processes`; a descriptor of a socket not in the four tables counts nowhere, and one on a mount other
+  than the sockets' counts nowhere either (S6, E8, E9, E18, E20).
+- [ ] AC5: running as a user other than the sockets' owners with `CAP_SYS_PTRACE` alone, the collector finds the owner of another
+  user's socket, measured on a host, and the measurement is recorded in the Agent area and `deploy/agent/README.md`; without them the sockets of unreadable processes carry no owner, the sample
   succeeds and the warning and info lines of E1 are logged once per change (S5, E1).
 - [ ] AC6: a missing table leaves its protocol out and logs E2's lines once per change, all four missing fail the sample; an unreadable
   line is left out with the snapshot not complete and E3's lines; a table that exists but cannot be read fails the sample as a gap
   (E2, E3, E4).
 - [ ] AC7: with more sockets or listed entries than the caps, every socket is still counted in `states`, no list holds more than 4,096
-  entries, the snapshot is not complete, and one run's allocations stay within the bound the Agent area states, asserted by a test; a
+  entries, the snapshot is not complete, and one run's live data stays within the bound the Agent area states, asserted by a test at two
+  sizes of each axis (table lines, descriptors of one process) between which it does not grow; a
   record that would exceed 1 MiB is reduced, connections first, recorded and marked not complete (E5, E16).
 - [ ] AC8: a run whose read blocks past the timeout becomes a gap with cause `collector_timeout` and the collector is not started again
   while it is stuck, tested with a double of the file system that hangs (E5, E6).
@@ -247,11 +263,11 @@ in addition, every connection and every remote address. Records are those of the
 - Q2: What is "on demand"? Answered: user commands exist only as the pulled, signed commands of the remote actions milestone (#76,
   #77) and the read commands of #74 (`docs/ARCHITECTURE.md`, *Remote actions (later)*), and the agent-internal demand is #36's OOM
   trigger; both are out of scope here.
-- Q3: What are "the minimal documented capabilities"? Answered: `CAP_SYS_PTRACE` and `CAP_DAC_READ_SEARCH`, the only ones the Agent
-  area (*Rights*) and record 0030 allow; record 0030 already names both for this purpose (listing `/proc/<pid>/fd` needs
-  `CAP_DAC_READ_SEARCH`, reading its links passes the ptrace check that `CAP_SYS_PTRACE` satisfies). That claim has not been measured
-  yet; AC5 requires the measurement. `deploy/agent/README.md` lists only `CAP_SYS_PTRACE` today, so this feature is the first to need
-  `CAP_DAC_READ_SEARCH`.
+- Q3: What are "the minimal documented capabilities"? Answered: the Agent area (*Rights*) and record 0030 allow `CAP_SYS_PTRACE` and
+  `CAP_DAC_READ_SEARCH`. Security measured (kernel 6.18, UID 65534 against a root process): listing `/proc/<pid>/fd` needs
+  `CAP_DAC_READ_SEARCH` and reading its links needs both, while `/proc/<pid>/fdinfo` (`ino:`, `mnt_id:`) is readable with
+  `CAP_SYS_PTRACE` alone. The minimum is therefore `CAP_SYS_PTRACE`, which `deploy/agent/README.md` already lists for the process
+  collector (revision after the plan's security review).
 - Q4: What does "stored" mean while the agent has no spool and the backend no ingest? Answered: until the spool (#38) exists the agent
   drops the records after checking them (Agent area, *Scheduling*), and the ingest API is #40. Here "stored" means the records pass the
   agent's wire check and the backend's decoder, and the backend's record writer stores them as it stores imported connection snapshots
@@ -320,3 +336,8 @@ Devil's Advocate, spec challenge: 1 major, 10 minor. All accepted; none narrows 
 - Minor 10 (no real table sample) — accepted for the plan: the plan names real captured samples of all four tables, IPv6 from a host
   that has it, and escalates for them if none can be captured; the spec states no format detail that rests on a sample.
 
+
+Revision after the plan challenge and the plan's security review (answered in [plan.md](plan.md), *Challenge* and *Security review*):
+owners come from `/proc/<pid>/fdinfo` with `CAP_SYS_PTRACE` alone (S5, Q3, *Rights*, AC5; new E20 with AC4); the memory requirement
+bounds the live data and states the garbage per descriptor (*Memory and time*, AC7); E6 states that stalled runs suppress the
+comparison and that a run past its deadline keeps nothing; E19 names the in-memory comparison basis.

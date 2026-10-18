@@ -1,4 +1,4 @@
-# 0115: Connection collector: the /proc/net tables with owners from /proc/<pid>/fd, regular and full snapshots in one record kind, a bounded new-listener check that favors privileged ports
+# 0115: Connection collector: the /proc/net tables with owners from /proc/<pid>/fdinfo, regular and full snapshots in one record kind, a bounded new-listener check that favors privileged ports
 
 - **Status:** Proposed
 - **Date:** 2026-10-18
@@ -21,8 +21,8 @@ squad record of #33.
 
 1. **Netlink socket diagnostics (`sock_diag`)** instead of the text tables — faster on very many sockets and filterable in the kernel,
    but it opens a socket, which the agent's collectors do not (0111, 0113), and still needs `/proc/<pid>/fd` for the owners. Rejected.
-2. **The four `/proc/net` tables of the agent's network namespace, owners from `/proc/<pid>/fd` links** (chosen) — what the issue
-   names; read through `io/fs` (with `fs.ReadLinkFS`), streamed line by line, so tests run on real captured tables.
+2. **The four `/proc/net` tables of the agent's network namespace** (chosen) — what the issue names; read through `io/fs`, streamed
+   line by line, so tests run on real captured tables.
 3. **A full connection list every run** — simplest, but about 4,096 entries of up to 1 KiB each every minute for data that matters
    only around an anomaly. Rejected for a **regular** snapshot (aggregates and inventory) every run and a **full** one on the first run,
    under memory pressure and on a new listener.
@@ -44,22 +44,35 @@ squad record of #33.
    unknown keys.
 9. **Deriving the process `command` again in the new package** — independent, but a second copy of the legacy name derivation that
    `testdata/processes/names.json` pins. Rejected for exported helpers of `internal/procstats` (`ListPIDs`, `CommandReader`).
+10. **Owners from the `/proc/<pid>/fd` links** (`socket:[N]`), as the issue names — exact and one `readlink` per descriptor, but
+    measured (Security, kernel 6.18, UID 65534 against a root process) to need `CAP_DAC_READ_SEARCH` to list the directory and both
+    capabilities to read a link; `CAP_DAC_READ_SEARCH` lets the whole agent read every file (`/etc/shadow`, Plesk's credentials), a right
+    no collector holds yet. Rejected.
+11. **Owners from `/proc/<pid>/fdinfo/<n>`** (chosen) — measured readable with `CAP_SYS_PTRACE` alone, the right the process collector
+    already uses; its first lines are `pos:`, `flags:`, `mnt_id:`, `ino:` (captured samples). Costs an open, a read and a close per
+    descriptor instead of one `readlink`, needs the `ino:` line (Linux 5.14 and later; without it the owners are unknown, as without
+    the right), and needs the mount to tell a socket from a file with the same inode number: the sockets' mount is taken as the one
+    most matching descriptors are on among those the agent's own mount table does not list (sockfs is an internal mount), which a local
+    user can outvote only by holding more colliding descriptors than all processes hold sockets (a stated residual).
 
 ## Decision
 
-Options 2, 3, 4, 6, 7, 8 and 9: a collector `connections` in `internal/connstats` reads the four tables and the descriptor links of at
-most 4,096 processes within fixed caps and records one `connection_snapshot` per run, regular or full, with the new-listener check and
+Options 2, 3, 4, 6, 7, 8, 9 and 11: a collector `connections` in `internal/connstats` reads the four tables and the `fdinfo` files of at
+most 4,096 processes within fixed caps, needing no right beyond `CAP_SYS_PTRACE`, and records one `connection_snapshot` per run, regular or full, with the new-listener check and
 its outcome in the same record; wire format 1.1. The rules, caps and log lines are in [Agent](../areas/agent.md) (*Connections*), the
 fields in [Wire format](../areas/wire-format.md).
 
 ## Consequences
 
-- Listing another user's `/proc/<pid>/fd` needs `CAP_DAC_READ_SEARCH` and reading its links the ptrace read check that
-  `CAP_SYS_PTRACE` passes (0030); this collector is the first user of `CAP_DAC_READ_SEARCH`, listed in `deploy/agent/README.md` with the
-  measurement.
+- The collector adds no right: it uses `CAP_SYS_PTRACE` like the process collector, and `deploy/agent/README.md` lists that use with
+  the measurement. `CAP_DAC_READ_SEARCH` stays unused by any collector; a later collector that wants it decides on its own.
+- A run that passes its deadline keeps no state, so a late return cannot make a listener known without a report; the window between
+  the last check and the return is a stated residual.
+- The live memory of a run is bounded by fixed caps; the garbage grows with the descriptors read (a fixed amount per descriptor through
+  `io/fs`), reclaimed by the runtime.
 - **Residuals:** a listener that opens while the agent is stopped is not reported by the agent (the backend comparison is #278); a local
   user who keeps more than 4,096 listeners open hides new listeners on ports from 1024 up for as long, visible as `listener_check`
-  `privileged`; with `hidepid=2` and without `CAP_SYS_PTRACE` owners are lost without a warning; short-lived TCP listeners such as
+  `privileged`; a user who keeps the collector stalled (a descriptor hog) suppresses the check while runs are gaps; with `hidepid=2` and without `CAP_SYS_PTRACE` owners are lost without a warning; short-lived TCP listeners such as
   passive FTP are reported when a run sees them.
 - The agent's totals include sockets without an owner (`TIME_WAIT`), which `lsof -ni` never listed, and the incident's connection peak
   is taken over every source in its window, so agent snapshots win it against imported ones (accepted, [Detection, alerts and
