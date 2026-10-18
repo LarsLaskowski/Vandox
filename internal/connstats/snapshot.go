@@ -99,9 +99,10 @@ func entrySize(e any) (int, bool) {
 }
 
 // fitRecord returns the record of snap, shortened until it fits the wire limit, carrying the inventory state of inv.
-func fitRecord(start time.Time, snap *model.ConnectionSnapshot, _ *inventory) (model.Record, error) {
+func fitRecord(start time.Time, snap *model.ConnectionSnapshot, inv *inventory) (model.Record, error) {
 	record := model.Record{Meta: model.Meta{Source: Source, CapturedAt: start.UTC()}, Data: snap}
 	for round := 0; ; round++ {
+		snap.Inventory = inventoryState(inv, len(snap.Listeners))
 		checked := record
 		checked.Origin, checked.Seq = model.OriginAgent, 1
 		_, err := wire.CheckRecord(&checked)
@@ -465,7 +466,7 @@ func buildSnapshot(col *collection, res *runResult, check model.ListenerCheck, a
 	}
 	l.omitted = uint32(min(max(len(added)-len(reported), 0), math.MaxUint32))
 
-	snap := &model.ConnectionSnapshot{AggregatesOnly: !full, ListenerCheck: check}
+	snap := &model.ConnectionSnapshot{AggregatesOnly: !full, ListenerCheck: check, Tables: tableList(col.read)}
 	cutAggregates, cut := fill(snap, &l, payloadBudget)
 	snap.AggregatesIncomplete = cutAggregates || col.badLines > 0 || col.untracked || col.listeners.cut || res.pidCapped ||
 		res.unreadable > 0 || res.ownersUnknown != nil

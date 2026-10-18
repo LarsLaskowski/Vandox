@@ -111,6 +111,9 @@ func (s *ConnectionSnapshot) Validate() error {
 	if err := s.validateFlags(); err != nil {
 		return err
 	}
+	if err := s.validateInventory(); err != nil {
+		return err
+	}
 	if err := s.validateStates(); err != nil {
 		return err
 	}
@@ -226,12 +229,33 @@ func (s *ConnectionSnapshot) validateFlags() error {
 		return invalid("complete", "must be false when aggregates are incomplete")
 	}
 	if s.ListenerCheck != "" {
-		if err := checkOneOf("listener_check", s.ListenerCheck, ListenerCheckAll, ListenerCheckPrivileged, ListenerCheckNone); err != nil {
+		if err := checkOneOf("listener_check", s.ListenerCheck, ListenerCheckAll, ListenerCheckPrivileged, ListenerCheckNone, ListenerCheckStart); err != nil {
 			return err
 		}
 	}
 	if (len(s.NewListeners) > 0 || s.NewListenersOmitted > 0) && s.ListenerCheck != ListenerCheckAll && s.ListenerCheck != ListenerCheckPrivileged {
 		return invalid("listener_check", "must be all or privileged when new listeners are reported")
+	}
+	return nil
+}
+
+// validateInventory checks the inventory state and the protocols of the tables read.
+func (s *ConnectionSnapshot) validateInventory() error {
+	if s.Inventory != "" {
+		if err := checkOneOf("inventory", s.Inventory, InventoryAll, InventoryPrivileged, InventoryCut, InventorySkipped); err != nil {
+			return err
+		}
+	}
+	seen := make(map[Proto]struct{}, len(s.Tables))
+	for i, p := range s.Tables {
+		path := indexed("tables", i)
+		if err := checkOneOf(path, p, ProtoTCP, ProtoTCP6, ProtoUDP, ProtoUDP6); err != nil {
+			return err
+		}
+		if _, dup := seen[p]; dup {
+			return invalid(path, "duplicate protocol")
+		}
+		seen[p] = struct{}{}
 	}
 	return nil
 }

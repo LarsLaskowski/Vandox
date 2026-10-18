@@ -215,8 +215,13 @@ func (c *Connections) readCommands(res *runResult) {
 
 // tableList returns the protocols of the tables in mask, in table order.
 func tableList(mask uint8) []model.Proto {
-	_ = mask
-	return nil
+	var out []model.Proto
+	for i := range socketTables {
+		if mask&(1<<i) != 0 {
+			out = append(out, socketTables[i].proto)
+		}
+	}
+	return out
 }
 
 // inventory returns the listener inventory of the run.

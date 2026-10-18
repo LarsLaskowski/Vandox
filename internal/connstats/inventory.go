@@ -39,7 +39,10 @@ func lessListener(a, b listenerKey) bool {
 // compare returns how far the inventories were compared and the keys of cur that prev lacks, in inventory order and without the
 // ones reportable excludes.
 func compare(prev, cur *inventory) (check model.ListenerCheck, added []listenerKey) {
-	if prev == nil || prev.skipped || cur.skipped || prev.tables != cur.tables {
+	if prev == nil {
+		return model.ListenerCheckStart, nil
+	}
+	if prev.skipped || cur.skipped || prev.tables != cur.tables {
 		return model.ListenerCheckNone, nil
 	}
 	if cutInPrivilegedPart(prev) || cutInPrivilegedPart(cur) {
@@ -89,6 +92,23 @@ func reportable(k listenerKey) bool {
 
 // inventoryState returns how much of the inventory inv the record's listeners list, which holds listed entries, covers.
 func inventoryState(inv *inventory, listed int) model.InventoryState {
-	_, _ = inv, listed
-	return ""
+	if inv.skipped {
+		return model.InventorySkipped
+	}
+	if cutInPrivilegedPart(inv) {
+		return model.InventoryCut
+	}
+	privileged := 0
+	for _, k := range inv.keys {
+		if k.port < PrivilegedPorts {
+			privileged++
+		}
+	}
+	if listed < privileged {
+		return model.InventoryCut
+	}
+	if inv.cut || listed < len(inv.keys) {
+		return model.InventoryPrivileged
+	}
+	return model.InventoryAll
 }
