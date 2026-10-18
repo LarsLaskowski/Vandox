@@ -6,4 +6,4 @@ are quoted in full.
 | Date | Step | Member | Result |
 | ---- | ---- | ------ | ------ |
 | 2026-10-18 14:09 | 1 Intake | Orchestrator | feature: user request (also label type: feature); issue #33 open, milestone v0.2.0, depends on #30; branch claude/sleepy-wright-h8zmxh at origin/main e3e4bd6 |
-| 2026-10-18 14:16 | 2a Spec | Lead | RESULT: DONE — spec.md Draft, S1–S6, E1–E18, AC1–AC11; plan-check --spec clean; #30 closed; no escalation (opus/medium · usage pending) |
+| 2026-10-18 14:16 | 2a Spec | Lead | RESULT: DONE — spec.md Draft, S1–S6, E1–E18, AC1–AC11; plan-check --spec clean; #30 closed; no escalation (opus/medium · 139,427 tokens · 30 tool uses · 427 s) |
