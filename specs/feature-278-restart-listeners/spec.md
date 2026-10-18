@@ -86,7 +86,7 @@ The exact phrases are in the table of AC11.
 - E11: Huge input: both inventories at their maximum of 4,096 listeners each, a server that reports a short-lived listener every minute
   (passive FTP with ProFTPD on Plesk without `PassivePorts`, record 0115) for a year, many agent IDs: the report keeps at most the fixed
   amounts of *Non-functional requirements*, restart and agent findings under separate caps so that agent findings never push out a
-  restart finding; over a cap the section says which and how many findings or agents it left out, in the section and in *Notes*.
+  restart finding; over a cap *Notes* say which and how many findings or agents it left out.
 - E12: No connection snapshot of an agent stored (an archive of imported logs only, today's state): the section says `No agent connection
   snapshot stored: new listeners unknown.`, never `No new listener found.`
 - E13: A run on the page that passes its deadline of 2 minutes (more snapshots to read): the page shows its existing timeout text; the
@@ -239,6 +239,9 @@ Spec defects fixed while planning (Lead, mode `plan`):
 
 - The caps of findings are 20 per kind, not 100: a finding holds up to 64 listeners with a command of up to 1,024 bytes each, so 100 per
   kind could put about 28 MB of text into the report run and into the page's per-circuit document (security area 3 bounds that document
-  at about 6.6 MB today); 20 per kind keep it at about 5.5 MB (plan, *Verified facts*). AC12, AC13 and the memory requirement changed.
+  at about 6.6 MB today); 20 per kind keep it at about 5.5 MB of stored text in the run and up to about 16 MB in the page's document, where every
+  command also carries its runs (plan, *Verified facts*, fact 13; decided after review round 1). AC12, AC13 and the memory requirement changed.
+- E11 said cap hits appear "in the section and in *Notes*"; AC12, its tests and the area document put them in *Notes* only, as the
+  report does for its other caps, so E11 now says *Notes* (decided after review round 1).
 - The memory requirement no longer says the report keeps inventories: the comparison is made when the snapshots are stored (plan,
   *Approach*), so the report keeps only the findings and the head; "64 agent IDs' inventories" became "the head of 64 agent IDs".

@@ -43,7 +43,11 @@ tables in [Storage](../areas/storage.md).
    Template statistics are kept the same way (0095).
 7. **One cap for all findings** (100, then the latest) — simpler, but agent findings of passive FTP would push the restart findings out
    within hours (spec challenge). Rejected for separate caps per kind; the caps are 20 each, because a finding can hold 64 commands of up to
-   1,024 bytes and the page keeps the report's document per circuit.
+   1,024 bytes and the page keeps the report's document per circuit: about 5.5 MB of stored text in the run and, with the runs every
+   external text carries on the page, up to about 16 MB per circuit. Lower caps (7 to 10 per kind, to stay near 5.5 MB on the page) were
+   weighed after review and rejected: they shorten the forensic window of restart findings, the main value of the section, to defend a
+   worst case that needs 2,560 commands of 1,024 bytes; the bound stays fixed, only a signed-in client opens a circuit, and the
+   incidents page already holds about 10 MB per circuit.
 8. **The pair picked by capture time** — what the reader sees, but the clock can step after a reboot (0046). Rejected for the agent's `seq`,
    which increases across restarts; capture time is shown only.
 
