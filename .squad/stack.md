@@ -121,6 +121,13 @@ analysis (the gate of a `patch` that touches only scripts, workflows or Dockerfi
 
 Other SonarQube Cloud findings (further rules, duplication, hotspots) have no local equivalent and arrive in
 squad step 11.
+For Go, `go:S1192` (a string literal repeated three or more times in one file) is one of them, and golangci-lint's
+`goconst` is deliberately not enabled as a stand-in: measured with golangci-lint 2.14.0 (`min-occurrences: 3`) on
+the head of PR #272 before its S1192 fix, it counts occurrences across the whole package instead of per file,
+skips literals passed to a call unless `ignore-calls: false`, missed `"invalid value, want "` (used only in
+concatenations) even then, and with `ignore-calls: false` reports about forty package-wide duplicates on `main`
+that the `--whole-files` gate would raise in any change to those files. The string-literal rule under *Writing
+code* stands in for it.
 
 Own browser scripts (`src/Vandox.Backend/wwwroot/js/*.js`, no Node build) have no local analyzer: SonarQube
 Cloud's JavaScript rules report on them only in squad step 11, so write them to those rules from the start. The
@@ -151,6 +158,7 @@ locally, <authoritative check>" once in `log.md` and does not repeat it as an op
 | C# conditions on a local that a lambda assigns (SonarQube Cloud `csharpsquid:S2583`, "condition always evaluates to False", and the other symbolic-execution rules) | the local SonarAnalyzer.CSharp build does not report them (run #27: the quality gate failed in CI with a C reliability rating on a local assigned only inside a callback passed to `PageRunner.RunAsync`) | the captured-local rule under *Writing code*, checked by reading every new lambda that assigns an outer local | SonarQube Cloud (step 11) |
 | values passed to a logger or other sink (CodeQL "Clear text storage of sensitive information") | CodeQL runs only in CI | the logger-argument rule below, checked by grepping the new logger calls | CodeQL code scanning on the pull request |
 | Go conversions of a parsed number to a narrower or signed integer type (CodeQL `go/incorrect-integer-conversion`) | CodeQL runs only in CI | gosec G115 in the *Analyzer gate* (record 0112), which reported every measured CodeQL alert but accepts a 64-bit parse result converted to `int` or `uint` (CodeQL's view unverified); the integer-conversion rule under *Writing code*, checked by grepping the new `strconv.ParseUint`, `strconv.ParseInt` and `strconv.Atoi` calls and every conversion of their results to `int` or `uint` | CodeQL code scanning on the pull request |
+| Go string literals repeated three or more times in one file (SonarQube Cloud `go:S1192`) | no local analyzer reports it; `goconst` does not match the rule and is not enabled (see *Analyzer gate*) | the string-literal rule under *Writing code*, checked by reading the repeated literals of each changed non-test Go file | SonarQube Cloud (step 11) |
 
 When the *Analyzer gate* reports shellcheck, actionlint or hadolint as NOT RUN (a refused download), that tool is
 missing locally for the session: note it in `log.md` as above, and parse a changed workflow as YAML instead
@@ -250,6 +258,14 @@ Go (agent):
   conversion of a 64-bit parse result to `int` or `uint` whose treatment by CodeQL is unverified (record 0112).
   On PR #265 a bound checked elsewhere (a digit-count limit, a check inside a helper) did not count: five
   alerts on `ParseUint` results converted to `int64`.
+- A string literal that occurs three or more times in one non-test Go file is declared once as a constant and
+  used by name (SonarQube Cloud `go:S1192`; on PR #272 `"has no value"` four times and `"invalid value, want "`
+  three times in `internal/config/decode.go`, fixed as `reasonNoValue` and `reasonWantPrefix`). The count is per
+  file and includes literals passed to a call and the literal operand of a concatenation; `_test.go` files are
+  excluded from the cloud analysis. SonarQube's minimum literal length is unverified, so a repeated literal is
+  made a constant unless it is empty. No local analyzer reports the rule (see *Analyzer gate*): before handing
+  back, read the repeated literals of each changed non-test Go file, for example with
+  `grep -o '"[^"]*"' <file> | sort | uniq -c | awk '$1 >= 3'`.
 - The agent prints its build information through `internal/version`, set via `-ldflags`.
 
 C# (backend): follow the surrounding code and the analyzers; in particular
