@@ -168,26 +168,35 @@ valid. `proto` is `tcp`, `tcp6`, `udp` or `udp6`; `state` is required for `tcp`/
 `udp`/`udp6`, from `ESTABLISHED SYN_SENT SYN_RECV FIN_WAIT1 FIN_WAIT2 TIME_WAIT CLOSE CLOSE_WAIT LAST_ACK
 LISTEN CLOSING NEW_SYN_RECV`; `count` >= 1; `pid` >= 0.
 
-Since format 1.1 five optional fields say what kind of snapshot it is and what its producer compared (all omitted when false, zero or
-absent):
+Since format 1.1 seven optional fields say what kind of snapshot it is, what its producer compared and what its own list holds (all omitted
+when false, zero or absent):
 
 - `aggregates_only` (true): a **regular** snapshot of the connection collector: the aggregates (`states`, `processes`, `remotes`,
   `listeners`) without `connections`. Requires `complete` false and no `connections`. Its `remotes` are the top 25 by count over the
   addresses the producer counted (at most 4,096; a heavy address first seen after the cap is missing).
 - `aggregates_incomplete` (true): `states`, `listeners` or `processes` may not cover every socket the producer saw (a list cut, a table
   line skipped, sockets without an owner beyond a cap, owners unknown). Requires `complete` false.
-- `listener_check` (`all`, `privileged`, `none`): the comparison of the listener inventory with the last successful run's that the producer
-  made for this snapshot: the whole inventory; only the listeners on ports 1 to 1023, because an inventory was cut at 4,096; or none.
+- `listener_check` (`all`, `privileged`, `none`, `start`): the comparison of the listener inventory with the last successful run's that the producer
+  made for this snapshot: the whole inventory; only the listeners on ports 1 to 1023, because an inventory was cut at 4,096; none; or `start`,
+  the first run after the producer started, which has no earlier inventory (nothing is compared, like `none`; record 0116).
 - `new_listeners` (listener entries, at most 4,096): the listeners the producer found new in the run, with the owner's `pid` and `command`
   when known. Requires `listener_check` `all` or `privileged`.
 - `new_listeners_omitted` (>= 1): how many more new listeners were found than `new_listeners` holds. Requires `listener_check` `all` or
   `privileged`.
+- `inventory` (`all`, `privileged`, `cut`, `skipped`): how much of the run's listener inventory this snapshot's `listeners` list holds: all of
+  it; every listener on ports 1 to 1023 but not necessarily the rest; fewer than the ports 1 to 1023 hold (a cut inside the privileged part); or
+  nothing reliable because a table line was skipped. A reader that compares two snapshots needs it, because `aggregates_incomplete` has other
+  causes too.
+- `tables` (protocols, distinct, at most four): the tables the run read, in table order. Two snapshots read from different tables are not
+  comparable.
 
-The absence of all five reads as a **full** snapshot with complete aggregates and no listener check, which is what an imported legacy snapshot
+The absence of all seven reads as a **full** snapshot with complete aggregates and no listener check, which is what an imported legacy snapshot
 and a 1.0 agent's snapshot are. The rules are checked in Go and C#; their field errors are `data.complete`: `must be false for an
 aggregates-only snapshot` and `must be false when aggregates are incomplete`; `data.connections`: `must be empty in an aggregates-only
-snapshot`; `data.listener_check`: one of `all`, `privileged`, `none`, and `must be all or privileged when new listeners are reported`. A
-JSON `null` of `listener_check` reads as absent (0089); the Go encoder never writes an empty `listener_check`.
+snapshot`; `data.listener_check`: one of `all`, `privileged`, `none`, `start`, and `must be all or privileged when new listeners are reported`;
+`data.inventory`: one of `all`, `privileged`, `cut`, `skipped`; `data.tables[<i>]`: one of `tcp`, `tcp6`, `udp`, `udp6`, and `duplicate protocol`.
+A JSON `null` of `listener_check` or `inventory` reads as absent (0089), and a `null` element of `tables` reads as an empty protocol that fails
+the one-of rule; the Go encoder never writes an empty `listener_check`, `inventory` or `tables`.
 
 ### `service_state`
 
@@ -292,8 +301,9 @@ so a header of any major that breaks one is `wire.ErrMalformed`, not `wire.ErrUn
 only through a record that supersedes 0090. It then reads the major before anything else and rejects any major it does not know with `wire.ErrUnsupportedVersion`, even
 if the rest of that header has an incompatible shape. A header that is not a JSON object or `null`, or whose major is not
 a JSON integer, is `wire.ErrMalformed`: the major is an integer in every version (0043). A minor change is additive: new optional fields and new kinds; a decoder ignores unknown
-keys at any depth and so accepts a newer minor of its major. The current version is **1.1**: 1.1 added the five optional fields of
-`connection_snapshot` (`aggregates_only`, `aggregates_incomplete`, `listener_check`, `new_listeners`, `new_listeners_omitted`; record 0115);
+keys at any depth and so accepts a newer minor of its major. The current version is **1.1**: 1.1 added the optional fields of
+`connection_snapshot` (`aggregates_only`, `aggregates_incomplete`, `listener_check` with the value `start`, `new_listeners`,
+`new_listeners_omitted`, `inventory`, `tables`; records 0115 and 0116; the format is unreleased, so the fields extend 1.1 in place);
 1.0 was released with v0.1.0. An unknown record kind is rejected. Until the
 upgrade rules are settled (#85), upgrade the backend before the agents.
 
@@ -405,6 +415,8 @@ Decompressed content of a batch of three records (the real stream is gzip-compre
   keys and nesting before binding, match keys ignoring ASCII case and report a misshapen header as malformed.
 - [0115](../decisions/0115-connection-collector-proc-net-tables-owners-from-fd-regular-and-full-snapshots-bounded-listener-check.md) — why a
   regular and a full snapshot are one record kind with additive fields, and format 1.1.
+- [0116](../decisions/0116-listeners-across-agent-starts-compared-when-stored-and-shown-in-the-forensics-report.md) — why `listener_check` gains
+  `start` and a snapshot says what its listener list holds (`inventory`, `tables`).
 - [0114](../decisions/0114-model-text-limits-measured-after-the-encoders-replacement.md) — why the Go model measures limits as the encoder writes them, invalid UTF-8 counted as its replacement.
 
 ## Not here

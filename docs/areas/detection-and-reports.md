@@ -403,8 +403,8 @@ connection snapshot gives no peak (`connections` null).
 ## Forensics report
 
 The **forensics report** summarizes the whole stored period: every outage incident with its victims and hypothesis, whether outages
-recur at a time of day or follow a backup, a boot or use of the Plesk panel, and which programs use the most memory permanently and
-transiently. It is computed on demand from the stored log lines, process snapshots and incidents, stores nothing, and is written as
+recur at a time of day or follow a backup, a boot or use of the Plesk panel, which programs use the most memory permanently and
+transiently, and which new listeners turned up, across an agent start or found by the agent. It is computed on demand from the stored log lines, process snapshots, incidents and listener comparisons, stores nothing, and is written as
 Markdown to standard output by `vandoxd report` (backend host area, *Command line and exit codes*). It lists the incidents as they are
 stored, so `vandoxd incidents` is run before it. The web UI shows the same report on the page `/report` and offers it as a Markdown download
 (*Report page* of the [Web UI](web-ui.md) area): both compose it from the same blocks as the command, so the texts, numbers and times are the same; the page
@@ -423,6 +423,10 @@ lists the outages 50 at a time, the command and the download list all of them.
   each outage. Stored incidents never overlap, so each page starts at the end of the previous incident's window; a page that does not
   lead past it is an error (`store: reading incidents: page did not advance`). When the second pass lists a different number of
   incidents than the first (a `vandoxd incidents` run in between), the notes say so and ask for a new run.
+- **The stored listener comparisons** (the derived tables `connection_marks` and `listener_comparisons`, [Storage](storage.md)), by three small
+  reads after the first pass over the incidents: the counts of the lowest 64 agent IDs, the latest 20 findings after an agent start and the
+  latest 20 findings of the agent. No connection snapshot is read or decoded by the report; the write path decodes the snapshots around an agent
+  start when it stores them (*New listeners*).
 
 ### Observed hours
 
@@ -484,6 +488,48 @@ summed RSS of the program's processes, which counts shared memory more than once
 At most **4,096** programs are tracked: a program first seen after that is not, and the notes give the number of its snapshot entries.
 Without a process snapshot both lists say unknown.
 
+### New listeners
+
+The agent reports a **new listener** by comparing a run's listener inventory with the previous run's, held in memory, so the first run after
+an agent start is a baseline and a listener that opened while the agent was stopped (an update, a crash, a reboot with a service that starts
+at boot) is never reported by the agent. The backend closes that gap when it stores the snapshots (record 0116) and shows the result, with
+the agent's own findings, in the section **New listeners**.
+
+- **Which snapshots are compared.** For each agent ID, the first connection snapshot after each agent start (`listener_check` `start`, the agent's
+  first run after it started or the machine rebooted) with the last one of the same agent before it. Both are picked by the record's `seq`, the
+  agent's persistent counter, which increases strictly across restarts and reboots, never by capture time, which is shown only (a clock can
+  step back after a reboot). No other pair is compared. Only a **usable** snapshot takes part: origin `agent`, source `connections`, an agent ID, and the fields
+  `listener_check`, `inventory` and `tables` of format 1.1 ([Wire format](wire-format.md)). Snapshots of another source, of a 1.0 agent and
+  imported ones are never a side of a comparison, never a finding and not counted.
+- **Outcomes** of a start (`ListenerComparer`, a pure function of the two snapshots with the agent's rules; the result is stored, *Storage*):
+  - `not compared: no earlier inventory`: no usable snapshot of the agent has a lower `seq` (a first installation, or the earlier part is not stored);
+  - `not compared: inventories not comparable`: a snapshot's `inventory` is `skipped` (a table line was skipped), the two read different
+    tables, or the stored earlier snapshot is missing or does not decode;
+  - `not compared: ports 1 to 1023 not complete`: either `inventory` is `cut`, so a listener on a port below 1024 may be missing from the list;
+  - `all ports`: both inventories are `all`: every listener is compared;
+  - `ports 1 to 1023 only`: either is `privileged` (the list was cut for size or at the inventory cap, but holds every listener on ports 1 to 1023):
+    only the listeners on ports below 1024 are compared.
+  A start that is not compared is always a finding and says why; it never reads as no new listener.
+- **A new listener** is a listener of the later snapshot whose protocol and local address and port are not in the earlier one (`IPEndPoint`
+  equality, the agent's key: `0.0.0.0` and `::ffff:0.0.0.0` are different addresses). A change of the owner is not new, an unconnected UDP socket on a
+  port from 32768 to 60999 is not listed (the agent's rule), and a listener without a local endpoint is ignored. A compared start without a new
+  listener writes no finding. A finding lists at most 64 new listeners in inventory order, each with protocol, local address and port and, when
+  known, the owner's PID and command, then `and <n> more`.
+- **The agent's own findings.** Every stored usable snapshot whose `listener_check` is `all` or `privileged` and that reports at least one new
+  listener is a finding **found by the agent**, with the agent's own list (the first 64 stored) and its omitted count; a `none` or `start`
+  snapshot reports none.
+- **Order independence.** The comparison of a start depends on the records only: it is computed again when a snapshot is stored below a stored start
+  (backfill sends the current data first), so the same records give the same section whatever order or batches they were stored in, and a
+  resent batch changes nothing. The findings are each listed once.
+- **Caps.** The head names at most the 64 lowest agent IDs; the findings after an agent start and the findings found by the agent are capped
+  **separately** at the latest 20 each (by capture time, then agent ID, then `seq`), so a server whose passive FTP produces an agent finding every minute cannot
+  push a restart finding out. Within the section the listed findings stand by agent ID, then `seq`. Notes name each cap hit and the number left out.
+
+Residuals: a listener that opened and closed while the agent was stopped is never seen; a start whose first snapshot is lost (a gap, a record the
+scheduler dropped) is not seen as a start, and its successor was compared by the agent with the lost inventory; findings are "latest" by capture
+time, so a clock that stepped back may keep an older finding instead of a newer one. No alert is raised by a finding (the rules are not built;
+backfilled data never alerts, *Live data and backfill*). A compromised agent can forge snapshots and so findings, like any record.
+
 ### Content and format
 
 The report has these sections, in this order. Headings and fixed words:
@@ -498,6 +544,7 @@ The report has these sections, in this order. Headings and fixed words:
 | memory | `## Memory consumers` | `## Speicherverbraucher` |
 | permanent | `### Permanent consumers` | `### Dauerhafte Verbraucher` |
 | transient | `### Transient consumers` | `### Vorübergehende Verbraucher` |
+| new listeners | `## New listeners` | `## Neue Listener` |
 | outages | `## Outages` | `## Ausfälle` |
 | one outage | `### Outage #<number> at <time>` | `### Ausfall #<number> am <time>` |
 | notes | `## Notes` | `## Hinweise` |
@@ -518,14 +565,30 @@ The report has these sections, in this order. Headings and fixed words:
   panel threshold in MiB.
 - **Memory consumers**: one list item per consumer: the program, its share of the snapshots, mean and peak RSS (permanent), peak RSS
   and its time (transient).
+- **New listeners** (after the memory consumers, before the outages): without any stored usable agent connection snapshot one paragraph, `No agent
+  connection snapshot stored: new listeners unknown.` (`Kein Verbindungs-Snapshot eines Agenten gespeichert: neue Listener unbekannt.`).
+  Otherwise one list item per agent (the head): the agent ID, the number of its connection snapshots with the first and last capture time, and its agent
+  starts: `<n> connection snapshots from <time> to <time>; <n> agent starts: <n> compared on all ports, <n> on ports 1 to 1023 only, <n> not compared`
+  (German: `<n> Verbindungs-Snapshots von <time> bis <time>; <n> Agentenstarts: <n> auf allen Ports verglichen, <n> nur auf Ports 1 bis 1023, <n> nicht
+  verglichen`). Then the findings after an agent start, then those found by the agent, each one list item with its listeners as items below it:
+  - `<time>, agent <id>, after an agent start (compared with <time>), all ports: <n> new` or `…, ports 1 to 1023 only: <n> new`
+    (`nach einem Agentenstart (verglichen mit <time>), alle Ports` / `nur Ports 1 bis 1023`, `<n> neu`);
+  - `<time>, agent <id>, after an agent start, not compared: <reason>` with the reason `no earlier inventory`, `ports 1 to 1023 not complete` or
+    `inventories not comparable` (`nicht verglichen: kein früheres Inventar`, `Ports 1 bis 1023 unvollständig`, `Inventare nicht vergleichbar`);
+  - `<time>, agent <id>, found by the agent, all ports: <n> new` (`vom Agenten gefunden`);
+  - a listener: `<proto> <address>:<port>, PID <pid> <command>` or `<proto> <address>:<port>, no owner` (`kein Besitzer`), the address in the
+    backend's numeric form (an IPv4-mapped address is written as .NET writes it); `and <n> more` (`und <n> weitere`) for the listeners left out.
+  When no finding holds a new listener the section ends with `No new listener found.` (`Kein neuer Listener gefunden.`), or, when a start was not
+  compared, `No new listener found among the compared inventories.` (`Kein neuer Listener unter den verglichenen Inventaren gefunden.`).
 - **Outages**: one section per stored incident, in the order of its window, with its number and first kill: the window; the kill
   count and the **victims** (the distinct victim commands of the kept kills in first-seen order with their count; a kill without a
   victim counts as unknown; the number of kills not kept, if any); the **hypothesis**: the growth candidates with their growth
   (unknown when the incident's growth is not known, "none" when known and empty), the largest consumers with their RSS (unknown
   when the incident had no snapshot), the three activities of the outage (the boot with its time), and the number of service events
   in the lookback as stored.
-- **Notes**: the rules in one sentence each, the limits that were hit, the number of program entries not tracked, and a different
-  number of incidents between the two passes.
+- **Notes**: the rules in one sentence each, the limits that were hit, the number of program entries not tracked, the caps of the new
+  listeners (`Only the latest 20 findings after an agent start are listed; <n> earlier ones are left out.`, the same for the findings of the agent, and
+  `Only the first 64 agent IDs are listed; <n> more are left out.`, with German texts) and a different number of incidents between the two passes.
 
 Formats, the same in both languages except the decimal separator:
 
@@ -542,7 +605,8 @@ separator, never the rules, the numbers or the external text.
 
 ### External text in the report
 
-Victim commands and program names (also of backup and panel programs) are external text (security area 12 of `.squad/project.md`).
+Victim commands and program names (also of backup and panel programs), and the owner commands of the listeners and the agent IDs of the new
+listeners section, are external text (security area 12 of `.squad/project.md`).
 The report writes them **only as Markdown code spans**, so no character of them is read as Markdown, HTML, an entity, a link or an
 autolink:
 
@@ -553,6 +617,10 @@ autolink:
 - the code span's fence is one backtick longer than the longest run of backticks in the escaped text, and the text is padded with
   one space on each side (which Markdown removes again); a text of spaces only has its spaces written as `\u0020`;
 - an empty text is written as `—`, not as a code span.
+
+The agent ID stands inside a sentence of the listener section (and in the head item), never in a heading or a table cell; the composer splits the
+text at the place of the agent ID and puts the code span between the parts. A command that holds Markdown, HTML, a backtick run or U+202E is
+therefore literal text on the page and in the download.
 
 The report's own words, numbers and times are not external. Backslash escapes do not apply inside a code span, so a literal
 backslash sequence in a name (the six characters `\u202e`) is rendered with its backslash doubled (`\\u202e`) and stays
@@ -567,13 +635,19 @@ distinguishable from the escape of a real U+202E (`\u202e`).
   plus a sorted copy of the panel memory of 8 MB for the threshold and, while the rules are evaluated, 4 MB of counts),
   **10,000 boots** (80 KB), **100,000 runs** of consecutive observed hours (about 1.6 MB), **4,096 programs** (their names, short
   texts of at most 1,024 bytes, about 8 MiB at most, plus about 80 bytes of counters each), and 24 hour counts.
-  The incidents add only counters. With all caps full the report keeps about 60 MB across the run, plus the one log page, process snapshot or incident it is reading.
+  The incidents add only counters. The listener section keeps the head of at most 64 agent IDs (under 64 KB) and at most 20 findings after an agent
+  start and 20 found by the agent, each with at most 64 listeners of a command of up to 1,024 UTF-8 bytes: a finding is at most about 140 KB, so the
+  section is at most about 5.5 MB in the run and in the document of the page's circuit. With all caps full the report keeps about 60 MB across the run, plus the 5.5 MB of the listener section, plus the one log page, process snapshot or incident it is reading.
 - **Over a cap** the statements that need the data are unknown: more snapshots make backup and panel unknown, more boots the boot,
   more runs of observed hours backup, boot and panel (their base rate). The time of day counts every observed hour and has no cap.
   The notes name the cap that was hit. An outage's own activity follows the same rule: past a cap of the data it needs, a yes stays
   a yes and a no becomes unknown.
 - **Time** grows with all stored lines, snapshots and incidents (the incidents are read twice, the base rate evaluates every observed
-  hour). The command runs off any request path.
+  hour). The command runs off any request path. The listener section adds three reads of the narrow derived tables and decodes no payload: over
+  a database with one more year of connection snapshots (one agent, 525,600 marks written through `SqliteStore.WriteBatchAsync` in batches of 1,440,
+  100 agent starts, 10,000 snapshots with agent findings, 762 MiB) the counts take 101 to 155 ms, the findings after an agent start 9 ms
+  (first read, then 1 to 2 ms) and the findings of the agent 3 ms (then 1 to 2 ms), and all three together 136 ms on their first run, on the
+  development host in a Debug build, far below the 5 seconds the section may add ([BENCHMARKS.md](../BENCHMARKS.md), *Listener reads*).
 - **Forged data shifts the result**: forged kills make forged outages (*Limits of incidents*), and forged boot lines, `pzstd` or
   `sw-engi*` processes shift the activities and their rates; forged process names can take the 4,096 program places first.
 - A cluster of outages that straddles an hour boundary is split between two hours of the day.
@@ -636,6 +710,9 @@ level of the mail services (process state, ports, logs), never individual mail a
   flag with English as default and its texts are tables in code.
 - [0115](../decisions/0115-connection-collector-proc-net-tables-owners-from-fd-regular-and-full-snapshots-bounded-listener-check.md) — why
   the agent's connection snapshots count sockets without an owner and why the connection peak is not filtered by source.
+- [0116](../decisions/0116-listeners-across-agent-starts-compared-when-stored-and-shown-in-the-forensics-report.md) — why the agent marks its
+  first snapshot after a start, the storage layer compares across the start when it stores the snapshots, and the report shows these findings with
+  the agent's own under separate caps.
 
 ## Not here
 
@@ -656,8 +733,8 @@ level of the mail services (process state, ports, logs), never individual mail a
 `Vandox.Core.Incidents` (`Incident` and its parts, `KillClusterer`, `KillCluster`, `IncidentBuilder`, `MemoryAnalysis`,
 `BackupPrograms`, `IncidentSignatures`, `IncidentLimits`, `IncidentJson`); `Vandox.Storage` (`IIncidentStore`, `IncidentRepository`,
 `SqliteStore`); `Vandox.Backend` (`Incidents/IncidentReconstructor`, `Incidents/RecordPager`, `Cli/IncidentsCommand`, `Cli/IncidentSummaryWriter`).
-`Vandox.Core.Reports` (`ForensicsAnalysis`, `ObservedHours`, `SnapshotSeries`, `ConsumerTracker`, `RecurrenceRules`, `PanelPrograms`,
+`Vandox.Core.Reports` (`ListenerComparer`, `ListenerComparison`, `ListenerOutcome`, `ListenerFinding`, `ListenerFindingKind`, `ListenerTally`, `ListenerReport` for the new listeners; `ForensicsAnalysis`, `ObservedHours`, `SnapshotSeries`, `ConsumerTracker`, `RecurrenceRules`, `PanelPrograms`,
 `ReportLimits`, `ProgramStatistics` and the result types) for the forensics report's analysis; `Vandox.Backend` (`Reports/ForensicsReporter`,
 `Reports/IReportWriter`, `Reports/ReportComposer` with the blocks `ReportBlock`, `ReportBlockKind` and `ReportPiece`, `Reports/MarkdownReportWriter`,
 `Reports/MarkdownText`, `Reports/ReportText`, `Cli/ReportCommand`) for reading the store and writing the Markdown; the web UI adds `Reports/ReportViewBuilder` and
-`ReportDocument` (the blocks of one page of outages), `ReportService` (one run at a time), `GatedIncidentStore` and the page and download described in the Web UI area.
+`ReportDocument` (the blocks of one page of outages), `ReportService` (one run at a time), `GatedIncidentStore` and `GatedListenerHistoryReader` and the page and download described in the Web UI area.
