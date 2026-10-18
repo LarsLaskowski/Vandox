@@ -368,7 +368,7 @@ public class ReportDownloadEndpointTests
     /// <returns>The service</returns>
     private static ReportService Service(IRecordReader records, IIncidentStore incidents)
     {
-        return new ReportService(records, incidents, BuiltInSignatures.Catalog, TimeSpan.FromHours(1), new FakeTimeProvider(_now));
+        return new ReportService(records, incidents, new ScriptedListenerHistoryReader(), BuiltInSignatures.Catalog, TimeSpan.FromHours(1), new FakeTimeProvider(_now));
     }
 
     /// <summary>

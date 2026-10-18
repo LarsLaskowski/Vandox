@@ -530,6 +530,101 @@ public sealed class ReportText
     /// </summary>
     public string IncidentsChangedNote { get; init; } = string.Empty;
 
+    /// <summary>
+    /// Gets the text: the heading of the new listeners section.
+    /// </summary>
+    public string NewListenersHeading { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets the text: the label of a comparison on all ports.
+    /// </summary>
+    public string ListenerAllPorts { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets the text: the label of a comparison on ports 1 to 1023 only.
+    /// </summary>
+    public string ListenerPrivilegedOnly { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets the text: the reason: no earlier inventory.
+    /// </summary>
+    public string ListenerNoEarlier { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets the text: the reason: the privileged inventory was incomplete.
+    /// </summary>
+    public string ListenerPrivilegedIncomplete { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets the text: the reason: the inventories are not comparable.
+    /// </summary>
+    public string ListenerNotComparable { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets the text: the line for the listeners left out of a finding.
+    /// </summary>
+    public string ListenerRest { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets the text: the line: no new listener found.
+    /// </summary>
+    public string NoNewListener { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets the text: the line: no new listener among the compared inventories.
+    /// </summary>
+    public string NoNewListenerCompared { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets the text: the line: no connection snapshots of any agent.
+    /// </summary>
+    public string NoAgentSnapshots { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets the text: the head line of an agent.
+    /// </summary>
+    public string ListenerAgentHead { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets the text: the template of a finding after an agent start.
+    /// </summary>
+    public string ListenerStartFinding { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets the text: the template of an agent start that was not compared.
+    /// </summary>
+    public string ListenerStartNotCompared { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets the text: the template of a finding by the agent.
+    /// </summary>
+    public string ListenerAgentFinding { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets the text: the template of one listener with its owner.
+    /// </summary>
+    public string ListenerEntry { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets the text: the template of one listener without an owner.
+    /// </summary>
+    public string ListenerEntryNoOwner { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets the text: the note: only the latest findings after an agent start are listed.
+    /// </summary>
+    public string CapStartFindingsNote { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets the text: the note: only the latest findings of the agent are listed.
+    /// </summary>
+    public string CapAgentFindingsNote { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets the text: the note: only the first agent IDs are listed.
+    /// </summary>
+    public string CapAgentsNote { get; init; } = string.Empty;
+
     #endregion // Properties
 
     #region Methods

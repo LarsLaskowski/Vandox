@@ -263,7 +263,7 @@ internal static class ServeCommand
     /// <returns>The service</returns>
     private static ReportService CreateReportService(SqliteStore store, BackendConfig config, WebReaderGate gate, TimeProvider clock)
     {
-        return new ReportService(new GatedRecordReader(store, gate), new GatedIncidentStore(store, gate), BuiltInSignatures.Catalog, config.Incidents.GetWindowBefore(), clock);
+        return new ReportService(new GatedRecordReader(store, gate), new GatedIncidentStore(store, gate), new GatedListenerHistoryReader(store, gate), BuiltInSignatures.Catalog, config.Incidents.GetWindowBefore(), clock);
     }
 
     /// <summary>

@@ -58,7 +58,7 @@ internal sealed class ReportPageHarness : IAsyncDisposable
         Navigation = new RecordingNavigationManager(uri);
         Clock = new FakeTimeProvider(new DateTimeOffset(2026, 10, 13, 12, 0, 0, TimeSpan.Zero));
         Logger = new ListLogger();
-        Service = new ReportService(records, incidents, BuiltInSignatures.Catalog, TimeSpan.FromHours(1), Clock);
+        Service = new ReportService(records, incidents, new ScriptedListenerHistoryReader(), BuiltInSignatures.Catalog, TimeSpan.FromHours(1), Clock);
 
         _services = new ServiceCollection().AddLogging(builder => builder.AddProvider(new ListLoggerProvider(Logger)))
                                            .AddSingleton(Service)

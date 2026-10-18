@@ -49,13 +49,15 @@ public sealed class ForensicsReporter
     /// </summary>
     /// <param name="records">The reader of stored records</param>
     /// <param name="incidents">The incident store</param>
+    /// <param name="listeners">The reader of the stored listener comparisons</param>
     /// <param name="catalog">The signature catalog</param>
     /// <param name="lookback">The lookback before an outage</param>
     /// <param name="clock">The clock that stamps the report</param>
-    public ForensicsReporter(IRecordReader records, IIncidentStore incidents, SignatureCatalog catalog, TimeSpan lookback, TimeProvider clock)
+    public ForensicsReporter(IRecordReader records, IIncidentStore incidents, IListenerHistoryReader listeners, SignatureCatalog catalog, TimeSpan lookback, TimeProvider clock)
     {
         ArgumentNullException.ThrowIfNull(records);
         ArgumentNullException.ThrowIfNull(incidents);
+        ArgumentNullException.ThrowIfNull(listeners);
         ArgumentNullException.ThrowIfNull(catalog);
         ArgumentNullException.ThrowIfNull(clock);
 

@@ -369,7 +369,7 @@ public class ForensicsReporterTests
     private async Task<(string Output, ReportResult Result)> RunAsync(IRecordReader records, IIncidentStore incidents, TimeSpan? lookback = null)
     {
         var output = new StringWriter();
-        var reporter = new ForensicsReporter(records, incidents, BuiltInSignatures.Catalog, lookback ?? TimeSpan.FromHours(1), new FakeTimeProvider(_now));
+        var reporter = new ForensicsReporter(records, incidents, new ScriptedListenerHistoryReader(), BuiltInSignatures.Catalog, lookback ?? TimeSpan.FromHours(1), new FakeTimeProvider(_now));
         var result = await reporter.RunAsync(new MarkdownReportWriter(output, ReportText.English), TestContext.CancellationToken);
 
         return (output.ToString().Replace("\r\n", "\n", StringComparison.Ordinal), result);
