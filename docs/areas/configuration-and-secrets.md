@@ -10,10 +10,11 @@ options and secrets do at run time is described in the area that owns the featur
 ## Configuration file
 
 - Each binary reads one YAML file: `/etc/vandox/agent.yaml` for the agent and `/etc/vandox/vandoxd.yaml` for the
-  backend (mounted into the container). The backend takes another path with `-config <path>`. The file is read once, at
-  start-up. The agent's loader exists, but the agent binary does not call it yet (it arrives with v0.2.0; see [Agent](agent.md)).
-- The file must be a regular file of at most 1 MiB; the type is checked before it is opened, so a FIFO cannot block
-  start-up. An empty file, a file with only comments, or a document that is just `---` or `~` means "defaults
+  backend (mounted into the container). Each binary takes another path with `-config <path>`. The file is read once, at
+  start-up (the agent's start-up is described in [Agent](agent.md), *Command line and start-up*).
+- The file must be a regular file of at most 1 MiB. It is opened without blocking and its type is checked on the
+  opened file, never only on the path before the open, so a FIFO or device named as the file, or swapped in while
+  it is opened, is refused without being read and cannot block start-up. An empty file, a file with only comments, or a document that is just `---` or `~` means "defaults
   only" (for the agent, whose `agent_id` and `backend.url` have no default, that is an error naming the missing key).
 - The file is **strict**. Only keys of the schema are accepted, and they are case-sensitive. These are errors:
   - an unknown key, a duplicate key, a key that is not a string;
@@ -23,7 +24,7 @@ options and secrets do at run time is described in the area that owns the featur
     `!!seq`), judged on the tag the parser resolved for the node and not on the source text, so tag re-mappings,
     verbatim tags, `!!set` and `!!omap` are rejected; a `!!null` tag on a value other than `""`, `~`, `null`,
     `Null` or `NULL` is rejected as well;
-  - a section with a non-mapping value; a leaf option with no value;
+  - a section with a non-mapping value; a leaf option or an element of a list with no value (the agent: a null element is refused, never dropped);
   - the backend also rejects nesting deeper than 64 levels.
 - A section key with a null value keeps the defaults of that section.
 - A string value must not contain characters of the Unicode categories Cc, Cf, Zl or Zp (control and format
@@ -42,6 +43,8 @@ Agent:
 | `backend.url` | none, required | URL with scheme `http` or `https`; a host that is an IP address or a name of letters, digits, `.` and `-` (checked after percent-decoding); an optional port from 1 to 65535; no user info, query, fragment or path other than `/` |
 | `spool.directory` | `/var/lib/vandox/spool` | absolute, clean path |
 | `log.level` | `info` | `debug`, `info`, `warn` or `error` |
+| `filesystem.mount_points` | `["/"]` | a list of at most 16 absolute, clean paths of at most 1,024 bytes each, every path listed once (see below) |
+| `processes.programs` | `[]` | a list of at most 64 rules, each a mapping of `program`, one of `command` and `cmdline_prefix`, and optionally `append_next_word` (see below) |
 
 Backend:
 
@@ -77,6 +80,37 @@ Backend:
   script, a second unit (`1h30m`), a missing unit (`60`) and any other unit (`1d`, `1s`) are rejected. The error reads
   `config: <file>:<line>: incidents.window_before: must be a whole number of minutes or hours from 1m to 24h, such as 30m or 1h`
   (and the same with `incidents.window_after`); it never contains the value.
+- `filesystem.mount_points` names the mount points whose use the agent records ([Agent](agent.md), *System metrics*). The list
+  replaces the default `["/"]`; an empty list `[]` records none and the agent does not run the file system collector. At most 16
+  entries, each an absolute, clean path (no trailing slash, no `.` or `..` element) of 1 to 1,024 bytes, no two equal; an element that
+  YAML would read as another type (`1`, `true`, `2026-01-01`) is the text it was written as and fails the rule as not absolute.
+  Anything else is refused with `config: <file>:<line>: filesystem.mount_points: must be a list of at most 16 absolute, clean paths of
+  at most 1024 bytes each (no trailing slash, no . or .. elements), each listed once`, never with the value. A null element (`~`,
+  `null`, `!!null` or an empty `-`) is refused with `has no value` and the line of the element: the YAML library would otherwise drop
+  it silently and an all-null list would turn into `[]` and switch the file system metrics off. A value is recorded only when it is a
+  mount point in the agent's own mount namespace; otherwise the agent logs that once and leaves it out.
+- `processes.programs` names the program a process belongs to ([Agent](agent.md), *Processes*). It is a list of at most 64 rules in
+  file order; the first rule that matches a process gives its program. Each rule is a mapping with `program` (required: 1 to 128
+  characters of `A-Z a-z 0-9 . _ : / @ + -`, starting with a letter or digit), exactly one of `command` (compared with the command
+  of the process as a whole) and `cmdline_prefix` (compared literally with the start of the command line), each 1 to 256 bytes
+  without characters of the categories Cc, Cf, Zl or Zp, and `append_next_word` (true or false, default false, only with
+  `cmdline_prefix`), which appends the word after the prefix as `<program>/<word>`. A rule is a literal comparison; there is no
+  pattern language. The strict decoder walks the list like a section for each element: an unknown or duplicate key, an anchor, an
+  alias or a custom tag inside an element, a null element and an element that is not a mapping are refused with the line of the
+  element or key and the key path `processes.programs[<index>]` (and `.<key>`). The other errors read
+  `config: <file>:<line>: <key>: <reason>`:
+
+  | Key | Reason |
+  | --- | ------ |
+  | `processes.programs` (more than 64 rules) | `must be a list of at most 64 rules` |
+  | `processes.programs[<i>].program` | `must be 1 to 128 characters of [A-Za-z0-9._:/@+-], starting with a letter or digit` |
+  | `processes.programs[<i>]` (neither or both of `command` and `cmdline_prefix`) | `must set exactly one of command and cmdline_prefix` |
+  | `processes.programs[<i>].command` or `.cmdline_prefix` (empty is "not set"; more than 256 bytes) | `must be 1 to 256 bytes` |
+  | `processes.programs[<i>].append_next_word` (without `cmdline_prefix`) | `needs cmdline_prefix` |
+  | `processes.programs[<i>]` (null element) | `has no value` |
+  | `processes.programs[<i>]` (element that is not a mapping) | `must be a section (a mapping of keys)` |
+
+  No error text contains the value of a rule.
 - A directory must be absolute and clean: no trailing slash and no empty, `.` or `..` element. The loader does not
   create it.
 - Plain `http` is allowed for `backend.url`, because the tailnet encrypts and authenticates the transport. Whether
@@ -113,7 +147,7 @@ Backend:
 - Setting both the variable and its `_FILE` form is an error, also when one of them is empty. The agent never
   receives the web or Telegram secrets: they are unknown variables there.
 - A `_FILE` path must be absolute and name a regular file (symbolic links are followed, so secret mounts work),
-  checked before it is opened. At most 4096 bytes plus a line ending are read; one trailing `\n` or `\r\n` is removed.
+  checked on the opened file as for the configuration file. At most 4096 bytes plus a line ending are read; one trailing `\n` or `\r\n` is removed.
 - A secret value has 1 to 4096 bytes of printable ASCII (`0x21` to `0x7E`). A BOM, spaces, other line endings and
   control characters are rejected instead of becoming part of the secret. A secret that needs other characters must
   be encoded, for example as base64. The agent token has at least 32 characters.
@@ -156,6 +190,7 @@ Backend:
 - [0050](../decisions/0050-secret-sources-rules-and-redaction.md) — why `*_FILE`, strict value rules and unknown `VANDOX_` variables.
 - [0078](../decisions/0078-configuration-and-secrets-in-the-backend-with-yamldotnet.md) — why the backend implements the same rules with YamlDotNet.
 - [0104](../decisions/0104-argon2id-password-hash-konscious-strict-phc-form-hash-password-command.md) and [0105](../decisions/0105-forwarded-headers-only-from-trusted-proxies-failed-logins-locked-per-client-and-capped.md) — why the hash form is checked on top of the secret rules and why `web.trusted_proxies` is a comma-separated string.
+- [0113](../decisions/0113-process-collector-pss-from-smaps-rollup-top-processes-full-snapshot-under-memory-pressure.md) — why the process grouping rules are a list of mappings of literal comparisons that the strict decoder checks.
 
 ## Not here
 

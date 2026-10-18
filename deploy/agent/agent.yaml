@@ -1,7 +1,7 @@
 # Configuration of vandox-agent. Default location: /etc/vandox/agent.yaml
 #
-# The agent is not part of v0.1.0: the binary does not read this file yet (it arrives with v0.2.0). The
-# rules below describe the loader that the agent will use.
+# The agent binary reads this file at start-up (-config <file> names another path). The rules below
+# describe the loader.
 #
 # The file is parsed strictly: an unknown key, a duplicate key, a second YAML document, an anchor, a
 # custom tag or an invalid value stops the agent at start-up, and the error names the file, the line and
@@ -33,3 +33,27 @@ spool:
 log:
   # Log level: debug, info, warn or error. Default: info
   level: info
+
+filesystem:
+  # Mount points whose size and inode use is recorded every minute: a list of at most 16 absolute,
+  # clean paths (no trailing slash, no . or .. elements) of at most 1024 bytes each, every path listed
+  # once. A path that is not a mount point of the agent is logged once and left out. An empty list [] turns
+  # the file system metrics off. Default: [/]
+  mount_points: [/]
+
+processes:
+  # Rules that name the program a process belongs to, tried in this order; the first match wins and a
+  # process that matches none is named by the first word of its command. At most 64 rules. Each rule has
+  # `program` (the name, 1 to 128 characters of A-Z a-z 0-9 . _ : / @ + -, starting with a letter or
+  # digit) and exactly one of `command` (the command of the process, compared as a whole) and
+  # `cmdline_prefix` (the start of its command line, compared literally; 1 to 256 bytes). With
+  # `append_next_word: true` (only with `cmdline_prefix`) the word after the prefix is appended to the
+  # program as `<program>/<word>`. The process collector reads the processes every minute; see
+  # deploy/agent/README.md for the right it needs to measure the proportional memory (PSS) of every
+  # process. Default: [] (no rules). A rule that sums the PHP-FPM pools of a Plesk server, for example:
+  #
+  #   programs:
+  #     - program: php-fpm
+  #       cmdline_prefix: "php-fpm: pool "
+  #       append_next_word: true
+  programs: []

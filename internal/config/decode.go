@@ -18,6 +18,8 @@ const (
 	parserReason     = "not valid YAML (syntax error or alias to an undefined anchor)"
 	secretHint       = "; secrets are read only from environment variables, never from this file"
 	maxShownKeyBytes = 31
+	reasonNoValue    = "has no value"
+	reasonWantPrefix = "invalid value, want "
 )
 
 // allowedTags are the resolved tags the decoder accepts. Everything else (custom tags, !!binary, !!set,
@@ -176,7 +178,46 @@ func (d *decoder) walkField(path string, k, v *yaml.Node, field reflect.Value) e
 	if field.Kind() == reflect.Struct {
 		return d.walkSection(path, k, v, field)
 	}
+	if field.Kind() == reflect.Slice && field.Type().Elem().Kind() == reflect.Struct {
+		return d.walkList(path, k, v, field)
+	}
 	return d.setLeaf(path, k, v, field)
+}
+
+// walkList handles the value v of the key k, a list of mappings that fills the slice of structs field.
+//
+// Each element is walked like a section under the path "<key>[<index>]"; the line of the key and of every element is
+// recorded. An element does not take defaults from the document, a null element and an element that is not a mapping are
+// refused with the element's line.
+func (d *decoder) walkList(path string, k, v *yaml.Node, field reflect.Value) error {
+	if isNull(v) {
+		return &KeyError{File: d.file, Line: k.Line, Key: path, Reason: reasonNoValue}
+	}
+	if v.Kind != yaml.SequenceNode {
+		return &KeyError{File: d.file, Line: k.Line, Key: path, Reason: reasonWantPrefix + describe(field.Type())}
+	}
+	d.lines[path] = k.Line
+	list := reflect.MakeSlice(field.Type(), 0, len(v.Content))
+	for i, e := range v.Content {
+		elemPath := path + "[" + strconv.Itoa(i) + "]"
+		if err := d.checkNode(elemPath, e); err != nil {
+			return err
+		}
+		if isNull(e) {
+			return &KeyError{File: d.file, Line: e.Line, Key: elemPath, Reason: reasonNoValue}
+		}
+		if e.Kind != yaml.MappingNode {
+			return &KeyError{File: d.file, Line: e.Line, Key: elemPath, Reason: "must be a section (a mapping of keys)"}
+		}
+		d.lines[elemPath] = e.Line
+		elem := reflect.New(field.Type().Elem()).Elem()
+		if err := d.walkMapping(elemPath, e, elem); err != nil {
+			return err
+		}
+		list = reflect.Append(list, elem)
+	}
+	field.Set(list)
+	return nil
 }
 
 // walkSection handles the value of a key that names a section. A null value keeps the defaults.
@@ -196,14 +237,14 @@ func (d *decoder) setLeaf(path string, k, v *yaml.Node, field reflect.Value) err
 		return &KeyError{File: d.file, Line: k.Line, Key: path, Reason: reason}
 	}
 	if isNull(v) {
-		return fail("has no value")
+		return fail(reasonNoValue)
 	}
 	if !leafKind(field.Type()) {
 		return fail("unsupported option type")
 	}
 	if field.Kind() == reflect.String {
 		if v.Kind != yaml.ScalarNode {
-			return fail("invalid value, want " + describe(field.Type()))
+			return fail(reasonWantPrefix + describe(field.Type()))
 		}
 		if !cleanString(v.Value) {
 			return fail("must not contain control, format or line-separating characters")
@@ -223,8 +264,11 @@ func (d *decoder) setOther(path string, k, v *yaml.Node, field reflect.Value) er
 	if err := d.checkTree(path, v); err != nil {
 		return err
 	}
+	if e := nullElement(v); e != nil {
+		return &KeyError{File: d.file, Line: e.Line, Key: path, Reason: reasonNoValue}
+	}
 	if v.Decode(field.Addr().Interface()) != nil {
-		return fail("invalid value, want " + describe(field.Type()))
+		return fail(reasonWantPrefix + describe(field.Type()))
 	}
 	if field.Kind() == reflect.Slice && field.Type().Elem().Kind() == reflect.String {
 		for i := 0; i < field.Len(); i++ {
@@ -234,6 +278,20 @@ func (d *decoder) setOther(path string, k, v *yaml.Node, field reflect.Value) er
 		}
 	}
 	d.lines[path] = k.Line
+	return nil
+}
+
+// nullElement returns the first null element of the sequence v, or nil. The decoder drops such an element
+// silently, so a list option would lose it without notice.
+func nullElement(v *yaml.Node) *yaml.Node {
+	if v.Kind != yaml.SequenceNode {
+		return nil
+	}
+	for _, e := range v.Content {
+		if isNull(e) {
+			return e
+		}
+	}
 	return nil
 }
 

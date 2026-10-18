@@ -3,6 +3,9 @@ package config
 import (
 	"net/netip"
 	"net/url"
+	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/LarsLaskowski/Vandox/internal/wire"
@@ -16,11 +19,13 @@ const (
 
 // Agent is the configuration of vandox-agent.
 type Agent struct {
-	AgentID string        `yaml:"agent_id"`
-	Backend BackendTarget `yaml:"backend"`
-	Spool   Spool         `yaml:"spool"`
-	Log     Log           `yaml:"log"`
-	Secrets AgentSecrets  `yaml:"-"`
+	AgentID    string        `yaml:"agent_id"`
+	Backend    BackendTarget `yaml:"backend"`
+	Spool      Spool         `yaml:"spool"`
+	Log        Log           `yaml:"log"`
+	Filesystem Filesystem    `yaml:"filesystem"`
+	Processes  Processes     `yaml:"processes"`
+	Secrets    AgentSecrets  `yaml:"-"`
 }
 
 // BackendTarget is where the agent sends its data.
@@ -38,6 +43,107 @@ type Log struct {
 	Level string `yaml:"level"`
 }
 
+// Filesystem configures the file system metrics.
+type Filesystem struct {
+	MountPoints []string `yaml:"mount_points"`
+}
+
+// Processes configures the process collector.
+type Processes struct {
+	Programs []ProgramRule `yaml:"programs"`
+}
+
+// ProgramRule names the program of the processes whose command and command line match.
+type ProgramRule struct {
+	Program        string `yaml:"program"`
+	Command        string `yaml:"command"`
+	CmdlinePrefix  string `yaml:"cmdline_prefix"`
+	AppendNextWord bool   `yaml:"append_next_word"`
+}
+
+// Bounds of processes.programs.
+const (
+	MaxProgramRules   = 64
+	MaxRuleMatchBytes = 256
+)
+
+// Reasons processes.programs is refused with; none of them quotes a value.
+const (
+	programRulesReason  = "must be a list of at most 64 rules"
+	programNameReason   = "must be 1 to 128 characters of [A-Za-z0-9._:/@+-], starting with a letter or digit"
+	programOneOfReason  = "must set exactly one of command and cmdline_prefix"
+	programLengthReason = "must be 1 to 256 bytes"
+	programWordReason   = "needs cmdline_prefix"
+)
+
+// maxProgramNameBytes is the longest program a rule names.
+const maxProgramNameBytes = 128
+
+// checkProgramRules checks the list of processes.programs.
+func checkProgramRules(file string, lines map[string]int, rules []ProgramRule) error {
+	if len(rules) > MaxProgramRules {
+		return keyError(file, lines, "processes.programs", programRulesReason)
+	}
+	for i := range rules {
+		if err := checkProgramRule(file, lines, "processes.programs["+strconv.Itoa(i)+"]", &rules[i]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// checkProgramRule checks the rule r, whose key path is path.
+func checkProgramRule(file string, lines map[string]int, path string, r *ProgramRule) error {
+	fail := func(key, reason string) error {
+		line := lines[key]
+		if line == 0 {
+			line = lines[path]
+		}
+		return &KeyError{File: file, Line: line, Key: key, Reason: reason}
+	}
+	if !validProgramName(r.Program) {
+		return fail(path+".program", programNameReason)
+	}
+	if (r.Command == "") == (r.CmdlinePrefix == "") {
+		return fail(path, programOneOfReason)
+	}
+	if len(r.Command) > MaxRuleMatchBytes {
+		return fail(path+".command", programLengthReason)
+	}
+	if len(r.CmdlinePrefix) > MaxRuleMatchBytes {
+		return fail(path+".cmdline_prefix", programLengthReason)
+	}
+	if r.AppendNextWord && r.CmdlinePrefix == "" {
+		return fail(path+".append_next_word", programWordReason)
+	}
+	return nil
+}
+
+// validProgramName reports whether s is 1 to 128 characters of [A-Za-z0-9._:/@+-], starting with a letter or digit.
+func validProgramName(s string) bool {
+	if len(s) < 1 || len(s) > maxProgramNameBytes {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		alnum := c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9'
+		if !alnum && (i == 0 || !strings.ContainsRune("._:/@+-", rune(c))) {
+			return false
+		}
+	}
+	return true
+}
+
+// mountPointsRule is the reason filesystem.mount_points is refused with; it does not quote the value.
+const mountPointsRule = "must be a list of at most 16 absolute, clean paths of at most 1024 bytes each " +
+	"(no trailing slash, no . or .. elements), each listed once"
+
+// Bounds of filesystem.mount_points.
+const (
+	MaxMountPoints     = 16
+	MaxMountPointBytes = 1024
+)
+
 // AgentSecrets holds the secrets of the agent.
 type AgentSecrets struct {
 	AgentToken Secret
@@ -48,12 +154,15 @@ func DefaultAgent() Agent {
 	return Agent{
 		Spool: Spool{Directory: "/var/lib/vandox/spool"},
 		Log:   Log{Level: "info"},
+
+		Filesystem: Filesystem{MountPoints: []string{"/"}},
 	}
 }
 
-// AgentKeys returns every option key path in file order: agent_id, backend.url, spool.directory, log.level.
+// AgentKeys returns every option key path in file order: agent_id, backend.url, spool.directory, log.level,
+// filesystem.mount_points, processes.programs.
 func AgentKeys() []string {
-	return []string{keyAgentID, keyBackendURL, "spool.directory", "log.level"}
+	return []string{keyAgentID, keyBackendURL, "spool.directory", "log.level", "filesystem.mount_points", "processes.programs"}
 }
 
 // LoadAgent reads the agent configuration file at path and the secrets from environ (in os.Environ form).
@@ -97,7 +206,26 @@ func (a *Agent) validate(file string, lines map[string]int) error {
 	if err := checkDirectory(file, lines, "spool.directory", a.Spool.Directory); err != nil {
 		return err
 	}
-	return checkLogLevel(file, lines, "log.level", a.Log.Level)
+	if err := checkLogLevel(file, lines, "log.level", a.Log.Level); err != nil {
+		return err
+	}
+	if err := checkMountPoints(file, lines, "filesystem.mount_points", a.Filesystem.MountPoints); err != nil {
+		return err
+	}
+	return checkProgramRules(file, lines, a.Processes.Programs)
+}
+
+// checkMountPoints checks the list of filesystem.mount_points.
+func checkMountPoints(file string, lines map[string]int, key string, values []string) error {
+	if len(values) > MaxMountPoints {
+		return keyError(file, lines, key, mountPointsRule)
+	}
+	for i, v := range values {
+		if len(v) < 1 || len(v) > MaxMountPointBytes || !filepath.IsAbs(v) || filepath.Clean(v) != v || slices.Contains(values[:i], v) {
+			return keyError(file, lines, key, mountPointsRule)
+		}
+	}
+	return nil
 }
 
 // urlRules are the rules of backend.url, in the order they are checked. Each returns the reason it is

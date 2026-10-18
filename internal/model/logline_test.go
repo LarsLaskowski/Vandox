@@ -97,3 +97,104 @@ func TestLogLine_Validate_EventIsCheckedAfterProgram(t *testing.T) {
 	l.Event = "bad event"
 	requireFieldError(t, l.Validate(), "program")
 }
+
+// invalidTextForm is one form of text that the wire encoder replaces: every byte that does not start a valid UTF-8 sequence becomes
+// the 3 bytes of U+FFFD. atEnd puts the form after the filler instead of before it.
+type invalidTextForm struct {
+	name    string
+	raw     string
+	counted int
+	atEnd   bool
+}
+
+// invalidTextForms lists the invalid forms with their raw bytes and the bytes they count (issue 270).
+func invalidTextForms() []invalidTextForm {
+	return []invalidTextForm{
+		{name: "stray continuation byte", raw: "\x80", counted: 3},
+		{name: "byte FF", raw: "\xff", counted: 3},
+		{name: "overlong 2-byte", raw: "\xc0\xaf", counted: 6},
+		{name: "overlong 3-byte", raw: "\xe0\x80\x80", counted: 9},
+		{name: "encoded surrogate", raw: "\xed\xa0\x80", counted: 9},
+		{name: "above U+10FFFF", raw: "\xf4\x90\x80\x80", counted: 12},
+		{name: "cut short before a letter", raw: "\xe2\x82", counted: 6},
+		{name: "cut short at the end", raw: "\xe2\x82", counted: 6, atEnd: true},
+		{name: "cut short 4-byte prefix before a letter", raw: "\xf0\x9f\x98", counted: 9},
+		{name: "cut short 4-byte prefix at the end", raw: "\xf0\x9f\x98", counted: 9, atEnd: true},
+	}
+}
+
+// textOfCountedLen returns the form with ASCII a filling it up to exactly counted bytes after the replacement.
+func textOfCountedLen(form invalidTextForm, counted int) string {
+	filler := strings.Repeat("a", counted-form.counted)
+	if form.atEnd {
+		return filler + form.raw
+	}
+	return form.raw + filler
+}
+
+func TestLogLine_Validate_InvalidUTF8CountsAsReplacement(t *testing.T) {
+	fields := []struct {
+		field string
+		limit int
+		set   func(l *model.LogLine, s string)
+	}{
+		{"message", model.MaxTextBytes, func(l *model.LogLine, s string) { l.Message = s }},
+		{"host", model.MaxShortTextBytes, func(l *model.LogLine, s string) { l.Host = s }},
+	}
+	for _, f := range fields {
+		for _, form := range invalidTextForms() {
+			t.Run(f.field+" "+form.name, func(t *testing.T) {
+				atLimit := textOfCountedLen(form, f.limit)
+				l := validLogLine()
+				f.set(l, atLimit)
+				requireValid(t, l)
+
+				over := textOfCountedLen(form, f.limit+1)
+				if len(over) >= f.limit {
+					t.Fatalf("raw length = %d, want below %d so that only the replacement exceeds the limit", len(over), f.limit)
+				}
+				l = validLogLine()
+				f.set(l, over)
+				fe := fieldErrorOf(t, l.Validate(), f.field)
+				if fe.Reason != "too long" {
+					t.Errorf("Validate() reason = %q, want %q", fe.Reason, "too long")
+				}
+			})
+		}
+	}
+}
+
+func TestLogLine_Validate_ValidMultiByteCountsItsOwnBytes(t *testing.T) {
+	texts := []struct {
+		name    string
+		text    string
+		counted int
+	}{
+		{"valid U+FFFD", "\xef\xbf\xbd", 3},
+		{"multi-byte characters", "é€😀", 9},
+	}
+	fields := []struct {
+		field string
+		limit int
+		set   func(l *model.LogLine, s string)
+	}{
+		{"message", model.MaxTextBytes, func(l *model.LogLine, s string) { l.Message = s }},
+		{"host", model.MaxShortTextBytes, func(l *model.LogLine, s string) { l.Host = s }},
+	}
+	for _, f := range fields {
+		for _, tc := range texts {
+			t.Run(f.field+" "+tc.name, func(t *testing.T) {
+				l := validLogLine()
+				f.set(l, tc.text+strings.Repeat("a", f.limit-tc.counted))
+				requireValid(t, l)
+
+				l = validLogLine()
+				f.set(l, tc.text+strings.Repeat("a", f.limit-tc.counted+1))
+				fe := fieldErrorOf(t, l.Validate(), f.field)
+				if fe.Reason != "too long" {
+					t.Errorf("Validate() reason = %q, want %q", fe.Reason, "too long")
+				}
+			})
+		}
+	}
+}

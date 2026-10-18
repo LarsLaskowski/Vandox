@@ -13,7 +13,7 @@ backend, written in .NET 10 with a Blazor web UI. Both implement the same data m
 
 | Binary | Runs on | Purpose |
 |---|---|---|
-| `vandox-agent` (Go) | the monitored Linux server | collects data and ships it to the backend (planned for v0.2.0; v0.1.0 ships the backend only) |
+| `vandox-agent` (Go) | the monitored Linux server | collects data and ships it to the backend (planned for v0.2.0; v0.1.0 ships the backend only); the runtime frame (configuration, collector scheduler, self-metrics, systemd notification) and the system, process and connection collectors exist; the other collectors and the sender do not yet |
 | `vandoxd` (.NET) | Docker container on any Docker host in the home network (NAS, mini PC, server) | backend with web UI |
 
 Both support `--version`, which prints version, commit and build date. `vandoxd` without arguments runs the
@@ -28,7 +28,7 @@ statistics* below, and `vandoxd report` writes the forensics report as Markdown,
 
 ```
 cmd/vandox-agent/   entry point of the agent (Go)
-internal/           the agent's Go packages: config, model, wire (batch encoder), cli, version
+internal/           the agent's Go packages: agent (start-up, logging, watchdog), scheduler, selfstats, sdnotify, config, model, wire (batch encoder), cli, version
 src/Vandox.Backend/ the backend vandoxd: host, command line, Blazor web UI
 src/Vandox.Core/    record model, wire decoder, configuration, safe file access, log parser framework, log signatures
 src/Vandox.Storage/ SQLite store: schema, migrations, batched writes, queries, log search and exploration
@@ -45,7 +45,7 @@ testdata/           fixtures for tests, shared by both languages (testdata/wire:
 
 ## Configuration
 
-Each binary reads one strict YAML file for its options (the agent from v0.2.0 on: its loader exists, but the agent binary of v0.1.0 does not call it yet). The secrets come only from the environment (or
+Each binary reads one strict YAML file for its options (the agent from v0.2.0 on: the agent binary of v0.1.0 does not call its loader, later versions read the file at start-up, `-config <file>` names another path). The secrets come only from the environment (or
 from files named by `*_FILE` variables), never from the file
 ([0032](docs/decisions/0032-secrets-only-from-environment-or-docker-secrets.md)).
 
@@ -66,6 +66,8 @@ the value.
 | `backend.url` | required | Base URL of the backend ingest endpoint: `http` or `https`, a host and an optional port, no user info, path or query. |
 | `spool.directory` | `/var/lib/vandox/spool` | Directory of the local spool, an absolute and clean path. |
 | `log.level` | `info` | `debug`, `info`, `warn` or `error`. |
+| `filesystem.mount_points` | `[/]` | Mount points whose size and inode use is recorded: a list of at most 16 absolute, clean paths of at most 1024 bytes each, every path listed once. A path that is not mounted is logged and left out; `[]` turns the file system metrics off. |
+| `processes.programs` | `[]` | Rules that name the program of a process, tried in order, at most 64, each a mapping with `program` (1 to 128 characters of `[A-Za-z0-9._:/@+-]`, starting with a letter or digit) and exactly one of `command` (the process command) and `cmdline_prefix` (a literal start of the command line), both 1 to 256 bytes; `append_next_word: true` (only with `cmdline_prefix`) appends the next word as `<program>/<word>`. Without a rule the program is the first word of the command, as in the legacy log. |
 
 **Backend options**
 
@@ -137,7 +139,7 @@ Releases are published from GitHub releases with `v<major>.<minor>.<patch>` tags
 
 **Agent.** The agent is not part of v0.1.0: collection, shipping and the ingest API arrive with v0.2.0. v0.1.0 is
 the forensics release and works from imported logs alone. A release also carries a `vandox-agent-linux-amd64` binary built
-from the current code; it has no function yet beyond `--version`, so there is nothing to install on the monitored server.
+from the current code; it starts with its configuration file and the agent token, schedules its own self-metrics and tells systemd that it is ready, but it collects nothing else and sends nothing yet, so there is nothing to install on the monitored server.
 
 **Backend.** Pull the image from Docker Hub, either by version or by the digest given in the release notes
 (`Docker image: networlddev/vandox:<X.Y.Z>@sha256:<digest>`):

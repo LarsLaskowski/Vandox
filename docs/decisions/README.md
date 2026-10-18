@@ -136,4 +136,10 @@ once in the [area document](../areas/README.md) of the record's area, and the re
 | 0107 | The incidents view reads bounded summaries and the window's own records; notes are rows per incident number that follow merges, saved by a form post with the antiforgery token; every time links to the logs of that moment | Accepted | 2026-10-14 |
 | 0108 | The report page renders the blocks the Markdown is written from, lists the outages in pages of 50 by a new run, takes the language from the address, and runs one report at a time under a deadline of 2 minutes; the Markdown is a GET download | Accepted | 2026-10-15 |
 | 0109 | Squad working records stay off main, and product PRs never change the squad | Accepted | 2026-10-17 |
+| 0110 | The agent's runtime frame: one runner per collector at a fixed rate, a gap for every missed sample, sd_notify by hand with a watchdog gated on the runners, journal logging on stderr | Accepted | 2026-10-17 |
+| 0111 | System metrics: three collectors read /proc, /sys, statfs and adjtimex; missing pressure data is logged once and never recorded as zero | Accepted | 2026-10-17 |
+| 0112 | gosec G115 as the local stand-in for CodeQL's integer-conversion query; enabled for the whole module, no exclusions | Accepted | 2026-10-17 |
+| 0113 | Process collector: PSS from smaps_rollup, top processes by memory and CPU with every program summed, a full snapshot under memory pressure that the system collector switches | Accepted | 2026-10-17 |
+| 0114 | The Go model measures text limits as the encoder writes them, invalid UTF-8 counted as its replacement | Accepted | 2026-10-18 |
+| [0115](0115-connection-collector-proc-net-tables-owners-from-fd-regular-and-full-snapshots-bounded-listener-check.md) | Connection collector: the /proc/net tables with owners from /proc/<pid>/fdinfo, regular and full snapshots in one record kind, a bounded new-listener check that favors privileged ports | Accepted | 2026-10-18 |
 <!-- project:end index -->

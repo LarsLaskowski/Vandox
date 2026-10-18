@@ -234,3 +234,119 @@ func TestConnectionSnapshot_Validate_Zone(t *testing.T) {
 		requireValid(t, p)
 	})
 }
+
+func validNewListeners() []model.Listener {
+	return []model.Listener{{Proto: model.ProtoTCP, Local: netip.MustParseAddrPort("0.0.0.0:23"), PID: 7, Command: "telnetd"}}
+}
+
+func TestConnectionSnapshot_Validate_NewFieldRules(t *testing.T) {
+	const (
+		completeAggregatesOnly       = "must be false for an aggregates-only snapshot"
+		completeAggregatesIncomplete = "must be false when aggregates are incomplete"
+		connectionsAggregatesOnly    = "must be empty in an aggregates-only snapshot"
+		checkNeeded                  = "must be all or privileged when new listeners are reported"
+	)
+	tests := []struct {
+		name   string
+		mutate func(p *model.ConnectionSnapshot)
+		field  string
+		reason string
+	}{
+		{"aggregates only and complete", func(p *model.ConnectionSnapshot) {
+			p.Connections, p.AggregatesOnly, p.Complete = nil, true, true
+		}, "complete", completeAggregatesOnly},
+		{"aggregates only with connections", func(p *model.ConnectionSnapshot) {
+			p.AggregatesOnly, p.Complete = true, false
+		}, "connections", connectionsAggregatesOnly},
+		{"aggregates incomplete and complete", func(p *model.ConnectionSnapshot) {
+			p.AggregatesIncomplete = true
+		}, "complete", completeAggregatesIncomplete},
+		{"listener check unknown", func(p *model.ConnectionSnapshot) { p.ListenerCheck = "bogus" }, "listener_check", "unknown value"},
+		{"listener check upper case", func(p *model.ConnectionSnapshot) { p.ListenerCheck = "ALL" }, "listener_check", "unknown value"},
+		{"new listeners without check", func(p *model.ConnectionSnapshot) {
+			p.NewListeners = validNewListeners()
+		}, "listener_check", checkNeeded},
+		{"new listeners with check none", func(p *model.ConnectionSnapshot) {
+			p.NewListeners, p.ListenerCheck = validNewListeners(), model.ListenerCheckNone
+		}, "listener_check", checkNeeded},
+		{"omitted count without check", func(p *model.ConnectionSnapshot) {
+			p.NewListenersOmitted = 1
+		}, "listener_check", checkNeeded},
+		{"omitted count with check none", func(p *model.ConnectionSnapshot) {
+			p.NewListenersOmitted, p.ListenerCheck = 1, model.ListenerCheckNone
+		}, "listener_check", checkNeeded},
+		{"too many new listeners", func(p *model.ConnectionSnapshot) {
+			p.ListenerCheck = model.ListenerCheckAll
+			p.NewListeners = repeat(model.Listener{Proto: model.ProtoTCP, Local: netip.MustParseAddrPort("0.0.0.0:80")}, model.MaxItems+1)
+		}, "new_listeners", "too many entries"},
+		{"new listener proto unknown", func(p *model.ConnectionSnapshot) {
+			p.ListenerCheck, p.NewListeners = model.ListenerCheckAll, validNewListeners()
+			p.NewListeners[0].Proto = "sctp"
+		}, "new_listeners[0].proto", "unknown value"},
+		{"new listener local invalid", func(p *model.ConnectionSnapshot) {
+			p.ListenerCheck, p.NewListeners = model.ListenerCheckAll, validNewListeners()
+			p.NewListeners[0].Local = netip.AddrPort{}
+		}, "new_listeners[0].local", "invalid address"},
+		{"new listener local zone", func(p *model.ConnectionSnapshot) {
+			p.ListenerCheck, p.NewListeners = model.ListenerCheckAll, validNewListeners()
+			p.NewListeners[0].Local = netip.AddrPortFrom(zoned(t, "fe80::1", "eth0"), 23)
+		}, "new_listeners[0].local", "zone not allowed"},
+		{"new listener pid negative", func(p *model.ConnectionSnapshot) {
+			p.ListenerCheck, p.NewListeners = model.ListenerCheckAll, validNewListeners()
+			p.NewListeners[0].PID = -1
+		}, "new_listeners[0].pid", "must not be negative"},
+		{"new listener command too long", func(p *model.ConnectionSnapshot) {
+			p.ListenerCheck, p.NewListeners = model.ListenerCheckAll, validNewListeners()
+			p.NewListeners[0].Command = strings.Repeat("c", model.MaxShortTextBytes+1)
+		}, "new_listeners[0].command", ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			p := validConnectionSnapshot()
+			tc.mutate(p)
+			fe := fieldErrorOf(t, p.Validate(), tc.field)
+			if tc.reason != "" && fe.Reason != tc.reason {
+				t.Errorf("Validate() reason = %q, want %q", fe.Reason, tc.reason)
+			}
+		})
+	}
+}
+
+func TestConnectionSnapshot_Validate_NewFields(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(p *model.ConnectionSnapshot)
+	}{
+		{"aggregates incomplete, not complete", func(p *model.ConnectionSnapshot) { p.Complete, p.AggregatesIncomplete = false, true }},
+		{"aggregates only without connections", func(p *model.ConnectionSnapshot) {
+			p.Complete, p.AggregatesOnly, p.Connections = false, true, nil
+		}},
+		{"listener check all", func(p *model.ConnectionSnapshot) { p.ListenerCheck = model.ListenerCheckAll }},
+		{"listener check privileged", func(p *model.ConnectionSnapshot) { p.ListenerCheck = model.ListenerCheckPrivileged }},
+		{"listener check none", func(p *model.ConnectionSnapshot) { p.ListenerCheck = model.ListenerCheckNone }},
+		{"new listeners with check all", func(p *model.ConnectionSnapshot) {
+			p.ListenerCheck, p.NewListeners, p.NewListenersOmitted = model.ListenerCheckAll, validNewListeners(), 3
+		}},
+		{"new listeners with check privileged", func(p *model.ConnectionSnapshot) {
+			p.ListenerCheck, p.NewListeners = model.ListenerCheckPrivileged, validNewListeners()
+		}},
+		{"omitted count with check privileged", func(p *model.ConnectionSnapshot) {
+			p.ListenerCheck, p.NewListenersOmitted = model.ListenerCheckPrivileged, 1
+		}},
+		{"new listeners at the limit", func(p *model.ConnectionSnapshot) {
+			p.ListenerCheck = model.ListenerCheckAll
+			p.NewListeners = repeat(model.Listener{Proto: model.ProtoTCP, Local: netip.MustParseAddrPort("0.0.0.0:80")}, model.MaxItems)
+		}},
+		{"every new field", func(p *model.ConnectionSnapshot) {
+			p.Complete, p.AggregatesOnly, p.AggregatesIncomplete, p.Connections = false, true, true, nil
+			p.ListenerCheck, p.NewListeners, p.NewListenersOmitted = model.ListenerCheckPrivileged, validNewListeners(), 2
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			p := validConnectionSnapshot()
+			tc.mutate(p)
+			requireValid(t, p)
+		})
+	}
+}

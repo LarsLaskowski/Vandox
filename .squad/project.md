@@ -9,7 +9,8 @@ and never overwrites it. A product PR updates it when the change makes an entry 
 
 ## Security areas
 
-A change that touches one of these is tier `security` (`.squad/routing.md`). Name the concrete types,
+A change that touches one of these lists it under *Security areas touched* in its plan, so Security reviews the
+plan (`.squad/routing.md`, *Tiers*, which also says when a change is tier `security`). Name the concrete types,
 files or endpoints.
 
 1. **Ingest authentication** (backend ingest API, not implemented yet): the agent token, request limits and
@@ -78,7 +79,8 @@ files or endpoints.
    credentials read that way may still lead to root through other services (password reuse, Plesk or
    MariaDB administration). `ProtectHome=yes` and `InaccessiblePaths=` (at least `/etc/shadow`,
    `/etc/gshadow`) are defence in depth against accidental reads only, not a limit on a compromised agent,
-   which bypasses them through `/proc/<pid>/root`. Records 0013, 0030.
+   which bypasses them through `/proc/<pid>/root`. The system call filter of the unit must allow `adjtimex`, which the `clock` collector calls
+with a zero `Timex` (mode 0, read-only; no capability needed), so the unit uses neither `ProtectClock=yes` nor an allow-list without it (#42). The process collector (`internal/procstats`) is the user of `CAP_SYS_PTRACE`: `smaps_rollup` of another user's process needs it and `CAP_DAC_READ_SEARCH` does not replace it (measured, record 0113); without it the collector records RSS and leaves PSS out, and `deploy/agent/README.md` lists the right. The connection collector (`internal/connstats`) is the second user of `CAP_SYS_PTRACE` and adds no right: it reads another user's `/proc/<pid>/fdinfo/<n>` with it alone (measured, record 0115), and not `/proc/<pid>/fd`, which needs `CAP_DAC_READ_SEARCH` (the right to read every file), which no collector uses. The agent's start-up probe of the socket mount (`internal/sockmount`) opens one Unix datagram socket, never bound, connected or sent on, and needs no right, but the unit's filters must allow `AF_UNIX` (`RestrictAddressFamilies=`), must not give the agent a network namespace of its own (`PrivateNetwork=`, `NetworkNamespacePath=`), must not set `ProcSubset=pid` and must leave `ProtectProc=` at `default`. Records 0013, 0030, 0111, 0113, 0115.
 7. **MariaDB monitoring user**: *Goal:* the agent connects over the local socket as `vandox-agent`,
    authenticated by `unix_socket`, with only the `PROCESS` privilege: no database password exists and no
    table data is readable; the agent issues read-only status queries only. Record 0013.
@@ -89,7 +91,8 @@ files or endpoints.
    time, the UI password through its hash function's comparison (`PasswordHash`, `CryptographicOperations.FixedTimeEquals`; the
    hash is checked at start-up and the password is never logged, echoed or stored). Implemented for the agent in `internal/config`
    (`readSecret`, `checkEnviron`, `Secret`) and for the backend in `src/Vandox.Core/Configuration`
-   (`SecretReader`, `Secret`, `BackendSecrets`). Records 0032, 0050, 0078, 0104.
+   (`SecretReader`, `Secret`, `BackendSecrets`). The running agent holds the token in `config.Agent` (`Secrets`) and never logs it: `internal/agent` `Run` passes
+   a logger only `agent_id`, the version and the errors of the loader and the notifier (`TestRun_DoesNotLogSecret`). Records 0032, 0050, 0078, 0104, 0110.
 9. **File writes and paths derived from external input** (log import, the agent's on-disk spool, database
    backups): *Goal:* no write outside the configured directories (no path traversal), the spool is
    size-bounded, files are created with restrictive permissions. The database file `vandox.db`
@@ -108,7 +111,11 @@ files or endpoints.
     `wire.Limits`; truncated or corrupt gzip is an error, record 0076); CLI arguments and configuration; later Telegram commands): *Goal:* malformed or hostile
     input yields an error or a skipped record, never a crash, an unbounded allocation or a hang. The
     configuration files are read by `internal/config` (`decodeStrict`, `readFile`; agent) and
-    `Vandox.Core.Configuration` (`StrictYamlDecoder`, `BackendConfigLoader`; backend). The log search text
+    `Vandox.Core.Configuration` (`StrictYamlDecoder`, `BackendConfigLoader`; backend). The agent's command line (`internal/cli` `Parse`: `-config` takes any
+    non-empty path, which the loader checks; a positional argument or an empty `-config` is a usage error) and the systemd variables it reads from the environment slice it
+    is given (`internal/sdnotify` `FromEnviron` and `WatchdogInterval`: ASCII digit guards, `NOTIFY_SOCKET` an absolute path or an abstract name within `sun_path`, `WATCHDOG_USEC`
+    at least 100 ms so a hostile value cannot make a busy loop, a variable set twice an error; `internal/agent` `journalStream`: `JOURNAL_STREAM` counts only as `<dev>:<ino>`
+    of stderr's own device and inode) never crash, hang or allocate without bound; `self/status` is read up to 64 KiB (`internal/selfstats`). The log search text
     (`SqliteStore` search, `FtsQuery`) reaches SQLite's FTS5 query parser and is reduced to quoted literal terms
     with bounded length and term count. Log files and archives reach the log import
     (`src/Vandox.Import`: `Scanner`, `FormatSniffer`, `ImportLimits`: entries, path length and batch size) and the
@@ -201,8 +208,8 @@ files or endpoints.
     store call), other keys are ignored, and the address is written only from the validated language (`ToQuery`, `ReportsView.PageHref`, `DownloadHref`, `FileName`); the `Content-Disposition`
     of the download carries only that fixed file name. Forged kill lines make forged incidents
     (a documented limitation, record 0096); forged boot lines, `pzstd` or `sw-engi*` processes shift the report's activities and rates, and forged process names can
-    take the 4,096 program places first (records 0100, 0101). Records 0048, 0049, 0066, 0069, 0076, 0078, 0079, 0084,
-    0085, 0086, 0088, 0091, 0092, 0093, 0094, 0095, 0096, 0097, 0100, 0101, 0102, 0106, 0108.
+    take the 4,096 program places first (records 0100, 0101). The agent's readers of `/proc` and `/sys` (`internal/sysstats`) bound every read before parsing: the first line of `stat` 4 KiB, `loadavg` 256 B, `meminfo` 16 KiB and 128 lines, `vmstat` 64 KiB, a pressure file 256 B, a block `stat` 1 KiB, `self/mountinfo` streamed line by line at 64 KiB per line; at most 16 disks and 16 mount points; every number is checked as 1 to 20 ASCII digits before conversion; the products of `statfs` counts are checked for 64-bit overflow with `bits.Mul64`; no error text holds file content or a configured path (a mount point is named by its index). `TestSysstats_ImportsOnlyAllowedPackages` holds the package to an allow-list of imports and of the `syscall` and `os` selectors it uses (no program, socket, cgo, `unsafe`, raw system call or `//go:` directive but `//go:build`). The option `filesystem.mount_points` is checked by `checkMountPoints` (`internal/config`), and `decode.go` refuses a null list element before decoding because the YAML library drops it silently. The process collector (`internal/procstats`) reads text any local user chooses (`comm`, command lines) and bounds every read before parsing: `stat` 4 KiB read whole and split at the last `)`, `status` 16 KiB with the lines `Uid:`, `VmRSS:` and `VmSwap:` read at most once each, `smaps_rollup` 4 KiB with `Rss:` and `Pss:` once each, `cmdline` 4 KiB read and cut to 1,024 bytes of valid UTF-8 while it is built (invalid bytes become U+FFFD), `/proc/stat` line by line at 1 MiB in total (a line over 64 KiB skipped), `/etc/passwd` 1 MiB with lines of 4 KiB and names cut to 256 bytes; `/proc` is listed in chunks of 256 entries, only canonical decimal PID directory names count, and a bounded max-heap keeps the 4,096 lowest PIDs; every number is 1 to 20 ASCII digits parsed into its target width, kB values times 1,024 are checked for overflow and sums saturate, `started_at` must be before the year 10000; every entry is validated and encoded alone and left out when it fails, so no user-chosen text can fail the sample, and a run over 4,096 maximal processes allocates at most 48 MiB (`TestProcesses_LargeSnapshotFitsTheLineLimit`). No error text holds file content, a `comm`, a command line or a user name. `TestProcstats_ImportsOnlyAllowedPackages` holds the package to an allow-list of imports (`os/user` is not allowed). The connection collector (`internal/connstats`) reads the kernel tables `/proc/net/{tcp,tcp6,udp,udp6}` and `/proc/<pid>/fdinfo/<n>` within bounds set before any decoding: a table line of 512 bytes (longer ones skipped), address fields of exactly 8 or 32 hex digits, a port of 4, a state of 2, an inode of 1 to 20 digits within 64 bits; an `fdinfo` file at most 256 bytes, its first four lines fixed keys with `mnt_id` of 1 to 10 digits and `ino` of 1 to 20; `/proc` listed in chunks of 256 with the lowest 4,096 PIDs scanned, 65,536 sockets tracked for owners, 4,096 entries per list, 4,096 remote addresses and at most 64 new listeners reported; no error text or log line holds table content, an address or process text. A descriptor counts as a socket only on the socket mount the agent learned from a socket of its own at its start (`internal/sockmount`: the probe reads its own `fdinfo`, checks that `ino:` equals the `fstat` inode, and any failure leaves every socket ownerless), so a file with a socket's inode number on another mount, however often duplicated, owns nothing, and the number of one process's descriptors changes no other process's owners. Stated residuals: the 32-bit inode counter wrap and the PID cap (record 0115). `TestConnstats_ImportsOnlyAllowedPackages` and `TestSockmount_ImportsOnlyAllowedPackages` pin imports and the `os` and `syscall` selectors. The decoder walks a list of mappings (`processes.programs`, `walkList`) with the same strictness as a section: unknown or duplicate keys, anchors, aliases, custom tags, null and non-mapping elements are refused with the element's line and index in the key path; `checkProgramRules` checks the rules (literal comparisons, no pattern language). Record 0113. Records 0048, 0049, 0066, 0069, 0076, 0078, 0079, 0084,
+    0085, 0086, 0088, 0091, 0092, 0093, 0094, 0095, 0096, 0097, 0100, 0101, 0102, 0106, 0108, 0110, 0111, 0113.
 11. **Outbound calls** (Telegram, external checks, the optional AI service of the nightly report, the
     agent's connection to the backend): *Goal:* every call has a timeout, goes only to its configured
     destination and leaves encrypted to a verified peer. The agent's only destination is the ingest port,
@@ -212,7 +219,8 @@ files or endpoints.
     result. Certificate verification is never switched off (no `InsecureSkipVerify`), and no secret is sent
     over an unencrypted connection. The image's health check (`HealthCheckCommand` in `src/Vandox.Backend/Cli`) calls only the
     configured web listener, on loopback for an unspecified host, with a 4 s timeout, no proxy, no redirects,
-    no credentials and no environment. Records 0006, 0008, 0010, 0012, 0017, 0023, 0059.
+    no credentials and no environment. Besides the ingest port the agent writes only to the local systemd notification socket named by `NOTIFY_SOCKET`
+    (`internal/sdnotify`: one unix datagram of the fixed states `READY=1`, `WATCHDOG=1` and `STOPPING=1`, a 1 s deadline per notification, no network). Records 0006, 0008, 0010, 0012, 0017, 0023, 0059, 0110.
 12. **Logging and display of external data** (log lines, process names and text derived from them, e.g. an
     AI-written report): *Goal:* they cannot inject into log output (control characters, newlines), into the
     web UI (HTML is escaped) or into Telegram messages (escaped for the parse mode used, or sent as plain
@@ -261,7 +269,10 @@ files or endpoints.
     private-use, unassigned and invalid characters as the escapes of `Terminal.Quote` (`\u202e`), a fence longer than any backtick run, padding spaces, an empty
     text as a dash; a code span keeps inline HTML, entities, links, autolinks and emphasis literal, no external text stands in a table or a heading, and the
     report's own labels, numbers and times come from `ReportText`; the `-lang` value in the usage error and an unknown flag name go through `Terminal.Quote`;
-    standard output is UTF-8 without a byte order mark (`Program`). Records 0072, 0081, 0095, 0096, 0100.
+    standard output is UTF-8 without a byte order mark (`Program`). The agent logs through `slog.TextHandler` on stderr (`internal/agent` `NewLogger`): values with control
+    characters are quoted and escaped, so a value cannot start a forged line; panic values and stacks of collectors are attributes, cut to 1 KiB and 4 KiB; the message and every
+    string, error or `fmt.Stringer` value are cut to 4 KiB and each line to 32 KiB, below journald's `LineMax=`, so no continuation can start with a forged `<N>` priority; the
+    configuration is never passed to a logger. The connection collector logs only fixed texts and counts (`socket owners partly unknown`, `socket lines not read`, `socket tables unavailable`, `socket owners unknown`): no process text and no address, and its `command` entries are the process collector's text to be escaped by whoever displays them, while the PID is the kernel's (`TestConnections_LogsHoldNoProcessTextOrAddress`). The process collector logs only counts and fixed texts: process names, command lines, user names and rule values are never logged by the agent, and its error texts name a file relative to `/proc` or `/etc` and a fixed reason (`TestProcesses_ErrorsAndLogsHoldNoProcessText`); the stored `command`, `cmdline`, `user` and `program` are text to be escaped by whoever displays them. Records 0072, 0081, 0095, 0096, 0100, 0110, 0113.
 13. **Release pipeline and published artifacts** (`.github/workflows/release.yml`,
     `.github/workflows/base-image-digests.yml`, `.github/scripts/`, `deploy/backend/Dockerfile`,
     `.dockerignore`, `dotnet-tools.json`, the GitHub environment `release`; the smoke script
@@ -309,7 +320,8 @@ Deliberate behavior that must not change without the Product Manager. Each one i
   cancelled, only abandoned; sources that take a context also get it); a hung source (`/proc`, `/sys`,
   D-Bus, journald, MariaDB) loses only its own sample, recorded as a gap, while the other collectors, the
   spool and the sender keep running; while a collector is still stuck it is not started again.
-  `docs/ARCHITECTURE.md` section *Components*; record 0029.
+  `docs/ARCHITECTURE.md` section *Components*; records 0029, 0110. Implemented by `internal/scheduler` (a runner goroutine and a worker goroutine per collector,
+  a gap for every timeout, skip, panic, error and late wake-up).
 - **Backfilled data never raises an alert by itself**: the backend classifies every record as live or
   backfilled from the data; alert rules run on live data only; backfill is stored and analyzed but never
   alerts. `docs/ARCHITECTURE.md` section *Offline behavior and backfill*; record 0022.
@@ -351,8 +363,8 @@ change with it.
 **A new or changed wire format field or record kind** touches (record 0075):
 - the Go model and encoder (`internal/model`, `internal/wire`) and the C# model and decoder
   (`src/Vandox.Core/Model`, `src/Vandox.Core/Wire`)
-- the golden batch `testdata/wire/all-kinds.jsonl` (regenerate with `VANDOX_UPDATE_GOLDEN=1 go test ./internal/wire`)
-  and both tests that read it (`internal/wire/golden_test.go`, `WireContractTests`)
+- the golden batches `testdata/wire/all-kinds.jsonl` and `testdata/wire/replaced-text.jsonl` (regenerate both with `VANDOX_UPDATE_GOLDEN=1 go test ./internal/wire`)
+  and both tests that read them (`internal/wire/golden_test.go`, `WireContractTests`)
 - `docs/areas/wire-format.md` and, for a version change, the major/minor rules (0043)
 
 **A new external API call or DTO** touches:
@@ -374,7 +386,8 @@ touches:
   `grep -l -i -E 'dependabot|workflow|dockerfile|compose|golangci|ci\.yml' docs/decisions/0*.md`. Among them: 0041 (base images
   pinned by digest through build arguments, no Dependabot `docker` entry, the weekly digest report in
   `base-image-digests.yml`), 0060 (the compose file, no Dependabot entry for it), 0037 (release workflow), 0047
-  (`gocognit` and its exclusions in `.golangci.yml`) and 0052 (image labels)
+  (`gocognit` and its exclusions in `.golangci.yml`), 0112 (`gosec` limited to G115 in `.golangci.yml`, no
+  exclusions) and 0052 (image labels)
 - a change that contradicts such a record is not merged as is: the record is edited (unreleased) or superseded
   (released) in the same pull request, or the change is dropped
 
@@ -388,8 +401,11 @@ double under this name and changes the status.
 
 | Surface | Test double |
 | ------- | ----------- |
-| `/proc` | collectors read through an `io/fs.FS` (production `os.DirFS("/proc")`; symlink targets such as `/proc/<pid>/fd/*` through `io/fs.ReadLinkFS` (Go 1.25 and later; implemented by `os.DirFS` and `fstest.MapFS`, the blocking wrapper must implement `fs.ReadLinkFS` (`ReadLink` and `Lstat`) as well)); tests use fixtures under `testdata/proc/` (via `os.DirFS`) or `fstest.MapFS`, plus a **blocking filesystem wrapper** whose reads block until the test releases them (in `t.Cleanup`), for 0029 |
-| `/sys` | same filesystem interface and blocking wrapper; fixtures under `testdata/sys/` |
+| `/proc` | collectors read through an `io/fs.FS` (production `os.DirFS("/proc")`; symlink targets such as `/proc/<pid>/fd/*` through `io/fs.ReadLinkFS` (Go 1.25 and later; implemented by `os.DirFS` and `fstest.MapFS`, the blocking wrapper must implement `fs.ReadLinkFS` (`ReadLink` and `Lstat`) as well)); tests use fixtures under `testdata/proc/` (via `os.DirFS`; `testdata/proc/self/status` is a real capture read by the self-metrics, implemented for `self/status`) or `fstest.MapFS` (the variants of that file are made in memory), plus a **blocking filesystem wrapper** whose reads block until the test releases them (in `t.Cleanup`), for 0029, and a wrapper whose open or read answers a given error such as `syscall.EOPNOTSUPP` (implemented in `internal/sysstats`: fixtures `testdata/proc/{stat,loadavg,meminfo,vmstat,pressure,self/mountinfo}`; and in `internal/procstats`: fixtures `testdata/proc/<pid>/{stat,status,cmdline,smaps_rollup}` captured from a Linux 6.18 kernel, `testdata/etc/passwd`, a per-file error wrapper (`faultFS`: a given error at open or at the first read of a named file, `.` for the listing, as `smaps_rollup` of a kernel thread answers `ESRCH`) and a wrapper that blocks the open of one file; and in `internal/connstats`, implemented: fixtures `testdata/proc/net/{tcp,tcp6,udp,udp6}` (the anonymized server capture) and `testdata/connections/sandbox/{tcp,udp,fdinfo/*}`, an `fstest.MapFS` built with PID directories and `fdinfo/<n>` files made from the captured samples with only `ino:` and `mnt_id:` changed, a `blockingFS` that blocks the open of one name, a `recordingFS` that lists the names opened, and generators of tables and descriptor sets for the cap tests; the socket mount is passed in `Sources.SocketMount`, so only `internal/sockmount`'s tests open a real socket, through `os.DirFS("/proc")`) |
+| `/sys` | same filesystem interface and blocking wrapper; fixtures under `testdata/sys/` (implemented: `testdata/sys/block`, `internal/sysstats`) |
+| `statfs` and `adjtimex` | the collectors take function values (`Sources.StatFS`, `Sources.Clock`; production `StatFS` and `ReadClock`, both read-only system calls); tests use fake functions with scripted results and errors per path, and variants that block until the test releases them (in `t.Cleanup`), for 0029 (implemented; `internal/sysstats`) |
+| systemd notification socket | a `unixgram` socket bound in `t.TempDir()` (or an abstract `@name`) that the test reads; it is local IPC, not network. The agent's watchdog loop is tested with a recording `notifier` (records state and time of every call, optional failure) (implemented; `internal/sdnotify`, `internal/agent`) |
+| collectors and sink (scheduler) | scripted collector (per-run results, errors and panics), hanging collector (blocks ignoring its context, released in `t.Cleanup`), recording sink (records every `Put` with its time, optional blocking `Put`), recording `slog.Handler` (implemented; `internal/scheduler`) |
 | systemd D-Bus | fake systemd reader (scripted unit states and errors, and a reader that blocks until its context is cancelled, for 0029) |
 | journald | fake journal reader (scripted entries, cursors and errors, and a reader that blocks until its context is cancelled, for 0029) |
 | MariaDB socket | fake MariaDB status source (status variables, process list, errors, and a source that hangs until its context is cancelled, for 0029) |
@@ -399,7 +415,7 @@ double under this name and changes the status.
 | Blazor components (C#) | `RecordingJsRuntime` (`IJSRuntime`: records identifier, arguments and token of every call in `RecordedJsCall` entries, hands out `RecordingJsObjectReference` instances for `import` (module) and `create` or `createStacked` (chart), and throws an exception scripted with `Fail(target, identifier, exception)`), `RecordingJsObjectReference` (`IJSObjectReference`: records its calls and its `DisposeAsync` in the call list of its runtime), `TestNavigationManager` (`NavigationManager` initialized with `http://localhost/`, for `NavLink` under `HtmlRenderer`; it records the navigations it is asked for in `Navigations` and does not navigate), `RecordingNavigationManager` (`NavigationManager` that starts at any address, records the targets of `NavigateTo` and applies them as the new address) and `FakeLogExplorer` (`ILogExplorer` with scripted results per method, copies of every query with its token, the highest number of calls in flight, a `Before` hook that can wait for a token or signal, and scripted failures; `LogPageHarness` wires it with the renderer, clock and logger for the page tests) (implemented), `IncidentPageHarness` (the same for the incident pages: a `FakeIncidentBrowser`, an `IncidentWindowReader` over a `ScriptedRecordReader`, clock, logger, recording script runtime and a fixed antiforgery token; static and interactive rendering, and a wait for a condition on the markup that the renderer signals after each render) (implemented) and `ComponentTestRenderer` (a `Renderer` subclass that renders a root component, runs `OnAfterRenderAsync`, re-renders it with new parameters, collects the exceptions the components hand to the renderer and waits for a condition after each render with `WaitUntilAsync`; no bUnit), all in `tests/Vandox.Backend.Tests`; static markup through `HtmlRenderer` as in `HomePageTests`; the web sources (`.razor`, scripts, style sheets) are checked by `WebSourceScanner` in `WebUiContentTests` (implemented); for the web login (all in `tests/Vandox.Backend.Tests`, implemented): `LoginTestClient` (an `HttpClient` for the web port of the running service, no automatic redirects and its own cookie jar that also sends `Secure` cookies over plain HTTP; reads the antiforgery token and `_handler` from the login form, posts the login form with optional extra headers, posts `/logout` with the token of the signed-in page, posts form and multipart bodies, copies cookies into a second client), `ScriptedPasswordVerifier` (`IPasswordVerifier`: accepts one password, counts calls, records overlapping calls and can block until released), `FixedAuthenticationStateProvider` (`AuthenticationStateProvider` returning a given principal), `FixedAntiforgeryStateProvider` (`AntiforgeryStateProvider` with one fixed token, for `<AntiforgeryToken />` under a plain renderer), `FixedAntiforgeryValidationFeature` (`IAntiforgeryValidationFeature` with a given result), `RecordingAuthenticationService` (`IAuthenticationService` that records sign-ins and sign-outs), `LoginServiceFixture` (a `LoginService` over a `ScriptedPasswordVerifier`, a `LoginThrottle`, a `FakeTimeProvider` and a `ListLogger`, with request contexts), `CountingTextReader` (a `TextReader` that counts the characters taken from it), `ReferenceVectors` (the argon2id vectors of `testdata/argon2/reference-argon2id.txt`); `BackendFixture` passes `VANDOX_WEB_PASSWORD_HASH` (the hash of `BackendFixture.Password` at the lowest accepted cost, a constant) when a caller gives no environment, can write the option `web.trusted_proxies`, starts the service with a given clock and reads the JSON log lines |
 | Telegram Bot API | fake Telegram client (records sent messages, returns scripted updates; no network) |
 | Tailscale network | none in code (0017: `vandoxd` embeds no Tailscale); the agent's sender is tested against a `net/http/httptest` server standing in for the ingest port; the ACL itself is deployment configuration, reviewed, not unit-tested |
-| time | Go: injectable clock (spool age, live/backfill classification, deadlines); C#: `TimeProvider` with `FakeTimeProvider` (`Microsoft.Extensions.TimeProvider.Testing`) |
+| time | Go: injectable clock (spool age, live/backfill classification, deadlines); the scheduler and the watchdog loop read the `time` package and are tested in `testing/synctest` bubbles (0062; implemented); C#: `TimeProvider` with `FakeTimeProvider` (`Microsoft.Extensions.TimeProvider.Testing`) |
 
 A double of an ASP.NET Core request or response stream behaves as Kestrel does: it refuses synchronous I/O, and
 a response stream starts the response on any flush, not only when a byte is written (`StartingResponseBody` is

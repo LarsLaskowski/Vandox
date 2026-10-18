@@ -1,0 +1,59 @@
+Name:	php-fpm: pool e
+Umask:	0022
+State:	S (sleeping)
+Tgid:	6514
+Ngid:	0
+Pid:	6514
+PPid:	6508
+TracerPid:	0
+Uid:	0	33	0	33
+Gid:	0	0	0	0
+FDSize:	64
+Groups:	 
+NStgid:	6514
+NSpid:	6514
+NSpgid:	6507
+NSsid:	6506
+Kthread:	0
+VmPeak:	   98160 kB
+VmSize:	   98160 kB
+VmLck:	       0 kB
+VmPin:	       0 kB
+VmHWM:	   89732 kB
+VmRSS:	   89732 kB
+RssAnon:	   88524 kB
+RssFile:	    1208 kB
+RssShmem:	       0 kB
+VmData:	   90272 kB
+VmStk:	     140 kB
+VmExe:	    1868 kB
+VmLib:	    2344 kB
+VmPTE:	     236 kB
+VmSwap:	       0 kB
+HugetlbPages:	       0 kB
+CoreDumping:	0
+THP_enabled:	1
+untag_mask:	0xffffffffffffffff
+Threads:	1
+SigQ:	0/64298
+SigPnd:	0000000000000000
+ShdPnd:	0000000000000000
+SigBlk:	0000000000000000
+SigIgn:	0000000000000080
+SigCgt:	0000000000000000
+CapInh:	0000000000000000
+CapPrm:	000001fffeffffff
+CapEff:	0000000000000000
+CapBnd:	000001fffeffffff
+CapAmb:	0000000000000000
+NoNewPrivs:	0
+Seccomp:	0
+Seccomp_filters:	0
+Speculation_Store_Bypass:	thread vulnerable
+SpeculationIndirectBranch:	conditional enabled
+Cpus_allowed:	f
+Cpus_allowed_list:	0-3
+Mems_allowed:	00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000001
+Mems_allowed_list:	0
+voluntary_ctxt_switches:	1
+nonvoluntary_ctxt_switches:	0

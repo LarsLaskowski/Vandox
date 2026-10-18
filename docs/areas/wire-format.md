@@ -5,8 +5,8 @@
 The format of the batches the agent sends to the backend, and the shared record model behind it: header, record kinds and their
 fields, limits, versioning, batch validation and the duties of the consumer. The rules hold for both implementations, whatever their
 language; names such as `MaxLineBytes` or `ErrLimitExceeded` are the identifiers of the Go agent and the C# decoder for the same
-rules (see *Implementation*). A golden batch with one record of every kind, `testdata/wire/all-kinds.jsonl`, is written by the
-Go encoder and decoded by the C# contract test, so the two sides cannot drift apart unnoticed; a shared fixture of decoder cases,
+rules (see *Implementation*). A golden batch with one record of every kind, `testdata/wire/all-kinds.jsonl`, and a second one, `testdata/wire/replaced-text.jsonl`, with texts at their limits that held
+invalid UTF-8 before encoding, are written by the Go encoder and decoded by the C# contract test, so the two sides cannot drift apart unnoticed; a shared fixture of decoder cases,
 `testdata/wire/decoder-cases.json`, is run by both decoders and pins the JSON-level rules below. How the backend stores the records
 is in [Storage](storage.md).
 
@@ -21,7 +21,7 @@ added by the backend and cannot be supplied by the agent.
 ## Header
 
 ```json
-{"format_major":1,"format_minor":0,"agent_id":"web-1","boot_id":"0b6f9b0c-2d1e-4c43-9a4e-7f1b2c3d4e5f","clock_offset_ns":-120000000,"mode":"live"}
+{"format_major":1,"format_minor":1,"agent_id":"web-1","boot_id":"0b6f9b0c-2d1e-4c43-9a4e-7f1b2c3d4e5f","clock_offset_ns":-120000000,"mode":"live"}
 ```
 
 | Field | Type | Rule |
@@ -59,7 +59,7 @@ persistent or use a new agent ID (#38, #40).
 | `kind` | one of the kinds below, exact lower-case match; an unknown kind rejects the batch |
 | `source` | name pattern (collector or parser, e.g. `proc.meminfo`, `journal`) |
 | `seq` | integer > 0, strictly increasing within the batch (gaps allowed; the backend detects them, #41); the backend stores at most 2^63 - 1 ([0063](../decisions/0063-storage-schema-records-table-typed-metric-and-log-tables-json-payloads.md)) |
-| `captured_at` | RFC 3339 in UTC, written with `Z`; the time the data describes (a log line: the time stamped in the line, else when it was read; a gap: when it was recorded); the backend stores instants from 1677-09-21 to 2262-04-11 (nanoseconds in an int64, 0063) |
+| `captured_at` | RFC 3339 in UTC, written with `Z`; the time the data describes (a log line: the time stamped in the line, else when it was read; a gap: when it was recorded, which its `to` may follow, see *`gap`*); the backend stores instants from 1677-09-21 to 2262-04-11 (nanoseconds in an int64, 0063) |
 | `data` | the payload object of the kind; required, not `null` |
 
 Records of origin `import` (log importer) and `backend` exist in the model but never on the wire: a batch with
@@ -84,7 +84,10 @@ one is invalid, and the decoder sets the origin of every decoded record to `agen
 - **Name pattern**: `^[A-Za-z0-9][A-Za-z0-9._:/@+-]*$`, 1 to 128 bytes (`MaxNameBytes`). Used for `source`,
   metric names and units, label keys, `gap.collector` and `log_line.event`.
 - **Short text** at most 1024 bytes (`MaxShortTextBytes`), **text** at most 16384 bytes (`MaxTextBytes`); lengths are in
-  UTF-8 bytes of the decoded string, no character restriction beyond *Text*.
+  UTF-8 bytes of the decoded string, no character restriction beyond *Text*. The Go model measures a record before encoding the same
+  way: a byte that does not start a valid UTF-8 sequence counts as the 3 bytes of its U+FFFD (a valid U+FFFD counts its own 3), for
+  names too, so a record `wire.CheckRecord` accepts never exceeds a limit at either decoder. See
+  [0114](../decisions/0114-model-text-limits-measured-after-the-encoders-replacement.md).
 - **Lists and maps** hold at most 4096 entries (`MaxItems`); metric labels at most 32 (`MaxLabels`).
 - **Times** are UTC (offset 0) and non-zero; optional times are checked only when present.
 - **Floats** are finite; percentages and rates are also >= 0.
@@ -123,6 +126,26 @@ produced it. Byte values are exact integers in a double (up to 2^53 exactly), co
 | `pressure_stall_microseconds_total` | `microseconds` | `resource`, `kind` | total stall time |
 | `vmstat_total` | — | `counter`: `pswpin`, `pswpout`, `pgmajfault`, `oom_kill` | the raw counter of `/proc/vmstat` |
 | `vmstat_per_second` | `per_second` | `counter` | (value − previous value) / seconds between two samples; only when the counter did not fall |
+| `disk_reads_total`, `disk_writes_total` | — | `device`: the disk's name in `/sys/block` | reads and writes completed |
+| `disk_read_bytes_total`, `disk_written_bytes_total` | `bytes` | `device` | sectors read and written, times 512 |
+| `disk_io_time_seconds_total` | `seconds` | `device` | time with I/O in flight |
+| `disk_reads_per_second`, `disk_writes_per_second` | `per_second` | `device` | rate of the counter between two samples, as for `vmstat_per_second` |
+| `disk_read_bytes_per_second`, `disk_written_bytes_per_second` | `bytes_per_second` | `device` | rate of the byte counter between two samples |
+| `disk_busy_percent` | `percent` | `device` | increase of the time with I/O in flight as a share of the time between two samples |
+| `filesystem_size_bytes`, `filesystem_used_bytes`, `filesystem_free_bytes`, `filesystem_available_bytes` | `bytes` | `mount`: the configured mount point | size, used, free and available to unprivileged users, from `statfs` |
+| `filesystem_inodes`, `filesystem_inodes_used`, `filesystem_inodes_free` | — | `mount` | inodes in total, used and free; left out when the file system reports 0 inodes |
+| `clock_synchronized` | — | — | 1 when the kernel's maximum clock error is below 16 seconds, else 0 |
+| `clock_max_error_seconds`, `clock_estimated_error_seconds` | `seconds` | — | the kernel's maximum and estimated clock error |
+| `clock_pll_offset_seconds` | `seconds` | — | the correction the kernel's phase-locked loop still has to apply; only while the loop is on |
+| `agent_rss_bytes` | `bytes` | — | resident memory of the agent itself (`VmRSS`, kB times 1,024) |
+| `agent_cpu_seconds_total` | `seconds` | — | user plus system CPU time the agent used since it started |
+| `agent_goroutines` | — | — | number of goroutines of the agent |
+| `agent_spool_bytes` | `bytes` | — | size of the agent's spool |
+| `agent_send_lag_seconds` | `seconds` | — | how far the agent's sending lags behind capture |
+
+The `agent_*` metrics are the agent's self-metrics ([Agent](agent.md), *Self-metrics*) and carry the source `agent`, as do the gaps
+the agent's scheduler records. The agent's system metrics (`load*`, `cpu_percent`, `mem_*`, `swap_*`, `meminfo*`, `pressure_*`,
+`vmstat_*`, `disk_*`, `filesystem_*`, `clock_*`) carry the source `system` ([Agent](agent.md), *System metrics*).
 
 ### `process_snapshot`
 
@@ -144,6 +167,27 @@ every socket; false after a reduction for size) and the lists `states` (`proto`,
 valid. `proto` is `tcp`, `tcp6`, `udp` or `udp6`; `state` is required for `tcp`/`tcp6` and optional for
 `udp`/`udp6`, from `ESTABLISHED SYN_SENT SYN_RECV FIN_WAIT1 FIN_WAIT2 TIME_WAIT CLOSE CLOSE_WAIT LAST_ACK
 LISTEN CLOSING NEW_SYN_RECV`; `count` >= 1; `pid` >= 0.
+
+Since format 1.1 five optional fields say what kind of snapshot it is and what its producer compared (all omitted when false, zero or
+absent):
+
+- `aggregates_only` (true): a **regular** snapshot of the connection collector: the aggregates (`states`, `processes`, `remotes`,
+  `listeners`) without `connections`. Requires `complete` false and no `connections`. Its `remotes` are the top 25 by count over the
+  addresses the producer counted (at most 4,096; a heavy address first seen after the cap is missing).
+- `aggregates_incomplete` (true): `states`, `listeners` or `processes` may not cover every socket the producer saw (a list cut, a table
+  line skipped, sockets without an owner beyond a cap, owners unknown). Requires `complete` false.
+- `listener_check` (`all`, `privileged`, `none`): the comparison of the listener inventory with the last successful run's that the producer
+  made for this snapshot: the whole inventory; only the listeners on ports 1 to 1023, because an inventory was cut at 4,096; or none.
+- `new_listeners` (listener entries, at most 4,096): the listeners the producer found new in the run, with the owner's `pid` and `command`
+  when known. Requires `listener_check` `all` or `privileged`.
+- `new_listeners_omitted` (>= 1): how many more new listeners were found than `new_listeners` holds. Requires `listener_check` `all` or
+  `privileged`.
+
+The absence of all five reads as a **full** snapshot with complete aggregates and no listener check, which is what an imported legacy snapshot
+and a 1.0 agent's snapshot are. The rules are checked in Go and C#; their field errors are `data.complete`: `must be false for an
+aggregates-only snapshot` and `must be false when aggregates are incomplete`; `data.connections`: `must be empty in an aggregates-only
+snapshot`; `data.listener_check`: one of `all`, `privileged`, `none`, and `must be all or privileged when new listeners are reported`. A
+JSON `null` of `listener_check` reads as absent (0089); the Go encoder never writes an empty `listener_check`.
 
 ### `service_state`
 
@@ -174,7 +218,7 @@ producer read; false for a configured subset or a reduction for size). When `ava
 it for imported records, relative to the import root or archive and with its rotation suffix), `host` (optional short
 text: the host that wrote the line, empty when unknown), `program` (short text), `pid` (>= 0), `priority` (optional, 0
 to 7), `message` (text, may be empty), `truncated` (the producer cut the message to 16384 bytes), `event` (optional name,
-see *Name pattern*: the event a producer recognized in the line, such as `mariadb.start`; empty for none). `host` and `event` are additive optional fields, so the wire version stays 1.0
+see *Name pattern*: the event a producer recognized in the line, such as `mariadb.start`; empty for none). `host` and `event` are additive optional fields, so the wire version stayed 1.0
 ([0084](../decisions/0084-log-line-record-gets-an-optional-host-field.md),
 [0088](../decisions/0088-mariadb-error-log-entries-by-content-and-lifecycle-events-in-log-line.md)). The Go encoder omits an
 empty `host` and an empty `event`; the C# decoder reads a line without them as empty.
@@ -185,7 +229,9 @@ empty `host` and an empty `event`; the C# decoder reads a line without them as e
 sequence_missing no_data unknown`), `collector` (name pattern, required for `collector_timeout`), `first_seq`
 and `last_seq` (both omitted or both > 0 with `first_seq <= last_seq`; both required for `spool_dropped` and
 `sequence_missing`). The causes `sequence_missing` and `no_data` are set by the backend and are rejected in
-agent records.
+agent records. `from` and `to` are not bound to the record's `captured_at`: a gap the agent records for a run it abandoned
+or skipped covers the sample's slot up to one interval after the due time, so its `to` lies after its
+`captured_at` ([Agent](agent.md), *Scheduling*).
 
 ## Producer mapping for connection endpoints
 
@@ -199,7 +245,10 @@ connection collector #33 and the legacy `lsof -ni` parser #20):
   table, never by a lookup on the host;
 - a socket whose address or port cannot be mapped is left out and reported (the importer counts it as a skipped line) and `complete` is set to false;
 - an unconnected socket without a remote endpoint (listening TCP, unconnected UDP) goes to `listeners`, never
-  to `connections`.
+  to `connections`;
+- the connection collector reads the kernel's tables `/proc/net/{tcp,tcp6,udp,udp6}`: each address word is a 32-bit number in the host's byte
+  order (one word for IPv4, four for IPv6), no zone is written, and an IPv4-mapped address in `tcp6`/`udp6` (`::ffff:a.b.c.d`) is kept as it
+  is, not unmapped, so `remotes` can hold one peer twice.
 
 ## Limits
 
@@ -243,7 +292,9 @@ so a header of any major that breaks one is `wire.ErrMalformed`, not `wire.ErrUn
 only through a record that supersedes 0090. It then reads the major before anything else and rejects any major it does not know with `wire.ErrUnsupportedVersion`, even
 if the rest of that header has an incompatible shape. A header that is not a JSON object or `null`, or whose major is not
 a JSON integer, is `wire.ErrMalformed`: the major is an integer in every version (0043). A minor change is additive: new optional fields and new kinds; a decoder ignores unknown
-keys at any depth and so accepts a newer minor of its major. An unknown record kind is rejected. Until the
+keys at any depth and so accepts a newer minor of its major. The current version is **1.1**: 1.1 added the five optional fields of
+`connection_snapshot` (`aggregates_only`, `aggregates_incomplete`, `listener_check`, `new_listeners`, `new_listeners_omitted`; record 0115);
+1.0 was released with v0.1.0. An unknown record kind is rejected. Until the
 upgrade rules are settled (#85), upgrade the backend before the agents.
 
 ## Batch rules and trust (0044)
@@ -333,7 +384,7 @@ Duties of the ingest API (#40, planned), which this package cannot take over. Th
 Decompressed content of a batch of three records (the real stream is gzip-compressed):
 
 ```
-{"format_major":1,"format_minor":0,"agent_id":"web-1","boot_id":"0b6f9b0c-2d1e-4c43-9a4e-7f1b2c3d4e5f","mode":"live"}
+{"format_major":1,"format_minor":1,"agent_id":"web-1","boot_id":"0b6f9b0c-2d1e-4c43-9a4e-7f1b2c3d4e5f","mode":"live"}
 {"kind":"metric","source":"proc.meminfo","seq":41,"captured_at":"2026-03-01T12:00:00Z","data":{"name":"mem_free_bytes","value":1048576,"unit":"bytes"}}
 {"kind":"service_state","source":"systemd","seq":42,"captured_at":"2026-03-01T12:00:00Z","data":{"unit":"mariadb.service","load_state":"loaded","active_state":"active","sub_state":"running","restarts":0}}
 {"kind":"gap","source":"agent","seq":43,"captured_at":"2026-03-01T12:00:05Z","data":{"from":"2026-03-01T11:58:00Z","to":"2026-03-01T12:00:00Z","cause":"collector_timeout","collector":"mariadb"}}
@@ -352,6 +403,9 @@ Decompressed content of a batch of three records (the real stream is gzip-compre
 - [0089](../decisions/0089-json-null-reads-as-an-absent-key-in-both-decoders.md) — why a JSON `null` reads as an absent key in both decoders.
 - [0090](../decisions/0090-wire-keys-matched-ignoring-ascii-case-duplicates-rejected-header-shape-malformed.md) — why both decoders check
   keys and nesting before binding, match keys ignoring ASCII case and report a misshapen header as malformed.
+- [0115](../decisions/0115-connection-collector-proc-net-tables-owners-from-fd-regular-and-full-snapshots-bounded-listener-check.md) — why a
+  regular and a full snapshot are one record kind with additive fields, and format 1.1.
+- [0114](../decisions/0114-model-text-limits-measured-after-the-encoders-replacement.md) — why the Go model measures limits as the encoder writes them, invalid UTF-8 counted as its replacement.
 
 ## Not here
 
@@ -362,8 +416,8 @@ Decompressed content of a batch of three records (the real stream is gzip-compre
 ## Implementation
 
 Agent (Go): `internal/model` (record types and validation) and `internal/wire` (header, encoder, streaming decoder with the line check
-in `decode.go`; golden test `internal/wire/golden_test.go`, `VANDOX_UPDATE_GOLDEN=1` rewrites the fixture; the shared decoder cases run in
+in `decode.go`; golden test `internal/wire/golden_test.go`, `VANDOX_UPDATE_GOLDEN=1` rewrites the fixtures `all-kinds.jsonl` and `replaced-text.jsonl`; the shared decoder cases run in
 `internal/wire/decode_test.go`). Backend (C#): `Vandox.Core.Model` and `Vandox.Core.Wire` (`BatchDecoder`, `WireLimits`, `WireKeyCheck` and
 `WireTextCheck` for the line check; `NullAsAbsentConverterFactory` with its two converters is the C# side of the null rule), `Vandox.Core.IO` (`StrictGzip`),
-contract test `WireContractTests` (golden batch and shared decoder cases).
+contract test `WireContractTests` (both golden batches and shared decoder cases).
 

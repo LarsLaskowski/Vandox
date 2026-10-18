@@ -2,10 +2,13 @@ package config
 
 import (
 	"errors"
+	"io"
 	"io/fs"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -26,6 +29,46 @@ func writeTemp(t *testing.T, content string) string {
 		t.Fatalf("os.WriteFile(%q) = %v, want nil", path, err)
 	}
 	return path
+}
+
+// makeFifo creates a FIFO without a writer or reader in a temporary directory and returns its path.
+func makeFifo(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "fifo")
+	if err := syscall.Mkfifo(path, 0o600); err != nil {
+		t.Fatalf("syscall.Mkfifo(%q) = %v, want nil", path, err)
+	}
+	return path
+}
+
+// makeSocket binds a Unix socket in a temporary directory and returns its path. The socket is closed with the test.
+func makeSocket(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "sock")
+	l, err := net.Listen("unix", path)
+	if err != nil {
+		t.Skipf("unix sockets not available: %v", err)
+	}
+	t.Cleanup(func() { _ = l.Close() })
+	return path
+}
+
+// openResult holds what openRegular returned.
+type openResult struct {
+	file *os.File
+	err  error
+}
+
+// openForTest calls openRegular(path) and closes a returned file with the test. A blocking open shows as a
+// test that hangs until the go test timeout.
+func openForTest(t *testing.T, path string) openResult {
+	t.Helper()
+	f, err := openRegular(path)
+	r := openResult{file: f, err: err}
+	if r.file != nil {
+		t.Cleanup(func() { _ = r.file.Close() })
+	}
+	return r
 }
 
 // requireKeyError fails the test unless err is a *KeyError with the given key and line.
@@ -111,6 +154,67 @@ func TestKeyError_Error(t *testing.T) {
 	}
 }
 
+func TestOpenRegular(t *testing.T) {
+	t.Run("regular file is opened", func(t *testing.T) {
+		path := writeTemp(t, "content")
+		r := openForTest(t, path)
+		if r.err != nil {
+			t.Fatalf("openRegular(%q) error = %v, want nil", path, r.err)
+		}
+		if r.file == nil {
+			t.Fatalf("openRegular(%q) file = nil, want an open file", path)
+		}
+		data, err := io.ReadAll(r.file)
+		if err != nil || string(data) != "content" {
+			t.Errorf("reading the opened file = %q, %v, want %q, nil", data, err, "content")
+		}
+	})
+
+	t.Run("FIFO without a writer is refused without blocking", func(t *testing.T) {
+		requireNotRegular(t, openForTest(t, makeFifo(t)), "FIFO")
+	})
+	t.Run("directory is refused", func(t *testing.T) {
+		requireNotRegular(t, openForTest(t, t.TempDir()), "directory")
+	})
+	t.Run("device file is refused", func(t *testing.T) {
+		requireNotRegular(t, openForTest(t, os.DevNull), "device file")
+	})
+
+	t.Run("Unix socket is refused without blocking", func(t *testing.T) {
+		requireOpenFails(t, openForTest(t, makeSocket(t)), syscall.ENXIO, nil)
+	})
+
+	t.Run("missing file", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "missing.yaml")
+		requireOpenFails(t, openForTest(t, path), fs.ErrNotExist, errNotRegular)
+	})
+}
+
+// requireOpenFails checks that r is a nil file whose error matches want and, when not is not nil, does not match not.
+func requireOpenFails(t *testing.T, r openResult, want, not error) {
+	t.Helper()
+	if r.file != nil {
+		t.Errorf("openRegular file = %v, want nil", r.file)
+	}
+	if !errors.Is(r.err, want) {
+		t.Errorf("openRegular error = %v, want errors.Is %v", r.err, want)
+	}
+	if not != nil && errors.Is(r.err, not) {
+		t.Errorf("openRegular error = %v, want it not to match %v", r.err, not)
+	}
+}
+
+// requireNotRegular checks that r is a nil file with errNotRegular.
+func requireNotRegular(t *testing.T, r openResult, kind string) {
+	t.Helper()
+	if r.file != nil {
+		t.Errorf("openRegular(%s) file = %v, want nil", kind, r.file)
+	}
+	if !errors.Is(r.err, errNotRegular) {
+		t.Errorf("openRegular(%s) error = %v, want errors.Is errNotRegular", kind, r.err)
+	}
+}
+
 func TestReadFile(t *testing.T) {
 	t.Run("regular file within the limit is returned", func(t *testing.T) {
 		path := writeTemp(t, "12345678")
@@ -138,6 +242,8 @@ func TestReadFile(t *testing.T) {
 		{"missing file", func(t *testing.T) string { return filepath.Join(t.TempDir(), "missing.yaml") }, fs.ErrNotExist},
 		{"directory", func(t *testing.T) string { return t.TempDir() }, nil},
 		{"device file", func(*testing.T) string { return os.DevNull }, nil},
+		{"FIFO", makeFifo, nil},
+		{"Unix socket", makeSocket, nil},
 		{"file larger than the limit", func(t *testing.T) string { return writeTemp(t, "123456789") }, nil},
 	}
 	for _, tt := range failures {
@@ -164,6 +270,15 @@ func requireReadFileFails(t *testing.T, path string, wantIs error) {
 	var ke *KeyError
 	if errors.As(err, &ke) {
 		t.Errorf("readFile(%q, 8) error is a *KeyError, want a plain file error", path)
+	}
+}
+
+func TestReadFileFIFOText(t *testing.T) {
+	path := makeFifo(t)
+	_, err := readFile(path, 8)
+	want := "config: " + path + ": not a regular file"
+	if err == nil || err.Error() != want {
+		t.Errorf("readFile(FIFO) error = %v, want %q", err, want)
 	}
 }
 

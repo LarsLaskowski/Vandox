@@ -483,7 +483,7 @@ public class BatchDecoderTests
         }
 
         // Assert
-        Assert.AreEqual(8, checkedLists, "lists in the golden batch");
+        Assert.AreEqual(13, checkedLists, "lists in the golden batch");
         Assert.IsEmpty(mismatches, string.Join("; ", mismatches));
     }
 
@@ -707,6 +707,7 @@ public class BatchDecoderTests
     [DataRow(RecordKind.ProcessSnapshot, """{"complete":true,"processes":[{"pid":1,"command":"c","ppid":null}]}""", """{"complete":true,"processes":[{"pid":1,"user":"","command":"c","cmdline":"","state":"","cpu_percent":0,"rss_bytes":0}]}""")]
     [DataRow(RecordKind.ConnectionSnapshot, """{"complete":true,"states":[{"proto":"udp","state":null,"count":1}]}""", """{"complete":true,"states":[{"proto":"udp","state":"","count":1}]}""")]
     [DataRow(RecordKind.ConnectionSnapshot, """{"complete":true,"listeners":[{"proto":"tcp","local":"1.2.3.4:1","command":null}]}""", """{"complete":true,"listeners":[{"proto":"tcp","local":"1.2.3.4:1","command":""}]}""")]
+    [DataRow(RecordKind.ConnectionSnapshot, """{"complete":true,"listener_check":null}""", """{"complete":true}""")]
     [DataRow(RecordKind.ServiceState, """{"unit":"nginx.service","load_state":"loaded","active_state":"active","sub_state":null,"active_enter_at":null,"restarts":null}""", """{"unit":"nginx.service","load_state":"loaded","active_state":"active","sub_state":"","restarts":0}""")]
     [DataRow(RecordKind.MariaDbStatus, """{"availability":"up","threads":[null],"complete":true}""", """{"availability":"up","threads":[{"id":0,"user":"","host":"","db":"","command":"","time_seconds":0,"state":"","info":""}],"complete":true}""")]
     [DataRow(RecordKind.MariaDbStatus, """{"availability":"up","variables":{"A":null},"complete":true}""", """{"availability":"up","variables":{"A":""},"complete":true}""")]
@@ -1777,16 +1778,19 @@ public class BatchDecoderTests
     }
 
     /// <summary>
-    /// Looks for a string, a list element or a map value that is a null reference below an object.
+    /// Looks for a string that is declared non-nullable, a list element or a map value that is a null reference below an object.
     /// </summary>
     /// <param name="value">The object</param>
     /// <param name="path">The path of the object</param>
     /// <returns>The path of the first null reference, or <c>null</c> when there is none</returns>
     private static string? FindNull(object value, string path)
     {
+        var context = new NullabilityInfoContext();
+
         foreach (var property in value.GetType().GetProperties(BindingFlags.Public | BindingFlags.Instance).Where(candidate => candidate.GetMethod is not null && candidate.GetIndexParameters().Length == 0))
         {
-            var found = FindNullIn(property.GetValue(value), property.PropertyType, $"{path}.{property.Name}");
+            var required = context.Create(property).ReadState != NullabilityState.Nullable;
+            var found = FindNullIn(property.GetValue(value), property.PropertyType, $"{path}.{property.Name}", required);
 
             if (found is not null)
             {
@@ -1803,24 +1807,25 @@ public class BatchDecoderTests
     /// <param name="child">The value</param>
     /// <param name="type">The declared type of the property</param>
     /// <param name="path">The path of the value</param>
+    /// <param name="required">A value indicating whether a string may not be a null reference, because it is declared non-nullable</param>
     /// <returns>The path of the first null reference, or <c>null</c> when there is none</returns>
-    private static string? FindNullIn(object? child, Type type, string path)
+    private static string? FindNullIn(object? child, Type type, string path, bool required)
     {
         switch (child)
         {
             case null:
                 {
-                    return type == typeof(string) ? path : null;
+                    return type == typeof(string) && required ? path : null;
                 }
 
             case IDictionary dictionary:
                 {
-                    return dictionary.Keys.Cast<object>().Select(key => dictionary[key] is { } entry ? FindNullIn(entry, entry.GetType(), $"{path}[{key}]") : $"{path}[{key}]").FirstOrDefault(found => found is not null);
+                    return dictionary.Keys.Cast<object>().Select(key => dictionary[key] is { } entry ? FindNullIn(entry, entry.GetType(), $"{path}[{key}]", true) : $"{path}[{key}]").FirstOrDefault(found => found is not null);
                 }
 
             case IList list:
                 {
-                    return Enumerable.Range(0, list.Count).Select(position => list[position] is { } element ? FindNullIn(element, element.GetType(), $"{path}[{position}]") : $"{path}[{position}]").FirstOrDefault(found => found is not null);
+                    return Enumerable.Range(0, list.Count).Select(position => list[position] is { } element ? FindNullIn(element, element.GetType(), $"{path}[{position}]", true) : $"{path}[{position}]").FirstOrDefault(found => found is not null);
                 }
 
             case string:

@@ -1,0 +1,116 @@
+{
+  "cases": [
+    {
+      "name": "path and arguments",
+      "cmdline": "/usr/sbin/apache2 -k start",
+      "fallback": "apache2",
+      "command": "apache2",
+      "program": "apache2"
+    },
+    {
+      "name": "php-fpm pool title",
+      "cmdline": "php-fpm: pool example.com",
+      "fallback": "php-fpm: pool e",
+      "command": "php-fpm",
+      "program": "php-fpm"
+    },
+    {
+      "name": "spamd child title",
+      "cmdline": "spamd child",
+      "fallback": "spamd child",
+      "command": "spamd",
+      "program": "spamd"
+    },
+    {
+      "name": "amavisd master title",
+      "cmdline": "amavisd (master)",
+      "fallback": "amavisd (master)",
+      "command": "amavisd",
+      "program": "amavisd"
+    },
+    {
+      "name": "bracketed kernel thread",
+      "cmdline": "[kthreadd]",
+      "fallback": "kthreadd",
+      "command": "kthreadd",
+      "program": "kthreadd"
+    },
+    {
+      "name": "empty command line with a long comm",
+      "cmdline": "",
+      "fallback": "kworker/u16:0-kvfree_rcu_reclaim",
+      "command": "kworker/u16:0-kvfree_rcu_reclaim",
+      "program": "kworker/u16:0-kvfree_rcu_reclaim"
+    },
+    {
+      "name": "empty command line and empty comm",
+      "cmdline": "",
+      "fallback": "(unnamed)",
+      "command": "(unnamed)",
+      "program": "(unnamed)"
+    },
+    {
+      "name": "root path",
+      "cmdline": "/",
+      "fallback": "x",
+      "command": "/",
+      "program": "/"
+    },
+    {
+      "name": "path ending in a slash",
+      "cmdline": "/usr/bin/",
+      "fallback": "x",
+      "command": "/usr/bin/",
+      "program": "/usr/bin/"
+    },
+    {
+      "name": "word with a trailing colon",
+      "cmdline": "a:",
+      "fallback": "x",
+      "command": "a",
+      "program": "a"
+    },
+    {
+      "name": "spaces only",
+      "cmdline": "   ",
+      "fallback": "x",
+      "command": "   ",
+      "program": "   "
+    },
+    {
+      "name": "empty brackets",
+      "cmdline": "[]",
+      "fallback": "x",
+      "command": "[]",
+      "program": "[]"
+    },
+    {
+      "name": "brackets with a space inside",
+      "cmdline": "[a b]",
+      "fallback": "x",
+      "command": "a b",
+      "program": "a"
+    },
+    {
+      "name": "sshd title with brackets inside",
+      "cmdline": "sshd: /usr/sbin/sshd -D [listener] 0 of 10-100 startups",
+      "fallback": "sshd",
+      "command": "sshd",
+      "program": "sshd"
+    },
+    {
+      "name": "colon only",
+      "cmdline": ":",
+      "fallback": "x",
+      "command": ":",
+      "program": ":"
+    },
+    {
+      "name": "command line with a line feed",
+      "cmdline": "/usr/bin/python3 -c \nimport time",
+      "fallback": "python3",
+      "command": "python3",
+      "program": "python3"
+    }
+  ]
+}

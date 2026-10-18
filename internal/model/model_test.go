@@ -341,3 +341,52 @@ func TestPayload_NilReceiver(t *testing.T) {
 		})
 	}
 }
+
+func TestValidName(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want bool
+	}{
+		{"agent", "agent", true},
+		{"dotted", "proc.meminfo", true},
+		{"single letter", "a", true},
+		{"128 bytes", strings.Repeat("a", 128), true},
+		{"empty", "", false},
+		{"129 bytes", strings.Repeat("a", 129), false},
+		{"leading dash", "-a", false},
+		{"leading dot", ".a", false},
+		{"space", "a b", false},
+		{"trailing newline", "a\n", false},
+		{"non-ASCII letter", "ä", false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := model.ValidName(tc.in); got != tc.want {
+				t.Errorf("ValidName(%q) = %v, want %v", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestMeta_Validate_NameLengthCountsInvalidBytesAsReplacement(t *testing.T) {
+	cases := []struct {
+		name   string
+		bytes  int
+		reason string
+	}{
+		{"43 bytes count 129", 43, "too long"},
+		{"42 bytes count 126", 42, "invalid characters"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := validMeta()
+			m.Source = strings.Repeat("\xff", tc.bytes)
+			fe := fieldErrorOf(t, m.Validate(), "source")
+			if fe.Reason != tc.reason {
+				t.Errorf("Validate() reason = %q, want %q", fe.Reason, tc.reason)
+			}
+		})
+	}
+}

@@ -10,7 +10,9 @@ This document describes the target architecture; as of now the binaries' `--vers
 `Vandox.Core.Configuration` for `vandoxd`), the backend service skeleton, the log import framework and the log signature catalog with its detector (`Vandox.Core.Signatures`; `vandoxd incidents` uses it, the running service does not apply it to live data yet), the log templates with their statistics and queries (`Vandox.Core.Templates`, `Vandox.Storage`), the logs view of the web UI (search, context, template list and chart; `Vandox.Backend`), the outage reconstruction (`vandoxd incidents`, `Vandox.Core.Incidents`), the forensics report as Markdown (`vandoxd report`, `Vandox.Core.Reports`) and as a page of the web UI with its Markdown download, the incidents view of the web UI (list, incident page with charts of the window, notes; `Vandox.Backend`) exist (`vandoxd import`, with the parsers for the journal export, the MariaDB error log, Dovecot's own log file, `syslog` and `kern.log`, the Plesk panel log, the nginx, `sw-cp-server` and Apache error logs and the legacy `top`/`lsof` monitoring log): `vandoxd` loads its configuration, opens and migrates its SQLite database (schema, batched writes, queries and log search
 exist as the storage layer; the service reads it through the logs and incidents views and the report page with its download and writes only the notes of incidents, `vandoxd import` writes through it), listens on the
 web and ingest ports, protects the web UI with a login (one password, server-side sessions, limits on failed sign-ins and the trust in a reverse proxy; `Vandox.Backend` `Security`), answers `/healthz` and shuts down gracefully, and ships as a container with a health
-check. Everything else described here — the agent, the ingest API, retention, alerting, Telegram, the nightly
+check. Of the agent, the runtime frame exists: `vandox-agent` loads its configuration, logs to the journal, runs its
+collectors under the scheduler (its self-metrics, the system metrics, the process and the connection snapshots) and notifies systemd; it drops what it collects until the spool exists.
+Everything else described here — the agent's collectors, spool and sender, the ingest API, retention, alerting, Telegram, the nightly
 report and remote actions — is planned and not implemented yet. The decisions behind it are recorded in
 [`docs/decisions/`](decisions/README.md); each section links the records it rests on. Vandox is an own
 project rather than an off-the-shelf stack ([0004](decisions/0004-own-project-instead-of-off-the-shelf-stack.md)).
@@ -32,7 +34,19 @@ way, and agents of the hosting provider are never disabled or changed
   an on-disk spool and sends them to the backend. It checks the state of the mail services, not individual
   mail accounts. Each collector runs in its own goroutine under a deadline and is abandoned when the
   deadline passes, so a hanging collector or database never blocks the agent; a missed sample is recorded
-  as a gap, and a collector that is still stuck is not started again.
+  as a gap, and a collector that is still stuck is not started again. The scheduler (`internal/scheduler`) runs every
+  collector at its own fixed rate, records a gap for every sample it misses (timeout, skip, panic, error, refused record,
+  late start) and offers a memory pressure mode with shorter intervals, which the system collector (`internal/sysstats`) switches
+  on low available memory or memory pressure stall and in which the process collector (`internal/procstats`) lists every process
+  instead of the top ones ([0113](decisions/0113-process-collector-pss-from-smaps-rollup-top-processes-full-snapshot-under-memory-pressure.md)),
+  and the connection collector (`internal/connstats`) reads the socket tables of `/proc/net` with their owners from `/proc/<pid>/fdinfo`,
+  records the counts and the listener inventory every run and every connection on its first run, under memory pressure and when a
+  new listener appears ([0115](decisions/0115-connection-collector-proc-net-tables-owners-from-fd-regular-and-full-snapshots-bounded-listener-check.md));
+  the agent records its own resource use as metrics
+  (`internal/selfstats`), and tells systemd that it is ready, alive (a watchdog fed only while every collector runner is on
+  time) and stopping (`internal/sdnotify`, `internal/agent`)
+  ([0110](decisions/0110-agent-runtime-frame-runner-per-collector-gaps-for-every-missed-sample-hand-written-sd-notify.md),
+  [0111](decisions/0111-system-metrics-three-collectors-from-proc-sys-statfs-and-adjtimex.md)).
 - `src/Vandox.Backend` — `vandoxd` (rules: [Backend host](areas/backend-host.md), [Web UI](areas/web-ui.md)), .NET 10 (ASP.NET Core with a Blazor Web App, Interactive Server render mode),
   one container on the backend host: ingest API, SQLite storage, analysis, rules, Telegram notifier, reports and
   web UI. Without arguments it runs the service; `-healthcheck` probes its `/healthz`; `vandoxd import <path>`
@@ -76,7 +90,7 @@ way, and agents of the hosting provider are never disabled or changed
   [0079](decisions/0079-log-parsing-and-import-in-the-backend-without-following-links.md)).
 - `internal/` — the agent's Go packages: data model and the versioned wire encoder (see
   [wire format](areas/wire-format.md)), version information, agent configuration loading (see
-  *Configuration*) and command-line handling (`internal/cli`). The model and the wire format exist twice, in Go
+  *Configuration*), command-line handling (`internal/cli`), start-up, logging and the watchdog loop (`internal/agent`), the collector scheduler (`internal/scheduler`), the self-metrics (`internal/selfstats`), the system metrics (`internal/sysstats`), the process collector (`internal/procstats`), the connection collector (`internal/connstats`) with the start-up probe of the socket mount (`internal/sockmount`) and the systemd notification (`internal/sdnotify`). The model and the wire format exist twice, in Go
   (producer) and in C# (consumer); a golden batch produced by the Go encoder and decoded by the C# decoder keeps
   them in step ([0075](decisions/0075-wire-contract-pinned-by-golden-fixtures.md)).
 
@@ -115,7 +129,9 @@ Records: [0004](decisions/0004-own-project-instead-of-off-the-shelf-stack.md),
 [0042](decisions/0042-wire-format-gzip-json-lines-standard-library.md),
 [0043](decisions/0043-wire-format-major-minor-versioning.md),
 [0044](decisions/0044-batch-validated-as-a-whole-agent-records-only.md),
-[0084](decisions/0084-log-line-record-gets-an-optional-host-field.md).
+[0084](decisions/0084-log-line-record-gets-an-optional-host-field.md),
+[0110](decisions/0110-agent-runtime-frame-runner-per-collector-gaps-for-every-missed-sample-hand-written-sd-notify.md),
+[0115](decisions/0115-connection-collector-proc-net-tables-owners-from-fd-regular-and-full-snapshots-bounded-listener-check.md).
 
 ## Data flow
 
@@ -352,7 +368,7 @@ Both binaries are configured through one strictly parsed YAML file each (`/etc/v
 `VANDOX_*` environment variables or `*_FILE` files. Each binary implements the rules in its own language:
 `internal/config` (Go) for the agent and `Vandox.Core.Configuration` (C#) for the backend
 ([0078](decisions/0078-configuration-and-secrets-in-the-backend-with-yamldotnet.md)). `vandoxd` loads its
-configuration at start-up; the agent will call `LoadAgent` with the agent feature. The rules, the options and the
+configuration at start-up, and so does the agent (`LoadAgent`). The rules, the options and the
 error behavior are in [Configuration and secrets](areas/configuration-and-secrets.md).
 
 ## Security model
@@ -433,22 +449,14 @@ Records: [0037](decisions/0037-releases-version-tag-plain-tooling-and-attested-a
 
 ## Development process
 
-This repository is developed with Claude Code: `AGENTS.md` holds the rules every AI coding agent reads
-(imported by `CLAUDE.md`, mirrored for GitHub Copilot in `.github/copilot-instructions.md`), the skills
-live under `.claude/skills/` and the squad roles under `.claude/agents/`. Every pull request is reviewed before it is opened by the read-only reviewer in `.claude/agents/squad-reviewer.md`
-— round 1 is a full review, every later round looks only at the delta, and only blocking findings earn
-another round, because a fresh full re-review of unchanged code always finds something new.
-
-The squad skills (`squad-issue`, `squad-spec`) wrap that review in a larger, bounded pipeline described in
-[`.squad/routing.md`](../.squad/routing.md): an Opus Lead plans, classifies the change into a tier (`docs`,
-`patch`, `trivial`, `standard`, `security`) that decides how much of the pipeline runs, and owns every decision;
-for `standard` and `security` plans that weigh options a Devil's Advocate challenges the plan once (no veto); on
-the `security` tier a Security member reviews the plan (in parallel with the challenge) and the diff, below it the Reviewer carries the security checklist; tests are
-written first and new/changed code is covered until the *Coverage gate* passes; the member that changed the files
-formats them and a Code Officer clears analyzer diagnostics *before* the review so the reviewed code is the merged code; and the review loop
-is one full pass plus at most two delta rounds; the pull request is approved by a checklist the orchestrating
-session runs, and the Lead is asked only for what is open. Every limit ends in a Lead decision, and only a
-decision the Lead cannot make reaches the human. The stack-specific commands live in
+This repository is developed with Claude Code: `AGENTS.md` holds the rules every AI coding agent reads, the
+skills live under `.claude/skills/` and the squad roles under `.claude/agents/`. Every pull request is reviewed
+before it is opened by the read-only reviewer in `.claude/agents/squad-reviewer.md`. The squad skills
+(`squad-issue`, `squad-spec`) wrap that review in a bounded pipeline described in
+[`.squad/routing.md`](../.squad/routing.md): a Lead plans, picks the tier that decides how much of the pipeline
+runs and owns every decision; a Devil's Advocate challenges a feature's spec and, when routing says so, the
+plan; Security reviews the plan when a security area is touched; tests come first, the gates run before the
+review, and every loop limit ends in a Lead decision — only one the Lead cannot make reaches the human. The stack's commands live in
 [`.squad/stack.md`](../.squad/stack.md), the project's guarantees and attack surface in
 [`.squad/project.md`](../.squad/project.md).
 

@@ -343,7 +343,12 @@ the same way; nothing alerts (*Live data and backfill*). The agent's `kernel_eve
   time, source and sample count.
 - The **connection peak** is the connection snapshot of the window with the most sockets (the sum of its state counts; a tie keeps
   the earliest), with its time, record ID, the number of snapshots and its three processes with the most sockets (summed per
-  command).
+  command). It is taken over the snapshots of **every source** in the window, regular and full alike (the state counts cover every
+  socket in both). The agent's snapshots (source `connections`) count sockets without an owner, such as `TIME_WAIT`, which `lsof -ni`
+  never listed, so when a window holds snapshots of the agent and of an imported legacy log, the agent's usually win the peak; the
+  peak names its record, so its source can be read there. This is accepted, not filtered
+  ([0115](../decisions/0115-connection-collector-proc-net-tables-owners-from-fd-regular-and-full-snapshots-bounded-listener-check.md)).
+  The *Connections* chart of the incident page shows the source of the earliest snapshot only ([Web UI](web-ui.md)).
 - **Templates**: the new templates of the window (source, program, template, first seen, count) and the template spikes of the
   window (source, program, template, hour, count, usual level), the first 20 of each. The spike query covers at most 744 hours from
   the start of the window.
@@ -629,6 +634,8 @@ level of the mail services (process state, ports, logs), never individual mail a
   permanent and transient consumers are defined.
 - [0102](../decisions/0102-report-language-from-a-flag-english-default-text-tables-in-code.md) — why the report's language is a
   flag with English as default and its texts are tables in code.
+- [0115](../decisions/0115-connection-collector-proc-net-tables-owners-from-fd-regular-and-full-snapshots-bounded-listener-check.md) — why
+  the agent's connection snapshots count sockets without an owner and why the connection peak is not filtered by source.
 
 ## Not here
 
