@@ -108,6 +108,24 @@ public sealed class ConnectionSnapshot : IPayload
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public uint NewListenersOmitted { get; set; }
 
+    /// <summary>
+    /// Gets or sets how much of the listener inventory the snapshot holds.
+    /// </summary>
+    [JsonPropertyName("inventory")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Inventory
+    {
+        get;
+        set => field = string.IsNullOrEmpty(value) ? null : value;
+    }
+
+    /// <summary>
+    /// Gets or sets the protocols of the tables the run read.
+    /// </summary>
+    [JsonPropertyName("tables")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<string>? Tables { get; set; }
+
     #endregion // Properties
 
     #region Methods
