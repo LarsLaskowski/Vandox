@@ -27,7 +27,7 @@ Feature: see [spec.md](spec.md) (Approved by Lead).
 | 8 | A socket descriptor can be in none of the four tables (Unix sockets, other namespaces) | `samples/sandbox/fd-of-capturing-process.txt` (`socket:[16078]`), `fdinfo/unix` | confirmed |
 | 9 | With `CAP_SYS_PTRACE` alone, another user's `fdinfo/` lists and its files read (`mnt_id`, `ino` = socket inode); `fd/` needs `CAP_DAC_READ_SEARCH` to list and both to read a link | Security's measurement (kernel 6.18.44, no Yama, UID 65534 against a root process), quoted in *Security review* B2 | confirmed |
 | 10 | With `CAP_SYS_PTRACE`, `hidepid=2` hides no process; without it other users' processes are invisible | Security's measurement (N1): scratch mount namespace, `proc` with `hidepid=2` | confirmed |
-| 20 | The `ino:` line exists in `fdinfo` from Linux 5.14 on; the server runs Ubuntu 22.04 (5.15 or a newer HWE kernel) | to verify: Dev, step 6, reads it in the kernel's `fs/proc/fd.c` history (or the Ubuntu 5.15 source) and names the version in the Agent area; the design fails closed (a file without `ino:` makes its process unreadable, E1); basis: kernel 6.18 shows it (fact 7) | unverified |
+| 20 | The `ino:` line exists in `fdinfo` from Linux 5.14 on; the server runs Ubuntu 22.04 (5.15 or a newer HWE kernel) | Dev's reading of upstream `fs/proc/fd.c` at v5.13 (no `ino:`) and v5.14/v5.15 (`ino:` after `mnt_id:`), step 6 (G2, e36088d); the design fails closed (E1) | confirmed |
 | 21 | Through `io/fs` over `os.DirFS` each open, read, close and `ReadDir` allocates a fixed small amount | DA's measurement, Go 1.27 | confirmed |
 | 22 | A run that returns after its deadline is turned into a gap and its records are dropped | `internal/scheduler/runner.go:203-206` (result received with `wctx.Err() == DeadlineExceeded`), `:207-213` (abandoned) | confirmed |
 | 11 | Kernel default local port range is 32768–60999; unprivileged ports start at 1024 | sandbox `/proc/sys/net/ipv4/ip_local_port_range` `32768 60999`, `ip_unprivileged_port_start` `1024` | confirmed |
@@ -41,7 +41,7 @@ Feature: see [spec.md](spec.md) (Approved by Lead).
 | 18 | A run over the sandbox's `/proc` takes milliseconds | to verify: Dev, step 6, `BenchmarkConnections_Collect`, figure and host into `docs/BENCHMARKS.md`; basis: not measured | unverified |
 | 24 | Every socket of any family (Unix datagram, TCP, UDP, netlink), in any mount, user or network namespace, has the same `mnt_id:` in `fdinfo`; a pipe's differs | Lead's measurement 2026-10-18, kernel 6.18.44: `mnt_id: 10` for all four families in the initial namespaces, after `unshare -m`, and as UID 65534 after `unshare -Urm` and `unshare -Urmn`; pipe `mnt_id: 16` | confirmed |
 | 25 | Mount IDs in `fdinfo` are global: a file on another namespace's mount shows that mount's own ID, not the socket mount's | Security's measurement (B3): a user-namespace tmpfs file showed `mnt_id: 76`, the host's `mountinfo` lists 23–48 | confirmed |
-| 26 | On the server's kernel (Ubuntu 22.04, 5.15 or HWE) every socket file is allocated on the one internal mount `sock_mnt` (`net/socket.c`, `sock_alloc_file`), which holds only sockets and no user can mount; socket inode numbers come from `get_next_ino()` (32 bits, shared with pipes and other pseudo files) | to verify: Dev, step 6, reads `net/socket.c` and `fs/inode.c` of the Ubuntu 5.15 source and names them in the Agent area; basis: facts 24–25 on 6.18; the design fails closed (a socket on another mount loses its owner, never gains a false one) | unverified |
+| 26 | On the server's kernel (Ubuntu 22.04, 5.15 or HWE) every socket file is allocated on the one internal mount `sock_mnt` (`net/socket.c`, `sock_alloc_file`), which holds only sockets and no user can mount; socket inode numbers come from `get_next_ino()` (32 bits, shared with pipes and other pseudo files) | Dev's reading of upstream v5.15 `net/socket.c` and `fs/inode.c`, step 6 (G2, e36088d); Ubuntu's 5.15 is built on it; facts 24–25 on 6.18 | confirmed |
 | 19 | Adding `testdata/proc/net/` does not disturb the existing `/proc` fixture tests (procstats lists `testdata/proc`; `net` is no canonical PID) | to verify: Tester, step 5, full `go test ./...` after copying the fixtures; basis: `procstats.go` `pidOfEntry` | unverified |
 
 ## Tests per criterion
@@ -58,7 +58,7 @@ Feature: see [spec.md](spec.md) (Approved by Lead).
 | AC4 | `TestProbe_ReturnsTheSocketMount` (equal to the `mnt_id:` of a `syscall.Socketpair` descriptor read through `os.DirFS("/proc")`, unequal to a pipe's) | `internal/sockmount/sockmount_test.go` |
 | AC4 | `TestConnections_OwnerlessSockets`, `TestConnections_InodeZeroLinesAreSeparateSockets` | `internal/connstats/connstats_test.go` |
 | AC5 | `TestConnections_UnreadableDescriptorsLogOnce`, `TestConnections_FdinfoWithoutInoIsUnreadable` (measurement: facts 9 and 10, Security's, recorded by the Dev), `TestConnections_UnknownSocketMountLeavesNoOwners` (no `fdinfo` opened, no owner, `aggregates_incomplete`, one warning over two runs) | `internal/connstats/connstats_test.go` |
-| AC5 | `TestProbe_UnreadableFdinfoFails`, `TestProbe_MalformedFdinfoFails`, `TestProbe_ClosesTheSocket` (entries of `/proc/self/fd` equal before and after, also on failure), `TestSockmount_ImportsOnlyAllowedPackages` | `internal/sockmount/sockmount_test.go` |
+| AC5 | `TestProbe_UnreadableFdinfoFails`, `TestProbe_MalformedFdinfoFails`, `TestProbe_InodeMismatchFails` (a well-formed `fdinfo` whose `ino:` is not the socket's: error, socket closed), `TestProbe_ClosesTheSocket` (entries of `/proc/self/fd` equal before and after, also on failure), `TestSockmount_ImportsOnlyAllowedPackages` | `internal/sockmount/sockmount_test.go` |
 | AC5 | `TestConnectionSources_ProbesOnlyWhenUnset` | `internal/agent/agent_test.go` |
 | AC6 | `TestConnections_MissingIPv6TablesLeaveProtocolsOut`, `TestConnections_AllTablesMissingFails`, `TestConnections_UnreadableLineLeftOut`, `TestConnections_TableReadErrorFails` | `internal/connstats/connstats_test.go` |
 | AC7 | `TestConnections_ManySocketsStayWithinCaps` (two sizes per axis, fact 17), `TestConnections_LargeRecordIsReduced`, `TestConnections_SocketsBeyondInodeCapUnattributed`, `TestConnections_ReusePortDuplicatesDoNotCutTheInventory`, `TestConnections_RemotesBeyondCapNotCounted` | `internal/connstats/connstats_test.go` |
@@ -153,9 +153,12 @@ New package `internal/connstats`, collector `connections`, source `connections`.
 9. **Agent and probe:** job `connections` after `processes` (60 s, pressure 15 s, timeout 10 s), `Options.Connections`;
    `connectionSources` fills `SocketMount` once at start, only when it is zero (tests pass the fixtures' `mnt_id: 10`), from
    `sockmount.Probe(os.DirFS("/proc"))`: `syscall.Socket(AF_UNIX, SOCK_DGRAM|SOCK_CLOEXEC, 0)` — never bound, connected or sent on —,
-   open `self/fdinfo/<fd>`, read at most 256 bytes, close file and socket on every path, return `connstats.ParseFdinfo(…).MountID`.
+   open `self/fdinfo/<fd>`, read at most 256 bytes, check that the parsed `ino:` equals `syscall.Fstat(fd).Ino` (else the error
+   `sockmount: self/fdinfo: inode mismatch`, failing closed; Security's note, Lead `decide` in step 6), close file and socket on every
+   path, return `connstats.ParseFdinfo(…).MountID`.
    Errors: `sockmount: socket: <errno>`, `sockmount: self/fdinfo: <os error>`, `sockmount: <fixed parse reason>`.
-   `TestSockmount_ImportsOnlyAllowedPackages` pins the `syscall` selectors (`Socket`, `Close`, `AF_UNIX`, `SOCK_DGRAM`, `SOCK_CLOEXEC`).
+   `TestSockmount_ImportsOnlyAllowedPackages` pins the `syscall` selectors (`Socket`, `Close`, `Fstat`, `Stat_t`, `AF_UNIX`, `SOCK_DGRAM`,
+   `SOCK_CLOEXEC`).
 
 ## Options considered
 
