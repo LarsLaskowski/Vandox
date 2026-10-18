@@ -1091,7 +1091,7 @@ const (
 
 // memRun is what one run held and allocated.
 type memRun struct {
-	live  float64 // heap in use at the start of the command lookups, less the heap before the run, after a collection
+	live  float64 // heap in use at PID 1's last descriptor read (the run's peak, the inode index and owner map alive), less the heap before the run, after a collection
 	alloc float64 // bytes allocated by the run
 	snap  *model.ConnectionSnapshot
 }
@@ -1110,13 +1110,13 @@ func lineSpec(i uint32) sockSpec {
 	}
 }
 
-// measureRun runs the collector once over g and measures the live data at the first command lookup, when every structure of the
-// run is still referenced, and the bytes the run allocated.
-func measureRun(t *testing.T, g *genFS) memRun {
+// measureRun runs the collector once over g and measures the live data when the collector opens hookName, the last fdinfo file it
+// reads for PID 1, when the inode index and the owner map are still referenced (the run's peak), and the bytes the run allocated.
+func measureRun(t *testing.T, g *genFS, hookName string) memRun {
 	t.Helper()
 
 	var before, mid, after runtime.MemStats
-	g.hookName = "1/stat"
+	g.hookName = hookName
 	g.hook = func() {
 		runtime.GC()
 		runtime.ReadMemStats(&mid)
@@ -1127,7 +1127,7 @@ func measureRun(t *testing.T, g *genFS) memRun {
 	_, snap := snapshotOf(t, c, runAt(0, false))
 	runtime.ReadMemStats(&after)
 	if !g.hooked {
-		t.Fatal("collector never opened 1/stat, want the command of the process that holds sockets looked up")
+		t.Fatalf("collector never opened %s, want the last descriptor of PID 1 read", hookName)
 	}
 	return memRun{live: float64(mid.HeapAlloc) - float64(before.HeapAlloc), alloc: float64(after.TotalAlloc) - float64(before.TotalAlloc), snap: snap}
 }
@@ -1140,7 +1140,7 @@ func measureTableLines(t *testing.T, n uint32) memRun {
 	w.clear()
 	w.process(1, "init", "/sbin/init\x00")
 	w.holdRange(1, 3, 10000000, 5)
-	return measureRun(t, &genFS{base: w, tables: map[string]*tableGen{"net/tcp": newTableGen(t, "tcp", n, lineSpec)}})
+	return measureRun(t, &genFS{base: w, tables: map[string]*tableGen{"net/tcp": newTableGen(t, "tcp", n, lineSpec)}}, "1/fdinfo/7")
 }
 
 // measureDescriptors runs over a table of 2,000 listeners and one process with n generated descriptors, half of them sockets of the table.
@@ -1152,7 +1152,8 @@ func measureDescriptors(t *testing.T, n uint32) memRun {
 	w.addListeners("0.0.0.0", 2000, 2000, 10000000)
 	w.process(1, "init", "/sbin/init\x00")
 	fds := &fdGen{dir: "1/fdinfo", count: n, inode: func(i uint32) uint64 { return 10000000 + uint64(i%4000) }}
-	return measureRun(t, &genFS{base: w, fds: fds})
+	// fdGen names the descriptors 3 to count+2 and the collector reads them all.
+	return measureRun(t, &genFS{base: w, fds: fds}, fds.dir+"/"+strconv.Itoa(2+int(n)))
 }
 
 // checkBounded checks that the live data did not grow from the small to the large run and that the garbage per extra unit stays small.
@@ -1275,9 +1276,34 @@ var allowedSelectors = map[string][]string{
 	"syscall": {},
 }
 
-// disallowedSelectors returns the uses in file of selectors of a restricted package that allowedSelectors does not list.
+// restrictedNames returns the local name of every import of file whose path is a key of allowedSelectors, and the violations for
+// dot imports of such a package; a blank import binds no name and is fine.
+func restrictedNames(name string, file *ast.File) (names map[string]string, violations []string) {
+	names = map[string]string{}
+	for _, imp := range file.Imports {
+		path, err := strconv.Unquote(imp.Path.Value)
+		if _, restricted := allowedSelectors[path]; err != nil || restricted == false {
+			continue
+		}
+		local := path[strings.LastIndex(path, "/")+1:]
+		if imp.Name != nil {
+			local = imp.Name.Name
+		}
+		switch local {
+		case "_":
+		case ".":
+			violations = append(violations, name+": dot import of "+path+" is not allowed")
+		default:
+			names[local] = path
+		}
+	}
+	return names, violations
+}
+
+// disallowedSelectors returns the uses in file of selectors of a restricted package, under whatever local name it is imported, that
+// allowedSelectors does not list, and the dot imports of a restricted package.
 func disallowedSelectors(name string, file *ast.File) []string {
-	var violations []string
+	names, violations := restrictedNames(name, file)
 	ast.Inspect(file, func(n ast.Node) bool {
 		sel, ok := n.(*ast.SelectorExpr)
 		if !ok {
@@ -1287,8 +1313,8 @@ func disallowedSelectors(name string, file *ast.File) []string {
 		if !ok {
 			return true
 		}
-		allowed, restricted := allowedSelectors[id.Name]
-		if restricted && !slices.Contains(allowed, sel.Sel.Name) {
+		path, bound := names[id.Name]
+		if bound && id.Obj == nil && slices.Contains(allowedSelectors[path], sel.Sel.Name) == false {
 			violations = append(violations, name+": "+id.Name+"."+sel.Sel.Name+" is not allowed")
 		}
 		return true

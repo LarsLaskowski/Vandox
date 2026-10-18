@@ -437,11 +437,15 @@ and info `socket owners known again`; warning `socket owners unknown` (above). T
 
 **Failures and rights.** The sample fails (a gap) when no table exists, a table cannot be read, `/proc` cannot be listed or the run's context ends.
 It succeeds when a process or a descriptor cannot be read: the first `EACCES`, `EPERM` or other error on a process, or an `fdinfo` that does not
-have the four-line shape (before Linux 5.14 there is no `ino:` line; upstream `fs/proc/fd.c` at v5.13 has none, at v5.14 and v5.15 it follows
-`mnt_id:`; the server runs Ubuntu 22.04 with 5.15 or a newer kernel), counts that process unreadable once, stops its scan, and the sockets it
-held have no owner. Without `CAP_SYS_PTRACE` that is every process of another user, so the warning is logged. With `hidepid=1` and without the
+have the four-line shape (a file changed or damaged after the start-up probe succeeded), counts that process unreadable once, stops its scan,
+and the sockets it held have no owner. Without `CAP_SYS_PTRACE` that is every process of another user, so the warning is logged. With `hidepid=1` and without the
 capability the same. With `hidepid=2` and without the capability other users' processes are **not listed at all**, so their sockets have no owner
 **without a warning** (stated residual). With the capability `hidepid=2` hides nothing (measured, *Rights*).
+
+**Kernel before 5.14.** Its `fdinfo` has no `ino:` line (upstream `fs/proc/fd.c` at v5.13 has none, at v5.14 and v5.15 it follows `mnt_id:`), so
+the start-up probe already fails (`sockmount: not in the expected format`), no `fdinfo` of any process is scanned and the collector logs
+`socket owners unknown` (above), not `socket owners partly unknown`. The server runs Ubuntu 22.04 with 5.15 or a newer kernel, so this does not apply
+there.
 
 **Bounded memory.** The live data of a run is bounded by the caps: the inode index of 65,536 sockets (two 32-bit numbers each for owner and
 last counting PID), two heaps of 4,096 entries and 4,096 remote counts. Measured by `TestConnections_ManySocketsStayWithinCaps` on Go 1.27
