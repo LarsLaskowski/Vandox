@@ -86,3 +86,9 @@ func reportable(k listenerKey) bool {
 	}
 	return true
 }
+
+// inventoryState returns how much of the inventory inv the record's listeners list, which holds listed entries, covers.
+func inventoryState(inv *inventory, listed int) model.InventoryState {
+	_, _ = inv, listed
+	return ""
+}

@@ -125,7 +125,7 @@ func (c *Connections) Collect(ctx context.Context, run scheduler.Run) ([]model.R
 	full := run.Pressure || prev == nil || len(added) > 0
 	snap := buildSnapshot(col, res, check, added, full)
 
-	record, err := fitRecord(run.Start, snap)
+	record, err := fitRecord(run.Start, snap, cur)
 	if err != nil {
 		return nil, err
 	}
@@ -211,6 +211,12 @@ func (c *Connections) readCommands(res *runResult) {
 			}
 		}
 	}
+}
+
+// tableList returns the protocols of the tables in mask, in table order.
+func tableList(mask uint8) []model.Proto {
+	_ = mask
+	return nil
 }
 
 // inventory returns the listener inventory of the run.

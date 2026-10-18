@@ -1541,7 +1541,7 @@ func TestFitRecord_ShortensUntilItFits(t *testing.T) {
 		snap.Listeners, snap.Processes = nil, nil
 		snap.Complete = true
 
-		rec, err := fitRecord(runBase, snap)
+		rec, err := fitRecord(runBase, snap, nil)
 
 		if err != nil || snap.Complete || len(snap.Connections) >= 4000 || len(snap.Connections) == 0 {
 			t.Fatalf("fitRecord() = %v, complete %v, %d connections, want a halved list and not complete", err, snap.Complete, len(snap.Connections))
@@ -1552,7 +1552,7 @@ func TestFitRecord_ShortensUntilItFits(t *testing.T) {
 		snap := build()
 		snap.Connections = nil
 
-		rec, err := fitRecord(runBase, snap)
+		rec, err := fitRecord(runBase, snap, nil)
 
 		if err != nil || !snap.AggregatesIncomplete || len(snap.Processes) >= 4000 || len(snap.Listeners) >= 4000 {
 			t.Fatalf("fitRecord() = %v, aggregates_incomplete %v, %d processes, %d listeners, want both halved and incomplete aggregates",
@@ -1561,7 +1561,7 @@ func TestFitRecord_ShortensUntilItFits(t *testing.T) {
 		checkWire(t, rec)
 	})
 	t.Run("an invalid snapshot is refused", func(t *testing.T) {
-		_, err := fitRecord(runBase, &model.ConnectionSnapshot{States: []model.StateCount{{Proto: "icmp", Count: 1}}})
+		_, err := fitRecord(runBase, &model.ConnectionSnapshot{States: []model.StateCount{{Proto: "icmp", Count: 1}}}, nil)
 
 		if err == nil || !strings.HasPrefix(err.Error(), "connstats: record refused: ") {
 			t.Errorf("fitRecord() error = %v, want one starting with %q", err, "connstats: record refused: ")

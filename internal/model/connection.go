@@ -23,6 +23,18 @@ const (
 	ListenerCheckAll        ListenerCheck = "all"
 	ListenerCheckPrivileged ListenerCheck = "privileged"
 	ListenerCheckNone       ListenerCheck = "none"
+	ListenerCheckStart      ListenerCheck = "start"
+)
+
+// InventoryState says how much of the run's listener inventory the record's own listeners list holds.
+type InventoryState string
+
+// Inventory states.
+const (
+	InventoryAll        InventoryState = "all"
+	InventoryPrivileged InventoryState = "privileged"
+	InventoryCut        InventoryState = "cut"
+	InventorySkipped    InventoryState = "skipped"
 )
 
 // ConnectionSnapshot is the socket overview at one moment.
@@ -38,6 +50,8 @@ type ConnectionSnapshot struct {
 	Connections          []Connection         `json:"connections,omitempty"`
 	NewListeners         []Listener           `json:"new_listeners,omitempty"`
 	NewListenersOmitted  uint32               `json:"new_listeners_omitted,omitempty"`
+	Inventory            InventoryState       `json:"inventory,omitempty"`
+	Tables               []Proto              `json:"tables,omitempty"`
 }
 
 // StateCount counts sockets per protocol and state.

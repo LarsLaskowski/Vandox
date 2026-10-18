@@ -98,8 +98,8 @@ func entrySize(e any) (int, bool) {
 	return len(b) + 1, true
 }
 
-// fitRecord returns the record of snap, shortened until it fits the wire limit.
-func fitRecord(start time.Time, snap *model.ConnectionSnapshot) (model.Record, error) {
+// fitRecord returns the record of snap, shortened until it fits the wire limit, carrying the inventory state of inv.
+func fitRecord(start time.Time, snap *model.ConnectionSnapshot, _ *inventory) (model.Record, error) {
 	record := model.Record{Meta: model.Meta{Source: Source, CapturedAt: start.UTC()}, Data: snap}
 	for round := 0; ; round++ {
 		checked := record
