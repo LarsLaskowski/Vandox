@@ -73,7 +73,7 @@ Feature: see [spec.md](spec.md) (Approved by Lead).
 | AC10 | `ConnectionSnapshotValidateAcceptsTheNewFields`, `ConnectionSnapshotValidateRefusesBrokenFieldRules`, `ConnectionSnapshotSerializeOmitsAbsentNewFields` | `tests/Vandox.Core.Tests/ConnectionSnapshotTests.cs` |
 | AC10 | `SqliteStoreWriteAgentConnectionSnapshotKeepsTheNewFields` | `tests/Vandox.Storage.Tests/SqliteStoreWriteTests.cs` |
 | AC10 | `IncidentBuilderConnectionPeakCountsAnAggregatesOnlySnapshot` | `tests/Vandox.Core.Tests/IncidentBuilderTests.cs` |
-| AC11 | `TestConnstats_ImportsOnlyAllowedPackages`, `TestConnections_ReadsOnlyNamedFiles` | `internal/connstats/connstats_test.go` |
+| AC11 | `TestConnstats_ImportsOnlyAllowedPackages` (imports incl. `os` and `math`; selectors pinned as in procstats: `os` only `DirFS`, no `syscall` selector beyond what the production files use — Lead `decide`, step 6, G3), `TestConnections_ReadsOnlyNamedFiles` | `internal/connstats/connstats_test.go` |
 | AC12 | `TestCompare_CutInventoryComparesPrivilegedOnly`, `TestCompare_SkippedLineOrChangedTablesComparesNothing`, `TestCompare_CutPrivilegedPartComparesNothing` | `internal/connstats/inventory_test.go` |
 | AC12 | `TestConnections_ListenerFloodCausesNoFullSnapshot` (4,100 unprivileged listeners held across runs: no report, regular snapshot, `listener_check` `privileged`; a new listener on port 2222 is not reported, one on port 23 is) | `internal/connstats/connstats_test.go` |
 
@@ -304,6 +304,9 @@ reading `../../testdata/proc`, and the in-memory `/proc` of `lowMemoryOptions` f
 
 Code a unit test cannot cover: the error return of `syscall.Socket` in `internal/sockmount/sockmount.go` (a test cannot make an unbound
 `AF_UNIX` socket fail without a system-call filter); the rest of the file is covered.
+Also `internal/agent/agent.go` 199–200, `probeSocketMount` (`sockmount.Probe(os.DirFS("/proc"))`): a test would open a real socket
+against the host's `/proc`, which agent tests must not read; `Probe` itself is covered with real sockets in `sockmount_test.go`
+(Lead `decide`, step 6, G3).
 
 ## Areas
 
