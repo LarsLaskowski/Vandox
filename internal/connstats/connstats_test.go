@@ -1282,7 +1282,7 @@ func restrictedNames(name string, file *ast.File) (names map[string]string, viol
 	names = map[string]string{}
 	for _, imp := range file.Imports {
 		path, err := strconv.Unquote(imp.Path.Value)
-		if _, restricted := allowedSelectors[path]; err != nil || restricted == false {
+		if _, restricted := allowedSelectors[path]; err != nil || !restricted {
 			continue
 		}
 		local := path[strings.LastIndex(path, "/")+1:]
@@ -1314,7 +1314,7 @@ func disallowedSelectors(name string, file *ast.File) []string {
 			return true
 		}
 		path, bound := names[id.Name]
-		if bound && id.Obj == nil && slices.Contains(allowedSelectors[path], sel.Sel.Name) == false {
+		if bound && id.Obj == nil && !slices.Contains(allowedSelectors[path], sel.Sel.Name) {
 			violations = append(violations, name+": "+id.Name+"."+sel.Sel.Name+" is not allowed")
 		}
 		return true
@@ -1590,5 +1590,34 @@ func TestDisallowedSelectors_ReportsEverySelectorOutsideTheAllowList(t *testing.
 	want := []string{"p.go: os.Open is not allowed", "p.go: syscall.EACCES is not allowed"}
 	if !slices.Equal(got, want) {
 		t.Errorf("disallowedSelectors() = %q, want %q", got, want)
+	}
+}
+
+func TestDisallowedSelectors_ResolvesTheLocalNameOfTheImport(t *testing.T) {
+	tests := []struct {
+		name string
+		src  string
+		want []string
+	}{
+		{"aliased forbidden selector", "package p\n\nimport o \"os\"\n\nvar _ = o.Open\n", []string{"p.go: o.Open is not allowed"}},
+		{"aliased allowed selector", "package p\n\nimport o \"os\"\n\nvar _ = o.DirFS\n", nil},
+		{"dot import", "package p\n\nimport . \"syscall\"\n\nvar _ = EACCES\n", []string{"p.go: dot import of syscall is not allowed"}},
+		{"blank import", "package p\n\nimport _ \"os\"\n", nil},
+		{"local variable named like the package", "package p\n\nimport \"fmt\"\n\ntype t struct{ Open int }\n\nfunc f() int {\n\tos := t{}\n\t_ = fmt.Sprint()\n\treturn os.Open\n}\n", nil},
+		{"alias shadowing another restricted name", "package p\n\nimport os \"syscall\"\n\nvar _ = os.EIO\n", []string{"p.go: os.EIO is not allowed"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			file, err := parser.ParseFile(token.NewFileSet(), "p.go", tt.src, 0)
+			if err != nil {
+				t.Fatalf("parsing the sample: %v", err)
+			}
+
+			got := disallowedSelectors("p.go", file)
+
+			if !slices.Equal(got, tt.want) {
+				t.Errorf("disallowedSelectors() = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
