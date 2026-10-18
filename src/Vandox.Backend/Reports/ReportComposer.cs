@@ -1,6 +1,7 @@
 using System.Globalization;
 
 using Vandox.Core.Incidents;
+using Vandox.Core.Model;
 using Vandox.Core.Reports;
 using Vandox.Storage;
 
@@ -58,6 +59,7 @@ internal sealed class ReportComposer
         AddSummary(blocks, summary);
         AddPatterns(blocks, summary);
         AddConsumers(blocks, summary);
+        AddListeners(blocks, summary.Listeners);
         blocks.Add(Heading(2, _text.OutagesHeading));
 
         if (summary.Incidents == 0)
@@ -142,6 +144,8 @@ internal sealed class ReportComposer
         {
             blocks.Add(Item(Format(_text.UntrackedNote, Number(summary.UntrackedProgramEntries), Number(ReportLimits.MaxPrograms))));
         }
+
+        AddListenerNotes(blocks, summary.Listeners);
 
         if (listed != summary.Incidents)
         {
@@ -330,6 +334,59 @@ internal sealed class ReportComposer
     private static string HourRange(int hour)
     {
         return Format("{0:00}:00{1}{2:00}:00", hour, RangeDash, (hour + 1) % 24);
+    }
+
+    /// <summary>
+    /// Splits a template at its placeholder <c>{0}</c>, which stands for external text, and fills the other placeholders, which start at <c>{1}</c>.
+    /// </summary>
+    /// <param name="template">The template</param>
+    /// <param name="code">The external text</param>
+    /// <param name="arguments">The values of the placeholders from <c>{1}</c></param>
+    /// <returns>The pieces: the text before, the external text, the text after</returns>
+    private static List<ReportPiece> WithCode(string template, string code, params string[] arguments)
+    {
+        object[] values = ["{0}", .. arguments];
+        var parts = template.Split("{0}", 2, StringSplitOptions.None);
+        var pieces = new List<ReportPiece>();
+
+        if (parts[0].Length > 0)
+        {
+            pieces.Add(ReportPiece.Plain(Format(parts[0], values)));
+        }
+
+        if (parts.Length == 1)
+        {
+            return pieces;
+        }
+
+        pieces.Add(ReportPiece.Code(code));
+
+        if (parts[1].Length > 0)
+        {
+            pieces.Add(ReportPiece.Plain(Format(parts[1], values)));
+        }
+
+        return pieces;
+    }
+
+    /// <summary>
+    /// Tells whether an outcome compared the inventories.
+    /// </summary>
+    /// <param name="outcome">The outcome</param>
+    /// <returns><c>true</c> for all ports or the ports below 1024 only</returns>
+    private static bool IsCompared(ListenerOutcome outcome)
+    {
+        return outcome is ListenerOutcome.AllPorts or ListenerOutcome.PrivilegedOnly;
+    }
+
+    /// <summary>
+    /// Sorts findings by agent ID, compared ordinally, then by sequence number.
+    /// </summary>
+    /// <param name="findings">The findings</param>
+    /// <returns>The sorted findings</returns>
+    private static List<ListenerFinding> Ordered(IEnumerable<ListenerFinding> findings)
+    {
+        return findings.OrderBy(finding => finding.AgentId, StringComparer.Ordinal).ThenBy(finding => finding.Seq).ToList();
     }
 
     /// <summary>
@@ -695,6 +752,153 @@ internal sealed class ReportComposer
     private IReadOnlyList<string> ActivityRow(string name, PatternResult result)
     {
         return [name, Number(result.Matching), Number(result.Known), Percent(result.Share), Percent(result.BaseShare), Word(result.Outcome), ReasonText(result.Reason)];
+    }
+
+    /// <summary>
+    /// Adds the section of the new listeners.
+    /// </summary>
+    /// <param name="blocks">The blocks</param>
+    /// <param name="listeners">The section</param>
+    private void AddListeners(List<ReportBlock> blocks, ListenerReport listeners)
+    {
+        blocks.Add(Heading(2, _text.NewListenersHeading));
+
+        if (listeners.Agents.Count == 0)
+        {
+            blocks.Add(Paragraph(_text.NoAgentSnapshots));
+
+            return;
+        }
+
+        blocks.AddRange(listeners.Agents.Select(tally => Item(0,
+                                                              WithCode(_text.ListenerAgentHead,
+                                                                       tally.AgentId,
+                                                                       Number(tally.Snapshots),
+                                                                       Time(tally.FirstAt),
+                                                                       Time(tally.LastAt),
+                                                                       Number(tally.Starts),
+                                                                       Number(tally.ComparedAll),
+                                                                       Number(tally.ComparedPrivileged),
+                                                                       Number(tally.NotCompared)).ToArray())));
+
+        var starts = Ordered(listeners.StartFindings);
+        var found = Ordered(listeners.AgentFindings);
+
+        foreach (var finding in starts)
+        {
+            AddFinding(blocks, finding, StartText(finding));
+        }
+
+        foreach (var finding in found)
+        {
+            AddFinding(blocks, finding, WithCode(_text.ListenerAgentFinding, finding.AgentId, Time(finding.CapturedAt), PortsText(finding.Outcome), Number(finding.Listeners.Count + finding.Omitted)));
+        }
+
+        var anyNew = starts.Concat(found).Any(finding => IsCompared(finding.Outcome));
+
+        if (anyNew)
+        {
+            return;
+        }
+
+        var notCompared = listeners.Agents.Any(tally => tally.NotCompared > 0) || starts.Any(finding => finding.Outcome is not (ListenerOutcome.AllPorts or ListenerOutcome.PrivilegedOnly));
+
+        blocks.Add(Item(notCompared ? _text.NoNewListenerCompared : _text.NoNewListener));
+    }
+
+    /// <summary>
+    /// Adds the notes of the caps of the listener section.
+    /// </summary>
+    /// <param name="blocks">The blocks</param>
+    /// <param name="listeners">The section</param>
+    private void AddListenerNotes(List<ReportBlock> blocks, ListenerReport listeners)
+    {
+        if (listeners.StartFindingsTotal > listeners.StartFindings.Count)
+        {
+            blocks.Add(Item(Format(_text.CapStartFindingsNote, Number(ListenerReport.MaxFindings), Number(listeners.StartFindingsTotal - listeners.StartFindings.Count))));
+        }
+
+        if (listeners.AgentFindingsTotal > listeners.AgentFindings.Count)
+        {
+            blocks.Add(Item(Format(_text.CapAgentFindingsNote, Number(ListenerReport.MaxFindings), Number(listeners.AgentFindingsTotal - listeners.AgentFindings.Count))));
+        }
+
+        if (listeners.AgentsOmitted > 0)
+        {
+            blocks.Add(Item(Format(_text.CapAgentsNote, Number(ListenerReport.MaxAgents), Number(listeners.AgentsOmitted))));
+        }
+    }
+
+    /// <summary>
+    /// Adds a finding and its listeners.
+    /// </summary>
+    /// <param name="blocks">The blocks</param>
+    /// <param name="finding">The finding</param>
+    /// <param name="pieces">The pieces of the finding's line</param>
+    private void AddFinding(List<ReportBlock> blocks, ListenerFinding finding, List<ReportPiece> pieces)
+    {
+        blocks.Add(Item(0, pieces.ToArray()));
+
+        if (IsCompared(finding.Outcome))
+        {
+            blocks.AddRange(finding.Listeners.Select(listener => Item(1, ListenerPieces(listener).ToArray())));
+
+            if (finding.Omitted > 0)
+            {
+                blocks.Add(Item(1, ReportPiece.Plain(Format(_text.ListenerRest, Number(finding.Omitted)))));
+            }
+        }
+    }
+
+    /// <summary>
+    /// Writes the line of a finding after an agent start.
+    /// </summary>
+    /// <param name="finding">The finding</param>
+    /// <returns>The pieces</returns>
+    private List<ReportPiece> StartText(ListenerFinding finding)
+    {
+        if (IsCompared(finding.Outcome))
+        {
+            return WithCode(_text.ListenerStartFinding,
+                            finding.AgentId,
+                            Time(finding.CapturedAt),
+                            Time(finding.BaseCapturedAt),
+                            PortsText(finding.Outcome),
+                            Number(finding.Listeners.Count + finding.Omitted));
+        }
+
+        var reason = finding.Outcome switch
+                     {
+                         ListenerOutcome.NoEarlierInventory => _text.ListenerNoEarlier,
+                         ListenerOutcome.PrivilegedIncomplete => _text.ListenerPrivilegedIncomplete,
+                         _ => _text.ListenerNotComparable
+                     };
+
+        return WithCode(_text.ListenerStartNotCompared, finding.AgentId, Time(finding.CapturedAt), reason);
+    }
+
+    /// <summary>
+    /// Writes the line of a listener with its owner.
+    /// </summary>
+    /// <param name="listener">The listener</param>
+    /// <returns>The pieces</returns>
+    private List<ReportPiece> ListenerPieces(Listener listener)
+    {
+        var endpoint = $"{listener.Proto} {listener.Local}";
+
+        return listener.Pid == 0
+                   ? WithCode(_text.ListenerEntryNoOwner, string.Empty, endpoint)
+                   : WithCode(_text.ListenerEntry, listener.Command, endpoint, Number(listener.Pid));
+    }
+
+    /// <summary>
+    /// Returns the label of the ports a comparison covered.
+    /// </summary>
+    /// <param name="outcome">The outcome</param>
+    /// <returns>The label</returns>
+    private string PortsText(ListenerOutcome outcome)
+    {
+        return outcome == ListenerOutcome.PrivilegedOnly ? _text.ListenerPrivilegedOnly : _text.ListenerAllPorts;
     }
 
     /// <summary>
