@@ -15,6 +15,7 @@ import (
 	"github.com/LarsLaskowski/Vandox/internal/scheduler"
 	"github.com/LarsLaskowski/Vandox/internal/sdnotify"
 	"github.com/LarsLaskowski/Vandox/internal/selfstats"
+	"github.com/LarsLaskowski/Vandox/internal/sockmount"
 	"github.com/LarsLaskowski/Vandox/internal/sysstats"
 	"github.com/LarsLaskowski/Vandox/internal/version"
 )
@@ -105,7 +106,7 @@ func Run(ctx context.Context, opts Options) int {
 	return 0
 }
 
-// jobs returns the collectors with their schedules: self, system, processes, filesystem (only when a mount point is
+// jobs returns the collectors with their schedules: self, system, processes, connections, filesystem (only when a mount point is
 // configured) and clock, and the system collector, which newScheduler connects to the scheduler. The collectors log
 // through log.
 func jobs(opts Options, cfg *config.Agent, log *slog.Logger) ([]scheduler.Job, *sysstats.System) {
@@ -122,6 +123,10 @@ func jobs(opts Options, cfg *config.Agent, log *slog.Logger) ([]scheduler.Job, *
 		{
 			Collector: procstats.New(opts.Processes, programRules(cfg.Processes.Programs), log),
 			Schedule:  scheduler.Schedule{Interval: ProcessesInterval, Timeout: ProcessesTimeout, PressureInterval: ProcessesPressureInterval},
+		},
+		{
+			Collector: connstats.New(connectionSources(opts.Connections, probeSocketMount), log),
+			Schedule:  scheduler.Schedule{Interval: ConnectionsInterval, Timeout: ConnectionsTimeout, PressureInterval: ConnectionsPressureInterval},
 		},
 	}
 	if len(cfg.Filesystem.MountPoints) > 0 {
@@ -182,5 +187,14 @@ func notification(environ []string, log *slog.Logger) (*sdnotify.Notifier, time.
 
 // connectionSources returns src with the socket mount filled by probe, which runs only when src.SocketMount is zero.
 func connectionSources(src connstats.Sources, probe func() (int32, error)) connstats.Sources {
+	if src.SocketMount.ID != 0 || src.SocketMount.Err != nil {
+		return src
+	}
+	src.SocketMount.ID, src.SocketMount.Err = probe()
 	return src
+}
+
+// probeSocketMount learns the socket mount from a socket of the agent's own, through the host's /proc.
+func probeSocketMount() (int32, error) {
+	return sockmount.Probe(os.DirFS("/proc"))
 }
