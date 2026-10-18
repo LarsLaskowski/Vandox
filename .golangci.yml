@@ -22,10 +22,6 @@ linters:
     warn-unused: true
     rules:
       # Sequential error checks that SonarQube rates at most 15 (record 0047).
-      - path: ^internal/model/connection\.go$
-        linters:
-          - gocognit
-        text: "`\\(\\*ConnectionSnapshot\\)\\.Validate`"
       - path: ^internal/model/mariadb\.go$
         linters:
           - gocognit

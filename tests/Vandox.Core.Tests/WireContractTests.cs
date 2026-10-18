@@ -80,7 +80,7 @@ public class WireContractTests
         // Assert
         Assert.AreEqual("agent-1", agentId, "agent id");
 
-        var expected = new[] { RecordKind.Metric, RecordKind.ProcessSnapshot, RecordKind.ConnectionSnapshot, RecordKind.ServiceState, RecordKind.MariaDbStatus, RecordKind.KernelEvent, RecordKind.KernelEvent, RecordKind.LogLine, RecordKind.Gap };
+        var expected = new[] { RecordKind.Metric, RecordKind.ProcessSnapshot, RecordKind.ConnectionSnapshot, RecordKind.ServiceState, RecordKind.MariaDbStatus, RecordKind.KernelEvent, RecordKind.KernelEvent, RecordKind.LogLine, RecordKind.Gap, RecordKind.ConnectionSnapshot };
 
         Assert.AreSequenceEqual(expected, kinds, "kinds in order");
     }
@@ -127,6 +127,83 @@ public class WireContractTests
         Assert.AreEqual("Failed password", line.Message, "message");
         Assert.IsTrue(line.Truncated, "truncated");
         Assert.AreEqual("auth.failure", line.Event, "event");
+    }
+
+    /// <summary>
+    /// The connection snapshots of the Go encoder's golden batch carry the five fields of format 1.1, and the decoder applies their rules to the golden text.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task WireContractConnectionSnapshotCarriesTheNewFields()
+    {
+        // Arrange
+        var text = Encoding.UTF8.GetString(await File.ReadAllBytesAsync(RepositoryFiles.Path("testdata/wire/all-kinds.jsonl"), CancellationToken.None));
+        const string completeFalse = "\"complete\":false,\"aggregates_incomplete\":true";
+
+        Assert.Contains(completeFalse, text, "the golden batch holds a snapshot that is not complete and has incomplete aggregates");
+
+        var snapshots = new List<ConnectionSnapshot>();
+
+        using (var compressed = GzipOf(Encoding.UTF8.GetBytes(text)))
+            using (var decoder = await BatchDecoder.OpenAsync(compressed, null, CancellationToken.None))
+            {
+                Assert.AreEqual(1L, decoder.Header.FormatMinor, "format minor of the golden batch");
+
+                for (var record = await decoder.NextAsync(CancellationToken.None); record is not null; record = await decoder.NextAsync(CancellationToken.None))
+                {
+                    if (record.Data is ConnectionSnapshot snapshot)
+                    {
+                        snapshots.Add(snapshot);
+                    }
+                }
+            }
+
+        // Act
+        var contradicting = text.Replace(completeFalse, "\"complete\":true,\"aggregates_incomplete\":true", StringComparison.Ordinal);
+
+        using var contradictingInput = GzipOf(Encoding.UTF8.GetBytes(contradicting));
+        using var contradictingDecoder = await BatchDecoder.OpenAsync(contradictingInput, null, CancellationToken.None);
+
+        Assert.IsNotNull(await contradictingDecoder.NextAsync(CancellationToken.None), "first record of the golden batch");
+        Assert.IsNotNull(await contradictingDecoder.NextAsync(CancellationToken.None), "second record of the golden batch");
+
+        var exception = await Assert.ThrowsExactlyAsync<WireException>(() => contradictingDecoder.NextAsync(CancellationToken.None), "a complete snapshot with incomplete aggregates");
+
+        // Assert
+        Assert.HasCount(2, snapshots, "connection snapshots of the golden batch");
+
+        var full = snapshots[0];
+
+        Assert.IsFalse(full.Complete, "full: complete");
+        Assert.IsFalse(full.AggregatesOnly, "full: aggregates_only");
+        Assert.IsTrue(full.AggregatesIncomplete, "full: aggregates_incomplete");
+        Assert.AreEqual("all", full.ListenerCheck, "full: listener_check");
+        Assert.IsNotNull(full.NewListeners, "full: new_listeners");
+        Assert.HasCount(1, full.NewListeners, "full: new listeners");
+        Assert.AreEqual("udp", full.NewListeners[0].Proto, "full: new listener proto");
+        Assert.AreEqual("0.0.0.0:5353", full.NewListeners[0].Local?.ToString(), "full: new listener local");
+        Assert.AreEqual(11, full.NewListeners[0].Pid, "full: new listener pid");
+        Assert.AreEqual("avahi", full.NewListeners[0].Command, "full: new listener command");
+        Assert.AreEqual(2u, full.NewListenersOmitted, "full: new_listeners_omitted");
+        Assert.IsNotNull(full.Connections, "full: connections");
+        Assert.IsNotNull(full.Remotes, "full: remotes");
+        Assert.AreEqual("::ffff:192.0.2.7", full.Remotes[1].Addr?.ToString(), "full: mapped remote address");
+        Assert.IsTrue(full.Remotes[1].Addr?.IsIPv4MappedToIPv6 ?? false, "full: the mapped address stays mapped");
+
+        var aggregates = snapshots[1];
+
+        Assert.IsFalse(aggregates.Complete, "aggregates: complete");
+        Assert.IsTrue(aggregates.AggregatesOnly, "aggregates: aggregates_only");
+        Assert.IsTrue(aggregates.AggregatesIncomplete, "aggregates: aggregates_incomplete");
+        Assert.AreEqual("privileged", aggregates.ListenerCheck, "aggregates: listener_check");
+        Assert.IsNull(aggregates.Connections, "aggregates: connections");
+        Assert.AreEqual(0u, aggregates.NewListenersOmitted, "aggregates: new_listeners_omitted");
+        Assert.IsNotNull(aggregates.NewListeners, "aggregates: new_listeners");
+        Assert.HasCount(1, aggregates.NewListeners, "aggregates: new listeners");
+
+        Assert.AreEqual(WireErrorKind.Invalid, exception.Kind, "error class");
+        Assert.AreEqual("data.complete", exception.FieldError?.Field, "field");
+        Assert.AreEqual("must be false when aggregates are incomplete", exception.FieldError?.Reason, "reason");
     }
 
     /// <summary>

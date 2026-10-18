@@ -32,7 +32,7 @@ Cloud session notes (found when a cloud image lacked the .NET SDK):
 
 ## Layout
 
-- Go (agent): `cmd/vandox-agent`, `internal/` (model, wire, config, cli, version, agent, scheduler, selfstats, sdnotify, sysstats, procstats); tests colocated as
+- Go (agent): `cmd/vandox-agent`, `internal/` (model, wire, config, cli, version, agent, scheduler, selfstats, sdnotify, sysstats, procstats, connstats, sockmount); tests colocated as
   `foo_test.go` next to `foo.go`.
 - .NET (backend): `src/Vandox.Core` (model, wire decoder, configuration, safe file access, log parsing, log signatures, log templates),
   `src/Vandox.Storage`, `src/Vandox.Import`, `src/Vandox.Backend` (host, CLI, Blazor; assembly `vandoxd`).
@@ -90,8 +90,7 @@ analysis (the gate of a `patch` that touches only scripts, workflows or Dockerfi
    close but not identical: in every case measured (PR #110, `main`) gocognit flagged at least what
    SonarQube flagged, and it also counts an `if` on the bare `err != nil` check, which SonarQube does not, so
    it can flag a function SonarQube accepts. Such a finding is fixed like any other diagnostic; a new gocognit
-   exclusion — a rule in `.golangci.yml` or a `//nolint:gocognit` directive — needs a Lead decision record (two
-   existing validators are excluded by name, without a complexity cap, record 0047). `gosec`, limited to rule G115,
+   exclusion — a rule in `.golangci.yml` or a `//nolint:gocognit` directive — needs a Lead decision record (one existing validator, `(*MariaDBStatus).Validate` in `internal/model/mariadb.go`, is excluded by name, record 0047). An exclusion has no complexity cap: it hides the rule for its function at any complexity, so if that function grows past SonarQube's 15, only the CI analysis reports `go:S3776`. A change that adds branches to an excluded function is checked against the threshold by hand (extract helpers as for any finding). Once the function is below 16, `warn-unused` reports the rule as unused, and the stale rule is removed in the same change. `gosec`, limited to rule G115,
    is the local stand-in for CodeQL's `go/incorrect-integer-conversion` (record 0112): it reported every CodeQL
    alert measured on PR #265 and accepts the two forms of the integer-conversion rule under *Writing code*, but reports an upper-bound check alone
    on a signed value (the rule's lower bound is missing). It

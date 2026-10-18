@@ -15,14 +15,29 @@ const (
 	ProtoUDP6 Proto = "udp6"
 )
 
+// ListenerCheck says how far the listener inventory was compared with the previous run.
+type ListenerCheck string
+
+// Listener checks.
+const (
+	ListenerCheckAll        ListenerCheck = "all"
+	ListenerCheckPrivileged ListenerCheck = "privileged"
+	ListenerCheckNone       ListenerCheck = "none"
+)
+
 // ConnectionSnapshot is the socket overview at one moment.
 type ConnectionSnapshot struct {
-	Complete    bool                 `json:"complete"`
-	States      []StateCount         `json:"states,omitempty"`
-	Processes   []ProcessConnections `json:"processes,omitempty"`
-	Remotes     []RemoteCount        `json:"remotes,omitempty"`
-	Listeners   []Listener           `json:"listeners,omitempty"`
-	Connections []Connection         `json:"connections,omitempty"`
+	Complete             bool                 `json:"complete"`
+	AggregatesOnly       bool                 `json:"aggregates_only,omitempty"`
+	AggregatesIncomplete bool                 `json:"aggregates_incomplete,omitempty"`
+	ListenerCheck        ListenerCheck        `json:"listener_check,omitempty"`
+	States               []StateCount         `json:"states,omitempty"`
+	Processes            []ProcessConnections `json:"processes,omitempty"`
+	Remotes              []RemoteCount        `json:"remotes,omitempty"`
+	Listeners            []Listener           `json:"listeners,omitempty"`
+	Connections          []Connection         `json:"connections,omitempty"`
+	NewListeners         []Listener           `json:"new_listeners,omitempty"`
+	NewListenersOmitted  uint32               `json:"new_listeners_omitted,omitempty"`
 }
 
 // StateCount counts sockets per protocol and state.
@@ -76,17 +91,48 @@ func (s *ConnectionSnapshot) Validate() error {
 	if s == nil {
 		return nilReceiver()
 	}
+	if err := s.validateCounts(); err != nil {
+		return err
+	}
+	if err := s.validateFlags(); err != nil {
+		return err
+	}
+	if err := s.validateStates(); err != nil {
+		return err
+	}
+	if err := s.validateProcesses(); err != nil {
+		return err
+	}
+	if err := s.validateRemotes(); err != nil {
+		return err
+	}
+	if err := checkListeners("listeners", s.Listeners); err != nil {
+		return err
+	}
+	if err := s.validateConnections(); err != nil {
+		return err
+	}
+	return checkListeners("new_listeners", s.NewListeners)
+}
+
+// validateCounts checks the number of entries of every list.
+func (s *ConnectionSnapshot) validateCounts() error {
 	for _, c := range []struct {
 		name string
 		n    int
 	}{
 		{"states", len(s.States)}, {"processes", len(s.Processes)}, {"remotes", len(s.Remotes)},
-		{"listeners", len(s.Listeners)}, {"connections", len(s.Connections)},
+		{"listeners", len(s.Listeners)}, {"connections", len(s.Connections)}, {"new_listeners", len(s.NewListeners)},
 	} {
 		if err := checkCount(c.name, c.n); err != nil {
 			return err
 		}
 	}
+	return nil
+}
+
+// validateStates checks the entries of states.
+func (s *ConnectionSnapshot) validateStates() error {
 	for i := range s.States {
 		e := &s.States[i]
 		path := indexed("states", i)
@@ -97,6 +143,11 @@ func (s *ConnectionSnapshot) Validate() error {
 			return err
 		}
 	}
+	return nil
+}
+
+// validateProcesses checks the entries of processes.
+func (s *ConnectionSnapshot) validateProcesses() error {
 	for i := range s.Processes {
 		e := &s.Processes[i]
 		path := indexed("processes", i)
@@ -110,6 +161,11 @@ func (s *ConnectionSnapshot) Validate() error {
 			return err
 		}
 	}
+	return nil
+}
+
+// validateRemotes checks the entries of remotes.
+func (s *ConnectionSnapshot) validateRemotes() error {
 	for i := range s.Remotes {
 		e := &s.Remotes[i]
 		path := indexed("remotes", i)
@@ -120,19 +176,11 @@ func (s *ConnectionSnapshot) Validate() error {
 			return err
 		}
 	}
-	for i := range s.Listeners {
-		e := &s.Listeners[i]
-		path := indexed("listeners", i)
-		if err := checkProtoOnly(path, e.Proto); err != nil {
-			return err
-		}
-		if err := checkAddrPort(path+".local", e.Local); err != nil {
-			return err
-		}
-		if err := checkProcess(path, e.PID, e.Command); err != nil {
-			return err
-		}
-	}
+	return nil
+}
+
+// validateConnections checks the entries of connections.
+func (s *ConnectionSnapshot) validateConnections() error {
 	for i := range s.Connections {
 		e := &s.Connections[i]
 		path := indexed("connections", i)
@@ -143,6 +191,46 @@ func (s *ConnectionSnapshot) Validate() error {
 			return err
 		}
 		if err := checkAddrPort(path+".remote", e.Remote); err != nil {
+			return err
+		}
+		if err := checkProcess(path, e.PID, e.Command); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// validateFlags checks the rules that tie the aggregate flags, the listener check and the new listeners together.
+func (s *ConnectionSnapshot) validateFlags() error {
+	if s.AggregatesOnly && s.Complete {
+		return invalid("complete", "must be false for an aggregates-only snapshot")
+	}
+	if s.AggregatesOnly && len(s.Connections) > 0 {
+		return invalid("connections", "must be empty in an aggregates-only snapshot")
+	}
+	if s.AggregatesIncomplete && s.Complete {
+		return invalid("complete", "must be false when aggregates are incomplete")
+	}
+	if s.ListenerCheck != "" {
+		if err := checkOneOf("listener_check", s.ListenerCheck, ListenerCheckAll, ListenerCheckPrivileged, ListenerCheckNone); err != nil {
+			return err
+		}
+	}
+	if (len(s.NewListeners) > 0 || s.NewListenersOmitted > 0) && s.ListenerCheck != ListenerCheckAll && s.ListenerCheck != ListenerCheckPrivileged {
+		return invalid("listener_check", "must be all or privileged when new listeners are reported")
+	}
+	return nil
+}
+
+// checkListeners checks the entries of the list name.
+func checkListeners(name string, listeners []Listener) error {
+	for i := range listeners {
+		e := &listeners[i]
+		path := indexed(name, i)
+		if err := checkProtoOnly(path, e.Proto); err != nil {
+			return err
+		}
+		if err := checkAddrPort(path+".local", e.Local); err != nil {
 			return err
 		}
 		if err := checkProcess(path, e.PID, e.Command); err != nil {

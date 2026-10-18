@@ -450,6 +450,35 @@ public class IncidentBuilderTests
     }
 
     /// <summary>
+    /// An aggregates-only snapshot of an agent, without connections and not complete, counts for the connection peak like a full one.
+    /// </summary>
+    [TestMethod]
+    public void IncidentBuilderConnectionPeakCountsAnAggregatesOnlySnapshot()
+    {
+        // Arrange
+        var builder = IncidentSamples.Builder(IncidentSamples.Base);
+        var aggregates = IncidentSamples.Connections(30, ("nginx", 20), ("php-fpm", 10));
+
+        aggregates.Complete = false;
+        aggregates.AggregatesOnly = true;
+        aggregates.AggregatesIncomplete = true;
+        aggregates.ListenerCheck = "privileged";
+        builder.AddConnectionSnapshot(21, At(-15), IncidentSamples.Connections(10, ("other", 4)));
+        builder.AddConnectionSnapshot(22, At(-8), aggregates);
+
+        // Act
+        var peak = builder.Build().Connections;
+
+        // Assert
+        Assert.IsNotNull(peak, "a peak exists");
+        Assert.AreEqual(2L, peak.Snapshots, "both snapshots are counted");
+        Assert.AreEqual(30L, peak.Sockets, "sockets are the sum of the state counts of the aggregates");
+        Assert.AreEqual(22L, peak.RecordId, "the aggregates-only snapshot is the peak");
+        Assert.AreEqual(At(-8), peak.At, "time of the peak");
+        Assert.AreSequenceEqual(["nginx", "php-fpm"], peak.Processes.Select(process => process.Command), "commands of the aggregates");
+    }
+
+    /// <summary>
     /// An incident is built once.
     /// </summary>
     [TestMethod]
