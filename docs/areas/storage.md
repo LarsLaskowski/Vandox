@@ -207,8 +207,9 @@ Indexes: a unique index on `records(agent_id, seq)` for origin `agent`; `records
   (template of a line, hourly counts, new templates, templates above their usual level), with the same time range and limit rules,
   on a reader connection. The cost of the usual-level query is not bounded by its range or limit; a cancelled token or deadline interrupts it
   (*Database file and connections*; *Limits of templates* there).
-- **Listener history** (`IListenerHistoryReader`, on the reader connections, narrow derived tables only, no payload decoded, each read its own
-  query): `ListenerTalliesAsync` returns, for the 64 lowest agent IDs of `connection_marks` (byte order of the text), the number of marks, the
+- **Listener history** (`IListenerHistoryReader`, on the reader connections, narrow derived tables only, no payload decoded, the queries of one read on
+  one reader lease without a shared transaction, so a batch committed between them can make a total differ from the rows by that
+  batch): `ListenerTalliesAsync` returns, for the 64 lowest agent IDs of `connection_marks` (byte order of the text), the number of marks, the
   first and last capture time and the number of starts per outcome (`Starts`, compared on all ports, compared on ports 1 to 1023 only, not
   compared), and the number of further agent IDs (only counted when 64 were returned). `ListenerFindingsAsync` returns the latest `Limit` (1 to 20)
   findings of one kind with the total of that kind: kind `AgentStart` reads the `listener_comparisons` rows with `finding = 1`, kind `Agent` the
