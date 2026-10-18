@@ -567,7 +567,7 @@ collector timeouts and backend gap detection each emit a gap record, and each pa
   as well), and a system-call filter must not deny `socket` for it; when the probe is refused the collector logs `socket owners unknown` and
   records no owners. The unit gives the agent **no network namespace of its own** (no `PrivateNetwork=`, no `NetworkNamespacePath=`, or
   `/proc/net` would show another namespace's sockets), does not set `ProcSubset=pid` (it hides `/proc/net`) and leaves `ProtectProc=` at
-  `default` (a stricter value hides other users' processes).
+  `default` (a stricter value hides other users' processes whenever the agent runs without `CAP_SYS_PTRACE`).
 - As soon as the unit grants any capability, the unit is confined: `NoNewPrivileges=yes`; a system-call filter that denies `ptrace`,
   `process_vm_readv`, `process_vm_writev`, `pidfd_getfd` and `open_by_handle_at` with `EPERM` (and not `pidfd_open` or
   `pidfd_send_signal`) under `SystemCallArchitectures=native`; no write-side capability; `ProtectHome=yes` and `InaccessiblePaths=` for at

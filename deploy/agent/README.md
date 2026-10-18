@@ -52,8 +52,8 @@ confined as soon as it grants any (`NoNewPrivileges=yes`, a system-call filter t
 
 - With `CAP_SYS_PTRACE`, `hidepid=2` hides no process (measured in a scratch mount namespace with `proc` mounted with `hidepid=2`); without
   it other users' processes are invisible, and their sockets then carry no owner **without a warning**.
-- The `ino:` line of `fdinfo` exists from Linux 5.14 on (the server's Ubuntu 22.04 has 5.15 or a newer kernel). On an older kernel no socket
-  gets an owner and the agent logs `socket owners partly unknown`.
+- The `ino:` line of `fdinfo` exists from Linux 5.14 on (the server's Ubuntu 22.04 has 5.15 or a newer kernel). On an older kernel the start-up probe of the socket mount fails, no socket
+  gets an owner and the agent logs `socket owners unknown`.
 - Without the capability the collector still runs: the sockets of other users' processes carry no owner, the sample succeeds and the agent logs
   `socket owners partly unknown` once with the number of processes it could not read.
 - **The socket probe needs no right but a unit setting.** At its start the agent opens one Unix datagram socket (never bound, connected or
@@ -65,7 +65,7 @@ confined as soon as it grants any (`NoNewPrivileges=yes`, a system-call filter t
 - `RestrictAddressFamilies=` must keep **`AF_UNIX`** (the probe above and the notification socket of systemd).
 - No own network namespace: no `PrivateNetwork=` and no `NetworkNamespacePath=`, or `/proc/net` shows another namespace's sockets.
 - No `ProcSubset=pid`: it hides `/proc/net`.
-- `ProtectProc=` stays at `default`: a stricter value hides other users' processes.
+- `ProtectProc=` stays at `default`: a stricter value hides other users' processes whenever the agent runs without `CAP_SYS_PTRACE`.
 
 ## Groups
 
