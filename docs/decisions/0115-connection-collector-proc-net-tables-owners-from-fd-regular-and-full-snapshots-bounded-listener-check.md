@@ -83,7 +83,7 @@ fields in [Wire format](../areas/wire-format.md).
   the last check and the return is a stated residual.
 - The live memory of a run is bounded by fixed caps; the garbage grows with the descriptors read (a fixed amount per descriptor through
   `io/fs`), reclaimed by the runtime.
-- **Residuals:** a listener that opens while the agent is stopped is not reported by the agent (the backend comparison is #278); a local
+- **Residuals:** a listener that opens while the agent is stopped is not reported by the agent (the backend compares across a start, [0116](0116-listeners-across-agent-starts-compared-when-stored-and-shown-in-the-forensics-report.md)); a local
   user who keeps more than 4,096 listeners open hides new listeners on ports from 1024 up for as long, visible as `listener_check`
   `privileged`; a user who keeps the collector stalled (a descriptor hog) suppresses the check while runs are gaps; with `hidepid=2` and without `CAP_SYS_PTRACE` owners are lost without a warning; a user who wraps the inode counter becomes one more
   holder of another socket (option 11), and one with more processes than the PID cap leaves later sockets without owner, visible as

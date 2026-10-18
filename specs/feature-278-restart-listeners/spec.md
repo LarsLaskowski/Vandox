@@ -1,7 +1,7 @@
 # Spec: Report listeners that appeared while the agent was stopped
 
 Source: Issue #278
-Status: Draft
+Status: Approved by Product Manager
 
 ## Problem
 
@@ -98,10 +98,10 @@ The exact phrases are in the table of AC11.
 - Reading: the report does **not** read every stored connection snapshot. It reads the full payload only of the snapshot pair around each
   agent start and of the snapshots that carry the agent's own findings; which snapshots those are is picked from indexed columns or small
   stored fields, never by decoding the other payloads (how is the plan's). Counting the agent's snapshots for the head (S8) uses an index.
-- Memory: the report keeps across the run the inventory keys of at most two snapshots at a time (at most 4,096 each), for at most 64 agent
-  IDs (an agent ID first seen after that gets no finding and is counted in the notes), the latest 100 **restart** findings and, separately,
-  the latest 100 **agent** findings, each with at most 64 listeners (the earlier ones of each kind counted in the notes), so the additional
-  memory stays within a fixed bound that the plan states in MB beside the report's existing 60 MB.
+- Memory: one comparison holds at most two inventories (at most 4,096 listeners each) and no other snapshot's. The report keeps across
+  the run the head of at most 64 agent IDs (the lowest; the rest counted in the notes), the latest 20 **restart** findings and, separately,
+  the latest 20 **agent** findings, each with at most 64 listeners (the earlier ones of each kind counted in the notes), so the additional
+  memory stays within a fixed bound that the plan states in MB beside the report's existing 60 MB and the page's per-circuit document.
 - Time: the section's added cost is measured on the development host over the database of *Limits of the report* extended by one year
   of connection snapshots (525,600, one a minute) with 100 agent starts and 10,000 snapshots carrying agent findings, and adds at most
   **5 seconds** to a run there; the plan states the measurement and its owner. The page's deadline of 2 minutes is unchanged; the report
@@ -157,11 +157,11 @@ The exact phrases are in the table of AC11.
 
   Times follow the report's format (`YYYY-MM-DD HH:MM UTC`), counts its digits; the head of S8 is written in the same style as the report's
   head.
-- [ ] AC12: The report keeps at most 64 agent IDs' inventories, the latest 100 restart findings and, separately, the latest 100 agent findings;
-  over a cap the section and *Notes* name the cap and the number of agents or findings of that kind left out; the page keeps its 2-minute
-  deadline (E11, E13).
+- [ ] AC12: The section's head lists at most 64 agent IDs (the lowest), and the section lists the latest 20 restart findings and, separately,
+  the latest 20 agent findings; over a cap *Notes* name the cap and the number of agents or findings of that kind left out; the page keeps
+  its 2-minute deadline (E11, E13).
 - [ ] AC13: With 1,000 stored snapshots carrying agent findings and one agent start whose comparison finds `tcp 0.0.0.0:23`, the section lists
-  the restart finding with `tcp 0.0.0.0:23`, the latest 100 agent findings and the note that 900 agent findings were left out: no number of
+  the restart finding with `tcp 0.0.0.0:23`, the latest 20 agent findings and the note that 980 agent findings were left out: no number of
   agent findings removes a restart finding (E11).
 - [ ] AC14: The section decodes the full payload only of the snapshots around agent starts and of those with agent findings, and its added time
   on the measurement database of *Non-functional requirements* is at most 5 seconds (E11, E13).
@@ -224,7 +224,7 @@ Objections of the Devil's Advocate to the spec, and the answers.
    already pass it there (*Limits of the report*: several minutes on the reference host); this section must not make that materially worse,
    and `vandoxd report` without deadline remains for it.
 2. **Major: a shared cap of 100 findings lets passive-FTP agent findings push out restart findings.** Accepted. Restart and agent findings
-   have separate caps of the latest 100 each, counted separately in the notes (*Non-functional requirements*, E11, AC12), and AC13 checks
+   have separate caps (the latest 20 each since the plan, first 100), counted separately in the notes (*Non-functional requirements*, E11, AC12), and AC13 checks
    1,000 agent findings beside one restart finding on port 23, which is listed.
 3. **Minor: pick the pair by `seq`, not capture time.** Accepted. AC1 and E3 pick the last snapshot before and the first after a start by
    the record's `seq`, the agent's persistent counter; capture time is shown only. E3a covers a clock step after a reboot (record 0046), and
@@ -234,3 +234,11 @@ Objections of the Devil's Advocate to the spec, and the answers.
    speaks for each.
 5. **Minor: AC7 is not backed by the logged answer.** Accepted. Open question 1 now quotes the option as it was put to the Product Manager,
    which includes the listeners the agent reported and which ports were compared, so S7 and AC7 rest on the chosen option.
+
+Spec defects fixed while planning (Lead, mode `plan`):
+
+- The caps of findings are 20 per kind, not 100: a finding holds up to 64 listeners with a command of up to 1,024 bytes each, so 100 per
+  kind could put about 28 MB of text into the report run and into the page's per-circuit document (security area 3 bounds that document
+  at about 6.6 MB today); 20 per kind keep it at about 5.5 MB (plan, *Verified facts*). AC12, AC13 and the memory requirement changed.
+- The memory requirement no longer says the report keeps inventories: the comparison is made when the snapshots are stored (plan,
+  *Approach*), so the report keeps only the findings and the head; "64 agent IDs' inventories" became "the head of 64 agent IDs".
