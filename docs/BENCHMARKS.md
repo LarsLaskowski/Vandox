@@ -312,3 +312,26 @@ The ten runs took 48.0 to 55.6 ms. The development host is a sandbox: of its 273
 allowed reading `smaps_rollup`, while most of the sandbox's own processes (another user namespace) refused it, so the figure is for a
 mix of processes with and without PSS; a host where all of them are readable costs somewhat more. The value on the server (Ubuntu 22.04, kernel 5.15, 2 GB) is **not measured**: #44 measures it. The cost of reading `smaps_rollup`
 of every process every 15 seconds under memory pressure is an open point of #44 and #45 (Agent area, *Processes*).
+
+## Connection snapshot
+
+Criterion (issue #33): a run over a server-sized `/proc` takes milliseconds, not seconds. `BenchmarkConnections_Collect`
+(`internal/connstats/connstats_test.go`) runs one `Collect` per iteration over an in-memory `/proc` made of the captured (anonymized) tables
+of the monitored server and 300 processes with 30 descriptors each (`fdinfo` files of the captured shape); every second run is a full snapshot.
+It reads no file of the host and asserts no duration.
+
+### Procedure
+
+```bash
+go test ./internal/connstats -run '^$' -bench Collect -benchmem
+```
+
+### Results
+
+| Host | Go | CPU | Date | Processes × descriptors | Time per run | Memory per run | Allocations per run |
+| ---- | -- | --- | ---- | ----------------------: | -----------: | -------------: | ------------------: |
+| development host (4 vCPU, sandbox) | 1.27.0 | Intel Xeon 2.1 GHz | 2026-10-18 | 300 × 30 | **50.7 ms** | 1.99 MB | 26,307 |
+
+One measurement of the benchmark's own report, not a median of several. The file system is in memory, so the figure leaves out the kernel's cost to
+produce `fdinfo` files and to resolve a path in `/proc`; the value on the server (Ubuntu 22.04, kernel 5.15, 2 GB) is **not measured**: #44 measures it.
+The memory figures of a run (live data, garbage per line and per descriptor) are in the Agent area (*Connections*, **Bounded memory**).

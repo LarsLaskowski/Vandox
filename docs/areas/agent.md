@@ -7,7 +7,7 @@ how it survives a stalled data source and a missing backend, how gaps are record
 sends is in the [wire format](wire-format.md); its configuration file is in [Configuration and secrets](configuration-and-secrets.md).
 
 **Status.** The command line, the start-up with the configuration file, logging, the scheduler with its gaps and the memory pressure
-switch, the self-metrics, the system metrics, the process collector with the memory pressure mode and the notification of systemd exist, as do
+switch, the self-metrics, the system metrics, the process collector with the memory pressure mode, the connection collector (with its start-up probe of the socket mount) and the notification of systemd exist, as do
 the shared data model and the wire encoder. The other collectors, the spool, the sender and the systemd unit are **not implemented yet**: until the spool exists, the agent
 drops the records it produces after checking them (it is not released in that state; v0.2.0 waits for the spool and the sender). The
 rules below for the parts not implemented are the target the implementation is held to and the tests must check.
@@ -327,6 +327,156 @@ is deliberate: a goroutine and deadline per process would cost more than the col
 `smaps_rollup` of every process every 15 seconds under pressure is a cost nobody has measured on the server; it is an **open point for #44
 and #45**.
 
+## Connections
+
+The collector `connections` (interval 60 seconds, pressure interval 15 seconds, timeout 10 seconds, placed after `processes` in the job
+list) records one `connection_snapshot` record per run with source `connections` and the capture time of the run's start. It replaces the
+`lsof -ni` half of the legacy script (record 0019). It reads `/proc/net/tcp`, `tcp6`, `udp` and `udp6`, lists `/proc`, reads
+`/proc/<pid>/fdinfo/<n>` (the first lines only) and what the process collector reads to derive a `command` (`stat`, `cmdline`), through the
+replaceable file-system interface. It starts no program, opens no socket and makes no raw system call; `TestConnstats_ImportsOnlyAllowedPackages`
+pins the imports (`os` only for `DirFS`, no `syscall`). The one socket the agent opens for it is the start-up probe below, outside the collector.
+
+**Terms.** A **socket** is one line of the four tables of the agent's network namespace (`/proc/net` is the reader's own namespace);
+two lines are two sockets, also when both have inode 0 (`TIME_WAIT`, `SYN_RECV`), and such a line never matches a descriptor. A
+**listener** is a TCP socket in `LISTEN` or a UDP socket whose remote address is all zeros with port 0; a **connection** is a socket with a
+non-zero remote address or port; any other TCP socket counts in `states` only. The **owner** of a socket is the lowest PID among the
+processes that hold it.
+
+**Tables.** `tcp`, `tcp6`, `udp`, `udp6` are read in that order, line by line; the first line is the header. A line longer than 512 bytes is
+skipped to its end and counted unreadable. A line needs at least 10 fields: `sl` (digits and `:`), the local and remote endpoint (8 upper-case
+hex digits for IPv4 and 32 for IPv6, `:`, 4 upper-case hex digits), the state (2 upper-case hex digits) and the inode (field 10, 1 to 20
+digits within 64 bits); the fields between and after are not interpreted. Each address word is read as a 32-bit number and written in the
+kernel's host byte order, so `0100007F` is `127.0.0.1`. An IPv4-mapped address in `tcp6` is kept as the kernel reports it (`::ffff:a.b.c.d`,
+no unmapping) and so is a link-local one, without a zone ([wire format](wire-format.md), *Producer mapping for connection endpoints*). The
+TCP states `01` to `0C` map to the model's twelve names; any other code makes the line unreadable; for UDP the state is checked and dropped.
+`sl` is not unique and a line can end in `-1` or in trailing spaces; none of it matters. A table that does not exist (`tcp6` and `udp6` on a
+kernel without IPv6, observed on the development host) leaves its protocol out; all four missing fail the sample (`connstats: no socket table
+found`), and a table that exists but cannot be read fails it too (a gap, [Scheduling](#scheduling)).
+
+**Caps.** Every socket of the tables is counted in `states`; the rest is bounded. Per run: the inode index holds the first 65,536 sockets with an inode
+other than 0 (more sockets have no owner and make the aggregates incomplete); the listener inventory holds the 4,096 lowest **distinct**
+endpoints (the wire format's list limit), so `SO_REUSEPORT` sockets share one entry and never count toward the cut; the connections list the 4,096 lowest
+(protocol, local, remote); `remotes` counts at most 4,096 remote addresses; at most 4,096 processes are scanned for owners (the lowest PIDs,
+as the process collector keeps them); at most 64 new listeners are reported.
+
+**Regular and full snapshots.** A **regular** snapshot (`aggregates_only` true, no `connections`) holds `states` (per protocol and TCP state,
+by protocol then state, UDP without state), `processes` (one entry per process that owns at least one socket: PID, `command`, distinct
+sockets it holds, by count descending then PID), `remotes` (the top 25 by count descending then address, address only) and `listeners` (the
+inventory, ports below 1024 first, then protocol, address, port). A **full** snapshot adds every connection (by protocol, local, remote) and
+every counted remote address. The first run after the agent starts, every run under memory pressure (the mode at the run's start, *Scheduling*)
+and every run that finds at least one new listener, reported or omitted, is full; every other run is regular. `complete` keeps its meaning of
+the wire format and is true only for a full snapshot in which nothing was cut, skipped, left without an owner beyond a cap, unread or
+uncounted, so a regular snapshot is never complete. `aggregates_incomplete` is set when `states`, `listeners` or `processes` may not cover
+every socket the run saw: a list cut for size or at its cap, a skipped table line, a socket beyond the inode index, more processes than the
+PID cap, a process whose descriptors could not be read, or an owner scan that did not run (below). Imported legacy snapshots and an older agent's
+carry none of the new fields and read as full with complete aggregates. A regular snapshot's top 25 `remotes` are over the counted addresses
+only: an address first seen after the 4,096 are counted, however heavy, is missing from it (a full snapshot says so through `complete`).
+`remotes` does not unmap IPv4-mapped addresses, so one IPv4 peer connected to a `0.0.0.0` and to a `::` listener is two entries.
+
+**Owners.** The agent does not read the `/proc/<pid>/fd` links, because listing them needs `CAP_DAC_READ_SEARCH` (*Rights*). For every
+listed process it lists `<pid>/fdinfo` in chunks of 256 and, per descriptor, opens the file, reads at most 256 bytes and closes it. The
+first four lines must be `pos:`, `flags:`, `mnt_id:` (1 to 10 digits, not 0) and `ino:` (1 to 20 digits), each a tab and digits; later lines
+(an epoll's `tfd:`) are not read. A descriptor counts only when its `ino:` is the inode of a tracked socket **and** its `mnt_id:` is the
+**socket mount** (below). Per tracked socket the collector keeps two 32-bit numbers, its owner and the last PID that counted it, so several
+descriptors of one socket in one process count once for that process; per PID it counts the distinct sockets. No list of matches is kept,
+so no process's descriptors can crowd out another's owners. A socket held by several processes counts once in `states`, `remotes`,
+`listeners` and `connections`, is owned by the lowest PID and counts once in the `processes` entry of every holder; several listening
+sockets on one endpoint are one listener owned by the lowest owning PID. A process that ends during the run is skipped (`ENOENT`/`ESRCH` on its
+directory); a descriptor closed meanwhile is skipped; an ended process owns nothing and is not in `processes`. A descriptor of a socket that
+is not in the four tables (another network namespace, a Unix socket) counts nowhere. Sockets without an owner (`TIME_WAIT`, a closed or
+unreadable one) count in `states` and, as connections, in `remotes` and `connections`; their entries carry no PID and no `command`. The
+`command` is the process collector's (*Processes*, **Names**, through `procstats.CommandReader`). It is text the process chooses; the
+PID is the kernel's. The kernel's `uid` column of the tables is not recorded (a follow-up).
+
+**The socket mount.** An inode number alone does not tell a socket from a file with the same number, which any user can create on a mount
+of their own (a tmpfs in a user namespace, FUSE, a container). Every socket of every family, in any namespace, is allocated on one
+internal kernel mount that holds nothing else and that no user can mount (upstream `net/socket.c`, `sock_alloc_file`, read at v5.15; the
+Ubuntu 22.04 kernel is built on it). Measured on kernel 6.18.44: `mnt_id: 10` for a Unix datagram, a TCP, a UDP and a netlink socket in
+the initial namespaces, after `unshare -m` and as UID 65534 after `unshare -Urm` and `unshare -Urmn`, while a pipe has `mnt_id: 16`; mount IDs are
+global, a file on a user-namespace tmpfs showed `mnt_id: 76`. At start-up the agent therefore opens one Unix datagram socket, never bound,
+connected or sent on, reads the first lines of its own `/proc/self/fdinfo/<fd>`, checks that the `ino:` equals the inode `fstat` reports for the
+descriptor (else the probe fails: `sockmount: self/fdinfo: inode mismatch`), closes both and keeps the `mnt_id:` for its lifetime
+(`internal/sockmount`). The probe needs no right. Its failure texts are `sockmount: socket: <errno>`, `sockmount: self/fdinfo: <os error>` and
+`sockmount: <fixed reason>`. When it fails, or when a collector is built without a probed mount, the collector opens no `fdinfo`, no
+socket has an owner, `processes` is empty, the aggregates are incomplete, the sample succeeds and one warning `socket owners unknown` (`err`) is
+logged at the first run; the state lasts until the agent restarts.
+
+**The listener check.** The collector keeps the previous successful run's inventory in memory: its keys (at most 4,096, as the heap
+holds them, not as the record's size budget may cut the list), whether it was cut, which tables were read and whether a line was skipped.
+Each snapshot states the comparison its run made in `listener_check`:
+
+- `none`: the first run, a skipped table line in either run, a different set of tables read, or a cut inside the privileged part
+  (nothing is reported and no full snapshot is taken for it); a failed run is not compared, the next successful run is compared with the last
+  successful one;
+- `privileged`: either inventory was cut at 4,096, so only the keys on ports below 1024 are compared; they come first in the inventory,
+  so a flood of unprivileged listeners never cuts them;
+- `all`: otherwise.
+
+A key in the current inventory that the previous lacks is a **new listener**, except an unconnected UDP socket on a port from 32768 to 60999 (the kernel's
+default local port range, fixed, not read from the server; a resolver's or client's temporary socket). A TCP listener is reported on any
+port. At most 64 are reported, in inventory order, in `new_listeners`; the rest is the count `new_listeners_omitted`. A change of the owner on
+the same protocol, address and port is not new; a listener that disappears and returns is new again. The current inventory becomes the
+base, also after a `none` check, **only when the run's context has not ended**: the collector tests `ctx.Err()` immediately before it returns
+its record and, when the deadline has passed, returns that error and keeps no inventory and no log state, so a run that becomes a gap
+(the scheduler drops a result that arrives after the deadline) cannot make a listener known without a report. A size cut of `listeners` in the
+record makes the aggregates incomplete but leaves the comparison alone.
+
+**The record always fits and is valid.** The record is filled entry by entry within a payload budget of 1 MiB less 8 KiB of JSON (each entry
+encoded alone to measure it), in the order `states`, `new_listeners`, `listeners`, `processes`, `remotes`, `connections`; at the first entry
+that does not fit, that list and every later one stop (a cut in `states`, `listeners` or `processes` sets `aggregates_incomplete`). The
+record is checked with the producer contract of the [wire format](wire-format.md); as a safety net a record still too long is shortened by
+halving `connections`, then `remotes`, `processes` and `listeners`, and is marked not complete. Size never fails the sample. No text a
+user chooses can: the `command` follows the process collector's rules.
+
+**Logging.** One line per change, through the collector's logger with `collector=connections`, no per-run line, no line per new listener, no
+process text and no address: info `socket tables unavailable` (`tables`: the missing ones, comma-separated, in table order) and `socket tables
+available`; warning `socket lines not read` (`lines`: the number, `err`: `connstats: net/<table>: line <n>: <reason>` with a fixed reason
+`not in the expected format`, `unknown state` or `line too long`) and info `socket lines read again`; warning `socket owners partly unknown`
+(`processes`: the number of listed processes whose descriptors could not be read, `err`: `connstats: <pid>/fdinfo: <fixed reason or os error>`)
+and info `socket owners known again`; warning `socket owners unknown` (above). The lines are written only for a run that finishes in time.
+
+**Failures and rights.** The sample fails (a gap) when no table exists, a table cannot be read, `/proc` cannot be listed or the run's context ends.
+It succeeds when a process or a descriptor cannot be read: the first `EACCES`, `EPERM` or other error on a process, or an `fdinfo` that does not
+have the four-line shape (before Linux 5.14 there is no `ino:` line; upstream `fs/proc/fd.c` at v5.13 has none, at v5.14 and v5.15 it follows
+`mnt_id:`; the server runs Ubuntu 22.04 with 5.15 or a newer kernel), counts that process unreadable once, stops its scan, and the sockets it
+held have no owner. Without `CAP_SYS_PTRACE` that is every process of another user, so the warning is logged. With `hidepid=1` and without the
+capability the same. With `hidepid=2` and without the capability other users' processes are **not listed at all**, so their sockets have no owner
+**without a warning** (stated residual). With the capability `hidepid=2` hides nothing (measured, *Rights*).
+
+**Bounded memory.** The live data of a run is bounded by the caps: the inode index of 65,536 sockets (two 32-bit numbers each for owner and
+last counting PID), two heaps of 4,096 entries and 4,096 remote counts. Measured by `TestConnections_ManySocketsStayWithinCaps` on Go 1.27
+(Xeon 2.1 GHz, an in-memory file system) at two sizes of each axis: the live data is 3.04 MB at 100,000 table lines and 3.18 MB at 400,000, and 0.71 MB at
+50,000 and 200,000 descriptors of one process, so it does not grow with the input beyond the caps; the peak with the inode index alive is about
+5.5 MB. The **garbage** does grow: reading a table line leaves none (0 B per extra line), reading a descriptor through `io/fs` allocates a fixed
+amount (about 170 B per extra descriptor, the test's generated file system included), and a run that reaches the caps allocates a fixed
+about 24.7 MB more (about 9 MB of it the growth of the 65,536-entry index map), all reclaimed by the garbage collector. The 24.7 MB is
+accepted; the live figure, not the garbage, is the bound.
+
+**Speed.** `BenchmarkConnections_Collect` over the captured server tables with 300 processes of 30 descriptors takes 50.7 ms per run and
+allocates 1.99 MB in 26,307 allocations ([Benchmarks](../BENCHMARKS.md), *Connection snapshot*); not measured on the server (#44).
+
+**Residuals.**
+
+- A listener that opens while the agent is stopped (an update, a crash, a reboot with a service that starts at boot) is not reported: the first run after a
+  start is the baseline. Both inventories are stored; their comparison is #278.
+- A local user who keeps more than 4,096 listeners open (about 4,100 TCP listeners on unprivileged ports suffice) hides new listeners on ports
+  from 1024 up for as long; the snapshots show `listener_check` `privileged`, and the flood alone causes no report and no full snapshot.
+- A user who holds hundreds of thousands of descriptors lengthens the run in proportion; a run past its timeout is a gap and the collector is
+  not started again while it lasts (*Collecting*). While runs are gaps no inventory is compared, so a listener that opens and closes during the stall
+  is never reported: a user who keeps the collector stalled suppresses the check, visible as the gaps. The next run compares with the last that finished
+  in time. A deadline that passes between the context check and the scheduler's receipt still keeps the inventory of a run that becomes a gap.
+- Socket inode numbers come from a 32-bit kernel counter that pipes and other kernel files share. A user who allocates some four billion of them can
+  hold a socket of their own outside the tables with the number of another socket and become one more holder of it, its owner only with a
+  lower PID than every real holder. A user who runs more processes than the PID cap leaves the sockets of later PIDs without an owner, visible
+  as incomplete aggregates.
+- Short-lived TCP listeners such as an FTP data connection in passive mode (ProFTPD on Plesk without `PassivePorts`) are reported when a run happens to see
+  one; how often is measured in the parallel run of #45. A server whose local port range differs reports UDP sockets outside the fixed range.
+- The agent's totals include sockets without an owner (`TIME_WAIT`), which `lsof -ni` never listed, and `processes` counts the sockets a process
+  owns on the descriptors the agent can read, so the numbers of the two sources differ for #45. Mapped addresses split a peer in `remotes`.
+- The incident's connection peak is taken over every source in its window, so the agent's higher totals win it against imported snapshots
+  ([Detection, alerts and reports](detection-and-reports.md)).
+- A skipped table line (it is counted, not parsed) makes the snapshot's aggregates incomplete and the run's comparison `none`.
+
 ## Memory pressure mode
 
 The `system` collector decides the memory pressure mode ([Scheduling](#scheduling)) after each successful `system` sample, from the values
@@ -342,7 +492,7 @@ it has just read:
 The collector calls the switch (`Scheduler.SetPressure`, which the agent connects when it builds the scheduler) only when the mode changes;
 it starts off. A change logs one info line `memory pressure mode on` or `memory pressure mode off` with `collector=system`,
 `mem_available_bytes` and, when the pressure file was read, `memory_some_avg10`. A failed sample changes nothing. The effect: the `system`
-(10 seconds) and `processes` (15 seconds) collectors run at their pressure intervals and `processes` lists every process.
+(10 seconds), `processes` (15 seconds) and `connections` (15 seconds) collectors run at their pressure intervals, `processes` lists every process and `connections` records a full snapshot.
 
 Because the decision follows a `system` sample, the switch can lag the pressure by up to one `system` interval (30 seconds). Any local
 user can switch the mode on by allocating memory; the result is a process snapshot with every process every 15 seconds and a spool that
@@ -398,6 +548,26 @@ collector timeouts and backend gap detection each emit a gap record, and each pa
   and another user namespace, were not measured and can refuse the read even with the capability. Without it the collector records the
   RSS from `status` and leaves the PSS out. `CAP_SYS_PTRACE` is the process collector's use of the capability; the list of rights per
   collector is in `deploy/agent/README.md`.
+- **Connection collector.** It reads another user's `/proc/<pid>/fdinfo/<n>` (`mnt_id:`, `ino:`, the socket's table inode) and uses
+  `CAP_SYS_PTRACE` alone; it does **not** use `CAP_DAC_READ_SEARCH`, which would only be needed for the `/proc/<pid>/fd` links and lets the whole
+  agent read every file (`/etc/shadow`, Plesk's credentials). Measured by Security on the development host (kernel 6.18.44, no Yama, no
+  `hidepid`), as UID 65534 against a process of root:
+
+  | Capabilities | list `fd/` | readlink `fd/3` | list `fdinfo/` | read `fdinfo/3` | read `/etc/shadow` |
+  | ------------ | ---------- | --------------- | -------------- | --------------- | ------------------ |
+  | none | `EACCES` | `EACCES` | `EACCES` | `EACCES` | `EACCES` |
+  | `CAP_DAC_READ_SEARCH` | ok | `EACCES` | `EACCES` | `EACCES` | ok |
+  | `CAP_SYS_PTRACE` | `EACCES` | `EACCES` | ok | ok (`mnt_id`, `ino` = the socket inode) | `EACCES` |
+  | both | ok | `socket:[N]` | ok | ok | ok |
+
+  `hidepid=2` hides no process from a reader that holds `CAP_SYS_PTRACE` (measured in a scratch mount namespace with `proc` mounted with
+  `hidepid=2`); without the capability other users' processes are invisible. Without the capability the sockets of other users' processes carry
+  no owner (*Connections*). A Yama or other LSM policy and another user namespace were not measured. The start-up probe's Unix datagram socket needs
+  no right, but the unit must allow it: `RestrictAddressFamilies=` must keep `AF_UNIX` (the notification socket of *Service manager* needs it
+  as well), and a system-call filter must not deny `socket` for it; when the probe is refused the collector logs `socket owners unknown` and
+  records no owners. The unit gives the agent **no network namespace of its own** (no `PrivateNetwork=`, no `NetworkNamespacePath=`, or
+  `/proc/net` would show another namespace's sockets), does not set `ProcSubset=pid` (it hides `/proc/net`) and leaves `ProtectProc=` at
+  `default` (a stricter value hides other users' processes).
 - As soon as the unit grants any capability, the unit is confined: `NoNewPrivileges=yes`; a system-call filter that denies `ptrace`,
   `process_vm_readv`, `process_vm_writev`, `pidfd_getfd` and `open_by_handle_at` with `EPERM` (and not `pidfd_open` or
   `pidfd_send_signal`) under `SystemCallArchitectures=native`; no write-side capability; `ProtectHome=yes` and `InaccessiblePaths=` for at
@@ -435,6 +605,9 @@ collector timeouts and backend gap detection each emit a gap record, and each pa
   collector reads `smaps_rollup` for PSS, lists the top processes and every program (every process under pressure), the `system` collector
   switches the memory pressure mode with fixed hysteretic thresholds, names follow the legacy derivation plus literal rules, and an entry
   that fails its check is left out.
+- [0115](../decisions/0115-connection-collector-proc-net-tables-owners-from-fd-regular-and-full-snapshots-bounded-listener-check.md) — why the
+  connection collector reads the `/proc/net` tables with owners from `fdinfo` on a socket mount the agent learns at its start (`CAP_SYS_PTRACE`
+  alone), records a regular or a full snapshot in the one record kind, and bounds the new-listener check, favoring privileged ports.
 
 ## Not here
 
@@ -446,6 +619,7 @@ collector timeouts and backend gap detection each emit a gap record, and each pa
 
 `cmd/vandox-agent` and `internal/cli` (Go), `internal/agent` (start-up, logging, watchdog), `internal/scheduler`, `internal/selfstats`,
 `internal/sysstats` (system metrics and the memory pressure mode; fixtures `testdata/proc/`, `testdata/sys/`),
-`internal/procstats` (process collector; fixtures `testdata/proc/<pid>/`, `testdata/etc/passwd`, `testdata/processes/names.json`),
+`internal/procstats` (process collector; fixtures `testdata/proc/<pid>/`, `testdata/etc/passwd`, `testdata/processes/names.json`; `ListPIDs`, `CommandReader` and `Ended` are shared with the connection collector),
+`internal/connstats` (connection collector; fixtures `testdata/proc/net/`, `testdata/connections/sandbox/`), `internal/sockmount` (the start-up probe of the socket mount),
 `internal/sdnotify`, `internal/config`, `internal/model`, `internal/wire`; `deploy/agent/` (example configuration; the unit and install
 scripts follow with the collectors).

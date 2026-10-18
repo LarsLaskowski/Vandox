@@ -21,7 +21,7 @@ added by the backend and cannot be supplied by the agent.
 ## Header
 
 ```json
-{"format_major":1,"format_minor":0,"agent_id":"web-1","boot_id":"0b6f9b0c-2d1e-4c43-9a4e-7f1b2c3d4e5f","clock_offset_ns":-120000000,"mode":"live"}
+{"format_major":1,"format_minor":1,"agent_id":"web-1","boot_id":"0b6f9b0c-2d1e-4c43-9a4e-7f1b2c3d4e5f","clock_offset_ns":-120000000,"mode":"live"}
 ```
 
 | Field | Type | Rule |
@@ -168,6 +168,27 @@ valid. `proto` is `tcp`, `tcp6`, `udp` or `udp6`; `state` is required for `tcp`/
 `udp`/`udp6`, from `ESTABLISHED SYN_SENT SYN_RECV FIN_WAIT1 FIN_WAIT2 TIME_WAIT CLOSE CLOSE_WAIT LAST_ACK
 LISTEN CLOSING NEW_SYN_RECV`; `count` >= 1; `pid` >= 0.
 
+Since format 1.1 five optional fields say what kind of snapshot it is and what its producer compared (all omitted when false, zero or
+absent):
+
+- `aggregates_only` (true): a **regular** snapshot of the connection collector: the aggregates (`states`, `processes`, `remotes`,
+  `listeners`) without `connections`. Requires `complete` false and no `connections`. Its `remotes` are the top 25 by count over the
+  addresses the producer counted (at most 4,096; a heavy address first seen after the cap is missing).
+- `aggregates_incomplete` (true): `states`, `listeners` or `processes` may not cover every socket the producer saw (a list cut, a table
+  line skipped, sockets without an owner beyond a cap, owners unknown). Requires `complete` false.
+- `listener_check` (`all`, `privileged`, `none`): the comparison of the listener inventory with the last successful run's that the producer
+  made for this snapshot: the whole inventory; only the listeners on ports 1 to 1023, because an inventory was cut at 4,096; or none.
+- `new_listeners` (listener entries, at most 4,096): the listeners the producer found new in the run, with the owner's `pid` and `command`
+  when known. Requires `listener_check` `all` or `privileged`.
+- `new_listeners_omitted` (>= 1): how many more new listeners were found than `new_listeners` holds. Requires `listener_check` `all` or
+  `privileged`.
+
+The absence of all five reads as a **full** snapshot with complete aggregates and no listener check, which is what an imported legacy snapshot
+and a 1.0 agent's snapshot are. The rules are checked in Go and C#; their field errors are `data.complete`: `must be false for an
+aggregates-only snapshot` and `must be false when aggregates are incomplete`; `data.connections`: `must be empty in an aggregates-only
+snapshot`; `data.listener_check`: one of `all`, `privileged`, `none`, and `must be all or privileged when new listeners are reported`. A
+JSON `null` of `listener_check` reads as absent (0089); the Go encoder never writes an empty `listener_check`.
+
 ### `service_state`
 
 `unit` (required, `^[A-Za-z0-9:_.@\-]+$`, at most 256 bytes), `load_state` (`loaded not-found bad-setting
@@ -197,7 +218,7 @@ producer read; false for a configured subset or a reduction for size). When `ava
 it for imported records, relative to the import root or archive and with its rotation suffix), `host` (optional short
 text: the host that wrote the line, empty when unknown), `program` (short text), `pid` (>= 0), `priority` (optional, 0
 to 7), `message` (text, may be empty), `truncated` (the producer cut the message to 16384 bytes), `event` (optional name,
-see *Name pattern*: the event a producer recognized in the line, such as `mariadb.start`; empty for none). `host` and `event` are additive optional fields, so the wire version stays 1.0
+see *Name pattern*: the event a producer recognized in the line, such as `mariadb.start`; empty for none). `host` and `event` are additive optional fields, so the wire version stayed 1.0
 ([0084](../decisions/0084-log-line-record-gets-an-optional-host-field.md),
 [0088](../decisions/0088-mariadb-error-log-entries-by-content-and-lifecycle-events-in-log-line.md)). The Go encoder omits an
 empty `host` and an empty `event`; the C# decoder reads a line without them as empty.
@@ -224,7 +245,10 @@ connection collector #33 and the legacy `lsof -ni` parser #20):
   table, never by a lookup on the host;
 - a socket whose address or port cannot be mapped is left out and reported (the importer counts it as a skipped line) and `complete` is set to false;
 - an unconnected socket without a remote endpoint (listening TCP, unconnected UDP) goes to `listeners`, never
-  to `connections`.
+  to `connections`;
+- the connection collector reads the kernel's tables `/proc/net/{tcp,tcp6,udp,udp6}`: each address word is a 32-bit number in the host's byte
+  order (one word for IPv4, four for IPv6), no zone is written, and an IPv4-mapped address in `tcp6`/`udp6` (`::ffff:a.b.c.d`) is kept as it
+  is, not unmapped, so `remotes` can hold one peer twice.
 
 ## Limits
 
@@ -268,7 +292,9 @@ so a header of any major that breaks one is `wire.ErrMalformed`, not `wire.ErrUn
 only through a record that supersedes 0090. It then reads the major before anything else and rejects any major it does not know with `wire.ErrUnsupportedVersion`, even
 if the rest of that header has an incompatible shape. A header that is not a JSON object or `null`, or whose major is not
 a JSON integer, is `wire.ErrMalformed`: the major is an integer in every version (0043). A minor change is additive: new optional fields and new kinds; a decoder ignores unknown
-keys at any depth and so accepts a newer minor of its major. An unknown record kind is rejected. Until the
+keys at any depth and so accepts a newer minor of its major. The current version is **1.1**: 1.1 added the five optional fields of
+`connection_snapshot` (`aggregates_only`, `aggregates_incomplete`, `listener_check`, `new_listeners`, `new_listeners_omitted`; record 0115);
+1.0 was released with v0.1.0. An unknown record kind is rejected. Until the
 upgrade rules are settled (#85), upgrade the backend before the agents.
 
 ## Batch rules and trust (0044)
@@ -358,7 +384,7 @@ Duties of the ingest API (#40, planned), which this package cannot take over. Th
 Decompressed content of a batch of three records (the real stream is gzip-compressed):
 
 ```
-{"format_major":1,"format_minor":0,"agent_id":"web-1","boot_id":"0b6f9b0c-2d1e-4c43-9a4e-7f1b2c3d4e5f","mode":"live"}
+{"format_major":1,"format_minor":1,"agent_id":"web-1","boot_id":"0b6f9b0c-2d1e-4c43-9a4e-7f1b2c3d4e5f","mode":"live"}
 {"kind":"metric","source":"proc.meminfo","seq":41,"captured_at":"2026-03-01T12:00:00Z","data":{"name":"mem_free_bytes","value":1048576,"unit":"bytes"}}
 {"kind":"service_state","source":"systemd","seq":42,"captured_at":"2026-03-01T12:00:00Z","data":{"unit":"mariadb.service","load_state":"loaded","active_state":"active","sub_state":"running","restarts":0}}
 {"kind":"gap","source":"agent","seq":43,"captured_at":"2026-03-01T12:00:05Z","data":{"from":"2026-03-01T11:58:00Z","to":"2026-03-01T12:00:00Z","cause":"collector_timeout","collector":"mariadb"}}
@@ -377,6 +403,8 @@ Decompressed content of a batch of three records (the real stream is gzip-compre
 - [0089](../decisions/0089-json-null-reads-as-an-absent-key-in-both-decoders.md) — why a JSON `null` reads as an absent key in both decoders.
 - [0090](../decisions/0090-wire-keys-matched-ignoring-ascii-case-duplicates-rejected-header-shape-malformed.md) — why both decoders check
   keys and nesting before binding, match keys ignoring ASCII case and report a misshapen header as malformed.
+- [0115](../decisions/0115-connection-collector-proc-net-tables-owners-from-fd-regular-and-full-snapshots-bounded-listener-check.md) — why a
+  regular and a full snapshot are one record kind with additive fields, and format 1.1.
 - [0114](../decisions/0114-model-text-limits-measured-after-the-encoders-replacement.md) — why the Go model measures limits as the encoder writes them, invalid UTF-8 counted as its replacement.
 
 ## Not here

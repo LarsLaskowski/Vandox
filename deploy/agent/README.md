@@ -11,6 +11,9 @@ collectors that need them.
 | Capability | Collector | What it is for |
 | ---------- | --------- | -------------- |
 | `CAP_SYS_PTRACE` | `processes` | Reading `/proc/<pid>/smaps_rollup` of **another user's** process, which gives the proportional set size (PSS). |
+| `CAP_SYS_PTRACE` | `connections` | Listing and reading `/proc/<pid>/fdinfo/<n>` of **another user's** process, which names the socket (`ino:`) a descriptor holds and its mount (`mnt_id:`), so a socket gets its owner. |
+
+`CAP_DAC_READ_SEARCH` is **not needed by any collector so far**. The connection collector deliberately does not use it (see below).
 
 `CAP_SYS_PTRACE` is granted as an ambient capability, with a bounding set limited to the capabilities the Agent area names, and the unit is
 confined as soon as it grants any (`NoNewPrivileges=yes`, a system-call filter that denies `ptrace`, `process_vm_readv`,
@@ -31,7 +34,40 @@ confined as soon as it grants any (`NoNewPrivileges=yes`, a system-call filter t
 - A kernel thread or a zombie has no address space; the kernel answers `ESRCH` for its `smaps_rollup`, and the collector records 0.
 - `/proc/stat`, `/etc/passwd` and the other files the system collectors read are readable by any user and need nothing.
 
+### What the connection collector reads and what it needs
+
+- `/proc/net/tcp`, `tcp6`, `udp` and `udp6` are readable by any user and need no right. `tcp6` and `udp6` are missing on a kernel without IPv6;
+  the collector then leaves those protocols out.
+- `/proc/<pid>/fdinfo/<n>` of **another user's** process needs `CAP_SYS_PTRACE`: the kernel checks ptrace access when the directory is listed
+  and the file opened. The links `/proc/<pid>/fd/<n>` (`socket:[N]`) would need `CAP_DAC_READ_SEARCH` to list and both capabilities to read,
+  and `CAP_DAC_READ_SEARCH` lets the agent read every file on the server (`/etc/shadow`, Plesk's credentials), so the collector does not read
+  them (record 0115). Measured on the development host (kernel 6.18.44, no Yama restriction, no `hidepid`), as user 65534 against a process of root:
+
+  | Capabilities | list `fd/` | readlink `fd/3` | list `fdinfo/` | read `fdinfo/3` | read `/etc/shadow` |
+  | ------------ | ---------- | --------------- | -------------- | --------------- | ------------------ |
+  | none | `EACCES` | `EACCES` | `EACCES` | `EACCES` | `EACCES` |
+  | `CAP_DAC_READ_SEARCH` | ok | `EACCES` | `EACCES` | `EACCES` | ok |
+  | `CAP_SYS_PTRACE` | `EACCES` | `EACCES` | ok | ok (`mnt_id: 10`, `ino:` the socket's inode) | `EACCES` |
+  | both | ok | `socket:[N]` | ok | ok | ok |
+
+- With `CAP_SYS_PTRACE`, `hidepid=2` hides no process (measured in a scratch mount namespace with `proc` mounted with `hidepid=2`); without
+  it other users' processes are invisible, and their sockets then carry no owner **without a warning**.
+- The `ino:` line of `fdinfo` exists from Linux 5.14 on (the server's Ubuntu 22.04 has 5.15 or a newer kernel). On an older kernel no socket
+  gets an owner and the agent logs `socket owners partly unknown`.
+- Without the capability the collector still runs: the sockets of other users' processes carry no owner, the sample succeeds and the agent logs
+  `socket owners partly unknown` once with the number of processes it could not read.
+- **The socket probe needs no right but a unit setting.** At its start the agent opens one Unix datagram socket (never bound, connected or
+  sent on) and reads its own `/proc/self/fdinfo/<fd>` to learn the mount that holds the kernel's sockets; only descriptors on that mount count as
+  sockets. If the unit refuses the socket, no socket gets an owner and the agent logs `socket owners unknown`.
+
+### Unit settings that must stay as they are
+
+- `RestrictAddressFamilies=` must keep **`AF_UNIX`** (the probe above and the notification socket of systemd).
+- No own network namespace: no `PrivateNetwork=` and no `NetworkNamespacePath=`, or `/proc/net` shows another namespace's sockets.
+- No `ProcSubset=pid`: it hides `/proc/net`.
+- `ProtectProc=` stays at `default`: a stricter value hides other users' processes.
+
 ## Groups
 
 The groups `adm` (log files) and `systemd-journal` (journal) are for the log collectors that follow; the process collector needs
-neither.
+neither, and neither does the connection collector.
