@@ -59,14 +59,8 @@ public class NullElementStringListConverterTests
         // Arrange
         var options = CreateOptions();
 
-        // Act
-        List<string>? Act()
-        {
-            return JsonSerializer.Deserialize<List<string>>(json, options);
-        }
-
-        // Assert
-        Assert.ThrowsExactly<JsonException>(Act, $"{json} is not an array");
+        // Act and Assert
+        Assert.ThrowsExactly<JsonException>(() => JsonSerializer.Deserialize<List<string>>(json, options), $"{json} is not an array");
     }
 
     /// <summary>
