@@ -1,6 +1,6 @@
 # 0114: The Go model measures text limits as the encoder writes them, invalid UTF-8 counted as its replacement
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-18
 - **Area:** Wire format
 - **Source:** Issue #270
