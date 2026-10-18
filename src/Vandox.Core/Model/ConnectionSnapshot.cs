@@ -88,7 +88,11 @@ public sealed class ConnectionSnapshot : IPayload
     /// </summary>
     [JsonPropertyName("listener_check")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? ListenerCheck { get; set; }
+    public string? ListenerCheck
+    {
+        get;
+        set => field = string.IsNullOrEmpty(value) ? null : value;
+    }
 
     /// <summary>
     /// Gets or sets the listeners that appeared since the previous run.
@@ -189,6 +193,44 @@ public sealed class ConnectionSnapshot : IPayload
         return null;
     }
 
+    /// <summary>
+    /// Checks the rules that tie the aggregate flags, the listener check and the new listeners together.
+    /// </summary>
+    /// <returns>The first rule that is broken, or <c>null</c></returns>
+    private FieldError? ValidateFlags()
+    {
+        if (AggregatesOnly && Complete)
+        {
+            return Check.Invalid("complete", "must be false for an aggregates-only snapshot");
+        }
+
+        if (AggregatesOnly && (Connections?.Count ?? 0) > 0)
+        {
+            return Check.Invalid("connections", "must be empty in an aggregates-only snapshot");
+        }
+
+        if (AggregatesIncomplete && Complete)
+        {
+            return Check.Invalid("complete", "must be false when aggregates are incomplete");
+        }
+
+        if (ListenerCheck is not null)
+        {
+            var error = Check.OneOf("listener_check", ListenerCheck, "all", "privileged", "none");
+
+            if (error is not null)
+            {
+                return error;
+            }
+        }
+
+        var reported = (NewListeners?.Count ?? 0) > 0 || NewListenersOmitted > 0;
+
+        return reported && ListenerCheck != "all" && ListenerCheck != "privileged"
+                   ? Check.Invalid("listener_check", "must be all or privileged when new listeners are reported")
+                   : null;
+    }
+
     #endregion // Methods
 
     #region IPayload
@@ -204,14 +246,17 @@ public sealed class ConnectionSnapshot : IPayload
                         ?? Check.Count("processes", Processes?.Count ?? 0)
                         ?? Check.Count("remotes", Remotes?.Count ?? 0)
                         ?? Check.Count("listeners", Listeners?.Count ?? 0)
-                        ?? Check.Count("connections", Connections?.Count ?? 0);
+                        ?? Check.Count("connections", Connections?.Count ?? 0)
+                        ?? Check.Count("new_listeners", NewListeners?.Count ?? 0)
+                        ?? ValidateFlags();
 
         return error
                    ?? ValidateList("states", States, (item, path) => item.Validate(path))
                    ?? ValidateList("processes", Processes, (item, path) => item.Validate(path))
                    ?? ValidateList("remotes", Remotes, (item, path) => item.Validate(path))
                    ?? ValidateList("listeners", Listeners, (item, path) => item.Validate(path))
-                   ?? ValidateList("connections", Connections, (item, path) => item.Validate(path));
+                   ?? ValidateList("connections", Connections, (item, path) => item.Validate(path))
+                   ?? ValidateList("new_listeners", NewListeners, (item, path) => item.Validate(path));
     }
 
     #endregion // IPayload

@@ -96,11 +96,14 @@ func (s *ConnectionSnapshot) Validate() error {
 		n    int
 	}{
 		{"states", len(s.States)}, {"processes", len(s.Processes)}, {"remotes", len(s.Remotes)},
-		{"listeners", len(s.Listeners)}, {"connections", len(s.Connections)},
+		{"listeners", len(s.Listeners)}, {"connections", len(s.Connections)}, {"new_listeners", len(s.NewListeners)},
 	} {
 		if err := checkCount(c.name, c.n); err != nil {
 			return err
 		}
+	}
+	if err := s.validateFlags(); err != nil {
+		return err
 	}
 	for i := range s.States {
 		e := &s.States[i]
@@ -135,18 +138,8 @@ func (s *ConnectionSnapshot) Validate() error {
 			return err
 		}
 	}
-	for i := range s.Listeners {
-		e := &s.Listeners[i]
-		path := indexed("listeners", i)
-		if err := checkProtoOnly(path, e.Proto); err != nil {
-			return err
-		}
-		if err := checkAddrPort(path+".local", e.Local); err != nil {
-			return err
-		}
-		if err := checkProcess(path, e.PID, e.Command); err != nil {
-			return err
-		}
+	if err := checkListeners("listeners", s.Listeners); err != nil {
+		return err
 	}
 	for i := range s.Connections {
 		e := &s.Connections[i]
@@ -158,6 +151,46 @@ func (s *ConnectionSnapshot) Validate() error {
 			return err
 		}
 		if err := checkAddrPort(path+".remote", e.Remote); err != nil {
+			return err
+		}
+		if err := checkProcess(path, e.PID, e.Command); err != nil {
+			return err
+		}
+	}
+	return checkListeners("new_listeners", s.NewListeners)
+}
+
+// validateFlags checks the rules that tie the aggregate flags, the listener check and the new listeners together.
+func (s *ConnectionSnapshot) validateFlags() error {
+	if s.AggregatesOnly && s.Complete {
+		return invalid("complete", "must be false for an aggregates-only snapshot")
+	}
+	if s.AggregatesOnly && len(s.Connections) > 0 {
+		return invalid("connections", "must be empty in an aggregates-only snapshot")
+	}
+	if s.AggregatesIncomplete && s.Complete {
+		return invalid("complete", "must be false when aggregates are incomplete")
+	}
+	if s.ListenerCheck != "" {
+		if err := checkOneOf("listener_check", s.ListenerCheck, ListenerCheckAll, ListenerCheckPrivileged, ListenerCheckNone); err != nil {
+			return err
+		}
+	}
+	if (len(s.NewListeners) > 0 || s.NewListenersOmitted > 0) && s.ListenerCheck != ListenerCheckAll && s.ListenerCheck != ListenerCheckPrivileged {
+		return invalid("listener_check", "must be all or privileged when new listeners are reported")
+	}
+	return nil
+}
+
+// checkListeners checks the entries of the list name.
+func checkListeners(name string, listeners []Listener) error {
+	for i := range listeners {
+		e := &listeners[i]
+		path := indexed(name, i)
+		if err := checkProtoOnly(path, e.Proto); err != nil {
+			return err
+		}
+		if err := checkAddrPort(path+".local", e.Local); err != nil {
 			return err
 		}
 		if err := checkProcess(path, e.PID, e.Command); err != nil {
