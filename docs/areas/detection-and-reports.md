@@ -637,7 +637,7 @@ distinguishable from the escape of a real U+202E (`\u202e`).
   texts of at most 1,024 bytes, about 8 MiB at most, plus about 80 bytes of counters each), and 24 hour counts.
   The incidents add only counters. The listener section keeps the head of at most 64 agent IDs (under 64 KB) and at most 20 findings after an agent
   start and 20 found by the agent, each with at most 64 listeners of a command of up to 1,024 UTF-8 bytes: a finding is at most about 140 KB, so the
-  section is at most about 5.5 MB in the run and in the document of the page's circuit. With all caps full the report keeps about 60 MB across the run, plus the 5.5 MB of the listener section, plus the one log page, process snapshot or incident it is reading.
+  section is at most about 5.5 MB in the run (on the page, where every command also carries its runs, up to about 16 MB per circuit, [Web UI](web-ui.md), *Limits and errors*). With all caps full the report keeps about 60 MB across the run, plus the 5.5 MB of the listener section, plus the one log page, process snapshot or incident it is reading.
 - **Over a cap** the statements that need the data are unknown: more snapshots make backup and panel unknown, more boots the boot,
   more runs of observed hours backup, boot and panel (their base rate). The time of day counts every observed hour and has no cap.
   The notes name the cap that was hit. An outage's own activity follows the same rule: past a cap of the data it needs, a yes stays

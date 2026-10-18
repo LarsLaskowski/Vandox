@@ -392,9 +392,9 @@ The ingest listener serves none of this: every UI path, static file and the live
 - **Memory per circuit (report page).** The page keeps the document of one run: the summary, at most 50 outages and the notes, as text. External text
   is at most 22 texts per outage (16 victims, 3 growth candidates, 3 consumers), each a stored text of at most 1,024 bytes (at most 2 KiB as
   UTF-16) plus its runs for the page (at most 2,048 displayed characters, 4 KiB), so up to about 6 KiB each, about 130 KiB per outage and
-  **about 6.6 MB** for 50 outages, 60 KB more for the 10 consumers of the summary, and **up to about 5.5 MB** for the new listeners section (at most 20 findings after an agent start and
-  20 found by the agent, each with at most 64 listeners of a command of up to 1,024 bytes, about 140 KB a finding, and the head of at most 64 agent IDs, under 64 KB; the agent ID and
-  each command are code spans of an `ExternalText`), plus the markup and the render tree (a typical outage holds a few hundred bytes of
+  **about 6.6 MB** for 50 outages, 60 KB more for the 10 consumers of the summary, and **up to about 16 MB** for the new listeners section (at most 20 findings after an agent start and
+  20 found by the agent, each with at most 64 listeners whose command, like every external text of the page, takes up to about 6 KiB with its runs, about 390 KB a finding, and the head of at most 64 agent IDs
+  of at most 64 bytes each; the agent ID and each command are code spans of an `ExternalText`), plus the markup and the render tree (a typical outage holds a few hundred bytes of
   external text); the render batch holds the text once more for a moment. This is **per circuit**. The run itself keeps up to about 60 MB once across the whole
   service, because only one run goes at a time ([Detection, alerts and reports](detection-and-reports.md), *Limits of the report*). The number of
   circuits is not bounded ([Pages and render mode](#pages-and-render-mode)) and the container has 512 MB; only a signed-in client can open a circuit.

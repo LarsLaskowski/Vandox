@@ -54,7 +54,7 @@ files or endpoints.
    download `GET /report/markdown` (`ReportDownloadEndpoint`, no `AllowAnonymous`: anonymous is redirected to the login, and the ingest listener answers `404`). Both run
    `ReportService`, which allows one report at a time across the service (a second one waits within its own deadline of 2 minutes, `ReportsView.Deadline`, and stops waiting when cancelled) and reads
    through `GatedRecordReader`, `GatedIncidentStore` and `GatedListenerHistoryReader` of the shared `WebReaderGate` (the listener reader takes one slot per call and only reads); `GatedIncidentStore.SaveIncidentAsync` refuses, so the web cannot write an incident. The
-   page keeps a document of at most 50 outages per circuit (about 6.6 MB of capped text in the worst case plus up to about 5.5 MB for the new listeners section, the web UI area, *Limits and errors*); the run keeps up to about 60 MB once for the whole
+   page keeps a document of at most 50 outages per circuit (about 6.6 MB of capped text in the worst case plus up to about 16 MB for the new listeners section, the web UI area, *Limits and errors*); the run keeps up to about 60 MB once for the whole
    service. The session cookie is `SameSite=Lax`, so another site can make a signed-in browser start a run; it reveals nothing to that site and is bounded by the run slot and the deadline.
    Records 0016, 0023, 0060, 0103, 0104, 0105, 0106, 0107, 0108, 0116.
 4. **Command signing for remote actions** (later, not part of v0.1.0): *Goal:* the agent executes only
