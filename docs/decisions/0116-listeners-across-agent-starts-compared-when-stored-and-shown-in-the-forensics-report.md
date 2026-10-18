@@ -1,6 +1,6 @@
 # 0116: New listeners across an agent start: the agent marks its first snapshot and what its inventory holds, the backend compares when it stores the snapshots, the forensics report shows them with the agent's own findings
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-18
 - **Area:** Detection, alerts and reports
 - **Source:** Issue #278
