@@ -91,6 +91,32 @@ func (s *ConnectionSnapshot) Validate() error {
 	if s == nil {
 		return nilReceiver()
 	}
+	if err := s.validateCounts(); err != nil {
+		return err
+	}
+	if err := s.validateFlags(); err != nil {
+		return err
+	}
+	if err := s.validateStates(); err != nil {
+		return err
+	}
+	if err := s.validateProcesses(); err != nil {
+		return err
+	}
+	if err := s.validateRemotes(); err != nil {
+		return err
+	}
+	if err := checkListeners("listeners", s.Listeners); err != nil {
+		return err
+	}
+	if err := s.validateConnections(); err != nil {
+		return err
+	}
+	return checkListeners("new_listeners", s.NewListeners)
+}
+
+// validateCounts checks the number of entries of every list.
+func (s *ConnectionSnapshot) validateCounts() error {
 	for _, c := range []struct {
 		name string
 		n    int
@@ -102,9 +128,11 @@ func (s *ConnectionSnapshot) Validate() error {
 			return err
 		}
 	}
-	if err := s.validateFlags(); err != nil {
-		return err
-	}
+	return nil
+}
+
+// validateStates checks the entries of states.
+func (s *ConnectionSnapshot) validateStates() error {
 	for i := range s.States {
 		e := &s.States[i]
 		path := indexed("states", i)
@@ -115,6 +143,11 @@ func (s *ConnectionSnapshot) Validate() error {
 			return err
 		}
 	}
+	return nil
+}
+
+// validateProcesses checks the entries of processes.
+func (s *ConnectionSnapshot) validateProcesses() error {
 	for i := range s.Processes {
 		e := &s.Processes[i]
 		path := indexed("processes", i)
@@ -128,6 +161,11 @@ func (s *ConnectionSnapshot) Validate() error {
 			return err
 		}
 	}
+	return nil
+}
+
+// validateRemotes checks the entries of remotes.
+func (s *ConnectionSnapshot) validateRemotes() error {
 	for i := range s.Remotes {
 		e := &s.Remotes[i]
 		path := indexed("remotes", i)
@@ -138,9 +176,11 @@ func (s *ConnectionSnapshot) Validate() error {
 			return err
 		}
 	}
-	if err := checkListeners("listeners", s.Listeners); err != nil {
-		return err
-	}
+	return nil
+}
+
+// validateConnections checks the entries of connections.
+func (s *ConnectionSnapshot) validateConnections() error {
 	for i := range s.Connections {
 		e := &s.Connections[i]
 		path := indexed("connections", i)
@@ -157,7 +197,7 @@ func (s *ConnectionSnapshot) Validate() error {
 			return err
 		}
 	}
-	return checkListeners("new_listeners", s.NewListeners)
+	return nil
 }
 
 // validateFlags checks the rules that tie the aggregate flags, the listener check and the new listeners together.
