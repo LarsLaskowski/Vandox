@@ -8,4 +8,4 @@ are quoted in full.
 | 2026-10-18 19:57 | 1 Intake | Orchestrator | feature: label type: feature; branch feature-278-restart-listeners off origin/main e2f5099 |
 | 2026-10-18 20:02 | 2a Spec | squad-lead | ESCALATE: where should the user see the listeners the comparison finds? (1) forensics report section [recommended] (2) data only for #51/#56 (3) defer behind #40, fold into #51 (opus/medium · 102,362 tokens · 28 tool uses · 246 s) |
 | 2026-10-18 20:03 | 2a Spec | Product Manager | Answer to question 1: option (1), a 'New listeners' section in the forensics report (vandoxd report and /report page) |
-| 2026-10-18 20:05 | 2a Spec | squad-lead | DONE: spec AC1-AC12 written with PM answer; plan-check --spec clean (opus/medium · usage pending) |
+| 2026-10-18 20:05 | 2a Spec | squad-lead | DONE: spec AC1-AC12 written with PM answer; plan-check --spec clean (opus/medium · 17,710 tokens · 5 tool uses · 98 s · continued) |
