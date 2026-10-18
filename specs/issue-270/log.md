@@ -15,3 +15,4 @@ are quoted in full.
 | 2026-10-18 07:54 | 6 Tester fix (gocognit) | Tester | helpers extracted in encode_test.go; Go+dotnet tests pass; Coverage gate PASS (14/14 new lines, 98.1% overall) (sonnet/medium · 3,076 tokens · 4 tool uses · 85 s · continued) |
 | 2026-10-18 07:54 | 7 Code check | Orchestrator | Format check, Analyzer gate, Test (949 .NET + Go -race), Coverage gate, scope-check, decision-check all PASS; main already merged |
 | 2026-10-18 07:55 | 8 Review r1 diff | Security | APPROVED, no findings (500k random strings: encodedLen == decoded length) (opus/medium · 34,120 tokens · 8 tool uses · 55 s) |
+| 2026-10-18 07:56 | 8 Review r1 | Reviewer | BLOCKING 0, NON-BLOCKING 2: (1) export of encodedLen: kept unexported per plan, #37 exports it when it needs it (no change); (2) verbatim fix to .squad/project.md golden batches applied (opus/medium · 59,213 tokens · 14 tool uses · 96 s) |

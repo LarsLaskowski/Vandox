@@ -362,8 +362,8 @@ change with it.
 **A new or changed wire format field or record kind** touches (record 0075):
 - the Go model and encoder (`internal/model`, `internal/wire`) and the C# model and decoder
   (`src/Vandox.Core/Model`, `src/Vandox.Core/Wire`)
-- the golden batch `testdata/wire/all-kinds.jsonl` (regenerate with `VANDOX_UPDATE_GOLDEN=1 go test ./internal/wire`)
-  and both tests that read it (`internal/wire/golden_test.go`, `WireContractTests`)
+- the golden batches `testdata/wire/all-kinds.jsonl` and `testdata/wire/replaced-text.jsonl` (regenerate both with `VANDOX_UPDATE_GOLDEN=1 go test ./internal/wire`)
+  and both tests that read them (`internal/wire/golden_test.go`, `WireContractTests`)
 - `docs/areas/wire-format.md` and, for a version change, the major/minor rules (0043)
 
 **A new external API call or DTO** touches:
