@@ -1,6 +1,7 @@
 package sockmount
 
 import (
+	"errors"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -309,4 +310,17 @@ func selectorsOf(file *ast.File, pkg string) []string {
 		return true
 	})
 	return names
+}
+
+// plainErrorFS fails every Open with an error that is not a path error.
+type plainErrorFS struct{}
+
+func (plainErrorFS) Open(string) (fs.File, error) { return nil, errors.New("boom") }
+
+func TestProbe_PlainOpenErrorIsReported(t *testing.T) {
+	got, err := Probe(plainErrorFS{})
+
+	if got != 0 || err == nil || err.Error() != "sockmount: self/fdinfo: boom" {
+		t.Errorf("Probe() = %d, %v, want 0 and the error %q", got, err, "sockmount: self/fdinfo: boom")
+	}
 }

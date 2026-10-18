@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"go/parser"
+	"go/token"
 	"io/fs"
 	"log/slog"
 	"net/netip"
@@ -1255,5 +1257,260 @@ func BenchmarkConnections_Collect(b *testing.B) {
 			b.Fatalf("Collect() error = %v, want nil", err)
 		}
 		i++
+	}
+}
+
+// allowedImports are the packages the non-test files of internal/connstats import (AC11): no program, socket, cgo or unsafe.
+var allowedImports = []string{
+	"bufio", "bytes", "cmp", "container/heap", "context", "encoding/binary", "encoding/json", "errors", "fmt", "io", "io/fs",
+	"log/slog", "math", "net/netip", "os", "slices", "sort", "strconv", "strings", "sync", "time",
+	"github.com/LarsLaskowski/Vandox/internal/model", "github.com/LarsLaskowski/Vandox/internal/procstats",
+	"github.com/LarsLaskowski/Vandox/internal/scheduler", "github.com/LarsLaskowski/Vandox/internal/wire",
+}
+
+func TestConnstats_ImportsOnlyAllowedPackages(t *testing.T) {
+	files, err := filepath.Glob("*.go")
+	if err != nil || len(files) == 0 {
+		t.Fatalf("Glob(*.go) = %v, %v, want the package's files", files, err)
+	}
+	checked := 0
+	for _, name := range files {
+		if strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		checked++
+		file, err := parser.ParseFile(token.NewFileSet(), name, nil, parser.ImportsOnly)
+		if err != nil {
+			t.Fatalf("parsing %s: %v", name, err)
+		}
+		for _, imp := range file.Imports {
+			path, err := strconv.Unquote(imp.Path.Value)
+			if err != nil || !slices.Contains(allowedImports, path) {
+				t.Errorf("%s imports %s, want only %v", name, imp.Path.Value, allowedImports)
+			}
+		}
+	}
+	if checked < 4 {
+		t.Errorf("checked %d production files, want the collector's files", checked)
+	}
+}
+
+func TestNew_TakesDefaults(t *testing.T) {
+	c := New(Sources{}, nil)
+
+	if c.src.Proc == nil || c.log == nil || c.Name() != Name {
+		t.Errorf("New(Sources{}, nil) = proc %v, log %v, name %q, want the host's /proc, a logger and %q", c.src.Proc, c.log, c.Name(), Name)
+	}
+	w := ownedWorld(t)
+	quiet := New(Sources{Proc: w, SocketMount: SocketMount{ID: socketMount}}, nil)
+	snapshotOf(t, quiet, runAt(0, false)) // logs through the default logger without failing
+}
+
+func TestConnections_SocketMountNotLearnedLeavesNoOwners(t *testing.T) {
+	rec := &recordingFS{FS: ownedWorld(t)}
+	c, logs := newRecordingCollector(rec, SocketMount{})
+
+	_, snap := snapshotOf(t, c, runAt(0, false))
+	snapshotOf(t, c, runAt(1, false))
+
+	for _, name := range rec.opened() {
+		if strings.Contains(name, "fdinfo") {
+			t.Errorf("collector opened %q, want no fdinfo without a learned socket mount", name)
+		}
+	}
+	if len(snap.Processes) != 0 || !snap.AggregatesIncomplete {
+		t.Errorf("%d processes, aggregates_incomplete = %v, want none and true", len(snap.Processes), snap.AggregatesIncomplete)
+	}
+	warns := wantLogged(t, logs, slog.LevelWarn, "socket owners unknown", 1)
+	if len(warns) == 1 && warns[0].attrs["err"] != "connstats: socket mount not learned" {
+		t.Errorf("warning err = %q, want %q", warns[0].attrs["err"], "connstats: socket mount not learned")
+	}
+}
+
+func TestConnections_SkippedLineMakesAggregatesIncomplete(t *testing.T) {
+	w := newWorld(t)
+	w.replaceLine("tcp", 3, "garbage")
+
+	_, snap := snapshotOf(t, newCollector(w), runAt(0, false))
+
+	wantFlags(t, snap, false, false, true, model.ListenerCheckNone)
+}
+
+func TestConnections_LateRunLogsNothing(t *testing.T) {
+	w := ownedWorld(t)
+	last := newBlockingFS(t, w, fdinfoName(601, 3))
+	c, logs := newRecordingCollector(last, SocketMount{ID: socketMount})
+	w.dropTable("tcp6") // a change the first kept run would log
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	done := make(chan error, 1)
+	go func() {
+		_, err := c.Collect(ctx, runAt(0, false))
+		done <- err
+	}()
+	select {
+	case <-last.reached:
+	case err := <-done:
+		t.Fatalf("Collect() = %v before reading the last descriptor, want it to block there", err)
+	}
+	cancel()
+	last.open()
+
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		t.Errorf("Collect() error = %v, want the context's error", err)
+	}
+	if got := logs.all(); len(got) != 0 {
+		t.Errorf("a late run logged %+v, want nothing (its state is not kept)", got)
+	}
+	snapshotOf(t, c, runAt(1, false))
+	wantLogged(t, logs, slog.LevelInfo, "socket tables unavailable", 1)
+}
+
+func TestConnections_CommandLookupErrors(t *testing.T) {
+	t.Run("an ended process is dropped silently", func(t *testing.T) {
+		w := ownedWorld(t)
+		delete(w.files, "100/stat")
+		c, logs := newRecordingCollector(w, SocketMount{ID: socketMount})
+
+		_, snap := snapshotOf(t, c, runAt(0, false))
+
+		if slices.ContainsFunc(snap.Processes, func(p model.ProcessConnections) bool { return p.PID == 100 }) {
+			t.Errorf("processes = %+v, want none for the ended PID 100", snap.Processes)
+		}
+		wantListener(t, snap, model.ProtoTCP, sshdListener, 0, "")
+		wantLogged(t, logs, slog.LevelWarn, "socket owners partly unknown", 0)
+	})
+
+	t.Run("an unreadable process is dropped and counted", func(t *testing.T) {
+		w := ownedWorld(t)
+		faulty := newFaultFS(w)
+		faulty.openErr["100/stat"] = syscall.EACCES
+		c, logs := newRecordingCollector(faulty, SocketMount{ID: socketMount})
+
+		_, snap := snapshotOf(t, c, runAt(0, false))
+
+		if slices.ContainsFunc(snap.Processes, func(p model.ProcessConnections) bool { return p.PID == 100 }) {
+			t.Errorf("processes = %+v, want none for the unreadable PID 100", snap.Processes)
+		}
+		wantListener(t, snap, model.ProtoTCP, sshdListener, 0, "")
+		if !snap.AggregatesIncomplete {
+			t.Error("aggregates_incomplete = false, want true")
+		}
+		warns := wantLogged(t, logs, slog.LevelWarn, "socket owners partly unknown", 1)
+		if len(warns) == 1 && (warns[0].attrs["processes"] != "1" || !strings.Contains(warns[0].attrs["err"], "100/stat") || !strings.Contains(warns[0].attrs["err"], "permission denied")) {
+			t.Errorf("warning attributes = %v, want processes=1 and the procstats error of 100/stat", warns[0].attrs)
+		}
+	})
+}
+
+// plainFile is a file that is no directory.
+type plainFile struct{ fs.File }
+
+// fdinfoFileFS answers the fdinfo directory of PID 10 with a plain file.
+type fdinfoFileFS struct{ fs.FS }
+
+func (f fdinfoFileFS) Open(name string) (fs.File, error) {
+	if name == "10/fdinfo" {
+		file, err := f.FS.Open("10/fdinfo/3")
+		return plainFile{file}, err
+	}
+	return f.FS.Open(name)
+}
+
+func TestScanOwners_DirectoryThatCannotBeListedIsUnreadable(t *testing.T) {
+	p := newProcTree(t)
+	p.add(10, 3, socketMount, 100)
+
+	_, unreadable, err := scan(t, fdinfoFileFS{p.files}, []int32{10}, indexOf(100))
+
+	if unreadable != 1 {
+		t.Errorf("scanOwners() unreadable = %d, want 1", unreadable)
+	}
+	wantErrPrefix(t, err, "connstats: 10/fdinfo: ")
+}
+
+// plainErrorProc fails the open of one table with an error that is no path error.
+type plainErrorProc struct{ fs.FS }
+
+func (p plainErrorProc) Open(name string) (fs.File, error) {
+	if name == "net/udp" {
+		return nil, errors.New("boom")
+	}
+	return p.FS.Open(name)
+}
+
+func TestConnections_PlainTableErrorFails(t *testing.T) {
+	records, err := newCollector(plainErrorProc{newWorld(t)}).Collect(context.Background(), runAt(0, false))
+
+	if err == nil || err.Error() != "connstats: net/udp: boom" || len(records) != 0 {
+		t.Errorf("Collect() = %d records, %v, want no records and the error %q", len(records), err, "connstats: net/udp: boom")
+	}
+}
+
+func TestConnections_LastTableLineWithoutNewline(t *testing.T) {
+	w := newWorld(t)
+	w.clear()
+	w.addListener("tcp", "0.0.0.0:22", 1)
+	w.dirty = false
+	w.flush()
+	file := w.files["net/tcp"]
+	file.Data = []byte(strings.TrimSuffix(string(file.Data), "\n"))
+
+	_, snap := snapshotOf(t, newCollector(w), runAt(0, false))
+
+	wantList(t, "states", snap.States, []model.StateCount{{Proto: model.ProtoTCP, State: "LISTEN", Count: 1}})
+}
+
+func TestFitRecord_ShortensUntilItFits(t *testing.T) {
+	cmd := longCommand
+	build := func() *model.ConnectionSnapshot {
+		snap := &model.ConnectionSnapshot{}
+		for i := range uint16(4000) {
+			local := netip.AddrPortFrom(netip.AddrFrom4(addr4(0x0A000000+uint32(i))), 443)
+			snap.Connections = append(snap.Connections, model.Connection{Proto: model.ProtoTCP, Local: local, Remote: local, State: "ESTABLISHED", PID: 1, Command: cmd})
+			snap.Listeners = append(snap.Listeners, model.Listener{Proto: model.ProtoTCP, Local: local, PID: 1, Command: cmd})
+			snap.Processes = append(snap.Processes, model.ProcessConnections{PID: int32(i) + 1, Command: cmd, Count: 1})
+		}
+		return snap
+	}
+	t.Run("connections first", func(t *testing.T) {
+		snap := build()
+		snap.Listeners, snap.Processes = nil, nil
+		snap.Complete = true
+
+		rec, err := fitRecord(runBase, snap)
+
+		if err != nil || snap.Complete || len(snap.Connections) >= 4000 || len(snap.Connections) == 0 {
+			t.Fatalf("fitRecord() = %v, complete %v, %d connections, want a halved list and not complete", err, snap.Complete, len(snap.Connections))
+		}
+		checkWire(t, rec)
+	})
+	t.Run("then processes and listeners", func(t *testing.T) {
+		snap := build()
+		snap.Connections = nil
+
+		rec, err := fitRecord(runBase, snap)
+
+		if err != nil || !snap.AggregatesIncomplete || len(snap.Processes) >= 4000 || len(snap.Listeners) >= 4000 {
+			t.Fatalf("fitRecord() = %v, aggregates_incomplete %v, %d processes, %d listeners, want both halved and incomplete aggregates",
+				err, snap.AggregatesIncomplete, len(snap.Processes), len(snap.Listeners))
+		}
+		checkWire(t, rec)
+	})
+	t.Run("an invalid snapshot is refused", func(t *testing.T) {
+		_, err := fitRecord(runBase, &model.ConnectionSnapshot{States: []model.StateCount{{Proto: "icmp", Count: 1}}})
+
+		if err == nil || !strings.HasPrefix(err.Error(), "connstats: record refused: ") {
+			t.Errorf("fitRecord() error = %v, want one starting with %q", err, "connstats: record refused: ")
+		}
+	})
+}
+
+func TestEntrySize_RefusesWhatCannotBeEncoded(t *testing.T) {
+	if n, ok := entrySize(make(chan int)); ok || n != 0 {
+		t.Errorf("entrySize(chan) = %d, %v, want 0 and false", n, ok)
+	}
+	if n, ok := entrySize(model.StateCount{Proto: model.ProtoTCP, State: "LISTEN", Count: 1}); !ok || n < 10 {
+		t.Errorf("entrySize(state) = %d, %v, want its encoded size", n, ok)
 	}
 }
