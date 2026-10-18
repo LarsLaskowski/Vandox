@@ -102,6 +102,21 @@ func wantFlags(t *testing.T, snap *model.ConnectionSnapshot, aggregatesOnly, com
 	}
 }
 
+// allTableProtos are the protocols of the four tables, in table order.
+var allTableProtos = []model.Proto{model.ProtoTCP, model.ProtoTCP6, model.ProtoUDP, model.ProtoUDP6}
+
+// wantInventory checks the inventory state of the record's listeners list and the protocols of the tables the run read.
+func wantInventory(t *testing.T, snap *model.ConnectionSnapshot, state model.InventoryState, tables ...model.Proto) {
+	t.Helper()
+
+	if snap.Inventory != state {
+		t.Errorf("inventory = %q, want %q", snap.Inventory, state)
+	}
+	if !slices.Equal(snap.Tables, tables) {
+		t.Errorf("tables = %v, want %v", snap.Tables, tables)
+	}
+}
+
 // wantNewListeners checks the reported new listeners and the number of the omitted ones.
 func wantNewListeners(t *testing.T, snap *model.ConnectionSnapshot, omitted uint32, want ...model.Listener) {
 	t.Helper()
@@ -127,6 +142,7 @@ func TestConnections_RegularSnapshotHoldsAggregatesAndInventory(t *testing.T) {
 	_, snap := snapshotOf(t, c, runAt(1, false))
 
 	wantFlags(t, snap, true, false, false, model.ListenerCheckAll)
+	wantInventory(t, snap, model.InventoryAll, allTableProtos...)
 	wantList(t, "states", snap.States, ownedStates)
 	wantList(t, "processes", snap.Processes, ownedProcesses)
 	wantList(t, "remotes", snap.Remotes, ownedRemotes)
@@ -285,7 +301,8 @@ func TestConnections_FullSnapshotOnFirstRun(t *testing.T) {
 
 	_, snap := snapshotOf(t, newCollector(w), runAt(0, false))
 
-	wantFlags(t, snap, false, true, false, model.ListenerCheckNone)
+	wantFlags(t, snap, false, true, false, model.ListenerCheckStart)
+	wantInventory(t, snap, model.InventoryAll, allTableProtos...)
 	wantNewListeners(t, snap, 0)
 	if len(snap.Connections) != 34 {
 		t.Errorf("connections = %d entries, want all 34", len(snap.Connections))
@@ -536,7 +553,8 @@ func TestConnections_InodeZeroLinesAreSeparateSockets(t *testing.T) {
 	if len(snap.Processes) != 0 {
 		t.Errorf("processes = %+v, want none", snap.Processes)
 	}
-	wantFlags(t, snap, false, true, false, model.ListenerCheckNone)
+	wantFlags(t, snap, false, true, false, model.ListenerCheckStart)
+	wantInventory(t, snap, model.InventoryAll, allTableProtos...)
 }
 
 func TestConnections_UnreadableDescriptorsLogOnce(t *testing.T) {
@@ -623,6 +641,94 @@ func TestConnections_UnknownSocketMountLeavesNoOwners(t *testing.T) {
 	}
 }
 
+func TestConnections_SnapshotCarriesInventoryAndTables(t *testing.T) {
+	t.Run("all four tables", func(t *testing.T) {
+		c := newCollector(ownedWorld(t))
+
+		_, first := snapshotOf(t, c, runAt(0, false))
+		_, second := snapshotOf(t, c, runAt(1, false))
+
+		wantInventory(t, first, model.InventoryAll, model.ProtoTCP, model.ProtoTCP6, model.ProtoUDP, model.ProtoUDP6)
+		wantInventory(t, second, model.InventoryAll, model.ProtoTCP, model.ProtoTCP6, model.ProtoUDP, model.ProtoUDP6)
+	})
+	t.Run("without the IPv6 tables", func(t *testing.T) {
+		w := newWorld(t)
+		w.dropTable("tcp6")
+		w.dropTable("udp6")
+
+		_, snap := snapshotOf(t, newCollector(w), runAt(0, false))
+
+		wantInventory(t, snap, model.InventoryAll, model.ProtoTCP, model.ProtoUDP)
+		for _, p := range snap.Tables {
+			if p == model.ProtoTCP6 || p == model.ProtoUDP6 {
+				t.Errorf("tables = %v, want no IPv6 protocol (those tables were not read)", snap.Tables)
+			}
+		}
+	})
+	t.Run("without the UDP tables", func(t *testing.T) {
+		w := newWorld(t)
+		w.dropTable("udp")
+		w.dropTable("udp6")
+
+		_, snap := snapshotOf(t, newCollector(w), runAt(0, false))
+
+		wantInventory(t, snap, model.InventoryAll, model.ProtoTCP, model.ProtoTCP6)
+	})
+	t.Run("a skipped line", func(t *testing.T) {
+		w := newWorld(t)
+		w.replaceLine("tcp", 3, "garbage")
+		w.dropTable("tcp6")
+
+		_, snap := snapshotOf(t, newCollector(w), runAt(0, false))
+
+		wantInventory(t, snap, model.InventorySkipped, model.ProtoTCP, model.ProtoUDP, model.ProtoUDP6)
+	})
+	t.Run("the record passes the wire check with both fields", func(t *testing.T) {
+		rec, _ := snapshotOf(t, newCollector(ownedWorld(t)), runAt(0, false))
+
+		checkWire(t, rec)
+	})
+}
+
+func TestConnections_SizeCutOfListenersSetsInventory(t *testing.T) {
+	t.Run("a cut after the privileged part", func(t *testing.T) {
+		w := newWorld(t)
+		w.clear()
+		w.addListeners("0.0.0.0", 2000, 3000, 97000000)
+		w.process(700, "big", longCommand+"\x00")
+		w.holdRange(700, 3, 97000000, 3000)
+
+		_, snap := snapshotOf(t, newCollector(w), runAt(0, false))
+
+		if len(snap.Listeners) == 0 || len(snap.Listeners) >= 3000 {
+			t.Fatalf("listeners = %d entries, want a list cut by the size budget (the precondition of this case)", len(snap.Listeners))
+		}
+		wantInventory(t, snap, model.InventoryPrivileged, allTableProtos...)
+	})
+	t.Run("a cut inside the privileged part", func(t *testing.T) {
+		w := newWorld(t)
+		w.clear()
+		w.addListeners("0.0.0.0", 1, 1000, 98000000)
+		w.addListeners("0.0.0.0", 2000, 2000, 98100000)
+		w.process(700, "big", longCommand+"\x00")
+		w.holdRange(700, 3, 98000000, 1000)
+		w.holdRange(700, 1003, 98100000, 2000)
+
+		_, snap := snapshotOf(t, newCollector(w), runAt(0, false))
+
+		privileged := 0
+		for _, l := range snap.Listeners {
+			if l.Local.Port() < PrivilegedPorts {
+				privileged++
+			}
+		}
+		if len(snap.Listeners) >= 3000 || privileged >= 1000 {
+			t.Fatalf("listeners = %d entries, %d privileged, want a list cut inside its privileged part (the precondition of this case)", len(snap.Listeners), privileged)
+		}
+		wantInventory(t, snap, model.InventoryCut, allTableProtos...)
+	})
+}
+
 func TestConnections_MissingIPv6TablesLeaveProtocolsOut(t *testing.T) {
 	w := newWorld(t)
 	w.dropTable("tcp6")
@@ -658,6 +764,9 @@ func TestConnections_MissingIPv6TablesLeaveProtocolsOut(t *testing.T) {
 	wantLogged(t, logs, slog.LevelInfo, "socket tables unavailable", 1)
 	// Another set of tables than in the last run: nothing is compared, so the 47 IPv6 listeners are not reported and no full snapshot is taken.
 	wantFlags(t, back, true, false, false, model.ListenerCheckNone)
+	wantInventory(t, back, model.InventoryAll, allTableProtos...)
+	wantInventory(t, first, model.InventoryAll, model.ProtoTCP, model.ProtoUDP)
+	wantInventory(t, second, model.InventoryAll, model.ProtoTCP, model.ProtoUDP)
 	wantNewListeners(t, back, 0)
 	if len(back.Listeners) != ownedListeners {
 		t.Errorf("listeners after the tables returned = %d, want %d", len(back.Listeners), ownedListeners)
@@ -702,7 +811,8 @@ func TestConnections_UnreadableLineLeftOut(t *testing.T) {
 	_, first := snapshotOf(t, c, runAt(0, false))
 	snapshotOf(t, c, runAt(1, false))
 
-	wantFlags(t, first, false, false, first.AggregatesIncomplete, model.ListenerCheckNone)
+	wantFlags(t, first, false, false, first.AggregatesIncomplete, model.ListenerCheckStart)
+	wantInventory(t, first, model.InventorySkipped, allTableProtos...)
 	if got := first.States[1]; got != (model.StateCount{Proto: model.ProtoTCP, State: "LISTEN", Count: 22}) {
 		t.Errorf("states[1] = %+v, want the 22 readable LISTEN sockets (4 lines left out; the line after a long one is read)", got)
 	}
@@ -717,6 +827,7 @@ func TestConnections_UnreadableLineLeftOut(t *testing.T) {
 		_, snap := snapshotOf(t, c, runAt(2, false))
 
 		wantFlags(t, snap, true, false, snap.AggregatesIncomplete, model.ListenerCheckNone)
+		wantInventory(t, snap, model.InventorySkipped, allTableProtos...)
 		wantNewListeners(t, snap, 0)
 	})
 
@@ -1065,11 +1176,13 @@ func TestConnections_ListenerFloodCausesNoFullSnapshot(t *testing.T) {
 	_, privileged := snapshotOf(t, c, runAt(2, false))
 
 	wantFlags(t, unprivileged, true, false, true, model.ListenerCheckPrivileged)
+	wantInventory(t, unprivileged, model.InventoryPrivileged, allTableProtos...)
 	wantNewListeners(t, unprivileged, 0)
 	if len(unprivileged.Listeners) != 4096 {
 		t.Errorf("listeners = %d entries, want the 4,096 lowest", len(unprivileged.Listeners))
 	}
 	wantFlags(t, privileged, false, false, true, model.ListenerCheckPrivileged)
+	wantInventory(t, privileged, model.InventoryPrivileged, allTableProtos...)
 	wantNewListeners(t, privileged, 0, model.Listener{Proto: model.ProtoTCP, Local: addrPort("0.0.0.0:23")})
 }
 
@@ -1396,7 +1509,8 @@ func TestConnections_SkippedLineMakesAggregatesIncomplete(t *testing.T) {
 
 	_, snap := snapshotOf(t, newCollector(w), runAt(0, false))
 
-	wantFlags(t, snap, false, false, true, model.ListenerCheckNone)
+	wantFlags(t, snap, false, false, true, model.ListenerCheckStart)
+	wantInventory(t, snap, model.InventorySkipped, allTableProtos...)
 }
 
 func TestConnections_LateRunLogsNothing(t *testing.T) {
@@ -1541,7 +1655,7 @@ func TestFitRecord_ShortensUntilItFits(t *testing.T) {
 		snap.Listeners, snap.Processes = nil, nil
 		snap.Complete = true
 
-		rec, err := fitRecord(runBase, snap, nil)
+		rec, err := fitRecord(runBase, snap, inv())
 
 		if err != nil || snap.Complete || len(snap.Connections) >= 4000 || len(snap.Connections) == 0 {
 			t.Fatalf("fitRecord() = %v, complete %v, %d connections, want a halved list and not complete", err, snap.Complete, len(snap.Connections))
@@ -1552,7 +1666,7 @@ func TestFitRecord_ShortensUntilItFits(t *testing.T) {
 		snap := build()
 		snap.Connections = nil
 
-		rec, err := fitRecord(runBase, snap, nil)
+		rec, err := fitRecord(runBase, snap, inv())
 
 		if err != nil || !snap.AggregatesIncomplete || len(snap.Processes) >= 4000 || len(snap.Listeners) >= 4000 {
 			t.Fatalf("fitRecord() = %v, aggregates_incomplete %v, %d processes, %d listeners, want both halved and incomplete aggregates",
@@ -1561,10 +1675,78 @@ func TestFitRecord_ShortensUntilItFits(t *testing.T) {
 		checkWire(t, rec)
 	})
 	t.Run("an invalid snapshot is refused", func(t *testing.T) {
-		_, err := fitRecord(runBase, &model.ConnectionSnapshot{States: []model.StateCount{{Proto: "icmp", Count: 1}}}, nil)
+		_, err := fitRecord(runBase, &model.ConnectionSnapshot{States: []model.StateCount{{Proto: "icmp", Count: 1}}}, inv())
 
 		if err == nil || !strings.HasPrefix(err.Error(), "connstats: record refused: ") {
 			t.Errorf("fitRecord() error = %v, want one starting with %q", err, "connstats: record refused: ")
+		}
+	})
+}
+
+// tcpKeysOn returns count TCP listener keys on 10.0.0.1 from port first on.
+func tcpKeysOn(first, count uint16) []listenerKey {
+	keys := make([]listenerKey, 0, count)
+	for i := range count {
+		keys = append(keys, key(model.ProtoTCP, "10.0.0.1", first+i))
+	}
+	return keys
+}
+
+// listedSnapshot returns a snapshot that lists every key with a long command.
+func listedSnapshot(keys []listenerKey) *model.ConnectionSnapshot {
+	snap := &model.ConnectionSnapshot{Tables: []model.Proto{model.ProtoTCP}}
+	for _, k := range keys {
+		snap.Listeners = append(snap.Listeners, model.Listener{Proto: k.proto, Local: netip.AddrPortFrom(k.addr, k.port), PID: 1, Command: longCommand})
+	}
+	return snap
+}
+
+func TestFitRecord_SetsTheInventoryState(t *testing.T) {
+	// 2,500 unprivileged keys follow the privileged ones; the record lists all of them with a long command and is cut by its size.
+	cases := []struct {
+		name       string
+		privileged uint16
+		want       model.InventoryState
+	}{
+		{"the privileged keys all stay", 10, model.InventoryPrivileged},
+		{"the cut reaches into the privileged keys", 1000, model.InventoryCut},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			keys := append(tcpKeysOn(1, c.privileged), tcpKeysOn(2000, 2500)...)
+			snap := listedSnapshot(keys)
+
+			rec, err := fitRecord(runBase, snap, &inventory{keys: keys, tables: 0b0001})
+
+			if err != nil || len(snap.Listeners) >= len(keys) {
+				t.Fatalf("fitRecord() = %v, %d listeners of %d, want a cut list (the precondition of this case)", err, len(snap.Listeners), len(keys))
+			}
+			if snap.Inventory != c.want {
+				t.Errorf("inventory = %q after %d of %d listeners were kept, want %q", snap.Inventory, len(snap.Listeners), len(keys), c.want)
+			}
+			checkWire(t, rec)
+		})
+	}
+}
+
+func TestFitRecord_SetsTheInventoryStateWithoutACut(t *testing.T) {
+	t.Run("an uncut list of an uncut inventory is all", func(t *testing.T) {
+		keys := tcpKeysOn(22, 2)
+		snap := listedSnapshot(keys)
+
+		_, err := fitRecord(runBase, snap, &inventory{keys: keys, tables: allTables})
+
+		if err != nil || snap.Inventory != model.InventoryAll {
+			t.Errorf("fitRecord() = %v, inventory %q, want nil and %q", err, snap.Inventory, model.InventoryAll)
+		}
+	})
+	t.Run("a skipped line", func(t *testing.T) {
+		snap := &model.ConnectionSnapshot{}
+
+		_, err := fitRecord(runBase, snap, &inventory{skipped: true, tables: allTables})
+
+		if err != nil || snap.Inventory != model.InventorySkipped {
+			t.Errorf("fitRecord() = %v, inventory %q, want nil and %q", err, snap.Inventory, model.InventorySkipped)
 		}
 	})
 }

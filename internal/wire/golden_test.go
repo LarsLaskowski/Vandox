@@ -2,6 +2,7 @@ package wire_test
 
 import (
 	"bytes"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strings"
@@ -112,4 +113,43 @@ func TestEncodeBatchGolden_ReplacedText(t *testing.T) {
 	if got != string(want) {
 		t.Errorf("encoded batch differs from %s (set %s=1 to update)", path, updateGoldenEnv)
 	}
+}
+
+// TestEncodeBatchStartSnapshotCarriesInventoryAndTables pins the three values the listener restart check adds to a connection snapshot
+// on the wire (the golden batch gains them with the backend decoder that accepts them).
+func TestEncodeBatchStartSnapshotCarriesInventoryAndTables(t *testing.T) {
+	batch := &wire.Batch{
+		Header: wire.NewHeader("agent-1", testBootID, wire.ModeLive),
+		Records: []model.Record{{Meta: agentMeta(1, "connections", time.UTC), Data: &model.ConnectionSnapshot{
+			Complete:      true,
+			ListenerCheck: model.ListenerCheckStart,
+			Inventory:     model.InventoryPrivileged,
+			Tables:        []model.Proto{model.ProtoTCP, model.ProtoUDP6},
+			Listeners:     []model.Listener{{Proto: model.ProtoTCP, Local: netip.MustParseAddrPort("0.0.0.0:22")}},
+		}}},
+	}
+	var buf bytes.Buffer
+	if err := wire.EncodeBatch(&buf, batch); err != nil {
+		t.Fatalf("EncodeBatch() = %v, want nil", err)
+	}
+	got := gunzip(t, buf.Bytes())
+	for _, want := range []string{`"listener_check":"start"`, `"inventory":"privileged"`, `"tables":["tcp","udp6"]`} {
+		if !strings.Contains(got, want) {
+			t.Errorf("encoded batch lacks %s\ngot:\n%s", want, got)
+		}
+	}
+
+	t.Run("a snapshot without the fields omits them", func(t *testing.T) {
+		batch.Records[0].Data = &model.ConnectionSnapshot{Complete: true}
+		var buf bytes.Buffer
+		if err := wire.EncodeBatch(&buf, batch); err != nil {
+			t.Fatalf("EncodeBatch() = %v, want nil", err)
+		}
+		plain := gunzip(t, buf.Bytes())
+		for _, absent := range []string{`"inventory"`, `"tables"`, `"listener_check"`} {
+			if strings.Contains(plain, absent) {
+				t.Errorf("encoded batch holds %s, want it omitted when empty\ngot:\n%s", absent, plain)
+			}
+		}
+	})
 }

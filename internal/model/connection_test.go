@@ -263,6 +263,24 @@ func TestConnectionSnapshot_Validate_NewFieldRules(t *testing.T) {
 		}, "complete", completeAggregatesIncomplete},
 		{"listener check unknown", func(p *model.ConnectionSnapshot) { p.ListenerCheck = "bogus" }, "listener_check", "unknown value"},
 		{"listener check upper case", func(p *model.ConnectionSnapshot) { p.ListenerCheck = "ALL" }, "listener_check", "unknown value"},
+		{"new listeners with check start", func(p *model.ConnectionSnapshot) {
+			p.NewListeners, p.ListenerCheck = validNewListeners(), model.ListenerCheckStart
+		}, "listener_check", checkNeeded},
+		{"omitted count with check start", func(p *model.ConnectionSnapshot) {
+			p.NewListenersOmitted, p.ListenerCheck = 1, model.ListenerCheckStart
+		}, "listener_check", checkNeeded},
+		{"inventory unknown", func(p *model.ConnectionSnapshot) { p.Inventory = "bogus" }, "inventory", "unknown value"},
+		{"inventory upper case", func(p *model.ConnectionSnapshot) { p.Inventory = "ALL" }, "inventory", "unknown value"},
+		{"tables proto unknown", func(p *model.ConnectionSnapshot) {
+			p.Tables = []model.Proto{model.ProtoTCP, "sctp"}
+		}, "tables[1]", "unknown value"},
+		{"tables proto upper case", func(p *model.ConnectionSnapshot) { p.Tables = []model.Proto{"TCP"} }, "tables[0]", "unknown value"},
+		{"tables duplicate protocol", func(p *model.ConnectionSnapshot) {
+			p.Tables = []model.Proto{model.ProtoTCP, model.ProtoUDP, model.ProtoTCP}
+		}, "tables[2]", "duplicate protocol"},
+		{"tables duplicate protocol next to each other", func(p *model.ConnectionSnapshot) {
+			p.Tables = []model.Proto{model.ProtoUDP6, model.ProtoUDP6}
+		}, "tables[1]", "duplicate protocol"},
 		{"new listeners without check", func(p *model.ConnectionSnapshot) {
 			p.NewListeners = validNewListeners()
 		}, "listener_check", checkNeeded},
@@ -324,6 +342,19 @@ func TestConnectionSnapshot_Validate_NewFields(t *testing.T) {
 		{"listener check all", func(p *model.ConnectionSnapshot) { p.ListenerCheck = model.ListenerCheckAll }},
 		{"listener check privileged", func(p *model.ConnectionSnapshot) { p.ListenerCheck = model.ListenerCheckPrivileged }},
 		{"listener check none", func(p *model.ConnectionSnapshot) { p.ListenerCheck = model.ListenerCheckNone }},
+		{"listener check start", func(p *model.ConnectionSnapshot) { p.ListenerCheck = model.ListenerCheckStart }},
+		{"inventory all", func(p *model.ConnectionSnapshot) { p.Inventory = model.InventoryAll }},
+		{"inventory privileged", func(p *model.ConnectionSnapshot) { p.Inventory = model.InventoryPrivileged }},
+		{"inventory cut", func(p *model.ConnectionSnapshot) { p.Inventory = model.InventoryCut }},
+		{"inventory skipped", func(p *model.ConnectionSnapshot) { p.Inventory = model.InventorySkipped }},
+		{"one table", func(p *model.ConnectionSnapshot) { p.Tables = []model.Proto{model.ProtoUDP6} }},
+		{"all four tables in table order", func(p *model.ConnectionSnapshot) {
+			p.Tables = []model.Proto{model.ProtoTCP, model.ProtoTCP6, model.ProtoUDP, model.ProtoUDP6}
+		}},
+		{"start with inventory and tables", func(p *model.ConnectionSnapshot) {
+			p.ListenerCheck, p.Inventory = model.ListenerCheckStart, model.InventoryPrivileged
+			p.Tables = []model.Proto{model.ProtoTCP, model.ProtoUDP}
+		}},
 		{"new listeners with check all", func(p *model.ConnectionSnapshot) {
 			p.ListenerCheck, p.NewListeners, p.NewListenersOmitted = model.ListenerCheckAll, validNewListeners(), 3
 		}},
