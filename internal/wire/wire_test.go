@@ -101,8 +101,8 @@ func TestRecordSizeError(t *testing.T) {
 
 func TestNewHeader(t *testing.T) {
 	h := wire.NewHeader("agent-1", testBootID, wire.ModeBackfill)
-	if h.FormatMajor != 1 || h.FormatMinor != 0 {
-		t.Errorf("NewHeader() format = %d.%d, want 1.0", h.FormatMajor, h.FormatMinor)
+	if h.FormatMajor != 1 || h.FormatMinor != 1 {
+		t.Errorf("NewHeader() format = %d.%d, want 1.1", h.FormatMajor, h.FormatMinor)
 	}
 	if h.AgentID != "agent-1" || h.BootID != testBootID || h.Mode != wire.ModeBackfill {
 		t.Errorf("NewHeader() = %+v, want agent-1, %s, backfill", h, testBootID)
@@ -113,8 +113,8 @@ func TestNewHeader(t *testing.T) {
 	if err := h.Validate(); err != nil {
 		t.Errorf("NewHeader().Validate() = %v, want nil", err)
 	}
-	if wire.MajorVersion != 1 || wire.MinorVersion != 0 {
-		t.Errorf("version constants = %d.%d, want 1.0", wire.MajorVersion, wire.MinorVersion)
+	if wire.MajorVersion != 1 || wire.MinorVersion != 1 {
+		t.Errorf("version constants = %d.%d, want 1.1", wire.MajorVersion, wire.MinorVersion)
 	}
 }
 

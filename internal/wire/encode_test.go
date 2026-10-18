@@ -55,21 +55,27 @@ func gapAll(seq uint64, loc *time.Location) model.Record {
 	}}
 }
 
-// allKindRecords returns one fully populated record of every kind (the kernel kind twice), seq 1..9.
+// allKindRecords returns one fully populated record of every kind (the kernel kind twice, the connection snapshot as a full and as an aggregates-only record), seq 1..10.
 func allKindRecords(loc *time.Location) []model.Record {
 	return []model.Record{
 		metricAll(1, loc),
 		processAll(2, loc),
 		{Meta: agentMeta(3, "lsof", loc), Data: &model.ConnectionSnapshot{
-			Complete:  true,
-			States:    []model.StateCount{{Proto: model.ProtoTCP, State: "ESTABLISHED", Count: 3}},
-			Processes: []model.ProcessConnections{{PID: 10, Command: "nginx", Count: 2}},
-			Remotes:   []model.RemoteCount{{Addr: netip.MustParseAddr("2001:db8::1"), Count: 4}},
+			AggregatesIncomplete: true,
+			ListenerCheck:        model.ListenerCheckAll,
+			States:               []model.StateCount{{Proto: model.ProtoTCP, State: "ESTABLISHED", Count: 3}},
+			Processes:            []model.ProcessConnections{{PID: 10, Command: "nginx", Count: 2}},
+			Remotes: []model.RemoteCount{
+				{Addr: netip.MustParseAddr("2001:db8::1"), Count: 4},
+				{Addr: netip.MustParseAddr("::ffff:192.0.2.7"), Count: 1},
+			},
 			Listeners: []model.Listener{{Proto: model.ProtoTCP6, Local: netip.MustParseAddrPort("[::]:443"), PID: 10, Command: "nginx"}},
 			Connections: []model.Connection{{
 				Proto: model.ProtoTCP, Local: netip.MustParseAddrPort("10.0.0.1:80"), Remote: netip.MustParseAddrPort("192.0.2.1:5000"),
 				State: "ESTABLISHED", PID: 10, Command: "nginx",
 			}},
+			NewListeners:        []model.Listener{{Proto: model.ProtoUDP, Local: netip.MustParseAddrPort("0.0.0.0:5353"), PID: 11, Command: "avahi"}},
+			NewListenersOmitted: 2,
 		}},
 		{Meta: agentMeta(4, "systemd", loc), Data: &model.ServiceState{
 			Unit: "nginx.service", LoadState: "loaded", ActiveState: "active", SubState: "running",
@@ -98,6 +104,15 @@ func allKindRecords(loc *time.Location) []model.Record {
 			Log: "journal", Host: "web-1", Program: "sshd", PID: 5120, Priority: ptr(uint8(3)), Message: "Failed password", Truncated: true, Event: "auth.failure",
 		}},
 		gapAll(9, loc),
+		{Meta: agentMeta(10, "connections", loc), Data: &model.ConnectionSnapshot{
+			AggregatesOnly:       true,
+			AggregatesIncomplete: true,
+			ListenerCheck:        model.ListenerCheckPrivileged,
+			States:               []model.StateCount{{Proto: model.ProtoUDP, Count: 1}},
+			Remotes:              []model.RemoteCount{{Addr: netip.MustParseAddr("::ffff:192.0.2.7"), Count: 1}},
+			Listeners:            []model.Listener{{Proto: model.ProtoTCP, Local: netip.MustParseAddrPort("0.0.0.0:22")}},
+			NewListeners:         []model.Listener{{Proto: model.ProtoTCP, Local: netip.MustParseAddrPort("0.0.0.0:23")}},
+		}},
 	}
 }
 
@@ -258,7 +273,7 @@ func requireHeaderLine(t *testing.T, line string) {
 	if err := json.Unmarshal([]byte(line), &header); err != nil {
 		t.Fatalf("line 1 is not a JSON object: %v", err)
 	}
-	for key, want := range map[string]any{"format_major": float64(1), "format_minor": float64(0), "agent_id": "agent-1", "boot_id": testBootID, "mode": "live"} {
+	for key, want := range map[string]any{"format_major": float64(1), "format_minor": float64(1), "agent_id": "agent-1", "boot_id": testBootID, "mode": "live"} {
 		if header[key] != want {
 			t.Errorf("header[%q] = %v, want %v", key, header[key], want)
 		}
