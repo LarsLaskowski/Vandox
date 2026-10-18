@@ -413,3 +413,10 @@ socket owner's UID from the kernel table in connection snapshots"** — body: "T
 PID and `command`; the command is text a local user chooses, while the `uid` column of `/proc/net/{tcp,tcp6,udp,udp6}` is the kernel's.
 Add the socket's UID (and a user name as the process snapshot resolves it) to listener and connection entries, an additive wire field."
 Labels `area: agent`, `type: feature`.
+
+## Security notes
+
+Non-blocking findings of Security's delta confirmation (APPROVED) of revision 2, verbatim:
+
+- The probe could also check that the parsed `ino:` equals `syscall.Fstat(fd).Ino`. That costs one call and would catch reading the wrong file. If they differ, return an error, which fails closed.
+- `AF_UNIX` must stay allowed in the unit's address-family filter. This is already planned for the Agent area *Rights* and `.squad/project.md`; I will check it in the diff review.
