@@ -47,7 +47,7 @@ tables in [Storage](../areas/storage.md).
    external text carries on the page, up to about 16 MB per circuit. Lower caps (7 to 10 per kind, to stay near 5.5 MB on the page) were
    weighed after review and rejected: they shorten the forensic window of restart findings, the main value of the section, to defend a
    worst case that needs 2,560 commands of 1,024 bytes; the bound stays fixed, only a signed-in client opens a circuit, and the
-   incidents page already holds about 10 MB per circuit.
+   incident page already holds about 10 MB per circuit while it reads an incident's window.
 8. **The pair picked by capture time** — what the reader sees, but the clock can step after a reboot (0046). Rejected for the agent's `seq`,
    which increases across restarts; capture time is shown only.
 
