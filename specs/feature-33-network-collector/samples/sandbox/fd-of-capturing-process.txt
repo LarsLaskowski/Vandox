@@ -1,8 +1,0 @@
-0 -> socket:[16078]
-1 -> /tmp/claude-0/-home-user-Vandox/fcba7881-cc34-5030-9b4a-3b6c7fc14eb5/tasks/b26hjl74u.output
-2 -> /tmp/claude-0/-home-user-Vandox/fcba7881-cc34-5030-9b4a-3b6c7fc14eb5/tasks/b26hjl74u.output
-3 -> socket:[16080]
-4 -> socket:[16081]
-5 -> socket:[16082]
-6 -> socket:[16083]
-7 -> socket:[16084]
