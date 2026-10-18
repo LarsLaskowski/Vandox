@@ -209,7 +209,13 @@ public class ReportContentTests
         Assert.DoesNotContain("</b>", html, "no end tag from the command");
         Assert.Contains(HtmlEncoder.Default.Encode("<b>x</b>"), html, "the markup of the command is encoded");
         Assert.Contains($"<span class=\"escape\">{Backslash}u202e</span>", html, "the right-to-left override is a visible escape");
-        Assert.AreEqual(5, Count(html, code), "the agent ID in the head and in both findings, and the two commands, are code");
+
+        var start = html.IndexOf(">New listeners</h2>", StringComparison.Ordinal);
+        var end = start < 0 ? -1 : html.IndexOf(">Outages</h2>", start, StringComparison.Ordinal);
+
+        Assert.IsGreaterThan(-1, start, "the rendered page has the heading of the listener section");
+        Assert.IsGreaterThan(start, end, "the outages heading follows the listener section");
+        Assert.AreEqual(5, Count(html[start..end], code), "the agent ID in the head and in both findings, and the two commands, are code in the listener section");
         Assert.AreEqual(Count(html, code), Count(html, "class=\"external\""), "external text is only ever inside a code element");
         Assert.Contains($"tcp 0.0.0.0:23, PID 7 <b>x</b> ``` {Backslash}u202e", pieces, "the command is text on the page");
         Assert.Contains($"2026-10-01 14:00 UTC, agent {agent}, found by the agent, all ports: 1 new", pieces, "the agent ID is text on the page");
