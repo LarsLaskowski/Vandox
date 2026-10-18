@@ -284,3 +284,31 @@ work and the memory of one match small. The budgets, the bound, the chunk and th
   1,000; 18 combinations) the old and the new statement returned identical rows in identical order.
 - The scan modes rely on the planner reading `records(kind, source, captured_at)` or `records(kind, captured_at)` in order without a hint; the times of cases 3 to 9
   (a few milliseconds for a page that needs a few hundred lines) show that it does, also with a source (cases 4b and 6c).
+
+## Process snapshot
+
+Criterion (issue #32): a snapshot of 250 processes takes under 100 ms. `BenchmarkProcesses_Collect`
+(`internal/procstats/procstats_test.go`) runs one `Collect` per iteration over the host's own `/proc` and `/etc` with memory pressure mode
+on, so every process is read (`stat`, `status`, `cmdline`, `smaps_rollup`) and listed; it asserts no duration.
+
+### Procedure
+
+On a host with at least 250 processes (start sleeping processes in a scratch shell until `/proc` lists 250, then stop them):
+
+```bash
+for i in $(seq 1 200); do sleep 600 & done
+ls /proc | grep -E '^[0-9]+$' | wc -l
+go test ./internal/procstats -run '^$' -bench Collect -count 10
+kill $(jobs -p)
+```
+
+### Results
+
+| Host | Kernel | CPU | Date | Processes | Median of ten (ms) |
+| ---- | ------ | --- | ---- | --------: | -----------------: |
+| development host (4 vCPU, sandbox) | 6.18.44 | Intel Xeon 2.80 GHz | 2026-10-17 | 273 | **48.9** |
+
+The ten runs took 48.0 to 55.6 ms. The development host is a sandbox: of its 273 processes the 190 sleepers started for the run
+allowed reading `smaps_rollup`, while most of the sandbox's own processes (another user namespace) refused it, so the figure is for a
+mix of processes with and without PSS; a host where all of them are readable costs somewhat more. The value on the server (Ubuntu 22.04, kernel 5.15, 2 GB) is **not measured**: #44 measures it. The cost of reading `smaps_rollup`
+of every process every 15 seconds under memory pressure is an open point of #44 and #45 (Agent area, *Processes*).

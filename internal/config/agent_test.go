@@ -80,11 +80,14 @@ func TestDefaultAgent(t *testing.T) {
 	if got.Log.Level != "info" {
 		t.Errorf("DefaultAgent().Log.Level = %q, want %q", got.Log.Level, "info")
 	}
+	if len(got.Processes.Programs) != 0 {
+		t.Errorf("DefaultAgent().Processes.Programs = %+v, want an empty list", got.Processes.Programs)
+	}
 }
 
 func TestAgentKeys(t *testing.T) {
 	got := AgentKeys()
-	want := []string{"agent_id", "backend.url", "spool.directory", "log.level", "filesystem.mount_points"}
+	want := []string{"agent_id", "backend.url", "spool.directory", "log.level", "filesystem.mount_points", "processes.programs"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Errorf("AgentKeys() = %v, want %v", got, want)
 	}
@@ -114,6 +117,9 @@ func TestLoadAgent_Example(t *testing.T) {
 		}
 		if !slices.Equal(got.Filesystem.MountPoints, def.Filesystem.MountPoints) {
 			t.Errorf("example Filesystem.MountPoints = %q, want the default %q", got.Filesystem.MountPoints, def.Filesystem.MountPoints)
+		}
+		if len(got.Processes.Programs) != 0 {
+			t.Errorf("example Processes.Programs = %+v, want the default empty list", got.Processes.Programs)
 		}
 	})
 }
@@ -734,5 +740,144 @@ func TestLoadAgent_MountPointsNullElement(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			requireMountError(t, mountDoc(tt.value), tt.line, "has no value")
 		})
+	}
+}
+
+// programsKeyLine is the line of the key processes.programs in a document built by programsDoc.
+const programsKeyLine = 5
+
+// programsDoc builds an agent file whose key processes.programs (line programsKeyLine) is followed by value, the raw YAML text
+// after the colon; the first element of a block list is on line 6.
+func programsDoc(value string) string {
+	return validAgent + "processes:\n  programs:" + value + "\n"
+}
+
+// programsErrorCase is a processes.programs value that is refused.
+type programsErrorCase struct {
+	name   string
+	value  string
+	line   int
+	key    string
+	reason string
+}
+
+// requireProgramsError loads the document and fails the test unless it is refused with exactly
+// "config: <file>:<line>: <key>: <reason>".
+func requireProgramsError(t *testing.T, tt programsErrorCase) {
+	t.Helper()
+
+	doc := programsDoc(tt.value)
+	path := writeTemp(t, doc)
+	got, err := LoadAgent(path, agentEnv())
+	if got != nil {
+		t.Errorf("LoadAgent(%q) = %+v, want nil on error", doc, got)
+	}
+	if err == nil {
+		t.Fatalf("LoadAgent(%q) error = nil, want an error for %s at line %d", doc, tt.key, tt.line)
+	}
+	want := "config: " + path + ":" + strconv.Itoa(tt.line) + ": " + tt.key + ": " + tt.reason
+	if err.Error() != want {
+		t.Errorf("LoadAgent(%q) error = %q, want %q", doc, err.Error(), want)
+	}
+	requireNoLeakBesidesFile(t, err, path, sentinel)
+}
+
+func TestLoadAgent_ProcessesPrograms(t *testing.T) {
+	var many strings.Builder
+	for i := 0; i < MaxProgramRules; i++ {
+		many.WriteString("\n    - {program: p" + strconv.Itoa(i) + ", command: c" + strconv.Itoa(i) + "}")
+	}
+	tests := []struct {
+		name string
+		doc  string
+		want []ProgramRule
+	}{
+		{"absent takes the default", validAgent, nil},
+		{"section without the key takes the default", validAgent + "processes:\n", nil},
+		{"empty list", programsDoc(" []"), nil},
+		{"command rule", programsDoc("\n    - program: web\n      command: apache2"), []ProgramRule{{Program: "web", Command: "apache2"}}},
+		{"prefix rule with the appended word", programsDoc("\n    - program: php-fpm\n      cmdline_prefix: \"php-fpm: pool \"\n      append_next_word: true"),
+			[]ProgramRule{{Program: "php-fpm", CmdlinePrefix: "php-fpm: pool ", AppendNextWord: true}}},
+		{"prefix rule with append_next_word false", programsDoc("\n    - {program: x, cmdline_prefix: abc, append_next_word: false}"),
+			[]ProgramRule{{Program: "x", CmdlinePrefix: "abc"}}},
+		{"rules in file order", programsDoc("\n    - {program: b, command: y}\n    - {program: a, cmdline_prefix: \"x \"}\n    - {program: c, command: z}"),
+			[]ProgramRule{{Program: "b", Command: "y"}, {Program: "a", CmdlinePrefix: "x "}, {Program: "c", Command: "z"}}},
+		{"program of the whole alphabet", programsDoc("\n    - {program: \"A0._:/@+-\", command: x}"), []ProgramRule{{Program: "A0._:/@+-", Command: "x"}}},
+		{"program of 128 characters", programsDoc("\n    - {program: " + strings.Repeat("a", 128) + ", command: x}"), []ProgramRule{{Program: strings.Repeat("a", 128), Command: "x"}}},
+		{"command of 256 bytes", programsDoc("\n    - {program: x, command: " + strings.Repeat("c", 256) + "}"), []ProgramRule{{Program: "x", Command: strings.Repeat("c", 256)}}},
+		{"prefix of 256 bytes in two-byte characters", programsDoc("\n    - {program: x, cmdline_prefix: " + strings.Repeat("\u00e9", 128) + "}"),
+			[]ProgramRule{{Program: "x", CmdlinePrefix: strings.Repeat("\u00e9", 128)}}},
+		{"block rule list in a flow list", programsDoc(" [{program: x, command: y}]"), []ProgramRule{{Program: "x", Command: "y"}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := LoadAgent(writeTemp(t, tt.doc), agentEnv())
+			if err != nil {
+				t.Fatalf("LoadAgent(%q) error = %v, want nil", tt.doc, err)
+			}
+			if !slices.Equal(got.Processes.Programs, tt.want) {
+				t.Errorf("LoadAgent(%q) Programs = %#v, want %#v", tt.doc, got.Processes.Programs, tt.want)
+			}
+		})
+	}
+
+	t.Run("64 rules", func(t *testing.T) {
+		doc := programsDoc(many.String())
+
+		got, err := LoadAgent(writeTemp(t, doc), agentEnv())
+
+		if err != nil || len(got.Processes.Programs) != MaxProgramRules {
+			t.Errorf("LoadAgent(64 rules) = %d rules, %v, want %d rules and no error", len(got.Processes.Programs), err, MaxProgramRules)
+		}
+	})
+}
+
+func TestLoadAgent_ProcessesProgramsErrors(t *testing.T) {
+	const (
+		listReason    = "must be a list of at most 64 rules"
+		programReason = "must be 1 to 128 characters of [A-Za-z0-9._:/@+-], starting with a letter or digit"
+		oneOfReason   = "must set exactly one of command and cmdline_prefix"
+		lengthReason  = "must be 1 to 256 bytes"
+		charReason    = "must not contain control, format or line-separating characters"
+		first         = "processes.programs[0]"
+	)
+	var many strings.Builder
+	for i := 0; i <= MaxProgramRules; i++ {
+		many.WriteString("\n    - {program: p" + strconv.Itoa(i) + ", command: c" + strconv.Itoa(i) + "}")
+	}
+	withProgram := func(program string) string { return "\n    - program: " + program + "\n      command: x" }
+	tests := []programsErrorCase{
+		{"65 rules", many.String(), programsKeyLine, "processes.programs", listReason},
+		{"program empty", withProgram(`""`), 6, first + ".program", programReason},
+		{"program starting with a hyphen", withProgram("-a"), 6, first + ".program", programReason},
+		{"program starting with an underscore", withProgram("_a"), 6, first + ".program", programReason},
+		{"program with a space", withProgram(`"a b"`), 6, first + ".program", programReason},
+		{"program with a dollar sign", withProgram("a$b"), 6, first + ".program", programReason},
+		{"program with a non-ASCII letter", withProgram("\u00e4"), 6, first + ".program", programReason},
+		{"program of 129 characters", withProgram(strings.Repeat("a", 129)), 6, first + ".program", programReason},
+		{"program that leaks", withProgram(sentinel + "$"), 6, first + ".program", programReason},
+		{"neither command nor prefix", "\n    - program: x", 6, first, oneOfReason},
+		{"command and prefix", "\n    - program: x\n      command: a\n      cmdline_prefix: b", 6, first, oneOfReason},
+		{"error of the second rule", "\n    - {program: a, command: b}\n    - program: y", 7, "processes.programs[1]", oneOfReason},
+		{"command of 257 bytes", "\n    - program: x\n      command: " + strings.Repeat("c", 257), 7, first + ".command", lengthReason},
+		{"prefix of 257 bytes", "\n    - program: x\n      cmdline_prefix: " + strings.Repeat("c", 257), 7, first + ".cmdline_prefix", lengthReason},
+		{"command of 129 two-byte characters", "\n    - program: x\n      command: " + strings.Repeat("\u00e9", 129), 7, first + ".command", lengthReason},
+		{"command that leaks", "\n    - program: x\n      command: " + strings.Repeat(sentinel, 40), 7, first + ".command", lengthReason},
+		{"append_next_word without a prefix", "\n    - program: x\n      command: y\n      append_next_word: true", 8, first + ".append_next_word", "needs cmdline_prefix"},
+		{"null element", "\n    - ~", 6, first, "has no value"},
+		{"empty element", "\n    -", 6, first, "has no value"},
+		{"scalar element", "\n    - x", 6, first, "must be a section (a mapping of keys)"},
+		{"sequence element", "\n    - [a]", 6, first, "must be a section (a mapping of keys)"},
+		{"null element after a rule", "\n    - {program: a, command: b}\n    - ~", 7, "processes.programs[1]", "has no value"},
+		{"unknown key in an element", "\n    - program: x\n      command: y\n      bogus: 1", 8, first + ".bogus", "unknown key"},
+		{"duplicate key in an element", "\n    - program: x\n      command: y\n      program: z", 8, first + ".program", "duplicate key"},
+		{"control character in the command", "\n    - program: x\n      command: \"a\\tb\"", 7, first + ".command", charReason},
+		{"append_next_word not a boolean", "\n    - program: x\n      cmdline_prefix: y\n      append_next_word: maybe", 8, first + ".append_next_word", "invalid value, want true or false"},
+		{"anchor on an element", "\n    - &a {program: x, command: y}", 6, first, "anchors and aliases are not supported"},
+		{"anchor inside an element", "\n    - program: &a x\n      command: y", 6, first + ".program", "anchors and aliases are not supported"},
+		{"custom tag inside an element", "\n    - program: !foo x\n      command: y", 6, first + ".program", "unsupported tag"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) { requireProgramsError(t, tt) })
 	}
 }

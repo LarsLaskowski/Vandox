@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"io/fs"
 	"log/slog"
 	"net"
 	"os"
@@ -15,10 +16,13 @@ import (
 	"sync"
 	"syscall"
 	"testing"
+	"testing/fstest"
+	"testing/synctest"
 	"time"
 
 	"github.com/LarsLaskowski/Vandox/internal/config"
 	"github.com/LarsLaskowski/Vandox/internal/model"
+	"github.com/LarsLaskowski/Vandox/internal/procstats"
 	"github.com/LarsLaskowski/Vandox/internal/scheduler"
 	"github.com/LarsLaskowski/Vandox/internal/selfstats"
 	"github.com/LarsLaskowski/Vandox/internal/sysstats"
@@ -235,6 +239,11 @@ func fixtureSystem() sysstats.Sources {
 	}
 }
 
+// fixtureProcesses returns process sources that read the fixture trees, so no agent test reads the host's /proc or /etc.
+func fixtureProcesses() procstats.Sources {
+	return procstats.Sources{Proc: os.DirFS("../../testdata/proc"), Etc: os.DirFS("../../testdata/etc")}
+}
+
 func logLines(out string) []string {
 	return strings.Split(strings.TrimSuffix(out, "\n"), "\n")
 }
@@ -277,10 +286,11 @@ func TestRun_ReadyWatchdogAndSelfMetrics(t *testing.T) {
 			"WATCHDOG_USEC=100000",
 			"JOURNAL_STREAM=" + stream,
 		},
-		Stderr: logFile,
-		Sink:   sink,
-		Self:   fixtureSources(),
-		System: fixtureSystem(),
+		Stderr:    logFile,
+		Sink:      sink,
+		Self:      fixtureSources(),
+		System:    fixtureSystem(),
+		Processes: fixtureProcesses(),
 	})
 
 	if first := socket.next(t, r); first != "READY=1" {
@@ -335,6 +345,7 @@ func TestRun_ConfigErrorExitsOne(t *testing.T) {
 				Stderr:     &stderr,
 				Self:       fixtureSources(),
 				System:     fixtureSystem(),
+				Processes:  fixtureProcesses(),
 			})
 
 			if code != 1 {
@@ -364,6 +375,7 @@ func TestRun_DoesNotLogSecret(t *testing.T) {
 		Sink:       sink,
 		Self:       fixtureSources(),
 		System:     fixtureSystem(),
+		Processes:  fixtureProcesses(),
 	})
 
 	r.waitMetrics(sink, selfstats.MetricRSS)
@@ -409,6 +421,7 @@ func TestRun_NotificationProblemsDoNotStopTheAgent(t *testing.T) {
 				Sink:       sink,
 				Self:       fixtureSources(),
 				System:     fixtureSystem(),
+				Processes:  fixtureProcesses(),
 			})
 
 			r.waitMetrics(sink, selfstats.MetricRSS)
@@ -445,15 +458,16 @@ func TestJobs_Schedules(t *testing.T) {
 	system := jobSchedule{"system", scheduler.Schedule{Interval: 30 * time.Second, Timeout: 5 * time.Second, PressureInterval: 10 * time.Second}}
 	filesystem := jobSchedule{"filesystem", scheduler.Schedule{Interval: 60 * time.Second, Timeout: 10 * time.Second}}
 	clock := jobSchedule{"clock", scheduler.Schedule{Interval: 60 * time.Second, Timeout: 5 * time.Second}}
+	processes := jobSchedule{"processes", scheduler.Schedule{Interval: 60 * time.Second, Timeout: 10 * time.Second, PressureInterval: 15 * time.Second}}
 
 	tests := []struct {
 		name        string
 		mountPoints []string
 		want        []jobSchedule
 	}{
-		{"default mount point", []string{"/"}, []jobSchedule{self, system, filesystem, clock}},
-		{"two mount points", []string{"/", "/var"}, []jobSchedule{self, system, filesystem, clock}},
-		{"no mount point leaves out the filesystem job", []string{}, []jobSchedule{self, system, clock}},
+		{"default mount point", []string{"/"}, []jobSchedule{self, system, processes, filesystem, clock}},
+		{"two mount points", []string{"/", "/var"}, []jobSchedule{self, system, processes, filesystem, clock}},
+		{"no mount point leaves out the filesystem job", []string{}, []jobSchedule{self, system, processes, clock}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -461,7 +475,7 @@ func TestJobs_Schedules(t *testing.T) {
 			cfg.Filesystem.MountPoints = tt.mountPoints
 			log := slog.New(slog.NewTextHandler(io.Discard, nil))
 
-			list := jobs(Options{Self: fixtureSources(), System: fixtureSystem()}, &cfg, log)
+			list, _ := jobs(Options{Self: fixtureSources(), System: fixtureSystem(), Processes: fixtureProcesses()}, &cfg, log)
 
 			if got := scheduleOf(list); !slices.Equal(got, tt.want) {
 				t.Errorf("jobs() = %+v, want %+v", got, tt.want)
@@ -482,6 +496,7 @@ func TestRun_RecordsSystemMetrics(t *testing.T) {
 		Sink:       sink,
 		Self:       fixtureSources(),
 		System:     fixtureSystem(),
+		Processes:  fixtureProcesses(),
 	})
 
 	r.waitMetrics(sink, "load1", "mem_available_bytes", "pressure_avg10", "filesystem_size_bytes", "clock_synchronized")
@@ -491,4 +506,149 @@ func TestRun_RecordsSystemMetrics(t *testing.T) {
 	}
 }
 
-var _ scheduler.Putter = (*metricSink)(nil)
+// loadDir reads all files below dir into a MapFS, so a test in a synctest bubble reads no real file.
+func loadDir(t *testing.T, dir string) fstest.MapFS {
+	t.Helper()
+
+	files := fstest.MapFS{}
+	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		rel, err := filepath.Rel(dir, path)
+		if err != nil {
+			return err
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		files[filepath.ToSlash(rel)] = &fstest.MapFile{Data: data}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("reading the fixture tree %s: %v", dir, err)
+	}
+	return files
+}
+
+// addWorker adds a process named worker with the PID pid, a resident set of pid kB and the command line "worker job<pid>".
+func addWorker(files fstest.MapFS, pid int) {
+	n := strconv.Itoa(pid)
+	fields := make([]string, 50)
+	for i := range fields {
+		fields[i] = "0"
+	}
+	fields[0], fields[1], fields[19] = "S", "1", "1000"
+	files[n+"/stat"] = &fstest.MapFile{Data: []byte(n + " (worker) " + strings.Join(fields, " ") + "\n")}
+	files[n+"/status"] = &fstest.MapFile{Data: []byte("Name:\tworker\nUid:\t0\t0\t0\t0\nVmRSS:\t" + n + " kB\nVmSwap:\t0 kB\n")}
+	files[n+"/cmdline"] = &fstest.MapFile{Data: []byte("worker job" + n + "\x00")}
+	files[n+"/smaps_rollup"] = &fstest.MapFile{Data: []byte("00400000-7ffd1a94b000 ---p 00000000 00:00 0   [rollup]\nRss: " + n + " kB\nPss: " + n + " kB\n")}
+}
+
+// snapshotSink is a scheduler.Putter that keeps the process snapshots it received.
+type snapshotSink struct {
+	mu        sync.Mutex
+	snapshots []*model.ProcessSnapshot
+}
+
+func (s *snapshotSink) Put(_ context.Context, records []model.Record) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for _, r := range records {
+		if snap, ok := r.Data.(*model.ProcessSnapshot); ok {
+			s.snapshots = append(s.snapshots, snap)
+		}
+	}
+	return nil
+}
+
+func (s *snapshotSink) all() []*model.ProcessSnapshot {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return slices.Clone(s.snapshots)
+}
+
+// lowMemoryOptions returns options whose sources read in-memory trees: the system sample reports about 6 percent of the memory
+// available, and the process sample sees workers beside the captured processes.
+func lowMemoryOptions(t *testing.T, workers int) Options {
+	t.Helper()
+
+	proc := loadDir(t, "../../testdata/proc")
+	meminfo := string(proc["meminfo"].Data)
+	if !strings.Contains(meminfo, "MemAvailable:   15901132 kB") {
+		t.Fatalf("test setup: the fixture meminfo lacks the MemAvailable line this test replaces")
+	}
+	// 1000000 of 16479424 kB are about 6 percent: below the 10 percent that switch memory pressure mode on.
+	proc["meminfo"] = &fstest.MapFile{Data: []byte(strings.Replace(meminfo, "MemAvailable:   15901132 kB", "MemAvailable:    1000000 kB", 1))}
+	for pid := 1001; pid < 1001+workers; pid++ {
+		addWorker(proc, pid)
+	}
+	return Options{
+		Self:      selfstats.Sources{Proc: proc},
+		System:    sysstats.Sources{Proc: proc, Sys: loadDir(t, "../../testdata/sys"), StatFS: fixtureSystem().StatFS, Clock: fixtureSystem().Clock},
+		Processes: procstats.Sources{Proc: proc, Etc: loadDir(t, "../../testdata/etc")},
+	}
+}
+
+// runFor runs the scheduler for d of fake time inside a synctest bubble and stops it.
+func runFor(t *testing.T, sched *scheduler.Scheduler, d time.Duration) {
+	t.Helper()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		sched.Run(ctx)
+	}()
+	time.Sleep(d)
+	synctest.Wait()
+	cancel()
+	<-done
+}
+
+// fullSnapshot returns the last of the snapshots that is complete and lists n processes, or nil.
+func fullSnapshot(snapshots []*model.ProcessSnapshot, n int) *model.ProcessSnapshot {
+	var full *model.ProcessSnapshot
+	for _, snap := range snapshots {
+		if snap.Complete && len(snap.Processes) == n {
+			full = snap
+		}
+	}
+	return full
+}
+
+func TestNewScheduler_LowMemoryMakesFullProcessSnapshots(t *testing.T) {
+	const workers = 60
+	opts := lowMemoryOptions(t, workers)
+	cfg := config.DefaultAgent()
+	cfg.Processes.Programs = []config.ProgramRule{{Program: "grouped", CmdlinePrefix: "worker ", AppendNextWord: true}}
+	// The workers and five captured processes: the kernel thread and the zombie of the fixture tree have no smaps_rollup file, which
+	// a MapFS answers with "does not exist" (the kernel answers ESRCH), so they count as ended.
+	wantProcesses := workers + 5
+
+	synctest.Test(t, func(t *testing.T) {
+		sink := &snapshotSink{}
+		opts.Sink = sink
+		sched, err := newScheduler(opts, &cfg, slog.New(slog.DiscardHandler))
+		if err != nil {
+			t.Fatalf("newScheduler() error = %v, want nil", err)
+		}
+
+		runFor(t, sched, 70*time.Second)
+
+		full := fullSnapshot(sink.all(), wantProcesses)
+		if full == nil {
+			t.Fatalf("no process snapshot lists all %d processes with complete true among %d snapshots, want one after the low memory switched the mode on",
+				wantProcesses, len(sink.all()))
+		}
+		if full.Total == nil || int(*full.Total) != wantProcesses {
+			t.Errorf("Total of the full snapshot = %v, want %d", full.Total, wantProcesses)
+		}
+		if !slices.ContainsFunc(full.Programs, func(a model.ProgramAggregate) bool { return a.Program == "grouped/job1001" && a.Count == 1 }) {
+			t.Errorf("programs of the full snapshot = %+v, want grouped/job1001 named by the configured rule", full.Programs)
+		}
+	})
+}

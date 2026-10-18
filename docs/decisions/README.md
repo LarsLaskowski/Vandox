@@ -139,4 +139,5 @@ once in the [area document](../areas/README.md) of the record's area, and the re
 | 0110 | The agent's runtime frame: one runner per collector at a fixed rate, a gap for every missed sample, sd_notify by hand with a watchdog gated on the runners, journal logging on stderr | Accepted | 2026-10-17 |
 | 0111 | System metrics: three collectors read /proc, /sys, statfs and adjtimex; missing pressure data is logged once and never recorded as zero | Accepted | 2026-10-17 |
 | 0112 | gosec G115 as the local stand-in for CodeQL's integer-conversion query; enabled for the whole module, no exclusions | Accepted | 2026-10-17 |
+| 0113 | Process collector: PSS from smaps_rollup, top processes by memory and CPU with every program summed, a full snapshot under memory pressure that the system collector switches | Accepted | 2026-10-17 |
 <!-- project:end index -->

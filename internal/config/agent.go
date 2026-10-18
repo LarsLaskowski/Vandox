@@ -5,6 +5,7 @@ import (
 	"net/url"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/LarsLaskowski/Vandox/internal/wire"
@@ -23,6 +24,7 @@ type Agent struct {
 	Spool      Spool         `yaml:"spool"`
 	Log        Log           `yaml:"log"`
 	Filesystem Filesystem    `yaml:"filesystem"`
+	Processes  Processes     `yaml:"processes"`
 	Secrets    AgentSecrets  `yaml:"-"`
 }
 
@@ -44,6 +46,92 @@ type Log struct {
 // Filesystem configures the file system metrics.
 type Filesystem struct {
 	MountPoints []string `yaml:"mount_points"`
+}
+
+// Processes configures the process collector.
+type Processes struct {
+	Programs []ProgramRule `yaml:"programs"`
+}
+
+// ProgramRule names the program of the processes whose command and command line match.
+type ProgramRule struct {
+	Program        string `yaml:"program"`
+	Command        string `yaml:"command"`
+	CmdlinePrefix  string `yaml:"cmdline_prefix"`
+	AppendNextWord bool   `yaml:"append_next_word"`
+}
+
+// Bounds of processes.programs.
+const (
+	MaxProgramRules   = 64
+	MaxRuleMatchBytes = 256
+)
+
+// Reasons processes.programs is refused with; none of them quotes a value.
+const (
+	programRulesReason  = "must be a list of at most 64 rules"
+	programNameReason   = "must be 1 to 128 characters of [A-Za-z0-9._:/@+-], starting with a letter or digit"
+	programOneOfReason  = "must set exactly one of command and cmdline_prefix"
+	programLengthReason = "must be 1 to 256 bytes"
+	programWordReason   = "needs cmdline_prefix"
+)
+
+// maxProgramNameBytes is the longest program a rule names.
+const maxProgramNameBytes = 128
+
+// checkProgramRules checks the list of processes.programs.
+func checkProgramRules(file string, lines map[string]int, rules []ProgramRule) error {
+	if len(rules) > MaxProgramRules {
+		return keyError(file, lines, "processes.programs", programRulesReason)
+	}
+	for i := range rules {
+		if err := checkProgramRule(file, lines, "processes.programs["+strconv.Itoa(i)+"]", &rules[i]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// checkProgramRule checks the rule r, whose key path is path.
+func checkProgramRule(file string, lines map[string]int, path string, r *ProgramRule) error {
+	fail := func(key, reason string) error {
+		line := lines[key]
+		if line == 0 {
+			line = lines[path]
+		}
+		return &KeyError{File: file, Line: line, Key: key, Reason: reason}
+	}
+	if !validProgramName(r.Program) {
+		return fail(path+".program", programNameReason)
+	}
+	if (r.Command == "") == (r.CmdlinePrefix == "") {
+		return fail(path, programOneOfReason)
+	}
+	if len(r.Command) > MaxRuleMatchBytes {
+		return fail(path+".command", programLengthReason)
+	}
+	if len(r.CmdlinePrefix) > MaxRuleMatchBytes {
+		return fail(path+".cmdline_prefix", programLengthReason)
+	}
+	if r.AppendNextWord && r.CmdlinePrefix == "" {
+		return fail(path+".append_next_word", programWordReason)
+	}
+	return nil
+}
+
+// validProgramName reports whether s is 1 to 128 characters of [A-Za-z0-9._:/@+-], starting with a letter or digit.
+func validProgramName(s string) bool {
+	if len(s) < 1 || len(s) > maxProgramNameBytes {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		alnum := c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9'
+		if !alnum && (i == 0 || !strings.ContainsRune("._:/@+-", rune(c))) {
+			return false
+		}
+	}
+	return true
 }
 
 // mountPointsRule is the reason filesystem.mount_points is refused with; it does not quote the value.
@@ -71,9 +159,10 @@ func DefaultAgent() Agent {
 	}
 }
 
-// AgentKeys returns every option key path in file order: agent_id, backend.url, spool.directory, log.level, filesystem.mount_points.
+// AgentKeys returns every option key path in file order: agent_id, backend.url, spool.directory, log.level,
+// filesystem.mount_points, processes.programs.
 func AgentKeys() []string {
-	return []string{keyAgentID, keyBackendURL, "spool.directory", "log.level", "filesystem.mount_points"}
+	return []string{keyAgentID, keyBackendURL, "spool.directory", "log.level", "filesystem.mount_points", "processes.programs"}
 }
 
 // LoadAgent reads the agent configuration file at path and the secrets from environ (in os.Environ form).
@@ -120,7 +209,10 @@ func (a *Agent) validate(file string, lines map[string]int) error {
 	if err := checkLogLevel(file, lines, "log.level", a.Log.Level); err != nil {
 		return err
 	}
-	return checkMountPoints(file, lines, "filesystem.mount_points", a.Filesystem.MountPoints)
+	if err := checkMountPoints(file, lines, "filesystem.mount_points", a.Filesystem.MountPoints); err != nil {
+		return err
+	}
+	return checkProgramRules(file, lines, a.Processes.Programs)
 }
 
 // checkMountPoints checks the list of filesystem.mount_points.

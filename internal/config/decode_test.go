@@ -17,6 +17,12 @@ type testSection struct {
 	Other string `yaml:"other"`
 }
 
+// testRule is an element of the list of sections of testDoc.
+type testRule struct {
+	Name string `yaml:"name"`
+	Flag bool   `yaml:"flag"`
+}
+
 // testDoc is the white-box target of decodeStrict. It has fields of every kind the walker must handle.
 type testDoc struct {
 	Title   string        `yaml:"title"`
@@ -25,6 +31,7 @@ type testDoc struct {
 	Wait    time.Duration `yaml:"wait"`
 	Tags    []string      `yaml:"tags"`
 	Section testSection   `yaml:"section"`
+	Rules   []testRule    `yaml:"rules"`
 	Skip    string        `yaml:"-"`
 }
 
@@ -332,4 +339,77 @@ func TestDecodeStrict_ListElementWithoutValue(t *testing.T) {
 			t.Errorf("decodeStrict(quoted tilde) Tags = %q, want %q", got.Tags, want)
 		}
 	})
+}
+
+func TestDecodeStrict_ListOfSections(t *testing.T) {
+	t.Run("elements are decoded and their lines recorded per element and key", func(t *testing.T) {
+		doc := "rules:\n  - name: a\n    flag: true\n  - name: b\n"
+		got, lines, err := decodeDoc(t, doc)
+		if err != nil {
+			t.Fatalf("decodeStrict(%q) error = %v, want nil", doc, err)
+		}
+		want := []testRule{{Name: "a", Flag: true}, {Name: "b"}}
+		if !reflect.DeepEqual(got.Rules, want) {
+			t.Errorf("decodeStrict(%q) Rules = %+v, want %+v", doc, got.Rules, want)
+		}
+		requireLines(t, doc, lines, map[string]int{"rules[0].name": 2, "rules[0].flag": 3, "rules[1].name": 4})
+	})
+
+	valid := []struct {
+		name string
+		doc  string
+		want []testRule
+	}{
+		{"flow list of flow mappings", "rules: [{name: a}, {name: b, flag: true}]\n", []testRule{{Name: "a"}, {Name: "b", Flag: true}}},
+		{"empty list", "rules: []\n", []testRule{}},
+		{"element without keys is a zero element", "rules:\n  - {}\n", []testRule{{}}},
+		{"element does not take the defaults of the document", "rules:\n  - name: a\n", []testRule{{Name: "a"}}},
+	}
+	for _, tt := range valid {
+		t.Run(tt.name, func(t *testing.T) {
+			got := mustDecodeDoc(t, tt.doc)
+			if len(got.Rules) != len(tt.want) || (len(tt.want) > 0 && !reflect.DeepEqual(got.Rules, tt.want)) {
+				t.Errorf("decodeStrict(%q) Rules = %+v, want %+v", tt.doc, got.Rules, tt.want)
+			}
+		})
+	}
+
+}
+
+func TestDecodeStrict_ListOfSectionsRefused(t *testing.T) {
+	refused := []struct {
+		name   string
+		doc    string
+		key    string
+		line   int
+		reason string
+	}{
+		{"unknown key in an element", "rules:\n  - name: a\n    bogus: 1\n", "rules[0].bogus", 3, "unknown key"},
+		{"unknown key in the second element", "rules:\n  - name: a\n  - bogus: 1\n", "rules[1].bogus", 3, "unknown key"},
+		{"duplicate key in an element", "rules:\n  - name: a\n    name: b\n", "rules[0].name", 3, "duplicate key"},
+		{"null element", "rules:\n  - ~\n", "rules[0]", 2, "has no value"},
+		{"empty element", "rules:\n  -\n", "rules[0]", 2, "has no value"},
+		{"scalar element", "rules:\n  - x\n", "rules[0]", 2, "must be a section (a mapping of keys)"},
+		{"list element", "rules:\n  - [a]\n", "rules[0]", 2, "must be a section (a mapping of keys)"},
+		{"anchor on an element", "rules:\n  - &a {name: x}\n", "rules[0]", 2, "anchors and aliases are not supported"},
+		{"anchor inside an element", "rules:\n  - name: &a x\n", "rules[0].name", 2, "anchors and aliases are not supported"},
+		{"alias inside an element", "rules:\n  - name: &a x\n  - name: *a\n", "rules[0].name", 2, "anchors and aliases are not supported"},
+		{"custom tag inside an element", "rules:\n  - name: !foo x\n", "rules[0].name", 2, "unsupported tag"},
+		{"leaf of the wrong type inside an element", "rules:\n  - flag: maybe\n", "rules[0].flag", 2, "invalid value, want true or false"},
+		{"null leaf inside an element", "rules:\n  - name:\n", "rules[0].name", 2, "has no value"},
+	}
+	for _, tt := range refused {
+		t.Run(tt.name, func(t *testing.T) {
+			_, _, err := decodeDoc(t, tt.doc)
+
+			ke := requireKeyError(t, err, tt.key, tt.line)
+			if ke.Reason != tt.reason {
+				t.Errorf("decodeStrict(%q) reason = %q, want %q", tt.doc, ke.Reason, tt.reason)
+			}
+			want := fmt.Sprintf("config: test.yaml:%d: %s: %s", tt.line, tt.key, tt.reason)
+			if got := err.Error(); got != want {
+				t.Errorf("decodeStrict(%q) error = %q, want %q", tt.doc, got, want)
+			}
+		})
+	}
 }

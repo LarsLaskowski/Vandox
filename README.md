@@ -67,6 +67,7 @@ the value.
 | `spool.directory` | `/var/lib/vandox/spool` | Directory of the local spool, an absolute and clean path. |
 | `log.level` | `info` | `debug`, `info`, `warn` or `error`. |
 | `filesystem.mount_points` | `[/]` | Mount points whose size and inode use is recorded: a list of at most 16 absolute, clean paths of at most 1024 bytes each, every path listed once. A path that is not mounted is logged and left out; `[]` turns the file system metrics off. |
+| `processes.programs` | `[]` | Rules that name the program of a process, tried in order, at most 64, each a mapping with `program` (1 to 128 characters of `[A-Za-z0-9._:/@+-]`, starting with a letter or digit) and exactly one of `command` (the process command) and `cmdline_prefix` (a literal start of the command line), both 1 to 256 bytes; `append_next_word: true` (only with `cmdline_prefix`) appends the next word as `<program>/<word>`. Without a rule the program is the first word of the command, as in the legacy log. |
 
 **Backend options**
 
