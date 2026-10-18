@@ -257,6 +257,7 @@ Go (agent):
   *Analyzer gate* reported every CodeQL alert measured on PR #265 and accepts both forms above, but accepts a
   conversion of a 64-bit parse result to `int` or `uint` whose treatment by CodeQL is unverified (record 0112).
   On PR #265 a bound checked elsewhere (a digit-count limit, a check inside a helper) did not count: five
+  alerts on `ParseUint` results converted to `int64`.
 - A string literal that occurs three or more times in one non-test Go file is declared once as a constant and
   used by name (SonarQube Cloud `go:S1192`; on PR #272 `"has no value"` four times and `"invalid value, want "`
   three times in `internal/config/decode.go`, fixed as `reasonNoValue` and `reasonWantPrefix`). The count is per
@@ -265,7 +266,6 @@ Go (agent):
   made a constant unless it is empty. No local analyzer reports the rule (see *Analyzer gate*): before handing
   back, read the repeated literals of each changed non-test Go file, for example with
   `grep -o '"[^"]*"' <file> | sort | uniq -c | awk '$1 >= 3'`.
-  alerts on `ParseUint` results converted to `int64`.
 - The agent prints its build information through `internal/version`, set via `-ldflags`.
 
 C# (backend): follow the surrounding code and the analyzers; in particular
