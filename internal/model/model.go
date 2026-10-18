@@ -11,15 +11,19 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // Bounds shared by all record types.
 const (
-	// MaxNameBytes is the maximum length of a name (source, metric name, label key, collector).
+	// MaxNameBytes is the maximum length of a name (source, metric name, label key, collector), in UTF-8 bytes after
+	// encoding: a byte that does not start a valid UTF-8 sequence counts as the 3 bytes of U+FFFD.
 	MaxNameBytes = 128
-	// MaxShortTextBytes is the maximum length of a short text.
+	// MaxShortTextBytes is the maximum length of a short text, in UTF-8 bytes after encoding: a byte that does not
+	// start a valid UTF-8 sequence counts as the 3 bytes of U+FFFD.
 	MaxShortTextBytes = 1024
-	// MaxTextBytes is the maximum length of a text.
+	// MaxTextBytes is the maximum length of a text, in UTF-8 bytes after encoding: a byte that does not start a valid
+	// UTF-8 sequence counts as the 3 bytes of U+FFFD.
 	MaxTextBytes = 16384
 	// MaxItems is the maximum number of entries of a list or map.
 	MaxItems = 4096
@@ -177,12 +181,12 @@ func indexed(list string, i int) string { return list + "[" + strconv.Itoa(i) + 
 
 func keyed(field, key string) string { return field + "[" + QuoteName(key) + "]" }
 
-// checkPattern requires s to be non-empty, at most limit bytes and to match re.
+// checkPattern requires s to be non-empty, at most limit bytes after encoding (see encodedLen) and to match re.
 func checkPattern(field, s string, re *regexp.Regexp, limit int) error {
 	switch {
 	case s == "":
 		return invalid(field, "required")
-	case len(s) > limit:
+	case encodedLen(s) > limit:
 		return invalid(field, "too long")
 	case !re.MatchString(s):
 		return invalid(field, "invalid characters")
@@ -209,7 +213,7 @@ func checkOptionalUUID(field, s string) error {
 }
 
 func checkLen(field, s string, limit int) error {
-	if len(s) > limit {
+	if encodedLen(s) > limit {
 		return invalid(field, "too long")
 	}
 	return nil
@@ -218,7 +222,21 @@ func checkLen(field, s string, limit int) error {
 // encodedLen returns the length of s in UTF-8 bytes after the wire encoder's replacement: every byte that does not start a valid
 // UTF-8 sequence counts as the 3 bytes of U+FFFD.
 func encodedLen(s string) int {
-	return 0
+	if utf8.ValidString(s) {
+		return len(s)
+	}
+
+	n := 0
+	for i := 0; i < len(s); {
+		r, w := utf8.DecodeRuneInString(s[i:])
+		if r == utf8.RuneError && w == 1 {
+			n += utf8.RuneLen(utf8.RuneError)
+		} else {
+			n += w
+		}
+		i += w
+	}
+	return n
 }
 
 func checkShort(field, s string) error { return checkLen(field, s, MaxShortTextBytes) }
