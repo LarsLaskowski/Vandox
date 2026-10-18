@@ -3,6 +3,7 @@ package agent
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"io/fs"
 	"log/slog"
@@ -21,6 +22,7 @@ import (
 	"time"
 
 	"github.com/LarsLaskowski/Vandox/internal/config"
+	"github.com/LarsLaskowski/Vandox/internal/connstats"
 	"github.com/LarsLaskowski/Vandox/internal/model"
 	"github.com/LarsLaskowski/Vandox/internal/procstats"
 	"github.com/LarsLaskowski/Vandox/internal/scheduler"
@@ -244,6 +246,14 @@ func fixtureProcesses() procstats.Sources {
 	return procstats.Sources{Proc: os.DirFS("../../testdata/proc"), Etc: os.DirFS("../../testdata/etc")}
 }
 
+// fixtureSocketMount is the mnt_id of the captured sockets (testdata/connections/sandbox/fdinfo), so no agent test opens a socket to probe it.
+const fixtureSocketMount = 10
+
+// fixtureConnections returns connection sources that read the fixture tree, so no agent test reads the host's /proc.
+func fixtureConnections() connstats.Sources {
+	return connstats.Sources{Proc: os.DirFS("../../testdata/proc"), SocketMount: connstats.SocketMount{ID: fixtureSocketMount}}
+}
+
 func logLines(out string) []string {
 	return strings.Split(strings.TrimSuffix(out, "\n"), "\n")
 }
@@ -286,11 +296,12 @@ func TestRun_ReadyWatchdogAndSelfMetrics(t *testing.T) {
 			"WATCHDOG_USEC=100000",
 			"JOURNAL_STREAM=" + stream,
 		},
-		Stderr:    logFile,
-		Sink:      sink,
-		Self:      fixtureSources(),
-		System:    fixtureSystem(),
-		Processes: fixtureProcesses(),
+		Stderr:      logFile,
+		Sink:        sink,
+		Self:        fixtureSources(),
+		System:      fixtureSystem(),
+		Processes:   fixtureProcesses(),
+		Connections: fixtureConnections(),
 	})
 
 	if first := socket.next(t, r); first != "READY=1" {
@@ -340,12 +351,13 @@ func TestRun_ConfigErrorExitsOne(t *testing.T) {
 			var stderr bytes.Buffer
 
 			code := Run(context.Background(), Options{
-				ConfigPath: tc.path,
-				Environ:    []string{"VANDOX_AGENT_TOKEN=" + testToken, "NOTIFY_SOCKET=" + socket.path},
-				Stderr:     &stderr,
-				Self:       fixtureSources(),
-				System:     fixtureSystem(),
-				Processes:  fixtureProcesses(),
+				ConfigPath:  tc.path,
+				Environ:     []string{"VANDOX_AGENT_TOKEN=" + testToken, "NOTIFY_SOCKET=" + socket.path},
+				Stderr:      &stderr,
+				Self:        fixtureSources(),
+				System:      fixtureSystem(),
+				Processes:   fixtureProcesses(),
+				Connections: fixtureConnections(),
 			})
 
 			if code != 1 {
@@ -369,13 +381,14 @@ func TestRun_DoesNotLogSecret(t *testing.T) {
 	var stderr bytes.Buffer
 	sink := newMetricSink()
 	r := startAgent(t, Options{
-		ConfigPath: writeConfig(t, validConfig+"log:\n  level: debug\n"),
-		Environ:    []string{"VANDOX_AGENT_TOKEN=" + token},
-		Stderr:     &stderr,
-		Sink:       sink,
-		Self:       fixtureSources(),
-		System:     fixtureSystem(),
-		Processes:  fixtureProcesses(),
+		ConfigPath:  writeConfig(t, validConfig+"log:\n  level: debug\n"),
+		Environ:     []string{"VANDOX_AGENT_TOKEN=" + token},
+		Stderr:      &stderr,
+		Sink:        sink,
+		Self:        fixtureSources(),
+		System:      fixtureSystem(),
+		Processes:   fixtureProcesses(),
+		Connections: fixtureConnections(),
 	})
 
 	r.waitMetrics(sink, selfstats.MetricRSS)
@@ -415,13 +428,14 @@ func TestRun_NotificationProblemsDoNotStopTheAgent(t *testing.T) {
 			var stderr bytes.Buffer
 			sink := newMetricSink()
 			r := startAgent(t, Options{
-				ConfigPath: writeConfig(t, validConfig),
-				Environ:    []string{"VANDOX_AGENT_TOKEN=" + testToken, tc.env},
-				Stderr:     &stderr,
-				Sink:       sink,
-				Self:       fixtureSources(),
-				System:     fixtureSystem(),
-				Processes:  fixtureProcesses(),
+				ConfigPath:  writeConfig(t, validConfig),
+				Environ:     []string{"VANDOX_AGENT_TOKEN=" + testToken, tc.env},
+				Stderr:      &stderr,
+				Sink:        sink,
+				Self:        fixtureSources(),
+				System:      fixtureSystem(),
+				Processes:   fixtureProcesses(),
+				Connections: fixtureConnections(),
 			})
 
 			r.waitMetrics(sink, selfstats.MetricRSS)
@@ -459,15 +473,16 @@ func TestJobs_Schedules(t *testing.T) {
 	filesystem := jobSchedule{"filesystem", scheduler.Schedule{Interval: 60 * time.Second, Timeout: 10 * time.Second}}
 	clock := jobSchedule{"clock", scheduler.Schedule{Interval: 60 * time.Second, Timeout: 5 * time.Second}}
 	processes := jobSchedule{"processes", scheduler.Schedule{Interval: 60 * time.Second, Timeout: 10 * time.Second, PressureInterval: 15 * time.Second}}
+	connections := jobSchedule{"connections", scheduler.Schedule{Interval: 60 * time.Second, Timeout: 10 * time.Second, PressureInterval: 15 * time.Second}}
 
 	tests := []struct {
 		name        string
 		mountPoints []string
 		want        []jobSchedule
 	}{
-		{"default mount point", []string{"/"}, []jobSchedule{self, system, processes, filesystem, clock}},
-		{"two mount points", []string{"/", "/var"}, []jobSchedule{self, system, processes, filesystem, clock}},
-		{"no mount point leaves out the filesystem job", []string{}, []jobSchedule{self, system, processes, clock}},
+		{"default mount point", []string{"/"}, []jobSchedule{self, system, processes, connections, filesystem, clock}},
+		{"two mount points", []string{"/", "/var"}, []jobSchedule{self, system, processes, connections, filesystem, clock}},
+		{"no mount point leaves out the filesystem job", []string{}, []jobSchedule{self, system, processes, connections, clock}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -475,7 +490,7 @@ func TestJobs_Schedules(t *testing.T) {
 			cfg.Filesystem.MountPoints = tt.mountPoints
 			log := slog.New(slog.NewTextHandler(io.Discard, nil))
 
-			list, _ := jobs(Options{Self: fixtureSources(), System: fixtureSystem(), Processes: fixtureProcesses()}, &cfg, log)
+			list, _ := jobs(Options{Self: fixtureSources(), System: fixtureSystem(), Processes: fixtureProcesses(), Connections: fixtureConnections()}, &cfg, log)
 
 			if got := scheduleOf(list); !slices.Equal(got, tt.want) {
 				t.Errorf("jobs() = %+v, want %+v", got, tt.want)
@@ -490,13 +505,14 @@ func TestJobs_Schedules(t *testing.T) {
 func TestRun_RecordsSystemMetrics(t *testing.T) {
 	sink := newMetricSink()
 	r := startAgent(t, Options{
-		ConfigPath: writeConfig(t, validConfig),
-		Environ:    []string{"VANDOX_AGENT_TOKEN=" + testToken},
-		Stderr:     io.Discard,
-		Sink:       sink,
-		Self:       fixtureSources(),
-		System:     fixtureSystem(),
-		Processes:  fixtureProcesses(),
+		ConfigPath:  writeConfig(t, validConfig),
+		Environ:     []string{"VANDOX_AGENT_TOKEN=" + testToken},
+		Stderr:      io.Discard,
+		Sink:        sink,
+		Self:        fixtureSources(),
+		System:      fixtureSystem(),
+		Processes:   fixtureProcesses(),
+		Connections: fixtureConnections(),
 	})
 
 	r.waitMetrics(sink, "load1", "mem_available_bytes", "pressure_avg10", "filesystem_size_bytes", "clock_synchronized")
@@ -590,6 +606,8 @@ func lowMemoryOptions(t *testing.T, workers int) Options {
 		Self:      selfstats.Sources{Proc: proc},
 		System:    sysstats.Sources{Proc: proc, Sys: loadDir(t, "../../testdata/sys"), StatFS: fixtureSystem().StatFS, Clock: fixtureSystem().Clock},
 		Processes: procstats.Sources{Proc: proc, Etc: loadDir(t, "../../testdata/etc")},
+		// The in-memory /proc holds the captured socket tables (net/ is in the fixture tree); the socket mount is the captured sockets'.
+		Connections: connstats.Sources{Proc: proc, SocketMount: connstats.SocketMount{ID: fixtureSocketMount}},
 	}
 }
 
@@ -651,4 +669,43 @@ func TestNewScheduler_LowMemoryMakesFullProcessSnapshots(t *testing.T) {
 			t.Errorf("programs of the full snapshot = %+v, want grouped/job1001 named by the configured rule", full.Programs)
 		}
 	})
+}
+
+func TestConnectionSources_ProbesOnlyWhenUnset(t *testing.T) {
+	probeErr := errors.New("sockmount: socket: permission denied")
+	proc := fstest.MapFS{"net/tcp": &fstest.MapFile{Data: []byte("header\n")}}
+	tests := []struct {
+		name      string
+		src       connstats.SocketMount
+		id        int32
+		err       error
+		wantMount connstats.SocketMount
+		wantCalls int
+	}{
+		{"unset takes the probed mount", connstats.SocketMount{}, 17, nil, connstats.SocketMount{ID: 17}, 1},
+		{"unset takes the probe's error", connstats.SocketMount{}, 0, probeErr, connstats.SocketMount{Err: probeErr}, 1},
+		{"a given mount is kept", connstats.SocketMount{ID: fixtureSocketMount}, 17, nil, connstats.SocketMount{ID: fixtureSocketMount}, 0},
+		{"a given error is kept", connstats.SocketMount{Err: probeErr}, 17, nil, connstats.SocketMount{Err: probeErr}, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			calls := 0
+			probe := func() (int32, error) {
+				calls++
+				return tt.id, tt.err
+			}
+
+			got := connectionSources(connstats.Sources{Proc: proc, SocketMount: tt.src}, probe)
+
+			if calls != tt.wantCalls {
+				t.Errorf("connectionSources() ran the probe %d times, want %d", calls, tt.wantCalls)
+			}
+			if got.SocketMount.ID != tt.wantMount.ID || !errors.Is(got.SocketMount.Err, tt.wantMount.Err) || (tt.wantMount.Err == nil) != (got.SocketMount.Err == nil) {
+				t.Errorf("connectionSources() socket mount = %+v, want %+v", got.SocketMount, tt.wantMount)
+			}
+			if got.Proc == nil {
+				t.Error("connectionSources() Proc = nil, want the given file system kept")
+			}
+		})
+	}
 }
