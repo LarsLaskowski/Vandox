@@ -369,3 +369,24 @@ func TestValidName(t *testing.T) {
 		})
 	}
 }
+
+func TestMeta_Validate_NameLengthCountsInvalidBytesAsReplacement(t *testing.T) {
+	cases := []struct {
+		name   string
+		bytes  int
+		reason string
+	}{
+		{"43 bytes count 129", 43, "too long"},
+		{"42 bytes count 126", 42, "invalid characters"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := validMeta()
+			m.Source = strings.Repeat("\xff", tc.bytes)
+			fe := fieldErrorOf(t, m.Validate(), "source")
+			if fe.Reason != tc.reason {
+				t.Errorf("Validate() reason = %q, want %q", fe.Reason, tc.reason)
+			}
+		})
+	}
+}

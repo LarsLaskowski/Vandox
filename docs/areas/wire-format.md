@@ -5,8 +5,8 @@
 The format of the batches the agent sends to the backend, and the shared record model behind it: header, record kinds and their
 fields, limits, versioning, batch validation and the duties of the consumer. The rules hold for both implementations, whatever their
 language; names such as `MaxLineBytes` or `ErrLimitExceeded` are the identifiers of the Go agent and the C# decoder for the same
-rules (see *Implementation*). A golden batch with one record of every kind, `testdata/wire/all-kinds.jsonl`, is written by the
-Go encoder and decoded by the C# contract test, so the two sides cannot drift apart unnoticed; a shared fixture of decoder cases,
+rules (see *Implementation*). A golden batch with one record of every kind, `testdata/wire/all-kinds.jsonl`, and a second one, `testdata/wire/replaced-text.jsonl`, with texts at their limits that held
+invalid UTF-8 before encoding, are written by the Go encoder and decoded by the C# contract test, so the two sides cannot drift apart unnoticed; a shared fixture of decoder cases,
 `testdata/wire/decoder-cases.json`, is run by both decoders and pins the JSON-level rules below. How the backend stores the records
 is in [Storage](storage.md).
 
@@ -84,7 +84,10 @@ one is invalid, and the decoder sets the origin of every decoded record to `agen
 - **Name pattern**: `^[A-Za-z0-9][A-Za-z0-9._:/@+-]*$`, 1 to 128 bytes (`MaxNameBytes`). Used for `source`,
   metric names and units, label keys, `gap.collector` and `log_line.event`.
 - **Short text** at most 1024 bytes (`MaxShortTextBytes`), **text** at most 16384 bytes (`MaxTextBytes`); lengths are in
-  UTF-8 bytes of the decoded string, no character restriction beyond *Text*.
+  UTF-8 bytes of the decoded string, no character restriction beyond *Text*. The Go model measures a record before encoding the same
+  way: a byte that does not start a valid UTF-8 sequence counts as the 3 bytes of its U+FFFD (a valid U+FFFD counts its own 3), for
+  names too, so a record `wire.CheckRecord` accepts never exceeds a limit at either decoder. See
+  [0114](../decisions/0114-model-text-limits-measured-after-the-encoders-replacement.md).
 - **Lists and maps** hold at most 4096 entries (`MaxItems`); metric labels at most 32 (`MaxLabels`).
 - **Times** are UTC (offset 0) and non-zero; optional times are checked only when present.
 - **Floats** are finite; percentages and rates are also >= 0.
@@ -374,6 +377,7 @@ Decompressed content of a batch of three records (the real stream is gzip-compre
 - [0089](../decisions/0089-json-null-reads-as-an-absent-key-in-both-decoders.md) — why a JSON `null` reads as an absent key in both decoders.
 - [0090](../decisions/0090-wire-keys-matched-ignoring-ascii-case-duplicates-rejected-header-shape-malformed.md) — why both decoders check
   keys and nesting before binding, match keys ignoring ASCII case and report a misshapen header as malformed.
+- [0114](../decisions/0114-model-text-limits-measured-after-the-encoders-replacement.md) — why the Go model measures limits as the encoder writes them, invalid UTF-8 counted as its replacement.
 
 ## Not here
 
@@ -384,8 +388,8 @@ Decompressed content of a batch of three records (the real stream is gzip-compre
 ## Implementation
 
 Agent (Go): `internal/model` (record types and validation) and `internal/wire` (header, encoder, streaming decoder with the line check
-in `decode.go`; golden test `internal/wire/golden_test.go`, `VANDOX_UPDATE_GOLDEN=1` rewrites the fixture; the shared decoder cases run in
+in `decode.go`; golden test `internal/wire/golden_test.go`, `VANDOX_UPDATE_GOLDEN=1` rewrites the fixtures `all-kinds.jsonl` and `replaced-text.jsonl`; the shared decoder cases run in
 `internal/wire/decode_test.go`). Backend (C#): `Vandox.Core.Model` and `Vandox.Core.Wire` (`BatchDecoder`, `WireLimits`, `WireKeyCheck` and
 `WireTextCheck` for the line check; `NullAsAbsentConverterFactory` with its two converters is the C# side of the null rule), `Vandox.Core.IO` (`StrictGzip`),
-contract test `WireContractTests` (golden batch and shared decoder cases).
+contract test `WireContractTests` (both golden batches and shared decoder cases).
 

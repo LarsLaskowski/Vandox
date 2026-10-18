@@ -130,6 +130,63 @@ public class WireContractTests
     }
 
     /// <summary>
+    /// The texts of the replaced-text golden batch sit exactly at their limits after the Go encoder's replacement of invalid bytes.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task DecodeReplacedTextBatchAcceptsTextsAtTheLimit()
+    {
+        // Arrange
+        var plain = await File.ReadAllBytesAsync(RepositoryFiles.Path("testdata/wire/replaced-text.jsonl"), CancellationToken.None);
+        using var compressed = GzipOf(plain);
+
+        // Act
+        LogLine? line = null;
+
+        using (var decoder = await BatchDecoder.OpenAsync(compressed, null, CancellationToken.None))
+        {
+            for (var record = await decoder.NextAsync(CancellationToken.None); record is not null; record = await decoder.NextAsync(CancellationToken.None))
+            {
+                line = record.Data as LogLine ?? line;
+            }
+        }
+
+        // Assert
+        Assert.IsNotNull(line, "the golden batch holds a log line");
+        Assert.AreEqual(16384, Encoding.UTF8.GetByteCount(line.Message), "message bytes");
+        Assert.AreEqual(1024, Encoding.UTF8.GetByteCount(line.Host), "host bytes");
+        Assert.Contains("�", line.Message, "message holds U+FFFD");
+        Assert.Contains("�", line.Host, "host holds U+FFFD");
+    }
+
+    /// <summary>
+    /// One more byte in the message of the replaced-text golden batch is refused as too long, and the whole batch with it.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task DecodeReplacedTextBatchOneByteOverTheLimitIsRefused()
+    {
+        // Arrange
+        var text = Encoding.UTF8.GetString(await File.ReadAllBytesAsync(RepositoryFiles.Path("testdata/wire/replaced-text.jsonl"), CancellationToken.None));
+        var marker = "\"message\":\"";
+
+        Assert.Contains(marker, text, "the golden batch holds a message");
+
+        var widened = text.Replace(marker, marker + "a", StringComparison.Ordinal);
+
+        using var compressed = GzipOf(Encoding.UTF8.GetBytes(widened));
+
+        // Act
+        using var decoder = await BatchDecoder.OpenAsync(compressed, null, CancellationToken.None);
+        var exception = await Assert.ThrowsExactlyAsync<WireException>(() => decoder.NextAsync(CancellationToken.None), "message one byte over the limit");
+
+        // Assert
+        Assert.AreEqual(WireErrorKind.Invalid, exception.Kind, "error class");
+        Assert.AreEqual("data.message", exception.FieldError?.Field, "field");
+        Assert.AreEqual("too long", exception.FieldError?.Reason, "reason");
+    }
+
+    /// <summary>
     /// Every shared decoder case (<c>testdata/wire/decoder-cases.json</c>), decoded to the end, gives the records and the error the case names.
     /// </summary>
     /// <param name="name">The name of the case</param>
@@ -260,6 +317,25 @@ public class WireContractTests
         }
 
         return (records, formatMinor, null);
+    }
+
+    /// <summary>
+    /// Compresses a plaintext batch.
+    /// </summary>
+    /// <param name="plain">The plaintext batch</param>
+    /// <returns>The compressed batch, positioned at its start</returns>
+    private static MemoryStream GzipOf(byte[] plain)
+    {
+        var compressed = new MemoryStream();
+
+        using (var gzip = new GZipStream(compressed, CompressionLevel.Optimal, true))
+        {
+            gzip.Write(plain);
+        }
+
+        compressed.Position = 0;
+
+        return compressed;
     }
 
     /// <summary>

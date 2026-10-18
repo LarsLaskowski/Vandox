@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/LarsLaskowski/Vandox/internal/model"
 	"github.com/LarsLaskowski/Vandox/internal/wire"
@@ -664,5 +665,108 @@ func TestEncodeBatch_InvalidTextDecodesAsReplacementCharacters(t *testing.T) {
 	metric, ok := recs[2].Data.(*model.MetricPoint)
 	if !ok || metric.Labels["a"] != "�" {
 		t.Errorf("record 3 = %#v, want a metric with label a = %q", recs[2].Data, "�")
+	}
+}
+
+// invalidTextForm is one form of text that the encoder replaces: every byte that does not start a valid UTF-8 sequence becomes
+// U+FFFD, which is 3 bytes after decoding. atEnd puts the form after the filler instead of before it.
+type invalidTextForm struct {
+	name     string
+	raw      string
+	replaced int
+	atEnd    bool
+}
+
+// counted returns the bytes the form holds after the replacement.
+func (f invalidTextForm) counted() int { return f.replaced * 3 }
+
+// invalidTextForms lists the invalid forms with their raw bytes and the replacements the encoder makes (issue 270).
+func invalidTextForms() []invalidTextForm {
+	return []invalidTextForm{
+		{name: "stray continuation byte", raw: "\x80", replaced: 1},
+		{name: "byte FF", raw: "\xff", replaced: 1},
+		{name: "overlong 2-byte", raw: "\xc0\xaf", replaced: 2},
+		{name: "overlong 3-byte", raw: "\xe0\x80\x80", replaced: 3},
+		{name: "encoded surrogate", raw: "\xed\xa0\x80", replaced: 3},
+		{name: "above U+10FFFF", raw: "\xf4\x90\x80\x80", replaced: 4},
+		{name: "cut short before a letter", raw: "\xe2\x82", replaced: 2},
+		{name: "cut short at the end", raw: "\xe2\x82", replaced: 2, atEnd: true},
+		{name: "cut short 4-byte prefix before a letter", raw: "\xf0\x9f\x98", replaced: 3},
+		{name: "cut short 4-byte prefix at the end", raw: "\xf0\x9f\x98", replaced: 3, atEnd: true},
+	}
+}
+
+// formMessage returns the form with ASCII a filling it up to exactly counted bytes after the replacement.
+func formMessage(form invalidTextForm, counted int) string {
+	filler := strings.Repeat("a", counted-form.counted())
+	if form.atEnd {
+		return filler + form.raw
+	}
+	return form.raw + filler
+}
+
+func messageRecord(message string) model.Record {
+	return model.Record{Meta: agentMeta(1, "journal", time.UTC), Data: &model.LogLine{Log: "journal", Message: message}}
+}
+
+// roundTripMessage encodes r in a batch, decodes it and returns the message of the only record.
+func roundTripMessage(t *testing.T, r model.Record) string {
+	t.Helper()
+	b := &wire.Batch{Header: wire.NewHeader("agent-1", testBootID, wire.ModeLive), Records: []model.Record{r}}
+	_, recs := decodeBatch(t, encodeBytes(t, b))
+	if len(recs) != 1 {
+		t.Fatalf("decoded %d records, want 1", len(recs))
+	}
+	line, ok := recs[0].Data.(*model.LogLine)
+	if !ok {
+		t.Fatalf("decoded payload = %#v, want a log line", recs[0].Data)
+	}
+	return line.Message
+}
+
+// requireDecodedWithinLimit checks a decoded message against the limit and the replacements the form makes.
+func requireDecodedWithinLimit(t *testing.T, message string, replaced int) {
+	t.Helper()
+	if len(message) != model.MaxTextBytes {
+		t.Errorf("decoded message length = %d, want %d", len(message), model.MaxTextBytes)
+	}
+	if !utf8.ValidString(message) {
+		t.Errorf("decoded message is not valid UTF-8")
+	}
+	if got := strings.Count(message, "\ufffd"); got != replaced {
+		t.Errorf("decoded message holds %d U+FFFD, want %d", got, replaced)
+	}
+}
+
+func TestCheckRecord_InvalidUTF8AtTheLimitDecodesWithinTheLimit(t *testing.T) {
+	for _, form := range invalidTextForms() {
+		t.Run(form.name, func(t *testing.T) {
+			message := formMessage(form, model.MaxTextBytes)
+			if len(message) >= model.MaxTextBytes {
+				t.Fatalf("raw length = %d, want below %d", len(message), model.MaxTextBytes)
+			}
+			r := messageRecord(message)
+			if _, err := wire.CheckRecord(&r); err != nil {
+				t.Fatalf("CheckRecord() = %v, want nil", err)
+			}
+			requireDecodedWithinLimit(t, roundTripMessage(t, r), form.replaced)
+		})
+	}
+}
+
+func TestCheckRecord_InvalidUTF8OverTheLimitIsRefused(t *testing.T) {
+	for _, form := range invalidTextForms() {
+		t.Run(form.name, func(t *testing.T) {
+			message := formMessage(form, model.MaxTextBytes+1)
+			if len(message) >= model.MaxTextBytes {
+				t.Fatalf("raw length = %d, want below %d so that only the replacement exceeds the limit", len(message), model.MaxTextBytes)
+			}
+			r := messageRecord(message)
+			n, err := wire.CheckRecord(&r)
+			requireFieldErrorReason(t, err, "data.message", "too long")
+			if n != 0 {
+				t.Errorf("CheckRecord() size = %d, want 0 for a refused record", n)
+			}
+		})
 	}
 }
