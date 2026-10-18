@@ -1,7 +1,7 @@
 # Spec: Network connection collector (replaces `lsof -ni`)
 
 Source: Issue #33
-Status: Approved by Lead
+Status: Approved by Product Manager
 
 ## Problem
 
@@ -24,7 +24,7 @@ namespace; two lines are two sockets, also when they share an inode number of 0 
 matches a file descriptor. A **listener** is a TCP socket in state `LISTEN` or a UDP socket without a remote endpoint (remote address all zeros and
 port 0); a **connection** is a socket with a remote endpoint. The **owner** of a socket is a process that holds it among its file
 descriptors, read from `/proc/<pid>/fdinfo/<n>`: a descriptor whose `ino:` is the socket's inode number (not 0) and whose `mnt_id:` is
-the socket file system's mount. A **regular** snapshot carries the aggregates and the listener inventory; a **full** snapshot carries,
+the socket file system's mount, which the agent learns once at its start from a socket of its own (E20, E21). A **regular** snapshot carries the aggregates and the listener inventory; a **full** snapshot carries,
 in addition, every connection and every remote address. Records are those of the [wire format](../../docs/areas/wire-format.md)
 (`connection_snapshot`); the collector is named `connections` and its records carry the source `connections`.
 
@@ -137,10 +137,21 @@ in addition, every connection and every remote address. Records are those of the
   listener is two remote entries (stated for the comparison of #45). Link-local addresses are kept without a zone (wire format,
   *Producer mapping for connection endpoints*).
 - E20: (a descriptor that only looks like a socket) Given a local user who holds files whose inode numbers equal those of sockets in
-  the tables (on a file system of their own mount namespace), when the collector runs, then such a descriptor counts only when its
-  mount is the one most of the matching descriptors are on and is not a mount the agent's own mount table lists; a user who holds more
-  such descriptors than all processes together hold socket descriptors can still make owners wrong (stated residual: owners are a
-  classification, the PID is the kernel's, the `command` is text the process chooses).
+  the tables — on a file system of their own (a tmpfs or FUSE mount in a user namespace, a container's mount), and duplicated as often
+  as their limits allow — when the collector runs, then none of these descriptors counts anywhere: a descriptor counts only when its
+  `mnt_id:` is the socket file system's mount, which the agent learns from a socket of its own; every socket of every family and
+  namespace is on that one kernel mount and nothing else is. Several descriptors of one socket in one process count once for that
+  process, and how many descriptors a process holds changes no other process's owners. Stated residuals: socket inode numbers come
+  from a kernel counter of 32 bits that pipes and other kernel files share, so a user who makes some four billion of them can hold a
+  socket of their own (a Unix socket outside the tables) with the number of another socket and becomes one more holder of it, its owner
+  only with a lower PID than every real holder; a user who runs more processes than the PID cap of E5 leaves the sockets of later PIDs
+  without owner, visible as incomplete aggregates. The PID is the kernel's, the `command` is text the process chooses.
+- E21: (sockets' mount unknown) Given the agent could not learn the socket file system's mount at its start (its socket was refused,
+  for example by the unit's address-family or system-call filter, or its own `fdinfo` entry could not be read or was not in the expected
+  shape), when the collector runs, then it reads no process's descriptors, no socket carries an owner, `processes` is empty, the
+  aggregates are marked incomplete and the sample still succeeds; the agent logs one warning `socket owners unknown` with
+  `collector=connections` and `err` (a fixed reason or the system error, no file content) at the first run, and the state lasts until
+  the agent restarts.
 - E18: (other network namespaces) Given containers with network namespaces of their own on the server, when the collector runs, then
   their sockets are not in the tables the agent reads and are not reported; a descriptor that points to a socket not in the four
   tables (another namespace, a Unix domain socket) is not counted in `processes` and makes its process no owner of anything.
@@ -164,8 +175,11 @@ in addition, every connection and every remote address. Records are those of the
 - **Schedule:** collector `connections`, interval 60 seconds, pressure interval 15 seconds, timeout 10 seconds, placed after
   `processes` in the job list.
 - **What it reads:** `/proc/net/tcp`, `tcp6`, `udp`, `udp6`, the `/proc` directory, `/proc/<pid>/fdinfo` and its files (the first
-  lines only), the agent's own `/proc/self/mountinfo` and what the process collector reads to derive a `command` (`stat`, `cmdline`), through the replaceable file-system interface (Agent area, *Collecting*). It starts no
-  program, opens no socket (no netlink socket diagnostics) and makes no raw system call.
+  lines only) and what the process collector reads to derive a `command` (`stat`, `cmdline`), through the replaceable file-system interface (Agent area, *Collecting*). It starts no
+  program, opens no socket (no netlink socket diagnostics) and makes no raw system call. Once at its start, outside the collector, the
+  agent opens one Unix datagram socket that it never binds, connects or sends on, reads the first lines of its own
+  `/proc/self/fdinfo/<n>` for the socket's `mnt_id:` and closes it (E20, E21); this needs no right, and the unit must allow it as it
+  allows the systemd notification's Unix socket.
 - **Rights:** only `CAP_SYS_PTRACE`, which the agent already holds for the process collector; not `CAP_DAC_READ_SEARCH`, which would
   let the whole agent read every file on the server (measured by Security: listing `/proc/<pid>/fd` needs it, reading
   `/proc/<pid>/fdinfo` does not). The collector works without the capability as E1 describes. The right is listed and justified in
@@ -216,10 +230,12 @@ in addition, every connection and every remote address. Records are those of the
 - [ ] AC4: sockets without an owner count in `states`, `remotes` and `connections` without PID and `command` and are not in
   `processes`; several lines with inode 0 are several sockets; a socket held by several processes counts once, owned by the lowest
   PID, and once per holder in `processes`; a descriptor of a socket not in the four tables counts nowhere, and one on a mount other
-  than the sockets' counts nowhere either (S6, E8, E9, E18, E20).
+  than the sockets' counts nowhere either, however often it is duplicated and whatever its PID; duplicated descriptors of one socket count
+  once per process (S6, E8, E9, E18, E20).
 - [ ] AC5: running as a user other than the sockets' owners with `CAP_SYS_PTRACE` alone, the collector finds the owner of another
   user's socket, measured on a host, and the measurement is recorded in the Agent area and `deploy/agent/README.md`; without them the sockets of unreadable processes carry no owner, the sample
-  succeeds and the warning and info lines of E1 are logged once per change (S5, E1).
+  succeeds and the warning and info lines of E1 are logged once per change; when the sockets' mount is unknown, no socket carries an
+  owner, the aggregates are incomplete, the sample succeeds and E21's warning is logged once (S5, E1, E21).
 - [ ] AC6: a missing table leaves its protocol out and logs E2's lines once per change, all four missing fail the sample; an unreadable
   line is left out with the snapshot not complete and E3's lines; a table that exists but cannot be read fails the sample as a gap
   (E2, E3, E4).
@@ -294,7 +310,8 @@ in addition, every connection and every remote address. Records are those of the
 - [Wire format](../../docs/areas/wire-format.md): *`connection_snapshot`* — how a reader tells a regular from a full snapshot and
   whether the aggregates are complete, and how a new listener is reported (a new kind or field, with the minor version);
   *Producer mapping for connection endpoints* — the mapping from the kernel's tables.
-- [Agent](../../docs/areas/agent.md) also: the residuals of E1 (`hidepid=2`), E14 (restart) and E19 (flood) and the unit settings of
+- [Agent](../../docs/areas/agent.md) also: the residuals of E1 (`hidepid=2`), E14 (restart), E19 (flood) and E20 (inode counter wrap,
+  PID cap), the start-up socket of E21 and its warning, and the unit settings of
   *Rights* (`PrivateNetwork=`, `ProcSubset=`, `ProtectProc=`).
 - [Detection, alerts and reports](../../docs/areas/detection-and-reports.md): the connection peak is taken over the snapshots of every
   source in the window, so agent snapshots (with ownerless sockets) win it against imported ones; and whether the peak or the chart
@@ -341,3 +358,8 @@ Revision after the plan challenge and the plan's security review (answered in [p
 owners come from `/proc/<pid>/fdinfo` with `CAP_SYS_PTRACE` alone (S5, Q3, *Rights*, AC5; new E20 with AC4); the memory requirement
 bounds the live data and states the garbage per descriptor (*Memory and time*, AC7); E6 states that stalled runs suppress the
 comparison and that a run past its deadline keeps nothing; E19 names the in-memory comparison basis.
+
+Revision after the second security review (Security B3: the majority vote over mounts could be outvoted with duplicated descriptors,
+by filling the match cap from a low PID, or from any mount outside the agent's mount table; settled by the Product Manager, option A):
+the agent learns the sockets' mount from a socket of its own at its start instead of a vote (terms, E20 rewritten, new E21, *What it
+reads*, AC4, AC5); the agent's `/proc/self/mountinfo` is no longer read.

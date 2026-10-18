@@ -1,13 +1,13 @@
 # Plan: Network connection collector (replaces `lsof -ni`)
 
 Source: [spec.md](spec.md)
-Status: Revised (1)
-Tier: security — the collector adds a guard against a hostile local user (a descriptor counts as a socket only on the sockets' mount,
-E20) and new confinement rules for the agent's unit (no own network namespace, no `ProcSubset=pid`, `ProtectProc=default`); it adds
+Status: Revised (2)
+Tier: security — the collector adds a guard against a hostile local user (a descriptor counts as a socket only on the socket mount the
+agent learns from a socket of its own, E20) and new confinement rules for the agent's unit (no own network namespace, no `ProcSubset=pid`, `ProtectProc=default`); it adds
 no right (revision: `CAP_SYS_PTRACE` only, not `CAP_DAC_READ_SEARCH`).
 Security areas touched: 6 Agent privileges (`deploy/agent/README.md`, the unit rules in the Agent area *Rights*), 10 Parsing of
-external input (`/proc/net/{tcp,tcp6,udp,udp6}`, `/proc/<pid>/fdinfo/<n>`, `/proc/self/mountinfo`, process names;
-`internal/connstats`), 12 Logging and display of external data (process names in records, the collector's log lines)
+external input (`/proc/net/{tcp,tcp6,udp,udp6}`, `/proc/<pid>/fdinfo/<n>`, the start-up socket's own `/proc/self/fdinfo/<n>`, process
+names; `internal/connstats`, `internal/sockmount`), 12 Logging and display of external data (process names in records, the collector's log lines)
 
 ## Problem / root cause
 
@@ -17,18 +17,18 @@ Feature: see [spec.md](spec.md) (Approved by Lead).
 
 | # | Claim | Evidence | Status |
 | - | ----- | -------- | ------ |
-| 1 | The four tables have the shape the parser expects: header line, then per socket `sl:` local `HEX:PORT` remote `HEX:PORT` state (2 hex) tx:rx tr:when retrnsmt uid timeout inode and a varying tail; IPv4 one 8-hex word, IPv6 four 8-hex words, each word in host byte order, port as 4 hex digits of its value | real captures of the monitored server (all four tables) and the sandbox (`tcp`, `udp`), `samples/README.md`; `::1` reads `00000000000000000000000001000000`, `127.0.0.1` reads `0100007F` | confirmed |
-| 2 | `sl` is not unique (udp: four lines `721:`), lines are padded with trailing spaces in `tcp` and `udp` but not in `tcp6`/`udp6`, a TIME_WAIT line has inode 0 and fewer tail fields, an ESTABLISHED line can end in `-1` | `samples/server/{tcp,udp,udp6}` | confirmed |
-| 3 | Two sockets on one endpoint occur on the server (BIND: `127.0.0.1:53`, `127.0.0.1:953`, public `:53`, the same in `tcp6`) | `samples/server/tcp` lines 7–8, 17–18, 20–21; `tcp6` lines 7–8, 10–11, 15–16 | confirmed |
+| 1 | The four tables: a header line, then per socket `sl:`, local and remote `HEX:PORT`, state (2 hex), …, inode (field 10), a varying tail; IPv4 one 8-hex word, IPv6 four, each word in host byte order, port 4 hex digits | captures of the server (all four) and the sandbox (`tcp`, `udp`), `samples/README.md`; `::1` = `00000000000000000000000001000000`, `127.0.0.1` = `0100007F` | confirmed |
+| 2 | `sl` is not unique, `tcp`/`udp` lines carry trailing spaces, a TIME_WAIT line has inode 0 and fewer tail fields, a line can end in `-1` | `samples/server/{tcp,udp,udp6}` | confirmed |
+| 3 | Two sockets on one endpoint occur (BIND on `:53`, `:953`) | `samples/server/tcp` lines 7–8, 17–18, 20–21; `tcp6` 7–8, 10–11, 15–16 | confirmed |
 | 4 | `tcp6` and `udp6` can be missing | sandbox kernel 6.18.44: `ls /proc/net` has no `tcp6`/`udp6`; an `AF_INET6` socket fails with errno 97 | confirmed |
-| 5 | An IPv4-mapped address in `tcp6` is four words like any address (`0000000000000000FFFF0000` + the IPv4 word) | to verify: residual accepted, tests derive the line from a real `tcp6` line by replacing only the address field (Tester, step 5); the #45 parallel run reads real ones; basis: no captured line has one (no IPv6 connection on the server at capture time); the format is per word (fact 1) | unverified |
+| 5 | An IPv4-mapped address in `tcp6` is four words like any address (`0000000000000000FFFF0000` + the IPv4 word) | to verify: residual accepted; tests derive the line from a real `tcp6` line by replacing the address field (Tester, step 5); #45 reads real ones; basis: no captured line has one, the format is per word (fact 1) | unverified |
 | 6 | `/proc/net` is the reader's own network namespace | `ls -ld /proc/net` → `/proc/net -> self/net` | confirmed |
-| 7 | `/proc/<pid>/fdinfo/<n>` starts with `pos:`, `flags:`, `mnt_id:`, `ino:` (tab-separated, decimal) for every descriptor type; `ino:` of a socket is its table inode; sockets are on one internal mount (sockfs) that `/proc/self/mountinfo` does not list; a pipe's inode comes from the same counter; a regular file is on a listed mount with its own inode numbers; an epoll's file holds `ino:` again (hex) in later `tfd:` lines | `samples/sandbox/fdinfo/`: TCP, UDP and Unix sockets `mnt_id: 10`, TCP `ino: 6087` = table inode; pipe `mnt_id: 16`, `ino: 6090`; file `mnt_id: 28`, `ino: 210788`; `awk '{print $1}' /proc/self/mountinfo` → 23–48 (no 10, no 16) | confirmed |
+| 7 | `fdinfo/<n>` starts with `pos:`, `flags:`, `mnt_id:`, `ino:` (tab, decimal) for every descriptor type; a socket's `ino:` is its table inode; pipes share the inode counter on their own mount; a regular file is on a listed mount; an epoll repeats `ino:` (hex) in later `tfd:` lines | `samples/sandbox/fdinfo/`: sockets `mnt_id: 10`, TCP `ino: 6087` = table inode; pipe `mnt_id: 16`; file `mnt_id: 28` | confirmed |
 | 8 | A socket descriptor can be in none of the four tables (Unix sockets, other namespaces) | `samples/sandbox/fd-of-capturing-process.txt` (`socket:[16078]`), `fdinfo/unix` | confirmed |
 | 9 | With `CAP_SYS_PTRACE` alone, another user's `fdinfo/` lists and its files read (`mnt_id`, `ino` = socket inode); `fd/` needs `CAP_DAC_READ_SEARCH` to list and both to read a link | Security's measurement (kernel 6.18.44, no Yama, UID 65534 against a root process), quoted in *Security review* B2 | confirmed |
 | 10 | With `CAP_SYS_PTRACE`, `hidepid=2` hides no process; without it other users' processes are invisible | Security's measurement (N1): scratch mount namespace, `proc` with `hidepid=2` | confirmed |
 | 20 | The `ino:` line exists in `fdinfo` from Linux 5.14 on; the server runs Ubuntu 22.04 (5.15 or a newer HWE kernel) | to verify: Dev, step 6, reads it in the kernel's `fs/proc/fd.c` history (or the Ubuntu 5.15 source) and names the version in the Agent area; the design fails closed (a file without `ino:` makes its process unreadable, E1); basis: kernel 6.18 shows it (fact 7) | unverified |
-| 21 | Through `io/fs` over `os.DirFS`, each open, read and close of a file and each `ReadDir` allocates a fixed small amount, so garbage grows with descriptors | DA's measurement on Go 1.27 (`fs.ReadLink` 4 allocs per call, `ReadDir(256)` 17) | confirmed |
+| 21 | Through `io/fs` over `os.DirFS` each open, read, close and `ReadDir` allocates a fixed small amount | DA's measurement, Go 1.27 | confirmed |
 | 22 | A run that returns after its deadline is turned into a gap and its records are dropped | `internal/scheduler/runner.go:203-206` (result received with `wctx.Err() == DeadlineExceeded`), `:207-213` (abandoned) | confirmed |
 | 11 | Kernel default local port range is 32768–60999; unprivileged ports start at 1024 | sandbox `/proc/sys/net/ipv4/ip_local_port_range` `32768 60999`, `ip_unprivileged_port_start` `1024` | confirmed |
 | 12 | The scheduler tells a run whether pressure mode was on at its start; a collector is `Name()` + `Collect(ctx, Run)` | `internal/scheduler/scheduler.go` (`Run.Pressure`, `Collector`) | confirmed |
@@ -37,8 +37,11 @@ Feature: see [spec.md](spec.md) (Approved by Lead).
 | 14 | The incident's connection peak takes every source; the chart only the earliest source | `IncidentReconstructor.cs` ~281–292; `IncidentWindowReader.cs` `FindSourceAsync` | confirmed |
 | 15 | Wire 1.0 is released (v0.1.0); both decoders accept a newer minor and ignore unknown keys | `git ls-remote --tags origin` → `v0.1.0`; wire format *Versioning*; `decode_test.go:186` (minor 7 accepted) | confirmed |
 | 16 | No released backend receives agent batches (no ingest before #40) | ARCHITECTURE (*Network*: ingest port not published until #40) | confirmed |
-| 17 | A run's live data is bounded by the caps (largest structures: the inode index of 65,536 sockets, 262,144 descriptor matches, two heaps of 4,096 entries, 4,096 remote counts; target under 16 MiB); a table line adds no garbage that grows (under 16 bytes per line on average); a descriptor adds a fixed amount (target under 1 KiB) | to verify: Dev, step 6, `TestConnections_ManySocketsStayWithinCaps` at 100,000 and 400,000 table lines and at 50,000 and 200,000 descriptors of one process: the structure sizes (internal counters) are equal between the two sizes, and the `TotalAlloc` growth per extra line and per extra descriptor stays under the targets; the figures go into the Agent area; a figure above a target goes to the Lead first; basis: design caps | unverified |
+| 17 | A run's live data is bounded by the caps (largest structures: the inode index of 65,536 sockets with two `int32` each for owner and last counting PID, two heaps of 4,096 entries, 4,096 remote counts; target under 16 MiB); a table line adds no garbage that grows (under 16 bytes per line on average); a descriptor adds a fixed amount (target under 1 KiB) | to verify: Dev, step 6, `TestConnections_ManySocketsStayWithinCaps` at 100,000 and 400,000 table lines and at 50,000 and 200,000 descriptors of one process: the structure sizes (internal counters) are equal between the two sizes, and the `TotalAlloc` growth per extra line and per extra descriptor stays under the targets; the figures go into the Agent area; a figure above a target goes to the Lead first; basis: design caps | unverified |
 | 18 | A run over the sandbox's `/proc` takes milliseconds | to verify: Dev, step 6, `BenchmarkConnections_Collect`, figure and host into `docs/BENCHMARKS.md`; basis: not measured | unverified |
+| 24 | Every socket of any family (Unix datagram, TCP, UDP, netlink), in any mount, user or network namespace, has the same `mnt_id:` in `fdinfo`; a pipe's differs | Lead's measurement 2026-10-18, kernel 6.18.44: `mnt_id: 10` for all four families in the initial namespaces, after `unshare -m`, and as UID 65534 after `unshare -Urm` and `unshare -Urmn`; pipe `mnt_id: 16` | confirmed |
+| 25 | Mount IDs in `fdinfo` are global: a file on another namespace's mount shows that mount's own ID, not the socket mount's | Security's measurement (B3): a user-namespace tmpfs file showed `mnt_id: 76`, the host's `mountinfo` lists 23–48 | confirmed |
+| 26 | On the server's kernel (Ubuntu 22.04, 5.15 or HWE) every socket file is allocated on the one internal mount `sock_mnt` (`net/socket.c`, `sock_alloc_file`), which holds only sockets and no user can mount; socket inode numbers come from `get_next_ino()` (32 bits, shared with pipes and other pseudo files) | to verify: Dev, step 6, reads `net/socket.c` and `fs/inode.c` of the Ubuntu 5.15 source and names them in the Agent area; basis: facts 24–25 on 6.18; the design fails closed (a socket on another mount loses its owner, never gains a false one) | unverified |
 | 19 | Adding `testdata/proc/net/` does not disturb the existing `/proc` fixture tests (procstats lists `testdata/proc`; `net` is no canonical PID) | to verify: Tester, step 5, full `go test ./...` after copying the fixtures; basis: `procstats.go` `pidOfEntry` | unverified |
 
 ## Tests per criterion
@@ -51,9 +54,12 @@ Feature: see [spec.md](spec.md) (Approved by Lead).
 | AC2 | `TestJobs_Schedules` (adapted: `connections` 60 s / 15 s / 10 s after `processes`; every `Options` gets `fixtureConnections()`) | `internal/agent/agent_test.go` |
 | AC3 | `TestCompare_NewListenerReported`, `TestCompare_BaselineReportsNone`, `TestCompare_EphemeralUDPNotReported`, `TestCompare_TCPOnEphemeralPortReported`, `TestCompare_ReappearingListenerIsNewAgain`, `TestCompare_OwnerChangeIsNotNew` | `internal/connstats/inventory_test.go` |
 | AC3 | `TestConnections_FailedRunIsNotCompared`, `TestConnections_LateRunKeepsNoInventory` (the context ends during the last PID's `fdinfo` read, the read is then released; `Collect` returns the context's error, and the next run still reports the listener), `TestConnections_ReportsAtMost64NewListeners`, `TestConnections_SizeCutOfListenersKeepsTheComparison` | `internal/connstats/connstats_test.go` |
-| AC4 | `TestParseFdinfo_Samples` (every file of `testdata/connections/sandbox/fdinfo/`, the epoll's `tfd:` lines ignored), `TestParseFdinfo_Rejects`, `TestScanOwners_LowestPIDOwnsSharedSocket`, `TestScanOwners_CountsDistinctSocketsPerProcess`, `TestScanOwners_IgnoresSocketsOutsideTables`, `TestScanOwners_EndedProcessIsSkipped`, `TestScanOwners_ClosedDescriptorKeepsTheOtherSockets`, `TestScanOwners_UnreadableProcessCountedOnce`, `TestSocketMount_MajorityOffTheMountTable`, `TestSocketMount_CollidingFileIsNotAnOwner` | `internal/connstats/owners_test.go` |
+| AC4 | `TestParseFdinfo_Samples` (every file of `testdata/connections/sandbox/fdinfo/`, the epoll's `tfd:` lines ignored), `TestParseFdinfo_Rejects`, `TestScanOwners_LowestPIDOwnsSharedSocket`, `TestScanOwners_CountsDistinctSocketsPerProcess`, `TestScanOwners_IgnoresSocketsOutsideTables`, `TestScanOwners_EndedProcessIsSkipped`, `TestScanOwners_ClosedDescriptorKeepsTheOtherSockets`, `TestScanOwners_UnreadableProcessCountedOnce`, `TestScanOwners_DescriptorOffTheSocketMountIsNotAnOwner` (an `ino:` equal to a listener's on mount 76, held by the lowest PID through 10,000 descriptors: no owner, not in `processes`; the real holder owns it), `TestScanOwners_DuplicatedDescriptorsCountOnce`, `TestScanOwners_ManyDescriptorsOfALowPIDStarveNoOne` (PID 1 holds 300,000 descriptors of one socket; a higher PID's socket keeps its owner) | `internal/connstats/owners_test.go` |
+| AC4 | `TestProbe_ReturnsTheSocketMount` (equal to the `mnt_id:` of a `syscall.Socketpair` descriptor read through `os.DirFS("/proc")`, unequal to a pipe's) | `internal/sockmount/sockmount_test.go` |
 | AC4 | `TestConnections_OwnerlessSockets`, `TestConnections_InodeZeroLinesAreSeparateSockets` | `internal/connstats/connstats_test.go` |
-| AC5 | `TestConnections_UnreadableDescriptorsLogOnce`, `TestConnections_FdinfoWithoutInoIsUnreadable` (measurement: facts 9 and 10, Security's, recorded by the Dev) | `internal/connstats/connstats_test.go` |
+| AC5 | `TestConnections_UnreadableDescriptorsLogOnce`, `TestConnections_FdinfoWithoutInoIsUnreadable` (measurement: facts 9 and 10, Security's, recorded by the Dev), `TestConnections_UnknownSocketMountLeavesNoOwners` (no `fdinfo` opened, no owner, `aggregates_incomplete`, one warning over two runs) | `internal/connstats/connstats_test.go` |
+| AC5 | `TestProbe_UnreadableFdinfoFails`, `TestProbe_MalformedFdinfoFails`, `TestProbe_ClosesTheSocket` (entries of `/proc/self/fd` equal before and after, also on failure), `TestSockmount_ImportsOnlyAllowedPackages` | `internal/sockmount/sockmount_test.go` |
+| AC5 | `TestConnectionSources_ProbesOnlyWhenUnset` | `internal/agent/agent_test.go` |
 | AC6 | `TestConnections_MissingIPv6TablesLeaveProtocolsOut`, `TestConnections_AllTablesMissingFails`, `TestConnections_UnreadableLineLeftOut`, `TestConnections_TableReadErrorFails` | `internal/connstats/connstats_test.go` |
 | AC7 | `TestConnections_ManySocketsStayWithinCaps` (two sizes per axis, fact 17), `TestConnections_LargeRecordIsReduced`, `TestConnections_SocketsBeyondInodeCapUnattributed`, `TestConnections_ReusePortDuplicatesDoNotCutTheInventory`, `TestConnections_RemotesBeyondCapNotCounted` | `internal/connstats/connstats_test.go` |
 | AC8 | `TestConnections_BlockingReadIsAbandonedAsGap` (blocks `net/tcp` and, separately, one `fdinfo` file) | `internal/connstats/connstats_test.go` |
@@ -74,7 +80,7 @@ Feature: see [spec.md](spec.md) (Approved by Lead).
 Fixtures the tests read: `testdata/proc/net/{tcp,tcp6,udp,udp6}` (the anonymized server capture) and `testdata/connections/sandbox/{tcp,udp}`,
 copied byte for byte from `samples/` (check with `cmp`). Collector tests build an `fstest.MapFS` with those bytes under `net/…`, PID
 directories with `stat`, `cmdline` and `fdinfo/<n>` files made from the captured `fdinfo` samples with only the `ino:` and `mnt_id:`
-values changed, and a `self/mountinfo` (from `testdata/proc/self/mountinfo`); generated tables and descriptor sets for the cap tests are
+values changed, and `Sources.SocketMount` set to the samples' socket mount (`ID: 10`); generated tables and descriptor sets for the cap tests are
 written by a helper from a real line by replacing fields, never typed by hand. A `faultFS`-style wrapper (error at open, read or
 `ReadDir` of a name) and a blocking wrapper (blocks the open or read of one name until released in `t.Cleanup`) serve E1, E4 and AC8.
 `testdata/connections/sandbox/fdinfo/` is copied from `samples/sandbox/fdinfo/`.
@@ -103,18 +109,19 @@ New package `internal/connstats`, collector `connections`, source `connections`.
    lowest connections (protocol, local, remote); counts per remote address for at most `MaxRemotes` (4,096) addresses (further ones
    are not counted and `complete` is false; a regular snapshot's top 25 can then miss a heavy address first seen after the cap, which
    the Agent and wire-format areas state and `TestConnections_RemotesBeyondCapNotCounted` pins).
-3. **Owners** (`owners.go`, revised for B2): `procstats.ListPIDs` (lowest 4,096 PIDs ascending; more: `aggregates_incomplete`); a failed
-   listing fails the sample. The mount IDs of the agent's own `self/mountinfo` are read first (field 1, line by line, 64 KiB per line, at
-   most 4,096 IDs; unreadable: an empty set). Per PID, `ReadDir` of `<pid>/fdinfo` in chunks of 256, and per entry open, read at most
-   256 bytes and close `<pid>/fdinfo/<n>`; `parseFdinfo` reads only the first four lines, which must be `pos:`, `flags:`, `mnt_id:` (1–10
-   digits within `int32`) and `ino:` (1–20 digits within 64 bits), each a tab and digits (anything after line 4, like an epoll's `tfd:`
-   lines, is not read). An `ino:` in the inode index is a **match** (PID, mount ID, index slot), kept in a list of at most `MaxMatches`
-   (262,144; further: `aggregates_incomplete`). `ENOENT`/`ESRCH` when opening `<pid>/fdinfo` skip the PID silently; `ENOENT` on one
-   `fdinfo/<n>` skips that descriptor only (closed meanwhile); the first `EACCES`/`EPERM` or any other error, or a file not in the
-   four-line shape (no `ino:` line on a kernel before 5.14), counts the PID as unreadable once and stops its scan (E1,
-   `aggregates_incomplete`). `ctx` is checked between PIDs and between chunks. Then `socketMount` picks the sockets' mount: the mount ID
-   with the most matches among those not in the agent's own mount table (ties: the lowest ID); only matches on it count (E20). Walking the
-   matches in PID order, the first PID per slot is the owner (lowest PID, E9), and each PID counts its distinct slots once.
+3. **Owners** (`owners.go`, revised for B2 and B3): the socket mount comes with the sources (`Sources.SocketMount`, learned once at the
+   agent's start, item 9); when its `Err` is set the collector opens no `fdinfo`, every socket stays ownerless, `aggregates_incomplete`
+   is set and E21's warning `socket owners unknown` (`err`) is logged once. Otherwise `procstats.ListPIDs` (lowest 4,096 PIDs ascending;
+   more: `aggregates_incomplete`); a failed listing fails the sample. Per PID, `ReadDir` of `<pid>/fdinfo` in chunks of 256, and per
+   entry open, read at most 256 bytes and close `<pid>/fdinfo/<n>`; `ParseFdinfo` reads only the first four lines, which must be `pos:`,
+   `flags:`, `mnt_id:` (1–10 digits within `int32`, not 0) and `ino:` (1–20 digits within 64 bits), each a tab and digits (an epoll's
+   later `tfd:` lines are not read). A descriptor counts only when its `ino:` is in the inode index **and** its `mnt_id:` equals the
+   socket mount (E20). Per tracked socket two `int32`: its owner, the first PID that holds it (PIDs ascend, so the lowest, E9), and the
+   last PID that counted it, so a PID's duplicated descriptors of one socket count once; `perPID` (at most 4,096 PIDs) counts each PID's
+   distinct sockets. No list of matches is kept, so no PID's descriptor count can crowd out another's owners (B3). `ENOENT`/`ESRCH` when
+   opening `<pid>/fdinfo` skip the PID silently; `ENOENT` on one `fdinfo/<n>` skips that descriptor (closed meanwhile); the first
+   `EACCES`/`EPERM` or any other error, or a file not in the four-line shape (no `ino:` before Linux 5.14), counts the PID unreadable once
+   and stops its scan (E1, `aggregates_incomplete`). `ctx` is checked between PIDs and between chunks.
 4. **Commands:** `procstats.CommandReader` for every PID with a socket; an ended process is dropped from `processes` and owns nothing;
    another error also drops it and counts it unreadable.
 5. **Inventory check** (`inventory.go`, E11–E14, E19): the collector keeps the previous successful run's inventory in memory (the at most
@@ -134,9 +141,8 @@ New package `internal/connstats`, collector `connections`, source `connections`.
    every later one stop (a cut in `states`, `listeners` or `processes` sets `aggregates_incomplete`). `complete` is true only for a full
    snapshot with nothing cut, skipped, unattributed beyond a cap, unread or uncounted. The record is checked with `wire.CheckRecord`; as a safety
    net a record still too long is shortened by halving `connections`, then `remotes`, `processes`, `listeners`.
-7. **Logs** (`collector=connections`, once per change, no process text, no address): warning `socket owners partly unknown` (`processes`)
-   / info `socket owners known again`; info `socket tables unavailable` (`tables`, comma-separated in table order) / `socket tables
-   available`; warning `socket lines not read` (`lines`, `err`) / info `socket lines read again`.
+7. **Logs** (`collector=connections`, once per change, no process text, no address): the lines of spec E1, E2, E3 and E21 with the
+   attributes named there, plus the info `socket tables available` when E2's tables return.
 8. **Wire** (`internal/model`, `internal/wire`, `Vandox.Core`): `connection_snapshot` gains `aggregates_only`, `aggregates_incomplete`,
    `listener_check` (`all`, `privileged`, `none`), `new_listeners` (listener entries, at most `MaxItems`), `new_listeners_omitted`, all
    omitted when zero; rules in both languages: `aggregates_only` requires `complete` false and no `connections`; `aggregates_incomplete`
@@ -144,27 +150,32 @@ New package `internal/connstats`, collector `connections`, source `connections`.
    `data.complete`: `must be false for an aggregates-only snapshot` / `must be false when aggregates are incomplete`;
    `data.connections`: `must be empty in an aggregates-only snapshot`; `data.listener_check`: one-of error, and `must be all or
    privileged when new listeners are reported`. Format version 1.1 (`wire.MinorVersion`, `WireFormat.MinorVersion`).
-9. **Agent:** job `connections` after `processes` (60 s, pressure 15 s, timeout 10 s), `Options.Connections`.
+9. **Agent and probe:** job `connections` after `processes` (60 s, pressure 15 s, timeout 10 s), `Options.Connections`;
+   `connectionSources` fills `SocketMount` once at start, only when it is zero (tests pass the fixtures' `mnt_id: 10`), from
+   `sockmount.Probe(os.DirFS("/proc"))`: `syscall.Socket(AF_UNIX, SOCK_DGRAM|SOCK_CLOEXEC, 0)` — never bound, connected or sent on —,
+   open `self/fdinfo/<fd>`, read at most 256 bytes, close file and socket on every path, return `connstats.ParseFdinfo(…).MountID`.
+   Errors: `sockmount: socket: <errno>`, `sockmount: self/fdinfo: <os error>`, `sockmount: <fixed parse reason>`.
+   `TestSockmount_ImportsOnlyAllowedPackages` pins the `syscall` selectors (`Socket`, `Close`, `AF_UNIX`, `SOCK_DGRAM`, `SOCK_CLOEXEC`).
 
 ## Options considered
 
-See record 0115 (*Options considered*): netlink `sock_diag` (rejected: a socket); a full list every run (rejected: volume); a
-`listener_event` kind or a `kernel_event` type (rejected for additive fields); reusing `complete` (rejected in the spec challenge); an
-unbounded comparison set (rejected: memory); reading `ip_local_port_range` (rejected: fixed default); keeping 1.0 (rejected: 1.0 is
-released); a second name derivation (rejected for `procstats` exports); owners from `/proc/<pid>/fd` links (rejected in revision 1:
-needs `CAP_DAC_READ_SEARCH`, which lets the whole agent read every file) for `/proc/<pid>/fdinfo` with `CAP_SYS_PTRACE` alone (chosen:
-three system calls per descriptor instead of one, the `ino:` line from Linux 5.14, and the mount rule of E20). Also weighed here: **sharing one `/proc` pass with the process
-collector** — fewer directory listings, but it couples two collectors' deadlines and gaps (0029); rejected.
+See record 0115 (*Options considered*), options 1–12. Weighed in this plan's revisions: owners from `/proc/<pid>/fd` links (rejected in
+revision 1: needs `CAP_DAC_READ_SEARCH`, the right to read every file; offered again after B3 and declined by the Product Manager); the
+sockets' mount as the majority among mounts off the agent's mount table (revision 1, rejected after B3: outvoted by duplicated
+descriptors, by filling the match cap from a low PID, or from any foreign mount); the mount learned from a socket of the agent's own
+(chosen, Product Manager option A); and **sharing one `/proc` pass with the process collector** — fewer listings, but it couples two
+collectors' deadlines and gaps (0029); rejected.
 
 ## Affected projects and types
 
 | Project | Type / file | Change |
 | ------- | ----------- | ------ |
 | Go agent | `internal/connstats/{connstats,table,owners,inventory,snapshot}.go` | new collector |
+| Go agent | `internal/sockmount/sockmount.go` | new: the start-up probe of the socket mount |
 | Go agent | `internal/procstats/command.go` | new: `ListPIDs`, `CommandReader`, `Ended` over the existing helpers |
 | Go agent | `internal/model/connection.go` | new fields, `ListenerCheck`, rules |
 | Go agent | `internal/wire/wire.go` | `MinorVersion = 1` |
-| Go agent | `internal/agent/agent.go` | schedule constants, `Options.Connections`, job |
+| Go agent | `internal/agent/agent.go` | schedule constants, `Options.Connections`, job, `connectionSources` |
 | .NET | `src/Vandox.Core/Model/ConnectionSnapshot.cs` | new properties and rules |
 | .NET | `src/Vandox.Core/Wire/WireFormat.cs` | `MinorVersion = 1` |
 | test data | `testdata/proc/net/*`, `testdata/connections/sandbox/*`, `testdata/wire/all-kinds.jsonl` | new fixtures; golden regenerated |
@@ -205,14 +216,14 @@ const (
 	Name, Source    = "connections", "connections"
 	TopRemotes      = 25
 	MaxSockets      = 65536  // sockets with an inode tracked for owners per run
-	MaxMatches      = 262144 // descriptors matching a tracked inode kept per run
 	MaxRemotes      = 4096  // remote addresses counted per run
 	MaxNewListeners = 64
 	PrivilegedPorts = 1024 // ports below are privileged
 	EphemeralFirst  = 32768
 	EphemeralLast   = 60999
 )
-type Sources struct{ Proc fs.FS } // default os.DirFS("/proc")
+type SocketMount struct{ ID int32; Err error } // learned at the agent's start; zero value: not probed
+type Sources struct{ Proc fs.FS; SocketMount SocketMount } // Proc default os.DirFS("/proc")
 type Connections struct{ /* src, log, mu, prev *inventory, state warnings */ }
 func New(src Sources, log *slog.Logger) *Connections
 func (c *Connections) Name() string
@@ -225,13 +236,13 @@ func parseLine(line []byte, t table) (socket, error)
 func readTable(proc fs.FS, t table, visit func(socket), bad func(line int, err error)) (missing bool, err error)
 
 // owners.go
-type fdinfo struct{ mountID int32; inode uint64 }
-type match struct{ pid, mountID, slot int32 }
-func parseFdinfo(data []byte) (fdinfo, error)              // the first four lines only
-func readMountIDs(proc fs.FS) map[int32]struct{}          // self/mountinfo field 1, at most 4,096; unreadable: empty
-func scanOwners(ctx context.Context, proc fs.FS, pids []int32, index map[uint64]int32) (matches []match, unreadable int, firstErr error)
-func socketMount(matches []match, own map[int32]struct{}) (mount int32, ok bool) // most matches off the own mount table; ties: lowest ID
-func resolveOwners(matches []match, mount int32, slots int) (owner []int32, perPID map[int32]uint32)
+type Fdinfo struct{ MountID int32; Inode uint64 }
+func ParseFdinfo(data []byte) (Fdinfo, error) // the first four lines only; exported for internal/sockmount
+type owners struct{ owner, last []int32; perPID map[int32]uint32 } // per tracked socket: owner PID (0: none), last PID that counted it
+func scanOwners(ctx context.Context, proc fs.FS, pids []int32, index map[uint64]int32, mount int32) (o owners, unreadable int, firstErr error)
+
+// internal/sockmount/sockmount.go
+func Probe(proc fs.FS) (int32, error) // opens, reads self/fdinfo/<fd> of, and closes one unbound AF_UNIX datagram socket
 
 // inventory.go
 type listenerKey struct{ proto model.Proto; addr netip.Addr; port uint16 }
@@ -251,6 +262,7 @@ const (
 	ConnectionsTimeout          = 10 * time.Second
 )
 // Options gains: Connections connstats.Sources
+func connectionSources(src connstats.Sources, probe func() (int32, error)) connstats.Sources // probes only when src.SocketMount is zero
 ```
 
 ```csharp
@@ -268,7 +280,7 @@ Files the skeleton rewrites: `internal/model/connection.go`, `internal/wire/wire
 
 ## Test files
 
-`internal/connstats/{connstats,table,owners,inventory}_test.go`, `internal/procstats/command_test.go`, `internal/model/connection_test.go`,
+`internal/connstats/{connstats,table,owners,inventory}_test.go`, `internal/sockmount/sockmount_test.go`, `internal/procstats/command_test.go`, `internal/model/connection_test.go`,
 `internal/wire/{golden,encode,wire}_test.go`, `internal/agent/agent_test.go`, `tests/Vandox.Core.Tests/{ConnectionSnapshotTests,
 WireContractTests,IncidentBuilderTests}.cs`, `tests/Vandox.Storage.Tests/SqliteStoreWriteTests.cs`; the benchmark
 `BenchmarkConnections_Collect` in `internal/connstats/connstats_test.go` (Tester writes, Dev runs).
@@ -279,19 +291,21 @@ golden assertions of `WireContractTests.cs`, `TestJobs_Schedules` in `internal/a
 `internal/agent/agent_test.go` (lines 281, 342, 371, 417, 478, 492, `lowMemoryOptions` at 589): a new helper `fixtureConnections()`
 reading `../../testdata/proc`, and the in-memory `/proc` of `lowMemoryOptions` for that test, so no agent test reads the host's `/proc`.
 
-Code a unit test cannot cover: none.
+Code a unit test cannot cover: the error return of `syscall.Socket` in `internal/sockmount/sockmount.go` (a test cannot make an unbound
+`AF_UNIX` socket fail without a system-call filter); the rest of the file is covered.
 
 ## Areas
 
 - [Agent](../../docs/areas/agent.md) (Dev): new section *Connections* after *Processes* with everything of Approach 1–7 (reads, caps,
   regular/full, inventory order and check, the 64 cap, ephemeral UDP, logs, errors, bounded memory figure, speed), the residuals
-  (E1 `hidepid=2`, E6 a stalled collector suppresses the check, E14 with #278, E19 flood, E20 colliding descriptors, passive FTP noise,
+  (E1 `hidepid=2`, E6 a stalled collector suppresses the check, E14 with #278, E19 flood, E20 inode counter wrap and PID cap, E21 probe failure and its warning, passive FTP noise,
   mapped addresses split in `remotes`, a regular snapshot's top 25 without the addresses beyond the remote cap, the late-return window
   of Approach 5, the owner's `command` is process-chosen text while its PID is the kernel's, ownerless sockets vs `lsof -ni` for #45),
   the live-data figure and the per-descriptor garbage figure (fact 17), the kernel version of `ino:` (fact 20); *Rights*: the connection
   collector uses `CAP_SYS_PTRACE` only (`fdinfo`), with Security's measurement, and why not `CAP_DAC_READ_SEARCH` (it would let the agent
-  read every file); the unit rules (no own network
-  namespace — no `PrivateNetwork=`, no `NetworkNamespacePath=` —, no `ProcSubset=pid`, `ProtectProc=default`); *Status*, *Related
+  read every file); the start-up socket (Unix datagram, never bound or connected, no right) and its measurement (facts 24–26); the unit
+  rules (no own network
+  namespace — no `PrivateNetwork=`, no `NetworkNamespacePath=` —, no `ProcSubset=pid`, `ProtectProc=default`, `AF_UNIX` sockets allowed); *Status*, *Related
   decisions* (0115), *Implementation*.
 - [Wire format](../../docs/areas/wire-format.md) (Dev): *`connection_snapshot`* (the five fields, their rules and absent meaning; the top
   `remotes` of a regular snapshot are over the counted addresses only),
@@ -306,17 +320,18 @@ Code a unit test cannot cover: none.
   measurement table of *Security review* B2, that `CAP_DAC_READ_SEARCH` is not needed by any collector so far, and the unit settings
   that must stay off.
 - `docs/BENCHMARKS.md` — Dev: *Connection snapshot* (figure, host, command).
-- `.squad/project.md` — Dev: area 6 (the connection collector uses `CAP_SYS_PTRACE` only), area 10 (the table, `fdinfo` and
-  `mountinfo` readers' bounds and the mount rule), *Test doubles* `/proc` row (connstats fixtures and wrappers, implemented).
-- `.squad/stack.md` *Layout* — Dev: `connstats` in the package list.
-- `docs/ARCHITECTURE.md` and `docs/areas/detection-and-reports.md` — Lead, done in this step (status, components, `internal/` list,
-  records; peak over every source).
+- `.squad/project.md` — Dev: area 6 (the connection collector uses `CAP_SYS_PTRACE` only; the start-up socket needs no right and the
+  unit's filters must allow `AF_UNIX`), area 10 (the table and `fdinfo` readers' bounds, the start-up probe and the mount rule), *Test doubles* `/proc` row (connstats fixtures and wrappers, implemented).
+- `.squad/stack.md` *Layout* — Dev: `connstats` and `sockmount` in the package list.
+- `docs/ARCHITECTURE.md` and `docs/areas/detection-and-reports.md` — Lead, done (status, components, `internal/` list with
+  `internal/sockmount`, records; peak over every source).
 - Sweep: `grep -rn "procstats\|connection snapshot\|connection_snapshot" docs .squad/project.md .squad/stack.md` — hits are the rows
   above; `docs/areas/log-import.md` (legacy parser) and `web-ui.md` (chart) need no change.
 
 ## Architecture check
 
-Outbound-only and "never contacts Telegram": the collector opens no socket (reads files only; AC11 pins imports). Hanging collector
+Outbound-only and "never contacts Telegram": the collector opens no socket (reads files only; AC11 pins imports); the agent's start-up
+probe opens one Unix datagram socket that is never bound, connected or sent on (no network; its imports pinned). Hanging collector
 (0029): runs under the scheduler's deadline, tested with a blocking `fdinfo` read and table read (AC8). Gaps (0028): failures are gaps by the
 scheduler. Rights (0030): no new capability; `CAP_SYS_PTRACE` gets a second user. Memory on the 2 GB server: every structure has a fixed
 cap and the live data is measured; garbage per descriptor is stated (fact 17). Wire contract (0075): the golden batch pins the new
@@ -326,12 +341,12 @@ fields on both sides. No guarantee is weakened.
 
 - [x] Limits on parsed input, all on raw bytes before any decoding: table line 512 bytes; address fields exactly 8/32 hex digits, port 4,
   state 2, inode 1–20 digits (checked before `strconv`); `fdinfo`: at most 256 bytes read, four lines of fixed keys, `mnt_id` 1–10 and
-  `ino` 1–20 digits; `mountinfo`: 64 KiB per line, field 1 only, 4,096 IDs; command
+  `ino` 1–20 digits, the same parser for the probe's own `fdinfo`; command
   texts by procstats' rules (4 KiB read, 1,024 bytes after U+FFFD replacement). Counts are capped as in Approach 2–6.
 - [x] Failure texts reaching a user: the gap's error is logged by the scheduler: `connstats: no socket table found`,
   `connstats: net/<table>: <os error>`, `procstats`'s listing error, `ctx.Err()` of a late run; the line error
   `connstats: net/<table>: line <n>: <fixed reason>`; the `err` of `socket owners partly unknown` is
-  `connstats: <pid>/fdinfo: <fixed reason or os error>`;
+  `connstats: <pid>/fdinfo: <fixed reason or os error>`; the `err` of `socket owners unknown` is the probe's (Approach 9);
   none contains table content, an address or process text.
 
 ## Decision records
@@ -342,39 +357,30 @@ fields on both sides. No guarantee is weakened.
 
 Devil's Advocate, plan challenge: 2 major, 5 minor. All accepted.
 
-- **M1 (a late run saves its inventory)** — accepted. Confirmed: the scheduler drops a result that arrives after the deadline
-  (`runner.go:203-213`), while the reused procstats pattern saves state without a context check. Approach 5: the inventory and the log
-  state are kept only when `ctx.Err()` is nil immediately before `Collect` returns; otherwise it returns `ctx.Err()`. New test
-  `TestConnections_LateRunKeepsNoInventory` (AC3). The remaining window between that check and the scheduler's receipt is a residual
-  the Agent area states; spec E6 now says a run past its deadline keeps nothing.
-- **M2 (the memory measure cannot hold for descriptors)** — accepted with the first option. Through `io/fs` every descriptor read
-  allocates garbage (fact 21), so the bound is on the **live data** (structures capped, asserted through internal counters at two sizes
-  per axis) and the garbage is stated per table line (near zero) and per descriptor (a fixed amount). Spec *Memory and time* and AC7
-  reworded; `TestConnections_ManySocketsStayWithinCaps` runs 100,000/400,000 lines and 50,000/200,000 descriptors of one PID (fact 17;
-  this also answers Security N2).
+- **M1 (a late run saves its inventory)** — accepted: the scheduler drops a late result (`runner.go:203-213`); Approach 5 keeps the
+  inventory and log state only when `ctx.Err()` is nil just before `Collect` returns, else returns `ctx.Err()`
+  (`TestConnections_LateRunKeepsNoInventory`); the remaining window is an Agent-area residual; spec E6 says so.
+- **M2 (the memory measure cannot hold for descriptors)** — accepted, first option: the bound is on the live data (two sizes per axis,
+  fact 17), the garbage is stated per line and per descriptor (fact 21); spec *Memory and time* and AC7 reworded (also Security N2).
 - **minor 1 (agent tests would read the host's `/proc`)** — accepted: `fixtureConnections()` and the in-memory `/proc` of
-  `lowMemoryOptions` in every `Options` (fact 23, *Test files*).
-- **minor 2 (one closed descriptor drops the process)** — accepted: `ENOENT` on one `fdinfo/<n>` skips that descriptor; only
-  `ENOENT`/`ESRCH` on the directory skips the PID; the first `EACCES`/`EPERM` counts the PID unreadable once and stops it (Approach 3).
-  Tests `TestScanOwners_ClosedDescriptorKeepsTheOtherSockets`, `TestScanOwners_UnreadableProcessCountedOnce`.
-- **minor 3 (listener heap without dedup)** — accepted: one heap slot per endpoint through a map, the inode index points to slots, so
-  storage stays within `MaxSockets` and `SO_REUSEPORT` pairs do not cut the inventory (Approach 2,
+  `lowMemoryOptions` (fact 23).
+- **minor 2 (one closed descriptor drops the process)** — accepted: `ENOENT` on one `fdinfo/<n>` skips that descriptor only
+  (Approach 3; two `TestScanOwners_` tests).
+- **minor 3 (listener heap without dedup)** — accepted: one slot per endpoint (Approach 2,
   `TestConnections_ReusePortDuplicatesDoNotCutTheInventory`).
-- **minor 4 (top 25 remotes beyond the remote cap)** — accepted: stated in the Agent and wire-format areas, pinned by
-  `TestConnections_RemotesBeyondCapNotCounted`.
-- **minor 5 (comparison basis vs the size cut)** — accepted: the basis is the in-memory key list; a size cut sets
-  `aggregates_incomplete`, not `listener_check` (Approach 5, spec E19 reworded, `TestConnections_SizeCutOfListenersKeepsTheComparison`).
+- **minor 4 (top 25 remotes beyond the remote cap)** — accepted: stated in the areas, `TestConnections_RemotesBeyondCapNotCounted`.
+- **minor 5 (comparison basis vs the size cut)** — accepted: the basis is the in-memory key list (Approach 5, spec E19,
+  `TestConnections_SizeCutOfListenersKeepsTheComparison`).
 
 ## Security review
 
-Security, plan review: CHANGES_REQUIRED, B1 and B2 blocking, N1–N5 non-blocking.
+Security, plan review: CHANGES_REQUIRED, B1 and B2 blocking, N1–N5 non-blocking; delta review: B1, B2 fixed, B3 blocking (2nd
+rejection), settled by the Product Manager.
 
-- **B1 (the samples leak part of the server's IPv6 address)** — fixed. Every address field is now replaced as a whole by a
-  documentation value that takes nothing from the real one: the public IPv6 address becomes `2001:db8::10`
-  (`B80D0120000000000000000010000000`); the link-local interface identifier is the documentation MAC's (`fe80::200:5eff:fe00:5301`), only
-  the generic `fe80::/64` prefix stays; the IPv4 replacements were whole already. The script listed every changed address field against
-  its original (four IPv4, two IPv6, nothing partial) and kept every line's byte length. `samples/README.md` no longer names any part of
-  the real address. The pushed history is a question for the user (orchestrator).
+- **B1 (the samples leak part of the server's IPv6 address)** — fixed. Every address field is replaced as a whole by a documentation
+  value that takes nothing from the real one (`2001:db8::10`, `B80D0120000000000000000010000000`; link-local identifier the
+  documentation MAC's, `fe80::200:5eff:fe00:5301`); every line keeps its byte length; `samples/README.md` names no part of the real
+  address. The pushed history is a question for the user (orchestrator).
 - **B2 (`CAP_DAC_READ_SEARCH` not weighed against `fdinfo`)** — accepted: the collector reads `/proc/<pid>/fdinfo` with
   `CAP_SYS_PTRACE` alone and adds no right. Security's measurement (kernel 6.18.44, no Yama, UID 65534 against a root process):
 
@@ -385,18 +391,20 @@ Security, plan review: CHANGES_REQUIRED, B1 and B2 blocking, N1–N5 non-blockin
   | `CAP_SYS_PTRACE` | EACCES | EACCES | ok | ok (`mnt_id: 10`, `ino: 5705`) | EACCES |
   | both | ok | `socket:[5705]` | ok | ok | ok |
 
-  The costs are weighed in record 0115 (option 11): three system calls per descriptor, `ino:` from Linux 5.14 (fact 20; fail closed),
-  and a socket told from a file of equal inode number by its mount — the sockets' mount is the one with the most matches among the mount
-  IDs the agent's own `mountinfo` does not list (sockfs is internal; captured `fdinfo` samples, fact 7), a guard a user can outvote only
-  by holding more colliding descriptors than all processes hold sockets (spec E20, residual). Spec S5, Q3, *Rights*, AC5 and record 0115
-  changed; Approach 3 rewritten; the `fd/` link route and `fs.ReadLinkFS` are gone.
-- **N1 (facts 9 and 10)** — taken: both confirmed by Security's measurement; the Dev records them in the Agent area and the README.
+  Costs in record 0115 (option 11). The `fd/` link route and `fs.ReadLinkFS` are gone.
+- **B3 (the mount vote can be outvoted cheaply)** — accepted; the Product Manager chose option A (record 0115, options 11–12). The
+  vote is gone: the agent learns the socket mount once at its start from a Unix datagram socket of its own (Approach 9) and a descriptor
+  counts only on that mount (Approach 3). **Duplicated descriptors**: off that mount they count nowhere, on it once per PID and socket.
+  **PID-order cap**: `MaxMatches` and the match list are gone; owners and counts live per tracked socket and per PID
+  (`TestScanOwners_ManyDescriptorsOfALowPIDStarveNoOne`). **Foreign mounts**: tmpfs, FUSE, container and private mounts have other IDs
+  (facts 24–25); `mountinfo` is no longer read. A failed probe fails closed (spec E21). Residuals (inode counter wrap, PID cap) in spec
+  E20; fact 26 is the Dev's to verify.
+- **N1 (facts 9 and 10)** — taken: confirmed by Security's measurement; the Dev records them in the Agent area and the README.
 - **N2 (one size cannot catch growth per line)** — taken with M2: two sizes per axis.
-- **N3 (pointer replacements)** — decided: replaced by random values (`os.urandom`), not derived from the real pointer; the README says
-  so. The earlier, hash-derived values were never committed to `testdata/`.
+- **N3 (pointer replacements)** — decided: random values (`os.urandom`), not derived from the real pointer; the README says so.
 - **N4 (a stuck run stops the check)** — taken: spec E6 and the Agent area residual say so.
-- **N5 (the owner's `command` can be faked)** — taken: the Agent area says the PID is the kernel's and the `command` process-chosen text;
-  the kernel's `uid` column is the follow-up below.
+- **N5 (the owner's `command` can be faked)** — taken: the Agent area says the PID is the kernel's and the `command` process-chosen
+  text; the kernel's `uid` column is the follow-up below.
 
 ## Out of scope / follow-ups
 

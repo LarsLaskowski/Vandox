@@ -90,7 +90,7 @@ way, and agents of the hosting provider are never disabled or changed
   [0079](decisions/0079-log-parsing-and-import-in-the-backend-without-following-links.md)).
 - `internal/` — the agent's Go packages: data model and the versioned wire encoder (see
   [wire format](areas/wire-format.md)), version information, agent configuration loading (see
-  *Configuration*), command-line handling (`internal/cli`), start-up, logging and the watchdog loop (`internal/agent`), the collector scheduler (`internal/scheduler`), the self-metrics (`internal/selfstats`), the system metrics (`internal/sysstats`), the process collector (`internal/procstats`), the connection collector (`internal/connstats`) and the systemd notification (`internal/sdnotify`). The model and the wire format exist twice, in Go
+  *Configuration*), command-line handling (`internal/cli`), start-up, logging and the watchdog loop (`internal/agent`), the collector scheduler (`internal/scheduler`), the self-metrics (`internal/selfstats`), the system metrics (`internal/sysstats`), the process collector (`internal/procstats`), the connection collector (`internal/connstats`) with the start-up probe of the socket mount (`internal/sockmount`) and the systemd notification (`internal/sdnotify`). The model and the wire format exist twice, in Go
   (producer) and in C# (consumer); a golden batch produced by the Go encoder and decoded by the C# decoder keeps
   them in step ([0075](decisions/0075-wire-contract-pinned-by-golden-fixtures.md)).
 
