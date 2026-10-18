@@ -24,6 +24,32 @@ public class ConnectionSnapshotTests
     #region Methods
 
     /// <summary>
+    /// The fields of format 1.1 are accepted in the combinations the rules allow.
+    /// </summary>
+    /// <param name="json">The payload</param>
+    [TestMethod]
+    [DataRow("""{"complete":false,"aggregates_incomplete":true}""")]
+    [DataRow("""{"complete":false,"aggregates_only":true,"states":[{"proto":"udp","count":1}],"listeners":[{"proto":"tcp","local":"0.0.0.0:22"}]}""")]
+    [DataRow("""{"complete":true,"listener_check":"all"}""")]
+    [DataRow("""{"complete":true,"listener_check":"privileged"}""")]
+    [DataRow("""{"complete":true,"listener_check":"none"}""")]
+    [DataRow("""{"complete":false,"listener_check":"all","new_listeners":[{"proto":"tcp","local":"0.0.0.0:23","pid":7,"command":"telnetd"}],"new_listeners_omitted":3}""")]
+    [DataRow("""{"complete":false,"listener_check":"privileged","new_listeners_omitted":1}""")]
+    [DataRow("""{"complete":false,"aggregates_only":true,"aggregates_incomplete":true,"listener_check":"privileged","new_listeners":[{"proto":"udp6","local":"[::]:53"}]}""")]
+    [DataRow("""{"complete":false,"listener_check":"all","new_listeners":[],"new_listeners_omitted":0}""")]
+    public void ConnectionSnapshotValidateAcceptsTheNewFields(string json)
+    {
+        // Arrange
+        var snapshot = Parse(json);
+
+        // Act
+        var error = snapshot.Validate();
+
+        // Assert
+        Assert.IsNull(error, $"the rules allow {json}, got {error?.Field}: {error?.Reason}");
+    }
+
+    /// <summary>
     /// A broken rule of the fields of format 1.1 names the field and the reason.
     /// </summary>
     /// <param name="json">The payload</param>

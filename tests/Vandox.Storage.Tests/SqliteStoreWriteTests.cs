@@ -101,6 +101,73 @@ public class SqliteStoreWriteTests
     }
 
     /// <summary>
+    /// A connection snapshot of an agent with the fields of format 1.1 is stored and read back with every one of them.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task SqliteStoreWriteAgentConnectionSnapshotKeepsTheNewFields()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+
+        var snapshot = new ConnectionSnapshot
+                       {
+                           Complete = false,
+                           AggregatesOnly = true,
+                           AggregatesIncomplete = true,
+                           ListenerCheck = "privileged",
+                           States = [
+                                        new StateCount
+                                        {
+                                            Proto = Proto.Udp,
+                                            Count = 2
+                                        }
+                                    ],
+                           NewListeners = [
+                                              new Listener
+                                              {
+                                                  Proto = "tcp",
+                                                  Local = new System.Net.IPEndPoint(System.Net.IPAddress.Parse("0.0.0.0"), 23),
+                                                  Pid = 7,
+                                                  Command = "telnetd"
+                                              }
+                                          ],
+                           NewListenersOmitted = 4
+                       };
+        var record = new DataRecord
+                     {
+                         Origin = RecordOrigin.Agent,
+                         Source = "connections",
+                         Seq = 1,
+                         CapturedAt = Samples.Base,
+                         Data = snapshot
+                     };
+
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+
+        // Act
+        var result = await store.WriteBatchAsync(Samples.AgentBatch(record), TestContext.CancellationToken);
+        var stored = await store.RecordsAsync(Samples.Query(RecordKind.ConnectionSnapshot), TestContext.CancellationToken);
+
+        // Assert
+        Assert.AreEqual(new WriteResult(1, 0), result, "the record is stored");
+        Assert.HasCount(1, stored, "one connection snapshot is read back");
+
+        var read = (ConnectionSnapshot)stored[0].Record.Data!;
+
+        Assert.IsFalse(read.Complete, "complete");
+        Assert.IsTrue(read.AggregatesOnly, "aggregates_only");
+        Assert.IsTrue(read.AggregatesIncomplete, "aggregates_incomplete");
+        Assert.AreEqual("privileged", read.ListenerCheck, "listener_check");
+        Assert.AreEqual(4u, read.NewListenersOmitted, "new_listeners_omitted");
+        Assert.IsNotNull(read.NewListeners, "new_listeners");
+        Assert.HasCount(1, read.NewListeners, "new listeners");
+        Assert.AreEqual("0.0.0.0:23", read.NewListeners[0].Local?.ToString(), "new listener local");
+        Assert.AreEqual("telnetd", read.NewListeners[0].Command, "new listener command");
+        Assert.IsNull(read.Validate(), "the stored snapshot is still valid");
+    }
+
+    /// <summary>
     /// Values that are absent are stored as NULL even when the previous record of the batch had a value: the writer reuses its parameters.
     /// </summary>
     /// <returns>A task that completes when the test is done</returns>

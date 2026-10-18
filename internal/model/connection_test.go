@@ -311,3 +311,42 @@ func TestConnectionSnapshot_Validate_NewFieldRules(t *testing.T) {
 		})
 	}
 }
+
+func TestConnectionSnapshot_Validate_NewFields(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(p *model.ConnectionSnapshot)
+	}{
+		{"aggregates incomplete, not complete", func(p *model.ConnectionSnapshot) { p.Complete, p.AggregatesIncomplete = false, true }},
+		{"aggregates only without connections", func(p *model.ConnectionSnapshot) {
+			p.Complete, p.AggregatesOnly, p.Connections = false, true, nil
+		}},
+		{"listener check all", func(p *model.ConnectionSnapshot) { p.ListenerCheck = model.ListenerCheckAll }},
+		{"listener check privileged", func(p *model.ConnectionSnapshot) { p.ListenerCheck = model.ListenerCheckPrivileged }},
+		{"listener check none", func(p *model.ConnectionSnapshot) { p.ListenerCheck = model.ListenerCheckNone }},
+		{"new listeners with check all", func(p *model.ConnectionSnapshot) {
+			p.ListenerCheck, p.NewListeners, p.NewListenersOmitted = model.ListenerCheckAll, validNewListeners(), 3
+		}},
+		{"new listeners with check privileged", func(p *model.ConnectionSnapshot) {
+			p.ListenerCheck, p.NewListeners = model.ListenerCheckPrivileged, validNewListeners()
+		}},
+		{"omitted count with check privileged", func(p *model.ConnectionSnapshot) {
+			p.ListenerCheck, p.NewListenersOmitted = model.ListenerCheckPrivileged, 1
+		}},
+		{"new listeners at the limit", func(p *model.ConnectionSnapshot) {
+			p.ListenerCheck = model.ListenerCheckAll
+			p.NewListeners = repeat(model.Listener{Proto: model.ProtoTCP, Local: netip.MustParseAddrPort("0.0.0.0:80")}, model.MaxItems)
+		}},
+		{"every new field", func(p *model.ConnectionSnapshot) {
+			p.Complete, p.AggregatesOnly, p.AggregatesIncomplete, p.Connections = false, true, true, nil
+			p.ListenerCheck, p.NewListeners, p.NewListenersOmitted = model.ListenerCheckPrivileged, validNewListeners(), 2
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			p := validConnectionSnapshot()
+			tc.mutate(p)
+			requireValid(t, p)
+		})
+	}
+}
