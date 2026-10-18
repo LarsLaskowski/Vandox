@@ -164,6 +164,38 @@ internal static class SchemaMigrator
                                                               ) STRICT
                                                               """,
                                                               "CREATE INDEX incident_notes_incident ON incident_notes(incident_id, written_for)"
+                                                          ]),
+                                                      new(11,
+                                                          [
+                                                              """
+                                                              CREATE TABLE connection_marks (
+                                                                record_id INTEGER PRIMARY KEY REFERENCES records(id),
+                                                                agent_id TEXT NOT NULL,
+                                                                seq INTEGER NOT NULL,
+                                                                captured_at INTEGER NOT NULL,
+                                                                listener_check TEXT NOT NULL,
+                                                                new_count INTEGER NOT NULL CHECK (new_count >= 0),
+                                                                new_listeners TEXT
+                                                              ) STRICT
+                                                              """,
+                                                              "CREATE UNIQUE INDEX connection_marks_agent_seq ON connection_marks(agent_id, seq)",
+                                                              "CREATE INDEX connection_marks_findings ON connection_marks(captured_at DESC, agent_id, seq DESC) WHERE new_count > 0",
+                                                              """
+                                                              CREATE TABLE listener_comparisons (
+                                                                record_id INTEGER PRIMARY KEY REFERENCES records(id),
+                                                                agent_id TEXT NOT NULL,
+                                                                seq INTEGER NOT NULL,
+                                                                captured_at INTEGER NOT NULL,
+                                                                base_record_id INTEGER,
+                                                                base_seq INTEGER,
+                                                                base_captured_at INTEGER,
+                                                                outcome TEXT NOT NULL,
+                                                                new_count INTEGER NOT NULL CHECK (new_count >= 0),
+                                                                new_listeners TEXT,
+                                                                finding INTEGER NOT NULL CHECK (finding IN (0, 1))
+                                                              ) STRICT
+                                                              """,
+                                                              "CREATE INDEX listener_comparisons_findings ON listener_comparisons(captured_at DESC, agent_id, seq DESC) WHERE finding = 1"
                                                           ])
                                                   ];
 

@@ -123,6 +123,10 @@ internal sealed class BatchWriter : IDisposable
         {
             WriteLogLine(recordId, record, line);
         }
+        else if (payload is ConnectionSnapshot snapshot && ListenerMarkWriter.IsUsable(record, batch.AgentId))
+        {
+            _listeners.Write(recordId, batch.AgentId, record, snapshot);
+        }
 
         return true;
     }
@@ -140,13 +144,10 @@ internal sealed class BatchWriter : IDisposable
     /// Writes the comparisons of the agent starts affected by the snapshots written so far.
     /// </summary>
     /// <param name="cancellationToken">Cancels the write</param>
-#pragma warning disable S2325, CA1822
     internal void WriteListenerComparisons(CancellationToken cancellationToken)
     {
-        // Skeleton stub: a throwing body would fail every stored batch of the existing tests.
-        cancellationToken.ThrowIfCancellationRequested();
+        _listeners.WriteComparisons(cancellationToken);
     }
-#pragma warning restore S2325, CA1822
 
     /// <summary>
     /// Serializes labels into a reused buffer and writer.

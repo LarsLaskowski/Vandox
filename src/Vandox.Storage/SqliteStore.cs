@@ -36,6 +36,11 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
     /// </summary>
     private const string IncidentsContext = "store: reading incidents";
 
+    /// <summary>
+    /// The operation named in the error of a listener read.
+    /// </summary>
+    private const string ListenersContext = "store: reading listener findings";
+
     private const string CommonPragmas = "PRAGMA busy_timeout=5000; PRAGMA foreign_keys=1; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;";
 
     // The writer connection holds up to 16 MiB of pages (the default is 2 MiB), so a large transaction does not spill pages to the
@@ -803,12 +808,10 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
 
     #region IListenerHistoryReader
 
-#pragma warning disable RH2003
-
     /// <inheritdoc />
     public Task<ListenerTallyPage> ListenerTalliesAsync(CancellationToken cancellationToken)
     {
-        throw new NotImplementedException();
+        return ReadAsync(connection => ListenerQueries.ReadTalliesAsync(connection, cancellationToken), ListenersContext, cancellationToken);
     }
 
     /// <inheritdoc />
@@ -816,10 +819,8 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
     {
         ListenerQueries.Validate(query);
 
-        throw new NotImplementedException();
+        return ReadAsync(connection => ListenerQueries.ReadFindingsAsync(connection, query, cancellationToken), ListenersContext, cancellationToken);
     }
-
-#pragma warning restore RH2003
 
     #endregion // IListenerHistoryReader
 

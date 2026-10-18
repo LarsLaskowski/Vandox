@@ -10,7 +10,7 @@ public sealed class ListenerFindingPage
     #region Properties
 
     /// <summary>
-    /// Gets the latest findings, by capture time, then agent ID, then sequence number, descending.
+    /// Gets the latest findings, by capture time descending, then agent ID ascending, then sequence number descending.
     /// </summary>
     public IReadOnlyList<ListenerFinding> Findings { get; init; } = [];
 
