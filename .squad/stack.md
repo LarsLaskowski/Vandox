@@ -54,6 +54,7 @@ Cloud session notes (found when a cloud image lacked the .NET SDK):
 | *Test with coverage* | `rm -rf TestResults coverage.out && go test ./... -race -coverprofile=coverage.out && python3 .squad/tools/go-coverage-to-cobertura.py && dotnet test Vandox.slnx --settings coverlet.runsettings --results-directory TestResults` (clears the results first) |
 | *Coverage gate* | `python3 .squad/tools/coverage-check.py` |
 | *Analyzer gate* | `python3 .squad/tools/analyzer-check.py` |
+| *Sonar gate* | `python3 .squad/tools/sonar-check.py branch -- bash -c 'dotnet tool run dotnet-sonarscanner begin /k:networlddev_vandox /o:networlddev /d:sonar.token="$SONAR_TOKEN" /d:sonar.host.url=https://sonarcloud.io /d:sonar.branch.name="$(git branch --show-current)" /d:sonar.projectBaseDir="$PWD" /d:sonar.cs.opencover.reportsPaths="TestResults/**/coverage.opencover.xml" /d:sonar.go.coverage.reportPaths=coverage.out /d:sonar.test.inclusions="**/*_test.go,tests/**" /d:sonar.exclusions="**/*_test.go,tests/**,bin/**,dist/**,**/obj/**,**/bin/**,TestResults/**,src/Vandox.Backend/wwwroot/lib/**" /d:sonar.coverage.exclusions=".squad/**,.claude/**,src/Vandox.Backend/wwwroot/js/**" && dotnet build Vandox.slnx -c Release --no-incremental && dotnet tool run dotnet-sonarscanner end /d:sonar.token="$SONAR_TOKEN"'` (after *Test with coverage*, so the analysis carries the coverage of both languages; needs `SONAR_TOKEN`, see *Sonar gate* below) |
 | *Image build check* | .NET: `docker build -f deploy/backend/Dockerfile .` where Docker runs, otherwise the restore-order reproduction under *Image build check* below (`.squad/routing.md`, *Criteria verified only in CI*); Go: none, the agent builds no image |
 
 `reihitsu-format` needs `DOTNET_ROOT` when it runs as a global tool outside the SDK's directory (for example
@@ -119,8 +120,9 @@ analysis (the gate of a `patch` that touches only scripts, workflows or Dockerfi
    note a scanner-only rule here.
    Never trust a test result after a build that failed on analyzer errors: the test run uses the stale DLLs.
 
-Other SonarQube Cloud findings (further rules, duplication, hotspots) have no local equivalent and arrive in
-squad step 11.
+Other SonarQube Cloud findings (further rules, hotspots, duplication) have no local equivalent: the *Sonar gate*
+below is the first to report their issues and hotspots, and squad step 11 reads the quality gate, duplication
+included.
 For Go, `go:S1192` (a string literal repeated three or more times in one file) is one of them, and golangci-lint's
 `goconst` is deliberately not enabled as a stand-in: measured with golangci-lint 2.14.0 (`min-occurrences: 3`) on
 the head of PR #272 before its S1192 fix, it counts occurrences across the whole package instead of per file,
@@ -130,7 +132,7 @@ that the `--whole-files` gate would raise in any change to those files. The stri
 code* stands in for it.
 
 Own browser scripts (`src/Vandox.Backend/wwwroot/js/*.js`, no Node build) have no local analyzer: SonarQube
-Cloud's JavaScript rules report on them only in squad step 11, so write them to those rules from the start. The
+Cloud's JavaScript rules report on them first in the *Sonar gate* below, so write them to those rules from the start. The
 one that bit (`javascript:S2486`): a `catch` block that ignores the exception holds exactly one whole-line
 comment and nothing else — a comment before a `return` inside the block is still flagged.
 
@@ -139,8 +141,24 @@ Changed shell scripts (`*.sh`), GitHub workflows (`.github/workflows/*.yml`) and
 binaries (`.claude/hooks/install-linters.sh`), and the gate reports NOT RUN for one that is missing (a refused
 download, for example). The gate itself checks two SonarQube Cloud shell rules shellcheck does not report:
 `shelldre:S7679` (a positional parameter `$1`…`$9` used as a word of its own inside a function — assign it to a
-local variable first) and `shelldre:S7688` (`[ … ]` instead of `[[ … ]]`). Other `shelldre:*` findings only report
-in squad step 11.
+local variable first) and `shelldre:S7688` (`[ … ]` instead of `[[ … ]]`). Other `shelldre:*` findings are first
+reported by the *Sonar gate* below.
+
+*Sonar gate* runs SonarQube Cloud's own analysis on the work branch before the pull request (squad step 7):
+`sonar-check.py` runs the scanner with the branch name, waits for the analysis and fails on every open issue or
+security hotspot on a line the branch changed, so the rules no local analyzer has stop surfacing only after the
+pull request. It runs on the committed change (the scanner uploads the working tree, so it refuses uncommitted or
+untracked files other than the coverage reports) and needs `SONAR_TOKEN` in the session's environment (an environment secret) and network access to the
+scanner's download hosts (`api.sonarcloud.io`, `scanner.sonarcloud.io` and the NuGet registry); without them it
+reports NOT CHECKED, and step 11 reads the draft pull request with `python3 .squad/tools/sonar-check.py pr <number>`
+instead. A finding of a rule no local analyzer reports is noted in this section, in the same change, instead of a
+squad lesson.
+One analysis covers both languages, as in CI: the scanner for .NET (`dotnet-sonarscanner` from the tool manifest)
+wraps the full, non-incremental C# build between `begin` and `end`, and its bundled scanner analyses the Go agent
+in the same run. Its `begin` arguments mirror the `sonarqube` job of `.github/workflows/ci.yml`, plus the branch
+name and the repository root as base directory: a change to the CI step changes this row too. It reads the
+OpenCover reports coverlet writes next to the Cobertura ones (`coverlet.runsettings`) and Go's `coverage.out`, so
+the branch analysis carries a coverage figure; the *Coverage gate* stays the gate for it.
 
 ### Not checkable in a cloud session
 
