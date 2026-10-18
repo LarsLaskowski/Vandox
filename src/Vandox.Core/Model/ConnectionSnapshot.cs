@@ -123,6 +123,7 @@ public sealed class ConnectionSnapshot : IPayload
     /// Gets or sets the protocols of the tables the run read.
     /// </summary>
     [JsonPropertyName("tables")]
+    [JsonConverter(typeof(NullElementStringListConverter))]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public List<string>? Tables { get; set; }
 
@@ -212,6 +213,46 @@ public sealed class ConnectionSnapshot : IPayload
     }
 
     /// <summary>
+    /// Checks the inventory state and the protocols of the tables the run read.
+    /// </summary>
+    /// <returns>The first rule that is broken, or <c>null</c></returns>
+    private FieldError? ValidateInventory()
+    {
+        if (Inventory is not null)
+        {
+            var error = Check.OneOf("inventory", Inventory, "all", "privileged", "cut", "skipped");
+
+            if (error is not null)
+            {
+                return error;
+            }
+        }
+
+        var seen = new HashSet<string>();
+
+        for (var index = 0; index < (Tables?.Count ?? 0); index++)
+        {
+            var path = Check.Indexed("tables", index);
+            var table = Tables![index];
+            var error = Check.OneOf(path, table, Proto.Tcp, Proto.Tcp6, Proto.Udp, Proto.Udp6);
+
+            if (error is not null)
+            {
+                return error;
+            }
+
+            if (seen.Add(table))
+            {
+                continue;
+            }
+
+            return Check.Invalid(path, "duplicate protocol");
+        }
+
+        return null;
+    }
+
+    /// <summary>
     /// Checks the rules that tie the aggregate flags, the listener check and the new listeners together.
     /// </summary>
     /// <returns>The first rule that is broken, or <c>null</c></returns>
@@ -234,7 +275,7 @@ public sealed class ConnectionSnapshot : IPayload
 
         if (ListenerCheck is not null)
         {
-            var error = Check.OneOf("listener_check", ListenerCheck, "all", "privileged", "none");
+            var error = Check.OneOf("listener_check", ListenerCheck, "all", "privileged", "none", "start");
 
             if (error is not null)
             {
@@ -266,7 +307,8 @@ public sealed class ConnectionSnapshot : IPayload
                         ?? Check.Count("listeners", Listeners?.Count ?? 0)
                         ?? Check.Count("connections", Connections?.Count ?? 0)
                         ?? Check.Count("new_listeners", NewListeners?.Count ?? 0)
-                        ?? ValidateFlags();
+                        ?? ValidateFlags()
+                        ?? ValidateInventory();
 
         return error
                    ?? ValidateList("states", States, (item, path) => item.Validate(path))
