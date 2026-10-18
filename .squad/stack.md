@@ -120,8 +120,9 @@ analysis (the gate of a `patch` that touches only scripts, workflows or Dockerfi
    note a scanner-only rule here.
    Never trust a test result after a build that failed on analyzer errors: the test run uses the stale DLLs.
 
-Other SonarQube Cloud findings (further rules, duplication, hotspots) have no local equivalent and arrive in
-squad step 11.
+Other SonarQube Cloud findings (further rules, hotspots, duplication) have no local equivalent: the *Sonar gate*
+below is the first to report their issues and hotspots, and squad step 11 reads the quality gate, duplication
+included.
 For Go, `go:S1192` (a string literal repeated three or more times in one file) is one of them, and golangci-lint's
 `goconst` is deliberately not enabled as a stand-in: measured with golangci-lint 2.14.0 (`min-occurrences: 3`) on
 the head of PR #272 before its S1192 fix, it counts occurrences across the whole package instead of per file,
@@ -131,7 +132,7 @@ that the `--whole-files` gate would raise in any change to those files. The stri
 code* stands in for it.
 
 Own browser scripts (`src/Vandox.Backend/wwwroot/js/*.js`, no Node build) have no local analyzer: SonarQube
-Cloud's JavaScript rules report on them only in squad step 11, so write them to those rules from the start. The
+Cloud's JavaScript rules report on them first in the *Sonar gate* below, so write them to those rules from the start. The
 one that bit (`javascript:S2486`): a `catch` block that ignores the exception holds exactly one whole-line
 comment and nothing else — a comment before a `return` inside the block is still flagged.
 
@@ -140,8 +141,8 @@ Changed shell scripts (`*.sh`), GitHub workflows (`.github/workflows/*.yml`) and
 binaries (`.claude/hooks/install-linters.sh`), and the gate reports NOT RUN for one that is missing (a refused
 download, for example). The gate itself checks two SonarQube Cloud shell rules shellcheck does not report:
 `shelldre:S7679` (a positional parameter `$1`…`$9` used as a word of its own inside a function — assign it to a
-local variable first) and `shelldre:S7688` (`[ … ]` instead of `[[ … ]]`). Other `shelldre:*` findings report
-in the *Sonar gate* (squad step 7) or, when it is NOT CHECKED, in squad step 11.
+local variable first) and `shelldre:S7688` (`[ … ]` instead of `[[ … ]]`). Other `shelldre:*` findings are first
+reported by the *Sonar gate* below.
 
 *Sonar gate* runs SonarQube Cloud's own analysis on the work branch before the pull request (squad step 7):
 `sonar-check.py` runs the scanner with the branch name, waits for the analysis and fails on every open issue or
