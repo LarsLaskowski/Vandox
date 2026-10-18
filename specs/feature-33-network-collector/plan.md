@@ -269,11 +269,19 @@ func connectionSources(src connstats.Sources, probe func() (int32, error)) conns
 // ConnectionSnapshot.cs, new properties (#region Properties), each with XML docs:
 [JsonPropertyName("aggregates_only")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public bool AggregatesOnly { get; set; }
 [JsonPropertyName("aggregates_incomplete")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public bool AggregatesIncomplete { get; set; }
-[JsonPropertyName("listener_check")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public string? ListenerCheck { get; set; }
+[JsonPropertyName("listener_check")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public string? ListenerCheck { get => _listenerCheck; set => _listenerCheck = string.IsNullOrEmpty(value) ? null : value; }
+// (backing field _listenerCheck in #region Fields; a JSON null reads as "" through NullAsAbsent and an empty value as absent, as Go's
+// omitempty writes it, so null is the only absent state and nothing writes "listener_check":"")
 [JsonPropertyName("new_listeners")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public List<Listener>? NewListeners { get; set; }
 [JsonPropertyName("new_listeners_omitted")] [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public uint NewListenersOmitted { get; set; }
 // WireFormat.MinorVersion = 1
 ```
+
+Decided after the skeleton (Lead, `decide`): `ListenerCheck` stays `string?` — a `string` with `string.Empty` would write
+`"listener_check":""` into every serialized snapshot (`NullAsAbsentConverterFactoryKeepsWrittenJson`) — with the setter above (Dev).
+The test helper `FindNull` in `tests/Vandox.Core.Tests/BatchDecoderTests.cs` checks only strings declared non-nullable
+(`NullabilityInfoContext`, read state `Nullable` skipped), as it already lets nullable lists and values be null; the Tester adapts it and
+adds a `BatchDecoderAcceptsNullOfOptionalPayloadField` row `{"complete":true,"listener_check":null}` → `{"complete":true}` (AC10).
 
 Files the skeleton rewrites: `internal/model/connection.go`, `internal/wire/wire.go`, `internal/agent/agent.go`,
 `src/Vandox.Core/Model/ConnectionSnapshot.cs`, `src/Vandox.Core/Wire/WireFormat.cs` (read; final apart from these members).
