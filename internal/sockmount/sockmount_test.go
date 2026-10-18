@@ -201,13 +201,31 @@ func TestProbe_ClosesTheSocket(t *testing.T) {
 	}
 }
 
+func TestProbe_InodeMismatchFails(t *testing.T) {
+	_ = openFDs(t) // the first listing may open the runtime's poller
+
+	// A well-formed file whose ino: is not the inode of the probe's socket: the wrong file was read.
+	const wellFormed = "pos:\t0\nflags:\t02000002\nmnt_id:\t10\nino:\t1\n"
+	before := openFDs(t)
+	id, err := Probe(fdinfoFS{data: wellFormed})
+	if err == nil || err.Error() != "sockmount: self/fdinfo: inode mismatch" {
+		t.Errorf("Probe(fdinfo with another inode) = %d, %v, want error %q", id, err, "sockmount: self/fdinfo: inode mismatch")
+	}
+	if id != 0 {
+		t.Errorf("Probe(fdinfo with another inode) mount = %d with an error, want 0", id)
+	}
+	if after := openFDs(t); !slices.Equal(before, after) {
+		t.Errorf("descriptors after the failed Probe = %v, want %v", after, before)
+	}
+}
+
 func TestSockmount_ImportsOnlyAllowedPackages(t *testing.T) {
 	allowedImports := []string{
 		"errors", "fmt", "io", "io/fs", "strconv", "syscall",
 		"github.com/LarsLaskowski/Vandox/internal/connstats",
 	}
 	// The probe opens an unbound Unix datagram socket and closes it; nothing binds, connects, sends or listens.
-	wantSyscall := []string{"AF_UNIX", "Close", "SOCK_CLOEXEC", "SOCK_DGRAM", "Socket"}
+	wantSyscall := []string{"AF_UNIX", "Close", "Fstat", "SOCK_CLOEXEC", "SOCK_DGRAM", "Socket", "Stat_t"}
 
 	imports, selectors := productionUses(t)
 	for _, path := range imports {
