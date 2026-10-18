@@ -39,7 +39,7 @@ tables in [Storage](../areas/storage.md).
 6. **The storage layer compares when it writes (chosen):** each usable agent snapshot gets a narrow row (`connection_marks`), each start
    a comparison row (`listener_comparisons`) computed from its predecessor by `seq` when either is written, recomputed when a snapshot is
    stored between them later (backfill sends current data first), so the result does not depend on the order of arrival; the report reads
-   only these rows. Costs two tables, one index lookup per stored snapshot and one payload decode per start, in the write transaction.
+   only these rows. Costs two tables, one index lookup per stored snapshot and, per batch, at most two payload decodes for each start the batch affects (computed once before the commit, so a backfill below a stored start does not decode it per record).
    Template statistics are kept the same way (0095).
 7. **One cap for all findings** (100, then the latest) — simpler, but agent findings of passive FTP would push the restart findings out
    within hours (spec challenge). Rejected for separate caps per kind; the caps are 20 each, because a finding can hold 64 commands of up to
@@ -62,9 +62,12 @@ separate caps (option 7) in a section *New listeners*.
   rebuild of `listener_comparisons` (not built; the rules are the agent's and change with them).
 - Agent snapshots stored before the schema step that adds the tables get no rows; no product path stores agent records before the ingest
   (#40), which comes later.
-- The write of a start reads and decodes one stored snapshot inside the write transaction; a snapshot that cannot be decoded fails the
-  batch like any store failure.
-- Findings are "latest" by capture time for the caps, so a clock that steps back may keep an older finding instead of a newer one; the
+- A batch decodes at most two stored snapshots per start it affects, inside the write transaction; a stored snapshot that cannot be
+  decoded makes that start `not comparable` instead of failing the batch, so a resend is never refused for it.
+- The stored copy of an agent's `new_listeners` keeps the first 64 entries and counts the rest, whatever the wire allows (4,096).
+- The derived rows are written only after the record insert returned an ID; only `listener_comparisons` rows are ever updated, never a
+  record.
+- Findings are "latest" by capture time (then agent ID and `seq`) for the caps, so a clock that steps back may keep an older finding instead of a newer one; the
   order shown within an agent is by `seq`.
 - Residuals: a listener that opened and closed while the agent was stopped is never seen; a start whose first snapshot is lost (a gap, a
   record the scheduler dropped) is not seen as a start, and its successor was compared by the agent with that lost inventory; snapshots of

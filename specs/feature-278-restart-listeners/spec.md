@@ -82,7 +82,7 @@ The exact phrases are in the table of AC11.
   the comparison runs against the last stored snapshot before the start, and both capture times show the span it covers.
 - E10: Hostile owner text: the owner's `command` is text the process chose (up to 1,024 bytes, any character the wire format allows) and the
   agent ID is the agent's; both are written only as code spans by the report's rules for external text (security area 12), so no character
-  of them is read as Markdown, HTML or a link, on the page or in the download. Addresses and ports are the producer's numeric form.
+  of them is read as Markdown, HTML or a link, on the page or in the download. Addresses and ports are shown in a numeric form.
 - E11: Huge input: both inventories at their maximum of 4,096 listeners each, a server that reports a short-lived listener every minute
   (passive FTP with ProFTPD on Plesk without `PassivePorts`, record 0115) for a year, many agent IDs: the report keeps at most the fixed
   amounts of *Non-functional requirements*, restart and agent findings under separate caps so that agent findings never push out a
