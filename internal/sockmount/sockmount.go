@@ -32,6 +32,10 @@ func Probe(proc fs.FS) (int32, error) {
 	if err != nil {
 		return 0, fmt.Errorf("sockmount: %w", err)
 	}
+	var st syscall.Stat_t
+	if syscall.Fstat(fd, &st) != nil || st.Ino != info.Inode {
+		return 0, errors.New("sockmount: self/fdinfo: inode mismatch")
+	}
 	return info.MountID, nil
 }
 
