@@ -140,8 +140,8 @@ Changed shell scripts (`*.sh`), GitHub workflows (`.github/workflows/*.yml`) and
 binaries (`.claude/hooks/install-linters.sh`), and the gate reports NOT RUN for one that is missing (a refused
 download, for example). The gate itself checks two SonarQube Cloud shell rules shellcheck does not report:
 `shelldre:S7679` (a positional parameter `$1`…`$9` used as a word of its own inside a function — assign it to a
-local variable first) and `shelldre:S7688` (`[ … ]` instead of `[[ … ]]`). Other `shelldre:*` findings only report
-in squad step 11.
+local variable first) and `shelldre:S7688` (`[ … ]` instead of `[[ … ]]`). Other `shelldre:*` findings report
+in the *Sonar gate* (squad step 7) or, when it is NOT CHECKED, in squad step 11.
 
 *Sonar gate* runs SonarQube Cloud's own analysis on the work branch before the pull request (squad step 7):
 `sonar-check.py` runs the scanner with the branch name, waits for the analysis and fails on every open issue or
