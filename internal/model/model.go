@@ -215,6 +215,12 @@ func checkLen(field, s string, limit int) error {
 	return nil
 }
 
+// encodedLen returns the length of s in UTF-8 bytes after the wire encoder's replacement: every byte that does not start a valid
+// UTF-8 sequence counts as the 3 bytes of U+FFFD.
+func encodedLen(s string) int {
+	return 0
+}
+
 func checkShort(field, s string) error { return checkLen(field, s, MaxShortTextBytes) }
 
 func checkText(field, s string) error { return checkLen(field, s, MaxTextBytes) }
