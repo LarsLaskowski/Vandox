@@ -349,6 +349,150 @@ public class SqliteStoreListenerHistoryTests
     }
 
     /// <summary>
+    /// A stored base whose data is NULL makes its start not comparable, and the batch is kept.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task SqliteStoreListenerWriteNullBaseDataIsNotComparable()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+
+        await store.WriteBatchAsync(ListenerSamples.Batch(Agent, BaseRecord(1, 0)), TestContext.CancellationToken);
+        await ExecuteAsync(directory, "UPDATE records SET data = NULL WHERE seq = 1");
+
+        // Act
+        var result = await store.WriteBatchAsync(ListenerSamples.Batch(Agent, StartRecord(2, 60)), TestContext.CancellationToken);
+        var starts = await ReadAsync(store, ListenerFindingKind.AgentStart);
+
+        // Assert
+        Assert.AreEqual(new WriteResult(1, 0), result, "the batch is stored");
+        Assert.AreEqual(ListenerOutcome.NotComparable, starts.Findings[0].Outcome, "outcome");
+        Assert.IsEmpty(starts.Findings[0].Listeners, "no listeners");
+    }
+
+    /// <summary>
+    /// A start whose base inventory is cut is incomplete, lists nothing, and reads back as not compared.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task SqliteStoreListenerFindingsStartWithCutBaseIsPrivilegedIncomplete()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+        var cut = ListenerSamples.Record(1, 0, ListenerSamples.Snapshot("none", "cut", ListenerSamples.Tcp("0.0.0.0", 22)));
+
+        // Act
+        await store.WriteBatchAsync(ListenerSamples.Batch(Agent, cut, StartRecord(2, 60)), TestContext.CancellationToken);
+
+        var tallies = await store.ListenerTalliesAsync(TestContext.CancellationToken);
+        var starts = await ReadAsync(store, ListenerFindingKind.AgentStart);
+
+        // Assert
+        Assert.AreEqual(ListenerOutcome.PrivilegedIncomplete, starts.Findings[0].Outcome, "outcome");
+        Assert.IsEmpty(starts.Findings[0].Listeners, "no listeners");
+        Assert.AreEqual(1L, tallies.Agents[0].NotCompared, "the second start is not compared");
+        Assert.AreEqual(0L, tallies.Agents[0].ComparedAll, "not compared on all ports");
+        Assert.AreEqual(0L, tallies.Agents[0].ComparedPrivileged, "not compared on privileged ports");
+    }
+
+    /// <summary>
+    /// A start compared with a base that lists only privileged ports keeps the new privileged listener only, and counts as compared on privileged ports.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task SqliteStoreListenerFindingsStartWithPrivilegedBaseIsPrivilegedOnly()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+        var earlier = ListenerSamples.Record(1, 0, ListenerSamples.Snapshot("none", "privileged", ListenerSamples.Tcp("0.0.0.0", 22)));
+        var start = ListenerSamples.Record(2, 60, ListenerSamples.Snapshot("start", "all", ListenerSamples.Tcp("0.0.0.0", 22), ListenerSamples.Tcp("0.0.0.0", 23), ListenerSamples.Tcp("0.0.0.0", 8080)));
+
+        // Act
+        await store.WriteBatchAsync(ListenerSamples.Batch(Agent, earlier, start), TestContext.CancellationToken);
+
+        var tallies = await store.ListenerTalliesAsync(TestContext.CancellationToken);
+        var starts = await ReadAsync(store, ListenerFindingKind.AgentStart);
+
+        // Assert
+        Assert.AreEqual(ListenerOutcome.PrivilegedOnly, starts.Findings[0].Outcome, "outcome");
+        Assert.AreEqual("tcp 0.0.0.0:23", ListenerSamples.Joined(starts.Findings[0]), "only the privileged listener");
+        Assert.AreEqual(1L, tallies.Agents[0].ComparedPrivileged, "compared on privileged ports");
+        Assert.AreEqual(0L, tallies.Agents[0].ComparedAll, "not compared on all ports");
+    }
+
+    /// <summary>
+    /// A stored listener list that does not decode fails the read with a store error that names the step.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task SqliteStoreListenerFindingsUndecodableStoredListenersThrowStoreException()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+
+        await store.WriteBatchAsync(ListenerSamples.Batch(Agent, BaseRecord(1, 0), StartRecord(2, 60)), TestContext.CancellationToken);
+        await ExecuteAsync(directory, "UPDATE listener_comparisons SET new_listeners = 'this is not json'");
+
+        // Act
+        var exception = await Assert.ThrowsExactlyAsync<StoreException>(() => ReadAsync(store, ListenerFindingKind.AgentStart));
+
+        // Assert
+        Assert.Contains("decoding listeners", exception.Message, "the failing step");
+    }
+
+    /// <summary>
+    /// A finding query with a defined kind and a limit from 1 to the maximum is accepted.
+    /// </summary>
+    /// <param name="kind">The kind</param>
+    /// <param name="limit">The limit</param>
+    [TestMethod]
+    [DataRow(ListenerFindingKind.Agent, 1)]
+    [DataRow(ListenerFindingKind.AgentStart, ListenerReport.MaxFindings)]
+    public void ListenerQueriesValidateAcceptsTheLimitBounds(ListenerFindingKind kind, int limit)
+    {
+        // Arrange
+        var query = new ListenerFindingQuery
+                    {
+                        Kind = kind,
+                        Limit = limit
+                    };
+
+        // Act
+        ListenerQueries.Validate(query);
+
+        // Assert
+        Assert.AreEqual(limit, query.Limit, "the query is accepted unchanged");
+    }
+
+    /// <summary>
+    /// A finding query with a limit of 0 or above the maximum, or an undefined kind, is refused.
+    /// </summary>
+    /// <param name="kind">The kind value</param>
+    /// <param name="limit">The limit</param>
+    [TestMethod]
+    [DataRow(0, 0)]
+    [DataRow(1, 21)]
+    [DataRow(0, -1)]
+    [DataRow(99, 5)]
+    public void ListenerQueriesValidateRefusesBrokenQuery(int kind, int limit)
+    {
+        // Arrange
+        var query = new ListenerFindingQuery
+                    {
+                        Kind = (ListenerFindingKind)kind,
+                        Limit = limit
+                    };
+
+        // Act & Assert
+        Assert.ThrowsExactly<InvalidQueryException>(() => ListenerQueries.Validate(query), "the query is refused");
+    }
+
+    /// <summary>
     /// Two snapshots at the wire's limits are stored and compared without a decoding error.
     /// </summary>
     /// <returns>A task that completes when the test is done</returns>
