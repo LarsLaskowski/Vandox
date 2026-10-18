@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"go/ast"
 	"go/parser"
 	"go/token"
 	"io/fs"
@@ -1268,6 +1269,45 @@ var allowedImports = []string{
 	"github.com/LarsLaskowski/Vandox/internal/scheduler", "github.com/LarsLaskowski/Vandox/internal/wire",
 }
 
+// allowedSelectors maps a package to the only selectors of it the non-test files may use: os only for DirFS, no syscall at all.
+var allowedSelectors = map[string][]string{
+	"os":      {"DirFS"},
+	"syscall": {},
+}
+
+// disallowedSelectors returns the uses in file of selectors of a restricted package that allowedSelectors does not list.
+func disallowedSelectors(name string, file *ast.File) []string {
+	var violations []string
+	ast.Inspect(file, func(n ast.Node) bool {
+		sel, ok := n.(*ast.SelectorExpr)
+		if !ok {
+			return true
+		}
+		id, ok := sel.X.(*ast.Ident)
+		if !ok {
+			return true
+		}
+		allowed, restricted := allowedSelectors[id.Name]
+		if restricted && !slices.Contains(allowed, sel.Sel.Name) {
+			violations = append(violations, name+": "+id.Name+"."+sel.Sel.Name+" is not allowed")
+		}
+		return true
+	})
+	return violations
+}
+
+// disallowedImports returns the imports in file that allowedImports does not list.
+func disallowedImports(name string, file *ast.File) []string {
+	var violations []string
+	for _, imp := range file.Imports {
+		path, err := strconv.Unquote(imp.Path.Value)
+		if err != nil || !slices.Contains(allowedImports, path) {
+			violations = append(violations, name+": imports "+imp.Path.Value+", want only "+strings.Join(allowedImports, " "))
+		}
+	}
+	return violations
+}
+
 func TestConnstats_ImportsOnlyAllowedPackages(t *testing.T) {
 	files, err := filepath.Glob("*.go")
 	if err != nil || len(files) == 0 {
@@ -1279,15 +1319,12 @@ func TestConnstats_ImportsOnlyAllowedPackages(t *testing.T) {
 			continue
 		}
 		checked++
-		file, err := parser.ParseFile(token.NewFileSet(), name, nil, parser.ImportsOnly)
+		file, err := parser.ParseFile(token.NewFileSet(), name, nil, 0)
 		if err != nil {
 			t.Fatalf("parsing %s: %v", name, err)
 		}
-		for _, imp := range file.Imports {
-			path, err := strconv.Unquote(imp.Path.Value)
-			if err != nil || !slices.Contains(allowedImports, path) {
-				t.Errorf("%s imports %s, want only %v", name, imp.Path.Value, allowedImports)
-			}
+		for _, v := range append(disallowedImports(name, file), disallowedSelectors(name, file)...) {
+			t.Error(v)
 		}
 	}
 	if checked < 4 {
@@ -1512,5 +1549,20 @@ func TestEntrySize_RefusesWhatCannotBeEncoded(t *testing.T) {
 	}
 	if n, ok := entrySize(model.StateCount{Proto: model.ProtoTCP, State: "LISTEN", Count: 1}); !ok || n < 10 {
 		t.Errorf("entrySize(state) = %d, %v, want its encoded size", n, ok)
+	}
+}
+
+func TestDisallowedSelectors_ReportsEverySelectorOutsideTheAllowList(t *testing.T) {
+	src := "package p\n\nimport (\n\t\"os\"\n\t\"syscall\"\n)\n\nvar _ = os.DirFS\nvar _ = os.Open\nvar _ = syscall.EACCES\n"
+	file, err := parser.ParseFile(token.NewFileSet(), "p.go", src, 0)
+	if err != nil {
+		t.Fatalf("parsing the sample: %v", err)
+	}
+
+	got := disallowedSelectors("p.go", file)
+
+	want := []string{"p.go: os.Open is not allowed", "p.go: syscall.EACCES is not allowed"}
+	if !slices.Equal(got, want) {
+		t.Errorf("disallowedSelectors() = %q, want %q", got, want)
 	}
 }
