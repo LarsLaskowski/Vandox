@@ -113,6 +113,13 @@ func allKindRecords(loc *time.Location) []model.Record {
 			Listeners:            []model.Listener{{Proto: model.ProtoTCP, Local: netip.MustParseAddrPort("0.0.0.0:22")}},
 			NewListeners:         []model.Listener{{Proto: model.ProtoTCP, Local: netip.MustParseAddrPort("0.0.0.0:23")}},
 		}},
+		{Meta: agentMeta(11, "connections", loc), Data: &model.ConnectionSnapshot{
+			Complete:      true,
+			ListenerCheck: model.ListenerCheckStart,
+			Inventory:     model.InventoryPrivileged,
+			Tables:        []model.Proto{model.ProtoTCP, model.ProtoUDP6},
+			Listeners:     []model.Listener{{Proto: model.ProtoTCP, Local: netip.MustParseAddrPort("0.0.0.0:22"), PID: 1, Command: "sshd"}},
+		}},
 	}
 }
 
