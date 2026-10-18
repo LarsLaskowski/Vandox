@@ -15,14 +15,29 @@ const (
 	ProtoUDP6 Proto = "udp6"
 )
 
+// ListenerCheck says how far the listener inventory was compared with the previous run.
+type ListenerCheck string
+
+// Listener checks.
+const (
+	ListenerCheckAll        ListenerCheck = "all"
+	ListenerCheckPrivileged ListenerCheck = "privileged"
+	ListenerCheckNone       ListenerCheck = "none"
+)
+
 // ConnectionSnapshot is the socket overview at one moment.
 type ConnectionSnapshot struct {
-	Complete    bool                 `json:"complete"`
-	States      []StateCount         `json:"states,omitempty"`
-	Processes   []ProcessConnections `json:"processes,omitempty"`
-	Remotes     []RemoteCount        `json:"remotes,omitempty"`
-	Listeners   []Listener           `json:"listeners,omitempty"`
-	Connections []Connection         `json:"connections,omitempty"`
+	Complete             bool                 `json:"complete"`
+	AggregatesOnly       bool                 `json:"aggregates_only,omitempty"`
+	AggregatesIncomplete bool                 `json:"aggregates_incomplete,omitempty"`
+	ListenerCheck        ListenerCheck        `json:"listener_check,omitempty"`
+	States               []StateCount         `json:"states,omitempty"`
+	Processes            []ProcessConnections `json:"processes,omitempty"`
+	Remotes              []RemoteCount        `json:"remotes,omitempty"`
+	Listeners            []Listener           `json:"listeners,omitempty"`
+	Connections          []Connection         `json:"connections,omitempty"`
+	NewListeners         []Listener           `json:"new_listeners,omitempty"`
+	NewListenersOmitted  uint32               `json:"new_listeners_omitted,omitempty"`
 }
 
 // StateCount counts sockets per protocol and state.

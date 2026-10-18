@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/LarsLaskowski/Vandox/internal/config"
+	"github.com/LarsLaskowski/Vandox/internal/connstats"
 	"github.com/LarsLaskowski/Vandox/internal/procstats"
 	"github.com/LarsLaskowski/Vandox/internal/scheduler"
 	"github.com/LarsLaskowski/Vandox/internal/sdnotify"
@@ -42,6 +43,13 @@ const (
 	ProcessesTimeout          = 10 * time.Second
 )
 
+// Schedules of the connection collector.
+const (
+	ConnectionsInterval         = 60 * time.Second
+	ConnectionsPressureInterval = 15 * time.Second
+	ConnectionsTimeout          = 10 * time.Second
+)
+
 // Options are the process boundaries Run works with.
 type Options struct {
 	ConfigPath string            // the configuration file
@@ -51,6 +59,8 @@ type Options struct {
 	Self       selfstats.Sources // the self-metrics sources; zero fields take their defaults
 	System     sysstats.Sources  // the system metrics sources; zero fields take their defaults
 	Processes  procstats.Sources // the process sources; zero fields take their defaults
+	// Connections are the connection sources; zero fields take their defaults.
+	Connections connstats.Sources
 }
 
 // Run runs the agent until ctx is done and returns the exit code: 0 after a clean stop, 1 when it cannot start.
@@ -168,4 +178,9 @@ func notification(environ []string, log *slog.Logger) (*sdnotify.Notifier, time.
 		log.Warn("watchdog disabled", "err", err)
 	}
 	return notify, interval
+}
+
+// connectionSources returns src with the socket mount filled by probe, which runs only when src.SocketMount is zero.
+func connectionSources(src connstats.Sources, probe func() (int32, error)) connstats.Sources {
+	return src
 }

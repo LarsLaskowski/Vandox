@@ -14,7 +14,7 @@ import (
 // Format version written by this package.
 const (
 	MajorVersion = 1
-	MinorVersion = 0
+	MinorVersion = 1
 )
 
 // Mode is a hint whether a batch carries current or backfilled records.

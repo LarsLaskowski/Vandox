@@ -69,6 +69,41 @@ public sealed class ConnectionSnapshot : IPayload
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public List<Connection>? Connections { get; set; }
 
+    /// <summary>
+    /// Gets or sets a value indicating whether the snapshot holds the aggregates only.
+    /// </summary>
+    [JsonPropertyName("aggregates_only")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool AggregatesOnly { get; set; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether the aggregates are incomplete.
+    /// </summary>
+    [JsonPropertyName("aggregates_incomplete")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool AggregatesIncomplete { get; set; }
+
+    /// <summary>
+    /// Gets or sets how far the listener inventory was compared with the previous run.
+    /// </summary>
+    [JsonPropertyName("listener_check")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ListenerCheck { get; set; }
+
+    /// <summary>
+    /// Gets or sets the listeners that appeared since the previous run.
+    /// </summary>
+    [JsonPropertyName("new_listeners")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<Listener>? NewListeners { get; set; }
+
+    /// <summary>
+    /// Gets or sets the number of new listeners that were left out of the list.
+    /// </summary>
+    [JsonPropertyName("new_listeners_omitted")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public uint NewListenersOmitted { get; set; }
+
     #endregion // Properties
 
     #region Methods

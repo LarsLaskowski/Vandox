@@ -19,7 +19,7 @@ public static partial class WireFormat
     /// <summary>
     /// Minor version of the format this build knows.
     /// </summary>
-    public const int MinorVersion = 0;
+    public const int MinorVersion = 1;
 
     /// <summary>
     /// Mode of a batch that carries current records.
