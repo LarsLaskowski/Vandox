@@ -140,4 +140,5 @@ once in the [area document](../areas/README.md) of the record's area, and the re
 | 0111 | System metrics: three collectors read /proc, /sys, statfs and adjtimex; missing pressure data is logged once and never recorded as zero | Accepted | 2026-10-17 |
 | 0112 | gosec G115 as the local stand-in for CodeQL's integer-conversion query; enabled for the whole module, no exclusions | Accepted | 2026-10-17 |
 | 0113 | Process collector: PSS from smaps_rollup, top processes by memory and CPU with every program summed, a full snapshot under memory pressure that the system collector switches | Accepted | 2026-10-17 |
+| 0114 | The Go model measures text limits as the encoder writes them, invalid UTF-8 counted as its replacement | Proposed | 2026-10-18 |
 <!-- project:end index -->
