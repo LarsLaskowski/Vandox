@@ -30,6 +30,7 @@ internal sealed class BatchWriter : IDisposable
     private readonly ArrayBufferWriter<byte> _labelBuffer = new();
     private readonly Utf8JsonWriter _labelWriter;
     private readonly TemplateTally _tally;
+    private readonly ListenerMarkWriter _listeners;
 
     #endregion // Fields
 
@@ -59,6 +60,7 @@ internal sealed class BatchWriter : IDisposable
         _logFtsValues = Bind(_logFts, "$id", "$message");
         _labelWriter = new Utf8JsonWriter(_labelBuffer);
         _tally = new TemplateTally(connection, transaction);
+        _listeners = new ListenerMarkWriter(connection, transaction);
     }
 
     #endregion // Constructors
@@ -133,6 +135,18 @@ internal sealed class BatchWriter : IDisposable
     {
         _tally.Write(cancellationToken);
     }
+
+    /// <summary>
+    /// Writes the comparisons of the agent starts affected by the snapshots written so far.
+    /// </summary>
+    /// <param name="cancellationToken">Cancels the write</param>
+#pragma warning disable S2325, CA1822
+    internal void WriteListenerComparisons(CancellationToken cancellationToken)
+    {
+        // Skeleton stub: a throwing body would fail every stored batch of the existing tests.
+        cancellationToken.ThrowIfCancellationRequested();
+    }
+#pragma warning restore S2325, CA1822
 
     /// <summary>
     /// Serializes labels into a reused buffer and writer.
@@ -252,6 +266,7 @@ internal sealed class BatchWriter : IDisposable
         _logFts.Dispose();
         _labelWriter.Dispose();
         _tally.Dispose();
+        _listeners.Dispose();
     }
 
     #endregion // IDisposable

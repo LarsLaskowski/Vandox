@@ -10,7 +10,7 @@ namespace Vandox.Storage;
 /// bounded number of query-only readers, so a committed batch is durable and reads (and the health check) do not wait for
 /// a write.
 /// </summary>
-public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, ILogTemplateReader, ILogExplorer, IIncidentStore, IIncidentBrowser, IImportTracker, IAsyncDisposable
+public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, ILogTemplateReader, ILogExplorer, IIncidentStore, IIncidentBrowser, IListenerHistoryReader, IImportTracker, IAsyncDisposable
 {
     #region Constants
 
@@ -465,6 +465,7 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
             var stored = batch.Records.Count(record => writer.Write(batch, record, cancellationToken));
 
             writer.WriteTemplates(cancellationToken);
+            writer.WriteListenerComparisons(cancellationToken);
 
             await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
 
@@ -799,6 +800,28 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
     }
 
     #endregion // IIncidentBrowser
+
+    #region IListenerHistoryReader
+
+#pragma warning disable RH2003
+
+    /// <inheritdoc />
+    public Task<ListenerTallyPage> ListenerTalliesAsync(CancellationToken cancellationToken)
+    {
+        throw new NotImplementedException();
+    }
+
+    /// <inheritdoc />
+    public Task<ListenerFindingPage> ListenerFindingsAsync(ListenerFindingQuery query, CancellationToken cancellationToken)
+    {
+        ListenerQueries.Validate(query);
+
+        throw new NotImplementedException();
+    }
+
+#pragma warning restore RH2003
+
+    #endregion // IListenerHistoryReader
 
     #region IImportTracker
 
