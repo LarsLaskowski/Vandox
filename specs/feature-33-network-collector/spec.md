@@ -13,14 +13,17 @@ when the data matters (record 0019). `vandox-agent` (#30, closed) already replac
 collector (#32); the `lsof` half has no replacement, so v0.2.0 cannot retire the script (#45) and the operator has no record of how
 many connections were open per state, which process held them, which remote addresses dominated, and which ports the server listened
 on. A port that starts listening without the operator's doing (a forgotten service, a compromised account) goes unnoticed today, and
-when memory runs short the operator has no full list of who was connected at that moment.
+when memory runs short the operator has no full list of who was connected at that moment. This feature reports a new listener that
+the agent sees appear while it runs; one that appears while the agent is stopped, or while a local user floods the inventory, is a
+stated residual (E14, E19).
 
 ## Scenarios
 
-Terms used below: a **socket** is a line of the kernel's tables `/proc/net/tcp`, `tcp6`, `udp` and `udp6` of the agent's network
-namespace. A **listener** is a TCP socket in state `LISTEN` or a UDP socket without a remote endpoint (remote address all zeros and
+Terms used below: a **socket** is one line of the kernel's tables `/proc/net/tcp`, `tcp6`, `udp` and `udp6` of the agent's network
+namespace; two lines are two sockets, also when they share an inode number of 0 (`TIME_WAIT`, `SYN_RECV`), and such a line never
+matches a file descriptor. A **listener** is a TCP socket in state `LISTEN` or a UDP socket without a remote endpoint (remote address all zeros and
 port 0); a **connection** is a socket with a remote endpoint. The **owner** of a socket is a process that holds it among its file
-descriptors (`/proc/<pid>/fd`). A **regular** snapshot carries the aggregates and the listener inventory; a **full** snapshot carries,
+descriptors (`/proc/<pid>/fd`), matched by the socket's inode number when it is not 0. A **regular** snapshot carries the aggregates and the listener inventory; a **full** snapshot carries,
 in addition, every connection and every remote address. Records are those of the [wire format](../../docs/areas/wire-format.md)
 (`connection_snapshot`); the collector is named `connections` and its records carry the source `connections`.
 
@@ -33,15 +36,19 @@ in addition, every connection and every remote address. Records are those of the
   `remotes` — the 25 remote addresses with the most connections (address only, as the model counts them), by count descending then
   address;
   `listeners` — the listener inventory: one entry per protocol, local address and port, with the PID and `command` of its owner when
-  one is known, by protocol, address, port;
+  one is known; the listeners on ports 1 to 1023 (which only a privileged process can bind) first, then the others, each part by
+  protocol, address, port;
   no `connections` list. A reader of the record can tell that it is a regular snapshot and whether its aggregates (`states`,
-  `processes`, `listeners`) cover every socket the run saw.
+  `processes`, `listeners`) cover every socket the run saw. `complete` keeps its wire-format meaning, so a regular snapshot is never
+  complete; the two facts are separate additive fields, whose absence reads as "full, aggregates complete", which is what an imported
+  legacy snapshot and an older agent's snapshot are.
 - S2: (baseline at start) Given the agent has just started, when the collector runs for the first time, then it records a full
   snapshot (S4) and reports no listener as new: the inventory of that run is the baseline later runs are compared with.
 - S3: (new listener) Given the last successful run's inventory had no `tcp` listener on `0.0.0.0:4444`, when a run finds one, then
   that run reports it as a **new listener** — protocol `tcp`, local address `0.0.0.0`, port 4444, the PID and `command` of its owner
   when known, and the capture time of the run's start — in a record the backend stores, and the run records a full snapshot (S4)
-  instead of a regular one, so the connections at the moment the port opened are kept.
+  instead of a regular one, so the connections at the moment the port opened are kept. Every snapshot states which comparison its run
+  made: full, privileged ports only, or none (E19).
 - S4: (full snapshot under memory pressure) Given the `system` collector has switched the memory pressure mode on (Agent area,
   *Memory pressure mode*), when the collector runs (every 15 seconds while the mode is on), then every run records a full snapshot:
   everything of S1, `remotes` with every remote address, and `connections` with every connection (protocol, local endpoint, remote
@@ -57,10 +64,13 @@ in addition, every connection and every remote address. Records are those of the
 
 ## Errors and edge cases
 
-- E1: (no capability, `hidepid`) Given the agent lacks the capabilities, or `/proc` is mounted with `hidepid`, when the collector runs,
-  then the sockets of processes whose descriptors it cannot read carry no owner, the sample still succeeds, and the agent logs one
-  warning `socket owners partly unknown` with `collector=connections` and `processes` (the number of processes whose descriptors could
-  not be read) when that number becomes positive, and one info line `socket owners known again` when it returns to 0.
+- E1: (no capability, `hidepid=1`) Given the agent lacks the capabilities, or `/proc` is mounted with `hidepid=1` (`noaccess`) and the
+  agent lacks `CAP_SYS_PTRACE`, when the collector runs, then the sockets of processes whose descriptors it cannot read carry no
+  owner, the sample still succeeds, and the agent logs one warning `socket owners partly unknown` with `collector=connections` and
+  `processes` (the number of listed processes whose descriptors could not be read) when that number becomes positive, and one info line
+  `socket owners known again` when it returns to 0. With `hidepid=2` (`invisible`) and without `CAP_SYS_PTRACE`, other users' processes
+  are not listed at all, so their sockets carry no owner **without a warning** (stated residual). With `CAP_SYS_PTRACE`, `hidepid` hides
+  nothing from the agent (the kernel's `hidepid` check is the ptrace read check; to be measured with AC5).
 - E2: (IPv6 tables missing) Given a kernel without IPv6 or booted with `ipv6.disable=1`, so `/proc/net/tcp6` and `/proc/net/udp6` do
   not exist (observed on the development host), when the collector runs, then the snapshot holds the IPv4 sockets only, nothing of
   `tcp6`/`udp6` is written as 0, and the sample succeeds; the agent logs one info line `socket tables unavailable` with `tables` (the
@@ -98,14 +108,20 @@ in addition, every connection and every remote address. Records are those of the
 - E11: (listener that disappears and returns) Given a listener that is missing in one successful run and present in the next, when the
   next run finds it, then it is reported as new again. A failed run (a gap) is not compared: the next successful run is compared with
   the last successful one. A change of owner on the same protocol, address and port is not a new listener.
-- E12: (flood of new listeners) Given a local user who opens hundreds of new listeners between two runs, when the collector runs, then
-  at most 64 of them are reported individually (in inventory order), and the run's records state how many more were new; the
-  inventory holds them up to its cap (E5).
-- E13: (ephemeral UDP ports) Given an unconnected UDP socket on a port in the kernel's local port range (`net.ipv4.ip_local_port_range`,
-  32768–60999 by default; a resolver's or client's temporary socket), when it first appears, then it is in the inventory but is not
-  reported as a new listener. A TCP listener is reported whatever its port.
-- E14: (agent restart) Given a listener that opened while the agent was stopped, when the agent starts again, then its first run is the
-  baseline (S2) and does not report that listener as new; the inventories before and after the restart are both stored.
+- E12: (flood of new listeners below the cap) Given a local user who opens hundreds of new listeners between two runs and the
+  inventory stays within its cap, when the collector runs, then at most 64 of them are reported individually (in inventory order) and
+  the run's records state how many more were new. A user who opens and closes listeners every interval thus costs one full snapshot
+  per run (one a minute, 4 a minute under pressure, when every run is full anyway), within the record and spool bounds.
+- E13: (ephemeral UDP ports) Given an unconnected UDP socket on a port from 32768 to 60999 (the kernel's default local port range,
+  fixed in the agent and not read from the server; a resolver's or client's temporary socket), when it first appears, then it is in the
+  inventory but is not reported as a new listener. A TCP listener is reported whatever its port, so short-lived TCP listeners in that
+  range — an FTP data connection in passive mode (ProFTPD on Plesk without `PassivePorts`), which opens a listener for each transfer —
+  are reported when a run happens to see one; how often that happens is measured in the parallel run of #45. A server whose local port
+  range differs gets reports for UDP sockets outside the fixed range.
+- E14: (agent restart) Given a listener that opened while the agent was stopped (an update, a crash, a reboot with a service that
+  starts at boot), when the agent starts again, then its first run is the baseline (S2) and does not report that listener as new; the
+  inventories before and after the restart are both stored, and no component compares them yet (stated residual; follow-up issue for
+  the backend's comparison across agent restarts).
 - E15: (mode switch during a run) Given the memory pressure mode switches while a run is in progress, when the run records its
   snapshot, then the run is regular or full according to the mode at its start (Agent area, *Scheduling*).
 - E16: (record too large) Given a snapshot whose encoded record would exceed the wire format's line limit (1 MiB), when the collector
@@ -113,11 +129,24 @@ in addition, every connection and every remote address. Records are those of the
   fails the sample.
 - E17: (IPv6 forms) Given a dual-stack listener on `::` and IPv4 peers connected to it, when the collector runs, then the listener is one
   `tcp6` listener on `::` and those peers appear as IPv4-mapped IPv6 addresses (`::ffff:a.b.c.d`) in `tcp6` connections and in
-  `remotes`, as the kernel reports them and as `lsof` printed them; link-local addresses are kept without a zone (wire format,
+  `remotes`, as the kernel reports them; `remotes` does not unmap them, so one IPv4 peer connected both to a `0.0.0.0` and to a `::`
+  listener is two remote entries (stated for the comparison of #45). Link-local addresses are kept without a zone (wire format,
   *Producer mapping for connection endpoints*).
 - E18: (other network namespaces) Given containers with network namespaces of their own on the server, when the collector runs, then
-  their sockets are not in the tables the agent reads and are not reported; descriptors of host processes that point to such sockets
-  are not counted.
+  their sockets are not in the tables the agent reads and are not reported; a descriptor that points to a socket not in the four
+  tables (another namespace, a Unix domain socket) is not counted in `processes` and makes its process no owner of anything.
+- E19: (inventory not complete) Given an inventory that is not complete in the current or the last successful run, when the run
+  compares them, then:
+  - when a run left a table line out (E3) or the two runs read different sets of tables (E2), no comparison is made: nothing is reported
+    as new and no full snapshot is taken for it;
+  - when both runs read the same tables without a line left out but at least one inventory was cut at its cap of 4,096 (E5), only the
+    listeners on ports 1 to 1023 are compared: they come first in the inventory, so a flood of unprivileged listeners never cuts them
+    (should the privileged part itself be cut, no comparison is made);
+  - otherwise the whole inventory is compared (E11, E12).
+  The comparison basis is the last successful run's inventory as recorded, so its memory is bounded by the cap. Every snapshot says
+  which comparison its run made (S3). A local user who keeps more than 4,096 listeners open (about 4,100 TCP listeners on unprivileged
+  ports suffice) thus hides new listeners on ports from 1024 up for as long as the flood lasts, which the snapshots show as "privileged
+  ports only" (stated residual); the flood alone causes no report and no full snapshot.
 
 ## Non-functional requirements
 
@@ -127,8 +156,9 @@ in addition, every connection and every remote address. Records are those of the
   reads to derive a `command` (`stat`, `cmdline`), through the replaceable file-system interface (Agent area, *Collecting*). It starts no
   program, opens no socket (no netlink socket diagnostics) and makes no raw system call.
 - **Rights:** no right beyond the two capabilities the Agent area already names; the collector works without them as E1 describes. The
-  rights the collector needs are listed and justified in `deploy/agent/README.md`; the unit must not give the agent a network namespace
-  of its own (`PrivateNetwork=` stays off), which the Agent area states.
+  rights the collector needs are listed and justified in `deploy/agent/README.md`. This feature adds to the Agent area (*Rights*) that
+  the unit, still to be written, must not give the agent a network namespace of its own (no `PrivateNetwork=`, no
+  `NetworkNamespacePath=`), must not set `ProcSubset=pid` (it hides `/proc/net`) and must leave `ProtectProc=` at `default`.
 - **Memory and time:** "never make the memory situation worse" (issue): the memory one run allocates has a fixed upper bound that does
   not depend on the number of sockets or descriptors beyond the caps of E5, stated in the Agent area and asserted by a test; tables and
   descriptor directories are read in bounded pieces, never whole. The time of a run over a stated number of sockets and processes is
@@ -139,7 +169,11 @@ in addition, every connection and every remote address. Records are those of the
   version, wire format *Versioning*), and the backend reads the new minor before agents send it. The backend's existing readers of
   connection snapshots — the incident's connection peak and the *Connections* chart of the incident page — read the agent's snapshots as
   they read imported ones. The agent counts sockets without an owner (`TIME_WAIT`, S6) that `lsof -ni` never listed, so its
-  totals are higher than the legacy log's at the same moment; the Agent area states this for the comparison of #45.
+  totals are higher than the legacy log's at the same moment; the Agent area states this for the comparison of #45. When one incident
+  window holds snapshots of both sources (the legacy log imported for the time of the parallel run of #45), the connection peak is
+  taken over all of them (`IncidentReconstructor`), so the agent's higher totals win it, while the *Connections* chart shows only the
+  source of the earliest snapshot (`IncidentWindowReader.FindSourceAsync`). This is accepted: both sources describe the same server and
+  the peak names its record; the Detection area states it.
 - **Configuration:** none new.
 - **Logs:** only the lines named in E1, E2 and E3, each once per change, with `collector=connections`; no per-run line, no line per new
   listener, no process text and no address in any line.
@@ -151,17 +185,22 @@ in addition, every connection and every remote address. Records are those of the
 - [ ] AC1: a run with the memory pressure mode off, after the first run and without a new listener, records exactly one
   `connection_snapshot` with source `connections` and the run's start as capture time, holding `states`, `processes`, the top 25
   `remotes` and `listeners` as S1 defines them, in the stated orders, and no `connections`; a reader can tell from the record that it
-  is regular and whether its aggregates cover every socket the run saw (S1, E9, E10, E17).
+  is regular and whether its aggregates cover every socket the run saw, `complete` is false, and a snapshot without the new fields
+  (an imported one) reads as full with complete aggregates (S1, E9, E10, E17).
 - [ ] AC2: every run with the memory pressure mode on, the first run after the agent starts and every run that reports a new listener
   records a full snapshot with every remote address and every connection; a reader can tell from the record that it is full; the mode
   at the run's start decides (S2, S3, S4, E15).
 - [ ] AC3: a listener absent from the last successful run's inventory and present in the current one is reported as new with protocol,
   local address, port, owner PID and `command` when known and the run's start time, in a record the backend's decoder accepts; the
-  first run after the start reports none; a failed run is not compared; an unconnected UDP socket on a port of the local port range is
-  not reported; at most 64 are reported per run, with the number of the rest (S2, S3, E11, E12, E13, E14).
+  first run after the start reports none; a failed run is not compared; an unconnected UDP socket on a port from 32768 to 60999 is
+  not reported; at most 64 are reported per run, with the number of the rest; every snapshot states the comparison its run made
+  (S2, S3, E11, E12, E13, E14).
+- [ ] AC12: with an inventory over its cap in the current or last run, only listeners on ports 1 to 1023 are compared and the snapshot
+  says so, so 4,100 unprivileged listeners held open across runs give no report and no full snapshot while a new privileged listener is
+  still reported; with a line left out or a different set of tables in either run, nothing is compared or reported (E19).
 - [ ] AC4: sockets without an owner count in `states`, `remotes` and `connections` without PID and `command` and are not in
-  `processes`; a socket held by several processes counts once, owned by the lowest PID, and once per holder in `processes` (S6, E8,
-  E9).
+  `processes`; several lines with inode 0 are several sockets; a socket held by several processes counts once, owned by the lowest
+  PID, and once per holder in `processes`; a descriptor of a socket not in the four tables counts nowhere (S6, E8, E9, E18).
 - [ ] AC5: running as a user other than the sockets' owners with exactly `CAP_SYS_PTRACE` and `CAP_DAC_READ_SEARCH`, the collector
   finds the owner of another user's socket, measured on a host, and the measurement with what each capability is needed for is
   recorded in the Agent area and `deploy/agent/README.md`; without them the sockets of unreadable processes carry no owner, the sample
@@ -192,7 +231,10 @@ in addition, every connection and every remote address. Records are those of the
   to the alerting milestones (#56, #57).
 - **Using the new data in the backend** (a view of connections or listeners, the new listeners in an incident's timeline, alerts on
   them): the backend reads agent events from #53 on and has no ingest before #40; this feature only makes the records storable.
-- **Unix domain sockets, raw sockets and sockets of other network namespaces** (E18): `lsof -ni` listed none of them either.
+- **Unix domain sockets, raw sockets and sockets of other network namespaces**: `lsof -ni` listed none of them either (E18 says how
+  their descriptors are treated).
+- **Comparing inventories across agent restarts** (E14): a backend task; follow-up issue.
+- **Changing the incident's connection peak to one source**: the mixed-source peak is accepted (*Compatibility*).
 - **Other connection anomalies as triggers** (a sudden rise in connections, a state count above a threshold): no threshold is known
   before the parallel run of #45; the regular snapshot's `states` already show such a rise.
 - **Per-port remote statistics:** `remotes` counts per address, as the model and the legacy parser do.
@@ -236,6 +278,45 @@ in addition, every connection and every remote address. Records are those of the
 - [Wire format](../../docs/areas/wire-format.md): *`connection_snapshot`* — how a reader tells a regular from a full snapshot and
   whether the aggregates are complete, and how a new listener is reported (a new kind or field, with the minor version);
   *Producer mapping for connection endpoints* — the mapping from the kernel's tables.
-- [Detection, alerts and reports](../../docs/areas/detection-and-reports.md): only if the plan finds that the connection peak or the
-  chart must treat regular agent snapshots differently from imported ones.
+- [Agent](../../docs/areas/agent.md) also: the residuals of E1 (`hidepid=2`), E14 (restart) and E19 (flood) and the unit settings of
+  *Rights* (`PrivateNetwork=`, `ProcSubset=`, `ProtectProc=`).
+- [Detection, alerts and reports](../../docs/areas/detection-and-reports.md): the connection peak is taken over the snapshots of every
+  source in the window, so agent snapshots (with ownerless sockets) win it against imported ones; and whether the peak or the chart
+  must treat regular agent snapshots differently.
 - `deploy/agent/README.md` (not an area document): the capabilities of the collector `connections`, each with its read.
+
+## Challenge
+
+Devil's Advocate, spec challenge: 1 major, 10 minor. All accepted; none narrows the scope beyond the residuals named.
+
+- M1 (E5, E11 and E12 contradict each other above 4,096 listeners) — accepted. New E19 states the rule for an inventory that is not
+  complete: no comparison after a left-out line or a changed set of tables; only ports 1 to 1023 compared when an inventory was cut at
+  the cap; the whole inventory otherwise. The inventory now lists privileged ports first, so an unprivileged flood cannot cut them, and
+  the comparison basis is the recorded inventory, bounded by the cap. Every snapshot says which comparison was made (S3). The cost of a
+  flood is stated: above the cap no report and no full snapshot, with new unprivileged listeners hidden for its duration (residual, also
+  in *Problem*); below the cap at most one full snapshot per run (E12). New AC12 tests the case together with the cap.
+- Minor 1 (keep `complete`) — accepted. S1 and AC1: `complete` keeps its meaning (a regular snapshot is never complete); "regular or
+  full" and "aggregates complete" are separate additive fields whose absence reads as full with complete aggregates, which describes
+  imported and older snapshots correctly.
+- Minor 2 (port-range file, TCP noise) — accepted. E13 uses the fixed default range 32768–60999 and reads no sysctl, so the read list
+  is unchanged; a server with another range is named, and the expected noise of passive-mode FTP listeners is stated for #45.
+- Minor 3 (E18 has no criterion) — accepted: AC4 covers a descriptor of a socket outside the four tables.
+- Minor 4 (socket identity) — accepted: a socket is one table line; lines with inode 0 are never merged and never match a descriptor
+  (*Scenarios*, terms; AC4).
+- Minor 5 (E1 and `hidepid=2`) — accepted with the second option: E1 now covers a missing capability and `hidepid=1`; `hidepid=2`
+  without `CAP_SYS_PTRACE` loses owners without a warning, a stated residual; with the capability `hidepid` hides nothing (kernel
+  source, measured with AC5). Counting ownerless sockets with an inode was rejected: a process that ends during the run leaves such
+  sockets on every busy run, so the warning would flap.
+- Minor 6 (the Agent area does not say it) — accepted: *Rights* in the non-functional requirements now makes the unit rules an Agent area
+  change of this feature: no own network namespace, no `ProcSubset=pid`, `ProtectProc=default`.
+- Minor 7 (`lsof` claim, mapped addresses) — accepted: "as `lsof` printed them" dropped; `remotes` keeps mapped addresses as the
+  kernel reports them, and the resulting split of one peer into two entries is stated for #45 (E17).
+- Minor 8 (two sources in one incident window) — accepted as stated behavior: verified in `IncidentReconstructor.cs` (the peak pages
+  every connection snapshot of the window, no source filter) and `IncidentWindowReader.cs` (`FindSourceAsync`, the chart takes the
+  earliest snapshot's source). The mixed-source peak is accepted and documented (*Compatibility*, Detection area); changing it is out of
+  scope.
+- Minor 9 (restart baseline) — accepted: E14 names the residual (update, crash, reboot), *Problem* no longer promises more, the Agent
+  area states it, and a follow-up issue for the backend's comparison across restarts is requested (*Out of scope*).
+- Minor 10 (no real table sample) — accepted for the plan: the plan names real captured samples of all four tables, IPv6 from a host
+  that has it, and escalates for them if none can be captured; the spec states no format detail that rests on a sample.
+
