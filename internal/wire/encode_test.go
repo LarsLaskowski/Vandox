@@ -709,6 +709,35 @@ func messageRecord(message string) model.Record {
 	return model.Record{Meta: agentMeta(1, "journal", time.UTC), Data: &model.LogLine{Log: "journal", Message: message}}
 }
 
+// roundTripMessage encodes r in a batch, decodes it and returns the message of the only record.
+func roundTripMessage(t *testing.T, r model.Record) string {
+	t.Helper()
+	b := &wire.Batch{Header: wire.NewHeader("agent-1", testBootID, wire.ModeLive), Records: []model.Record{r}}
+	_, recs := decodeBatch(t, encodeBytes(t, b))
+	if len(recs) != 1 {
+		t.Fatalf("decoded %d records, want 1", len(recs))
+	}
+	line, ok := recs[0].Data.(*model.LogLine)
+	if !ok {
+		t.Fatalf("decoded payload = %#v, want a log line", recs[0].Data)
+	}
+	return line.Message
+}
+
+// requireDecodedWithinLimit checks a decoded message against the limit and the replacements the form makes.
+func requireDecodedWithinLimit(t *testing.T, message string, replaced int) {
+	t.Helper()
+	if len(message) != model.MaxTextBytes {
+		t.Errorf("decoded message length = %d, want %d", len(message), model.MaxTextBytes)
+	}
+	if !utf8.ValidString(message) {
+		t.Errorf("decoded message is not valid UTF-8")
+	}
+	if got := strings.Count(message, "\ufffd"); got != replaced {
+		t.Errorf("decoded message holds %d U+FFFD, want %d", got, replaced)
+	}
+}
+
 func TestCheckRecord_InvalidUTF8AtTheLimitDecodesWithinTheLimit(t *testing.T) {
 	for _, form := range invalidTextForms() {
 		t.Run(form.name, func(t *testing.T) {
@@ -720,24 +749,7 @@ func TestCheckRecord_InvalidUTF8AtTheLimitDecodesWithinTheLimit(t *testing.T) {
 			if _, err := wire.CheckRecord(&r); err != nil {
 				t.Fatalf("CheckRecord() = %v, want nil", err)
 			}
-			b := &wire.Batch{Header: wire.NewHeader("agent-1", testBootID, wire.ModeLive), Records: []model.Record{r}}
-			_, recs := decodeBatch(t, encodeBytes(t, b))
-			if len(recs) != 1 {
-				t.Fatalf("decoded %d records, want 1", len(recs))
-			}
-			line, ok := recs[0].Data.(*model.LogLine)
-			if !ok {
-				t.Fatalf("decoded payload = %#v, want a log line", recs[0].Data)
-			}
-			if len(line.Message) != model.MaxTextBytes {
-				t.Errorf("decoded message length = %d, want %d", len(line.Message), model.MaxTextBytes)
-			}
-			if !utf8.ValidString(line.Message) {
-				t.Errorf("decoded message is not valid UTF-8")
-			}
-			if got := strings.Count(line.Message, "�"); got != form.replaced {
-				t.Errorf("decoded message holds %d U+FFFD, want %d", got, form.replaced)
-			}
+			requireDecodedWithinLimit(t, roundTripMessage(t, r), form.replaced)
 		})
 	}
 }
