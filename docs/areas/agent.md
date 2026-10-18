@@ -449,9 +449,9 @@ there.
 
 **Bounded memory.** The live data of a run is bounded by the caps: the inode index of 65,536 sockets (two 32-bit numbers each for owner and
 last counting PID), two heaps of 4,096 entries and 4,096 remote counts. Measured by `TestConnections_ManySocketsStayWithinCaps` on Go 1.27
-(Xeon 2.1 GHz, an in-memory file system) at two sizes of each axis: the live data is 3.04 MB at 100,000 table lines and 3.18 MB at 400,000, and 0.71 MB at
-50,000 and 200,000 descriptors of one process, so it does not grow with the input beyond the caps; the peak with the inode index alive is about
-5.5 MB. The **garbage** does grow: reading a table line leaves none (0 B per extra line), reading a descriptor through `io/fs` allocates a fixed
+(Xeon 2.1 GHz, an in-memory file system) at two sizes of each axis: the live data at the run's peak (the inode index and the owner map alive) is 5.5 MB at
+100,000 table lines and 4.8 MB at 400,000, and 0.75 MB at 50,000 and 200,000 descriptors of one process, so it does not grow with the input
+beyond the caps. The **garbage** does grow: reading a table line leaves none (0 B per extra line), reading a descriptor through `io/fs` allocates a fixed
 amount (about 170 B per extra descriptor, the test's generated file system included), and a run that reaches the caps allocates a fixed
 about 24.7 MB more (about 9 MB of it the growth of the 65,536-entry index map), all reclaimed by the garbage collector. The 24.7 MB is
 accepted; the live figure, not the garbage, is the bound.
