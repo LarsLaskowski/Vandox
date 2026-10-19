@@ -45,11 +45,17 @@ memory situation worse.
   collector is due, then it runs every 10 seconds instead of every 30, so a service that fails under pressure is seen
   within 10 seconds.
 - S8: Given a unit whose state does not change for days, when one hour has passed since its last record, then the next
-  run records it again with its unchanged state, so every hour of collected data holds the state of every tracked unit.
+  run records it again with its unchanged state, so a unit's records are at most one hour plus one interval apart while
+  the collector succeeds (an incident window shorter than that, `incidents.window_before` below about 61 minutes, may hold
+  no record of a quiet unit).
 - S9: Given `services: {units: []}`, when the agent starts, then the collector `systemd` does not run, records nothing,
   logs no warning and the agent does not connect to the system bus.
 - S10: Given the agent is restarted, when the first run after the start succeeds, then every tracked unit is recorded
   again, as in S1, and the missing-unit warning of S5 is logged again.
+- S11: Given a sample of the collector `systemd` was lost — the run failed, timed out, was abandoned or skipped while an
+  earlier run was stuck, or the sink refused its records — when the next run succeeds, then it records every tracked unit
+  again, as after a start (S1), so a change seen only by the lost sample is never missing from the record (the
+  missing-unit warning is not repeated).
 
 ## Errors and edge cases
 
@@ -68,18 +74,25 @@ memory situation worse.
 - E3: systemd or the bus daemon does not answer (stalled under memory pressure): the run is abandoned at its 5-second
   timeout, recorded as a gap with cause `collector_timeout`, not started again while it is stuck, and no other
   collector, the watchdog aside as *Scheduling* describes, is held up.
-- E4: A run that sees a change but ends after its deadline (its result becomes a gap) does not count the change as
-  recorded: the next run in time records it.
+- E4: A run that sees a change but ends after its deadline (its result becomes a gap), or whose records the sink
+  refuses: the collector cannot tell from inside the run whether its result was kept (it races the deadline, and
+  `scheduler.Run` carries only `Start` and `Pressure`), so the scheduler tells the next run that the previous sample of
+  this collector was lost, and that run records every tracked unit (S11).
 - E5: systemd reports a value the wire format refuses for one unit (an `active_state` or `load_state` a newer systemd
-  adds, a `sub_state` with characters outside `[a-z0-9-]` or longer than 64 bytes): that unit's record is left out, the
-  other units' records of the run are kept, the run records one gap with cause `unknown` and collector `systemd`, one
-  warning `systemd unit state not recorded` (`unit`, `err` with a fixed reason) is logged at the first such run and an
-  info line `systemd unit state recorded again` when the unit is recorded again. The unit counts as not recorded, so
+  adds, a `sub_state` with characters outside `[a-z0-9-]` or longer than 64 bytes): the collector checks every unit's
+  record against the model's rules itself, before it returns the run's records, so the scheduler never sees a refused
+  record and never logs `record refused` for it. That unit's record is left out, the other units' records of the run are
+  kept, the collector returns one gap with cause `unknown` and collector `systemd` with them, one warning `systemd unit
+  state not recorded` (`unit`, `field`: the field's name) is logged at the first such run and an info line `systemd unit
+  state recorded again` when the unit is recorded again. The validation error's text, which may quote the value, is
+  never logged. The unit counts as not recorded, so
   each such run is a gap. An `active_enter_at` that is 0 (never active) or outside the storable range (after
   2262-04-11) is left out as unknown, never clamped, and fails nothing.
-- E6: Patterns match more than 256 units in total (for example `*`): the 256 first tracked units, exact names first in
-  file order, then matches in name order, are tracked; the rest are not, and one warning `systemd units cut`
-  (`collector=systemd`, `left_out=<n>`) is logged once per agent run.
+- E6: Patterns match more than 256 units in total (for example `*`): the first run tracks the exact names first in file
+  order, then the matches in name order, up to 256 units. A unit once tracked is never dropped for a later match, even one
+  whose name sorts before it; while 256 units are tracked a new match is not tracked and counts as left out. The warning
+  `systemd units cut` (`collector=systemd`, `left_out=<n>`: the matches not tracked in that run) is logged once per agent
+  run, at the first run that leaves a match out, and not again.
 - E7: A pattern matches a unit whose name the wire format refuses (systemd's `\x2d` escapes): it is not tracked, and one
   warning `systemd units not tracked` (`count=<n>`) is logged once per agent run without the name.
 - E8: The bus delivers messages the agent did not ask for (any local user may send a signal to the agent's bus
@@ -122,6 +135,13 @@ memory situation worse.
 - **Logs.** Only fixed texts and counts, through the collector's logger with `collector=systemd`; unit names only as
   attribute values and only names that passed the configuration or wire rules; no line per run and no line per state
   change; no text a reply carries beyond a unit name and the fixed reasons.
+- **Scheduler.** S11 needs a change of the scheduler (`internal/scheduler`): a run must learn whether the previous
+  sample of its collector was lost (a gap of any cause, or records the sink refused), for example a field of `Run` or a
+  confirmation of accepted results; the plan picks it and records it against record 0110, which it extends. The existing
+  collectors ignore it.
+- **Test data.** The D-Bus replies are an external format: the plan builds the decoder from real systemd 249 replies
+  under `testdata/` (`ListUnitsByPatterns`, `LoadUnit`, `Properties.GetAll` of a loaded, a not-found and a masked unit,
+  and an unsolicited signal), and the tests read them.
 - **Compatibility.** Ubuntu 22.04 with systemd 249 on the server; the wire format stays 1.1 (the `service_state` fields
   are unchanged); Linux only.
 
@@ -134,8 +154,8 @@ memory situation worse.
   names the key path and the reason and never the value (E1).
 - [ ] AC3: The first successful run after the agent starts records one `service_state` record per tracked unit, with
   source `systemd`, the capture time of the run's start, the unit's primary name, `load_state`, `active_state`,
-  `sub_state`, `active_enter_at` (left out when 0 or not storable) and `restarts`; masked, bad-setting and error units
-  included (S1, S10, E10, E12).
+  `sub_state`, `active_enter_at` (left out when 0 or not storable) and `restarts` (systemd's `NRestarts` as reported, 0
+  for a not-found or masked unit); masked, bad-setting and error units included (S1, S10, E10, E12).
 - [ ] AC4: A later run records a unit only when its `load_state`, `active_state`, `sub_state`, `active_enter_at` or
   `restarts` differs from the unit's last recorded state, or when its last record is at least one hour old (S2, S3, S8,
   E11, E13).
@@ -148,10 +168,12 @@ memory situation worse.
 - [ ] AC7: A bus that cannot be reached, fails or exceeds the reply bound makes the run a gap with cause `unknown`, and
   a bus that does not answer makes it a gap with cause `collector_timeout` without holding up any other collector; the
   next run after the bus returns connects anew and records (E2, E3, E8, E9).
-- [ ] AC8: A run whose result arrives after its deadline does not change the last recorded state of any unit, so the
-  next run in time records the change (E4).
-- [ ] AC9: A unit whose state the wire format refuses is left out of the run with one gap with cause `unknown` per such
-  run and the warning and recovery lines of E5, while the run's other records are kept (E5).
+- [ ] AC8: After any lost sample of the collector `systemd` (a failed, timed-out, abandoned or skipped run, or records
+  the sink refused) the next successful run records every tracked unit, without repeating the missing-unit warning; the
+  scheduler tells the run so, and the other collectors behave as before (S11, E4).
+- [ ] AC9: A unit whose state the model's rules refuse is left out of the run by the collector itself, which returns
+  one gap with cause `unknown` per such run and logs the warning and recovery lines of E5 without the validation error's
+  text, while the run's other records are kept and the scheduler logs no `record refused` (E5).
 - [ ] AC10: The collector runs every 30 seconds with a 5-second timeout and every 10 seconds under memory pressure (S7).
 - [ ] AC11: The collector only calls systemd's read methods on the system bus, starts no program and discards messages
   it did not ask for without keeping them, so a flood of unsolicited signals does not grow the agent's memory (E8).
@@ -186,8 +208,9 @@ memory situation worse.
   loaded; the default holds `plesk-php*-fpm` and `php*-fpm`.
 - Does an entry need the `.service` suffix? Answered: no; as `systemctl` does, an entry without a unit type suffix gets
   `.service` (the suffix after the last dot decides: `php8.1-fpm` becomes `php8.1-fpm.service`); other unit types are
-  refused because only services have `NRestarts`, and a `restarts` of 0 for them would break the wire format's rule
-  that an unknown value is left out, never 0.
+  refused because only services have `NRestarts` and the issue is about services. `restarts` is a required field
+  (`internal/model/service.go`, no `omitempty`), so a not-found or masked service is recorded with the 0 systemd reports
+  for it.
 - What is a "missing unit"? Answered: an exact entry for which systemd reports `load_state` `not-found`; a pattern
   that matches nothing is not one, and masked or broken units are recorded, not warned about. "One warning" is one line
   naming every missing unit, logged at the first successful run after the start.
@@ -195,6 +218,8 @@ memory situation worse.
   properties and load a unit's state, which is why `systemctl show` and `systemctl status` work for an unprivileged
   user; the plan checks this against systemd 249's policy file and records it, and a right found to be needed would
   make it a `security`-tier escalation.
+- Is there a real sample of the D-Bus replies? Answered: not yet; the plan captures real systemd 249 replies into
+  `testdata/` (see *Non-functional requirements*, *Test data*) or escalates for one.
 - Does #30 provide what the collector plugs into? Answered: yes, #30 is closed: the scheduler with per-collector
   interval, timeout, pressure interval and gaps exists (`internal/scheduler`), and the agent builds the job list in
   `internal/agent`.
@@ -209,4 +234,27 @@ memory situation worse.
 - [Configuration and secrets](../../docs/areas/configuration-and-secrets.md): the option `services.units` with its
   default, the suffix and pattern rules and the error texts of E1.
 - [Wire format](../../docs/areas/wire-format.md): the producer of `service_state` (source `systemd`, a record per
-  change, the first run and the hourly repeat; `active_enter_at` left out when unknown).
+  change, the first run, the first run after a lost sample and the hourly repeat; `active_enter_at` left out when
+  unknown).
+- Not area documents, but changed with them: `deploy/agent/README.md` (rights per collector: the `systemd` collector
+  needs no group and no capability, only `AF_UNIX` and the system bus socket reachable from the unit) and
+  `deploy/agent/agent.yaml` (a commented `services:` section with `units` at its default).
+
+## Challenge
+
+- M1 (record-on-change loses changes with lost samples): accepted. Confirmed in the code: a timed-out run's result is
+  dropped (`internal/scheduler/runner.go` 185-187, 204-214), a failed run becomes a gap (233-237), and `Run` carries only
+  `Start` and `Pressure` (`scheduler.go` 23-26), so the collector cannot know. Added S11; E4 and AC8 rewritten: after any
+  lost sample, sink refusals included, the next successful run records every unit; the *Scheduler* requirement assigns
+  the scheduler change to the plan, recorded against record 0110.
+- Minor 1 (E5 against the scheduler's `record refused` log per run): accepted. The collector validates every unit
+  itself, leaves the unit out, returns the gap itself and logs only the field name, never the validation text (E5, AC9).
+- Minor 2 (install files): accepted. `deploy/agent/README.md` and `deploy/agent/agent.yaml` added under *Area
+  documents*.
+- Minor 3 (no real D-Bus sample): accepted. *Test data* requirement and an open question added; the plan names the
+  captured replies or escalates.
+- Minor 4 (`restarts` cannot be left out): accepted. AC3 and the open-question answer state `NRestarts` as reported, 0
+  for not-found and masked units, and the reason for services only no longer rests on the unknown-versus-zero rule.
+- Minor 5 (cap order, hourly wording): accepted. E6 states that tracked units are never dropped, a new match beyond
+  the cap counts as left out and the warning is logged once per agent run; S8 now says records are at most one hour
+  plus one interval apart, and that a shorter incident window may hold no record of a quiet unit.
