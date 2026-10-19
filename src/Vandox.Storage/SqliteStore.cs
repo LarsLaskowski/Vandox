@@ -10,7 +10,7 @@ namespace Vandox.Storage;
 /// bounded number of query-only readers, so a committed batch is durable and reads (and the health check) do not wait for
 /// a write.
 /// </summary>
-public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, ILogTemplateReader, ILogExplorer, IIncidentStore, IIncidentBrowser, IImportTracker, IAsyncDisposable
+public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, ILogTemplateReader, ILogExplorer, IIncidentStore, IIncidentBrowser, IListenerHistoryReader, IImportTracker, IAsyncDisposable
 {
     #region Constants
 
@@ -35,6 +35,11 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
     /// The operation named in the error of an incident read.
     /// </summary>
     private const string IncidentsContext = "store: reading incidents";
+
+    /// <summary>
+    /// The operation named in the error of a listener read.
+    /// </summary>
+    private const string ListenersContext = "store: reading listener findings";
 
     private const string CommonPragmas = "PRAGMA busy_timeout=5000; PRAGMA foreign_keys=1; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;";
 
@@ -465,6 +470,7 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
             var stored = batch.Records.Count(record => writer.Write(batch, record, cancellationToken));
 
             writer.WriteTemplates(cancellationToken);
+            writer.WriteListenerComparisons(cancellationToken);
 
             await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
 
@@ -799,6 +805,24 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
     }
 
     #endregion // IIncidentBrowser
+
+    #region IListenerHistoryReader
+
+    /// <inheritdoc />
+    public Task<ListenerTallyPage> ListenerTalliesAsync(CancellationToken cancellationToken)
+    {
+        return ReadAsync(connection => ListenerQueries.ReadTalliesAsync(connection, cancellationToken), ListenersContext, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public Task<ListenerFindingPage> ListenerFindingsAsync(ListenerFindingQuery query, CancellationToken cancellationToken)
+    {
+        ListenerQueries.Validate(query);
+
+        return ReadAsync(connection => ListenerQueries.ReadFindingsAsync(connection, query, cancellationToken), ListenersContext, cancellationToken);
+    }
+
+    #endregion // IListenerHistoryReader
 
     #region IImportTracker
 

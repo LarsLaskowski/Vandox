@@ -71,19 +71,67 @@ func TestCompare_NewListenerReported(t *testing.T) {
 	})
 }
 
-func TestCompare_BaselineReportsNone(t *testing.T) {
+func TestCompare_FirstRunReportsStart(t *testing.T) {
 	ssh := key(model.ProtoTCP, "0.0.0.0", 22)
 	backdoor := key(model.ProtoTCP, "0.0.0.0", 4444)
 
 	t.Run("no previous inventory", func(t *testing.T) {
-		checkCompare(t, nil, inv(ssh, backdoor), model.ListenerCheckNone, nil)
+		checkCompare(t, nil, inv(ssh, backdoor), model.ListenerCheckStart, nil)
 	})
 	t.Run("no previous inventory and an empty current one", func(t *testing.T) {
-		checkCompare(t, nil, inv(), model.ListenerCheckNone, nil)
+		checkCompare(t, nil, inv(), model.ListenerCheckStart, nil)
+	})
+	t.Run("no previous inventory and a skipped line", func(t *testing.T) {
+		cur := inv(ssh)
+		cur.skipped = true
+		checkCompare(t, nil, cur, model.ListenerCheckStart, nil)
 	})
 	t.Run("a previous inventory does compare", func(t *testing.T) {
 		checkCompare(t, inv(ssh), inv(ssh, backdoor), model.ListenerCheckAll, []listenerKey{backdoor})
 	})
+}
+
+func TestInventoryState(t *testing.T) {
+	ssh := key(model.ProtoTCP, "0.0.0.0", 22)
+	http := key(model.ProtoTCP, "0.0.0.0", 80)
+	alt := key(model.ProtoTCP, "0.0.0.0", 8080)
+	other := key(model.ProtoTCP, "0.0.0.0", 9090)
+	flags := func(i *inventory, cut, skipped bool) *inventory {
+		i.cut, i.skipped = cut, skipped
+		return i
+	}
+	cases := []struct {
+		name   string
+		inv    *inventory
+		listed int
+		want   model.InventoryState
+	}{
+		{"no cut, every key listed", inv(ssh, http, alt), 3, model.InventoryAll},
+		{"no cut and no listener", inv(), 0, model.InventoryAll},
+		{"no cut, only unprivileged keys, all listed", inv(alt, other), 2, model.InventoryAll},
+		{"inventory cut with unprivileged keys kept, all of them listed", flags(inv(ssh, http, alt), true, false), 3, model.InventoryPrivileged},
+		{"inventory cut with a whole privileged part and no more", flags(inv(ssh, http, alt), true, false), 2, model.InventoryPrivileged},
+		{"inventory cut before any privileged key", flags(inv(alt, other), true, false), 2, model.InventoryPrivileged},
+		{"size cut after the privileged part", inv(ssh, http, alt, other), 3, model.InventoryPrivileged},
+		{"size cut right after the privileged part", inv(ssh, http, alt, other), 2, model.InventoryPrivileged},
+		{"size cut of a list without privileged keys", inv(alt, other), 0, model.InventoryPrivileged},
+		{"size cut inside the privileged part", inv(ssh, http, alt, other), 1, model.InventoryCut},
+		{"size cut of every entry with privileged keys", inv(ssh, http, alt), 0, model.InventoryCut},
+		{"inventory cut inside the privileged part", flags(inv(ssh, http), true, false), 2, model.InventoryCut},
+		{"inventory cut inside the privileged part and the list cut", flags(inv(ssh, http), true, false), 1, model.InventoryCut},
+		{"a skipped line", flags(inv(ssh, http, alt), false, true), 3, model.InventorySkipped},
+		{"a skipped line and a cut inventory", flags(inv(ssh, http, alt), true, true), 3, model.InventorySkipped},
+		{"a skipped line and a cut inside the privileged part", flags(inv(ssh, http), true, true), 1, model.InventorySkipped},
+		{"a skipped line and a size cut", flags(inv(ssh, http, alt), false, true), 1, model.InventorySkipped},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := inventoryState(c.inv, c.listed); got != c.want {
+				t.Errorf("inventoryState(%d keys, cut %v, skipped %v, listed %d) = %q, want %q",
+					len(c.inv.keys), c.inv.cut, c.inv.skipped, c.listed, got, c.want)
+			}
+		})
+	}
 }
 
 func TestCompare_EphemeralUDPNotReported(t *testing.T) {
@@ -282,4 +330,25 @@ func TestCompare_CutPrivilegedPartComparesNothing(t *testing.T) {
 // portName writes a port for a subtest name.
 func portName(port uint16) string {
 	return strconv.Itoa(int(port))
+}
+
+func TestTableList(t *testing.T) {
+	cases := []struct {
+		name string
+		mask uint8
+		want []model.Proto
+	}{
+		{"all four tables in table order", allTables, []model.Proto{model.ProtoTCP, model.ProtoTCP6, model.ProtoUDP, model.ProtoUDP6}},
+		{"IPv6 tables missing", 0b0101, []model.Proto{model.ProtoTCP, model.ProtoUDP}},
+		{"IPv4 tables missing", 0b1010, []model.Proto{model.ProtoTCP6, model.ProtoUDP6}},
+		{"one table", 0b0100, []model.Proto{model.ProtoUDP}},
+		{"no table", 0, nil},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := tableList(c.mask); !slices.Equal(got, c.want) {
+				t.Errorf("tableList(%04b) = %v, want %v", c.mask, got, c.want)
+			}
+		})
+	}
 }

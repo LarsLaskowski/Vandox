@@ -68,6 +68,23 @@ first batch is about 250 ms slower than the later ones on the SSD (fresh file, s
 made no difference on the development host. The FTS5 remedy of record 0063 (option c) does not apply, because this measurement writes no log lines.
 The development-host rows are not the reference host.
 
+**Listener marks** ([0116](decisions/0116-listeners-across-agent-starts-compared-when-stored-and-shown-in-the-forensics-report.md)). The write path
+also inserts a row of `connection_marks` for each usable agent connection snapshot and, once per batch, computes the comparison of each agent start
+it affected. Measured on the development host (4 vCPU Intel Xeon 2.10 GHz, .NET 10, Debug build) through `SqliteStore.WriteBatchAsync` with the
+same five batches of 10,000 records, three runs before and after the change (ms per batch, run 1 / run 2 / run 3):
+
+| Batches | Before | After |
+| ------- | -----: | ----: |
+| 5 × 10,000 metric points (the case above) | 231 / 222 / 248 | 224 / 278 / 246 |
+| 5 × 10,000 usable snapshots of 12 listeners each | 392 / 410 / 451 | 431 / 445 / 463 |
+| a start stored first, then a 7-day backlog of snapshots in chronological batches of 1,008 (median per batch) | 36–37 | 35 / 47 / 47 |
+| the same, total of the 10 batches | 354–368 | 363 / 452 / 447 |
+
+A metric batch pays nothing for the marks, and a batch of usable snapshots pays one `connection_marks` insert and one index lookup of the next mark
+for each of them. A start stored before a backlog of its predecessors is not decoded per record: the backlog's batches decoded two payloads in all
+for the start (`ListenerMarkWriter.PayloadDecodes`, checked by a test). The programs of these runs were not kept in the repository; the first case is
+`WriteThroughputOfTenThousandMetricsPerBatch`. The reference host is not measured.
+
 ## Log templates
 
 Criterion ([0095](decisions/0095-log-templates-token-rules-statistics-in-the-write-path-usual-level-from-covered-hours.md), from issue #22):
@@ -335,3 +352,24 @@ go test ./internal/connstats -run '^$' -bench Collect -benchmem
 One measurement of the benchmark's own report, not a median of several. The file system is in memory, so the figure leaves out the kernel's cost to
 produce `fdinfo` files and to resolve a path in `/proc`; the value on the server (Ubuntu 22.04, kernel 5.15, 2 GB) is **not measured**: #44 measures it.
 The memory figures of a run (live data, garbage per line and per descriptor) are in the Agent area (*Connections*, **Bounded memory**).
+
+## Listener reads
+
+Criterion ([0116](decisions/0116-listeners-across-agent-starts-compared-when-stored-and-shown-in-the-forensics-report.md), issue #278): the section *New
+listeners* of the forensics report adds at most **5 seconds** to a run over a database with one more year of connection snapshots. It reads three
+queries of the derived tables (`SqliteStore.ListenerTalliesAsync` and `ListenerFindingsAsync` for each kind, limit 20) and decodes no payload.
+
+### Procedure
+
+A database written only through `SqliteStore.WriteBatchAsync`: one agent, 525,600 connection snapshots (one a minute for a year) in batches of 1,440,
+100 of them agent starts and 10,000 carrying agent findings (a new listener each), then the three reads, repeated for the cold and the warm
+case. The program that wrote the database and timed the reads is not kept in the repository.
+
+### Results
+
+| Host | CPU | Date | Database | Write | Tallies | Start findings (limit 20) | Agent findings (limit 20) | All three, first run |
+| ---- | --- | ---- | -------: | ----: | ------: | ------------------------: | ------------------------: | -------------------: |
+| development host (4 vCPU, sandbox, Debug build) | Intel Xeon 2.10 GHz | 2026-10-18 | 762 MiB | 19.6 s | 101–155 ms (first run 124 ms) | 9 ms cold, then 1–2 ms | 3 ms cold, then 1–2 ms | **136 ms** |
+
+The reads are far below the 5 seconds. The Debug build and the development host make the figure an order of magnitude, not a value for the
+reference host; the counts of the tallies are the slowest read because they group every mark of the agent. The reference host is not measured.

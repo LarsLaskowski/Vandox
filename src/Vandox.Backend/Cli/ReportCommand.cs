@@ -50,7 +50,7 @@ internal static class ReportCommand
     {
         logger.ReportStarted();
 
-        var reporter = new ForensicsReporter(store, store, BuiltInSignatures.Catalog, config.Incidents.GetWindowBefore(), clock);
+        var reporter = new ForensicsReporter(store, store, store, BuiltInSignatures.Catalog, config.Incidents.GetWindowBefore(), clock);
 
         try
         {

@@ -36,6 +36,7 @@ public sealed class ForensicsReporter
 
     private readonly IRecordReader _records;
     private readonly IIncidentStore _incidents;
+    private readonly IListenerHistoryReader _listeners;
     private readonly SignatureCatalog _catalog;
     private readonly TimeSpan _lookback;
     private readonly TimeProvider _clock;
@@ -49,18 +50,21 @@ public sealed class ForensicsReporter
     /// </summary>
     /// <param name="records">The reader of stored records</param>
     /// <param name="incidents">The incident store</param>
+    /// <param name="listeners">The reader of the stored listener comparisons</param>
     /// <param name="catalog">The signature catalog</param>
     /// <param name="lookback">The lookback before an outage</param>
     /// <param name="clock">The clock that stamps the report</param>
-    public ForensicsReporter(IRecordReader records, IIncidentStore incidents, SignatureCatalog catalog, TimeSpan lookback, TimeProvider clock)
+    public ForensicsReporter(IRecordReader records, IIncidentStore incidents, IListenerHistoryReader listeners, SignatureCatalog catalog, TimeSpan lookback, TimeProvider clock)
     {
         ArgumentNullException.ThrowIfNull(records);
         ArgumentNullException.ThrowIfNull(incidents);
+        ArgumentNullException.ThrowIfNull(listeners);
         ArgumentNullException.ThrowIfNull(catalog);
         ArgumentNullException.ThrowIfNull(clock);
 
         _records = records;
         _incidents = incidents;
+        _listeners = listeners;
         _catalog = catalog;
         _lookback = lookback;
         _clock = clock;
@@ -98,11 +102,47 @@ public sealed class ForensicsReporter
 
         var summary = analysis.Summarize(_clock.GetUtcNow());
 
+        summary.Listeners = await ReadListenersAsync(cancellationToken).ConfigureAwait(false);
+
         await writer.WriteSummaryAsync(summary).ConfigureAwait(false);
         result.IncidentsListed = await PageIncidentsAsync(stored => writer.WriteIncidentAsync(stored, analysis.Activities(stored.Incident)), cancellationToken).ConfigureAwait(false);
         await writer.WriteNotesAsync(summary, result.IncidentsListed).ConfigureAwait(false);
 
         return result;
+    }
+
+    /// <summary>
+    /// Reads the listener section: the counts of the agents once and the latest findings of each kind once.
+    /// </summary>
+    /// <param name="cancellationToken">The cancellation token</param>
+    /// <returns>The section</returns>
+    private async Task<ListenerReport> ReadListenersAsync(CancellationToken cancellationToken)
+    {
+        var tallies = await _listeners.ListenerTalliesAsync(cancellationToken).ConfigureAwait(false);
+        var starts = await _listeners.ListenerFindingsAsync(new ListenerFindingQuery
+                                                            {
+                                                                Kind = ListenerFindingKind.AgentStart,
+                                                                Limit = ListenerReport.MaxFindings
+                                                            },
+                                                            cancellationToken)
+                                     .ConfigureAwait(false);
+        var found = await _listeners.ListenerFindingsAsync(new ListenerFindingQuery
+                                                           {
+                                                               Kind = ListenerFindingKind.Agent,
+                                                               Limit = ListenerReport.MaxFindings
+                                                           },
+                                                           cancellationToken)
+                                    .ConfigureAwait(false);
+
+        return new ListenerReport
+               {
+                   Agents = tallies.Agents,
+                   AgentsOmitted = tallies.Omitted,
+                   StartFindings = starts.Findings,
+                   StartFindingsTotal = starts.Total,
+                   AgentFindings = found.Findings,
+                   AgentFindingsTotal = found.Total
+               };
     }
 
     /// <summary>

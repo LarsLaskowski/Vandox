@@ -14,6 +14,8 @@ public sealed class ReportService : IDisposable
 
     private readonly IIncidentStore _incidents;
 
+    private readonly IListenerHistoryReader _listeners;
+
     private readonly SignatureCatalog _catalog;
 
     private readonly TimeSpan _lookback;
@@ -31,18 +33,21 @@ public sealed class ReportService : IDisposable
     /// </summary>
     /// <param name="records">The reader of stored records</param>
     /// <param name="incidents">The incident store</param>
+    /// <param name="listeners">The reader of the stored listener comparisons</param>
     /// <param name="catalog">The signature catalog</param>
     /// <param name="lookback">The lookback before an outage</param>
     /// <param name="clock">The clock that stamps the report</param>
-    public ReportService(IRecordReader records, IIncidentStore incidents, SignatureCatalog catalog, TimeSpan lookback, TimeProvider clock)
+    public ReportService(IRecordReader records, IIncidentStore incidents, IListenerHistoryReader listeners, SignatureCatalog catalog, TimeSpan lookback, TimeProvider clock)
     {
         ArgumentNullException.ThrowIfNull(records);
         ArgumentNullException.ThrowIfNull(incidents);
+        ArgumentNullException.ThrowIfNull(listeners);
         ArgumentNullException.ThrowIfNull(catalog);
         ArgumentNullException.ThrowIfNull(clock);
 
         _records = records;
         _incidents = incidents;
+        _listeners = listeners;
         _catalog = catalog;
         _lookback = lookback;
         _clock = clock;
@@ -66,7 +71,7 @@ public sealed class ReportService : IDisposable
 
         try
         {
-            var reporter = new ForensicsReporter(_records, _incidents, _catalog, _lookback, _clock);
+            var reporter = new ForensicsReporter(_records, _incidents, _listeners, _catalog, _lookback, _clock);
 
             return await reporter.RunAsync(writer, cancellationToken).ConfigureAwait(false);
         }

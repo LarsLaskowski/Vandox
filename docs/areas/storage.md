@@ -33,7 +33,7 @@ readable by the next, whichever language implements it, so the schema below is p
 
 ## Schema
 
-The schema version is stored in `meta.schema_version`; the current version is 10 (step 10 adds the table `incident_notes` with its index, empty; step 9 adds the table `incidents` with its index, empty; step 8 adds the tables `log_templates`,
+The schema version is stored in `meta.schema_version`; the current version is 11 (step 11 adds the tables `connection_marks` and `listener_comparisons` with their indexes, empty, so agent connection snapshots stored before it have no rows there; step 10 adds the table `incident_notes` with its index, empty; step 9 adds the table `incidents` with its index, empty; step 8 adds the tables `log_templates`,
 `log_template_hours` and `log_source_hours` with their indexes, empty, so log lines stored before it have no template statistics until `vandoxd templates` rebuilds them; step 7 adds `import_files.attempt`, `INTEGER NOT NULL DEFAULT 0`, and `import_files.hashes_attempt`, `INTEGER`, and the table `import_line_hashes`, so existing rows get attempt 0 and no line hashes; step 6 adds `import_files.head_sha256`, `continues_id` and `start_offset` and the index `import_files_head`; step 5 adds `log_lines.event`, `TEXT NOT NULL DEFAULT ''`, so lines stored before it get an empty event; step 4 adds `log_lines.host`, `TEXT NOT NULL DEFAULT ''`, so lines stored before it get an empty host). Times are Unix nanoseconds in `INTEGER` columns.
 All tables are `STRICT`.
 
@@ -50,11 +50,13 @@ All tables are `STRICT`.
 | `log_source_hours` | `source`, `hour`, `count` (the stored log lines of the source in that hour, at least 1); primary key `(source, hour)`, without row ID |
 | `incidents` | one row per incident: `id` (`AUTOINCREMENT`, so a number that was merged away is never given again), `started_at` and `ended_at` (the window, `ended_at > started_at`), `first_kill_at`, `kill_count` (at least 1), `created_at`, `updated_at` and `data` (the incident as JSON, at most 8,388,608 UTF-8 bytes) |
 | `incident_notes` | the notes of the incidents: `written_for` (the incident number the note was written for, the primary key; numbers are never reused), `incident_id` (the incident the note belongs to now, a foreign key to `incidents(id)` with no `ON DELETE` action, so a delete of an incident that still has notes fails), `text` (`CHECK (length(CAST(text AS BLOB)) BETWEEN 1 AND 5400)`: 1 to 5,400 UTF-8 bytes, the size of 1,800 UTF-16 characters at most, counted in bytes because SQLite's `length()` of a text stops at the first U+0000) and `updated_at` |
+| `connection_marks` | derived rows, one per usable agent connection snapshot: `record_id` (the primary key, a foreign key to `records(id)`), `agent_id`, `seq`, `captured_at`, `listener_check` (`all`, `privileged`, `none` or `start`), `new_count` (`CHECK (new_count >= 0)`: the new listeners the agent reported, listed and omitted together; 0 unless the check is `all` or `privileged`) and `new_listeners` (the first 64 listed entries as a JSON array, `NULL` when `new_count` is 0) |
+| `listener_comparisons` | derived rows, one per usable agent snapshot with `listener_check` `start`: `record_id` (the start's record, the primary key, a foreign key to `records(id)`), `agent_id`, `seq`, `captured_at`, `base_record_id`, `base_seq` and `base_captured_at` (the agent's previous mark by `seq`, `NULL` when there is none), `outcome` (text: `no_earlier`, `not_comparable`, `privileged_incomplete`, `all_ports` or `privileged_only`), `new_count` (the listeners found new, listed and omitted together), `new_listeners` (the first 64 as a JSON array, `NULL` when `new_count` is 0) and `finding` (`CHECK (finding IN (0, 1))`: 1 when `new_count` is above 0 or the outcome says the start was not compared) |
 | `import_line_hashes` | rows of line hashes of an imported content: `file_id`, `attempt`, `first_offset`, `last_offset` and `hashes` (a blob of 16-byte entries, 1 to 4,096, in ascending order of their line ends); the primary key `(file_id, attempt, last_offset)` is its index |
 
 Indexes: a unique index on `records(agent_id, seq)` for origin `agent`; `records(kind, source, captured_at)`;
 `records(kind, captured_at)`; `metrics(source, name, captured_at)`; `import_files(head_sha256, source_type, size)` for complete rows with a head key (`import_files_head`);
-`log_templates(source, first_seen)` (`log_templates_source_first_seen`); `log_template_hours(hour)` (`log_template_hours_hour`); `incidents(started_at)` (`incidents_started_at`); `incident_notes(incident_id, written_for)` (`incident_notes_incident`).
+`log_templates(source, first_seen)` (`log_templates_source_first_seen`); `log_template_hours(hour)` (`log_template_hours_hour`); `incidents(started_at)` (`incidents_started_at`); `incident_notes(incident_id, written_for)` (`incident_notes_incident`); `connection_marks(agent_id, seq)`, unique (`connection_marks_agent_seq`, which serves the lookup of an agent's previous and next mark by `seq`); `connection_marks(captured_at DESC, agent_id, seq DESC)` where `new_count > 0` (`connection_marks_findings`); `listener_comparisons(captured_at DESC, agent_id, seq DESC)` where `finding = 1` (`listener_comparisons_findings`).
 
 - `agent_id`, `seq`, `boot_id` and `clock_offset_ns` are `NULL` when absent (`seq` for any origin other than `agent`). `source` and
   `captured_at` of a metric are copied from `records`, so one index serves a time series in order.
@@ -101,6 +103,21 @@ Indexes: a unique index on `records(agent_id, seq)` for origin `agent`; `records
   runs one statement per template, template hour and source hour it touches; a batch without log lines runs none. A record that is not
   stored (a duplicate) is not counted. The template tables are written only by this path and the rebuild below; code that deletes log lines leaves them
   unchanged.
+- **Listener marks and comparisons** (record 0116): a record of origin `agent`, source `connections`, with an agent ID in its batch and a
+  connection snapshot that carries `listener_check`, `inventory` and at least one table is **usable**; any other record writes nothing of
+  this. Right after the `records` insert of a usable snapshot returned an ID (a duplicate, which returns none, writes nothing, so a resent batch
+  changes nothing), in the same transaction, the write path inserts its row of `connection_marks`. The new listeners are stored cut to the first
+  64 (the wire allows 4,096), and `new_count` counts the listed and the omitted ones (the agent's `new_listeners_omitted` plus the entries cut), so
+  a read tells how many were left out. A mark of `listener_check` `start` is an **affected start**, and so is the agent's next mark by `seq` when it is a
+  start (a snapshot stored later below a stored start changes what that start is compared with). The comparison of each affected start is
+  computed **once per batch**, after the last record and before the commit, next to the template statistics: it reads the start's predecessor
+  mark by `seq` (never by capture time), decodes the predecessor's and the start's stored payloads (two decodes per start, however many records
+  of the batch lie below it), compares them with `ListenerComparer` ([Detection, alerts and reports](detection-and-reports.md), *New
+  listeners*) and inserts or replaces the start's row of `listener_comparisons`. Without a predecessor the outcome is `no_earlier`; a payload that is
+  missing or does not decode makes the outcome `not_comparable` and never fails the batch, so a resend is never refused for it. The rows of a
+  batch therefore equal the rows of the same records stored in any order or batches. The rows of `listener_comparisons` are the only rows the
+  write path ever updates; a `records` row never is. The decode count of a batch is checked by a test (`PayloadDecodes`). The throughput effect is
+  in `docs/BENCHMARKS.md` (*Storage write throughput*).
 - **Template rebuild** (`vandoxd templates`, `SqliteStore.RebuildTemplatesAsync`): a clear transaction empties the three template tables
   (hours first), writes the run marker (the row `template_rebuild` of `meta`, 32 random hexadecimal characters) and reads the
   high-water ID (the highest record ID), then the stored log lines up to it are counted in batches of at most 10,000 by record ID, one
@@ -190,7 +207,19 @@ Indexes: a unique index on `records(agent_id, seq)` for origin `agent`; `records
   (template of a line, hourly counts, new templates, templates above their usual level), with the same time range and limit rules,
   on a reader connection. The cost of the usual-level query is not bounded by its range or limit; a cancelled token or deadline interrupts it
   (*Database file and connections*; *Limits of templates* there).
-- Callers depend on small interfaces (record writer, record reader, log searcher, log explorer, log template reader, incident store, incident browser, import tracker). The real store is tested against
+- **Listener history** (`IListenerHistoryReader`, on the reader connections, narrow derived tables only, no payload decoded, the queries of one read on
+  one reader lease without a shared transaction, so a batch committed between them can make a total differ from the rows by that
+  batch): `ListenerTalliesAsync` returns, for the 64 lowest agent IDs of `connection_marks` (byte order of the text), the number of marks, the
+  first and last capture time and the number of starts per outcome (`Starts`, compared on all ports, compared on ports 1 to 1023 only, not
+  compared), and the number of further agent IDs (only counted when 64 were returned). `ListenerFindingsAsync` returns the latest `Limit` (1 to 20)
+  findings of one kind with the total of that kind: kind `AgentStart` reads the `listener_comparisons` rows with `finding = 1`, kind `Agent` the
+  `connection_marks` rows with `new_count > 0` (its outcome is the ports the agent compared: `all_ports` for `all`, else `privileged_only`).
+  Both order by capture time descending, then agent ID ascending, then `seq` descending, so the arrival order never matters (the capture time
+  decides which findings are the latest, and a clock that stepped back can keep an older one). A finding holds at most 64 listeners
+  and the number left out (`new_count` minus the listed). Exact errors: `store: invalid query: kind must be a known finding kind` and `limit must be
+  between 1 and 20`; a stored listener list that does not decode is `store: reading listener findings: decoding listeners`; an unknown stored
+  outcome reads as not comparable.
+- Callers depend on small interfaces (record writer, record reader, log searcher, log explorer, log template reader, incident store, incident browser, listener history reader, import tracker). The real store is tested against
   real files; a consumer whose behavior depends on the store's semantics (such as "a resent batch is stored once") is tested against
   the real store. Fakes for other consumers only record calls and return what the test scripts.
 
@@ -314,7 +343,7 @@ every log line of the range (the benchmark shows it).
 ## Retention (planned)
 
 Raw data is kept 30 days, 5-minute rollups 1 year, hourly rollups 3 years (the template statistics count as hourly rollups), incidents
-unlimited, logs 90 days, process and connection snapshots 30 days. Incidents are kept without limit, and an incident that no rebuilt one overlaps is kept as it is (*Incidents* in [Detection, alerts and reports](detection-and-reports.md)). Open limit for #46: once retention deletes lines, a re-run rebuilds an incident whose window lines have partly expired from what is left and replaces the richer stored one (fewer kills, a shorter timeline); retention must prevent that (keep the data of incident windows, or stop rebuilding incidents older than the log retention). Forged incidents (up to 8 MiB each) outlive the lines they came from, so retention must bound them, too. Open limit for #46: an incident with notes cannot be deleted (the foreign key of `incident_notes` has no cascade), so retention must move or keep the notes before it deletes an incident. Open limit for #46: a template rebuild counts only the lines still stored, so after retention it would lose the history of expired lines (retention must make the rebuild refuse or keep that history). Retention and rollups are the backend's own job and **are not implemented yet**; deleting log lines must also remove
+unlimited, logs 90 days, process and connection snapshots 30 days. Incidents are kept without limit, and an incident that no rebuilt one overlaps is kept as it is (*Incidents* in [Detection, alerts and reports](detection-and-reports.md)). Open limit for #46: once retention deletes lines, a re-run rebuilds an incident whose window lines have partly expired from what is left and replaces the richer stored one (fewer kills, a shorter timeline); retention must prevent that (keep the data of incident windows, or stop rebuilding incidents older than the log retention). Forged incidents (up to 8 MiB each) outlive the lines they came from, so retention must bound them, too. Open limit for #46: an incident with notes cannot be deleted (the foreign key of `incident_notes` has no cascade), so retention must move or keep the notes before it deletes an incident. The derived rows of `connection_marks` and `listener_comparisons` go with their records (their `record_id` is a foreign key without a cascade, so retention deletes them first); the comparison of a start whose predecessor was deleted would read `no_earlier` if it were recomputed, so retention must not recompute it. Open limit for #46: a template rebuild counts only the lines still stored, so after retention it would lose the history of expired lines (retention must make the rebuild refuse or keep that history). Retention and rollups are the backend's own job and **are not implemented yet**; deleting log lines must also remove
 their `log_fts` entries (the FTS5 `delete` command with the old message).
 
 ## Write throughput
@@ -338,6 +367,7 @@ weakened silently, and `synchronous=FULL` stays unless the Product Manager decid
 - [0097](../decisions/0097-reader-statements-interrupted-by-a-progress-handler-bound-to-the-token.md) — why a progress handler interrupts reader statements and why the interruption is an `OperationCanceledException`.
 - [0106](../decisions/0106-logs-view-address-as-the-view-bounded-search-pages-template-lines-by-normalization.md) — why the logs view's search chooses between the index and a bounded scan and finds a template's lines by normalizing candidates.
 - [0107](../decisions/0107-incidents-view-summaries-notes-per-incident-number-time-links-to-the-logs.md) — why notes are rows per incident number moved in the merge, and why the incidents view reads summaries.
+- [0116](../decisions/0116-listeners-across-agent-starts-compared-when-stored-and-shown-in-the-forensics-report.md) — why the write path stores a mark per agent connection snapshot and the comparison of each agent start, computed once per batch.
 
 ## Not here
 
@@ -347,4 +377,4 @@ weakened silently, and `synchronous=FULL` stays unless the Product Manager decid
 
 ## Implementation
 
-`Vandox.Storage` (`SqliteStore`, `SchemaMigrator`, `BatchWriter`, `BatchValidator`, `FtsQuery`, `TemplateTally`, `TemplateRebuilder`, `TemplateQueries`, `IncidentRepository`, `IncidentNoteRepository`, `ReaderQuery`, `LogFinder`, `LogFinderQueries`, `LogCriteria`, `LogFilterRules`, `LogExplorerQueries`, `TemplateTerms`, `StorageLimits`).
+`Vandox.Storage` (`SqliteStore`, `SchemaMigrator`, `BatchWriter`, `BatchValidator`, `FtsQuery`, `TemplateTally`, `TemplateRebuilder`, `ListenerMarkWriter`, `ListenerQueries`, `IListenerHistoryReader`, `TemplateQueries`, `IncidentRepository`, `IncidentNoteRepository`, `ReaderQuery`, `LogFinder`, `LogFinderQueries`, `LogCriteria`, `LogFilterRules`, `LogExplorerQueries`, `TemplateTerms`, `StorageLimits`).

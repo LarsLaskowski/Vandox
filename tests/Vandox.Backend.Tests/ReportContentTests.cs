@@ -7,6 +7,8 @@ using Microsoft.Extensions.Logging;
 
 using Vandox.Backend.Components.Reports;
 using Vandox.Backend.Reports;
+using Vandox.Core.Model;
+using Vandox.Core.Reports;
 
 using static Vandox.Backend.Tests.ReportSamples;
 
@@ -122,6 +124,101 @@ public class ReportContentTests
         Assert.AreEqual($"Backtick: {backtick}", pieces[3], "the backtick");
         Assert.AreEqual($"Long: {new string('a', 2048)}[cut: 952 more characters]", pieces[4], "the long text ends with the marker");
         Assert.AreEqual("Empty: " + (char)0x2014, pieces[5], "the empty text is the dash of the Markdown");
+    }
+
+    /// <summary>
+    /// The pieces of the listener section on the page, in order, are those of the Markdown for the same data and language: the head, the findings with their listeners and the notes of the caps.
+    /// </summary>
+    /// <param name="language">The language</param>
+    /// <param name="sample">The sample: the rich one, one in which every cap was hit, and one with a start that was not compared</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [DataRow("en", "rich")]
+    [DataRow("de", "rich")]
+    [DataRow("en", "capped")]
+    [DataRow("de", "capped")]
+    [DataRow("en", "uncompared")]
+    [DataRow("de", "uncompared")]
+    public async Task ReportContentShowsListenerSectionLikeTheMarkdown(string language, string sample)
+    {
+        // Arrange
+        var text = ReportText.For(language);
+
+        Assert.IsNotNull(text, "the language has a table");
+
+        var at = new DateTimeOffset(2026, 10, 5, 21, 0, 0, TimeSpan.Zero);
+        var summary = sample switch
+                      {
+                          "rich" => RichSummary(),
+                          "capped" => ListenerSummary(CappedListeners()),
+                          _ => ListenerSummary(Section(Tally("web-1", 50, at.AddDays(-4), at, 1, 0, 0, 1), [StartFinding("web-1", 9, at, ListenerOutcome.NotComparable, 0)], []))
+                      };
+        var markdown = new StringWriter();
+        var builder = new ReportViewBuilder(text, 0, ReportsView.PageOutages);
+
+        await WriteAsync(new MarkdownReportWriter(markdown, text), summary, []);
+        await WriteAsync(builder, summary, []);
+
+        // Act
+        var html = await RenderAsync(builder.Document);
+
+        // Assert
+        var expected = ReportPieces.FromMarkdown(markdown.ToString());
+        var actual = ReportPieces.FromHtml(html);
+        var heading = language == "en" ? "New listeners" : "Neue Listener";
+
+        Assert.Contains(heading, expected, "the Markdown has the section");
+        Assert.Contains(heading, actual, "the page has the section");
+        Assert.HasCount(expected.Count, actual, "the number of pieces");
+
+        for (var index = 0; index < expected.Count; index++)
+        {
+            Assert.AreEqual(expected[index], actual[index], $"piece {index} of the report in {language}, {sample}");
+        }
+    }
+
+    /// <summary>
+    /// The command of an owner and the agent ID appear on the page only as text inside a code element: markup is encoded, the right-to-left override is a visible escape and no element comes from the command.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task ReportContentShowsListenerCommandAsText()
+    {
+        // Arrange
+        const string agent = "web`1";
+
+        var command = "<b>x</b> ``` " + (char)0x202E + "\n";
+        var at = new DateTimeOffset(2026, 10, 1, 12, 0, 0, TimeSpan.Zero);
+        var summary = ListenerSummary(Section(Tally(agent, 3, at.AddDays(-1), at.AddDays(1), 1, 1, 0, 0),
+                                              [StartFinding(agent, 2, at, ListenerOutcome.AllPorts, 0, Entry(Proto.Tcp, "0.0.0.0", 23, 7, command))],
+                                              [AgentFinding(agent, 4, at.AddHours(2), ListenerOutcome.AllPorts, 0, Entry(Proto.Tcp, "0.0.0.0", 24, 8, command))]));
+        var builder = new ReportViewBuilder(ReportText.English, 0, ReportsView.PageOutages);
+
+        Assert.IsTrue(command.Contains((char)0x202E), "the command still holds the right-to-left override");
+
+        await WriteAsync(builder, summary, []);
+
+        // Act
+        var html = await RenderAsync(builder.Document);
+
+        // Assert
+        var pieces = ReportPieces.FromHtml(html);
+        var code = "<code><span class=\"external\">";
+
+        Assert.DoesNotContain("<b>", html, "no element from the command");
+        Assert.DoesNotContain("</b>", html, "no end tag from the command");
+        Assert.Contains(HtmlEncoder.Default.Encode("<b>x</b>"), html, "the markup of the command is encoded");
+        Assert.Contains($"<span class=\"escape\">{Backslash}u202e</span>", html, "the right-to-left override is a visible escape");
+
+        var start = html.IndexOf(">New listeners</h2>", StringComparison.Ordinal);
+        var end = start < 0 ? -1 : html.IndexOf(">Outages</h2>", start, StringComparison.Ordinal);
+
+        Assert.IsGreaterThan(-1, start, "the rendered page has the heading of the listener section");
+        Assert.IsGreaterThan(start, end, "the outages heading follows the listener section");
+        Assert.AreEqual(5, Count(html[start..end], code), "the agent ID in the head and in both findings, and the two commands, are code in the listener section");
+        Assert.AreEqual(Count(html, code), Count(html, "class=\"external\""), "external text is only ever inside a code element");
+        Assert.Contains($"tcp 0.0.0.0:23, PID 7 <b>x</b> ``` {Backslash}u202e", pieces, "the command is text on the page");
+        Assert.Contains($"2026-10-01 14:00 UTC, agent {agent}, found by the agent, all ports: 1 new", pieces, "the agent ID is text on the page");
     }
 
     /// <summary>

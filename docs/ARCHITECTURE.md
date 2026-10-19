@@ -136,7 +136,9 @@ Records: [0004](decisions/0004-own-project-instead-of-off-the-shelf-stack.md),
 ## Data flow
 
 The agent collects data and writes it to its spool, then sends it in batches over Tailscale to the ingest
-API. The backend stores the batches in SQLite; analysis, rules, the web UI and Telegram work from the stored
+API. The backend stores the batches in SQLite; when it stores an agent's connection snapshots it also compares the first one after
+an agent start with the agent's previous one, so a listener that opened while the agent was stopped is found
+([0116](decisions/0116-listeners-across-agent-starts-compared-when-stored-and-shown-in-the-forensics-report.md)). Analysis, rules, the web UI and Telegram work from the stored
 data. Detection, incident reconstruction and alerting are deterministic (rules, thresholds, log signatures);
 AI is optional and only used to write the nightly report, which is sent at 06:00, or as soon as the backfill
 has completed if the backend host was off at that time. The first release (v0.1.0) is the forensics release:
@@ -170,6 +172,7 @@ duplicating them. The rules are in [Detection, alerts and reports](areas/detecti
 
 The forensics report works on the stored data as well and stores nothing. `vandoxd report` reads every stored log line (observed
 hours and boots), every process snapshot (backups, panel memory, memory consumers) and every stored incident (twice, one at a time),
+and reads the stored listener comparisons (the new listeners after an agent start and the agent's own), without decoding a snapshot,
 keeps only capped series, compares the share of outages with a time of day, a backup, a boot or high panel memory against the share
 of observed hours with it, and writes the result in English or German as Markdown to standard output, all times in UTC; the web UI's
 report page runs the same passes and shows the same content. The rules
@@ -177,7 +180,8 @@ are in [Detection, alerts and reports](areas/detection-and-reports.md) (*Forensi
 ([0100](decisions/0100-forensics-report-as-markdown-from-vandoxd-report.md),
 [0101](decisions/0101-forensics-rules-share-of-outages-against-observed-hours-binomial-tail.md),
 [0102](decisions/0102-report-language-from-a-flag-english-default-text-tables-in-code.md),
-[0108](decisions/0108-report-page-one-block-model-outage-pages-by-rerun-language-in-the-address.md)).
+[0108](decisions/0108-report-page-one-block-model-outage-pages-by-rerun-language-in-the-address.md),
+[0116](decisions/0116-listeners-across-agent-starts-compared-when-stored-and-shown-in-the-forensics-report.md)).
 
 Records: [0006](decisions/0006-agent-connects-outbound-only.md),
 [0007](decisions/0007-sqlite-with-fts5-no-external-database.md),

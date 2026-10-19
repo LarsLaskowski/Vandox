@@ -2,6 +2,7 @@ using System.Text;
 
 using Vandox.Backend.Reports;
 using Vandox.Core.Incidents;
+using Vandox.Core.Model;
 using Vandox.Core.Reports;
 using Vandox.Storage;
 
@@ -16,6 +17,8 @@ namespace Vandox.Backend.Tests;
 public class MarkdownReportWriterTests
 {
     #region Constants
+
+    private const string Backslash = "\\";
 
     private static readonly string[] _caps = ["1000000", "10000", "100000", "4096"];
 
@@ -602,6 +605,346 @@ public class MarkdownReportWriterTests
         // Assert
         AssertAnyLine(output, text.Victims, text.Unknown);
         Assert.DoesNotContain("` mariadbd `", output, "no victim is invented");
+    }
+
+    /// <summary>
+    /// The section of new listeners stands after the memory consumers and before the outages, with its head, its findings after an agent start and its findings of the agents, in the words of the language.
+    /// </summary>
+    /// <param name="language">The language</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [DataRow("en")]
+    [DataRow("de")]
+    public async Task MarkdownReportWriterWritesNewListenersBeforeOutages(string language)
+    {
+        // Arrange
+        var english = language == "en";
+        var text = english ? ReportText.English : ReportText.German;
+        var consumers = english ? "## Memory consumers" : "## Speicherverbraucher";
+        var heading = english ? "## New listeners" : "## Neue Listener";
+        var outages = english ? "## Outages" : "## Ausfälle";
+        string[] expected = english
+                                ? [
+                                      "- Agent ` web-1 `: 1440 connection snapshots from 2026-09-29 00:05 UTC to 2026-10-06 05:55 UTC; 4 agent starts: 2 compared on all ports, 1 on ports 1 to 1023 only, 1 not compared",
+                                      "- Agent ` web-2 `: 12 connection snapshots from 2026-10-03 08:00 UTC to 2026-10-03 09:50 UTC; 0 agent starts: 0 compared on all ports, 0 on ports 1 to 1023 only, 0 not compared",
+                                      "- 2026-10-02 06:40 UTC, agent ` web-1 `, after an agent start (compared with 2026-10-02 06:10 UTC), all ports: 2 new",
+                                      "  - tcp 0.0.0.0:23, PID 200 ` telnetd `",
+                                      "  - tcp6 [::]:8443, no owner",
+                                      "- 2026-10-04 03:12 UTC, agent ` web-1 `, after an agent start (compared with 2026-10-04 02:42 UTC), ports 1 to 1023 only: 7 new",
+                                      "  - tcp 0.0.0.0:25, PID 311 ` exim4 `",
+                                      "  - and 6 more",
+                                      "- 2026-10-05 21:00 UTC, agent ` web-1 `, after an agent start, not compared: ports 1 to 1023 not complete",
+                                      "- 2026-10-05 12:00 UTC, agent ` web-1 `, found by the agent, all ports: 1 new",
+                                      "  - tcp 0.0.0.0:2121, no owner",
+                                      "- 2026-10-06 04:00 UTC, agent ` web-2 `, found by the agent, ports 1 to 1023 only: 1 new",
+                                      "  - udp 0.0.0.0:69, PID 12 `` tftp`d ``"
+                                  ]
+                                : [
+                                      "- Agent ` web-1 `: 1440 Verbindungs-Snapshots von 2026-09-29 00:05 UTC bis 2026-10-06 05:55 UTC; 4 Agentenstarts: 2 auf allen Ports verglichen, 1 nur auf Ports 1 bis 1023, 1 nicht verglichen",
+                                      "- Agent ` web-2 `: 12 Verbindungs-Snapshots von 2026-10-03 08:00 UTC bis 2026-10-03 09:50 UTC; 0 Agentenstarts: 0 auf allen Ports verglichen, 0 nur auf Ports 1 bis 1023, 0 nicht verglichen",
+                                      "- 2026-10-02 06:40 UTC, Agent ` web-1 `, nach einem Agentenstart (verglichen mit 2026-10-02 06:10 UTC), alle Ports: 2 neu",
+                                      "  - tcp 0.0.0.0:23, PID 200 ` telnetd `",
+                                      "  - tcp6 [::]:8443, kein Besitzer",
+                                      "- 2026-10-04 03:12 UTC, Agent ` web-1 `, nach einem Agentenstart (verglichen mit 2026-10-04 02:42 UTC), nur Ports 1 bis 1023: 7 neu",
+                                      "  - tcp 0.0.0.0:25, PID 311 ` exim4 `",
+                                      "  - und 6 weitere",
+                                      "- 2026-10-05 21:00 UTC, Agent ` web-1 `, nach einem Agentenstart, nicht verglichen: Ports 1 bis 1023 unvollständig",
+                                      "- 2026-10-05 12:00 UTC, Agent ` web-1 `, vom Agenten gefunden, alle Ports: 1 neu",
+                                      "  - tcp 0.0.0.0:2121, kein Besitzer",
+                                      "- 2026-10-06 04:00 UTC, Agent ` web-2 `, vom Agenten gefunden, nur Ports 1 bis 1023: 1 neu",
+                                      "  - udp 0.0.0.0:69, PID 12 `` tftp`d ``"
+                                  ];
+
+        // Act
+        var output = await WriteSummaryOnlyAsync(text, ListenerSummary(RichListeners()));
+
+        var lines = output.Split('\n');
+        var section = Between(output, heading, outages).Split('\n').Skip(1).Where(line => line.Length > 0).ToArray();
+
+        // Assert
+        Assert.IsGreaterThan(Array.IndexOf(lines, consumers), Array.IndexOf(lines, heading), "the section follows the memory consumers");
+        Assert.IsGreaterThan(Array.IndexOf(lines, heading), Array.IndexOf(lines, outages), "the section precedes the outages");
+        Assert.AreSequenceEqual(expected, section, "head, findings after an agent start by agent and sequence number, then the findings of the agents");
+    }
+
+    /// <summary>
+    /// Without any stored agent snapshot the section says that new listeners are unknown; with snapshots and every start compared it says that none was found; with a start that was not compared it says so with its finding and never claims a plain absence; a listed new listener removes both sentences.
+    /// </summary>
+    /// <param name="language">The language</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [DataRow("en")]
+    [DataRow("de")]
+    public async Task MarkdownReportWriterWritesNoNewListenerVariants(string language)
+    {
+        // Arrange
+        var english = language == "en";
+        var text = english ? ReportText.English : ReportText.German;
+        var heading = english ? "## New listeners" : "## Neue Listener";
+        var outages = english ? "## Outages" : "## Ausfälle";
+        var unknown = english ? "No agent connection snapshot stored: new listeners unknown." : "Kein Verbindungs-Snapshot eines Agenten gespeichert: neue Listener unbekannt.";
+        var none = english ? "No new listener found." : "Kein neuer Listener gefunden.";
+        var amongCompared = english ? "No new listener found among the compared inventories." : "Kein neuer Listener unter den verglichenen Inventaren gefunden.";
+        var notComparedFinding = english
+                                     ? "2026-10-05 21:00 UTC, agent ` web-1 `, after an agent start, not compared: no earlier inventory"
+                                     : "2026-10-05 21:00 UTC, Agent ` web-1 `, nach einem Agentenstart, nicht verglichen: kein früheres Inventar";
+        var at = new DateTimeOffset(2026, 10, 5, 21, 0, 0, TimeSpan.Zero);
+        var first = new DateTimeOffset(2026, 10, 1, 0, 0, 0, TimeSpan.Zero);
+
+        // Act
+        var noData = await SectionAsync(text, ListenerSummary(new ListenerReport()), heading, outages);
+        var allCompared = await SectionAsync(text, ListenerSummary(Section(Tally("web-1", 50, first, at, 2, 2, 0, 0), [], [])), heading, outages);
+        var oneNotCompared = await SectionAsync(text, ListenerSummary(Section(Tally("web-1", 50, first, at, 1, 0, 0, 1), [StartFinding("web-1", 9, at, ListenerOutcome.NoEarlierInventory, 0)], [])), heading, outages);
+        var withNew = await SectionAsync(text, ListenerSummary(Section(Tally("web-1", 50, first, at, 1, 1, 0, 0), [StartFinding("web-1", 9, at, ListenerOutcome.AllPorts, 0, Entry(Proto.Tcp, "0.0.0.0", 23, 5, "telnetd"))], [])), heading, outages);
+
+        // Assert
+        Assert.IsTrue(HasLine(noData, unknown), "no snapshot: new listeners are unknown");
+        Assert.IsFalse(HasLine(noData, none) || noData.Any(line => line.Contains(amongCompared, StringComparison.Ordinal)), "no snapshot: never that none was found");
+        Assert.DoesNotContain(line => line.Contains("web-1", StringComparison.Ordinal), noData, "no snapshot: no head line");
+        Assert.IsTrue(HasLine(allCompared, none), "every start compared and no finding: none found");
+        Assert.DoesNotContain(line => line.Contains(amongCompared, StringComparison.Ordinal) || line.Contains(unknown, StringComparison.Ordinal), allCompared, "every start compared: neither of the other sentences");
+        Assert.Contains(line => line.StartsWith("- Agent ` web-1 `:", StringComparison.Ordinal), allCompared, "every start compared: the head names the agent");
+        Assert.IsTrue(HasLine(oneNotCompared, notComparedFinding), "a start not compared has its finding");
+        Assert.IsTrue(HasLine(oneNotCompared, amongCompared), "a start not compared: none found among the compared inventories");
+        Assert.IsFalse(HasLine(oneNotCompared, none), "a start not compared: never the plain sentence");
+        Assert.DoesNotContain(line => line.Contains(none, StringComparison.Ordinal) || line.Contains(amongCompared, StringComparison.Ordinal) || line.Contains(unknown, StringComparison.Ordinal), withNew, "a listed new listener: none of the three sentences");
+    }
+
+    /// <summary>
+    /// A start that was not compared says why with the three reasons of the specification, in the exact words of both languages, and lists no listener and no count.
+    /// </summary>
+    /// <param name="language">The language</param>
+    /// <param name="outcome">The outcome of the comparison</param>
+    /// <param name="expected">The expected line without its list marker</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [DataRow("en", ListenerOutcome.NoEarlierInventory, "2026-10-05 21:00 UTC, agent ` web-1 `, after an agent start, not compared: no earlier inventory")]
+    [DataRow("en", ListenerOutcome.PrivilegedIncomplete, "2026-10-05 21:00 UTC, agent ` web-1 `, after an agent start, not compared: ports 1 to 1023 not complete")]
+    [DataRow("en", ListenerOutcome.NotComparable, "2026-10-05 21:00 UTC, agent ` web-1 `, after an agent start, not compared: inventories not comparable")]
+    [DataRow("de", ListenerOutcome.NoEarlierInventory, "2026-10-05 21:00 UTC, Agent ` web-1 `, nach einem Agentenstart, nicht verglichen: kein früheres Inventar")]
+    [DataRow("de", ListenerOutcome.PrivilegedIncomplete, "2026-10-05 21:00 UTC, Agent ` web-1 `, nach einem Agentenstart, nicht verglichen: Ports 1 bis 1023 unvollständig")]
+    [DataRow("de", ListenerOutcome.NotComparable, "2026-10-05 21:00 UTC, Agent ` web-1 `, nach einem Agentenstart, nicht verglichen: Inventare nicht vergleichbar")]
+    public async Task MarkdownReportWriterWritesNotComparedReasons(string language, ListenerOutcome outcome, string expected)
+    {
+        // Arrange
+        var english = language == "en";
+        var text = english ? ReportText.English : ReportText.German;
+        var at = new DateTimeOffset(2026, 10, 5, 21, 0, 0, TimeSpan.Zero);
+        var summary = ListenerSummary(Section(Tally("web-1", 50, at.AddDays(-4), at, 1, 0, 0, 1), [StartFinding("web-1", 9, at, outcome, 0)], []));
+
+        // Act
+        var section = await SectionAsync(text, summary, english ? "## New listeners" : "## Neue Listener", english ? "## Outages" : "## Ausfälle");
+
+        // Assert
+        var index = Array.IndexOf(section, $"- {expected}");
+
+        Assert.IsGreaterThan(-1, index, "the finding says that the start was not compared and why");
+        Assert.IsTrue(index == section.Length - 1 || section[index + 1].Length == 0 || section[index + 1].StartsWith("- ", StringComparison.Ordinal), "no listener is listed below the finding");
+    }
+
+    /// <summary>
+    /// A finding that omits listeners counts the listed and the omitted ones as new, lists at most the given ones and ends with the line for the rest; a finding that omits none has no such line.
+    /// </summary>
+    /// <param name="language">The language</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [DataRow("en")]
+    [DataRow("de")]
+    public async Task MarkdownReportWriterWritesRestOfNewListeners(string language)
+    {
+        // Arrange
+        var english = language == "en";
+        var text = english ? ReportText.English : ReportText.German;
+        var at = new DateTimeOffset(2026, 10, 5, 21, 0, 0, TimeSpan.Zero);
+        var listed = Enumerable.Range(0, 64).Select(index => Entry(Proto.Tcp, "0.0.0.0", 1000 + index)).ToArray();
+        var summary = ListenerSummary(Section(Tally("web-1", 50, at.AddDays(-4), at, 2, 2, 0, 0),
+                                              [
+                                                  StartFinding("web-1", 9, at, ListenerOutcome.AllPorts, 6, listed),
+                                                  StartFinding("web-1", 12, at.AddHours(1), ListenerOutcome.AllPorts, 0, Entry(Proto.Tcp, "0.0.0.0", 23))
+                                              ],
+                                              []));
+        var count = english ? "2026-10-05 21:00 UTC, agent ` web-1 `, after an agent start (compared with 2026-10-05 20:30 UTC), all ports: 70 new" : "2026-10-05 21:00 UTC, Agent ` web-1 `, nach einem Agentenstart (verglichen mit 2026-10-05 20:30 UTC), alle Ports: 70 neu";
+        var rest = english ? "  - and 6 more" : "  - und 6 weitere";
+
+        // Act
+        var section = await SectionAsync(text, summary, english ? "## New listeners" : "## Neue Listener", english ? "## Outages" : "## Ausfälle");
+
+        // Assert
+        var head = Array.IndexOf(section, $"- {count}");
+
+        Assert.IsGreaterThan(-1, head, "70 listeners are new: 64 listed and 6 omitted");
+
+        for (var index = 0; index < 64; index++)
+        {
+            Assert.AreEqual($"  - tcp 0.0.0.0:{1000 + index}, {(english ? "no owner" : "kein Besitzer")}", section[head + 1 + index], $"listener {index} in inventory order");
+        }
+
+        Assert.AreEqual(rest, section[head + 65], "the rest follows the 64 listed");
+        Assert.ContainsSingle(line => line.Contains(english ? " more" : " weitere", StringComparison.Ordinal), section, "only the finding that omitted listeners has the line for the rest");
+    }
+
+    /// <summary>
+    /// The agent ID in the head and in all three finding texts, and the command of an owner, are written only as code spans: a command with markup, a run of three backticks, U+202E and a line feed stays one literal line with its escapes, and nothing of the external text stands outside a span.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task MarkdownReportWriterWritesCommandAndAgentIdAsCodeSpans()
+    {
+        // Arrange
+        const string agent = "web`1";
+        const string agentSpan = "`` web`1 ``";
+
+        var command = "<b>x</b> ``` " + (char)0x202E + "\n";
+        var commandSpan = $"```` <b>x</b> ``` {Backslash}u202e{Backslash}n ````";
+        var at = new DateTimeOffset(2026, 10, 1, 12, 0, 0, TimeSpan.Zero);
+        var summary = ListenerSummary(Section(Tally(agent, 3, at.AddDays(-1), at.AddDays(1), 2, 1, 0, 1),
+                                              [
+                                                  StartFinding(agent, 2, at, ListenerOutcome.AllPorts, 0, Entry(Proto.Tcp, "0.0.0.0", 23, 7, command)),
+                                                  StartFinding(agent, 3, at.AddHours(1), ListenerOutcome.NoEarlierInventory, 0)
+                                              ],
+                                              [AgentFinding(agent, 4, at.AddHours(2), ListenerOutcome.AllPorts, 0, Entry(Proto.Tcp, "0.0.0.0", 24, 8, command))]));
+
+        Assert.Contains(Backslash, commandSpan, "the expected span still holds the backslash of its escapes");
+        Assert.IsTrue(command.Contains((char)0x202E), "the command still holds the right-to-left override");
+        Assert.IsTrue(command.Contains('\n'), "the command still holds the line feed");
+
+        // Act
+        var section = await SectionAsync(ReportText.English, summary, "## New listeners", "## Outages");
+
+        string[] expected = [
+                                $"- Agent {agentSpan}: 3 connection snapshots from 2026-09-30 12:00 UTC to 2026-10-02 12:00 UTC; 2 agent starts: 1 compared on all ports, 0 on ports 1 to 1023 only, 1 not compared",
+                                $"- 2026-10-01 12:00 UTC, agent {agentSpan}, after an agent start (compared with 2026-10-01 11:30 UTC), all ports: 1 new",
+                                $"  - tcp 0.0.0.0:23, PID 7 {commandSpan}",
+                                $"- 2026-10-01 13:00 UTC, agent {agentSpan}, after an agent start, not compared: no earlier inventory",
+                                $"- 2026-10-01 14:00 UTC, agent {agentSpan}, found by the agent, all ports: 1 new",
+                                $"  - tcp 0.0.0.0:24, PID 8 {commandSpan}"
+                            ];
+
+        // Assert
+        Assert.AreSequenceEqual(expected, section, "the head and the three finding texts hold the agent ID as a code span, the command stands as one literal line");
+
+        var outside = string.Join('\n', section).Replace(commandSpan, string.Empty, StringComparison.Ordinal).Replace(agentSpan, string.Empty, StringComparison.Ordinal);
+
+        Assert.DoesNotContain("web", outside, "the agent ID stands only inside spans");
+        Assert.DoesNotContain("<b>", outside, "the markup stands only inside spans");
+        Assert.IsFalse(outside.Contains((char)0x202E), "the override stands nowhere");
+    }
+
+    /// <summary>
+    /// The findings of each kind are listed by agent ID and then sequence number whatever order the store hands them in, and the findings after an agent start come before the findings of the agents.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task MarkdownReportWriterOrdersFindingsByAgentThenSequenceNumber()
+    {
+        // Arrange
+        var day = new DateTimeOffset(2026, 10, 1, 0, 0, 0, TimeSpan.Zero);
+        var summary = ListenerSummary(Section(Tally("web-a", 50, day, day.AddDays(1), 3, 0, 0, 3),
+                                              [
+                                                  StartFinding("web-b", 5, day.AddHours(5), ListenerOutcome.NotComparable, 0),
+                                                  StartFinding("web-a", 9, day.AddHours(9), ListenerOutcome.NotComparable, 0),
+                                                  StartFinding("web-a", 3, day.AddHours(3), ListenerOutcome.NotComparable, 0)
+                                              ],
+                                              [
+                                                  AgentFinding("web-b", 2, day.AddHours(2), ListenerOutcome.AllPorts, 0, Entry(Proto.Tcp, "0.0.0.0", 23)),
+                                                  AgentFinding("web-a", 8, day.AddHours(8), ListenerOutcome.AllPorts, 0, Entry(Proto.Tcp, "0.0.0.0", 24))
+                                              ]));
+
+        // Act
+        var section = await SectionAsync(ReportText.English, summary, "## New listeners", "## Outages");
+
+        // Assert
+        var order = new[] { "03:00 UTC, agent ` web-a `", "09:00 UTC, agent ` web-a `", "05:00 UTC, agent ` web-b `", "08:00 UTC, agent ` web-a `", "02:00 UTC, agent ` web-b `" };
+        var indexes = order.Select(marker => Array.FindIndex(section, line => line.Contains(marker, StringComparison.Ordinal))).ToArray();
+
+        Assert.IsTrue(indexes.All(index => index >= 0), "every finding is listed");
+        Assert.AreSequenceEqual(indexes.Order().ToArray(), indexes, "after an agent start by agent then sequence number, then the findings of the agents by agent");
+    }
+
+    /// <summary>
+    /// The notes name each cap of the section that was hit with the cap and the number left out, in both languages, and name none when no cap was hit.
+    /// </summary>
+    /// <param name="language">The language</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [DataRow("en")]
+    [DataRow("de")]
+    public async Task MarkdownReportWriterNotesListenerCaps(string language)
+    {
+        // Arrange
+        var english = language == "en";
+        var text = english ? ReportText.English : ReportText.German;
+        var at = new DateTimeOffset(2026, 10, 1, 0, 0, 0, TimeSpan.Zero);
+        var capped = CappedListeners();
+        var starts = capped.StartFindings;
+        var found = capped.AgentFindings;
+        var startNote = english ? "Only the latest 20 findings after an agent start are listed; 5 earlier ones are left out." : "Nur die letzten 20 Funde nach einem Agentenstart sind aufgeführt; 5 frühere fehlen.";
+        var agentNote = english ? "Only the latest 20 findings of the agent are listed; 980 earlier ones are left out." : "Nur die letzten 20 Funde des Agenten sind aufgeführt; 980 frühere fehlen.";
+        var agentsNote = english ? "Only the first 64 agent IDs are listed; 3 more are left out." : "Nur die ersten 64 Agenten-IDs sind aufgeführt; 3 weitere fehlen.";
+        var onlyAgents = new ListenerReport
+                         {
+                             Agents = [Tally("web-1", 50, at, at.AddDays(1), 0, 0, 0, 0)],
+                             AgentsOmitted = 1,
+                             StartFindings = starts,
+                             StartFindingsTotal = 20,
+                             AgentFindings = found,
+                             AgentFindingsTotal = 20
+                         };
+
+        // Act
+        var cappedNotes = (await WriteNotesAsync(text, ListenerSummary(capped), 13)).Split('\n');
+        var agentsOnlyNotes = (await WriteNotesAsync(text, ListenerSummary(onlyAgents), 13)).Split('\n');
+        var plainNotes = (await WriteNotesAsync(text, ListenerSummary(Section(Tally("web-1", 50, at, at.AddDays(1), 20, 0, 0, 20), starts, found)), 13)).Split('\n');
+
+        // Assert
+        Assert.IsTrue(HasLine(cappedNotes, startNote), "the cap of the findings after an agent start");
+        Assert.IsTrue(HasLine(cappedNotes, agentNote), "the cap of the findings of the agents");
+        Assert.IsTrue(HasLine(cappedNotes, agentsNote), "the cap of the agent IDs");
+        Assert.IsTrue(HasLine(agentsOnlyNotes, english ? "Only the first 64 agent IDs are listed; 1 more are left out." : "Nur die ersten 64 Agenten-IDs sind aufgeführt; 1 weitere fehlen."), "the cap of the agent IDs alone");
+        Assert.DoesNotContain(line => line.Contains(english ? "findings" : "Funde", StringComparison.Ordinal), agentsOnlyNotes, "no note of findings when only the agent IDs were capped");
+        Assert.DoesNotContain(line => line.Contains(english ? "agent IDs" : "Agenten-IDs", StringComparison.Ordinal), plainNotes, "no note of agent IDs when none was left out");
+        Assert.DoesNotContain(line => line.Contains(english ? "findings" : "Funde", StringComparison.Ordinal), plainNotes, "no note of findings when exactly the cap is listed and nothing is left out");
+    }
+
+    /// <summary>
+    /// Writes only the summary of a report with a new writer.
+    /// </summary>
+    /// <param name="text">The table</param>
+    /// <param name="summary">The summary</param>
+    /// <returns>The text with line feeds</returns>
+    private static async Task<string> WriteSummaryOnlyAsync(ReportText text, ForensicsSummary summary)
+    {
+        var buffer = new StringWriter();
+
+        await new MarkdownReportWriter(buffer, text).WriteSummaryAsync(summary);
+
+        return buffer.ToString().Replace("\r\n", "\n", StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Writes the summary and returns the lines of the listener section: the lines between its heading and the next heading, without the empty ones.
+    /// </summary>
+    /// <param name="text">The table</param>
+    /// <param name="summary">The summary</param>
+    /// <param name="heading">The heading of the section</param>
+    /// <param name="next">The heading that follows it</param>
+    /// <returns>The lines</returns>
+    private static async Task<string[]> SectionAsync(ReportText text, ForensicsSummary summary, string heading, string next)
+    {
+        var output = await WriteSummaryOnlyAsync(text, summary);
+
+        return [.. Between(output, heading, next).Split('\n').Skip(1).Where(line => line.Length > 0)];
+    }
+
+    /// <summary>
+    /// Tells whether a line is the text, as a paragraph or as a list item.
+    /// </summary>
+    /// <param name="lines">The lines</param>
+    /// <param name="line">The text without a list marker</param>
+    /// <returns><c>true</c> when a line equals the text or the text as a top-level list item</returns>
+    private static bool HasLine(string[] lines, string line)
+    {
+        return lines.Contains(line) || lines.Contains($"- {line}");
     }
 
     /// <summary>

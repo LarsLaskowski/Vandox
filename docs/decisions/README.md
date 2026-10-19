@@ -142,4 +142,5 @@ once in the [area document](../areas/README.md) of the record's area, and the re
 | 0113 | Process collector: PSS from smaps_rollup, top processes by memory and CPU with every program summed, a full snapshot under memory pressure that the system collector switches | Accepted | 2026-10-17 |
 | 0114 | The Go model measures text limits as the encoder writes them, invalid UTF-8 counted as its replacement | Accepted | 2026-10-18 |
 | [0115](0115-connection-collector-proc-net-tables-owners-from-fd-regular-and-full-snapshots-bounded-listener-check.md) | Connection collector: the /proc/net tables with owners from /proc/<pid>/fdinfo, regular and full snapshots in one record kind, a bounded new-listener check that favors privileged ports | Accepted | 2026-10-18 |
+| [0116](0116-listeners-across-agent-starts-compared-when-stored-and-shown-in-the-forensics-report.md) | New listeners across an agent start: the agent marks its first snapshot and what its inventory holds, the backend compares when it stores the snapshots, the forensics report shows them with the agent's own findings | Accepted | 2026-10-18 |
 <!-- project:end index -->

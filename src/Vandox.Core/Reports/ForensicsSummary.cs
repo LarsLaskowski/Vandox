@@ -127,5 +127,10 @@ public sealed class ForensicsSummary
     /// </summary>
     public bool ObservedHoursTruncated { get; init; }
 
+    /// <summary>
+    /// Gets or sets the listener section.
+    /// </summary>
+    public ListenerReport Listeners { get; set; } = new();
+
     #endregion // Properties
 }

@@ -405,9 +405,11 @@ logged at the first run; the state lasts until the agent restarts.
 holds them, not as the record's size budget may cut the list), whether it was cut, which tables were read and whether a line was skipped.
 Each snapshot states the comparison its run made in `listener_check`:
 
-- `none`: the first run, a skipped table line in either run, a different set of tables read, or a cut inside the privileged part
-  (nothing is reported and no full snapshot is taken for it); a failed run is not compared, the next successful run is compared with the last
-  successful one;
+- `start`: the first run after the agent starts, which has no previous inventory in memory (nothing is reported by the agent; the backend
+  compares this snapshot with the agent's last one before the start, [Detection, alerts and reports](detection-and-reports.md), *New
+  listeners*);
+- `none`: a skipped table line in either run, a different set of tables read, or a cut inside the privileged part (nothing is reported and no
+  full snapshot is taken for it); a failed run is not compared, the next successful run is compared with the last successful one;
 - `privileged`: either inventory was cut at 4,096, so only the keys on ports below 1024 are compared; they come first in the inventory,
   so a flood of unprivileged listeners never cuts them;
 - `all`: otherwise.
@@ -420,6 +422,14 @@ base, also after a `none` check, **only when the run's context has not ended**: 
 its record and, when the deadline has passed, returns that error and keeps no inventory and no log state, so a run that becomes a gap
 (the scheduler drops a result that arrives after the deadline) cannot make a listener known without a report. A size cut of `listeners` in the
 record makes the aggregates incomplete but leaves the comparison alone.
+
+**What a snapshot's own list holds.** Every snapshot also says which tables its run read (`tables`: the protocols `tcp`, `tcp6`, `udp`, `udp6`
+in table order) and how much of the run's inventory its own `listeners` list holds (`inventory`), which the backend needs to compare two
+snapshots of one agent: `skipped` when a table line was skipped; `cut` when the inventory was cut inside its privileged part or the list holds
+fewer entries than the inventory has on ports below 1024; `all` when the inventory was not cut and the list holds every key; `privileged`
+otherwise (every listener on ports 1 to 1023, not necessarily the rest). The state is set from the list as it finally stands, so a list the
+size budget or the safety net halves is described as it is sent. Neither field changes the agent's own comparison, the full snapshots or the
+caps.
 
 **The record always fits and is valid.** The record is filled entry by entry within a payload budget of 1 MiB less 8 KiB of JSON (each entry
 encoded alone to measure it), in the order `states`, `new_listeners`, `listeners`, `processes`, `remotes`, `connections`; at the first entry
@@ -461,8 +471,10 @@ allocates 1.99 MB in 26,307 allocations ([Benchmarks](../BENCHMARKS.md), *Connec
 
 **Residuals.**
 
-- A listener that opens while the agent is stopped (an update, a crash, a reboot with a service that starts at boot) is not reported: the first run after a
-  start is the baseline. Both inventories are stored; their comparison is #278.
+- A listener that opens while the agent is stopped (an update, a crash, a reboot with a service that starts at boot) is not reported by the agent: the
+  first run after a start is the baseline (`listener_check` `start`). The backend compares the stored snapshot with the agent's last one before
+  the start and shows the result in the forensics report ([Detection, alerts and reports](detection-and-reports.md), *New listeners*, record
+  0116); a listener that opened and closed while the agent was stopped is still never seen.
 - A local user who keeps more than 4,096 listeners open (about 4,100 TCP listeners on unprivileged ports suffice) hides new listeners on ports
   from 1024 up for as long; the snapshots show `listener_check` `privileged`, and the flood alone causes no report and no full snapshot.
 - A user who holds hundreds of thousands of descriptors lengthens the run in proportion; a run past its timeout is a gap and the collector is
@@ -612,6 +624,8 @@ collector timeouts and backend gap detection each emit a gap record, and each pa
 - [0115](../decisions/0115-connection-collector-proc-net-tables-owners-from-fd-regular-and-full-snapshots-bounded-listener-check.md) — why the
   connection collector reads the `/proc/net` tables with owners from `fdinfo` on a socket mount the agent learns at its start (`CAP_SYS_PTRACE`
   alone), records a regular or a full snapshot in the one record kind, and bounds the new-listener check, favoring privileged ports.
+- [0116](../decisions/0116-listeners-across-agent-starts-compared-when-stored-and-shown-in-the-forensics-report.md) — why the first snapshot after
+  a start is marked `start`, every snapshot says what its listener list holds, and the backend compares across the start.
 
 ## Not here
 

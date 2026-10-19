@@ -80,7 +80,7 @@ public class WireContractTests
         // Assert
         Assert.AreEqual("agent-1", agentId, "agent id");
 
-        var expected = new[] { RecordKind.Metric, RecordKind.ProcessSnapshot, RecordKind.ConnectionSnapshot, RecordKind.ServiceState, RecordKind.MariaDbStatus, RecordKind.KernelEvent, RecordKind.KernelEvent, RecordKind.LogLine, RecordKind.Gap, RecordKind.ConnectionSnapshot };
+        var expected = new[] { RecordKind.Metric, RecordKind.ProcessSnapshot, RecordKind.ConnectionSnapshot, RecordKind.ServiceState, RecordKind.MariaDbStatus, RecordKind.KernelEvent, RecordKind.KernelEvent, RecordKind.LogLine, RecordKind.Gap, RecordKind.ConnectionSnapshot, RecordKind.ConnectionSnapshot };
 
         Assert.AreSequenceEqual(expected, kinds, "kinds in order");
     }
@@ -130,7 +130,7 @@ public class WireContractTests
     }
 
     /// <summary>
-    /// The connection snapshots of the Go encoder's golden batch carry the five fields of format 1.1, and the decoder applies their rules to the golden text.
+    /// The connection snapshots of the Go encoder's golden batch carry the fields of format 1.1, and the decoder applies their rules to the golden text.
     /// </summary>
     /// <returns>A task that completes when the test is done</returns>
     [TestMethod]
@@ -170,7 +170,7 @@ public class WireContractTests
         var exception = await Assert.ThrowsExactlyAsync<WireException>(() => contradictingDecoder.NextAsync(CancellationToken.None), "a complete snapshot with incomplete aggregates");
 
         // Assert
-        Assert.HasCount(2, snapshots, "connection snapshots of the golden batch");
+        Assert.HasCount(3, snapshots, "connection snapshots of the golden batch");
 
         var full = snapshots[0];
 
@@ -200,6 +200,20 @@ public class WireContractTests
         Assert.AreEqual(0u, aggregates.NewListenersOmitted, "aggregates: new_listeners_omitted");
         Assert.IsNotNull(aggregates.NewListeners, "aggregates: new_listeners");
         Assert.HasCount(1, aggregates.NewListeners, "aggregates: new listeners");
+
+        var start = snapshots[2];
+
+        Assert.IsTrue(start.Complete, "start: complete");
+        Assert.AreEqual("start", start.ListenerCheck, "start: listener_check");
+        Assert.AreEqual("privileged", start.Inventory, "start: inventory");
+        Assert.IsNotNull(start.Tables, "start: tables");
+        Assert.AreSequenceEqual(["tcp", "udp6"], start.Tables, "start: tables in table order");
+        Assert.IsNull(start.NewListeners, "start: new_listeners");
+        Assert.AreEqual(0u, start.NewListenersOmitted, "start: new_listeners_omitted");
+        Assert.IsNotNull(start.Listeners, "start: listeners");
+        Assert.HasCount(1, start.Listeners, "start: listeners");
+        Assert.IsNull(full.Inventory, "full: inventory is absent");
+        Assert.IsNull(aggregates.Tables, "aggregates: tables is absent");
 
         Assert.AreEqual(WireErrorKind.Invalid, exception.Kind, "error class");
         Assert.AreEqual("data.complete", exception.FieldError?.Field, "field");

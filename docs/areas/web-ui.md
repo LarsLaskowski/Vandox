@@ -257,10 +257,10 @@ service, the gate is held per store call (a window read of many snapshots takes 
 **Page (`/report`).**
 
 - The page shows the forensics report of [Detection, alerts and reports](detection-and-reports.md) (*Forensics report*) behind the login:
-  the head, the summary, the recurring patterns, the memory consumers, one section per outage and the notes, as headings, paragraphs,
+  the head, the summary, the recurring patterns, the memory consumers, the new listeners, one section per outage and the notes, as headings, paragraphs,
   lists and tables. The page and `vandoxd report` compose the report from the same blocks, so for the same data, clock, lookback and
   language they show the same texts, numbers and times in the same order. **The same content per page of outages:** the page lists at most
-  **50 outages** (below), while the command and the download list all of them; the summary, the patterns, the consumers and the notes are those of
+  **50 outages** (below), while the command and the download list all of them; the summary, the patterns, the consumers, the new listeners and the notes are those of
   the whole run.
 - **The language comes from the address.** `report` is English; `report?lang=en` and `report?lang=de` choose a language, the key in any letter
   case and percent-encoded, the value compared after decoding with exactly `en` or `de` (so `lang=%64%65` is German). Any other value (`DE`,
@@ -277,7 +277,7 @@ service, the gate is held per store call (a window read of many snapshots takes 
   *First outages* (a new run from the first). A later page whose run finds fewer outages than its start (the stored outages shrank since the
   previous page) shows no range and no outages but still offers *First outages*. The position is not in the address. A new run reads the store again, so the outages of a
   page are those `vandoxd incidents` stored at that time.
-- **External text** (victim commands and program names) is shown only as the text of an `ExternalText` inside a `code` element, capped at
+- **External text** (victim commands, program names, the owner commands of the new listeners and the agent IDs of that section) is shown only as the text of an `ExternalText` inside a `code` element, capped at
   2,048 displayed characters per text with the marker of the logs view, with invisible characters as visible escapes; an empty text is the dash `—` as
   in the Markdown. No external text is in a heading or a table cell, and the page uses no `MarkupString`.
 - **Failures.** A run that reaches its deadline shows `Making the report took longer than 2 minutes and was stopped.`; a store failure shows `The report could
@@ -387,11 +387,14 @@ The ingest listener serves none of this: every UI path, static file and the live
   open a circuit.
 - **The report page is behind the login** like the other pages (`/report` carries the same `[Authorize]`, and the download endpoint has no
   `AllowAnonymous`, so the fallback policy demands a session). It reads only: no gap, no alert and no write; the incident store of the run
-  refuses `SaveIncidentAsync`.
+  refuses `SaveIncidentAsync`. The new listeners section reads the stored listener comparisons through `GatedListenerHistoryReader`, which takes one
+  slot of the same gate per read, and reads only.
 - **Memory per circuit (report page).** The page keeps the document of one run: the summary, at most 50 outages and the notes, as text. External text
   is at most 22 texts per outage (16 victims, 3 growth candidates, 3 consumers), each a stored text of at most 1,024 bytes (at most 2 KiB as
   UTF-16) plus its runs for the page (at most 2,048 displayed characters, 4 KiB), so up to about 6 KiB each, about 130 KiB per outage and
-  **about 6.6 MB** for 50 outages, 60 KB more for the 10 consumers of the summary, plus the markup and the render tree (a typical outage holds a few hundred bytes of
+  **about 6.6 MB** for 50 outages, 60 KB more for the 10 consumers of the summary, and **up to about 16 MB** for the new listeners section (at most 20 findings after an agent start and
+  20 found by the agent, each with at most 64 listeners whose command, like every external text of the page, takes up to about 6 KiB with its runs, about 390 KB a finding, and the head of at most 64 agent IDs
+  of at most 64 bytes each; the agent ID and each command are code spans of an `ExternalText`), plus the markup and the render tree (a typical outage holds a few hundred bytes of
   external text); the render batch holds the text once more for a moment. This is **per circuit**. The run itself keeps up to about 60 MB once across the whole
   service, because only one run goes at a time ([Detection, alerts and reports](detection-and-reports.md), *Limits of the report*). The number of
   circuits is not bounded ([Pages and render mode](#pages-and-render-mode)) and the container has 512 MB; only a signed-in client can open a circuit.
@@ -429,7 +432,7 @@ The ingest listener serves none of this: every UI path, static file and the live
 
 `Vandox.Backend` (`Components/App.razor`, `Components/Layout/MainLayout.razor`, `Components/Charts`, `Components/Pages/LogsPage` and
 `LogTemplatesPage`, `Components/Pages/IncidentsPage` and `IncidentPage`, `Components/Incidents/IncidentNoteForm`, `Components/Pages/ReportPage`, `Components/Reports/ReportContent`, `Components/Logs/ExternalText`, `Logs/` (`LogsAddress`, `LogText`, `LogLineView`, `GatedLogExplorer`, `WebReaderGate`, `TemplateHourSeries`, `LogsView`),
-`Reports/` (`ReportService`, `ReportViewBuilder`, `ReportDocument`, `ReportAddress`, `ReportsView`, `ReportDownloadEndpoint`, `GatedIncidentStore`, and the blocks `ReportComposer`, `ReportBlock`, `ReportPiece`), `Logs/ActionRun`, `Logs/ActionSequence` and `Logs/PageRunner` (the deadline of an action),
+`Reports/` (`ReportService`, `ReportViewBuilder`, `ReportDocument`, `ReportAddress`, `ReportsView`, `ReportDownloadEndpoint`, `GatedIncidentStore`, `GatedListenerHistoryReader`, and the blocks `ReportComposer`, `ReportBlock`, `ReportPiece`), `Logs/ActionRun`, `Logs/ActionSequence` and `Logs/PageRunner` (the deadline of an action),
 `Incidents/` (`IncidentsView`, `IncidentRowView`, `IncidentDetailView`, `IncidentWindowReader`, `ProgramMemorySeries`, `GatedIncidentBrowser`, `GatedRecordReader`, `IncidentNoteText`, `IncidentNoteEndpoint`), `Hosting/SecurityHeadersMiddleware`,
 `Hosting/ServeCommand`, `wwwroot/`, and `Vandox.Backend.csproj`, whose `RequiresAspNetWebAssets` makes the restore add the framework
 script independently of the sources, as the image build restores before copying them; record 0098).

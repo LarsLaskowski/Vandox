@@ -84,6 +84,25 @@ public sealed class ReportText
                                                     CapRunsNote = "The report keeps at most {0} runs of consecutive observed hours; the later hours were not used, so backup, boot and panel memory are unknown.",
                                                     UntrackedNote = "{0} program entries were not tracked because the report tracks at most {1} programs.",
                                                     IncidentsChangedNote = "The number of incidents changed between the two passes over the stored incidents, so the rules and the list of outages may not match; run vandoxd incidents and the report again.",
+                                                    NewListenersHeading = "New listeners",
+                                                    ListenerAllPorts = "all ports",
+                                                    ListenerPrivilegedOnly = "ports 1 to 1023 only",
+                                                    ListenerNoEarlier = "no earlier inventory",
+                                                    ListenerPrivilegedIncomplete = "ports 1 to 1023 not complete",
+                                                    ListenerNotComparable = "inventories not comparable",
+                                                    ListenerRest = "and {0} more",
+                                                    NoNewListener = "No new listener found.",
+                                                    NoNewListenerCompared = "No new listener found among the compared inventories.",
+                                                    NoAgentSnapshots = "No agent connection snapshot stored: new listeners unknown.",
+                                                    ListenerAgentHead = "Agent {0}: {1} connection snapshots from {2} to {3}; {4} agent starts: {5} compared on all ports, {6} on ports 1 to 1023 only, {7} not compared",
+                                                    ListenerStartFinding = "{1}, agent {0}, after an agent start (compared with {2}), {3}: {4} new",
+                                                    ListenerStartNotCompared = "{1}, agent {0}, after an agent start, not compared: {2}",
+                                                    ListenerAgentFinding = "{1}, agent {0}, found by the agent, {2}: {3} new",
+                                                    ListenerEntry = "{1}, PID {2} {0}",
+                                                    ListenerEntryNoOwner = "{1}, no owner",
+                                                    CapStartFindingsNote = "Only the latest {0} findings after an agent start are listed; {1} earlier ones are left out.",
+                                                    CapAgentFindingsNote = "Only the latest {0} findings of the agent are listed; {1} earlier ones are left out.",
+                                                    CapAgentsNote = "Only the first {0} agent IDs are listed; {1} more are left out.",
                                                 };
 
     /// <summary>
@@ -163,6 +182,25 @@ public sealed class ReportText
                                                    CapRunsNote = "Der Bericht behält höchstens {0} Abschnitte aufeinanderfolgender beobachteter Stunden; die späteren Stunden wurden nicht verwendet, daher sind Backup, Neustart und Panel-Speicher unbekannt.",
                                                    UntrackedNote = "{0} Programmeinträge wurden nicht verfolgt, weil der Bericht höchstens {1} Programme verfolgt.",
                                                    IncidentsChangedNote = "Die Zahl der Vorfälle hat sich zwischen den beiden Durchläufen über die gespeicherten Vorfälle geändert, daher passen Regeln und Ausfallliste möglicherweise nicht zusammen; vandoxd incidents und den Bericht erneut ausführen.",
+                                                   NewListenersHeading = "Neue Listener",
+                                                   ListenerAllPorts = "alle Ports",
+                                                   ListenerPrivilegedOnly = "nur Ports 1 bis 1023",
+                                                   ListenerNoEarlier = "kein früheres Inventar",
+                                                   ListenerPrivilegedIncomplete = "Ports 1 bis 1023 unvollständig",
+                                                   ListenerNotComparable = "Inventare nicht vergleichbar",
+                                                   ListenerRest = "und {0} weitere",
+                                                   NoNewListener = "Kein neuer Listener gefunden.",
+                                                   NoNewListenerCompared = "Kein neuer Listener unter den verglichenen Inventaren gefunden.",
+                                                   NoAgentSnapshots = "Kein Verbindungs-Snapshot eines Agenten gespeichert: neue Listener unbekannt.",
+                                                   ListenerAgentHead = "Agent {0}: {1} Verbindungs-Snapshots von {2} bis {3}; {4} Agentenstarts: {5} auf allen Ports verglichen, {6} nur auf Ports 1 bis 1023, {7} nicht verglichen",
+                                                   ListenerStartFinding = "{1}, Agent {0}, nach einem Agentenstart (verglichen mit {2}), {3}: {4} neu",
+                                                   ListenerStartNotCompared = "{1}, Agent {0}, nach einem Agentenstart, nicht verglichen: {2}",
+                                                   ListenerAgentFinding = "{1}, Agent {0}, vom Agenten gefunden, {2}: {3} neu",
+                                                   ListenerEntry = "{1}, PID {2} {0}",
+                                                   ListenerEntryNoOwner = "{1}, kein Besitzer",
+                                                   CapStartFindingsNote = "Nur die letzten {0} Funde nach einem Agentenstart sind aufgeführt; {1} frühere fehlen.",
+                                                   CapAgentFindingsNote = "Nur die letzten {0} Funde des Agenten sind aufgeführt; {1} frühere fehlen.",
+                                                   CapAgentsNote = "Nur die ersten {0} Agenten-IDs sind aufgeführt; {1} weitere fehlen.",
                                                };
 
     /// <summary>
@@ -529,6 +567,101 @@ public sealed class ReportText
     /// Gets the note: the incident count changed between the passes.
     /// </summary>
     public string IncidentsChangedNote { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets the text: the heading of the new listeners section.
+    /// </summary>
+    public string NewListenersHeading { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets the text: the label of a comparison on all ports.
+    /// </summary>
+    public string ListenerAllPorts { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets the text: the label of a comparison on ports 1 to 1023 only.
+    /// </summary>
+    public string ListenerPrivilegedOnly { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets the text: the reason: no earlier inventory.
+    /// </summary>
+    public string ListenerNoEarlier { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets the text: the reason: the privileged inventory was incomplete.
+    /// </summary>
+    public string ListenerPrivilegedIncomplete { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets the text: the reason: the inventories are not comparable.
+    /// </summary>
+    public string ListenerNotComparable { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets the text: the line for the listeners left out of a finding.
+    /// </summary>
+    public string ListenerRest { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets the text: the line: no new listener found.
+    /// </summary>
+    public string NoNewListener { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets the text: the line: no new listener among the compared inventories.
+    /// </summary>
+    public string NoNewListenerCompared { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets the text: the line: no connection snapshots of any agent.
+    /// </summary>
+    public string NoAgentSnapshots { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets the text: the head line of an agent.
+    /// </summary>
+    public string ListenerAgentHead { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets the text: the template of a finding after an agent start.
+    /// </summary>
+    public string ListenerStartFinding { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets the text: the template of an agent start that was not compared.
+    /// </summary>
+    public string ListenerStartNotCompared { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets the text: the template of a finding by the agent.
+    /// </summary>
+    public string ListenerAgentFinding { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets the text: the template of one listener with its owner.
+    /// </summary>
+    public string ListenerEntry { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets the text: the template of one listener without an owner.
+    /// </summary>
+    public string ListenerEntryNoOwner { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets the text: the note: only the latest findings after an agent start are listed.
+    /// </summary>
+    public string CapStartFindingsNote { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets the text: the note: only the latest findings of the agent are listed.
+    /// </summary>
+    public string CapAgentFindingsNote { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets the text: the note: only the first agent IDs are listed.
+    /// </summary>
+    public string CapAgentsNote { get; init; } = string.Empty;
 
     #endregion // Properties
 

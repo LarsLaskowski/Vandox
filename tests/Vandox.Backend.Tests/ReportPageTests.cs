@@ -71,7 +71,7 @@ public class ReportPageTests
 
         var markdown = new StringWriter();
 
-        await new ForensicsReporter(store, store, BuiltInSignatures.Catalog, TimeSpan.FromHours(1), new FakeTimeProvider(harness.Clock.GetUtcNow())).RunAsync(new MarkdownReportWriter(markdown, text), TestContext.CancellationToken);
+        await new ForensicsReporter(store, store, store, BuiltInSignatures.Catalog, TimeSpan.FromHours(1), new FakeTimeProvider(harness.Clock.GetUtcNow())).RunAsync(new MarkdownReportWriter(markdown, text), TestContext.CancellationToken);
 
         // Act
         await harness.AddAsync<ReportPage>().WaitAsync(TimeSpan.FromSeconds(20), TestContext.CancellationToken);

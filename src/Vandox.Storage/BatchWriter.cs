@@ -30,6 +30,7 @@ internal sealed class BatchWriter : IDisposable
     private readonly ArrayBufferWriter<byte> _labelBuffer = new();
     private readonly Utf8JsonWriter _labelWriter;
     private readonly TemplateTally _tally;
+    private readonly ListenerMarkWriter _listeners;
 
     #endregion // Fields
 
@@ -59,6 +60,7 @@ internal sealed class BatchWriter : IDisposable
         _logFtsValues = Bind(_logFts, "$id", "$message");
         _labelWriter = new Utf8JsonWriter(_labelBuffer);
         _tally = new TemplateTally(connection, transaction);
+        _listeners = new ListenerMarkWriter(connection, transaction);
     }
 
     #endregion // Constructors
@@ -121,6 +123,10 @@ internal sealed class BatchWriter : IDisposable
         {
             WriteLogLine(recordId, record, line);
         }
+        else if (payload is ConnectionSnapshot snapshot && ListenerMarkWriter.IsUsable(record, batch.AgentId))
+        {
+            _listeners.Write(recordId, batch.AgentId, record, snapshot);
+        }
 
         return true;
     }
@@ -132,6 +138,15 @@ internal sealed class BatchWriter : IDisposable
     internal void WriteTemplates(CancellationToken cancellationToken)
     {
         _tally.Write(cancellationToken);
+    }
+
+    /// <summary>
+    /// Writes the comparisons of the agent starts affected by the snapshots written so far.
+    /// </summary>
+    /// <param name="cancellationToken">Cancels the write</param>
+    internal void WriteListenerComparisons(CancellationToken cancellationToken)
+    {
+        _listeners.WriteComparisons(cancellationToken);
     }
 
     /// <summary>
@@ -252,6 +267,7 @@ internal sealed class BatchWriter : IDisposable
         _logFts.Dispose();
         _labelWriter.Dispose();
         _tally.Dispose();
+        _listeners.Dispose();
     }
 
     #endregion // IDisposable
