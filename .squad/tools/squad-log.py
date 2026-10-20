@@ -30,7 +30,10 @@ mechanics out of the orchestrator's hands:
   each in a fresh launch), `--continued-from "<step>"` names the step cell of the fresh launch whose agent was
   continued: only that launch and its own continuations are subtracted, and the trailer records the step
   (`· continued from <step>`), so a later continuation of either agent is computed against the right rows.
-  `--continued` needs an earlier row of that member with usage, `--continued-from` a fresh launch of that step;
+  `--continued` needs an earlier row of that member with usage, `--continued-from` a fresh launch of that step.
+  A continuation logged at another step number than the fresh launch it continues prints a warning, unless its
+  step cell names a fix, delta or revise round: the first launch of another mode (`skeleton` to `implement`,
+  `tests-first` to `coverage`, `approve-pr`, `decide`) is a fresh launch, not a continuation;
 - the usage block often arrives only after the member's hand-back: `--amend-last MEMBER` with the same
   options adds the trailer to the last row of that member afterwards, so the row can be written as soon as
   the report is in. A row gets its trailer once (a pending one is completed); a second amend is refused. When a
@@ -113,6 +116,8 @@ STAMP = r"\d{4}-\d{2}-\d{2}(?: \d{2}:\d{2})?"
 ROW = re.compile(rf"^\| (?P<date>{STAMP}) \| (?P<step>(?:[^|\\]|\\\|)*) \| (?P<member>(?:[^|\\]|\\\|)*) \| "
                  r"(?P<result>.*) \|\s*$")
 MIN_TOKENS = 1000
+STEP_NUMBER = re.compile(r"^\s*(\d+)")
+ROUND_OF_SAME_MODE = re.compile(r"\b(?:fix|delta|revis)", re.I)
 FRONT_MATTER_KEY = re.compile(r"^(model|effort):\s*(\S+)\s*$", re.M)
 
 
@@ -181,10 +186,10 @@ def previous_tokens(path, member, skip_last=False, step=None, origin=None):
 
 
 def rows_before(rows, member, step):
-    """The rows before the last row of `member` whose step cell is `step` (both already escaped as cells); all
-    rows when there is no such row."""
+    """The rows before the last row of `member` whose step cell is `step` (both already escaped as cells; with
+    `step` None, the member's last row); all rows when there is no such row."""
     for index in range(len(rows) - 1, -1, -1):
-        if rows[index][2] == member and rows[index][1] == step:
+        if rows[index][2] == member and (step is None or rows[index][1] == step):
             return rows[:index]
     return rows
 
@@ -198,6 +203,32 @@ def continued_launch(path, member, launch, skip_last=False, step=None, origin=No
         return None
     model, tokens, tool_uses, seconds = launch[:4]
     return (model, tokens - earlier if tokens >= earlier else tokens, tool_uses, seconds, True, origin)
+
+
+def mode_change_warning(path, member, own_step, origin=None, amending=False, step=None):
+    """A warning, or None, for a continuation logged at another step number than the fresh launch it continues
+    (`origin`, or else the member's last fresh launch) whose step cell names no fix, delta or revise round: the
+    first launch of another mode is a fresh launch (`.squad/routing.md`, *Continuing a member*). With `amending`,
+    the row being amended (the member's last, or its last of `step`) is left out."""
+    with open(path, encoding="utf-8-sig") as handle:
+        rows = parse_rows(handle.read())
+    wanted = cell(member)
+    if amending:
+        rows = rows_before(rows, wanted, None if step is None else cell(step))
+    fresh = [row_step for _, row_step, row_member, result in rows if row_member == wanted
+             and TRAILER.search(result) and not TRAILER.search(result).group("continued")]
+    if origin is not None:
+        continued = cell(origin)
+    elif fresh:
+        continued = fresh[-1]
+    else:
+        continued = None
+    numbers = [STEP_NUMBER.match(text or "") for text in (continued, own_step)]
+    if None in numbers or numbers[0].group(1) == numbers[1].group(1) or ROUND_OF_SAME_MODE.search(own_step):
+        return None
+    return (f"WARNING: '{own_step}' continues {member}'s launch of step '{continued}': a fix, delta or revise "
+            "round continues, but the first launch of another mode is a fresh launch (.squad/routing.md, "
+            "*Continuing a member*)")
 
 
 def resolve_log(root, folder):
@@ -249,15 +280,15 @@ def amendable(result, replace):
     return (not old or pending), old
 
 
-def target_result(path, member, step=None):
-    """The result cell of the row `--amend-last`/`--replace-last` would change, or None."""
+def target_row(path, member, step=None):
+    """(step cell, result cell) of the row `--amend-last`/`--replace-last` would change, or (None, None)."""
     with open(path, encoding="utf-8-sig") as handle:
         rows = parse_rows(handle.read())
     wanted, wanted_step = cell(member), None if step is None else cell(step)
     for _, row_step, row_member, result in reversed(rows):
         if row_member == wanted and (wanted_step is None or row_step == wanted_step):
-            return result
-    return None
+            return row_step, result
+    return None, None
 
 
 def amend_last(path, member, launch, replace=False, step=None):
@@ -534,17 +565,21 @@ def amend_command(parser, path, folder, member, launch, replace, continued, step
         parser.error(f"{option} needs --agent (or --launch), --tokens, --tool-uses and --seconds (or --unreported)")
     if replace and launch[1] is None:
         parser.error("--unreported marks a row without a trailer: use it with --amend-last")
-    current = target_result(path, member, step) or ""
+    own_step, current = target_row(path, member, step)
+    current = current or ""
     if replace and PENDING_TRAILER.search(current):
         parser.error("the row's usage is still pending: add it with --amend-last, not --replace-last")
     # Only a replaced trailer with real numbers is part of the earlier usage a continuation subtracts.
     launch = share_of_round(path, member, launch, continued, replace and bool(TRAILER.search(current)), step, origin)
     if launch is None:
         return 1
+    warning = mode_change_warning(path, member, own_step, origin, True, step) if continued and own_step else None
     row = amend_last(path, member, launch, replace=replace, step=step)
     if row is None:
         print(no_row_message(folder, member, replace, step))
         return 1
+    if warning:
+        print(warning)
     print(row)
     return 0
 
@@ -571,6 +606,9 @@ def row_command(parser, path, args, launch):
     launch = share_of_round(path, args.member, launch, args.continued, origin=args.continued_from)
     if args.continued and launch is None:
         return 1
+    warning = mode_change_warning(path, args.member, cell(args.step), args.continued_from) if args.continued else None
+    if warning:
+        print(warning)
     print(append_row(path, args.step, args.member, args.result, launch=launch))
     return 0
 

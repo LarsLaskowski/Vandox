@@ -50,7 +50,8 @@ formatter touched is reported as "formatted outside the change", not edited, and
 **Git and GitHub.** Members never run Git write operations and never post to GitHub (no GitHub MCP write tool
 either); the `PreToolUse` hook `.claude/hooks/git-guard.py`, declared in every `squad-*.md`, denies such Bash
 commands. Read-only Git, `git add` and a scratch `git worktree` stay allowed; a member that needs
-anything else reports it.
+anything else reports it. Another revision is read with `git show <sha>:<path>` or in a scratch worktree
+(`git worktree add --detach`), never by checking it out in the repository working tree.
 Session-management tools (`create_session`, `send_message`, `archive_session` and the other remote-session
 tools) belong to the orchestrator alone, also for "handing over" work. Experiments — mutation tests, trial
 edits, baselines — run in a scratch `git worktree`, never in the repository working tree (`git stash` is a
