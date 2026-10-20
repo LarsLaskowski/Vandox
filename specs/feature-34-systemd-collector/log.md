@@ -25,3 +25,4 @@ are quoted in full.
 | 2026-10-20 18:32 | 6 Implement (task 2) | squad-dev | PreviousLost implemented, tests green, QF1001 fixed; scheduler cov 98.9% (sonnet/medium · 74,280 tokens · 13 tool uses · 544 s) |
 | 2026-10-20 18:34 | 6 Coverage (task 2) | squad-tester | Late-start tests added, pass (sonnet/medium · 67,390 tokens · 9 tool uses · 130 s) |
 | 2026-10-20 18:35 | 4 Skeleton (task 4) | squad-dev | internal/sdbus stubs; builds, vet clean (sonnet/medium · 66,677 tokens · 6 tool uses · 32 s) |
+| 2026-10-20 18:48 | 5 Tests first (tasks 3, 4) | squad-tester | Fake bus, capture reader, sdbus tests: 110 failures on stubs, none deferred (sonnet/medium · usage pending) |

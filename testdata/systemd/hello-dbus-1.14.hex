@@ -1,0 +1,18 @@
+# EXTERNAL authentication and Hello on a D-Bus bus with the stock system policy.
+#
+# Provenance: measured by the Lead for feature #34 (plan row 16) on dbus-daemon 1.14.10 of the development host with
+# /usr/share/dbus-1/system.conf (only <listen> moved to a scratch path; <user>, <fork>, <pidfile>, <syslog> and the
+# includes removed), a Python client run as uid 0 and as uid 65534 (setpriv); the daemon was stopped afterwards.
+#
+# Exchange: the client sends one NUL byte, "AUTH EXTERNAL <hex of the ASCII decimal uid>" and CR LF; the daemon
+# answers the line below (the guid differs per daemon start) and CR LF. After "BEGIN" and Hello (serial 1) the daemon
+# sends, in one write, the method return of Hello (flags NO_REPLY_EXPECTED, destination :1.1, reply_serial 1,
+# signature s, sender org.freedesktop.DBus, body the unique name) and then a unicast NameAcquired signal to the new
+# connection. The hex below is those two messages, 258 bytes, for uid 65534 and unique name :1.1.
+OK 379ab99b4e3b5df5bce269566ad7ae12
+6c02010109000000010000003d00000006017300040000003a312e310000000005017500010000000801670001730000
+07017300140000006f72672e667265656465736b746f702e4442757300000000040000003a312e31006c040101090000
+00020000008d00000001016f00150000002f6f72672f667265656465736b746f702f4442757300000002017300140000
+006f72672e667265656465736b746f702e4442757300000000030173000c0000004e616d654163717569726564000000
+0006017300040000003a312e3100000000080167000173000007017300140000006f72672e667265656465736b746f70
+2e4442757300000000040000003a312e3100
