@@ -16,6 +16,7 @@ import (
 	"github.com/LarsLaskowski/Vandox/internal/sdnotify"
 	"github.com/LarsLaskowski/Vandox/internal/selfstats"
 	"github.com/LarsLaskowski/Vandox/internal/sockmount"
+	"github.com/LarsLaskowski/Vandox/internal/svcstats"
 	"github.com/LarsLaskowski/Vandox/internal/sysstats"
 	"github.com/LarsLaskowski/Vandox/internal/version"
 )
@@ -51,6 +52,13 @@ const (
 	ConnectionsTimeout          = 10 * time.Second
 )
 
+// Schedules of the systemd collector.
+const (
+	SystemdInterval         = 30 * time.Second
+	SystemdPressureInterval = 10 * time.Second
+	SystemdTimeout          = 5 * time.Second
+)
+
 // Options are the process boundaries Run works with.
 type Options struct {
 	ConfigPath string            // the configuration file
@@ -62,6 +70,8 @@ type Options struct {
 	Processes  procstats.Sources // the process sources; zero fields take their defaults
 	// Connections are the connection sources; zero fields take their defaults.
 	Connections connstats.Sources
+	// Services are the systemd sources; the zero value uses the system bus.
+	Services svcstats.Sources
 }
 
 // Run runs the agent until ctx is done and returns the exit code: 0 after a clean stop, 1 when it cannot start.
