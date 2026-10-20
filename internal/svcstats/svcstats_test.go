@@ -496,6 +496,50 @@ func TestCollect_BusFailureFailsTheRun(t *testing.T) {
 	}
 }
 
+// shortReader answers every Read with one unit fewer than asked for.
+type shortReader struct {
+	Reader
+}
+
+// Read implements Reader: a hand-built wrong answer, not a measured one.
+func (r shortReader) Read(ctx context.Context, names []string) ([]Unit, error) {
+	units, err := r.Reader.Read(ctx, names)
+	if err != nil || len(units) == 0 {
+		return units, err
+	}
+	return units[:len(units)-1], nil
+}
+
+// shortSystemd opens shortReaders over a fake systemd.
+type shortSystemd struct {
+	*fakeSystemd
+}
+
+// Open implements Systemd.
+func (s shortSystemd) Open(ctx context.Context) (Reader, error) {
+	r, err := s.fakeSystemd.Open(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return shortReader{Reader: r}, nil
+}
+
+func TestCollect_WrongNumberOfUnitsFailsTheRun(t *testing.T) {
+	r := newRig(t, "mariadb.service", "nginx.service")
+	r.fake.add(running("mariadb.service"))
+	r.fake.add(running("nginx.service"))
+	r.c = New(Sources{Systemd: shortSystemd{r.fake}}, []string{"mariadb.service", "nginx.service"}, testSchedule, slog.New(&recordingHandler{store: r.logs}))
+
+	recs, err := r.c.Collect(context.Background(), runAt(0, false))
+
+	if err == nil || err.Error() != "svcstats: read: unexpected number of units" || len(recs) != 0 {
+		t.Errorf("Collect() = %d records, %v, want no record and \"svcstats: read: unexpected number of units\"", len(recs), err)
+	}
+	if opens, closes := r.fake.counts(); opens != 1 || closes != 1 {
+		t.Errorf("reader opened %d times and closed %d times, want 1 and 1", opens, closes)
+	}
+}
+
 func TestCollect_HungBusEndsAtTheDeadline(t *testing.T) {
 	for _, stage := range []string{stageOpen, stageList, stageRead} {
 		t.Run(stage, func(t *testing.T) {

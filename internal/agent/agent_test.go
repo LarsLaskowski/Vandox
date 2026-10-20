@@ -878,3 +878,35 @@ func TestRun_ServiceUnitsFromConfigurationFile(t *testing.T) {
 		t.Errorf("units read from systemd = %v, want [nginx.service] (the entry nginx with the suffix added)", got)
 	}
 }
+
+func TestNewScheduler_EmptyServiceUnitsNeverOpenSystemd(t *testing.T) {
+	cfg := config.DefaultAgent()
+	cfg.Services.Units = []string{}
+	fake := &fakeSystemd{}
+	opts := lowMemoryOptions(t, 0)
+	opts.Services = svcstats.Sources{Systemd: fake}
+
+	synctest.Test(t, func(t *testing.T) {
+		sink := &recordSink{}
+		opts.Sink = sink
+		sched, err := newScheduler(opts, &cfg, slog.New(slog.DiscardHandler))
+		if err != nil {
+			t.Fatalf("newScheduler() error = %v, want nil", err)
+		}
+
+		runFor(t, sched, 2*SystemdInterval)
+
+		fake.mu.Lock()
+		opens := fake.opens
+		fake.mu.Unlock()
+		if opens != 0 {
+			t.Errorf("systemd was opened %d times with services.units empty, want 0", opens)
+		}
+		if units := serviceUnits(t, sink.all()); len(units) != 0 {
+			t.Errorf("service_state records for %v with services.units empty, want none", units)
+		}
+		if len(sink.all()) == 0 {
+			t.Errorf("no record at all, want the other collectors to run")
+		}
+	})
+}

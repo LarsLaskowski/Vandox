@@ -7,7 +7,7 @@ how it survives a stalled data source and a missing backend, how gaps are record
 sends is in the [wire format](wire-format.md); its configuration file is in [Configuration and secrets](configuration-and-secrets.md).
 
 **Status.** The command line, the start-up with the configuration file, logging, the scheduler with its gaps and the memory pressure
-switch, the self-metrics, the system metrics, the process collector with the memory pressure mode, the connection collector (with its start-up probe of the socket mount) and the notification of systemd exist, as do
+switch, the self-metrics, the system metrics, the process collector with the memory pressure mode, the connection collector (with its start-up probe of the socket mount), the systemd service collector and the notification of systemd exist, as do
 the shared data model and the wire encoder. The other collectors, the spool, the sender and the systemd unit are **not implemented yet**: until the spool exists, the agent
 drops the records it produces after checking them (it is not released in that state; v0.2.0 waits for the spool and the sender). The
 rules below for the parts not implemented are the target the implementation is held to and the tests must check.
@@ -45,9 +45,10 @@ rules below for the parts not implemented are the target the implementation is h
 - Commands for the server (a later feature) are fetched by the agent from the backend, never pushed to it, so they reach the server
   only at the agent's next poll.
 - The agent never contacts Telegram or any other service; all notification goes through the backend.
-- Two local channels to the service manager that started it are not network connections and need no rule: its log on standard error,
-  which systemd passes to the journal, and the notification datagrams it sends to the local socket systemd names (*Service manager*).
-  The agent binds no socket for them.
+- Three local channels are not network connections and need no rule: the agent's log on standard error, which systemd passes to the
+  journal, the notification datagrams it sends to the local socket systemd names (*Service manager*) and the connection to the system
+  bus socket `/run/dbus/system_bus_socket` that the `systemd` collector opens for each run (*Services*). The agent binds no socket for
+  them.
 
 ## Collecting
 
@@ -76,6 +77,10 @@ rules below for the parts not implemented are the target the implementation is h
   **skipped** and recorded as a gap with cause `collector_timeout` as well; the collector is not started a second time. When the
   abandoned run returns, its result is dropped, one line names how many runs were skipped, and the collector runs again at its next
   due time.
+- A run learns whether the previous sample of its collector was lost (`Run.PreviousLost`): its result was not kept, because the run
+  timed out, was skipped, returned an error or panicked, had a record refused, or the sink refused its records. A run that starts
+  late does not set it. A run whose records were all kept and accepted clears it. A collector that records only changes uses it to
+  record its full state again after a lost sample; the other collectors ignore it.
 - A run that **panics** or returns an **error** loses its sample: the panic is recovered, the sample is recorded as a gap with cause
   `unknown`, and the collector runs again at its next due time. A panic is logged as an error with the collector's name, the panic
   value (at most 1,024 bytes) and the stack (at most 4 KiB). Errors are logged at the first failure after a success, and the next
@@ -508,7 +513,7 @@ it has just read:
 The collector calls the switch (`Scheduler.SetPressure`, which the agent connects when it builds the scheduler) only when the mode changes;
 it starts off. A change logs one info line `memory pressure mode on` or `memory pressure mode off` with `collector=system`,
 `mem_available_bytes` and, when the pressure file was read, `memory_some_avg10`. A failed sample changes nothing. The effect: the `system`
-(10 seconds), `processes` (15 seconds) and `connections` (15 seconds) collectors run at their pressure intervals, `processes` lists every process and `connections` records a full snapshot.
+(10 seconds), `processes` (15 seconds), `connections` (15 seconds) and `systemd` (10 seconds) collectors run at their pressure intervals, `processes` lists every process and `connections` records a full snapshot.
 
 Because the decision follows a `system` sample, the switch can lag the pressure by up to one `system` interval (30 seconds). Any local
 user can switch the mode on by allocating memory; the result is a process snapshot with every process every 15 seconds and a spool that

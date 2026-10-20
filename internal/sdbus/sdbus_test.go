@@ -483,6 +483,79 @@ func TestSession_ErrorReplyFailsTheCall(t *testing.T) {
 	}
 }
 
+// failingMember answers the calls of member with an error reply; for Get, only those that ask for property (any when
+// empty). The reply is hand-built, hostile input: the captured bus never answered these calls with an error.
+func failingMember(t *testing.T, member, property, text string) respondFunc {
+	return func(req busMessage) ([]frame, bool) {
+		if req.Member != member {
+			return nil, false
+		}
+		if property != "" {
+			r := &bodyReader{t: t, order: req.Order, b: req.Body}
+			_ = r.str()
+			if r.str() != property {
+				return nil, false
+			}
+		}
+		return []frame{errorFrame(req.Serial, "org.freedesktop.DBus.Error.NoMemory", text)}, true
+	}
+}
+
+// askedProperties returns the properties of the Get requests of bus in order.
+func askedProperties(t *testing.T, bus *fakeBus) []string {
+	t.Helper()
+	var asked []string
+	for _, g := range getCalls(t, bus) {
+		asked = append(asked, g.property)
+	}
+	return asked
+}
+
+func TestSession_ReadFailsOnAnErrorReply(t *testing.T) {
+	const leak = "text-of-the-reply-5c2e"
+	cases := []struct {
+		name     string
+		member   string
+		property string
+		want     string
+		gets     []string
+	}{
+		{"error of the list", "ListUnitsByNames", "", "sdbus: ListUnitsByNames: error reply org.freedesktop.DBus.Error.NoMemory", nil},
+		{"error of the first Get", "Get", "ActiveEnterTimestamp", "sdbus: Get: error reply org.freedesktop.DBus.Error.NoMemory", []string{"ActiveEnterTimestamp"}},
+		{"error of the second Get", "Get", "NRestarts", "sdbus: Get: error reply org.freedesktop.DBus.Error.NoMemory", []string{"ActiveEnterTimestamp", "NRestarts"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			s, bus, ctx := openSession(t, fakeBusConfig{Respond: failingMember(t, c.member, c.property, leak)})
+
+			got, err := s.Read(ctx, []string{"mariadb.service"})
+
+			wantError(t, "Read", err, c.want)
+			if len(got) != 0 {
+				t.Errorf("Read returned %d units with its error, want none", len(got))
+			}
+			if asked := askedProperties(t, bus); !slices.Equal(asked, c.gets) {
+				t.Errorf("Read asked for the properties %v, want %v (it stops at the first error)", asked, c.gets)
+			}
+		})
+	}
+}
+
+func TestSession_ListFailsOnAnErrorReply(t *testing.T) {
+	// A hand-built error reply (hostile input): the captured bus never answered this call with an error.
+	respond := onMember("ListUnitsByPatterns", func(req busMessage) []frame {
+		return []frame{errorFrame(req.Serial, "org.freedesktop.DBus.Error.AccessDenied", "text")}
+	})
+	s, _, ctx := openSession(t, fakeBusConfig{Respond: respond})
+
+	got, err := s.List(ctx, capturedPatterns)
+
+	wantError(t, "List", err, "sdbus: ListUnitsByPatterns: error reply org.freedesktop.DBus.Error.AccessDenied")
+	if len(got) != 0 {
+		t.Errorf("List returned %d units with its error, want none", len(got))
+	}
+}
+
 func TestSession_RefusesOversizedReply(t *testing.T) {
 	t.Run("body over the reply bound", func(t *testing.T) {
 		body := make([]byte, MaxReplyBody+1)
