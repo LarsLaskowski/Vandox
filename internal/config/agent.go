@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"net/netip"
 	"net/url"
 	"path/filepath"
@@ -25,6 +26,7 @@ type Agent struct {
 	Log        Log           `yaml:"log"`
 	Filesystem Filesystem    `yaml:"filesystem"`
 	Processes  Processes     `yaml:"processes"`
+	Services   Services      `yaml:"services"`
 	Secrets    AgentSecrets  `yaml:"-"`
 }
 
@@ -59,6 +61,32 @@ type ProgramRule struct {
 	Command        string `yaml:"command"`
 	CmdlinePrefix  string `yaml:"cmdline_prefix"`
 	AppendNextWord bool   `yaml:"append_next_word"`
+}
+
+// Services configures the systemd service collector.
+type Services struct {
+	Units []string `yaml:"units"` // full service unit names or patterns, in file order
+}
+
+// Bounds of services.units.
+const (
+	MaxServiceUnits     = 64
+	MaxServiceUnitBytes = 255
+)
+
+// DefaultServiceUnits returns the default value of services.units.
+func DefaultServiceUnits() []string {
+	return nil
+}
+
+// checkServiceUnits checks the list of services.units and returns it with every entry as a full unit name.
+func checkServiceUnits(file string, lines map[string]int, values []string) ([]string, error) {
+	return nil, errors.New("not implemented")
+}
+
+// serviceUnitName returns the full unit name of entry, or the reason it is refused.
+func serviceUnitName(entry string) (name, reason string) {
+	return "", "not implemented"
 }
 
 // Bounds of processes.programs.
