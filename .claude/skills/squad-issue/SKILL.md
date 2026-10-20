@@ -60,7 +60,8 @@ every Git and GitHub action yourself, including follow-up issues the Lead decide
      marked `--unreported`; a wrong trailer is corrected with `--replace-last`, never with a second row.
    - A continued launch gets `--continued` (or `--continued-from "<step cell of the fresh launch>"` when that
      agent is not the member's last fresh launch) on the call that carries its numbers — the amend of its pending
-     row — with the notification's numbers unchanged.
+     row — with the notification's numbers unchanged. Name a fix, delta or revise round as such in its step
+     cell; a continuation at another step than its fresh launch draws a warning (a new mode is a fresh launch).
    - Rows of the Orchestrator, the Product Manager and the User take no metric option.
    - Everything else, and what each refusal means: `python3 .squad/tools/squad-log.py --help`.
 
@@ -98,7 +99,8 @@ every Git and GitHub action yourself, including follow-up issues the Lead decide
    tests it hands back as **deferred**. A fix without a reproducing test is acceptable only when the bug
    genuinely needs a live external system — then the PR says so.
 6. **Implement and cover.** For a change without production or test code this is the Dev's edits alone: no
-   `squad-tester`, no *Test with coverage*, no *Coverage gate*. Otherwise launch `squad-dev` in mode `implement` with the plan and the test names. If the
+   `squad-tester`, no *Test with coverage*, no *Coverage gate*. Otherwise launch `squad-dev` in mode `implement`
+   — a fresh launch, never a continuation of its `skeleton` agent — with the plan and the test names. If the
    Dev disputes a test, launch `squad-lead` in mode `decide`; the Tester changes a test only if the Lead says
    so. Run *Test with coverage* and the *Coverage gate* yourself. Launch `squad-tester` in mode `coverage`,
    with the reason, only when the gate fails, the Dev reports uncovered new lines, a resource bound of the
@@ -128,9 +130,10 @@ every Git and GitHub action yourself, including follow-up issues the Lead decide
    A reviewer or `squad-security` that stops on an API error (`529 Overloaded`; `429`: once the limit has reset) is relaunched
    unchanged, at most twice; after that report a blocker to the user.
 9. **PR approval.** Run *PR approval* (`.squad/routing.md`): the checklist in full, then the record status
-   and `decision-check.py`. Launch `squad-lead` in mode `approve-pr` — with the base ref, the gate output, the
-   review outcome and the open points (after the PR also the finished check-run list) — only for the open
-   decisions it lists; otherwise log "approved by checklist".
+   and `decision-check.py`. Launch `squad-lead` in mode `approve-pr` as a fresh launch (never a continuation
+   of its plan agent) — with the base ref, the gate output, the review outcome and the open points (after the
+   PR also the finished check-run list) — only for the open decisions it lists; otherwise log "approved by
+   checklist".
 10. **Pull request.** Post `plan.md` (none on tiers `docs` and `patch`) and `log.md` as one comment on the
     issue, headed "Squad working record", each inside a collapsed `<details>` block — or, for a `plan.md` too
     long to re-type, a permalink to the last commit that contains it

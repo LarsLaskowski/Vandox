@@ -62,7 +62,9 @@ The orchestrator tells you which **mode** to run:
   - for a bug fix, acceptance criteria the Tester can turn into unit tests (a feature's are the spec's: never
     copy them), and for every criterion its tests in *Tests per criterion* — the Tester writes exactly those
     first. A criterion that words a condition for user-visible text (a status line, a message) is derived from
-    the code path that decides it, and the plan names that path, not a paraphrase of the trigger;
+    the code path that decides it, and the plan names that path, not a paraphrase of the trigger. New
+    user-visible output gets its layout in *Approach* — heading level, list structure, order, when optional
+    notes appear — or the line "layout free for the Tester, approved in step 9": the Tester does not decide it;
   - the **documentation updates**, found by a sweep before they are listed: search the area documents and
     `docs/ARCHITECTURE.md` for every enumeration or "only these …" statement the change extends (routes,
     rules, settings, tables, limits) and list each hit, besides the documents you already know the change
@@ -88,6 +90,10 @@ The orchestrator tells you which **mode** to run:
   - for a new or changed parser, decoder or reader of an external format: the **real sample** of that format
     the plan is built from — a file under the stack's test data layout or attached to the issue, named with
     the variants it covers, which the Tester's tests read instead of hand-typed lines where the format allows.
+    A sample with real private values (addresses, host names, keys, user names) is anonymized by replacing
+    each such field whole, generated from nothing of the real value; before you hand it back, decode every
+    field of the result and compare each against the set of real values, prefixes included, since a grep for
+    the original strings misses a partly replaced field.
     Without one, return `RESULT: ESCALATE` (*Escalation to the Product Manager*: provide a sample, naming the
     variants the issue mentions, or confirm building from the description with the residual risk recorded in
     the decision record) and plan on only with the answer;

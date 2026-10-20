@@ -46,8 +46,8 @@ cells in `log.md`); steps 4–12 follow `squad-issue` with the changes listed af
 
 ## Steps 4–12: as in `squad-issue`, with these changes
 
-- **Steps 4–6** run per task group from `tasks.md`, in the order its *Depends on* column allows; tick tasks off
-  as they are done. The Tester's tests first are the tests *Tests per criterion* names for the group's
+- **Steps 4–6** run per task group — the *Group* column of `tasks.md`, in table order; tick tasks off as they
+  are done. The Tester's tests first are the tests *Tests per criterion* names for the group's
   criteria. Continue a member for the fix and delta rounds of its task group; the next task group starts with
   a fresh launch (*Continuing a member*), and a later fix round for an earlier group's agent is logged with
   `--continued-from "<step cell of that group's launch>"`.

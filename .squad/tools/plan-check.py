@@ -14,14 +14,18 @@ Checks, in the work folder `specs/<folder>/`:
   another form is reported; every scenario and edge case `E<n>` is named by a criterion or listed under *Out of
   scope*; every open question is answered (`Answered:`) or the section says "none"; `plan.md` defines no
   criterion of its own; every criterion of the spec has a row in the plan's *Tests per criterion* and appears in
-  the *Criteria* column of `tasks.md` (every table of it), and neither names a criterion the spec lacks.
+  the *Criteria* column of `tasks.md` (every table of it), and neither names a criterion the spec lacks; every
+  task row names its *Group* (the unit steps 4–6 run as one launch per member), and a group's rows are
+  consecutive.
 - **Bug fix** (no `spec.md`): `plan.md` defines its acceptance criteria, and each has a row in *Tests per
   criterion* (tier `trivial`, which writes no tests first, needs none).
 - **Both:** the *Tier* line names exactly one tier, and the *Security areas touched* line says "none" or lists
   them (it decides the Security plan review); *Verified facts* has at least
   one row, and every row has evidence and a status (`confirmed`, `refuted`, or `unverified` with the measurement
-  that settles it, starting with `to verify:`); no template placeholder is left. A plan longer than `PLAN_MAX_WORDS`
-  (`squad_settings.py`, default 4000) is reported as a warning: a long plan costs every member that reads it.
+  that settles it, starting with `to verify:`); no template placeholder is left; no Markdown file of the work
+  folder contains a control character (`scope-check.py`'s check, here before any member reads the folder). A
+  plan longer than `PLAN_MAX_WORDS` (`squad_settings.py`, default 4000) is reported as a warning: a long plan
+  costs every member that reads it.
 
 Ids may be written as ranges (`AC1–AC3`, `S2-S4`); backticks and emphasis around a cell are ignored. A criterion
 without a test, in a plan whose *Verification without tests* section names it, counts as covered.
@@ -39,6 +43,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import squad_settings as settings  # noqa: E402  (per-repository settings next to this script)
+from analyzer_common import control_characters  # noqa: E402  (shared helpers next to this script)
 
 PLAN_MAX_WORDS = getattr(settings, "PLAN_MAX_WORDS", 4000)
 TIERS = ("trivial", "standard", "security")
@@ -237,6 +242,25 @@ def check_facts(plan_parts, errors):
             errors.append(f"plan.md: unverified claim without `to verify:` and its measurement: {claim}")
 
 
+def check_groups(header, rows, errors):
+    """Every task row names its group, and a group's rows are consecutive: steps 4–6 run one group at a time, as
+    one launch per member, in table order."""
+    index = column(header, "group")
+    if index is None:
+        errors.append("tasks.md: a task table without a *Group* column (steps 4–6 run per task group)")
+        return
+    seen, previous = set(), None
+    for row in rows:
+        group = row[index] if len(row) > index else ""
+        if empty(group):
+            errors.append(f"tasks.md: task without a group: | {' | '.join(row)} |")
+            continue
+        if group != previous and group in seen:
+            errors.append(f"tasks.md: the rows of group {group} are not consecutive")
+        seen.add(group)
+        previous = group
+
+
 def check_tasks(tasks, criteria, errors):
     named, found_column = set(), False
     for header, rows in tables(tasks):
@@ -245,6 +269,7 @@ def check_tasks(tasks, criteria, errors):
             continue
         found_column = True
         named |= {i for row in rows if len(row) > index for i in ids(row[index], "AC")}
+        check_groups(header, rows, errors)
     if not found_column:
         errors.append("tasks.md: no table with a *Criteria* column")
     for criterion in sorted(criteria - named):
@@ -298,12 +323,25 @@ def check_spec_only(folder):
         return ["spec.md is missing"], []
     check_spec(spec, errors)
     check_placeholders(SPEC, spec, errors)
+    check_control_characters(folder, errors)
     return errors, []
+
+
+def check_control_characters(folder, errors):
+    """No Markdown file of the work folder carries a control character: `scope-check.py` would reject it only in
+    the docs step, after every member has read the plan."""
+    for name in sorted(os.listdir(folder)):
+        path = os.path.join(folder, name)
+        if name.endswith(".md") and os.path.isfile(path):
+            found = control_characters(read(path, []) or "")
+            if found:
+                errors.append(f"{name}: control characters {', '.join(found)} (write them as text escapes)")
 
 
 def check(folder):
     """All findings for the work folder, and the warnings."""
     errors, warnings = [], []
+    check_control_characters(folder, errors)
     plan = read(os.path.join(folder, "plan.md"), errors)
     spec = read(os.path.join(folder, SPEC), errors)
     if plan is None:
