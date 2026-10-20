@@ -1,7 +1,7 @@
 # Spec: systemd service collector
 
 Source: Issue #34
-Status: Draft
+Status: Approved by Lead
 
 ## Problem
 
@@ -68,7 +68,7 @@ memory situation worse.
   `nginx.service`); more than 64 entries; a null element (`has no value`, as for the other agent lists); an element or
   a list of another YAML type.
 - E2: The system bus cannot be reached (`/run/dbus/system_bus_socket` missing, connection refused, authentication
-  refused, systemd not on the bus): the run fails, the sample is a gap with cause `unknown` and collector `systemd`, the
+  refused, systemd not on the bus, or systemd or the bus answering one of the agent's calls with an error): the run fails, the sample is a gap with cause `unknown` and collector `systemd`, the
   scheduler logs `collector failed` with `collector=systemd` at the first failure and `collector recovered` when a run
   succeeds again; no record and no missing-unit warning is written until a run succeeds.
 - E3: systemd or the bus daemon does not answer (stalled under memory pressure): the run is abandoned at its 5-second
@@ -140,8 +140,9 @@ memory situation worse.
   confirmation of accepted results; the plan picks it and records it against record 0110, which it extends. The existing
   collectors ignore it.
 - **Test data.** The D-Bus replies are an external format: the plan builds the decoder from real systemd 249 replies
-  under `testdata/` (`ListUnitsByPatterns`, `LoadUnit`, `Properties.GetAll` of a loaded, a not-found and a masked unit,
-  and an unsolicited signal), and the tests read them.
+  under `testdata/` (`ListUnitsByPatterns`, `LoadUnit` and `Properties.Get` of `Id`, `LoadState`, `ActiveState`, `SubState`,
+  `ActiveEnterTimestamp` and `NRestarts` for a loaded, a not-found and a masked unit, and unsolicited signals); the Product
+  Manager provided it as `testdata/systemd/capture-systemd249.pcap`, and the tests read them.
 - **Compatibility.** Ubuntu 22.04 with systemd 249 on the server; the wire format stays 1.1 (the `service_state` fields
   are unchanged); Linux only.
 
@@ -214,12 +215,12 @@ memory situation worse.
 - What is a "missing unit"? Answered: an exact entry for which systemd reports `load_state` `not-found`; a pattern
   that matches nothing is not one, and masked or broken units are recorded, not warned about. "One warning" is one line
   naming every missing unit, logged at the first successful run after the start.
-- Does reading unit states over D-Bus need a right? Answered: no: systemd's bus policy lets any local user read unit
-  properties and load a unit's state, which is why `systemctl show` and `systemctl status` work for an unprivileged
-  user; the plan checks this against systemd 249's policy file and records it, and a right found to be needed would
-  make it a `security`-tier escalation.
-- Is there a real sample of the D-Bus replies? Answered: not yet; the plan captures real systemd 249 replies into
-  `testdata/` (see *Non-functional requirements*, *Test data*) or escalates for one.
+- Does reading unit states over D-Bus need a right? Answered: no. systemd 249's bus policy
+  (`src/core/org.freedesktop.systemd1.conf`) allows every user `Properties.Get`, `LoadUnit` and `ListUnitsByPatterns`, its
+  `dbus-manager.c` says "Anyone can call this method" for both Manager methods, and the server capture was taken with
+  every call made as `nobody`.
+- Is there a real sample of the D-Bus replies? Answered: yes, after an escalation the Product Manager provided
+  `testdata/systemd/capture-systemd249.pcap`, taken on the monitored server (Ubuntu 22.04, systemd 249).
 - Does #30 provide what the collector plugs into? Answered: yes, #30 is closed: the scheduler with per-collector
   interval, timeout, pressure interval and gaps exists (`internal/scheduler`), and the agent builds the job list in
   `internal/agent`.
@@ -258,3 +259,5 @@ memory situation worse.
 - Minor 5 (cap order, hourly wording): accepted. E6 states that tracked units are never dropped, a new match beyond
   the cap counts as left out and the warning is logged once per agent run; S8 now says records are at most one hour
   plus one interval apart, and that a shorter incident window may hold no record of a quiet unit.
+- Planning (Lead): E2 now names an error reply to one of the agent's calls as a failed run, which the spec left open;
+  *Test data* names the individual `Properties.Get` calls the capture holds instead of `GetAll`.
