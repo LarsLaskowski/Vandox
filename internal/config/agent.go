@@ -123,9 +123,9 @@ func serviceUnitName(entry string) (name, reason string) {
 	if entry == "" || entry[0] == '.' || entry[0] == '-' || strings.Count(entry, "@") > 1 {
 		return "", serviceNameReason
 	}
-	for i := 0; i < len(entry); i++ {
+	for i := range len(entry) {
 		c := entry[i]
-		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || strings.IndexByte(":_.@*?-", c) >= 0) {
+		if (c < 'a' || c > 'z') && (c < 'A' || c > 'Z') && (c < '0' || c > '9') && strings.IndexByte(":_.@*?-", c) < 0 {
 			return "", serviceNameReason
 		}
 	}
