@@ -17,3 +17,4 @@ are quoted in full.
 | 2026-10-20 18:13 | 3 Plan security review (round 2) | squad-security | APPROVED, no non-blocking findings (opus/medium · 25,047 tokens · 4 tool uses · 40 s · continued) |
 | 2026-10-20 18:13 | 3 Plan gate | squad-orchestrator | Plan approved: challenge answered, Security APPROVED on 9797e70; starting task groups 1-8 |
 | 2026-10-20 18:14 | 4 Skeleton (task 1) | squad-dev | Stubs in internal/config/agent.go; builds, existing tests pass (sonnet/medium · 70,548 tokens · 5 tool uses · 30 s) |
+| 2026-10-20 18:15 | 5 Tests first (task 1) | squad-tester | Tests for AC1/AC2 written, fail on skeleton; EmptyTurnsCollectorOff deferred (sonnet/medium · usage pending) |
