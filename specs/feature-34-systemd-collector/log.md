@@ -32,3 +32,4 @@ are quoted in full.
 | 2026-10-20 19:07 | 5 Tests first (decide) | squad-lead | DECIDED: unit reading moves into sdbus (Unit, Session.List/Read), BusSystemd only dials; new task 4b (opus/medium · 15,810 tokens · 6 tool uses · 78 s · continued) |
 | 2026-10-20 19:08 | 4 Skeleton (task 4b) | squad-dev | sdbus.Unit/List/Read stubs; svcstats.Unit alias, BusSystemd dials (sonnet/medium · 62,200 tokens · 7 tool uses · 26 s) |
 | 2026-10-20 19:11 | 5 Tests first (task 4b) | squad-tester | 3 sdbus tests fail on stubs; svcstats BusSystemd and import tests written (sonnet/medium · 100,519 tokens · 11 tool uses · 174 s) |
+| 2026-10-20 19:14 | 6 Implement (tasks 4b, 5) | squad-dev | List/Read and collector implemented; tests green; sdbus 91.6%, svcstats 98.3%; coverage pass deferred to gate (sonnet/medium · usage pending) |

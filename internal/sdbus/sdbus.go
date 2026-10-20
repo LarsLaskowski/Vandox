@@ -39,6 +39,13 @@ const (
 	ifaceManager = "org.freedesktop.systemd1.Manager"
 	ifaceProps   = "org.freedesktop.DBus.Properties"
 
+	ifaceUnit       = "org.freedesktop.systemd1.Unit"
+	ifaceService    = "org.freedesktop.systemd1.Service"
+	propActiveEnter = "ActiveEnterTimestamp"
+	propRestarts    = "NRestarts"
+	loadNotFound    = "not-found"
+	activeInactive  = "inactive"
+
 	memberHello      = "Hello"
 	memberByPatterns = "ListUnitsByPatterns"
 	memberByNames    = "ListUnitsByNames"
@@ -89,12 +96,53 @@ type Unit struct {
 
 // List returns the units matching patterns with their states; ActiveEnter and Restarts are not read.
 func (s *Session) List(ctx context.Context, patterns []string) ([]Unit, error) {
-	return nil, errors.New("sdbus: not implemented")
+	infos, err := s.ListUnitsByPatterns(ctx, patterns)
+	if err != nil {
+		return nil, err
+	}
+
+	units := make([]Unit, len(infos))
+	for i, info := range infos {
+		units[i] = unitOf(info)
+	}
+
+	return units, nil
 }
 
-// Read returns one Unit per name, in order.
+// Read returns one Unit per name, in order: the states from ListUnitsByNames, then ActiveEnterTimestamp and NRestarts of
+// each unit, except for a unit that is not-found and inactive, which has neither.
 func (s *Session) Read(ctx context.Context, names []string) ([]Unit, error) {
-	return nil, errors.New("sdbus: not implemented")
+	infos, err := s.ListUnitsByNames(ctx, names)
+	if err != nil {
+		return nil, err
+	}
+
+	units := make([]Unit, len(infos))
+
+	for i, info := range infos {
+		units[i] = unitOf(info)
+
+		if info.LoadState == loadNotFound && info.ActiveState == activeInactive {
+			continue
+		}
+
+		units[i].ActiveEnter, err = s.GetUint64(ctx, info.Path, ifaceUnit, propActiveEnter)
+		if err != nil {
+			return nil, err
+		}
+
+		units[i].Restarts, err = s.GetUint32(ctx, info.Path, ifaceService, propRestarts)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return units, nil
+}
+
+// unitOf returns the Unit with the states of info.
+func unitOf(info UnitInfo) Unit {
+	return Unit{ID: info.ID, LoadState: info.LoadState, ActiveState: info.ActiveState, SubState: info.SubState}
 }
 
 // Dial connects to the unix stream socket at path, authenticates as the current user and says Hello.
