@@ -37,4 +37,5 @@ are quoted in full.
 | 2026-10-20 19:16 | 5 Tests first (task 6) | squad-tester | Agent tests adapted and added; fail on skeleton; empty-list never-opens test deferred (sonnet/medium · 91,984 tokens · 9 tool uses · 80 s) |
 | 2026-10-20 19:18 | 6 Implement (tasks 6, 7) | squad-dev | Job wired, README and deploy notes written; tests green, analyzer 0 (sonnet/medium · 73,985 tokens · 11 tool uses · 142 s) |
 | 2026-10-20 19:20 | 6 Coverage (task 6, error paths) | squad-tester | Deferred empty-list test and sdbus/svcstats error-path tests added, pass (sonnet/medium · 94,303 tokens · 13 tool uses · 82 s) |
-| 2026-10-20 19:22 | 6 Implement (task 8) | squad-dev | Area documents, architecture, project, stack, unit-test guide updated; decision-check and config-check pass (sonnet/medium · usage pending) |
+| 2026-10-20 19:22 | 6 Implement (task 8) | squad-dev | Area documents, architecture, project, stack, unit-test guide updated; decision-check and config-check pass (sonnet/medium · 176,733 tokens · 40 tool uses · 184 s) |
+| 2026-10-20 19:26 | 7 Code check | squad-orchestrator | format, build, test -race, analyzer 0 issues, coverage gate PASS (new 90.2%, overall 97.9%), scope-check, decision-check PASS; Sonar gate: see next row |
