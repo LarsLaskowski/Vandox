@@ -1,7 +1,6 @@
 package config
 
 import (
-	"errors"
 	"net/netip"
 	"net/url"
 	"path/filepath"
@@ -74,19 +73,79 @@ const (
 	MaxServiceUnitBytes = 255
 )
 
+// Reasons services.units is refused with; none of them quotes a value.
+const (
+	serviceUnitsReason  = "must be a list of at most 64 unit names"
+	serviceNameReason   = "must be a service unit name or pattern of 1 to 255 bytes of [A-Za-z0-9:_.@*?-], not starting with . or -"
+	serviceTypeReason   = "must name a service unit"
+	serviceTemplateText = "must name an instance, not a template"
+	serviceTwiceReason  = "listed twice"
+)
+
+// serviceSuffix is the type suffix of a service unit; serviceOtherTypes are the suffixes of the other unit types.
+const serviceSuffix = ".service"
+
+var serviceOtherTypes = []string{
+	".socket", ".timer", ".target", ".mount", ".automount", ".swap", ".path", ".slice", ".scope", ".device",
+}
+
 // DefaultServiceUnits returns the default value of services.units.
 func DefaultServiceUnits() []string {
-	return nil
+	return []string{
+		"sw-cp-server.service", "sw-engine.service", "psa.service", "nginx.service", "apache2.service", "postfix.service",
+		"dovecot.service", "mariadb.service", "plesk-php*-fpm.service", "php*-fpm.service", "fail2ban.service",
+	}
 }
 
 // checkServiceUnits checks the list of services.units and returns it with every entry as a full unit name.
 func checkServiceUnits(file string, lines map[string]int, values []string) ([]string, error) {
-	return nil, errors.New("not implemented")
+	const key = "services.units"
+	if len(values) > MaxServiceUnits {
+		return nil, keyError(file, lines, key, serviceUnitsReason)
+	}
+	names := make([]string, 0, len(values))
+	for i, v := range values {
+		elem := key + "[" + strconv.Itoa(i) + "]"
+		name, reason := serviceUnitName(v)
+		if reason == "" && slices.Contains(names, name) {
+			reason = serviceTwiceReason
+		}
+		if reason != "" {
+			return nil, keyError(file, lines, elem, reason)
+		}
+		names = append(names, name)
+	}
+	return names, nil
 }
 
 // serviceUnitName returns the full unit name of entry, or the reason it is refused.
 func serviceUnitName(entry string) (name, reason string) {
-	return "", "not implemented"
+	if entry == "" || entry[0] == '.' || entry[0] == '-' || strings.Count(entry, "@") > 1 {
+		return "", serviceNameReason
+	}
+	for i := 0; i < len(entry); i++ {
+		c := entry[i]
+		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || strings.IndexByte(":_.@*?-", c) >= 0) {
+			return "", serviceNameReason
+		}
+	}
+	if entry[0] == '@' {
+		return "", serviceTemplateText
+	}
+	if dot := strings.LastIndexByte(entry, '.'); dot >= 0 && slices.Contains(serviceOtherTypes, entry[dot:]) {
+		return "", serviceTypeReason
+	}
+	name = entry
+	if !strings.HasSuffix(entry, serviceSuffix) {
+		name += serviceSuffix
+	}
+	if len(name) > MaxServiceUnitBytes {
+		return "", serviceNameReason
+	}
+	if strings.HasSuffix(name, "@"+serviceSuffix) {
+		return "", serviceTemplateText
+	}
+	return name, ""
 }
 
 // Bounds of processes.programs.
@@ -184,13 +243,14 @@ func DefaultAgent() Agent {
 		Log:   Log{Level: "info"},
 
 		Filesystem: Filesystem{MountPoints: []string{"/"}},
+		Services:   Services{Units: DefaultServiceUnits()},
 	}
 }
 
 // AgentKeys returns every option key path in file order: agent_id, backend.url, spool.directory, log.level,
-// filesystem.mount_points, processes.programs.
+// filesystem.mount_points, processes.programs, services.units.
 func AgentKeys() []string {
-	return []string{keyAgentID, keyBackendURL, "spool.directory", "log.level", "filesystem.mount_points", "processes.programs"}
+	return []string{keyAgentID, keyBackendURL, "spool.directory", "log.level", "filesystem.mount_points", "processes.programs", "services.units"}
 }
 
 // LoadAgent reads the agent configuration file at path and the secrets from environ (in os.Environ form).
@@ -240,7 +300,15 @@ func (a *Agent) validate(file string, lines map[string]int) error {
 	if err := checkMountPoints(file, lines, "filesystem.mount_points", a.Filesystem.MountPoints); err != nil {
 		return err
 	}
-	return checkProgramRules(file, lines, a.Processes.Programs)
+	if err := checkProgramRules(file, lines, a.Processes.Programs); err != nil {
+		return err
+	}
+	units, err := checkServiceUnits(file, lines, a.Services.Units)
+	if err != nil {
+		return err
+	}
+	a.Services.Units = units
+	return nil
 }
 
 // checkMountPoints checks the list of filesystem.mount_points.
