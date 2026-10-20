@@ -510,3 +510,42 @@ func TestRunner_PreviousLostAfterEveryKindOfLoss(t *testing.T) {
 		})
 	}
 }
+
+// runLateStart blocks the first Put for block and checks that no run sees PreviousLost.
+func runLateStart(t *testing.T, name string, block, until time.Duration, wantStarts []time.Duration) {
+	t.Helper()
+
+	c := newScripted("late", nil)
+	sink := &recordingSink{hook: func(_ context.Context, n int) error {
+		if n == 0 {
+			time.Sleep(block)
+		}
+		return nil
+	}}
+	h := start(t, []scheduler.Job{job(c, 10*time.Second, 2*time.Second)}, sink)
+
+	h.sleepTo(until)
+
+	runs := c.started()
+	if got := h.offsets(runs); !slices.Equal(got, wantStarts) {
+		t.Fatalf("run starts after %s = %v, want %v", name, got, wantStarts)
+	}
+	for i, r := range runs {
+		if r.PreviousLost {
+			t.Errorf("Run.PreviousLost of run %d after %s = true, want false: a late start loses no Collect result", i, name)
+		}
+	}
+}
+
+func TestRunner_LateStartDoesNotSetPreviousLost(t *testing.T) {
+	s := time.Second
+
+	t.Run("a start inside the next slot", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) { runLateStart(t, "a start inside the next slot", 15*s, 22*s, seconds(0, 15, 20)) })
+	})
+	t.Run("a whole-slot gap recorded in startCycle", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			runLateStart(t, "a whole-slot gap recorded in startCycle", 30*s, 42*s, seconds(0, 30, 40))
+		})
+	})
+}
