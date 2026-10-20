@@ -205,6 +205,137 @@ func wantNames(t *testing.T, bus *fakeBus, counts []int, names []string) {
 	}
 }
 
+// getCall is one recorded Properties.Get request: the object it asked and the interface and property it named.
+type getCall struct {
+	path, iface, property string
+}
+
+// getCalls returns the Get requests of bus in order.
+func getCalls(t *testing.T, bus *fakeBus) []getCall {
+	t.Helper()
+	var out []getCall
+	for _, call := range bus.calls("Get") {
+		r := &bodyReader{t: t, order: call.Order, b: call.Body}
+		iface := r.str()
+		property := r.str()
+		out = append(out, getCall{path: call.Path, iface: iface, property: property})
+	}
+	return out
+}
+
+// wantGets checks that bus received exactly the two Gets of each path, ActiveEnterTimestamp then NRestarts.
+func wantGets(t *testing.T, bus *fakeBus, paths ...string) {
+	t.Helper()
+	var want []getCall
+	for _, p := range paths {
+		want = append(want,
+			getCall{path: p, iface: unitIface, property: "ActiveEnterTimestamp"},
+			getCall{path: p, iface: serviceIface, property: "NRestarts"})
+	}
+	if got := getCalls(t, bus); !slices.Equal(got, want) {
+		t.Errorf("Get calls = %v, want %v", got, want)
+	}
+}
+
+// removedWhileRunning answers ListUnitsByNames with one unit whose file is gone while it still runs: not-found and
+// active, on the object of the captured mariadb unit (whose Get replies are measured).
+func removedWhileRunning() respondFunc {
+	entry := unitEntry{
+		ID: "gone.service", Description: "gone.service", Load: "not-found", Active: "active", Sub: "running",
+		Path: mariadbPath, JobPath: "/",
+	}
+	return replyWith("ListUnitsByNames", unitListSignature, unitListBody([]unitEntry{entry}))
+}
+
+func TestSession_ReadSkipsGetsForNotFoundInactive(t *testing.T) {
+	t.Run("not-found and inactive", func(t *testing.T) {
+		s, bus, ctx := openSession(t, fakeBusConfig{})
+
+		got, err := s.Read(ctx, []string{"vandox-does-not-exist.service"})
+
+		want := []Unit{{ID: "vandox-does-not-exist.service", LoadState: "not-found", ActiveState: "inactive", SubState: "dead"}}
+		if err != nil || !slices.Equal(got, want) {
+			t.Errorf("Read(not-found inactive unit) = %v, %v, want %v", got, err, want)
+		}
+		if gets := getCalls(t, bus); len(gets) != 0 {
+			t.Errorf("Read(not-found inactive unit) made Get calls %v, want none", gets)
+		}
+	})
+	t.Run("not-found but still active", func(t *testing.T) {
+		s, bus, ctx := openSession(t, fakeBusConfig{Respond: removedWhileRunning()})
+
+		got, err := s.Read(ctx, []string{"gone.service"})
+
+		want := []Unit{{ID: "gone.service", LoadState: "not-found", ActiveState: "active", SubState: "running", ActiveEnter: 1792240371069328}}
+		if err != nil || !slices.Equal(got, want) {
+			t.Errorf("Read(not-found active unit) = %v, %v, want %v", got, err, want)
+		}
+		wantGets(t, bus, mariadbPath)
+	})
+	t.Run("loaded and active", func(t *testing.T) {
+		s, bus, ctx := openSession(t, fakeBusConfig{})
+
+		got, err := s.Read(ctx, []string{"mariadb.service"})
+
+		want := []Unit{{ID: "mariadb.service", LoadState: "loaded", ActiveState: "active", SubState: "running", ActiveEnter: 1792240371069328}}
+		if err != nil || !slices.Equal(got, want) {
+			t.Errorf("Read(mariadb.service) = %v, %v, want %v", got, err, want)
+		}
+		wantGets(t, bus, mariadbPath)
+	})
+}
+
+func TestSession_ReadResolvesAliasesInChunks(t *testing.T) {
+	s, bus, ctx := openSession(t, fakeBusConfig{})
+	names := make([]string, 66)
+	wantIDsInOrder := make([]string, len(names))
+	for i := range names {
+		names[i] = fmt.Sprintf("unit%03d.service", i)
+		wantIDsInOrder[i] = names[i]
+	}
+	for _, i := range []int{0, 65} {
+		names[i] = "mysql.service" // an alias of mariadb.service, once in each chunk
+		wantIDsInOrder[i] = "mariadb.service"
+	}
+
+	got, err := s.Read(ctx, names)
+
+	if err != nil {
+		t.Fatalf("Read(%d names) = %v, want no error", len(names), err)
+	}
+	ids := make([]string, len(got))
+	for i, u := range got {
+		ids[i] = u.ID
+	}
+	if !slices.Equal(ids, wantIDsInOrder) {
+		t.Errorf("Read(%d names) returned ids %q, want one Unit per name in order, an alias under its primary name %q", len(names), ids, "mariadb.service")
+	}
+	wantNames(t, bus, []int{64, 2}, names)
+	for _, i := range []int{0, 65} {
+		if i < len(got) && (got[i].ActiveEnter != 1792240371069328 || got[i].LoadState != "loaded") {
+			t.Errorf("Read(...)[%d] = %+v, want the loaded mariadb unit with its active_enter", i, got[i])
+		}
+	}
+	wantGets(t, bus, mariadbPath, mariadbPath)
+}
+
+func TestSession_ListReadsNoProperties(t *testing.T) {
+	s, bus, ctx := openSession(t, fakeBusConfig{})
+
+	got, err := s.List(ctx, capturedPatterns)
+
+	want := []Unit{{ID: wantPlesk.ID, LoadState: wantPlesk.LoadState, ActiveState: wantPlesk.ActiveState, SubState: wantPlesk.SubState}}
+	if err != nil || !slices.Equal(got, want) {
+		t.Errorf("List(%q) = %v, %v, want %v", capturedPatterns, got, err, want)
+	}
+	if calls := bus.calls("ListUnitsByPatterns"); len(calls) != 1 {
+		t.Errorf("List made %d ListUnitsByPatterns calls, want 1", len(calls))
+	}
+	if gets := getCalls(t, bus); len(gets) != 0 {
+		t.Errorf("List made Get calls %v, want none (ActiveEnter and Restarts are not read)", gets)
+	}
+}
+
 func TestSession_ListUnitsByNamesRefusesWrongEntryCount(t *testing.T) {
 	names := []string{"a.service", "b.service", "c.service"}
 	entries := func(n int) []unitEntry {

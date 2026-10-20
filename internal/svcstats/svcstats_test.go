@@ -4,10 +4,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"log/slog"
 	"maps"
 	"math"
+	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -117,6 +122,8 @@ func TestCollect_ActiveEnterLeftOutWhenZeroOrNotStorable(t *testing.T) {
 	}
 }
 
+// TestCollect_NotFoundUnitNeedsNoGet checks what the collector passes through for not-found units; that the reader
+// reads no properties of a not-found inactive unit is tested in internal/sdbus.
 func TestCollect_NotFoundUnitNeedsNoGet(t *testing.T) {
 	r := newRig(t, "apache2.service", "gone.service")
 	r.fake.add(missing("apache2.service"))
@@ -784,4 +791,112 @@ func TestCollect_RefusedUnitIsNotRefusedByTheScheduler(t *testing.T) {
 			t.Errorf("scheduler logged %d lines %q, want none: the collector checks its records itself", len(refused), "record refused")
 		}
 	})
+}
+
+func TestBusSystemd_OpenReportsAnUnreachableBus(t *testing.T) {
+	socket := filepath.Join(t.TempDir(), "no-such-bus.sock")
+
+	reader, err := BusSystemd(socket).Open(t.Context())
+
+	if err == nil || reader != nil {
+		t.Errorf("BusSystemd(%q).Open() = %v, %v, want an error and a nil Reader", socket, reader, err)
+	}
+}
+
+// allowedImports are the packages the non-test files of internal/svcstats import (AC11): no program, file, socket, cgo or unsafe.
+var allowedImports = []string{
+	"cmp", "context", "errors", "fmt", "log/slog", "maps", "math", "path", "slices", "sort", "strconv", "strings", "sync", "time",
+	"unicode/utf8",
+	"github.com/LarsLaskowski/Vandox/internal/model", "github.com/LarsLaskowski/Vandox/internal/scheduler",
+	"github.com/LarsLaskowski/Vandox/internal/sdbus", "github.com/LarsLaskowski/Vandox/internal/wire",
+}
+
+// sdbusPackage is the one package whose selectors are restricted: the collector dials and holds sessions, and reads only through Reader.
+const sdbusPackage = "github.com/LarsLaskowski/Vandox/internal/sdbus"
+
+// allowedSelectors maps a package to the only selectors of it the non-test files may use.
+var allowedSelectors = map[string][]string{
+	sdbusPackage: {"Dial", "SystemBusPath", "Session", "Unit"},
+}
+
+// restrictedNames returns the local name of every import of file whose path is a key of allowedSelectors, and the violations for
+// dot imports of such a package; a blank import binds no name and is fine.
+func restrictedNames(name string, file *ast.File) (names map[string]string, violations []string) {
+	names = map[string]string{}
+	for _, imp := range file.Imports {
+		pkg, err := strconv.Unquote(imp.Path.Value)
+		if _, restricted := allowedSelectors[pkg]; err != nil || !restricted {
+			continue
+		}
+		local := pkg[strings.LastIndex(pkg, "/")+1:]
+		if imp.Name != nil {
+			local = imp.Name.Name
+		}
+		switch local {
+		case "_":
+		case ".":
+			violations = append(violations, name+": dot import of "+pkg+" is not allowed")
+		default:
+			names[local] = pkg
+		}
+	}
+	return names, violations
+}
+
+// disallowedSelectors returns the uses in file of selectors of a restricted package, under whatever local name it is imported, that
+// allowedSelectors does not list, and the dot imports of a restricted package.
+func disallowedSelectors(name string, file *ast.File) []string {
+	names, violations := restrictedNames(name, file)
+	ast.Inspect(file, func(n ast.Node) bool {
+		sel, ok := n.(*ast.SelectorExpr)
+		if !ok {
+			return true
+		}
+		id, ok := sel.X.(*ast.Ident)
+		if !ok {
+			return true
+		}
+		pkg, bound := names[id.Name]
+		if bound && id.Obj == nil && !slices.Contains(allowedSelectors[pkg], sel.Sel.Name) {
+			violations = append(violations, name+": "+id.Name+"."+sel.Sel.Name+" is not allowed")
+		}
+		return true
+	})
+	return violations
+}
+
+// disallowedImports returns the imports in file that allowedImports does not list.
+func disallowedImports(name string, file *ast.File) []string {
+	var violations []string
+	for _, imp := range file.Imports {
+		pkg, err := strconv.Unquote(imp.Path.Value)
+		if err != nil || !slices.Contains(allowedImports, pkg) {
+			violations = append(violations, name+": imports "+imp.Path.Value+", want only "+strings.Join(allowedImports, " "))
+		}
+	}
+	return violations
+}
+
+func TestSvcstats_ImportsOnlyAllowedPackages(t *testing.T) {
+	files, err := filepath.Glob("*.go")
+	if err != nil || len(files) == 0 {
+		t.Fatalf("Glob(*.go) = %v, %v, want the package's files", files, err)
+	}
+	checked := 0
+	for _, name := range files {
+		if strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		checked++
+		file, err := parser.ParseFile(token.NewFileSet(), name, nil, 0)
+		if err != nil {
+			t.Fatalf("parsing %s: %v", name, err)
+		}
+		for _, v := range append(disallowedImports(name, file), disallowedSelectors(name, file)...) {
+			t.Error(v)
+		}
+	}
+	if checked < 1 {
+		t.Errorf("checked %d production files, want the collector's files", checked)
+	}
 }

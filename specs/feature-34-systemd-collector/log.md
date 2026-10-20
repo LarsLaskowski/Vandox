@@ -31,3 +31,4 @@ are quoted in full.
 | 2026-10-20 19:06 | 5 Tests first (task 5) | squad-tester | 17 collector tests fail on skeleton; deferred: ImportsOnlyAllowedPackages; open: BusSystemd adapter untestable from svcstats (sonnet/medium · 178,636 tokens · 27 tool uses · 482 s) |
 | 2026-10-20 19:07 | 5 Tests first (decide) | squad-lead | DECIDED: unit reading moves into sdbus (Unit, Session.List/Read), BusSystemd only dials; new task 4b (opus/medium · 15,810 tokens · 6 tool uses · 78 s · continued) |
 | 2026-10-20 19:08 | 4 Skeleton (task 4b) | squad-dev | sdbus.Unit/List/Read stubs; svcstats.Unit alias, BusSystemd dials (sonnet/medium · 62,200 tokens · 7 tool uses · 26 s) |
+| 2026-10-20 19:11 | 5 Tests first (task 4b) | squad-tester | 3 sdbus tests fail on stubs; svcstats BusSystemd and import tests written (sonnet/medium · usage pending) |
