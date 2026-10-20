@@ -24,4 +24,4 @@ are quoted in full.
 | 2026-10-20 18:23 | 5 Tests first (task 2) | squad-tester | 6 AC8 loss cases fail on skeleton; late-start-alone test deferred (sonnet/medium · 93,946 tokens · 10 tool uses · 236 s) |
 | 2026-10-20 18:32 | 6 Implement (task 2) | squad-dev | PreviousLost implemented, tests green, QF1001 fixed; scheduler cov 98.9% (sonnet/medium · 74,280 tokens · 13 tool uses · 544 s) |
 | 2026-10-20 18:34 | 6 Coverage (task 2) | squad-tester | Late-start tests added, pass (sonnet/medium · 67,390 tokens · 9 tool uses · 130 s) |
-| 2026-10-20 18:35 | 4 Skeleton (task 4) | squad-dev | internal/sdbus stubs; builds, vet clean (sonnet/medium · usage pending) |
+| 2026-10-20 18:35 | 4 Skeleton (task 4) | squad-dev | internal/sdbus stubs; builds, vet clean (sonnet/medium · 66,677 tokens · 6 tool uses · 32 s) |
