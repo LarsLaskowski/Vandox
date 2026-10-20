@@ -21,4 +21,4 @@ are quoted in full.
 | 2026-10-20 18:17 | 6 Implement (task 1) | squad-dev | services.units implemented, config tests green, coverage 96.4% (sonnet/medium · 86,018 tokens · 13 tool uses · 94 s) |
 | 2026-10-20 18:18 | 6 Coverage (task 1) | squad-tester | Deferred test EmptyTurnsCollectorOff added, passes (sonnet/medium · 61,568 tokens · 7 tool uses · 27 s) |
 | 2026-10-20 18:18 | 4 Skeleton (task 2) | squad-dev | Run.PreviousLost field added; builds, tests pass (sonnet/medium · 58,857 tokens · 4 tool uses · 24 s) |
-| 2026-10-20 18:23 | 5 Tests first (task 2) | squad-tester | 6 AC8 loss cases fail on skeleton; late-start-alone test deferred (sonnet/medium · usage pending) |
+| 2026-10-20 18:23 | 5 Tests first (task 2) | squad-tester | 6 AC8 loss cases fail on skeleton; late-start-alone test deferred (sonnet/medium · 93,946 tokens · 10 tool uses · 236 s) |
