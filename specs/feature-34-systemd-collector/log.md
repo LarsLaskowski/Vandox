@@ -28,3 +28,4 @@ are quoted in full.
 | 2026-10-20 18:48 | 5 Tests first (tasks 3, 4) | squad-tester | Fake bus, capture reader, sdbus tests: 110 failures on stubs, none deferred (sonnet/medium · 213,552 tokens · 34 tool uses · 746 s) |
 | 2026-10-20 18:56 | 6 Implement (task 4) | squad-dev | sdbus implemented, tests green under -race, coverage 91.9%; coverage pass skipped: above 80% (sonnet/medium · 158,841 tokens · 19 tool uses · 503 s) |
 | 2026-10-20 18:57 | 4 Skeleton (task 5) | squad-dev | internal/svcstats stubs; builds, vet clean (sonnet/medium · 71,665 tokens · 8 tool uses · 37 s) |
+| 2026-10-20 19:06 | 5 Tests first (task 5) | squad-tester | 17 collector tests fail on skeleton; deferred: ImportsOnlyAllowedPackages; open: BusSystemd adapter untestable from svcstats (sonnet/medium · usage pending) |
