@@ -47,7 +47,7 @@ Related defect found on the way: none.
 | -- | ------- | --------- |
 | AC1 | `TestLoadAgent_ServiceUnitsDefault`, `TestLoadAgent_ServiceUnitsOverrideAndSuffix`, `TestLoadAgent_ServiceUnitsEmptyTurnsCollectorOff`; `TestJobs_Schedules` (case "no service unit leaves out the systemd job") | `internal/config/agent_test.go`; `internal/agent/agent_test.go` |
 | AC2 | `TestLoadAgent_ServiceUnitsRefused` (table: every E1 case with the exact error text, and that the text holds no value) | `internal/config/agent_test.go` |
-| AC3 | `TestCollect_FirstRunRecordsEveryUnit`, `TestCollect_AliasRecordedOnceUnderPrimaryName`, `TestCollect_ActiveEnterLeftOutWhenZeroOrNotStorable`, `TestCollect_NotFoundUnitNeedsNoGet`; `TestSession_ReadsCapturedUnits` (the captured `ListUnitsByPatterns` reply decoded byte for byte, and the captured `Get` replies of `ActiveEnterTimestamp` and `NRestarts`), `TestSession_ListUnitsByNamesInChunks` | `internal/svcstats/svcstats_test.go`; `internal/sdbus/sdbus_test.go` |
+| AC3 | `TestCollect_FirstRunRecordsEveryUnit`, `TestCollect_AliasRecordedOnceUnderPrimaryName`, `TestCollect_ActiveEnterLeftOutWhenZeroOrNotStorable`, `TestCollect_NotFoundUnitNeedsNoGet`; `TestSession_ReadsCapturedUnits` (the captured `ListUnitsByPatterns` reply decoded byte for byte, and the captured `Get` replies of `ActiveEnterTimestamp` and `NRestarts`), `TestSession_ListUnitsByNamesInChunks`, `TestSession_ReadSkipsGetsForNotFoundInactive`, `TestSession_ReadResolvesAliasesInChunks`, `TestSession_ListReadsNoProperties`; `TestBusSystemd_OpenReportsAnUnreachableBus` | `internal/svcstats/svcstats_test.go`; `internal/sdbus/sdbus_test.go` |
 | AC4 | `TestCollect_RecordsOnlyChanges`, `TestCollect_RepeatsAfterAnHour` | `internal/svcstats/svcstats_test.go` |
 | AC5 | `TestCollect_WarnsOnceAboutMissingUnits` | `internal/svcstats/svcstats_test.go` |
 | AC6 | `TestCollect_PatternsTrackLoadedMatches` (with a not-found match that is not tracked), `TestCollect_CapsTrackedUnits`, `TestCollect_SkipsMatchesTheWireRefuses` | `internal/svcstats/svcstats_test.go` |
@@ -104,7 +104,7 @@ Weighed in record 0117 (D-Bus against `systemctl` or `/run/systemd`; godbus or g
 | ------- | ----------- | ------ |
 | `internal/config` | `agent.go` (`Agent`, `Services`, `DefaultAgent`, `AgentKeys`, `validate`, `checkServiceUnits`, `serviceUnitName`), `decode.go` (`setOther`: element lines) | option `services.units` |
 | `internal/scheduler` | `scheduler.go` (`Run`), `runner.go` (`runner.lost`) | `PreviousLost` |
-| `internal/sdbus` (new) | `sdbus.go` (`Dial`, `Open`, `Session`, `UnitInfo` and its calls), `message.go` (header encode/decode, body decoder) | minimal D-Bus client |
+| `internal/sdbus` (new) | `sdbus.go` (`Dial`, `Open`, `Session`, `UnitInfo`, `Unit` and its calls, `List` and `Read`), `message.go` (header encode/decode, body decoder) | minimal D-Bus client |
 | `internal/svcstats` (new) | `svcstats.go` (`Collector`, `Sources`, `Systemd`, `Reader`, `Unit`, `BusSystemd`) | the collector |
 | `internal/agent` | `agent.go` (`Options.Services`, constants, `jobs`) | wiring |
 | `testdata/systemd` | `capture-systemd249.pcap` (exists, from the Product Manager) | read by the tests |
@@ -151,14 +151,7 @@ type UnitInfo struct {
 func (s *Session) ListUnitsByNames(ctx context.Context, names []string) ([]UnitInfo, error) // at most 64 names per call
 func (s *Session) GetUint64(ctx context.Context, path, iface, property string) (uint64, error)
 func (s *Session) GetUint32(ctx context.Context, path, iface, property string) (uint32, error)
-
-// internal/svcstats/svcstats.go
-const (
-	Name       = "systemd"
-	MaxTracked = 256
-	Repeat     = time.Hour
-)
-type Unit struct {
+type Unit struct { // what the collector reads (decision of task 5, below)
 	ID          string
 	LoadState   string
 	ActiveState string
@@ -166,6 +159,19 @@ type Unit struct {
 	ActiveEnter uint64 // µs since the epoch, 0 = never
 	Restarts    uint32
 }
+// List returns the units matching patterns (ListUnitsByPatterns) with their states; ActiveEnter and Restarts are not read.
+func (s *Session) List(ctx context.Context, patterns []string) ([]Unit, error)
+// Read returns one Unit per name, in order: ListUnitsByNames in calls of 64 names, then the Gets of ActiveEnterTimestamp
+// and NRestarts on each unit's path, except for a unit that is not-found and inactive (0 and 0, no call).
+func (s *Session) Read(ctx context.Context, names []string) ([]Unit, error)
+
+// internal/svcstats/svcstats.go
+const (
+	Name       = "systemd"
+	MaxTracked = 256
+	Repeat     = time.Hour
+)
+type Unit = sdbus.Unit // alias, so *sdbus.Session is a Reader
 type Reader interface {
 	List(ctx context.Context, patterns []string) ([]Unit, error) // matches with their states; ActiveEnter and Restarts not read
 	Read(ctx context.Context, names []string) ([]Unit, error)    // one Unit per name, in order
@@ -177,7 +183,7 @@ type Systemd interface {
 type Sources struct {
 	Systemd Systemd // nil: BusSystemd(sdbus.SystemBusPath)
 }
-func BusSystemd(path string) Systemd
+func BusSystemd(path string) Systemd // Open returns sdbus.Dial(ctx, path); nothing else
 func New(src Sources, units []string, schedule scheduler.Schedule, log *slog.Logger) *Collector
 func (c *Collector) Name() string
 func (c *Collector) Collect(ctx context.Context, run scheduler.Run) ([]model.Record, error)
@@ -254,6 +260,25 @@ Sweep for enumerations the change extends (agent's local channels, packages, opt
 - B1: accepted. Row 15 rests on the kernel; `internal/sdbus` uses only `net.Conn` `Read`, `Write`, `SetDeadline`, `Close`, pinned with the forbidden selectors and `os.Getenv`/`os.LookupEnv` by `TestSdbus_ImportsOnlyAllowedPackages`; *Approach* 3, *Security considerations* and 0117 option 2 changed.
 - B2: accepted. The Lead measured the auth exchange and `Hello` on the stock system policy before any test is written (row 16, bytes after *Approach*), which also showed the unicast `NameAcquired` signal after `Hello`; task 3 uses these bytes.
 - N1, N2, N3: taken (*Approach* 3; `TestSession_RefusesUnknownHeaderFieldType`; `NO_AUTO_START` in the AC11 method list). N4: as m1. N5: taken (`.squad/project.md` area 10, Dev; 0117 *Consequences*). N6: kept.
+
+## Lead decisions during the build
+
+- Task 5, where the unit-reading adapter lives (the measured fake bus exists only in `internal/sdbus` tests, which
+  `internal/svcstats` cannot import): option (a), moved into `internal/sdbus`. `sdbus.Unit`, `Session.List` and
+  `Session.Read` hold the chunking, the alias resolution, the two `Get`s and their omission for a not-found inactive
+  unit, tested against the fake bus; `svcstats.Unit` is an alias of `sdbus.Unit`, so `*sdbus.Session` is the
+  `Reader`, and `BusSystemd` only dials. Option (b), a non-test package exporting the fake bus, would ship test code in
+  the module's import graph and widen the import allow-lists; option (c), a second fake in `svcstats`, would duplicate
+  the measured protocol bytes and could drift from them. The success line of `BusSystemd.Open` stays uncovered (one
+  line); its error path is tested.
+- The `internal/svcstats` import allow-list: `cmp`, `context`, `errors`, `fmt`, `log/slog`, `maps`, `math`, `path`,
+  `slices`, `sort`, `strconv`, `strings`, `sync`, `time`, `unicode/utf8`, `internal/model`, `internal/scheduler`,
+  `internal/wire`, and from `internal/sdbus` only the selectors `Dial`, `SystemBusPath`, `Session` and `Unit` (no
+  `UnitInfo`, no `Open`, no `Get*`, so the collector reads only through `Reader`).
+- Confirmed: the missing-unit warning names only exact entries whose `load_state` is `not-found`, with `count` (spec
+  AC5); a refused unit that becomes acceptable again is recorded at that run even when equal to its last recorded
+  state, with the info line `systemd unit state recorded again` (spec E5: the refused runs were gaps, as after a lost
+  sample).
 
 ## Out of scope / follow-ups
 
