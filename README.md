@@ -68,6 +68,7 @@ the value.
 | `log.level` | `info` | `debug`, `info`, `warn` or `error`. |
 | `filesystem.mount_points` | `[/]` | Mount points whose size and inode use is recorded: a list of at most 16 absolute, clean paths of at most 1024 bytes each, every path listed once. A path that is not mounted is logged and left out; `[]` turns the file system metrics off. |
 | `processes.programs` | `[]` | Rules that name the program of a process, tried in order, at most 64, each a mapping with `program` (1 to 128 characters of `[A-Za-z0-9._:/@+-]`, starting with a letter or digit) and exactly one of `command` (the process command) and `cmdline_prefix` (a literal start of the command line), both 1 to 256 bytes; `append_next_word: true` (only with `cmdline_prefix`) appends the next word as `<program>/<word>`. Without a rule the program is the first word of the command, as in the legacy log. |
+| `services.units` | `[sw-cp-server, sw-engine, psa, nginx, apache2, postfix, dovecot, mariadb, plesk-php*-fpm, php*-fpm, fail2ban]` | Services whose state the `systemd` collector records, as unit names or patterns with `*` and `?`; an entry without a unit type suffix means `<entry>.service`. At most 64 entries of 1 to 255 bytes of `[A-Za-z0-9:_.@*?-]`, not starting with `.` or `-`; only service units, instances (not templates), each listed once. A unit that is not installed is logged and left out; `[]` turns the collector off. |
 
 **Backend options**
 
