@@ -415,3 +415,98 @@ func TestScheduler_LateWakeUpRecordsGap(t *testing.T) {
 		})
 	}
 }
+
+// lostCase is one case of TestRunner_PreviousLostAfterEveryKindOfLoss.
+type lostCase struct {
+	name       string
+	first      func() ([]model.Record, error) // what the first run does; every later run returns one clean record
+	sinkFails  bool                           // the first Put returns an error
+	until      time.Duration
+	wantStarts []time.Duration
+	wantLost   []bool
+}
+
+func runLostCase(t *testing.T, tc lostCase) {
+	t.Helper()
+
+	c := newScripted("lost", func(_ context.Context, n int, _ scheduler.Run) ([]model.Record, error) {
+		if n == 0 {
+			return tc.first()
+		}
+		return []model.Record{metricRecord("lost", 1)}, nil
+	})
+	sink := &recordingSink{}
+	if tc.sinkFails {
+		sink.hook = func(_ context.Context, n int) error {
+			if n == 0 {
+				return errors.New("spool full")
+			}
+			return nil
+		}
+	}
+	h := start(t, []scheduler.Job{job(c, 10*time.Second, 2*time.Second)}, sink)
+
+	h.sleepTo(tc.until)
+
+	runs := c.started()
+	if got := h.offsets(runs); !slices.Equal(got, tc.wantStarts) {
+		t.Fatalf("run starts after %s = %v, want %v", tc.name, got, tc.wantStarts)
+	}
+	got := make([]bool, len(runs))
+	for i, r := range runs {
+		got[i] = r.PreviousLost
+	}
+	if !slices.Equal(got, tc.wantLost) {
+		t.Errorf("Run.PreviousLost per run after %s = %v, want %v (true after the loss, false after a kept result)",
+			tc.name, got, tc.wantLost)
+	}
+}
+
+func TestRunner_PreviousLostAfterEveryKindOfLoss(t *testing.T) {
+	s := time.Second
+	clean := func() ([]model.Record, error) { return []model.Record{metricRecord("lost", 1)}, nil }
+	nanRecord := model.Record{Meta: model.Meta{Source: "lost"}, Data: &model.MetricPoint{Name: "sample", Value: math.NaN()}}
+	tests := []lostCase{
+		{
+			name: "a timeout",
+			first: func() ([]model.Record, error) {
+				time.Sleep(5 * s) // ignores its context and returns after the deadline of 2s
+				return clean()
+			},
+			until: 25 * s, wantStarts: seconds(0, 10, 20), wantLost: []bool{false, true, false},
+		},
+		{
+			name: "skipped runs",
+			first: func() ([]model.Record, error) {
+				time.Sleep(25 * s) // the cycles at 10s and 20s are skipped
+				return clean()
+			},
+			until: 45 * s, wantStarts: seconds(0, 30, 40), wantLost: []bool{false, true, false},
+		},
+		{
+			name:  "an error",
+			first: func() ([]model.Record, error) { return nil, errors.New("disk on fire") },
+			until: 25 * s, wantStarts: seconds(0, 10, 20), wantLost: []bool{false, true, false},
+		},
+		{
+			name:  "a panic",
+			first: func() ([]model.Record, error) { panic("boom") },
+			until: 25 * s, wantStarts: seconds(0, 10, 20), wantLost: []bool{false, true, false},
+		},
+		{
+			name:  "a refused record",
+			first: func() ([]model.Record, error) { return []model.Record{metricRecord("lost", 1), nanRecord}, nil },
+			until: 25 * s, wantStarts: seconds(0, 10, 20), wantLost: []bool{false, true, false},
+		},
+		{
+			name: "a sink error", first: clean, sinkFails: true,
+			until: 25 * s, wantStarts: seconds(0, 10, 20), wantLost: []bool{false, true, false},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) { runLostCase(t, tc) })
+		})
+	}
+}
