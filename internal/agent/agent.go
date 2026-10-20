@@ -116,11 +116,12 @@ func Run(ctx context.Context, opts Options) int {
 	return 0
 }
 
-// jobs returns the collectors with their schedules: self, system, processes, connections, filesystem (only when a mount point is
-// configured) and clock, and the system collector, which newScheduler connects to the scheduler. The collectors log
+// jobs returns the collectors with their schedules: self, system, processes, connections, systemd (only when a service unit is
+// configured), filesystem (only when a mount point is configured) and clock, and the system collector, which newScheduler connects to the scheduler. The collectors log
 // through log.
 func jobs(opts Options, cfg *config.Agent, log *slog.Logger) ([]scheduler.Job, *sysstats.System) {
 	system := sysstats.NewSystem(opts.System, log)
+	systemdSchedule := scheduler.Schedule{Interval: SystemdInterval, Timeout: SystemdTimeout, PressureInterval: SystemdPressureInterval}
 	list := []scheduler.Job{
 		{
 			Collector: selfstats.New(opts.Self),
@@ -138,6 +139,12 @@ func jobs(opts Options, cfg *config.Agent, log *slog.Logger) ([]scheduler.Job, *
 			Collector: connstats.New(connectionSources(opts.Connections, probeSocketMount), log),
 			Schedule:  scheduler.Schedule{Interval: ConnectionsInterval, Timeout: ConnectionsTimeout, PressureInterval: ConnectionsPressureInterval},
 		},
+	}
+	if len(cfg.Services.Units) > 0 {
+		list = append(list, scheduler.Job{
+			Collector: svcstats.New(opts.Services, cfg.Services.Units, systemdSchedule, log),
+			Schedule:  systemdSchedule,
+		})
 	}
 	if len(cfg.Filesystem.MountPoints) > 0 {
 		list = append(list, scheduler.Job{
