@@ -39,3 +39,4 @@ are quoted in full.
 | 2026-10-20 19:20 | 6 Coverage (task 6, error paths) | squad-tester | Deferred empty-list test and sdbus/svcstats error-path tests added, pass (sonnet/medium · 94,303 tokens · 13 tool uses · 82 s) |
 | 2026-10-20 19:22 | 6 Implement (task 8) | squad-dev | Area documents, architecture, project, stack, unit-test guide updated; decision-check and config-check pass (sonnet/medium · 176,733 tokens · 40 tool uses · 184 s) |
 | 2026-10-20 19:26 | 7 Code check | squad-orchestrator | format, build, test -race, analyzer 0 issues, coverage gate PASS (new 90.2%, overall 97.9%), scope-check, decision-check PASS; Sonar gate: see next row |
+| 2026-10-20 19:26 | 7 Sonar gate | squad-orchestrator | skipped: SONAR_TOKEN not available in this session; CI code analysis reports after the PR |
