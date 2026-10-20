@@ -64,7 +64,7 @@ memory situation worse.
   the value: an entry that is empty, longer than 255 bytes after the implied `.service`, holds a character other than
   `A-Z a-z 0-9 : _ . @ -` and the pattern characters `*` and `?`, names another unit type (`.socket`, `.timer`,
   `.target`, `.mount`, `.automount`, `.swap`, `.path`, `.slice`, `.scope`, `.device`), is a template without an
-  instance (`foo@.service`), starts with `.` or `-`, or equals another entry after `.service` was added (`nginx` and
+  instance (`foo@.service`), holds more than one `@` or starts with `@`, `.` or `-`, or equals another entry after `.service` was added (`nginx` and
   `nginx.service`); more than 64 entries; a null element (`has no value`, as for the other agent lists); an element or
   a list of another YAML type.
 - E2: The system bus cannot be reached (`/run/dbus/system_bus_socket` missing, connection refused, authentication
@@ -111,7 +111,8 @@ memory situation worse.
 - E13: A unit that was not found at start-up is installed later: the first run that sees it with another state
   records it, without a log line. A unit removed later (its file deleted and systemd reloaded) is recorded with
   `load_state` `not-found`, without a warning: the warning belongs to the start-up only.
-- E14: A pattern that matches no loaded unit causes no warning; a matched unit that systemd later unloads (stopped and
+- E14: A pattern that matches no loaded unit causes no warning; a match whose `load_state` is `not-found` when it is
+  listed (a stub any local user can make systemd load) is not tracked; a matched unit that systemd later unloads (stopped and
   no longer referenced) stays tracked by name until the agent restarts, so its stop is recorded.
 
 ## Non-functional requirements
@@ -163,7 +164,8 @@ memory situation worse.
 - [ ] AC5: The first successful run after a start logs one warning `systemd units not found` with `count` and `units`
   (the exact entries whose `load_state` is `not-found`, comma-separated in file order) when there is at least one, and no
   later run logs it again (S5, E13, E14).
-- [ ] AC6: Patterns track every loaded unit whose name matches, a new match from the run that sees it, a match that
+- [ ] AC6: Patterns track every loaded unit whose name matches and whose `load_state` is not `not-found` when it is
+  listed, a new match from the run that sees it, a match that
   systemd unloads until the agent restarts, at most 256 units in total with the warning of E6, and no unit whose name
   the wire format refuses, with the warning of E7 (S6, E6, E7, E14).
 - [ ] AC7: A bus that cannot be reached, fails or exceeds the reply bound makes the run a gap with cause `unknown`, and
@@ -261,3 +263,5 @@ memory situation worse.
   plus one interval apart, and that a shorter incident window may hold no record of a quiet unit.
 - Planning (Lead): E2 now names an error reply to one of the agent's calls as a failed run, which the spec left open;
   *Test data* names the individual `Properties.Get` calls the capture holds instead of `GetAll`.
+- Plan challenge m1 and Security N4 (pattern matches that are not-found stubs): accepted, E14 and AC6 leave them out.
+- Plan challenge m4 (more than one `@`): accepted, E1 names it.

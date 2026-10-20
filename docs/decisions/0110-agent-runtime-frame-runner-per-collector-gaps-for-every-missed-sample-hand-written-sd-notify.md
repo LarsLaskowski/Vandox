@@ -59,15 +59,14 @@ memory pressure hook, self-metrics (RSS, CPU, goroutines, spool size, send lag) 
 13. **Telling a collector that its previous sample was lost** (#34: a collector that records only changes must record
     everything again after a dropped result). The collector checks its context before returning — a deadline can pass
     between the check and the scheduler's receipt, and a failed run, a refused record or a refused sink stays unknown to
-    it; a callback that confirms each kept result — a second method on every collector; **a flag in `Run` that is true
-    when the collector's previous due sample became a gap of any cause, had a record refused or was refused by the sink**
-    (chosen), which collectors without such state ignore.
+    it; a callback that confirms each kept result — a second method on every collector; **a flag in `Run`, true after a run whose result was not kept (timeout, skip, error or panic, refused record, sink
+    error)** (chosen); a late start does not set it, since it drops no result. Collectors without such state ignore it.
 
 ## Decision
 
 The agent runs one runner per collector at a fixed rate, abandons a run at its deadline, never starts a stuck collector
 again until it returns, and records a gap for every sample it misses (timeout, skip, panic, error, refused record, late
-start, but never a memory pressure switch) and tells the next run when the previous sample was lost; it notifies systemd with the standard library and sends `WATCHDOG=1` only
+start, but never a memory pressure switch) and tells the next run when the previous run's result was not kept; it notifies systemd with the standard library and sends `WATCHDOG=1` only
 while every runner is on time. The
 rules are in the [Agent](../areas/agent.md) area (*Scheduling*, *Self-metrics*, *Service manager*, *Logging*) and the
 metric names in the [wire format](../areas/wire-format.md) (*Metric names*).

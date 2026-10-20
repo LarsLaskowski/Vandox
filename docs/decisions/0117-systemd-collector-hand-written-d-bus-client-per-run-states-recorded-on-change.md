@@ -24,16 +24,22 @@ on the server (`testdata/systemd/capture-systemd249.pcap`) shows that an unprivi
 2. **D-Bus client.** `github.com/godbus/dbus/v5` (or `coreos/go-systemd/dbus` on top of it) — a dependency whose reader
    accepts messages up to 128 MiB and buffers each whole, negotiates file-descriptor passing, starts a goroutine per
    incoming method call and panics on some malformed bus signals (read at v5.2.4), none of which the agent can bound;
-   **a minimal client in the agent** (chosen): SASL `EXTERNAL`, no file-descriptor passing, the four methods it calls,
-   a decoder for exactly the reply signatures it expects, and messages it did not ask for discarded by length without
-   decoding, as 0110 did for the notification protocol.
+   **a minimal client in the agent** (chosen): SASL `EXTERNAL`, no file-descriptor passing and reads only through the
+   connection's plain `Read`, so the kernel closes any descriptor sent to it; a fixed socket path, never an environment
+   variable; the methods it calls; header fields decoded only with their fixed basic types; a decoder for exactly the
+   reply signatures it expects; and every message it did not ask for discarded by length without decoding, as 0110 did
+   for the notification protocol.
 3. **Connection.** One connection for the agent's lifetime — a reader goroutine, a queue for whatever arrives between
    runs and a reconnect path after `daemon-reexec` or a bus restart; **one connection per run, closed at its end**
    (chosen): nothing arrives between runs, the run's deadline bounds the connection, and a broken bus heals at the
    next run.
-4. **Properties.** `GetAll` per unit — one call, but a reply of about a hundred properties of every D-Bus type, which
-   needs a general variant decoder; **`Get` of the six properties** (chosen), the calls the capture holds, so the
-   decoder handles only `s`, `t` and `u` in a variant.
+4. **Reading a unit.** `GetAll` per unit — one call, but a reply of about a hundred properties of every D-Bus type,
+   which needs a general variant decoder; `LoadUnit` and a `Get` per property — seven round trips per unit (about 1,800
+   at the cap inside a 5-second timeout) and active and sub state read at different moments, a pair that may never have
+   existed; **`ListUnitsByNames` for many units at once (primary name, load, active and sub state in one consistent
+   entry, aliases resolved) and a `Get` of `ActiveEnterTimestamp` and `NRestarts` per loaded unit** (chosen), the
+   reply layout of the captured `ListUnitsByPatterns` reply and the captured `Get` replies, so the decoder handles one
+   struct array and `t` and `u` in a variant; a not-found, inactive unit needs no `Get`.
 5. **Noticing changes.** Subscribing to `PropertiesChanged` — a persistent connection and match rules that make the bus
    deliver every unit's broadcasts to the agent; **polling at the collector's interval** (chosen), 10 seconds under
    memory pressure, with `NRestarts` and `ActiveEnterTimestamp` revealing a restart between two runs.
@@ -60,9 +66,10 @@ the option in [Configuration and secrets](../areas/configuration-and-secrets.md)
 - No new dependency and no new right; the agent's unit (#42) must keep `AF_UNIX` and the system bus socket reachable.
 - A unit's records are at most an hour plus one interval apart; a state that comes and goes between two runs without
   changing `NRestarts` or `ActiveEnterTimestamp` is not seen, and the second of a failure comes from the journal (#37).
-- Reading a unit systemd has not loaded (a not-found one) makes systemd load and unload it for each call, and so
-  broadcast `UnitNew` and `UnitRemoved` on the bus (seen in the capture); the cost is a few signals per missing unit and
-  run.
-- A local user who floods the agent's connection with signals makes the run discard them until its deadline; the run
-  then becomes a gap, visible as such, and no memory grows.
+- Reading a unit systemd has not loaded (a not-found one) makes systemd load and unload it for the call, and so
+  broadcast `UnitNew` and `UnitRemoved` on the bus (seen in the capture); with `ListUnitsByNames` and no `Get` for it
+  that is one pair per missing unit and run.
+- A pattern match that systemd lists as not-found (a stub any local user can make it load) is not tracked.
+- A local user who learns the agent's unique name during a run can flood that connection with signals; the run
+  discards them until its deadline and becomes a gap, visible as such, and no memory grows.
 - Self-healing (#69) can read the same states; a need for instant notice of a change would revisit option 5.
