@@ -515,7 +515,7 @@ type shortSystemd struct {
 	*fakeSystemd
 }
 
-// Open implements Systemd.
+// Open implements Opener.
 func (s shortSystemd) Open(ctx context.Context) (Reader, error) {
 	r, err := s.fakeSystemd.Open(ctx)
 	if err != nil {

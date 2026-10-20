@@ -263,7 +263,7 @@ type fakeSystemd struct {
 	reads [][]string
 }
 
-// Open implements svcstats.Systemd.
+// Open implements svcstats.Opener.
 func (f *fakeSystemd) Open(context.Context) (svcstats.Reader, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

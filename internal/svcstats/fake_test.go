@@ -127,7 +127,7 @@ func (f *fakeSystemd) readNames() [][]string {
 	return slices.Clone(f.reads)
 }
 
-// Open implements Systemd.
+// Open implements Opener.
 func (f *fakeSystemd) Open(ctx context.Context) (Reader, error) {
 	f.mu.Lock()
 	f.opens++

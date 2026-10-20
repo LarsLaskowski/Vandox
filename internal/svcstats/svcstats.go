@@ -38,15 +38,15 @@ type Reader interface {
 	Close() error
 }
 
-// Systemd opens readers.
-type Systemd interface {
+// Opener opens readers.
+type Opener interface {
 	// Open opens a connection to systemd for one run.
 	Open(ctx context.Context) (Reader, error)
 }
 
 // Sources are the inputs of the collector; a nil field takes its default.
 type Sources struct {
-	Systemd Systemd // default BusSystemd(sdbus.SystemBusPath)
+	Systemd Opener // default BusSystemd(sdbus.SystemBusPath)
 }
 
 // Collector collects the unit states; it implements scheduler.Collector.
@@ -77,8 +77,8 @@ type warned struct {
 	missing, cut, notTracked bool
 }
 
-// BusSystemd returns the Systemd that talks to the system bus at path.
-func BusSystemd(path string) Systemd {
+// BusSystemd returns the Opener that talks to the system bus at path.
+func BusSystemd(path string) Opener {
 	return busSystemd{path: path}
 }
 
