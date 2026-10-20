@@ -27,6 +27,7 @@ import (
 	"github.com/LarsLaskowski/Vandox/internal/procstats"
 	"github.com/LarsLaskowski/Vandox/internal/scheduler"
 	"github.com/LarsLaskowski/Vandox/internal/selfstats"
+	"github.com/LarsLaskowski/Vandox/internal/svcstats"
 	"github.com/LarsLaskowski/Vandox/internal/sysstats"
 )
 
@@ -254,6 +255,62 @@ func fixtureConnections() connstats.Sources {
 	return connstats.Sources{Proc: os.DirFS("../../testdata/proc"), SocketMount: connstats.SocketMount{ID: fixtureSocketMount}}
 }
 
+// fakeSystemd is a hand-written systemd: every unit asked for is active and running. It models no real timing or error
+// behavior of systemd; the real reader is tested against the measured fake bus of the sdbus package.
+type fakeSystemd struct {
+	mu    sync.Mutex
+	opens int
+	reads [][]string
+}
+
+// Open implements svcstats.Opener.
+func (f *fakeSystemd) Open(context.Context) (svcstats.Reader, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	f.opens++
+	return &fakeReader{f: f}, nil
+}
+
+// readNames returns the names of every Read call.
+func (f *fakeSystemd) readNames() [][]string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	return slices.Clone(f.reads)
+}
+
+// fakeReader is one open connection of fakeSystemd.
+type fakeReader struct {
+	f *fakeSystemd
+}
+
+// List implements svcstats.Reader: no unit matches.
+func (r *fakeReader) List(context.Context, []string) ([]svcstats.Unit, error) {
+	return nil, nil
+}
+
+// Read implements svcstats.Reader.
+func (r *fakeReader) Read(_ context.Context, names []string) ([]svcstats.Unit, error) {
+	r.f.mu.Lock()
+	r.f.reads = append(r.f.reads, slices.Clone(names))
+	r.f.mu.Unlock()
+
+	units := make([]svcstats.Unit, 0, len(names))
+	for _, name := range names {
+		units = append(units, svcstats.Unit{ID: name, LoadState: "loaded", ActiveState: "active", SubState: "running", ActiveEnter: 1792240371069328})
+	}
+	return units, nil
+}
+
+// Close implements svcstats.Reader.
+func (r *fakeReader) Close() error { return nil }
+
+// fixtureServices returns systemd sources that answer from a fake, so no agent test dials the system bus.
+func fixtureServices() svcstats.Sources {
+	return svcstats.Sources{Systemd: &fakeSystemd{}}
+}
+
 func logLines(out string) []string {
 	return strings.Split(strings.TrimSuffix(out, "\n"), "\n")
 }
@@ -302,6 +359,7 @@ func TestRun_ReadyWatchdogAndSelfMetrics(t *testing.T) {
 		System:      fixtureSystem(),
 		Processes:   fixtureProcesses(),
 		Connections: fixtureConnections(),
+		Services:    fixtureServices(),
 	})
 
 	if first := socket.next(t, r); first != "READY=1" {
@@ -358,6 +416,7 @@ func TestRun_ConfigErrorExitsOne(t *testing.T) {
 				System:      fixtureSystem(),
 				Processes:   fixtureProcesses(),
 				Connections: fixtureConnections(),
+				Services:    fixtureServices(),
 			})
 
 			if code != 1 {
@@ -389,6 +448,7 @@ func TestRun_DoesNotLogSecret(t *testing.T) {
 		System:      fixtureSystem(),
 		Processes:   fixtureProcesses(),
 		Connections: fixtureConnections(),
+		Services:    fixtureServices(),
 	})
 
 	r.waitMetrics(sink, selfstats.MetricRSS)
@@ -436,6 +496,7 @@ func TestRun_NotificationProblemsDoNotStopTheAgent(t *testing.T) {
 				System:      fixtureSystem(),
 				Processes:   fixtureProcesses(),
 				Connections: fixtureConnections(),
+				Services:    fixtureServices(),
 			})
 
 			r.waitMetrics(sink, selfstats.MetricRSS)
@@ -475,22 +536,28 @@ func TestJobs_Schedules(t *testing.T) {
 	processes := jobSchedule{"processes", scheduler.Schedule{Interval: 60 * time.Second, Timeout: 10 * time.Second, PressureInterval: 15 * time.Second}}
 	connections := jobSchedule{"connections", scheduler.Schedule{Interval: 60 * time.Second, Timeout: 10 * time.Second, PressureInterval: 15 * time.Second}}
 
+	systemd := jobSchedule{"systemd", scheduler.Schedule{Interval: 30 * time.Second, Timeout: 5 * time.Second, PressureInterval: 10 * time.Second}}
+
 	tests := []struct {
 		name        string
 		mountPoints []string
+		units       []string
 		want        []jobSchedule
 	}{
-		{"default mount point", []string{"/"}, []jobSchedule{self, system, processes, connections, filesystem, clock}},
-		{"two mount points", []string{"/", "/var"}, []jobSchedule{self, system, processes, connections, filesystem, clock}},
-		{"no mount point leaves out the filesystem job", []string{}, []jobSchedule{self, system, processes, connections, clock}},
+		{"default mount point", []string{"/"}, []string{"nginx.service"}, []jobSchedule{self, system, processes, connections, systemd, filesystem, clock}},
+		{"two mount points", []string{"/", "/var"}, []string{"nginx.service"}, []jobSchedule{self, system, processes, connections, systemd, filesystem, clock}},
+		{"no mount point leaves out the filesystem job", []string{}, []string{"nginx.service"}, []jobSchedule{self, system, processes, connections, systemd, clock}},
+		{"no service unit leaves out the systemd job", []string{"/"}, []string{}, []jobSchedule{self, system, processes, connections, filesystem, clock}},
+		{"no mount point and no service unit", []string{}, []string{}, []jobSchedule{self, system, processes, connections, clock}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := config.DefaultAgent()
 			cfg.Filesystem.MountPoints = tt.mountPoints
+			cfg.Services.Units = tt.units
 			log := slog.New(slog.NewTextHandler(io.Discard, nil))
 
-			list, _ := jobs(Options{Self: fixtureSources(), System: fixtureSystem(), Processes: fixtureProcesses(), Connections: fixtureConnections()}, &cfg, log)
+			list, _ := jobs(Options{Self: fixtureSources(), System: fixtureSystem(), Processes: fixtureProcesses(), Connections: fixtureConnections(), Services: fixtureServices()}, &cfg, log)
 
 			if got := scheduleOf(list); !slices.Equal(got, tt.want) {
 				t.Errorf("jobs() = %+v, want %+v", got, tt.want)
@@ -513,6 +580,7 @@ func TestRun_RecordsSystemMetrics(t *testing.T) {
 		System:      fixtureSystem(),
 		Processes:   fixtureProcesses(),
 		Connections: fixtureConnections(),
+		Services:    fixtureServices(),
 	})
 
 	r.waitMetrics(sink, "load1", "mem_available_bytes", "pressure_avg10", "filesystem_size_bytes", "clock_synchronized")
@@ -608,6 +676,7 @@ func lowMemoryOptions(t *testing.T, workers int) Options {
 		Processes: procstats.Sources{Proc: proc, Etc: loadDir(t, "../../testdata/etc")},
 		// The in-memory /proc holds the captured socket tables (net/ is in the fixture tree); the socket mount is the captured sockets'.
 		Connections: connstats.Sources{Proc: proc, SocketMount: connstats.SocketMount{ID: fixtureSocketMount}},
+		Services:    fixtureServices(),
 	}
 }
 
@@ -708,4 +777,136 @@ func TestConnectionSources_ProbesOnlyWhenUnset(t *testing.T) {
 			}
 		})
 	}
+}
+
+// recordSink is a scheduler.Putter that keeps the records it received.
+type recordSink struct {
+	mu      sync.Mutex
+	records []model.Record
+}
+
+func (s *recordSink) Put(_ context.Context, records []model.Record) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.records = append(s.records, records...)
+	return nil
+}
+
+func (s *recordSink) all() []model.Record {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return slices.Clone(s.records)
+}
+
+// serviceUnits returns the units of the service_state records, and fails for a record whose source is not systemd.
+func serviceUnits(t *testing.T, records []model.Record) []string {
+	t.Helper()
+
+	var units []string
+	for _, r := range records {
+		state, ok := r.Data.(*model.ServiceState)
+		if !ok {
+			continue
+		}
+		if r.Source != "systemd" {
+			t.Errorf("Source of a service_state record = %q, want %q", r.Source, "systemd")
+		}
+		units = append(units, state.Unit)
+	}
+	return units
+}
+
+func TestNewScheduler_RecordsServiceStatesOfConfiguredUnits(t *testing.T) {
+	cfg := config.DefaultAgent()
+	cfg.Services.Units = []string{"nginx.service", "postfix.service"}
+	fake := &fakeSystemd{}
+	opts := lowMemoryOptions(t, 0)
+	opts.Services = svcstats.Sources{Systemd: fake}
+
+	synctest.Test(t, func(t *testing.T) {
+		sink := &recordSink{}
+		opts.Sink = sink
+		sched, err := newScheduler(opts, &cfg, slog.New(slog.DiscardHandler))
+		if err != nil {
+			t.Fatalf("newScheduler() error = %v, want nil", err)
+		}
+
+		runFor(t, sched, 5*time.Second)
+
+		units := serviceUnits(t, sink.all())
+		if want := []string{"nginx.service", "postfix.service"}; !slices.Equal(units, want) {
+			t.Errorf("units of the service_state records = %v, want %v", units, want)
+		}
+		if reads := fake.readNames(); len(reads) == 0 || !slices.Equal(reads[0], []string{"nginx.service", "postfix.service"}) {
+			t.Errorf("units read from systemd = %v, want the configured units first", reads)
+		}
+	})
+}
+
+func TestRun_ServiceUnitsFromConfigurationFile(t *testing.T) {
+	fake := &fakeSystemd{}
+	sink := &recordSink{}
+	r := startAgent(t, Options{
+		ConfigPath:  writeConfig(t, validConfig+"services:\n  units:\n    - nginx\n"),
+		Environ:     []string{"VANDOX_AGENT_TOKEN=" + testToken},
+		Stderr:      io.Discard,
+		Sink:        sink,
+		Self:        fixtureSources(),
+		System:      fixtureSystem(),
+		Processes:   fixtureProcesses(),
+		Connections: fixtureConnections(),
+		Services:    svcstats.Sources{Systemd: fake},
+	})
+
+	limit := time.After(waitLimit)
+	for len(fake.readNames()) == 0 {
+		select {
+		case <-r.done:
+			t.Fatalf("Run returned %d before systemd was read", r.code)
+		case <-limit:
+			t.Fatalf("systemd was not read within %v", waitLimit)
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+
+	if code := r.stop(); code != 0 {
+		t.Errorf("Run() = %d after the context was cancelled, want 0", code)
+	}
+	if got := fake.readNames()[0]; !slices.Equal(got, []string{"nginx.service"}) {
+		t.Errorf("units read from systemd = %v, want [nginx.service] (the entry nginx with the suffix added)", got)
+	}
+}
+
+func TestNewScheduler_EmptyServiceUnitsNeverOpenSystemd(t *testing.T) {
+	cfg := config.DefaultAgent()
+	cfg.Services.Units = []string{}
+	fake := &fakeSystemd{}
+	opts := lowMemoryOptions(t, 0)
+	opts.Services = svcstats.Sources{Systemd: fake}
+
+	synctest.Test(t, func(t *testing.T) {
+		sink := &recordSink{}
+		opts.Sink = sink
+		sched, err := newScheduler(opts, &cfg, slog.New(slog.DiscardHandler))
+		if err != nil {
+			t.Fatalf("newScheduler() error = %v, want nil", err)
+		}
+
+		runFor(t, sched, 2*SystemdInterval)
+
+		fake.mu.Lock()
+		opens := fake.opens
+		fake.mu.Unlock()
+		if opens != 0 {
+			t.Errorf("systemd was opened %d times with services.units empty, want 0", opens)
+		}
+		if units := serviceUnits(t, sink.all()); len(units) != 0 {
+			t.Errorf("service_state records for %v with services.units empty, want none", units)
+		}
+		if len(sink.all()) == 0 {
+			t.Errorf("no record at all, want the other collectors to run")
+		}
+	})
 }

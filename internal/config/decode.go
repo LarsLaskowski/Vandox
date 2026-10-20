@@ -275,6 +275,9 @@ func (d *decoder) setOther(path string, k, v *yaml.Node, field reflect.Value) er
 			if !cleanString(field.Index(i).String()) {
 				return fail("must not contain control, format or line-separating characters")
 			}
+			if v.Kind == yaml.SequenceNode && i < len(v.Content) {
+				d.lines[path+"["+strconv.Itoa(i)+"]"] = v.Content[i].Line
+			}
 		}
 	}
 	d.lines[path] = k.Line

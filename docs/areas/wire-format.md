@@ -205,6 +205,13 @@ error masked stub merged`), `active_state` (`active reloading inactive failed ac
 maintenance refreshing`), `sub_state` (optional, `^[a-z0-9-]+$`, at most 64 bytes), `active_enter_at`
 (optional), `restarts`.
 
+Producer: the agent's `systemd` collector ([Agent](agent.md), *Services*) writes it with source `systemd` and the capture time of the
+run's start, one record per tracked unit with `unit` the unit's primary name (aliases resolved). A record is written for the first run
+after an agent start, for the first run after a lost sample, when `load_state`, `active_state`, `sub_state`, `active_enter_at` or
+`restarts` differs from the unit's last record, and again once the last record is an hour old. `active_enter_at` is left out when
+systemd has none (the unit was never active) or the time cannot be stored; `restarts` is systemd's `NRestarts`, 0 for a unit that is
+not found or masked. The collector checks each record against these rules itself and leaves out a unit whose state they refuse.
+
 ### `mariadb_status`
 
 `availability` (`up`, `down`, `not_answering`), `ping_latency_ns` (optional, >= 0), `status` (map of

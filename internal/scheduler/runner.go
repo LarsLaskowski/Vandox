@@ -67,6 +67,7 @@ type runner struct {
 	skipped     int         // cycles skipped while pending was out
 	failedRuns  int         // failed runs in a row
 	sinkFailing bool
+	lost        bool // the result of the previous due sample was not kept; passed on as Run.PreviousLost
 }
 
 func newRunner(s *Scheduler, j Job) *runner {
@@ -165,7 +166,9 @@ func (r *runner) nextDue(d time.Time, seen *pressureMode) time.Time {
 	return d.Add(r.interval(seen.high))
 }
 
-// cycle runs one cycle that is due at d.
+// cycle runs one cycle that is due at d. The flag lost is true after a due sample whose result was not kept (timeout,
+// skipped cycle, error or panic, refused record, sink error) and false after a kept one; a late start, including the
+// whole-slot gap recorded in startCycle, does not set it, since no Collect result was lost.
 func (r *runner) cycle(ctx context.Context, d time.Time, seen *pressureMode) {
 	iv := r.interval(seen.high)
 	if r.pending != nil {
@@ -175,14 +178,16 @@ func (r *runner) cycle(ctx context.Context, d time.Time, seen *pressureMode) {
 			r.pending, r.skipped = nil, 0
 		default:
 			r.skipped++
+			r.lost = true
 			r.put(ctx, r.gap(model.GapCollectorTimeout, d, d.Add(iv), time.Now()))
 			return
 		}
 	}
-	run := Run{Start: time.Now().UTC(), Pressure: seen.high}
+	run := Run{Start: time.Now().UTC(), Pressure: seen.high, PreviousLost: r.lost}
 	res, out := r.collect(ctx, run)
 	switch out {
 	case outcomeTimedOut:
+		r.lost = true
 		r.s.log.Warn("collector timed out", "collector", r.name, "timeout", r.job.Schedule.Timeout)
 		r.put(ctx, r.gap(model.GapCollectorTimeout, d, d.Add(iv), time.Now()))
 	case outcomeDone:
@@ -233,6 +238,7 @@ func (r *runner) finish(ctx context.Context, d time.Time, iv time.Duration, run 
 	if res.err != nil {
 		r.logFailure(res.err)
 		r.failedRuns++
+		r.lost = true
 		r.put(ctx, r.gap(model.GapUnknown, d, d.Add(iv), time.Now()))
 		return
 	}
@@ -245,7 +251,8 @@ func (r *runner) finish(ctx context.Context, d time.Time, iv time.Duration, run 
 		r.s.log.Warn("record refused", "collector", r.name, "err", refused)
 		records = append(records, r.gap(model.GapUnknown, d, d.Add(iv), time.Now()))
 	}
-	r.put(ctx, records...)
+	err := r.deliver(ctx, records...)
+	r.lost = refused != nil || err != nil
 }
 
 // logFailure logs the error of a failed run: every panic, and an error only at the first failure after a success.
@@ -291,10 +298,15 @@ func (r *runner) gap(cause model.GapCause, from, to, at time.Time) model.Record 
 	}
 }
 
-// put hands records to the sink and logs its failures at the first and its recovery.
+// put hands the records of a gap to the sink; whether the sink kept them does not matter to the flag lost.
 func (r *runner) put(ctx context.Context, records ...model.Record) {
+	_ = r.deliver(ctx, records...)
+}
+
+// deliver hands records to the sink, logs its failures at the first and its recovery, and returns its error.
+func (r *runner) deliver(ctx context.Context, records ...model.Record) error {
 	if len(records) == 0 {
-		return
+		return nil
 	}
 	err := r.s.sink.Put(ctx, records)
 	switch {
@@ -305,4 +317,5 @@ func (r *runner) put(ctx context.Context, records ...model.Record) {
 		r.sinkFailing = false
 		r.s.log.Info("sink recovered", "collector", r.name)
 	}
+	return err
 }

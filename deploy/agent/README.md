@@ -62,12 +62,21 @@ confined as soon as it grants any (`NoNewPrivileges=yes`, a system-call filter t
 
 ### Unit settings that must stay as they are
 
-- `RestrictAddressFamilies=` must keep **`AF_UNIX`** (the probe above and the notification socket of systemd).
+- `RestrictAddressFamilies=` must keep **`AF_UNIX`** (the probe above, the notification socket of systemd and the system bus of the systemd collector).
 - No own network namespace: no `PrivateNetwork=` and no `NetworkNamespacePath=`, or `/proc/net` shows another namespace's sockets.
+- `/run/dbus/system_bus_socket` stays reachable: no `InaccessiblePaths=` or `TemporaryFileSystem=` over `/run/dbus`.
 - No `ProcSubset=pid`: it hides `/proc/net`.
 - `ProtectProc=` stays at `default`: a stricter value hides other users' processes whenever the agent runs without `CAP_SYS_PTRACE`.
+
+### What the systemd collector reads and what it needs
+
+- It asks systemd for the state of the configured units over the system bus socket `/run/dbus/system_bus_socket`. Reading unit states is
+  allowed to any user, so the collector needs **no group and no capability**.
+- It needs the socket to be reachable: the unit must not hide `/run/dbus` (no `InaccessiblePaths=` or `TemporaryFileSystem=` over it), and
+  `RestrictAddressFamilies=` must keep `AF_UNIX`, also for this bus connection.
+- With `services.units: []` the collector is off and the bus is never opened.
 
 ## Groups
 
 The groups `adm` (log files) and `systemd-journal` (journal) are for the log collectors that follow; the process collector needs
-neither, and neither does the connection collector.
+neither, and neither do the connection and systemd collectors.

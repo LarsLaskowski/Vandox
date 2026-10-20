@@ -83,11 +83,14 @@ func TestDefaultAgent(t *testing.T) {
 	if len(got.Processes.Programs) != 0 {
 		t.Errorf("DefaultAgent().Processes.Programs = %+v, want an empty list", got.Processes.Programs)
 	}
+	if !slices.Equal(got.Services.Units, defaultServiceUnits) {
+		t.Errorf("DefaultAgent().Services.Units = %q, want %q", got.Services.Units, defaultServiceUnits)
+	}
 }
 
 func TestAgentKeys(t *testing.T) {
 	got := AgentKeys()
-	want := []string{"agent_id", "backend.url", "spool.directory", "log.level", "filesystem.mount_points", "processes.programs"}
+	want := []string{"agent_id", "backend.url", "spool.directory", "log.level", "filesystem.mount_points", "processes.programs", "services.units"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Errorf("AgentKeys() = %v, want %v", got, want)
 	}
@@ -879,5 +882,211 @@ func TestLoadAgent_ProcessesProgramsErrors(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) { requireProgramsError(t, tt) })
+	}
+}
+
+// servicesKeyLine is the line of the key services.units in a document built by servicesDoc.
+const servicesKeyLine = 5
+
+// servicesDoc builds an agent file whose key services.units (line servicesKeyLine) is followed by value, the raw YAML text
+// after the colon; the first element of a block list is on line 6.
+func servicesDoc(value string) string {
+	return validAgent + "services:\n  units:" + value + "\n"
+}
+
+// servicesList returns the block list of entries, each one a single-quoted YAML scalar, for servicesDoc.
+func servicesList(entries ...string) string {
+	var b strings.Builder
+	for _, e := range entries {
+		b.WriteString("\n    - " + quote(e))
+	}
+	return b.String()
+}
+
+// defaultServiceUnits is the default of services.units: the eleven entries of the spec as full unit names.
+var defaultServiceUnits = []string{
+	"sw-cp-server.service", "sw-engine.service", "psa.service", "nginx.service", "apache2.service", "postfix.service",
+	"dovecot.service", "mariadb.service", "plesk-php*-fpm.service", "php*-fpm.service", "fail2ban.service",
+}
+
+func TestLoadAgent_ServiceUnitsDefault(t *testing.T) {
+	t.Run("DefaultServiceUnits", func(t *testing.T) {
+		if got := DefaultServiceUnits(); !slices.Equal(got, defaultServiceUnits) {
+			t.Errorf("DefaultServiceUnits() = %q, want %q", got, defaultServiceUnits)
+		}
+	})
+	t.Run("DefaultAgent", func(t *testing.T) {
+		if got := DefaultAgent().Services.Units; !slices.Equal(got, defaultServiceUnits) {
+			t.Errorf("DefaultAgent().Services.Units = %q, want %q", got, defaultServiceUnits)
+		}
+	})
+	docs := []struct {
+		name string
+		doc  string
+	}{
+		{"no services section", validAgent},
+		{"section without the key", validAgent + "services:\n"},
+	}
+	for _, tt := range docs {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := LoadAgent(writeTemp(t, tt.doc), agentEnv())
+			if err != nil {
+				t.Fatalf("LoadAgent(%q) error = %v, want nil", tt.doc, err)
+			}
+			if !slices.Equal(got.Services.Units, defaultServiceUnits) {
+				t.Errorf("LoadAgent(%q) Services.Units = %q, want the default %q", tt.doc, got.Services.Units, defaultServiceUnits)
+			}
+		})
+	}
+}
+
+func TestLoadAgent_ServiceUnitsEmptyTurnsCollectorOff(t *testing.T) {
+	docs := []struct {
+		name string
+		doc  string
+	}{
+		{"block form with an empty flow list", servicesDoc(" []")},
+		{"flow form of the section", validAgent + "services: {units: []}\n"},
+	}
+	for _, tt := range docs {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := LoadAgent(writeTemp(t, tt.doc), agentEnv())
+			if err != nil {
+				t.Fatalf("LoadAgent(%q) error = %v, want nil", tt.doc, err)
+			}
+			if len(got.Services.Units) != 0 {
+				t.Errorf("LoadAgent(%q) Services.Units = %q, want an empty list, not the default", tt.doc, got.Services.Units)
+			}
+		})
+	}
+}
+
+func TestLoadAgent_ServiceUnitsOverrideAndSuffix(t *testing.T) {
+	long := strings.Repeat("a", 247)
+	many := make([]string, MaxServiceUnits)
+	for i := range many {
+		many[i] = "u" + strconv.Itoa(i)
+	}
+	wantMany := make([]string, MaxServiceUnits)
+	for i := range many {
+		wantMany[i] = many[i] + ".service"
+	}
+	tests := []struct {
+		name string
+		doc  string
+		want []string
+	}{
+		{"the spec example replaces the default", servicesDoc(" [mariadb, nginx.service, \"plesk-php*-fpm\"]"),
+			[]string{"mariadb.service", "nginx.service", "plesk-php*-fpm.service"}},
+		{"block list in file order", servicesDoc(servicesList("zeta", "alpha", "mid")), []string{"zeta.service", "alpha.service", "mid.service"}},
+		{"suffix service stays", servicesDoc(servicesList("nginx.service")), []string{"nginx.service"}},
+		{"name without a suffix gets .service", servicesDoc(servicesList("nginx")), []string{"nginx.service"}},
+		{"unknown suffix after a dot gets .service", servicesDoc(servicesList("foo.bar")), []string{"foo.bar.service"}},
+		{"instance without a suffix", servicesDoc(servicesList("getty@tty1")), []string{"getty@tty1.service"}},
+		{"instance with the suffix", servicesDoc(servicesList("user@1000.service")), []string{"user@1000.service"}},
+		{"pattern characters", servicesDoc(servicesList("php?-fpm", "plesk-php*-fpm.service")), []string{"php?-fpm.service", "plesk-php*-fpm.service"}},
+		{"whole alphabet", servicesDoc(servicesList("A0:_.@-z*?")), []string{"A0:_.@-z*?.service"}},
+		{"255 bytes with the implied suffix", servicesDoc(servicesList(long)), []string{long + ".service"}},
+		{"255 bytes with the suffix", servicesDoc(servicesList(long + ".service")), []string{long + ".service"}},
+		{"64 entries", servicesDoc(servicesList(many...)), wantMany},
+		{"same name on different types of suffix text", servicesDoc(servicesList("a", "a.b")), []string{"a.service", "a.b.service"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := LoadAgent(writeTemp(t, tt.doc), agentEnv())
+			if err != nil {
+				t.Fatalf("LoadAgent(%q) error = %v, want nil", tt.doc, err)
+			}
+			if !slices.Equal(got.Services.Units, tt.want) {
+				t.Errorf("LoadAgent(%q) Services.Units = %q, want %q", tt.doc, got.Services.Units, tt.want)
+			}
+		})
+	}
+}
+
+func TestLoadAgent_ServiceUnitsRefused(t *testing.T) {
+	const (
+		listReason     = "must be a list of at most 64 unit names"
+		nameReason     = "must be a service unit name or pattern of 1 to 255 bytes of [A-Za-z0-9:_.@*?-], not starting with . or -"
+		typeReason     = "must name a service unit"
+		templateReason = "must name an instance, not a template"
+		twiceReason    = "listed twice"
+		typeKey        = "services.units"
+		first          = "services.units[0]"
+		second         = "services.units[1]"
+	)
+	tooMany := make([]string, MaxServiceUnits+1)
+	for i := range tooMany {
+		tooMany[i] = "u" + strconv.Itoa(i)
+	}
+	cases := []struct {
+		name   string
+		value  string
+		line   int
+		key    string
+		reason string
+	}{
+		{"65 entries", servicesList(tooMany...), servicesKeyLine, typeKey, listReason},
+		{"empty entry", servicesList(""), 6, first, nameReason},
+		{"entry of 256 bytes with the implied suffix", servicesList(strings.Repeat("a", 248)), 6, first, nameReason},
+		{"entry of 256 bytes with the suffix", servicesList(strings.Repeat("a", 248) + ".service"), 6, first, nameReason},
+		{"entry with a space", servicesList("a b"), 6, first, nameReason},
+		{"entry with a slash", servicesList("a/b"), 6, first, nameReason},
+		{"entry with a dollar sign", servicesList("a$b"), 6, first, nameReason},
+		{"entry with a non-ASCII letter", servicesList("ä"), 6, first, nameReason},
+		{"entry with brackets", servicesList("php[78]-fpm"), 6, first, nameReason},
+		{"entry starting with a dot", servicesList(".nginx"), 6, first, nameReason},
+		{"entry starting with a hyphen", servicesList("-nginx"), 6, first, nameReason},
+		{"entry with two at signs", servicesList("a@b@c"), 6, first, nameReason},
+		{"entry that leaks", servicesList(sentinel + "$"), 6, first, nameReason},
+		{"entry of 256 bytes that leaks", servicesList(sentinel + strings.Repeat("a", 241)), 6, first, nameReason},
+		{"error of the second entry", servicesList("ok", "a b"), 7, second, nameReason},
+		{"first error wins", servicesList("ok", "a b", ".c"), 7, second, nameReason},
+		{"socket", servicesList("foo.socket"), 6, first, typeReason},
+		{"timer", servicesList("foo.timer"), 6, first, typeReason},
+		{"target", servicesList("foo.target"), 6, first, typeReason},
+		{"mount", servicesList("foo.mount"), 6, first, typeReason},
+		{"automount", servicesList("foo.automount"), 6, first, typeReason},
+		{"swap", servicesList("foo.swap"), 6, first, typeReason},
+		{"path", servicesList("foo.path"), 6, first, typeReason},
+		{"slice", servicesList("foo.slice"), 6, first, typeReason},
+		{"scope", servicesList("foo.scope"), 6, first, typeReason},
+		{"device", servicesList("foo.device"), 6, first, typeReason},
+		{"instance of another type", servicesList("foo@bar.socket"), 6, first, typeReason},
+		{"template with the suffix", servicesList("foo@.service"), 6, first, templateReason},
+		{"template without a suffix start", servicesList("@foo"), 6, first, templateReason},
+		{"name and its full name", servicesList("nginx", "nginx.service"), 7, second, twiceReason},
+		{"full name and its short name", servicesList("nginx.service", "nginx"), 7, second, twiceReason},
+		{"same full name twice", servicesList("nginx.service", "nginx.service"), 7, second, twiceReason},
+		{"same pattern twice", servicesList("php*-fpm", "mariadb", "php*-fpm.service"), 8, "services.units[2]", twiceReason},
+		{"null element", "\n    - ~", 6, typeKey, "has no value"},
+		{"empty element", "\n    -", 6, typeKey, "has no value"},
+		{"null element after an entry", "\n    - nginx\n    - null", 7, typeKey, "has no value"},
+		{"null element in a flow list", " [nginx, ~, mariadb]", servicesKeyLine, typeKey, "has no value"},
+		{"null value of the key", "", servicesKeyLine, typeKey, "has no value"},
+		{"scalar in place of the list", " nginx", servicesKeyLine, typeKey, "invalid value, want a list"},
+		{"mapping in place of the list", " {a: b}", servicesKeyLine, typeKey, "invalid value, want a list"},
+		{"mapping element", " [{a: b}]", servicesKeyLine, typeKey, "invalid value, want a list"},
+		{"nested list", " [[nginx]]", servicesKeyLine, typeKey, "invalid value, want a list"},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			doc := servicesDoc(tt.value)
+			path := writeTemp(t, doc)
+
+			got, err := LoadAgent(path, agentEnv())
+
+			if got != nil {
+				t.Errorf("LoadAgent(%q) = %+v, want nil on error", doc, got)
+			}
+			if err == nil {
+				t.Fatalf("LoadAgent(%q) error = nil, want an error for %s at line %d", doc, tt.key, tt.line)
+			}
+			want := "config: " + path + ":" + strconv.Itoa(tt.line) + ": " + tt.key + ": " + tt.reason
+			if err.Error() != want {
+				t.Errorf("LoadAgent(%q) error = %q, want %q", doc, err.Error(), want)
+			}
+			requireNoLeakBesidesFile(t, err, path, sentinel)
+		})
 	}
 }
