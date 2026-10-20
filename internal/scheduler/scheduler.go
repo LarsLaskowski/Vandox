@@ -21,8 +21,9 @@ const LivenessSlack = 30 * time.Second
 
 // Run describes one run of a collector.
 type Run struct {
-	Start    time.Time // when the run started, in UTC
-	Pressure bool      // whether memory pressure mode was on when the run started
+	Start        time.Time // when the run started, in UTC
+	Pressure     bool      // whether memory pressure mode was on when the run started
+	PreviousLost bool      // the collector's previous due sample became a gap, had a record refused or was refused by the sink
 }
 
 // Collector takes one sample per run.
