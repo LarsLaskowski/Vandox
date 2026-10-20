@@ -12,3 +12,4 @@ are quoted in full.
 | 2026-10-19 17:15 | 2b Plan | squad-lead | RESULT: ESCALATE, needs real systemd 249 D-Bus capture; PM chose (a) will provide capture (opus/medium · usage pending) |
 | 2026-10-20 18:01 | 2b Plan | squad-lead | RESULT: DONE, tier security, plan.md+tasks.md, record 0117 new, 0110 extended, plan-check PASS (opus/medium · 109,182 tokens · 29 tool uses · 417 s · continued) |
 | 2026-10-20 18:04 | 2b Plan challenge | squad-devils-advocate | OBJECTIONS 1 major (use ListUnitsByNames, fewer calls, consistent snapshot), 4 minor (opus/medium · 66,422 tokens · 20 tool uses · 160 s) |
+| 2026-10-20 18:07 | 3 Plan security review | squad-security | CHANGES_REQUIRED: B1 no-fd property to rest on plain net.Conn reads, B2 fake bus auth exchange unmeasured; 6 non-blocking (opus/medium · 111,386 tokens · 19 tool uses · 349 s) |
