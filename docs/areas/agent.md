@@ -498,6 +498,101 @@ allocates 1.99 MB in 26,307 allocations ([Benchmarks](../BENCHMARKS.md), *Connec
   ([Detection, alerts and reports](detection-and-reports.md)).
 - A skipped table line (it is counted, not parsed) makes the snapshot's aggregates incomplete and the run's comparison `none`.
 
+## Services
+
+The collector `systemd` (interval 30 seconds, pressure interval 10 seconds, timeout 5 seconds, placed after `connections` in the job list)
+records the state of the tracked systemd service units as `service_state` records with source `systemd` and the capture time of the
+run's start ([wire format](wire-format.md)). It runs only when `services.units` holds at least one entry (default: the Plesk services,
+[Configuration and secrets](configuration-and-secrets.md)); with `services.units: []` it does not run, records nothing, logs nothing and
+the agent never connects to the system bus. It starts no program (record 0019): it asks systemd over D-Bus, as `systemctl` does.
+
+**What it reads.** Each run opens its own connection to the system bus socket `/run/dbus/system_bus_socket` (a constant; no environment
+variable names it), authenticates as the agent's user, says `Hello` and closes the connection at its end. It calls read methods only,
+all with `NO_AUTO_START`: `ListUnitsByPatterns` (only when a pattern is configured), `ListUnitsByNames` for the tracked names in calls of
+at most 64 (systemd loads each named unit, resolves an alias to its primary name and answers primary name, load, active and sub state in
+one consistent entry), and `Properties.Get` of `ActiveEnterTimestamp` and `NRestarts` on each unit, except for a unit that is `not-found`
+and `inactive`, which has neither (they count as 0). About 25 round trips for the default list, about 520 at the cap. Reading needs no
+group and no capability: systemd's bus policy lets every user make these calls.
+
+**Which units are tracked.** An entry without a pattern character is tracked from the start; an entry with `*` or `?` is matched by
+systemd against the units it has loaded, and each match whose `load_state` is not `not-found` is tracked from the first run that lists it.
+A unit once tracked stays tracked until the agent restarts, even when systemd unloads it, so its stop is recorded. At most 256 units are
+tracked: the exact entries first in file order, then the matches in name order; a unit once tracked is never dropped for a later match,
+and a new match beyond the cap is left out. A name the wire format refuses (systemd's `\x2d` escapes) is not tracked. A pattern that
+matches nothing is no error. Two entries or a pattern that name one unit (an alias, `mysql` and `mariadb`) give one unit, recorded once
+under systemd's primary name.
+
+**What is recorded and when.** One record per unit with the primary name, `load_state`, `active_state`, `sub_state`, `active_enter_at`
+and `restarts` (systemd's `NRestarts` as reported, 0 for a `not-found` or masked unit; masked, `bad-setting` and `error` units are
+recorded like any other). `active_enter_at` is left out when systemd reports 0 (never active) or a time the backend cannot store
+(after 2262-04-11), never clamped. The first successful run after a start records every tracked unit. A later run records a unit when
+its `load_state`, `active_state`, `sub_state`, `active_enter_at` or `restarts` differs from the unit's last recorded state, or when its
+last record is at least one hour old, so a unit's records are at most one hour plus one interval apart while the collector succeeds (an
+incident window shorter than that may hold no record of a quiet unit). After a lost sample (*Scheduling*, `Run.PreviousLost`) the next
+successful run records every tracked unit again, as after a start, so a change seen only by the lost sample is not missing. A state that
+came and went between two runs without a new `active_enter_at` or a higher `restarts` (a short `activating` or `reloading`) is not seen,
+and a change is recorded at most one interval after it happened; the second of a failure is in the journal.
+
+**A unit the wire format refuses.** The collector checks every unit's record against the model itself before it returns the run's
+records. A unit whose state is refused (an `active_state` or `load_state` a newer systemd adds, a `sub_state` with other characters than
+`[a-z0-9-]` or longer than 64 bytes) is left out and its last record forgotten; the run's other records are kept, and the run returns
+one gap with cause `unknown`, collector `systemd`, from the run's start to the next due time of the run's mode. Each such run is a gap,
+because the unit counts as not recorded. The scheduler therefore never sees a refused record. The warning `systemd unit state not
+recorded` (`unit`: the tracked name, `field`: the name of the field) is logged at the first such run and the info line `systemd unit
+state recorded again` when the unit is recorded again; the refused value is never logged.
+
+**Logging.** Through the collector's logger with `collector=systemd`, one line per change and none per run or per state change, and only
+fixed texts, counts and names that passed the configuration or wire rules; no text a reply carries is logged beyond a unit name:
+
+| Line | Attributes | When |
+| ---- | ---------- | ---- |
+| warning `systemd units not found` | `count`, `units` (the exact entries whose `load_state` is `not-found`, comma-separated in file order) | at the first successful run after a start, when there is one; not repeated after a lost sample; not for patterns, masked or broken units; a unit installed or removed later is recorded without a line |
+| warning `systemd units cut` | `left_out` | once per agent run, at the first run that leaves a match out because of the cap |
+| warning `systemd units not tracked` | `count` | once per agent run, when a match has a name the wire format refuses |
+| warning `systemd unit state not recorded`, info `systemd unit state recorded again` | `unit`, `field` | as above |
+
+**Failures.** A bus that cannot be reached (socket missing, connection refused), an authentication that is refused, an error reply to one
+of the agent's calls, a reply or message the client refuses and a reply larger than 1 MiB fail the run: no record and no missing-unit
+warning is written, the sample is a gap with cause `unknown` and the scheduler logs `collector failed` once and `collector recovered`
+(*Scheduling*). The run's context is the connection's deadline, so a systemd or bus daemon that does not answer ends the run at its
+5-second timeout as a gap with cause `collector_timeout`, the collector is not started again while it is stuck, and no other collector
+waits. After `daemon-reexec`, `daemon-reload` or a restart of the bus daemon the next run connects anew; at most the runs while the bus
+is away are gaps. The failure texts are `sdbus: connect: <os error>`, `sdbus: authentication refused`, `sdbus: message: <fixed reason>`,
+`sdbus: <member>: error reply <error name>` (the name only when it follows the D-Bus error-name grammar and is at most 255 bytes),
+`sdbus: <member>: reply too large`, `sdbus: <member>: unexpected signature` and `sdbus: <member>: malformed body`; none contains a
+string of a reply body.
+
+**The client (security area 10).** The bus delivers messages to the agent that it did not ask for: any local user may send a signal to
+the agent's connection, up to 32 MiB and with file descriptors, and the replies are text systemd and the bus daemon choose. The client in
+`internal/sdbus` is therefore written to bound what it reads before it decodes anything:
+
+- It reads and writes only through `Read`, `Write`, `SetDeadline` and `Close` of the connection and never negotiates file-descriptor
+  passing, so the kernel closes any descriptor sent to it. The imports and selectors are pinned by `TestSdbus_ImportsOnlyAllowedPackages`
+  (no `ReadMsgUnix`, `ReadFrom*`, `SyscallConn`, `File`, `syscall`, `os.Getenv`, `os.LookupEnv`).
+- Authentication is `EXTERNAL`; the answer line is cut at 512 bytes before it is compared and only `OK` and 32 hexadecimal digits are
+  accepted.
+- A message is refused when the byte order is unknown, the version is not 1, or the message is larger than 2^27 bytes. Every message
+  that is not a method return or error (signals, method calls, unknown types) is skipped by its length without a look at its header
+  fields, in a fixed buffer, so a flood of them keeps nothing in memory. A return or error is read only with header fields of at most
+  64 KiB, of which only the codes 1 to 9 are decoded, each with its one fixed basic type; any other code or type fails the call. A
+  return or error for another call is skipped after its header fields.
+- The awaited reply's body is read only up to 1 MiB and its signature must be exactly the expected one (`s`, `a(ssssssouso)`, `v`
+  holding `t` or `u`); strings must be NUL-terminated valid UTF-8 within the body, object paths are checked against the D-Bus path
+  grammar before they are used in a call, and the answer of `ListUnitsByNames` must hold exactly one entry per name. The body of an error
+  reply is never read into a text.
+- Memory is bounded independently of the server: at most 256 tracked units with their last recorded state, one connection, one reply of at
+  most 1 MiB.
+
+**Residuals.**
+
+- A local user who learns the agent's unique bus name during a run can flood that connection with signals; the run discards them until
+  its deadline and becomes a gap, visible as such, and no memory grows (record 0117).
+- Reading a unit systemd has not loaded makes systemd load and unload it for the call and so broadcast `UnitNew` and `UnitRemoved` on the
+  bus; that is one pair per missing unit and run (`ListUnitsByNames` needs no further `Get` for it).
+- A local user can make systemd load a stub unit that a pattern matches; a match listed as `not-found` is not tracked.
+- The unit must keep `AF_UNIX` and the bus socket reachable (*Rights*). The captured replies of systemd 249 are the test data; other
+  systemd versions were not captured.
+
 ## Memory pressure mode
 
 The `system` collector decides the memory pressure mode ([Scheduling](#scheduling)) after each successful `system` sample, from the values
@@ -589,6 +684,10 @@ collector timeouts and backend gap detection each emit a gap record, and each pa
   records no owners. The unit gives the agent **no network namespace of its own** (no `PrivateNetwork=`, no `NetworkNamespacePath=`, or
   `/proc/net` would show another namespace's sockets), does not set `ProcSubset=pid` (it hides `/proc/net`) and leaves `ProtectProc=` at
   `default` (a stricter value hides other users' processes whenever the agent runs without `CAP_SYS_PTRACE`).
+- **Systemd collector.** Reading unit states over the system bus needs no group and no capability: systemd's bus policy lets every user
+  call `Properties.Get`, `ListUnitsByPatterns`, `ListUnitsByNames` and `LoadUnit` (the server capture was taken with every call made
+  as `nobody`). The unit must keep the bus reachable: `RestrictAddressFamilies=` keeps `AF_UNIX` (also for this connection) and
+  nothing hides `/run/dbus` (no `InaccessiblePaths=` or `TemporaryFileSystem=` over it), or the collector fails every run as a gap.
 - As soon as the unit grants any capability, the unit is confined: `NoNewPrivileges=yes`; a system-call filter that denies `ptrace`,
   `process_vm_readv`, `process_vm_writev`, `pidfd_getfd` and `open_by_handle_at` with `EPERM` (and not `pidfd_open` or
   `pidfd_send_signal`) under `SystemCallArchitectures=native`; no write-side capability; `ProtectHome=yes` and `InaccessiblePaths=` for at
@@ -631,6 +730,9 @@ collector timeouts and backend gap detection each emit a gap record, and each pa
   alone), records a regular or a full snapshot in the one record kind, and bounds the new-listener check, favoring privileged ports.
 - [0116](../decisions/0116-listeners-across-agent-starts-compared-when-stored-and-shown-in-the-forensics-report.md) — why the first snapshot after
   a start is marked `start`, every snapshot says what its listener list holds, and the backend compares across the start.
+- [0117](../decisions/0117-systemd-collector-hand-written-d-bus-client-per-run-states-recorded-on-change.md) — why the systemd collector
+  reads unit states over the system bus with a minimal client of its own and one connection per run, polls, records on change, after a
+  start or a lost sample and hourly, and tracks patterns up to 256 services.
 
 ## Not here
 
@@ -644,5 +746,6 @@ collector timeouts and backend gap detection each emit a gap record, and each pa
 `internal/sysstats` (system metrics and the memory pressure mode; fixtures `testdata/proc/`, `testdata/sys/`),
 `internal/procstats` (process collector; fixtures `testdata/proc/<pid>/`, `testdata/etc/passwd`, `testdata/processes/names.json`; `ListPIDs`, `CommandReader` and `Ended` are shared with the connection collector),
 `internal/connstats` (connection collector; fixtures `testdata/proc/net/`, `testdata/connections/sandbox/`), `internal/sockmount` (the start-up probe of the socket mount),
+`internal/svcstats` (systemd collector) and `internal/sdbus` (its D-Bus client; fixture `testdata/systemd/`, a capture of systemd 249's replies),
 `internal/sdnotify`, `internal/config`, `internal/model`, `internal/wire`; `deploy/agent/` (example configuration; the unit and install
 scripts follow with the collectors).

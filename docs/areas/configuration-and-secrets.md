@@ -45,6 +45,7 @@ Agent:
 | `log.level` | `info` | `debug`, `info`, `warn` or `error` |
 | `filesystem.mount_points` | `["/"]` | a list of at most 16 absolute, clean paths of at most 1,024 bytes each, every path listed once (see below) |
 | `processes.programs` | `[]` | a list of at most 64 rules, each a mapping of `program`, one of `command` and `cmdline_prefix`, and optionally `append_next_word` (see below) |
+| `services.units` | `[sw-cp-server, sw-engine, psa, nginx, apache2, postfix, dovecot, mariadb, plesk-php*-fpm, php*-fpm, fail2ban]` | a list of at most 64 service unit names or patterns of 1 to 255 bytes (see below) |
 
 Backend:
 
@@ -111,6 +112,28 @@ Backend:
   | `processes.programs[<i>]` (element that is not a mapping) | `must be a section (a mapping of keys)` |
 
   No error text contains the value of a rule.
+- `services.units` names the services whose state the agent records ([Agent](agent.md), *Services*). The list replaces the default
+  (it is not extended); an empty list `[]` switches the `systemd` collector off, so the agent does not connect to the system bus. An
+  entry is a unit name or a pattern, and an entry without a unit type suffix means `<entry>.service`, as `systemctl` reads it: the suffix
+  after the last dot decides, so `php8.1-fpm` becomes `php8.1-fpm.service`. `*` and `?` are the only pattern characters; they are matched
+  by systemd against the names of the loaded units. An entry is 1 to 255 bytes long (counted after the implied `.service`) of
+  `A-Z a-z 0-9 : _ . @ - * ?`, does not start with `.` or `-`, holds at most one `@` and names a service: the suffixes `.socket`, `.timer`,
+  `.target`, `.mount`, `.automount`, `.swap`, `.path`, `.slice`, `.scope` and `.device` are refused, and so is a template without an
+  instance (`foo@.service`, `@foo`). Two entries that are equal once `.service` is added (`nginx` and `nginx.service`) are refused. The
+  loader stores every entry as its full name. The errors read `config: <file>:<line>: <key>: <reason>` with the line of the element
+  (of the key for the list itself) and never contain the value:
+
+  | Key | Reason |
+  | --- | ------ |
+  | `services.units` (more than 64 entries) | `must be a list of at most 64 unit names` |
+  | `services.units[<i>]` (empty; over 255 bytes with the implied `.service`; a character outside the set; starting with `.` or `-`; more than one `@`) | `must be a service unit name or pattern of 1 to 255 bytes of [A-Za-z0-9:_.@*?-], not starting with . or -` |
+  | `services.units[<i>]` (another unit type suffix) | `must name a service unit` |
+  | `services.units[<i>]` (`foo@.service`, `@foo`) | `must name an instance, not a template` |
+  | `services.units[<i>]` (equal to an earlier entry) | `listed twice` |
+  | `services.units` (null element) | `has no value` |
+  | `services.units`, `services.units[<i>]` (an element or the list of another YAML type) | the decoder's reason for the type, as for the other agent lists |
+
+  The agent stops at start-up with exit code 1 on every one of them.
 - A directory must be absolute and clean: no trailing slash and no empty, `.` or `..` element. The loader does not
   create it.
 - Plain `http` is allowed for `backend.url`, because the tailnet encrypts and authenticates the transport. Whether
@@ -191,6 +214,7 @@ Backend:
 - [0078](../decisions/0078-configuration-and-secrets-in-the-backend-with-yamldotnet.md) — why the backend implements the same rules with YamlDotNet.
 - [0104](../decisions/0104-argon2id-password-hash-konscious-strict-phc-form-hash-password-command.md) and [0105](../decisions/0105-forwarded-headers-only-from-trusted-proxies-failed-logins-locked-per-client-and-capped.md) — why the hash form is checked on top of the secret rules and why `web.trusted_proxies` is a comma-separated string.
 - [0113](../decisions/0113-process-collector-pss-from-smaps-rollup-top-processes-full-snapshot-under-memory-pressure.md) — why the process grouping rules are a list of mappings of literal comparisons that the strict decoder checks.
+- [0117](../decisions/0117-systemd-collector-hand-written-d-bus-client-per-run-states-recorded-on-change.md) — why the units to track are a list of names and patterns, an entry without a suffix is a service, and other unit types are refused.
 
 ## Not here
 
