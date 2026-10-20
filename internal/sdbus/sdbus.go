@@ -77,6 +77,26 @@ type UnitInfo struct {
 	Path string
 }
 
+// Unit is the state of one unit as List and Read return it.
+type Unit struct {
+	ID          string
+	LoadState   string
+	ActiveState string
+	SubState    string
+	ActiveEnter uint64 // microseconds since the epoch, 0 = never
+	Restarts    uint32
+}
+
+// List returns the units matching patterns with their states; ActiveEnter and Restarts are not read.
+func (s *Session) List(ctx context.Context, patterns []string) ([]Unit, error) {
+	return nil, errors.New("sdbus: not implemented")
+}
+
+// Read returns one Unit per name, in order.
+func (s *Session) Read(ctx context.Context, names []string) ([]Unit, error) {
+	return nil, errors.New("sdbus: not implemented")
+}
+
 // Dial connects to the unix stream socket at path, authenticates as the current user and says Hello.
 func Dial(ctx context.Context, path string) (*Session, error) {
 	var dialer net.Dialer

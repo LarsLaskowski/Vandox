@@ -10,6 +10,7 @@ import (
 
 	"github.com/LarsLaskowski/Vandox/internal/model"
 	"github.com/LarsLaskowski/Vandox/internal/scheduler"
+	"github.com/LarsLaskowski/Vandox/internal/sdbus"
 )
 
 // Name, bounds and cadence of the systemd collector.
@@ -20,14 +21,7 @@ const (
 )
 
 // Unit is the state of one unit as the reader returns it.
-type Unit struct {
-	ID          string
-	LoadState   string
-	ActiveState string
-	SubState    string
-	ActiveEnter uint64 // microseconds since the epoch, 0 = never
-	Restarts    uint32
-}
+type Unit = sdbus.Unit
 
 // Reader reads unit states from one open connection to systemd.
 type Reader interface {
@@ -60,7 +54,22 @@ type Collector struct {
 
 // BusSystemd returns the Systemd that talks to the system bus at path.
 func BusSystemd(path string) Systemd {
-	return nil
+	return busSystemd{path: path}
+}
+
+// busSystemd opens sessions on the system bus socket at path.
+type busSystemd struct {
+	path string
+}
+
+// Open dials the bus.
+func (b busSystemd) Open(ctx context.Context) (Reader, error) {
+	session, err := sdbus.Dial(ctx, b.path)
+	if err != nil {
+		return nil, err
+	}
+
+	return session, nil
 }
 
 // New returns the collector tracking units (full names or patterns), run on schedule; a nil log logs nothing.
