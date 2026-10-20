@@ -34,3 +34,4 @@ are quoted in full.
 | 2026-10-20 19:11 | 5 Tests first (task 4b) | squad-tester | 3 sdbus tests fail on stubs; svcstats BusSystemd and import tests written (sonnet/medium · 100,519 tokens · 11 tool uses · 174 s) |
 | 2026-10-20 19:14 | 6 Implement (tasks 4b, 5) | squad-dev | List/Read and collector implemented; tests green; sdbus 91.6%, svcstats 98.3%; coverage pass deferred to gate (sonnet/medium · 137,396 tokens · 17 tool uses · 155 s) |
 | 2026-10-20 19:14 | 4 Skeleton (task 6) | squad-dev | Options.Services and Systemd schedule constants; job not yet added (sonnet/medium · 69,481 tokens · 5 tool uses · 26 s) |
+| 2026-10-20 19:16 | 5 Tests first (task 6) | squad-tester | Agent tests adapted and added; fail on skeleton; empty-list never-opens test deferred (sonnet/medium · usage pending) |
