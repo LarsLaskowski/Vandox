@@ -217,7 +217,12 @@ def mode_change_warning(path, member, own_step, origin=None, amending=False, ste
         rows = rows_before(rows, wanted, None if step is None else cell(step))
     fresh = [row_step for _, row_step, row_member, result in rows if row_member == wanted
              and TRAILER.search(result) and not TRAILER.search(result).group("continued")]
-    continued = cell(origin) if origin is not None else (fresh[-1] if fresh else None)
+    if origin is not None:
+        continued = cell(origin)
+    elif fresh:
+        continued = fresh[-1]
+    else:
+        continued = None
     numbers = [STEP_NUMBER.match(text or "") for text in (continued, own_step)]
     if None in numbers or numbers[0].group(1) == numbers[1].group(1) or ROUND_OF_SAME_MODE.search(own_step):
         return None
