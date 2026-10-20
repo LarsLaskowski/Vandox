@@ -940,6 +940,27 @@ func TestLoadAgent_ServiceUnitsDefault(t *testing.T) {
 	}
 }
 
+func TestLoadAgent_ServiceUnitsEmptyTurnsCollectorOff(t *testing.T) {
+	docs := []struct {
+		name string
+		doc  string
+	}{
+		{"block form with an empty flow list", servicesDoc(" []")},
+		{"flow form of the section", validAgent + "services: {units: []}\n"},
+	}
+	for _, tt := range docs {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := LoadAgent(writeTemp(t, tt.doc), agentEnv())
+			if err != nil {
+				t.Fatalf("LoadAgent(%q) error = %v, want nil", tt.doc, err)
+			}
+			if len(got.Services.Units) != 0 {
+				t.Errorf("LoadAgent(%q) Services.Units = %q, want an empty list, not the default", tt.doc, got.Services.Units)
+			}
+		})
+	}
+}
+
 func TestLoadAgent_ServiceUnitsOverrideAndSuffix(t *testing.T) {
 	long := strings.Repeat("a", 247)
 	many := make([]string, MaxServiceUnits)
