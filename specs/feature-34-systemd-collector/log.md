@@ -41,3 +41,5 @@ are quoted in full.
 | 2026-10-20 19:26 | 7 Code check | squad-orchestrator | format, build, test -race, analyzer 0 issues, coverage gate PASS (new 90.2%, overall 97.9%), scope-check, decision-check PASS; Sonar gate: see next row |
 | 2026-10-20 19:26 | 7 Sonar gate | squad-orchestrator | skipped: SONAR_TOKEN not available in this session; CI code analysis reports after the PR |
 | 2026-10-20 19:28 | 8 Review (diff, round 1) | squad-security | APPROVED, no findings (opus/medium · 56,556 tokens · 12 tool uses · 91 s) |
+| 2026-10-20 19:29 | 8 Review (round 1) | squad-reviewer | BLOCKING 1 (README says missing unit left out), NON-BLOCKING 2 (agent.md wording); all marked verbatim (opus/medium · 127,610 tokens · 22 tool uses · 170 s) |
+| 2026-10-20 19:30 | 8 Verbatim doc fixes | squad-orchestrator | Applied the reviewer's 3 verbatim documentation fixes (README services.units row, agent.md logging and gap wording); no delta round |

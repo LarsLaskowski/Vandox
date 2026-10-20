@@ -1,6 +1,6 @@
 # 0117: systemd collector: a hand-written D-Bus client with one connection per run, unit states recorded on change, after a lost sample and hourly
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-20
 - **Area:** Agent
 - **Source:** Issue #34

@@ -536,12 +536,12 @@ and a change is recorded at most one interval after it happened; the second of a
 **A unit the wire format refuses.** The collector checks every unit's record against the model itself before it returns the run's
 records. A unit whose state is refused (an `active_state` or `load_state` a newer systemd adds, a `sub_state` with other characters than
 `[a-z0-9-]` or longer than 64 bytes) is left out and its last record forgotten; the run's other records are kept, and the run returns
-one gap with cause `unknown`, collector `systemd`, from the run's start to the next due time of the run's mode. Each such run is a gap,
+one gap with cause `unknown`, collector `systemd`, from the run's start to the run's start plus the interval of the run's mode. Each such run is a gap,
 because the unit counts as not recorded. The scheduler therefore never sees a refused record. The warning `systemd unit state not
 recorded` (`unit`: the tracked name, `field`: the name of the field) is logged at the first such run and the info line `systemd unit
 state recorded again` when the unit is recorded again; the refused value is never logged.
 
-**Logging.** Through the collector's logger with `collector=systemd`, one line per change and none per run or per state change, and only
+**Logging.** Through the collector's logger with `collector=systemd`, no line per run and none per state change, and only
 fixed texts, counts and names that passed the configuration or wire rules; no text a reply carries is logged beyond a unit name:
 
 | Line | Attributes | When |
