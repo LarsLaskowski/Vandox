@@ -23,12 +23,19 @@ and no field that ties a snapshot to an event.
 - S1: Given the agent is running, when the kernel's OOM killer kills a process, then within 5 seconds of the kill line reaching the
   journal the agent records one `kernel_event` of type `oom_kill` with the victim's PID, its command (the kernel's process name),
   its anonymous RSS in bytes (`anon-rss` in kB times 1,024), its `oom_score_adj`, the kill line as `message`, and as capture time the
-  moment the kernel wrote the line (the kernel's own time stamp in UTC, not the time the journal received it). The event carries an
+  moment the kernel wrote the line: the kernel's own time stamp (time since the boot of that entry) converted to UTC with the boot
+  time of the entry's own boot (the entry's receipt time minus its monotonic time), not the time the journal received it; when the
+  result lies before that boot's start or after the receipt time, the receipt time is the capture time. The event carries an
   identity that is the same however often the same kill is read and differs between any two kills.
 - S2: Given S1, when the event is recorded, then the agent at once (within 1 second, or as soon as the collector's current run ends)
   takes an additional full process snapshot (every process, as under memory pressure) and an additional full connection snapshot
-  (with every connection), and each of these two records names the kill it was taken for by the kill's identity. The collectors'
-  regular runs keep their schedule: none is skipped and no gap is recorded because of the additional run.
+  (with every connection), and each of these two records names the kill it was taken for by the kill's identity. Without memory
+  pressure mode the collectors' regular runs keep their schedule: none is skipped and no gap is recorded because of the additional
+  run, as long as it finishes within its timeout. Under memory pressure mode (when the regular runs are already full snapshots every
+  15 seconds) the additional run takes the place of the collector's next regular run: that run is not taken and records no gap, and
+  the grid continues from the additional run's start. The additional run is a sample like any other: it is the predecessor of the
+  next run (CPU rates of the processes, the listener comparison of the connections), it sets and clears `Run.PreviousLost` by the same
+  rules, and its failures are recorded as for any run (E11).
 - S3: Given an OOM storm in which the kernel kills several processes within seconds, then every kill is its own event (S1); the
   first kill gets its additional snapshots at once (S2), and the kills that follow within 15 seconds of the start of those snapshots
   get one further pair of snapshots when the 15 seconds have passed, which names all of them (at most 64, and the number of the
@@ -66,8 +73,9 @@ and no field that ties a snapshot to an event.
 ## Errors and edge cases
 
 - E1: A kill line that does not come from the kernel — written with `logger -t kernel`, to syslog, to the journal's native or
-  stream interface, or by a service whose name is `kernel` — is no event. Only messages that the journal received through its
-  kernel transport count; any local user can write the others.
+  stream interface, by a service whose name is `kernel`, or by root to `/dev/kmsg` — is no event. Only entries that the journal
+  received through its kernel transport **and** that carry the kernel facility (0) count; any local user can write entries of the
+  other transports, and a write to `/dev/kmsg` reaches the kernel transport with a facility other than 0.
 - E2: A victim's process name is text the process chose (up to 15 bytes): it may contain spaces, `)`, a line feed, invalid UTF-8 or
   text that imitates the line's fields (`x) anon-rss:1kB`). The event holds the real PID, RSS and `oom_score_adj` the kernel wrote,
   the name cleaned to valid UTF-8 (each invalid byte U+FFFD), and `(unnamed)` for an empty name, so the record is always valid.
@@ -84,7 +92,11 @@ and no field that ties a snapshot to an event.
   read — rotated or vacuumed away before it read them, or in a part of a file that cannot be decoded — is recorded as a `gap` of the
   kernel event collector for that span; a span read late is not lost and needs no gap.
 - E6: journald itself is stalled, killed or restarted (it can be an OOM victim too): the kernel's lines reach the journal later;
-  the events then have the kernel's time of the kill (S1), and the 5 seconds count from the moment the journal holds the line.
+  the events then have the kernel's time of the kill (S1), and the 5 seconds count from the moment the journal holds the line. When
+  the kernel's buffer overflowed meanwhile, journald writes its own entry that it missed kernel messages (its "missed kernel
+  messages" message ID, written by journald itself, not on the kernel transport); such an entry is recorded as a `gap` of the kernel
+  event collector from the time of the last kernel entry before it to the time of the next kernel entry after it, since kills in that
+  span may be lost.
 - E7: The agent was stopped for days, so a large backlog of journal entries lies after its position: it reads the backlog in bounded
   steps with memory that does not grow with the backlog or the journal, records the kills in journal order, and takes no additional
   snapshot for them (S10). A saved position older than the oldest entry the journal still has gives a `gap` from the saved position's
@@ -97,11 +109,16 @@ and no field that ties a snapshot to an event.
 - E9: `/proc/sys/kernel/random/boot_id` cannot be read or is not a lower-case UUID: no `boot` event, one warning `boot ID not
   readable`, and the other features run.
 - E10: The clock is set after the boot (NTP corrects it by minutes): `booted_at` is the boot time as the kernel reports it when the
-  agent reads it, the kill's capture time follows the same boot time, and whether a kill is still recent enough for snapshots (S10) is
-  judged on the kernel's monotonic clock, so a clock step neither suppresses nor triggers snapshots.
+  agent reads it; each kill's capture time is converted with the boot time of the kill's own boot, also for kills of an earlier boot
+  (S1, S10); and whether a kill is still recent enough for snapshots (S10) is judged on the kernel's monotonic clock of the current
+  boot, so a clock step neither suppresses nor triggers snapshots.
 - E11: The process or connection collector is stuck in an abandoned run when a kill is recorded: no additional snapshot is started
-  for that collector (it is never started twice); the missed snapshot is a `gap` with cause `collector_timeout` as for any run, and
-  the event is recorded anyway. Under memory pressure mode the additional snapshots are taken as well, so the kill is named.
+  for that collector (it is never started twice) and the event is recorded anyway; the missed snapshot is a `gap` with cause
+  `collector_timeout` from the moment the additional run was due to that moment plus the collector's interval of the current mode. An
+  additional run that itself fails is a `gap` over the same span (cause `unknown` for an error or a panic, `collector_timeout` when it
+  is abandoned), and while an abandoned additional run has not returned, every regular run then due is skipped with a
+  `collector_timeout` gap as for any abandoned run; the "no gap" of S2 holds only while the additional run finishes within its
+  timeout. Under memory pressure mode the additional snapshots are taken as well (S2), so the kill is named.
 - E12: A local user starts a process whose command matches a rule (a process named `pzstd`): it counts as a backup run. Rules are
   literal comparisons, so `grep pzstd` (command `grep`) does not match a `command` rule.
 - E13: `backups.processes: []`: no backup check runs, no backup record and no log line is written.
@@ -123,22 +140,27 @@ and no field that ties a snapshot to an event.
 - **Memory and load.** The server must not be put under more memory pressure: reading the journal holds memory that does not grow
   with the size of the journal, the backlog or a single entry (an entry is read only up to a fixed limit), and the plan states the
   bound and a test that checks it at two sizes. The additional snapshots are bounded to one per collector per 15 seconds, the rate of
-  memory pressure mode, so a storm of kills costs no more snapshots than pressure mode already takes. The backup check reads only
+  memory pressure mode. Without pressure mode they come on top of the regular runs (at most one more per 15 seconds); under pressure
+  mode, where an OOM kill usually happens, each takes the place of the collector's next regular run (S2), so a storm of kills costs
+  no more snapshots than pressure mode already takes. The backup check reads only
   what the process collector reads to name a process. The real cost on the server is measured in #44.
 - **Disk.** The agent's saved state (its last boot ID and uptime, the journal position, an open backup run) is one small file written
   atomically with owner-only permissions, at most once every 10 seconds while kill lines or a backup run are being followed and once a
-  minute otherwise; it is the agent's first file write.
+  minute otherwise; it is the agent's first file write. It is not part of the spool: whatever the spool (#38) later counts against its
+  size bound and deletes when full never includes the state file.
 - **No new right, no program, static binary.** The agent reads the journal as a member of `systemd-journal`, which it already is
   (Agent area, *Rights*), `/proc` as today, and writes only below `spool.directory`. No capability, group or polkit rule is added, no
   program is started (record 0019) and the binary stays static (`CGO_ENABLED=0`), so no C library of systemd is linked.
 - **The guarantees hold.** A hanging journal, `/proc` read or state write never blocks the agent (record 0029), and every span of
   kernel messages, snapshots or backup checks that is lost is recorded as a gap (record 0028).
-- **Security.** Only the kernel transport of the journal counts (E1). Victim names, commands and command lines are external text: they
+- **Security.** Only entries of the journal's kernel transport with the kernel facility count (E1). Victim names, commands and command lines are external text: they
   reach the records only, never a log line or an error text, and whoever displays them escapes them. Every read is bounded before it is
   parsed (security area 10); the state file is a write in the agent's own directory (security area 9) and is validated when read.
 - **Compatibility.** The wire format changes only by additions to the unreleased version 1.1 (only `v0.1.0` is tagged): what the plan
-  adds for the snapshot link, the event identity and the backup run is optional for older readers, decoded by the Go and the C# side
-  and pinned by the golden batches (record 0075). Existing configuration files stay valid.
+  adds as new optional fields (the event identity, the snapshot link) is ignored by a reader that does not know them; a new record
+  kind or a new `kernel_event` type for the backup run is refused by a reader that does not know it (an unknown kind rejects the
+  batch, `KernelEvent.Validate` accepts only `oom_kill` and `boot`), so both decoders accept it in the same change, which is allowed
+  because 1.1 is unreleased. Everything is pinned by the golden batches (record 0075). Existing configuration files stay valid.
 - **Configuration.** One new option, `backups.processes`: a list of at most 64 literal rules, each exactly one of `command` (equal to
   the process's command as the process collector derives it) and `cmdline_prefix` (the start of its command line), with the strict
   rules and error texts of `processes.programs`; `[]` switches the backup check off. The default is one rule, `command: pzstd`
@@ -150,17 +172,24 @@ and no field that ties a snapshot to an event.
 
 ## Acceptance criteria
 
-- [ ] AC1: For a kill line of the kernel transport read live, the agent hands one `oom_kill` event to the sink within 5 seconds, with
-  the victim PID, command, anonymous RSS in bytes, `oom_score_adj`, the kill line as message, the kernel's time of the line as capture
-  time and an identity that two readings of the same kill share and two kills never share (S1, E6, E10).
+- [ ] AC1: For a kill line of the kernel transport and facility read live, the agent hands one `oom_kill` event to the sink within 5
+  seconds, with the victim PID, command, anonymous RSS in bytes, `oom_score_adj`, the kill line as message, the kernel's time of the
+  line converted with the boot time of the entry's own boot as capture time (the receipt time when that lies outside the boot's start
+  and the receipt time), and an identity that two readings of the same kill share and two kills never share (S1, E6, E10).
 - [ ] AC2: Each recorded live kill makes the process and the connection collector take one additional full snapshot within 1 second
-  (or at the end of the current run), each naming the kill's identity, while the regular runs keep their grid and record no gap (S2,
-  E11).
+  (or at the end of the current run), each naming the kill's identity; without pressure mode the regular runs keep their grid and
+  record no gap while the additional run finishes in time, under pressure mode the additional run replaces the next regular run
+  without a gap; the additional run is the next run's predecessor (S2).
+- [ ] AC19: An abandoned or failed additional run records a gap of its collector from its due time over one interval of the current
+  mode (`collector_timeout` or `unknown`), and the regular runs due while an abandoned one hangs are skipped with `collector_timeout`
+  gaps; a kill while the collector is stuck starts no additional run and is recorded as an event (E11).
+- [ ] AC20: journald's entry about missed kernel messages gives a gap of the kernel event collector from the last kernel entry before
+  it to the next kernel entry after it (E6).
 - [ ] AC3: Kills within 15 seconds after the start of the additional snapshots produce exactly one further pair after the 15
   seconds, naming them (at most 64, with the count of the rest); no collector takes more than one additional snapshot per 15 seconds
   (S3).
-- [ ] AC4: A kill line not received through the kernel transport, and the report, `oom_reaper` and `no killable processes` lines,
-  give no event (E1, E3).
+- [ ] AC4: A kill line not received through the kernel transport, one on the kernel transport with a facility other than 0, and the
+  report, `oom_reaper` and `no killable processes` lines, give no event (E1, E3).
 - [ ] AC5: A victim name with spaces, `)`, a line feed, invalid bytes, imitated fields or no characters gives an event with the
   kernel's real values and a valid, cleaned command or `(unnamed)`; a kill line without `anon-rss` or `oom_score_adj` gives an event
   without that field; the cgroup and the allocating-task kill lines give events (E2, E3).
@@ -186,8 +215,9 @@ and no field that ties a snapshot to an event.
 - [ ] AC14: `backups.processes` defaults to exactly one rule, `command: pzstd`, accepts at most 64 literal `command` or
   `cmdline_prefix` rules with the errors of `processes.programs`, `[]` switches the check off without records or log lines, and a
   `command` rule does not match another command whose command line mentions it (E12, E13).
-- [ ] AC15: The new and changed records validate in Go and C#, the golden batches hold them, and a 1.1 reader that does not know the
-  new fields still reads the records (E16, Compatibility).
+- [ ] AC15: The new and changed records validate in Go and C#, and both decoders and the golden batches accept the backup run's
+  record; a reader that does not know the new optional fields (event identity, snapshot link) still reads the records (E16,
+  Compatibility).
 - [ ] AC16: Following the journal over a journal and a backlog of two different sizes keeps the reader's memory within the plan's
   bound, independent of the size (E7, Memory).
 - [ ] AC17: The state file is written with owner-only permissions and atomically, never more often than the stated rates, and a
@@ -219,12 +249,14 @@ and no field that ties a snapshot to an event.
   1.1 in place (record 0043, wire format area *Versioning*).
 - Q3: How does the agent follow the kernel messages "in the journal"? Answered: it reads the system journal the issue names, as a
   member of `systemd-journal`, without starting `journalctl` (record 0019, Agent area *Collecting*), without cgo (the release build
-  sets `CGO_ENABLED=0`) and without a new right such as `CAP_SYSLOG` for `/dev/kmsg` (record 0030, security area 6). How it reads the
-  journal is the plan's choice within these rules; the plan names the real journal sample it is built from (`.squad/routing.md`,
-  *Escalation to the Product Manager*).
-- Q4: Can a local user forge an OOM event? Answered: not through the journal's kernel transport, which only the kernel feeds; every
-  other way in is excluded (E1). This differs from the backend's log signatures, which treat forged kernel lines as a limitation
-  (record 0094).
+  sets `CGO_ENABLED=0`) and without a new right such as `CAP_SYSLOG` for `/dev/kmsg` (record 0030, security area 6). So the agent
+  reads the binary journal files itself. The repository holds no real journal file (`testdata/logs/kern.log-oom` is rsyslog text,
+  `testdata/systemd/` a D-Bus capture), and the issue attaches none: the sample the reader is built from is escalated to the
+  Product Manager (Challenge, M1); once it exists, this answer names its path under `testdata/`.
+- Q4: Can a local user forge an OOM event? Answered: not through an entry of the journal's kernel transport with the kernel facility
+  (0): only the kernel's own messages carry both, a write to `/dev/kmsg` (root only) gets another facility, and every other way in is
+  excluded (E1); the facility rule is checked against the kernel source in the plan. This differs from the backend's log signatures,
+  which treat forged kernel lines as a limitation (record 0094).
 - Q5: Where does the state that survives restarts and reboots live? Answered: in `spool.directory` (default
   `/var/lib/vandox/spool`), the agent's one write area (Agent area, *Spool and sending*; security area 9), so no new option.
 - Q6: Where does "the previous uptime if known" come from? Answered: from the uptime the agent saves at least once a minute; it is a
@@ -254,3 +286,34 @@ and no field that ties a snapshot to an event.
   `spool.directory` for the agent's state.
 - `docs/areas/storage.md`: only if the plan's backup record needs a storage rule beyond the JSON payload every kind other than
   metrics and log lines gets.
+
+## Challenge
+
+- M1 (major, journal reader without a real sample): accepted. Q3 settles that the agent decodes the binary journal files itself,
+  and no real journal file exists in `testdata/` or on the issue, so the requirement is ambiguous under `.squad/routing.md`
+  (*Escalation to the Product Manager*). Escalated now, not passed on to the plan: the Product Manager is asked for a copied journal
+  file of the Ubuntu 22.04 / systemd 249 server, or for the confirmation to build from the format documentation with the residual
+  risk recorded in the decision record. Q3 says so and will name the sample's path once it exists; E1, E5 and E7 stay requirements
+  on behavior and are checked against the sample in the plan.
+- m1 (additional snapshots double the rate under pressure): accepted. Under memory pressure mode the additional run takes the place
+  of the collector's next regular run, without a gap, and the grid continues from it; without pressure mode it comes on top, at most
+  one per 15 seconds. S2, *Memory and load* and AC2 say so.
+- m2 (an additional run and the collectors' state): accepted. S2 states that the additional run is a sample like any other
+  (predecessor for CPU rates and the listener comparison, `Run.PreviousLost` by the same rules); E11 and the new AC19 state the gap of
+  a failed or abandoned additional run (from its due time over one interval of the current mode), the skipped regular runs while it
+  hangs, and that the "no gap" of S2 holds only while it finishes within its timeout.
+- m3 (the kernel transport alone does not prove kernel origin): accepted. An entry counts only with the kernel transport and the
+  kernel facility 0; E1, Q4, *Security*, AC1 and AC4 say so, and Q4 names the check against the kernel source as the plan's.
+- m4 (messages journald missed are lost without a gap): accepted. E6 and the new AC20: journald's own entry about missed kernel
+  messages becomes a gap of the kernel event collector from the last kernel entry before it to the next one after it. Only journald's
+  own entry counts; its message ID and fields are checked against the sample in the plan.
+- m5 (capture time of kills from a previous boot): accepted in part. Each kill's time is converted with the boot time of its own
+  boot (receipt time minus monotonic time of the entry), also for earlier boots (S1, E10, AC1). The fallback to the receipt time
+  applies when the result lies before that boot's start or after the receipt time. The proposed lower tolerance below the receipt
+  time is rejected: when journald is stalled or restarted (E6) a kill line can be received minutes after the kill, and that late
+  receipt is exactly the case in which the kernel's own time is the right one.
+- m6 (AC15 and a new kind or type): accepted. *Compatibility* and AC15 limit the claim about readers that do not know them to the new
+  optional fields; a new record kind or `kernel_event` type for the backup run is accepted by both decoders and the golden batches in
+  the same change, which is allowed because 1.1 is unreleased.
+- Note for the plan (state file in `spool.directory`): taken into the spec. *Disk* says that the state file is never part of what
+  the spool counts against its bound or deletes.
