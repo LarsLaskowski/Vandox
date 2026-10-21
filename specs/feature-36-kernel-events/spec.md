@@ -183,9 +183,9 @@ and no field that ties a snapshot to an event.
   gone-by time and the largest count; pauses shorter than 60 seconds keep one run (S7, S8, S9, E14, E15).
 - [ ] AC13: A restart during a run whose process still runs records no second start; a stop or reboot after which no match runs
   records the end with the last seen time from before the stop, and a backup in the new boot is a new run (S11, S12).
-- [ ] AC14: `backups.processes` accepts at most 64 literal `command` or `cmdline_prefix` rules with the errors of `processes.programs`,
-  `[]` switches the check off without records or log lines, and a `command` rule does not match another command whose command line
-  mentions it (E12, E13).
+- [ ] AC14: `backups.processes` defaults to exactly one rule, `command: pzstd`, accepts at most 64 literal `command` or
+  `cmdline_prefix` rules with the errors of `processes.programs`, `[]` switches the check off without records or log lines, and a
+  `command` rule does not match another command whose command line mentions it (E12, E13).
 - [ ] AC15: The new and changed records validate in Go and C#, the golden batches hold them, and a 1.1 reader that does not know the
   new fields still reads the records (E16, Compatibility).
 - [ ] AC16: Following the journal over a journal and a backlog of two different sizes keeps the reader's memory within the plan's
@@ -243,12 +243,14 @@ and no field that ties a snapshot to an event.
 
 - `docs/areas/agent.md`: a section *Kernel events* (the journal as source, the kernel transport only, the kill line forms and their
   fields, the position and the backlog, the gaps, the additional snapshots and their 15-second limit, the logs), a section *Boots*
-  (boot ID, saved state, previous boot and uptime), a section *Backup runs* (rules, checks, start and end, restarts), additions to
+  (boot ID, saved state, previous boot and uptime), a section *Backup runs* (rules, the default `pzstd` only and the stated gap that
+  Plesk's own backup processes, uncaptured until #45, are not recognized by default, checks, start and end, restarts), additions to
   *Processes*, *Connections* and *Memory pressure mode* (the additional snapshots), *Rights* (the journal, the state file),
   *Status*, *Related decisions* and *Implementation*.
 - `docs/areas/wire-format.md`: `kernel_event` with the event identity and its producer, the link of `process_snapshot` and
   `connection_snapshot` to the kills, the backup run record, *Versioning* (what 1.1 adds) and the golden batches.
-- `docs/areas/configuration-and-secrets.md`: the option `backups.processes`, its rules and error texts, and the use of
+- `docs/areas/configuration-and-secrets.md`: the option `backups.processes` with its default `[{command: pzstd}]`, its rules and
+  error texts, and the use of
   `spool.directory` for the agent's state.
 - `docs/areas/storage.md`: only if the plan's backup record needs a storage rule beyond the JSON payload every kind other than
   metrics and log lines gets.
