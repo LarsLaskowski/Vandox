@@ -1319,7 +1319,7 @@ var escapedCaseIDs = []string{"K4", "K5", "N4", "N7", "N8", "N9", "N10", "N11", 
 // requiredCaseIDs lists the cases the fixture must hold, from the plans of issues 175 and 182.
 func requiredCaseIDs() []string {
 	var ids []string
-	for prefix, count := range map[string]int{"K": 6, "N": 11, "D": 28, "H": 31, "O": 4, "X": 4, "M": 5, "U": 2, "S": 32} {
+	for prefix, count := range map[string]int{"K": 6, "N": 11, "D": 28, "H": 31, "O": 4, "X": 4, "M": 5, "U": 2, "S": 38} {
 		for i := 1; i <= count; i++ {
 			ids = append(ids, prefix+strconv.Itoa(i))
 		}

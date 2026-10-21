@@ -135,6 +135,41 @@ public class PayloadValidationTests
     }
 
     /// <summary>
+    /// The error code of a MariaDB status is checked like the agent checks it: 1 to 65535, and only with <c>not_answering</c>.
+    /// </summary>
+    /// <param name="json">The payload</param>
+    /// <param name="field">The field that is refused, or empty when the payload is valid</param>
+    /// <param name="reason">The reason</param>
+    [TestMethod]
+    [DataRow("""{"availability":"not_answering","error_code":1,"complete":false}""", "", "")]
+    [DataRow("""{"availability":"not_answering","error_code":65535,"complete":false}""", "", "")]
+    [DataRow("""{"availability":"not_answering","complete":false}""", "", "")]
+    [DataRow("""{"availability":"not_answering","error_code":0,"complete":false}""", "error_code", "must be 1 to 65535")]
+    [DataRow("""{"availability":"up","error_code":1045,"complete":true}""", "error_code", "only with not_answering")]
+    [DataRow("""{"availability":"down","error_code":1045,"complete":true}""", "error_code", "only with not_answering")]
+    [DataRow("""{"availability":"not_answering","error_code":1045,"status":{"A":1},"complete":false}""", "availability", "status, variables and threads must be empty unless up")]
+    public void MariaDbStatusErrorCodeIsCheckedLikeTheAgent(string json, string field, string reason)
+    {
+        // Arrange
+        var payload = Parse("mariadb_status", json);
+
+        // Act
+        var error = payload.Validate();
+
+        // Assert
+        if (field.Length == 0)
+        {
+            Assert.IsNull(error, "payload is valid");
+        }
+        else
+        {
+            Assert.IsNotNull(error, "payload is invalid");
+            Assert.AreEqual(field, error.Field, "field");
+            Assert.AreEqual(reason, error.Reason, "reason");
+        }
+    }
+
+    /// <summary>
     /// Limits on counts and lengths are enforced.
     /// </summary>
     [TestMethod]
