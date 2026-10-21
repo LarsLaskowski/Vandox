@@ -1136,3 +1136,74 @@ func rawLogin(t *testing.T, raw net.Conn, hs capturePacket) capturePacket {
 	}
 	return capturePacket{seq: header[3], payload: payload}
 }
+
+func TestErrorOf_ErrorPacketsBelowThreeBytesAreMalformed(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		payload []byte
+		want    string
+	}{
+		{"only the marker", []byte{0xff}, "mariadb: query: malformed packet"},
+		{"the marker and one byte of the code", []byte{0xff, 0x15}, "mariadb: query: malformed packet"},
+		{"the marker and the code", []byte{0xff, 0x15, 0x04}, "mariadb: query: server error 1045"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := errorOf("query", tc.payload)
+
+			wantError(t, "errorOf()", err, tc.want)
+		})
+	}
+}
+
+func TestEndOf_ChecksTheEOFPacket(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		payload []byte
+		want    string
+	}{
+		{"an EOF packet", []byte{0xfe, 0, 0, 0x02, 0}, ""},
+		{"an error packet", []byte{0xff, 0x15, 0x04, '#'}, "mariadb: query: server error 1045"},
+		{"an error packet without a code", []byte{0xff, 0x15}, "mariadb: query: malformed packet"},
+		{"an empty packet", nil, "mariadb: query: unexpected reply"},
+		{"an EOF packet cut short", []byte{0xfe, 0, 0, 0x02}, "mariadb: query: unexpected reply"},
+		{"a packet of another kind", []byte{0x00, 0, 0, 0x02, 0}, "mariadb: query: unexpected reply"},
+		{"an EOF packet that is long enough to be a row", []byte{0xfe, 0, 0, 0, 0, 0, 0, 0, 0}, "mariadb: query: unexpected reply"},
+		{"an EOF packet with more results", []byte{0xfe, 0, 0, 0x08, 0}, "mariadb: query: more results refused"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := endOf("query", tc.payload)
+
+			if tc.want == "" {
+				if err != nil {
+					t.Errorf("endOf() = %v, want nil", err)
+				}
+				return
+			}
+			wantError(t, "endOf()", err, tc.want)
+		})
+	}
+}
+
+func TestTakeString_ReadsLengthPrefixedStrings(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		in       []byte
+		wantOK   bool
+		wantStr  string
+		wantRest string
+	}{
+		{"a string and a rest", []byte{3, 'a', 'b', 'c', 'x'}, true, "abc", "x"},
+		{"an empty string", []byte{0, 'x'}, true, "", "x"},
+		{"no bytes", nil, false, "", ""},
+		{"a NULL marker", []byte{0xfb}, false, "", ""},
+		{"a length beyond the bytes", []byte{4, 'a', 'b'}, false, "", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, rest, ok := takeString(tc.in)
+
+			if ok != tc.wantOK || string(s) != tc.wantStr || string(rest) != tc.wantRest {
+				t.Errorf("takeString(%v) = %q, %q, %v, want %q, %q, %v", tc.in, s, rest, ok, tc.wantStr, tc.wantRest, tc.wantOK)
+			}
+		})
+	}
+}

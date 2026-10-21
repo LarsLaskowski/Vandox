@@ -1769,3 +1769,40 @@ func runLongReply(t *testing.T, statement string) {
 		t.Errorf("variables = %v, want only the selection %v", s.Variables, want)
 	}
 }
+
+func TestServerStart_IsTheRunLessTheUptime(t *testing.T) {
+	run := time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		name   string
+		status map[string]uint64
+		want   time.Time
+		wantOK bool
+	}{
+		{"an uptime", map[string]uint64{"Uptime": 3600}, run.Add(-time.Hour), true},
+		{"no uptime", map[string]uint64{"Questions": 1}, time.Time{}, false},
+		{"an uptime that does not fit a duration", map[string]uint64{"Uptime": maxUptime + 1}, time.Time{}, false},
+		{"the largest uptime that fits", map[string]uint64{"Uptime": maxUptime}, run.Add(-time.Duration(maxUptime) * time.Second), true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := serverStart(&sample{status: tc.status, run: run})
+
+			if ok != tc.wantOK || !got.Equal(tc.want) {
+				t.Errorf("serverStart() = %v, %v, want %v, %v", got, ok, tc.want, tc.wantOK)
+			}
+		})
+	}
+}
+
+func TestNew_FillsTheDefaults(t *testing.T) {
+	c := New(Sources{}, "/nonexistent/vandox-test.sock", nil)
+
+	if c.src.Dial == nil || c.src.Proc == nil || c.log == nil {
+		t.Fatalf("New() left dial = %v, proc = %v, log = %v unset, want the defaults", c.src.Dial != nil, c.src.Proc != nil, c.log != nil)
+	}
+	if _, err := fs.Stat(c.src.Proc, "self"); err != nil {
+		t.Errorf("default Proc cannot see /proc/self: %v", err)
+	}
+	if _, err := c.src.Dial(t.Context()); err == nil || !errors.Is(err, syscall.ENOENT) {
+		t.Errorf("default dialer on a missing socket = %v, want ENOENT", err)
+	}
+}

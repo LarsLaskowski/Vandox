@@ -393,3 +393,101 @@ func TestWritePacket_ReturnsTheWriteError(t *testing.T) {
 		t.Errorf("writePacket() = %v, want the error of the writer", err)
 	}
 }
+
+// fullFrame returns the packet header of a full-size frame with sequence number seq.
+func fullFrame(seq byte) []byte { return []byte{0xff, 0xff, 0xff, seq} }
+
+func TestPacketReader_TruncatedStreamsAreClosedConnections(t *testing.T) {
+	const closed = "mariadb: status: connection closed"
+	nameAndValue := rowPayload(text("name"), text("value"))
+	for _, tc := range []struct {
+		name string
+		run  func() error
+	}{
+		{"next with a payload shorter than its header says", func() error {
+			_, err := newPacketReader(bytes.NewReader([]byte{5, 0, 0, 0, 'a', 'b'})).next("status", 64)
+			return err
+		}},
+		{"beginRow with no payload after the header", func() error {
+			_, err := newPacketReader(bytes.NewReader([]byte{5, 0, 0, 0})).beginRow("status")
+			return err
+		}},
+		{"beginRow after a row cut short in the stream", func() error {
+			p := newPacketReader(bytes.NewReader(append([]byte{10, 0, 0, 0}, 'a', 'b', 'c')))
+			if _, err := p.beginRow("status"); err != nil {
+				return err
+			}
+			_, err := p.beginRow("status")
+			return err
+		}},
+		{"rest with a payload shorter than its header says", func() error {
+			p := newPacketReader(bytes.NewReader(append([]byte{10, 0, 0, 0}, 'a', 'b', 'c')))
+			if _, err := p.beginRow("status"); err != nil {
+				return err
+			}
+			_, err := p.rest("status", 64)
+			return err
+		}},
+		{"a long row whose next frame never comes, reading a cell", func() error {
+			stream := append(fullFrame(0), 0xfe, 0xff, 0xff, 0xff, 0, 0, 0, 0, 0)
+			stream = append(stream, make([]byte, maxFrame-9)...)
+			p := newPacketReader(bytes.NewReader(stream))
+			if _, err := p.beginRow("status"); err != nil {
+				return err
+			}
+			_, err := p.readCell("status", column{name: "Variable_name", limit: 4, cut: true})
+			return err
+		}},
+		{"a long row whose next frame never comes, starting the next row", func() error {
+			p := newPacketReader(bytes.NewReader(append(fullFrame(0), make([]byte, maxFrame)...)))
+			if _, err := p.beginRow("status"); err != nil {
+				return err
+			}
+			_, err := p.beginRow("status")
+			return err
+		}},
+		{"an end packet with a header and nothing else", func() error {
+			p := newPacketReader(bytes.NewReader(append(encodePacket(0, nameAndValue), 7, 0, 0, 1)))
+			if _, err := p.beginRow("status"); err != nil {
+				return err
+			}
+			_, err := p.beginRow("status")
+			return err
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.run()
+
+			wantError(t, "read", err, closed)
+		})
+	}
+}
+
+func TestPacketReader_EmptyRowPacketIsMalformed(t *testing.T) {
+	p := newPacketReader(bytes.NewReader(frames(nil)))
+
+	_, err := p.beginRow("status")
+
+	wantError(t, "beginRow()", err, "mariadb: status: malformed packet")
+}
+
+func TestPacketReader_RestRefusesAPayloadAboveTheLimit(t *testing.T) {
+	p := newPacketReader(bytes.NewReader(frames(bytes.Repeat([]byte{'a'}, 10))))
+	if _, err := p.beginRow("status"); err != nil {
+		t.Fatalf("beginRow() = %v", err)
+	}
+
+	_, err := p.rest("status", 4)
+
+	wantError(t, "rest()", err, "mariadb: status: packet too large")
+}
+
+func TestWritePacket_RefusesAPayloadOfAFullFrame(t *testing.T) {
+	var buf bytes.Buffer
+
+	err := writePacket(&buf, 0, make([]byte, maxFrame))
+
+	if err == nil || buf.Len() != 0 {
+		t.Errorf("writePacket() = %v after writing %d bytes, want an error and nothing written", err, buf.Len())
+	}
+}

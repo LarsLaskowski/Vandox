@@ -50,7 +50,7 @@ func localNames(file *ast.File) (names map[string]string, violations []string) {
 	names = map[string]string{}
 	for _, imp := range file.Imports {
 		path, err := strconv.Unquote(imp.Path.Value)
-		if _, restricted := allowedSelectorsOf[path]; err != nil || restricted == false {
+		if _, restricted := allowedSelectorsOf[path]; err != nil || !restricted {
 			continue
 		}
 		local := path[strings.LastIndex(path, "/")+1:]
@@ -71,7 +71,7 @@ func importViolations(file *ast.File, allowed []string) []string {
 	var violations []string
 	for _, imp := range file.Imports {
 		path, err := strconv.Unquote(imp.Path.Value)
-		if err != nil || slices.Contains(allowed, path) == false {
+		if err != nil || !slices.Contains(allowed, path) {
 			violations = append(violations, "imports "+imp.Path.Value+", want only "+strings.Join(allowed, " "))
 		}
 	}
@@ -83,7 +83,7 @@ func selectorViolations(file *ast.File) []string {
 	names, violations := localNames(file)
 	ast.Inspect(file, func(n ast.Node) bool {
 		sel, ok := n.(*ast.SelectorExpr)
-		if ok == false {
+		if !ok {
 			return true
 		}
 		if forbiddenMethod(sel.Sel.Name) {
@@ -91,7 +91,7 @@ func selectorViolations(file *ast.File) []string {
 		}
 		if id, isIdent := sel.X.(*ast.Ident); isIdent {
 			path, bound := names[id.Name]
-			if bound && id.Obj == nil && slices.Contains(allowedSelectorsOf[path], sel.Sel.Name) == false {
+			if bound && id.Obj == nil && !slices.Contains(allowedSelectorsOf[path], sel.Sel.Name) {
 				violations = append(violations, id.Name+"."+sel.Sel.Name+" is not allowed")
 			}
 		}
@@ -100,31 +100,44 @@ func selectorViolations(file *ast.File) []string {
 	return violations
 }
 
+// isDialOrListen reports whether call calls a method or function named Dial* or Listen*.
+func isDialOrListen(call *ast.CallExpr) (name string, ok bool) {
+	sel, isSel := call.Fun.(*ast.SelectorExpr)
+	if !isSel {
+		return "", false
+	}
+	return sel.Sel.Name, strings.HasPrefix(sel.Sel.Name, "Dial") || strings.HasPrefix(sel.Sel.Name, "Listen")
+}
+
+// isUnixDial reports whether call is DialContext(ctx, "unix", path) with the network as a constant.
+func isUnixDial(call *ast.CallExpr) bool {
+	if len(call.Args) != 3 {
+		return false
+	}
+	network, isLit := call.Args[1].(*ast.BasicLit)
+	return isLit && network.Value == `"unix"`
+}
+
 // dialViolations pins the only dial: a DialContext call (any receiver) inside UnixDialer whose network argument is the
-// constant "unix"; any other DialContext or Dial call is a violation.
+// constant "unix"; any other Dial or Listen call is a violation.
 func dialViolations(file *ast.File) (violations []string, dials int) {
 	for _, decl := range file.Decls {
 		fn, isFunc := decl.(*ast.FuncDecl)
-		if isFunc == false {
+		if !isFunc {
 			continue
 		}
 		ast.Inspect(fn, func(n ast.Node) bool {
 			call, isCall := n.(*ast.CallExpr)
-			if isCall == false {
+			if !isCall {
 				return true
 			}
-			sel, isSel := call.Fun.(*ast.SelectorExpr)
-			if isSel == false || strings.HasPrefix(sel.Sel.Name, "Dial") == false && strings.HasPrefix(sel.Sel.Name, "Listen") == false {
+			name, dial := isDialOrListen(call)
+			if !dial {
 				return true
 			}
 			dials++
-			lit, isLit := ast.Expr(nil), false
-			if len(call.Args) == 3 {
-				lit, isLit = call.Args[1], true
-			}
-			basic, isBasic := lit.(*ast.BasicLit)
-			if sel.Sel.Name != "DialContext" || fn.Name.Name != "UnixDialer" || isLit == false || isBasic == false || basic.Value != `"unix"` {
-				violations = append(violations, fn.Name.Name+": "+sel.Sel.Name+" is not the DialContext(ctx, \"unix\", path) of UnixDialer")
+			if name != "DialContext" || fn.Name.Name != "UnixDialer" || !isUnixDial(call) {
+				violations = append(violations, fn.Name.Name+": "+name+" is not the DialContext(ctx, \"unix\", path) of UnixDialer")
 			}
 			return true
 		})
@@ -143,7 +156,7 @@ func TestMariadb_ImportsOnlyAllowedPackages(t *testing.T) {
 			continue
 		}
 		allowed, known := importsOfFile[name]
-		if known == false {
+		if !known {
 			t.Errorf("%s: no import allow-list; add the file to importsOfFile", name)
 			continue
 		}

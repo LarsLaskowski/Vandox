@@ -547,3 +547,47 @@ func TestRates_StartOfTheServerIsRunStartMinusUptime(t *testing.T) {
 		{name: "and 6 seconds later again", after: 60 * sec, uptime: 5110, q: 3400, reads: 140, req: 10800, total: 1000, free: 400, qps: none, hit: none, used: val(60), restartedAt: 5110},
 	})
 }
+
+func TestU128_StringMatchesBigInt(t *testing.T) {
+	for _, v := range []u128{
+		{}, {lo: 7}, {lo: 9_999_999_999_999_999_999}, {lo: 10_000_000_000_000_000_000}, {lo: ^uint64(0)},
+		{hi: 1}, {hi: 1, lo: 5}, {hi: 12345, lo: 6789}, {hi: ^uint64(0), lo: ^uint64(0)},
+	} {
+		want := new(big.Int).Lsh(new(big.Int).SetUint64(v.hi), 64)
+		want.Or(want, new(big.Int).SetUint64(v.lo))
+
+		got := v.String()
+
+		if got != want.String() {
+			t.Errorf("u128{hi: %d, lo: %d}.String() = %q, want %q", v.hi, v.lo, got, want.String())
+		}
+	}
+}
+
+func TestMemoryMax_LeftOutWhenItDoesNotFit128Bits(t *testing.T) {
+	const max64 = "18446744073709551615"
+	for _, tc := range []struct {
+		name string
+		set  map[string]string
+	}{
+		{"the product of the per-connection buffers and the connections", map[string]string{
+			"sort_buffer_size": max64, "read_buffer_size": max64, "join_buffer_size": max64, "thread_stack": max64, "max_connections": max64,
+		}},
+		{"the sum of the global buffers and the product", map[string]string{
+			"innodb_buffer_pool_size": max64, "key_buffer_size": max64, "query_cache_size": max64,
+			"sort_buffer_size": max64, "read_buffer_size": absent, "read_rnd_buffer_size": absent, "join_buffer_size": absent,
+			"thread_stack": absent, "log_bin": "OFF", "max_connections": max64,
+		}},
+		{"a binlog cache size that is no number", map[string]string{"log_bin": "ON", "binlog_cache_size": "large"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			vars := variablesWith(t, tc.set)
+
+			hi, lo, ok := memoryMax(vars)
+
+			if ok {
+				t.Errorf("memoryMax() = %d, %d, true, want it left out", hi, lo)
+			}
+		})
+	}
+}
