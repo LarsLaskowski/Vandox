@@ -237,8 +237,8 @@ it with the field errors `data.error_code`: `must be 1 to 65535` (the value 0) a
 is `ErrMalformed` like every integer out of its field's range (*Accepted forms*), and `null` reads as absent (0089).
 
 Producer: the agent's `mariadb` collector ([Agent](agent.md), *MariaDB*) writes one record per run with source `mariadb` and the capture
-time of the run's start: `down` when nothing accepts on the socket, `not_answering` (with `error_code` for a refusal) when the server
-accepted but gave no usable answer in time, and `up` with `ping_latency_ns`, the selected `status` values and `variables`, and `threads`
+time of the run's start: `down` when nothing accepts on the socket, `not_answering` when the server's listen queue is full
+or it gives no usable answer in time, and with `error_code` when it refuses the agent with an error packet, and `up` with `ping_latency_ns`, the selected `status` values and `variables`, and `threads`
 only when its thread snapshot is due. `complete` is always false, because the record holds a fixed selection; `info` is cut to 16,384
 bytes and kept for at most 64 of at most 4,096 threads, and the producer shortens the record by an upper-bound estimate before it is
 encoded (*Producer size contract*).
