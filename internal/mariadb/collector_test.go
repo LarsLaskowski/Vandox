@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log/slog"
+	"maps"
 	"net"
 	"net/netip"
 	"os"
@@ -154,7 +155,7 @@ func meminfoFile(totalKB int) *fstest.MapFile {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "MemTotal:       %d kB\n", totalKB)
 	for _, name := range []string{"MemFree", "MemAvailable", "Buffers", "Cached", "SReclaimable", "SwapTotal", "SwapFree"} {
-		fmt.Fprintf(&sb, "%s:%*d kB\n", name, 15-len(name), 1000)
+		fmt.Fprintf(&sb, "%-15s%d kB\n", name+":", 1000)
 	}
 	return &fstest.MapFile{Data: []byte(sb.String())}
 }
@@ -314,6 +315,9 @@ type rig struct {
 	status  [][]textCell
 	vars    [][]textCell
 	ownID   string
+	created time.Time
+	set     map[string]string // the overrides of the last setStatus
+	mine    []capturePacket   // the status reply the rig made last; a test that replaces it keeps its own
 }
 
 // newRig returns a rig whose database answers as the captures hold it, over a /proc with 4 GB of memory and a loopback listener
@@ -321,11 +325,12 @@ type rig struct {
 func newRig(t *testing.T, cfg fakeConfig) *rig {
 	t.Helper()
 	srv := newFakeServer(t, cfg)
-	r := &rig{t: t, srv: srv, logs: &logStore{}, proc: newProc(4*1024*1024, "127.0.0.1:3306"), defs: map[string][][]byte{}}
+	r := &rig{t: t, srv: srv, logs: &logStore{}, proc: newProc(4*1024*1024, "127.0.0.1:3306"), defs: map[string][][]byte{}, created: time.Now()}
 	for _, stmt := range []string{statusText, variablesText, processlistText, currentUserText, privilegesText} {
 		r.defs[stmt] = defsOf(srv.replies[stmt])
 	}
 	r.status = decodeResultSet(t, srv.replies[statusText]).rows
+	r.mine = srv.replies[statusText]
 	r.vars = decodeResultSet(t, srv.replies[variablesText]).rows
 	r.ownID = strconv.FormatUint(uint64(binaryID(srv.capture.greeting.payload)), 10)
 	log := slog.New(&recordingHandler{store: r.logs})
@@ -349,7 +354,9 @@ func (r *rig) dial(ctx context.Context) (net.Conn, error) {
 
 // setStatus makes the next runs answer SHOW GLOBAL STATUS with the captured rows changed as set says.
 func (r *rig) setStatus(set map[string]string) {
-	r.srv.replies[statusText] = resultSetPackets(r.defs[statusText], withRows(r.status, set))
+	r.set = set
+	r.mine = resultSetPackets(r.defs[statusText], withRows(r.status, set))
+	r.srv.replies[statusText] = r.mine
 }
 
 // setVariables makes the next runs answer SHOW GLOBAL VARIABLES with the captured rows changed as set says.
@@ -398,6 +405,12 @@ func (r *rig) settle() {
 	}
 }
 
+// ownsStatus reports whether the status reply is still the one the rig made or the captured one.
+func (r *rig) ownsStatus() bool {
+	cur := r.srv.replies[statusText]
+	return r.mine == nil || (len(cur) > 0 && len(r.mine) > 0 && &cur[0] == &r.mine[0])
+}
+
 // collect runs the collector once at the current time.
 func (r *rig) collect() ([]model.Record, error) {
 	r.t.Helper()
@@ -407,6 +420,17 @@ func (r *rig) collect() ([]model.Record, error) {
 // collectRun runs the collector for run.
 func (r *rig) collectRun(run scheduler.Run) ([]model.Record, error) {
 	r.t.Helper()
+	if _, own := r.set["Uptime"]; !own && r.ownsStatus() {
+		// The server keeps running while the clock moves: its Uptime grows with the time since the rig was made.
+		up, _ := strconv.ParseUint(rowMap(r.status)["Uptime"], 10, 64)
+		set := maps.Clone(r.set)
+		if set == nil {
+			set = map[string]string{}
+		}
+		set["Uptime"] = strconv.FormatUint(up+uint64(max(run.Start.Sub(r.created), 0)/time.Second), 10)
+		r.mine = resultSetPackets(r.defs[statusText], withRows(r.status, set))
+		r.srv.replies[statusText] = r.mine
+	}
 	recs, err := r.col.Collect(testContext(r.t), run)
 	r.settle()
 	return recs, err
@@ -1053,7 +1077,9 @@ func runAccountCase(t *testing.T, accounts []account, warnings []int) {
 		recs := r.mustCollect()
 
 		s := statusOf(t, recs)
-		if s.Availability != model.MariaDBUp || !mapsEqual(s.Status, wantStatus) {
+		wantRun := maps.Clone(wantStatus)
+		wantRun["Uptime"] = s.Status["Uptime"] // the server's uptime grows with the clock
+		if s.Availability != model.MariaDBUp || !mapsEqual(s.Status, wantRun) {
 			t.Errorf("run %d record = %+v, want the up record of the selection whatever the check finds", i+1, *s)
 		}
 		var want []wantLog
