@@ -26,3 +26,4 @@ are quoted in full.
 | 2026-10-21 06:15 | 6 Implement G2 | squad-dev | DONE: error_code checks Go+C#; deviation: NullAsAbsentConverterFactory gets ushort; model/wire/Core tests green (sonnet/medium · 71,029 tokens · 17 tool uses · 120 s) |
 | 2026-10-21 06:18 | 5 Tests first G3 | squad-tester | DONE: config, MemTotal, TCPListeners tests; red on skeleton; TestLoadAgent_Example red until task 11 (sonnet/medium · 126,013 tokens · 19 tool uses · 127 s) |
 | 2026-10-21 06:20 | 6 Implement G3 | squad-dev | DONE tasks 4,5; 2 test-helper failures (newline/tab socket cases expect the rule text but the shared decoder refuses control chars first) -> back to Tester (sonnet/medium · 92,281 tokens · 10 tool uses · 117 s) |
+| 2026-10-21 06:20 | 6 G3 fix round (test helper) | squad-tester | DONE: badSocket.reason covers control chars; only TestLoadAgent_Example red until task 11 (sonnet/medium · 1,341 tokens · 2 tool uses · 8 s · continued from 5 Tests first G3) |
