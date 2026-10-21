@@ -1389,7 +1389,7 @@
  28 62 75 69 6c 74 2d 69 6e 29 10 00 00 7c 0b 67  (built-in)...|.g
  65 6e 65 72 61 6c 5f 6c 6f 67 03 4f 46 46 19 00  eneral_log.OFF..
  00 7d 10 67 65 6e 65 72 61 6c 5f 6c 6f 67 5f 66  .}.general_log_f
- 69 6c 65 07 31 34 34 2e 6c 6f 67 1d 00 00 7e 14  ile.144.log...~.
+ 69 6c 65 07 31 39 32 2e 6c 6f 67 1d 00 00 7e 14  ile.192.log...~.
  67 72 6f 75 70 5f 63 6f 6e 63 61 74 5f 6d 61 78  group_concat_max
  5f 6c 65 6e 07 31 30 34 38 35 37 36 11 00 00 7f  _len.1048576....
  0f 67 74 69 64 5f 62 69 6e 6c 6f 67 5f 70 6f 73  .gtid_binlog_pos
@@ -1830,7 +1830,7 @@
  00 00 50 0e 6c 6f 67 5f 73 6c 6f 77 5f 71 75 65  ..P.log_slow_que
  72 79 03 4f 46 46 21 00 00 51 13 6c 6f 67 5f 73  ry.OFF!..Q.log_s
  6c 6f 77 5f 71 75 65 72 79 5f 66 69 6c 65 0c 31  low_query_file.1
- 34 34 2d 73 6c 6f 77 2e 6c 6f 67 1e 00 00 52 13  44-slow.log...R.
+ 39 32 2d 73 6c 6f 77 2e 6c 6f 67 1e 00 00 52 13  92-slow.log...R.
  6c 6f 67 5f 73 6c 6f 77 5f 71 75 65 72 79 5f 74  log_slow_query_t
  69 6d 65 09 31 30 2e 30 30 30 30 30 30 16 00 00  ime.10.000000...
  53 13 6c 6f 67 5f 73 6c 6f 77 5f 72 61 74 65 5f  S.log_slow_rate_
@@ -2328,9 +2328,9 @@
  75 72 65 5f 74 69 6d 65 73 74 61 6d 70 02 4e 4f  ure_timestamp.NO
  0c 00 00 19 09 73 65 72 76 65 72 5f 69 64 01 31  .....server_id.1
  28 00 00 1a 0a                                   (....
- 73 65 72 76 65 72 5f 75 69 64 1c 37 49 4d 74 49  server_uid.7IMtI
- 75 69 4b 33 79 55 78 53 7a 35 32 74 7a 71 44 32  uiK3yUxSz52tzqD2
- 30 31 72 59 67 41 3d 18 00 00 1b 14 73 65 73 73  01rYgA=.....sess
+ 73 65 72 76 65 72 5f 75 69 64 1c 41 41 41 41 41  server_uid.AAAAA
+ 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41  AAAAAAAAAAAAAAAA
+ 41 41 41 41 41 41 3d 18 00 00 1b 14 73 65 73 73  AAAAAA=.....sess
  69 6f 6e 5f 74 72 61 63 6b 5f 73 63 68 65 6d 61  ion_track_schema
  02 4f 4e 1f 00 00 1c 1a 73 65 73 73 69 6f 6e 5f  .ON.....session_
  74 72 61 63 6b 5f 73 74 61 74 65 5f 63 68 61 6e  track_state_chan
@@ -2409,7 +2409,7 @@
  01 32 13 00 00 3b 0e 73 6c 6f 77 5f 71 75 65 72  .2...;.slow_quer
  79 5f 6c 6f 67 03 4f 46 46 21 00 00 3c 13 73 6c  y_log.OFF!..<.sl
  6f 77 5f 71 75 65 72 79 5f 6c 6f 67 5f 66 69 6c  ow_query_log_fil
- 65 0c 31 34 34 2d 73 6c 6f 77 2e 6c 6f 67 1f 00  e.144-slow.log..
+ 65 0c 31 39 32 2d 73 6c 6f 77 2e 6c 6f 67 1f 00  e.192-slow.log..
  00 3d 06 73 6f 63 6b 65 74 17 2f 72 75 6e 2f 6d  .=.socket./run/m
  79 73 71 6c 64 2f 6d 79 73 71 6c 64 2e 73 6f 63  ysqld/mysqld.soc
  6b 19 00 00 3e 10 73 6f 72 74 5f 62 75 66 66 65  k...>.sort_buffe

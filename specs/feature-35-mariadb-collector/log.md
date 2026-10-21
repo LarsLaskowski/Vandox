@@ -12,3 +12,5 @@ are quoted in full.
 | 2026-10-20 20:57 | 2a Escalation | Product Manager | Protocol sample: (a) the user captures it on MariaDB 10.6 / Ubuntu 22.04; plan waits for the capture |
 | 2026-10-21 05:27 | 2b Escalation follow-up | Orchestrator | Capture 1 received: server MariaDB 12.3.3 (ubu2204), but client switched to TLS after greeting, so the rest is encrypted and unusable; user asked to repeat with --skip-ssl |
 | 2026-10-21 05:35 | 2b Escalation answer | Product Manager | Captures supplied (MariaDB 12.3.3-ubu2204, plaintext, --skip-ssl): status+variables+processlist, account check; hostname anonymised same-length; no captures of error cases 1698/1045/1040 available. Stored in testdata/mariadb/ |
+| 2026-10-21 05:50 | 2b Plan | squad-lead | DONE: plan.md, tasks.md (7 groups), record 0118 Proposed; tier security; areas 6,7,10,11,12; spec closed (opus/medium · 139,852 tokens · 53 tool uses · 884 s · continued) |
+| 2026-10-21 05:50 | 2b Capture fix | Orchestrator | Capture: replaced leaked file-name prefix 144 and server_uid by same-length placeholders (hex+text); remaining 144 are numeric values |

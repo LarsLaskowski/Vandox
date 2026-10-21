@@ -1,7 +1,7 @@
 # Spec: MariaDB collector
 
 Source: Issue #35
-Status: Draft
+Status: Approved by Product Manager
 
 ## Problem
 
@@ -31,7 +31,7 @@ All records carry source `mariadb` and the capture time of the run's start; ever
   `Memory_used` — and a `variables` map with those of these variables the server reports, as text: `version`, `max_connections`,
   `innodb_buffer_pool_size`, `innodb_log_buffer_size`, `key_buffer_size`, `aria_pagecache_buffer_size`, `query_cache_size`,
   `tmp_table_size`, `max_heap_table_size`, `sort_buffer_size`, `read_buffer_size`, `read_rnd_buffer_size`, `join_buffer_size`,
-  `thread_stack`, `binlog_cache_size`, `log_bin`, `bind_address`, `skip_networking`, `port`. No log line is written while the
+  `thread_stack`, `binlog_cache_size`, `log_bin`, `bind_address`, `skip_networking`, `port`, `extra_port`. No log line is written while the
   database stays up.
 - S2: Given MariaDB is stopped (its socket file is gone, or nothing accepts on it), when the collector runs, then it writes a
   `mariadb_status` record with `availability` `down` and nothing else but `complete` false, and logs the warning `mariadb down` at the
@@ -72,7 +72,7 @@ All records carry source `mariadb` and the capture time of the run's start; ever
   `Innodb_buffer_pool_read_requests`)).
 - S9: Given MariaDB listens for TCP on an address that is not a loopback address (bind address empty, `*`, `0.0.0.0`, `::` or a
   public address of the server), when the collector writes an `up` record, then it writes the metric `mariadb_exposed_listeners` with
-  the number of listening TCP sockets on MariaDB's `port` whose local address is not loopback, read from the kernel's TCP tables (0
+  the number of listening TCP sockets on MariaDB's `port` (and on `extra_port` when it is not 0) whose local address is not loopback, read from the kernel's TCP tables (0
   when there is none), and logs the warning `mariadb listens on a non-loopback address` with `count` at the first run that finds one
   after the agent started or after a run that found none; the info line `mariadb listens on loopback only` follows when the count is
   0 again.
@@ -96,22 +96,26 @@ All records carry source `mariadb` and the capture time of the run's start; ever
 - E2: MariaDB was killed (OOM) and left its socket file, or the configured path is a file that is not a socket: the connection is
   refused, which is `down` as well (S2), never a failed run.
 - E3: MariaDB accepts the connection, or leaves it pending in a full queue, but sends no greeting within 2 seconds of the run's
-  start: `not_answering` without `error_code` (S3). An error packet that arrives in place of the greeting is not "no greeting": it
+  start, or closes the connection before a usable answer: `not_answering` without `error_code` (S3). An error packet that arrives in place of the greeting is not "no greeting": it
   is `not_answering` with its error number (S4).
-- E4: The greeting and login succeed but the ping or a statement gets no answer by 4 seconds after the run's start: `not_answering`
-  with no values at all, never a record with part of the values (S3).
+- E4: The greeting and login succeed but the ping or a statement gets no answer by 4 seconds after the run's start, or the server
+  closes the connection in the middle (it was killed while answering): `not_answering` with no values at all, never a record with part of the values (S3).
 - E5: A read the collector cannot interrupt hangs (for example `/proc/meminfo` or the TCP tables under memory pressure): the scheduler
   abandons the run at its 5-second timeout and records a gap with cause `collector_timeout` and collector `mariadb`; the collector is
   not started again while the run is stuck, so the agent never holds a second MariaDB connection, and no other collector waits.
 - E6: The user `vandox-agent` exists but is not identified via `unix_socket` (it has a password), or the agent runs as another OS
   user: MariaDB refuses the login with 1698 or 1045, which is `not_answering` with that `error_code` and the warning `mariadb user
-  missing or not allowed` (S4).
+  missing or not allowed` (S4). A server that asks the agent to switch to another authentication method (the user has a password
+  of another plugin) gets no credential: the run fails as in E14 with the error text `mariadb: login: authentication switch
+  refused`.
 - E7: MariaDB is at `max_connections` and sends 1040 before any greeting, is shutting down and sends 1053, or the user's
   `MAX_USER_CONNECTIONS` is reached at login (1226): `not_answering` with that `error_code` and the warning `mariadb login refused`
   (S4), never a failed run or a gap. Any other error number from 1 to 65535, before the greeting or at the login, is recorded the
   same way.
 - E8: More than 4,096 connections, or statements of megabytes, while a thread snapshot is due: the record keeps at most 4,096
-  threads in the order of S6 (working threads before sleeping ones), each `info` cut to 16 KiB with `truncated`; if the record is
+  threads in the order of S6 (working threads before sleeping ones), each `info` cut to 16 KiB with `truncated`, and only the first
+  64 threads of that order keep their `info` at all (the others get an empty `info` with `truncated` set when they had one), so the
+  agent never holds more than 1 MiB of statement text; if the record is
   still too large for the wire format, the `info` texts are shortened further and then threads are left out from the end of that
   order, so idle sleepers go first (S6).
 - E9: A statement text, user, host or database name holds control characters, format characters or invalid UTF-8 (any web-space user
@@ -129,9 +133,10 @@ All records carry source `mariadb` and the capture time of the run's start; ever
   time between the runs is not positive, when the increase of `Innodb_buffer_pool_read_requests` is 0 or smaller than that of
   `Innodb_buffer_pool_reads`, and `mariadb_innodb_buffer_pool_used_percent` when `Innodb_buffer_pool_pages_total` is 0 or missing.
 - E12: Listener forms: `127.0.0.0/8`, `::1` and the IPv4-mapped loopback `::ffff:127.0.0.0/104` are loopback; the wildcard `0.0.0.0`
-  and `::`, any other address (private, Tailscale or public) count as exposed. A kernel without IPv6 has no `tcp6` table: only `tcp`
+  and `::`, any other address (private, Tailscale, public, link-local, the IPv4-compatible `::127.0.0.1`) count as exposed. A kernel without IPv6 has no `tcp6` table: only `tcp`
   is read. A listening socket of another program on MariaDB's port counts as well. When the tables cannot be read, or `port` is
-  missing or not a number from 1 to 65535, the metric is left out and the log state does not change (S9).
+  missing or not a number from 1 to 65535 (or `extra_port` is present but not a number from 0 to 65535), the metric is left out and
+  the log state does not change (S9).
 - E13: `mariadb.socket` that is not an absolute, clean path, is longer than 107 bytes (the limit of a Unix socket address) or holds a
   control or format character stops the agent at start-up with a configuration error that names the key and never the value;
   `mariadb.enabled` that is not a boolean likewise (S11).
@@ -166,14 +171,19 @@ All records carry source `mariadb` and the capture time of the run's start; ever
 - **Configuration** (agent, new section `mariadb`): `mariadb.enabled` (default `true`) and `mariadb.socket` (default
   `/run/mysqld/mysqld.sock`, the socket of Ubuntu's MariaDB package, which Plesk uses). The 10-thread threshold of S6 and the time
   budget are fixed, not options, like the pressure thresholds of record 0113.
-- **Compatibility.** MariaDB 10.6 (Ubuntu 22.04) is the target; a server that lacks a listed value (an older MariaDB, MySQL) gives
-  records without it. The wire format gets one additive optional field, `mariadb_status.error_code` (1 to 65535, only with
+- **Compatibility.** The target is the server's MariaDB 12.3 (`12.3.3-MariaDB-ubu2204`, the mariadb.org package for Ubuntu 22.04,
+  captured under `testdata/mariadb/`). MariaDB from 10.6 on is supported by the same rules but not captured: the client reads no
+  version from the greeting (so the `5.5.5-` prefix of 10.x greetings does not matter) and refuses any reply that differs from
+  the captured layout as a failed run, never a wrong value. A server that lacks a listed value gives records without it; MySQL is
+  not supported (its process list has no `Progress` column, which fails the run). The wire format gets one additive optional field, `mariadb_status.error_code` (1 to 65535, only with
   `not_answering`), which is a minor change under record 0043: a decoder of 1.0 ignores the unknown key and reads the record as
   `not_answering`, which stays true. The availability values are unchanged. Format 1.1 is unreleased (v0.1.0 shipped 1.0), so the
   field joins 1.1 in place as the fields of records 0115 and 0116 did.
-- **Test data.** The protocol tests run against a fake that replays a real capture of MariaDB 10.6 under `testdata/mariadb/`
-  (as `testdata/systemd/` pins the D-Bus fake), not bytes typed from a description; the source of that capture is the escalation
-  of this spec (*Open questions*).
+- **Test data.** The protocol tests run against a fake that replays the real captures of MariaDB 12.3.3 under `testdata/mariadb/`
+  (as `testdata/systemd/` pins the D-Bus fake) for every exchange the captures hold. The error packets before the greeting and at
+  the login, the ping and the authentication switch were not captured (the Product Manager has no capture of them): those replies
+  are built from the protocol documentation, marked as such in the test, and their residual risk is recorded in the decision
+  record.
 - **Logs.** Only the fixed lines of S2 to S9, S12 and E11, with counts, error numbers and byte values as attributes; no line per
   run.
 
@@ -217,15 +227,17 @@ All records carry source `mariadb` and the capture time of the run's start; ever
   less logs nothing), when a counter fell, when the time between runs is not positive and in the zero and inconsistent cases of E11
   (S8, E11).
 - [ ] AC11: For TCP table fixtures with listeners on MariaDB's port at `127.0.0.1`, `127.1.2.3`, `::1`, `::ffff:127.0.0.1`, `0.0.0.0`,
-  `::`, a public IPv4 and IPv6 address and a Tailscale address, and on another port, `mariadb_exposed_listeners` counts exactly the
-  non-loopback ones on MariaDB's port; it is 0 for loopback only, read from `tcp` alone without a `tcp6` table, left out for
+  `::`, `::127.0.0.1`, a public IPv4 and IPv6 address and a Tailscale address, on `extra_port` and on another port,
+  `mariadb_exposed_listeners` counts exactly the non-loopback ones on `port` and on a non-zero `extra_port`; it is 0 for loopback only, read from `tcp` alone without a `tcp6` table, left out for
   unreadable tables or an invalid `port`, and the warning and info lines of S9 follow the changes of the count (S9, E12).
 - [ ] AC12: With a fake that sends a malformed packet, a packet or value above the agent's bounds, a status name twice or an error
   to a statement after the login, and with a socket the agent may not use, the run fails as a gap with cause `unknown`, its error text
   holds no byte the fake sent (permission denied reads `mariadb: connect: permission denied`), and a test pins that the run's
   allocation stays within the bound the plan fixes for an oversized reply (E14, E15).
-- [ ] AC13: The fake records every statement the agent sends: only the fixed read-only statements of the plan, the user name is
-  `vandox-agent` from the OS user, no password or other credential is sent, and at most one connection is open at any time (S1, E5).
+- [ ] AC13: The fake records every statement the agent sends: only the fixed read-only statements of the plan, the user name is the
+  constant `vandox-agent` (MariaDB's `unix_socket` compares it with the OS user the agent runs as), the authentication data is
+  empty, no password or other credential is sent, an authentication switch is answered by closing the connection, and at most one
+  connection is open at any time (S1, E5, E6).
 - [ ] AC14: The configuration accepts `mariadb.enabled` and `mariadb.socket` with their defaults and the example file sets both; a
   relative, unclean, longer than 107 bytes or control-character path and a non-boolean `enabled` stop the start-up with an error that
   names the key and not the value; with `enabled: false` the collector is not scheduled and never connects (S11, E13).
@@ -236,10 +248,11 @@ All records carry source `mariadb` and the capture time of the run's start; ever
   anonymous account or without `PROCESS` logs `mariadb user not as installed` with the `fix` text once, again only after a run with an
   `error_code`, and the run's record is written either way; an error answer to the check writes the record, logs nothing and repeats
   the check at the next `up` run (S12, E17).
-- [ ] AC17: The fake of the protocol criteria (AC1, AC3, AC5, AC7, AC8, AC12, AC13, AC16) replays the capture under
-  `testdata/mariadb/` for every exchange the capture holds — greeting, `unix_socket` login with or without an authentication switch,
-  the status, variables, account and process list statements, the login errors 1045 or 1698, the error 1040 before the greeting —
-  and only the cases a capture cannot hold (hangs, malformed and oversized packets) are built by the test (S1, S4).
+- [ ] AC17: The fake of the protocol criteria (AC1, AC3, AC5, AC7, AC8, AC12, AC13, AC16) replays the captures under
+  `testdata/mariadb/` byte for byte for every exchange they hold — the greeting, the `unix_socket` login without an authentication
+  switch, the status, variables, process list and account statements — and builds only what they do not hold: hangs, malformed and
+  oversized packets, generated process lists, and, from the protocol documentation and marked as such, the error packets before the
+  greeting and at the login, the ping's answer and the authentication switch (S1, S4).
 
 ## Out of scope
 
@@ -265,12 +278,10 @@ All records carry source `mariadb` and the capture time of the run's start; ever
   the login is the server answering that it will not serve the agent: recorded as a gap it would lose the "too many connections"
   state that the outage analysis needs, and `up` without values would read as normal. It is `not_answering` with the new optional
   `error_code` (S4): additive under record 0043, so no availability value is added and no versioning rule changes (*Challenge*, M1).
-- How does the agent speak the MariaDB protocol, and what pins the fake? Answered: (pending the Product Manager's answer on the sample) the choice between a client library
-  (a new dependency) and a minimal client of the agent's own is the plan's, made with reasons as record 0117 made it for D-Bus —
-  the process list carries text any web-space user chooses, so the plan must show how every reply is bounded before it is decoded;
-  the Lead's leaning is a minimal own client (greeting, `unix_socket` login, ping, text queries), for the same reasons as 0117.
-  Either way the fake replays a real capture (AC17). No capture exists in the repository: the source of the sample is escalated to
-  the Product Manager with this spec, and the plan waits for the answer.
+- How does the agent speak the MariaDB protocol, and what pins the fake? Answered: a minimal client of the agent's own (no new
+  dependency), for the reasons record 0117 gave for D-Bus; the plan and its decision record weigh the library. The Product Manager
+  chose option (a) of the escalation and supplied real captures of the server (`testdata/mariadb/`), which the fake replays (AC17);
+  the error cases were not captured and are built from the protocol documentation (*Test data*).
 - What is the "event" for a public listener? Answered: the agent has no event record of its own (`kernel_event` holds only
   `oom_kill` and `boot`; `log_line.event` is for log lines). The finding becomes the metric `mariadb_exposed_listeners`, which the
   backend can store and later alert on, plus a warning in the agent's log, which reaches the journal. "Public" is read strictly as
@@ -285,8 +296,10 @@ All records carry source `mariadb` and the capture time of the run's start; ever
   user (S4), and a successful one is followed by the account check of S12, because a login alone does not prove that the account is
   `vandox-agent` (an anonymous account can accept it) or that it holds `PROCESS`. Every later refusal is seen at once, not only at
   the next agent start.
-- Which socket path? Answered: Ubuntu's MariaDB package and Plesk on Ubuntu use `/run/mysqld/mysqld.sock`; the option exists for a
-  server that differs. The plan marks the path as to be confirmed on the server.
+- Which socket path? Answered: the server's variable `socket` is `/run/mysqld/mysqld.sock` (capture
+  `testdata/mariadb/select-status-variables-processlist.txt`); the option exists for a server that differs.
+- Which MariaDB version? Answered: the captures show `12.3.3-MariaDB-ubu2204`, not the 10.6 this spec first assumed; every value of
+  the selection is present there, and *Compatibility* keeps 10.6 and later supported by the same rules, uncaptured.
 
 ## Area documents
 
