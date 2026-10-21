@@ -173,3 +173,47 @@ func TestMariaDBStatus_Validate_KeysDifferingInMoreThanCase(t *testing.T) {
 		})
 	}
 }
+
+func TestMariaDBStatus_ErrorCode(t *testing.T) {
+	notAnswering := func(code uint16) *model.MariaDBStatus {
+		return &model.MariaDBStatus{Availability: model.MariaDBNotAnswering, ErrorCode: &code}
+	}
+	valid := []struct {
+		name string
+		p    *model.MariaDBStatus
+	}{
+		{"not answering with 1", notAnswering(1)},
+		{"not answering with 1045", notAnswering(1045)},
+		{"not answering with 65535", notAnswering(65535)},
+		{"not answering without code", &model.MariaDBStatus{Availability: model.MariaDBNotAnswering}},
+		{"up without code", validMariaDBStatus()},
+	}
+	for _, tc := range valid {
+		t.Run("valid "+tc.name, func(t *testing.T) { requireValid(t, tc.p) })
+	}
+
+	invalid := []struct {
+		name   string
+		mutate func() *model.MariaDBStatus
+		reason string
+	}{
+		{"not answering with 0", func() *model.MariaDBStatus { return notAnswering(0) }, "must be 1 to 65535"},
+		{"up with 1045", func() *model.MariaDBStatus {
+			p := validMariaDBStatus()
+			p.ErrorCode = ptr(uint16(1045))
+			return p
+		}, "only with not_answering"},
+		{"down with 1045", func() *model.MariaDBStatus {
+			p := &model.MariaDBStatus{Availability: model.MariaDBDown, ErrorCode: ptr(uint16(1045))}
+			return p
+		}, "only with not_answering"},
+	}
+	for _, tc := range invalid {
+		t.Run("invalid "+tc.name, func(t *testing.T) {
+			fe := fieldErrorOf(t, tc.mutate().Validate(), "error_code")
+			if fe.Reason != tc.reason {
+				t.Errorf("Validate() reason = %q, want %q", fe.Reason, tc.reason)
+			}
+		})
+	}
+}

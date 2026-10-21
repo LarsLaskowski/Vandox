@@ -11,7 +11,7 @@ This document describes the target architecture; as of now the binaries' `--vers
 exist as the storage layer; the service reads it through the logs and incidents views and the report page with its download and writes only the notes of incidents, `vandoxd import` writes through it), listens on the
 web and ingest ports, protects the web UI with a login (one password, server-side sessions, limits on failed sign-ins and the trust in a reverse proxy; `Vandox.Backend` `Security`), answers `/healthz` and shuts down gracefully, and ships as a container with a health
 check. Of the agent, the runtime frame exists: `vandox-agent` loads its configuration, logs to the journal, runs its
-collectors under the scheduler (its self-metrics, the system metrics, the process and the connection snapshots and the state of the configured systemd services) and notifies systemd; it drops what it collects until the spool exists.
+collectors under the scheduler (its self-metrics, the system metrics, the process and the connection snapshots, the state of the configured systemd services and the state of the local MariaDB server) and notifies systemd; it drops what it collects until the spool exists.
 Everything else described here — the agent's collectors, spool and sender, the ingest API, retention, alerting, Telegram, the nightly
 report and remote actions — is planned and not implemented yet. The decisions behind it are recorded in
 [`docs/decisions/`](decisions/README.md); each section links the records it rests on. Vandox is an own
@@ -44,7 +44,12 @@ way, and agents of the hosting provider are never disabled or changed
   new listener appears ([0115](decisions/0115-connection-collector-proc-net-tables-owners-from-fd-regular-and-full-snapshots-bounded-listener-check.md)),
   and the systemd collector (`internal/svcstats`) asks systemd for the state of the configured services over the system bus with a minimal
   D-Bus client of its own (`internal/sdbus`) and records a unit's state on a change, after a start or a lost sample and hourly
-  ([0117](decisions/0117-systemd-collector-hand-written-d-bus-client-per-run-states-recorded-on-change.md));
+  ([0117](decisions/0117-systemd-collector-hand-written-d-bus-client-per-run-states-recorded-on-change.md)),
+  and the MariaDB collector (`internal/mariadb`) asks the local MariaDB server over its Unix socket, as the `unix_socket` user
+  `vandox-agent` with a minimal protocol client of its own and fixed read-only statements, for its availability, status, variables and,
+  under load or memory pressure, its process list, records a refused login as `not_answering` with the error number, and derives the
+  theoretical memory maximum, rates and the number of non-loopback listeners on its ports
+  ([0118](decisions/0118-mariadb-collector-hand-written-client-captured-statements-refusals-as-not-answering-with-error-code.md));
   the agent records its own resource use as metrics
   (`internal/selfstats`), and tells systemd that it is ready, alive (a watchdog fed only while every collector runner is on
   time) and stopping (`internal/sdnotify`, `internal/agent`)
@@ -93,7 +98,7 @@ way, and agents of the hosting provider are never disabled or changed
   [0079](decisions/0079-log-parsing-and-import-in-the-backend-without-following-links.md)).
 - `internal/` — the agent's Go packages: data model and the versioned wire encoder (see
   [wire format](areas/wire-format.md)), version information, agent configuration loading (see
-  *Configuration*), command-line handling (`internal/cli`), start-up, logging and the watchdog loop (`internal/agent`), the collector scheduler (`internal/scheduler`), the self-metrics (`internal/selfstats`), the system metrics (`internal/sysstats`), the process collector (`internal/procstats`), the connection collector (`internal/connstats`) with the start-up probe of the socket mount (`internal/sockmount`), the systemd service collector (`internal/svcstats`) with its D-Bus client (`internal/sdbus`) and the systemd notification (`internal/sdnotify`). The model and the wire format exist twice, in Go
+  *Configuration*), command-line handling (`internal/cli`), start-up, logging and the watchdog loop (`internal/agent`), the collector scheduler (`internal/scheduler`), the self-metrics (`internal/selfstats`), the system metrics (`internal/sysstats`), the process collector (`internal/procstats`), the connection collector (`internal/connstats`) with the start-up probe of the socket mount (`internal/sockmount`), the systemd service collector (`internal/svcstats`) with its D-Bus client (`internal/sdbus`), the MariaDB collector with its protocol client (`internal/mariadb`) and the systemd notification (`internal/sdnotify`). The model and the wire format exist twice, in Go
   (producer) and in C# (consumer); a golden batch produced by the Go encoder and decoded by the C# decoder keeps
   them in step ([0075](decisions/0075-wire-contract-pinned-by-golden-fixtures.md)).
 
@@ -135,7 +140,8 @@ Records: [0004](decisions/0004-own-project-instead-of-off-the-shelf-stack.md),
 [0084](decisions/0084-log-line-record-gets-an-optional-host-field.md),
 [0110](decisions/0110-agent-runtime-frame-runner-per-collector-gaps-for-every-missed-sample-hand-written-sd-notify.md),
 [0115](decisions/0115-connection-collector-proc-net-tables-owners-from-fd-regular-and-full-snapshots-bounded-listener-check.md),
-[0117](decisions/0117-systemd-collector-hand-written-d-bus-client-per-run-states-recorded-on-change.md).
+[0117](decisions/0117-systemd-collector-hand-written-d-bus-client-per-run-states-recorded-on-change.md),
+[0118](decisions/0118-mariadb-collector-hand-written-client-captured-statements-refusals-as-not-answering-with-error-code.md).
 
 ## Data flow
 

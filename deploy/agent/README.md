@@ -67,6 +67,7 @@ confined as soon as it grants any (`NoNewPrivileges=yes`, a system-call filter t
 - `/run/dbus/system_bus_socket` stays reachable: no `InaccessiblePaths=` or `TemporaryFileSystem=` over `/run/dbus`.
 - No `ProcSubset=pid`: it hides `/proc/net`.
 - `ProtectProc=` stays at `default`: a stricter value hides other users' processes whenever the agent runs without `CAP_SYS_PTRACE`.
+- `/run/mysqld` stays reachable (the MariaDB collector connects to `/run/mysqld/mysqld.sock`): no `InaccessiblePaths=` or `TemporaryFileSystem=` over `/run/mysqld`, and `AF_UNIX` in `RestrictAddressFamilies=`.
 
 ### What the systemd collector reads and what it needs
 
@@ -76,7 +77,27 @@ confined as soon as it grants any (`NoNewPrivileges=yes`, a system-call filter t
   `RestrictAddressFamilies=` must keep `AF_UNIX`, also for this bus connection.
 - With `services.units: []` the collector is off and the bus is never opened.
 
+### What the MariaDB collector reads and what it needs
+
+- It connects to the local MariaDB server over its Unix socket (`mariadb.socket`, default `/run/mysqld/mysqld.sock`) and sends only fixed,
+  read-only statements: the server status and variables, the process list when many threads run or the server is under memory pressure, and
+  two questions about its own account. It needs **no group, no capability and no password**; with `mariadb.enabled: false` it does not run and
+  never opens the socket.
+- **The account.** The agent logs in as `vandox-agent`@`localhost`, authenticated by the operating system user of the connecting process
+  (`unix_socket`), so no database password exists. `deploy/agent/mariadb-user.sql` creates it: `CREATE OR REPLACE USER 'vandox-agent'@'localhost'
+  IDENTIFIED VIA unix_socket WITH MAX_USER_CONNECTIONS 2` and `GRANT PROCESS ON *.* TO 'vandox-agent'@'localhost'`, nothing else.
+- **Run it once as the database administrator.** The file may be run again, for example after a Plesk update dropped the user; it resets the
+  account to exactly this state. As root on a plain MariaDB server: `mariadb < mariadb-user.sql`. On a Plesk server: `plesk db < mariadb-user.sql`.
+- **What `PROCESS` lets the agent see.** The process list of all connections: user, host, database, command, state, time and the **statement
+  text** of every running or sleeping connection, and the server status counters. It does not let the agent read a table or its data, change
+  anything or see a password hash.
+- **The statement texts can hold customer data and credentials** (`IDENTIFIED BY '...'`, the values of an `INSERT`). While the process list is
+  recorded (more than 10 running threads, or memory pressure), the agent cuts each statement to 16 KiB, keeps the first 64, and sends them to
+  the backend, which stores and shows them in the web UI. Treat the backend and its web UI like the database for that reason.
+- **Without the user** the collector records the server as `not_answering` with the error number the server sent (for example 1698) and logs
+  how to fix it; a missing socket is recorded as `down`.
+
 ## Groups
 
 The groups `adm` (log files) and `systemd-journal` (journal) are for the log collectors that follow; the process collector needs
-neither, and neither do the connection and systemd collectors.
+neither, and neither do the connection, systemd and MariaDB collectors.

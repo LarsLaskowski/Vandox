@@ -197,3 +197,12 @@ func vmstatIndex(name string) int {
 	}
 	return -1
 }
+
+// MemTotal returns the MemTotal of /proc/meminfo in bytes.
+func MemTotal(proc fs.FS) (uint64, error) {
+	m, err := readMeminfo(proc)
+	if err != nil {
+		return 0, err
+	}
+	return kBToBytes(m.values["MemTotal"]), nil
+}

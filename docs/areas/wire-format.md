@@ -142,10 +142,18 @@ produced it. Byte values are exact integers in a double (up to 2^53 exactly), co
 | `agent_goroutines` | — | — | number of goroutines of the agent |
 | `agent_spool_bytes` | `bytes` | — | size of the agent's spool |
 | `agent_send_lag_seconds` | `seconds` | — | how far the agent's sending lags behind capture |
+| `mariadb_memory_max_bytes` | `bytes` | — | MariaDB's theoretical maximum memory: its global buffers plus `max_connections` times its per-connection buffers |
+| `mariadb_memory_max_ram_percent` | `percent` | — | that maximum as a share of `MemTotal` |
+| `mariadb_questions_per_second` | `per_second` | — | increase of the status value `Questions` / seconds between two samples |
+| `mariadb_innodb_buffer_pool_used_percent` | `percent` | — | used pages of the InnoDB buffer pool as a share of its pages |
+| `mariadb_innodb_buffer_pool_read_hit_percent` | `percent` | — | share of the buffer pool's read requests between two samples that did not read from disk |
+| `mariadb_exposed_listeners` | — | — | listening TCP sockets on MariaDB's ports whose local address is not loopback |
 
 The `agent_*` metrics are the agent's self-metrics ([Agent](agent.md), *Self-metrics*) and carry the source `agent`, as do the gaps
 the agent's scheduler records. The agent's system metrics (`load*`, `cpu_percent`, `mem_*`, `swap_*`, `meminfo*`, `pressure_*`,
-`vmstat_*`, `disk_*`, `filesystem_*`, `clock_*`) carry the source `system` ([Agent](agent.md), *System metrics*).
+`vmstat_*`, `disk_*`, `filesystem_*`, `clock_*`) carry the source `system` ([Agent](agent.md), *System metrics*). The `mariadb_*` metrics
+carry the source `mariadb`, like the `mariadb_status` record they are written with ([Agent](agent.md), *MariaDB*, where their formulas
+and the cases that leave them out are).
 
 ### `process_snapshot`
 
@@ -214,12 +222,26 @@ not found or masked. The collector checks each record against these rules itself
 
 ### `mariadb_status`
 
-`availability` (`up`, `down`, `not_answering`), `ping_latency_ns` (optional, >= 0), `status` (map of
+`availability` (`up`, `down`, `not_answering`), `ping_latency_ns` (optional, >= 0), `error_code` (optional, 1 to 65535, only with
+`not_answering`), `status` (map of
 `^[A-Za-z][A-Za-z0-9_]*$` key, at most 128 bytes, unique ignoring ASCII case, to unsigned integer), `variables` (same keys, short text
 values), `threads`, `complete` (true only if `status`, `variables` and `threads` hold every entry the
 producer read; false for a configured subset or a reduction for size). When `availability` is not `up`,
 `status`, `variables` and `threads` must be empty. A thread: `id`, `user`, `host`, `db`, `command`, `state`
 (short text), `time_seconds`, `info` (text), `truncated` (the producer shortened `info`).
+
+`error_code` is MariaDB's error number when the server refused the producer with an error packet in place of its greeting or as the
+answer to the login (for example 1040 too many connections, 1698 or 1045 access denied): the server answered, but would not serve. It
+was added in format 1.1 (record 0118); a decoder that does not know it ignores it and reads a true `not_answering`. Both decoders refuse
+it with the field errors `data.error_code`: `must be 1 to 65535` (the value 0) and `only with not_answering`; a value outside 0 to 65535
+is `ErrMalformed` like every integer out of its field's range (*Accepted forms*), and `null` reads as absent (0089).
+
+Producer: the agent's `mariadb` collector ([Agent](agent.md), *MariaDB*) writes one record per run with source `mariadb` and the capture
+time of the run's start: `down` when nothing accepts on the socket, `not_answering` when the server's listen queue is full
+or it gives no usable answer in time, and with `error_code` when it refuses the agent with an error packet, and `up` with `ping_latency_ns`, the selected `status` values and `variables`, and `threads`
+only when its thread snapshot is due. `complete` is always false, because the record holds a fixed selection; `info` is cut to 16,384
+bytes and kept for at most 64 of at most 4,096 threads, and the producer shortens the record by an upper-bound estimate before it is
+encoded (*Producer size contract*).
 
 ### `kernel_event`
 
@@ -310,7 +332,8 @@ if the rest of that header has an incompatible shape. A header that is not a JSO
 a JSON integer, is `wire.ErrMalformed`: the major is an integer in every version (0043). A minor change is additive: new optional fields and new kinds; a decoder ignores unknown
 keys at any depth and so accepts a newer minor of its major. The current version is **1.1**: 1.1 added the optional fields of
 `connection_snapshot` (`aggregates_only`, `aggregates_incomplete`, `listener_check` with the value `start`, `new_listeners`,
-`new_listeners_omitted`, `inventory`, `tables`; records 0115 and 0116; the format is unreleased, so the fields extend 1.1 in place);
+`new_listeners_omitted`, `inventory`, `tables`; records 0115 and 0116) and the optional field `error_code` of `mariadb_status` (record
+0118); the format is unreleased, so the fields extend 1.1 in place;
 1.0 was released with v0.1.0. An unknown record kind is rejected. Until the
 upgrade rules are settled (#85), upgrade the backend before the agents.
 
@@ -425,6 +448,8 @@ Decompressed content of a batch of three records (the real stream is gzip-compre
 - [0116](../decisions/0116-listeners-across-agent-starts-compared-when-stored-and-shown-in-the-forensics-report.md) — why `listener_check` gains
   `start` and a snapshot says what its listener list holds (`inventory`, `tables`).
 - [0114](../decisions/0114-model-text-limits-measured-after-the-encoders-replacement.md) — why the Go model measures limits as the encoder writes them, invalid UTF-8 counted as its replacement.
+- [0118](../decisions/0118-mariadb-collector-hand-written-client-captured-statements-refusals-as-not-answering-with-error-code.md) — why a
+  refused login is `not_answering` with the optional `error_code` instead of a gap or a new availability.
 
 ## Not here
 

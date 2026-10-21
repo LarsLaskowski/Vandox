@@ -20,12 +20,6 @@ linters:
         - G115
   exclusions:
     warn-unused: true
-    rules:
-      # Sequential error checks that SonarQube rates at most 15 (record 0047).
-      - path: ^internal/model/mariadb\.go$
-        linters:
-          - gocognit
-        text: "`\\(\\*MariaDBStatus\\)\\.Validate`"
 
 formatters:
   enable:

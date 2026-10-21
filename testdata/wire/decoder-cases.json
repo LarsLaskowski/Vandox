@@ -1480,6 +1480,110 @@
           }
         ]
       }
+    },
+    {
+      "name": "S33 mariadb not answering with error code 1045",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"mariadb_status\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"availability\":\"not_answering\",\"error_code\":1045,\"complete\":false}}"
+      ],
+      "want": {
+        "records": [
+          {
+            "kind": "mariadb_status",
+            "seq": 1
+          }
+        ]
+      }
+    },
+    {
+      "name": "S34 mariadb not answering with error code 65535",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"mariadb_status\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"availability\":\"not_answering\",\"error_code\":65535,\"complete\":false}}"
+      ],
+      "want": {
+        "records": [
+          {
+            "kind": "mariadb_status",
+            "seq": 1
+          }
+        ]
+      }
+    },
+    {
+      "name": "S35 mariadb not answering with error code 0",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"mariadb_status\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"availability\":\"not_answering\",\"error_code\":0,\"complete\":false}}"
+      ],
+      "want": {
+        "error": "Invalid",
+        "line": 2,
+        "field": "data.error_code",
+        "reason": "must be 1 to 65535"
+      }
+    },
+    {
+      "name": "S36 mariadb up with error code",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"mariadb_status\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"availability\":\"up\",\"error_code\":1045,\"complete\":true}}"
+      ],
+      "want": {
+        "error": "Invalid",
+        "line": 2,
+        "field": "data.error_code",
+        "reason": "only with not_answering"
+      }
+    },
+    {
+      "name": "S37 mariadb down with error code",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"mariadb_status\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"availability\":\"down\",\"error_code\":1045,\"complete\":true}}"
+      ],
+      "want": {
+        "error": "Invalid",
+        "line": 2,
+        "field": "data.error_code",
+        "reason": "only with not_answering"
+      }
+    },
+    {
+      "name": "S38 mariadb not answering with values",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"mariadb_status\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"availability\":\"not_answering\",\"error_code\":1045,\"status\":{\"A\":1},\"complete\":false}}"
+      ],
+      "want": {
+        "error": "Invalid",
+        "line": 2,
+        "field": "data.availability",
+        "reason": "status, variables and threads must be empty unless up"
+      }
+    },
+    {
+      "name": "S39 mariadb error code above 65535",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"mariadb_status\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"availability\":\"not_answering\",\"error_code\":65536,\"complete\":false}}"
+      ],
+      "want": {
+        "error": "Malformed",
+        "line": 2
+      }
+    },
+    {
+      "name": "S40 mariadb negative error code",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"mariadb_status\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"availability\":\"not_answering\",\"error_code\":-1,\"complete\":false}}"
+      ],
+      "want": {
+        "error": "Malformed",
+        "line": 2
+      }
     }
   ]
 }

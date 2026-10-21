@@ -28,6 +28,12 @@ func parseCmdline(raw []byte, more bool) (text string, truncated bool) {
 	return text, more || cut
 }
 
+// CleanText makes s valid UTF-8 and cuts it to at most limit bytes at a character boundary; cut tells that text is shorter
+// than s.
+func CleanText(s string, limit int) (text string, cut bool) {
+	return cleanText(s, limit)
+}
+
 // cleanText makes s valid UTF-8 and cuts it to at most limit bytes at a character boundary; cut tells that text is shorter
 // than s. Every byte that does not start a valid sequence becomes U+FFFD; control characters are kept.
 func cleanText(s string, limit int) (text string, cut bool) {

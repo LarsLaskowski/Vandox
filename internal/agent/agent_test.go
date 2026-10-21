@@ -23,6 +23,7 @@ import (
 
 	"github.com/LarsLaskowski/Vandox/internal/config"
 	"github.com/LarsLaskowski/Vandox/internal/connstats"
+	"github.com/LarsLaskowski/Vandox/internal/mariadb"
 	"github.com/LarsLaskowski/Vandox/internal/model"
 	"github.com/LarsLaskowski/Vandox/internal/procstats"
 	"github.com/LarsLaskowski/Vandox/internal/scheduler"
@@ -255,6 +256,18 @@ func fixtureConnections() connstats.Sources {
 	return connstats.Sources{Proc: os.DirFS("../../testdata/proc"), SocketMount: connstats.SocketMount{ID: fixtureSocketMount}}
 }
 
+// errFixtureMariaDB is what the dialer of fixtureMariaDB answers.
+var errFixtureMariaDB = errors.New("fixture: no database")
+
+// fixtureMariaDB returns MariaDB sources whose dialer always fails and that read the fixture /proc, so no agent test
+// connects to the host's database socket or reads the host's /proc; every Options a test runs or schedules sets it.
+func fixtureMariaDB() mariadb.Sources {
+	return mariadb.Sources{
+		Dial: func(context.Context) (net.Conn, error) { return nil, errFixtureMariaDB },
+		Proc: os.DirFS("../../testdata/proc"),
+	}
+}
+
 // fakeSystemd is a hand-written systemd: every unit asked for is active and running. It models no real timing or error
 // behavior of systemd; the real reader is tested against the measured fake bus of the sdbus package.
 type fakeSystemd struct {
@@ -360,6 +373,7 @@ func TestRun_ReadyWatchdogAndSelfMetrics(t *testing.T) {
 		Processes:   fixtureProcesses(),
 		Connections: fixtureConnections(),
 		Services:    fixtureServices(),
+		MariaDB:     fixtureMariaDB(),
 	})
 
 	if first := socket.next(t, r); first != "READY=1" {
@@ -417,6 +431,7 @@ func TestRun_ConfigErrorExitsOne(t *testing.T) {
 				Processes:   fixtureProcesses(),
 				Connections: fixtureConnections(),
 				Services:    fixtureServices(),
+				MariaDB:     fixtureMariaDB(),
 			})
 
 			if code != 1 {
@@ -449,6 +464,7 @@ func TestRun_DoesNotLogSecret(t *testing.T) {
 		Processes:   fixtureProcesses(),
 		Connections: fixtureConnections(),
 		Services:    fixtureServices(),
+		MariaDB:     fixtureMariaDB(),
 	})
 
 	r.waitMetrics(sink, selfstats.MetricRSS)
@@ -497,6 +513,7 @@ func TestRun_NotificationProblemsDoNotStopTheAgent(t *testing.T) {
 				Processes:   fixtureProcesses(),
 				Connections: fixtureConnections(),
 				Services:    fixtureServices(),
+				MariaDB:     fixtureMariaDB(),
 			})
 
 			r.waitMetrics(sink, selfstats.MetricRSS)
@@ -555,15 +572,66 @@ func TestJobs_Schedules(t *testing.T) {
 			cfg := config.DefaultAgent()
 			cfg.Filesystem.MountPoints = tt.mountPoints
 			cfg.Services.Units = tt.units
+			cfg.MariaDB.Enabled = false
 			log := slog.New(slog.NewTextHandler(io.Discard, nil))
 
-			list, _ := jobs(Options{Self: fixtureSources(), System: fixtureSystem(), Processes: fixtureProcesses(), Connections: fixtureConnections(), Services: fixtureServices()}, &cfg, log)
+			list, _ := jobs(Options{Self: fixtureSources(), System: fixtureSystem(), Processes: fixtureProcesses(), Connections: fixtureConnections(), Services: fixtureServices(), MariaDB: fixtureMariaDB()}, &cfg, log)
 
 			if got := scheduleOf(list); !slices.Equal(got, tt.want) {
 				t.Errorf("jobs() = %+v, want %+v", got, tt.want)
 			}
 			if _, err := scheduler.New(list, scheduler.DiscardSink{}, log); err != nil {
 				t.Errorf("scheduler.New(jobs()) error = %v, want nil", err)
+			}
+		})
+	}
+}
+
+// jobNames returns the collector names of list in order.
+func jobNames(list []scheduler.Job) []string {
+	var got []string
+	for _, j := range list {
+		got = append(got, j.Collector.Name())
+	}
+	return got
+}
+
+// requireMariaDBSchedule fails when the mariadb job of list does not run on the MariaDB intervals.
+func requireMariaDBSchedule(t *testing.T, list []scheduler.Job) {
+	t.Helper()
+	want := scheduler.Schedule{Interval: MariaDBInterval, Timeout: MariaDBTimeout, PressureInterval: MariaDBPressureInterval}
+	for _, j := range list {
+		if j.Collector.Name() == "mariadb" && j.Schedule != want {
+			t.Errorf("mariadb schedule = %+v, want %+v", j.Schedule, want)
+		}
+	}
+}
+
+func TestJobs_MariaDBAfterSystemdOnlyWhenEnabled(t *testing.T) {
+	tests := []struct {
+		name    string
+		enabled bool
+		units   []string
+		want    []string
+	}{
+		{"enabled follows systemd", true, []string{"nginx.service"}, []string{"self", "system", "processes", "connections", "systemd", "mariadb", "filesystem", "clock"}},
+		{"enabled without systemd follows connections", true, []string{}, []string{"self", "system", "processes", "connections", "mariadb", "filesystem", "clock"}},
+		{"disabled leaves the job out", false, []string{"nginx.service"}, []string{"self", "system", "processes", "connections", "systemd", "filesystem", "clock"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := config.DefaultAgent()
+			cfg.MariaDB.Enabled = tt.enabled
+			cfg.Services.Units = tt.units
+			log := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+			list, _ := jobs(Options{Self: fixtureSources(), System: fixtureSystem(), Processes: fixtureProcesses(), Connections: fixtureConnections(), Services: fixtureServices(), MariaDB: fixtureMariaDB()}, &cfg, log)
+
+			if got := jobNames(list); !slices.Equal(got, tt.want) {
+				t.Errorf("job names = %v, want %v", got, tt.want)
+			}
+			if tt.enabled {
+				requireMariaDBSchedule(t, list)
 			}
 		})
 	}
@@ -581,6 +649,7 @@ func TestRun_RecordsSystemMetrics(t *testing.T) {
 		Processes:   fixtureProcesses(),
 		Connections: fixtureConnections(),
 		Services:    fixtureServices(),
+		MariaDB:     fixtureMariaDB(),
 	})
 
 	r.waitMetrics(sink, "load1", "mem_available_bytes", "pressure_avg10", "filesystem_size_bytes", "clock_synchronized")
@@ -677,6 +746,7 @@ func lowMemoryOptions(t *testing.T, workers int) Options {
 		// The in-memory /proc holds the captured socket tables (net/ is in the fixture tree); the socket mount is the captured sockets'.
 		Connections: connstats.Sources{Proc: proc, SocketMount: connstats.SocketMount{ID: fixtureSocketMount}},
 		Services:    fixtureServices(),
+		MariaDB:     fixtureMariaDB(),
 	}
 }
 
@@ -858,6 +928,7 @@ func TestRun_ServiceUnitsFromConfigurationFile(t *testing.T) {
 		Processes:   fixtureProcesses(),
 		Connections: fixtureConnections(),
 		Services:    svcstats.Sources{Systemd: fake},
+		MariaDB:     fixtureMariaDB(),
 	})
 
 	limit := time.After(waitLimit)

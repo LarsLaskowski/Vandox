@@ -11,6 +11,7 @@ import (
 
 	"github.com/LarsLaskowski/Vandox/internal/config"
 	"github.com/LarsLaskowski/Vandox/internal/connstats"
+	"github.com/LarsLaskowski/Vandox/internal/mariadb"
 	"github.com/LarsLaskowski/Vandox/internal/procstats"
 	"github.com/LarsLaskowski/Vandox/internal/scheduler"
 	"github.com/LarsLaskowski/Vandox/internal/sdnotify"
@@ -59,6 +60,13 @@ const (
 	SystemdTimeout          = 5 * time.Second
 )
 
+// Schedules of the MariaDB collector.
+const (
+	MariaDBInterval         = 30 * time.Second
+	MariaDBPressureInterval = 10 * time.Second
+	MariaDBTimeout          = 5 * time.Second
+)
+
 // Options are the process boundaries Run works with.
 type Options struct {
 	ConfigPath string            // the configuration file
@@ -72,6 +80,8 @@ type Options struct {
 	Connections connstats.Sources
 	// Services are the systemd sources; the zero value uses the system bus.
 	Services svcstats.Sources
+	// MariaDB are the MariaDB sources; zero fields take their defaults.
+	MariaDB mariadb.Sources
 }
 
 // Run runs the agent until ctx is done and returns the exit code: 0 after a clean stop, 1 when it cannot start.
@@ -144,6 +154,12 @@ func jobs(opts Options, cfg *config.Agent, log *slog.Logger) ([]scheduler.Job, *
 		list = append(list, scheduler.Job{
 			Collector: svcstats.New(opts.Services, cfg.Services.Units, systemdSchedule, log),
 			Schedule:  systemdSchedule,
+		})
+	}
+	if cfg.MariaDB.Enabled {
+		list = append(list, scheduler.Job{
+			Collector: mariadb.New(opts.MariaDB, cfg.MariaDB.Socket, log),
+			Schedule:  scheduler.Schedule{Interval: MariaDBInterval, Timeout: MariaDBTimeout, PressureInterval: MariaDBPressureInterval},
 		})
 	}
 	if len(cfg.Filesystem.MountPoints) > 0 {

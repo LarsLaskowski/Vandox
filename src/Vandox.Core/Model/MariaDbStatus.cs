@@ -43,6 +43,13 @@ public sealed partial class MariaDbStatus : IPayload
     public long? PingLatencyNs { get; set; }
 
     /// <summary>
+    /// Gets or sets the error code of the database when it did not answer.
+    /// </summary>
+    [JsonPropertyName("error_code")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public ushort? ErrorCode { get; set; }
+
+    /// <summary>
     /// Gets or sets the status counters.
     /// </summary>
     [JsonPropertyName("status")]
@@ -79,6 +86,25 @@ public sealed partial class MariaDbStatus : IPayload
     /// <returns>The pattern</returns>
     [GeneratedRegex(@"^[A-Za-z][A-Za-z0-9_]*\z", RegexOptions.CultureInvariant)]
     private static partial Regex KeyPattern();
+
+    /// <summary>
+    /// Checks the error code: 1 to 65535, and only with <c>not_answering</c>.
+    /// </summary>
+    /// <returns>The rule that is broken, or <c>null</c></returns>
+    private FieldError? ValidateErrorCode()
+    {
+        if (ErrorCode is null)
+        {
+            return null;
+        }
+
+        if (ErrorCode == 0)
+        {
+            return Check.Invalid("error_code", "must be 1 to 65535");
+        }
+
+        return Availability == NotAnswering ? null : Check.Invalid("error_code", "only with not_answering");
+    }
 
     /// <summary>
     /// Checks the keys and values of the status, the variables and the threads.
@@ -141,6 +167,13 @@ public sealed partial class MariaDbStatus : IPayload
         if (PingLatencyNs < 0)
         {
             return Check.Invalid("ping_latency_ns", "must not be negative");
+        }
+
+        error = ValidateErrorCode();
+
+        if (error is not null)
+        {
+            return error;
         }
 
         var statusCount = Status?.Count ?? 0;

@@ -7,7 +7,7 @@ how it survives a stalled data source and a missing backend, how gaps are record
 sends is in the [wire format](wire-format.md); its configuration file is in [Configuration and secrets](configuration-and-secrets.md).
 
 **Status.** The command line, the start-up with the configuration file, logging, the scheduler with its gaps and the memory pressure
-switch, the self-metrics, the system metrics, the process collector with the memory pressure mode, the connection collector (with its start-up probe of the socket mount), the systemd service collector and the notification of systemd exist, as do
+switch, the self-metrics, the system metrics, the process collector with the memory pressure mode, the connection collector (with its start-up probe of the socket mount), the systemd service collector, the MariaDB collector and the notification of systemd exist, as do
 the shared data model and the wire encoder. The other collectors, the spool, the sender and the systemd unit are **not implemented yet**: until the spool exists, the agent
 drops the records it produces after checking them (it is not released in that state; v0.2.0 waits for the spool and the sender). The
 rules below for the parts not implemented are the target the implementation is held to and the tests must check.
@@ -45,10 +45,11 @@ rules below for the parts not implemented are the target the implementation is h
 - Commands for the server (a later feature) are fetched by the agent from the backend, never pushed to it, so they reach the server
   only at the agent's next poll.
 - The agent never contacts Telegram or any other service; all notification goes through the backend.
-- Three local channels are not network connections and need no rule: the agent's log on standard error, which systemd passes to the
-  journal, the notification datagrams it sends to the local socket systemd names (*Service manager*) and the connection to the system
-  bus socket `/run/dbus/system_bus_socket` that the `systemd` collector opens for each run (*Services*). The agent binds no socket for
-  them.
+- Four local channels are not network connections and need no rule: the agent's log on standard error, which systemd passes to the
+  journal, the notification datagrams it sends to the local socket systemd names (*Service manager*), the connection to the system
+  bus socket `/run/dbus/system_bus_socket` that the `systemd` collector opens for each run (*Services*) and the connection to the
+  MariaDB Unix socket (`mariadb.socket`, default `/run/mysqld/mysqld.sock`) that the `mariadb` collector opens for each run
+  (*MariaDB*). The agent binds no socket for them.
 
 ## Collecting
 
@@ -593,6 +594,228 @@ the agent's connection, up to 32 MiB and with file descriptors, and the replies 
 - The unit must keep `AF_UNIX` and the bus socket reachable (*Rights*). The captured replies of systemd 249 are the test data; other
   systemd versions were not captured.
 
+## MariaDB
+
+The collector `mariadb` (interval 30 seconds, pressure interval 10 seconds, timeout 5 seconds, placed after `systemd` in the job list)
+records the state of the local MariaDB server as one `mariadb_status` record per run and, for an `up` run, its `mariadb_*` metrics, all
+with source `mariadb` and the capture time of the run's start ([wire format](wire-format.md)). It runs while `mariadb.enabled` is true
+(the default, [Configuration and secrets](configuration-and-secrets.md)); with `mariadb.enabled: false` it is not scheduled: no record,
+no log line, no connection. It starts no program and uses no client library: `internal/mariadb` speaks MariaDB's client protocol
+itself (record 0118).
+
+**What a run does.** Each run opens one connection to the Unix socket `mariadb.socket` (default `/run/mysqld/mysqld.sock`), reads the
+greeting, logs in as `vandox-agent` (*The login*) and closes the connection at its end with `COM_QUIT`, sent with a write deadline of
+250 ms and not waited for. In between it sends, in this order: one `COM_PING`, whose round trip on the monotonic clock is
+`ping_latency_ns`; `SHOW GLOBAL STATUS`; `SHOW GLOBAL VARIABLES`; the two statements of the account check, `SELECT CURRENT_USER()` and
+`SELECT PRIVILEGE_TYPE FROM information_schema.USER_PRIVILEGES WHERE GRANTEE LIKE '%vandox-agent%'`; and `SHOW FULL PROCESSLIST` only when
+the status value `Threads_running` is above 10 (the agent's own statement counts) or the run started in memory pressure mode
+(*Scheduling*). No other statement is ever sent, none takes input, and the agent holds at most one connection at a time: a run's
+connection is closed before it returns, and the scheduler never starts the collector while a run is stuck. After the connection the run
+reads `MemTotal` of `/proc/meminfo` and the TCP tables `/proc/net/tcp` and `tcp6`, as far as the metrics need them (*Metrics*).
+
+**Time budget.** The greeting must arrive by 2 seconds after the run's start, and everything else by 4 seconds after it: every read
+and write on the connection carries that deadline, and the end of the run's context ends every wait at once. The scheduler's 5-second
+timeout is only the backstop for the reads of `/proc`, which no deadline can interrupt: a read that blocks there is abandoned as a
+`collector_timeout` gap for `mariadb`, no second connection is opened while it is stuck, and no other collector waits.
+
+**Availability.** Every run that reaches a verdict writes one `mariadb_status` record with `complete` false:
+
+- `down`, and nothing else: connecting fails with `ENOENT` (no socket file: MariaDB is stopped or not installed) or `ECONNREFUSED` (a
+  socket file nobody accepts on, as a killed server leaves it, or a path that is no socket).
+- `not_answering` without `error_code` and without values: connecting fails with `EAGAIN` (the server's listen queue is full) or does
+  not finish by 4 seconds, no greeting arrives by 2 seconds, the login, the ping or any statement gets no answer by 4 seconds, or the
+  server closes or resets the connection at any point, also in the middle of a result. A run never writes part of the values.
+- `not_answering` with `error_code` and without values: the server sends an error packet in place of its greeting (1040 when it has no
+  free connection, 1053 while it shuts down) or as the answer to the login (1698 or 1045 when the user `vandox-agent` is missing or not
+  identified via `unix_socket`, 1226 at the user's connection limit), any number from 1 to 65535. An error packet with number 0 is
+  recorded without `error_code`.
+- `up`: the login, the ping, both selection statements and the account check were answered (an error answer to the check counts,
+  *Account check*), and the process list too when it was due. The record holds `ping_latency_ns`, `status`, `variables` and, when the
+  process list was read, `threads`.
+
+Any other outcome fails the run (*Failures*).
+
+**The login.** The greeting is at most 1 KiB and must be protocol 10 with a NUL-terminated version text (never interpreted, so the
+`5.5.5-` prefix of older servers does not matter), the capabilities `CLIENT_PROTOCOL_41`, `CLIENT_SECURE_CONNECTION`,
+`CLIENT_PLUGIN_AUTH` and `CLIENT_SESSION_TRACK`, capability bit 0 clear (a MariaDB server, not MySQL), and MariaDB's extended
+capabilities extended metadata (`0x08`) and cache metadata (`0x10`); anything else fails the run with `unexpected reply`. The agent
+answers with the capabilities `0x00aea204` (the captured client's without `CLIENT_LOCAL_FILES`, `CLIENT_MULTI_STATEMENTS` and
+`CLIENT_CONNECT_ATTRS`; no `CLIENT_DEPRECATE_EOF`, no TLS), the extended capabilities `0x18`, a maximum packet of 1 MiB, character set
+45, the user `vandox-agent`, **empty authentication data** and the plugin name `mysql_native_password`. MariaDB's `unix_socket` plugin
+compares the user name with the OS user of the connecting process, so no password exists and none is ever sent. The server's answer:
+
+- OK: logged in.
+- An error packet: `not_answering` with its number (*Availability*).
+- An authentication switch request (`0xfe` with a plugin name, at most 1 KiB, else `packet too large`; neither the plugin name nor its
+  data is kept or logged): answered once with an empty packet, never a credential, and the next packet counts as the login's answer.
+  A second switch request, or any request for more authentication data (`0x01`) after the first, fails the run with `authentication
+  switch refused`.
+- A request for more authentication data (`0x01`) of more than 2 bytes before any switch also fails the run with `authentication switch
+  refused`; one of 1 or 2 bytes, an empty packet, a `0xfe` packet without a plugin name and any other first byte fail it with
+  `unexpected reply`.
+
+**The selection.** Of `SHOW GLOBAL STATUS` the record keeps those of these 14 status values the server reports: `Uptime`,
+`Threads_connected`, `Threads_running`, `Max_used_connections`, `Aborted_connects`, `Aborted_clients`, `Questions`, `Slow_queries`,
+`Created_tmp_disk_tables`, `Innodb_buffer_pool_pages_total`, `Innodb_buffer_pool_pages_free`, `Innodb_buffer_pool_read_requests`,
+`Innodb_buffer_pool_reads`, `Memory_used`; of `SHOW GLOBAL VARIABLES` those of these 20 variables, as text: `version`,
+`max_connections`, `innodb_buffer_pool_size`, `innodb_log_buffer_size`, `key_buffer_size`, `aria_pagecache_buffer_size`,
+`query_cache_size`, `tmp_table_size`, `max_heap_table_size`, `sort_buffer_size`, `read_buffer_size`, `read_rnd_buffer_size`,
+`join_buffer_size`, `thread_stack`, `binlog_cache_size`, `log_bin`, `bind_address`, `skip_networking`, `port`, `extra_port`.
+
+- A row's name is read up to 64 bytes and its value up to 1,025 bytes; the rest of a longer cell is discarded by length. A name is
+  compared exactly (case-sensitive) with the 34 names of the selection; every other name is neither kept nor remembered, so a reply of
+  any length keeps at most 34 values. A selected name that appears twice in one reply fails the run (`name sent twice`).
+- A status value is kept when it is 1 to 20 ASCII digits within an unsigned 64-bit number; a variable when its value was not cut and
+  is at most 1,024 bytes once cleaned (every byte that does not start a valid UTF-8 sequence becomes U+FFFD). Any other value is left
+  out of its map and the rest of the record is written.
+
+**Thread snapshot.** When the process list is due, `threads` holds every row of `SHOW FULL PROCESSLIST` except the agent's own
+connection (the connection id of the greeting), each with `id`, `user`, `host`, `db`, `command`, `state`, `time_seconds`, `info` (the
+statement text) and `truncated`. Order: threads whose `command` is not `Sleep` first, then the sleeping ones, each group by
+`time_seconds` descending, then `id` ascending.
+
+- The cells of a row are bounded on their raw bytes before anything is kept: `Id` and `Time` 20 bytes and `Progress` 64 bytes, strict
+  (a longer cell fails the run with `cell too long`); `User` and `Host` 512 bytes, `db` and `State` 256, `Command` 32 and `Info` 16,384,
+  cut (the rest is discarded by length). `Id` must be 1 to 20 ASCII digits within 64 bits, anything else, NULL included, fails the run
+  with `unexpected reply`, so the agent's own row is always recognized; a `Time` that is not 1 to 20 digits reads 0; a NULL text is
+  empty.
+- At most 4,096 threads are kept, the first in the order (a later row that ranks before the last kept thread takes its place), and
+  only the first 64 in the order keep their statement; a kept thread that had a statement but is not among them gets an empty `info`
+  with `truncated` set.
+- When the record is built, every text is cleaned as the wire format's text rules want it: every byte that does not start a valid
+  UTF-8 sequence becomes U+FFFD, the text is cut at a character boundary to 1,024 bytes (`user`, `host`, `db`, `command`, `state`) or
+  16,384 bytes (`info`, with `truncated` set when it or its raw cell was cut), and control and format characters are kept as the
+  server sent them. These texts are chosen by whoever sends SQL to the server (any web-space user); they reach the record only, never a
+  log line or an error text, and whoever displays them escapes them like log text. They can hold customer data and credentials
+  (`IDENTIFIED BY '...'`, the values of an `INSERT`), which are sent to the backend and shown there; `deploy/agent/README.md` says so.
+
+**The record always fits.** The collector bounds the record's encoded line by an estimate made before anything is encoded: 6 bytes
+per byte of every kept text (the longest JSON escape, `\u00XX`), 21 bytes per number, 8 per map entry, 256 per thread for its keys and
+punctuation and 1 KiB for the record, which is never less than the encoded size. Threads that cannot fit within 1 MiB even without a
+statement (by the estimate of their raw short texts) are not built at all. Then, while the estimate is above 1 MiB, every `info` is cut
+to 4,096, then 1,024, then 0 bytes (each cut sets `truncated`), and then the thread list is halved from its end, so idle sleepers go
+first. The scheduler's check of the record (*Scheduling*) therefore passes; `complete` is always false, because the record holds a
+selection.
+
+**Bounded memory.** A run keeps of the server's replies only one scratch buffer per cell position, the 34 selected values and, for
+the process list, at most 4,096 thread slots of 1,568 bytes for the short texts and 64 statement buffers of 16 KiB (about 7.2 MiB),
+which are reused once full, so no row allocates beyond them. Every packet that is not a row is read whole only up to its limit (the
+greeting 1 KiB, an OK, error, EOF, column count or column definition packet 64 KiB) and is refused above it with `packet too large`; a
+row is read cell by cell. The tests pin the bound: a run over 4,200 threads whose every kept field is at its cap and filled with `<`,
+control characters and invalid bytes, with statements of 20 KiB, allocates at most 32 MiB in total and gives a record line of at most
+1 MiB (`TestCollect_WorstCaseProcessListIsBounded`); a status or variables reply of 1,000,000 distinct names allocates at most 4 MiB
+(`TestCollect_LongStatusAndVariablesRepliesAreBounded`); a cell of 64 MiB is discarded with at most 4 MiB allocated
+(`TestPacketReader_DiscardsBeyondTheLimitWithBoundedMemory`).
+
+**The client's protocol rules (security area 10).** A packet has a 3-byte length and a sequence number that must increase by one modulo
+256 (else `packet out of sequence`); a payload of `0xffffff` bytes is continued in the next packet. Length-encoded integers take the
+prefixes `0xfc`, `0xfd` and `0xfe`, `0xfb` is NULL in a row, and `0xff` or a length beyond its packet is `malformed packet`. A statement
+must be answered by an error packet or by a column count packet of exactly two bytes: the number of columns the statement has and the
+"metadata follows" byte 1 (else `unexpected reply`; another number is `unexpected columns`). Each column definition's name (its fifth
+length-encoded string) must be exactly the expected one (else `unexpected columns`): `Variable_name`, `Value`; `Id`, `User`, `Host`,
+`db`, `Command`, `Time`, `State`, `Info`, `Progress` (so MySQL, whose process list lacks `Progress`, fails the run); `CURRENT_USER()`;
+`PRIVILEGE_TYPE`. Then an EOF packet, the rows and an EOF packet; an EOF packet with `SERVER_MORE_RESULTS_EXISTS` is `more results
+refused`. An answer `0xfb` (a request to send a local file) is `local file request refused`, and nothing is read from or sent for it; an
+OK packet or any other first byte is `unexpected reply`. The server's error message is skipped by its length and never read into a text.
+
+**Account check.** A login alone does not prove that the agent got the account `deploy/agent/mariadb-user.sql` creates: an anonymous
+account `''@'localhost'` can accept it, and without `PROCESS` the process list shows only the agent's own connection, so an empty
+`threads` would look normal. Every `up` run therefore asks the two questions of *What a run does*; both need no privilege, and an account
+sees only its own rows of `USER_PRIVILEGES`. The check passes when `CURRENT_USER()` answers exactly one row `vandox-agent@localhost` (the
+cell read up to 1,024 bytes; a cut one does not match) and one row of the privileges is `PROCESS` (read up to 64 bytes). When it fails,
+the run's record is written as usual, and the warning `mariadb user not as installed` is logged at the first such run after the agent
+started or after a run whose check passed. When the server answers either question with an error, the check has no result: the record
+is written, nothing is logged and the state does not change; the agent closes the connection after that error (what is left of the
+reply could not be told apart from the next one), so a process list due in that run is not read and the record has no `threads`.
+No answer in time is `not_answering`, as for every statement.
+
+**Metrics.** An `up` run writes after its `mariadb_status` record these `metric` records (names and units in the
+[wire format](wire-format.md), *Metric names*), each only when its inputs are there:
+
+- `mariadb_memory_max_bytes`: the theoretical maximum, *global buffers* + `max_connections` × *per-connection buffers*. The global
+  buffers are `innodb_buffer_pool_size` + `innodb_log_buffer_size` + `key_buffer_size` + `aria_pagecache_buffer_size` +
+  `query_cache_size` + the smaller of `tmp_table_size` and `max_heap_table_size`; the per-connection buffers are `sort_buffer_size` +
+  `read_buffer_size` + `read_rnd_buffer_size` + `join_buffer_size` + `thread_stack`, plus `binlog_cache_size` when `log_bin` is `ON`. A
+  variable is a number when it is 1 to 20 ASCII digits within 64 bits. A missing summand counts as 0 (a missing `tmp_table_size` or
+  `max_heap_table_size` therefore makes the smaller of the two 0); a missing or non-numeric `innodb_buffer_pool_size` or
+  `max_connections`, or any present summand that is not a number (`binlog_cache_size` only while `log_bin` is `ON`), leaves both memory
+  metrics out without a log line. The sum and product are computed exactly in 128 bits. On the captured server the maximum is
+  898,035,712 bytes.
+- `mariadb_memory_max_ram_percent`: 100 × that maximum / `MemTotal` of `/proc/meminfo` (kB times 1,024, read by the system collector's
+  reader with its bounds); left out alone when `/proc/meminfo` cannot be read or `MemTotal` is 0.
+- `mariadb_innodb_buffer_pool_used_percent`: 100 × (`Innodb_buffer_pool_pages_total` − `Innodb_buffer_pool_pages_free`) /
+  `Innodb_buffer_pool_pages_total`, from the first sample on; left out when either value is missing, the total is 0 or the free pages
+  exceed it.
+- `mariadb_questions_per_second`: the increase of `Questions` over the seconds between the two runs' starts, and
+  `mariadb_innodb_buffer_pool_read_hit_percent`: 100 × (1 − increase of `Innodb_buffer_pool_reads` / increase of
+  `Innodb_buffer_pool_read_requests`). Both compare with the previous run and are left out on the first `up` run, when the previous run
+  was not `up` or failed, when its sample was lost (`Run.PreviousLost`, *Scheduling*), after a restart (below), when `Uptime` is
+  missing, when the time between the runs' starts is not positive, and, each for itself, when its counter is missing in one sample or
+  fell; the hit ratio also when the increase of the read requests is 0 or smaller than that of the reads.
+- `mariadb_exposed_listeners` (no unit): the number of listening sockets in `/proc/net/tcp` and `tcp6` on MariaDB's `port` and, when it
+  is not 0, `extra_port`, whose local address is not loopback once an IPv4-mapped address is unmapped. `127.0.0.0/8`, `::1` and
+  `::ffff:127.0.0.0/104` are loopback; the wildcards `0.0.0.0` and `::`, private, Tailscale, public and link-local addresses and the
+  IPv4-compatible `::127.0.0.1` count. A listener of another program on the port counts as well. A kernel without IPv6 has no `tcp6`,
+  which is skipped. The metric is left out, and the log state below kept, when `port` is missing or not a number from 1 to 65535,
+  `extra_port` is present and not a number from 0 to 65535, `tcp` is missing, or a table cannot be read or holds a line the connection
+  collector's reader does not accept (over 512 bytes or not in its format). The value of `bind_address` is not interpreted.
+
+**Restarts.** The server's start time is the run's start minus `Uptime` seconds. When it lies more than 5 seconds after the start time
+of the previous `up` run of this agent run that had an `Uptime`, whether or not runs that were not `up` lie between them, the server
+restarted (also when systemd restarted it without the service state showing it): the warning `mariadb restarted` with `uptime_seconds`
+is logged and the rates are left out for that run. A start time that moves by 5 seconds or less, or backwards, is the jitter of whole
+seconds and run starts, not a restart.
+
+**Logging.** Through the collector's logger with `collector=mariadb`, no line per run while nothing changes, and only fixed texts with
+counts, error numbers and byte values (in decimal) as attributes: never a statement, user, host, database name, server message, the
+value of `bind_address` or the socket path.
+
+| Line | Attributes | When |
+| ---- | ---------- | ---- |
+| warning `mariadb down` | — | the first `down` run after the agent started or after a run that was not `down` |
+| warning `mariadb not answering` | — | the first `not_answering` run without `error_code` after a run in another state |
+| warning `mariadb user missing or not allowed` | `error_code`, `fix` = `run deploy/agent/mariadb-user.sql as the database administrator` | the first run refused with 1045 or 1698 after a run in another state |
+| warning `mariadb login refused` | `error_code` | the first run refused with any other number after a run in another state |
+| info `mariadb answering again` | — | the first `up` run after a run that was `down` or `not_answering` |
+| warning `mariadb user not as installed` | `fix` (the same text) | *Account check* |
+| warning `mariadb restarted` | `uptime_seconds` | *Restarts* |
+| warning `mariadb memory maximum above RAM` | `max_bytes`, `ram_bytes` | the first `up` run whose maximum exceeds `MemTotal` after the agent started or after a run below it; a run without both values changes nothing |
+| warning `mariadb listens on a non-loopback address` | `count` | the first run with a count above 0 after the agent started or after a run with 0 |
+| info `mariadb listens on loopback only` | — | the first run with a count of 0 after a run above 0 |
+
+The state of the first five lines is the availability with the error number: the agent starts out assuming `up`, so a first `up` run
+logs nothing, and a refusal with another number (1040, then 1053) is a new episode. A failed run changes none of these states. A
+missing user is reported at the first run after the start that reaches the server, and again when the user disappears while the agent
+runs.
+
+**Failures.** These fail the run: no record is written, the sample is a gap with cause `unknown`, and the scheduler logs `collector
+failed` once and `collector recovered` (*Scheduling*):
+
+- connecting fails with any other error, for example `EACCES` when the unit hides the socket (`mariadb: connect: permission denied`),
+  or with no OS error number (`mariadb: connect: failed`);
+- a reply the client refuses (*The login*, *The selection*, *Thread snapshot*, *The client's protocol rules*);
+- an error packet in answer to the ping or to the status, variables or process list statement (`mariadb: <step>: server error <n>`).
+
+The error texts are `mariadb: connect: <OS error text>` (the text of the error number, never the path) or `mariadb: connect: failed`,
+and `mariadb: <step>: <reason>` with the step `greeting`, `login`, `ping`, `status`, `variables`, `processlist` or `account` and the
+reason `malformed packet`, `packet out of sequence`, `packet too large`, `unexpected reply`, `unexpected columns`, `cell too long`,
+`local file request refused`, `more results refused`, `authentication switch refused`, `name sent twice` or `server error <n>`. The
+reasons `no answer in time` and `connection closed` end a run as `not_answering`, not as a failure. No error text holds a byte the server
+sent.
+
+**Residuals (record 0118).**
+
+- The replies that were not captured are built from the protocol documentation: the error packet in place of the greeting, the error
+  numbers of a refused `unix_socket` login, the answer to `COM_PING`, the authentication switch and the replies to the agent's own
+  capability set. A server that answers otherwise fails the run as a gap with a fixed reason, never with a wrong value; the first runs on
+  the server, or a capture of the agent itself, settle it.
+- Only MariaDB 12.3.3 (`12.3.3-MariaDB-ubu2204`) is captured (`testdata/mariadb/`); MariaDB from 10.6 on is served by the same rules
+  but not captured, and MySQL is not supported.
+- The full status and variable lists, about 40 KB, are read every run, and the account check costs two small statements per `up` run.
+- A listener of another program on MariaDB's port counts as exposed; telling owners apart is the connection collector's job.
+- The process list shows what `PROCESS` lets the account see: the statements of every connection, with the customer data and
+  credentials they may hold (*Thread snapshot*).
+
 ## Memory pressure mode
 
 The `system` collector decides the memory pressure mode ([Scheduling](#scheduling)) after each successful `system` sample, from the values
@@ -608,7 +831,7 @@ it has just read:
 The collector calls the switch (`Scheduler.SetPressure`, which the agent connects when it builds the scheduler) only when the mode changes;
 it starts off. A change logs one info line `memory pressure mode on` or `memory pressure mode off` with `collector=system`,
 `mem_available_bytes` and, when the pressure file was read, `memory_some_avg10`. A failed sample changes nothing. The effect: the `system`
-(10 seconds), `processes` (15 seconds), `connections` (15 seconds) and `systemd` (10 seconds) collectors run at their pressure intervals, `processes` lists every process and `connections` records a full snapshot.
+(10 seconds), `processes` (15 seconds), `connections` (15 seconds), `systemd` (10 seconds) and `mariadb` (10 seconds) collectors run at their pressure intervals, `processes` lists every process, `connections` records a full snapshot and `mariadb` records the thread snapshot of the server's process list (*MariaDB*).
 
 Because the decision follows a `system` sample, the switch can lag the pressure by up to one `system` interval (30 seconds). Any local
 user can switch the mode on by allocating memory; the result is a process snapshot with every process every 15 seconds and a spool that
@@ -688,6 +911,16 @@ collector timeouts and backend gap detection each emit a gap record, and each pa
   call `Properties.Get`, `ListUnitsByPatterns`, `ListUnitsByNames` and `LoadUnit` (the server capture was taken with every call made
   as `nobody`). The unit must keep the bus reachable: `RestrictAddressFamilies=` keeps `AF_UNIX` (also for this connection) and
   nothing hides `/run/dbus` (no `InaccessiblePaths=` or `TemporaryFileSystem=` over it), or the collector fails every run as a gap.
+- **MariaDB collector.** It needs no group, no capability and no password: it connects to the MariaDB socket as the agent's OS user and
+  logs in as the MariaDB user `vandox-agent`, which MariaDB's `unix_socket` plugin accepts for that OS user. `deploy/agent/mariadb-user.sql`
+  creates the account and is its one source: `CREATE OR REPLACE USER 'vandox-agent'@'localhost' IDENTIFIED VIA unix_socket WITH
+  MAX_USER_CONNECTIONS 2` and `GRANT PROCESS ON *.* TO 'vandox-agent'@'localhost'`, nothing else. It is run once as the database
+  administrator (`mariadb < mariadb-user.sql` as root, or `plesk db < mariadb-user.sql` on Plesk) and may be run again, for example after a
+  Plesk update dropped the user: `OR REPLACE` resets the account to exactly this state. `PROCESS` shows the status counters and the
+  process list of every connection with its statement text; it gives no access to tables or their data. With `MAX_USER_CONNECTIONS 2`
+  one connection stays free beside the agent's one. The unit must keep `AF_UNIX` in `RestrictAddressFamilies=` and the socket's directory
+  `/run/mysqld` reachable (no `InaccessiblePaths=` or `TemporaryFileSystem=` over it), or every run fails (`mariadb: connect: permission
+  denied`) or reads as `down`.
 - As soon as the unit grants any capability, the unit is confined: `NoNewPrivileges=yes`; a system-call filter that denies `ptrace`,
   `process_vm_readv`, `process_vm_writev`, `pidfd_getfd` and `open_by_handle_at` with `EPERM` (and not `pidfd_open` or
   `pidfd_send_signal`) under `SystemCallArchitectures=native`; no write-side capability; `ProtectHome=yes` and `InaccessiblePaths=` for at
@@ -733,6 +966,10 @@ collector timeouts and backend gap detection each emit a gap record, and each pa
 - [0117](../decisions/0117-systemd-collector-hand-written-d-bus-client-per-run-states-recorded-on-change.md) — why the systemd collector
   reads unit states over the system bus with a minimal client of its own and one connection per run, polls, records on change, after a
   start or a lost sample and hourly, and tracks patterns up to 256 services.
+- [0118](../decisions/0118-mariadb-collector-hand-written-client-captured-statements-refusals-as-not-answering-with-error-code.md) — why the
+  MariaDB collector speaks the protocol with a minimal client of its own over one connection per run, sends the captured statements with
+  the captured layout bits, records a refused login as `not_answering` with its error number, keeps the statement text of only the first
+  64 threads, and counts exposure from the kernel's TCP tables.
 
 ## Not here
 
@@ -747,5 +984,6 @@ collector timeouts and backend gap detection each emit a gap record, and each pa
 `internal/procstats` (process collector; fixtures `testdata/proc/<pid>/`, `testdata/etc/passwd`, `testdata/processes/names.json`; `ListPIDs`, `CommandReader` and `Ended` are shared with the connection collector),
 `internal/connstats` (connection collector; fixtures `testdata/proc/net/`, `testdata/connections/sandbox/`), `internal/sockmount` (the start-up probe of the socket mount),
 `internal/svcstats` (systemd collector) and `internal/sdbus` (its D-Bus client; fixture `testdata/systemd/`, a capture of systemd 249's replies),
-`internal/sdnotify`, `internal/config`, `internal/model`, `internal/wire`; `deploy/agent/` (example configuration; the unit and install
+`internal/mariadb` (MariaDB collector and its protocol client; fixture `testdata/mariadb/`, two captures of MariaDB 12.3.3's replies to a `unix_socket` login; it uses `sysstats.MemTotal`, `connstats.TCPListeners` and `procstats.CleanText`),
+`internal/sdnotify`, `internal/config`, `internal/model`, `internal/wire`; `deploy/agent/` (example configuration, `mariadb-user.sql`; the unit and install
 scripts follow with the collectors).

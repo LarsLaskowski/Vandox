@@ -1,12 +1,15 @@
 package connstats
 
 import (
+	"encoding/binary"
 	"fmt"
 	"net/netip"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
+	"testing/fstest"
 
 	"github.com/LarsLaskowski/Vandox/internal/model"
 )
@@ -307,5 +310,166 @@ func TestParseLine_Rejects(t *testing.T) {
 				t.Errorf("parseLine(%q) = %+v, %v, want a socket accepted as the boundary case %q", a.line, got, err, a.name)
 			}
 		})
+	}
+}
+
+// tcpTestEntry is one socket of a generated table: its local endpoint and its state code.
+type tcpTestEntry struct {
+	local netip.AddrPort
+	state string
+}
+
+// endpointText writes ap as the kernel does: the address words in host byte order, a colon and the port.
+func endpointText(ap netip.AddrPort) string {
+	raw := ap.Addr().As16()
+	words := raw[:]
+	if ap.Addr().Is4() {
+		raw4 := ap.Addr().As4()
+		words = raw4[:]
+	}
+	var b strings.Builder
+	for i := 0; i < len(words); i += 4 {
+		fmt.Fprintf(&b, "%08X", binary.NativeEndian.Uint32(words[i:]))
+	}
+	return fmt.Sprintf("%s:%04X", b.String(), ap.Port())
+}
+
+// generatedTable builds the text of a table with the header of a captured one and one line per entry.
+func generatedTable(entries []tcpTestEntry, zeroRemote string) string {
+	var b strings.Builder
+	b.WriteString("  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n")
+	for i, e := range entries {
+		fmt.Fprintf(&b, "%4d: %s %s %s 00000000:00000000 00:00000000 00000000     0        0 %d 1 0000000000000000 100 0 0 10 0\n",
+			i, endpointText(e.local), zeroRemote, e.state, 1000+i)
+	}
+	return b.String()
+}
+
+const (
+	zeroRemote4 = "00000000:0000"
+	zeroRemote6 = "00000000000000000000000000000000:0000"
+)
+
+// collectListeners runs TCPListeners on proc and returns the visited endpoints in order.
+func collectListeners(proc fstest.MapFS) ([]netip.AddrPort, error) {
+	var got []netip.AddrPort
+	err := TCPListeners(proc, func(local netip.AddrPort) { got = append(got, local) })
+	return got, err
+}
+
+func TestTCPListeners_VisitsListeningSockets(t *testing.T) {
+	loopback := addrPort("127.0.0.1:3306")
+	anyV4 := addrPort("0.0.0.0:3306")
+	public := addrPort("203.0.113.7:3307")
+	v6any := addrPort("[::]:3306")
+	v6loop := addrPort("[::1]:3306")
+	mapped := addrPort("[::ffff:127.0.0.1]:3306")
+	tcp4 := generatedTable([]tcpTestEntry{
+		{loopback, "0A"}, {addrPort("10.0.0.5:51000"), "01"}, {anyV4, "0A"}, {addrPort("10.0.0.5:51001"), "06"}, {public, "0A"},
+	}, zeroRemote4)
+	tcp6 := generatedTable([]tcpTestEntry{
+		{v6any, "0A"}, {addrPort("[2001:db8::1]:51000"), "01"}, {v6loop, "0A"}, {mapped, "0A"},
+	}, zeroRemote6)
+
+	t.Run("calls visit for the LISTEN sockets of tcp then tcp6 in table order", func(t *testing.T) {
+		got, err := collectListeners(fstest.MapFS{
+			"net/tcp":  {Data: []byte(tcp4)},
+			"net/tcp6": {Data: []byte(tcp6)},
+		})
+
+		if err != nil {
+			t.Fatalf("TCPListeners() error = %v, want nil", err)
+		}
+		want := []netip.AddrPort{loopback, anyV4, public, v6any, v6loop, mapped}
+		if !slices.Equal(got, want) {
+			t.Errorf("TCPListeners() visited %v, want %v", got, want)
+		}
+	})
+
+	t.Run("a missing tcp6 table is skipped", func(t *testing.T) {
+		got, err := collectListeners(fstest.MapFS{"net/tcp": {Data: []byte(tcp4)}})
+
+		if err != nil {
+			t.Fatalf("TCPListeners() without tcp6 error = %v, want nil", err)
+		}
+		want := []netip.AddrPort{loopback, anyV4, public}
+		if !slices.Equal(got, want) {
+			t.Errorf("TCPListeners() without tcp6 visited %v, want %v", got, want)
+		}
+	})
+
+	t.Run("a missing tcp table is an error", func(t *testing.T) {
+		_, err := collectListeners(fstest.MapFS{"net/tcp6": {Data: []byte(tcp6)}})
+
+		if err == nil {
+			t.Errorf("TCPListeners() without tcp error = nil, want an error")
+		}
+	})
+
+	t.Run("a table without sockets visits nothing", func(t *testing.T) {
+		got, err := collectListeners(fstest.MapFS{"net/tcp": {Data: []byte(generatedTable(nil, zeroRemote4))}})
+
+		if err != nil || len(got) != 0 {
+			t.Errorf("TCPListeners() = %v, %v, want no endpoint and nil", got, err)
+		}
+	})
+}
+
+func TestTCPListeners_UnreadableLineIsAnError(t *testing.T) {
+	good4 := generatedTable([]tcpTestEntry{{addrPort("127.0.0.1:3306"), "0A"}}, zeroRemote4)
+	good6 := generatedTable([]tcpTestEntry{{addrPort("[::1]:3306"), "0A"}}, zeroRemote6)
+	bad := []struct {
+		name string
+		line string
+	}{
+		{"too few fields", "   1: 0100007F:0CEA 00000000:0000 0A\n"},
+		{"unknown state", "   1: 0100007F:0CEA 00000000:0000 FF 00000000:00000000 00:00000000 00000000 0 0 5 1\n"},
+		{"bad address", "   1: 0100007Z:0CEA 00000000:0000 0A 00000000:00000000 00:00000000 00000000 0 0 5 1\n"},
+		{"a line over the limit", strings.Repeat("x", 600) + "\n"},
+	}
+	for _, tt := range bad {
+		t.Run("tcp "+tt.name, func(t *testing.T) {
+			_, err := collectListeners(fstest.MapFS{"net/tcp": {Data: []byte(good4 + tt.line)}, "net/tcp6": {Data: []byte(good6)}})
+
+			if err == nil {
+				t.Errorf("TCPListeners() with %s in tcp error = nil, want an error", tt.name)
+			}
+		})
+		t.Run("tcp6 "+tt.name, func(t *testing.T) {
+			line := strings.Replace(tt.line, "0100007F", "00000000000000000000000001000000", 1)
+			_, err := collectListeners(fstest.MapFS{"net/tcp": {Data: []byte(good4)}, "net/tcp6": {Data: []byte(good6 + line)}})
+
+			if err == nil {
+				t.Errorf("TCPListeners() with %s in tcp6 error = nil, want an error", tt.name)
+			}
+		})
+	}
+}
+
+func TestTCPListeners_CapturedServerTables(t *testing.T) {
+	const wantListeners = 26 + 25 // LISTEN lines (state 0A) of the captured tcp and tcp6
+	got, err := collectListeners(nil)
+	if err == nil {
+		t.Fatalf("TCPListeners(empty tree) = %v, nil, want an error for the missing tcp", got)
+	}
+	proc := fstest.MapFS{}
+	for _, name := range []string{"tcp", "tcp6"} {
+		data, rerr := os.ReadFile(filepath.Join(serverNetDir, name))
+		if rerr != nil {
+			t.Fatalf("reading the fixture %s: %v", name, rerr)
+		}
+		proc["net/"+name] = &fstest.MapFile{Data: data}
+	}
+
+	got, err = collectListeners(proc)
+
+	if err != nil {
+		t.Fatalf("TCPListeners(captured tables) error = %v, want nil", err)
+	}
+	if len(got) != wantListeners {
+		t.Errorf("TCPListeners(captured tables) visited %d sockets, want %d", len(got), wantListeners)
+	}
+	if !slices.Contains(got, addrPort("127.0.0.1:3306")) {
+		t.Errorf("TCPListeners(captured tables) = %v, want it to hold 127.0.0.1:3306", got)
 	}
 }

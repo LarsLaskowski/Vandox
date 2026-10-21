@@ -55,7 +55,7 @@ func gapAll(seq uint64, loc *time.Location) model.Record {
 	}}
 }
 
-// allKindRecords returns one fully populated record of every kind (the kernel kind twice, the connection snapshot as a full and as an aggregates-only record), seq 1..10.
+// allKindRecords returns one fully populated record of every kind (the kernel kind twice, the connection snapshot as a full and as an aggregates-only record, the MariaDB status as a database that answered and as one that refused the login), seq 1..12.
 func allKindRecords(loc *time.Location) []model.Record {
 	return []model.Record{
 		metricAll(1, loc),
@@ -119,6 +119,10 @@ func allKindRecords(loc *time.Location) []model.Record {
 			Inventory:     model.InventoryPrivileged,
 			Tables:        []model.Proto{model.ProtoTCP, model.ProtoUDP6},
 			Listeners:     []model.Listener{{Proto: model.ProtoTCP, Local: netip.MustParseAddrPort("0.0.0.0:22"), PID: 1, Command: "sshd"}},
+		}},
+		{Meta: agentMeta(12, "mariadb", loc), Data: &model.MariaDBStatus{
+			Availability: model.MariaDBNotAnswering,
+			ErrorCode:    ptr(uint16(1045)),
 		}},
 	}
 }

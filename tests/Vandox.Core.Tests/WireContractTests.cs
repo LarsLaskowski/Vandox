@@ -65,6 +65,7 @@ public class WireContractTests
 
         // Act
         var kinds = new List<string>();
+        MariaDbStatus? refused = null;
         string agentId;
 
         using (var decoder = await BatchDecoder.OpenAsync(compressed, null, CancellationToken.None))
@@ -74,15 +75,24 @@ public class WireContractTests
             for (var record = await decoder.NextAsync(CancellationToken.None); record is not null; record = await decoder.NextAsync(CancellationToken.None))
             {
                 kinds.Add(record.Kind);
+
+                if (record.Data is MariaDbStatus { ErrorCode: not null } status)
+                {
+                    refused = status;
+                }
             }
         }
 
         // Assert
         Assert.AreEqual("agent-1", agentId, "agent id");
 
-        var expected = new[] { RecordKind.Metric, RecordKind.ProcessSnapshot, RecordKind.ConnectionSnapshot, RecordKind.ServiceState, RecordKind.MariaDbStatus, RecordKind.KernelEvent, RecordKind.KernelEvent, RecordKind.LogLine, RecordKind.Gap, RecordKind.ConnectionSnapshot, RecordKind.ConnectionSnapshot };
+        var expected = new[] { RecordKind.Metric, RecordKind.ProcessSnapshot, RecordKind.ConnectionSnapshot, RecordKind.ServiceState, RecordKind.MariaDbStatus, RecordKind.KernelEvent, RecordKind.KernelEvent, RecordKind.LogLine, RecordKind.Gap, RecordKind.ConnectionSnapshot, RecordKind.ConnectionSnapshot, RecordKind.MariaDbStatus };
 
         Assert.AreSequenceEqual(expected, kinds, "kinds in order");
+        Assert.IsNotNull(refused, "the golden batch holds a MariaDB status of a database that refused the login");
+        Assert.AreEqual(MariaDbStatus.NotAnswering, refused.Availability, "availability of the refused login");
+        Assert.AreEqual((ushort)1045, refused.ErrorCode, "error code of the refused login");
+        Assert.IsNull(refused.Validate(), "the refused login is valid");
     }
 
     /// <summary>
@@ -346,7 +356,7 @@ public class WireContractTests
                          ("X", 4),
                          ("M", 5),
                          ("U", 2),
-                         ("S", 32)
+                         ("S", 40)
                      };
         var required = groups.SelectMany(pair => Enumerable.Range(1, pair.Count).Select(number => $"{pair.Prefix}{number}"));
 

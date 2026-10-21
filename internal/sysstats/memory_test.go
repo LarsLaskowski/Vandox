@@ -120,3 +120,53 @@ func requireMemory(t *testing.T, got []model.Record, want map[string]int, absent
 		}
 	}
 }
+
+func TestMemTotal_ReturnsBytes(t *testing.T) {
+	t.Run("the captured meminfo", func(t *testing.T) {
+		tr := loadTree(t)
+
+		got, err := sysstats.MemTotal(tr.proc)
+
+		const want = uint64(16479424) * kib
+		if err != nil || got != want {
+			t.Errorf("MemTotal(captured) = %d, %v, want %d, nil", got, err, want)
+		}
+	})
+
+	t.Run("an edited value", func(t *testing.T) {
+		tr := loadTree(t)
+		replaceLine(t, tr.proc, "meminfo", "MemTotal:", kbLine("MemTotal", 2000000))
+
+		got, err := sysstats.MemTotal(tr.proc)
+
+		const want = uint64(2000000) * kib
+		if err != nil || got != want {
+			t.Errorf("MemTotal(2000000 kB) = %d, %v, want %d, nil", got, err, want)
+		}
+	})
+
+	failures := map[string]func(t *testing.T, tr *tree){
+		"no meminfo": func(_ *testing.T, tr *tree) { delete(tr.proc, "meminfo") },
+		"no MemTotal line": func(t *testing.T, tr *tree) {
+			replaceLine(t, tr.proc, "meminfo", "MemTotal:", "")
+		},
+		"MemTotal without kB": func(t *testing.T, tr *tree) {
+			replaceLine(t, tr.proc, "meminfo", "MemTotal:", "MemTotal:       123")
+		},
+		"non-numeric MemTotal": func(t *testing.T, tr *tree) {
+			replaceLine(t, tr.proc, "meminfo", "MemTotal:", "MemTotal:       abc kB")
+		},
+	}
+	for name, mutate := range failures {
+		t.Run(name+" is an error", func(t *testing.T) {
+			tr := loadTree(t)
+			mutate(t, tr)
+
+			got, err := sysstats.MemTotal(tr.proc)
+
+			if err == nil || got != 0 {
+				t.Errorf("MemTotal(%s) = %d, %v, want 0 and an error", name, got, err)
+			}
+		})
+	}
+}
