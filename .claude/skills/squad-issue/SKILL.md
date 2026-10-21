@@ -56,7 +56,9 @@ every Git and GitHub action yourself, including follow-up issues the Lead decide
      its task notification arrives, add the usage with `--amend-last "<member>" --agent squad-<role> --tokens …
      --tool-uses … --seconds …` (`--step "<step>"` for a row that is no longer the member's last).
    - **Every number is copied from the usage block of a task notification you have in front of you** —
-     never an estimate, a figure from memory or the member's hand-back. A notification that never comes is
+     never an estimate, a figure from memory or the member's hand-back. A notification whose summary says the
+     agent is waiting on its own background work is interim: amend with the numbers of the final notification
+     of the same task id (`--replace-last` if the interim ones are already in). A notification that never comes is
      marked `--unreported`; a wrong trailer is corrected with `--replace-last`, never with a second row.
    - A continued launch gets `--continued` (or `--continued-from "<step cell of the fresh launch>"` when that
      agent is not the member's last fresh launch) on the call that carries its numbers — the amend of its pending

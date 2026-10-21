@@ -360,8 +360,10 @@ PR is opened, the branch stays without one, and the user is told so.
   compiling only because of a signature or field change the Dev made itself — mechanically, no assertion touched, listed in
   its report; these are the only cases in which the Dev edits test code. The **Tester** moves them in step 5
   when old and new signature coexist, and checks the Dev's edits in its coverage step.
-- **Dev ↔ Tester disagreements:** if the Dev believes a step-5 test is wrong, the Lead decides (the test
-  is not changed silently). Not counted against a loop limit.
+- **Dev ↔ Tester disagreements:** if the Dev believes a step-5 test's expectation is wrong, the Lead decides
+  (the test is not changed silently). A defect the Dev reproduces without changing the test (a failing fixture
+  or helper, not a disputed expectation) goes to the Tester as a fix round once the orchestrator has verified
+  the reproduction. Not counted against a loop limit.
 - **Code check needs a structural change** (or breaks build/tests): the Code Officer's edit is reverted
   and the item goes to the Dev (or Tester for tests), then the code check runs again. Not counted
   against a loop limit.
