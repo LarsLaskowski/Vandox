@@ -24,4 +24,4 @@ are quoted in full.
 | 2026-10-21 06:09 | 5 Tests first G1 (capture check) | squad-tester | DONE: both captures clean, nothing edited (sonnet/medium · 75,425 tokens · 11 tool uses · 73 s) |
 | 2026-10-21 06:13 | 5 Tests first G2 | squad-tester | DONE: AC6 tests Go+C#, golden regenerated, shared cases S33-S38; refusal cases fail on skeleton (golden/pins deferred) (sonnet/medium · 120,374 tokens · 19 tool uses · 236 s) |
 | 2026-10-21 06:15 | 6 Implement G2 | squad-dev | DONE: error_code checks Go+C#; deviation: NullAsAbsentConverterFactory gets ushort; model/wire/Core tests green (sonnet/medium · 71,029 tokens · 17 tool uses · 120 s) |
-| 2026-10-21 06:18 | 5 Tests first G3 | squad-tester | DONE: config, MemTotal, TCPListeners tests; red on skeleton; TestLoadAgent_Example red until task 11 (sonnet/medium · usage pending) |
+| 2026-10-21 06:18 | 5 Tests first G3 | squad-tester | DONE: config, MemTotal, TCPListeners tests; red on skeleton; TestLoadAgent_Example red until task 11 (sonnet/medium · 126,013 tokens · 19 tool uses · 127 s) |
