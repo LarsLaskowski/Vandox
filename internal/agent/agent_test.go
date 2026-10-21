@@ -555,6 +555,7 @@ func TestJobs_Schedules(t *testing.T) {
 			cfg := config.DefaultAgent()
 			cfg.Filesystem.MountPoints = tt.mountPoints
 			cfg.Services.Units = tt.units
+			cfg.MariaDB.Enabled = false
 			log := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 			list, _ := jobs(Options{Self: fixtureSources(), System: fixtureSystem(), Processes: fixtureProcesses(), Connections: fixtureConnections(), Services: fixtureServices()}, &cfg, log)
@@ -564,6 +565,48 @@ func TestJobs_Schedules(t *testing.T) {
 			}
 			if _, err := scheduler.New(list, scheduler.DiscardSink{}, log); err != nil {
 				t.Errorf("scheduler.New(jobs()) error = %v, want nil", err)
+			}
+		})
+	}
+}
+
+func TestJobs_MariaDBAfterSystemdOnlyWhenEnabled(t *testing.T) {
+	names := func(list []scheduler.Job) []string {
+		var got []string
+		for _, j := range list {
+			got = append(got, j.Collector.Name())
+		}
+		return got
+	}
+	tests := []struct {
+		name    string
+		enabled bool
+		units   []string
+		want    []string
+	}{
+		{"enabled follows systemd", true, []string{"nginx.service"}, []string{"self", "system", "processes", "connections", "systemd", "mariadb", "filesystem", "clock"}},
+		{"enabled without systemd follows connections", true, []string{}, []string{"self", "system", "processes", "connections", "mariadb", "filesystem", "clock"}},
+		{"disabled leaves the job out", false, []string{"nginx.service"}, []string{"self", "system", "processes", "connections", "systemd", "filesystem", "clock"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := config.DefaultAgent()
+			cfg.MariaDB.Enabled = tt.enabled
+			cfg.Services.Units = tt.units
+			log := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+			list, _ := jobs(Options{Self: fixtureSources(), System: fixtureSystem(), Processes: fixtureProcesses(), Connections: fixtureConnections(), Services: fixtureServices()}, &cfg, log)
+
+			if got := names(list); !slices.Equal(got, tt.want) {
+				t.Errorf("job names = %v, want %v", got, tt.want)
+			}
+			if tt.enabled {
+				want := scheduler.Schedule{Interval: MariaDBInterval, Timeout: MariaDBTimeout, PressureInterval: MariaDBPressureInterval}
+				for _, j := range list {
+					if j.Collector.Name() == "mariadb" && j.Schedule != want {
+						t.Errorf("mariadb schedule = %+v, want %+v", j.Schedule, want)
+					}
+				}
 			}
 		})
 	}
