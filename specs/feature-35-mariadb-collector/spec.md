@@ -85,12 +85,13 @@ All records carry source `mariadb` and the capture time of the run's start; ever
   password for it.
 - S11: Given `mariadb.enabled: false` in the agent's configuration, when the agent runs, then the collector `mariadb` does not run:
   no record, no log line, no connection to the socket.
-- S12: Given the login succeeded, when it is the first `up` run after the agent started or after a run with an `error_code`, then the
-  agent also asks the server which account it was authenticated as and whether that account holds `PROCESS` (fixed, read-only
+- S12: Given the login succeeded, when a run is `up`, then the agent also asks the server which account it was authenticated as and whether that account holds `PROCESS` (fixed, read-only
   questions that need no privilege); when the account is not `vandox-agent`@`localhost` (for example an anonymous `''@'localhost'`
   accepted the login) or `PROCESS` is missing (the process list would show only the agent's own connection, so an empty `threads`
   would look normal), it logs the warning `mariadb user not as installed` with `fix` = `run deploy/agent/mariadb-user.sql as the
-  database administrator` once until the next such check, and keeps collecting what it can.
+  database administrator` at the first such run after the agent started or after a run whose check passed, and keeps collecting what
+  it can. The check runs on every `up` run (two small statements), so an account that changes while the agent runs — the user dropped
+  while an anonymous account with an empty password accepts the login — is reported at the next run, not only after a restart.
 
 ## Errors and edge cases
 
@@ -158,7 +159,7 @@ All records carry source `mariadb` and the capture time of the run's start; ever
 - E16: A status value that is not a plain unsigned 64-bit number, or a variable value longer than 1,024 bytes: that entry is left out
   of its map; the rest of the record is written (S1).
 - E17: The server answers a question of the account check of S12 with an error: unlike E14 the run does not fail; its record is
-  written as for any other `up` run, no warning is logged, and the check is repeated at the next `up` run. No answer in time is E4
+  written as for any other `up` run, no warning is logged, the state of S12 does not change, and the next `up` run checks again. No answer in time is E4
   as for every statement.
 
 ## Non-functional requirements
@@ -256,9 +257,9 @@ All records carry source `mariadb` and the capture time of the run's start; ever
   via `unix_socket` with `MAX_USER_CONNECTIONS 2` and grants exactly `PROCESS` on `*.*`; `deploy/agent/README.md` documents it as S10
   says (S10).
 - [ ] AC16: With a fake whose account check answers `vandox-agent`@`localhost` with `PROCESS`, nothing is logged; answering an
-  anonymous account or without `PROCESS` logs `mariadb user not as installed` with the `fix` text once, again only after a run with an
-  `error_code`, and the run's record is written either way; an error answer to the check writes the record, logs nothing and repeats
-  the check at the next `up` run (S12, E17).
+  anonymous account or without `PROCESS` logs `mariadb user not as installed` with the `fix` text once per episode, also when the
+  account changes after passing runs, and again only after a passing check; the check runs on every `up` run and the run's record is
+  written either way; an error answer to the check writes the record, logs nothing and leaves the state unchanged (S12, E17).
 - [ ] AC17: The fake of the protocol criteria (AC1, AC3, AC5, AC7, AC8, AC12, AC13, AC16) replays the captures under
   `testdata/mariadb/` byte for byte for every exchange they hold — the greeting, the `unix_socket` login without an authentication
   switch, the status, variables, process list and account statements — and builds only what they do not hold: hangs, malformed and
@@ -304,9 +305,9 @@ All records carry source `mariadb` and the capture time of the run's start; ever
 - Does the collector need RSS/PSS of `mariadbd` itself? Answered: no, see *Out of scope*; the program entry of the process collector
   carries both.
 - What is the start-up check? Answered: the first run after the start that reaches the database: a refused login reports a missing
-  user (S4), and a successful one is followed by the account check of S12, because a login alone does not prove that the account is
-  `vandox-agent` (an anonymous account can accept it) or that it holds `PROCESS`. Every later refusal is seen at once, not only at
-  the next agent start.
+  user (S4), and a successful one runs the account check of S12, because a login alone does not prove that the account is
+  `vandox-agent` (an anonymous account can accept it) or that it holds `PROCESS`. The check repeats on every `up` run, so a change
+  while the agent runs is seen at the next run.
 - Which socket path? Answered: the server's variable `socket` is `/run/mysqld/mysqld.sock` (capture
   `testdata/mariadb/select-status-variables-processlist.txt`); the option exists for a server that differs.
 - Which MariaDB version? Answered: the captures show `12.3.3-MariaDB-ubu2204`, not the 10.6 this spec first assumed; every value of
@@ -346,3 +347,5 @@ All records carry source `mariadb` and the capture time of the run's start; ever
 - m3 (account check) — accepted: S12, E17 and AC16 add a fixed check of the authenticated account and `PROCESS` at the first `up` run
   after the start or after a refusal, with the warning `mariadb user not as installed`. Over-privilege stays out of scope.
 - m4 (`.squad/project.md`) — accepted: listed under *Area documents* (security areas 7, 11, 12 and the *Test doubles* row).
+- Security note on the plan (account check only after a start or a refusal; a user dropped while an anonymous account accepts the
+  login would go unnoticed until a restart) — accepted: S12, E17 and AC16 now run the check on every `up` run.

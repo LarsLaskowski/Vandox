@@ -59,7 +59,7 @@ Feature: [spec.md](spec.md). Nothing produces `mariadb_status` today; the agent 
 | AC13 | `TestOpen_SendsOnlyTheUserAndNoCredential` (handshake response fields: capabilities `0x00aea204`, extended `0x18`, user, empty auth data, plugin; a switch FromDocs gets one empty payload and no credential, a second switch ends the run with `authentication switch refused`); `TestCollect_SendsOnlyFixedStatementsOverOneConnection`; `TestMariadb_ImportsOnlyAllowedPackages` (the allow-lists and the dial pin of *Approach*) | `internal/mariadb/client_test.go`, `internal/mariadb/collector_test.go` |
 | AC14 | `TestLoadAgent_MariaDBDefaultsAndRules`; `TestLoadAgent_Example`; `TestJobs_MariaDBAfterSystemdOnlyWhenEnabled` | `internal/config/agent_test.go`, `internal/agent/agent_test.go` |
 | AC15 | `TestUserSQL_CreatesOnlyTheProcessUser` (the exact statements of *Approach* in `deploy/agent/mariadb-user.sql`) | `internal/mariadb/client_test.go` |
-| AC16 | `TestCollect_AccountCheck` (capture: no line; generated: anonymous account, no `PROCESS`, server error to the check, repeat after an `error_code` run) | `internal/mariadb/collector_test.go` |
+| AC16 | `TestCollect_AccountCheck` (capture: no line; generated: anonymous account, no `PROCESS`, a change to an anonymous account after passing runs, server error to the check; the check's statements sent on every `up` run) | `internal/mariadb/collector_test.go` |
 | AC17 | `TestCapture_ReplaysByteForByte` (the helper's packets of both captures re-encode to the file's bytes); `TestCapture_FakeRequiresTheCapturedLayoutBits` (a handshake without `PROTOCOL_41`, `SESSION_TRACK`, `PLUGIN_AUTH_LENENC_CLIENT_DATA`, extended `0x08` or `0x10`, or with `DEPRECATE_EOF`, is refused by the fake before it replays); `TestOpen_CapturedLogin`; `TestQuery_CapturedResultSets` (row counts 571, 696, 2, 1, 1 and the cells of facts 7-9) | `internal/mariadb/client_test.go` |
 
 ## Approach
@@ -110,7 +110,7 @@ Client (`client.go`, `packet.go`, `statement.go`):
   `mariadb: variables: name sent twice`. The server's error message is skipped by length and never read into a string.
 
 Collector (`collector.go`, `sample.go`, `derived.go`), per run: budget context of `run.Start + 4 s` (greeting by `run.Start + 2 s`);
-open, ping (latency by the monotonic clock), status, variables, the account check when due, the process list when `Threads_running`
+open, ping (latency by the monotonic clock), status, variables, the account check (every `up` run), the process list when `Threads_running`
 > 10 or `run.Pressure`, close; then `sysstats.MemTotal` and, when `port` is valid, `connstats.TCPListeners`.
 - Classification: dial `ENOENT`/`ECONNREFUSED` → `down`; dial `EAGAIN`, `errTimeout`, `errClosed` → `not_answering`; server error at
   the greeting or login → `not_answering` + `error_code`; any other error → the run fails (the scheduler's gap and log).
@@ -136,7 +136,7 @@ open, ping (latency by the monotonic clock), status, variables, the account chec
   run was `up`, not `PreviousLost`, the start moved by at most 5 s and the time is positive. Exposure: local address `Unmap()`, then
   `IsLoopback()`; every other address (wildcard, private, link-local, `::127.0.0.1`) counts; ports `port` and non-zero `extra_port`.
 - State and log lines as the spec fixes them (texts, attributes, transitions); initial availability `up`, RAM state below, exposure 0,
-  account check due. Metric records: source `mariadb`, the run's start, names and units of S7-S9. The account check reads only the
+  account check state passing. Metric records: source `mariadb`, the run's start, names and units of S7-S9. The account check reads only the
   current account's rows (`GRANTEE LIKE '%vandox-agent%'`, and MariaDB shows an account without privileges on `mysql` only its own).
 
 `deploy/agent/mariadb-user.sql` (exact statements; comments above them say what it does, that it is run as the database
@@ -390,4 +390,6 @@ As in the spec. The verification rows 12-15 and 22 are for the Product Manager o
 - Note 4 (non-digit `Id`) — adopted: `unexpected reply`, the run fails.
 - Note 5 (history of ff1c0e2) — noted in fact 10; deleting the branch after the merge needs the user's approval.
 - Note 6 — nothing to do.
-
+- Approval note (account check only after a start or a refusal) — adopted: the check's two fixed statements run on every `up` run
+  (about 1 KB of reply every 30 seconds); the warning follows the transitions of S12. Spec S12, E17, AC16 and `TestCollect_AccountCheck`
+  changed; no new option.

@@ -18,3 +18,5 @@ are quoted in full.
 | 2026-10-21 05:56 | 2b Plan challenge | squad-devils-advocate | OBJECTIONS 2 major (M1 capability bits drop extended metadata, M2 unknown user may answer with auth switch), 5 minor (opus/medium · 94,913 tokens · 23 tool uses · 319 s) |
 | 2026-10-21 06:00 | 2b Plan revise (challenge + security) | squad-lead | DONE: M1,M2,m1,m3-m5, B1 + notes accepted; m2 rejected (bytes read little-endian = 0x00100000); plan-check, decision-check PASS; plan.md 5231 words (soft limit warning) (opus/medium · 46,451 tokens · 12 tool uses · 222 s · continued) |
 | 2026-10-21 06:01 | 3 Plan security delta | squad-security | APPROVED; one non-blocking note leaves the plan a choice (account check re-run) -> Lead decides (opus/medium · 22,558 tokens · 5 tool uses · 66 s · continued) |
+| 2026-10-21 06:02 | 2b Plan revise (security note) | squad-lead | DONE: account check runs on every up run; plan-check, decision-check PASS (opus/medium · usage pending) |
+| 2026-10-21 06:02 | 2b Plan done | Orchestrator | Plan approved by Security and Lead; plan.md >4000 words soft warning only |
