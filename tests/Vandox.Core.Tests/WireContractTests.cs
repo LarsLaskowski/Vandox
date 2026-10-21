@@ -356,7 +356,7 @@ public class WireContractTests
                          ("X", 4),
                          ("M", 5),
                          ("U", 2),
-                         ("S", 38)
+                         ("S", 40)
                      };
         var required = groups.SelectMany(pair => Enumerable.Range(1, pair.Count).Select(number => $"{pair.Prefix}{number}"));
 

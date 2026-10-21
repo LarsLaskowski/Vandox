@@ -1562,6 +1562,28 @@
         "field": "data.availability",
         "reason": "status, variables and threads must be empty unless up"
       }
+    },
+    {
+      "name": "S39 mariadb error code above 65535",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"mariadb_status\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"availability\":\"not_answering\",\"error_code\":65536,\"complete\":false}}"
+      ],
+      "want": {
+        "error": "Malformed",
+        "line": 2
+      }
+    },
+    {
+      "name": "S40 mariadb negative error code",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"mariadb_status\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"availability\":\"not_answering\",\"error_code\":-1,\"complete\":false}}"
+      ],
+      "want": {
+        "error": "Malformed",
+        "line": 2
+      }
     }
   ]
 }

@@ -44,3 +44,4 @@ are quoted in full.
 | 2026-10-21 08:03 | 8 Review round 1 (security diff) | squad-security | APPROVED, no blocking; N1 shared case for out-of-range error_code, N2 import list wider than plan, N3 fact 17 unmeasured (opus/medium · 103,251 tokens · 29 tool uses · 200 s) |
 | 2026-10-21 08:07 | 8 Review round 1 | squad-reviewer | BLOCKING 2 (agent Run tests reach the host's real MariaDB socket and /proc; no out-of-range error_code test), NON-BLOCKING 1 verbatim doc (opus/medium · 193,875 tokens · 54 tool uses · 423 s) |
 | 2026-10-21 08:07 | 8 Verbatim doc fix | Orchestrator | Applied reviewer's verbatim fix in docs/areas/wire-format.md (mariadb_status Producer sentence: listen queue full / error packet); diff contains only that |
+| 2026-10-21 08:11 | 8 Fix round 1 | squad-tester | DONE: fixtureMariaDB on 10 agent test sites (listener saw 0 connections), S39/S40 out-of-range error_code (sonnet/medium · 76,479 tokens · 19 tool uses · 199 s) |
