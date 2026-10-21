@@ -27,6 +27,9 @@ const (
 	decimalBase   = 10
 )
 
+// listenState is the name of the state of a listening socket.
+const listenState = "LISTEN"
+
 // Fixed reasons of an unreadable line.
 var (
 	errFormat    = errors.New("not in the expected format")
@@ -271,6 +274,26 @@ func cause(err error) error {
 // TCPListeners calls visit for the local address of every LISTEN socket of net/tcp and net/tcp6; a missing tcp6 is skipped,
 // a missing tcp or any unread line is an error.
 func TCPListeners(proc fs.FS, visit func(local netip.AddrPort)) error {
-	_, _ = proc, visit
-	return errors.New("not implemented")
+	for _, t := range socketTables[:2] {
+		var badErr error
+		missing, err := readTable(proc, t, func(s socket) {
+			if s.state == listenState {
+				visit(s.local)
+			}
+		}, func(line int, lerr error) {
+			if badErr == nil {
+				badErr = fmt.Errorf("connstats: net/%s: line %d: %w", t.name, line, lerr)
+			}
+		})
+		if err != nil {
+			return err
+		}
+		if badErr != nil {
+			return badErr
+		}
+		if missing && t.name == "tcp" {
+			return fmt.Errorf("connstats: net/%s: %w", t.name, fs.ErrNotExist)
+		}
+	}
+	return nil
 }

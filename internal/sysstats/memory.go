@@ -200,6 +200,9 @@ func vmstatIndex(name string) int {
 
 // MemTotal returns the MemTotal of /proc/meminfo in bytes.
 func MemTotal(proc fs.FS) (uint64, error) {
-	_ = proc
-	return 0, errors.New("not implemented")
+	m, err := readMeminfo(proc)
+	if err != nil {
+		return 0, err
+	}
+	return uint64(m.values["MemTotal"]) * 1024, nil
 }

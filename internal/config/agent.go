@@ -1,7 +1,6 @@
 package config
 
 import (
-	"errors"
 	"net/netip"
 	"net/url"
 	"path/filepath"
@@ -81,10 +80,15 @@ const (
 	MaxSocketPathBytes   = 107
 )
 
+// socketPathReason is the reason mariadb.socket is refused with; it does not quote the value.
+const socketPathReason = "must be an absolute, clean path of at most 107 bytes"
+
 // checkSocketPath checks the value of key: an absolute, clean path of at most MaxSocketPathBytes bytes.
 func checkSocketPath(file string, lines map[string]int, key, value string) error {
-	_, _, _, _ = file, lines, key, value
-	return errors.New("not implemented")
+	if len(value) < 2 || len(value) > MaxSocketPathBytes || !filepath.IsAbs(value) || filepath.Clean(value) != value {
+		return keyError(file, lines, key, socketPathReason)
+	}
+	return nil
 }
 
 // Bounds of services.units.
@@ -264,13 +268,14 @@ func DefaultAgent() Agent {
 
 		Filesystem: Filesystem{MountPoints: []string{"/"}},
 		Services:   Services{Units: DefaultServiceUnits()},
+		MariaDB:    MariaDB{Enabled: true, Socket: DefaultMariaDBSocket},
 	}
 }
 
 // AgentKeys returns every option key path in file order: agent_id, backend.url, spool.directory, log.level,
-// filesystem.mount_points, processes.programs, services.units.
+// filesystem.mount_points, processes.programs, services.units, mariadb.enabled, mariadb.socket.
 func AgentKeys() []string {
-	return []string{keyAgentID, keyBackendURL, "spool.directory", "log.level", "filesystem.mount_points", "processes.programs", "services.units"}
+	return []string{keyAgentID, keyBackendURL, "spool.directory", "log.level", "filesystem.mount_points", "processes.programs", "services.units", "mariadb.enabled", "mariadb.socket"}
 }
 
 // LoadAgent reads the agent configuration file at path and the secrets from environ (in os.Environ form).
@@ -328,7 +333,7 @@ func (a *Agent) validate(file string, lines map[string]int) error {
 		return err
 	}
 	a.Services.Units = units
-	return nil
+	return checkSocketPath(file, lines, "mariadb.socket", a.MariaDB.Socket)
 }
 
 // checkMountPoints checks the list of filesystem.mount_points.
