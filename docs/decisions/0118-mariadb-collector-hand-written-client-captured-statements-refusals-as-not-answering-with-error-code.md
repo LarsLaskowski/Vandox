@@ -38,8 +38,10 @@ greeting when the server is full), and the Product Manager has none.
 4. **Capabilities.** The client's capability bits decide the layout of the server's replies, and the captures pin only the layout
    of the captured client. **The client sends the captured client's format-relevant bits** (chosen): `CLIENT_PROTOCOL_41`,
    `CLIENT_SESSION_TRACK`, `CLIENT_PLUGIN_AUTH` with length-encoded data, no `CLIENT_DEPRECATE_EOF` (so result sets end in EOF
-   packets, as captured) and MariaDB's extended metadata (an extra field in every column definition, as captured); it leaves out the
-   bits it must not or need not have (`CLIENT_LOCAL_FILES`, `CLIENT_MULTI_STATEMENTS`, `CLIENT_CONNECT_ATTRS`, progress reports).
+   packets, as captured), and MariaDB's extended metadata (`0x08`: an extra field in every column definition) and cache metadata
+   (`0x10`: a "metadata follows" byte after every column count), both as captured; it leaves out the bits it must not or need not
+   have (`CLIENT_LOCAL_FILES`, `CLIENT_MULTI_STATEMENTS`, `CLIENT_CONNECT_ATTRS`, progress reports, bulk operations). The test fake
+   refuses a handshake without the layout bits, so the replay pins the layout the agent really asks for.
 5. **A login the server refuses.** A gap — loses the "too many connections" state an outage analysis needs; a new availability
    `refused` — a 1.0 decoder rejects an unknown value, so it is not a minor change under 0043; **`not_answering` with the new optional
    field `error_code`** (chosen): additive, and a reader that ignores the field still reads a true statement.
@@ -50,8 +52,9 @@ greeting when the server is full), and the Product Manager has none.
    opened another way is missed; **the listening sockets in the kernel's TCP tables on MariaDB's `port` and non-zero `extra_port`**
    (chosen), every address that is not loopback counted, read through the connection collector's table reader.
 8. **Test data for what was not captured.** Wait for captures of the error cases — the Product Manager has none, and provoking them on
-   the production server (filling `max_connections`, dropping the user) is an outage; **build those replies from the protocol
-   documentation, marked in the tests, with the residual risk stated here** (chosen).
+   the production server (filling `max_connections`, a shutdown) is an outage; **build those replies from the protocol documentation,
+   marked in the tests, with the residual risk stated here** (chosen). The harmless ones (a ping, a login refused as another OS user or
+   for a missing user, the user's connection limit) are requested as captures and replace the built replies when they arrive.
 
 ## Decision
 
@@ -70,7 +73,11 @@ recorded as `not_answering` with `error_code`. The rules are in the [Agent](../a
   fixed reason, never a wrong value; the first real run on the server, or a capture of the agent itself, settles it.
 - MariaDB 10.6 to 12.x share the protocol and the statements, but only 12.3.3 is captured; MySQL is not supported (its process list
   has no `Progress` column, which fails the run).
-- A server that asks for another authentication method gets no credential, so a user with a password fails every run as a gap.
+- A server that asks for another authentication method (a user with a password of another plugin, or a missing user answered with a
+  stand-in account) gets one empty answer and no credential; its next answer counts as the login's, so a missing user still ends in
+  `mariadb user missing or not allowed`, and a second switch fails the run as a gap.
+- The statement texts of the process list can hold customer data and credentials (`IDENTIFIED BY '...'`, values of an `INSERT`); they
+  are stored and sent to the backend, which shows them escaped. That is the consequence 0013 accepted; `deploy/agent/README.md` says so.
 - The full status and variable lists are read every run (about 40 KB from a local socket every 30 seconds) for the sake of the
   capture; a filtered query would need a new capture.
 - A listener of another program on MariaDB's port counts as exposed; telling owners apart needs `CAP_SYS_PTRACE`.

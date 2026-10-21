@@ -79,7 +79,10 @@ All records carry source `mariadb` and the capture time of the run's start; ever
 - S10: Given an operator installs the agent, when they read `deploy/agent/README.md`, then it names `deploy/agent/mariadb-user.sql`,
   says that it is run once as the database administrator and may be run again (for example after a Plesk update dropped the user),
   what it creates (the user `vandox-agent`@`localhost` identified via `unix_socket`, `MAX_USER_CONNECTIONS 2`, only the privilege
-  `PROCESS`), what that privilege lets the agent see and not see, and that the agent needs no group, capability or password for it.
+  `PROCESS`), what that privilege lets the agent see and not see, that the statement texts it records can hold customer data and
+  credentials (`IDENTIFIED BY '...'`, values of an `INSERT`) and are sent to the backend and shown there, how to run the file
+  (`mariadb < mariadb-user.sql` as root, or `plesk db < mariadb-user.sql` on Plesk), and that the agent needs no group, capability or
+  password for it.
 - S11: Given `mariadb.enabled: false` in the agent's configuration, when the agent runs, then the collector `mariadb` does not run:
   no record, no log line, no connection to the socket.
 - S12: Given the login succeeded, when it is the first `up` run after the agent started or after a run with an `error_code`, then the
@@ -105,9 +108,10 @@ All records carry source `mariadb` and the capture time of the run's start; ever
   not started again while the run is stuck, so the agent never holds a second MariaDB connection, and no other collector waits.
 - E6: The user `vandox-agent` exists but is not identified via `unix_socket` (it has a password), or the agent runs as another OS
   user: MariaDB refuses the login with 1698 or 1045, which is `not_answering` with that `error_code` and the warning `mariadb user
-  missing or not allowed` (S4). A server that asks the agent to switch to another authentication method (the user has a password
-  of another plugin) gets no credential: the run fails as in E14 with the error text `mariadb: login: authentication switch
-  refused`.
+  missing or not allowed` (S4). A server that asks the agent to switch to another authentication method — the user has a password of
+  another plugin, or the user does not exist and MariaDB answers with a stand-in account — gets an empty answer, never a credential,
+  and its next answer counts as the login's: an error is S4 with its number, a success is checked by S12. A second switch or any
+  further request in the same login fails the run as in E14 with the error text `mariadb: login: authentication switch refused`.
 - E7: MariaDB is at `max_connections` and sends 1040 before any greeting, is shutting down and sends 1053, or the user's
   `MAX_USER_CONNECTIONS` is reached at login (1226): `not_answering` with that `error_code` and the warning `mariadb login refused`
   (S4), never a failed run or a gap. Any other error number from 1 to 65535, before the greeting or at the login, is recorded the
@@ -115,9 +119,11 @@ All records carry source `mariadb` and the capture time of the run's start; ever
 - E8: More than 4,096 connections, or statements of megabytes, while a thread snapshot is due: the record keeps at most 4,096
   threads in the order of S6 (working threads before sleeping ones), each `info` cut to 16 KiB with `truncated`, and only the first
   64 threads of that order keep their `info` at all (the others get an empty `info` with `truncated` set when they had one), so the
-  agent never holds more than 1 MiB of statement text; if the record is
-  still too large for the wire format, the `info` texts are shortened further and then threads are left out from the end of that
-  order, so idle sleepers go first (S6).
+  agent never holds more than 1 MiB of statement text; `user`, `host`, `db`, `command` and `state` are kept up to 512, 512, 256, 32 and
+  256 bytes (above MariaDB's own limits, so a real value is never cut). If the record could be too large for the wire format —
+  judged by an upper bound computed before it is encoded (6 bytes per kept byte, the longest JSON escape), never by encoding an
+  oversized record — the `info` texts are shortened further and then threads are left out from the end of that order, so idle
+  sleepers go first (S6).
 - E9: A statement text, user, host or database name holds control characters, format characters or invalid UTF-8 (any web-space user
   can send such SQL): it is stored as the wire format's text rules prescribe (invalid bytes as U+FFFD), and none of it ever appears
   in the agent's log (S6).
@@ -144,7 +150,9 @@ All records carry source `mariadb` and the capture time of the run's start; ever
   twice, a statement that answers with an error after a good login (an error packet before or in answer to the login is S4, not
   this case): the run fails, the sample is a gap with cause `unknown`, and the
   scheduler logs `collector failed` once (and `collector recovered`) with an error text that holds a fixed reason and never text the
-  server sent; the agent's memory for the run stays within its fixed bound whatever the server sends.
+  server sent; the agent's memory for the run stays within its fixed bound whatever the server sends: of a status or variables reply
+  of any length it keeps only the values of the selection (a selected name sent twice is the error above; other names are not
+  kept), and of a process list only what E8 keeps.
 - E15: The agent may not use the socket (permission denied, for example a unit setting that hides `/run/mysqld`): a failed run as in
   E14 with the error text `mariadb: connect: permission denied`, not `down`.
 - E16: A status value that is not a plain unsigned 64-bit number, or a variable value longer than 1,024 bytes: that entry is left out
@@ -205,7 +213,7 @@ All records carry source `mariadb` and the capture time of the run's start; ever
 - [ ] AC5: With a fake that sends an error packet in place of the greeting (1040 and 1053) and one that answers the login with an error
   (1698, 1045 and 1226), a run writes `not_answering` with that `error_code` and no values, and records no gap; 1698 and 1045 log
   `mariadb user missing or not allowed` with `error_code` and the `fix` text, the others `mariadb login refused`, once per episode, also
-  when the refusal first appears after `up` runs (S4, E6, E7).
+  when the refusal first appears after `up` runs; an authentication switch followed by 1045 is the same as 1045 (S4, E6, E7).
 - [ ] AC6: The Go model and the C# decoder accept `error_code` of 1 to 65535 with `availability` `not_answering`, refuse it outside
   that range or with `up` or `down`, and still refuse values with `not_answering`; the golden batches hold a `not_answering` record
   with an `error_code` and both contract tests read it (S4).
@@ -216,7 +224,9 @@ All records carry source `mariadb` and the capture time of the run's start; ever
 - [ ] AC8: With more than 4,096 threads, or threads whose texts make the record too large for the wire format, the record keeps the
   first threads of the order of S6 within the wire limits as E8 orders the reductions (sleeping threads left out before working
   ones), and passes the wire format's record check; texts with
-  control characters and invalid UTF-8 are kept as the wire rules prescribe and appear in no log line (E8, E9).
+  control characters and invalid UTF-8 are kept as the wire rules prescribe and appear in no log line. A run over at least 4,096
+  threads whose every kept field is at its cap and filled with `<`, control characters and invalid bytes allocates at most 32 MiB
+  in total and never encodes a record line larger than the wire format's 1 MiB (E8, E9).
 - [ ] AC9: For a table of variable sets, `mariadb_memory_max_bytes` and `mariadb_memory_max_ram_percent` equal the formula of S7
   (with `log_bin` `ON` and `OFF`, missing optional summands counting 0, values near 2^64 computed without overflow), both are left
   out for a missing or non-numeric required value or a non-numeric summand, only the percentage is left out when `/proc/meminfo`
@@ -232,12 +242,13 @@ All records carry source `mariadb` and the capture time of the run's start; ever
   unreadable tables or an invalid `port`, and the warning and info lines of S9 follow the changes of the count (S9, E12).
 - [ ] AC12: With a fake that sends a malformed packet, a packet or value above the agent's bounds, a status name twice or an error
   to a statement after the login, and with a socket the agent may not use, the run fails as a gap with cause `unknown`, its error text
-  holds no byte the fake sent (permission denied reads `mariadb: connect: permission denied`), and a test pins that the run's
-  allocation stays within the bound the plan fixes for an oversized reply (E14, E15).
+  holds no byte the fake sent (permission denied reads `mariadb: connect: permission denied`); a cell of 64 MiB is discarded with the
+  run allocating at most 4 MiB, and a status reply and a variables reply of 1,000,000 distinct names each allocate at most 4 MiB
+  (E14, E15).
 - [ ] AC13: The fake records every statement the agent sends: only the fixed read-only statements of the plan, the user name is the
   constant `vandox-agent` (MariaDB's `unix_socket` compares it with the OS user the agent runs as), the authentication data is
-  empty, no password or other credential is sent, an authentication switch is answered by closing the connection, and at most one
-  connection is open at any time (S1, E5, E6).
+  empty, no password or other credential is sent, an authentication switch is answered with an empty payload once and a second one
+  ends the run, and at most one connection is open at any time (S1, E5, E6).
 - [ ] AC14: The configuration accepts `mariadb.enabled` and `mariadb.socket` with their defaults and the example file sets both; a
   relative, unclean, longer than 107 bytes or control-character path and a non-boolean `enabled` stop the start-up with an error that
   names the key and not the value; with `enabled: false` the collector is not scheduled and never connects (S11, E13).

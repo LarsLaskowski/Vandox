@@ -1,17 +1,17 @@
 # Tasks: MariaDB collector
 
-Plan: [plan.md](plan.md) — Status: Draft
+Plan: [plan.md](plan.md) — Status: Draft (revised with the plan)
 
 Each task names the criteria of `spec.md` it delivers, the tasks it waits for and its group: one launch per member in steps 4–6, in
 table order, its rows consecutive. Every documentation edit is in exactly one row.
 
 | # | Group | Task | Files | Criteria | Depends on | Owner | Done |
 | - | ----- | ---- | ----- | -------- | ---------- | ----- | ---- |
-| 1 | G1 | Fix the anonymization of the capture (plan fact 10, *Documentation updates*) and confirm by decoding every field | `testdata/mariadb/select-status-variables-processlist.txt` | AC17 | — | Tester | [ ] |
+| 1 | G1 | Check only (0093b4f fixed it): decode every field of both captures, no `144` prefix, `server_uid` the placeholder, no other real value; report, do not edit | `testdata/mariadb/select-status-variables-processlist.txt`, `testdata/mariadb/account-check.txt` | AC17 | — | Tester | [ ] |
 | 2 | G2 | `error_code` in the Go model and the C# model with its checks | `internal/model/mariadb.go`, `src/Vandox.Core/Model/MariaDbStatus.cs` | AC6 | — | Dev | [ ] |
 | 3 | G2 | Model, golden and shared-case tests; regenerate `all-kinds.jsonl`; adapt the expected kinds and case counts | `internal/model/mariadb_test.go`, `internal/wire/encode_test.go`, `internal/wire/decode_test.go`, `testdata/wire/all-kinds.jsonl`, `testdata/wire/decoder-cases.json`, `tests/Vandox.Core.Tests/PayloadValidationTests.cs`, `tests/Vandox.Core.Tests/WireContractTests.cs` | AC6 | 2 | Tester | [ ] |
 | 4 | G3 | Section `mariadb` of the agent configuration | `internal/config/agent.go` | AC14 | — | Dev | [ ] |
-| 5 | G3 | Exported readers `MemTotal` and `TCPListeners` | `internal/sysstats/memory.go`, `internal/connstats/table.go` | AC9, AC11 | — | Dev | [ ] |
+| 5 | G3 | Exported readers `MemTotal` and `TCPListeners`, exported `procstats.CleanText` wrapper | `internal/sysstats/memory.go`, `internal/connstats/table.go`, `internal/procstats/cmdline.go` | AC8, AC9, AC11 | — | Dev | [ ] |
 | 6 | G3 | Configuration and reader tests | `internal/config/agent_test.go`, `internal/sysstats/memory_test.go`, `internal/connstats/table_test.go` | AC9, AC11, AC14 | 4, 5 | Tester | [ ] |
 | 7 | G4 | Protocol client: packets, statements, open, ping, query, close, error texts | `internal/mariadb/client.go`, `internal/mariadb/packet.go`, `internal/mariadb/statement.go` | AC3, AC5, AC12, AC13, AC17 | 1 | Dev | [ ] |
 | 8 | G4 | Capture reader, fake server and client tests, SQL file test | `internal/mariadb/capture_test.go`, `internal/mariadb/fakeserver_test.go`, `internal/mariadb/client_test.go`, `internal/mariadb/packet_test.go` | AC12, AC13, AC15, AC17 | 1, 7 | Tester | [ ] |
