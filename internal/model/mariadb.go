@@ -1,6 +1,7 @@
 package model
 
 import (
+	"errors"
 	"regexp"
 	"time"
 )
@@ -19,6 +20,7 @@ const (
 type MariaDBStatus struct {
 	Availability MariaDBAvailability `json:"availability"`
 	PingLatency  *time.Duration      `json:"ping_latency_ns,omitempty"`
+	ErrorCode    *uint16             `json:"error_code,omitempty"`
 	Status       map[string]uint64   `json:"status,omitempty"`
 	Variables    map[string]string   `json:"variables,omitempty"`
 	Threads      []MariaDBThread     `json:"threads,omitempty"`
@@ -91,6 +93,12 @@ func (s *MariaDBStatus) Validate() error {
 		}
 	}
 	return nil
+}
+
+// checkErrorCode checks the error code of s: 1 to 65535, and only with not_answering.
+func checkErrorCode(s *MariaDBStatus) error {
+	_ = s
+	return errors.New("not implemented")
 }
 
 func (t *MariaDBThread) validate(path string) error {

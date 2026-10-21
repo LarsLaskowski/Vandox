@@ -20,3 +20,4 @@ are quoted in full.
 | 2026-10-21 06:01 | 3 Plan security delta | squad-security | APPROVED; one non-blocking note leaves the plan a choice (account check re-run) -> Lead decides (opus/medium · 22,558 tokens · 5 tool uses · 66 s · continued) |
 | 2026-10-21 06:02 | 2b Plan revise (security note) | squad-lead | DONE: account check runs on every up run; plan-check, decision-check PASS (opus/medium · 4,308 tokens · 3 tool uses · 26 s · continued) |
 | 2026-10-21 06:02 | 2b Plan done | Orchestrator | Plan approved by Security and Lead; plan.md >4000 words soft warning only |
+| 2026-10-21 06:07 | 4 Skeleton | squad-dev | DONE: internal/mariadb stubs, model ErrorCode (Go, C#), config MariaDB, exported readers, agent job entry; Format+Build pass (sonnet/medium · usage pending) |

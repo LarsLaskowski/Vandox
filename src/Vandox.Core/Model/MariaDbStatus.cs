@@ -43,6 +43,13 @@ public sealed partial class MariaDbStatus : IPayload
     public long? PingLatencyNs { get; set; }
 
     /// <summary>
+    /// Gets or sets the error code of the database when it did not answer.
+    /// </summary>
+    [JsonPropertyName("error_code")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public ushort? ErrorCode { get; set; }
+
+    /// <summary>
     /// Gets or sets the status counters.
     /// </summary>
     [JsonPropertyName("status")]

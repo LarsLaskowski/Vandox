@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"net/netip"
 	"net/url"
 	"path/filepath"
@@ -26,6 +27,7 @@ type Agent struct {
 	Filesystem Filesystem    `yaml:"filesystem"`
 	Processes  Processes     `yaml:"processes"`
 	Services   Services      `yaml:"services"`
+	MariaDB    MariaDB       `yaml:"mariadb"`
 	Secrets    AgentSecrets  `yaml:"-"`
 }
 
@@ -65,6 +67,24 @@ type ProgramRule struct {
 // Services configures the systemd service collector.
 type Services struct {
 	Units []string `yaml:"units"` // full service unit names or patterns, in file order
+}
+
+// MariaDB configures the MariaDB collector.
+type MariaDB struct {
+	Enabled bool   `yaml:"enabled"`
+	Socket  string `yaml:"socket"`
+}
+
+// Defaults and bounds of mariadb.socket.
+const (
+	DefaultMariaDBSocket = "/run/mysqld/mysqld.sock"
+	MaxSocketPathBytes   = 107
+)
+
+// checkSocketPath checks the value of key: an absolute, clean path of at most MaxSocketPathBytes bytes.
+func checkSocketPath(file string, lines map[string]int, key, value string) error {
+	_, _, _, _ = file, lines, key, value
+	return errors.New("not implemented")
 }
 
 // Bounds of services.units.

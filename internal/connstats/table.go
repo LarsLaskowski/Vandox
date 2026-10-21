@@ -267,3 +267,10 @@ func cause(err error) error {
 	}
 	return err
 }
+
+// TCPListeners calls visit for the local address of every LISTEN socket of net/tcp and net/tcp6; a missing tcp6 is skipped,
+// a missing tcp or any unread line is an error.
+func TCPListeners(proc fs.FS, visit func(local netip.AddrPort)) error {
+	_, _ = proc, visit
+	return errors.New("not implemented")
+}
