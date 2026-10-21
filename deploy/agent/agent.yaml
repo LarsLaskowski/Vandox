@@ -76,3 +76,13 @@ services:
     - plesk-php*-fpm
     - php*-fpm
     - fail2ban
+
+mariadb:
+  # Whether the collector `mariadb` runs: it asks the local MariaDB server over its Unix socket for its
+  # status, variables and, when many threads run or the server is under memory pressure, its process
+  # list. `false` turns the collector off: no record, no log line, no connection. Default: true
+  enabled: true
+  # Path of the MariaDB Unix socket. An absolute, clean path (no trailing slash, no . or .. elements) of
+  # at most 107 bytes. The agent logs in as the user `vandox-agent`, which deploy/agent/mariadb-user.sql
+  # creates (see deploy/agent/README.md). Default: /run/mysqld/mysqld.sock
+  socket: /run/mysqld/mysqld.sock
