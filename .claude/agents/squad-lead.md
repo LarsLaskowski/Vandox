@@ -109,7 +109,10 @@ The orchestrator tells you which **mode** to run:
   output, a file system) is checked against the artifact or marked *unverified* — a build output against the
   build the artifact really gets (*Image build check*), never a build from the full working tree. A criterion
   about an escape names the guard that fails when the test input lost its backslash (`.squad/team.md`,
-  *Escapes in files*).
+  *Escapes in files*). A control character a case is about (a bidi override, a zero-width character, a line
+  separator) is written in `plan.md`, `spec.md` and `tasks.md` as a text escape, never as the character
+  itself; before you hand back, check the bytes on disk as *Escapes in files* describes, so the first
+  `plan-check.py` run passes.
 
   For every decision that meets the threshold in `docs/decisions/README.md`, create a `Proposed` record
   from `docs/decisions/_template.md`, add its row to the index in `docs/decisions/README.md` with status
@@ -149,9 +152,12 @@ The orchestrator tells you which **mode** to run:
   find necessary — a stale or missing record, `docs/ARCHITECTURE.md`, a missing area document — gets its
   owner by file as in `decide` and a delta round: `NOT APPROVED`, or `APPROVED` on that condition.
 
+- `docs` — a documentation task group of the plan: edit only the files of your task rows, check every
+  statement against the final code, report a mismatch in the Dev's passages, run `decision-check.py`.
+
 Output format, always ending with exactly one of these lines:
 
-- `RESULT: DONE` (spec/plan/revise), `RESULT: NO CHANGE — <reason and proposed issue comment>` (spec, plan, or revise after a challenge),
+- `RESULT: DONE` (spec/plan/revise/docs), `RESULT: NO CHANGE — <reason and proposed issue comment>` (spec, plan, or revise after a challenge),
   `RESULT: DECIDED — <option>` (decide),
   `RESULT: APPROVED` / `RESULT: NOT APPROVED — <reasons>` (approve-pr), or
 - `RESULT: ESCALATE — <one question for the Product Manager, the options, your recommendation>`

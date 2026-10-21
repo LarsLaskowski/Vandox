@@ -93,4 +93,7 @@ file with a script; either way check the bytes on disk (`grep -n '\\u' <file>`) 
 there exactly as the case needs before reporting the file done — again after *Format*, since a formatter may do
 the same to string literals (*Known pitfalls* in `.squad/stack.md`). A test whose case is about an escape also
 asserts that its input still contains the backslash, so a lost escape fails the run instead of testing the
-wrong input.
+wrong input. A control character a case is about (a bidi override such as U+202E, a zero-width character, a
+line separator) is never written as the character itself into `plan.md`, `spec.md`, `tasks.md` or any other
+working record: it stands there as a text escape (`U+202E`, or `\\u202E` with the doubled backslash), because
+`plan-check.py` and `scope-check.py` reject the character.

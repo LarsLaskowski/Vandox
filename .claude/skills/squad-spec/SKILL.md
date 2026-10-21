@@ -50,7 +50,8 @@ cells in `log.md`); steps 4–12 follow `squad-issue` with the changes listed af
   are done. The Tester's tests first are the tests *Tests per criterion* names for the group's
   criteria. Continue a member for the fix and delta rounds of its task group; the next task group starts with
   a fresh launch (*Continuing a member*), and a later fix round for an earlier group's agent is logged with
-  `--continued-from "<step cell of that group's launch>"`.
+  `--continued-from "<step cell of that group's launch>"`. A group whose task rows belong to the Lead
+  (documentation) is launched as `squad-lead` in mode `docs`, after the groups it waits for.
 - **Code-free changes:** as *Changes without production or test code*; *Verification without tests* then
   covers each criterion of the spec.
 - **Decision records:** features usually involve real design choices, so expect a record in
