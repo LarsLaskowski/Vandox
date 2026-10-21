@@ -1121,7 +1121,7 @@ const controlReasonText = "must not contain control, format or line-separating c
 
 // reason returns the reason the value is refused with: the decoder's for a control character, otherwise the rule's.
 func (b badSocket) reason(rule string) string {
-	if strings.Contains(b.value, `\x`) || strings.Contains(b.value, `\u`) {
+	if strings.ContainsAny(b.value, `\`) {
 		return controlReasonText
 	}
 	return rule
