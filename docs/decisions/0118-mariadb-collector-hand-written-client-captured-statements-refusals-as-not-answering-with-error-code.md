@@ -1,6 +1,6 @@
 # 0118: MariaDB collector: a hand-written client over the local socket, the captured statements, a refusal recorded as `not_answering` with its error number
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-21
 - **Area:** Agent
 - **Source:** Issue #35
