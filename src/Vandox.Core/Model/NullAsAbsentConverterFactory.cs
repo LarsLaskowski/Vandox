@@ -15,6 +15,7 @@ internal sealed class NullAsAbsentConverterFactory : JsonConverterFactory
                                                          typeof(bool),
                                                          typeof(byte),
                                                          typeof(short),
+                                                         typeof(ushort),
                                                          typeof(int),
                                                          typeof(uint),
                                                          typeof(long),

@@ -1,7 +1,6 @@
 package model
 
 import (
-	"errors"
 	"regexp"
 	"time"
 )
@@ -56,6 +55,9 @@ func (s *MariaDBStatus) Validate() error {
 	if s.PingLatency != nil && *s.PingLatency < 0 {
 		return invalid("ping_latency_ns", "must not be negative")
 	}
+	if err := checkErrorCode(s); err != nil {
+		return err
+	}
 	for _, c := range []struct {
 		name string
 		n    int
@@ -97,8 +99,16 @@ func (s *MariaDBStatus) Validate() error {
 
 // checkErrorCode checks the error code of s: 1 to 65535, and only with not_answering.
 func checkErrorCode(s *MariaDBStatus) error {
-	_ = s
-	return errors.New("not implemented")
+	if s.ErrorCode == nil {
+		return nil
+	}
+	if *s.ErrorCode == 0 {
+		return invalid("error_code", "must be 1 to 65535")
+	}
+	if s.Availability != MariaDBNotAnswering {
+		return invalid("error_code", "only with not_answering")
+	}
+	return nil
 }
 
 func (t *MariaDBThread) validate(path string) error {

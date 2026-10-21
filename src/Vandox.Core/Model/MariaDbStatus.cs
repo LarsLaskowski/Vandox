@@ -88,6 +88,25 @@ public sealed partial class MariaDbStatus : IPayload
     private static partial Regex KeyPattern();
 
     /// <summary>
+    /// Checks the error code: 1 to 65535, and only with <c>not_answering</c>.
+    /// </summary>
+    /// <returns>The rule that is broken, or <c>null</c></returns>
+    private FieldError? ValidateErrorCode()
+    {
+        if (ErrorCode is null)
+        {
+            return null;
+        }
+
+        if (ErrorCode == 0)
+        {
+            return Check.Invalid("error_code", "must be 1 to 65535");
+        }
+
+        return Availability == NotAnswering ? null : Check.Invalid("error_code", "only with not_answering");
+    }
+
+    /// <summary>
     /// Checks the keys and values of the status, the variables and the threads.
     /// </summary>
     /// <returns>The first rule that is broken, or <c>null</c></returns>
@@ -148,6 +167,13 @@ public sealed partial class MariaDbStatus : IPayload
         if (PingLatencyNs < 0)
         {
             return Check.Invalid("ping_latency_ns", "must not be negative");
+        }
+
+        error = ValidateErrorCode();
+
+        if (error is not null)
+        {
+            return error;
         }
 
         var statusCount = Status?.Count ?? 0;
