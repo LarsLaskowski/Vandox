@@ -18,6 +18,8 @@ linters:
       # Only G115, the local stand-in for CodeQL's go/incorrect-integer-conversion (record 0112).
       includes:
         - G115
+  exclusions:
+    warn-unused: true
 
 formatters:
   enable:
