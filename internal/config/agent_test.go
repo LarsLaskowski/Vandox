@@ -1127,18 +1127,18 @@ func (b badSocket) reason(rule string) string {
 	return rule
 }
 
-func TestLoadAgent_MariaDBDefaultsAndRules(t *testing.T) {
-	const socketReason = "must be an absolute, clean path of at most 107 bytes"
+// mariadbSocketReason is the rule's reason for a socket that is not an absolute, clean path.
+const mariadbSocketReason = "must be an absolute, clean path of at most 107 bytes"
+
+func TestLoadAgent_MariaDBConstants(t *testing.T) {
+	if DefaultMariaDBSocket != "/run/mysqld/mysqld.sock" || MaxSocketPathBytes != 107 {
+		t.Errorf("DefaultMariaDBSocket, MaxSocketPathBytes = %q, %d, want %q, 107", DefaultMariaDBSocket, MaxSocketPathBytes, "/run/mysqld/mysqld.sock")
+	}
+}
+
+func TestLoadAgent_MariaDBAccepts(t *testing.T) {
 	long107 := "/" + strings.Repeat("s", MaxSocketPathBytes-1)
-	long108 := long107 + "s"
 	defaults := MariaDB{Enabled: true, Socket: DefaultMariaDBSocket}
-
-	t.Run("constants", func(t *testing.T) {
-		if DefaultMariaDBSocket != "/run/mysqld/mysqld.sock" || MaxSocketPathBytes != 107 {
-			t.Errorf("DefaultMariaDBSocket, MaxSocketPathBytes = %q, %d, want %q, 107", DefaultMariaDBSocket, MaxSocketPathBytes, "/run/mysqld/mysqld.sock")
-		}
-	})
-
 	accepted := []struct {
 		name string
 		doc  string
@@ -1166,7 +1166,10 @@ func TestLoadAgent_MariaDBDefaultsAndRules(t *testing.T) {
 			}
 		})
 	}
+}
 
+func TestLoadAgent_MariaDBRefusesSocket(t *testing.T) {
+	long108 := "/" + strings.Repeat("s", MaxSocketPathBytes-1) + "s"
 	badSockets := []badSocket{
 		{"empty", "''"},
 		{"relative", "mysqld.sock"},
@@ -1197,7 +1200,7 @@ func TestLoadAgent_MariaDBDefaultsAndRules(t *testing.T) {
 				t.Errorf("LoadAgent(%q) = %+v, want nil on error", doc, got)
 			}
 			ke := requireKeyError(t, err, "mariadb.socket", 5)
-			if want := tt.reason(socketReason); ke.Reason != want {
+			if want := tt.reason(mariadbSocketReason); ke.Reason != want {
 				t.Errorf("KeyError.Reason = %q, want %q", ke.Reason, want)
 			}
 			requireNoLeakBesidesFile(t, err, path, sentinel, "\n", "\u202E", "\u2028", "\x01")
@@ -1216,7 +1219,9 @@ func TestLoadAgent_MariaDBDefaultsAndRules(t *testing.T) {
 			_ = requireKeyError(t, err, "mariadb.socket", 5)
 		})
 	}
+}
 
+func TestLoadAgent_MariaDBRefusesEnabledAndUnknownKey(t *testing.T) {
 	for _, v := range []string{"'true'", "'false'", "1", "0", "maybe", "~", "[true]", "{a: b}", quote(sentinel)} {
 		t.Run("refuses enabled "+truncate(v), func(t *testing.T) {
 			path := writeTemp(t, mariadbDoc(v, ""))

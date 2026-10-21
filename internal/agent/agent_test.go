@@ -570,14 +570,27 @@ func TestJobs_Schedules(t *testing.T) {
 	}
 }
 
-func TestJobs_MariaDBAfterSystemdOnlyWhenEnabled(t *testing.T) {
-	names := func(list []scheduler.Job) []string {
-		var got []string
-		for _, j := range list {
-			got = append(got, j.Collector.Name())
-		}
-		return got
+// jobNames returns the collector names of list in order.
+func jobNames(list []scheduler.Job) []string {
+	var got []string
+	for _, j := range list {
+		got = append(got, j.Collector.Name())
 	}
+	return got
+}
+
+// requireMariaDBSchedule fails when the mariadb job of list does not run on the MariaDB intervals.
+func requireMariaDBSchedule(t *testing.T, list []scheduler.Job) {
+	t.Helper()
+	want := scheduler.Schedule{Interval: MariaDBInterval, Timeout: MariaDBTimeout, PressureInterval: MariaDBPressureInterval}
+	for _, j := range list {
+		if j.Collector.Name() == "mariadb" && j.Schedule != want {
+			t.Errorf("mariadb schedule = %+v, want %+v", j.Schedule, want)
+		}
+	}
+}
+
+func TestJobs_MariaDBAfterSystemdOnlyWhenEnabled(t *testing.T) {
 	tests := []struct {
 		name    string
 		enabled bool
@@ -597,16 +610,11 @@ func TestJobs_MariaDBAfterSystemdOnlyWhenEnabled(t *testing.T) {
 
 			list, _ := jobs(Options{Self: fixtureSources(), System: fixtureSystem(), Processes: fixtureProcesses(), Connections: fixtureConnections(), Services: fixtureServices()}, &cfg, log)
 
-			if got := names(list); !slices.Equal(got, tt.want) {
+			if got := jobNames(list); !slices.Equal(got, tt.want) {
 				t.Errorf("job names = %v, want %v", got, tt.want)
 			}
 			if tt.enabled {
-				want := scheduler.Schedule{Interval: MariaDBInterval, Timeout: MariaDBTimeout, PressureInterval: MariaDBPressureInterval}
-				for _, j := range list {
-					if j.Collector.Name() == "mariadb" && j.Schedule != want {
-						t.Errorf("mariadb schedule = %+v, want %+v", j.Schedule, want)
-					}
-				}
+				requireMariaDBSchedule(t, list)
 			}
 		})
 	}

@@ -38,3 +38,4 @@ are quoted in full.
 | 2026-10-21 07:34 | 6 Doc fix project.md | squad-dev | DONE: area 10 socket sentence, area 12 log-line list (10 texts verified against code) (sonnet/medium · 59,059 tokens · 9 tool uses · 34 s) |
 | 2026-10-21 07:43 | 6 Coverage pass | squad-tester | DONE: imports test (AC13), guard tests; Go coverage internal/mariadb 95.9%, changed Go lines 94.3% (tester's script) (sonnet/medium · 109,167 tokens · 36 tool uses · 566 s) |
 | 2026-10-21 07:52 | 7 Code check | squad-code-officer | DONE: QF1012, revive, G115 (guard in MemTotal, judgement call); 2 gocognit findings (test structure) -> Tester (haiku/medium · 67,502 tokens · 11 tool uses · 146 s) |
+| 2026-10-21 07:54 | 7 Code check: test complexity | squad-tester | DONE: gocognit findings fixed (helpers, 4 tests); MemTotal guard uncoverable -> use existing kBToBytes (sonnet/medium · 71,595 tokens · 11 tool uses · 57 s) |
