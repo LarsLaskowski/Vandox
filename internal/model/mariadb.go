@@ -58,6 +58,19 @@ func (s *MariaDBStatus) Validate() error {
 	if err := checkErrorCode(s); err != nil {
 		return err
 	}
+	if err := s.checkContent(); err != nil {
+		return err
+	}
+	for i := range s.Threads {
+		if err := s.Threads[i].validate(indexed("threads", i)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// checkContent checks the status and variables maps of s: counts, emptiness unless up, keys and values.
+func (s *MariaDBStatus) checkContent() error {
 	for _, c := range []struct {
 		name string
 		n    int
@@ -77,6 +90,11 @@ func (s *MariaDBStatus) Validate() error {
 	if err := checkFoldUnique("status", s.Status); err != nil {
 		return err
 	}
+	return s.checkVariables()
+}
+
+// checkVariables checks the keys and values of the variables of s.
+func (s *MariaDBStatus) checkVariables() error {
 	for _, k := range sortedKeys(s.Variables) {
 		path := keyed("variables", k)
 		if err := checkPattern(path, k, statusKeyPattern, MaxNameBytes); err != nil {
@@ -86,15 +104,7 @@ func (s *MariaDBStatus) Validate() error {
 			return err
 		}
 	}
-	if err := checkFoldUnique("variables", s.Variables); err != nil {
-		return err
-	}
-	for i := range s.Threads {
-		if err := s.Threads[i].validate(indexed("threads", i)); err != nil {
-			return err
-		}
-	}
-	return nil
+	return checkFoldUnique("variables", s.Variables)
 }
 
 // checkErrorCode checks the error code of s: 1 to 65535, and only with not_answering.

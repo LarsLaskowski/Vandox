@@ -18,14 +18,6 @@ linters:
       # Only G115, the local stand-in for CodeQL's go/incorrect-integer-conversion (record 0112).
       includes:
         - G115
-  exclusions:
-    warn-unused: true
-    rules:
-      # Sequential error checks that SonarQube rates at most 15 (record 0047).
-      - path: ^internal/model/mariadb\.go$
-        linters:
-          - gocognit
-        text: "`\\(\\*MariaDBStatus\\)\\.Validate`"
 
 formatters:
   enable:
