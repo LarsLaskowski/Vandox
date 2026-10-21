@@ -46,6 +46,8 @@ Agent:
 | `filesystem.mount_points` | `["/"]` | a list of at most 16 absolute, clean paths of at most 1,024 bytes each, every path listed once (see below) |
 | `processes.programs` | `[]` | a list of at most 64 rules, each a mapping of `program`, one of `command` and `cmdline_prefix`, and optionally `append_next_word` (see below) |
 | `services.units` | `[sw-cp-server, sw-engine, psa, nginx, apache2, postfix, dovecot, mariadb, plesk-php*-fpm, php*-fpm, fail2ban]` | a list of at most 64 service unit names or patterns of 1 to 255 bytes (see below) |
+| `mariadb.enabled` | `true` | `true` or `false` (see below) |
+| `mariadb.socket` | `/run/mysqld/mysqld.sock` | absolute, clean path of 2 to 107 bytes (see below) |
 
 Backend:
 
@@ -134,6 +136,14 @@ Backend:
   | `services.units`, `services.units[<i>]` (an element or the list of another YAML type) | the decoder's reason for the type, as for the other agent lists |
 
   The agent stops at start-up with exit code 1 on every one of them.
+- `mariadb.enabled` and `mariadb.socket` configure the `mariadb` collector ([Agent](agent.md), *MariaDB*). With `mariadb.enabled: false`
+  the collector is not scheduled and the agent never connects to the socket; a value that is not a boolean is refused by the decoder
+  with the key and the line. `mariadb.socket` is the path of MariaDB's Unix socket; the default is the socket of Ubuntu's MariaDB
+  package, which Plesk uses, and the option exists for a server that differs. It must be an absolute, clean path (no trailing slash, no
+  `.` or `..` element) of 2 to 107 bytes, 107 being the limit of a Unix socket address; anything else, the empty value included, is
+  refused with `config: <file>:<line>: mariadb.socket: must be an absolute, clean path of at most 107 bytes`, a value with a control,
+  format or line-separating character by the general string rule above, and a null value as "has no value"; no error contains the
+  value. The agent stops at start-up with exit code 1 on each of them. The collector itself never logs the path.
 - A directory must be absolute and clean: no trailing slash and no empty, `.` or `..` element. The loader does not
   create it.
 - Plain `http` is allowed for `backend.url`, because the tailnet encrypts and authenticates the transport. Whether
@@ -215,6 +225,7 @@ Backend:
 - [0104](../decisions/0104-argon2id-password-hash-konscious-strict-phc-form-hash-password-command.md) and [0105](../decisions/0105-forwarded-headers-only-from-trusted-proxies-failed-logins-locked-per-client-and-capped.md) — why the hash form is checked on top of the secret rules and why `web.trusted_proxies` is a comma-separated string.
 - [0113](../decisions/0113-process-collector-pss-from-smaps-rollup-top-processes-full-snapshot-under-memory-pressure.md) — why the process grouping rules are a list of mappings of literal comparisons that the strict decoder checks.
 - [0117](../decisions/0117-systemd-collector-hand-written-d-bus-client-per-run-states-recorded-on-change.md) — why the units to track are a list of names and patterns, an entry without a suffix is a service, and other unit types are refused.
+- [0118](../decisions/0118-mariadb-collector-hand-written-client-captured-statements-refusals-as-not-answering-with-error-code.md) — why the MariaDB collector, which these options switch and point to its socket, connects over the local socket with a client of its own, one connection per run.
 
 ## Not here
 

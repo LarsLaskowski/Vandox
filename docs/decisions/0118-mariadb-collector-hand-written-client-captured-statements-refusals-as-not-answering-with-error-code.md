@@ -75,7 +75,13 @@ recorded as `not_answering` with `error_code`. The rules are in the [Agent](../a
   has no `Progress` column, which fails the run).
 - A server that asks for another authentication method (a user with a password of another plugin, or a missing user answered with a
   stand-in account) gets one empty answer and no credential; its next answer counts as the login's, so a missing user still ends in
-  `mariadb user missing or not allowed`, and a second switch fails the run as a gap.
+  `mariadb user missing or not allowed`, and a second switch fails the run as a gap. A request for more authentication data (`0x01`)
+  is never answered either: after a switch, or longer than 2 bytes before one (a plugin's continuation), it fails the run with
+  `authentication switch refused`; a shorter one is no request the protocol defines and fails it with `unexpected reply`. Either way no
+  credential leaves the agent.
+- A command that fails closes the connection, because what is left of its reply cannot be told apart from the next one. An error answer
+  to the account check is therefore tolerated for the record (written, nothing logged, the check's state unchanged), but a process list
+  due in that run is not read.
 - The statement texts of the process list can hold customer data and credentials (`IDENTIFIED BY '...'`, values of an `INSERT`); they
   are stored and sent to the backend, which shows them escaped. That is the consequence 0013 accepted; `deploy/agent/README.md` says so.
 - The full status and variable lists are read every run (about 40 KB from a local socket every 30 seconds) for the sake of the
