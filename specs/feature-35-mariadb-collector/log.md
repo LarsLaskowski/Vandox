@@ -15,3 +15,4 @@ are quoted in full.
 | 2026-10-21 05:50 | 2b Plan | squad-lead | DONE: plan.md, tasks.md (7 groups), record 0118 Proposed; tier security; areas 6,7,10,11,12; spec closed (opus/medium · 139,852 tokens · 53 tool uses · 884 s · continued) |
 | 2026-10-21 05:50 | 2b Capture fix | Orchestrator | Capture: replaced leaked file-name prefix 144 and server_uid by same-length placeholders (hex+text); remaining 144 are numeric values |
 | 2026-10-21 05:55 | 3 Plan security review | squad-security | CHANGES_REQUIRED: B1 memory bound (short text fields x 4096 threads encoded via json.Marshal, duplicate-name memory, tests); 6 non-blocking (opus/medium · 107,771 tokens · 17 tool uses · 257 s) |
+| 2026-10-21 05:56 | 2b Plan challenge | squad-devils-advocate | OBJECTIONS 2 major (M1 capability bits drop extended metadata, M2 unknown user may answer with auth switch), 5 minor (opus/medium · 94,913 tokens · 23 tool uses · 319 s) |
