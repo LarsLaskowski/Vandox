@@ -10,3 +10,4 @@ are quoted in full.
 | 2026-10-20 20:51 | 2a Spec challenge | squad-devils-advocate | OBJECTIONS 3 major (M1 refused vs record 0043, M2 pre-greeting error packet, M3 protocol client/capture), 4 minor (opus/medium · 69,988 tokens · 21 tool uses · 209 s) |
 | 2026-10-20 20:57 | 2a Spec revise | squad-lead | ESCALATE: source of MariaDB protocol sample; all 7 objections accepted, plan-check --spec PASS (opus/medium · 28,102 tokens · 27 tool uses · 124 s · continued) |
 | 2026-10-20 20:57 | 2a Escalation | Product Manager | Protocol sample: (a) the user captures it on MariaDB 10.6 / Ubuntu 22.04; plan waits for the capture |
+| 2026-10-21 05:27 | 2b Escalation follow-up | Orchestrator | Capture 1 received: server MariaDB 12.3.3 (ubu2204), but client switched to TLS after greeting, so the rest is encrypted and unusable; user asked to repeat with --skip-ssl |
