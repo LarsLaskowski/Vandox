@@ -329,7 +329,7 @@ func endpointText(ap netip.AddrPort) string {
 	}
 	var b strings.Builder
 	for i := 0; i < len(words); i += 4 {
-		b.WriteString(fmt.Sprintf("%08X", binary.NativeEndian.Uint32(words[i:])))
+		fmt.Fprintf(&b, "%08X", binary.NativeEndian.Uint32(words[i:]))
 	}
 	return fmt.Sprintf("%s:%04X", b.String(), ap.Port())
 }

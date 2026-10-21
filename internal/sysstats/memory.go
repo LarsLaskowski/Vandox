@@ -204,5 +204,9 @@ func MemTotal(proc fs.FS) (uint64, error) {
 	if err != nil {
 		return 0, err
 	}
-	return uint64(m.values["MemTotal"]) * 1024, nil
+	kB := m.values["MemTotal"]
+	if kB < 0 {
+		return 0, fmt.Errorf("sysstats: meminfo: negative MemTotal")
+	}
+	return uint64(kB) * 1024, nil
 }

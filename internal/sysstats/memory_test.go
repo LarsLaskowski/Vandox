@@ -146,7 +146,7 @@ func TestMemTotal_ReturnsBytes(t *testing.T) {
 	})
 
 	failures := map[string]func(t *testing.T, tr *tree){
-		"no meminfo": func(t *testing.T, tr *tree) { delete(tr.proc, "meminfo") },
+		"no meminfo": func(_ *testing.T, tr *tree) { delete(tr.proc, "meminfo") },
 		"no MemTotal line": func(t *testing.T, tr *tree) {
 			replaceLine(t, tr.proc, "meminfo", "MemTotal:", "")
 		},
