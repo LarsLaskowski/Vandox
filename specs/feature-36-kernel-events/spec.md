@@ -141,7 +141,8 @@ and no field that ties a snapshot to an event.
   and pinned by the golden batches (record 0075). Existing configuration files stay valid.
 - **Configuration.** One new option, `backups.processes`: a list of at most 64 literal rules, each exactly one of `command` (equal to
   the process's command as the process collector derives it) and `cmdline_prefix` (the start of its command line), with the strict
-  rules and error texts of `processes.programs`; `[]` switches the backup check off. The default is the open question Q7. The state
+  rules and error texts of `processes.programs`; `[]` switches the backup check off. The default is one rule, `command: pzstd`
+  (Q7); Plesk's own backup processes are not in it until #45 captures them. The state
   uses the existing `spool.directory`; no other option.
 - **Logs.** One line per change of state, fixed texts with counts and error texts as attributes, no process name, command line or
   message text: `kernel messages not readable` / `kernel messages readable again`, `agent state not available`, `agent state not
@@ -228,9 +229,11 @@ and no field that ties a snapshot to an event.
   `/var/lib/vandox/spool`), the agent's one write area (Agent area, *Spool and sending*; security area 9), so no new option.
 - Q6: Where does "the previous uptime if known" come from? Answered: from the uptime the agent saves at least once a minute; it is a
   lower bound, at most one minute short when the agent ran until the end of that boot, and absent when the agent never ran before.
-- Q7: Which processes mark a Plesk backup run, as the default of `backups.processes`? Not answered: escalated to the Product Manager.
-  The only backup program seen in real data is `pzstd` (the backend's built-in list, `BackupPrograms`); the names and command lines of
-  Plesk's own backup processes on the server were never captured, and a wrong default misses the dump phase before the compression.
+- Q7: Which processes mark a Plesk backup run, as the default of `backups.processes`? Answered: by the Product Manager (option b):
+  the default is `pzstd` only (one `command` rule), matching the backend's built-in list (`BackupPrograms`), the only backup program
+  seen in real data. Plesk's own backup processes were never captured; the operator adds them through the option once the parallel
+  run of #45 has captured them. Until then a run is recognized only while `pzstd` runs, so a phase without it (the database dump
+  before the compression) is not part of the run; the decision record and the Agent area state this gap.
 - Q8: What is one backup run? Answered: the span in which at least one matching process exists, ended by 60 seconds without one
   (S8, S9); a Lead decision, so Plesk's phases do not split into many runs.
 - Q9: What is "within a few seconds"? Answered: 5 seconds from the journal holding the kill line to the event in the sink, and 1
