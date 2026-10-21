@@ -86,11 +86,14 @@ func TestDefaultAgent(t *testing.T) {
 	if !slices.Equal(got.Services.Units, defaultServiceUnits) {
 		t.Errorf("DefaultAgent().Services.Units = %q, want %q", got.Services.Units, defaultServiceUnits)
 	}
+	if want := (MariaDB{Enabled: true, Socket: DefaultMariaDBSocket}); got.MariaDB != want {
+		t.Errorf("DefaultAgent().MariaDB = %+v, want %+v", got.MariaDB, want)
+	}
 }
 
 func TestAgentKeys(t *testing.T) {
 	got := AgentKeys()
-	want := []string{"agent_id", "backend.url", "spool.directory", "log.level", "filesystem.mount_points", "processes.programs", "services.units"}
+	want := []string{"agent_id", "backend.url", "spool.directory", "log.level", "filesystem.mount_points", "processes.programs", "services.units", "mariadb.enabled", "mariadb.socket"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Errorf("AgentKeys() = %v, want %v", got, want)
 	}
@@ -123,6 +126,9 @@ func TestLoadAgent_Example(t *testing.T) {
 		}
 		if len(got.Processes.Programs) != 0 {
 			t.Errorf("example Processes.Programs = %+v, want the default empty list", got.Processes.Programs)
+		}
+		if got.MariaDB != def.MariaDB {
+			t.Errorf("example MariaDB = %+v, want the default %+v", got.MariaDB, def.MariaDB)
 		}
 	})
 }
@@ -1089,4 +1095,147 @@ func TestLoadAgent_ServiceUnitsRefused(t *testing.T) {
 			requireNoLeakBesidesFile(t, err, path, sentinel)
 		})
 	}
+}
+
+// mariadbDoc returns a valid agent file followed by the section mariadb with the raw YAML values given; an empty
+// value leaves its line out. The section starts at line 4, enabled is line 5 and socket the next line.
+func mariadbDoc(enabled, socket string) string {
+	doc := validAgent + "mariadb:\n"
+	if enabled != "" {
+		doc += "  enabled: " + enabled + "\n"
+	}
+	if socket != "" {
+		doc += "  socket: " + socket + "\n"
+	}
+	return doc
+}
+
+// badSocket is a refused value of mariadb.socket: its name and its raw YAML text.
+type badSocket struct {
+	name  string
+	value string
+}
+
+// controlReasonText is the reason the decoder gives for a value with a control, format or line-separating character.
+const controlReasonText = "must not contain control, format or line-separating characters"
+
+// reason returns the reason the value is refused with: the decoder's for a control character, otherwise the rule's.
+func (b badSocket) reason(rule string) string {
+	if strings.Contains(b.value, `\x`) || strings.Contains(b.value, `\u`) {
+		return controlReasonText
+	}
+	return rule
+}
+
+func TestLoadAgent_MariaDBDefaultsAndRules(t *testing.T) {
+	const socketReason = "must be an absolute, clean path of at most 107 bytes"
+	long107 := "/" + strings.Repeat("s", MaxSocketPathBytes-1)
+	long108 := long107 + "s"
+	defaults := MariaDB{Enabled: true, Socket: DefaultMariaDBSocket}
+
+	t.Run("constants", func(t *testing.T) {
+		if DefaultMariaDBSocket != "/run/mysqld/mysqld.sock" || MaxSocketPathBytes != 107 {
+			t.Errorf("DefaultMariaDBSocket, MaxSocketPathBytes = %q, %d, want %q, 107", DefaultMariaDBSocket, MaxSocketPathBytes, "/run/mysqld/mysqld.sock")
+		}
+	})
+
+	accepted := []struct {
+		name string
+		doc  string
+		want MariaDB
+	}{
+		{"section omitted", validAgent, defaults},
+		{"empty section", validAgent + "mariadb:\n", defaults},
+		{"section with null", validAgent + "mariadb: ~\n", defaults},
+		{"children commented out", validAgent + "mariadb:\n  # enabled: false\n", defaults},
+		{"enabled false keeps the socket default", mariadbDoc("false", ""), MariaDB{Enabled: false, Socket: DefaultMariaDBSocket}},
+		{"enabled true", mariadbDoc("true", ""), defaults},
+		{"socket only keeps enabled", mariadbDoc("", "/var/run/mysqld/other.sock"), MariaDB{Enabled: true, Socket: "/var/run/mysqld/other.sock"}},
+		{"both set", mariadbDoc("false", quote("/srv/db.sock")), MariaDB{Enabled: false, Socket: "/srv/db.sock"}},
+		{"socket of 107 bytes", mariadbDoc("", long107), MariaDB{Enabled: true, Socket: long107}},
+		{"root-level one-byte name", mariadbDoc("", "/s"), MariaDB{Enabled: true, Socket: "/s"}},
+	}
+	for _, tt := range accepted {
+		t.Run("accepts "+tt.name, func(t *testing.T) {
+			got, err := LoadAgent(writeTemp(t, tt.doc), agentEnv())
+			if err != nil {
+				t.Fatalf("LoadAgent(%q) error = %v, want nil", tt.doc, err)
+			}
+			if got.MariaDB != tt.want {
+				t.Errorf("LoadAgent(%q).MariaDB = %+v, want %+v", tt.doc, got.MariaDB, tt.want)
+			}
+		})
+	}
+
+	badSockets := []badSocket{
+		{"empty", "''"},
+		{"relative", "mysqld.sock"},
+		{"relative with a directory", "run/mysqld.sock"},
+		{"dot segment", "/run/./mysqld.sock"},
+		{"parent segment", "/run/../mysqld.sock"},
+		{"double slash", "/run//mysqld.sock"},
+		{"trailing slash", "/run/mysqld/"},
+		{"root", "/"},
+		{"108 bytes", long108},
+		{"control character", `"/run/a\x01b.sock"`},
+		{"newline", `"/run/a\nb.sock"`},
+		{"tab", `"/run/a\tb.sock"`},
+		{"format character", `"/run/a\u202Eb.sock"`},
+		{"line separator", `"/run/a\u2028b.sock"`},
+		{"byte order mark", `"/run/\uFEFFb.sock"`},
+		{"leaks the value", quote(sentinel + "/not/absolute")},
+		{"leaks a long value", "/" + sentinel + strings.Repeat("s", 120)},
+	}
+	for _, tt := range badSockets {
+		t.Run("refuses socket "+tt.name, func(t *testing.T) {
+			doc := mariadbDoc("", tt.value)
+			path := writeTemp(t, doc)
+
+			got, err := LoadAgent(path, agentEnv())
+
+			if got != nil {
+				t.Errorf("LoadAgent(%q) = %+v, want nil on error", doc, got)
+			}
+			ke := requireKeyError(t, err, "mariadb.socket", 5)
+			if want := tt.reason(socketReason); ke.Reason != want {
+				t.Errorf("KeyError.Reason = %q, want %q", ke.Reason, want)
+			}
+			requireNoLeakBesidesFile(t, err, path, sentinel, "\n", "\u202E", "\u2028", "\x01")
+		})
+	}
+
+	for _, v := range []string{"~", "[a]", "{a: b}", "7"} {
+		t.Run("refuses socket "+v, func(t *testing.T) {
+			path := writeTemp(t, mariadbDoc("", v))
+
+			got, err := LoadAgent(path, agentEnv())
+
+			if got != nil {
+				t.Errorf("LoadAgent(socket %s) = %+v, want nil on error", v, got)
+			}
+			_ = requireKeyError(t, err, "mariadb.socket", 5)
+		})
+	}
+
+	for _, v := range []string{"'true'", "'false'", "1", "0", "maybe", "~", "[true]", "{a: b}", quote(sentinel)} {
+		t.Run("refuses enabled "+truncate(v), func(t *testing.T) {
+			path := writeTemp(t, mariadbDoc(v, ""))
+
+			got, err := LoadAgent(path, agentEnv())
+
+			if got != nil {
+				t.Errorf("LoadAgent(enabled %s) = %+v, want nil on error", v, got)
+			}
+			_ = requireKeyError(t, err, "mariadb.enabled", 5)
+			requireNoLeakBesidesFile(t, err, path, sentinel)
+		})
+	}
+
+	t.Run("refuses an unknown key of the section", func(t *testing.T) {
+		path := writeTemp(t, validAgent+"mariadb:\n  port: 3306\n")
+
+		_, err := LoadAgent(path, agentEnv())
+
+		_ = requireKeyError(t, err, "mariadb.port", 5)
+	})
 }
