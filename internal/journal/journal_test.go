@@ -2,11 +2,15 @@ package journal
 
 import (
 	"errors"
+	"io"
+	"io/fs"
+	"math"
 	"reflect"
 	"runtime"
 	"strconv"
 	"strings"
 	"testing"
+	"testing/fstest"
 	"time"
 )
 
@@ -845,5 +849,250 @@ func checkOmitted(t *testing.T, i int, e *Entry, keep int) {
 	}
 	if i != 1 && got != 0 {
 		t.Errorf("entry %d: Omitted = %d, want 0 (reset for each entry)", i, got)
+	}
+}
+
+var errBoom = errors.New("boom: device gone")
+
+// failingReader serves b but fails every read after the first okReads ones with errBoom.
+type failingReader struct {
+	r       *refReader
+	okReads int
+	calls   int
+}
+
+func (f *failingReader) ReadAt(p []byte, off int64) (int, error) {
+	f.calls++
+	if f.calls > f.okReads {
+		return 0, errBoom
+	}
+	return f.r.ReadAt(p, off)
+}
+
+func TestFile_ReaderFailureIsErrReadWithoutDetails(t *testing.T) {
+	b, _ := buildFile(kernelEntries(20, false), testOptions())
+	sawRead := false
+	for ok := 0; ok < 40; ok++ {
+		fr := &failingReader{r: newRefReader(b), okReads: ok}
+		res := walk(fr, int64(len(b)), false)
+		if res.panic != nil {
+			t.Fatalf("after %d good reads: panic %v", ok, res.panic)
+		}
+		if res.err == nil {
+			continue
+		}
+		if !errors.Is(res.err, ErrRead) || !errors.Is(res.err, errBoom) {
+			t.Fatalf("after %d good reads: error %v, want one that is %v and wraps the reader's error", ok, res.err, ErrRead)
+		}
+		if res.err.Error() != "journal: read failed" {
+			t.Fatalf("error text = %q, want %q with no path, offset or cause", res.err.Error(), "journal: read failed")
+		}
+		sawRead = true
+	}
+	if !sawRead {
+		t.Errorf("no failing read surfaced as %v", ErrRead)
+	}
+}
+
+func TestFile_StampsAreKeptAsStoredAndConvertedInRange(t *testing.T) {
+	const firstBad = 253402300800000000
+	maxMono := uint64(math.MaxInt64 / 1000)
+	cases := []struct {
+		name         string
+		real, mono   uint64
+		realZero     bool
+		monotonicZer bool
+	}{
+		{"ordinary", testBase, testMono, false, false},
+		{"real-time zero", 0, testMono, true, false},
+		{"real-time first bad microsecond", firstBad, testMono, true, false},
+		{"real-time last good microsecond", firstBad - 1, testMono, false, false},
+		{"real-time 1<<62", 1 << 62, testMono, true, false},
+		{"real-time all ones", ^uint64(0), testMono, true, false},
+		{"monotonic at the limit", testBase, maxMono, false, false},
+		{"monotonic one above the limit", testBase, maxMono + 1, false, true},
+		{"monotonic all ones", testBase, ^uint64(0), false, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			e := readStampedEntry(t, c.real, c.mono)
+			if e.RealtimeUS != c.real || e.MonotonicUS != c.mono {
+				t.Errorf("RealtimeUS, MonotonicUS = %d, %d, want the stored %d, %d", e.RealtimeUS, e.MonotonicUS, c.real, c.mono)
+			}
+			if e.Realtime.IsZero() != c.realZero || (!c.realZero && !e.Realtime.Equal(microTime(c.real))) {
+				t.Errorf("Realtime = %v, want zero %v (stamp %d)", e.Realtime, c.realZero, c.real)
+			}
+			if wantMono := wantMonotonic(c.mono, c.monotonicZer); e.Monotonic != wantMono {
+				t.Errorf("Monotonic = %v, want %v (stamp %d)", e.Monotonic, wantMono, c.mono)
+			}
+		})
+	}
+}
+
+func wantMonotonic(us uint64, zero bool) time.Duration {
+	if zero {
+		return 0
+	}
+	return time.Duration(i64(us)) * time.Microsecond
+}
+
+// readStampedEntry builds a one-entry file with the given stamps and returns the entry as read.
+func readStampedEntry(t *testing.T, realUS, mono uint64) Entry {
+	t.Helper()
+	entries := kernelEntries(1, false)
+	entries[0].realtime, entries[0].mono = realUS, mono
+	b, _ := buildFile(entries, testOptions())
+	f := openBytes(t, b, false)
+	cur, err := f.Seek(kernelList(t, f), 0)
+	if err != nil {
+		t.Fatalf("Seek() error = %v, want nil", err)
+	}
+	var e Entry
+	if ok, err := f.Next(&cur, wantNames, &e); err != nil || !ok {
+		t.Fatalf("Next() = %v, %v, want true, nil", ok, err)
+	}
+	return e
+}
+
+func TestLookup_DoesNotFindLookalikes(t *testing.T) {
+	want := []byte("AAAA=1")
+	hash := refSipHash24(testFileID, want)
+	entries := kernelEntries(1, false)
+	entries[0].items = append(entries[0].items, bItem{payload: []byte("AAAA=2")}) // stored with the hash of AAAA=1
+	o := testOptions()
+	o.hash = func(p []byte) uint64 {
+		if string(p) == "AAAA=2" {
+			return hash
+		}
+		return refSipHash24(testFileID, p)
+	}
+	o.buckets = 1
+	b, _ := buildFile(entries, o)
+	f := openBytes(t, b, false)
+	for name, p := range map[string][]byte{"same hash and size, other bytes": want, "empty": nil, "too long": make([]byte, 5000), "absent": []byte("ZZZZ=9")} {
+		if _, found, err := f.Lookup(p); found || err != nil {
+			t.Errorf("%s: Lookup() = found %v, err %v, want found false and no error", name, found, err)
+		}
+	}
+}
+
+func TestLookup_SkipsCompressedObjectsOfTheSameHash(t *testing.T) {
+	plain := []byte("MESSAGE=" + strings.Repeat("x", 300))
+	entries := kernelEntries(1, false)
+	entries[0].items = append(entries[0].items, bItem{payload: plain, compressed: true})
+	b, _ := buildFile(entries, testOptions())
+	if _, found, err := openBytes(t, b, false).Lookup(plain); found || err != nil {
+		t.Errorf("Lookup() of a payload stored compressed = found %v, err %v, want found false and no error", found, err)
+	}
+}
+
+func TestLookup_RefusesAnUnusableHashTable(t *testing.T) {
+	b, _ := buildFile(kernelEntries(2, false), testOptions())
+	for name, size := range map[string]uint64{"zero": 0, "not a multiple of 16": 24} {
+		f := openBytes(t, mutated(b, hdrDataTableSz, size), false)
+		if _, _, err := f.Lookup([]byte(kernelPayload)); !errors.Is(err, ErrMalformed) {
+			t.Errorf("table size %s: Lookup() error = %v, want %v", name, err, ErrMalformed)
+		}
+	}
+}
+
+func TestListFiles_SelectsJournalFiles(t *testing.T) {
+	fsys := fstest.MapFS{
+		"system.journal":        {Data: []byte("x")},
+		"system@a-1-2.journal":  {Data: []byte("x")},
+		"system@a-1-2.journal~": {Data: []byte("x")},
+		"system@b-1-2.journal":  {Data: []byte("x")},
+		"user-1000.journal":     {Data: []byte("x")},
+		"system.journal~":       {Data: []byte("x")},
+		"system@c.txt":          {Data: []byte("x")},
+		"system@d.journal.bak":  {Data: []byte("x")},
+		"sub/system.journal":    {Data: []byte("x")},
+		"system@dir.journal/x":  {Data: []byte("x")},
+	}
+	got, err := ListFiles(fsys)
+	want := []string{"system.journal", "system@a-1-2.journal", "system@a-1-2.journal~", "system@b-1-2.journal"}
+	if err != nil || strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Errorf("ListFiles() = %v, %v, want %v", got, err, want)
+	}
+}
+
+func TestListFiles_ReadsAtMost1024FilesInChunks(t *testing.T) {
+	fsys := fstest.MapFS{}
+	for i := 0; i < 1100; i++ {
+		fsys["system@"+strconv.Itoa(1000+i)+".journal"] = &fstest.MapFile{Data: []byte("x")}
+	}
+	got, err := ListFiles(fsys)
+	if err != nil || len(got) != 1024 {
+		t.Errorf("ListFiles() = %d files, %v, want 1024 and no error", len(got), err)
+	}
+}
+
+type brokenFS struct{ openErr error }
+
+func (b brokenFS) Open(string) (fs.File, error) { return nil, b.openErr }
+
+type plainFile struct{}
+
+func (plainFile) Stat() (fs.FileInfo, error) { return nil, errBoom }
+func (plainFile) Read([]byte) (int, error)   { return 0, io.EOF }
+func (plainFile) Close() error               { return nil }
+
+type notListableFS struct{}
+
+func (notListableFS) Open(string) (fs.File, error) { return plainFile{}, nil }
+
+type failingDir struct{ plainFile }
+
+func (failingDir) ReadDir(int) ([]fs.DirEntry, error) { return nil, errBoom }
+
+type failingDirFS struct{}
+
+func (failingDirFS) Open(string) (fs.File, error) { return failingDir{}, nil }
+
+func TestListFiles_ReportsADirectoryThatCannotBeRead(t *testing.T) {
+	cases := map[string]fs.FS{
+		"open fails":    brokenFS{openErr: fs.ErrPermission},
+		"not listable":  notListableFS{},
+		"listing fails": failingDirFS{},
+	}
+	for name, fsys := range cases {
+		if got, err := ListFiles(fsys); err == nil || got != nil {
+			t.Errorf("%s: ListFiles() = %v, %v, want nil and an error", name, got, err)
+		}
+	}
+}
+
+func TestMachineDir_TakesOnlyThirtyTwoLowerCaseHexDigits(t *testing.T) {
+	const id = "0badc0de0badc0de0badc0de0badc0de"
+	cases := []struct {
+		name string
+		data string
+		ok   bool
+	}{
+		{"with line feed", id + "\n", true},
+		{"without line feed", id, true},
+		{"upper case", strings.ToUpper(id), false},
+		{"31 digits", id[1:], false},
+		{"33 digits", id + "0", false},
+		{"not hex", strings.Repeat("g", 32), false},
+		{"two lines", id + "\n" + id + "\n", false},
+		{"two line feeds", id + "\n\n", false},
+		{"empty", "", false},
+		{"huge", strings.Repeat("a", 1<<20), false},
+		{"path", "../../" + id[6:], false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got, err := MachineDir(fstest.MapFS{"machine-id": {Data: []byte(c.data)}})
+			if c.ok && (err != nil || got != id) {
+				t.Errorf("MachineDir() = %q, %v, want %q", got, err, id)
+			}
+			if !c.ok && (err == nil || got != "") {
+				t.Errorf("MachineDir() = %q, %v, want an error", got, err)
+			}
+		})
+	}
+	if got, err := MachineDir(fstest.MapFS{}); err == nil || got != "" {
+		t.Errorf("MachineDir() without the file = %q, %v, want an error", got, err)
 	}
 }

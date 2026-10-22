@@ -466,3 +466,26 @@ func TestFixture_UpdateGolden(t *testing.T) {
 	files := fixtureFiles(t, readFixtureExport(t))
 	writeFixtureFiles(t, fixtureDir(), files)
 }
+
+func TestFixture_CommittedFilesMatchTheWriter(t *testing.T) {
+	files := fixtureFiles(t, readFixtureExport(t))
+	dir := t.TempDir()
+	writeFixtureFiles(t, dir, files)
+	for _, f := range files {
+		want, err := os.ReadFile(filepath.Join(dir, f.name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := os.ReadFile(filepath.Join(fixtureDir(), f.name))
+		if err != nil {
+			t.Errorf("%s is not committed: %v (regenerate with VANDOX_UPDATE_GOLDEN=1)", f.name, err)
+			continue
+		}
+		if !bytes.Equal(got, want) {
+			t.Errorf("%s differs from the writer's output (%d bytes committed, %d generated); regenerate with VANDOX_UPDATE_GOLDEN=1", f.name, len(got), len(want))
+		}
+	}
+	if left, _ := filepath.Glob(filepath.Join(fixtureDir(), "system*")); len(left) != len(files) {
+		t.Errorf("testdata/journal holds %d journal files, want exactly the %d the writer makes", len(left), len(files))
+	}
+}
