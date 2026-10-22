@@ -1,7 +1,7 @@
 package procstats
 
 import (
-	"errors"
+	"fmt"
 	"io/fs"
 	"strconv"
 	"time"
@@ -52,5 +52,19 @@ type ProcessInfo struct {
 
 // Process returns the command, command line and start time of pid, the start derived from boot; it is not safe for concurrent use.
 func (c *CommandReader) Process(pid int32, boot time.Time) (ProcessInfo, error) {
-	return ProcessInfo{}, errors.New("not implemented")
+	dir := strconv.Itoa(int(pid)) + "/"
+	st, err := c.r.stat(dir, pid)
+	if err != nil {
+		return ProcessInfo{}, err
+	}
+	cmdline, _, err := c.r.cmdline(dir)
+	if err != nil {
+		return ProcessInfo{}, err
+	}
+	startedAt, err := startTime(boot, st.starttime)
+	if err != nil {
+		return ProcessInfo{}, fmt.Errorf("procstats: %sstat: %w", dir, err)
+	}
+	comm, _ := cleanText(st.comm, maxTextBytes)
+	return ProcessInfo{PID: st.pid, Command: commandFor(cmdline, comm), Cmdline: cmdline, StartedAt: startedAt}, nil
 }

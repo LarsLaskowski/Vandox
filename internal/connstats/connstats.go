@@ -122,8 +122,9 @@ func (c *Connections) Collect(ctx context.Context, run scheduler.Run) ([]model.R
 
 	cur := col.inventory()
 	check, added := compare(prev, cur)
-	full := run.Pressure || prev == nil || len(added) > 0
+	full := run.Pressure || run.Trigger != nil || prev == nil || len(added) > 0
 	snap := buildSnapshot(col, res, check, added, full)
+	snap.Trigger = snapshotTrigger(run.Trigger)
 
 	record, err := fitRecord(run.Start, snap, cur)
 	if err != nil {
@@ -293,4 +294,12 @@ func missingNames(mask uint8) string {
 		}
 	}
 	return strings.Join(names, ",")
+}
+
+// snapshotTrigger returns the trigger of the snapshot an extra run takes, nil for a regular run.
+func snapshotTrigger(t *scheduler.Trigger) *model.SnapshotTrigger {
+	if t == nil {
+		return nil
+	}
+	return &model.SnapshotTrigger{Kills: slices.Clone(t.Kills), KillsOmitted: t.KillsOmitted}
 }
