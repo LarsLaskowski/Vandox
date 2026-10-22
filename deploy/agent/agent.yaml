@@ -86,3 +86,12 @@ mariadb:
   # at most 107 bytes. The agent logs in as the user `vandox-agent`, which deploy/agent/mariadb-user.sql
   # creates (see deploy/agent/README.md). Default: /run/mysqld/mysqld.sock
   socket: /run/mysqld/mysqld.sock
+
+backups:
+  # Processes that mean a backup is running, tried in this order: a process counts when its command
+  # equals `command` (compared as a whole) or its command line starts with `cmdline_prefix` (compared
+  # literally, no pattern). At most 64 rules, each with exactly one of the two, 1 to 256 bytes. The
+  # collector `backups` checks the processes every 10 seconds and records when a backup run starts and
+  # ends. An empty list [] turns the check off. Default: [{command: pzstd}]
+  processes:
+    - command: pzstd
