@@ -148,6 +148,10 @@ func killMsg(pid int, comm string, rssKB, adj int) string {
 type seqCounter struct{ n uint64 }
 
 func (c *seqCounter) next() uint64 {
+	if c.n == 0 {
+		c.n = 1 // the first entry of a seqnum ID is 1, so before() lies directly before it
+		return c.n
+	}
 	c.n += 2 // seqnums are not dense
 	return c.n
 }

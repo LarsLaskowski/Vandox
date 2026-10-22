@@ -589,6 +589,72 @@ func TestKernel_VacuumedPositionRecordsGap(t *testing.T) {
 	t.Run("later file without a head time and without a kernel entry ends the gap at the run start", vacuumedNoHeadTimeRunStart)
 	t.Run("later file without a kernel entry gives the gap once", vacuumedLaterFileWithoutKernelEntry)
 	t.Run("a dropped run after the gap reads the same single gap again", vacuumedGapReadAgainAfterDroppedRun)
+	t.Run("position 0 and the remaining file starts at sequence number 50", vacuumedPositionZeroFileStartsAtFifty)
+	t.Run("position 0 and the first file starts at sequence number 1 gives no gap", vacuumedPositionZeroFileStartsAtOne)
+	t.Run("position n and the next file starts at n+1 gives no gap", vacuumedNextFileContinuesThePosition)
+}
+
+func vacuumedPositionZeroFileStartsAtFifty(t *testing.T) {
+	e := newEnv(t)
+	c := &seqCounter{n: 48} // the first entry is 50
+	f := []entry{c.line(bootB, 4), c.kill(bootB, 5, 222, "online", lagUS)}
+	e.j.add(t, kindOnline, seqIDA, f)
+	e.seed(dashed(bootB), before())
+
+	recs := e.run(false)
+
+	if got := pids(killsOf(recs)); !slices.Equal(got, []int32{222}) {
+		t.Errorf("kills = %v, want [222]", got)
+	}
+	gaps := gapsOf(recs)
+	if len(gaps) != 1 {
+		t.Fatalf("gaps = %d, want 1 from the position's time to the head time of the file (entries 1 to 49 are gone)", len(gaps))
+	}
+	requireGap(t, gaps[0], before().Realtime, micro(rtOf(f[0])))
+	checkValid(t, recs, t0)
+	if again := gapsOf(e.run(false)); len(again) != 0 {
+		t.Errorf("second run: %d gaps, want none (the vacuumed span is recorded once)", len(again))
+	}
+}
+
+func vacuumedPositionZeroFileStartsAtOne(t *testing.T) {
+	e := newEnv(t)
+	c := &seqCounter{}
+	f := []entry{c.line(bootB, 4), c.kill(bootB, 5, 222, "online", lagUS)}
+	if got := seqOf(f[0]); got != 1 {
+		t.Fatalf("first sequence number = %d, want 1", got)
+	}
+	e.j.add(t, kindOnline, seqIDA, f)
+	e.seed(dashed(bootB), before())
+
+	recs := e.run(false)
+
+	if got := pids(killsOf(recs)); !slices.Equal(got, []int32{222}) {
+		t.Errorf("kills = %v, want [222]", got)
+	}
+	if g := gapsOf(recs); len(g) != 0 {
+		t.Errorf("gaps = %d, want none (the file starts directly after position 0)", len(g))
+	}
+}
+
+func vacuumedNextFileContinuesThePosition(t *testing.T) {
+	w := newVacuumWorld(t, 3, true)
+	pos := seqOf(w.f1[3])
+	c := &seqCounter{n: pos - 1} // the first entry is pos+1
+	f2 := []entry{c.line(bootB, 4), c.kill(bootB, 5, 222, "online", lagUS)}
+	if got := seqOf(f2[0]); got != pos+1 {
+		t.Fatalf("first sequence number = %d, want %d", got, pos+1)
+	}
+	w.online(f2...)
+
+	recs := w.e.run(false)
+
+	if got := pids(killsOf(recs)); !slices.Equal(got, []int32{222}) {
+		t.Errorf("kills = %v, want [222]", got)
+	}
+	if g := gapsOf(recs); len(g) != 0 {
+		t.Errorf("gaps = %d, want none (the next file continues at position+1, nothing is gone)", len(g))
+	}
 }
 
 func vacuumedLaterFileRemains(t *testing.T) {

@@ -997,3 +997,55 @@ func TestSaverWithoutBootWritesNoUptime(t *testing.T) {
 		t.Errorf("Boot = %+v, want none when no boot is set", got)
 	}
 }
+
+// setField sets obj[section][key] to value.
+func setField(t *testing.T, obj map[string]any, section, key string, value any) {
+	t.Helper()
+	m, ok := obj[section].(map[string]any)
+	if !ok {
+		t.Fatalf("the state file holds no %q object", section)
+	}
+	m[key] = value
+}
+
+func TestOpenInvalidOpenRunIsMissing(t *testing.T) {
+	const (
+		zeroTime  = "0001-01-01T00:00:00Z"
+		year10000 = "10000-01-01T00:00:00Z"
+	)
+	started := t0.Add(-time.Hour).Format(time.RFC3339)
+	cases := []struct {
+		name            string
+		section, key    string
+		value           any
+		wantLoadedState bool
+	}{
+		{name: "LastSeenBeforeStartedAt", section: "backup", key: "last_seen", value: t0.Add(-2 * time.Hour).Format(time.RFC3339)},
+		{name: "MaxProcessesZero", section: "backup", key: "max_processes", value: 0},
+		{name: "StartedAtZero", section: "backup", key: "started_at", value: zeroTime},
+		{name: "LastSeenZero", section: "backup", key: "last_seen", value: zeroTime},
+		{name: "StartedAtInYear10000", section: "backup", key: "started_at", value: year10000},
+		{name: "LastSeenInYear10000", section: "backup", key: "last_seen", value: year10000},
+		{name: "JournalRealtimeInYear10000", section: "journal", key: "realtime", value: year10000},
+		{name: "BootedAtInYear10000", section: "boot", key: "booted_at", value: year10000},
+		{name: "ValidOpenRunLoads", section: "backup", key: "started_at", value: started, wantLoadedState: true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			dir, path := savedStore(t)
+			mutateJSON(t, path, func(obj map[string]any) { setField(t, obj, c.section, c.key, c.value) })
+			lc := &logCapture{}
+			s, st := openWithin(t, dir, lc.logger())
+			if c.wantLoadedState {
+				if st != StatusLoaded || s.State().Backup == nil {
+					t.Errorf("status = %v, state %+v, want a valid open run loaded", st, s.State())
+				}
+				if n := lc.count(t, warnUnavailable); n != 0 {
+					t.Errorf("%q logged %d times, want none", warnUnavailable, n)
+				}
+				return
+			}
+			requireMissing(t, dir, lc, s, st)
+		})
+	}
+}
