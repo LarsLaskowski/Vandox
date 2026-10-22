@@ -1,6 +1,6 @@
 # 0120: OOM kill events with triggered snapshots, boots from saved state, and backup runs
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-22
 - **Area:** Agent
 - **Source:** Issue #36

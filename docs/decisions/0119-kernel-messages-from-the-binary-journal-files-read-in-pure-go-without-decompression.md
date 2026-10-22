@@ -1,6 +1,6 @@
 # 0119: Kernel messages from the binary journal files, read in pure Go without decompression
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-22
 - **Area:** Agent
 - **Source:** Issue #36
