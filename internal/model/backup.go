@@ -57,13 +57,13 @@ func (b *BackupRun) Validate() error {
 
 func (b *BackupRun) validateStart() error {
 	if !b.LastSeenAt.IsZero() {
-		return invalid("last_seen_at", "not allowed for phase start")
+		return invalid("last_seen_at", msgNotAllowedForStart)
 	}
 	if !b.GoneBy.IsZero() {
-		return invalid("gone_by", "not allowed for phase start")
+		return invalid("gone_by", msgNotAllowedForStart)
 	}
 	if b.MaxProcesses != 0 {
-		return invalid("max_processes", "not allowed for phase start")
+		return invalid("max_processes", msgNotAllowedForStart)
 	}
 	if b.PID <= 0 {
 		return invalid("pid", "must be greater than 0")
@@ -79,13 +79,13 @@ func (b *BackupRun) validateStart() error {
 
 func (b *BackupRun) validateEnd() error {
 	if b.PID != 0 {
-		return invalid("pid", "not allowed for phase end")
+		return invalid("pid", msgNotAllowedForEnd)
 	}
 	if b.Command != "" {
-		return invalid("command", "not allowed for phase end")
+		return invalid("command", msgNotAllowedForEnd)
 	}
 	if b.Processes != 0 {
-		return invalid("processes", "not allowed for phase end")
+		return invalid("processes", msgNotAllowedForEnd)
 	}
 	if err := checkTime("last_seen_at", b.LastSeenAt); err != nil {
 		return err
