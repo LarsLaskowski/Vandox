@@ -287,6 +287,121 @@ public class PayloadValidationTests
     }
 
     /// <summary>
+    /// The identity of an OOM kill (boot ID and kernel time) is optional and checked when present.
+    /// </summary>
+    /// <param name="json">The payload</param>
+    /// <param name="field">The field that is refused, or empty when the payload is valid</param>
+    /// <param name="reason">The reason</param>
+    [TestMethod]
+    [DataRow("""{"type":"oom_kill","oom_kill":{"victim_pid":42,"victim_command":"mysqld","boot_id":"0123abcd-0123-0123-0123-0123456789ab","kernel_time_ns":123456789}}""", "", "")]
+    [DataRow("""{"type":"oom_kill","oom_kill":{"victim_pid":42,"victim_command":"mysqld","boot_id":"0123abcd-0123-0123-0123-0123456789ab","kernel_time_ns":0}}""", "", "")]
+    [DataRow("""{"type":"oom_kill","oom_kill":{"victim_pid":42,"victim_command":"mysqld"}}""", "", "")]
+    [DataRow("""{"type":"oom_kill","oom_kill":{"victim_pid":42,"victim_command":"mysqld","boot_id":"nope","kernel_time_ns":5}}""", "oom_kill.boot_id", "invalid characters")]
+    [DataRow("""{"type":"oom_kill","oom_kill":{"victim_pid":42,"victim_command":"mysqld","boot_id":"0123ABCD-0123-0123-0123-0123456789AB","kernel_time_ns":5}}""", "oom_kill.boot_id", "invalid characters")]
+    [DataRow("""{"type":"oom_kill","oom_kill":{"victim_pid":42,"victim_command":"mysqld","boot_id":"0123abcd-0123-0123-0123-0123456789a\n","kernel_time_ns":5}}""", "oom_kill.boot_id", "invalid characters")]
+    [DataRow("""{"type":"oom_kill","oom_kill":{"victim_pid":42,"victim_command":"mysqld","boot_id":"0123abcd-0123-0123-0123-0123456789ab","kernel_time_ns":-1}}""", "oom_kill.kernel_time_ns", "must not be negative")]
+    public void PayloadValidationOomKillIdentity(string json, string field, string reason)
+    {
+        // Arrange
+        var payload = Parse("kernel_event", json);
+
+        // Act
+        var error = payload.Validate();
+        var text = PayloadRegistry.Serialize(payload);
+
+        // Assert
+        if (field.Length == 0)
+        {
+            Assert.IsNull(error, "payload is valid");
+            Assert.AreEqual(json.Contains("boot_id", StringComparison.Ordinal), text.Contains("\"boot_id\"", StringComparison.Ordinal), "the identity is written when it was read, and only then");
+        }
+        else
+        {
+            Assert.IsNotNull(error, "payload is invalid");
+            Assert.AreEqual(field, error.Field, "field");
+            Assert.AreEqual(reason, error.Reason, "reason");
+        }
+    }
+
+    /// <summary>
+    /// A kernel time of zero is written, not left out as a default.
+    /// </summary>
+    [TestMethod]
+    public void PayloadValidationOomKillKernelTimeZeroIsWritten()
+    {
+        // Arrange
+        var payload = Parse("kernel_event", """{"type":"oom_kill","oom_kill":{"victim_pid":42,"victim_command":"mysqld","boot_id":"0123abcd-0123-0123-0123-0123456789ab","kernel_time_ns":0}}""");
+
+        // Act
+        var text = PayloadRegistry.Serialize(payload);
+
+        // Assert
+        Assert.Contains("\"kernel_time_ns\":0", text, "kernel time zero is part of the identity");
+    }
+
+    /// <summary>
+    /// The trigger of a process or a connection snapshot is checked below the path <c>trigger</c>.
+    /// </summary>
+    /// <param name="kind">The kind</param>
+    /// <param name="trigger">The trigger</param>
+    /// <param name="field">The field that is refused, or empty when the payload is valid</param>
+    /// <param name="reason">The reason</param>
+    [TestMethod]
+    [DataRow("process_snapshot", """{"kills":[{"boot_id":"0123abcd-0123-0123-0123-0123456789ab","kernel_time_ns":5,"victim_pid":7}],"kills_omitted":2}""", "", "")]
+    [DataRow("connection_snapshot", """{"kills":[{"boot_id":"0123abcd-0123-0123-0123-0123456789ab","kernel_time_ns":5,"victim_pid":7}],"kills_omitted":2}""", "", "")]
+    [DataRow("process_snapshot", """{"kills":[{"boot_id":"x","kernel_time_ns":5,"victim_pid":7}]}""", "trigger.kills[0].boot_id", "invalid characters")]
+    [DataRow("connection_snapshot", """{"kills":[{"boot_id":"x","kernel_time_ns":5,"victim_pid":7}]}""", "trigger.kills[0].boot_id", "invalid characters")]
+    [DataRow("process_snapshot", """{"kills":[{"boot_id":"0123abcd-0123-0123-0123-0123456789ab","kernel_time_ns":-1,"victim_pid":7}]}""", "trigger.kills[0].kernel_time_ns", "must not be negative")]
+    [DataRow("connection_snapshot", """{"kills":[{"boot_id":"0123abcd-0123-0123-0123-0123456789ab","kernel_time_ns":5,"victim_pid":0}]}""", "trigger.kills[0].victim_pid", "must be greater than 0")]
+    public void PayloadValidationSnapshotTrigger(string kind, string trigger, string field, string reason)
+    {
+        // Arrange
+        var body = kind == "process_snapshot" ? """{"complete":true,"processes":[{"pid":1,"command":"init"}],""" : """{"complete":true,""";
+        var payload = Parse(kind, $"{body}\"trigger\":{trigger}}}");
+
+        // Act
+        var error = payload.Validate();
+
+        // Assert
+        if (field.Length == 0)
+        {
+            Assert.IsNull(error, "payload is valid");
+        }
+        else
+        {
+            Assert.IsNotNull(error, "payload is invalid");
+            Assert.AreEqual(field, error.Field, "field");
+            Assert.AreEqual(reason, error.Reason, "reason");
+        }
+    }
+
+    /// <summary>
+    /// A trigger without kills or with more than 64 kills is refused by a snapshot at the list or one of its elements.
+    /// </summary>
+    /// <param name="kind">The kind</param>
+    /// <param name="killCount">The number of kills; zero for a trigger without a list</param>
+    [TestMethod]
+    [DataRow("process_snapshot", 0)]
+    [DataRow("connection_snapshot", 0)]
+    [DataRow("process_snapshot", 65)]
+    [DataRow("connection_snapshot", 65)]
+    public void PayloadValidationSnapshotTriggerRefusesBrokenLists(string kind, int killCount)
+    {
+        // Arrange
+        var kills = string.Join(',', Enumerable.Range(1, killCount).Select(pid => $$"""{"boot_id":"0123abcd-0123-0123-0123-0123456789ab","kernel_time_ns":5,"victim_pid":{{pid}}}"""));
+        var trigger = killCount == 0 ? "{}" : $$"""{"kills":[{{kills}}]}""";
+        var body = kind == "process_snapshot" ? """{"complete":true,"processes":[{"pid":1,"command":"init"}],""" : """{"complete":true,""";
+        var payload = Parse(kind, $"{body}\"trigger\":{trigger}}}");
+
+        // Act
+        var error = payload.Validate();
+
+        // Assert
+        Assert.IsNotNull(error, "payload is invalid");
+        Assert.IsTrue(error.Field == "trigger.kills" || error.Field.StartsWith("trigger.kills[", StringComparison.Ordinal), $"the field is the list or one of its elements, got {error.Field}");
+    }
+
+    /// <summary>
     /// Creates a process sample.
     /// </summary>
     /// <param name="pid">The process ID</param>

@@ -10,6 +10,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"slices"
 	"strconv"
@@ -310,7 +311,7 @@ func TestDecoder_RejectsMalformedRecords(t *testing.T) {
 		// Kinds and data.
 		{"line null is an empty kind", []string{`null`}, want{is: wire.ErrUnknownKind, line: 2}},
 		{"kind wrong case", []string{envelope("Metric", 1, tsJSON, okData)}, want{is: wire.ErrUnknownKind, line: 2}},
-		{"kind unknown", []string{envelope("backup_run", 1, tsJSON, `{}`)}, want{is: wire.ErrUnknownKind, line: 2}},
+		{"kind unknown", []string{envelope("restart_event", 1, tsJSON, `{}`)}, want{is: wire.ErrUnknownKind, line: 2}},
 		{"kind empty", []string{envelope("", 1, tsJSON, okData)}, want{is: wire.ErrUnknownKind, line: 2}},
 		{"kind missing", []string{`{"source":"proc.stat","seq":1,"captured_at":` + tsJSON + `,"data":` + okData + `}`}, want{is: wire.ErrUnknownKind, line: 2}},
 		{"kind null", []string{`{"kind":null,"source":"proc.stat","seq":1,"captured_at":` + tsJSON + `,"data":` + okData + `}`}, want{is: wire.ErrUnknownKind, line: 2}},
@@ -364,7 +365,7 @@ func TestDecoder_UnknownKindText(t *testing.T) {
 		kind string
 	}{
 		{"wrong case", "Metric"},
-		{"unknown", "backup_run"},
+		{"unknown", "restart_event"},
 		{"empty", ""},
 		{"5000 bytes with newline", long},
 	}
@@ -2227,4 +2228,180 @@ func TestCheckText_AllocatesNothing(t *testing.T) {
 	if allocs := testing.AllocsPerRun(100, func() { _ = wire.CheckText(line) }); allocs != 0 {
 		t.Errorf("CheckText() allocates %v times per call, want 0", allocs)
 	}
+}
+
+const (
+	killBootID     = "0123abcd-0123-0123-0123-0123456789ab"
+	backupStartRaw = `"phase":"start","boot_id":"` + killBootID + `","started_at":"2026-03-01T11:00:00Z","pid":5150,"command":"pzstd","processes":3`
+	backupEndRaw   = `"phase":"end","boot_id":"` + killBootID + `","started_at":"2026-03-01T11:00:00Z","last_seen_at":"2026-03-01T11:05:00Z","gone_by":"2026-03-01T11:05:10Z","max_processes":4`
+)
+
+// triggerData wraps a trigger object into the data of a complete process snapshot.
+func triggerData(trigger string) string {
+	return `{"complete":true,"processes":[{"pid":1,"command":"x"}],"trigger":` + trigger + `}`
+}
+
+// killJSON is one kill of a trigger with the given pid and kernel time.
+func killJSON(pid int, kernelTime string) string {
+	return `{"boot_id":"` + killBootID + `","kernel_time_ns":` + kernelTime + `,"victim_pid":` + strconv.Itoa(pid) + `}`
+}
+
+// killsJSON is a trigger of n distinct kills.
+func killsJSON(n int) string {
+	kills := make([]string, n)
+	for i := range kills {
+		kills[i] = killJSON(100+i, "5")
+	}
+	return `{"kills":[` + strings.Join(kills, ",") + `]}`
+}
+
+func TestDecoder_FieldErrors(t *testing.T) {
+	oom := func(fields string) []string {
+		return []string{kindLine("kernel_event", `{"type":"oom_kill","oom_kill":{"victim_pid":1,"victim_command":"x"`+fields+`}}`)}
+	}
+	backup := func(fields string) []string { return []string{kindLine("backup_run", `{`+fields+`}`)} }
+	snapshot := func(trigger string) []string { return []string{kindLine("process_snapshot", triggerData(trigger))} }
+	connection := func(trigger string) []string {
+		return []string{kindLine("connection_snapshot", `{"complete":true,"trigger":`+trigger+`}`)}
+	}
+	cases := []struct {
+		name  string
+		lines []string
+		w     want
+	}{
+		// The identity of an OOM kill.
+		{"oom_kill boot_id malformed", oom(`,"boot_id":"nope"`), want{is: model.ErrInvalid, field: "data.oom_kill.boot_id", reason: "invalid characters", line: 2}},
+		{"oom_kill boot_id upper case", oom(`,"boot_id":"` + strings.ToUpper(killBootID) + `"`), want{is: model.ErrInvalid, field: "data.oom_kill.boot_id", reason: "invalid characters", line: 2}},
+		{"oom_kill kernel_time_ns negative", oom(`,"kernel_time_ns":-1`), want{is: model.ErrInvalid, field: "data.oom_kill.kernel_time_ns", reason: "must not be negative", line: 2}},
+		{"oom_kill kernel_time_ns fractional", oom(`,"kernel_time_ns":1.5`), malformed(2)},
+		{"oom_kill kernel_time_ns as text", oom(`,"kernel_time_ns":"5"`), malformed(2)},
+		{"oom_kill kernel_time_ns above int64", oom(`,"kernel_time_ns":9223372036854775808`), malformed(2)},
+		{"oom_kill boot_id as number", oom(`,"boot_id":5`), malformed(2)},
+
+		// The trigger of a snapshot.
+		{"trigger without kills", snapshot(`{}`), want{is: model.ErrInvalid, fieldSuffix: "trigger.kills", line: 2}},
+		{"trigger with empty kills", snapshot(`{"kills":[]}`), want{is: model.ErrInvalid, fieldSuffix: "trigger.kills", line: 2}},
+		{"trigger with 65 kills", snapshot(killsJSON(65)), want{is: model.ErrInvalid, fieldSuffix: "trigger.kills", line: 2}},
+		{"trigger with a duplicate kill", snapshot(`{"kills":[` + killJSON(7, "5") + `,` + killJSON(7, "5") + `]}`), want{is: model.ErrInvalid, line: 2}},
+		{"trigger boot_id malformed", snapshot(`{"kills":[{"boot_id":"x","kernel_time_ns":5,"victim_pid":7}]}`), want{is: model.ErrInvalid, field: "data.trigger.kills[0].boot_id", reason: "invalid characters", line: 2}},
+		{"trigger boot_id missing", snapshot(`{"kills":[{"kernel_time_ns":5,"victim_pid":7}]}`), want{is: model.ErrInvalid, field: "data.trigger.kills[0].boot_id", reason: "required", line: 2}},
+		{"trigger kernel_time_ns negative", snapshot(`{"kills":[` + killJSON(7, "-5") + `]}`), want{is: model.ErrInvalid, field: "data.trigger.kills[0].kernel_time_ns", reason: "must not be negative", line: 2}},
+		{"trigger second victim_pid zero", snapshot(`{"kills":[` + killJSON(7, "5") + `,` + killJSON(0, "5") + `]}`), want{is: model.ErrInvalid, field: "data.trigger.kills[1].victim_pid", line: 2}},
+		{"trigger victim_pid negative", snapshot(`{"kills":[` + killJSON(-7, "5") + `]}`), want{is: model.ErrInvalid, field: "data.trigger.kills[0].victim_pid", line: 2}},
+		{"trigger victim_pid above int32", snapshot(`{"kills":[` + killJSON(2147483648, "5") + `]}`), malformed(2)},
+		{"trigger kills_omitted negative", snapshot(`{"kills":[` + killJSON(7, "5") + `],"kills_omitted":-1}`), malformed(2)},
+		{"trigger kills_omitted above uint32", snapshot(`{"kills":[` + killJSON(7, "5") + `],"kills_omitted":4294967296}`), malformed(2)},
+		{"trigger as list", snapshot(`[]`), malformed(2)},
+		{"connection trigger without kills", connection(`{}`), want{is: model.ErrInvalid, fieldSuffix: "trigger.kills", line: 2}},
+		{"connection trigger boot_id malformed", connection(`{"kills":[{"boot_id":"x","kernel_time_ns":5,"victim_pid":7}]}`), want{is: model.ErrInvalid, field: "data.trigger.kills[0].boot_id", reason: "invalid characters", line: 2}},
+		{"connection trigger with 65 kills", connection(killsJSON(65)), want{is: model.ErrInvalid, fieldSuffix: "trigger.kills", line: 2}},
+
+		// The backup run.
+		{"backup_run without phase", backup(`"boot_id":"` + killBootID + `","started_at":"2026-03-01T11:00:00Z"`), want{is: model.ErrInvalid, field: "data.phase", line: 2}},
+		{"backup_run unknown phase", backup(`"phase":"middle","boot_id":"` + killBootID + `","started_at":"2026-03-01T11:00:00Z"`), want{is: model.ErrInvalid, field: "data.phase", reason: "unknown value", line: 2}},
+		{"backup_run boot_id malformed", backup(strings.Replace(backupStartRaw, killBootID, "x", 1)), want{is: model.ErrInvalid, field: "data.boot_id", reason: "invalid characters", line: 2}},
+		{"backup_run started_at with offset", backup(strings.Replace(backupStartRaw, "11:00:00Z", "13:00:00+02:00", 1)), want{is: model.ErrInvalid, field: "data.started_at", reason: "must be UTC", line: 2}},
+		{"backup_run start without pid", backup(strings.Replace(backupStartRaw, `"pid":5150,`, "", 1)), want{is: model.ErrInvalid, field: "data.pid", line: 2}},
+		{"backup_run start without command", backup(strings.Replace(backupStartRaw, `"command":"pzstd",`, "", 1)), want{is: model.ErrInvalid, field: "data.command", reason: "required", line: 2}},
+		{"backup_run start without processes", backup(strings.Replace(backupStartRaw, `,"processes":3`, "", 1)), want{is: model.ErrInvalid, field: "data.processes", line: 2}},
+		{"backup_run start with last_seen_at", backup(backupStartRaw + `,"last_seen_at":"2026-03-01T11:05:00Z"`), want{is: model.ErrInvalid, field: "data.last_seen_at", reason: "not allowed for phase start", line: 2}},
+		{"backup_run start with gone_by", backup(backupStartRaw + `,"gone_by":"2026-03-01T11:05:10Z"`), want{is: model.ErrInvalid, field: "data.gone_by", reason: "not allowed for phase start", line: 2}},
+		{"backup_run start with max_processes", backup(backupStartRaw + `,"max_processes":2`), want{is: model.ErrInvalid, field: "data.max_processes", reason: "not allowed for phase start", line: 2}},
+		{"backup_run end without last_seen_at", backup(strings.Replace(backupEndRaw, `"last_seen_at":"2026-03-01T11:05:00Z",`, "", 1)), want{is: model.ErrInvalid, field: "data.last_seen_at", reason: "required", line: 2}},
+		{"backup_run end with last_seen_at before started_at", backup(strings.Replace(backupEndRaw, "11:05:00Z", "10:59:59Z", 1)), want{is: model.ErrInvalid, field: "data.last_seen_at", reason: "must not be before started_at", line: 2}},
+		{"backup_run end with gone_by before last_seen_at", backup(strings.Replace(backupEndRaw, "11:05:10Z", "11:04:59Z", 1)), want{is: model.ErrInvalid, field: "data.gone_by", line: 2}},
+		{"backup_run end without max_processes", backup(strings.Replace(backupEndRaw, `,"max_processes":4`, "", 1)), want{is: model.ErrInvalid, field: "data.max_processes", line: 2}},
+		{"backup_run end with pid", backup(backupEndRaw + `,"pid":5150`), want{is: model.ErrInvalid, field: "data.pid", reason: "not allowed for phase end", line: 2}},
+		{"backup_run end with command", backup(backupEndRaw + `,"command":"pzstd"`), want{is: model.ErrInvalid, field: "data.command", reason: "not allowed for phase end", line: 2}},
+		{"backup_run end with processes", backup(backupEndRaw + `,"processes":3`), want{is: model.ErrInvalid, field: "data.processes", reason: "not allowed for phase end", line: 2}},
+		{"backup_run pid above int32", backup(strings.Replace(backupStartRaw, `"pid":5150`, `"pid":2147483648`, 1)), malformed(2)},
+		{"backup_run processes negative", backup(strings.Replace(backupStartRaw, `"processes":3`, `"processes":-1`, 1)), malformed(2)},
+		{"backup_run started_at as number", backup(strings.Replace(backupStartRaw, `"2026-03-01T11:00:00Z"`, `5`, 1)), malformed(2)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			recs, err := decodeAll(t, withHeader(t, tc.lines...), wire.DefaultLimits())
+			tc.w.check(t, err)
+			if len(recs) != 0 {
+				t.Errorf("decoded %d records before the error, want 0", len(recs))
+			}
+		})
+	}
+}
+
+// decodeRecords decodes lines after the standard header and requires n records and no error.
+func decodeRecords(t *testing.T, n int, lines ...string) []model.Record {
+	t.Helper()
+	recs, err := decodeAll(t, withHeader(t, lines...), wire.DefaultLimits())
+	if err != nil || len(recs) != n {
+		t.Fatalf("decoded %d records, error %v, want %d and nil", len(recs), err, n)
+	}
+	return recs
+}
+
+func TestDecoder_AcceptsKillIdentity(t *testing.T) {
+	line := kindLine("kernel_event", `{"type":"oom_kill","oom_kill":{"victim_pid":4242,"victim_command":"mysqld","boot_id":"`+killBootID+`","kernel_time_ns":0}}`)
+	recs := decodeRecords(t, 1, line)
+	reencoded := string(mustEncodeLine(t, recs[0]))
+	for _, want := range []string{`"boot_id":"` + killBootID + `"`, `"kernel_time_ns":0`} {
+		if !strings.Contains(reencoded, want) {
+			t.Errorf("record encodes as %s, want it to contain %s", reencoded, want)
+		}
+	}
+}
+
+func TestDecoder_SnapshotsKeepTheirTrigger(t *testing.T) {
+	trigger := `{"kills":[` + killJSON(7, "5") + `,` + killJSON(8, "0") + `],"kills_omitted":3}`
+	recs := decodeRecords(t, 2,
+		kindLine("process_snapshot", triggerData(trigger)),
+		kindLine("connection_snapshot", `{"complete":true,"trigger":`+trigger+`}`))
+	want := &model.SnapshotTrigger{
+		Kills:        []model.KillRef{{BootID: killBootID, KernelTime: 5, VictimPID: 7}, {BootID: killBootID, KernelTime: 0, VictimPID: 8}},
+		KillsOmitted: 3,
+	}
+	for i, got := range []*model.SnapshotTrigger{recs[0].Data.(*model.ProcessSnapshot).Trigger, recs[1].Data.(*model.ConnectionSnapshot).Trigger} {
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("record %d trigger = %+v, want %+v", i, got, want)
+		}
+	}
+}
+
+func TestDecoder_AcceptsTriggerOfSixtyFourKillsAndNullTrigger(t *testing.T) {
+	recs := decodeRecords(t, 2, kindLine("process_snapshot", triggerData(killsJSON(64))), kindLine("process_snapshot", triggerData("null")))
+	if got := len(recs[0].Data.(*model.ProcessSnapshot).Trigger.Kills); got != 64 {
+		t.Errorf("trigger kills = %d, want 64", got)
+	}
+	if got := recs[1].Data.(*model.ProcessSnapshot).Trigger; got != nil {
+		t.Errorf("trigger of a null trigger = %+v, want nil", got)
+	}
+}
+
+func TestDecoder_AcceptsBackupRunStartAndEnd(t *testing.T) {
+	recs := decodeRecords(t, 2, kindLine("backup_run", `{`+backupStartRaw+`}`), kindLine("backup_run", `{`+backupEndRaw+`}`))
+	startedAt := time.Date(2026, 3, 1, 11, 0, 0, 0, time.UTC)
+	wantStart := &model.BackupRun{Phase: model.BackupPhaseStart, BootID: killBootID, StartedAt: startedAt, PID: 5150, Command: "pzstd", Processes: 3}
+	wantEnd := &model.BackupRun{
+		Phase: model.BackupPhaseEnd, BootID: killBootID, StartedAt: startedAt,
+		LastSeenAt: time.Date(2026, 3, 1, 11, 5, 0, 0, time.UTC), GoneBy: time.Date(2026, 3, 1, 11, 5, 10, 0, time.UTC), MaxProcesses: 4,
+	}
+	if got := recs[0].Data; !reflect.DeepEqual(got, wantStart) {
+		t.Errorf("start = %+v, want %+v", got, wantStart)
+	}
+	if got := recs[1].Data; !reflect.DeepEqual(got, wantEnd) {
+		t.Errorf("end = %+v, want %+v", got, wantEnd)
+	}
+	if recs[0].Kind() != model.KindBackupRun {
+		t.Errorf("Kind() = %q, want %q", recs[0].Kind(), model.KindBackupRun)
+	}
+}
+
+func TestDecoder_AcceptsBackupRunEndSeenAtItsStart(t *testing.T) {
+	raw := strings.Replace(backupEndRaw, "11:05:00Z", "11:00:00Z", 1)
+	decodeRecords(t, 1, kindLine("backup_run", `{`+raw+`}`))
+}
+
+// mustEncodeLine encodes one record as the wire encoder does.
+func mustEncodeLine(t *testing.T, r model.Record) []byte {
+	t.Helper()
+	return envelopeLine(t, &r)
 }

@@ -55,7 +55,47 @@ func gapAll(seq uint64, loc *time.Location) model.Record {
 	}}
 }
 
-// allKindRecords returns one fully populated record of every kind (the kernel kind twice, the connection snapshot as a full and as an aggregates-only record, the MariaDB status as a database that answered and as one that refused the login), seq 1..12.
+// previousBootID is the boot before testBootID in the golden records.
+const previousBootID = "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d"
+
+// killRefs returns the two kills the triggered golden snapshots name: the kill of oomKillWithIdentity and one of the previous boot.
+func killRefs() []model.KillRef {
+	return []model.KillRef{
+		{BootID: testBootID, KernelTime: 5_000_000_000, VictimPID: 4242},
+		{BootID: previousBootID, KernelTime: 7_250_000_000, VictimPID: 77},
+	}
+}
+
+// oomKillWithIdentity returns the kernel event of the kill killRefs names first. It is built from JSON so that this file compiles
+// whether or not OOMKill already has the fields boot_id and kernel_time_ns; without them the golden batch lacks the identity.
+func oomKillWithIdentity() *model.KernelEvent {
+	raw := `{"type":"oom_kill","message":"Out of memory: Killed process 4242 (mysqld)","oom_kill":{"victim_pid":4242,"victim_command":"mysqld",` +
+		`"anon_rss_bytes":1073741824,"oom_score_adj":-900,"boot_id":"` + testBootID + `","kernel_time_ns":5000000000}}`
+	var e model.KernelEvent
+	if err := json.Unmarshal([]byte(raw), &e); err != nil {
+		panic("test setup: " + err.Error())
+	}
+	return &e
+}
+
+// backupStartAll and backupEndAll are the golden records of a backup run; the capture time of the start is started_at and the one of the end last_seen_at.
+func backupStartAll(seq uint64, loc *time.Location) model.Record {
+	started := atLoc(loc, 11, 0)
+	return model.Record{
+		Meta: model.Meta{Origin: model.OriginAgent, Source: "backups", Seq: seq, CapturedAt: started},
+		Data: &model.BackupRun{Phase: model.BackupPhaseStart, BootID: testBootID, StartedAt: started, PID: 5150, Command: "pzstd", Processes: 3},
+	}
+}
+
+func backupEndAll(seq uint64, loc *time.Location) model.Record {
+	started, lastSeen := atLoc(loc, 11, 0), atLoc(loc, 12, 0)
+	return model.Record{
+		Meta: model.Meta{Origin: model.OriginAgent, Source: "backups", Seq: seq, CapturedAt: lastSeen},
+		Data: &model.BackupRun{Phase: model.BackupPhaseEnd, BootID: testBootID, StartedAt: started, LastSeenAt: lastSeen, GoneBy: atLoc(loc, 12, 500_000_000), MaxProcesses: 4},
+	}
+}
+
+// allKindRecords returns one fully populated record of every kind (the kernel kind three times, the second with the identity of the kill, the connection snapshot as a full and as an aggregates-only record, the MariaDB status as a database that answered and as one that refused the login, a process and a connection snapshot that name two kills, a backup run start and end), seq 1..17.
 func allKindRecords(loc *time.Location) []model.Record {
 	return []model.Record{
 		metricAll(1, loc),
@@ -124,6 +164,19 @@ func allKindRecords(loc *time.Location) []model.Record {
 			Availability: model.MariaDBNotAnswering,
 			ErrorCode:    ptr(uint16(1045)),
 		}},
+		{Meta: agentMeta(13, "ps", loc), Data: &model.ProcessSnapshot{
+			Complete:  true,
+			Processes: []model.ProcessSample{{PID: 4242, Command: "mysqld", StartedAt: atLoc(loc, 8, 5), RSSBytes: 8192}},
+			Trigger:   &model.SnapshotTrigger{Kills: killRefs(), KillsOmitted: 3},
+		}},
+		{Meta: agentMeta(14, "connections", loc), Data: &model.ConnectionSnapshot{
+			Complete:  true,
+			Listeners: []model.Listener{{Proto: model.ProtoTCP, Local: netip.MustParseAddrPort("0.0.0.0:22"), PID: 1, Command: "sshd"}},
+			Trigger:   &model.SnapshotTrigger{Kills: killRefs()[:1]},
+		}},
+		backupStartAll(15, loc),
+		backupEndAll(16, loc),
+		{Meta: agentMeta(17, "kernel", loc), Data: oomKillWithIdentity()},
 	}
 }
 
@@ -512,7 +565,27 @@ func worstCaseRecords() map[string]model.Record {
 				OOMKill: &model.OOMKill{VictimPID: 1, VictimCommand: worstText(model.MaxShortTextBytes), AnonRSSBytes: ptr(uint64(1)), OOMScoreAdj: ptr(int16(1000))},
 			},
 		},
+		"backup run start": {
+			Meta: meta,
+			Data: &model.BackupRun{Phase: model.BackupPhaseStart, BootID: testBootID, StartedAt: testTime, PID: 1, Command: worstText(model.MaxShortTextBytes), Processes: 1},
+		},
+		"snapshot trigger with 64 kills": {
+			Meta: meta,
+			Data: &model.ProcessSnapshot{
+				Complete: true, Processes: []model.ProcessSample{{PID: 1, Command: "c"}},
+				Trigger: &model.SnapshotTrigger{Kills: maxTriggerKills(), KillsOmitted: 4294967295},
+			},
+		},
 	}
+}
+
+// maxTriggerKills returns model.MaxTriggerKills distinct kills with the largest kernel times.
+func maxTriggerKills() []model.KillRef {
+	kills := make([]model.KillRef, model.MaxTriggerKills)
+	for i := range kills {
+		kills[i] = model.KillRef{BootID: testBootID, KernelTime: time.Duration(1<<62 + int64(i)), VictimPID: int32(2147483647 - i)}
+	}
+	return kills
 }
 
 func TestCheckRecord_Valid(t *testing.T) {

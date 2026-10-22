@@ -86,13 +86,88 @@ public class WireContractTests
         // Assert
         Assert.AreEqual("agent-1", agentId, "agent id");
 
-        var expected = new[] { RecordKind.Metric, RecordKind.ProcessSnapshot, RecordKind.ConnectionSnapshot, RecordKind.ServiceState, RecordKind.MariaDbStatus, RecordKind.KernelEvent, RecordKind.KernelEvent, RecordKind.LogLine, RecordKind.Gap, RecordKind.ConnectionSnapshot, RecordKind.ConnectionSnapshot, RecordKind.MariaDbStatus };
+        var expected = new[] { RecordKind.Metric, RecordKind.ProcessSnapshot, RecordKind.ConnectionSnapshot, RecordKind.ServiceState, RecordKind.MariaDbStatus, RecordKind.KernelEvent, RecordKind.KernelEvent, RecordKind.LogLine, RecordKind.Gap, RecordKind.ConnectionSnapshot, RecordKind.ConnectionSnapshot, RecordKind.MariaDbStatus, RecordKind.ProcessSnapshot, RecordKind.ConnectionSnapshot, RecordKind.BackupRun, RecordKind.BackupRun, RecordKind.KernelEvent };
 
         Assert.AreSequenceEqual(expected, kinds, "kinds in order");
         Assert.IsNotNull(refused, "the golden batch holds a MariaDB status of a database that refused the login");
         Assert.AreEqual(MariaDbStatus.NotAnswering, refused.Availability, "availability of the refused login");
         Assert.AreEqual((ushort)1045, refused.ErrorCode, "error code of the refused login");
         Assert.IsNull(refused.Validate(), "the refused login is valid");
+    }
+
+    /// <summary>
+    /// The golden batch holds the kill identity, the triggered snapshots and the backup run, and the decoder reads every value the Go encoder wrote.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task WireContractDecodesGoldenBatch()
+    {
+        // Arrange
+        var plain = await File.ReadAllBytesAsync(RepositoryFiles.Path("testdata/wire/all-kinds.jsonl"), CancellationToken.None);
+        var records = new List<DataRecord>();
+
+        using (var compressed = GzipOf(plain))
+            using (var decoder = await BatchDecoder.OpenAsync(compressed, null, CancellationToken.None))
+            {
+                for (var record = await decoder.NextAsync(CancellationToken.None); record is not null; record = await decoder.NextAsync(CancellationToken.None))
+                {
+                    records.Add(record);
+                }
+            }
+
+        const string bootId = "0b6f9b0c-2d1e-4c43-9a4e-7f1b2c3d4e5f";
+        const string previousBootId = "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d";
+
+        // Act
+        var kill = records.Select(record => record.Data).OfType<KernelEvent>().Select(candidate => candidate.OomKill).Single(candidate => candidate is { BootId.Length: > 0 });
+        var process = records.Select(record => record.Data).OfType<ProcessSnapshot>().Single(candidate => candidate.Trigger is not null);
+        var connection = records.Select(record => record.Data).OfType<ConnectionSnapshot>().Single(candidate => candidate.Trigger is not null);
+        var runs = records.Where(record => record.Data is BackupRun).ToList();
+
+        // Assert
+        Assert.IsNotNull(kill, "the golden batch holds an OOM kill with an identity");
+        Assert.AreEqual(4242, kill.VictimPid, "kill: victim pid");
+        Assert.AreEqual(bootId, kill.BootId, "kill: boot_id");
+        Assert.AreEqual(5_000_000_000L, kill.KernelTimeNs, "kill: kernel_time_ns");
+        Assert.IsNull(kill.Validate(), "the kill is valid");
+        Assert.ContainsSingle(records.Select(record => record.Data).OfType<KernelEvent>().Where(candidate => candidate.OomKill is { KernelTimeNs: null }).ToList(), "the plain OOM kill carries no kernel time");
+
+        Assert.IsNotNull(process.Trigger!.Kills, "process snapshot: kills");
+        Assert.HasCount(2, process.Trigger.Kills, "process snapshot: kills");
+        Assert.AreEqual(bootId, process.Trigger.Kills[0].BootId, "process snapshot: first boot_id");
+        Assert.AreEqual(5_000_000_000L, process.Trigger.Kills[0].KernelTimeNs, "process snapshot: first kernel_time_ns");
+        Assert.AreEqual(4242, process.Trigger.Kills[0].VictimPid, "process snapshot: first victim_pid");
+        Assert.AreEqual(previousBootId, process.Trigger.Kills[1].BootId, "process snapshot: second boot_id");
+        Assert.AreEqual(7_250_000_000L, process.Trigger.Kills[1].KernelTimeNs, "process snapshot: second kernel_time_ns");
+        Assert.AreEqual(77, process.Trigger.Kills[1].VictimPid, "process snapshot: second victim_pid");
+        Assert.AreEqual(3u, process.Trigger.KillsOmitted, "process snapshot: kills_omitted");
+
+        Assert.IsNotNull(connection.Trigger!.Kills, "connection snapshot: kills");
+        Assert.HasCount(1, connection.Trigger.Kills, "connection snapshot: kills");
+        Assert.AreEqual(4242, connection.Trigger.Kills[0].VictimPid, "connection snapshot: victim_pid");
+        Assert.AreEqual(0u, connection.Trigger.KillsOmitted, "connection snapshot: kills_omitted");
+
+        Assert.HasCount(2, runs, "backup runs of the golden batch");
+
+        var start = (BackupRun)runs[0].Data!;
+        var end = (BackupRun)runs[1].Data!;
+
+        Assert.AreEqual("start", start.Phase, "start: phase");
+        Assert.AreEqual(bootId, start.BootId, "start: boot_id");
+        Assert.AreEqual(5150, start.Pid, "start: pid");
+        Assert.AreEqual("pzstd", start.Command, "start: command");
+        Assert.AreEqual(3u, start.Processes, "start: processes");
+        Assert.AreEqual(start.StartedAt, runs[0].CapturedAt, "start: captured_at is started_at");
+        Assert.AreEqual("backups", runs[0].Source, "start: source");
+        Assert.IsNull(start.LastSeenAt, "start: last_seen_at");
+        Assert.AreEqual("end", end.Phase, "end: phase");
+        Assert.AreEqual(start.StartedAt, end.StartedAt, "end: started_at pairs it with the start");
+        Assert.AreEqual(new DateTimeOffset(2026, 3, 1, 12, 30, 15, TimeSpan.Zero), end.LastSeenAt, "end: last_seen_at");
+        Assert.AreEqual(new DateTimeOffset(2026, 3, 1, 12, 30, 15, TimeSpan.Zero).AddMilliseconds(500), end.GoneBy, "end: gone_by");
+        Assert.AreEqual(4u, end.MaxProcesses, "end: max_processes");
+        Assert.AreEqual(end.LastSeenAt, runs[1].CapturedAt, "end: captured_at is last_seen_at");
+        Assert.IsNull(start.Validate(), "the start is valid");
+        Assert.IsNull(end.Validate(), "the end is valid");
     }
 
     /// <summary>
@@ -180,7 +255,7 @@ public class WireContractTests
         var exception = await Assert.ThrowsExactlyAsync<WireException>(() => contradictingDecoder.NextAsync(CancellationToken.None), "a complete snapshot with incomplete aggregates");
 
         // Assert
-        Assert.HasCount(3, snapshots, "connection snapshots of the golden batch");
+        Assert.HasCount(4, snapshots, "connection snapshots of the golden batch");
 
         var full = snapshots[0];
 
