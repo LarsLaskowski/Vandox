@@ -567,12 +567,12 @@ func TestRun_ConfigErrorExitsOne(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			socket := newNotificationSocket(t)
-			var stderr bytes.Buffer
+			stderr := &syncBuffer{}
 
 			code := Run(context.Background(), Options{
 				ConfigPath:  tc.path,
 				Environ:     []string{"VANDOX_AGENT_TOKEN=" + testToken, "NOTIFY_SOCKET=" + socket.path},
-				Stderr:      &stderr,
+				Stderr:      stderr,
 				Self:        fixtureSources(),
 				System:      fixtureSystem(),
 				Processes:   fixtureProcesses(),
@@ -601,12 +601,12 @@ func TestRun_ConfigErrorExitsOne(t *testing.T) {
 
 func TestRun_DoesNotLogSecret(t *testing.T) {
 	const token = "leak-sentinel-0123456789abcdef0123456789"
-	var stderr bytes.Buffer
+	stderr := &syncBuffer{}
 	sink := newMetricSink()
 	r := startAgent(t, Options{
 		ConfigPath:  writeConfig(t, validConfig+"log:\n  level: debug\n"),
 		Environ:     []string{"VANDOX_AGENT_TOKEN=" + token},
-		Stderr:      &stderr,
+		Stderr:      stderr,
 		Sink:        sink,
 		Self:        fixtureSources(),
 		System:      fixtureSystem(),
@@ -652,12 +652,12 @@ func TestRun_NotificationProblemsDoNotStopTheAgent(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			var stderr bytes.Buffer
+			stderr := &syncBuffer{}
 			sink := newMetricSink()
 			r := startAgent(t, Options{
 				ConfigPath:  writeConfig(t, validConfig),
 				Environ:     []string{"VANDOX_AGENT_TOKEN=" + testToken, tc.env},
-				Stderr:      &stderr,
+				Stderr:      stderr,
 				Sink:        sink,
 				Self:        fixtureSources(),
 				System:      fixtureSystem(),
@@ -1215,29 +1215,42 @@ func TestNewScheduler_StateFileIsKeptInTheSpoolDirectoryOrStateDir(t *testing.T)
 				opts.StateDir = other
 				want, unwanted = other, spool
 			}
-			world := newKernelWorld()
-			opts.Kernel = world.sources()
+			opts.Kernel = newKernelWorld().sources()
 
-			synctest.Test(t, func(t *testing.T) {
-				sched, err := newScheduler(opts, &cfg, slog.New(slog.DiscardHandler))
-				if err != nil {
-					t.Fatalf("newScheduler() error = %v, want nil", err)
-				}
+			runSchedulerFor(t, opts, &cfg, 25*time.Second)
 
-				runFor(t, sched, 25*time.Second)
-			})
-
-			data, err := os.ReadFile(filepath.Join(want, "agent-state.json"))
-			if err != nil {
-				t.Fatalf("reading the state file: %v, want the state job to have saved the boot there", err)
-			}
-			if !strings.Contains(string(data), kernelBootRaw) {
-				t.Errorf("state file = %s, want it to hold the boot ID %s", data, kernelBootRaw)
-			}
-			if _, err := os.Stat(filepath.Join(unwanted, "agent-state.json")); !errors.Is(err, fs.ErrNotExist) {
-				t.Errorf("state file in the other directory: Stat error = %v, want %v", err, fs.ErrNotExist)
-			}
+			requireStateFile(t, want, unwanted)
 		})
+	}
+}
+
+// runSchedulerFor builds the scheduler of opts and cfg and runs it for d of fake time.
+func runSchedulerFor(t *testing.T, opts Options, cfg *config.Agent, d time.Duration) {
+	t.Helper()
+
+	synctest.Test(t, func(t *testing.T) {
+		sched, err := newScheduler(opts, cfg, slog.New(slog.DiscardHandler))
+		if err != nil {
+			t.Fatalf("newScheduler() error = %v, want nil", err)
+		}
+
+		runFor(t, sched, d)
+	})
+}
+
+// requireStateFile fails unless dir holds a state file with the boot of the kernel world and other holds none.
+func requireStateFile(t *testing.T, dir, other string) {
+	t.Helper()
+
+	data, err := os.ReadFile(filepath.Join(dir, "agent-state.json"))
+	if err != nil {
+		t.Fatalf("reading the state file: %v, want the state job to have saved the boot there", err)
+	}
+	if !strings.Contains(string(data), kernelBootRaw) {
+		t.Errorf("state file = %s, want it to hold the boot ID %s", data, kernelBootRaw)
+	}
+	if _, err := os.Stat(filepath.Join(other, "agent-state.json")); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("state file in the other directory: Stat error = %v, want %v", err, fs.ErrNotExist)
 	}
 }
 
@@ -1290,43 +1303,60 @@ func TestNewScheduler_LiveKillTriggersExtraSnapshots(t *testing.T) {
 		StateDir:    t.TempDir(),
 	}
 	const victim = 4711
-	killLine := fmt.Sprintf("Out of memory: Killed process %d (pzstd) total-vm:1000kB, anon-rss:100kB, file-rss:0kB, shmem-rss:0kB, UID:0 pgtables:4kB oom_score_adj:0", victim)
 
 	synctest.Test(t, func(t *testing.T) {
-		// Second s of the timeline is origin + s; the run starts at second 5.
-		origin := time.Now().Add(-5 * time.Second)
-		world.setUptime(kernelMono/1e6 + 5)
-		world.addJournalFile(t, []map[string][]byte{
-			kernelLine(2, origin, 1, 300_000, "handmade kernel line 2"),
-			kernelLine(4, origin, 2, 300_000, "handmade kernel line 4"),
-			kernelLine(6, origin, 3, 300_000, "handmade kernel line 6"),
-		})
 		sched, err := newScheduler(opts, &cfg, slog.New(slog.DiscardHandler))
 		if err != nil {
 			t.Fatalf("newScheduler() error = %v, want nil", err)
 		}
-		ctx, cancel := context.WithCancel(context.Background())
-		done := make(chan struct{})
-		go func() {
-			defer close(done)
-			sched.Run(ctx)
-		}()
-
-		time.Sleep(3 * time.Second)
-		synctest.Wait()
-		world.setUptime(kernelMono/1e6 + 8)
-		world.addJournalFile(t, []map[string][]byte{kernelLine(8, origin, 7, 300_000, killLine)})
-		time.Sleep(4 * time.Second)
-		synctest.Wait()
-		cancel()
-		<-done
+		runWithKill(t, sched, world, victim)
 	})
 
 	records := sink.all()
 	if n := countKills(records, victim); n != 1 {
 		t.Fatalf("oom_kill events of PID %d = %d, want 1 (the kernel job read the journal)", victim, n)
 	}
-	var processes, connections int
+	processes, connections := countTriggered(t, records, victim)
+	if processes != 1 || connections != 1 {
+		t.Errorf("triggered snapshots = %d process and %d connection, want 1 and 1 within seconds of the kill (the regular ones are 60 s apart)", processes, connections)
+	}
+}
+
+// runWithKill runs sched inside a synctest bubble: the journal of world holds three lines at the first start, and a kill of the
+// victim is added three seconds later. Second s of the timeline is origin + s; the first run is at second 5.
+func runWithKill(t *testing.T, sched *scheduler.Scheduler, world *kernelWorld, victim int) {
+	t.Helper()
+
+	killLine := fmt.Sprintf("Out of memory: Killed process %d (pzstd) total-vm:1000kB, anon-rss:100kB, file-rss:0kB, shmem-rss:0kB, UID:0 pgtables:4kB oom_score_adj:0", victim)
+	origin := time.Now().Add(-5 * time.Second)
+	world.setUptime(kernelMono/1e6 + 5)
+	world.addJournalFile(t, []map[string][]byte{
+		kernelLine(2, origin, 1, 300_000, "handmade kernel line 2"),
+		kernelLine(4, origin, 2, 300_000, "handmade kernel line 4"),
+		kernelLine(6, origin, 3, 300_000, "handmade kernel line 6"),
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		sched.Run(ctx)
+	}()
+
+	time.Sleep(3 * time.Second)
+	synctest.Wait()
+	world.setUptime(kernelMono/1e6 + 8)
+	world.addJournalFile(t, []map[string][]byte{kernelLine(8, origin, 7, 300_000, killLine)})
+	time.Sleep(4 * time.Second)
+	synctest.Wait()
+	cancel()
+	<-done
+}
+
+// countTriggered returns the number of triggered process and connection snapshots in records; every triggered snapshot must name
+// the victim's kill.
+func countTriggered(t *testing.T, records []model.Record, victim int32) (processes, connections int) {
+	t.Helper()
+
 	for _, r := range records {
 		switch d := r.Data.(type) {
 		case *model.ProcessSnapshot:
@@ -1342,9 +1372,7 @@ func TestNewScheduler_LiveKillTriggersExtraSnapshots(t *testing.T) {
 			}
 		}
 	}
-	if processes != 1 || connections != 1 {
-		t.Errorf("triggered snapshots = %d process and %d connection, want 1 and 1 within seconds of the kill (the regular ones are 60 s apart)", processes, connections)
-	}
+	return processes, connections
 }
 
 // countKills returns the number of oom_kill events of the victim in records.
@@ -1369,4 +1397,39 @@ func requireTriggerNames(t *testing.T, what string, trigger *model.SnapshotTrigg
 		t.Errorf("trigger of the %s snapshot = %+v, want the one kill of PID %d in boot %s", what, trigger, victim, kernelBootRaw)
 	}
 	return true
+}
+
+func TestJobs_ZeroKernelSourcesStillBuildAllJobs(t *testing.T) {
+	cfg := config.DefaultAgent()
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	list, _ := jobs(Options{Self: fixtureSources(), System: fixtureSystem(), Processes: fixtureProcesses(), Connections: fixtureConnections(), Services: fixtureServices(), MariaDB: fixtureMariaDB(), StateDir: t.TempDir()}, &cfg, log)
+
+	names := jobNames(list)
+	if want := []string{"kernel", "backups", "state"}; len(names) < 3 || !slices.Equal(names[len(names)-3:], want) {
+		t.Errorf("job names = %v, want them to end with %v with zero kernel sources", names, want)
+	}
+}
+
+func TestNewScheduler_BackupsAndStateReadTheKernelProc(t *testing.T) {
+	cfg := config.DefaultAgent()
+	world := newKernelWorld()
+	world.proc.set("1234/stat", []byte("1234 (pzstd) S "+strings.Repeat("0 ", 49)+"\n"))
+	world.proc.set("1234/cmdline", []byte("/usr/bin/pzstd\x00-p\x004\x00"))
+	sink := &recordSink{}
+	opts := lowMemoryOptions(t, 0)
+	opts.Sink = sink
+	opts.Kernel = world.sources()
+
+	runSchedulerFor(t, opts, &cfg, 25*time.Second)
+
+	starts := 0
+	for _, r := range sink.all() {
+		if run, ok := r.Data.(*model.BackupRun); ok && r.Source == "backups" && run.Phase == "start" {
+			starts++
+		}
+	}
+	if starts != 1 {
+		t.Errorf("backup_run start records = %d, want 1 (the backups job reads the process of Kernel.Proc, not Processes.Proc)", starts)
+	}
 }
