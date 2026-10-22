@@ -323,7 +323,8 @@ public sealed class ConnectionSnapshot : IPayload
                    ?? ValidateList("remotes", Remotes, (item, path) => item.Validate(path))
                    ?? ValidateList("listeners", Listeners, (item, path) => item.Validate(path))
                    ?? ValidateList("connections", Connections, (item, path) => item.Validate(path))
-                   ?? ValidateList("new_listeners", NewListeners, (item, path) => item.Validate(path));
+                   ?? ValidateList("new_listeners", NewListeners, (item, path) => item.Validate(path))
+                   ?? Trigger?.Validate("trigger");
     }
 
     #endregion // IPayload

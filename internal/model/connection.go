@@ -131,7 +131,10 @@ func (s *ConnectionSnapshot) Validate() error {
 	if err := s.validateConnections(); err != nil {
 		return err
 	}
-	return checkListeners("new_listeners", s.NewListeners)
+	if err := checkListeners("new_listeners", s.NewListeners); err != nil {
+		return err
+	}
+	return validateTrigger(s.Trigger)
 }
 
 // validateCounts checks the number of entries of every list.

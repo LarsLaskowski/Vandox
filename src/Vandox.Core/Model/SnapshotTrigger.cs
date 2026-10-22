@@ -7,6 +7,15 @@ namespace Vandox.Core.Model;
 /// </summary>
 public sealed class SnapshotTrigger
 {
+    #region Constants
+
+    /// <summary>
+    /// The most kills a trigger lists.
+    /// </summary>
+    public const int MaxKills = 64;
+
+    #endregion // Constants
+
     #region Properties
 
     /// <summary>
@@ -31,13 +40,43 @@ public sealed class SnapshotTrigger
     /// </summary>
     /// <param name="path">The field path of the trigger in the record</param>
     /// <returns>The first rule that is broken, or <c>null</c></returns>
-#pragma warning disable RH2003, S2325
     internal FieldError? Validate(string path)
     {
-        throw new NotImplementedException();
-    }
+        var field = $"{path}.kills";
+        var count = Kills?.Count ?? 0;
 
-#pragma warning restore RH2003, S2325
+        if (count == 0)
+        {
+            return Check.Invalid(field, "at least one kill required");
+        }
+
+        if (count > MaxKills)
+        {
+            return Check.Invalid(field, "too many entries");
+        }
+
+        var seen = new HashSet<(string BootId, long KernelTimeNs, int VictimPid)>();
+
+        for (var index = 0; index < count; index++)
+        {
+            var kill = Kills![index];
+            var error = kill.Validate(Check.Indexed(field, index));
+
+            if (error is not null)
+            {
+                return error;
+            }
+
+            if (seen.Add((kill.BootId, kill.KernelTimeNs, kill.VictimPid)))
+            {
+                continue;
+            }
+
+            return Check.Invalid(Check.Indexed(field, index), "duplicate kill");
+        }
+
+        return null;
+    }
 
     #endregion // Methods
 }

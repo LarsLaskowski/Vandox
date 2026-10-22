@@ -39,7 +39,7 @@ public sealed class OomKill
     /// Gets or sets the ID of the boot the kill happened in, empty when absent.
     /// </summary>
     [JsonPropertyName("boot_id")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    [OmitWhenEmpty]
     public string BootId { get; set; } = string.Empty;
 
     /// <summary>
@@ -64,7 +64,16 @@ public sealed class OomKill
             return Check.Invalid("oom_kill.victim_pid", "must be greater than 0");
         }
 
-        return Check.RequiredShort("oom_kill.victim_command", VictimCommand) ?? Check.OomScoreAdj("oom_kill.oom_score_adj", OomScoreAdj);
+        var error = Check.RequiredShort("oom_kill.victim_command", VictimCommand)
+                        ?? Check.OomScoreAdj("oom_kill.oom_score_adj", OomScoreAdj)
+                        ?? Check.OptionalUuid("oom_kill.boot_id", BootId);
+
+        if (error is not null)
+        {
+            return error;
+        }
+
+        return KernelTimeNs < 0 ? Check.Invalid("oom_kill.kernel_time_ns", "must not be negative") : null;
     }
 
     #endregion // Methods

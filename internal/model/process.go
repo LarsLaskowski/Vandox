@@ -80,7 +80,7 @@ func (s *ProcessSnapshot) Validate() error {
 		}
 		names[a.Program] = struct{}{}
 	}
-	return nil
+	return validateTrigger(s.Trigger)
 }
 
 func (p *ProcessSample) validate(path string) error {

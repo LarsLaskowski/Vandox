@@ -1,7 +1,6 @@
 package model
 
 import (
-	"errors"
 	"time"
 )
 
@@ -32,5 +31,70 @@ func (b *BackupRun) Kind() Kind { return KindBackupRun }
 
 // Validate checks the payload.
 func (b *BackupRun) Validate() error {
-	return errors.New("not implemented")
+	if b == nil {
+		return nilReceiver()
+	}
+	if err := checkOneOf("phase", b.Phase, BackupPhaseStart, BackupPhaseEnd); err != nil {
+		return err
+	}
+	if err := checkUUID("boot_id", b.BootID); err != nil {
+		return err
+	}
+	if err := checkTime("started_at", b.StartedAt); err != nil {
+		return err
+	}
+	if b.Phase == BackupPhaseStart {
+		return b.validateStart()
+	}
+	return b.validateEnd()
+}
+
+func (b *BackupRun) validateStart() error {
+	if !b.LastSeenAt.IsZero() {
+		return invalid("last_seen_at", "not allowed for phase start")
+	}
+	if !b.GoneBy.IsZero() {
+		return invalid("gone_by", "not allowed for phase start")
+	}
+	if b.MaxProcesses != 0 {
+		return invalid("max_processes", "not allowed for phase start")
+	}
+	if b.PID <= 0 {
+		return invalid("pid", "must be greater than 0")
+	}
+	if err := checkRequiredShort("command", b.Command); err != nil {
+		return err
+	}
+	if b.Processes < 1 {
+		return invalid("processes", "must be at least 1")
+	}
+	return nil
+}
+
+func (b *BackupRun) validateEnd() error {
+	if b.PID != 0 {
+		return invalid("pid", "not allowed for phase end")
+	}
+	if b.Command != "" {
+		return invalid("command", "not allowed for phase end")
+	}
+	if b.Processes != 0 {
+		return invalid("processes", "not allowed for phase end")
+	}
+	if err := checkTime("last_seen_at", b.LastSeenAt); err != nil {
+		return err
+	}
+	if b.LastSeenAt.Before(b.StartedAt) {
+		return invalid("last_seen_at", "must not be before started_at")
+	}
+	if err := checkTime("gone_by", b.GoneBy); err != nil {
+		return err
+	}
+	if b.GoneBy.Before(b.LastSeenAt) {
+		return invalid("gone_by", "must not be before last_seen_at")
+	}
+	if b.MaxProcesses < 1 {
+		return invalid("max_processes", "must be at least 1")
+	}
+	return nil
 }

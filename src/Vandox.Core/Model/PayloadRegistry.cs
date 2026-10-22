@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.Json.Serialization.Metadata;
 
 namespace Vandox.Core.Model;
 
@@ -34,6 +35,12 @@ public static class PayloadRegistry
                                                            {
                                                                DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
                                                                PropertyNameCaseInsensitive = true,
+                                                               TypeInfoResolver = new DefaultJsonTypeInfoResolver
+                                                                                  {
+                                                                                      Modifiers = {
+                                                                                                      OmitEmptyText
+                                                                                                  }
+                                                                                  },
                                                                Converters = {
                                                                                 new NullAsAbsentConverterFactory()
                                                                             }
@@ -73,6 +80,18 @@ public static class PayloadRegistry
     public static string Serialize(IPayload payload)
     {
         return JsonSerializer.Serialize(payload, payload.GetType(), Options);
+    }
+
+    /// <summary>
+    /// Leaves out the empty text of every property marked <see cref="OmitWhenEmptyAttribute"/>.
+    /// </summary>
+    /// <param name="typeInfo">The contract of a type</param>
+    private static void OmitEmptyText(JsonTypeInfo typeInfo)
+    {
+        foreach (var property in typeInfo.Properties.Where(candidate => candidate.AttributeProvider?.IsDefined(typeof(OmitWhenEmptyAttribute), true) == true))
+        {
+            property.ShouldSerialize = static (_, value) => value is string { Length: > 0 };
+        }
     }
 
     #endregion // Methods

@@ -27,6 +27,9 @@ type OOMKill struct {
 	VictimCommand string  `json:"victim_command"`
 	AnonRSSBytes  *uint64 `json:"anon_rss_bytes,omitempty"`
 	OOMScoreAdj   *int16  `json:"oom_score_adj,omitempty"`
+	// BootID and KernelTime identify the kill together with VictimPID; both are absent for a kill without identity.
+	BootID     string         `json:"boot_id,omitempty"`
+	KernelTime *time.Duration `json:"kernel_time_ns,omitempty"`
 }
 
 // Boot describes a system boot.
@@ -80,7 +83,16 @@ func (o *OOMKill) validate() error {
 	if err := checkRequiredShort("oom_kill.victim_command", o.VictimCommand); err != nil {
 		return err
 	}
-	return checkOOMScoreAdj("oom_kill.oom_score_adj", o.OOMScoreAdj)
+	if err := checkOOMScoreAdj("oom_kill.oom_score_adj", o.OOMScoreAdj); err != nil {
+		return err
+	}
+	if o.BootID != "" && !uuidPattern.MatchString(o.BootID) {
+		return invalid("oom_kill.boot_id", "invalid characters")
+	}
+	if o.KernelTime != nil && *o.KernelTime < 0 {
+		return invalid("oom_kill.kernel_time_ns", "must not be negative")
+	}
+	return nil
 }
 
 func (b *Boot) validate() error {

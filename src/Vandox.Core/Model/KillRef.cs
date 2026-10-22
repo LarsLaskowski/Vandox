@@ -36,13 +36,22 @@ public sealed class KillRef
     /// </summary>
     /// <param name="path">The field path of the kill in the record</param>
     /// <returns>The first rule that is broken, or <c>null</c></returns>
-#pragma warning disable RH2003, S2325
     internal FieldError? Validate(string path)
     {
-        throw new NotImplementedException();
-    }
+        var error = Check.Uuid($"{path}.boot_id", BootId);
 
-#pragma warning restore RH2003, S2325
+        if (error is not null)
+        {
+            return error;
+        }
+
+        if (KernelTimeNs < 0)
+        {
+            return Check.Invalid($"{path}.kernel_time_ns", "must not be negative");
+        }
+
+        return VictimPid <= 0 ? Check.Invalid($"{path}.victim_pid", "must be greater than 0") : null;
+    }
 
     #endregion // Methods
 }

@@ -117,7 +117,7 @@ public sealed class ProcessSnapshot : IPayload
             return Check.Invalid($"{Check.Indexed("programs", index)}.program", "duplicate program");
         }
 
-        return null;
+        return Trigger?.Validate("trigger");
     }
 
     #endregion // IPayload
