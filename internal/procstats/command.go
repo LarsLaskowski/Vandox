@@ -1,8 +1,10 @@
 package procstats
 
 import (
+	"errors"
 	"io/fs"
 	"strconv"
+	"time"
 )
 
 // ListPIDs returns the lowest PIDs of proc in ascending order and the number of PIDs seen, as the process collector lists them.
@@ -38,4 +40,17 @@ func (c *CommandReader) Command(pid int32) (string, error) {
 // Ended reports whether err says that the process ended (ENOENT, ESRCH).
 func Ended(err error) bool {
 	return hasEnded(err)
+}
+
+// ProcessInfo is what the kernel event correlation needs to know about one process.
+type ProcessInfo struct {
+	PID       int32
+	Command   string
+	Cmdline   string
+	StartedAt time.Time
+}
+
+// Process returns the command, command line and start time of pid, the start derived from boot; it is not safe for concurrent use.
+func (c *CommandReader) Process(pid int32, boot time.Time) (ProcessInfo, error) {
+	return ProcessInfo{}, errors.New("not implemented")
 }

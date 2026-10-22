@@ -24,6 +24,7 @@ type Run struct {
 	Start        time.Time // when the run started, in UTC
 	Pressure     bool      // whether memory pressure mode was on when the run started
 	PreviousLost bool      // the previous due sample's result was not kept: timeout, skip, error, panic, refused record or sink error; a late start does not set it
+	Trigger      *Trigger  // set only for an extra run requested through Scheduler.Trigger
 }
 
 // Collector takes one sample per run.

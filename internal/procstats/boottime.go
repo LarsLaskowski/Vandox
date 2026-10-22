@@ -103,3 +103,8 @@ func bootTimeOf(value string) (time.Time, error) {
 	}
 	return time.Unix(int64(secs), 0).UTC(), nil
 }
+
+// ReadBootTime returns the boot time from the btime line of proc/stat.
+func ReadBootTime(proc fs.FS) (time.Time, error) {
+	return time.Time{}, errors.New("not implemented")
+}
