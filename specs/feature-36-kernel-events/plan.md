@@ -1,7 +1,7 @@
 # Plan: Kernel events, reboots and backup runs
 
 Source: Issue #36 | [spec.md](spec.md)
-Status: Revised (1)
+Status: Revised (2)
 Tier: security — the change creates guards against an attacker (only kernel-transport entries with exactly one facility `0` count as kills, a bounded parser of a binary format read from disk, a state file refused unless it is the agent's own) and the agent's first file write.
 Security areas touched: 10 Parsing of external input (`internal/journal`, the kill-line parser in `internal/kernevents`, `internal/agentstate` reading its file, `/proc/uptime` and `boot_id`, the option `backups.processes`, the new wire fields and kind in both decoders); 9 File writes (`internal/agentstate`: the state file in `spool.directory`); 12 Logging and display of external data (victim names and backup commands as record text, never logged; the committed fixture); 6 Agent privileges (the group `systemd-journal` gets its first user, no new right; `deploy/agent/README.md`)
 
@@ -50,8 +50,8 @@ AC1 to AC20 of [spec.md](spec.md).
 | AC3 | `TestKernel_StormCoalescesWithinFifteenSeconds`; `TestScheduler_TriggerMergesKillsUpToSixtyFour` | `internal/kernevents/kernevents_test.go`; `internal/scheduler/trigger_test.go` |
 | AC4 | `TestParseKill_IgnoresOtherLines`; `TestKernel_OnlyKernelTransportWithFacilityZero` | `internal/kernevents/kill_test.go`; `internal/kernevents/kernevents_test.go` |
 | AC5 | `TestParseKill_HostileNames`, `TestParseKill_MissingFields`, `TestParseKill_AllKillForms` | `internal/kernevents/kill_test.go` |
-| AC6 | `TestKernel_ResumesAtSavedPositionAcrossBoots`, `TestKernel_ReadsSetAsideFilesAfterUncleanShutdown`, `TestKernel_JournaldRestartStartsNewSeqnumID`, `TestKernel_LostRunRereadsEntries`, `TestKernel_LateOrOtherBootKillsGetNoSnapshot` | `internal/kernevents/kernevents_test.go` |
-| AC7 | `TestKernel_LostPositionRecordsGapAndContinues`, `TestKernel_UndecodableEntryRecordsGap`, `TestKernel_HangingJournalLosesOnlyItsSample`, `TestKernel_PollWorkIndependentOfEarlierEntries`, `TestKernel_TimeBudgetEachRunGetsFurther`; `TestFile_RefusesUnsupportedLayout`, `TestFile_BoundsEveryOffset`, `TestFile_TornTailIsEndOfFile` | `internal/kernevents/kernevents_test.go`; `internal/journal/journal_test.go` |
+| AC6 | `TestKernel_ResumesAtSavedPositionAcrossBoots`, `TestKernel_ReadsSetAsideFilesAfterUncleanShutdown`, `TestKernel_JournaldRestartStartsNewSeqnumID`, `TestKernel_LostRunRereadsEntries`, `TestKernel_LateOrOtherBootKillsGetNoSnapshot`, `TestKernel_ReversedTimeGapStillMovesPosition` (a span whose missed-messages entry lies between two kernel entries of the same µs and one whose clock steps back: each gap ends 1 µs after its start, every returned record passes `wire.CheckRecord`, the next run's `PreviousLost` is false and the position moves past the span, the span is not returned again), `TestKernel_RefusedRecordBecomesGap` (a record forced to fail the check through an unexported hook: left out, a gap in its place, the position moves on), `TestKernel_RereadCappedAtThree` (four dropped runs in a row: three re-reads, then one gap over the span and reading after it; a dropped run that read nothing does not count; a dropped give-up run gives up the same span again without its kills) | `internal/kernevents/kernevents_test.go` |
+| AC7 | `TestKernel_LostPositionRecordsGapAndContinues`, `TestKernel_UndecodableEntryRecordsGap`, `TestKernel_MonotonicStampOutOfRangeIsUnreadable` (`_SOURCE_MONOTONIC_TIMESTAMP` empty, 21 digits, `18446744073709551616`, `9223372036854776` µs, with a sign, a space or a line feed; `__MONOTONIC_TIMESTAMP` above `math.MaxInt64 / 1000`: each a gap, no event, never a negative `kernel_time_ns`), `TestKernel_HangingJournalLosesOnlyItsSample`, `TestKernel_PollWorkIndependentOfEarlierEntries`, `TestKernel_TimeBudgetEachRunGetsFurther`; `TestFile_RefusesUnsupportedLayout`, `TestFile_BoundsEveryOffset`, `TestFile_TornTailIsEndOfFile` | `internal/kernevents/kernevents_test.go`; `internal/journal/journal_test.go` |
 | AC8 | `TestKernel_UnreadableJournalLogsOnceAndResumes` | `internal/kernevents/kernevents_test.go` |
 | AC9 | `TestBoot_NewBootRecordsPreviousBootAndUptime` | `internal/kernevents/boot_test.go` |
 | AC10 | `TestBoot_SameBootRecordsNothing`, `TestBoot_FirstStartWithoutPrevious`, `TestBoot_WithoutStateEveryStart`; `TestOpen_StatusAndWarnings` | `internal/kernevents/boot_test.go`; `internal/agentstate/agentstate_test.go` |
@@ -93,13 +93,30 @@ are never decompressed. Seqnum differences are never used for counts or gaps (fa
 
 **Kernel collector** (`internal/kernevents`, name `kernel`). First run: the boot check (below). Each run: commit the position kept in
 memory by the previous run when `run.PreviousLost` is false, else drop it and read again from the committed position (same identities;
-kills already triggered are remembered by identity, the last 64, and not triggered again). Then read from the committed position over the
+kills already triggered are remembered by identity, the last 64, and not triggered again). Because the collector returns only records
+that pass the scheduler's check (*Record check* below), `run.PreviousLost` means a dropped result (timeout, skip, error, sink error),
+never a refused record. *Re-read cap:* a counter of re-reads of the same committed position in a row (reset when a run is kept or the
+committed position moves); a dropped run that read no entry (its in-memory position equals the committed one) does not count. At the
+fourth dropped run in a row, the next run reads nothing of the span from the committed position to the dropped run's in-memory
+position: it returns a gap over it (cause `unknown`, from the committed position's time to the time of the last entry read, bounds as
+in *Gaps*) and reads on after the span; the committed position moves past it with the usual commit at the following run, so while this
+run is dropped too, the next one gives up the same span again (its gap again, never its kills). Then read from the committed position over the
 files of its seqnum ID in head-seqnum order, then the files of other seqnum IDs whose head time is not before the position's, in
 head-time order, from their heads. A saved seqnum ID without any file gives a gap from the position's time to the first entry after it,
 and reading goes on there; no saved position starts at the newest file's tail. A run stops after 1 s of reading (half the timeout,
 checked between entries) or 256 kills, whichever first, and returns what it read. An entry counts only with `_TRANSPORT=kernel` and
 exactly one `SYSLOG_FACILITY` item whose value is exactly `0`; its `MESSAGE` goes to `parseKill`. Abandoned runs never touch the store:
 only the start of the next run commits.
+
+*Record check.* Before returning, `checkRecords` copies each record as the scheduler's `stamp` does (`Origin` agent, `Seq`
+`math.MaxInt64`, `CapturedAt` set) and calls `wire.CheckRecord`; a record it refuses is left out and replaced by a gap over the time of
+its entry (from the previous kernel entry's time, or the committed position's, to that entry's time, bounds as in *Gaps*). No log line (the gap records the loss;
+spec *Logs* adds none). The gaps themselves pass the same check by construction.
+
+*Timestamps.* `__MONOTONIC_TIMESTAMP` is read from the entry object as an unsigned 64-bit number of µs, `_SOURCE_MONOTONIC_TIMESTAMP`
+from its item as 1 to 20 ASCII digits `0`-`9`, nothing else (no sign, space or line feed), parsed into a `uint64` with an overflow check;
+each value is turned into ns only when it is at most `math.MaxInt64 / 1000` µs. Any other value makes the entry unreadable (a gap as for
+an undecodable entry), never a negative or wrapped duration.
 
 *Time.* `lag = __MONOTONIC_TIMESTAMP − _SOURCE_MONOTONIC_TIMESTAMP` of the entry; `drift` = the smallest `lag` among the last 64 kernel
 entries of the same boot read in order (the kernel clock's offset, which grows slowly); `delay = max(0, lag − drift)`. Capture time =
@@ -112,7 +129,9 @@ it is kept (at most 64, then counted) and sent at the first run 15 s after the l
 
 *Gaps* (source and collector `kernel`, cause `unknown`): a lost saved seqnum ID (above); an unreadable entry or unsupported file (from
 the last readable kernel entry's time to the next one's, or to the run's start); a torn tail (above); a missed-messages entry with
-`_TRANSPORT=driver` (from the last kernel entry before it to the next one after it). Logs: warning `kernel messages not readable` (`err`:
+`_TRANSPORT=driver` (from the last kernel entry before it to the next one after it); a refused record (*Record check*); a given-up span
+(*Re-read cap*). Every gap is valid by construction, `newGap`: when `To` is not after `From` (two entries in the same µs, or a clock set
+back between them, spec E10), `To = From + 1 µs`; `From` and `To` are UTC. Logs: warning `kernel messages not readable` (`err`:
 `journal: <online|archived>: <fixed reason>`), info `kernel messages readable again`, warning `boot ID not readable`.
 
 **Kill parser** (`parseKill`). Prefix exactly one of `Out of memory: Killed process `, `Memory cgroup out of memory: Killed process `,
@@ -373,6 +392,10 @@ func (k *Kernel) SetTrigger(fn TriggerFunc)
 func (k *Kernel) Name() string
 func (k *Kernel) Collect(ctx context.Context, run scheduler.Run) ([]model.Record, error)
 func parseKill(message []byte) (model.OOMKill, bool)
+func newGap(from, to, at time.Time) model.Record                                 // To = From + 1 µs when To is not after From
+func checkRecords(records []model.Record, at time.Time, gapFrom func(i int) time.Time) []model.Record // refused → gap
+func parseMicros(b []byte) (time.Duration, bool)                                 // 1-20 ASCII digits, overflow checked, ≤ MaxInt64/1000 µs
+const maxRereads = 3
 
 // internal/backups
 const Name = "backups"
@@ -417,7 +440,7 @@ Files no unit test can cover: none.
 
 ## Areas
 
-- `docs/areas/agent.md`: new *Kernel events*, *Boots*, *Backup runs*, *Agent state*; additions to *Scheduling* (extra runs),
+- `docs/areas/agent.md`: new *Kernel events* (with the commit rule, the re-read cap of three, the record check and the gap bounds), *Boots*, *Backup runs*, *Agent state*; additions to *Scheduling* (extra runs),
   *Processes*, *Connections*, *Memory pressure mode*, *Rights*, *Spool and sending* (the spool leaves the state file alone), *Status*,
   *Related decisions*, *Implementation*; residuals: the backup default (`pzstd` only), the filter proves that the kernel wrote the line,
   not that the OOM killer did (N4), `COMPACT` journals are not read.
@@ -445,7 +468,9 @@ configuration *Options*; ARCHITECTURE *Components* and package list. `docs/areas
 - **Hanging collector:** `kernel`, `backups`, `state` are jobs with timeouts; an extra run uses the same runner, never beside an abandoned
   run, under the watchdog's liveness deadline; abandoned `kernel` runs never write the store.
 - **No gap unless recorded:** lost spans of kernel messages, lost extra snapshots and lost backup checks are gaps; a run whose records
-  were lost is read again, so no position moves past an unkept kill.
+  were dropped is read again, at most three times in a row, after which its span is a gap, so no position moves past an unkept kill
+  without a gap; a record the wire format would refuse becomes a gap in the collector, and every gap is valid by construction.
+- **Never a hang:** no record and no gap of the kernel collector can hold its position back for ever (B6).
 - **Outbound only, no new right:** no socket, no program, no capability; reads the journal (`systemd-journal`), `/proc`,
   `/etc/machine-id`; one write, the state file.
 - **Memory (0025):** at most 4 MiB live for the journal, no `mmap`, extra snapshots bounded and replacing a run under pressure.
@@ -460,6 +485,8 @@ configuration *Options*; ARCHITECTURE *Components* and package list. `docs/areas
 - [ ] Kill filter (E1): `_TRANSPORT=kernel` and exactly one `SYSLOG_FACILITY` item equal to `0` (fact 10); residual N4 in the Agent area.
 - [ ] Every chain walk is bounded (strictly increasing offsets, 64 arrays) so no file can make a run loop.
 - [ ] The state file is trusted only after `fstat` of its `O_NOFOLLOW` descriptor; the agent never creates directories.
+- [ ] The position cannot freeze: the collector returns only records that pass `wire.CheckRecord` (a refused one becomes a gap),
+  `newGap` makes every gap valid, monotonic stamps are 1 to 20 digits with an overflow check, and re-reads stop after three.
 
 ## Decision records
 
@@ -478,7 +505,7 @@ configuration *Options*; ARCHITECTURE *Components* and package list. `docs/areas
   `TestKernel_ReadsSetAsideFilesAfterUncleanShutdown`, `TestKernel_JournaldRestartStartsNewSeqnumID`, `TestFile_TornTailIsEndOfFile`;
   spec S10, E7, AC6, AC7; record 0119.
 - M3 (position moving past dropped records): accepted. The position is committed at the start of the next run only when
-  `run.PreviousLost` is false, else read again; abandoned runs never write the store. Test `TestKernel_LostRunRereadsEntries`; spec S10,
+  `run.PreviousLost` is false, else read again (at most three times in a row since B6); abandoned runs never write the store. Test `TestKernel_LostRunRereadsEntries`; spec S10,
   AC6; record 0120.
 - m1 (time budget): accepted. A run stops after 1 s of reading or 256 kills; `TestKernel_TimeBudgetEachRunGetsFurther` with a slow
   `ReaderAt`.
@@ -504,9 +531,13 @@ configuration *Options*; ARCHITECTURE *Components* and package list. `docs/areas
   saved`; first start is an absent file in an existing directory without other entries.
 - N1: accepted (checks on `fstat` of the opened descriptor). N2: accepted (hand-made facility-1 kill line). N3: accepted (exactly one
   `SYSLOG_FACILITY` item equal to `0`; fixture entry with two items). N4: accepted (Agent area residual; comm to the last `) total-vm:`).
-- B6 (a refused record freezes the position; empty or reversed gap bounds; monotonic stamp parsing), round 2: not fixed in this plan
-  yet. The Plan ↔ Security loop limit is reached and the fix changes the commit rule of S10 and AC6 of the approved spec, so it is
-  outside the accept-and-fix exception; escalated to the Product Manager (Lead decision, round 2).
+- B6 (a refused record freezes the position; empty or reversed gap bounds; monotonic stamp parsing), round 2: the loop limit was
+  reached and the fix changes S10 and AC6 of the approved spec, so the Lead escalated; the Product Manager chose option 1 (fix in the
+  collector, scheduler contract unchanged). (a) *Record check* and *Re-read cap* in *Kernel collector*: `PreviousLost` now means a
+  dropped result; at most three re-reads, then a gap over the span. (b) `newGap` in *Gaps*. (c) *Timestamps*. Tests
+  `TestKernel_ReversedTimeGapStillMovesPosition`, `TestKernel_RefusedRecordBecomesGap`, `TestKernel_RereadCappedAtThree`,
+  `TestKernel_MonotonicStampOutOfRangeIsUnreadable`; spec S10, E16, AC6; record 0120 (option 8). Options rejected: a scheduler
+  signal telling refused from dropped (changes the contract `processes` and `connections` share), dropping re-reads (gives up AC6).
 - N5: accepted (*Memory bound*: about 13 KiB per kill record, about 3.3 MiB for 256). N6: accepted (exact-match exceptions `sshd`,
   `apport`, `kernel`, `systemd-journald` in `TestFixture_HoldsNoRealPrivateValue`).
 

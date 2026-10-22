@@ -28,9 +28,15 @@ starts one twice; the agent had no state that outlives a restart. The Product Ma
    per collector** or **writes from each collector run** — more writes and concurrent writers.
 7. **The previous uptime from the uptime the agent saves** (chosen) — independent of the journal; **from the last journal entry of the
    previous boot** — exact to the last entry, but a search per boot in the journal for one number.
-8. **Commit the journal position at the next run when the previous one was kept** (chosen) — a run whose records the scheduler or
-   the sink dropped is read again (same identities); **commit when the run returns** — simpler, but moves past kills whose records were
-   lost without a gap.
+8. **Commit the journal position at the next run when the previous one was kept** (chosen) — a run whose result was dropped
+   (timeout, error, sink error) is read again (same identities); **commit when the run returns** — simpler, but moves past kills whose
+   records were lost without a gap (rejected by the Product Manager as option 3 of the B6 escalation).
+   A record the scheduler would refuse must not hold the position back, or one such record makes the same span resend forever, since
+   storage deduplicates by sequence number, not by kill identity. **The collector checks its own records and caps the re-reads**
+   (chosen by the Product Manager): every record passes the scheduler's own check before it is returned, a failing one becomes a gap
+   that is valid by construction, so `Run.PreviousLost` can only mean a dropped result, and a cap of three re-reads of the same position
+   ends any other loop with a gap; the scheduler contract stays as it is. **A scheduler signal telling a refused record from a dropped
+   result** (a new `Run` field) — the same effect, but a change to the contract `processes` and `connections` also rely on.
 9. **Default backup rules `pzstd` only** (chosen by the Product Manager) — the one backup program seen in real data; **Plesk's
    documented tool names** — never captured, a wrong rule fails silently; **a capture first** — not available.
 
@@ -48,5 +54,7 @@ events*, *Boots*, *Backup runs*) and the [wire format](../areas/wire-format.md).
   compression is not part of a run unless the operator adds a rule.
 - An extra snapshot is a sample like any other (predecessor, `Run.PreviousLost`, gaps); without pressure mode it costs at most one more
   snapshot per collector per 15 seconds.
+- A span whose result is dropped more than three times in a row is given up with a gap; its kills are then lost although the journal
+  may still hold them.
 - The state file is the agent's first file write; the spool (#38) must leave it out of what it counts and deletes.
 - Without a usable state every start records a `boot` event of the current boot (same boot ID), and the journal is read from its end.

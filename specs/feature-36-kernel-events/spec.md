@@ -65,8 +65,10 @@ and no field that ties a snapshot to an event.
   yet started it after a boot — when the agent runs again, then every kill line the journal holds after the position the agent last
   read becomes an event with its own capture time, also for the kills of the previous boot and those in a file journald set aside
   after an unclean shutdown or its own restart (`system@...journal~`); a kill read more than 60 seconds after it happened (the time
-  since the journal received it plus its delay, S1), or one from another boot, gets no additional snapshot. A run whose records the
-  agent did not keep (a timeout, a refused record, a sink error) is read again from the last kept position.
+  since the journal received it plus its delay, S1), or one from another boot, gets no additional snapshot. A run whose result the
+  agent dropped (a timeout, an error, a sink error) is read again from the last kept position, at most three times in a row; after
+  the third the span is given up with a `gap` of the kernel event collector and reading goes on after it. A record of that span that
+  the wire format would refuse never causes a re-read: it is replaced by a `gap` for its time (E16).
 - S11: Given the agent is restarted during a backup run and a matching process still runs, then the run continues: no second
   start is recorded and the end, when it comes, names the original start time.
 - S12: Given the agent was stopped or the server rebooted during a backup run and no matching process runs at the agent's first
@@ -139,7 +141,11 @@ and no field that ties a snapshot to an event.
 - E15: A backup process that lives shorter than the time between two checks may be missed; one seen in a single check gives a run
   with its start and its end.
 - E16: An event the wire format would refuse (it cannot, by construction): it is left out and its loss is a `gap` of its collector,
-  as the producer size contract demands.
+  as the producer size contract demands; the kernel event collector does this itself before it hands its records over, so such an
+  event never makes its span be read again (S10). Every gap is valid by construction: when its end would not be after its start (two
+  entries with the same time, or a clock set back between them, E10), it ends one microsecond after its start. A kernel timestamp
+  that is not a number of 1 to 20 digits, or that overflows when converted to nanoseconds, makes its entry unreadable: a `gap`,
+  never an event with a negative time.
 - E17: The agent did not run in one or more boots (it was disabled): `previous_boot_id` and `previous_uptime_ns` describe the last
   boot the agent ran in, and the boots between are not recorded.
 
@@ -206,9 +212,11 @@ and no field that ties a snapshot to an event.
   kernel's real values and a valid, cleaned command or `(unnamed)`; a kill line without `anon-rss` or `oom_score_adj` gives an event
   without that field; the cgroup and the allocating-task kill lines give events (E2, E3).
 - [ ] AC6: After a stop, a crash, the agent's own kill, a reboot, an unclean shutdown or a journald restart (`.journal~` files), every
-  kill line after the saved position becomes one event, also for the previous boot; a run whose records were not kept is read again;
+  kill line after the saved position becomes one event, also for the previous boot; a run whose result was dropped is read again, at most three times in a row, then its span is a gap and
+  reading moves on; a record the wire format would refuse and a gap whose times are equal or reversed never stop the position from
+  moving on;
   kills read more than 60 seconds late (on one monotonic clock, also after 20 days of uptime) or from another boot get no additional
-  snapshot (S10, E7).
+  snapshot (S10, E7, E16).
 - [ ] AC7: A saved position whose files are gone, and a span the agent cannot decode, give a gap of the kernel event collector for that
   span; a blocked journal read leaves the other collectors and the watchdog on time and the reader is not started twice; the work of a
   poll does not grow with the kernel entries before the position (E5, E7).
@@ -343,5 +351,9 @@ and no field that ties a snapshot to an event.
 - m6 (AC15 and a new kind or type): accepted. *Compatibility* and AC15 limit the claim about readers that do not know them to the new
   optional fields; a new record kind or `kernel_event` type for the backup run is accepted by both decoders and the golden batches in
   the same change, which is allowed because 1.1 is unreleased.
+- Security B6 of the plan review (a refused record froze the position and resent its span forever): escalated; the Product Manager
+  chose option 1. S10, E16 and AC6 now say that only a dropped result is read again, at most three times in a row before the span
+  becomes a gap, that the collector replaces a record the wire format would refuse by a gap itself, that every gap is valid by
+  construction, and that an unparsable kernel timestamp makes its entry unreadable.
 - Note for the plan (state file in `spool.directory`): taken into the spec. *Disk* says that the state file is never part of what
   the spool counts against its bound or deletes.
