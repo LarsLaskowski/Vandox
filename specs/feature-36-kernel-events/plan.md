@@ -161,7 +161,9 @@ plus `not allowed for phase start|end` and `must not be before started_at`.
 
 **Memory bound (B3).** Live memory of the reader and the collector: fixed buffers (one 4,096-byte payload buffer per needed field, item
 and array buffers of 8 KiB), at most 1,024 file headers (about 200 KiB), the drift window and trigger lists (64 entries each), and at most
-256 kill records per run (each at most about 18 KiB with message and command cleaned) — **at most 4 MiB in total**, independent of the
+256 kill records per run (each at most about 13 KiB: the message at most 12,288 bytes, since the 4,096-byte raw payload grows at most
+threefold by U+FFFD replacement, so the 16,384-byte message cap is never reached, plus the command at most 1,024 bytes; about 3.3 MiB for
+256) — **at most 4 MiB in total**, independent of the
 journal, the backlog and the entry sizes. `TestFile_MemoryDoesNotGrowWithJournalSize` and `TestKernel_BacklogMemoryIsBounded` assert the
 heap in use after a run (`runtime.ReadMemStats` after `runtime.GC`) grows by at most 4 MiB at journals of 1,000 and 100,000 kernel entries.
 
@@ -184,8 +186,10 @@ compares `journalctl --verify` and `-o export` of them with the export. `TestFix
 real files before the fixtures are committed, decodes every field of the export and the three files and fails on any value, or substring
 of 6 bytes or more, of: `_HOSTNAME`, `_MACHINE_ID`, `_BOOT_ID`, the address in the host name and its parts, the provider domain, every
 value of `_SYSTEMD_UNIT`, `_SYSTEMD_USER_UNIT`, `SYSLOG_IDENTIFIER`, `_COMM`, `_EXE` and `_CMDLINE`, and every mail address, domain
-name and user name (`user=<x>`, `for <x>`, `<x>@`) found in any `MESSAGE` of the real files; the only exceptions are the exact comm values of the kept lines (`pzstd`,
-`mariadbd`, `/usr/sbin/amavi`, `systemd`).
+name and user name (`user=<x>`, `for <x>`, `<x>@`) found in any `MESSAGE` of the real files; the only exceptions are these public, generic values, each skipped
+only where a fixture field equals it exactly (a fixture value that merely contains one is still checked): the comms of the kept lines
+(`pzstd`, `mariadbd`, `/usr/sbin/amavi`, `systemd`, `sshd`, `apport`) and the identifiers `kernel` and `systemd-journald`
+(`SYSLOG_IDENTIFIER` of the kernel entries and of the missed-messages entry).
 
 **Real files** (never committed or copied into the working tree): kept outside the repository with mode 0700;
 `VANDOX_REAL_JOURNAL_DIR=<dir> go test ./internal/journal/... -run Real` (here
@@ -500,6 +504,11 @@ configuration *Options*; ARCHITECTURE *Components* and package list. `docs/areas
   saved`; first start is an absent file in an existing directory without other entries.
 - N1: accepted (checks on `fstat` of the opened descriptor). N2: accepted (hand-made facility-1 kill line). N3: accepted (exactly one
   `SYSLOG_FACILITY` item equal to `0`; fixture entry with two items). N4: accepted (Agent area residual; comm to the last `) total-vm:`).
+- B6 (a refused record freezes the position; empty or reversed gap bounds; monotonic stamp parsing), round 2: not fixed in this plan
+  yet. The Plan ↔ Security loop limit is reached and the fix changes the commit rule of S10 and AC6 of the approved spec, so it is
+  outside the accept-and-fix exception; escalated to the Product Manager (Lead decision, round 2).
+- N5: accepted (*Memory bound*: about 13 KiB per kill record, about 3.3 MiB for 256). N6: accepted (exact-match exceptions `sshd`,
+  `apport`, `kernel`, `systemd-journald` in `TestFixture_HoldsNoRealPrivateValue`).
 
 ## Out of scope / follow-ups
 
