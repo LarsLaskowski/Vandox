@@ -225,11 +225,12 @@ func (r *pass) readSameID(dir fs.FS, files []fileInfo, id [16]byte) bool {
 }
 
 // detectVacuumed records the entries lost when files of the position's seqnum ID remain but none holds the position and one starts
-// after it: one gap from the position's time to the head time of the first such file, once per position; sequence number 0 is no entry, so nothing before it can be lost. Without a readable head time
-// the next readable kernel entry, else the end of the run, closes the gap. same is sorted by head sequence number.
+// after it: one gap from the position's time to the head time of the first such file, once per position; a first such file that starts right after the position (head sequence number position+1) lost nothing, so
+// no gap. Without a readable head time the next readable kernel entry, else the end of the run, closes the gap. same is sorted
+// by head sequence number.
 func (r *pass) detectVacuumed(same []fileInfo) {
 	pos := r.cur.pos
-	if pos.seq == 0 || r.cur.vacuumed.same(pos) {
+	if r.cur.vacuumed.same(pos) {
 		return
 	}
 	var next *fileInfo
@@ -242,7 +243,7 @@ func (r *pass) detectVacuumed(same []fileInfo) {
 			next = f
 		}
 	}
-	if next == nil {
+	if next == nil || next.hdr.HeadSeqnum == pos.seq+1 {
 		return
 	}
 	r.cur.vacuumed = pos

@@ -271,7 +271,7 @@ func decode(data []byte) (State, error) {
 	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
 		return State{}, errInvalid
 	}
-	if f.Version == nil || *f.Version != fileVersion {
+	if f.Version == nil || *f.Version != fileVersion || !timesInRange(f) {
 		return State{}, errInvalid
 	}
 
@@ -289,13 +289,42 @@ func decode(data []byte) (State, error) {
 		st.Journal = &JournalPosition{SeqnumID: f.Journal.SeqnumID, Seqnum: f.Journal.Seqnum, Realtime: f.Journal.Realtime}
 	}
 	if f.Backup != nil {
-		if !validUUID.MatchString(f.Backup.BootID) {
+		if !validUUID.MatchString(f.Backup.BootID) || !validRun(f.Backup) {
 			return State{}, errInvalid
 		}
 		st.Backup = &OpenRun{BootID: f.Backup.BootID, StartedAt: f.Backup.StartedAt, LastSeen: f.Backup.LastSeen, MaxProcesses: f.Backup.MaxProcesses}
 	}
 
 	return st, nil
+}
+
+// maxYear is the first year a time in the state file may not reach.
+const maxYear = 10000
+
+// validRun reports whether the open run b is usable: set times in order and a process count.
+func validRun(b *fileBackup) bool {
+	return !b.StartedAt.IsZero() && !b.LastSeen.IsZero() && !b.LastSeen.Before(b.StartedAt) && b.MaxProcesses > 0
+}
+
+// timesInRange reports whether every time of f lies before the year 10000 UTC.
+func timesInRange(f fileState) bool {
+	var times []time.Time
+	if f.Boot != nil {
+		times = append(times, f.Boot.BootedAt)
+	}
+	if f.Journal != nil {
+		times = append(times, f.Journal.Realtime)
+	}
+	if f.Backup != nil {
+		times = append(times, f.Backup.StartedAt, f.Backup.LastSeen)
+	}
+	for _, t := range times {
+		if t.UTC().Year() >= maxYear {
+			return false
+		}
+	}
+
+	return true
 }
 
 // encode returns the JSON form of st.
@@ -444,6 +473,12 @@ func (v *Saver) prepare(now time.Time) (State, uint64, bool) {
 	due := s.dirty && (elapsed >= heartbeatInterval || (s.urgentPending && elapsed >= urgentInterval))
 	if !due {
 		return State{}, 0, false
+	}
+
+	if s.state.Boot != nil {
+		if up, ok := ReadUptime(v.proc); ok {
+			s.state.Boot.Uptime = up
+		}
 	}
 
 	return copyState(s.state), s.seq, true
