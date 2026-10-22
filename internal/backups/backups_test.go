@@ -85,9 +85,8 @@ func TestBackups_EndAfterSixtySeconds(t *testing.T) {
 	e.w.remove(100)
 
 	e.quietRuns(30, 40, 50, 60, 70)
-	ends := append(e.run(80), e.run(90)...)
-
-	requireOneEnd(t, ends, endWant{boot: bootA, started: at(-5), lastSeen: at(20), goneBy: at(30), max: 1})
+	requireOneEnd(t, e.run(80), endWant{boot: bootA, started: at(-5), lastSeen: at(20), goneBy: at(30), max: 1})
+	e.quiet(90)
 	requireNoOpenRun(t, e.store)
 	e.quiet(100)
 
