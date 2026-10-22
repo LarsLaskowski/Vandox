@@ -42,3 +42,4 @@ are quoted in full.
 | 2026-10-22 19:44 | 6 G4 test fix round | squad-tester | Binary length 11->9 fixed; TestFile_FieldsBeyondCapAreCounted added (fails until Entry.Omitted exists) (sonnet/medium · 5,493 tokens · 4 tool uses · 42 s · continued from 5 Tests first G4) |
 | 2026-10-22 19:46 | 6 G4 delta (Entry.Omitted) | squad-dev | Entry.Omitted added; journal tests green with -race; analyzer-check passes (sonnet/medium · 4,962 tokens · 4 tool uses · 96 s · continued from 6 Implement G4) |
 | 2026-10-22 19:49 | 6 G4 coverage round | squad-tester | journal 93.5%, journaltest 92.9%; ErrRead, stamps, ListFiles, MachineDir, Lookup, golden-sync tests added; -race green (sonnet/medium · 18,801 tokens · 8 tool uses · 184 s · continued from 5 Tests first G4) |
+| 2026-10-22 19:50 | 4 Skeleton G5 | squad-dev | G5 skeleton in place (internal/kernevents) (sonnet/medium · usage pending) |
