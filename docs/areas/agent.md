@@ -911,7 +911,8 @@ of the two times is kept). A saved ID of which no file is left records a gap fro
 entry (or to the run's start), once, and reading goes on there. When files of the position's ID are left but none holds the position
 and one starts after it (the files that held it were vacuumed), the entries between are gone: one gap from the position's time to
 the header's first time of the first such file (without a readable one, to the next readable kernel entry, else the run's start),
-once for that position, and reading goes on in that file; since sequence numbers are not dense, such a gap is recorded even when the
+once for that position, and reading goes on in that file. Only when that file's first sequence number directly follows the
+position's is nothing lost and no gap recorded; since sequence numbers are not dense, a gap is otherwise recorded even when the
 vacuumed part held no kernel entry. A file that disappears between the listing and its read is skipped.
 
 **Limits of a run.** A run stops after one second of reading (checked between entries), after 256 kills, or when its deadline passes,
@@ -994,6 +995,8 @@ records per run. Two tests assert it at journals of 1,000 and 100,000 kernel ent
   the same identities), and a refused file gives its gap again once per agent start.
 - An archived or set-aside file of another ID whose header's first time lies before the committed position's time is not read.
 - journald's entry about missed kernel messages is built from the systemd 249 source; the real journals hold none.
+- A journal file is opened by its name in the journal directory, and a symbolic link there is followed. The directory belongs to
+  root, so only root or journald can place one, and they can change the journal anyway.
 
 ## Boots
 
@@ -1071,15 +1074,17 @@ file write. The agent never creates the directory; the installation does (#42).
 **Reading (at start-up).** The file is opened without following a link and without blocking, and is trusted only when `fstat` of
 that descriptor shows a regular file of the agent's effective user without any group or other permission bit and of at most 16 KiB.
 Its content is decoded strictly: one object and nothing after it, `version` 1, no unknown key, no wrong type, lower-case UUIDs, a
-non-negative uptime. An absent file in an existing, empty directory is a first start, without a warning. Anything else that is not
+non-negative uptime, every time before 1 January 10000 UTC, and an open run with a start and a last sighting, the last sighting not
+before the start, and at least one process. An absent file in an existing, empty directory is a first start, without a warning. Anything else that is not
 usable — a missing directory, an absent file beside other entries, a link, a file of another user or with group or other permission,
 an oversized or corrupt file — is treated as no state and logged once as warning `agent state not available`; the first save replaces
 the file.
 
 **Saving.** The `state` job (interval 10 seconds, timeout 5 seconds, last in the job list; it records nothing) saves when a change
 waits: at most every 10 seconds when a kill, a boot or a backup change waits (a new run, its end, a higher process count, a position
-moved by a run that read kills), else once 50 seconds have passed, when it also refreshes the stored uptime from `/proc/uptime` (a
-position that moved over other kernel lines waits for this). A save removes a left-over `agent-state.json.tmp`, creates it anew
+moved by a run that read kills), else once 50 seconds have passed, the uptime heartbeat (a position that moved over other kernel
+lines waits for this); every save first refreshes the stored uptime from `/proc/uptime`, so the saved uptime is never more than a
+minute old. A save removes a left-over `agent-state.json.tmp`, creates it anew
 (exclusively, without following a link, mode 0600), writes and syncs it, renames it over `agent-state.json` and syncs the directory.
 A failure, also a missing directory, is logged once as warning `agent state not saved` with `err` `agentstate: save: <system error
 text>` (never a path) until a save succeeds, and the agent goes on; a save that hangs past the job's timeout is a gap of collector
