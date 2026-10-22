@@ -125,8 +125,12 @@ name), from their heads; (3) the archived and set-aside files of other seqnum ID
 (Security N9), from their heads or from the seqnum the reading state holds for them; (4) the online file when its seqnum ID is
 another, from its head, whatever its head time (the newest file; a clock set back, E10, must not hide it). A file of steps 2 and 3
 in the set of files read to their end is not read again. The position is `(seqnum ID, seqnum, realtime)` of the last entry read in
-a file of steps 1, 2 or 4 — a file without a head time never becomes the position — and its realtime never moves back (the later
-of the old and the entry's time). A saved seqnum ID without any file gives a gap from the position's time to the first entry after it,
+a file of step 1 or 4, or of a file of step 2 whose head time is not before the in-memory position's time at the moment step 2
+reaches that file (G5 follow-up, Lead decision: a step-2 file older than where reading has got, such as the fixture's set-aside
+file of 20 Sep read after the files of the position's ID, is read but leaves the position where it was, here `(ID1, 157,
+1792657800000000)`; otherwise the position would leave the seqnum ID whose online file still grows, and step 2 would then skip
+that ID's files for their earlier head time). A file without a head time never becomes the position, and the position's realtime
+never moves back (the later of the old and the entry's time). A saved seqnum ID without any file gives a gap from the position's time to the first entry after it,
 and reading goes on there; no saved position starts at the newest file's tail.
 
 A run stops after 1 s of reading (half the timeout,
