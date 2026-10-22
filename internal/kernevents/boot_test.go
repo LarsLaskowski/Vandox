@@ -53,8 +53,8 @@ func TestBoot_NewBootRecordsPreviousBootAndUptime(t *testing.T) {
 	}
 	checkValid(t, recs, t0)
 	st := e.store.State()
-	if st.Boot == nil || st.Boot.ID != dashed(bootB) || !st.Boot.BootedAt.Equal(bootTime) {
-		t.Errorf("state after the boot event = %+v, want the current boot %s booted at %s", st.Boot, dashed(bootB), bootTime)
+	if st.Boot == nil || st.Boot.ID != dashed(bootB) || !st.Boot.BootedAt.Equal(bootTime) || st.Boot.Uptime != 5_000_000*time.Second {
+		t.Errorf("state after the boot event = %+v, want the current boot %s booted at %s with the uptime of /proc/uptime, 5,000,000 s", st.Boot, dashed(bootB), bootTime)
 	}
 	if again := bootsOf(e.run(false)); len(again) != 0 {
 		t.Errorf("the second run made %d boot events, want none", len(again))
@@ -225,3 +225,19 @@ func requireBootIDOutcome(t *testing.T, e *env, recs []model.Record, usable bool
 }
 
 func strPtr(s string) *string { return &s }
+
+func TestBoot_UptimeIsZeroWhenProcUptimeIsUnreadable(t *testing.T) {
+	e := newEnv(t)
+	healthyJournal(e)
+	e.seed("", before())
+	delete(e.proc, "uptime")
+
+	recs := e.run(false)
+
+	if len(bootsOf(recs)) != 1 {
+		t.Fatalf("boot events = %d, want 1", len(bootsOf(recs)))
+	}
+	if st := e.store.State(); st.Boot == nil || st.Boot.ID != dashed(bootB) || st.Boot.Uptime != 0 {
+		t.Errorf("state after the boot event = %+v, want the current boot with uptime 0", st.Boot)
+	}
+}

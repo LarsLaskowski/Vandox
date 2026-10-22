@@ -197,6 +197,10 @@ func TestParseKill_MissingFields(t *testing.T) {
 		{"negative rss", ", anon-rss:-5kB oom_score_adj:1", nil, i16p(1)},
 		{"largest rss that fits", ", anon-rss:18014398509481983kB oom_score_adj:1", u64p(18014398509481983 * 1024), i16p(1)},
 		{"rss that overflows when multiplied", ", anon-rss:18014398509481984kB oom_score_adj:1", nil, i16p(1)},
+		{"anon-rss twice", ", anon-rss:5kB, anon-rss:7kB oom_score_adj:3", nil, i16p(3)},
+		{"anon-rss twice with the same value", ", anon-rss:5kB, anon-rss:5kB oom_score_adj:3", nil, i16p(3)},
+		{"oom_score_adj twice", ", anon-rss:5kB oom_score_adj:3 oom_score_adj:4", u64p(5 * 1024), nil},
+		{"both twice", ", anon-rss:5kB, anon-rss:7kB oom_score_adj:3 oom_score_adj:3", nil, nil},
 		{"rss of 21 digits", ", anon-rss:100000000000000000000kB oom_score_adj:1", nil, i16p(1)},
 	}
 	for _, tc := range tests {
@@ -211,14 +215,16 @@ func TestParseKill_MissingFields(t *testing.T) {
 
 func TestParseKill_PIDs(t *testing.T) {
 	tests := []struct {
-		pid string
-		ok  bool
-		pwd int32
+		pid  string
+		ok   bool
+		want int32
 	}{
 		{"1", true, 1},
 		{"4194304", true, 4194304},
 		{"2147483647", true, 2147483647},
 		{"0", false, 0},
+		{"2147483648", false, 0},
+		{"4294967295", false, 0},
 		{"4294967296", false, 0},
 		{"99999999999", false, 0},
 		{"", false, 0},
@@ -234,8 +240,8 @@ func TestParseKill_PIDs(t *testing.T) {
 			if ok != tc.ok {
 				t.Fatalf("parseKill(%q) ok = %v, want %v", msg, ok, tc.ok)
 			}
-			if ok && got.VictimPID != tc.pwd {
-				t.Errorf("parseKill(%q) VictimPID = %d, want %d", msg, got.VictimPID, tc.pwd)
+			if ok && got.VictimPID != tc.want {
+				t.Errorf("parseKill(%q) VictimPID = %d, want %d", msg, got.VictimPID, tc.want)
 			}
 		})
 	}

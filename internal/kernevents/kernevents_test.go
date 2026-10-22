@@ -94,6 +94,11 @@ func TestKernel_NoTriggerFuncIsNotAnError(t *testing.T) {
 func TestKernel_CaptureTimeCorrectsKernelClockDrift(t *testing.T) {
 	t.Run("fixture with 20 days of uptime and 40 s of drift", captureFixtureDrift)
 	t.Run("lines of an earlier run give the drift", captureEarlierRunDrift)
+	t.Run("fixture read from the start of the boot", captureFixtureFromBootStart)
+	t.Run("a line more than 600 s old is ignored", func(t *testing.T) { captureOldLine(t, 700, 0) })
+	t.Run("a line 599 s old counts", func(t *testing.T) { captureOldLine(t, 600, 1_000_000) })
+	t.Run("a re-read gives the same capture time", captureReread)
+	t.Run("a source stamp above the receipt stamp counts as no lag", captureSourceAhead)
 	for _, tc := range noDelayCases {
 		t.Run(tc.name, func(t *testing.T) { captureWithoutDelay(t, tc) })
 	}
@@ -123,6 +128,80 @@ func captureFixtureDrift(t *testing.T) {
 		}
 	}
 	checkValid(t, recs, t0)
+}
+
+func captureFixtureFromBootStart(t *testing.T) {
+	e := newEnv(t)
+	e.j.loadFixture(t)
+	e.seed(dashed(bootB), position(seqIDA, 0, 1790000000000000))
+
+	kills := killsOf(e.run(false))
+
+	want := map[int32]uint64{
+		3021:   1790790382989841,
+		352448: 1790916696593383 - 490464, // the delay of the pzstd kill is 0.490464 s, not that of the lines of the boot's start
+		351416: 1790917172776852 - 410875, // 0.410875 s
+		5150:   1792657799750000,
+	}
+	if len(kills) != 4 {
+		t.Fatalf("kills = %v, want the 4 kills of the fixture", pids(kills))
+	}
+	for _, k := range kills {
+		pid := k.ev.OOMKill.VictimPID
+		if !k.rec.CapturedAt.Equal(micro(want[pid])) {
+			t.Errorf("kill %d captured_at = %s, want %s", pid, k.rec.CapturedAt.Format(time.RFC3339Nano), micro(want[pid]).Format(time.RFC3339Nano))
+		}
+	}
+}
+
+// captureOldLine puts a line at second 1 with a lag of 0.3 s and a kill at second sec with a lag of 1.3 s; extra is the delay wanted.
+func captureOldLine(t *testing.T, sec int, extra uint64) {
+	e, c := liveEnv(t)
+	killRT, _ := tl(sec)
+	e.add(c.line(bootB, 1), c.kill(bootB, sec, 4711, "p", lagUS+1_000_000))
+	e.uptimeNow(0)
+
+	kills := killsOf(e.run(false))
+
+	if len(kills) != 1 {
+		t.Fatalf("kills = %d, want 1", len(kills))
+	}
+	if want := micro(killRT - extra); !kills[0].rec.CapturedAt.Equal(want) {
+		t.Errorf("captured_at = %s, want %s (delay %d µs)", kills[0].rec.CapturedAt, want, extra)
+	}
+}
+
+func captureReread(t *testing.T) {
+	e, c := liveEnv(t)
+	killRT, _ := tl(6)
+	e.add(c.line(bootB, 5), c.kill(bootB, 6, 4711, "p", lagUS+1_000_000))
+	e.uptimeNow(0)
+
+	first := killsOf(e.run(false))
+	again := killsOf(e.run(true))
+
+	want := micro(killRT - 1_000_000)
+	if len(first) != 1 || len(again) != 1 || !first[0].rec.CapturedAt.Equal(want) || !again[0].rec.CapturedAt.Equal(want) {
+		t.Errorf("captured_at on the first reading and the re-read = %v and %v, want both %s", first, again, want)
+	}
+}
+
+func captureSourceAhead(t *testing.T) {
+	e, c := liveEnv(t)
+	rt5, mono5 := tl(5)
+	killRT, _ := tl(6)
+	ahead := kernelLine(c.next(), bootB, rt5, mono5, mono5+3_000_000, "handmade kernel line with a source stamp ahead")
+	e.add(ahead, c.kill(bootB, 6, 4711, "p", 1_000_000))
+	e.uptimeNow(0)
+
+	kills := killsOf(e.run(false))
+
+	if len(kills) != 1 {
+		t.Fatalf("kills = %d, want 1", len(kills))
+	}
+	if want := micro(killRT - 1_000_000); !kills[0].rec.CapturedAt.Equal(want) {
+		t.Errorf("captured_at = %s, want %s (the line counts as lag 0, so the whole lag of 1 s is delay)", kills[0].rec.CapturedAt, want)
+	}
 }
 
 func captureEarlierRunDrift(t *testing.T) {

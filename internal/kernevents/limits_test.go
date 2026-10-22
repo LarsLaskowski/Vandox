@@ -365,12 +365,12 @@ func TestKernel_UnreadableJournalLogsOnceAndResumes(t *testing.T) {
 			}
 
 			tc.breakIt(e)
-			lost := runBroken(e, 3)
+			runBroken(t, e, 3)
 			e.add(c.kill(bootB, 4, 4711, "pzstd", lagUS)) // written while the journal cannot be read
 			requireOneWarning(t, e, 1)
 			tc.fix(e)
 
-			recs, err := e.collect(lost)
+			recs, err := e.collect(false)
 
 			if err != nil {
 				t.Fatalf("Collect() after the journal is readable again: error = %v, want nil", err)
@@ -384,19 +384,20 @@ func TestKernel_UnreadableJournalLogsOnceAndResumes(t *testing.T) {
 			}
 			requireOneWarning(t, e, 1)
 			tc.breakIt(e)
-			runBroken(e, 2)
+			runBroken(t, e, 2)
 			requireOneWarning(t, e, 2)
 		})
 	}
 }
 
-// runBroken makes n runs on an unreadable journal and returns whether the last result was dropped.
-func runBroken(e *env, n int) (lost bool) {
-	for range n {
-		_, err := e.collect(lost)
-		lost = err != nil
+// runBroken makes n runs on an unreadable journal; every one returns a nil error.
+func runBroken(t *testing.T, e *env, n int) {
+	t.Helper()
+	for i := range n {
+		if _, err := e.collect(false); err != nil {
+			t.Errorf("run %d on an unreadable journal: Collect() error = %v, want nil", i+1, err)
+		}
 	}
-	return lost
 }
 
 // requireOneWarning checks the number of "not readable" warnings and that the err attribute of the last one is set and names no path.
@@ -450,8 +451,7 @@ func TestKernel_JournalErrorsLogFixedReasons(t *testing.T) {
 			e.seed(dashed(bootB), before())
 			tc.mess(e, name)
 
-			_, _ = e.collect(false)
-			_, _ = e.collect(false)
+			runBroken(t, e, 2)
 
 			warns := e.logs.find(slog.LevelWarn, "kernel messages not readable")
 			if len(warns) != 1 || warns[0].attrs["err"] != tc.want {
