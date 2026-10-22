@@ -45,7 +45,7 @@ func (e *Entry) Field(name string) ([]Field, bool) {
 // reset empties e for the next entry and keeps its buffers.
 func (e *Entry) reset() {
 	e.Fields = e.Fields[:0]
-	e.Realtime, e.Monotonic, e.Items = time.Time{}, 0, 0
+	e.Realtime, e.Monotonic, e.Items, e.Omitted = time.Time{}, 0, 0, 0
 }
 
 // buffer returns the k-th payload buffer of e, made when first needed.
@@ -96,10 +96,11 @@ func (f *File) readItem(off uint64, want []string, e *Entry) error {
 	if err != nil {
 		return err
 	}
-	if len(e.Fields) >= maxKept {
-		return nil
-	}
 	if obj[1]&objCompress != 0 {
+		if len(e.Fields) >= maxKept {
+			e.Omitted++
+			return nil
+		}
 		e.Fields = append(e.Fields, Field{Compressed: true})
 		return nil
 	}
@@ -110,6 +111,10 @@ func (f *File) readItem(off uint64, want []string, e *Entry) error {
 	}
 	name, ok := wanted(want, head[:eq])
 	if !ok {
+		return nil
+	}
+	if len(e.Fields) >= maxKept {
+		e.Omitted++
 		return nil
 	}
 	take := min(size-dataFixed, maxPayload)
