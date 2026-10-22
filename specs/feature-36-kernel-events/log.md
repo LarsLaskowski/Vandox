@@ -84,3 +84,4 @@ are quoted in full.
 | 2026-10-22 22:30 | 9 Condition: 60 s boundary pinned | squad-tester | TestBackups_EndAfterSixtySeconds pins the end at +80; mutation check (>= to >) fails in a scratch copy; backups tests green (sonnet/medium · 2,363 tokens · 3 tool uses · 27 s · continued from 5 Tests first G6) |
 | 2026-10-22 22:33 | 8 Review round 3 (delta) | squad-reviewer | APPROVE: both approval conditions hold; Lead's agent.md additions accurate (opus/medium · 6,598 tokens · 4 tool uses · 26 s · continued) |
 | 2026-10-22 22:33 | 9 Records accepted | Orchestrator | approved by checklist after Lead conditions; records 0119 and 0120 and their index rows set to Accepted; decision-check PASS |
+| 2026-10-22 22:34 | 10 Pull request | Orchestrator | Follow-up issues #286 (COMPACT layout) and #287 (Plesk default backup rules) created, checks commented on #42; working record posted to issue #36, specs folder removed, draft PR opened |
