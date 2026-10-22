@@ -2,6 +2,7 @@ package journal
 
 import (
 	"errors"
+	"reflect"
 	"runtime"
 	"strconv"
 	"strings"
@@ -787,5 +788,62 @@ func readLastEntry(t *testing.T, r *refReader, last uint64) {
 	}
 	if ok, err := f.Next(&c, wantNames, &e); err != nil || ok {
 		t.Fatalf("second Next() = %v, %v, want false, nil", ok, err)
+	}
+}
+
+// omittedOf reads Entry.Omitted by reflection so that the suite builds before the field exists.
+func omittedOf(t *testing.T, e *Entry) int {
+	t.Helper()
+	f := reflect.ValueOf(e).Elem().FieldByName("Omitted")
+	if !f.IsValid() || f.Kind() != reflect.Int {
+		t.Fatalf("Entry has no int field Omitted")
+	}
+	return int(f.Int())
+}
+
+func TestFile_FieldsBeyondCapAreCounted(t *testing.T) {
+	const keep = 16
+	cases := []struct {
+		name string
+		item func(i int) bItem
+	}{
+		{"wanted items", func(i int) bItem { return bItem{payload: []byte("SYSLOG_FACILITY=" + strconv.Itoa(i))} }},
+		{"compressed items", func(i int) bItem {
+			return bItem{payload: []byte("X" + strconv.Itoa(i) + "=" + strings.Repeat("handmade ", 8)), compressed: true}
+		}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			entries := kernelEntries(3, false)
+			// the second entry keeps only items that are not wanted, plus 17 of the kind under test
+			entries[1].items = []bItem{{payload: []byte(kernelPayload)}, {payload: []byte("PRIORITY=6")}}
+			for i := 0; i < keep+1; i++ {
+				entries[1].items = append(entries[1].items, c.item(i))
+			}
+			b, _ := buildFile(entries, testOptions())
+			f := openBytes(t, b, false)
+			cur, err := f.Seek(kernelList(t, f), 0)
+			if err != nil {
+				t.Fatalf("Seek() error = %v, want nil", err)
+			}
+			var e Entry
+			for i := 0; i < 3; i++ {
+				if ok, err := f.Next(&cur, wantNames, &e); err != nil || !ok {
+					t.Fatalf("Next() %d = %v, %v, want true, nil", i, ok, err)
+				}
+				checkOmitted(t, i, &e, keep)
+			}
+		})
+	}
+}
+
+func checkOmitted(t *testing.T, i int, e *Entry, keep int) {
+	t.Helper()
+	got := omittedOf(t, e)
+	if i == 1 && (len(e.Fields) != keep || got != 1) {
+		t.Errorf("entry with %d items of one kind: %d Fields, Omitted %d, want %d and 1", keep+1, len(e.Fields), got, keep)
+	}
+	if i != 1 && got != 0 {
+		t.Errorf("entry %d: Omitted = %d, want 0 (reset for each entry)", i, got)
 	}
 }

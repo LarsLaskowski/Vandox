@@ -100,7 +100,7 @@ func TestReadExport_ParsesTextBinaryAndRepeatedFields(t *testing.T) {
 	var in bytes.Buffer
 	in.WriteString("A=1\nB=x=y\nEMPTY=\nSYSLOG_FACILITY=0\nSYSLOG_FACILITY=3\nSYSLOG_FACILITY=5\n\n")
 	in.WriteString("MESSAGE\n")
-	_ = binary.Write(&in, binary.LittleEndian, uint64(11))
+	_ = binary.Write(&in, binary.LittleEndian, uint64(9))
 	in.WriteString("one\ntwo\x00\xff\nC=2\n\n")
 	got, err := ReadExport(&in)
 	if err != nil {
