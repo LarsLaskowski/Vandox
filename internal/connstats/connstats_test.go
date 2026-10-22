@@ -1807,8 +1807,10 @@ func TestDisallowedSelectors_ResolvesTheLocalNameOfTheImport(t *testing.T) {
 // killsFor returns n distinct kills for the triggered runs.
 func killsFor(n int) []model.KillRef {
 	kills := make([]model.KillRef, n)
+	pid := int32(900)
 	for i := range kills {
-		kills[i] = model.KillRef{BootID: "0f1e2d3c-4b5a-4968-8776-655443322110", KernelTime: time.Duration(i+1) * time.Second, VictimPID: int32(900 + i)}
+		kills[i] = model.KillRef{BootID: "0f1e2d3c-4b5a-4968-8776-655443322110", KernelTime: time.Duration(i+1) * time.Second, VictimPID: pid}
+		pid++
 	}
 	return kills
 }
@@ -1869,5 +1871,23 @@ func TestConnections_TriggeredFirstRunNamesKills(t *testing.T) {
 	wantFlags(t, snap, false, true, false, model.ListenerCheckStart)
 	if snap.Trigger == nil || !slices.Equal(snap.Trigger.Kills, kills) || snap.Trigger.KillsOmitted != 3 {
 		t.Errorf("snapshot trigger = %+v, want kills %+v and 3 omitted", snap.Trigger, kills)
+	}
+}
+
+func TestConnections_TriggeredRunKeepsTheListenerComparison(t *testing.T) {
+	w := ownedWorld(t)
+	c := newCollector(w)
+	snapshotOf(t, c, runAt(0, false))
+	snapshotOf(t, c, triggeredAt(1, false, killsFor(1), 0))
+	w.addListener("tcp", newBackdoor, 99999999)
+	w.flush()
+
+	_, snap := snapshotOf(t, c, runAt(2, false))
+
+	if len(snap.NewListeners) != 1 || snap.NewListeners[0].Local != addrPort(newBackdoor) {
+		t.Errorf("new listeners after a triggered run = %+v, want the one on %s (the triggered run is the predecessor)", snap.NewListeners, newBackdoor)
+	}
+	if snap.Trigger != nil {
+		t.Errorf("trigger of the run after a triggered one = %+v, want nil", snap.Trigger)
 	}
 }

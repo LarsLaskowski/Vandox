@@ -3,6 +3,7 @@ package scheduler_test
 import (
 	"context"
 	"errors"
+	"math"
 	"slices"
 	"testing"
 	"testing/synctest"
@@ -14,10 +15,14 @@ import (
 
 // killOf returns the i-th kill of a test, distinct from every other.
 func killOf(i int) model.KillRef {
+	pid := int32(1000)
+	for range i {
+		pid++
+	}
 	return model.KillRef{
 		BootID:     "0f1e2d3c-4b5a-4968-8776-655443322110",
 		KernelTime: time.Duration(i+1) * time.Second,
-		VictimPID:  int32(1000 + i),
+		VictimPID:  pid,
 	}
 }
 
@@ -220,8 +225,45 @@ func mergeCases() []mergeCase {
 	}
 }
 
+// mergedRuns makes the requests of tc while the first run of a collector is busy and returns the runs after 10 s.
+func mergedRuns(t *testing.T, h *harness, c *scriptedCollector, requests []scheduler.Trigger) []scheduler.Run {
+	t.Helper()
+
+	for i, req := range requests {
+		h.sleepTo(time.Duration(i+1) * 500 * time.Millisecond)
+		requireAccepted(t, h.sched, "kern", req)
+	}
+	h.sleepTo(10 * time.Second)
+	return c.started()
+}
+
+// requireMerged checks the one extra run that the requests of tc merged into.
+func requireMerged(t *testing.T, h *harness, runs []scheduler.Run, tc mergeCase) {
+	t.Helper()
+
+	if got := h.offsets(runs); !slices.Equal(got, seconds(0, 3)) {
+		t.Fatalf("run starts = %v, want [0s 3s] (the requests merge into one extra run)", got)
+	}
+	got := runs[1].Trigger
+	if got == nil {
+		t.Fatalf("Run.Trigger of the extra run = nil, want the merged request")
+	}
+	if !slices.Equal(got.Kills, tc.wantKills) {
+		t.Errorf("merged kills = %d entries %+v, want %d entries %+v", len(got.Kills), got.Kills, len(tc.wantKills), tc.wantKills)
+	}
+	if got.KillsOmitted != tc.wantOmitted {
+		t.Errorf("merged KillsOmitted = %d, want %d", got.KillsOmitted, tc.wantOmitted)
+	}
+}
+
 func TestScheduler_TriggerMergesKillsUpToSixtyFour(t *testing.T) {
-	for _, tc := range mergeCases() {
+	cases := append(mergeCases(), mergeCase{
+		name:        "omitted counts saturate at the largest uint32",
+		requests:    []scheduler.Trigger{{Kills: killsOf(0, 1), KillsOmitted: math.MaxUint32}, {Kills: killsOf(1, 1), KillsOmitted: 5}},
+		wantKills:   killsOf(0, 2),
+		wantOmitted: math.MaxUint32,
+	})
+	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				c := newScripted("kern", func(_ context.Context, n int, _ scheduler.Run) ([]model.Record, error) {
@@ -231,33 +273,30 @@ func TestScheduler_TriggerMergesKillsUpToSixtyFour(t *testing.T) {
 					return nil, nil
 				})
 				h := start(t, []scheduler.Job{job(c, 20*time.Second, 5*time.Second)}, &recordingSink{})
-				for i, req := range tc.requests {
-					h.sleepTo(time.Duration(i+1) * 500 * time.Millisecond)
-					requireAccepted(t, h.sched, "kern", req)
-				}
 
-				h.sleepTo(10 * time.Second)
+				runs := mergedRuns(t, h, c, tc.requests)
 
-				runs := c.started()
-				if got := h.offsets(runs); !slices.Equal(got, seconds(0, 3)) {
-					t.Fatalf("run starts = %v, want [0s 3s] (the requests merge into one extra run)", got)
-				}
-				got := runs[1].Trigger
-				if got == nil {
-					t.Fatalf("Run.Trigger of the extra run = nil, want the merged request")
-				}
-				if !slices.Equal(got.Kills, tc.wantKills) {
-					t.Errorf("merged kills = %d entries %+v, want %d entries %+v", len(got.Kills), got.Kills, len(tc.wantKills), tc.wantKills)
-				}
-				if got.KillsOmitted != tc.wantOmitted {
-					t.Errorf("merged KillsOmitted = %d, want %d", got.KillsOmitted, tc.wantOmitted)
-				}
-				if len(got.Kills) > model.MaxTriggerKills {
-					t.Errorf("merged kills = %d, want at most %d", len(got.Kills), model.MaxTriggerKills)
-				}
+				requireMerged(t, h, runs, tc)
 			})
 		})
 	}
+}
+
+func TestScheduler_TriggerUnknownCollectorIsRefused(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		c := newScripted("kern", nil)
+		h := start(t, []scheduler.Job{job(c, 10*time.Second, 2*time.Second)}, &recordingSink{})
+		h.sleepTo(3 * time.Second)
+
+		if h.sched.Trigger("nobody", scheduler.Trigger{Kills: killsOf(0, 1)}) {
+			t.Errorf(`Trigger("nobody") = true, want false (unknown collector)`)
+		}
+		h.sleepTo(5 * time.Second)
+
+		if got := h.offsets(c.started()); !slices.Equal(got, seconds(0)) {
+			t.Errorf("run starts = %v, want [0s] (a refused request starts no run)", got)
+		}
+	})
 }
 
 func TestScheduler_TriggerAfterExtraRunStartsNewExtraRun(t *testing.T) {

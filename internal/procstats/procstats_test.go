@@ -1625,8 +1625,10 @@ func requireProbeRefused(t *testing.T, content, name, want string) {
 // triggerKills are the kills a triggered run names in the tests of the snapshots.
 func triggerKills(n int) []model.KillRef {
 	kills := make([]model.KillRef, n)
+	pid := int32(900)
 	for i := range kills {
-		kills[i] = model.KillRef{BootID: "0f1e2d3c-4b5a-4968-8776-655443322110", KernelTime: time.Duration(i+1) * time.Second, VictimPID: int32(900 + i)}
+		kills[i] = model.KillRef{BootID: "0f1e2d3c-4b5a-4968-8776-655443322110", KernelTime: time.Duration(i+1) * time.Second, VictimPID: pid}
+		pid++
 	}
 	return kills
 }
@@ -1813,4 +1815,34 @@ func TestReadBootTime_Exported(t *testing.T) {
 			t.Errorf("ReadBootTime(empty /proc) error = nil, want an error")
 		}
 	})
+}
+
+func TestProcesses_ScheduledRunHasNoTrigger(t *testing.T) {
+	const n = 120
+	c, _ := newCollector(bulkRank(n), nil)
+
+	regular := snapshotOf(t, c, runStart, false)
+	pressed := snapshotOf(t, c, runStart.Add(time.Minute), true)
+
+	if regular.Trigger != nil || pressed.Trigger != nil {
+		t.Errorf("Trigger of scheduled snapshots = %+v, %+v, want nil, nil", regular.Trigger, pressed.Trigger)
+	}
+}
+
+func TestProcesses_RunAfterTriggeredRunHasNoTriggerAndTopLists(t *testing.T) {
+	const n = 120
+	c, _ := newCollector(bulkRank(n), nil)
+	triggered := scheduler.Run{Start: runStart, Trigger: &scheduler.Trigger{Kills: triggerKills(2)}}
+	if _, err := c.Collect(context.Background(), triggered); err != nil {
+		t.Fatalf("Collect(triggered run) error = %v, want nil", err)
+	}
+
+	next := snapshotOf(t, c, runStart.Add(time.Minute), false)
+
+	if next.Trigger != nil {
+		t.Errorf("Trigger of the run after a triggered one = %+v, want nil", next.Trigger)
+	}
+	if len(next.Processes) >= n || next.Complete {
+		t.Errorf("run after a triggered one listed %d processes, Complete %v, want the top lists only and not complete", len(next.Processes), next.Complete)
+	}
 }
