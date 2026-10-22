@@ -35,4 +35,4 @@ are quoted in full.
 | 2026-10-22 18:48 | 4 Skeleton G3 | squad-dev | G3 skeleton in place (internal/agentstate); Update panics (void signature) (sonnet/medium · 62,679 tokens · 6 tool uses · 33 s) |
 | 2026-10-22 18:52 | 5 Tests first G3 | squad-tester | G3 tests written (internal/agentstate/agentstate_test.go); all fail/skip on skeleton, none deferred; assumptions: JSON keys not in plan, save restarts both rates, heartbeat sets Boot.Uptime only when Boot set (sonnet/medium · 107,501 tokens · 18 tool uses · 228 s) |
 | 2026-10-22 18:56 | 6 Implement G3 | squad-dev | G3 implemented (internal/agentstate: Open, Save, state job); tests green, 90.9% package coverage, analyzer-check passes; no disputed test (sonnet/medium · 95,639 tokens · 13 tool uses · 225 s) |
-| 2026-10-22 18:57 | 4 Skeleton G4 | squad-dev | G4 skeleton in place (internal/journal, journaltest); build and vet pass (sonnet/medium · usage pending) |
+| 2026-10-22 18:57 | 4 Skeleton G4 | squad-dev | G4 skeleton in place (internal/journal, journaltest); build and vet pass (sonnet/medium · 67,978 tokens · 5 tool uses · 45 s) |
