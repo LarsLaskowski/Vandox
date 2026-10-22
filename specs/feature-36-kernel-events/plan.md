@@ -32,7 +32,7 @@ The feature is specified in [spec.md](spec.md) (S1 to S13, E1 to E17, AC1 to AC2
 | 17 | `journalctl` 255 here verifies and exports the non-compact layout | rows 6 and 9 read with it; `--verify` passes the prototype `scratchpad/fixture/oom.journal` | confirmed |
 | 18 | The server's journal files are readable by `systemd-journal` | to verify: #42 checks `ls -ln /var/log/journal/<machine-id>` on the server | unverified |
 | 19 | The kernel's printk clock drifts against `CLOCK_MONOTONIC` and real time | Devil's Advocate M1 against `audit(...)` stamps; spot check here: the 2 Oct `mariadbd` kill has receipt monotonic minus source stamp = 4.30 s at uptime 128,205 s (about 33.5 µs/s) | confirmed |
-| 20 | `/proc/uptime` equals the journal's `__MONOTONIC_TIMESTAMP` clock on a server that never suspends | to verify: Tester compares `/proc/uptime` with the `__MONOTONIC_TIMESTAMP` of a fresh `logger` entry (scratch measurement, step 5), and records the facility a `<0>` write to `/dev/kmsg` gets | unverified |
+| 20 | `/proc/uptime` equals the journal's `__MONOTONIC_TIMESTAMP` clock on a server that never suspends | to verify: #42 on the server compares the first field of `/proc/uptime` with the `__MONOTONIC_TIMESTAMP` of a fresh `logger` entry (`journalctl -o export -n 1`), expected difference below 1 s; not measurable in the session (no journald in the sandbox, step 5). By the kernel's definitions `/proc/uptime` counts `CLOCK_BOOTTIME`, which includes suspend, and `__MONOTONIC_TIMESTAMP` is `CLOCK_MONOTONIC`, which does not; without a suspend they agree. Residual until then, in record 0120 and the Agent area: after a suspend every kill reads as late and gets no snapshots (fails closed: an event without snapshots, never a snapshot too many) | unverified |
 | 21 | Entry arrays double in size (a chain has at most 64 arrays); new data objects are linked at their hash chain's end (offsets strictly increase) | systemd `journal-file.c` (`scratchpad/src/`) lines 1837-1843 and 1254-1265; the file is append-only | confirmed |
 | 22 | An unclean close renames the file to `*.journal~`, and the next file gets a new seqnum ID | systemd v249 `journal-file.c` 589-593 and 3836-3861, `journald-server.c` 281-283, `journal-file.c` 443-446 (Devil's Advocate M2) | confirmed |
 | 23 | Seqnums are not dense | archived file: 73,265 entries over seqnums 1 to 30,218,745; online file: 72,909 over 30,674,914 to 30,747,972 | confirmed |
@@ -46,15 +46,15 @@ AC1 to AC20 of [spec.md](spec.md).
 
 | AC | Test(s) | Test file |
 | -- | ------- | --------- |
-| AC1 | `TestKernel_LiveKillBecomesEventWithinFiveSeconds`, `TestKernel_CaptureTimeCorrectsKernelClockDrift`, `TestKernel_KillIdentityStableAcrossReadings`; `TestParseKill_RealLines` | `internal/kernevents/kernevents_test.go`; `internal/kernevents/kill_test.go` |
+| AC1 | `TestKernel_LiveKillBecomesEventWithinFiveSeconds`, `TestKernel_CaptureTimeCorrectsKernelClockDrift` (also: the fixture read from the boot's first entry gives the same 0.490464 s and 0.410875 s delays as from seqnum 21; a line received more than 600 s before the kill does not set the drift; a re-read after a dropped run gives the same capture time; a source stamp above `__MONOTONIC_TIMESTAMP` counts as lag 0), `TestKernel_KillIdentityStableAcrossReadings`; `TestParseKill_RealLines` | `internal/kernevents/kernevents_test.go`; `internal/kernevents/kill_test.go` |
 | AC2 | `TestScheduler_TriggerRunsExtraWithinOneSecond`, `TestScheduler_TriggerWaitsForCurrentRun`, `TestScheduler_TriggerKeepsGridWithoutPressure`, `TestScheduler_TriggerReplacesNextRunUnderPressure`; `TestProcesses_TriggeredRunIsFullAndNamesKills`; `TestConnections_TriggeredRunIsFullAndNamesKills`; `TestKernel_LiveKillTriggersBothCollectors` | `internal/scheduler/trigger_test.go`; `internal/procstats/procstats_test.go`; `internal/connstats/connstats_test.go`; `internal/kernevents/kernevents_test.go` |
-| AC3 | `TestKernel_StormCoalescesWithinFifteenSeconds`; `TestScheduler_TriggerMergesKillsUpToSixtyFour` | `internal/kernevents/kernevents_test.go`; `internal/scheduler/trigger_test.go` |
+| AC3 | `TestKernel_StormCoalescesWithinFifteenSeconds`, `TestKernel_StormNamesAtMostSixtyFourKills`, `TestKernel_KillsOfOneRunShareOneTrigger` (three live kills in one run without a trigger in the last 15 s: one pair naming all three, sent before the run returns; 70 in one run: 64 named, 6 counted); `TestScheduler_TriggerMergesKillsUpToSixtyFour` | `internal/kernevents/kernevents_test.go`; `internal/scheduler/trigger_test.go` |
 | AC4 | `TestParseKill_IgnoresOtherLines`; `TestKernel_OnlyKernelTransportWithFacilityZero` | `internal/kernevents/kill_test.go`; `internal/kernevents/kernevents_test.go` |
-| AC5 | `TestParseKill_HostileNames`, `TestParseKill_MissingFields`, `TestParseKill_AllKillForms` | `internal/kernevents/kill_test.go` |
-| AC6 | `TestKernel_ResumesAtSavedPositionAcrossBoots`, `TestKernel_ReadsSetAsideFilesAfterUncleanShutdown`, `TestKernel_JournaldRestartStartsNewSeqnumID`, `TestKernel_LostRunRereadsEntries`, `TestKernel_LateOrOtherBootKillsGetNoSnapshot`, `TestKernel_ReversedTimeGapStillMovesPosition` (a span whose missed-messages entry lies between two kernel entries of the same µs and one whose clock steps back: each gap ends 1 µs after its start, every returned record passes `wire.CheckRecord`, the next run's `PreviousLost` is false and the position moves past the span, the span is not returned again), `TestKernel_RefusedRecordBecomesGap` (a record forced to fail the check through an unexported hook: left out, a gap in its place, the position moves on), `TestKernel_RereadCappedAtThree` (four dropped runs in a row: three re-reads, then one gap over the span and reading after it; a dropped run that read nothing does not count; a dropped give-up run gives up the same span again without its kills) | `internal/kernevents/kernevents_test.go` |
-| AC7 | `TestKernel_LostPositionRecordsGapAndContinues`, `TestKernel_UndecodableEntryRecordsGap`, `TestKernel_MonotonicStampOutOfRangeIsUnreadable` (`_SOURCE_MONOTONIC_TIMESTAMP` empty, 21 digits, `18446744073709551616`, `9223372036854776` µs, with a sign, a space or a line feed; `__MONOTONIC_TIMESTAMP` above `math.MaxInt64 / 1000`: each a gap, no event, never a negative `kernel_time_ns`; the boundary `9223372036854775` µs in both fields is accepted and gives an event), `TestKernel_RealtimeOutOfRangeIsUnreadable` (`__REALTIME_TIMESTAMP` 0, `253402300800000000` and `1<<62` on a kill entry and on the entries a missed-messages gap and a give-up span would take their bounds from: each such entry unreadable, a gap from readable times only, every returned record passes `wire.CheckRecord`, the next run's `PreviousLost` is false and the position moves on; `253402300799999999` accepted; and, through the unexported hook, a gap still refused becomes `[run.Start − 1 µs, run.Start)`), `TestKernel_HangingJournalLosesOnlyItsSample`, `TestKernel_PollWorkIndependentOfEarlierEntries`, `TestKernel_TimeBudgetEachRunGetsFurther`; `TestFile_RefusesUnsupportedLayout`, `TestFile_BoundsEveryOffset`, `TestFile_TornTailIsEndOfFile`, `TestFile_FieldsBeyondCapAreCounted` (an entry with 17 `SYSLOG_FACILITY` items: 16 in `Fields`, `Omitted` 1; one with 17 compressed items likewise); in G5 `TestKernel_UndecodableEntryRecordsGap` also covers a kernel entry with a compressed item and one with `Omitted` above 0 (each a gap, no event), and `TestKernel_ReadsSetAsideFilesAfterUncleanShutdown` a file of another seqnum ID without a header head time (read after the others, its kill returned) | `internal/kernevents/kernevents_test.go`; `internal/journal/journal_test.go` |
-| AC8 | `TestKernel_UnreadableJournalLogsOnceAndResumes` | `internal/kernevents/kernevents_test.go` |
-| AC9 | `TestBoot_NewBootRecordsPreviousBootAndUptime` | `internal/kernevents/boot_test.go` |
+| AC5 | `TestParseKill_HostileNames`, `TestParseKill_MissingFields` (also: an `anon-rss` or `oom_score_adj` token that appears twice leaves that field absent, the event stays), `TestParseKill_AllKillForms`, `TestParseKill_PIDs` (`2147483647` accepted; `0`, `2147483648`, `4294967295`, 11 digits refused) | `internal/kernevents/kill_test.go` |
+| AC6 | `TestKernel_ResumesAtSavedPositionAcrossBoots`, `TestKernel_ReadsSetAsideFilesAfterUncleanShutdown`, `TestKernel_JournaldRestartStartsNewSeqnumID`, `TestKernel_LostRunRereadsEntries`, `TestKernel_LateOrOtherBootKillsGetNoSnapshot`, `TestKernel_ReversedTimeGapStillMovesPosition` (a span whose missed-messages entry lies between two kernel entries of the same µs and one whose clock steps back: each gap ends 1 µs after its start, every returned record passes `wire.CheckRecord`, the next run's `PreviousLost` is false and the position moves past the span, the span is not returned again), `TestKernel_RefusedRecordBecomesGap` (a record forced to fail the check by swapping the package variable `checkRecord`, not in a parallel test: left out, a gap in its place, the position moves on), `TestKernel_PositionNeverMovesBackInTime` (after a file without a head time or an older set-aside file of another seqnum ID is read last, the next runs return no record of the files already read and the saved position is the last entry of the newest file with a head time; an online file of another seqnum ID whose head time lies before the position's, a clock set back, is still read; a file of another seqnum ID without a head time cut by the 256-kill limit is continued, not read again from its head; after a dropped run these files are read again exactly as before), `TestKernel_RereadCappedAtThree` (four dropped runs in a row: three re-reads, then one gap over the span and reading after it; a dropped run that read nothing does not count; a dropped give-up run gives up the same span again without its kills) | `internal/kernevents/kernevents_test.go` |
+| AC7 | `TestKernel_LostPositionRecordsGapAndContinues`, `TestKernel_UndecodableEntryRecordsGap`, `TestKernel_MonotonicStampOutOfRangeIsUnreadable` (`_SOURCE_MONOTONIC_TIMESTAMP` empty, 21 digits, `18446744073709551616`, `9223372036854776` µs, with a sign, a space or a line feed; `__MONOTONIC_TIMESTAMP` above `math.MaxInt64 / 1000`: each a gap, no event, never a negative `kernel_time_ns`; the boundary `9223372036854775` µs in both fields is accepted and gives an event), `TestKernel_RealtimeOutOfRangeIsUnreadable` (`__REALTIME_TIMESTAMP` 0, `253402300800000000` and `1<<62` on a kill entry and on the entries a missed-messages gap and a give-up span would take their bounds from: each such entry unreadable, a gap from readable times only, every returned record passes `wire.CheckRecord`, the next run's `PreviousLost` is false and the position moves on; `253402300799999999` accepted; and, through the unexported hook, a gap still refused becomes `[run.Start − 1 µs, run.Start)`), `TestKernel_HangingJournalLosesOnlyItsSample`, `TestKernel_PollWorkIndependentOfEarlierEntries`, `TestKernel_TimeBudgetEachRunGetsFurther`, `TestKernel_TornOrMalformedArchivedFileRecordsGap` (a set-aside file cut inside an entry and an archived file with a malformed entry in the middle: one gap each from the last readable kernel entry before the break to the header's tail time, the next file is read, the position moves past the file, the next run records no further gap), `TestKernel_UnsupportedFileRecordsGap` (an archived file with signature `NOTAJRNL`: one gap `[committed position's time, run.Start)` per process, none at the next runs; an unsupported online file: the same first gap, then one gap `[end of the last one, run.Start)` at the first run at least 600 s later), `TestKernel_ReadErrorRetriedThenGivenUp` (a read error in an archived file of the position's seqnum ID: the files after it are not read and no gap at the first two runs, at the third run in a row failing at the same position the file is given up with the gap of a malformed file and reading goes on; a file that opens again after one failing run loses nothing); `TestFile_RefusesUnsupportedLayout`, `TestFile_BoundsEveryOffset`, `TestFile_TornTailIsEndOfFile` (also: `Cursor.Torn` is true after the cut, false at the normal end of a list), `TestFile_FieldsBeyondCapAreCounted` (an entry with 17 `SYSLOG_FACILITY` items: 16 in `Fields`, `Omitted` 1; one with 17 compressed items likewise); in G5 `TestKernel_UndecodableEntryRecordsGap` also covers a kernel entry with a compressed item and one with `Omitted` above 0 (each a gap, no event), and `TestKernel_ReadsSetAsideFilesAfterUncleanShutdown` a file of another seqnum ID without a header head time (read after the others, its kill returned) | `internal/kernevents/kernevents_test.go`; `internal/journal/journal_test.go` |
+| AC8 | `TestKernel_UnreadableJournalLogsOnceAndResumes` (also: `Collect` returns a nil error and no record on every run while the journal is unreadable) | `internal/kernevents/kernevents_test.go` |
+| AC9 | `TestBoot_NewBootRecordsPreviousBootAndUptime` (also: the state then holds `Boot.Uptime` equal to the first field of `/proc/uptime`, 5,000,000 s in the harness) | `internal/kernevents/boot_test.go` |
 | AC10 | `TestBoot_SameBootRecordsNothing`, `TestBoot_FirstStartWithoutPrevious`, `TestBoot_WithoutStateEveryStart`; `TestOpen_StatusAndWarnings` | `internal/kernevents/boot_test.go`; `internal/agentstate/agentstate_test.go` |
 | AC11 | `TestBoot_BadBootIDRecordsNothing` | `internal/kernevents/boot_test.go` |
 | AC12 | `TestBackups_StartWithinFifteenSeconds`, `TestBackups_EndAfterSixtySeconds`, `TestBackups_ShortPauseKeepsOneRun`, `TestBackups_SingleSightingGivesStartAndEnd`, `TestBackups_CountsWithoutKeepingProcesses` | `internal/backups/backups_test.go` |
@@ -100,7 +100,8 @@ every further wanted or compressed item is counted in `Entry.Omitted`, never dro
 `Field{Compressed: true}` with an empty name and value. `Seek` and `Next` re-read the list's entry count from its data object, so a
 cursor follows a growing online file. A torn tail: in an archived or set-aside file `Next` ends the list (`false, nil`), and `Seek` and
 `Lookup` do not fail on it; in an online file `Next` returns `ErrMalformed` and leaves the cursor where it was, so the read is repeated
-after `Refresh`. A header head or tail time outside the range of *Timestamps* is the zero time in `Header`.
+after `Refresh`. A header head or tail time outside the range of *Timestamps* is the zero time in `Header`. `Cursor.Torn` (G5, Lead
+decision) reports that the list ended at such a cut, so the collector can tell a torn tail from the normal end of a list.
 
 **Kernel collector** (`internal/kernevents`, name `kernel`). First run: the boot check (below). Each run: commit the position kept in
 memory by the previous run when `run.PreviousLost` is false, else drop it and read again from the committed position (same identities;
@@ -111,20 +112,50 @@ committed position moves); a dropped run that read no entry (its in-memory posit
 fourth dropped run in a row, the next run reads nothing of the span from the committed position to the dropped run's in-memory
 position: it returns a gap over it (cause `unknown`, from the committed position's time to the time of the last readable entry read, else the
 run's start, bounds as in *Gaps*) and reads on after the span; the committed position moves past it with the usual commit at the following run, so while this
-run is dropped too, the next one gives up the same span again (its gap again, never its kills). Then read from the committed position over the
-files of its seqnum ID in head-seqnum order, then the files of other seqnum IDs whose head time is not before the position's, in
-head-time order, from their heads. A saved seqnum ID without any file gives a gap from the position's time to the first entry after it,
-and reading goes on there; no saved position starts at the newest file's tail. A run stops after 1 s of reading (half the timeout,
+run is dropped too, the next one gives up the same span again (its gap again, never its kills); the give-up run starts from the
+dropped run's in-memory reading state.
+
+*Reading state* (G5, Lead decision). What a run reaches — the position, the drift window (*Time*), the set of archived and
+set-aside files of other seqnum IDs read to their end in this process (by file ID, at most 1,024) and, per file without a head time, the last seqnum read
+there — is kept in memory and committed as one unit at the start of the next run; a re-read starts from the committed copy. Only the
+position goes into the state file. Per run the files are read in this order: (1) the files of the position's seqnum ID in
+head-seqnum order, from the position (a file whose tail seqnum is not after the position's is skipped); (2) the archived and
+set-aside files of other seqnum IDs whose header head time is not before the position's time, in head-time order (ties by file
+name), from their heads; (3) the archived and set-aside files of other seqnum IDs without a header head time, in file-name order
+(Security N9), from their heads or from the seqnum the reading state holds for them; (4) the online file when its seqnum ID is
+another, from its head, whatever its head time (the newest file; a clock set back, E10, must not hide it). A file of steps 2 and 3
+in the set of files read to their end is not read again. The position is `(seqnum ID, seqnum, realtime)` of the last entry read in
+a file of steps 1, 2 or 4 — a file without a head time never becomes the position — and its realtime never moves back (the later
+of the old and the entry's time). A saved seqnum ID without any file gives a gap from the position's time to the first entry after it,
+and reading goes on there; no saved position starts at the newest file's tail.
+
+A run stops after 1 s of reading (half the timeout,
 checked between entries) or 256 kills, whichever first, and returns what it read. An entry counts only with `_TRANSPORT=kernel` and
 exactly one `SYSLOG_FACILITY` item whose value is exactly `0`; its `MESSAGE` goes to `parseKill`. A kernel entry with a compressed
 item (its name is unknown, it could be `MESSAGE` or a second `SYSLOG_FACILITY`) or with `Entry.Omitted` above 0 is unreadable (a gap
-as for an undecodable entry), never a kill. A file of another seqnum ID whose header head time is absent is read after the files with
-a head time, in file-name order, from its head (Security N9). `ErrRead` is logged as the fixed reason `read failed`,
+as for an undecodable entry), never a kill. `ErrRead` is logged as the fixed reason `read failed`,
 `ErrUnsupported` as `unsupported layout`, `ErrMalformed` as `malformed file`. Abandoned runs never touch the store:
 only the start of the next run commits.
 
+*Failures* (G5, Lead decision). `Collect` returns a nil error in every case: an unreadable journal is the warning of *Gaps* and,
+where something is lost, a gap of the collector, never a scheduler gap. (a) No machine ID, no journal directory, a listing or an
+`open` that fails (other than a file that no longer exists, which is skipped: it was vacuumed, the lost-ID rule covers it): the run
+stops there with what it read before, the position does not pass that file, no gap, retried at every run (E4: nothing is lost while
+the journal holds it). (b) A file that `Open` refuses (`ErrUnsupported`, or `ErrMalformed` on its header): it cannot be ordered or
+read; one gap `[committed position's time, else run.Start, run.Start)` the first time this process meets it (by file name), and the
+other files are read on; while the online file is refused, a further gap `[end of the last one, run.Start)` at the first run at
+least 600 s after it, so a journal the reader cannot read stays covered by gaps (record 0119). (c) A torn tail (`Cursor.Torn`) or
+`ErrMalformed` from `Lookup`, `Seek` or `Next` in an archived or set-aside file: that file's list ends there, with a gap from the last readable
+kernel entry's time read in it (else the committed position's) to the header's tail time when that is readable and later, else to
+the next readable kernel entry read after it in this run, else the run's start (a torn tail whose header tail time is not later
+gives no gap); the position moves to `(its seqnum ID, the later of the last seqnum read and the header's tail seqnum, the later of
+the position's time and the header's tail time)`, so the file is not read again. (d) `ErrRead` in any file, or `ErrMalformed` in the
+online file: the run stops at that file as in (a); the third run in a row that fails at the same position (the reader's "three polls on the same entry") gives the file up as in
+(c) (for the online file the position moves to the header's tail seqnum after `Refresh`), so no damaged file holds the position
+for ever (B6).
+
 *Record check.* Before returning, `checkRecords` copies each record as the scheduler's `stamp` does (`Origin` agent, `Seq`
-`math.MaxInt64`, `CapturedAt` set) and calls `wire.CheckRecord`; a record it refuses is left out and replaced by a gap over the time of
+`math.MaxInt64`, `CapturedAt` set) and calls `wire.CheckRecord` through the package variable `checkRecord` (the hook tests swap); a record it refuses is left out and replaced by a gap over the time of
 its entry (from the previous kernel entry's time, or the committed position's, to that entry's time, bounds as in *Gaps*). No log line (the gap records the loss;
 spec *Logs* adds none). `checkRecords` runs the same check on every gap it builds or gets (also the give-up gap); a gap still refused is
 replaced by the fallback gap `[run.Start − 1 µs, run.Start)`, so the returned records pass the check in every case (B7).
@@ -136,17 +167,29 @@ when it is above 0 and below 253402300800000000 µs (1 Jan 10000 UTC, the first 
 applies to the header's head and tail times, and one outside it counts as absent. Any other value makes the entry unreadable (a gap as
 for an undecodable entry), never a negative or wrapped duration or a time the wire format refuses.
 
-*Time.* `lag = __MONOTONIC_TIMESTAMP − _SOURCE_MONOTONIC_TIMESTAMP` of the entry; `drift` = the smallest `lag` among the last 64 kernel
-entries of the same boot read in order (the kernel clock's offset, which grows slowly); `delay = max(0, lag − drift)`. Capture time =
-`__REALTIME_TIMESTAMP − delay` (never after the receipt). Live: entry boot ID equals `/proc/sys/kernel/random/boot_id` and
-`uptime − __MONOTONIC_TIMESTAMP + delay ≤ 60 s` (`uptime` from `/proc/uptime`, fact 20). Identity: entry boot ID, the raw
+*Time.* `lag = max(0, __MONOTONIC_TIMESTAMP − _SOURCE_MONOTONIC_TIMESTAMP)` of the entry (a source stamp above the receipt stamp
+counts as 0). The *drift window* holds the `(__MONOTONIC_TIMESTAMP, lag)` of the last 64 counted kernel entries (kernel transport,
+exactly one facility `0`, readable stamps, a source stamp present) of one boot in reading order; it is part of the reading state,
+so it is kept across runs, restored on a re-read, emptied when an entry of another boot is read and empty after a restart.
+`drift` = the smallest `lag` among the entry itself and the window's entries whose `__MONOTONIC_TIMESTAMP` lies in
+`[its own − 600 s, its own]` (`driftSpan`; G5, Lead decision: the drift only grows, so a minimum over older lines would take the
+oldest line and overstate the delay, by 5.77 s for the 2 Oct `pzstd` kill read from the boot's start; within 600 s the drift moves
+by at most 20 ms at 33.5 µs/s); `delay = lag − drift`, so `0 ≤ delay ≤ lag ≤ __MONOTONIC_TIMESTAMP` and without an earlier line
+the delay is 0. Capture time = `__REALTIME_TIMESTAMP − delay`: never after the receipt, never before that boot's start. An entry
+without a source stamp has delay 0. Live: entry boot ID equals `/proc/sys/kernel/random/boot_id` and
+`uptime − __MONOTONIC_TIMESTAMP + delay ≤ 60 s` (a negative age counts as 0; `uptime` from `/proc/uptime` read by
+`agentstate.ReadUptime`; unreadable: not live; fact 20, unverified, fails closed after a suspend). Identity: entry boot ID, the raw
 `_SOURCE_MONOTONIC_TIMESTAMP` in ns (else `__MONOTONIC_TIMESTAMP`), victim PID.
 
-*Triggers.* A live kill calls `Trigger` for `processes` and `connections` at once when no trigger was sent in the last 15 s; otherwise
-it is kept (at most 64, then counted) and sent at the first run 15 s after the last trigger.
+*Triggers.* Times are `run.Start`. The live kills a run reads that were not triggered before (the last 64 identities) are
+collected; before the run returns, when no trigger was sent at a `run.Start` less than 15 s ago, one `Trigger` for `processes` and
+one for `connections` names the kept kills and this run's (oldest first, at most 64, the rest counted in `KillsOmitted`); otherwise
+they are kept (at most 64, then counted) and sent so at the first run whose `run.Start` is at least 15 s after the last trigger's
+(G5, Lead decision: kills of one run share one pair; spec S2 and S3).
 
-*Gaps* (source and collector `kernel`, cause `unknown`): a lost saved seqnum ID (above); an unreadable entry or unsupported file (from
-the last readable kernel entry's time to the next one's, or to the run's start); a torn tail (above); a missed-messages entry with
+*Gaps* (source and collector `kernel`, cause `unknown`): a lost saved seqnum ID (above); an unreadable entry (from the last readable entry's time of the `_TRANSPORT=kernel` list, any facility, else the committed
+position's time, to the next such entry's time, or to the run's start); a file the reader refuses, a torn tail, a malformed or
+given-up file (*Failures*); a missed-messages entry with
 `_TRANSPORT=driver` (from the last kernel entry before it to the next one after it); a refused record (*Record check*); a given-up span
 (*Re-read cap*). Every gap is valid by construction, `newGap`: when `To` is not after `From` (two entries in the same µs, or a clock set
 back between them, spec E10), `To = From + 1 µs`; `From` and `To` are UTC. Gap bounds and give-up spans take only the times of readable entries (*Timestamps*), the
@@ -154,14 +197,17 @@ committed position's time (strictly decoded from the state file) or the run's st
 `journal: <online|archived>: <fixed reason>`), info `kernel messages readable again`, warning `boot ID not readable`.
 
 **Kill parser** (`parseKill`). Prefix exactly one of `Out of memory: Killed process `, `Memory cgroup out of memory: Killed process `,
-`Out of memory (oom_kill_allocating_task): Killed process `; a PID of 1 to 10 digits within 32 bits, above 0; ` (`; the comm up to the
+`Out of memory (oom_kill_allocating_task): Killed process `; a PID of 1 to 10 digits from 1 to 2147483647 (`int32`, the type of `victim_pid`; anything else is no kill); ` (`; the comm up to the
 **last** `) total-vm:`; the tail split at `, ` and ` ` into tokens, of which only `anon-rss:<1-20 digits>kB` (times 1,024, overflow
-checked) and `oom_score_adj:<-?1-4 digits>` (−1000 to 1000), each at most once, are used. Command: `procstats.CleanText(comm, 1024)`,
+checked) and `oom_score_adj:<-?1-4 digits>` (−1000 to 1000), are used; a token of either name that appears twice leaves that field absent (the event stays). A line
+without `) total-vm:` after the comm is no kill. Command: `procstats.CleanText(comm, 1024)`,
 `(unnamed)` when empty; `message`: the message cleaned the same way at 16,384 bytes.
 
 **Boots** (first `kernel` run). `boot_id` up to 64 bytes, a lower-case UUID and one line feed; `booted_at` from `procstats.ReadBootTime`.
-State boot equal: nothing; different: `boot` event with `previous_boot_id` and `previous_uptime_ns`; none: event without them. Then the
-state holds the current boot and uptime.
+State boot equal: nothing; different: `boot` event with `previous_boot_id` and `previous_uptime_ns`; none: event without them. Then (`Store.Update`, urgent) the
+state holds `Boot{ID: the current boot ID, Uptime: agentstate.ReadUptime(proc) (0 when unreadable), BootedAt: booted_at}`; when the
+boot is equal, the boot check leaves the state alone (the `state` job's heartbeat keeps the uptime); with an unreadable boot ID
+(E9) the state's `Boot` is not touched.
 
 **State** (`internal/agentstate`). `agent-state.json` in `spool.directory`, which the agent never creates (#42 does). Opened with
 `O_RDONLY|O_NOFOLLOW|O_NONBLOCK`; the checks run on `fstat` of that descriptor: a regular file of the agent's effective UID without group
@@ -335,6 +381,7 @@ func (f *File) Lookup(payload []byte) (Data, bool, error)
 type Cursor struct{ /* array offset, index, seqnum */ }
 func (f *File) Seek(d Data, after uint64) (Cursor, error)
 func (f *File) Next(c *Cursor, want []string, e *Entry) (bool, error)
+func (c *Cursor) Torn() bool // G5: the list ended at a cut-off tail of an archived or set-aside file
 type Entry struct { // not comparable with ==
 	Seqnum      uint64
 	Realtime    time.Time     // zero when RealtimeUS is 0 or ≥ 253402300800000000
@@ -398,6 +445,7 @@ func (s *Store) State() State
 func (s *Store) Update(urgent bool, fn func(*State)) // urgent: a kill, boot or backup change (10 s); else the 50 s heartbeat
 type Saver struct{ /* unexported */ }
 func NewSaver(s *Store, proc fs.FS) *Saver
+func ReadUptime(proc fs.FS) (time.Duration, bool) // G5: the existing readUptime exported, unchanged (64 bytes, first field)
 func (v *Saver) Name() string
 func (v *Saver) Collect(ctx context.Context, run scheduler.Run) ([]model.Record, error)
 
@@ -420,6 +468,9 @@ func checkRecords(records []model.Record, at time.Time, gapFrom func(i int) time
 func realtimeOK(us uint64) bool                                                  // 0 < us < 253402300800000000
 func parseMicros(b []byte) (time.Duration, bool)                                 // 1-20 ASCII digits, overflow checked, ≤ MaxInt64/1000 µs
 const maxRereads = 3
+const driftSpan = 600 * time.Second          // G5: the drift window's span before an entry
+const refusedGapEvery = 600 * time.Second    // G5: the spacing of the further gaps while the online file is refused
+var checkRecord = wire.CheckRecord           // G5: the record check checkRecords calls; tests swap it (never in a parallel test)
 
 // internal/backups
 const Name = "backups"
@@ -469,7 +520,10 @@ Files no unit test can cover: none.
   time ranges and the gap bounds), *Boots*, *Backup runs*, *Agent state*; additions to *Scheduling* (extra runs),
   *Processes*, *Connections*, *Memory pressure mode*, *Rights*, *Spool and sending* (the spool leaves the state file alone), *Status*,
   *Related decisions*, *Implementation*; residuals: the backup default (`pzstd` only), the filter proves that the kernel wrote the line,
-  not that the OOM killer did (N4), `COMPACT` journals are not read.
+  not that the OOM killer did (N4), `COMPACT` journals are not read (covered by gaps while refused); `/proc/uptime` and the
+  journal's monotonic clock are assumed equal (fact 20: after a suspend every kill reads as late and gets no snapshots); after a
+  restart, files of another seqnum ID without a header head time are read again from their heads (their kills return with the same
+  identities), and a refused file gives its gap again once per agent start.
 - `docs/areas/wire-format.md`: `kernel_event` identity, `trigger`, `backup_run`, the producer size contract list, *Versioning*.
 - `docs/areas/configuration-and-secrets.md`: `backups.processes`; `spool.directory` also holds the agent's state.
 
@@ -544,7 +598,7 @@ configuration *Options*; ARCHITECTURE *Components* and package list. `docs/areas
 
 ## Security review
 
-- Row 10: confirmed, now fact 10. The optional measurement (facility of a `<0>` write) is added to fact 20's scratch measurement.
+- Row 10: confirmed, now fact 10. The optional measurement (facility of a `<0>` write) was planned with fact 20's scratch measurement; with no journald in the session it is dropped (fact 10 settles the rule from the kernel source) and fact 20 moves to the server (#42).
 - B1 (private data in the fixture): accepted. Only the listed real `MESSAGE` kinds are kept (kill, `invoked oom-killer:`, `oom_reaper`
   lines of three kills; the `Linux version` line is dropped, it carries a build host); the compressed, facility-1 and facility-3 entries
   are hand-made; `TestFixture_HoldsNoRealPrivateValue` also checks units, comms, executables, command lines, user names, mail addresses
@@ -583,6 +637,18 @@ configuration *Options*; ARCHITECTURE *Components* and package list. `docs/areas
   compressed items without a name. The cap as first built dropped further items silently, so a second `SYSLOG_FACILITY` item beyond it
   could have let an entry pass the exactly-one-facility guard; amended to fail closed: `Entry.Omitted` counts them and the collector
   treats such an entry, and any kernel entry with a compressed item, as unreadable. Security confirms this in its diff review.
+- G5 questions of the Tester before the implementation (Lead decision): (1) the drift baseline takes only lines received within
+  600 s before the entry (*Time*), since a minimum over the last 64 lines of a quiet boot took the oldest one; (2) the position is
+  taken only from files with a head time and the online file, the reading state (position, drift window, files read to their end,
+  cursors of files without a head time) is committed as one unit, and the online file is always read (*Reading state*), so a file of
+  another seqnum ID can neither move the position back in time nor hide the online file; (3) the record-check hook is the package
+  variable `checkRecord`; (4) the Tester's assumptions on the drift window across runs, gap bounds from the neighbouring entries of
+  the `_TRANSPORT=kernel` list, the give-up gap, `run.Start` as the clock of the 15 s, the count of four dropped runs and the comm up
+  to `) total-vm:` are confirmed; several live kills of one run share one trigger (amended); (5) `Collect` never returns an error,
+  PIDs are `int32`, a duplicated token leaves its field absent, the gaps of a refused, torn, malformed or failing file and the
+  stored uptime are fixed (*Failures*, *Kill parser*, *Boots*), and a read error can no longer hold the position for ever; the
+  collector tells a torn tail through the new `Cursor.Torn`; (6) fact 20 is not measurable here and stays unverified, checked on the
+  server in #42, with the residual in record 0120. Security confirms (2), (5) and `Cursor.Torn` in its diff review.
 
 ## Out of scope / follow-ups
 

@@ -35,7 +35,10 @@ starts one twice; the agent had no state that outlives a restart. The Product Ma
    storage deduplicates by sequence number, not by kill identity. **The collector checks its own records and caps the re-reads**
    (chosen by the Product Manager): every record passes the scheduler's own check before it is returned, a failing one becomes a gap
    that is valid by construction, so `Run.PreviousLost` can only mean a dropped result, and a cap of three re-reads of the same position
-   ends any other loop with a gap; the scheduler contract stays as it is. **A scheduler signal telling a refused record from a dropped
+   ends any other loop with a gap; the scheduler contract stays as it is. What a run reached (the position, the drift window, the
+   files of other seqnum IDs already read) is committed as one unit, so a re-read repeats the run exactly; only files with a head
+   time and the online file set the position, so a file of another seqnum ID can neither move it back in time nor hide the online
+   file, and a file that keeps failing is given up with a gap after three runs instead of holding the position. **A scheduler signal telling a refused record from a dropped
    result** (a new `Run` field) — the same effect, but a change to the contract `processes` and `connections` also rely on.
 9. **Default backup rules `pzstd` only** (chosen by the Product Manager) — the one backup program seen in real data; **Plesk's
    documented tool names** — never captured, a wrong rule fails silently; **a capture first** — not available.
@@ -57,5 +60,8 @@ events*, *Boots*, *Backup runs*) and the [wire format](../areas/wire-format.md).
 - A span whose result is dropped more than three times in a row is given up with a gap; its kills are then lost although the journal
   may still hold them, for example during a sink error lasting more than four runs (later a full spool, #38) even when the sink
   recovers soon after.
+- Whether a kill is live is judged with `/proc/uptime`, which counts time in suspend, against the journal's monotonic clock, which
+  does not; they agree on a server that never suspends, which could not be measured before the first run on the server (#42 checks
+  it). After a suspend every kill reads as late and gets no snapshots: the error is towards fewer snapshots, never more.
 - The state file is the agent's first file write; the spool (#38) must leave it out of what it counts and deletes.
 - Without a usable state every start records a `boot` event of the current boot (same boot ID), and the journal is read from its end.

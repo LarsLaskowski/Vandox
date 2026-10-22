@@ -40,7 +40,8 @@ object; the kill lines are 159 to 171 bytes), and 221 entries of the kernel tran
 9. **Kill time as the boot time plus the kernel's stamp** — exact in principle, but the kernel's printk clock runs slow against the
    monotonic and real-time clocks (about 33 µs per second on the server, a minute after three weeks), so the time comes out early; the
    receipt time minus the delay, corrected by the drift seen on recent lines, is used, and liveness is judged on the journal's monotonic
-   clock.
+   clock. "Recent" is a span of receipt time, not a count of lines: the drift only grows, so on a quiet boot the smallest lag of the
+   last 64 lines is that of a line days old and overstates the delay (by 5.8 s for the 2 Oct `pzstd` kill).
 10. **Commit `systemd-journal-remote` output as the fixture** — easy to produce, but systemd 255 here writes only the `COMPACT`
    variant, which the server never writes, so it would test the wrong layout; an anonymized copy of a real 80 MiB file cannot be
    made either, because rewriting a field breaks its keyed hash.
