@@ -908,7 +908,11 @@ A file of steps 2 and 3 that was read to its end is not read again while the age
 limit cut it. The files of steps 1 and 4 move the position, and so does a file of step 2 whose first time is not before the time the
 position has reached when the file is read; the others are read without moving it. The position's time never moves back (the later
 of the two times is kept). A saved ID of which no file is left records a gap from the position's time to the next readable kernel
-entry (or to the run's start), once, and reading goes on there. A file that disappears between the listing and its read is skipped.
+entry (or to the run's start), once, and reading goes on there. When files of the position's ID are left but none holds the position
+and one starts after it (the files that held it were vacuumed), the entries between are gone: one gap from the position's time to
+the header's first time of the first such file (without a readable one, to the next readable kernel entry, else the run's start),
+once for that position, and reading goes on in that file; since sequence numbers are not dense, such a gap is recorded even when the
+vacuumed part held no kernel entry. A file that disappears between the listing and its read is skipped.
 
 **Limits of a run.** A run stops after one second of reading (checked between entries), after 256 kills, or when its deadline passes,
 and returns what it read; the next run continues there.
@@ -932,7 +936,7 @@ after its start ends 1 µs after it. Gaps are recorded for:
   to the next readable kernel entry (else the run's start); several in a row give one gap;
 - journald's entry about missed kernel messages on the `driver` transport (or with an item whose name is unknown): over the same
   span;
-- a saved ID without files, a given-up span, and a file the reader refuses, finds torn or cannot read (*Failures*);
+- a saved ID without files, a vacuumed position, a given-up span, and a file the reader refuses, finds torn or cannot read (*Failures*);
 - a record that would fail the scheduler's check (*Scheduling*): the collector runs the same check on every record before it returns
   them and puts a gap over that record's entry in its place (from the previous kernel entry, or the committed position, to the
   entry's time); a gap that would still fail becomes the gap of the last microsecond before the run's start. So a refused record never
@@ -959,11 +963,13 @@ after its start ends 1 µs after it. Gaps are recorded for:
 **Extra snapshots.** A kill is **live** when its entry's boot ID is the current boot's and the time since the journal
 received it, plus its delay, is at most 60 seconds on the monotonic clock (the first field of `/proc/uptime` minus the
 `__MONOTONIC_TIMESTAMP`, a negative age counting as 0); without a readable `/proc/uptime` or boot ID no kill is live. Kills read
-from a backlog or of another boot therefore get no snapshot. The live kills of a run whose identity is not among the last 64 live
-kills the collector has seen are queued; before the run returns, when no request was made at a run start less than 15 seconds before, the
+from a backlog or of another boot therefore get no snapshot. A run queues its live kills whose identity is not among the last 64
+kills it queued before; a run whose deadline has passed when it
+finishes queues and requests nothing, so a run the scheduler abandoned never requests snapshots late, and its kills are judged live
+again when the next run reads them again. Before a run returns, when no request was made at a run start less than 15 seconds before, the
 collector asks the scheduler for one extra run of `processes` and one of `connections` (*Scheduling*), naming the queued kills (oldest
-first, at most 64, the rest counted); otherwise they wait for the first run at least 15 seconds after the last request. A run that is
-read again does not request its kills a second time.
+first, at most 64, the rest counted); otherwise they wait for the first run at least 15 seconds after the last request. A run that
+reads again kills that an earlier run queued does not request them a second time.
 
 **Logging.** Through the collector's logger, one line per change: warning `kernel messages not readable` with `err` one of
 `journal: machine ID not readable`, `journal: no journal directory`, `journal: directory not readable` and `journal: <online|archived>:
@@ -987,8 +993,6 @@ records per run. Two tests assert it at journals of 1,000 and 100,000 kernel ent
 - After a restart the files of another ID without a readable header time are read again from their start (their kills return with
   the same identities), and a refused file gives its gap again once per agent start.
 - An archived or set-aside file of another ID whose header's first time lies before the committed position's time is not read.
-- When the file that held the saved position is gone but a later file of the same ID is left (archived files vacuumed while the
-  agent was stopped), reading goes on in the later file and the entries between are skipped without a gap.
 - journald's entry about missed kernel messages is built from the systemd 249 source; the real journals hold none.
 
 ## Boots
@@ -1042,7 +1046,7 @@ time, so it is never before the real end.
 time and the first-check flag as they were before that check, so the dropped start or end is decided again: the start is written
 again while a match runs, the end again with the gone-by time of the last kept check. The scheduler's gap covers the lost check.
 
-**Errors.** A boot ID or boot time that cannot be read, a `/proc` that cannot be listed or the run's deadline fail the run (a gap,
+**Errors.** A boot ID that cannot be read or is not a lower-case UUID (the rule of *Boots*), a boot time that cannot be read, a `/proc` that cannot be listed or the run's deadline fail the run (a gap,
 *Scheduling*); the error texts name the file and a fixed reason, never a command or command line.
 
 **Residuals (record 0120).**
