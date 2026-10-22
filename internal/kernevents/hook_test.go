@@ -1,5 +1,4 @@
-// These tests swap the package variable checkRecord (var checkRecord = wire.CheckRecord, added with the collector). The build tag keeps
-// them out of the build until the variable exists; the Dev removes the tag line when adding it. They must not run in parallel.
+// These tests swap the package variable checkRecord (var checkRecord = wire.CheckRecord). They must not run in parallel.
 
 package kernevents
 

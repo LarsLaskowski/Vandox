@@ -24,16 +24,16 @@ import (
 
 var (
 	bulkMu    sync.Mutex
-	bulkCache = map[[3]int][]byte{}
+	bulkCache = map[[4]int][]byte{}
 )
 
 // bulkJournal returns the bytes of one archived journal file of n kernel entries one millisecond apart; every killEvery-th entry is a
 // kill of PID i+1 with a process name of nameLen bytes (killEvery 0: no kill). The file is built once per size and shared.
-func bulkJournal(t testing.TB, n, killEvery, nameLen int) []byte {
+func bulkJournal(t testing.TB, n, killEvery, nameLen int, online bool) []byte {
 	t.Helper()
 	bulkMu.Lock()
 	defer bulkMu.Unlock()
-	key := [3]int{n, killEvery, nameLen}
+	key := [4]int{n, killEvery, nameLen, btoi(online)}
 	if b, ok := bulkCache[key]; ok {
 		return b
 	}
@@ -50,7 +50,7 @@ func bulkJournal(t testing.TB, n, killEvery, nameLen int) []byte {
 		entries = append(entries, kernelLine(seq, bootB, rt, mono, src, msg))
 	}
 	var buf bytes.Buffer
-	opts := journaltest.Options{FileID: mustID(t, "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1"), MachineID: mustID(t, machineID), SeqnumID: mustID(t, seqIDA)}
+	opts := journaltest.Options{FileID: mustID(t, "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1"), MachineID: mustID(t, machineID), SeqnumID: mustID(t, seqIDA), Online: online}
 	if err := journaltest.Write(&buf, entries, opts); err != nil {
 		t.Fatalf("journaltest.Write() error = %v, want nil", err)
 	}
@@ -62,7 +62,7 @@ func bulkJournal(t testing.TB, n, killEvery, nameLen int) []byte {
 func bulkEnv(t *testing.T, n, killEvery, nameLen int) *env {
 	t.Helper()
 	e := newEnv(t)
-	e.j.put(fileName(kindArchived, seqIDA, 2, r0()), bulkJournal(t, n, killEvery, nameLen))
+	e.j.put(fileName(kindArchived, seqIDA, 2, r0()), bulkJournal(t, n, killEvery, nameLen, false))
 	e.seed(dashed(bootB), before())
 	return e
 }
@@ -129,11 +129,20 @@ func TestKernel_TimeBudgetEachRunGetsFurther(t *testing.T) {
 }
 
 func TestKernel_PollWorkIndependentOfEarlierEntries(t *testing.T) {
+	pollWork(t, true) // the online file is the one that is polled; the reads of an archived file are the same
+}
+
+// pollWork checks that the reads of a poll do not grow with the entries before the position, for an archived or the online file.
+func pollWork(t *testing.T, online bool) {
 	const budget = 400
 	measure := func(n int) (first, idle, withNew int64) {
 		t.Helper()
 		e := newEnv(t)
-		e.j.put(fileName(kindArchived, seqIDA, 2, r0()), bulkJournal(t, n, 0, 0))
+		kind := kindArchived
+		if online {
+			kind = kindOnline
+		}
+		e.j.put(fileName(kind, seqIDA, 2, r0()), bulkJournal(t, n, 0, 0, online))
 		e.seed(dashed(bootB), position(seqIDA, uint64(2*n), r0()+uint64(n-1)*1000)) // #nosec G115 -- small test values
 		before := e.j.reads.Load()
 		e.run(false)

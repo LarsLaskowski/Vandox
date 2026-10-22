@@ -724,3 +724,14 @@ func (e *env) add(entries ...entry) string {
 	e.t.Helper()
 	return e.j.add(e.t, kindArchived, seqIDA, entries)
 }
+
+// dataOf returns the bytes of a journal file with the entries, without adding it.
+func (j *journalFS) dataOf(t testing.TB, kind fileKind, seqID string, entries []entry) []byte {
+	t.Helper()
+	name := j.add(t, kind, seqID, entries)
+	data := j.data(name)
+	j.mu.Lock()
+	delete(j.files, name)
+	j.mu.Unlock()
+	return data
+}
