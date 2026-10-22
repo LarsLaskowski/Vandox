@@ -479,6 +479,7 @@ func TestKernel_MissedKernelMessagesRecordGap(t *testing.T) {
 	t.Run("entries that only look like it give no gap", func(t *testing.T) {
 		e := newEnv(t)
 		var c seqCounter
+		first := c.line(bootB, 1)
 		forged := []entry{
 			missedLine(c.next(), bootB, rtAt(2), monoAt(2), withTransport("syslog")),
 			missedLine(c.next(), bootB, rtAt(3), monoAt(3), withTransport("journal")),
@@ -486,7 +487,7 @@ func TestKernel_MissedKernelMessagesRecordGap(t *testing.T) {
 			missedLine(c.next(), bootB, rtAt(5), monoAt(5), func(en entry) { en["MESSAGE_ID"] = []byte("e9bf28e6e834481bb6f48f548ad13607") }),
 			missedLine(c.next(), bootB, rtAt(6), monoAt(6), func(en entry) { delete(en, "MESSAGE_ID") }),
 		}
-		ents := []entry{c.line(bootB, 1)}
+		ents := []entry{first}
 		ents = append(ents, forged...)
 		ents = append(ents, c.line(bootB, 8), c.kill(bootB, 9, 77, "k", lagUS))
 		e.add(ents...)
@@ -592,6 +593,64 @@ func TestKernel_VacuumedPositionRecordsGap(t *testing.T) {
 	t.Run("position 0 and the remaining file starts at sequence number 50", vacuumedPositionZeroFileStartsAtFifty)
 	t.Run("position 0 and the first file starts at sequence number 1 gives no gap", vacuumedPositionZeroFileStartsAtOne)
 	t.Run("position n and the next file starts at n+1 gives no gap", vacuumedNextFileContinuesThePosition)
+	t.Run("a refused file met first in the run gives its gap and no vacuumed-position gap", vacuumedWithRefusedFileFirstMet)
+	t.Run("a refused file met in an earlier run does not suppress the vacuumed-position gap", vacuumedAfterRefusedFileMetEarlier)
+}
+
+func vacuumedWithRefusedFileFirstMet(t *testing.T) {
+	w := newVacuumWorld(t, 1, true)
+	garble(w.e, w.e.add(w.c.line(bootB, 4), w.c.line(bootB, 5)))
+	f2 := []entry{w.c.line(bootB, 6), w.c.kill(bootB, 7, 222, "online", lagUS)}
+	w.online(f2...)
+	start := w.e.start
+
+	first := w.e.run(false)
+
+	if got := pids(killsOf(first)); !slices.Equal(got, []int32{222}) {
+		t.Errorf("kills = %v, want [222]", got)
+	}
+	gaps := gapsOf(first)
+	if len(gaps) != 1 {
+		t.Fatalf("gaps = %d, want exactly the gap of the refused file (the vacuumed span is part of it)", len(gaps))
+	}
+	requireGap(t, gaps[0], micro(rtOf(w.f1[1])), start)
+	checkValid(t, first, start)
+	for i := 2; i <= 3; i++ {
+		if again := gapsOf(w.e.run(false)); len(again) != 0 {
+			t.Errorf("run %d: %d gaps, want none", i, len(again))
+		}
+	}
+}
+
+func vacuumedAfterRefusedFileMetEarlier(t *testing.T) {
+	e := newEnv(t)
+	c := &seqCounter{}
+	f1 := []entry{c.line(bootB, 0), c.line(bootB, 1), c.kill(bootB, 2, 111, "first", lagUS), c.line(bootB, 3)}
+	name := e.add(f1...)
+	garble(e, e.add(c.line(bootB, 4), c.line(bootB, 5)))
+	e.seed(dashed(bootB), position(seqIDA, seqOf(f1[0]), rtOf(f1[0])))
+	start := e.start
+
+	first := e.run(false)
+
+	if gaps := gapsOf(first); len(gaps) != 1 {
+		t.Fatalf("first run: gaps = %d, want 1 for the refused file", len(gaps))
+	}
+	e.j.remove(name)
+	f2 := []entry{c.line(bootB, 6), c.kill(bootB, 7, 222, "online", lagUS)}
+	e.j.add(t, kindOnline, seqIDA, f2)
+
+	second := e.run(false)
+
+	gaps := gapsOf(second)
+	if len(gaps) != 1 {
+		t.Fatalf("second run: gaps = %d, want 1 for the vacuumed span (the refused file was met earlier)", len(gaps))
+	}
+	requireGap(t, gaps[0], micro(rtOf(f1[3])), micro(rtOf(f2[0])))
+	checkValid(t, second, start)
+	if got := pids(killsOf(second)); !slices.Equal(got, []int32{222}) {
+		t.Errorf("kills = %v, want [222]", got)
+	}
 }
 
 func vacuumedPositionZeroFileStartsAtFifty(t *testing.T) {
