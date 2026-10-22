@@ -44,6 +44,9 @@ func metricLine(seq int) string { return envelope("metric", seq, tsJSON, okData)
 
 func kindLine(kind, data string) string { return envelope(kind, 1, tsJSON, data) }
 
+// kindLineSeq is kindLine with the given sequence number, for batches of several records.
+func kindLineSeq(kind string, seq int, data string) string { return envelope(kind, seq, tsJSON, data) }
+
 func gzipString(t *testing.T, s string) []byte {
 	t.Helper()
 	var buf bytes.Buffer
@@ -1109,8 +1112,8 @@ func TestDecoder_NullReadsAsAbsentKey(t *testing.T) {
 func TestDecoder_NullListElementReadsAsEmptyObject(t *testing.T) {
 	lines := goldenLines(t)
 	_, elements := goldenVariants(t, lines)
-	if len(elements) != 14 {
-		t.Fatalf("golden batch has %d lists of objects, want 14", len(elements))
+	if len(elements) != 18 {
+		t.Fatalf("golden batch has %d lists of objects, want 18", len(elements))
 	}
 	for _, v := range elements {
 		requireSameOutcome(t, v, lines, "{}", ptr("null"), ptr("{}"))
@@ -2354,7 +2357,7 @@ func TestDecoder_SnapshotsKeepTheirTrigger(t *testing.T) {
 	trigger := `{"kills":[` + killJSON(7, "5") + `,` + killJSON(8, "0") + `],"kills_omitted":3}`
 	recs := decodeRecords(t, 2,
 		kindLine("process_snapshot", triggerData(trigger)),
-		kindLine("connection_snapshot", `{"complete":true,"trigger":`+trigger+`}`))
+		kindLineSeq("connection_snapshot", 2, `{"complete":true,"trigger":`+trigger+`}`))
 	want := &model.SnapshotTrigger{
 		Kills:        []model.KillRef{{BootID: killBootID, KernelTime: 5, VictimPID: 7}, {BootID: killBootID, KernelTime: 0, VictimPID: 8}},
 		KillsOmitted: 3,
@@ -2367,7 +2370,7 @@ func TestDecoder_SnapshotsKeepTheirTrigger(t *testing.T) {
 }
 
 func TestDecoder_AcceptsTriggerOfSixtyFourKillsAndNullTrigger(t *testing.T) {
-	recs := decodeRecords(t, 2, kindLine("process_snapshot", triggerData(killsJSON(64))), kindLine("process_snapshot", triggerData("null")))
+	recs := decodeRecords(t, 2, kindLine("process_snapshot", triggerData(killsJSON(64))), kindLineSeq("process_snapshot", 2, triggerData("null")))
 	if got := len(recs[0].Data.(*model.ProcessSnapshot).Trigger.Kills); got != 64 {
 		t.Errorf("trigger kills = %d, want 64", got)
 	}
@@ -2377,7 +2380,7 @@ func TestDecoder_AcceptsTriggerOfSixtyFourKillsAndNullTrigger(t *testing.T) {
 }
 
 func TestDecoder_AcceptsBackupRunStartAndEnd(t *testing.T) {
-	recs := decodeRecords(t, 2, kindLine("backup_run", `{`+backupStartRaw+`}`), kindLine("backup_run", `{`+backupEndRaw+`}`))
+	recs := decodeRecords(t, 2, kindLine("backup_run", `{`+backupStartRaw+`}`), kindLineSeq("backup_run", 2, `{`+backupEndRaw+`}`))
 	startedAt := time.Date(2026, 3, 1, 11, 0, 0, 0, time.UTC)
 	wantStart := &model.BackupRun{Phase: model.BackupPhaseStart, BootID: killBootID, StartedAt: startedAt, PID: 5150, Command: "pzstd", Processes: 3}
 	wantEnd := &model.BackupRun{
