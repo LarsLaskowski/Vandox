@@ -55,6 +55,7 @@ events*, *Boots*, *Backup runs*) and the [wire format](../areas/wire-format.md).
 - An extra snapshot is a sample like any other (predecessor, `Run.PreviousLost`, gaps); without pressure mode it costs at most one more
   snapshot per collector per 15 seconds.
 - A span whose result is dropped more than three times in a row is given up with a gap; its kills are then lost although the journal
-  may still hold them.
+  may still hold them, for example during a sink error lasting more than four runs (later a full spool, #38) even when the sink
+  recovers soon after.
 - The state file is the agent's first file write; the spool (#38) must leave it out of what it counts and deletes.
 - Without a usable state every start records a `boot` event of the current boot (same boot ID), and the journal is read from its end.
