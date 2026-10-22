@@ -154,7 +154,20 @@ func (e *env) reopen(sec int) {
 // run collects at sec seconds after t0, checks every record and returns the backup run payloads.
 func (e *env) run(sec int) []*model.BackupRun {
 	e.t.Helper()
-	records, err := e.b.Collect(context.Background(), scheduler.Run{Start: at(sec)})
+	return e.runWith(scheduler.Run{Start: at(sec)})
+}
+
+// runLost collects at sec seconds after t0 as the run after one whose result was dropped (Run.PreviousLost).
+func (e *env) runLost(sec int) []*model.BackupRun {
+	e.t.Helper()
+	return e.runWith(scheduler.Run{Start: at(sec), PreviousLost: true})
+}
+
+// runWith collects for run, checks every record and returns the backup run payloads.
+func (e *env) runWith(run scheduler.Run) []*model.BackupRun {
+	e.t.Helper()
+	sec := int(run.Start.Sub(t0) / time.Second)
+	records, err := e.b.Collect(context.Background(), run)
 	if err != nil {
 		e.t.Fatalf("Collect(run at +%d s) error = %v, want nil", sec, err)
 	}

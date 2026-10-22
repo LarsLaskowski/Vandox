@@ -389,7 +389,6 @@ func TestBackups_LogsHoldNoProcessText(t *testing.T) {
 	e.reopen(10)
 	e.quiet(20)
 
-	e.w.remove(100)
 	e.restart()
 	e.quiet(30)
 	e.w.reboot(bootB, at(100))
@@ -410,4 +409,59 @@ func TestBackups_LogsHoldNoProcessText(t *testing.T) {
 	if e.logs.Len() != 0 {
 		t.Errorf("log of runs that only start and end backup runs = %q, want no line (no line per backup run)", e.logs.String())
 	}
+}
+
+func TestBackups_LostRunIsDecidedAgain(t *testing.T) {
+	t.Run("dropped start is written again while the process runs", func(t *testing.T) {
+		e := newEnv(t, pzstdRule)
+		e.w.addPzstd(100, at(-5))
+		want := startWant{boot: bootA, started: at(-5), pid: 100, command: "pzstd", processes: 1}
+		requireOneStart(t, e.run(0), want)
+
+		requireOneStart(t, e.runLost(10), want)
+
+		e.quiet(20)
+		requireOpenRun(t, e.store, agentstate.OpenRun{BootID: bootA, StartedAt: at(-5), LastSeen: at(20), MaxProcesses: 1})
+	})
+
+	t.Run("dropped start gives nothing once the process has ended", func(t *testing.T) {
+		e := newEnv(t, pzstdRule)
+		e.w.addPzstd(100, at(-5))
+		requireOneStart(t, e.run(0), startWant{boot: bootA, started: at(-5), pid: 100, command: "pzstd", processes: 1})
+		e.w.remove(100)
+
+		if got := e.runLost(10); len(got) != 0 {
+			t.Errorf("lost run after a dropped start returned %s, want no record (no open run, no match)", describe(got))
+		}
+		requireNoOpenRun(t, e.store)
+		e.quiet(20)
+	})
+
+	t.Run("dropped end is written again with the gone_by of the last kept check", func(t *testing.T) {
+		e := newEnv(t, pzstdRule)
+		e.w.addPzstd(100, at(-5))
+		requireOneStart(t, e.run(0), startWant{boot: bootA, started: at(-5), pid: 100, command: "pzstd", processes: 1})
+		e.quiet(10)
+		e.w.remove(100)
+		e.quietRuns(20, 30)
+		want := endWant{boot: bootA, started: at(-5), lastSeen: at(10), goneBy: at(20), max: 1}
+		requireOneEnd(t, e.run(100), want)
+
+		requireOneEnd(t, e.runLost(110), want)
+
+		requireNoOpenRun(t, e.store)
+		e.quiet(120)
+	})
+
+	t.Run("dropped first check after a restart is repeated", func(t *testing.T) {
+		e := openRunEnv(t)
+		e.w.remove(100)
+		e.restart()
+		requireOneEnd(t, e.run(300), endWant{boot: bootA, started: at(-20), lastSeen: at(10), goneBy: at(300), max: 1})
+
+		requireOneEnd(t, e.runLost(310), endWant{boot: bootA, started: at(-20), lastSeen: at(10), goneBy: at(310), max: 1})
+
+		requireNoOpenRun(t, e.store)
+		e.quiet(320)
+	})
 }
