@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"net/netip"
 	"net/url"
 	"path/filepath"
@@ -25,6 +26,7 @@ type Agent struct {
 	Log        Log           `yaml:"log"`
 	Filesystem Filesystem    `yaml:"filesystem"`
 	Processes  Processes     `yaml:"processes"`
+	Backups    Backups       `yaml:"backups"`
 	Services   Services      `yaml:"services"`
 	MariaDB    MariaDB       `yaml:"mariadb"`
 	Secrets    AgentSecrets  `yaml:"-"`
@@ -61,6 +63,22 @@ type ProgramRule struct {
 	Command        string `yaml:"command"`
 	CmdlinePrefix  string `yaml:"cmdline_prefix"`
 	AppendNextWord bool   `yaml:"append_next_word"`
+}
+
+// Backups configures the backup run collector.
+type Backups struct {
+	Processes []BackupRule `yaml:"processes"`
+}
+
+// BackupRule names the processes of a backup by command or command line prefix.
+type BackupRule struct {
+	Command       string `yaml:"command"`
+	CmdlinePrefix string `yaml:"cmdline_prefix"`
+}
+
+// checkBackupRules checks the list of backups.processes.
+func checkBackupRules(file string, lines map[string]int, rules []BackupRule) error {
+	return errors.New("not implemented")
 }
 
 // Services configures the systemd service collector.
