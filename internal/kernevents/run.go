@@ -42,6 +42,9 @@ type pass struct {
 	uptime   time.Duration
 	uptimeOK bool
 	uptimeAt bool
+
+	// refusedGap says that this run recorded the first-meeting gap of a refused file, which covers a vacuumed position.
+	refusedGap bool
 }
 
 // emit adds a record; from is the start of the gap that replaces the record if the record check refuses it.
@@ -226,7 +229,7 @@ func (r *pass) readSameID(dir fs.FS, files []fileInfo, id [16]byte) bool {
 
 // detectVacuumed records the entries lost when files of the position's seqnum ID remain but none holds the position and one starts
 // after it: one gap from the position's time to the head time of the first such file, once per position; a first such file that starts right after the position (head sequence number position+1) lost nothing, so
-// no gap. Without a readable head time the next readable kernel entry, else the end of the run, closes the gap. same is sorted
+// no gap, and a run that recorded the first-meeting gap of a refused file records none and only sets the marker. Without a readable head time the next readable kernel entry, else the end of the run, closes the gap. same is sorted
 // by head sequence number.
 func (r *pass) detectVacuumed(same []fileInfo) {
 	pos := r.cur.pos
@@ -247,6 +250,9 @@ func (r *pass) detectVacuumed(same []fileInfo) {
 		return
 	}
 	r.cur.vacuumed = pos
+	if r.refusedGap {
+		return
+	}
 	if head := next.hdr.HeadRealtime; head.After(pos.rt) {
 		r.emitGap(pos.rt, head)
 		return

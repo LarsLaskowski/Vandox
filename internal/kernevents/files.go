@@ -185,6 +185,7 @@ func (r *pass) refuse(f fileInfo) {
 			from = r.start
 		}
 		r.emit(newGap(from, r.start, r.start), r.start)
+		r.refusedGap = true
 	case f.online && r.start.Sub(last) >= refusedGapEvery:
 		r.emit(newGap(last, r.start, r.start), r.start)
 	default:
