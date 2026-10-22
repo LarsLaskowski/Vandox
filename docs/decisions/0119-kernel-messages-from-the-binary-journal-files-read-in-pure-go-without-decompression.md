@@ -30,7 +30,8 @@ object; the kill lines are 159 to 171 bytes), and 221 entries of the kernel tran
 5. **Follow rsyslog's `/var/log/kern.log`** — plain text, but rsyslog may not be installed, the line carries no proof of kernel
    origin and the times have whole seconds.
 6. **Decompress fields with a zstd library** (with option 1) — would read every field, but adds a dependency and a decompression
-   surface for nothing the agent needs: journald compresses only fields of at least 512 bytes, and no kill line comes near it.
+   surface for nothing the agent needs: journald compresses only fields whose whole `NAME=value` payload is at least 512 bytes (systemd v249
+   `DEFAULT_COMPRESS_THRESHOLD`), and no kill line comes near it.
 7. **Find the kernel entries by a full scan of each file's objects** (instead of the hash lookup) — no hash function to get right,
    but 80 MiB read per file and per start.
 8. **Skip set-aside files (`*.journal~`)** — simpler, but journald sets a file aside after every unclean close (a crash, a hard reset,
@@ -47,7 +48,8 @@ object; the kill lines are 159 to 171 bytes), and 221 entries of the kernel tran
 ## Decision
 
 The agent reads the system journal files itself, set-aside files included (options 1 and 8), and times a kill by its receipt corrected for the kernel clock's drift (option 9). It counts only entries of the kernel transport with exactly one facility `0`,
-decompresses nothing (a needed field that is compressed makes the entry unreadable, recorded as a gap), and supports only the
+decompresses nothing (a compressed item, whose name cannot be known without decompressing it, makes a kernel entry unreadable,
+recorded as a gap; so do items beyond the per-entry cap of kept fields), and supports only the
 keyed-hash, non-compact layout the server writes; any other layout fails closed, also as a gap. The committed fixtures are generated
 in that layout from an anonymized export by a test-only writer whose output `journalctl --verify` and `journalctl -o export` must
 accept. The rules are in the [Agent](../areas/agent.md) area (*Kernel events*).

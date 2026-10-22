@@ -25,9 +25,9 @@ The feature is specified in [spec.md](spec.md) (S1 to S13, E1 to E17, AC1 to AC2
 | 10 | The kernel never gives facility 0 to a write to `/dev/kmsg` | Security read `devkmsg_write` in `kernel/printk/printk.c` v5.15 (facility forced to 1; same in v6.8) | confirmed |
 | 11 | The 5.15 kill line format ends in `UID:<n> pgtables:<n>kB oom_score_adj:<n>` | the 8 real kill lines | confirmed |
 | 12 | The cgroup and allocating-task reasons use the same format | to verify: Tester reads `__oom_kill_process` and callers in `mm/oom_kill.c`, `mm/memcontrol.c` v5.15 (step 5) | unverified |
-| 13 | The keyed hash is SipHash-2-4 of the payload keyed with the file ID | to verify: Dev, step 6, `TestFile_RealServerJournals` finds `_TRANSPORT=kernel` through the hash table of both real files | unverified |
-| 14 | journald's "Missed N kernel messages" entry has `MESSAGE_ID=e9bf28e6e834481bb6f48f548ad13606` on the driver transport | to verify: Dev reads `journald-kmsg.c` and `sd-messages.h` at systemd v249 (step 6); not in the real files | unverified |
-| 15 | journald compresses only fields from 512 bytes on | to verify: Dev reads `COMPRESSION_SIZE_THRESHOLD_DEFAULT` at systemd v249 (step 6) | unverified |
+| 13 | The keyed hash is SipHash-2-4 of the payload keyed with the file ID | Dev, step 6 (G4): `TestFile_RealServerJournals` finds `_TRANSPORT=kernel` through `File.Lookup` in both real files (1,456 and 2,107 kernel entries, 8 kills) | confirmed |
+| 14 | journald's "Missed N kernel messages" entry has `MESSAGE_ID=e9bf28e6e834481bb6f48f548ad13606` on the driver transport | Dev, step 6 (G4), systemd v249 `journald-kmsg.c` and `sd-messages.h`: `SD_MESSAGE_JOURNAL_MISSED` emitted through `server_driver_message` with `_TRANSPORT=driver`, `SYSLOG_FACILITY=3`, `SYSLOG_IDENTIFIER=systemd-journald`, `PRIORITY=6`; not in the real files | confirmed |
+| 15 | journald compresses only fields whose whole `NAME=value` payload is at least 512 bytes, and not every such payload is compressed | Dev, step 6 (G4), systemd v249 `DEFAULT_COMPRESS_THRESHOLD` 512 applied to the whole payload | confirmed |
 | 16 | No reboot on 2 Oct 2026; `pzstd` and `mariadbd` were killed; next reboot 21 Oct 16:28:27 UTC | `journalctl --file=... --list-boots` and the kill entries; the issue's account is refuted (spec *Problem*) | refuted |
 | 17 | `journalctl` 255 here verifies and exports the non-compact layout | rows 6 and 9 read with it; `--verify` passes the prototype `scratchpad/fixture/oom.journal` | confirmed |
 | 18 | The server's journal files are readable by `systemd-journal` | to verify: #42 checks `ls -ln /var/log/journal/<machine-id>` on the server | unverified |
@@ -52,7 +52,7 @@ AC1 to AC20 of [spec.md](spec.md).
 | AC4 | `TestParseKill_IgnoresOtherLines`; `TestKernel_OnlyKernelTransportWithFacilityZero` | `internal/kernevents/kill_test.go`; `internal/kernevents/kernevents_test.go` |
 | AC5 | `TestParseKill_HostileNames`, `TestParseKill_MissingFields`, `TestParseKill_AllKillForms` | `internal/kernevents/kill_test.go` |
 | AC6 | `TestKernel_ResumesAtSavedPositionAcrossBoots`, `TestKernel_ReadsSetAsideFilesAfterUncleanShutdown`, `TestKernel_JournaldRestartStartsNewSeqnumID`, `TestKernel_LostRunRereadsEntries`, `TestKernel_LateOrOtherBootKillsGetNoSnapshot`, `TestKernel_ReversedTimeGapStillMovesPosition` (a span whose missed-messages entry lies between two kernel entries of the same µs and one whose clock steps back: each gap ends 1 µs after its start, every returned record passes `wire.CheckRecord`, the next run's `PreviousLost` is false and the position moves past the span, the span is not returned again), `TestKernel_RefusedRecordBecomesGap` (a record forced to fail the check through an unexported hook: left out, a gap in its place, the position moves on), `TestKernel_RereadCappedAtThree` (four dropped runs in a row: three re-reads, then one gap over the span and reading after it; a dropped run that read nothing does not count; a dropped give-up run gives up the same span again without its kills) | `internal/kernevents/kernevents_test.go` |
-| AC7 | `TestKernel_LostPositionRecordsGapAndContinues`, `TestKernel_UndecodableEntryRecordsGap`, `TestKernel_MonotonicStampOutOfRangeIsUnreadable` (`_SOURCE_MONOTONIC_TIMESTAMP` empty, 21 digits, `18446744073709551616`, `9223372036854776` µs, with a sign, a space or a line feed; `__MONOTONIC_TIMESTAMP` above `math.MaxInt64 / 1000`: each a gap, no event, never a negative `kernel_time_ns`; the boundary `9223372036854775` µs in both fields is accepted and gives an event), `TestKernel_RealtimeOutOfRangeIsUnreadable` (`__REALTIME_TIMESTAMP` 0, `253402300800000000` and `1<<62` on a kill entry and on the entries a missed-messages gap and a give-up span would take their bounds from: each such entry unreadable, a gap from readable times only, every returned record passes `wire.CheckRecord`, the next run's `PreviousLost` is false and the position moves on; `253402300799999999` accepted; and, through the unexported hook, a gap still refused becomes `[run.Start − 1 µs, run.Start)`), `TestKernel_HangingJournalLosesOnlyItsSample`, `TestKernel_PollWorkIndependentOfEarlierEntries`, `TestKernel_TimeBudgetEachRunGetsFurther`; `TestFile_RefusesUnsupportedLayout`, `TestFile_BoundsEveryOffset`, `TestFile_TornTailIsEndOfFile` | `internal/kernevents/kernevents_test.go`; `internal/journal/journal_test.go` |
+| AC7 | `TestKernel_LostPositionRecordsGapAndContinues`, `TestKernel_UndecodableEntryRecordsGap`, `TestKernel_MonotonicStampOutOfRangeIsUnreadable` (`_SOURCE_MONOTONIC_TIMESTAMP` empty, 21 digits, `18446744073709551616`, `9223372036854776` µs, with a sign, a space or a line feed; `__MONOTONIC_TIMESTAMP` above `math.MaxInt64 / 1000`: each a gap, no event, never a negative `kernel_time_ns`; the boundary `9223372036854775` µs in both fields is accepted and gives an event), `TestKernel_RealtimeOutOfRangeIsUnreadable` (`__REALTIME_TIMESTAMP` 0, `253402300800000000` and `1<<62` on a kill entry and on the entries a missed-messages gap and a give-up span would take their bounds from: each such entry unreadable, a gap from readable times only, every returned record passes `wire.CheckRecord`, the next run's `PreviousLost` is false and the position moves on; `253402300799999999` accepted; and, through the unexported hook, a gap still refused becomes `[run.Start − 1 µs, run.Start)`), `TestKernel_HangingJournalLosesOnlyItsSample`, `TestKernel_PollWorkIndependentOfEarlierEntries`, `TestKernel_TimeBudgetEachRunGetsFurther`; `TestFile_RefusesUnsupportedLayout`, `TestFile_BoundsEveryOffset`, `TestFile_TornTailIsEndOfFile`, `TestFile_FieldsBeyondCapAreCounted` (an entry with 17 `SYSLOG_FACILITY` items: 16 in `Fields`, `Omitted` 1; one with 17 compressed items likewise); in G5 `TestKernel_UndecodableEntryRecordsGap` also covers a kernel entry with a compressed item and one with `Omitted` above 0 (each a gap, no event), and `TestKernel_ReadsSetAsideFilesAfterUncleanShutdown` a file of another seqnum ID without a header head time (read after the others, its kill returned) | `internal/kernevents/kernevents_test.go`; `internal/journal/journal_test.go` |
 | AC8 | `TestKernel_UnreadableJournalLogsOnceAndResumes` | `internal/kernevents/kernevents_test.go` |
 | AC9 | `TestBoot_NewBootRecordsPreviousBootAndUptime` | `internal/kernevents/boot_test.go` |
 | AC10 | `TestBoot_SameBootRecordsNothing`, `TestBoot_FirstStartWithoutPrevious`, `TestBoot_WithoutStateEveryStart`; `TestOpen_StatusAndWarnings` | `internal/kernevents/boot_test.go`; `internal/agentstate/agentstate_test.go` |
@@ -92,6 +92,16 @@ items are read in full: the one at the offset of `SYSLOG_FACILITY=0`, items name
 `_SOURCE_MONOTONIC_TIMESTAMP`, `_TRANSPORT`; of every other item only the first 64 bytes of its payload, to see its name. Compressed items
 are never decompressed. Seqnum differences are never used for counts or gaps (fact 23).
 
+*Reader contract (G4, Lead decision after the Dev's report).* `Entry` holds the stamps as stored (`RealtimeUS`, `MonotonicUS`) next to
+the converted ones: `Realtime` is the zero time when the stamp is 0 or at least 253402300800000000, `Monotonic` is zero above
+`math.MaxInt64 / 1000` µs; the collector decides from the raw fields (*Timestamps*). A failure of the underlying reader other than
+EOF is `ErrRead` (`errors.Is` also finds the reader's error). At most 16 fields are kept per entry (wanted names and compressed items);
+every further wanted or compressed item is counted in `Entry.Omitted`, never dropped silently. A compressed item is
+`Field{Compressed: true}` with an empty name and value. `Seek` and `Next` re-read the list's entry count from its data object, so a
+cursor follows a growing online file. A torn tail: in an archived or set-aside file `Next` ends the list (`false, nil`), and `Seek` and
+`Lookup` do not fail on it; in an online file `Next` returns `ErrMalformed` and leaves the cursor where it was, so the read is repeated
+after `Refresh`. A header head or tail time outside the range of *Timestamps* is the zero time in `Header`.
+
 **Kernel collector** (`internal/kernevents`, name `kernel`). First run: the boot check (below). Each run: commit the position kept in
 memory by the previous run when `run.PreviousLost` is false, else drop it and read again from the committed position (same identities;
 kills already triggered are remembered by identity, the last 64, and not triggered again). Because the collector returns only records
@@ -106,7 +116,11 @@ files of its seqnum ID in head-seqnum order, then the files of other seqnum IDs 
 head-time order, from their heads. A saved seqnum ID without any file gives a gap from the position's time to the first entry after it,
 and reading goes on there; no saved position starts at the newest file's tail. A run stops after 1 s of reading (half the timeout,
 checked between entries) or 256 kills, whichever first, and returns what it read. An entry counts only with `_TRANSPORT=kernel` and
-exactly one `SYSLOG_FACILITY` item whose value is exactly `0`; its `MESSAGE` goes to `parseKill`. Abandoned runs never touch the store:
+exactly one `SYSLOG_FACILITY` item whose value is exactly `0`; its `MESSAGE` goes to `parseKill`. A kernel entry with a compressed
+item (its name is unknown, it could be `MESSAGE` or a second `SYSLOG_FACILITY`) or with `Entry.Omitted` above 0 is unreadable (a gap
+as for an undecodable entry), never a kill. A file of another seqnum ID whose header head time is absent is read after the files with
+a head time, in file-name order, from its head (Security N9). `ErrRead` is logged as the fixed reason `read failed`,
+`ErrUnsupported` as `unsupported layout`, `ErrMalformed` as `malformed file`. Abandoned runs never touch the store:
 only the start of the next run commits.
 
 *Record check.* Before returning, `checkRecords` copies each record as the scheduler's `stamp` does (`Origin` agent, `Seq`
@@ -304,6 +318,7 @@ func ReadBootTime(proc fs.FS) (time.Time, error)
 var (
 	ErrUnsupported = errors.New("journal: unsupported layout")
 	ErrMalformed   = errors.New("journal: malformed file")
+	ErrRead        = errors.New("journal: read failed") // a non-EOF reader failure; Unwrap gives the reader's error
 )
 type Header struct {
 	FileID, MachineID, SeqnumID [16]byte
@@ -320,17 +335,20 @@ func (f *File) Lookup(payload []byte) (Data, bool, error)
 type Cursor struct{ /* array offset, index, seqnum */ }
 func (f *File) Seek(d Data, after uint64) (Cursor, error)
 func (f *File) Next(c *Cursor, want []string, e *Entry) (bool, error)
-type Entry struct {
-	Seqnum    uint64
-	Realtime  time.Time
-	Monotonic time.Duration
-	BootID    [16]byte
-	Items     int
-	Fields    []Field // only the names in want, values read up to 4,096 bytes into reused buffers
+type Entry struct { // not comparable with ==
+	Seqnum      uint64
+	Realtime    time.Time     // zero when RealtimeUS is 0 or ≥ 253402300800000000
+	Monotonic   time.Duration // zero when MonotonicUS > math.MaxInt64 / 1000
+	BootID      [16]byte
+	Items       int
+	Fields      []Field // only the names in want and compressed items, at most 16, values up to 4,096 bytes in reused buffers
+	Omitted     int     // wanted or compressed items beyond the 16 kept
+	RealtimeUS  uint64  // the stamp as stored
+	MonotonicUS uint64  // the stamp as stored
 }
 type Field struct {
-	Name       string
-	Value      []byte
+	Name       string // empty for a compressed item
+	Value      []byte // empty for a compressed item
 	Compressed bool
 }
 func (e *Entry) Field(name string) ([]Field, bool)
@@ -557,11 +575,15 @@ configuration *Options*; ARCHITECTURE *Components* and package list. `docs/areas
   trade-off of the re-read cap in the Agent area, *Areas*; record 0120, *Consequences*).
 - N5: accepted (*Memory bound*: about 13 KiB per kill record, about 3.3 MiB for 256). N6: accepted (exact-match exceptions `sshd`,
   `apport`, `kernel`, `systemd-journald` in `TestFixture_HoldsNoRealPrivateValue`).
+- N9 (a file whose header head time is absent could be skipped silently), Security delta round: accepted, option "read it after the
+  others, from its head" (Lead decision in G4): the reader reports a zero `HeadRealtime`, the collector reads such a file of another
+  seqnum ID after the files with a head time, in file-name order (*Kernel collector*); pinned in
+  `TestKernel_ReadsSetAsideFilesAfterUncleanShutdown`. A gap instead would lose kills the file holds.
+- G4 deviations (Lead decision): the reader contract (*Reader contract*) adds raw stamps, `ErrRead`, a cap of 16 kept fields and
+  compressed items without a name. The cap as first built dropped further items silently, so a second `SYSLOG_FACILITY` item beyond it
+  could have let an entry pass the exactly-one-facility guard; amended to fail closed: `Entry.Omitted` counts them and the collector
+  treats such an entry, and any kernel entry with a compressed item, as unreadable. Security confirms this in its diff review.
 
 ## Out of scope / follow-ups
 
 As the spec's *Out of scope*. Follow-up issue: "[Agent] Read journal files of the COMPACT layout" (systemd 252 and later; record 0119).
-
-## Security notes
-
-- N9 (non-blocking, Security delta round): The plan does not say how a file whose header head time is now "absent" is ordered. Among the files of other seqnum IDs, which go "in head-time order, from their heads", such a file could be skipped silently. Its kills would then be lost without a gap. Have the Dev read such a file after the others, from its head, or record a gap for it. A test case in `TestFile_TornTailIsEndOfFile` or `TestKernel_ReadsSetAsideFilesAfterUncleanShutdown` would pin it.
