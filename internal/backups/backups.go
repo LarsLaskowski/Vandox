@@ -42,6 +42,14 @@ type Backups struct {
 	reader  *procstats.CommandReader
 	checked bool      // whether the stored run was compared with the processes yet
 	goneBy  time.Time // the first check that saw no matching process since the last match, zero while one is seen
+	before  *memory   // what the previous run started with, restored when its result was lost
+}
+
+// memory is the state of the collector before a run: the stored open run, goneBy and the first-check flag.
+type memory struct {
+	open    *agentstate.OpenRun
+	goneBy  time.Time
+	checked bool
 }
 
 // New returns the collector that reads the processes below proc, matches them against rules and keeps the open
@@ -66,6 +74,7 @@ func (b *Backups) Collect(ctx context.Context, run scheduler.Run) ([]model.Recor
 	if len(b.rules) == 0 {
 		return nil, nil
 	}
+	b.remember(run.PreviousLost)
 	bootID, err := b.readBootID()
 	if err != nil {
 		return nil, err
@@ -80,6 +89,40 @@ func (b *Backups) Collect(ctx context.Context, run scheduler.Run) ([]model.Recor
 	}
 
 	return b.advance(run.Start.UTC(), bootID, found), nil
+}
+
+// remember takes the copy of the state this run starts with; when the previous run's result was lost, it first
+// restores the copy that run took, so the lost check is decided again.
+func (b *Backups) remember(previousLost bool) {
+	if previousLost && b.before != nil {
+		b.goneBy, b.checked = b.before.goneBy, b.before.checked
+		if stored := b.store.State().Backup; !sameRun(stored, b.before.open) {
+			restored := copyRun(b.before.open)
+			b.store.Update(true, func(st *agentstate.State) {
+				st.Backup = restored
+			})
+		}
+	}
+	b.before = &memory{open: copyRun(b.store.State().Backup), goneBy: b.goneBy, checked: b.checked}
+}
+
+// copyRun returns a copy of run, or nil.
+func copyRun(run *agentstate.OpenRun) *agentstate.OpenRun {
+	if run == nil {
+		return nil
+	}
+	c := *run
+
+	return &c
+}
+
+// sameRun reports whether a and b are the same open run, or both none.
+func sameRun(a, b *agentstate.OpenRun) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+
+	return a.BootID == b.BootID && a.StartedAt.Equal(b.StartedAt) && a.LastSeen.Equal(b.LastSeen) && a.MaxProcesses == b.MaxProcesses
 }
 
 // readBootID returns the boot ID of the monitored server.
