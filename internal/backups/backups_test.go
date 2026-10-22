@@ -10,6 +10,7 @@ import (
 	"github.com/LarsLaskowski/Vandox/internal/agentstate"
 	"github.com/LarsLaskowski/Vandox/internal/model"
 	"github.com/LarsLaskowski/Vandox/internal/procstats"
+	"github.com/LarsLaskowski/Vandox/internal/scheduler"
 	"github.com/LarsLaskowski/Vandox/internal/wire"
 )
 
@@ -464,4 +465,34 @@ func TestBackups_LostRunIsDecidedAgain(t *testing.T) {
 		requireNoOpenRun(t, e.store)
 		e.quiet(320)
 	})
+}
+
+func TestBackups_MalformedBootIDFailsTheRun(t *testing.T) {
+	const want = "backups: procstats: boot_id: not a lower-case UUID"
+	malformed := map[string]string{
+		"upper case":  strings.ToUpper(bootA) + "\n",
+		"not a UUID":  "not-a-uuid\n",
+		"37 bytes":    bootA + "c\n",
+		"empty":       "",
+		"two newline": bootA + "\n\n",
+	}
+	for name, content := range malformed {
+		t.Run(name, func(t *testing.T) {
+			e := newEnv(t, pzstdRule)
+			e.w.addPzstd(810, at(-5))
+			e.w.fs["sys/kernel/random/boot_id"] = &fstest.MapFile{Data: []byte(content)}
+
+			records, err := e.b.Collect(t.Context(), scheduler.Run{Start: at(0)})
+
+			if err == nil || err.Error() != want {
+				t.Errorf("Collect() error = %v, want %q", err, want)
+			}
+			if len(records) != 0 {
+				t.Errorf("Collect() = %d records, want none", len(records))
+			}
+			if open := e.store.State().Backup; open != nil {
+				t.Errorf("state Backup = %+v, want nil: no open run may carry a malformed boot ID", *open)
+			}
+		})
+	}
 }

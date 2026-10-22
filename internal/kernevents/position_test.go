@@ -548,3 +548,163 @@ func TestKernel_UndecodableEntryRecordsGap(t *testing.T) {
 	requireGap(t, gaps[1], micro(rtOf(l3)), micro(rtOf(l5)))
 	checkValid(t, recs, t0)
 }
+
+// remove deletes a journal file, as a vacuum of journald does.
+func (j *journalFS) remove(name string) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	delete(j.files, name)
+}
+
+// vacuumWorld is a journal whose archived file of the seqnum ID A holds the saved position; the file may be removed.
+type vacuumWorld struct {
+	e  *env
+	c  *seqCounter
+	f1 []entry
+}
+
+// newVacuumWorld returns an environment with the archived file [line 0, line 1, kill 111, line 3] (seconds of the timeline) and
+// the saved position at its entry posIdx; removed deletes the file again.
+func newVacuumWorld(t *testing.T, posIdx int, removed bool) *vacuumWorld {
+	t.Helper()
+	w := &vacuumWorld{e: newEnv(t), c: &seqCounter{}}
+	w.f1 = []entry{w.c.line(bootB, 0), w.c.line(bootB, 1), w.c.kill(bootB, 2, 111, "vacuumed", lagUS), w.c.line(bootB, 3)}
+	name := w.e.add(w.f1...)
+	if removed {
+		w.e.j.remove(name)
+	}
+	w.e.seed(dashed(bootB), position(seqIDA, seqOf(w.f1[posIdx]), rtOf(w.f1[posIdx])))
+	return w
+}
+
+// online adds the online file of the seqnum ID A.
+func (w *vacuumWorld) online(entries ...entry) {
+	w.e.j.add(w.e.t, kindOnline, seqIDA, entries)
+}
+
+func TestKernel_VacuumedPositionRecordsGap(t *testing.T) {
+	t.Run("position in a removed file, a later file of the same ID remains", vacuumedLaterFileRemains)
+	t.Run("the file with the position is present and fully read", vacuumedPositionFileFullyRead)
+	t.Run("later file without a head time ends the gap at the next readable kernel entry", vacuumedNoHeadTimeNextEntry)
+	t.Run("later file without a head time and without a kernel entry ends the gap at the run start", vacuumedNoHeadTimeRunStart)
+	t.Run("later file without a kernel entry gives the gap once", vacuumedLaterFileWithoutKernelEntry)
+	t.Run("a dropped run after the gap reads the same single gap again", vacuumedGapReadAgainAfterDroppedRun)
+}
+
+func vacuumedLaterFileRemains(t *testing.T) {
+	w := newVacuumWorld(t, 1, true)
+	f2 := []entry{w.c.line(bootB, 4), w.c.kill(bootB, 5, 222, "online", lagUS)}
+	w.online(f2...)
+
+	first := w.e.run(false)
+
+	if got := pids(killsOf(first)); !slices.Equal(got, []int32{222}) {
+		t.Errorf("kills = %v, want [222] (the kill of the removed file is lost, the online file is read from its head)", got)
+	}
+	gaps := gapsOf(first)
+	if len(gaps) != 1 {
+		t.Fatalf("gaps = %d, want 1 from the position's time to the head time of the online file", len(gaps))
+	}
+	requireGap(t, gaps[0], micro(rtOf(w.f1[1])), micro(rtOf(f2[0])))
+	checkValid(t, first, t0)
+	for i := 2; i <= 3; i++ {
+		if again := gapsOf(w.e.run(false)); len(again) != 0 {
+			t.Errorf("run %d: %d gaps, want none (the vacuumed span is recorded once)", i, len(again))
+		}
+	}
+	requirePosition(t, w.e, seqIDA, seqOf(f2[1]), rtOf(f2[1]))
+}
+
+func vacuumedPositionFileFullyRead(t *testing.T) {
+	w := newVacuumWorld(t, 3, false)
+	w.online(w.c.line(bootB, 4), w.c.kill(bootB, 5, 222, "online", lagUS))
+
+	recs := w.e.run(false)
+
+	if got := pids(killsOf(recs)); !slices.Equal(got, []int32{222}) {
+		t.Errorf("kills = %v, want [222]", got)
+	}
+	if g := gapsOf(recs); len(g) != 0 {
+		t.Errorf("gaps = %d, want none (the file with the position is still there, nothing between is gone)", len(g))
+	}
+}
+
+func vacuumedNoHeadTimeNextEntry(t *testing.T) {
+	w := newVacuumWorld(t, 1, true)
+	next := w.c.line(bootB, 4)
+	w.online(noHeadEntry(w.c.next(), bootB), next, w.c.kill(bootB, 5, 222, "online", lagUS))
+
+	recs := w.e.run(false)
+
+	if got := pids(killsOf(recs)); !slices.Equal(got, []int32{222}) {
+		t.Errorf("kills = %v, want [222]", got)
+	}
+	gaps := gapsOf(recs)
+	if len(gaps) != 1 {
+		t.Fatalf("gaps = %d, want 1 ending at the next readable kernel entry", len(gaps))
+	}
+	requireGap(t, gaps[0], micro(rtOf(w.f1[1])), micro(rtOf(next)))
+	checkValid(t, recs, t0)
+}
+
+func vacuumedNoHeadTimeRunStart(t *testing.T) {
+	w := newVacuumWorld(t, 1, true)
+	w.online(noHeadEntry(w.c.next(), bootB))
+
+	recs := w.e.run(false)
+
+	gaps := gapsOf(recs)
+	if len(gaps) != 1 {
+		t.Fatalf("gaps = %d, want 1 ending at the start of the run", len(gaps))
+	}
+	requireGap(t, gaps[0], micro(rtOf(w.f1[1])), t0)
+	checkValid(t, recs, t0)
+	if again := gapsOf(w.e.run(false)); len(again) != 0 {
+		t.Errorf("second run: %d gaps, want none", len(again))
+	}
+}
+
+func vacuumedLaterFileWithoutKernelEntry(t *testing.T) {
+	w := newVacuumWorld(t, 1, true)
+	head := missedLine(w.c.next(), bootB, rtAt(4), monoAt(4))
+	head["MESSAGE_ID"] = []byte("00000000000000000000000000000000") // a driver entry that is no missed-messages entry
+	w.online(head)
+
+	first := w.e.run(false)
+
+	gaps := gapsOf(first)
+	if len(gaps) != 1 {
+		t.Fatalf("gaps = %d, want 1 to the head time of the file", len(gaps))
+	}
+	requireGap(t, gaps[0], micro(rtOf(w.f1[1])), micro(rtOf(head)))
+	for i := 2; i <= 4; i++ {
+		if again := gapsOf(w.e.run(false)); len(again) != 0 {
+			t.Errorf("run %d: %d gaps, want none (the gap is recorded once although the position did not move)", i, len(again))
+		}
+	}
+}
+
+func vacuumedGapReadAgainAfterDroppedRun(t *testing.T) {
+	w := newVacuumWorld(t, 1, true)
+	f2 := []entry{w.c.line(bootB, 4), w.c.kill(bootB, 5, 222, "online", lagUS)}
+	w.online(f2...)
+
+	first := w.e.run(false)
+	again := w.e.run(true) // the result of the first run was dropped
+	next := w.e.run(false)
+
+	for name, recs := range map[string][]model.Record{"first run": first, "run after the dropped one": again} {
+		gaps := gapsOf(recs)
+		if len(gaps) != 1 {
+			t.Errorf("%s: gaps = %d, want 1", name, len(gaps))
+			continue
+		}
+		requireGap(t, gaps[0], micro(rtOf(w.f1[1])), micro(rtOf(f2[0])))
+		if got := pids(killsOf(recs)); !slices.Equal(got, []int32{222}) {
+			t.Errorf("%s: kills = %v, want [222]", name, got)
+		}
+	}
+	if g := gapsOf(next); len(g) != 0 || len(killsOf(next)) != 0 {
+		t.Errorf("run after a kept result: %d gaps and %d kills, want none", len(g), len(killsOf(next)))
+	}
+}

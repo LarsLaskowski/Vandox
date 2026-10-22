@@ -1,12 +1,16 @@
 package kernevents
 
 import (
+	"context"
+	"io/fs"
+	"log/slog"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/LarsLaskowski/Vandox/internal/model"
+	"github.com/LarsLaskowski/Vandox/internal/scheduler"
 )
 
 // liveEnv returns an environment in boot bootB whose first run (the first start, which reads from the end of the journal) has
@@ -569,4 +573,112 @@ func fixtureKillAt(t *testing.T, uptime float64, live bool) {
 	} else if len(calls) != 0 {
 		t.Errorf("trigger calls = %+v, want none", calls)
 	}
+}
+
+// uptimeHook is a /proc whose uptime file, when opened, runs a function: it models the moment during a run at which the run's
+// context ends (the deadline of the job passes while the run reads).
+type uptimeHook struct {
+	fs.FS
+	onUptime func()
+}
+
+// Open implements fs.FS.
+func (h *uptimeHook) Open(name string) (fs.File, error) {
+	if name == "uptime" && h.onUptime != nil {
+		h.onUptime()
+	}
+	return h.FS.Open(name)
+}
+
+// droppedRunEnv returns an environment with the saved position before a live kill of PID 4711 (read at the second 4 of the timeline),
+// a collector over a /proc that ends the context of the run in progress when the uptime is read, and the identity of the kill.
+func droppedRunEnv(t *testing.T) (*env, *uptimeHook, model.KillRef) {
+	t.Helper()
+	e := newEnv(t)
+	var c seqCounter
+	e.add(c.line(bootB, 3), c.kill(bootB, 4, 4711, "pzstd", lagUS))
+	e.seed(dashed(bootB), position(seqIDA, 0, r0()-1_000_000))
+	hook := &uptimeHook{FS: e.proc}
+	e.k = New(Sources{Journal: []fs.FS{e.j}, Etc: e.etc, Proc: hook}, e.store, slog.New(e.logs))
+	e.k.SetTrigger(e.trig.fn)
+	e.uptimeNow(0)
+	return e, hook, killIdentity(bootB, killSrc(4, lagUS), 4711)
+}
+
+// runEnding makes a run whose context ends while it reads the live kill, as the deadline of a job does; the scheduler drops its result.
+func (e *env) runEnding(hook *uptimeHook) int {
+	e.t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	hook.onUptime = cancel
+	_, _ = e.k.Collect(ctx, scheduler.Run{Start: e.start})
+	hook.onUptime = nil
+	e.start = e.start.Add(2 * time.Second)
+	e.runs++
+	if n := e.trig.count(); n != 0 {
+		e.t.Errorf("the run whose context ended made %d trigger calls, want none", n)
+	}
+	return e.trig.count()
+}
+
+func TestKernel_DroppedRunSendsNoLateTrigger(t *testing.T) {
+	t.Run("a run whose context ended sends nothing", func(t *testing.T) {
+		e, hook, _ := droppedRunEnv(t)
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		hook.onUptime = cancel
+		_, _ = e.k.Collect(ctx, scheduler.Run{Start: e.start})
+
+		if ctx.Err() == nil {
+			t.Fatalf("test set-up: the context did not end during the run, the live kill was not read")
+		}
+		if calls := e.trig.since(0); len(calls) != 0 {
+			t.Errorf("trigger calls = %+v, want none (a run whose context ended queues and sends nothing)", calls)
+		}
+	})
+
+	t.Run("the next run reads the kill again and sends one pair", func(t *testing.T) {
+		e, hook, ref := droppedRunEnv(t)
+		dropped := e.runEnding(hook)
+		e.uptimeNow(0)
+
+		recs := e.run(true)
+
+		if got := pids(killsOf(recs)); !slices.Equal(got, []int32{4711}) {
+			t.Fatalf("kills of the run after the dropped one = %v, want [4711]", got)
+		}
+		requireTriggerPair(t, e.trig.since(dropped), []model.KillRef{ref}, 0)
+	})
+
+	t.Run("a kill that is older than 60 s by then sends nothing", func(t *testing.T) {
+		e, hook, _ := droppedRunEnv(t)
+		dropped := e.runEnding(hook)
+		e.uptimeNow(120)
+
+		recs := e.run(true)
+
+		if got := pids(killsOf(recs)); !slices.Equal(got, []int32{4711}) {
+			t.Fatalf("kills of the run after the dropped one = %v, want [4711]", got)
+		}
+		if calls := e.trig.since(dropped); len(calls) != 0 {
+			t.Errorf("trigger calls = %+v, want none (the kill is no longer live)", calls)
+		}
+	})
+
+	t.Run("a trigger of a kept run is not sent twice after a sink drop", func(t *testing.T) {
+		e, _, ref := droppedRunEnv(t)
+		e.run(false) // a kept run that queues and sends the pair
+		requireTriggerPair(t, e.trig.since(0), []model.KillRef{ref}, 0)
+		e.uptimeNow(0)
+
+		again := e.run(true) // the sink dropped the records of that run
+
+		if got := pids(killsOf(again)); !slices.Equal(got, []int32{4711}) {
+			t.Errorf("kills of the run after the dropped one = %v, want [4711] (the records are read again)", got)
+		}
+		if n := e.trig.count(); n != 2 {
+			t.Errorf("trigger calls = %d, want 2 (the pair of the first run only: a kill that was sent is not sent again)", n)
+		}
+	})
 }

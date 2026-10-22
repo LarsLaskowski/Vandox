@@ -1584,6 +1584,19 @@
         "error": "Malformed",
         "line": 2
       }
+    },
+    {
+      "name": "S41 oom_kill boot_id too long",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"kernel_event\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"type\":\"oom_kill\",\"oom_kill\":{\"victim_pid\":4242,\"victim_command\":\"mysqld\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789abc\",\"kernel_time_ns\":5}}}"
+      ],
+      "want": {
+        "error": "Invalid",
+        "line": 2,
+        "field": "data.oom_kill.boot_id",
+        "reason": "too long"
+      }
     }
   ]
 }

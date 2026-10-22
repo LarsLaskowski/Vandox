@@ -299,6 +299,7 @@ public class PayloadValidationTests
     [DataRow("""{"type":"oom_kill","oom_kill":{"victim_pid":42,"victim_command":"mysqld","boot_id":"nope","kernel_time_ns":5}}""", "oom_kill.boot_id", "invalid characters")]
     [DataRow("""{"type":"oom_kill","oom_kill":{"victim_pid":42,"victim_command":"mysqld","boot_id":"0123ABCD-0123-0123-0123-0123456789AB","kernel_time_ns":5}}""", "oom_kill.boot_id", "invalid characters")]
     [DataRow("""{"type":"oom_kill","oom_kill":{"victim_pid":42,"victim_command":"mysqld","boot_id":"0123abcd-0123-0123-0123-0123456789a\n","kernel_time_ns":5}}""", "oom_kill.boot_id", "invalid characters")]
+    [DataRow("""{"type":"oom_kill","oom_kill":{"victim_pid":42,"victim_command":"mysqld","boot_id":"0123abcd-0123-0123-0123-0123456789abc","kernel_time_ns":5}}""", "oom_kill.boot_id", "too long")]
     [DataRow("""{"type":"oom_kill","oom_kill":{"victim_pid":42,"victim_command":"mysqld","boot_id":"0123abcd-0123-0123-0123-0123456789ab","kernel_time_ns":-1}}""", "oom_kill.kernel_time_ns", "must not be negative")]
     public void PayloadValidationOomKillIdentity(string json, string field, string reason)
     {

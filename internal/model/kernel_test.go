@@ -140,7 +140,9 @@ func TestKernelEvent_Validate_KillIdentity(t *testing.T) {
 	}{
 		{"boot_id malformed", oomKillEventFromJSON(t, "not-a-uuid", "5"), "oom_kill.boot_id", "invalid characters"},
 		{"boot_id upper case", oomKillEventFromJSON(t, strings.ToUpper(bootIDA), "5"), "oom_kill.boot_id", "invalid characters"},
-		{"boot_id with trailing newline", oomKillEventFromJSON(t, bootIDA+"\n", "5"), "oom_kill.boot_id", "invalid characters"},
+		{"boot_id with trailing newline", oomKillEventFromJSON(t, bootIDA[:35]+"\n", "5"), "oom_kill.boot_id", "invalid characters"},
+		{"boot_id 37 bytes", oomKillEventFromJSON(t, bootIDA+"c", "5"), "oom_kill.boot_id", "too long"},
+		{"boot_id 37 bytes with trailing newline", oomKillEventFromJSON(t, bootIDA+"\n", "5"), "oom_kill.boot_id", "too long"},
 		{"kernel_time_ns negative", oomKillEventFromJSON(t, bootIDA, "-1"), "oom_kill.kernel_time_ns", "must not be negative"},
 	}
 	for _, tc := range invalid {

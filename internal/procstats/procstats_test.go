@@ -1846,3 +1846,53 @@ func TestProcesses_RunAfterTriggeredRunHasNoTriggerAndTopLists(t *testing.T) {
 		t.Errorf("run after a triggered one listed %d processes, Complete %v, want the top lists only and not complete", len(next.Processes), next.Complete)
 	}
 }
+
+const (
+	bootIDPath  = "sys/kernel/random/boot_id"
+	bootIDValue = "0b6f9b0c-2d1e-4c43-9a4e-7f1b2c3d4e5f"
+)
+
+func TestReadBootID(t *testing.T) {
+	accepted := map[string]string{
+		"one line feed": bootIDValue + "\n",
+		"no line feed":  bootIDValue,
+	}
+	for name, content := range accepted {
+		t.Run("accepted/"+name, func(t *testing.T) {
+			proc := fstest.MapFS{bootIDPath: &fstest.MapFile{Data: []byte(content)}}
+			got, err := ReadBootID(proc)
+			if err != nil || got != bootIDValue {
+				t.Errorf("ReadBootID(%q) = %q, %v, want %q, nil", content, got, err, bootIDValue)
+			}
+		})
+	}
+
+	const notUUID = "procstats: boot_id: not a lower-case UUID"
+	refused := map[string]string{
+		"upper case":         strings.ToUpper(bootIDValue) + "\n",
+		"two line feeds":     bootIDValue + "\n\n",
+		"35 characters":      bootIDValue[:35],
+		"37 characters":      bootIDValue + "c",
+		"empty file":         "",
+		"longer than 64":     bootIDValue + "\n" + strings.Repeat("x", 40),
+		"line feed only":     "\n",
+		"line feed in front": "\n" + bootIDValue,
+	}
+	for name, content := range refused {
+		t.Run("refused/"+name, func(t *testing.T) {
+			proc := fstest.MapFS{bootIDPath: &fstest.MapFile{Data: []byte(content)}}
+			got, err := ReadBootID(proc)
+			if err == nil || err.Error() != notUUID || got != "" {
+				t.Errorf("ReadBootID(%q) = %q, %v, want \"\", %q", content, got, err, notUUID)
+			}
+		})
+	}
+
+	t.Run("refused/missing file", func(t *testing.T) {
+		got, err := ReadBootID(fstest.MapFS{})
+		want := "procstats: boot_id: open " + bootIDPath + ": file does not exist"
+		if err == nil || err.Error() != want || got != "" {
+			t.Errorf("ReadBootID(empty tree) = %q, %v, want \"\", %q", got, err, want)
+		}
+	})
+}
