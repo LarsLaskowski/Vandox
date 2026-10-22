@@ -64,13 +64,14 @@ the value.
 | --- | ------- | ----------- |
 | `agent_id` | required | Name of the server, 1 to 64 characters of `[A-Za-z0-9._-]`, starting with a letter or digit. |
 | `backend.url` | required | Base URL of the backend ingest endpoint: `http` or `https`, a host and an optional port, no user info, path or query. |
-| `spool.directory` | `/var/lib/vandox/spool` | Directory of the local spool, an absolute and clean path. |
+| `spool.directory` | `/var/lib/vandox/spool` | Directory of the local spool, an absolute and clean path. It also holds the agent's state file `agent-state.json` (the boot, the position in the journal and the open backup run); the agent never creates the directory, the installation does. |
 | `log.level` | `info` | `debug`, `info`, `warn` or `error`. |
 | `filesystem.mount_points` | `[/]` | Mount points whose size and inode use is recorded: a list of at most 16 absolute, clean paths of at most 1024 bytes each, every path listed once. A path that is not mounted is logged and left out; `[]` turns the file system metrics off. |
 | `processes.programs` | `[]` | Rules that name the program of a process, tried in order, at most 64, each a mapping with `program` (1 to 128 characters of `[A-Za-z0-9._:/@+-]`, starting with a letter or digit) and exactly one of `command` (the process command) and `cmdline_prefix` (a literal start of the command line), both 1 to 256 bytes; `append_next_word: true` (only with `cmdline_prefix`) appends the next word as `<program>/<word>`. Without a rule the program is the first word of the command, as in the legacy log. |
 | `services.units` | `[sw-cp-server, sw-engine, psa, nginx, apache2, postfix, dovecot, mariadb, plesk-php*-fpm, php*-fpm, fail2ban]` | Services whose state the `systemd` collector records, as unit names or patterns with `*` and `?`; an entry without a unit type suffix means `<entry>.service`. At most 64 entries of 1 to 255 bytes of `[A-Za-z0-9:_.@*?-]`, not starting with `.` or `-`; only service units, instances (not templates), each listed once. A unit that is not installed is logged once at start-up and recorded with `load_state` `not-found`; `[]` turns the collector off. |
 | `mariadb.enabled` | `true` | Whether the `mariadb` collector runs: it asks the local MariaDB server over its Unix socket for status, variables and, under load, the process list (statement texts can hold customer data and credentials; see `deploy/agent/README.md`). `false` turns it off completely. |
 | `mariadb.socket` | `/run/mysqld/mysqld.sock` | Path of the MariaDB Unix socket: an absolute, clean path of at most 107 bytes. The agent logs in as `vandox-agent`, created by `deploy/agent/mariadb-user.sql`. |
+| `backups.processes` | `[{command: pzstd}]` | Rules that name the processes of a backup, tried in order, at most 64, each a mapping with exactly one of `command` (the process command) and `cmdline_prefix` (a literal start of the command line), as in `processes.programs`. The `backups` collector records the start and the end of a run while a matching process exists; `[]` turns the collector off. |
 
 **Backend options**
 

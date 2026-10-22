@@ -99,5 +99,21 @@ confined as soon as it grants any (`NoNewPrivileges=yes`, a system-call filter t
 
 ## Groups
 
-The groups `adm` (log files) and `systemd-journal` (journal) are for the log collectors that follow; the process collector needs
-neither, and neither do the connection, systemd and MariaDB collectors.
+The group `systemd-journal` is used by the `kernel` collector: it reads the binary journal files below `/var/log/journal` and `/run/log/journal`
+itself (pure Go, no `journalctl`, no decompression) for the kernel messages that report an out-of-memory kill. The group `adm` (log files) is
+for the log collectors that follow; the process and `backups` collectors need neither, and neither do the connection, systemd and MariaDB
+collectors.
+
+## Kernel events, backups and the state file
+
+- **The unit keeps the journal readable**: no `InaccessiblePaths=` or `TemporaryFileSystem=` over `/var/log/journal` or `/run/log/journal`, and
+  it starts after `systemd-journal-flush.service`, so the persistent journal is in place when the `kernel` collector first reads it. A server
+  without a persistent journal is read from `/run/log/journal`; if neither can be read, the collector records a gap and logs
+  `kernel messages not readable` once.
+- **The state file** `agent-state.json` lives in `spool.directory` and holds the boot, the position in the journal and the open backup run, so
+  a restart neither repeats nor loses a kill, and a backup that ended while the agent was down is closed. The agent writes this one file
+  (mode 0600) and **never creates the directory**: the installation creates `spool.directory` and makes it writable for `vandox-agent`
+  (for example `install -d -o vandox-agent -g vandox-agent -m 0700 /var/lib/vandox/spool`). When the file cannot be read or written the agent
+  logs `agent state not available` or `agent state not saved` once and runs on without it.
+- **The `backups` collector** reads `/proc` like the process collector and needs no further right; its rules are `backups.processes` in
+  `agent.yaml`.
