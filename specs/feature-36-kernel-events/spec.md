@@ -5,13 +5,16 @@ Status: Draft
 
 ## Problem
 
-The operator of the monitored server (Ubuntu 22.04, Plesk 18, 2 GB RAM) has to explain outages after the fact. On 2 Oct 2026 the
-server rebooted at 06:51, Plesk at once started the backup it had missed during the night, and the kernel's OOM killer killed MariaDB
-at 06:59. Today the agent records metrics, process, connection, service and MariaDB snapshots on a fixed grid (#30 to #35), but it
+The operator of the monitored server (Ubuntu 22.04, Plesk 18, 2 GB RAM) has to explain outages after the fact. The issue describes 2 Oct 2026 as a
+reboot at 06:51, then Plesk's missed backup, then an OOM kill of MariaDB at 06:59 (server time, UTC+2). The server's real journal
+(Q3) shows that chain differently: there was no reboot that day (one boot ran from 30 Sep to 21 Oct); at 04:51:36 UTC the OOM killer
+killed `pzstd`, so a backup was already running, and at 04:59:32 UTC it killed `mariadbd`. The next reboot came on 21 Oct at 16:28:27
+UTC. In the days before, the same boot holds six more kills of `mariadbd`, `amavisd` and `pzstd`. Today the agent records metrics, process, connection, service and MariaDB snapshots on a fixed grid (#30 to #35), but it
 records no kernel event at all: an OOM kill is only visible later, if at all, as a log line the backend imports, the process snapshot
 nearest to the kill can be up to a minute (15 seconds under memory pressure) away from it, a reboot is visible only as a jump in
 the data, and a backup run only as a `pzstd` process that happens to be in a snapshot. Such a chain — reboot, backup, kill — cannot be
-read from the agent's data as one sequence of events with their own times.
+read from the agent's data as one sequence of events with their own times; that the issue's own account of 2 Oct does not match the
+journal shows how much a reconstruction from memory and scattered log lines is worth.
 
 What exists to build on (checked in the code): the record kind `kernel_event` with the types `oom_kill` (`victim_pid`,
 `victim_command`, `anon_rss_bytes`, `oom_score_adj`) and `boot` (`boot_id`, `previous_boot_id`, `booted_at`,
@@ -66,9 +69,12 @@ and no field that ties a snapshot to an event.
   check, then the agent records the run's end with the last time it saw a matching process before the stop (at most one minute
   before the stop) and "gone by" the time of that first check; a backup that starts in the new boot (Plesk's missed backup) is a new
   run with its own start.
-- S13: Given the chain of 2 Oct (reboot, Plesk's missed backup, OOM kill of MariaDB), then the agent's records hold, each with its
-  own time, the `boot` event, the backup run's start, the `oom_kill` event with the two snapshots that name it, and the backup run's
-  end, so the backend can show them as one sequence (showing them is not part of this feature).
+- S13: Given the chain of 2 Oct as the server's journal holds it (a backup with `pzstd` running, the kill of `pzstd` at 04:51:36 UTC,
+  the kill of `mariadbd` at 04:59:32 UTC, no reboot), then the agent's records hold, each with its own time, the backup run's start,
+  the `oom_kill` event of `pzstd` with the two snapshots that name it, the backup run's end once no `pzstd` has been seen for 60
+  seconds, and the `oom_kill` event of `mariadbd` with its own two snapshots; and given the reboot of 21 Oct 16:28:27 UTC (boot
+  `f96458fd...` after `4ffeb4e7...`), the agent's first start in the new boot records its `boot` event (S4). The backend can then
+  show them as one sequence (showing them is not part of this feature).
 
 ## Errors and edge cases
 
@@ -250,9 +256,23 @@ and no field that ties a snapshot to an event.
 - Q3: How does the agent follow the kernel messages "in the journal"? Answered: it reads the system journal the issue names, as a
   member of `systemd-journal`, without starting `journalctl` (record 0019, Agent area *Collecting*), without cgo (the release build
   sets `CGO_ENABLED=0`) and without a new right such as `CAP_SYSLOG` for `/dev/kmsg` (record 0030, security area 6). So the agent
-  reads the binary journal files itself. The repository holds no real journal file (`testdata/logs/kern.log-oom` is rsyslog text,
-  `testdata/systemd/` a D-Bus capture), and the issue attaches none: the sample the reader is built from is escalated to the
-  Product Manager (Challenge, M1); once it exists, this answer names its path under `testdata/`.
+  reads the binary journal files itself. The real sample (answer of the Product Manager to M1): two journal files copied from the
+  server, `system.journal` (online, 2026-10-21 02:50 to 2026-10-22 17:04 UTC, boot `f96458fd...` with the last entries of boot
+  `4ffeb4e7...`) and the archived `system@7b7188d0...-0000000000000001-00065cb6ddc61ac1.journal` (2026-09-30 17:45 to 2026-10-02
+  08:19 UTC, boot `4ffeb4e7...`), 80 MiB each. They are **not anonymized and are never committed** or copied into the working tree.
+  Checked with `journalctl --file ... --header` and the entries: written by systemd `249.11-0ubuntu3.23` on kernel
+  `5.15.0-191-generic` (Ubuntu 22.04, as the spec assumes); header of 256 bytes, the layout of systemd 246 to 251; incompatible
+  flags `COMPRESSED-ZSTD` and `KEYED-HASH`, **not** `COMPACT`; data hash table of 233,016 buckets; the OOM kill entries carry
+  `_TRANSPORT=kernel`, `SYSLOG_FACILITY=0` and `_SOURCE_MONOTONIC_TIMESTAMP`, with the kill line of S1 (`total-vm`, `anon-rss`,
+  `file-rss`, `shmem-rss`, `UID`, `pgtables`, `oom_score_adj`), and victim names as the kernel cuts them (`/usr/sbin/amavi`).
+  Neither file holds journald's entry about missed kernel messages (E6), so that entry is built from the systemd 249 source, a
+  residual the decision record states. The committed fixture is derived from these files: small, anonymized (every private field —
+  host name, machine ID, boot IDs, addresses, user names, command lines — replaced whole and checked field by field after decoding),
+  and in the server's real variant (zstd, keyed hash, not compact, the 256-byte header), with at least one OOM kill, a compressed
+  field, an online and an archived file. How it is produced (a tool that rewrites selected entries of a real file, or
+  `systemd-journal-remote`, whose systemd 255 here writes only the `COMPACT` variant and so serves at most as a second variant),
+  its path under `testdata/`, and how developers run local checks against the real files outside the repository are the plan's
+  decisions (Lead, mode `plan`).
 - Q4: Can a local user forge an OOM event? Answered: not through an entry of the journal's kernel transport with the kernel facility
   (0): only the kernel's own messages carry both, a write to `/dev/kmsg` (root only) gets another facility, and every other way in is
   excluded (E1); the facility rule is checked against the kernel source in the plan. This differs from the backend's log signatures,
@@ -289,12 +309,12 @@ and no field that ties a snapshot to an event.
 
 ## Challenge
 
-- M1 (major, journal reader without a real sample): accepted. Q3 settles that the agent decodes the binary journal files itself,
-  and no real journal file exists in `testdata/` or on the issue, so the requirement is ambiguous under `.squad/routing.md`
-  (*Escalation to the Product Manager*). Escalated now, not passed on to the plan: the Product Manager is asked for a copied journal
-  file of the Ubuntu 22.04 / systemd 249 server, or for the confirmation to build from the format documentation with the residual
-  risk recorded in the decision record. Q3 says so and will name the sample's path once it exists; E1, E5 and E7 stay requirements
-  on behavior and are checked against the sample in the plan.
+- M1 (major, journal reader without a real sample): accepted and escalated. The Product Manager supplied two real journal files of
+  the server (option a, not anonymized, never committed); Q3 records what they show (systemd 249.11, zstd, keyed hash, not compact,
+  kernel entries with facility 0 and the kernel's own time stamp) and what the plan decides about the committed, anonymized fixture.
+  The files also refuted the issue's account of 2 Oct (no reboot that day; `pzstd` and then `mariadbd` were killed): *Problem* and
+  S13 now follow the journal, and the reboot scenarios rest on the real boot change of 21 Oct. E1, E5 and E7 stay requirements on
+  behavior and are checked against the sample in the plan.
 - m1 (additional snapshots double the rate under pressure): accepted. Under memory pressure mode the additional run takes the place
   of the collector's next regular run, without a gap, and the grid continues from it; without pressure mode it comes on top, at most
   one per 15 seconds. S2, *Memory and load* and AC2 say so.
