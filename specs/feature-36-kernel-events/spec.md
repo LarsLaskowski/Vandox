@@ -1,7 +1,7 @@
 # Spec: Kernel events, reboots and backup runs
 
 Source: Issue #36
-Status: Draft
+Status: Approved by Product Manager
 
 ## Problem
 
