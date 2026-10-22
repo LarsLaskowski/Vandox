@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -928,5 +929,71 @@ func TestStoreConcurrentUpdateAndCollect(t *testing.T) {
 	wg.Wait()
 	if _, st := Open(dir, slog.New(slog.DiscardHandler)); st != StatusLoaded {
 		t.Errorf("status = %v, want StatusLoaded after concurrent saves", st)
+	}
+}
+
+// setUptime sets the first field of proc/uptime to seconds.
+func setUptime(proc fstest.MapFS, seconds int) {
+	proc["uptime"] = &fstest.MapFile{Data: []byte(fmt.Sprintf("%d.00 4000.00\n", seconds))}
+}
+
+// savedBoot reopens the state in dir and returns its boot.
+func savedBoot(t *testing.T, dir string) *Boot {
+	t.Helper()
+	s, st := Open(dir, slog.New(slog.DiscardHandler))
+	if st != StatusLoaded {
+		t.Fatalf("status = %v, want StatusLoaded", st)
+	}
+	return s.State().Boot
+}
+
+func TestSaverUrgentSaveRefreshesTheUptime(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := Open(dir, slog.New(slog.DiscardHandler))
+	proc := procFS("1000.00")
+	sv := NewSaver(s, proc)
+	update(t, s, true, fullState(1))
+	collect(t, sv, t0)
+	for _, d := range []int{10, 20, 30} {
+		setUptime(proc, 1000+d)
+		collect(t, sv, t0.Add(time.Duration(d)*time.Second))
+	}
+	setUptime(proc, 1040)
+	update(t, s, true, func(st *State) { st.Backup.MaxProcesses = 9 })
+	collect(t, sv, t0.Add(40*time.Second))
+	got := savedBoot(t, dir)
+	if got == nil || got.Uptime != 1040*time.Second {
+		t.Errorf("Boot = %+v after an urgent save at 40 s, want the uptime of that moment, 1040s", got)
+	}
+}
+
+func TestSaverUrgentStormKeepsTheUptimeWithinAMinute(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := Open(dir, slog.New(slog.DiscardHandler))
+	proc := procFS("1000.00")
+	sv := NewSaver(s, proc)
+	update(t, s, true, fullState(0))
+	collect(t, sv, t0)
+	for d := uint64(30); d <= 600; d += 30 {
+		setUptime(proc, int(1000+d))
+		update(t, s, true, func(st *State) { st.Journal.Seqnum = d })
+		collect(t, sv, t0.Add(time.Duration(d)*time.Second))
+		got := savedBoot(t, dir)
+		want := time.Duration(1000+d) * time.Second
+		if got == nil || got.Uptime != want {
+			t.Fatalf("Boot = %+v after the urgent save at %d s, want uptime %v", got, d, want)
+		}
+	}
+}
+
+func TestSaverWithoutBootWritesNoUptime(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := Open(dir, slog.New(slog.DiscardHandler))
+	update(t, s, true, func(st *State) {
+		st.Journal = &JournalPosition{SeqnumID: seqnumID, Seqnum: 1, Realtime: t0}
+	})
+	collect(t, NewSaver(s, procFS("1000.00")), t0)
+	if got := savedBoot(t, dir); got != nil {
+		t.Errorf("Boot = %+v, want none when no boot is set", got)
 	}
 }
