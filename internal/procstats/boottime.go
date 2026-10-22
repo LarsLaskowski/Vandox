@@ -108,3 +108,9 @@ func bootTimeOf(value string) (time.Time, error) {
 func ReadBootTime(proc fs.FS) (time.Time, error) {
 	return readBootTime(proc)
 }
+
+// ReadBootID returns the boot id of the running kernel from sys/kernel/random/boot_id of proc: a lower-case UUID with
+// at most one line feed, read up to 64 bytes.
+func ReadBootID(proc fs.FS) (string, error) {
+	return "", errors.New("not implemented")
+}
