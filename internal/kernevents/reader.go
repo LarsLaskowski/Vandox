@@ -230,7 +230,7 @@ func (fr *fileReader) nextEntry() (*journal.Entry, bool, error) {
 		return nil, false, err
 	}
 	switch {
-	case fr.kern.have && fr.miss.have && fr.miss.ent.Seqnum < fr.kern.ent.Seqnum:
+	case fr.miss.have && (!fr.kern.have || fr.miss.ent.Seqnum < fr.kern.ent.Seqnum):
 		fr.miss.have = false
 		return &fr.miss.ent, false, nil
 	case fr.kern.have:
@@ -239,9 +239,6 @@ func (fr *fileReader) nextEntry() (*journal.Entry, bool, error) {
 		}
 		fr.kern.have = false
 		return &fr.kern.ent, true, nil
-	case fr.miss.have:
-		fr.miss.have = false
-		return &fr.miss.ent, false, nil
 	default:
 		return nil, false, nil
 	}

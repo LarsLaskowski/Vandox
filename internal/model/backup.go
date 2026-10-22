@@ -13,6 +13,12 @@ const (
 	BackupPhaseEnd   BackupPhase = "end"
 )
 
+// Validation messages of the phase-specific fields of a BackupRun.
+const (
+	msgNotAllowedForStart = "not allowed for phase start"
+	msgNotAllowedForEnd   = "not allowed for phase end"
+)
+
 // BackupRun is the start or the end of a backup run.
 type BackupRun struct {
 	Phase        BackupPhase `json:"phase"`
