@@ -11,6 +11,7 @@ import (
 
 	"github.com/LarsLaskowski/Vandox/internal/config"
 	"github.com/LarsLaskowski/Vandox/internal/connstats"
+	"github.com/LarsLaskowski/Vandox/internal/kernevents"
 	"github.com/LarsLaskowski/Vandox/internal/mariadb"
 	"github.com/LarsLaskowski/Vandox/internal/procstats"
 	"github.com/LarsLaskowski/Vandox/internal/scheduler"
@@ -67,6 +68,16 @@ const (
 	MariaDBTimeout          = 5 * time.Second
 )
 
+// Schedules of the kernel event, backup and state collectors.
+const (
+	KernelInterval  = 2 * time.Second
+	KernelTimeout   = 2 * time.Second
+	BackupsInterval = 10 * time.Second
+	BackupsTimeout  = 5 * time.Second
+	StateInterval   = 10 * time.Second
+	StateTimeout    = 5 * time.Second
+)
+
 // Options are the process boundaries Run works with.
 type Options struct {
 	ConfigPath string            // the configuration file
@@ -82,6 +93,10 @@ type Options struct {
 	Services svcstats.Sources
 	// MariaDB are the MariaDB sources; zero fields take their defaults.
 	MariaDB mariadb.Sources
+	// Kernel are the kernel event sources; zero fields take their defaults.
+	Kernel kernevents.Sources
+	// StateDir is the directory of the agent's state file; "" takes spool.directory.
+	StateDir string
 }
 
 // Run runs the agent until ctx is done and returns the exit code: 0 after a clean stop, 1 when it cannot start.
