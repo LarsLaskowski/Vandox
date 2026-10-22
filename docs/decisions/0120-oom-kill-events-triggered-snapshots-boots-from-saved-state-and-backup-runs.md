@@ -42,6 +42,11 @@ starts one twice; the agent had no state that outlives a restart. The Product Ma
    result** (a new `Run` field) — the same effect, but a change to the contract `processes` and `connections` also rely on.
 9. **Default backup rules `pzstd` only** (chosen by the Product Manager) — the one backup program seen in real data; **Plesk's
    documented tool names** — never captured, a wrong rule fails silently; **a capture first** — not available.
+10. **A backup run whose records were dropped is decided again: the collector restores its copy of the open run on
+    `Run.PreviousLost`** (chosen) — a lost start or end is written again by the next check, and the state stays current for a
+    restart; **commit the open run only at the next kept run**, as for the journal position — the stored run then lags one more
+    check, so a restart gives a second start within a wider window (S11); **accept the loss** — a dropped end leaves a run without
+    an end for ever.
 
 ## Decision
 
@@ -65,3 +70,6 @@ events*, *Boots*, *Backup runs*) and the [wire format](../areas/wire-format.md).
   it). After a suspend every kill reads as late and gets no snapshots: the error is towards fewer snapshots, never more.
 - The state file is the agent's first file write; the spool (#38) must leave it out of what it counts and deletes.
 - Without a usable state every start records a `boot` event of the current boot (same boot ID), and the journal is read from its end.
+- A backup run's state that the `state` job saved between a dropped run and the next one survives a restart before that next run:
+  the dropped start or end is then not written again. An unreadable process is skipped like an ended one, without a log line, so a
+  backup process the agent cannot read is not recognized.

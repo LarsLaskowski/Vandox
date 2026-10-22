@@ -57,7 +57,7 @@ AC1 to AC20 of [spec.md](spec.md).
 | AC9 | `TestBoot_NewBootRecordsPreviousBootAndUptime` (also: the state then holds `Boot.Uptime` equal to the first field of `/proc/uptime`, 5,000,000 s in the harness) | `internal/kernevents/boot_test.go` |
 | AC10 | `TestBoot_SameBootRecordsNothing`, `TestBoot_FirstStartWithoutPrevious`, `TestBoot_WithoutStateEveryStart`; `TestOpen_StatusAndWarnings` | `internal/kernevents/boot_test.go`; `internal/agentstate/agentstate_test.go` |
 | AC11 | `TestBoot_BadBootIDRecordsNothing` | `internal/kernevents/boot_test.go` |
-| AC12 | `TestBackups_StartWithinFifteenSeconds`, `TestBackups_EndAfterSixtySeconds`, `TestBackups_ShortPauseKeepsOneRun`, `TestBackups_SingleSightingGivesStartAndEnd`, `TestBackups_CountsWithoutKeepingProcesses` | `internal/backups/backups_test.go` |
+| AC12 | `TestBackups_StartWithinFifteenSeconds`, `TestBackups_EndAfterSixtySeconds`, `TestBackups_ShortPauseKeepsOneRun`, `TestBackups_SingleSightingGivesStartAndEnd`, `TestBackups_CountsWithoutKeepingProcesses`, `TestBackups_LostRunIsDecidedAgain` (G6: a run with `PreviousLost` after a dropped start returns the start again while the process runs, and nothing with no open run once it ended; after a dropped end, the end again with the original `last_seen` and the `gone_by` of the last kept check; after a dropped first check after a restart that ended the stored run, the end again with `gone_by` of the repeating check) | `internal/backups/backups_test.go` |
 | AC13 | `TestBackups_RestartContinuesRun`, `TestBackups_RunEndedAcrossStopOrReboot` | `internal/backups/backups_test.go` |
 | AC14 | `TestLoadAgent_BackupProcesses`; `TestBackups_RulesAreLiteral`; `TestJobs_BackupsOnlyWithRules` | `internal/config/agent_test.go`; `internal/backups/backups_test.go`; `internal/agent/agent_test.go` |
 | AC15 | `TestBackupRun_Validate`; `TestSnapshotTrigger_Validate`; `TestKernelEvent_Validate_KillIdentity`; `TestEncodeBatchGolden`; `TestDecoder_FieldErrors` (new cases); C#: `BackupRunValidateRules`, `SnapshotTriggerValidateRules`, `KillRefValidateRules`, `PayloadValidationOomKillIdentity`, `WireContractDecodesGoldenBatch`, `QueryRecordsAcceptsBackupRun` | `internal/model/backup_test.go`, `trigger_test.go`, `kernel_test.go`; `internal/wire/golden_test.go`, `decode_test.go`; `tests/Vandox.Core.Tests/BackupRunTests.cs`, `SnapshotTriggerTests.cs`, `KillRefTests.cs`, `PayloadValidationTests.cs`, `WireContractTests.cs`; `tests/Vandox.Storage.Tests/SqliteStoreQueryTests.cs` |
@@ -236,6 +236,17 @@ equals the process's command or the cleaned command line starts with `cmdline_pr
 with a match, that process's PID and command, the count. Each run with a match sets `last_seen` and `max_processes`; the first without
 sets `gone_by`; 60 s after `last_seen` without a match the end is written. The open run lives in the state; at the first run after a start
 a stored run of another boot, or one without a match now, is ended (`last_seen` from the state, `gone_by` now), else it continues.
+A process `CommandReader.Process` cannot read, ended or not, is skipped like an ended one, with no log line and no gap (G6, Lead
+decision: the `processes` collector already warns `processes not read` for the same processes; a backup process unreadable throughout
+is not recognized, one that becomes unreadable during a run can end it early). `gone_by` lives in the collector's memory only, not in
+`agentstate.OpenRun`: after a restart the first check without a match is the gone-by time (S12), also when a check before the stop had
+already seen none, so `gone_by` stays at or after the real end. *Lost runs* (G6, Lead decision): each run first takes a copy of the
+open run in the state, `gone_by` and whether the first check was done; when `run.PreviousLost` is true, the run first restores these
+from the copy the previous run took (the store with `Update(true, …)`, only when the stored run differs), so a start, an end or a
+`last_seen` whose records were dropped (timeout, error, sink error) is decided again by this check: a start is written again while a
+match runs, an end again with the `gone_by` of the last kept check, and the first check after a start is repeated. The scheduler's gap
+covers the lost check. Residual: a state the `state` job saved between the lost run and the next one, followed by a restart, keeps the
+lost run's change (record 0120, *Consequences*).
 
 **Records (wire 1.1).** `kernel_event.oom_kill`: optional `boot_id` (UUID) and `kernel_time_ns` (≥ 0), set by the agent.
 `process_snapshot`, `connection_snapshot`: optional `trigger` `{"kills":[{"boot_id","kernel_time_ns","victim_pid"}],"kills_omitted":n}`
@@ -653,6 +664,14 @@ configuration *Options*; ARCHITECTURE *Components* and package list. `docs/areas
   stored uptime are fixed (*Failures*, *Kill parser*, *Boots*), and a read error can no longer hold the position for ever; the
   collector tells a torn tail through the new `Cursor.Torn`; (6) fact 20 is not measurable here and stays unverified, checked on the
   server in #42, with the residual in record 0120. Security confirms (2), (5) and `Cursor.Torn` in its diff review.
+- G6 Dev and Tester questions (Lead decision): (1) `TestBackups_LogsHoldNoProcessText` expected no record at the first check after a
+  restart without a match, against S12 and *Backup check*; the test is wrong and keeps process 100 running at that check (Tester), the
+  collector stays as built. (2a) an unreadable process is skipped silently, as an ended one (*Backup check*; no code change).
+  (2b) `gone_by` stays in memory; S12 already names the first check after the start as the gone-by time (no change). (2c) the
+  collector restores its copy of the open run on `run.PreviousLost` (*Lost runs*; Dev, test `TestBackups_LostRunIsDecidedAgain` by
+  the Tester; record 0120, option 10). Options rejected: commit the open run only at the next kept run, as the kernel collector does
+  (a restart then loses up to one more `last_seen` and gives a second start within a wider window, against AC13); accept the loss
+  (a dropped end leaves a run without an end for ever).
 
 ## Out of scope / follow-ups
 
