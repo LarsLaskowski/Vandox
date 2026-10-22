@@ -26,9 +26,11 @@ and no field that ties a snapshot to an event.
 - S1: Given the agent is running, when the kernel's OOM killer kills a process, then within 5 seconds of the kill line reaching the
   journal the agent records one `kernel_event` of type `oom_kill` with the victim's PID, its command (the kernel's process name),
   its anonymous RSS in bytes (`anon-rss` in kB times 1,024), its `oom_score_adj`, the kill line as `message`, and as capture time the
-  moment the kernel wrote the line: the kernel's own time stamp (time since the boot of that entry) converted to UTC with the boot
-  time of the entry's own boot (the entry's receipt time minus its monotonic time), not the time the journal received it; when the
-  result lies before that boot's start or after the receipt time, the receipt time is the capture time. The event carries an
+  moment the kernel wrote the line: the journal's receipt time minus the time the line took to reach the journal. That delay is
+  measured on the journal's monotonic clock against the kernel's stamp, less the drift of the kernel's clock as it shows on recent,
+  promptly received kernel lines of the same boot (the kernel's clock runs slow by about 33 microseconds per second on the server, a
+  minute after three weeks, so the kernel's stamp converted with the boot time would be early); without such lines the delay is 0. The
+  capture time is never after the receipt time. The event carries an
   identity that is the same however often the same kill is read and differs between any two kills.
 - S2: Given S1, when the event is recorded, then the agent at once (within 1 second, or as soon as the collector's current run ends)
   takes an additional full process snapshot (every process, as under memory pressure) and an additional full connection snapshot
@@ -61,8 +63,10 @@ and no field that ties a snapshot to an event.
   part), then it is one run with one start and one end.
 - S10: Given kills the agent did not see live — it was stopped, restarting, killed itself by the OOM killer, or the server had not
   yet started it after a boot — when the agent runs again, then every kill line the journal holds after the position the agent last
-  read becomes an event with its own capture time, also for the kills of the previous boot; a kill read more than 60 seconds after it
-  happened, or one from another boot, gets no additional snapshot.
+  read becomes an event with its own capture time, also for the kills of the previous boot and those in a file journald set aside
+  after an unclean shutdown or its own restart (`system@...journal~`); a kill read more than 60 seconds after it happened (the time
+  since the journal received it plus its delay, S1), or one from another boot, gets no additional snapshot. A run whose records the
+  agent did not keep (a timeout, a refused record, a sink error) is read again from the last kept position.
 - S11: Given the agent is restarted during a backup run and a matching process still runs, then the run continues: no second
   start is recorded and the end, when it comes, names the original start time.
 - S12: Given the agent was stopped or the server rebooted during a backup run and no matching process runs at the agent's first
@@ -105,8 +109,9 @@ and no field that ties a snapshot to an event.
   span may be lost.
 - E7: The agent was stopped for days, so a large backlog of journal entries lies after its position: it reads the backlog in bounded
   steps with memory that does not grow with the backlog or the journal, records the kills in journal order, and takes no additional
-  snapshot for them (S10). A saved position older than the oldest entry the journal still has gives a `gap` from the saved position's
-  time to the oldest entry.
+  snapshot for them (S10); the work of a run does not grow with the entries before the position, so lines a remote sender causes (a
+  firewall's log lines are kernel messages) cannot push every run past its timeout. A saved position whose files are gone gives a `gap`
+  from the saved position's time to the first entry after it that the journal still has, and reading goes on there.
 - E8: The agent has no saved state (first start, the directory missing, the file unreadable, corrupt or not the agent's own): it logs
   one warning `agent state not available` (unless it is the first start with an empty directory), starts reading the journal at its
   current end, and records a `boot` event for the current boot at every start (each with the same `boot_id`, so a reader sees one
@@ -115,9 +120,10 @@ and no field that ties a snapshot to an event.
 - E9: `/proc/sys/kernel/random/boot_id` cannot be read or is not a lower-case UUID: no `boot` event, one warning `boot ID not
   readable`, and the other features run.
 - E10: The clock is set after the boot (NTP corrects it by minutes): `booted_at` is the boot time as the kernel reports it when the
-  agent reads it; each kill's capture time is converted with the boot time of the kill's own boot, also for kills of an earlier boot
-  (S1, S10); and whether a kill is still recent enough for snapshots (S10) is judged on the kernel's monotonic clock of the current
-  boot, so a clock step neither suppresses nor triggers snapshots.
+  agent reads it; a kill's capture time follows the journal's receipt time of that entry (S1), also for kills of an earlier boot; and
+  whether a kill is still recent enough for snapshots (S10) is judged on one monotonic clock (the time since the journal received the
+  line, plus its delay), so neither a clock step nor the drift of the kernel's clock over a long uptime suppresses or triggers
+  snapshots.
 - E11: The process or connection collector is stuck in an abandoned run when a kill is recorded: no additional snapshot is started
   for that collector (it is never started twice) and the event is recorded anyway; the missed snapshot is a `gap` with cause
   `collector_timeout` from the moment the additional run was due to that moment plus the collector's interval of the current mode. An
@@ -144,15 +150,15 @@ and no field that ties a snapshot to an event.
   ends. A backup run's start is recorded within 15 seconds of the first matching process starting, its end within 15 seconds after
   the 60 seconds without a match.
 - **Memory and load.** The server must not be put under more memory pressure: reading the journal holds memory that does not grow
-  with the size of the journal, the backlog or a single entry (an entry is read only up to a fixed limit), and the plan states the
-  bound and a test that checks it at two sizes. The additional snapshots are bounded to one per collector per 15 seconds, the rate of
+  with the size of the journal, the backlog or a single entry (an entry is read only up to a fixed limit and only the fields the agent
+  needs): at most 4 MiB live, checked by a test at two sizes. The additional snapshots are bounded to one per collector per 15 seconds, the rate of
   memory pressure mode. Without pressure mode they come on top of the regular runs (at most one more per 15 seconds); under pressure
   mode, where an OOM kill usually happens, each takes the place of the collector's next regular run (S2), so a storm of kills costs
   no more snapshots than pressure mode already takes. The backup check reads only
   what the process collector reads to name a process. The real cost on the server is measured in #44.
 - **Disk.** The agent's saved state (its last boot ID and uptime, the journal position, an open backup run) is one small file written
   atomically with owner-only permissions, at most once every 10 seconds while kill lines or a backup run are being followed and once a
-  minute otherwise; it is the agent's first file write. It is not part of the spool: whatever the spool (#38) later counts against its
+  minute otherwise (a journal position that moved over other kernel lines only waits for the minute); it is the agent's first file write. It is not part of the spool: whatever the spool (#38) later counts against its
   size bound and deletes when full never includes the state file.
 - **No new right, no program, static binary.** The agent reads the journal as a member of `systemd-journal`, which it already is
   (Agent area, *Rights*), `/proc` as today, and writes only below `spool.directory`. No capability, group or polkit rule is added, no
@@ -179,9 +185,9 @@ and no field that ties a snapshot to an event.
 ## Acceptance criteria
 
 - [ ] AC1: For a kill line of the kernel transport and facility read live, the agent hands one `oom_kill` event to the sink within 5
-  seconds, with the victim PID, command, anonymous RSS in bytes, `oom_score_adj`, the kill line as message, the kernel's time of the
-  line converted with the boot time of the entry's own boot as capture time (the receipt time when that lies outside the boot's start
-  and the receipt time), and an identity that two readings of the same kill share and two kills never share (S1, E6, E10).
+  seconds, with the victim PID, command, anonymous RSS in bytes, `oom_score_adj`, the kill line as message, the receipt time minus the
+  drift-corrected delay as capture time (never after the receipt time, also after 20 days of uptime), and an identity that two
+  readings of the same kill share and two kills never share (S1, E6, E10).
 - [ ] AC2: Each recorded live kill makes the process and the connection collector take one additional full snapshot within 1 second
   (or at the end of the current run), each naming the kill's identity; without pressure mode the regular runs keep their grid and
   record no gap while the additional run finishes in time, under pressure mode the additional run replaces the next regular run
@@ -199,11 +205,13 @@ and no field that ties a snapshot to an event.
 - [ ] AC5: A victim name with spaces, `)`, a line feed, invalid bytes, imitated fields or no characters gives an event with the
   kernel's real values and a valid, cleaned command or `(unnamed)`; a kill line without `anon-rss` or `oom_score_adj` gives an event
   without that field; the cgroup and the allocating-task kill lines give events (E2, E3).
-- [ ] AC6: After a stop, a crash, the agent's own kill or a reboot, every kill line after the saved position becomes one event, also
-  for the previous boot; kills read more than 60 seconds late or from another boot get no additional snapshot (S10, E7).
-- [ ] AC7: A saved position older than the journal's oldest entry, and a span the agent cannot decode, give a gap of the kernel event
-  collector for that span; a blocked journal read leaves the other collectors and the watchdog on time and the reader is not started
-  twice (E5, E7).
+- [ ] AC6: After a stop, a crash, the agent's own kill, a reboot, an unclean shutdown or a journald restart (`.journal~` files), every
+  kill line after the saved position becomes one event, also for the previous boot; a run whose records were not kept is read again;
+  kills read more than 60 seconds late (on one monotonic clock, also after 20 days of uptime) or from another boot get no additional
+  snapshot (S10, E7).
+- [ ] AC7: A saved position whose files are gone, and a span the agent cannot decode, give a gap of the kernel event collector for that
+  span; a blocked journal read leaves the other collectors and the watchdog on time and the reader is not started twice; the work of a
+  poll does not grow with the kernel entries before the position (E5, E7).
 - [ ] AC8: An unreadable journal logs `kernel messages not readable` once and `kernel messages readable again` once, and resumes at
   the saved position without losing a kill (E4).
 - [ ] AC9: A start in a new boot records one `boot` event with `boot_id`, `booted_at` as capture time, `previous_boot_id` and

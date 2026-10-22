@@ -33,13 +33,20 @@ object; the kill lines are 159 to 171 bytes), and 221 entries of the kernel tran
    surface for nothing the agent needs: journald compresses only fields of at least 512 bytes, and no kill line comes near it.
 7. **Find the kernel entries by a full scan of each file's objects** (instead of the hash lookup) — no hash function to get right,
    but 80 MiB read per file and per start.
-8. **Commit `systemd-journal-remote` output as the fixture** — easy to produce, but systemd 255 here writes only the `COMPACT`
+8. **Skip set-aside files (`*.journal~`)** — simpler, but journald sets a file aside after every unclean close (a crash, a hard reset,
+   journald itself killed) and starts the next one with a new seqnum ID, so exactly the kills before an outage would be lost; they are
+   read as archived files, a torn tail ends the file.
+9. **Kill time as the boot time plus the kernel's stamp** — exact in principle, but the kernel's printk clock runs slow against the
+   monotonic and real-time clocks (about 33 µs per second on the server, a minute after three weeks), so the time comes out early; the
+   receipt time minus the delay, corrected by the drift seen on recent lines, is used, and liveness is judged on the journal's monotonic
+   clock.
+10. **Commit `systemd-journal-remote` output as the fixture** — easy to produce, but systemd 255 here writes only the `COMPACT`
    variant, which the server never writes, so it would test the wrong layout; an anonymized copy of a real 80 MiB file cannot be
    made either, because rewriting a field breaks its keyed hash.
 
 ## Decision
 
-The agent reads the system journal files itself (option 1). It counts only entries of the kernel transport with facility 0,
+The agent reads the system journal files itself, set-aside files included (options 1 and 8), and times a kill by its receipt corrected for the kernel clock's drift (option 9). It counts only entries of the kernel transport with exactly one facility `0`,
 decompresses nothing (a needed field that is compressed makes the entry unreadable, recorded as a gap), and supports only the
 keyed-hash, non-compact layout the server writes; any other layout fails closed, also as a gap. The committed fixtures are generated
 in that layout from an anonymized export by a test-only writer whose output `journalctl --verify` and `journalctl -o export` must
@@ -50,6 +57,9 @@ accept. The rules are in the [Agent](../areas/agent.md) area (*Kernel events*).
 - A journal written with a compression threshold below the size of a kill line, in the `COMPACT` layout (systemd 252 and later) or
   without keyed hashes loses its kernel events to recorded gaps until the reader learns that layout; an upgrade of the server's
   systemd is a reason to revisit this record.
+- Every chain in a file is followed only to larger offsets, at most 64 entry arrays per chain, and a poll finds its position by
+  bisection, so neither a damaged file nor a flood of kernel lines (a firewall's log lines are remote-triggered) can make a run loop or
+  grow with the entries before the position.
 - journald's entry about missed kernel messages is not in the real files; it is built from the systemd 249 source (residual).
 - The reader is checked against the real files only on a developer's machine (`VANDOX_REAL_JOURNAL_DIR`); CI sees the generated
   fixtures.

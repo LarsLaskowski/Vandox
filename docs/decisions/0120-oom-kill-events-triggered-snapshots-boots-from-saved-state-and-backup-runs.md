@@ -28,7 +28,10 @@ starts one twice; the agent had no state that outlives a restart. The Product Ma
    per collector** or **writes from each collector run** — more writes and concurrent writers.
 7. **The previous uptime from the uptime the agent saves** (chosen) — independent of the journal; **from the last journal entry of the
    previous boot** — exact to the last entry, but a search per boot in the journal for one number.
-8. **Default backup rules `pzstd` only** (chosen by the Product Manager) — the one backup program seen in real data; **Plesk's
+8. **Commit the journal position at the next run when the previous one was kept** (chosen) — a run whose records the scheduler or
+   the sink dropped is read again (same identities); **commit when the run returns** — simpler, but moves past kills whose records were
+   lost without a gap.
+9. **Default backup rules `pzstd` only** (chosen by the Product Manager) — the one backup program seen in real data; **Plesk's
    documented tool names** — never captured, a wrong rule fails silently; **a capture first** — not available.
 
 ## Decision
