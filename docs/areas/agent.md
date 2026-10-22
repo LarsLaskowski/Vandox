@@ -996,8 +996,9 @@ records per run. Two tests assert it at journals of 1,000 and 100,000 kernel ent
   the same identities), and a refused file gives its gap again once per agent start.
 - An archived or set-aside file of another ID whose header's first time lies before the committed position's time is not read.
 - journald's entry about missed kernel messages is built from the systemd 249 source; the real journals hold none.
-- A journal file is opened by its name in the journal directory, and a symbolic link there is followed. The directory belongs to
-  root, so only root or journald can place one, and they can change the journal anyway.
+- The listing skips symbolic links, but a journal file is then opened by its name in the journal directory, so a file replaced by a
+  symbolic link between the listing and the read is followed. The directory belongs to root, so only root or journald can place one,
+  and they can change the journal anyway.
 
 ## Boots
 
