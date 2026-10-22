@@ -19,6 +19,7 @@ type Entry struct {
 	Fields      []Field // only the names in want, values read up to 4,096 bytes into reused buffers
 	RealtimeUS  uint64  // the real-time stamp as stored, in µs
 	MonotonicUS uint64  // the monotonic stamp as stored, in µs
+	Omitted     int     // wanted or compressed items beyond the 16 kept in Fields
 
 	bufs [][]byte
 }
