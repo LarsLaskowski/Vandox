@@ -914,7 +914,8 @@ the header's first time of the first such file (without a readable one, to the n
 once for that position, and reading goes on in that file. Only when that file's first sequence number directly follows the
 position's is nothing lost and no gap recorded; since sequence numbers are not dense, a gap is otherwise recorded even when the
 vacuumed part held no kernel entry. A run that records the gap of a refused file (*Failures*) from the committed position's time
-records no second gap for the vacuumed position, since that gap already covers the span. A file that disappears between the listing and its read is skipped.
+records no second gap for the vacuumed position, since that gap already covers the span (unless the clock was set back, see
+*Residuals*). A file that disappears between the listing and its read is skipped.
 
 **Limits of a run.** A run stops after one second of reading (checked between entries), after 256 kills, or when its deadline passes,
 and returns what it read; the next run continues there.
@@ -996,6 +997,13 @@ records per run. Two tests assert it at journals of 1,000 and 100,000 kernel ent
   the same identities), and a refused file gives its gap again once per agent start.
 - An archived or set-aside file of another ID whose header's first time lies before the committed position's time is not read.
 - journald's entry about missed kernel messages is built from the systemd 249 source; the real journals hold none.
+- The cgroup and the allocating-task kill lines (`Memory cgroup out of memory: Killed process …`, `Out of memory
+  (oom_kill_allocating_task): Killed process …`) are built from the kernel source, not from real lines (the server's journals hold
+  only the global form); a kernel whose line differs in the prefix or before `) total-vm:` records no event and no gap for such a
+  kill.
+- After the clock was set back, entries of a vacuumed position can carry times after the run's start. A run that also meets a
+  refused file for the first time records only the refused file's gap, which ends at the run's start (or 1 µs after the
+  position's time when that is later): the loss is recorded at the position, but not every lost entry's time lies inside the gap.
 - The listing skips symbolic links, but a journal file is then opened by its name in the journal directory, so a file replaced by a
   symbolic link between the listing and the read is followed. The directory belongs to root, so only root or journald can place one,
   and they can change the journal anyway.

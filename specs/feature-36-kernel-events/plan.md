@@ -24,7 +24,7 @@ The feature is specified in [spec.md](spec.md) (S1 to S13, E1 to E17, AC1 to AC2
 | 9 | Kernel-transport entries with facility 3 or 5 exist (userspace writes to `/dev/kmsg`) | `journalctl -o export _TRANSPORT=kernel`: 3,342 facility 0, 220 facility 3, 1 facility 5 | confirmed |
 | 10 | The kernel never gives facility 0 to a write to `/dev/kmsg` | Security read `devkmsg_write` in `kernel/printk/printk.c` v5.15 (facility forced to 1; same in v6.8) | confirmed |
 | 11 | The 5.15 kill line format ends in `UID:<n> pgtables:<n>kB oom_score_adj:<n>` | the 8 real kill lines | confirmed |
-| 12 | The cgroup and allocating-task reasons use the same format | to verify: Tester reads `__oom_kill_process` and callers in `mm/oom_kill.c`, `mm/memcontrol.c` v5.15 (step 5) | unverified |
+| 12 | The cgroup and allocating-task reasons use the same format | to verify: Tester reads `__oom_kill_process` and callers in `mm/oom_kill.c`, `mm/memcontrol.c` v5.15 (step 5). Not reported in step 5. Step 9 (Lead): a scratch copy of `mm/oom_kill.c` of unestablished version (no `process_mrelease`, so likely before 5.15) has one `pr_err("%s: Killed process %d (%s) total-vm:…")` for all three prefixes, `out_of_memory` passing `Memory cgroup out of memory` for a memcg OOM and `Out of memory (oom_kill_allocating_task)`; the format equals the 8 real 5.15 lines (fact 11). The exact v5.15 text stays unread; residual in the Agent area (a differing line is no event and no gap) | unverified |
 | 13 | The keyed hash is SipHash-2-4 of the payload keyed with the file ID | Dev, step 6 (G4): `TestFile_RealServerJournals` finds `_TRANSPORT=kernel` through `File.Lookup` in both real files (1,456 and 2,107 kernel entries, 8 kills) | confirmed |
 | 14 | journald's "Missed N kernel messages" entry has `MESSAGE_ID=e9bf28e6e834481bb6f48f548ad13606` on the driver transport | Dev, step 6 (G4), systemd v249 `journald-kmsg.c` and `sd-messages.h`: `SD_MESSAGE_JOURNAL_MISSED` emitted through `server_driver_message` with `_TRANSPORT=driver`, `SYSLOG_FACILITY=3`, `SYSLOG_IDENTIFIER=systemd-journald`, `PRIORITY=6`; not in the real files | confirmed |
 | 15 | journald compresses only fields whose whole `NAME=value` payload is at least 512 bytes, and not every such payload is compressed | Dev, step 6 (G4), systemd v249 `DEFAULT_COMPRESS_THRESHOLD` 512 applied to the whole payload | confirmed |
@@ -143,7 +143,9 @@ record a gap where the vacuumed file held no kernel entry after the position. A 
 for the first time, the refused-file gap of *Failures* (b) or (a) (from the committed position's time to `run.Start`) records no
 vacuumed-position gap and sets the marker as if it had: that gap covers the span, and a file whose header cannot be read may be the
 one that holds the position (review round 1 follow-up, Lead decision; `TestKernel_OpenFailuresAtScanTime` keeps one gap). A refused
-file met in an earlier run does not suppress the gap.
+file met in an earlier run does not suppress the gap. Residual (Security delta note, step 9): after the clock was set back, vacuumed
+entries stamped after `run.Start` lie outside that refused-file gap, which `newGap` may shrink to 1 µs; the loss stays recorded at
+the position (Agent area, *Residuals*).
 
 A run stops after 1 s of reading (half the timeout,
 checked between entries) or 256 kills, whichever first, and returns what it read. An entry counts only with `_TRANSPORT=kernel` and
@@ -586,6 +588,8 @@ Files no unit test can cover: none.
 | `deploy/agent/README.md` | G8: a journal that cannot be read records no gap; the collector logs `kernel messages not readable` once and resumes at the saved position | Dev |
 | `docs/areas/agent.md` | G8: *Position* gets the vacuumed-position gap (the residual goes), *Extra snapshots* the late-trigger rule, *Backup runs* the boot ID rule | Lead |
 | `docs/areas/wire-format.md` | G8: none (the UUID rule already stands) | Lead |
+| `.squad/project.md` | Step 9: area 12, the logging sentences of the kernel event and backup collectors and the state file, and records 0119, 0120 (text in the Lead's step-9 result) | Dev |
+| `docs/areas/agent.md` | Step 9: *Kernel events* residuals for the clock set back under the refused-file/vacuum rule and for the kill-line forms built from the source | Lead |
 
 Sweep (searched `docs/areas/` and `docs/ARCHITECTURE.md` for enumerations the change extends): wire *Records* kinds, *Producer size
 contract* list, *Versioning*; Agent *Status*, *Memory pressure mode* effects, *Rights*, *Implementation*, *Related decisions*;
@@ -727,7 +731,23 @@ configuration *Options*; ARCHITECTURE *Components* and package list. `docs/areas
   N3 (the journal files are opened through `os.DirFS`, which follows a symbolic link in the journal directory): accepted as a residual,
   since the directory belongs to root and only root (or journald) can place a link there, and root can change the journal anyway;
   Agent area *Kernel events*. N4: no change (Security rated it harmless).
+- Security delta note (clock set back under the refused-file/vacuum rule) and step-9 decisions (Lead, `approve-pr`): the note is
+  taken as a residual line in the Agent area (*Kernel events*, *Residuals*) and in *Reading state*; the rule stays (a second gap
+  over the same position would only re-state a loss the refused-file gap already records). Security notes N1 to N4 of the diff
+  review are all closed (N1 narrowed, N2 fixed, N3 residual, N4 no change). Deviations confirmed against the plan and the area
+  document: the header of every listed file read at every run, no header cache (B4 bounds the work per entry; per file it is one
+  `open` and 256 bytes, at most 1,024 files, Agent area *Where it reads*); the online file's `malformed file` retried without a log
+  line until it is given up (*Failures* (d), the reader's "three polls"); the boot event returned again until a run's result is kept
+  (*No gap unless recorded*; Agent area *Boots*); the per-file cursor kept between runs (B4); `Entry.Omitted` (G4 decision); the
+  fixed warning texts before any file is read (G8 decision 3); the test harness numbering seqnums from 1 as journald does (needed by
+  the `pos.seq + 1` rule); the Dev's `.squad/project.md` and `.squad/stack.md` edits (*Documentation updates*) except that area 12
+  lacks the sentences for the new collectors, which the plan assigned: Dev adds them verbatim (step-9 condition). Facts 12, 18 and 20
+  stay unverified and are named in the PR with their residuals; 18 and 20 are checked on the server in #42. The 60-s end of a backup
+  run is pinned exactly: the Tester changes `TestBackups_EndAfterSixtySeconds` to require the end at the run 60 s after the last
+  sighting and none at the run after it (step-9 condition). The Sonar gate runs on the pull request; its findings are worked there.
 
 ## Out of scope / follow-ups
 
-As the spec's *Out of scope*. Follow-up issue: "[Agent] Read journal files of the COMPACT layout" (systemd 252 and later; record 0119).
+As the spec's *Out of scope*. Follow-up issues: "[Agent] Read journal files of the COMPACT layout" (systemd 252 and later; record
+0119); "[Agent] Default backup rules from Plesk's captured backup processes" (after #45; record 0120); comments on #42 for the
+server checks of facts 18 and 20.
