@@ -14,6 +14,12 @@ type Cursor struct {
 	idx                  uint64 // list index of the next entry
 	arr, arrBase, arrCap uint64 // the array that holds chain index idx-1 (0 when unknown), the chain index of its first item, its capacity
 	arrNo                int    // 1-based place of arr in the chain
+	torn                 bool   // the list ended at a cut-off tail of an archived or set-aside file
+}
+
+// Torn reports whether the list ended at a cut-off tail of an archived or set-aside file, as opposed to the normal end of the list.
+func (c *Cursor) Torn() bool {
+	return c.torn
 }
 
 // Lookup finds the data object with the given payload through the data hash table. A payload that is empty or longer than 4,096
@@ -199,6 +205,7 @@ func (f *File) array(off uint64, ord int) (uint64, uint64, error) {
 func (f *File) Next(c *Cursor, want []string, e *Entry) (bool, error) {
 	ok, err := f.next(c, want, e)
 	if errors.Is(err, errTorn) {
+		c.torn = true
 		return false, nil
 	}
 	return ok, err

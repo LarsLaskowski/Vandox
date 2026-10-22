@@ -434,7 +434,7 @@ func (v *Saver) prepare(now time.Time) (State, uint64, bool) {
 
 	elapsed := now.Sub(s.lastSave)
 	if elapsed >= heartbeatInterval && s.state.Boot != nil {
-		if up, ok := readUptime(v.proc); ok {
+		if up, ok := ReadUptime(v.proc); ok {
 			s.state.Boot.Uptime = up
 			s.seq++
 			s.dirty = true
@@ -449,8 +449,8 @@ func (v *Saver) prepare(now time.Time) (State, uint64, bool) {
 	return copyState(s.state), s.seq, true
 }
 
-// readUptime reads the uptime from proc's uptime file.
-func readUptime(proc fs.FS) (time.Duration, bool) {
+// ReadUptime reads the uptime from proc's uptime file.
+func ReadUptime(proc fs.FS) (time.Duration, bool) {
 	f, err := proc.Open("uptime")
 	if err != nil {
 		return 0, false
