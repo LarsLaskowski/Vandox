@@ -35,6 +35,20 @@ public sealed class OomKill
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public short? OomScoreAdj { get; set; }
 
+    /// <summary>
+    /// Gets or sets the ID of the boot the kill happened in, empty when absent.
+    /// </summary>
+    [JsonPropertyName("boot_id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public string BootId { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the kernel clock reading of the kill in nanoseconds.
+    /// </summary>
+    [JsonPropertyName("kernel_time_ns")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public long? KernelTimeNs { get; set; }
+
     #endregion // Properties
 
     #region Methods

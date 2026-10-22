@@ -19,7 +19,8 @@ public static class PayloadRegistry
                                                                   [RecordKind.MariaDbStatus] = typeof(MariaDbStatus),
                                                                   [RecordKind.KernelEvent] = typeof(KernelEvent),
                                                                   [RecordKind.LogLine] = typeof(LogLine),
-                                                                  [RecordKind.Gap] = typeof(Gap)
+                                                                  [RecordKind.Gap] = typeof(Gap),
+                                                                  [RecordKind.BackupRun] = typeof(BackupRun)
                                                               };
 
     #endregion // Fields

@@ -52,6 +52,8 @@ type ConnectionSnapshot struct {
 	NewListenersOmitted  uint32               `json:"new_listeners_omitted,omitempty"`
 	Inventory            InventoryState       `json:"inventory,omitempty"`
 	Tables               []Proto              `json:"tables,omitempty"`
+	// Trigger names the kills that caused this snapshot; nil for a scheduled one.
+	Trigger *SnapshotTrigger `json:"trigger,omitempty"`
 }
 
 // StateCount counts sockets per protocol and state.

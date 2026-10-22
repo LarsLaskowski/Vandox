@@ -42,6 +42,13 @@ public sealed class ProcessSnapshot : IPayload
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public List<ProgramAggregate>? Programs { get; set; }
 
+    /// <summary>
+    /// Gets or sets the kills that caused this snapshot, <c>null</c> for a scheduled one.
+    /// </summary>
+    [JsonPropertyName("trigger")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public SnapshotTrigger? Trigger { get; set; }
+
     #endregion // Properties
 
     #region IPayload

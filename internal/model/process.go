@@ -10,6 +10,8 @@ type ProcessSnapshot struct {
 	Total     *uint32            `json:"total,omitempty"`
 	Processes []ProcessSample    `json:"processes,omitempty"`
 	Programs  []ProgramAggregate `json:"programs,omitempty"`
+	// Trigger names the kills that caused this snapshot; nil for a scheduled one.
+	Trigger *SnapshotTrigger `json:"trigger,omitempty"`
 }
 
 // ProcessSample is one process of a ProcessSnapshot.

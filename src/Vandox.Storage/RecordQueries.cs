@@ -34,7 +34,8 @@ internal static class RecordQueries
                                                   RecordKind.MariaDbStatus,
                                                   RecordKind.KernelEvent,
                                                   RecordKind.LogLine,
-                                                  RecordKind.Gap
+                                                  RecordKind.Gap,
+                                                  RecordKind.BackupRun
                                               ];
 
     #endregion // Fields

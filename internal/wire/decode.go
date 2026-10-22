@@ -26,6 +26,7 @@ var kinds = map[model.Kind]func() model.Payload{
 	model.KindKernelEvent:        func() model.Payload { return new(model.KernelEvent) },
 	model.KindLogLine:            func() model.Payload { return new(model.LogLine) },
 	model.KindGap:                func() model.Payload { return new(model.Gap) },
+	model.KindBackupRun:          func() model.Payload { return new(model.BackupRun) },
 }
 
 // envelope is the decoded form of a record line.
