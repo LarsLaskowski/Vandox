@@ -139,7 +139,11 @@ marker in the reading state, so a re-read gives the same gap once and a later ru
 that file. Seqnums are not dense (fact 23), so the rule compares no seqnum differences except one: when the first such file's head
 seqnum is exactly `pos.seq + 1`, nothing lies between and no gap is recorded (review round 1, N1; this replaces the Dev's guard
 `pos.seq == 0`, so a position `(ID, 0)` saved from an empty online file gives the gap when the remaining files start above 1). It may
-record a gap where the vacuumed file held no kernel entry after the position.
+record a gap where the vacuumed file held no kernel entry after the position. A run that has already recorded, for a file it met
+for the first time, the refused-file gap of *Failures* (b) or (a) (from the committed position's time to `run.Start`) records no
+vacuumed-position gap and sets the marker as if it had: that gap covers the span, and a file whose header cannot be read may be the
+one that holds the position (review round 1 follow-up, Lead decision; `TestKernel_OpenFailuresAtScanTime` keeps one gap). A refused
+file met in an earlier run does not suppress the gap.
 
 A run stops after 1 s of reading (half the timeout,
 checked between entries) or 256 kills, whichever first, and returns what it read. An entry counts only with `_TRANSPORT=kernel` and

@@ -913,7 +913,8 @@ and one starts after it (the files that held it were vacuumed), the entries betw
 the header's first time of the first such file (without a readable one, to the next readable kernel entry, else the run's start),
 once for that position, and reading goes on in that file. Only when that file's first sequence number directly follows the
 position's is nothing lost and no gap recorded; since sequence numbers are not dense, a gap is otherwise recorded even when the
-vacuumed part held no kernel entry. A file that disappears between the listing and its read is skipped.
+vacuumed part held no kernel entry. A run that records the gap of a refused file (*Failures*) from the committed position's time
+records no second gap for the vacuumed position, since that gap already covers the span. A file that disappears between the listing and its read is skipped.
 
 **Limits of a run.** A run stops after one second of reading (checked between entries), after 256 kills, or when its deadline passes,
 and returns what it read; the next run continues there.
