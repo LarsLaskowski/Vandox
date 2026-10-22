@@ -1,7 +1,7 @@
 # Plan: Kernel events, reboots and backup runs
 
 Source: Issue #36 | [spec.md](spec.md)
-Status: Revised (2)
+Status: Approved by Security
 Tier: security — the change creates guards against an attacker (only kernel-transport entries with exactly one facility `0` count as kills, a bounded parser of a binary format read from disk, a state file refused unless it is the agent's own) and the agent's first file write.
 Security areas touched: 10 Parsing of external input (`internal/journal`, the kill-line parser in `internal/kernevents`, `internal/agentstate` reading its file, `/proc/uptime` and `boot_id`, the option `backups.processes`, the new wire fields and kind in both decoders); 9 File writes (`internal/agentstate`: the state file in `spool.directory`); 12 Logging and display of external data (victim names and backup commands as record text, never logged; the committed fixture); 6 Agent privileges (the group `systemd-journal` gets its first user, no new right; `deploy/agent/README.md`)
 

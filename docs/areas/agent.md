@@ -7,7 +7,7 @@ how it survives a stalled data source and a missing backend, how gaps are record
 sends is in the [wire format](wire-format.md); its configuration file is in [Configuration and secrets](configuration-and-secrets.md).
 
 **Status.** The command line, the start-up with the configuration file, logging, the scheduler with its gaps and the memory pressure
-switch, the self-metrics, the system metrics, the process collector with the memory pressure mode, the connection collector (with its start-up probe of the socket mount), the systemd service collector, the MariaDB collector and the notification of systemd exist, as do
+switch, the self-metrics, the system metrics, the process collector with the memory pressure mode, the connection collector (with its start-up probe of the socket mount), the systemd service collector, the MariaDB collector, the kernel event collector with the boot check and the extra snapshots it requests, the backup run check, the agent's state file and the notification of systemd exist, as do
 the shared data model and the wire encoder. The other collectors, the spool, the sender and the systemd unit are **not implemented yet**: until the spool exists, the agent
 drops the records it produces after checking them (it is not released in that state; v0.2.0 waits for the spool and the sender). The
 rules below for the parts not implemented are the target the implementation is held to and the tests must check.
@@ -56,7 +56,7 @@ rules below for the parts not implemented are the target the implementation is h
 - Process, memory and connection data come from **reading `/proc` and `/sys` directly**, never from running `top`, `lsof` or other
   programs: starting programs is slow and can fail under memory pressure, which is when the data matters. Collectors read the kernel
   files through a replaceable file-system interface, never through hard-coded paths, so tests can substitute fixtures and hanging
-  files.
+  files. Kernel messages come from reading the journal's files directly, never from `journalctl` (*Kernel events*).
 - Linux only, matching the monitored server.
 - **A hanging collector or database never blocks the agent.** Every collector runs isolated under its own deadline. When the
   deadline passes the agent stops waiting for it, records its missed sample as a gap, and keeps running the other collectors, the
@@ -81,7 +81,18 @@ rules below for the parts not implemented are the target the implementation is h
 - A run learns whether the previous sample of its collector was lost (`Run.PreviousLost`): its result was not kept, because the run
   timed out, was skipped, returned an error or panicked, had a record refused, or the sink refused its records. A run that starts
   late does not set it. A run whose records were all kept and accepted clears it. A collector that records only changes uses it to
-  record its full state again after a lost sample; the other collectors ignore it.
+  record its full state again after a lost sample; the `kernel` collector reads the lost run's entries again and the `backups`
+  collector decides the lost check again (*Kernel events*, *Backup runs*); the other collectors ignore it.
+- An **extra run** of a collector is requested through the scheduler (the `kernel` collector does so for `processes` and
+  `connections`, *Kernel events*). A runner waiting for its next due time starts it at once; a runner in a run starts it when that
+  run ends. Requests made before the extra run starts merge into one, which names at most 64 kills and counts the rest. The extra run
+  starts at the moment it begins and knows its request (`Run.Trigger`); in every other respect it is a run like any other: it is the
+  next run's predecessor, it sets and clears `Run.PreviousLost`, and a timeout, a panic or an error records a gap over one interval
+  of the current mode from its start (`collector_timeout`, `unknown`), after which an abandoned extra run makes the due runs skips as
+  above. While an abandoned run of the collector is still out, no extra run starts: the request records a gap with cause
+  `collector_timeout` from that moment over one interval of the current mode. Without memory pressure mode, or for a collector without
+  a pressure interval, the grid is unchanged; under pressure mode a collector with a pressure interval counts its next due time from
+  the extra run's start, so the extra run takes the place of the next regular one.
 - A run that **panics** or returns an **error** loses its sample: the panic is recovered, the sample is recorded as a gap with cause
   `unknown`, and the collector runs again at its next due time. A panic is logged as an error with the collector's name, the panic
   value (at most 1,024 bytes) and the stack (at most 4 KiB). Errors are logged at the first failure after a success, and the next
@@ -242,7 +253,8 @@ system call; the package imports none that would.
   RSS counts a shared page in every process that maps it, PSS divides it among them, so the PSS sum is the memory the program really
   holds in the memory processes map; kernel memory and unmapped page cache are in neither sum.
 - Without pressure mode the list of processes is the union of the top 25 by memory and the top 25 by `cpu_percent` (ties by PID, lowest
-  first). Under pressure mode (the run knows it, *Scheduling*) it lists **every process read**. `total` is the number of processes seen
+  first). Under pressure mode (the run knows it, *Scheduling*) and in an extra run requested for an OOM kill (*Kernel events*) it lists
+  **every process read**; the extra run's record names the kills in `trigger`. `total` is the number of processes seen
   (the PID directories, less those that ended during the read), `complete` is true only when every process was read and listed and no
   entry was left out for size or validity.
 - **One memory key for the whole run:** the PSS when every process read has one, else the RSS for all, so a process whose PSS cannot be
@@ -369,8 +381,9 @@ as the process collector keeps them); at most 64 new listeners are reported.
 by protocol then state, UDP without state), `processes` (one entry per process that owns at least one socket: PID, `command`, distinct
 sockets it holds, by count descending then PID), `remotes` (the top 25 by count descending then address, address only) and `listeners` (the
 inventory, ports below 1024 first, then protocol, address, port). A **full** snapshot adds every connection (by protocol, local, remote) and
-every counted remote address. The first run after the agent starts, every run under memory pressure (the mode at the run's start, *Scheduling*)
-and every run that finds at least one new listener, reported or omitted, is full; every other run is regular. `complete` keeps its meaning of
+every counted remote address. The first run after the agent starts, every run under memory pressure (the mode at the run's start, *Scheduling*),
+every extra run requested for an OOM kill (*Kernel events*; its record names the kills in `trigger`) and every run that finds at least one
+new listener, reported or omitted, is full; every other run is regular. `complete` keeps its meaning of
 the wire format and is true only for a full snapshot in which nothing was cut, skipped, left without an owner beyond a cap, unread or
 uncounted, so a regular snapshot is never complete. `aggregates_incomplete` is set when `states`, `listeners` or `processes` may not cover
 every socket the run saw: a list cut for size or at its cap, a skipped table line, a socket beyond the inode index, more processes than the
@@ -816,6 +829,261 @@ sent.
 - The process list shows what `PROCESS` lets the account see: the statements of every connection, with the customer data and
   credentials they may hold (*Thread snapshot*).
 
+## Kernel events
+
+The collector `kernel` (interval 2 seconds, timeout 2 seconds, placed after `clock` in the job list) records the kernel's OOM kills
+as `kernel_event` records of type `oom_kill` with source `kernel` ([wire format](wire-format.md)), the `boot` event of *Boots*, and
+a `gap` (source and collector `kernel`, cause `unknown`) for every span of kernel messages it cannot read. It reads the binary
+journal files of systemd-journald itself, through reads at offsets into fixed buffers (no `mmap`); it starts no program (no
+`journalctl`), links no C library and decompresses nothing.
+
+**Where it reads.** The machine ID comes from at most 64 bytes of `/etc/machine-id`: 32 lower-case hex digits and an optional line
+feed. The journal directory is `/var/log/journal/<machine-id>`, else `/run/log/journal/<machine-id>`; the first that can be listed is
+read. Of its regular files only `system.journal` (the **online** file, which journald writes), `system@*.journal` (archived) and
+`system@*.journal~` (set aside by journald after an unclean close, read like an archived file) are read; the directory is listed in
+chunks of 256 entries and at most 1,024 files are taken. The header of every listed file is read at every run.
+
+**Layout (security area 10).** Only the layout of systemd 249 on the server is read: the signature `LPKSHHRH`, a header of 256 to
+4,096 bytes (a multiple of 8, within the file), the incompatible flag `KEYED-HASH` set and no incompatible flag other than
+`COMPRESSED-XZ`, `COMPRESSED-LZ4`, `KEYED-HASH` and `COMPRESSED-ZSTD`. Any other file — a `COMPACT` journal (systemd 252 and later), a
+journal without keyed hashes, a file shorter than 256 bytes — is refused as `unsupported layout`. Before anything is decoded, every
+offset must be 8-aligned and inside the header's arena and the file, and every object at least its fixed size and end there; hash
+chains and entry-array chains are followed only to strictly larger offsets, a hash chain for at most 65,536 objects and an
+entry-array chain for at most 64 arrays; an entry has at most 512 items. A violation is `malformed file`. An object that lies beyond
+the end of an archived or set-aside file is a **torn tail**: the file ends there. The same in the online file is `malformed file`,
+retried once in the run after the file's size is read again, and at the next runs. Per entry only the items `_TRANSPORT`,
+`SYSLOG_FACILITY`, `MESSAGE` and `_SOURCE_MONOTONIC_TIMESTAMP` are read in full, up to 4,096 bytes of payload each; of every other
+item only the first 64 bytes, to see its name. At most 16 of these items and compressed items are kept per entry; every further one
+is counted. A compressed item is never decompressed, so its name is unknown.
+
+**Finding the entries.** The data hash table (SipHash-2-4 keyed with the file ID) finds the data objects `_TRANSPORT=kernel` and
+`MESSAGE_ID=e9bf28e6e834481bb6f48f548ad13606` (journald's entry about missed kernel messages); their entry lists, merged by sequence
+number, are what a file holds for the collector. The place after the position is found by bisection over the entry arrays, and the
+cursors at the end of the lists of the file the position lies in are kept between runs, so the work of a run is a fixed number of
+reads plus the new entries, whatever the number of entries before the position. Differences of sequence numbers are never used as
+counts or gaps.
+
+**Which entry counts.** An entry of the `_TRANSPORT=kernel` list is **readable** when it has exactly one `_TRANSPORT` item and
+that is `kernel`, no compressed item, no item beyond the 16 kept, a `__REALTIME_TIMESTAMP` above 0 and below 253,402,300,800,000,000
+µs (1 January 10000 UTC), a `__MONOTONIC_TIMESTAMP` of at most 9,223,372,036,854,775 µs, and at most one
+`_SOURCE_MONOTONIC_TIMESTAMP`, which must be 1 to 20 ASCII digits (no sign, space or line feed) within the same bound; a readable
+entry is **counted** when it also has exactly one `SYSLOG_FACILITY` item whose value is exactly `0`. Only a counted entry with exactly
+one `MESSAGE` item can be a kill. Any local user can write entries of the other transports, and a write to `/dev/kmsg` reaches the
+kernel transport with a facility other than 0 (the kernel forces it), so neither is ever a kill. An entry that is not readable is a
+gap (*Gaps of the kernel collector*), never a kill.
+
+**The kill line.** The `MESSAGE` starts with exactly one of `Out of memory: Killed process `, `Memory cgroup out of memory: Killed
+process ` and `Out of memory (oom_kill_allocating_task): Killed process `, followed by the PID (1 to 10 digits, 1 to 2,147,483,647)
+and ` (`; the victim's name runs to the **last** `) total-vm:` of the line, and a line without one is no kill. The rest is split at
+`, ` and at spaces; only the tokens `anon-rss:<1 to 20 digits>kB` (times 1,024, within 64 bits) and `oom_score_adj:<an optional
+minus and 1 to 4 digits>` (−1000 to 1000) are used, and one that is missing, malformed, out of range or present twice leaves its
+field out while the event stays. The report lines before a kill, `Out of memory and no killable processes` and the `oom_reaper` line
+are no kill. The record holds `victim_pid`, `victim_command` (the name made valid UTF-8, each invalid byte U+FFFD, cut to 1,024 bytes;
+`(unnamed)` when empty), `anon_rss_bytes`, `oom_score_adj`, `boot_id` (the entry's boot ID), `kernel_time_ns` (the
+`_SOURCE_MONOTONIC_TIMESTAMP` in nanoseconds, else the `__MONOTONIC_TIMESTAMP`) and the line as `message` (made valid UTF-8 the same
+way, at most 16,384 bytes).
+`boot_id`, `kernel_time_ns` and `victim_pid` are the kill's **identity**: the same however often the kill is read.
+
+**Capture time.** The kernel's clock drifts against the journal's clocks, so a kill is timed by its receipt. The *lag* of a counted
+entry is its `__MONOTONIC_TIMESTAMP` minus its `_SOURCE_MONOTONIC_TIMESTAMP` (0 when the source stamp is the later one). The *drift*
+is the smallest lag among the entry and the counted entries with a source stamp of the same boot that were received at most 600
+seconds before it, among the last 64 such entries read (kept across runs, emptied by an entry of another boot, empty after a
+restart); the *delay* is lag minus drift. The capture time is the `__REALTIME_TIMESTAMP` minus the delay, so it is never after the
+receipt and the delay is 0 without an earlier line; an entry without a source stamp has delay 0. A kill of an earlier boot is timed
+the same way.
+
+**Position.** The position is the sequence-number ID, the sequence number and the real time of the last entry read; it is saved in
+the agent's state (*Agent state*). Without a usable saved position (a first start, no usable state, a saved position that does not
+decode) the collector starts at the end of the newest file (the online file, else the file with the latest tail time) and reads no
+kill before it. Each run reads the files in this order:
+
+1. the files of the position's sequence-number ID in the order of their first sequence number, after the position (a file that ends
+   at or before it is skipped);
+2. the archived and set-aside files of other IDs whose header's first time is not before the committed position's time, by that time
+   (ties by file name), from their start;
+3. the archived and set-aside files of other IDs without a readable header time, by file name, from their start;
+4. the online file, when its ID is another, from its start, whatever its header time (so a clock set back cannot hide it).
+
+A file of steps 2 and 3 that was read to its end is not read again while the agent runs; one cut by a limit is continued where the
+limit cut it. The files of steps 1 and 4 move the position, and so does a file of step 2 whose first time is not before the time the
+position has reached when the file is read; the others are read without moving it. The position's time never moves back (the later
+of the two times is kept). A saved ID of which no file is left records a gap from the position's time to the next readable kernel
+entry (or to the run's start), once, and reading goes on there. A file that disappears between the listing and its read is skipped.
+
+**Limits of a run.** A run stops after one second of reading (checked between entries), after 256 kills, or when its deadline passes,
+and returns what it read; the next run continues there.
+
+**Commit and re-read.** What a run reaches — the position, the drift window, the files of other IDs read to their end or cut by
+a limit, and the gaps already recorded for refused files and a lost ID — is committed as one unit at the start of the next run, and
+only when the scheduler reports that the previous result was kept (`Run.PreviousLost` false); the position is then saved. Otherwise
+the next run reads again from the committed state, so a kill whose record was dropped (a timeout, a skip, a sink error) returns with
+the same identity. A dropped run that read nothing does not count. At the fourth dropped run in a row from the same committed
+position, the span from that position to where the last dropped run got is **given up**: the run records one gap from the committed
+position's time to the time of the last readable kernel entry that run read (else the run's start), reads on after the span, and the
+span's kills are not returned; while that run is dropped as well, the next one gives up the same span again. Trade-off: a sink error
+that lasts more than four runs (8 seconds; later a full spool, #38) gives up the span's kills as a gap although the journal still
+holds them and the sink may recover soon after. A run that is abandoned never moves the saved position.
+
+**Gaps of the kernel collector.** Each gap has source and collector `kernel` and cause `unknown`, and its times come only from
+readable entries, the committed position (decoded strictly from the state file) and the run's start; a gap whose end would not be
+after its start ends 1 µs after it. Gaps are recorded for:
+
+- an unreadable entry of the kernel list: from the last readable kernel entry read (any facility; else the committed position's time)
+  to the next readable kernel entry (else the run's start); several in a row give one gap;
+- journald's entry about missed kernel messages on the `driver` transport (or with an item whose name is unknown): over the same
+  span;
+- a saved ID without files, a given-up span, and a file the reader refuses, finds torn or cannot read (*Failures*);
+- a record that would fail the scheduler's check (*Scheduling*): the collector runs the same check on every record before it returns
+  them and puts a gap over that record's entry in its place (from the previous kernel entry, or the committed position, to the
+  entry's time); a gap that would still fail becomes the gap of the last microsecond before the run's start. So a refused record never
+  makes a span be read again, and the scheduler never refuses a record of this collector.
+
+**Failures.** A run never fails: the collector returns its records and gaps, and an unreadable journal is logged.
+
+- No machine ID, no journal directory, a directory that cannot be listed: the run reads nothing and records no gap; reading resumes
+  at the committed position once the journal can be read, so nothing is lost while the journal still holds it.
+- A file whose header the reader refuses (`unsupported layout`, `malformed file`): one gap from the committed position's time (else
+  the run's start) to the run's start the first time the agent meets the file, and the other files are read on; while the online
+  file is refused, a further gap from the end of the last one to the run's start at the first run at least 600 seconds after it.
+- A torn tail, or `malformed file` while reading an archived or set-aside file: that file ends there, with a gap from the last readable
+  kernel entry read in it (else the committed position's time, else the run's start) to the header's last time when that is later;
+  when the header has no readable last time, to the next readable kernel entry read in this run (else the run's start); when its
+  last time is not later, without a gap. The file is not read again: a file that moves the position moves it past the file's last
+  entry.
+- A file that cannot be opened, a read that fails, and `malformed file` in the online file: the run stops at that file, without a gap,
+  and reads it again at the next run. At the third run in a row that fails at the same file and position the file is given up: a
+  file whose header could not be read gets the gap of a refused file, one being read the gap and the move past the file of a torn
+  tail (the online file's header read again first), and the other files are read on. The online file's `malformed file` is not
+  logged before it is given up.
+
+**Extra snapshots.** A kill is **live** when its entry's boot ID is the current boot's and the time since the journal
+received it, plus its delay, is at most 60 seconds on the monotonic clock (the first field of `/proc/uptime` minus the
+`__MONOTONIC_TIMESTAMP`, a negative age counting as 0); without a readable `/proc/uptime` or boot ID no kill is live. Kills read
+from a backlog or of another boot therefore get no snapshot. The live kills of a run whose identity is not among the last 64 live
+kills the collector has seen are queued; before the run returns, when no request was made at a run start less than 15 seconds before, the
+collector asks the scheduler for one extra run of `processes` and one of `connections` (*Scheduling*), naming the queued kills (oldest
+first, at most 64, the rest counted); otherwise they wait for the first run at least 15 seconds after the last request. A run that is
+read again does not request its kills a second time.
+
+**Logging.** Through the collector's logger, one line per change: warning `kernel messages not readable` with `err` one of
+`journal: machine ID not readable`, `journal: no journal directory`, `journal: directory not readable` and `journal: <online|archived>:
+<unsupported layout|malformed file|read failed>`, and info `kernel messages readable again`. No line per event and none with a path,
+a field value or a message.
+
+**Memory.** The reader and the collector hold at most 4 MiB live, independent of the size of the journal, of the backlog and
+of an entry: fixed buffers, at most 1,024 file headers, the drift window and trigger lists of 64 entries each and at most 256 kill
+records per run. Two tests assert it at journals of 1,000 and 100,000 kernel entries.
+
+**Residuals (records 0119, 0120).**
+
+- The facility rule proves that the kernel wrote the line, not that the OOM killer did: kernel code (a module or a driver) that
+  prints a line of the same form at facility 0 is recorded as a kill.
+- A `COMPACT` journal (systemd 252 and later), one without keyed hashes or one that stores the kill lines compressed is not read; its
+  kernel events are lost to recorded gaps while it is refused. An upgrade of the server's systemd needs the reader to learn the
+  layout.
+- Whether a kill is live compares `/proc/uptime`, which counts time in suspend, with the journal's monotonic clock, which does not.
+  They agree on a server that never suspends (to be checked on the server, #42); after a suspend every kill reads as late and gets no
+  snapshots, never a snapshot too many.
+- After a restart the files of another ID without a readable header time are read again from their start (their kills return with
+  the same identities), and a refused file gives its gap again once per agent start.
+- An archived or set-aside file of another ID whose header's first time lies before the committed position's time is not read.
+- When the file that held the saved position is gone but a later file of the same ID is left (archived files vacuumed while the
+  agent was stopped), reading goes on in the later file and the entries between are skipped without a gap.
+- journald's entry about missed kernel messages is built from the systemd 249 source; the real journals hold none.
+
+## Boots
+
+At its first run the `kernel` collector reads the boot ID from `/proc/sys/kernel/random/boot_id` (at most 64 bytes: a lower-case
+UUID and at most one line feed) and compares it with the boot in the agent's state (*Agent state*):
+
+- the same boot (a restart of the agent): no record, and the state's boot is left alone;
+- another boot: one `kernel_event` of type `boot` with `boot_id`, `booted_at` (the `btime` of `/proc/stat`), `previous_boot_id`
+  and `previous_uptime_ns` (the uptime the state holds for the previous boot, a lower bound at most a minute short when the agent ran
+  until that boot ended; boots the agent did not run in are not recorded);
+- no saved boot (a first start, or no usable state): the same event without `previous_boot_id` and `previous_uptime_ns`, at every
+  start for as long as no state is usable (each with the same `boot_id`).
+
+The capture time is `booted_at`; when the boot time cannot be read, `booted_at` is left out and the capture time is the run's start.
+With the event the state's boot becomes the current one, with the first field of `/proc/uptime` as its uptime (0 when unreadable)
+and its boot time; the `state` job keeps that uptime current. The boot event is returned again by every run until a run's result is kept; the boot is
+in the state from the first run on, so a restart after that state was saved and before a run was kept records no boot event. A boot ID that
+cannot be read or is not a lower-case UUID gives no boot event, leaves the state's boot alone, makes no kill live and logs one
+warning `boot ID not readable`; the other features run.
+
+## Backup runs
+
+The collector `backups` (interval 10 seconds, timeout 5 seconds, placed after `kernel` in the job list) records the start and the end
+of each backup run as `backup_run` records with source `backups` ([wire format](wire-format.md)). It runs only when
+`backups.processes` holds at least one rule (default: one rule, `command: pzstd`; [Configuration and
+secrets](configuration-and-secrets.md)); with `backups.processes: []` it does not run and writes no record and no log line.
+
+**Matching.** Each run lists `/proc` as the process collector does (its 4,096 lowest PIDs) and reads `stat` and `cmdline` of each
+process with the process collector's readers (*Processes*, **Readers**). A process matches when a rule's `command` equals its
+`command` as the process collector derives it (*Processes*, **Names**), or when its cleaned command line starts with a rule's
+`cmdline_prefix`; both are literal comparisons, so `grep pzstd` (command `grep`) does not match `command: pzstd`. A process that
+cannot be read, ended or not, is skipped like an ended one, without a log line or a gap.
+
+**A run.** A run starts at the first check that sees a match: the **start** record holds `started_at` (the earliest start time of the
+matching processes, also its capture time), `boot_id`, the `pid` and `command` of that earliest process and `processes`, the number of
+matches. Each further check with a match keeps the time of the check as the last sighting and the largest number of matches; only
+the earliest process is ever kept, never a list. The first check without a match is the **gone-by** time; a match before 60
+seconds have passed since the last sighting keeps the run. At the first check at least 60 seconds after the last sighting the
+**end** record is written with `started_at`, `boot_id`, `last_seen_at` (the last sighting, also its capture time), `gone_by` and
+`max_processes`; the real end lies between `last_seen_at` and `gone_by`. A process seen at one check only gives a run with its start
+and its end; one that lives shorter than the time between two checks may be missed.
+
+**Restarts and reboots.** The open run is kept in the agent's state. At the first check after the agent starts, a stored
+run of the current boot with a match continues (no second start); a stored run of another boot, or one without a match, ends at once
+with the stored `last_seen_at` (at most a minute before the stop) and `gone_by` that first check; a backup that runs in the new boot
+is a new run with its own start. The gone-by time is not stored: after a restart the first check without a match is the gone-by
+time, so it is never before the real end.
+
+**Lost runs.** After a check whose result was dropped (`Run.PreviousLost`), the collector first restores the open run, the gone-by
+time and the first-check flag as they were before that check, so the dropped start or end is decided again: the start is written
+again while a match runs, the end again with the gone-by time of the last kept check. The scheduler's gap covers the lost check.
+
+**Errors.** A boot ID or boot time that cannot be read, a `/proc` that cannot be listed or the run's deadline fail the run (a gap,
+*Scheduling*); the error texts name the file and a fixed reason, never a command or command line.
+
+**Residuals (record 0120).**
+
+- With the default rule a backup is recognized only while `pzstd` runs: Plesk's own backup processes have not been captured (#45), so
+  a phase without `pzstd` (the database dump before the compression) is not part of the run unless the operator adds a rule.
+- Any local user can start a process named `pzstd`; it counts as a backup run.
+- A backup process the agent cannot read is not recognized; one that becomes unreadable during a run can end the run early.
+- A state the `state` job saved between a dropped check and the next one survives a restart before that next check: the dropped start
+  or end is then not written again.
+
+## Agent state
+
+The agent keeps one small state file, `agent-state.json` in `spool.directory` (security area 9): the last boot it ran in with that
+boot's uptime and boot time, the position of the `kernel` collector in the journal, and the open backup run. It is the agent's only
+file write. The agent never creates the directory; the installation does (#42).
+
+**Format.** One JSON object `{"version":1,"boot":{"id","uptime_ns","booted_at"},"journal":{"seqnum_id","seqnum","realtime"},
+"backup":{"boot_id","started_at","last_seen","max_processes"}}`, the three sections optional, IDs as lower-case UUIDs, times in RFC
+3339 UTC.
+
+**Reading (at start-up).** The file is opened without following a link and without blocking, and is trusted only when `fstat` of
+that descriptor shows a regular file of the agent's effective user without any group or other permission bit and of at most 16 KiB.
+Its content is decoded strictly: one object and nothing after it, `version` 1, no unknown key, no wrong type, lower-case UUIDs, a
+non-negative uptime. An absent file in an existing, empty directory is a first start, without a warning. Anything else that is not
+usable — a missing directory, an absent file beside other entries, a link, a file of another user or with group or other permission,
+an oversized or corrupt file — is treated as no state and logged once as warning `agent state not available`; the first save replaces
+the file.
+
+**Saving.** The `state` job (interval 10 seconds, timeout 5 seconds, last in the job list; it records nothing) saves when a change
+waits: at most every 10 seconds when a kill, a boot or a backup change waits (a new run, its end, a higher process count, a position
+moved by a run that read kills), else once 50 seconds have passed, when it also refreshes the stored uptime from `/proc/uptime` (a
+position that moved over other kernel lines waits for this). A save removes a left-over `agent-state.json.tmp`, creates it anew
+(exclusively, without following a link, mode 0600), writes and syncs it, renames it over `agent-state.json` and syncs the directory.
+A failure, also a missing directory, is logged once as warning `agent state not saved` with `err` `agentstate: save: <system error
+text>` (never a path) until a save succeeds, and the agent goes on; a save that hangs past the job's timeout is a gap of collector
+`state`, as for any collector.
+
+**The spool leaves it alone.** The state file is not part of the spool: whatever the spool (#38) counts against its size bound and
+deletes when full must never include it.
+
 ## Memory pressure mode
 
 The `system` collector decides the memory pressure mode ([Scheduling](#scheduling)) after each successful `system` sample, from the values
@@ -831,7 +1099,7 @@ it has just read:
 The collector calls the switch (`Scheduler.SetPressure`, which the agent connects when it builds the scheduler) only when the mode changes;
 it starts off. A change logs one info line `memory pressure mode on` or `memory pressure mode off` with `collector=system`,
 `mem_available_bytes` and, when the pressure file was read, `memory_some_avg10`. A failed sample changes nothing. The effect: the `system`
-(10 seconds), `processes` (15 seconds), `connections` (15 seconds), `systemd` (10 seconds) and `mariadb` (10 seconds) collectors run at their pressure intervals, `processes` lists every process, `connections` records a full snapshot and `mariadb` records the thread snapshot of the server's process list (*MariaDB*).
+(10 seconds), `processes` (15 seconds), `connections` (15 seconds), `systemd` (10 seconds) and `mariadb` (10 seconds) collectors run at their pressure intervals, `processes` lists every process, `connections` records a full snapshot and `mariadb` records the thread snapshot of the server's process list (*MariaDB*). An extra run of `processes` or `connections` for an OOM kill then takes the place of the collector's next regular run (*Scheduling*), so a storm of kills costs no more snapshots than the mode already takes.
 
 Because the decision follows a `system` sample, the switch can lag the pressure by up to one `system` interval (30 seconds). Any local
 user can switch the mode on by allocating memory; the result is a process snapshot with every process every 15 seconds and a spool that
@@ -859,7 +1127,7 @@ grows faster until its size bound evicts older data with a recorded gap, bounded
 ## Gaps
 
 **There is no data gap unless it is explicitly recorded.** The agent records the gaps it knows about: a collector sample missed or
-skipped, and spool data dropped when the spool's size bound is hit. The backend records the gaps it detects (missing sequence numbers,
+skipped, a span of kernel messages it cannot read (*Kernel events*), and spool data dropped when the spool's size bound is hit. The backend records the gaps it detects (missing sequence numbers,
 intervals with no batch). Analysis, reports and the web UI treat a recorded gap as *unknown*, never as *normal*. Spool eviction,
 collector timeouts and backend gap detection each emit a gap record, and each path has a test.
 
@@ -873,6 +1141,8 @@ collector timeouts and backend gap detection each emit a gap record, and each pa
 - The boot ID and the clock offset are kept with each spooled record, and a batch holds only records with the same boot ID and offset.
 - The spool is a file-write area of the agent: it has a size bound and defined behavior when it is full (oldest data dropped, a gap
   recorded). Records the spool refuses to take from the scheduler are its loss to record as a gap, too.
+- The spool counts and deletes only its own files: the agent's state file in the same directory (*Agent state*) is never part of its
+  size or of what it drops.
 
 ## Rights
 
@@ -932,6 +1202,14 @@ collector timeouts and backend gap detection each emit a gap record, and each pa
   `adjtimex` with modes 0 and `statfs` succeed, while an `adjtimex` that sets the maximum error fails with `EPERM`). The unit's system-call filter must allow `adjtimex`: `ProtectClock=yes` denies it with `EPERM` even for a
   read, and the group `@system-service` does not contain it, so an allow-list names it. A change of the clock still needs
   `CAP_SYS_TIME`, which the bounding set excludes.
+- **Kernel event collector.** It reads the journal files below `/var/log/journal` and `/run/log/journal` as a member of
+  `systemd-journal`, its first user, and `/etc/machine-id`, `/proc/sys/kernel/random/boot_id`, `/proc/uptime` and `/proc/stat`, which
+  any user can read; it needs no capability (not `CAP_SYSLOG`: it does not read `/dev/kmsg`). The unit must keep both journal
+  directories readable (no `InaccessiblePaths=` or `TemporaryFileSystem=` over them) and start after `systemd-journal-flush.service`.
+  That the server's journal files are readable by the group is checked on the server (#42).
+- **Backup check.** It reads `/proc` as the process collector does and needs no right of its own.
+- **State file.** The agent's one write is `agent-state.json` in `spool.directory` (*Agent state*); the installation creates that
+  directory, writable by the agent's user, and the agent never creates it.
 - For restarting units (self-healing, a later feature) a polkit rule lets this user restart only the units named in the configuration;
   there is no sudo and no shell.
 - Each group, capability and confinement setting is listed and justified in `deploy/agent/` when the collector that needs it is
@@ -970,6 +1248,14 @@ collector timeouts and backend gap detection each emit a gap record, and each pa
   MariaDB collector speaks the protocol with a minimal client of its own over one connection per run, sends the captured statements with
   the captured layout bits, records a refused login as `not_answering` with its error number, keeps the statement text of only the first
   64 threads, and counts exposure from the kernel's TCP tables.
+- [0119](../decisions/0119-kernel-messages-from-the-binary-journal-files-read-in-pure-go-without-decompression.md) — why the kernel
+  messages are read from the binary journal files in pure Go, set-aside files included, without decompression and only in the layout
+  the server writes, why only the kernel transport with facility 0 counts, and why a kill is timed by its receipt corrected for the
+  kernel clock's drift.
+- [0120](../decisions/0120-oom-kill-events-triggered-snapshots-boots-from-saved-state-and-backup-runs.md) — why a live kill requests
+  extra snapshots through the scheduler and names them by its identity, why boots come from a saved state file, why the journal
+  position is committed only after a kept run with at most three re-reads, and why backup runs are a record kind of their own with
+  `pzstd` as the default rule.
 
 ## Not here
 
@@ -985,5 +1271,8 @@ collector timeouts and backend gap detection each emit a gap record, and each pa
 `internal/connstats` (connection collector; fixtures `testdata/proc/net/`, `testdata/connections/sandbox/`), `internal/sockmount` (the start-up probe of the socket mount),
 `internal/svcstats` (systemd collector) and `internal/sdbus` (its D-Bus client; fixture `testdata/systemd/`, a capture of systemd 249's replies),
 `internal/mariadb` (MariaDB collector and its protocol client; fixture `testdata/mariadb/`, two captures of MariaDB 12.3.3's replies to a `unix_socket` login; it uses `sysstats.MemTotal`, `connstats.TCPListeners` and `procstats.CleanText`),
+`internal/journal` (the journal file reader) and `internal/journal/journaltest` (a writer of journal files for tests; fixtures
+`testdata/journal/`: an online, an archived and a set-aside file generated from `kernel.export`), `internal/kernevents` (kernel event
+collector and boot check), `internal/backups` (backup run check), `internal/agentstate` (the state file and the `state` job),
 `internal/sdnotify`, `internal/config`, `internal/model`, `internal/wire`; `deploy/agent/` (example configuration, `mariadb-user.sql`; the unit and install
 scripts follow with the collectors).

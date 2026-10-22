@@ -41,13 +41,14 @@ Agent:
 | --- | ------- | ---- |
 | `agent_id` | none, required | 1 to 64 characters of `A-Z a-z 0-9 . _ -`, starting with a letter or digit (the rule of the [wire format](wire-format.md) for agent IDs) |
 | `backend.url` | none, required | URL with scheme `http` or `https`; a host that is an IP address or a name of letters, digits, `.` and `-` (checked after percent-decoding); an optional port from 1 to 65535; no user info, query, fragment or path other than `/` |
-| `spool.directory` | `/var/lib/vandox/spool` | absolute, clean path |
+| `spool.directory` | `/var/lib/vandox/spool` | absolute, clean path (see below) |
 | `log.level` | `info` | `debug`, `info`, `warn` or `error` |
 | `filesystem.mount_points` | `["/"]` | a list of at most 16 absolute, clean paths of at most 1,024 bytes each, every path listed once (see below) |
 | `processes.programs` | `[]` | a list of at most 64 rules, each a mapping of `program`, one of `command` and `cmdline_prefix`, and optionally `append_next_word` (see below) |
 | `services.units` | `[sw-cp-server, sw-engine, psa, nginx, apache2, postfix, dovecot, mariadb, plesk-php*-fpm, php*-fpm, fail2ban]` | a list of at most 64 service unit names or patterns of 1 to 255 bytes (see below) |
 | `mariadb.enabled` | `true` | `true` or `false` (see below) |
 | `mariadb.socket` | `/run/mysqld/mysqld.sock` | absolute, clean path of 2 to 107 bytes (see below) |
+| `backups.processes` | `[{command: pzstd}]` | a list of at most 64 rules, each a mapping of exactly one of `command` and `cmdline_prefix` (see below) |
 
 Backend:
 
@@ -144,6 +145,29 @@ Backend:
   refused with `config: <file>:<line>: mariadb.socket: must be an absolute, clean path of at most 107 bytes`, a value with a control,
   format or line-separating character by the general string rule above, and a null value as "has no value"; no error contains the
   value. The agent stops at start-up with exit code 1 on each of them. The collector itself never logs the path.
+- `backups.processes` names the processes that mark a running backup ([Agent](agent.md), *Backup runs*). The list replaces the
+  default (one rule, `command: pzstd`; Plesk's own backup processes are not in it until they are captured, #45); an empty list `[]`
+  switches the `backups` collector off, so it writes no record and no log line, and a section without the key or a null section keeps
+  the default. It is a list of at most 64 rules in file order; a process is part of a backup when any rule matches it. Each rule is a
+  mapping with exactly one of `command` (compared with the command of the process as a whole) and `cmdline_prefix` (compared literally
+  with the start of the command line), each 1 to 256 bytes without characters of the categories Cc, Cf, Zl or Zp; `*`, `?` and other
+  characters are literal text. The strict decoder walks the list as for `processes.programs`, and the keys `program` and
+  `append_next_word` are unknown here. The errors read `config: <file>:<line>: <key>: <reason>` and never contain the value:
+
+  | Key | Reason |
+  | --- | ------ |
+  | `backups.processes` (more than 64 rules) | `must be a list of at most 64 rules` |
+  | `backups.processes` (a value that is not a list) | `invalid value, want a list` |
+  | `backups.processes[<i>]` (neither or both of `command` and `cmdline_prefix`; empty is "not set") | `must set exactly one of command and cmdline_prefix` |
+  | `backups.processes[<i>].command` or `.cmdline_prefix` (more than 256 bytes) | `must be 1 to 256 bytes` |
+  | `backups.processes[<i>]` (null element) | `has no value` |
+  | `backups.processes[<i>]` (element that is not a mapping) | `must be a section (a mapping of keys)` |
+  | `backups.processes[<i>].<key>` (an unknown or duplicate key) | `unknown key`, `duplicate key` |
+
+  The agent stops at start-up with exit code 1 on every one of them.
+- `spool.directory` also holds the agent's state file `agent-state.json` (the last boot, the position in the journal and the open
+  backup run; [Agent](agent.md), *Agent state*). The agent never creates the directory: the installation does, writable by the
+  agent's user.
 - A directory must be absolute and clean: no trailing slash and no empty, `.` or `..` element. The loader does not
   create it.
 - Plain `http` is allowed for `backend.url`, because the tailnet encrypts and authenticates the transport. Whether
@@ -226,6 +250,7 @@ Backend:
 - [0113](../decisions/0113-process-collector-pss-from-smaps-rollup-top-processes-full-snapshot-under-memory-pressure.md) — why the process grouping rules are a list of mappings of literal comparisons that the strict decoder checks.
 - [0117](../decisions/0117-systemd-collector-hand-written-d-bus-client-per-run-states-recorded-on-change.md) — why the units to track are a list of names and patterns, an entry without a suffix is a service, and other unit types are refused.
 - [0118](../decisions/0118-mariadb-collector-hand-written-client-captured-statements-refusals-as-not-answering-with-error-code.md) — why the MariaDB collector, which these options switch and point to its socket, connects over the local socket with a client of its own, one connection per run.
+- [0120](../decisions/0120-oom-kill-events-triggered-snapshots-boots-from-saved-state-and-backup-runs.md) — why backup runs are named by literal process rules with `pzstd` as the only default, and why the agent's state lives in `spool.directory` without a new option.
 
 ## Not here
 
