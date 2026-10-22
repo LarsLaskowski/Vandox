@@ -212,6 +212,7 @@ func (r *pass) readSameID(dir fs.FS, files []fileInfo, id [16]byte) bool {
 	slices.SortFunc(same, func(a, b fileInfo) int {
 		return cmpUint(a.hdr.HeadSeqnum, b.hdr.HeadSeqnum)
 	})
+	r.detectVacuumed(same)
 	for _, f := range same {
 		if f.hdr.TailSeqnum <= r.cur.pos.seq {
 			continue
@@ -221,6 +222,35 @@ func (r *pass) readSameID(dir fs.FS, files []fileInfo, id [16]byte) bool {
 		}
 	}
 	return true
+}
+
+// detectVacuumed records the entries lost when files of the position's seqnum ID remain but none holds the position and one starts
+// after it: one gap from the position's time to the head time of the first such file, once per position; sequence number 0 is no entry, so nothing before it can be lost. Without a readable head time
+// the next readable kernel entry, else the end of the run, closes the gap. same is sorted by head sequence number.
+func (r *pass) detectVacuumed(same []fileInfo) {
+	pos := r.cur.pos
+	if pos.seq == 0 || r.cur.vacuumed.same(pos) {
+		return
+	}
+	var next *fileInfo
+	for i := range same {
+		f := &same[i]
+		if f.hdr.HeadSeqnum <= pos.seq && pos.seq <= f.hdr.TailSeqnum {
+			return
+		}
+		if next == nil && f.hdr.HeadSeqnum > pos.seq {
+			next = f
+		}
+	}
+	if next == nil {
+		return
+	}
+	r.cur.vacuumed = pos
+	if head := next.hdr.HeadRealtime; head.After(pos.rt) {
+		r.emitGap(pos.rt, head)
+		return
+	}
+	r.openGap(pos.rt)
 }
 
 // readOlder reads the archived and set-aside files of other IDs whose head time is not before the position's time, by head time.

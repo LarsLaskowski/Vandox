@@ -86,8 +86,8 @@ func (o *OOMKill) validate() error {
 	if err := checkOOMScoreAdj("oom_kill.oom_score_adj", o.OOMScoreAdj); err != nil {
 		return err
 	}
-	if o.BootID != "" && !uuidPattern.MatchString(o.BootID) {
-		return invalid("oom_kill.boot_id", "invalid characters")
+	if err := checkOptionalUUID("oom_kill.boot_id", o.BootID); err != nil {
+		return err
 	}
 	if o.KernelTime != nil && *o.KernelTime < 0 {
 		return invalid("oom_kill.kernel_time_ns", "must not be negative")

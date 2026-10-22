@@ -17,6 +17,13 @@ const (
 	maxProcStatLine  = 64 << 10 // the longest line that is held; a longer one (intr) is skipped to its end
 )
 
+// Bounds of the read of the boot ID file.
+const (
+	bootIDFile    = "sys/kernel/random/boot_id"
+	maxBootIDFile = 64 // the UUID and a line feed
+	bootIDLen     = 36
+)
+
 // maxUnixSeconds is the last second of the year 9999: Go's JSON encoding of a time fails beyond it.
 const maxUnixSeconds = 253402300799
 
@@ -24,6 +31,7 @@ const maxUnixSeconds = 253402300799
 var (
 	errTooLarge   = errors.New("larger than the limit")
 	errNoBootTime = errors.New("btime missing, repeated or not a number")
+	errNotBootID  = errors.New("procstats: boot_id: not a lower-case UUID")
 )
 
 // readBootTime returns the boot time from the btime line of proc/stat: "btime", one space and 1 to 20 digits, exactly once.
@@ -112,5 +120,35 @@ func ReadBootTime(proc fs.FS) (time.Time, error) {
 // ReadBootID returns the boot id of the running kernel from sys/kernel/random/boot_id of proc: a lower-case UUID with
 // at most one line feed, read up to 64 bytes.
 func ReadBootID(proc fs.FS) (string, error) {
-	return "", errors.New("not implemented")
+	f, err := proc.Open(bootIDFile)
+	if err != nil {
+		return "", fmt.Errorf("procstats: boot_id: %w", err)
+	}
+	defer func() { _ = f.Close() }()
+
+	raw, err := io.ReadAll(io.LimitReader(f, maxBootIDFile))
+	if err != nil {
+		return "", fmt.Errorf("procstats: boot_id: %w", err)
+	}
+	text := string(bytes.TrimSuffix(raw, []byte("\n")))
+	if len(text) != bootIDLen || !isLowerUUID(text) {
+		return "", errNotBootID
+	}
+	return text, nil
+}
+
+// isLowerUUID reports whether s is the 36 character form of an ID with lower-case hexadecimal digits.
+func isLowerUUID(s string) bool {
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case i == 8 || i == 13 || i == 18 || i == 23:
+			if c != '-' {
+				return false
+			}
+		case (c < '0' || c > '9') && (c < 'a' || c > 'f'):
+			return false
+		}
+	}
+	return true
 }

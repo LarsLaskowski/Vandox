@@ -1,6 +1,7 @@
 package kernevents
 
 import (
+	"context"
 	"slices"
 	"time"
 
@@ -27,16 +28,20 @@ type triggerState struct {
 	sent    bool
 }
 
-// isNew remembers a kill and reports whether it was not remembered before. The last 64 kills are remembered.
-func (t *triggerState) isNew(ref model.KillRef) bool {
+// knows reports whether a kill was handed out before or is waiting for its turn.
+func (t *triggerState) knows(ref model.KillRef) bool {
+	return slices.Contains(t.seen, ref)
+}
+
+// remember keeps a kill; the last 64 kills are remembered.
+func (t *triggerState) remember(ref model.KillRef) {
 	if slices.Contains(t.seen, ref) {
-		return false
+		return
 	}
 	if len(t.seen) >= model.MaxTriggerKills {
 		t.seen = append(t.seen[:0], t.seen[1:]...)
 	}
 	t.seen = append(t.seen, ref)
-	return true
 }
 
 // add queues kills, oldest first, up to the most a request names; the rest is counted.
@@ -62,11 +67,20 @@ func (t *triggerState) take(start time.Time) scheduler.Trigger {
 
 // requestSnapshots queues the live kills of a run and, when the 15 seconds since the last request have passed, asks the process and
 // the connection collector for one extra full snapshot naming all queued kills.
-func (k *Kernel) requestSnapshots(start time.Time, kills []model.KillRef) {
-	if k.trigger == nil {
+// A run whose context ended queues and sends nothing, and its kills stay unremembered so that a re-read can trigger them.
+func (k *Kernel) requestSnapshots(ctx context.Context, start time.Time, kills []model.KillRef) {
+	if k.trigger == nil || ctx.Err() != nil {
 		return
 	}
-	k.trig.add(kills)
+	var fresh []model.KillRef
+	for _, ref := range kills {
+		if k.trig.knows(ref) {
+			continue
+		}
+		k.trig.remember(ref)
+		fresh = append(fresh, ref)
+	}
+	k.trig.add(fresh)
 	nothing := len(k.trig.waiting) == 0 && k.trig.omitted == 0
 	if nothing || !k.trig.due(start) {
 		return

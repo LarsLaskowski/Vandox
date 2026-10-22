@@ -431,10 +431,9 @@ func (r *pass) countedEntry(e *journal.Entry, info entryInfo, from time.Time) {
 		Data: &model.KernelEvent{Type: model.KernelEventOOMKill, OOMKill: &kill, Message: text},
 	}, from)
 	r.kills++
-	if r.isLive(e, info, delay) {
-		if ref := (model.KillRef{BootID: boot, KernelTime: identity, VictimPID: kill.VictimPID}); r.k.trig.isNew(ref) {
-			r.live = append(r.live, ref)
-		}
+	ref := model.KillRef{BootID: boot, KernelTime: identity, VictimPID: kill.VictimPID}
+	if r.isLive(e, info, delay) && !r.k.trig.knows(ref) {
+		r.live = append(r.live, ref)
 	}
 }
 

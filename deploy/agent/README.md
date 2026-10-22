@@ -108,8 +108,8 @@ collectors.
 
 - **The unit keeps the journal readable**: no `InaccessiblePaths=` or `TemporaryFileSystem=` over `/var/log/journal` or `/run/log/journal`, and
   it starts after `systemd-journal-flush.service`, so the persistent journal is in place when the `kernel` collector first reads it. A server
-  without a persistent journal is read from `/run/log/journal`; if neither can be read, the collector records a gap and logs
-  `kernel messages not readable` once.
+  without a persistent journal is read from `/run/log/journal`; if neither can be read, the collector logs
+  `kernel messages not readable` once, records no gap and resumes at the saved position once the journal is readable again.
 - **The state file** `agent-state.json` lives in `spool.directory` and holds the boot, the position in the journal and the open backup run, so
   a restart neither repeats nor loses a kill, and a backup that ended while the agent was down is closed. The agent writes this one file
   (mode 0600) and **never creates the directory**: the installation creates `spool.directory` and makes it writable for `vandox-agent`

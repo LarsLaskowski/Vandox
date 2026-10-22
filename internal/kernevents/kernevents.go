@@ -180,7 +180,7 @@ func (k *Kernel) finish(p *pass) []model.Record {
 		k.fail = failure{}
 	}
 	k.logOutcome(p.problem)
-	k.requestSnapshots(p.start, p.live)
+	k.requestSnapshots(p.ctx, p.start, p.live)
 	return checkRecords(p.records, p.start, func(i int) time.Time { return p.froms[i] })
 }
 

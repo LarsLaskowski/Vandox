@@ -113,6 +113,8 @@ type readState struct {
 	// lostID is the seqnum ID whose loss was recorded as a gap.
 	lostID [16]byte
 	lost   bool
+	// vacuumed is the position for which the entries lost to a vacuum were recorded as a gap.
+	vacuumed place
 }
 
 // fork returns a copy a run may change.

@@ -5,7 +5,6 @@ package backups
 import (
 	"context"
 	"fmt"
-	"io"
 	"io/fs"
 	"log/slog"
 	"strings"
@@ -29,9 +28,6 @@ type Rule struct {
 
 // endAfter is how long no matching process may be seen before the run ends.
 const endAfter = 60 * time.Second
-
-// maxBootIDBytes bounds the read of the boot ID file.
-const maxBootIDBytes = 128
 
 // Backups is the backup run collector.
 type Backups struct {
@@ -75,9 +71,9 @@ func (b *Backups) Collect(ctx context.Context, run scheduler.Run) ([]model.Recor
 		return nil, nil
 	}
 	b.remember(run.PreviousLost)
-	bootID, err := b.readBootID()
+	bootID, err := procstats.ReadBootID(b.proc)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("backups: %w", err)
 	}
 	boot, err := procstats.ReadBootTime(b.proc)
 	if err != nil {
@@ -123,21 +119,6 @@ func sameRun(a, b *agentstate.OpenRun) bool {
 	}
 
 	return a.BootID == b.BootID && a.StartedAt.Equal(b.StartedAt) && a.LastSeen.Equal(b.LastSeen) && a.MaxProcesses == b.MaxProcesses
-}
-
-// readBootID returns the boot ID of the monitored server.
-func (b *Backups) readBootID() (string, error) {
-	f, err := b.proc.Open("sys/kernel/random/boot_id")
-	if err != nil {
-		return "", fmt.Errorf("backups: boot id: %w", err)
-	}
-	defer func() { _ = f.Close() }()
-	raw, err := io.ReadAll(io.LimitReader(f, maxBootIDBytes))
-	if err != nil {
-		return "", fmt.Errorf("backups: boot id: %w", err)
-	}
-
-	return strings.TrimSpace(string(raw)), nil
 }
 
 // scan lists the processes and counts those a rule matches.

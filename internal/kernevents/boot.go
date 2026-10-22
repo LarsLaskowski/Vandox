@@ -1,10 +1,7 @@
 package kernevents
 
 import (
-	"bytes"
-	"io"
 	"io/fs"
-	"strings"
 	"time"
 
 	"github.com/LarsLaskowski/Vandox/internal/agentstate"
@@ -13,13 +10,6 @@ import (
 )
 
 const (
-	// bootIDPath is the file with the ID of the current boot.
-	bootIDPath = "sys/kernel/random/boot_id"
-	// maxBootIDFile bounds what is read of the boot ID file: the UUID and a line feed.
-	maxBootIDFile = 64
-	// uuidLen is the length of the text form of an ID.
-	uuidLen = 36
-
 	msgBootUnreadable = "boot ID not readable"
 )
 
@@ -76,22 +66,6 @@ func (k *Kernel) saveBoot(id string, bootedAt time.Time) {
 
 // readBootID reads the boot ID: a lower-case UUID and at most one line feed.
 func readBootID(proc fs.FS) (string, bool) {
-	f, err := proc.Open(bootIDPath)
-	if err != nil {
-		return "", false
-	}
-	defer func() { _ = f.Close() }()
-
-	raw, err := io.ReadAll(io.LimitReader(f, maxBootIDFile))
-	if err != nil {
-		return "", false
-	}
-	text := string(bytes.TrimSuffix(raw, []byte("\n")))
-	if len(text) != uuidLen {
-		return "", false
-	}
-	if _, ok := parseUUID(text); !ok || text != strings.ToLower(text) {
-		return "", false
-	}
-	return text, true
+	id, err := procstats.ReadBootID(proc)
+	return id, err == nil
 }
