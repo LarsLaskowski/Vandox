@@ -1803,3 +1803,71 @@ func TestDisallowedSelectors_ResolvesTheLocalNameOfTheImport(t *testing.T) {
 		})
 	}
 }
+
+// killsFor returns n distinct kills for the triggered runs.
+func killsFor(n int) []model.KillRef {
+	kills := make([]model.KillRef, n)
+	for i := range kills {
+		kills[i] = model.KillRef{BootID: "0f1e2d3c-4b5a-4968-8776-655443322110", KernelTime: time.Duration(i+1) * time.Second, VictimPID: int32(900 + i)}
+	}
+	return kills
+}
+
+// triggeredAt returns the i-th run, started by the kills with omitted more kills beyond them.
+func triggeredAt(i int, pressure bool, kills []model.KillRef, omitted uint32) scheduler.Run {
+	run := runAt(i, pressure)
+	run.Trigger = &scheduler.Trigger{Kills: kills, KillsOmitted: omitted}
+	return run
+}
+
+func TestConnections_TriggeredRunIsFullAndNamesKills(t *testing.T) {
+	tests := []struct {
+		name     string
+		pressure bool
+		kills    []model.KillRef
+		omitted  uint32
+	}{
+		{"one kill without pressure", false, killsFor(1), 0},
+		{"the most kills with omitted ones", false, killsFor(model.MaxTriggerKills), 7},
+		{"one kill under pressure", true, killsFor(1), 0},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			w := ownedWorld(t)
+			c := newCollector(w)
+			snapshotOf(t, c, runAt(0, false))
+			_, regular := snapshotOf(t, c, runAt(1, false))
+
+			rec, snap := snapshotOf(t, c, triggeredAt(2, tc.pressure, tc.kills, tc.omitted))
+
+			wantFlags(t, regular, true, false, false, model.ListenerCheckAll)
+			wantFlags(t, snap, false, true, false, model.ListenerCheckAll)
+			wantList(t, "connections of the triggered run", snap.Connections, ownedConnections)
+			wantList(t, "remotes of the triggered run", snap.Remotes, ownedRemotes)
+			if len(snap.Listeners) != ownedListeners {
+				t.Errorf("listeners of the triggered run = %d, want %d", len(snap.Listeners), ownedListeners)
+			}
+			if snap.Trigger == nil {
+				t.Fatalf("snapshot trigger = nil, want %d kills and %d omitted", len(tc.kills), tc.omitted)
+			}
+			if !slices.Equal(snap.Trigger.Kills, tc.kills) || snap.Trigger.KillsOmitted != tc.omitted {
+				t.Errorf("snapshot trigger = %+v, want kills %+v and %d omitted", snap.Trigger, tc.kills, tc.omitted)
+			}
+			if err := snap.Validate(); err != nil {
+				t.Errorf("Validate() of the triggered snapshot = %v, want nil", err)
+			}
+			checkWire(t, rec)
+		})
+	}
+}
+
+func TestConnections_TriggeredFirstRunNamesKills(t *testing.T) {
+	kills := killsFor(2)
+
+	_, snap := snapshotOf(t, newCollector(ownedWorld(t)), triggeredAt(0, false, kills, 3))
+
+	wantFlags(t, snap, false, true, false, model.ListenerCheckStart)
+	if snap.Trigger == nil || !slices.Equal(snap.Trigger.Kills, kills) || snap.Trigger.KillsOmitted != 3 {
+		t.Errorf("snapshot trigger = %+v, want kills %+v and 3 omitted", snap.Trigger, kills)
+	}
+}
