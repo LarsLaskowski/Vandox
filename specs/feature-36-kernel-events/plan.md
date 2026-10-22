@@ -561,3 +561,7 @@ configuration *Options*; ARCHITECTURE *Components* and package list. `docs/areas
 ## Out of scope / follow-ups
 
 As the spec's *Out of scope*. Follow-up issue: "[Agent] Read journal files of the COMPACT layout" (systemd 252 and later; record 0119).
+
+## Security notes
+
+- N9 (non-blocking, Security delta round): The plan does not say how a file whose header head time is now "absent" is ordered. Among the files of other seqnum IDs, which go "in head-time order, from their heads", such a file could be skipped silently. Its kills would then be lost without a gap. Have the Dev read such a file after the others, from its head, or record a gap for it. A test case in `TestFile_TornTailIsEndOfFile` or `TestKernel_ReadsSetAsideFilesAfterUncleanShutdown` would pin it.
