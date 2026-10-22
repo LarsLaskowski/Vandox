@@ -1,6 +1,7 @@
 package kernevents
 
 import (
+	"context"
 	"errors"
 	"io/fs"
 	"time"
@@ -81,8 +82,8 @@ type fileReader struct {
 }
 
 // readFile reads one file and reports whether the run goes on with the next one.
-func (r *pass) readFile(dir fs.FS, fi fileInfo, mode fileMode) bool {
-	if r.limitReached() {
+func (r *pass) readFile(ctx context.Context, dir fs.FS, fi fileInfo, mode fileMode) bool {
+	if r.limitReached(ctx) {
 		r.stopped = true
 		return false
 	}
@@ -93,7 +94,7 @@ func (r *pass) readFile(dir fs.FS, fi fileInfo, mode fileMode) bool {
 	defer o.close()
 
 	fr := &fileReader{r: r, fi: fi, o: o, mode: mode}
-	res, err := fr.read()
+	res, err := fr.read(ctx)
 	if mode.moving {
 		r.k.cache = fr.cursors(res)
 	}
@@ -149,12 +150,12 @@ func (r *pass) failure(fr *fileReader, err error) bool {
 }
 
 // read reads the lists to their end or until a limit or an error stops it.
-func (fr *fileReader) read() (result, error) {
+func (fr *fileReader) read(ctx context.Context) (result, error) {
 	if err := fr.open(); err != nil {
 		return resFail, err
 	}
 	for {
-		if fr.r.limitReached() {
+		if fr.r.limitReached(ctx) {
 			return resStop, nil
 		}
 		e, kernel, err := fr.nextEntry()

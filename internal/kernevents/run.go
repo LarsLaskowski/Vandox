@@ -25,7 +25,6 @@ const (
 // pass is one pass over the journal.
 type pass struct {
 	k        *Kernel
-	ctx      context.Context
 	start    time.Time
 	begin    time.Time
 	cur      readState
@@ -86,8 +85,8 @@ func (r *pass) gapFrom() time.Time {
 }
 
 // limitReached reports whether the run has read enough: 256 kills, one second, or a cancelled context.
-func (r *pass) limitReached() bool {
-	return r.kills >= maxKills || r.ctx.Err() != nil || time.Since(r.begin) >= readBudget
+func (r *pass) limitReached(ctx context.Context) bool {
+	return r.kills >= maxKills || ctx.Err() != nil || time.Since(r.begin) >= readBudget
 }
 
 // noteProblem keeps the first fixed reason why the journal could not be read.
@@ -124,7 +123,7 @@ func (r *pass) uptimeNow() (time.Duration, bool) {
 }
 
 // readJournal reads the new entries of the journal files.
-func (r *pass) readJournal() {
+func (r *pass) readJournal(ctx context.Context) {
 	dir, names, ok := r.locate()
 	if !ok {
 		return
@@ -138,7 +137,7 @@ func (r *pass) readJournal() {
 		return
 	}
 	r.detectLost(files)
-	r.readFiles(dir, files)
+	r.readFiles(ctx, dir, files)
 }
 
 // startAtTail sets the position to the end of the newest file: a first start reads no history.
@@ -202,15 +201,15 @@ type fileMode struct {
 
 // readFiles reads the files in the order of the plan: the files of the position's seqnum ID, then the older files of other IDs by head
 // time, then those without a head time, then the online file of another ID.
-func (r *pass) readFiles(dir fs.FS, files []fileInfo) {
+func (r *pass) readFiles(ctx context.Context, dir fs.FS, files []fileInfo) {
 	id, from := r.cur.pos.id, r.startPos.rt
-	if r.readSameID(dir, files, id) && r.readOlder(dir, files, id, from) && r.readNoHead(dir, files, id) {
-		r.readOnline(dir, files, id)
+	if r.readSameID(ctx, dir, files, id) && r.readOlder(ctx, dir, files, id, from) && r.readNoHead(ctx, dir, files, id) {
+		r.readOnline(ctx, dir, files, id)
 	}
 }
 
 // readSameID reads the files of the seqnum ID of the position, from the position.
-func (r *pass) readSameID(dir fs.FS, files []fileInfo, id [16]byte) bool {
+func (r *pass) readSameID(ctx context.Context, dir fs.FS, files []fileInfo, id [16]byte) bool {
 	same := selectFiles(files, func(f fileInfo) bool { return f.hdr.SeqnumID == id })
 	slices.SortFunc(same, func(a, b fileInfo) int {
 		return cmpUint(a.hdr.HeadSeqnum, b.hdr.HeadSeqnum)
@@ -220,7 +219,7 @@ func (r *pass) readSameID(dir fs.FS, files []fileInfo, id [16]byte) bool {
 		if f.hdr.TailSeqnum <= r.cur.pos.seq {
 			continue
 		}
-		if !r.readFile(dir, f, fileMode{moving: true, after: r.cur.pos.seq}) {
+		if !r.readFile(ctx, dir, f, fileMode{moving: true, after: r.cur.pos.seq}) {
 			return false
 		}
 	}
@@ -261,7 +260,7 @@ func (r *pass) detectVacuumed(same []fileInfo) {
 }
 
 // readOlder reads the archived and set-aside files of other IDs whose head time is not before the position's time, by head time.
-func (r *pass) readOlder(dir fs.FS, files []fileInfo, id [16]byte, from time.Time) bool {
+func (r *pass) readOlder(ctx context.Context, dir fs.FS, files []fileInfo, id [16]byte, from time.Time) bool {
 	others := selectFiles(files, func(f fileInfo) bool {
 		return !f.online && f.hdr.SeqnumID != id && !f.hdr.HeadRealtime.IsZero() && !f.hdr.HeadRealtime.Before(from) && !r.isDone(f)
 	})
@@ -273,7 +272,7 @@ func (r *pass) readOlder(dir fs.FS, files []fileInfo, id [16]byte, from time.Tim
 	})
 	for _, f := range others {
 		mode := fileMode{moving: !f.hdr.HeadRealtime.Before(r.cur.pos.rt), after: r.cur.resume[f.hdr.FileID]}
-		if !r.readFile(dir, f, mode) {
+		if !r.readFile(ctx, dir, f, mode) {
 			return false
 		}
 	}
@@ -281,13 +280,13 @@ func (r *pass) readOlder(dir fs.FS, files []fileInfo, id [16]byte, from time.Tim
 }
 
 // readNoHead reads the files of other IDs without a head time, by name; they never move the position.
-func (r *pass) readNoHead(dir fs.FS, files []fileInfo, id [16]byte) bool {
+func (r *pass) readNoHead(ctx context.Context, dir fs.FS, files []fileInfo, id [16]byte) bool {
 	others := selectFiles(files, func(f fileInfo) bool {
 		return !f.online && f.hdr.SeqnumID != id && f.hdr.HeadRealtime.IsZero() && !r.isDone(f)
 	})
 	slices.SortFunc(others, func(a, b fileInfo) int { return strings.Compare(a.name, b.name) })
 	for _, f := range others {
-		if !r.readFile(dir, f, fileMode{after: r.cur.resume[f.hdr.FileID]}) {
+		if !r.readFile(ctx, dir, f, fileMode{after: r.cur.resume[f.hdr.FileID]}) {
 			return false
 		}
 	}
@@ -295,9 +294,9 @@ func (r *pass) readNoHead(dir fs.FS, files []fileInfo, id [16]byte) bool {
 }
 
 // readOnline reads the online file when its seqnum ID is another, from its head, whatever its head time.
-func (r *pass) readOnline(dir fs.FS, files []fileInfo, id [16]byte) bool {
+func (r *pass) readOnline(ctx context.Context, dir fs.FS, files []fileInfo, id [16]byte) bool {
 	for _, f := range files {
-		if f.online && f.hdr.SeqnumID != id && !r.readFile(dir, f, fileMode{moving: true}) {
+		if f.online && f.hdr.SeqnumID != id && !r.readFile(ctx, dir, f, fileMode{moving: true}) {
 			return false
 		}
 	}

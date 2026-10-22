@@ -98,15 +98,15 @@ func (k *Kernel) Name() string {
 // read is logged once and, where something is lost, a gap.
 func (k *Kernel) Collect(ctx context.Context, sr scheduler.Run) ([]model.Record, error) {
 	st, giveUp := k.prepare(sr)
-	p := &pass{k: k, ctx: ctx, start: sr.Start, begin: time.Now(), cur: st, startPos: st.pos}
+	p := &pass{k: k, start: sr.Start, begin: time.Now(), cur: st, startPos: st.pos}
 	if k.boot != nil {
 		p.emit(*k.boot, time.Time{})
 	}
 	if giveUp {
 		p.giveUpSpan()
 	}
-	p.readJournal()
-	return k.finish(p), nil
+	p.readJournal(ctx)
+	return k.finish(ctx, p), nil
 }
 
 // prepare commits or drops what the previous run reached and returns the state this run starts from; giveUp tells that the run
@@ -173,14 +173,14 @@ func (p *pass) giveUpSpan() {
 
 // finish ends the run: the state it reached waits for the next run to commit, the log follows its outcome, the extra snapshots are
 // requested and every record is checked.
-func (k *Kernel) finish(p *pass) []model.Record {
+func (k *Kernel) finish(ctx context.Context, p *pass) []model.Record {
 	p.closeGap(p.start)
 	k.mem, k.memKills = p.cur, p.kills > 0
 	if !p.failed {
 		k.fail = failure{}
 	}
 	k.logOutcome(p.problem)
-	k.requestSnapshots(p.ctx, p.start, p.live)
+	k.requestSnapshots(ctx, p.start, p.live)
 	return checkRecords(p.records, p.start, func(i int) time.Time { return p.froms[i] })
 }
 
