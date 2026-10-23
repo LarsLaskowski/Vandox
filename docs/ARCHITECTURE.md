@@ -421,7 +421,7 @@ maps the file `MAP_SHARED` and runs code as another user where that user execute
 the ptrace-checked `/proc` files whose mode allows it, not another user's `mem` or `environ` and not `/etc/shadow`, and credentials it reads
 may still lead to root through other services (password reuse, Plesk or MariaDB administration)
 ([0030](decisions/0030-agent-runs-unprivileged-with-named-capabilities.md),
-[0121](decisions/0121-cap-sys-ptrace-cannot-write-another-users-proc-pid-mem-without-cap-dac-override.md)). The Telegram bot sends to and
+[0121](decisions/0121-cap-sys-ptrace-alone-cannot-write-another-users-process-memory-through-proc-pid-mem-or-fd.md)). The Telegram bot sends to and
 accepts updates only from allowlisted users in their private chats
 ([0031](decisions/0031-telegram-user-allowlist.md)). Secrets come only from environment variables or Docker
 secrets ([0032](decisions/0032-secrets-only-from-environment-or-docker-secrets.md)). The only release
