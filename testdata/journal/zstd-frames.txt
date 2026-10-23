@@ -1,0 +1,6 @@
+# zstd frames of the compressed data objects of the server journal (systemd 249.11), headers only, no content.
+# columns: file, frame header descriptor, single segment, checksum, dictionary flag, content-size bytes, block types, blocks, bytes after the last block, count
+archived 0x60 1 0 0 2 compressed 1 0 140
+online 0x60 1 0 0 2 compressed 1 0 200
+# online: content size (= window) min 512 max 1458
+# archived: content size (= window) min 512 max 19718

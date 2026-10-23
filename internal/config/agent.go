@@ -28,7 +28,9 @@ type Agent struct {
 	Backups    Backups       `yaml:"backups"`
 	Services   Services      `yaml:"services"`
 	MariaDB    MariaDB       `yaml:"mariadb"`
-	Secrets    AgentSecrets  `yaml:"-"`
+	// LogShipping configures the log shipping collector.
+	LogShipping LogShipping  `yaml:"log_shipping"`
+	Secrets     AgentSecrets `yaml:"-"`
 }
 
 // BackendTarget is where the agent sends its data.
@@ -309,13 +311,20 @@ func DefaultAgent() Agent {
 		Backups:    Backups{Processes: []BackupRule{{Command: "pzstd"}}},
 		Services:   Services{Units: DefaultServiceUnits()},
 		MariaDB:    MariaDB{Enabled: true, Socket: DefaultMariaDBSocket},
+
+		LogShipping: LogShipping{Journal: true, MinPriority: "info"},
 	}
 }
 
 // AgentKeys returns every option key path in file order: agent_id, backend.url, spool.directory, log.level,
-// filesystem.mount_points, processes.programs, services.units, mariadb.enabled, mariadb.socket, backups.processes.
+// filesystem.mount_points, processes.programs, services.units, mariadb.enabled, mariadb.socket, backups.processes and the log_shipping
+// options journal, min_priority, files and drop.
 func AgentKeys() []string {
-	return []string{keyAgentID, keyBackendURL, "spool.directory", "log.level", "filesystem.mount_points", "processes.programs", "services.units", "mariadb.enabled", "mariadb.socket", "backups.processes"}
+	return []string{
+		keyAgentID, keyBackendURL, "spool.directory", "log.level", "filesystem.mount_points", "processes.programs", "services.units",
+		"mariadb.enabled", "mariadb.socket", "backups.processes",
+		"log_shipping.journal", "log_shipping.min_priority", keyShippingFiles, keyShippingDrop,
+	}
 }
 
 // LoadAgent reads the agent configuration file at path and the secrets from environ (in os.Environ form).
@@ -376,7 +385,10 @@ func (a *Agent) validate(file string, lines map[string]int) error {
 	if err := checkSocketPath(file, lines, "mariadb.socket", a.MariaDB.Socket); err != nil {
 		return err
 	}
-	return checkBackupRules(file, lines, a.Backups.Processes)
+	if err := checkBackupRules(file, lines, a.Backups.Processes); err != nil {
+		return err
+	}
+	return a.LogShipping.validate(file, lines)
 }
 
 // checkMountPoints checks the list of filesystem.mount_points.

@@ -14,6 +14,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/LarsLaskowski/Vandox/internal/zstdfield"
 )
 
 const realDirEnv = "VANDOX_REAL_JOURNAL_DIR"
@@ -456,4 +458,81 @@ func (r *realCounts) count(e *Entry) {
 	if ok && len(m) == 1 && len(fac) == 1 && string(fac[0].Value) == "0" && strings.HasPrefix(string(m[0].Value), "Out of memory: Killed process ") {
 		r.kills++
 	}
+}
+
+// TestReal_NextWithDecodesEveryEntry reads every entry of every journal file of the real server directory (system and user files)
+// with the options of the log collector: no read error, every compressed item decoded, as many entries as each header counts.
+// It logs counts only.
+func TestReal_NextWithDecodesEveryEntry(t *testing.T) {
+	dir := os.Getenv(realDirEnv)
+	if dir == "" {
+		t.Skipf("%s is not set", realDirEnv)
+	}
+	names, err := ListAllFiles(os.DirFS(dir))
+	if err != nil || len(names) == 0 {
+		t.Fatalf("ListAllFiles() = %d files, error %v, want at least one", len(names), err)
+	}
+	dec, err := zstdfield.New()
+	if err != nil {
+		t.Fatalf("zstdfield.New() error = %v, want nil", err)
+	}
+	opt := &ReadOptions{MaxPayload: 16384 + 1, Decompress: dec, MaxCompressed: 4, MaxCompressedBytes: zstdfield.MaxFrameBytes}
+	want := []string{"MESSAGE", "PRIORITY", "_HOSTNAME", "SYSLOG_IDENTIFIER", "_COMM", "_PID", "SYSLOG_PID"}
+	for _, name := range names {
+		entries := readEveryEntry(t, filepath.Join(dir, name), want, opt)
+		t.Logf("file %d of %d: %d entries read, none undecoded", fileNumber(names, name), len(names), entries)
+	}
+}
+
+func fileNumber(names []string, name string) int {
+	for i, n := range names {
+		if n == name {
+			return i + 1
+		}
+	}
+	return 0
+}
+
+// readEveryEntry reads all entries of the file at path, fails on an undecoded item and returns the number of entries.
+func readEveryEntry(t *testing.T, path string, want []string, opt *ReadOptions) (entries int) {
+	t.Helper()
+	fh, err := os.Open(path)
+	if err != nil {
+		t.Fatalf("opening a real file: %v", err)
+	}
+	defer func() { _ = fh.Close() }()
+	st, err := fh.Stat()
+	if err != nil {
+		t.Fatalf("stat of a real file: %v", err)
+	}
+	f, err := Open(fh, st.Size(), strings.HasSuffix(path, "~"))
+	if err != nil {
+		t.Fatalf("Open() of a real file: %v", err)
+	}
+	var count [8]byte
+	if _, err := fh.ReadAt(count[:], 152); err != nil {
+		t.Fatalf("reading the entry count of a real file: %v", err)
+	}
+	c, err := f.SeekAll(0)
+	if err != nil {
+		t.Fatalf("SeekAll(0) in a real file: %v", err)
+	}
+	var e Entry
+	for {
+		ok, err := f.NextWith(&c, want, &e, opt)
+		if err != nil {
+			t.Fatalf("NextWith() in a real file after %d entries: %v", entries, err)
+		}
+		if !ok {
+			break
+		}
+		entries++
+		if e.Undecoded != 0 {
+			t.Fatalf("entry %d (seqnum %d) of a real file has %d undecoded items, want 0", entries, e.Seqnum, e.Undecoded)
+		}
+	}
+	if n := binary.LittleEndian.Uint64(count[:]); uint64(entries) != n { // #nosec G115 -- entries is never negative
+		t.Errorf("read %d entries of a real file whose header counts %d", entries, n)
+	}
+	return entries
 }

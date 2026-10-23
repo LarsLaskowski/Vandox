@@ -14,7 +14,12 @@ collectors that need them.
 | `CAP_SYS_PTRACE` | `connections` | Listing and reading `/proc/<pid>/fdinfo/<n>` of **another user's** process, which names the socket (`ino:`) a descriptor holds and its mount (`mnt_id:`), so a socket gets its owner. |
 
 `CAP_DAC_READ_SEARCH` is **not granted**: with `CAP_SYS_PTRACE` it opens other processes' open files, memfds included, for writing
-(record 0122). No collector needs it; the connection collector deliberately does not use it (see below).
+(record 0122). No collector needs it; the connection collector deliberately does not use it (see below). The `logs` collector adds no
+capability: it opens each file of `log_shipping.files` through a walk from `/` that refuses a symbolic link in any element and a file with
+more than one link (against an attacker who races the check, the hard-link refusal relies on the distribution default
+`fs.protected_hardlinks=1`, Ubuntu's default), so a service user who replaces its log file with a link to another file (for example
+`/etc/shadow`) never gets that file shipped. It reads the files the agent's user and groups (`adm`, `systemd-journal`) can read and logs
+`log file not readable` with the reason `permission denied` for the others.
 
 `CAP_SYS_PTRACE` is granted as an ambient capability, with a bounding set that holds `CAP_SYS_PTRACE` only; adding any capability to it is a
 `security` change that supersedes record 0122. For example, `CAP_DAC_READ_SEARCH` reopens the write through `/proc/<pid>/fd/<n>` into other
@@ -45,6 +50,26 @@ file tree of another mount namespace (a container's). A write into such a file r
 file `MAP_SHARED`, and runs code as another user where that user executes the file or reads it as a script or configuration. Readable besides are
 the ptrace-checked `/proc` files whose mode allows reading (`maps`, `smaps_rollup`, `fdinfo`, …), not another user's `mem` or `environ` and not
 `/etc/shadow`; credentials read that way may still lead to root through other services (password reuse, Plesk or MariaDB administration).
+
+### What the log collector reads and what it needs
+
+- **The journal.** The system files (`system.journal`, `system@*.journal`, `system@*.journal~`) **and** the user files (`user-<UID>.journal`,
+  `user-<UID>@*.journal`, `user-<UID>@*.journal~`) below `/var/log/journal/<machine-id>`, else `/run/log/journal/<machine-id>`, are read with the
+  group `systemd-journal`; journald's default `SplitMode=uid` puts the entries of users with a UID of 1000 or more (on Plesk the web-space
+  users) into the user files. The agent reads the machine ID from `/etc/machine-id` and decodes zstd-compressed items itself (no `journalctl`).
+- **Configured files.** Each file of `log_shipping.files` is read with the group `adm` (or as another user may read it); a file that is
+  readable by neither, or below a directory the agent has no search right on, is logged `log file not readable` with the reason
+  `permission denied` and not shipped, because `CAP_DAC_READ_SEARCH` is not granted (record 0122). The path is walked from `/` without following a link; the directory of a rotated file is reached the same way when the
+  agent looks for it after a rotation that happened while it was stopped (`<name>.1` and `<name>-YYYYMMDD`).
+- **The time zone.** `/etc/localtime` (readable by anyone) gives the zone of the year-less times of `syslog` files. When it cannot be read the
+  agent logs `time zone not readable` once, reads no `syslog` file until it can, keeps their positions and records no gap; the journal is
+  not affected.
+- **What it logs.** Fixed texts only, one per change: `journal not readable` (with a reason such as `journal: no journal directory`),
+  `log file not readable` (with the index of the file in `log_shipping.files` and a reason: `missing`, `not a regular file`, `link refused`,
+  `permission denied`, `read failed`), `time zone not readable` and their `... readable again`. A path, a field value or a message never
+  reaches the agent's own log.
+- **Duplicates.** A file that holds what the journal ships (rsyslog's `/var/log/syslog` on a server that forwards the journal to rsyslog) is shipped
+  twice, once per source. The agent does not remove them.
 
 ### What the process collector reads and what it needs
 
@@ -127,19 +152,23 @@ the ptrace-checked `/proc` files whose mode allows reading (`maps`, `smaps_rollu
 
 ## Groups
 
-The group `systemd-journal` is used by the `kernel` collector: it reads the binary journal files below `/var/log/journal` and `/run/log/journal`
-itself (pure Go, no `journalctl`, no decompression) for the kernel messages that report an out-of-memory kill. The group `adm` (log files) is
-for the log collectors that follow; the process and `backups` collectors need neither, and neither do the connection, systemd and MariaDB
-collectors.
+The group `systemd-journal` is used by the `kernel` collector and the `logs` collector: they read the binary journal files below
+`/var/log/journal` and `/run/log/journal` themselves (pure Go, no `journalctl`). The `kernel` collector reads the system files for the kernel
+messages that report an out-of-memory kill, without decompression; the `logs` collector reads the system and the user files and decodes
+zstd-compressed items. The group `adm` (log files) is for the files named in `log_shipping.files`; the process and `backups` collectors need
+neither group, and neither do the connection, systemd and MariaDB collectors.
 
-## Kernel events, backups and the state file
+## Kernel events, log shipping, backups and the state file
 
 - **The unit keeps the journal readable**: no `InaccessiblePaths=` or `TemporaryFileSystem=` over `/var/log/journal` or `/run/log/journal`, and
   it starts after `systemd-journal-flush.service`, so the persistent journal is in place when the `kernel` collector first reads it. A server
   without a persistent journal is read from `/run/log/journal`; if neither can be read, the collector logs
   `kernel messages not readable` once, records no gap and resumes at the saved position once the journal is readable again.
-- **The state file** `agent-state.json` lives in `spool.directory` and holds the boot, the position in the journal and the open backup run, so
-  a restart neither repeats nor loses a kill, and a backup that ended while the agent was down is closed. The agent writes this one file
+- **The state file** `agent-state.json` lives in `spool.directory` and holds the boot, the position in the journal, the open backup run and the
+  positions of the `logs` collector (a position per journal sequence number ID, at most 256, and per configured file, at most 16, with the
+  SHA-256 of its path instead of the path; up to 64 KiB in all), so a restart neither repeats nor loses a kill or a log line, and a backup
+  that ended while the agent was down is closed. The agent saves it within 10 seconds after a position changed (the next run of its
+  10-second state job) and once more when it stops; after a crash it ships the lines of the last seconds again. The agent writes this one file
   (mode 0600) and **never creates the directory**: the installation creates `spool.directory` and makes it writable for `vandox-agent`
   (for example `install -d -o vandox-agent -g vandox-agent -m 0700 /var/lib/vandox/spool`). When the file cannot be read or written the agent
   logs `agent state not available` or `agent state not saved` once and runs on without it.

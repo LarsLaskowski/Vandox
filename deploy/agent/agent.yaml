@@ -95,3 +95,40 @@ backups:
   # ends. An empty list [] turns the check off. Default: [{command: pzstd}]
   processes:
     - command: pzstd
+
+log_shipping:
+  # Whether the collector `logs` ships the systemd journal: the system files and the user files
+  # (user-<UID>.journal, into which journald puts the entries of users with a UID of 1000 or more) of
+  # /var/log/journal, else /run/log/journal. Default: true
+  journal: true
+  # The least severe priority that is shipped: emerg, alert, crit, err, warning, notice, info or debug. A
+  # line with a known priority less severe than this is not shipped; a line without a priority (the lines of
+  # a traditional syslog file) is never dropped by it. Default: info
+  min_priority: info
+  # Log files shipped besides the journal: a list of at most 16 mappings with `path` (an absolute, clean path
+  # of at most 1024 bytes, each listed once; it must not be, or lie behind, a symbolic link) and `format`
+  # (only `syslog` so far: the traditional or the RFC 3339 form of rsyslog's files). Their year-less times
+  # are read in the time zone of /etc/localtime. A file that did not exist when the agent started is read
+  # from its first line once it appears, a file that exists starts at its end: the history before the first
+  # start is imported with `vandoxd import`. The agent follows a rotation by rename and a truncation in place.
+  # The agent's groups (`adm`, `systemd-journal`) decide which files it can read; any other file is logged
+  # "log file not readable" (permission denied) and not shipped (deploy/agent/README.md). Do not name a file that holds what the journal already ships (/var/log/syslog,
+  # /var/log/mail.log of a server whose rsyslog copies the journal): every line would be shipped twice, once
+  # with the source `journal` and once with the source `syslog`. Default: []
+  #
+  #   files:
+  #     - {path: /var/log/mail.log, format: syslog}
+  files: []
+  # Rules for lines that are not shipped: a list of at most 64 mappings, each with at least one of `log`
+  # (`journal` or a path listed in `files`), `program` (compared whole and literally), `priority` (a line of
+  # that priority or less severe; a line without a priority never matches) and `message` (an RE2 regular
+  # expression in Go syntax, searched anywhere in the message unless anchored; at most 1024 bytes). A line
+  # that meets every condition of any rule is not shipped. All `message` patterns together may compile to at
+  # most 400 instructions, and one pattern to at most 400 as well: about a dozen ordinary patterns fit; a
+  # pattern with a large repetition such as \pL{0,300} is refused at start-up, and the error names the key.
+  # Default: []
+  #
+  #   drop:
+  #     - {program: dovecot, message: '^imap-login: Login: '}
+  #     - {log: journal, program: systemd, priority: info, message: '^Started Session '}
+  drop: []

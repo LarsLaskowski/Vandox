@@ -36,6 +36,12 @@ type Collector interface {
 	Collect(ctx context.Context, run Run) ([]model.Record, error)
 }
 
+// Observer is implemented by a Collector that wants to know whether the records of a run were kept.
+type Observer interface {
+	// Kept reports whether the records of run, which finished in time, were kept.
+	Kept(run Run, kept bool)
+}
+
 // Schedule is how often and how long a collector runs.
 type Schedule struct {
 	Interval         time.Duration // between the starts of two runs

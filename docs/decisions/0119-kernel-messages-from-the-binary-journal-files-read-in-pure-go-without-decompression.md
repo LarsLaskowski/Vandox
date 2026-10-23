@@ -66,4 +66,6 @@ accept. The rules are in the [Agent](../areas/agent.md) area (*Kernel events*).
 - journald's entry about missed kernel messages is not in the real files; it is built from the systemd 249 source (residual).
 - The reader is checked against the real files only on a developer's machine (`VANDOX_REAL_JOURNAL_DIR`); CI sees the generated
   fixtures.
-- #37 (log shipping) can reuse the reader for other fields.
+- #37 (log shipping) reuses the reader for other fields and adds a bounded zstd path that only the log collector uses
+  ([0121](0121-log-shipping-journal-and-syslog-files-positions-per-seqnum-id-zstd-commit-when-kept.md)); the kernel collector still
+  decompresses nothing.
