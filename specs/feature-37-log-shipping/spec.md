@@ -1,7 +1,7 @@
 # Spec: Continuous log shipping in the agent
 
 Source: Issue #37
-Status: Draft (scope of the file formats settled by the Product Manager: option A)
+Status: Approved by Product Manager (scope of the file formats: option A)
 
 ## Problem
 
@@ -270,11 +270,10 @@ What happens today, checked against the code:
   fields of the minimal parsing; `event` is not among them). Live data therefore carries no `mariadb.*`, `postfix.*` or
   `dovecot.*` events, so the signatures `mariadb_crash`, `mariadb_recovery_start`, `mariadb_recovery_end`,
   `postfix_fatal` and `dovecot_fatal` do not fire on it, and mail lines keep their transport priority instead of the
-  marker's, until the follow-up issue on classifying live log lines (opened by the orchestrator, number to be filled in)
-  is done.
+  marker's, until the follow-up issue #290 (classifying live log lines) is done.
 - Formats other than the journal and `syslog` files (the Plesk panel, nginx, `sw-cp-server`, Apache and MariaDB error logs,
   Dovecot's own log file) — the Product Manager chose option A (first open question); the Plesk panel, nginx,
-  `sw-cp-server` and Apache error logs follow in a separate issue.
+  `sw-cp-server` and Apache error logs follow in #289.
 - Reading compressed rotated files (`.gz`) and files of other directories than the configured file's after a rotation.
 - Storing and sending the records: the spool (#38), the sender (#39) and the ingest API (#40).
 - Shipping history from before the first start: `vandoxd import`.
@@ -293,7 +292,7 @@ What happens today, checked against the code:
   *Plesk and web server error logs* family, with records equal to the import's for the same line; (C) also a `plain` format
   that ships every line whole with the time it was read, so error logs arrive now but the web signatures do not match them.
   Answered: option A, by the Product Manager — the journal and `syslog`-format files only; the error log formats
-  (Plesk panel, nginx, `sw-cp-server`, Apache) follow in a separate issue.
+  (Plesk panel, nginx, `sw-cp-server`, Apache) follow in #289.
 - Does "after an agent restart, without loss or duplicates" include a crash or a power loss? Answered: a restart is a stop
   and a start of the service (S4, AC4), which must be exact. After an unclean end the agent cannot know which read lines
   reached the sink after its last save, so it re-reads them: duplicates bounded to 10 + 2 seconds, never a loss (E1, AC5). The
@@ -344,8 +343,7 @@ What happens today, checked against the code:
   export` as root gives the import; E11's `logger` example and AC1 say so. The *Problem* section records that today's reader
   lists only system files.
 - Minor 2 (live classification not tracked): accepted. *Out of scope* names the five signatures that match only on events
-  and the replaced priority of mail lines, and points to the follow-up issue on classifying live log lines, whose number the
-  orchestrator fills in; AC1 now compares with the journal mapping of `docs/areas/log-import.md` before the mail, MariaDB and
+  and the replaced priority of mail lines, and points to the follow-up issue #290 on classifying live log lines; AC1 now compares with the journal mapping of `docs/areas/log-import.md` before the mail, MariaDB and
   kernel report stages.
 - Minor 3 (10-second bound against the commit mechanism): accepted. E1, AC5, *Durability* and the open question now say at
   most one state interval plus one collector interval (10 + 2 seconds); committing when the run is kept is not required,
