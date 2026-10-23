@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math"
@@ -70,6 +71,13 @@ func (c *logCapture) lines(t *testing.T) []logLine {
 		out = append(out, l)
 	}
 	return out
+}
+
+// contains reports whether the captured log holds text.
+func (c *logCapture) contains(text string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return bytes.Contains(c.buf.Bytes(), []byte(text))
 }
 
 // count returns the number of lines with msg.
@@ -1549,5 +1557,213 @@ func TestDecode_RefusesAnInvalidKernelJournalPosition(t *testing.T) {
 
 			requireMissing(t, dir, lc, s, st)
 		})
+	}
+}
+
+const (
+	reasonNotDurable = "agentstate: save: spool not durable"
+	barrierGuard     = 2 * time.Second
+)
+
+// barrierStore returns a store in a fresh directory with a changed state, its saver and the path of the state file.
+func barrierStore(t *testing.T, lc *logCapture) (*Store, *Saver, string) {
+	t.Helper()
+	dir := t.TempDir()
+	s, _ := Open(dir, lc.logger())
+	update(t, s, true, fullState(1))
+	return s, NewSaver(s, procFS("1000.00")), filepath.Join(dir, FileName)
+}
+
+// fileExists reports whether path exists.
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+func TestStore_SaveWaitsForBarrier(t *testing.T) {
+	s, sv, path := barrierStore(t, &logCapture{})
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	s.SetBarrier(func(context.Context) error {
+		close(entered)
+		<-release
+		return nil
+	})
+	done := make(chan error, 1)
+	go func() {
+		_, err := sv.Collect(context.Background(), scheduler.Run{Start: t0})
+		done <- err
+	}()
+
+	select {
+	case <-entered:
+	case <-time.After(barrierGuard):
+		close(release)
+		t.Fatal("the state job did not call the barrier before saving")
+	}
+	if fileExists(path) {
+		t.Error("the state file exists while the barrier is held back, want the save to wait for it")
+	}
+	select {
+	case err := <-done:
+		t.Fatalf("Collect returned %v while the barrier is held back, want it to wait", err)
+	default:
+	}
+
+	close(release)
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Errorf("Collect() error = %v, want nil", err)
+		}
+	case <-time.After(barrierGuard):
+		t.Fatal("Collect did not finish after the barrier returned")
+	}
+	if !fileExists(path) {
+		t.Error("the state file is missing after the barrier returned, want the save to follow it")
+	}
+}
+
+func TestStore_FlushSyncsBarrierFirst(t *testing.T) {
+	s, _, path := barrierStore(t, &logCapture{})
+	calls := 0
+	var existedAtCall bool
+	var remaining time.Duration
+	var hasDeadline bool
+	s.SetBarrier(func(ctx context.Context) error {
+		calls++
+		existedAtCall = fileExists(path)
+		var deadline time.Time
+		deadline, hasDeadline = ctx.Deadline()
+		remaining = time.Until(deadline)
+		return nil
+	})
+
+	if err := s.Flush(t0); err != nil {
+		t.Fatalf("Flush() error = %v, want nil", err)
+	}
+
+	if calls != 1 {
+		t.Fatalf("the barrier was called %d times by Flush, want 1", calls)
+	}
+	if existedAtCall {
+		t.Error("the state file existed when the barrier ran, want the barrier before the write")
+	}
+	if !hasDeadline || remaining <= time.Second || remaining > flushWait {
+		t.Errorf("barrier context: deadline %v, remaining %v, want a deadline within %v", hasDeadline, remaining, flushWait)
+	}
+	if !fileExists(path) {
+		t.Error("Flush did not write the state file after the barrier")
+	}
+}
+
+func TestStore_BarrierRunsBeforeEverySave(t *testing.T) {
+	s, sv, _ := barrierStore(t, &logCapture{})
+	calls := 0
+	s.SetBarrier(func(context.Context) error {
+		calls++
+		return nil
+	})
+
+	collect(t, sv, t0)
+	update(t, s, true, func(st *State) { st.Journal.Seqnum = 2 })
+	collect(t, sv, t0.Add(10*time.Second))
+	update(t, s, false, func(st *State) { st.Journal.Seqnum = 3 })
+	if err := s.Flush(t0.Add(11 * time.Second)); err != nil {
+		t.Fatalf("Flush() error = %v, want nil", err)
+	}
+
+	if calls != 3 {
+		t.Errorf("the barrier was called %d times for 2 state job saves and 1 Flush, want 3", calls)
+	}
+}
+
+// notSavedWarnings returns the captured "agent state not saved" lines.
+func notSavedWarnings(t *testing.T, lc *logCapture) []logLine {
+	t.Helper()
+	var warnings []logLine
+	for _, l := range lc.lines(t) {
+		if l.Msg == warnNotSaved {
+			warnings = append(warnings, l)
+		}
+	}
+	return warnings
+}
+
+// requireNotDurable checks the log and the error of a save whose barrier failed with secret.
+func requireNotDurable(t *testing.T, lc *logCapture, err error, secret string, returned bool) {
+	t.Helper()
+	warnings := notSavedWarnings(t, lc)
+	if len(warnings) != 1 || warnings[0].Level != "WARN" || warnings[0].Err != reasonNotDurable {
+		t.Errorf("warnings %q = %+v, want exactly one WARN with err %q", warnNotSaved, warnings, reasonNotDurable)
+	}
+	if strings.Contains(fmt.Sprint(err), secret) || lc.contains(secret) {
+		t.Errorf("the barrier's own error %q leaked into the returned error %v or the log", secret, err)
+	}
+	if returned && (err == nil || err.Error() != reasonNotDurable) {
+		t.Errorf("Flush() error = %v, want %q", err, reasonNotDurable)
+	}
+}
+
+func TestStore_FailingBarrierSkipsTheWrite(t *testing.T) {
+	const secret = "disk /srv/secret-spool exploded"
+	tests := []struct {
+		name string
+		save func(s *Store, sv *Saver) error
+	}{
+		{"StateJob", func(_ *Store, sv *Saver) error {
+			_, err := sv.Collect(context.Background(), scheduler.Run{Start: t0})
+			return err
+		}},
+		{"Flush", func(s *Store, _ *Saver) error { return s.Flush(t0) }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			lc := &logCapture{}
+			s, sv, path := barrierStore(t, lc)
+			healthy := false
+			s.SetBarrier(func(context.Context) error {
+				if healthy {
+					return nil
+				}
+				return errors.New(secret)
+			})
+
+			err := tt.save(s, sv)
+
+			if fileExists(path) {
+				t.Error("the state file exists after a failed barrier, want no write")
+			}
+			requireNotDurable(t, lc, err, secret, tt.name == "Flush")
+
+			healthy = true
+			if err := s.Flush(t0.Add(time.Minute)); err != nil {
+				t.Fatalf("Flush() after the barrier recovered error = %v, want nil", err)
+			}
+			if !fileExists(path) {
+				t.Error("the skipped state was not kept dirty, want it written once the barrier succeeds")
+			}
+		})
+	}
+}
+
+func TestStore_NilBarrierRemovesIt(t *testing.T) {
+	s, _, path := barrierStore(t, &logCapture{})
+	calls := 0
+	s.SetBarrier(func(context.Context) error {
+		calls++
+		return errors.New("must not run")
+	})
+	s.SetBarrier(nil)
+
+	if err := s.Flush(t0); err != nil {
+		t.Fatalf("Flush() after SetBarrier(nil) error = %v, want nil", err)
+	}
+
+	if calls != 0 {
+		t.Errorf("the removed barrier was called %d times, want 0", calls)
+	}
+	if !fileExists(path) {
+		t.Error("the state file is missing, want the save to run without a barrier")
 	}
 }
