@@ -22,3 +22,4 @@ are quoted in full.
 | 2026-10-23 13:06 | 3 Plan security review (re-review) | Security | CHANGES_REQUIRED: headline guarantee absolute vs accepted residual (cwd/root link); N1 stale status; N2 bounding-set rule; N3 task/<tid> and mount-namespace wording (opus/medium · usage pending) |
 | 2026-10-23 13:10 | 3 Plan revise (2) | Lead | DONE: qualified headline H, residual R, bounding-set rule B, status updated (opus/medium · usage pending) |
 | 2026-10-23 13:11 | 3 Plan security review (delta) | Security | APPROVED; NB1 (residual overstated), NB2 (record title) appended (opus/medium · usage pending) |
+| 2026-10-23 13:17 | 8 Review round 2 | Reviewer | BLOCKING 2 (SECURITY.md:39 stale read residual; project.md:79 H missing 'user's'), NON-BLOCKING 1 (README 0115/0121 citation) (opus/medium · usage pending) |
