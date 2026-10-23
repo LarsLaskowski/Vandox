@@ -61,9 +61,9 @@ listing `/proc/<pid>/fd`, which 0115 gave up.
    Rejected.
 7. **Drop CAP_DAC_READ_SEARCH, keep CAP_SYS_PTRACE alone with a bounding set holding only it, and deny
    `process_madvise` by name** (chosen by the Product Manager) — closes the memfd path (measured), costs no
-   collector and also ends the read residual of 0030 that rested on CAP_DAC_READ_SEARCH. The agent never calls
+   collector and also narrows the read residual of 0030 that rested on CAP_DAC_READ_SEARCH. The agent never calls
    `process_madvise`, so denying it costs nothing. It leaves the residual of files whose own mode grants the
-   agent write, reached through other processes' working and root directories (*Consequences*).
+   agent write, reached through other processes' working and root directories or executables (*Consequences*).
 
 ## Decision
 
@@ -82,10 +82,13 @@ barriers this rests on, their measurements and the residual are in the [Agent](.
   or file, or to run code as another user, except through a file whose own mode grants the agent's user, its
   groups or others write. 0030's absolute "cannot write as or run code as another user" does not hold.
 - The accepted residual, and with CAP_SYS_PTRACE alone the only one of the vectors examined: the capability
-  lets the agent follow another process's `/proc/<pid>/cwd` and `/proc/<pid>/root` links and their
-  `/proc/<pid>/task/<tid>/` variants, so such a file is reachable even below a closed directory that contains
-  another process's working or root directory; the path components after the link are still checked against
-  their own modes. The `root` link of a process in another mount namespace (a container's) resolves in that
+  lets the agent follow another process's `/proc/<pid>/cwd`, `/proc/<pid>/root` and `/proc/<pid>/exe` links
+  and their `/proc/<pid>/task/<tid>/` variants (all three resolve through the same ptrace-checked link
+  lookup), so such a file is reachable even below a directory closed to the agent, but only along paths from
+  some process's working or root directory, or as that process's executable through `exe`; the path components
+  after a `cwd` or `root` link are still checked against their own modes, and the executable against its own
+  mode only (whether a write open of a running executable fails with `ETXTBSY` is version-dependent and not
+  measured, so it is not counted as a barrier). The `root` link of a process in another mount namespace (a container's) resolves in that
   namespace, on the same terms. A write into such a file reaches another user's process memory where that
   process maps the file `MAP_SHARED`, and runs code as another user where that user executes the file or reads
   it as a script or configuration. The title's "through `/proc/<pid>/mem` or `/proc/<pid>/fd`" is therefore

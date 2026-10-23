@@ -3,7 +3,8 @@
 Source: Issue #271
 Status: Draft — the Product Manager answered E1 with option 1 (log, 2026-10-23 13:03): the agent holds
 `CAP_SYS_PTRACE` alone, `CAP_DAC_READ_SEARCH` is dropped, and the residual of fact 23 is accepted. Revised for
-Security's re-review (B1, N1–N3 in *Security review*).
+Security's re-review (B1, N1–N3 in *Security review*) and for the diff review of head 399e198 (the `exe` link,
+fact 25).
 Tier: security — changes sandbox controls: the agent's capability set shrinks to `CAP_SYS_PTRACE` alone,
 `process_madvise` joins the system calls the agent unit's filter must deny, and the exclusion of
 every other capability from the bounding set (it holds `CAP_SYS_PTRACE` only) becomes a stated load-bearing
@@ -39,11 +40,12 @@ the agent write below a directory closed to it (fact 19). The filter cannot stop
 
 **No collector uses `CAP_DAC_READ_SEARCH`** (fact 20): 0030 granted it for listing `/proc/<pid>/fd`, which the
 connection collector gave up in 0115. With `CAP_SYS_PTRACE` alone the memfd open fails `EACCES` (facts 16, 18),
-so dropping `CAP_DAC_READ_SEARCH` closes the vector at no functional cost, and also ends 0030's read residual
+so dropping `CAP_DAC_READ_SEARCH` closes the vector at no functional cost, and also narrows 0030's read residual
 "read access equals root's" (fact 22). What remains with `CAP_SYS_PTRACE` alone (fact 23), accepted by the Product
 Manager: a file whose own mode grants the agent's user, groups or others write or read stays reachable through
-another process's `/proc/<pid>/cwd` or `/proc/<pid>/root` link, and the same links under
-`/proc/<pid>/task/<tid>/`, even below a directory closed to the agent; the `root` link reaches the whole file
+another process's `/proc/<pid>/cwd` or `/proc/<pid>/root` link, or as that process's executable through its
+`/proc/<pid>/exe` link (fact 25), and the same links under `/proc/<pid>/task/<tid>/`, even below a directory closed
+to the agent; the `root` link reaches the whole file
 tree of another mount namespace (a container's), not only paths below a closed directory. Its two consequences:
 a write into such a file reaches another user's process memory where that process maps the file `MAP_SHARED`,
 and runs code as another user where that user executes the file or reads it as a script or configuration. The
@@ -76,8 +78,9 @@ absolute guarantee ("cannot write as or run code as another user") is therefore 
 | 20 | No collector uses `CAP_DAC_READ_SEARCH`: the process collector needs `CAP_SYS_PTRACE` alone (0113), the connection collector reads `fdinfo` with `CAP_SYS_PTRACE` alone and not the `fd` links (0115), journal and logs come through `systemd-journal` and `adm`; the agent's code opens no `/proc/<pid>/fd` link. | `deploy/agent/README.md` ("`CAP_DAC_READ_SEARCH` is not needed by any collector so far"); `.squad/project.md` area 6 ("which no collector uses"); `docs/areas/agent.md` *Rights*; `grep` over `internal/` and `cmd/`: only `fdinfo` paths, no `readlink`. Issue #42's "what `/proc/<pid>/fd` … require" predates 0115. | confirmed |
 | 21 | A runtime may map its generated code from a memfd (double mapping for W^X JITs, for example .NET's), so the memfd write could reach code of a process, not only data. Whether such a process runs as another user on the production server is unknown. | to verify: not needed — the measurement (Security listing the root processes on the server with an executable memfd mapping) mattered only for option 2 of E1, which the Product Manager declined (option 1 chosen, log 13:03); with `CAP_SYS_PTRACE` alone the memfd open fails (fact 16). Stays an inference from the runtimes' design; no owner. | unverified |
 | 22 | With `CAP_SYS_PTRACE` alone, uid 65534 cannot open a root process's `environ` (`0400`) or `mem`, nor `/etc/shadow` directly or through `/proc/<pid>/root`; it can open the root process's `maps` and `smaps_rollup`. | Measured by the Lead, kernel 6.18.44 (open and close only). | confirmed |
-| 23 | With `CAP_SYS_PTRACE` alone, uid 65534 opens for writing a `0666` file in a `0755` directory below a `0700` root directory through `/proc/<pid>/cwd/` of a root process whose working directory it is; without a capability `EACCES`. | Measured by the Lead (open and close only), kernel 6.18.44. The same holds by construction for `/proc/<pid>/root` and for `/proc/<pid>/task/<tid>/cwd` and `…/root` (the same ptrace-checked link, `proc_cwd_link`/`proc_root_link`); `root` resolves in the target's mount namespace, so it reaches another namespace's tree, each later path component still checked against its own mode (Security NB1). | confirmed |
+| 23 | With `CAP_SYS_PTRACE` alone, uid 65534 opens for writing a `0666` file in a `0755` directory below a `0700` root directory through `/proc/<pid>/cwd/` of a root process whose working directory it is; without a capability `EACCES`. | Measured by the Lead (open and close only), kernel 6.18.44. The same holds by construction for `/proc/<pid>/root` and for `/proc/<pid>/task/<tid>/cwd` and `…/root` (the same ptrace-checked link, `proc_cwd_link`/`proc_root_link`); `root` resolves in the target's mount namespace, so it reaches another namespace's tree, each later path component still checked against its own mode (Security NB1). The `exe` link adds to this residual (fact 25). | confirmed |
 | 24 | `/proc/<pid>/map_files/<range>` stays closed with `CAP_SYS_PTRACE` alone: following its links needs `CAP_SYS_ADMIN` (or, since kernel 5.9, `CAP_CHECKPOINT_RESTORE`) besides search of the `0500` directory owned by the target's user. | Security's re-review (N2); kernel `proc_map_files_get_link`/`proc_map_files_lookup` check `checkpoint_restore_ns_capable`. Neither capability is in the bounding set, which holds `CAP_SYS_PTRACE` only. | confirmed |
+| 25 | With `CAP_SYS_PTRACE` alone the agent can follow another process's `/proc/<pid>/exe` and `/proc/<pid>/task/<tid>/exe` links like `cwd` and `root`: `proc_pid_get_link` runs the ptrace-read check (`proc_fd_access_allowed`), which the capability passes, then `nd_jump_link` to the executable, skipping the search check of the directories above it; the open is then checked against the file's own mode only. So another user's running executable whose own mode grants the agent read (or write) opens even below a directory closed to the agent. A write open of a running executable may fail `ETXTBSY`; that is version-dependent and not counted as a barrier. | to verify: not needed for this change — derived from the kernel source (`fs/proc/base.c`: `proc_pid_get_link`, `proc_exe_link`; Security's diff review of head 399e198), not measured; the residual is stated as reachable and without relying on `ETXTBSY`, so a measurement could only narrow it (as `nobody` with `CAP_SYS_PTRACE` alone, `O_RDONLY` open of `/proc/<pid>/exe` of a root process whose `0755` executable lies below a `0700` directory, open and close only); no owner. | unverified |
 
 ## Acceptance criteria
 
@@ -152,12 +155,16 @@ structure and with every element kept, in all four documents (record 0121 states
   another user's process or file, or to run code as another user, except through a file whose own mode grants
   the agent's user, its groups (`adm`, `systemd-journal`) or others write (accepted residual, record 0121)."
 - **R — the accepted residual** (replaces "its read access equals root's …" and "can read everything on the
-  server"): "With `CAP_SYS_PTRACE` the agent follows another process's `/proc/<pid>/cwd` and `/proc/<pid>/root`
-  links and their `/proc/<pid>/task/<tid>/cwd` and `…/root` variants, so a file whose own mode grants the
-  agent's user, its groups or others read or write is reachable even below a closed directory that contains
-  another process's working or root directory (the path components after the link are still checked against
-  their own modes), and the `root` link of a process in another mount namespace (a container's) resolves in that
-  namespace on the same terms. A write into such a file reaches another user's process memory where that process maps the
+  server"; revised for the `exe` link, fact 25 — the Dev applies this exact text in `.squad/project.md`,
+  `deploy/agent/README.md` and `docs/ARCHITECTURE.md`): "With `CAP_SYS_PTRACE` the agent follows another
+  process's `/proc/<pid>/cwd`, `/proc/<pid>/root` and `/proc/<pid>/exe` links and their
+  `/proc/<pid>/task/<tid>/cwd`, `…/root` and `…/exe` variants, so a file whose own mode grants the agent's user,
+  its groups or others read or write is reachable even below a directory closed to the agent, but only along
+  paths from some process's cwd or root, or that process's executable through `exe` (the path components after a
+  `cwd` or `root` link are still checked against their own modes, the executable against its own mode only;
+  whether a write open of a running executable fails with `ETXTBSY` depends on the kernel version, was not
+  measured and is not counted as a barrier), and the `root` link of a process in another mount namespace (a
+  container's) resolves in that namespace on the same terms. A write into such a file reaches another user's process memory where that process maps the
   file `MAP_SHARED`, and runs code as another user where that user executes the file or reads it as a script or
   configuration. Readable besides are the ptrace-checked `/proc` files whose mode allows reading (`maps`,
   `smaps_rollup`, `fdinfo`, …), not another user's `mem` or `environ` and not `/etc/shadow`; credentials read
@@ -179,14 +186,15 @@ The change per document:
    the vector table gains the rows "`/proc/<pid>/fd/<n>` of another user's process, then `pwrite` → (a) DAC and
    the bounding set: the `0500` directory needs `CAP_DAC_READ_SEARCH`", "`/proc/<pid>/map_files/<range>` → (a)
    the bounding set: the link needs `CAP_SYS_ADMIN` or `CAP_CHECKPOINT_RESTORE` (fact 24)" and "a file whose own
-   mode grants the agent write, through another process's `cwd`/`root` link (also `task/<tid>/`) → none:
+   mode grants the agent write, through another process's `cwd`/`root` link or its executable through `exe`
+   (also `task/<tid>/`) → none:
    accepted residual R"; the bounding-set rule becomes B; the "Read and write differ for `mem`" sentence goes
    (with `CAP_SYS_PTRACE` alone the read open fails too, fact 2); the `InaccessiblePaths=` sentence keeps "can
    reach the same files through another process's root" and adds "where their own mode allows it"; the
    *Accepted residual* bullet (line 1288) becomes R; the related-decisions line for 0121 (line 1330) becomes
    "why the agent holds `CAP_SYS_PTRACE` alone and not `CAP_DAC_READ_SEARCH`, which barrier stops each write
    vector examined, which residual remains (files whose own mode grants the agent write, reached through other
-   processes' `cwd` and `root` links), why the bounding set holds `CAP_SYS_PTRACE` only, and why the filter also
+   processes' `cwd`, `root` and `exe` links), why the bounding set holds `CAP_SYS_PTRACE` only, and why the filter also
    denies `process_madvise`".
 2. **`docs/ARCHITECTURE.md`** (Dev, lines 408–418): "The two capabilities it needs … (`CAP_SYS_PTRACE`,
    `CAP_DAC_READ_SEARCH`) give it root's read access" becomes "The one capability it needs to read other users'
@@ -194,7 +202,7 @@ The change per document:
    barriers including (c) the kernel's `CAP_SYS_NICE` requirement and its refusal of destructive advice on
    another process (Reviewer blocking); "a compromised agent can read everything on the server but cannot use its
    capabilities to write as or run code as another user" becomes H followed by R in one or two sentences
-   (the `cwd`/`root` links with `task/<tid>/`, other mount namespaces, both consequences, the narrowed read
+   (the `cwd`/`root`/`exe` links with `task/<tid>/`, other mount namespaces, both consequences, the narrowed read
    access, credentials); links 0030 and 0121 stay.
 3. **`.squad/project.md` area 6** (Dev): the goal names `CAP_SYS_PTRACE` alone from #42 ("bounding set limited to
    exactly these" becomes "bounding set limited to it"); "So a compromised agent cannot use its capabilities to
@@ -256,6 +264,7 @@ unnoticed); `pidfd_open` stays allowed (the Go runtime uses it; alone it gives n
 | docs | `docs/decisions/0121-…md` + `docs/decisions/README.md` index | Rewritten in this revision (Proposed, amends 0030): H, R and B in *Consequences*; index row unchanged. |
 | squad/project doc | `.squad/project.md` area 6 | Approach 3. |
 | deploy doc | `deploy/agent/README.md` | Approach 4, incl. the Reviewer's blocking AC4 fix. |
+| docs | `SECURITY.md` | Its read-residual sentence names `CAP_SYS_PTRACE` as the one capability (no `CAP_DAC_READ_SEARCH`) and matches R. |
 
 ## Signatures (for the Dev's skeleton)
 
@@ -293,6 +302,12 @@ describe what the capability does and stay true; each owner checks them while ed
 - `docs/decisions/0121-…md` — **Lead** (done in this revision).
 - `.squad/project.md` area 6 — **Dev** (allowed by `.squad/routing.md`, *Scope of a product PR*).
 - `deploy/agent/README.md` — **Dev**.
+- `SECURITY.md` (the agent-rights sentence of its hardening section: "its one capability, `CAP_SYS_PTRACE`, lets it
+  read every file whose own mode allows the agent …") — **Dev**; it names `CAP_SYS_PTRACE` only and its bound
+  follows R (along paths from some process's cwd or root, or that process's executable through `exe`). Missed by
+  the first sweep, which did not cover the repository root; found in the diff review of head 399e198.
+- `docs/decisions/0115-…md` — **Lead**: one in-place clarification in *Consequences* (unreleased, not in
+  `v0.1.0`) that 0121 excludes granting `CAP_DAC_READ_SEARCH`.
 
 ## Architecture check
 
@@ -315,8 +330,8 @@ option 1, residual accepted).
 - [x] No exception reaches a user-visible message — "none".
 - Residual with option 1 (fact 23, accepted by the Product Manager; text R in *Approach*): files whose own mode
   grants write (or read) to the agent's user, its groups (`adm`, `systemd-journal`) or others stay reachable
-  through another process's `/proc/<pid>/cwd` or `/proc/<pid>/root` link and their `/proc/<pid>/task/<tid>/`
-  variants, even below a directory closed to the agent, and through `root` in the whole tree of another mount
+  through another process's `/proc/<pid>/cwd` or `/proc/<pid>/root` link, or as its executable through
+  `/proc/<pid>/exe` (fact 25), and their `/proc/<pid>/task/<tid>/` variants, even below a directory closed to the agent, and through `root` in the whole tree of another mount
   namespace (a container's). It is DAC as the file's owner set it, reached past a closed parent. Consequences:
   a write reaches another user's process memory where that process maps the file `MAP_SHARED`, and runs code as
   another user where that user executes the file or reads it as a script or configuration.
@@ -384,6 +399,18 @@ option 1, residual accepted).
   `/proc/<pid>/mem` or `/proc/<pid>/fd` …"), its index row and the Agent area link follow, and its residual bullet
   says that with `CAP_SYS_PTRACE` alone only the residual remains. The link in `docs/ARCHITECTURE.md` is the Dev's
   to update.
+- **Diff review of head 399e198, blocking: the residual misses `/proc/<pid>/exe` and `task/<tid>/exe`.**
+  Accepted: fact 25 (from the kernel source, unmeasured); R in *Approach* names `exe` and bounds the residual to
+  "only along paths from some process's cwd or root, or that process's executable through `exe`", with `ETXTBSY`
+  stated as unmeasured and not a barrier; applied in the Agent area (residual bullet, last vector-table row,
+  related-decisions line) and record 0121 (*Consequences*, option 7) by the Lead, and in `.squad/project.md`,
+  `deploy/agent/README.md`, `docs/ARCHITECTURE.md` and `SECURITY.md` by the Dev with the exact R text.
+- **Diff review NB: record 0121 option 7 says dropping the capability "ends" 0030's read residual.** Accepted:
+  "narrows" (the plan's *Problem* says so too).
+- **Diff review NB: record 0115 leaves `CAP_DAC_READ_SEARCH` to "a later collector".** Accepted: 0115 is
+  unreleased; one in-place clarification in its *Consequences* says 0121 excludes granting it without a
+  superseding record.
+- **Diff review: `SECURITY.md` missing from the documentation updates.** Accepted: listed, owner Dev.
 - A Security diff review of the final diff is required again.
 
 ## Out of scope / follow-ups
