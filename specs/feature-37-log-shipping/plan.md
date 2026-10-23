@@ -59,7 +59,7 @@ The criteria are the spec's AC1–AC17 ([spec.md](spec.md)).
 | AC | Test(s) | Test file |
 | -- | ------- | --------- |
 | AC1 | `TestJournal_EntriesMapAsTheImportGolden` (the generated fixture files from `live.export`, compressed with real frames, against `testdata/journal/live-records.jsonl`), `TestJournal_ReadsUserFilesAndTheVolatileDirectory`, `TestJournal_CutsLongFieldsWithTruncated`, `TestJournal_XzOrLz4ItemIsAGap`; C#: `JournalExportParserParsesLiveFixtureAsTheGoldenRecords`; `TestEntries_SeekAllFindsTheFirstEntryAfter`, `TestEntries_NextWithDecodesCompressedItems`, `TestEntries_NextWithMarksCutFields`, `TestEntries_MoreThanFourCompressedItemsLeaveTheEntryUndecoded`, `TestEntries_CompressedObjectBeyondTheBoundIsNotRead`, `TestListAllFiles_TakesSystemAndUserFiles`, `TestReal_NextWithDecodesEveryEntry` (skips without `VANDOX_REAL_JOURNAL_DIR`), `TestJournal_PidFallsBackToSyslogPid` (decision 8), `TestEntries_NextWithCountsTheValueOnly` (decision 6), `TestEntries_NextWithKeepsTheFirstItemOfEachName`, `TestJournal_EntryWithRepeatedFieldsIsShippedWithTheFirstValues` (G4 decision 1) | `internal/logship/journal_test.go`, `tests/Vandox.Core.Tests/JournalExportParserTests.cs`, `internal/journal/entries_test.go`, `internal/journal/dir_test.go`, `internal/journal/real_test.go` |
-| AC2 | `TestParse_ReadsTheImportsSyslogForms` (table from `testdata/logs/mail.log`, `kern.log-oom` and the forms of fact 11), `TestParse_LineWithoutHeaderIsRaw` (with the impossible and unstorable header times of decision 5), `TestClock_YearAndDaylightSavingRules`, `TestClock_SetZoneKeepsThePreviousInstant` (step 6), `TestLoadZone_RefusesWhatIsNotAZoneFile`, `TestFiles_HoldsSyslogFilesWhileTheZoneIsUnknown`, `TestFiles_LineIsCutAsTheImportCutsIt` (review decision R1); C#: `SyslogParserParseAsyncCutsTheWholeLineBeforeItsHeader` (R1) | `internal/syslogline/syslogline_test.go`, `internal/syslogline/clock_test.go`, `internal/syslogline/zone_test.go`, `internal/logship/files_test.go`, `tests/Vandox.Core.Tests/SyslogParserTests.cs` |
+| AC2 | `TestParse_ReadsTheImportsSyslogForms` (table from `testdata/logs/mail.log`, `kern.log-oom` and the forms of fact 11), `TestParse_LineWithoutHeaderIsRaw` (with the impossible and unstorable header times of decision 5), `TestClock_YearAndDaylightSavingRules`, `TestClock_SetZoneKeepsThePreviousInstant` (step 6), `TestLoadZone_RefusesWhatIsNotAZoneFile`, `TestFiles_HoldsSyslogFilesWhileTheZoneIsUnknown`, `TestFiles_LineIsCutAsTheImportCutsIt` (review decision D1); C#: `SyslogParserParseAsyncCutsTheWholeLineBeforeItsHeader` (D1) | `internal/syslogline/syslogline_test.go`, `internal/syslogline/clock_test.go`, `internal/syslogline/zone_test.go`, `internal/logship/files_test.go`, `tests/Vandox.Core.Tests/SyslogParserTests.cs` |
 | AC3 | `TestFilter_MinPriorityAndDropRules` (table: each condition alone and together, a line without priority) | `internal/logship/filter_test.go` |
 | AC4 | `TestLogs_StopAndStartShipEveryLineOnce` (real files in `t.TempDir()`, a fixture journal, `Kept`, `Store.Flush`, a new collector on the saved state), `TestRun_SavesTheStateWhenItStops`, `TestRunner_TellsTheObserverWhetherARunWasKept`, `TestStore_FlushWaitsForARunningSave`, `TestStore_FlushGivesUpWhenASaveDoesNotEnd` (decision 2, coverage mode) | `internal/logship/logship_test.go`, `internal/agent/agent_test.go`, `internal/scheduler/runner_test.go`, `internal/agentstate/agentstate_test.go` |
 | AC5 | `TestLogs_UncleanEndRepeatsOnlyLinesAfterTheSavedPosition`, `TestSaver_SavesALogPositionWithinTenSeconds` (run starts a few milliseconds early on the 10 s grid) | `internal/logship/logship_test.go`, `internal/agentstate/agentstate_test.go` |
@@ -97,8 +97,9 @@ LZ4 items and failed decodings count in `Entry.Undecoded`. `Next` keeps its beha
 collector unchanged).
 
 **Decoder (`internal/zstdfield`).** One `zstd.Decoder` per collector with `WithDecoderConcurrency(1)`, `WithDecoderLowmem(true)`,
-`WithDecoderMaxMemory(4 MiB)`, `WithDecoderMaxWindow(4 MiB)`. Before `DecodeAll`, `Decompress` reads the frame header itself and refuses
-(`ErrFrameRefused`) every frame that is not single-segment, has no stated content size, a stated size over `MaxFrameBytes` or a
+`WithDecoderMaxMemory(4 MiB)`, `WithDecoderMaxWindow(4 MiB)`. Before `DecodeAll`, `Decompress` reads the frame header and walks the block headers itself and
+refuses (`ErrFrameRefused`) a source that is not exactly one frame (bytes after the last block and checksum, a reserved block type, a
+block over 128 KiB or past the source; review finding S1) and every frame that is not single-segment, has no stated content size, a stated size over `MaxFrameBytes` or a
 dictionary (every real frame is `0x60`, fact 6). It decodes into one output buffer allocated once at `MaxFrameBytes` + 128 KiB + 16
 bytes (one block of overshoot for a frame whose stated size is too small, plus the library's over-allocation), never grown: a result
 whose backing array is not that buffer is an error and is dropped. It copies at most the caller's limit into `dst`. Any error makes the
@@ -288,7 +289,7 @@ The Dev's deviations:
    the committed state and up to two forks, so the spec's memory figure for the file reader becomes under 2 MiB (spec fixed). The
    bound of 16,896 bytes (16,384 + 512 for the header) accepted here rested on the premise that the import cuts the message after the
    header; the import cuts the whole line first (`LogLineReader.cs:16`, `:144`), so the review of step 8 replaced it with 16,385 bytes
-   and the import's cut (*Decisions after review*, decision R1).
+   and the import's cut (*Decisions after review*, decision D1).
 6. **`SeekAll` returns the start when `after` is below the header head sequence number: accepted;** equal to the bisection for a
    file whose head sequence number is its first entry's, which journald sets once at the first entry, and a damaged entry before
    the position is not met.
@@ -403,7 +404,7 @@ final code in task 15a.
 
 ## Decisions after review (step 8, round 1)
 
-R1. **A cut `syslog` line keeps 16,384 bytes of message after its header, the import 16,384 bytes of line — fixed: option (a), the
+D1. **A cut `syslog` line keeps 16,384 bytes of message after its header, the import 16,384 bytes of line — fixed: option (a), the
 import's cut.** Root cause: `lineKeep = maxMessageBytes + 512` (`internal/logship/logship.go:43`) keeps 16,896 bytes of a line, and
 `fileRecord` (`internal/logship/files.go:349`) cuts only the parsed message to 16,384, so a 30-byte header with 20,000 `x` ships a
 message of 16,384 bytes. The import's `LogLineReader` cuts the whole line to `MaxLineBytes` = 16,384 before `SyslogParser.Map`
@@ -476,6 +477,13 @@ order mark is trimmed; the doc comments of `splitLines` and `line` name the `\r`
 Then *Format*, the tests and the *Coverage gate*. The Lead already changed spec E6 and the memory figure (16,385 bytes) and the Agent
 area (*Lines*, *Memory*); `docs/areas/wire-format.md` needs no change (its parity sentence becomes true). The Lead checks them against
 the final code in task 15d.
+
+The Reviewer's other blocking findings of round 1 were fixed without a plan change and documented by the Lead in task 15d: S1 (a zstd
+object must hold exactly one frame: `checkBlocks` in `internal/zstdfield/zstdfield.go`; Agent area *Compressed items*, record 0121), R1
+(the give-up gap: after a give-up every run starts from the state the last dropped run reached and carries the same gap until one is
+kept, a dropped run from the span does not replace it — `begin`, `giveUp`, `Kept` in `internal/logship/logship.go`; Agent area *Commit,
+save and give-up*, spec E19), R2 (the per-file clock survives `(*filesRun).begin`, as the Agent area already says), the `rootDir`
+constant in `safeopen.go` and N10 (`fs.protected_hardlinks` in the Agent area and `deploy/agent/README.md`).
 
 ## Options considered
 
@@ -696,7 +704,7 @@ Sweep: `grep` for `agentstate`, `position in the journal`, `the open backup run`
 ## Security considerations
 
 - [ ] Limits on parsed input (as *Approach* sets them): journal payloads 16,384 / 1,024 bytes **before** decoding to text and the
-  record cuts **after** `CleanText` (as the wire check measures); zstd frames refused **before** decoding unless single-segment with a
+  record cuts **after** `CleanText` (as the wire check measures); zstd frames refused **before** decoding unless the object is exactly one frame, single-segment with a
   stated size of at most 4 MiB and no dictionary, objects over 4 MiB not read, at most 4 decoded per entry, one fixed output buffer;
   drop patterns at most 1,024 bytes and 400 compiled instructions each and together (fact 25); file lines cut at 16 KiB raw before
   decoding; `localtime` and the state file at most 64 KiB raw; run budgets count bytes of the cleaned record text.

@@ -277,6 +277,26 @@ func TestLogs_FourthDroppedRunGivesUpTheSpan(t *testing.T) {
 	t.Run("three dropped runs give up nothing", giveUpNothingAfterThree)
 	t.Run("the run that gives up is dropped too: the next kept run carries the gap", giveUpRunDroppedToo)
 	t.Run("the run that gives up is dropped too, for a file", giveUpRunOfAFileDroppedToo)
+	t.Run("every run that starts from the given up span carries the gap until one is kept", giveUpGapIsCarriedByEveryRunUntilOneIsKept)
+}
+
+func giveUpGapIsCarriedByEveryRunUntilOneIsKept(t *testing.T) {
+	w := droppedWorld(t)
+	for range 4 {
+		w.collect()
+		w.refuse()
+	}
+	w.online(seqID(1), jentries(1, 6))
+
+	for i, drop := range []func(){w.refuse, w.timeout, w.refuse} {
+		recs := w.collect()
+		gap := oneGap(t, fmt.Sprintf("dropped run %d from the given up span", i+1), recs)
+		requireGap(t, gap, entryTime(2), entryTime(5))
+		requireMessages(t, fmt.Sprintf("lines of dropped run %d from the span", i+1), messages(recs), []string{"line 6"})
+		drop()
+	}
+
+	requireOneGapInTheFirstKeptRun(t, w, entryTime(2), entryTime(5), "line 6")
 }
 
 func giveUpRunDroppedToo(t *testing.T) {

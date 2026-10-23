@@ -139,7 +139,8 @@ What happens today, checked against the code:
   the flood lasts until the journal or a rotation removes unread lines, E2 or E3 records the gap.
 - E12: A journal entry without `MESSAGE`, or with an invalid `__REALTIME_TIMESTAMP` — not shipped and no gap (there is no
   line). An entry whose items the reader cannot read (a damaged data object of an item, an item compressed with XZ or LZ4,
-  a zstd item that does not decompress or needs more than the decoder's memory bound, a fifth compressed item) — one gap
+  a zstd item that is not exactly one frame of journald's form, does not decompress or needs more than the decoder's memory
+  bound, a fifth compressed item) — one gap
   over that entry (from the previous entry read, shipped or filtered, else the position's time, to the next entry read,
   else the run's start), and reading goes on; several in a row give one gap. A damaged entry object or entry array is
   E23.
@@ -167,7 +168,8 @@ What happens today, checked against the code:
   never makes a run be dropped or a span be read again. When runs are still dropped (timeouts, skips, sink refusals), the
   fourth dropped run in a row from the same committed position **gives up** the span from that position to where the last
   dropped run got, as the kernel collector does: one gap from the committed position's time to the capture time of the last
-  line that run read (else the run's start), reading goes on after the span, and the span's lines are not shipped. Trade-off,
+  line that run read (else the run's start), reading goes on after the span, and the span's lines are not shipped; every
+  following run carries that same gap until one is kept, so a dropped run never loses it. Trade-off,
   as for the kernel collector: a sink refusal lasting more than four runs (8 seconds; later a full spool, #38) gives up lines
   the journal or the file still holds.
 - E20: `/etc/localtime` cannot be read or is not a valid time zone file — the agent never falls back to UTC silently: it

@@ -59,8 +59,8 @@ in the [Agent](../areas/agent.md) area (*Log shipping*, *Agent state*) and the
   An ID without a position is read from its start only when it is newer than the newest position held, so a forgotten ID, a journal
   turned on later or more IDs than the bound never make a file be shipped twice; an ID started at its end whose end is newer than every
   position held records one gap, so skipped newer lines (a clock step back, an unsaved ID after a restart) are never lost silently.
-- Library and decoder bounds are chosen against hostile input, not only real frames: only single-segment frames with a stated size of at
-  most 4 MiB are decoded, into one fixed buffer, at most 4 per entry, because the library stops other frames only after their output
+- Library and decoder bounds are chosen against hostile input, not only real frames: only objects that hold exactly one single-segment frame
+  with a stated size of at most 4 MiB are decoded, into one fixed buffer, at most 4 per entry, because the library stops other frames only after their output
   passed the bound and one crafted entry could otherwise use most of a run; drop patterns are bounded by their compiled size, 400
   instructions each and together, because RE2's linear time still multiplies by the program's length: about 0.2 ms per instruction on a
   16 KiB line, so 1,000 per pattern cost up to 300 ms a line and let a flood of long lines push the collector into gaps; the price is

@@ -349,3 +349,83 @@ func TestDecoder_NeverKeepsAGrownBuffer(t *testing.T) {
 	}
 	runtime.KeepAlive(d)
 }
+
+// frameOf returns a frame of the server's form made of the descriptor, the content size field and the given bytes after them.
+func frameOf(descriptor byte, sizeFieldBytes []byte, blocks ...byte) []byte {
+	out := append([]byte{}, magic...)
+	out = append(out, descriptor)
+	out = append(out, sizeFieldBytes...)
+	return append(out, blocks...)
+}
+
+// blockHeader returns the 3 bytes of a block header; kind is 0 raw, 1 RLE, 2 compressed, 3 reserved.
+func blockHeader(size uint32, kind uint32, last bool) []byte {
+	h := size<<3 | kind<<1
+	if last {
+		h |= 1
+	}
+	return []byte{byte(h), byte(h >> 8), byte(h >> 16)} // #nosec G115 -- the three low bytes of a 24-bit header
+}
+
+func TestDecoder_RefusesFramesWhoseStructureDoesNotEndExactlyAfterOneFrame(t *testing.T) {
+	const single, checksum = 0x20, 0x04
+	oneBlock := append(blockHeader(5, 0, true), "hello"...)
+	tests := []struct {
+		name  string
+		frame []byte
+	}{
+		{"a stated size of two bytes cut short", frameOf(single|1<<6, []byte{0})},
+		{"a stated size of four bytes cut short", frameOf(single|2<<6, []byte{1, 0, 0})},
+		{"a stated size of eight bytes cut short", frameOf(single|3<<6, []byte{1, 0, 0, 0, 0, 0, 0})},
+		{"no block header", frameOf(single, []byte{5})},
+		{"a block header cut short", frameOf(single, []byte{5}, 0x29, 0x00)},
+		{"a block that is not the last and nothing after it", frameOf(single, []byte{5}, append(blockHeader(5, 0, false), "hello"...)...)},
+		{"a reserved block type", frameOf(single, []byte{5}, append(blockHeader(5, 3, true), "hello"...)...)},
+		{"a block over 128 KiB", frameOf(single|2<<6, []byte{0, 0, 3, 0}, append(blockHeader(128<<10+1, 0, true), make([]byte, 128<<10+1)...)...)},
+		{"a block that runs past the end", frameOf(single, []byte{5}, append(blockHeader(100, 0, true), "hello"...)...)},
+		{"a raw block with one byte missing", frameOf(single, []byte{5}, append(blockHeader(5, 0, true), "hell"...)...)},
+		{"a frame followed by one byte", frameOf(single, []byte{5}, append(append([]byte{}, oneBlock...), 0)...)},
+		{"a checksum flag and no checksum", frameOf(single|checksum, []byte{5}, oneBlock...)},
+		{"a checksum flag and a checksum cut short", frameOf(single|checksum, []byte{5}, append(append([]byte{}, oneBlock...), 1, 2, 3)...)},
+		{"a checksum flag and bytes after the checksum", frameOf(single|checksum, []byte{5}, append(append([]byte{}, oneBlock...), 1, 2, 3, 4, 5)...)},
+		{"no checksum flag and four bytes after the block", frameOf(single, []byte{5}, append(append([]byte{}, oneBlock...), 1, 2, 3, 4)...)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := newDecoder(t).Decompress(nil, tt.frame, 1<<20)
+
+			if !errors.Is(err, zstdfield.ErrFrameRefused) || len(got) != 0 {
+				t.Errorf("Decompress() = %d bytes, error %v, want no bytes and ErrFrameRefused", len(got), err)
+			}
+		})
+	}
+}
+
+func TestDecoder_DecodesTheFramesTheStructureCheckAccepts(t *testing.T) {
+	payload := text(5000)
+	crc, err := zstd.NewWriter(nil, zstd.WithEncoderConcurrency(1), zstd.WithEncoderCRC(true), zstd.WithSingleSegment(true))
+	if err != nil {
+		t.Fatalf("zstd.NewWriter() error = %v, want nil", err)
+	}
+	defer func() { _ = crc.Close() }()
+	rle := frameOf(0x20|1<<6, []byte{44, 0}, blockHeader(300, 1, true)...) // 300 bytes of one repeated byte: the size field holds 300 - 256
+	rle = append(rle, 'z')
+	tests := []struct {
+		name  string
+		frame []byte
+		want  []byte
+	}{
+		{"a frame with a valid checksum", crc.EncodeAll(payload, nil), payload},
+		{"a frame made of an RLE block", rle, bytes.Repeat([]byte{'z'}, 300)},
+		{"a frame of a block that is not the last and one that is", frameOf(0x20, []byte{10}, append(append(blockHeader(5, 0, false), "hello"...), append(blockHeader(5, 0, true), "world"...)...)...), []byte("helloworld")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := newDecoder(t).Decompress(nil, tt.frame, 1<<20)
+
+			if err != nil || !bytes.Equal(got, tt.want) {
+				t.Errorf("Decompress() = %d bytes, error %v, want the %d bytes of the payload", len(got), err, len(tt.want))
+			}
+		})
+	}
+}

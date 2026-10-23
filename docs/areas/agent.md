@@ -1069,9 +1069,10 @@ is not shipped and is no gap.
 **Compressed items.** journald compresses every item whose payload is 512 bytes or more (on the server with zstd). The name of a
 compressed item lies inside its frame, so every compressed item of an entry counts, wanted or not: at most 4 are decoded per entry,
 and a fifth makes the entry unreadable without the rest being read, so an entry with more (a coredump's) is a gap. An item is decoded
-only when it is zstd, its stored object is at most 4 MiB (a larger one is not read) and its frame, checked from the frame header
-before anything is decoded, is single-segment with a stated content size of at most 4 MiB and no dictionary — the form journald
-writes. The decoder (`github.com/klauspost/compress/zstd`, one goroutine, low-memory mode, memory and window bounded to 4 MiB) writes
+only when it is zstd, its stored object is at most 4 MiB (a larger one is not read) and holds exactly one frame, which is
+single-segment with a stated content size of at most 4 MiB and no dictionary — the form journald writes. Before anything is decoded the
+frame header is checked and the block headers are walked to the last block: a reserved block type, a block over 128 KiB or past the
+object, or bytes left after the last block (and the checksum, when the frame has one) refuse the frame, so no second frame follows it. The decoder (`github.com/klauspost/compress/zstd`, one goroutine, low-memory mode, memory and window bounded to 4 MiB) writes
 into one output buffer of 4 MiB + 128 KiB + 16 bytes, allocated once and never grown; a result outside that buffer is refused. Of a
 decoded item at most its 16,384 bytes of value are kept, as for a plain item. An item compressed with XZ or LZ4, a frame refused or
 failing to decode, a larger object and a damaged data object of an item make the entry **unreadable**: a gap over it (*Gaps of the
@@ -1205,9 +1206,12 @@ are saved within one state interval. A run that is reported not kept (an error, 
 run that timed out or was skipped is not reported and counts as one dropped run at the next run, through `Run.PreviousLost`. Its
 copy, which an abandoned worker may still change, is never committed. The next run reads again from the committed state, so the
 lines return as long as the journal or the file still holds them. At the fourth dropped run in a row from one committed state the
-span is **given up**: when a dropped run's result came back, the copy of the last such run is committed and one gap runs from the
-committed time (the newest of the journal positions' times and the files' last times, else the run's start) to the latest time of an
-entry or line that run read (else the run's start); its lines are not shipped and reading goes on after them. When none came back
+span is **given up**: when a dropped run's result came back, the next run starts from the reading state the last such run reached
+(that copy is not committed) and records one gap from the committed time (the newest of the journal positions' times and the files'
+last times, else the run's start) to the latest time of an entry or line that run read (else the run's start); the span's lines are
+not shipped and reading goes on after them. Every following run starts from that same state and carries the same gap until a run is
+kept and its copy is committed, so the gap is never lost with a dropped run; a run that started from the span and is dropped too does
+not replace the span. When none came back
 (all timed out or were skipped), one gap runs from the committed time to the run's start, once per committed state, and the
 positions stay. Trade-off, as for the kernel collector: a sink refusal that lasts more than four runs (8 seconds; later a full spool,
 #38) gives up lines the journal or the file still holds. A run that is abandoned never moves a committed or saved position.
