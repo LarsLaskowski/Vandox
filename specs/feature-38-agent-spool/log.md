@@ -63,4 +63,5 @@ are quoted in full.
 | 2026-10-23 22:37 | 8 Fix round 2 tests | squad-tester | level=WARN required in both close subtests (fail on current Error), hang subtest in synctest (sonnet/medium · usage pending) |
 | 2026-10-23 22:37 | 8 Fix round 2 tests | squad-tester | level=WARN required in both close subtests (fail on current Error), hang subtest in synctest (sonnet/medium · 6,285 tokens · 4 tool uses · 63 s · continued) |
 | 2026-10-23 22:37 | 8 Security delta review (round 2) | squad-security | APPROVED; meta 65 ranges and closeSpool goroutine confirmed; N1-N3 stay non-blocking (hardening issue optional); notes the Warn/Error conformance point (fixed in fix round 2) (opus/medium · 14,116 tokens · 4 tool uses · 139 s · continued) |
+| 2026-10-23 22:37 | 8 Fix round 2 (log level) | squad-dev | closeSpool logs spool not closed with Warn again; agent tests green; analyzer green (sonnet/medium · usage pending) |
 | 2026-10-23 22:39 | 8 Review round 3 (delta) | squad-reviewer | APPROVE; log level Warn restored with level=WARN assertions, hang test in synctest; no new findings (opus/medium · 4,276 tokens · 3 tool uses · 23 s · continued) |
