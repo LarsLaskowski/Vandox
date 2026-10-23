@@ -23,3 +23,4 @@ are quoted in full.
 | 2026-10-23 13:10 | 3 Plan revise (2) | Lead | DONE: qualified headline H, residual R, bounding-set rule B, status updated (opus/medium · usage pending) |
 | 2026-10-23 13:11 | 3 Plan security review (delta) | Security | APPROVED; NB1 (residual overstated), NB2 (record title) appended (opus/medium · usage pending) |
 | 2026-10-23 13:17 | 8 Review round 2 | Reviewer | BLOCKING 2 (SECURITY.md:39 stale read residual; project.md:79 H missing 'user's'), NON-BLOCKING 1 (README 0115/0121 citation) (opus/medium · usage pending) |
+| 2026-10-23 13:18 | 8 Review round 1 | Security | CHANGES_REQUIRED: residual misses /proc/<pid>/exe link (blocking); project.md H wording; option 7 'ends'->'narrows'; 0115 clarification (non-blocking) (opus/medium · usage pending) |
