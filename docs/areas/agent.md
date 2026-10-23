@@ -1510,7 +1510,9 @@ above it are followed as configured); the spool opens it with `O_DIRECTORY|O_NOF
 create, remove and rename is relative to that descriptor on a plain name (`openat`, `unlinkat`, `renameat`), never by path and never
 through Go's `os.Root`, which follows a symbolic link whose target stays inside the directory. A file is opened with `O_NOFOLLOW` and
 `O_NONBLOCK` (a link fails, a FIFO does not block) and trusted only when `fstat` on that descriptor shows a regular file of the
-agent's effective user without any group or other permission bit and with exactly one link; it is created exclusively. A name is
+agent's effective user without any group or other permission bit and with exactly one link; it is created exclusively. Because the
+check runs on the opened descriptor, an entry that is no regular file is opened before it is refused and closed at once, never read or
+written: a device node placed under a spool name (which needs `CAP_MKNOD`) reaches its driver's open. A name is
 removed or renamed only after the same check, a data file only when its device and inode are those of the file the spool holds,
 so a link or an entry swapped in between never makes the spool write or delete anything but its own files. An entry the check refuses
 is never followed, written, renamed or deleted: in place of a data file it is damage (below); in place of the meta file or its
@@ -1631,7 +1633,8 @@ under the new ID would describe another agent's data) and logs the warning `spoo
 count); the new ID's numbers start as on a fresh spool.
 
 **Durability and the stop.** A hand-over is written with one `write` and no `fsync`, so an accepted record survives a `kill -9` (the
-page cache keeps it). Once a second, when something was written, the spool syncs the file being written to, the meta file and the
+page cache keeps it). A hand-over is written even when the caller's context is already cancelled, so the records of a run that ends
+while the agent stops are kept; the context only accompanies the spool's log lines. Once a second, when something was written, the spool syncs the file being written to, the meta file and the
 directory; at most one sync is in flight, outside the spool's lock, so a slow sync never holds up a hand-over, and a caller that finds
 one running waits for its result. An OS crash or power loss therefore loses at most the records of about the last second, never a
 damaged record handed out and never a number issued twice; the backend sees the loss as a sequence gap (#41), and the `kernel` and
