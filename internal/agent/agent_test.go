@@ -1973,6 +1973,39 @@ func TestRun_SpoolCloseGivesUp(t *testing.T) {
 			t.Errorf("the log holds the spool directory path, want no path; log:\n%s", out.String())
 		}
 	})
+	t.Run("a close that hangs is given up at the deadline", func(t *testing.T) {
+		sp, err := spool.Open(spool.Options{Dir: t.TempDir(), AgentID: "web-1", BootID: kernelBootRaw, MaxBytes: 2 << 30}, slog.New(slog.DiscardHandler))
+		if err != nil {
+			t.Fatalf("spool.Open() error = %v, want nil", err)
+		}
+		release := make(chan struct{})
+		t.Cleanup(func() { _ = sp.Close(context.Background()) })
+		t.Cleanup(func() { close(release) })
+		oldClose, oldTimeout := spoolClose, closeTimeout
+		t.Cleanup(func() { spoolClose, closeTimeout = oldClose, oldTimeout })
+		spoolClose = func(*spool.Spool, context.Context) error {
+			<-release
+
+			return nil
+		}
+		closeTimeout = 100 * time.Millisecond
+		out := &syncBuffer{}
+		done := make(chan struct{})
+
+		go func() {
+			closeSpool(sp, slog.New(slog.NewTextHandler(out, nil)))
+			close(done)
+		}()
+
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Fatalf("closeSpool still running 5 s after a 100 ms deadline, want it to give up")
+		}
+		if n := countLines(out.String(), `msg="spool not closed"`); n != 1 {
+			t.Errorf("lines %q = %d, want 1; log:\n%s", "spool not closed", n, out.String())
+		}
+	})
 }
 
 // requireStartFailure fails unless Run answered 1, logged one "agent cannot start" error with err and no path of paths, and

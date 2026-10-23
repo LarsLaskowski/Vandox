@@ -6,6 +6,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -307,4 +308,41 @@ func TestOpen_OtherAgentID(t *testing.T) {
 	need(t, len(pieces) == 1, "Read returned %d pieces, want 1", len(pieces))
 	expect(t, pieces[0].AgentID == "agent-two" && len(pieces[0].Records) == 2, "the piece is under agent %q with %d records, want agent-two with the 2 new records", pieces[0].AgentID, len(pieces[0].Records))
 	requireNoLeak(t, r)
+}
+
+// manyRangesMeta writes a meta file of n single-number acknowledged ranges (every second number) over a closed spool
+// of 2n+4 records and opens it. It returns the rig, the spool and the first number.
+func manyRangesMeta(t *testing.T, n int) (*rig, *Spool, uint64) {
+	t.Helper()
+
+	r := newRig(t)
+	sp := r.open()
+	recs := putTagged(t, sp, epoch, "many", 2*n+4, 60)
+	r.closeSpool(sp)
+	first := recs[0].Seq
+	var acked [][2]uint64
+	for i := range n {
+		num := first + ofLenInt(2*i+1)
+		acked = append(acked, [2]uint64{num, num})
+	}
+	writeMeta(t, r.dir(), metaSpec{agent: testAgent, boot: testBoot, clean: true, next: first + ofLenInt(len(recs)), acked: acked})
+	r.logs.reset()
+
+	return r, r.open(), first
+}
+
+func TestOpen_MetaAckRangeLimit(t *testing.T) {
+	t.Run("MaxAckRanges plus one ranges are honored", func(t *testing.T) {
+		r, sp, first := manyRangesMeta(t, MaxAckRanges+1)
+		expect(t, r.logs.count(msgDamaged) == 0, "%q was logged %d times for %d ranges, want 0", msgDamaged, r.logs.count(msgDamaged), MaxAckRanges+1)
+		expect(t, len(readNumbers(t, sp)) == 2*(MaxAckRanges+1)+4-(MaxAckRanges+1), "%d records handed out, want the unacknowledged ones", len(readNumbers(t, sp)))
+		expect(t, !slices.Contains(readNumbers(t, sp), first+1), "acknowledged number %d is handed out", first+1)
+	})
+	t.Run("MaxAckRanges plus two ranges are refused", func(t *testing.T) {
+		r, sp, first := manyRangesMeta(t, MaxAckRanges+2)
+		lines := r.logs.find(msgDamaged)
+		need(t, len(lines) == 1 && lines[0].str("file") == metaName && lines[0].str("err") == errInconsistent,
+			"log lines %q = %v, want one warning for %s with err %q", msgDamaged, lines, metaName, errInconsistent)
+		expect(t, slices.Contains(readNumbers(t, sp), first+1), "the acknowledgements were honored, want them discarded")
+	})
 }

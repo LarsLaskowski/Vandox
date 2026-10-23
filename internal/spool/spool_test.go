@@ -613,3 +613,28 @@ func TestSync_AfterPutSucceeds(t *testing.T) {
 	killed := r.snapshot()
 	requireSame(t, "records after Sync and a kill", readAll(t, killed.open()), all)
 }
+
+func TestAck_MaxRangesSurviveRestart(t *testing.T) {
+	r := newRig(t)
+	sp := r.open()
+	all := putTagged(t, sp, epoch, "t", 200, 60)
+
+	// A range that starts at the oldest kept number is not counted against the limit, so 65 ranges can be held.
+	mustAck(t, sp, all[0].Seq, all[1].Seq)
+	var odd []int
+	var want []model.Record
+	for i := range MaxAckRanges {
+		odd = append(odd, 2*i+3)
+		want = append(want, all[2*i+2])
+	}
+	want = append(want, all[2*MaxAckRanges+2:]...)
+	ackSingles(t, sp, all, odd...)
+	requireSame(t, "before the restart", readAll(t, sp), want)
+
+	r.logs.reset()
+	sp = r.reopen(sp)
+	expect(t, r.logs.count(msgDamaged) == 0, "%q was logged %d times after the restart, want 0 (the meta file is consistent)", msgDamaged, r.logs.count(msgDamaged))
+	requireSame(t, "after the restart (acknowledged records are not handed out again)", readAll(t, sp), want)
+	mustPut(t, sp, batchOf(epoch.Add(time.Hour), "next", 1, 60))
+	expect(t, sp.LastSeq() == all[len(all)-1].Seq+1, "the number after the restart is %d, want %d (no jump)", sp.LastSeq(), all[len(all)-1].Seq+1)
+}
