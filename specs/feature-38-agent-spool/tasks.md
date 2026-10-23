@@ -9,7 +9,7 @@ state file, agent), then the documentation. Each group runs Skeleton (Dev), test
 | - | ----- | ---- | ----- | -------- | ---------- | ----- | ---- |
 | 1 | G1 | Skeleton: MarshalRecord, UnmarshalRecord | internal/wire/encode.go, internal/wire/decode.go | AC1 | — | Dev | [x] |
 | 2 | G1 | Tests: round trip of every record kind, damaged and oversized lines refused | internal/wire/encode_test.go | AC1 | 1 | Tester | [x] |
-| 3 | G1 | Implement the single-line codec on the existing marshalLine, keyCheck and decodeRecord | internal/wire/encode.go, internal/wire/decode.go | AC1 | 2 | Dev | [ ] |
+| 3 | G1 | Implement the single-line codec on the existing marshalLine, keyCheck and decodeRecord | internal/wire/encode.go, internal/wire/decode.go | AC1 | 2 | Dev | [x] |
 | 4 | G2 | Skeleton: Spool fields MaxSize, MinFree, MaxBytes, MinFreeBytes; parseSize | internal/config/agent.go, internal/config/config.go | AC16 | — | Dev | [ ] |
 | 5 | G2 | Tests: defaults, valid values, every E1 value with its exact text; adapt TestAgentKeys and TestDefaultAgent | internal/config/agent_test.go | AC16 | 4 | Tester | [ ] |
 | 6 | G2 | Implement defaults (2GiB, 1GiB), AgentKeys, validation | internal/config/agent.go, internal/config/config.go | AC16 | 5 | Dev | [ ] |

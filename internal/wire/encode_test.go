@@ -871,80 +871,99 @@ func TestCheckRecord_InvalidUTF8OverTheLimitIsRefused(t *testing.T) {
 	}
 }
 
+// assertMarshalRoundTrip checks that rec encodes to the wire envelope and decodes back unchanged.
+func assertMarshalRoundTrip(t *testing.T, rec model.Record) {
+	t.Helper()
+	line, err := wire.MarshalRecord(&rec)
+	if err != nil {
+		t.Fatalf("MarshalRecord() = %v, want nil", err)
+	}
+	if want := envelopeLine(t, &rec); !bytes.Equal(line, want) {
+		t.Errorf("MarshalRecord() = %s, want the wire envelope %s", line, want)
+	}
+	if bytes.ContainsAny(line, "\n") {
+		t.Errorf("MarshalRecord() line contains a newline, want a single line without terminator")
+	}
+	got, err := wire.UnmarshalRecord(line)
+	if err != nil {
+		t.Fatalf("UnmarshalRecord() = %v, want nil", err)
+	}
+	if !reflect.DeepEqual(got, rec) {
+		t.Errorf("UnmarshalRecord() = %+v (data %+v), want %+v (data %+v)", got, got.Data, rec, rec.Data)
+	}
+}
+
 func TestMarshalRecord_RoundTrip(t *testing.T) {
 	for _, rec := range allKindRecords(time.UTC) {
 		t.Run(fmt.Sprintf("%s seq %d", rec.Kind(), rec.Seq), func(t *testing.T) {
-			line, err := wire.MarshalRecord(&rec)
-			if err != nil {
-				t.Fatalf("MarshalRecord() = %v, want nil", err)
-			}
-			if want := envelopeLine(t, &rec); !bytes.Equal(line, want) {
-				t.Errorf("MarshalRecord() = %s, want the wire envelope %s", line, want)
-			}
-			if bytes.ContainsAny(line, "\n") {
-				t.Errorf("MarshalRecord() line contains a newline, want a single line without terminator")
-			}
-			got, err := wire.UnmarshalRecord(line)
-			if err != nil {
-				t.Fatalf("UnmarshalRecord() = %v, want nil", err)
-			}
-			if !reflect.DeepEqual(got, rec) {
-				t.Errorf("UnmarshalRecord() = %+v (data %+v), want %+v (data %+v)", got, got.Data, rec, rec.Data)
-			}
+			assertMarshalRoundTrip(t, rec)
 		})
 	}
+}
 
-	t.Run("zone with zero offset decodes as UTC", func(t *testing.T) {
-		rec := metricAll(1, time.FixedZone("X", 0))
-		line, err := wire.MarshalRecord(&rec)
-		if err != nil {
-			t.Fatalf("MarshalRecord() = %v, want nil", err)
-		}
-		got, err := wire.UnmarshalRecord(line)
-		if err != nil {
-			t.Fatalf("UnmarshalRecord() = %v, want nil", err)
-		}
-		if got.CapturedAt.Location() != time.UTC {
-			t.Errorf("CapturedAt location = %v, want UTC", got.CapturedAt.Location())
-		}
-	})
+func TestMarshalRecord_ZeroOffsetZoneDecodesAsUTC(t *testing.T) {
+	rec := metricAll(1, time.FixedZone("X", 0))
+	line, err := wire.MarshalRecord(&rec)
+	if err != nil {
+		t.Fatalf("MarshalRecord() = %v, want nil", err)
+	}
+	got, err := wire.UnmarshalRecord(line)
+	if err != nil {
+		t.Fatalf("UnmarshalRecord() = %v, want nil", err)
+	}
+	if got.CapturedAt.Location() != time.UTC {
+		t.Errorf("CapturedAt location = %v, want UTC", got.CapturedAt.Location())
+	}
+}
 
-	t.Run("line of exactly the line limit round trips", func(t *testing.T) {
-		limit := wire.DefaultLimits().MaxLineBytes
-		rec := metricAll(1, time.UTC)
-		rec.Data.(*model.MetricPoint).Labels = map[string]string{"k": ""}
-		base, err := wire.MarshalRecord(&rec)
-		if err != nil {
-			t.Fatalf("MarshalRecord() = %v, want nil", err)
-		}
-		// Grow one label value until the line has exactly limit bytes.
-		extra := limit - len(base)
-		if extra > model.MaxTextBytes {
-			t.Skipf("one text of %d bytes cannot reach the line limit %d", model.MaxTextBytes, limit)
-		}
-		rec.Data.(*model.MetricPoint).Labels["k"] = strings.Repeat("x", extra)
-		line, err := wire.MarshalRecord(&rec)
-		if err != nil {
-			t.Fatalf("MarshalRecord() of %d bytes = %v, want nil", len(base)+extra, err)
-		}
-		if len(line) != limit {
-			t.Fatalf("test setup: line has %d bytes, want %d", len(line), limit)
-		}
-		if _, err := wire.UnmarshalRecord(line); err != nil {
-			t.Errorf("UnmarshalRecord() of a line of the limit = %v, want nil", err)
-		}
-	})
+func TestMarshalRecord_LineOfExactlyTheLimitRoundTrips(t *testing.T) {
+	limit := wire.DefaultLimits().MaxLineBytes
+	status := bigStatus(63, model.MaxTextBytes, false)
+	status.Threads = append(status.Threads, model.MariaDBThread{ID: 64, Info: "x"})
+	rec := model.Record{Meta: agentMeta(1, "mariadb", time.UTC), Data: status}
+	base, err := wire.MarshalRecord(&rec)
+	if err != nil {
+		t.Fatalf("test setup: MarshalRecord() = %v, want nil", err)
+	}
+	extra := limit - len(base) + 1 // the base line holds one byte of info
+	if extra < 1 || extra > model.MaxTextBytes {
+		t.Fatalf("test setup: %d bytes missing to the limit, want 0 to %d", extra, model.MaxTextBytes)
+	}
+	status.Threads[63].Info = strings.Repeat("x", extra)
+	line, err := wire.MarshalRecord(&rec)
+	if err != nil {
+		t.Fatalf("MarshalRecord() of a line of the limit = %v, want nil", err)
+	}
+	if len(line) != limit {
+		t.Fatalf("test setup: line has %d bytes, want %d", len(line), limit)
+	}
+	got, err := wire.UnmarshalRecord(line)
+	if err != nil {
+		t.Fatalf("UnmarshalRecord() of a line of the limit = %v, want nil", err)
+	}
+	if !reflect.DeepEqual(got, rec) {
+		t.Errorf("UnmarshalRecord() of a line of the limit differs from the record")
+	}
+}
+
+// oversizedStatusRecord returns a record that is valid for the model but whose line exceeds the line limit.
+func oversizedStatusRecord(t *testing.T) model.Record {
+	t.Helper()
+	rec := model.Record{Meta: agentMeta(1, "mariadb", time.UTC), Data: bigStatus(500, model.MaxTextBytes, false)}
+	if err := rec.Validate(); err != nil {
+		t.Fatalf("test setup: oversized record fails the model validation: %v", err)
+	}
+	return rec
 }
 
 func TestMarshalRecord_RefusesInvalidRecords(t *testing.T) {
-	oversized := model.Record{Meta: agentMeta(1, "mariadb", time.UTC), Data: bigStatus(500, model.MaxTextBytes, false)}
-	if err := oversized.Validate(); err != nil {
-		t.Fatalf("test setup: oversized record fails the model validation: %v", err)
-	}
 	notAgent := metricAll(1, time.UTC)
 	notAgent.Origin = model.OriginBackend
-	noSeq := metricAll(0, time.UTC)
-	tests := map[string]model.Record{"oversized": oversized, "origin not agent": notAgent, "sequence number 0": noSeq}
+	tests := map[string]model.Record{
+		"oversized":         oversizedStatusRecord(t),
+		"origin not agent":  notAgent,
+		"sequence number 0": metricAll(0, time.UTC),
+	}
 	for name, rec := range tests {
 		t.Run(name, func(t *testing.T) {
 			line, err := wire.MarshalRecord(&rec)
@@ -960,25 +979,42 @@ func TestMarshalRecord_RefusesInvalidRecords(t *testing.T) {
 			}
 		})
 	}
+}
 
-	t.Run("oversized is a RecordSizeError", func(t *testing.T) {
-		_, err := wire.MarshalRecord(&oversized)
-		var rse *wire.RecordSizeError
-		if !errors.As(err, &rse) {
-			t.Fatalf("MarshalRecord() = %v, want a *wire.RecordSizeError", err)
-		}
-		if rse.Limit != wire.DefaultLimits().MaxLineBytes || rse.Size <= rse.Limit {
-			t.Errorf("RecordSizeError = size %d limit %d, want size above the line limit %d", rse.Size, rse.Limit, wire.DefaultLimits().MaxLineBytes)
-		}
-		if !errors.Is(err, wire.ErrRecordTooLarge) {
-			t.Errorf("MarshalRecord() = %v, want ErrRecordTooLarge", err)
-		}
-	})
+func TestMarshalRecord_OversizedIsRecordSizeError(t *testing.T) {
+	rec := oversizedStatusRecord(t)
+	_, err := wire.MarshalRecord(&rec)
+	var rse *wire.RecordSizeError
+	if !errors.As(err, &rse) {
+		t.Fatalf("MarshalRecord() = %v, want a *wire.RecordSizeError", err)
+	}
+	if rse.Limit != wire.DefaultLimits().MaxLineBytes || rse.Size <= rse.Limit {
+		t.Errorf("RecordSizeError = size %d limit %d, want size above the line limit %d", rse.Size, rse.Limit, wire.DefaultLimits().MaxLineBytes)
+	}
+	if !errors.Is(err, wire.ErrRecordTooLarge) {
+		t.Errorf("MarshalRecord() = %v, want ErrRecordTooLarge", err)
+	}
+}
+
+// assertRejected checks that line is refused with an error wrapping want (any error when want is nil) and a zero record.
+func assertRejected(t *testing.T, line string, want error) {
+	t.Helper()
+	rec, err := wire.UnmarshalRecord([]byte(line))
+	if err == nil {
+		t.Fatalf("UnmarshalRecord() = %+v, nil, want an error", rec)
+	}
+	if want != nil && !errors.Is(err, want) {
+		t.Errorf("UnmarshalRecord() error = %v, want it to wrap %v", err, want)
+	}
+	if rec.Data != nil {
+		t.Errorf("UnmarshalRecord() returned data %+v with an error, want a zero record", rec.Data)
+	}
 }
 
 func TestUnmarshalRecord_RejectsDamagedLine(t *testing.T) {
 	good := metricLine(1)
 	limit := wire.DefaultLimits().MaxLineBytes
+	const tail = `"seq":1,"captured_at":"2026-03-01T12:00:00Z","data":{"name":"x","value":1}}`
 	tests := []struct {
 		name string
 		line string
@@ -995,13 +1031,13 @@ func TestUnmarshalRecord_RejectsDamagedLine(t *testing.T) {
 		{"unknown kind", kindLine("nope", `{"name":"x","value":1}`), wire.ErrUnknownKind},
 		{"null data", kindLine("metric", "null"), nil},
 		{"missing data", `{"kind":"metric","source":"s","seq":1,"captured_at":"2026-03-01T12:00:00Z"}`, nil},
-		{"duplicate key", `{"kind":"metric","kind":"metric","source":"s","seq":1,"captured_at":"2026-03-01T12:00:00Z","data":{"name":"x","value":1}}`, wire.ErrMalformed},
-		{"duplicate key by case", `{"kind":"metric","KIND":"metric","source":"s","seq":1,"captured_at":"2026-03-01T12:00:00Z","data":{"name":"x","value":1}}`, wire.ErrMalformed},
-		{"key not ASCII", `{"kind":"metric","söurce":"s","seq":1,"captured_at":"2026-03-01T12:00:00Z","data":{"name":"x","value":1}}`, wire.ErrMalformed},
+		{"duplicate key", `{"kind":"metric","kind":"metric","source":"s",` + tail, wire.ErrMalformed},
+		{"duplicate key by case", `{"kind":"metric","KIND":"metric","source":"s",` + tail, wire.ErrMalformed},
+		{"key not ASCII", `{"kind":"metric","söurce":"s",` + tail, wire.ErrMalformed},
 		{"nesting too deep", `{"kind":"metric","source":"s","seq":1,"captured_at":"2026-03-01T12:00:00Z","data":{"name":"x","value":1,"labels":` +
 			strings.Repeat("[", wire.MaxDepth+1) + strings.Repeat("]", wire.MaxDepth+1) + `}}`, wire.ErrMalformed},
-		{"invalid UTF-8", strings.Replace(good, `"proc.meminfo"`, "\"proc\xff\"", 1), wire.ErrMalformed},
-		{"unpaired surrogate", strings.Replace(good, `"proc.meminfo"`, `"proc\ud800"`, 1), wire.ErrMalformed},
+		{"invalid UTF-8", strings.Replace(good, `"proc.stat"`, "\"proc\xff\"", 1), wire.ErrMalformed},
+		{"unpaired surrogate", strings.Replace(good, `"proc.stat"`, `"proc\ud800"`, 1), wire.ErrMalformed},
 		{"sequence number 0", kindLineSeq("metric", 0, okData), nil},
 		{"sequence number negative", `{"kind":"metric","source":"s","seq":-1,"captured_at":"2026-03-01T12:00:00Z","data":{"name":"x","value":1}}`, nil},
 		{"bad time", `{"kind":"metric","source":"s","seq":1,"captured_at":"yesterday","data":{"name":"x","value":1}}`, nil},
@@ -1010,28 +1046,22 @@ func TestUnmarshalRecord_RejectsDamagedLine(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			rec, err := wire.UnmarshalRecord([]byte(tt.line))
-			if err == nil {
-				t.Fatalf("UnmarshalRecord() = %+v, nil, want an error", rec)
+			if tt.line == good {
+				t.Fatalf("test setup: damaged line equals the valid line")
 			}
-			if tt.want != nil && !errors.Is(err, tt.want) {
-				t.Errorf("UnmarshalRecord() error = %v, want it to wrap %v", err, tt.want)
-			}
-			if rec.Data != nil {
-				t.Errorf("UnmarshalRecord() returned data %+v with an error, want a zero record", rec.Data)
-			}
+			assertRejected(t, tt.line, tt.want)
 		})
 	}
+}
 
-	t.Run("valid line is accepted", func(t *testing.T) {
-		rec, err := wire.UnmarshalRecord([]byte(good))
-		if err != nil {
-			t.Fatalf("UnmarshalRecord() = %v, want nil", err)
-		}
-		if rec.Seq != 1 || rec.Origin != model.OriginAgent {
-			t.Errorf("UnmarshalRecord() seq %d origin %q, want seq 1 origin %q", rec.Seq, rec.Origin, model.OriginAgent)
-		}
-	})
+func TestUnmarshalRecord_AcceptsValidLine(t *testing.T) {
+	rec, err := wire.UnmarshalRecord([]byte(metricLine(1)))
+	if err != nil {
+		t.Fatalf("UnmarshalRecord() = %v, want nil", err)
+	}
+	if rec.Seq != 1 || rec.Origin != model.OriginAgent {
+		t.Errorf("UnmarshalRecord() seq %d origin %q, want seq 1 origin %q", rec.Seq, rec.Origin, model.OriginAgent)
+	}
 }
 
 func TestUnmarshalRecord_ReusableAfterFailure(t *testing.T) {
