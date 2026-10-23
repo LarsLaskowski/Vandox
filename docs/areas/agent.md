@@ -392,7 +392,8 @@ carry none of the new fields and read as full with complete aggregates. A regula
 only: an address first seen after the 4,096 are counted, however heavy, is missing from it (a full snapshot says so through `complete`).
 `remotes` does not unmap IPv4-mapped addresses, so one IPv4 peer connected to a `0.0.0.0` and to a `::` listener is two entries.
 
-**Owners.** The agent does not read the `/proc/<pid>/fd` links, because listing them needs `CAP_DAC_READ_SEARCH` (*Rights*). For every
+**Owners.** The agent does not read the `/proc/<pid>/fd` links, because listing them needs `CAP_DAC_READ_SEARCH`, which the agent does not
+hold (*Rights*). For every
 listed process it lists `<pid>/fdinfo` in chunks of 256 and, per descriptor, opens the file, reads at most 256 bytes and closes it. The
 first four lines must be `pos:`, `flags:`, `mnt_id:` (1 to 10 digits, not 0) and `ino:` (1 to 20 digits), each a tab and digits; later lines
 (an epoll's `tfd:`) are not read. A descriptor counts only when its `ino:` is the inode of a tracked socket **and** its `mnt_id:` is the
@@ -1167,8 +1168,10 @@ collector timeouts and backend gap detection each emit a gap record, and each pa
 
 - The agent runs as the dedicated system user `vandox-agent` without a login shell, **never as root**. It authenticates to MariaDB as
   that OS user through `unix_socket` with only the `PROCESS` privilege.
-- For reading it is a member of the groups `adm` (log files) and `systemd-journal` (journal). To read other users' processes and their
-  open files it holds exactly `CAP_SYS_PTRACE` and `CAP_DAC_READ_SEARCH`, as ambient capabilities with a bounding set limited to these two.
+- For reading it is a member of the groups `adm` (log files) and `systemd-journal` (journal). To read other users' processes it holds
+  `CAP_SYS_PTRACE` alone, as an ambient capability with a bounding set limited to it (rule below, record 0121). `CAP_DAC_READ_SEARCH` is
+  **not** granted: together with `CAP_SYS_PTRACE` it opens other processes' open files through `/proc/<pid>/fd/<n>` for writing, memfds
+  included (measured below), and no collector needs it.
 - **Process collector.** `stat`, `status` and `cmdline` of every process are readable by any user (unless `/proc` is mounted with
   `hidepid`); `smaps_rollup` of **another user's** process needs `CAP_SYS_PTRACE`, and `CAP_DAC_READ_SEARCH` does not replace it. Measured
   on the development host as UID 65534 against a root process in the same namespace, without Yama or `hidepid`: `smaps_rollup` answers
@@ -1177,8 +1180,9 @@ collector timeouts and backend gap detection each emit a gap record, and each pa
   RSS from `status` and leaves the PSS out. `CAP_SYS_PTRACE` is the process collector's use of the capability; the list of rights per
   collector is in `deploy/agent/README.md`.
 - **Connection collector.** It reads another user's `/proc/<pid>/fdinfo/<n>` (`mnt_id:`, `ino:`, the socket's table inode) and uses
-  `CAP_SYS_PTRACE` alone; it does **not** use `CAP_DAC_READ_SEARCH`, which would only be needed for the `/proc/<pid>/fd` links and lets the whole
-  agent read every file (`/etc/shadow`, Plesk's credentials). Measured by Security on the development host (kernel 6.18.44, no Yama, no
+  `CAP_SYS_PTRACE` alone. The `fd` links stay unread, because reading them needs `CAP_DAC_READ_SEARCH`, which lets the whole agent read
+  every file (`/etc/shadow`, Plesk's credentials) and, with `CAP_SYS_PTRACE`, also enables the memfd write (*No write into another user's
+  process or file beyond its own mode*); the agent does not hold it. Measured by Security on the development host (kernel 6.18.44, no Yama, no
   `hidepid`), as UID 65534 against a process of root:
 
   | Capabilities | list `fd/` | readlink `fd/3` | list `fdinfo/` | read `fdinfo/3` | read `/etc/shadow` |

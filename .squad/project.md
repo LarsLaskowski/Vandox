@@ -70,33 +70,39 @@ files or endpoints.
    Records 0012, 0031.
 6. **Agent privileges** (`deploy/agent/`: user, systemd unit; from v0.6.0 the polkit rule): *Goal:* the
    agent never runs as root; it holds only the group memberships (`adm`, `systemd-journal`), from #42 the
-   capabilities `CAP_SYS_PTRACE` and `CAP_DAC_READ_SEARCH` (bounding set limited to exactly these), and,
+   capability `CAP_SYS_PTRACE` alone (bounding set limited to it), and,
    once self-healing exists, a polkit rule that allows restarting only the configured units, each listed
    and justified in `deploy/agent/`. While any capability is granted, the unit is confined:
    `NoNewPrivileges=yes`; `SystemCallFilter=` denies at least `ptrace`, `process_vm_readv`,
    `process_vm_writev`, `pidfd_getfd`, `open_by_handle_at` and `process_madvise` (with
    `SystemCallErrorNumber=EPERM`; `process_madvise` is named explicitly because `@system-service` includes
-   it, and `pidfd_open` stays allowed), and `SystemCallArchitectures=native`; no write-side capability. So a
-   compromised agent cannot use its capabilities to write as or run code as another user. Three distinct
-   barriers stop the write vectors examined, and none of them alone covers all: (a) DAC plus the bounding
-   set: opening another user's `/proc/<pid>/mem` (and any other owner-only writable `/proc/<pid>/` file,
-   such as `clear_refs`) for writing needs `CAP_DAC_OVERRIDE`, which `CAP_SYS_PTRACE` does not grant and
-   `CAP_DAC_READ_SEARCH` does not either (read and search only), so the bounding set must keep
-   `CAP_DAC_OVERRIDE` and every write-side DAC capability out; (b) the system-call filter, for `ptrace`
-   (POKE), `process_vm_writev`, `pidfd_getfd`, `open_by_handle_at` and `process_madvise`, and not for
-   `openat` or `pwrite`, which the filter does not deny; (c) the kernel, behind the filter, for `pidfd_open`
-   plus `process_madvise`: the call needs `CAP_SYS_NICE` (since kernel 5.12), which the bounding set must
-   also keep out, and the kernel refuses destructive advice on another process (version-dependent, so
-   defence in depth only). Read and write differ for `mem`: with `CAP_DAC_READ_SEARCH` the agent can open
-   another user's `mem` read-only, which is the accepted read residual below, and it cannot open it for
-   writing. Adding `CAP_DAC_OVERRIDE`, a write-side DAC capability or `CAP_SYS_NICE` to the bounding set, or
-   removing one of the six denied calls, is a `security` change that must supersede record 0121. Accepted residual, stated openly: its read access
-   equals root's, i.e. every file on the server, and the memory and environment of every process, and
-   credentials read that way may still lead to root through other services (password reuse, Plesk or
-   MariaDB administration). `ProtectHome=yes` and `InaccessiblePaths=` (at least `/etc/shadow`,
+   it, and `pidfd_open` stays allowed), and `SystemCallArchitectures=native`; no write-side capability. A compromised agent cannot use its capability to write into another process or file, or to run code as another user,
+   except through a file whose own mode grants the agent's user, its groups (`adm`, `systemd-journal`) or others write (accepted
+   residual, record 0121). Three distinct barriers stop the write vectors examined, and none of them alone covers all: (a) DAC plus the
+   bounding set: opening another user's `/proc/<pid>/mem` (and any other owner-only writable `/proc/<pid>/` file, such as `clear_refs`)
+   for writing needs `CAP_DAC_OVERRIDE`, which `CAP_SYS_PTRACE` does not grant, the lookup in `/proc/<pid>/fd` (mode `0500`, owned by the
+   target's user) needs `CAP_DAC_READ_SEARCH`, and following the links in `/proc/<pid>/map_files/` needs `CAP_SYS_ADMIN` or
+   `CAP_CHECKPOINT_RESTORE`, so the bounding set must keep them out; (b) the system-call filter, for `ptrace` (POKE), `process_vm_writev`,
+   `pidfd_getfd`, `open_by_handle_at` and `process_madvise`, and not for `openat` or `pwrite`, which the filter does not deny; (c) the
+   kernel, behind the filter, for `pidfd_open` plus `process_madvise`: the call needs `CAP_SYS_NICE` (since kernel 5.12), which the
+   bounding set must also keep out, and the kernel refuses destructive advice on another process (version-dependent, so defence in depth
+   only). The bounding set holds `CAP_SYS_PTRACE` only; adding any capability to it is a `security` change that supersedes record 0121.
+   For example, `CAP_DAC_READ_SEARCH` reopens the write through `/proc/<pid>/fd/<n>` into other processes' open files, memfds included,
+   and below closed directories; `CAP_DAC_OVERRIDE` and the other write-side DAC capabilities the write open of `mem`; `CAP_SYS_NICE`
+   `process_madvise` on another process; `CAP_SYS_ADMIN` or `CAP_CHECKPOINT_RESTORE`, together with directory search, the links in
+   `/proc/<pid>/map_files/`. Removing one of the six denied calls is such a change too. Accepted residual, stated openly: with
+   `CAP_SYS_PTRACE` the agent follows another process's `/proc/<pid>/cwd` and `/proc/<pid>/root` links and their
+   `/proc/<pid>/task/<tid>/cwd` and `…/root` variants, so every file whose own mode grants the agent's user, its groups or others read or
+   write is reachable even below a closed directory that contains another process's working or root directory (a file is reachable only
+   along paths from some process's `cwd` or `root`; the path components after the link are still checked against their own modes), and the
+   `root` link reaches the file tree of another mount namespace (a container's). A write into such a file reaches another user's process
+   memory where that process maps the file `MAP_SHARED`, and runs code as another user where that user executes the file or reads it as a
+   script or configuration. Readable besides are the ptrace-checked `/proc` files whose mode allows reading (`maps`, `smaps_rollup`,
+   `fdinfo`, …), not another user's `mem` or `environ` and not `/etc/shadow`; credentials read that way may still lead to root through
+   other services (password reuse, Plesk or MariaDB administration). `ProtectHome=yes` and `InaccessiblePaths=` (at least `/etc/shadow`,
    `/etc/gshadow`) are defence in depth against accidental reads only, not a limit on a compromised agent,
-   which bypasses them through `/proc/<pid>/root`. The system call filter of the unit must allow `adjtimex`, which the `clock` collector calls
-with a zero `Timex` (mode 0, read-only; no capability needed), so the unit uses neither `ProtectClock=yes` nor an allow-list without it (#42). The process collector (`internal/procstats`) is the user of `CAP_SYS_PTRACE`: `smaps_rollup` of another user's process needs it and `CAP_DAC_READ_SEARCH` does not replace it (measured, record 0113); without it the collector records RSS and leaves PSS out, and `deploy/agent/README.md` lists the right. The connection collector (`internal/connstats`) is the second user of `CAP_SYS_PTRACE` and adds no right: it reads another user's `/proc/<pid>/fdinfo/<n>` with it alone (measured, record 0115), and not `/proc/<pid>/fd`, which needs `CAP_DAC_READ_SEARCH` (the right to read every file), which no collector uses. The agent's start-up probe of the socket mount (`internal/sockmount`) opens one Unix datagram socket, never bound, connected or sent on, and needs no right, but the unit's filters must allow `AF_UNIX` (`RestrictAddressFamilies=`), must not give the agent a network namespace of its own (`PrivateNetwork=`, `NetworkNamespacePath=`), must not set `ProcSubset=pid` and must leave `ProtectProc=` at `default`. The systemd collector (`internal/svcstats`, `internal/sdbus`) reads unit states over the system bus socket `/run/dbus/system_bus_socket` and needs no group and no capability, because systemd's bus policy lets every user make the read calls it uses (the server capture was taken as `nobody`); the unit must keep that socket reachable (`AF_UNIX` in `RestrictAddressFamilies=`, no `InaccessiblePaths=` or `TemporaryFileSystem=` over `/run/dbus`), and `deploy/agent/README.md` lists it. The MariaDB collector (`internal/mariadb`) needs no group and no capability: it connects to the local socket as `vandox-agent` (area 7); the unit must keep `/run/mysqld` reachable (no `InaccessiblePaths=` or `TemporaryFileSystem=` over it) and `AF_UNIX` in `RestrictAddressFamilies=`, and `deploy/agent/README.md` lists it. The kernel event collector (`internal/kernevents`, `internal/journal`) is the user of the group `systemd-journal`: it reads the journal files below `/var/log/journal` and `/run/log/journal` in pure Go and adds no capability; the unit must keep both paths readable (no `InaccessiblePaths=` or `TemporaryFileSystem=` over them) and start after `systemd-journal-flush.service`. The backup collector (`internal/backups`) reads `/proc` like the process collector and needs no right. Records 0013, 0030, 0111, 0113, 0115, 0117, 0118, 0119, 0120, 0121.
+   which bypasses them through `/proc/<pid>/root` where the files' own modes allow it. The system call filter of the unit must allow `adjtimex`, which the `clock` collector calls
+with a zero `Timex` (mode 0, read-only; no capability needed), so the unit uses neither `ProtectClock=yes` nor an allow-list without it (#42). The process collector (`internal/procstats`) is the user of `CAP_SYS_PTRACE`: `smaps_rollup` of another user's process needs it and `CAP_DAC_READ_SEARCH` does not replace it (measured, record 0113); without it the collector records RSS and leaves PSS out, and `deploy/agent/README.md` lists the right. The connection collector (`internal/connstats`) is the second user of `CAP_SYS_PTRACE` and adds no right: it reads another user's `/proc/<pid>/fdinfo/<n>` with it alone (measured, record 0115), and not `/proc/<pid>/fd`, which needs `CAP_DAC_READ_SEARCH` (the right to read every file), which the agent does not hold (record 0121). The agent's start-up probe of the socket mount (`internal/sockmount`) opens one Unix datagram socket, never bound, connected or sent on, and needs no right, but the unit's filters must allow `AF_UNIX` (`RestrictAddressFamilies=`), must not give the agent a network namespace of its own (`PrivateNetwork=`, `NetworkNamespacePath=`), must not set `ProcSubset=pid` and must leave `ProtectProc=` at `default`. The systemd collector (`internal/svcstats`, `internal/sdbus`) reads unit states over the system bus socket `/run/dbus/system_bus_socket` and needs no group and no capability, because systemd's bus policy lets every user make the read calls it uses (the server capture was taken as `nobody`); the unit must keep that socket reachable (`AF_UNIX` in `RestrictAddressFamilies=`, no `InaccessiblePaths=` or `TemporaryFileSystem=` over `/run/dbus`), and `deploy/agent/README.md` lists it. The MariaDB collector (`internal/mariadb`) needs no group and no capability: it connects to the local socket as `vandox-agent` (area 7); the unit must keep `/run/mysqld` reachable (no `InaccessiblePaths=` or `TemporaryFileSystem=` over it) and `AF_UNIX` in `RestrictAddressFamilies=`, and `deploy/agent/README.md` lists it. The kernel event collector (`internal/kernevents`, `internal/journal`) is the user of the group `systemd-journal`: it reads the journal files below `/var/log/journal` and `/run/log/journal` in pure Go and adds no capability; the unit must keep both paths readable (no `InaccessiblePaths=` or `TemporaryFileSystem=` over them) and start after `systemd-journal-flush.service`. The backup collector (`internal/backups`) reads `/proc` like the process collector and needs no right. Records 0013, 0030, 0111, 0113, 0115, 0117, 0118, 0119, 0120, 0121.
 7. **MariaDB monitoring user**: *Goal:* the agent connects over the local socket as `vandox-agent`,
    authenticated by `unix_socket`, with only the `PROCESS` privilege: no database password exists and no
    table data is readable; the agent issues read-only status queries only. `deploy/agent/mariadb-user.sql` is the one
