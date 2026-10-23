@@ -7,9 +7,10 @@ how it survives a stalled data source and a missing backend, how gaps are record
 sends is in the [wire format](wire-format.md); its configuration file is in [Configuration and secrets](configuration-and-secrets.md).
 
 **Status.** The command line, the start-up with the configuration file, logging, the scheduler with its gaps and the memory pressure
-switch, the self-metrics, the system metrics, the process collector with the memory pressure mode, the connection collector (with its start-up probe of the socket mount), the systemd service collector, the MariaDB collector, the kernel event collector with the boot check and the extra snapshots it requests, the log shipping collector (the journal and configured `syslog` files), the backup run check, the agent's state file and the notification of systemd exist, as do
-the shared data model and the wire encoder. The other collectors, the spool, the sender and the systemd unit are **not implemented yet**: until the spool exists, the agent
-drops the records it produces after checking them (it is not released in that state; v0.2.0 waits for the spool and the sender). The
+switch, the self-metrics, the system metrics, the process collector with the memory pressure mode, the connection collector (with its start-up probe of the socket mount), the systemd service collector, the MariaDB collector, the kernel event collector with the boot check and the extra snapshots it requests, the log shipping collector (the journal and configured `syslog` files), the backup run check, the agent's state file, the on-disk spool and the notification of systemd exist, as do
+the shared data model and the wire encoder. The other collectors, the sender and the systemd unit are **not implemented yet**: the
+agent keeps every record it produces in its spool, but nothing reads the spool yet, so it fills up to `spool.max_size` and then drops
+its oldest records with recorded gaps (it is not released in that state; v0.2.0 waits for the sender). The
 rules below for the parts not implemented are the target the implementation is held to and the tests must check.
 
 ## Command line and start-up
@@ -19,7 +20,8 @@ rules below for the parts not implemented are the target the implementation is h
   positional argument or an empty `-config` is a usage error: the usage on standard error, exit code 2.
 - At start-up the agent reads the configuration file and the agent token as [Configuration and secrets](configuration-and-secrets.md)
   describes. When that fails it logs one error line with the loader's error text and exits with 1, before it notifies systemd of
-  anything.
+  anything. It then opens its state file (*Agent state*) and, after it, its spool (*Spool and sending*); a spool that cannot be
+  opened ends the start the same way, with the error line `agent cannot start`.
 - It runs until it receives SIGTERM or SIGINT, then stops its collectors (a collector stuck in a run is not waited for), tells systemd
   that it is stopping and exits with 0.
 
@@ -127,19 +129,22 @@ rules below for the parts not implemented are the target the implementation is h
 - Records go to the sink with the agent's own context, not one bounded by the run's timeout. When the sink refuses records, the
   agent logs the error (at the first failure, and the recovery once) and records no gap itself: the sink that refuses records owns
   recording their loss as a gap (the spool, *Spool and sending*).
-- Until the spool exists, the records that passed these checks are dropped. The spool assigns the sequence numbers (*Spool and
-  sending*).
+- The records that passed these checks go to the spool, which assigns the sequence numbers (*Spool and sending*). A hand-over is
+  never refused because the agent's context ended, so a stop does not lose the records of a run that finished.
 
 ## Self-metrics
 
 The collector `self` (interval 60 seconds, timeout 10 seconds) records the agent's own resource use as ordinary `metric` records with
-source `agent`, through the scheduler like every collector: its resident memory, its CPU time, its number of goroutines, and — once
-the spool and the sender exist — the size of the spool and how far sending lags behind capture. The names, units and values are in the
+source `agent`, through the scheduler like every collector: its resident memory, its CPU time, its number of goroutines, the size of
+the spool's files (`agent_spool_bytes`), the age of the oldest record the spool holds unacknowledged (`agent_spool_age_seconds`), and —
+once the sender exists — how far sending lags behind capture. The names, units and values are in the
 [wire format](wire-format.md) (*Metric names*, the `agent_*` rows).
 
 The resident memory is read from at most 64 KiB of the agent's own `/proc` status file, and its line must be `VmRSS:`, spaces or tabs,
-1 to 12 ASCII digits, one space and `kB`; anything else, a failed read, a negative spool size or a negative send lag fails the
-sample, which then becomes a gap.
+1 to 12 ASCII digits, one space and `kB`; anything else, a failed read, a negative spool size, an error of the spool's size or age and
+a negative send lag fails the sample, which then becomes a gap. The spool's age is the sample's start minus the capture time of the
+oldest unacknowledged record; it is 0 when the spool holds none and when that capture time lies after the sample's start (a clock set
+back), never negative.
 
 ## System metrics
 
@@ -935,8 +940,9 @@ the same identity. A dropped run that read nothing does not count. At the fourth
 position, the span from that position to where the last dropped run got is **given up**: the run records one gap from the committed
 position's time to the time of the last readable kernel entry that run read (else the run's start), reads on after the span, and the
 span's kills are not returned; while that run is dropped as well, the next one gives up the same span again. Trade-off: a sink error
-that lasts more than four runs (8 seconds; later a full spool, #38) gives up the span's kills as a gap although the journal still
-holds them and the sink may recover soon after. A run that is abandoned never moves the saved position.
+that lasts more than four runs (8 seconds: a spool write that keeps failing, or a hand-over the spool cannot place, *Spool and
+sending*) gives up the span's kills as a gap although the journal still holds them and the sink may recover soon after. A full spool
+is no such error: it drops its oldest records with a gap and takes the run's records. A run that is abandoned never moves the saved position.
 
 **Gaps of the kernel collector.** Each gap has source and collector `kernel` and cause `unknown`, and its times come only from
 readable entries, the committed position (decoded strictly from the state file) and the run's start; a gap whose end would not be
@@ -1014,6 +1020,11 @@ records per run. Two tests assert it at journals of 1,000 and 100,000 kernel ent
 - The listing skips symbolic links, but a journal file is then opened by its name in the journal directory, so a file replaced by a
   symbolic link between the listing and the read is followed. The directory belongs to root, so only root or journald can place one,
   and they can change the journal anyway.
+- The boot change of *Boots* is written to the state inside the run, before the run's records reach the spool (record 0123). A state
+  save that falls between the two, followed by a power loss or kernel crash within the spool's next sync (one second), can lose the
+  `boot` event while the saved state already holds the new boot, so it is never recorded again and no gap says so; the backend still
+  sees the new boot in the batch headers' `boot_id`. Accepted for #38 as a stated residual; #300 moves the update behind the
+  scheduler's report that the run was kept and must be merged before the agent's first release.
 
 ## Boots
 
@@ -1032,7 +1043,8 @@ With the event the state's boot becomes the current one, with the first field of
 and its boot time; the `state` job keeps that uptime current. The boot event is returned again by every run until a run's result is kept; the boot is
 in the state from the first run on, so a restart after that state was saved and before a run was kept records no boot event. A boot ID that
 cannot be read or is not a lower-case UUID gives no boot event, leaves the state's boot alone, makes no kill live and logs one
-warning `boot ID not readable`; the other features run.
+warning `boot ID not readable`; the other features run. The agent does not start without a readable boot ID (the spool needs it,
+*Spool and sending*), so this warning comes only from a read that fails after a successful start.
 
 ## Log shipping
 
@@ -1214,8 +1226,9 @@ not shipped and reading goes on after them. Every following run starts from that
 kept and its copy is committed, so the gap is never lost with a dropped run; a run that started from the span and is dropped too does
 not replace the span. When none came back
 (all timed out or were skipped), one gap runs from the committed time to the run's start, once per committed state, and the
-positions stay. Trade-off, as for the kernel collector: a sink refusal that lasts more than four runs (8 seconds; later a full spool,
-#38) gives up lines the journal or the file still holds. A run that is abandoned never moves a committed or saved position.
+positions stay. Trade-off, as for the kernel collector: a sink refusal that lasts more than four runs (8 seconds: a spool write that
+keeps failing, or a hand-over the spool cannot place; a full spool drops its oldest records instead of refusing) gives up lines the
+journal or the file still holds. A run that is abandoned never moves a committed or saved position.
 
 **Gaps of the log collector.** Each gap has source and collector `logs`, cause `unknown` and the run's start as its capture time; a
 gap whose end would not be after its start ends 1 µs after it. Besides the gaps of the journal positions, a lost rotation, a
@@ -1339,12 +1352,18 @@ again while a match runs, the end again with the gone-by time of the last kept c
 - A backup process the agent cannot read is not recognized; one that becomes unreadable during a run can end the run early.
 - A state the `state` job saved between a dropped check and the next one survives a restart before that next check: the dropped start
   or end is then not written again.
+- A backup start, sighting or end is written to the state inside the check, before the check's records reach the spool (record
+  0123). A state save that falls between the two, followed by a power loss or kernel crash within the spool's next sync (one second),
+  can lose the `backup_run` record while the saved state already holds the change, so it is never written again and no gap says so.
+  Accepted for #38 as a stated residual; #300 moves the update behind the scheduler's report that the check was kept and must be
+  merged before the agent's first release.
 
 ## Agent state
 
 The agent keeps one small state file, `agent-state.json` in `spool.directory` (security area 9): the last boot it ran in with that
 boot's uptime and boot time, the position of the `kernel` collector in the journal, the open backup run and the positions of the
-`logs` collector. It is the agent's only file write. The agent never creates the directory; the installation does (#42).
+`logs` collector. Besides the spool's own files (*Spool and sending*) it is the agent's only file write. The agent never creates the
+directory; the installation does (#42).
 
 **Format.** One JSON object `{"version":1,"boot":{"id","uptime_ns","booted_at"},"journal":{"seqnum_id","seqnum","realtime"},
 "backup":{"boot_id","started_at","last_seen","max_processes"},"logs":{"journal":[{"seqnum_id","seqnum","realtime"}],"files":[{"path_sha256",
@@ -1364,7 +1383,11 @@ lower-case hex digits, `head_len` 0 to 256 and offsets and sizes that are not ne
 positions existed) stays usable: the `logs` collector starts at the current ends as on a first start. An absent file in an existing, empty directory is a first start, without a warning. Anything else that is not
 usable — a missing directory, an absent file beside other entries, a link, a file of another user or with group or other permission,
 an oversized or corrupt file — is treated as no state and logged once as warning `agent state not available`; the first save replaces
-the file.
+the file. The state file is read before the spool is opened, so on a first start the directory is still empty and neither logs a
+warning; a missing directory logs this warning and then ends the start, because the spool refuses it (*Spool and sending*), so the
+agent never runs without its directory. Stated residual: a start that ends after the spool created its files and before the first
+state save (a `kill -9` in the first seconds, a later start error) leaves spool files without a state file, and the next start logs
+`agent state not available` once.
 
 **Saving.** The `state` job (interval 10 seconds, timeout 5 seconds, last in the job list; it records nothing) saves when a change
 waits: when an urgent change waits — a kill, a boot or a backup change (a new run, its end, a higher process count, a position moved
@@ -1375,18 +1398,23 @@ at the next run, within one state interval, however the start times jitter. Ever
 `/proc/uptime`, so the saved uptime is never more than a minute old. A save removes a left-over `agent-state.json.tmp`, creates it anew
 (exclusively, without following a link, mode 0600), writes and syncs it, renames it over `agent-state.json` and syncs the directory.
 One write lock of the store covers the encoding, the write and the bookkeeping of a save, so a save of the job and the save at the
-stop never run at once. A failure, also a missing directory, is logged once as warning `agent state not saved` with `err`
-`agentstate: save: <system error text>` (never a path) until a save succeeds, whether the job or the stop saved, and the agent goes on;
+stop never run at once. **Every save first makes the spool durable** (the spool's `Sync`, within the save's deadline: the job's
+timeout, or 5 seconds at the stop), so no saved position or state covers a record a crash can still lose (the exception is the boot
+and backup change of record 0123, *Kernel events* and *Backup runs*). When that sync fails or does not finish in time, the save is
+not written. A failure, also a missing directory, is logged once as warning `agent state not saved` with `err`
+`agentstate: save: <system error text>` (never a path), or `agentstate: save: spool not durable` when the spool's sync failed, until
+a save succeeds, whether the job or the stop saved, and the agent goes on;
 a save that hangs past the job's timeout is a gap of collector `state`, as for any collector.
 
 **Saving at the stop.** When the agent stops, after the scheduler has stopped (a collector stuck in a run is not waited for), it saves
 the state once more when anything changed since the last save, so the positions of the last kept runs survive a restart (a stop with
 SIGTERM neither repeats nor loses a log line). It waits at most 5 seconds for a save of the `state` job that is still running; when
 that save does not end, it saves nothing and logs the warning `agent state not saved` with `err` `agentstate: save still running`
-(every time it gives up), and the agent exits as usual.
+(every time it gives up), and the agent exits as usual. The order at the stop is: the scheduler stops, this last save (which makes
+the spool durable first), then the spool is closed (*Spool and sending*).
 
-**The spool leaves it alone.** The state file is not part of the spool: whatever the spool (#38) counts against its size bound and
-deletes when full must never include it.
+**The spool leaves it alone.** The state file is not part of the spool: the spool never reads, counts, overwrites or deletes it
+(*Spool and sending*).
 
 ## Memory pressure mode
 
@@ -1431,23 +1459,214 @@ grows faster until its size bound evicts older data with a recorded gap, bounded
 ## Gaps
 
 **There is no data gap unless it is explicitly recorded.** The agent records the gaps it knows about: a collector sample missed or
-skipped, a span of kernel messages it cannot read (*Kernel events*), a span of log lines it cannot ship (*Log shipping*), and spool
-data dropped when the spool's size bound is hit. The backend records the gaps it detects (missing sequence numbers,
+skipped, a span of kernel messages it cannot read (*Kernel events*), a span of log lines it cannot ship (*Log shipping*), spool
+data dropped for the size bound, the free-space reserve or the file limit or lost to damage (`spool_dropped`), and the records the
+spool refused while its writes failed (`unknown`; *Spool and sending*). The backend records the gaps it detects (missing sequence numbers,
 intervals with no batch). Analysis, reports and the web UI treat a recorded gap as *unknown*, never as *normal*. Spool eviction,
 collector timeouts and backend gap detection each emit a gap record, and each path has a test.
 
 ## Spool and sending
 
 - The agent keeps collecting while the backend is unreachable and keeps **at least 7 days** of records in an on-disk spool. When the
-  backend is reachable again it sends current data first, then backfills the spool chronologically and throttled.
+  backend is reachable again it sends current data first, then backfills the spool chronologically and throttled (the sender, #39, is
+  not implemented yet; until it is, only the tests read and acknowledge the spool).
 - Every record carries a sequence number from one counter per agent that increases strictly, survives restarts and reboots and is never
-  reused. A batch has no identity of its own (see the wire format). Losing the counter makes new records collide with stored ones, so it
-  is persistent state of the agent.
+  reused. A batch has no identity of its own (see the wire format). Losing the counter would make new records collide with stored
+  ones; the clock bound below keeps a fresh spool's numbers above them.
 - The boot ID and the clock offset are kept with each spooled record, and a batch holds only records with the same boot ID and offset.
 - The spool is a file-write area of the agent: it has a size bound and defined behavior when it is full (oldest data dropped, a gap
   recorded). Records the spool refuses to take from the scheduler are its loss to record as a gap, too.
 - The spool counts and deletes only its own files: the agent's state file in the same directory (*Agent state*) is never part of its
   size or of what it drops.
+
+**What is kept.** The scheduler hands every run's checked records to the spool (*Scheduling*); a hand-over is accepted whole, when it
+returns without an error, or refused whole. Each kept record gets its sequence number, in hand-over order, and is kept as its wire
+line with the agent ID, the boot ID the agent read from `/proc/sys/kernel/random/boot_id` at its start and the clock offset estimate.
+No part of the agent measures an offset yet, so every record is kept without one (the header's "unknown"); the format holds the field.
+A record reads back unchanged, also one of the largest size the wire format allows. The agent token is never written to the spool.
+
+**Files.** The spool lives in `spool.directory` beside `agent-state.json`. Its own names are the data files
+`segment-<the first record's number in 20 decimal digits>.spool`, the meta file `spool-meta.json` and its temporary file
+`spool-meta.json.tmp`, all created with mode 0600. Every other entry (`agent-state.json`, `agent-state.json.tmp`, any other file or
+directory, up to 100,000 of them within the memory bound) is foreign: never opened, read, counted, overwritten or deleted.
+
+- A data file (format version 1, every integer little-endian) starts with a header of at most 128 bytes: `VXSPOOL1`, the version, the
+  agent ID (1 to 64 bytes), the boot ID, the clock offset (flag and value) and a CRC-32C. Each record is one frame: the payload's length
+  (at most the wire format's line limit plus 8 bytes), the payload's CRC-32C (Castagnoli) and the payload, the sequence number and the
+  wire line. A sealed file ends with a summary frame (marker `0xFFFFFFFF`, the last number, the record count, the earliest and the
+  latest capture time, for a gap record its `from` and `to`, and a CRC-32C).
+- A data file holds the records of one capture context (agent ID, boot ID, clock offset). It is sealed — summary written, file synced —
+  before the next one is created: when the next hand-over would take it beyond `spool.max_size` / 128, bounded to 1 to 64 MiB (16 MiB
+  at the default), or when its context ends; a file grows beyond that size only by a single hand-over that is larger. A start in the
+  same boot appends to the newest unsealed file of the context, so restarts alone add no file; a start in a new boot seals it.
+- The meta file is one JSON object, `{"version":1,"agent_id":…,"boot_id":…,"clean":…,"next":…,"acked":[{"first":…,"last":…}]}`, every
+  key required, at most 16 KiB: the agent ID and the boot ID of the last start, whether the spool was closed cleanly, the next sequence
+  number at the time of the write and at most 64 acknowledged ranges. It is replaced through its temporary file and a rename: at the
+  start (synced, `clean` false), at every acknowledgement (not synced: a lost acknowledgement only makes records be sent again) and at
+  the close (synced, `clean` true).
+
+**File access (security area 9).** `spool.directory` must be absolute and clean and its last element must not be a symbolic link (links
+above it are followed as configured); the spool opens it with `O_DIRECTORY|O_NOFOLLOW` and keeps the descriptor. Every later open,
+create, remove and rename is relative to that descriptor on a plain name (`openat`, `unlinkat`, `renameat`), never by path and never
+through Go's `os.Root`, which follows a symbolic link whose target stays inside the directory. A file is opened with `O_NOFOLLOW` and
+`O_NONBLOCK` (a link fails, a FIFO does not block) and trusted only when `fstat` on that descriptor shows a regular file of the
+agent's effective user without any group or other permission bit and with exactly one link; it is created exclusively. A name is
+removed or renamed only after the same check, a data file only when its device and inode are those of the file the spool holds,
+so a link or an entry swapped in between never makes the spool write or delete anything but its own files. An entry the check refuses
+is never followed, written, renamed or deleted: in place of a data file it is damage (below); in place of the meta file or its
+temporary file the meta file cannot be written, so the start fails and at run time an acknowledgement, a sync or the close returns
+`spool: meta: refused entry`.
+
+**Start.** The agent opens the state file first, then reads the boot ID and opens the spool. A spool that cannot be opened makes the
+agent log the error line `agent cannot start` with one of these errors and exit with 1 before it notifies systemd (`READY=1`), so
+`systemctl status` shows the failure; a failed start is retried only by the unit's `Restart=` (#42). No error names a path.
+
+| Error | Cause |
+| ----- | ----- |
+| `spool: boot id: not readable`, `spool: boot id: not a lower-case UUID` | `/proc/sys/kernel/random/boot_id` missing or unreadable, or not a lower-case UUID |
+| `spool: directory: not an absolute, clean path` | the path is relative or not clean (the configuration already refuses such a path) |
+| `spool: directory: symbolic link` | the last element of `spool.directory` is a symbolic link |
+| `spool: directory: not a directory` | `spool.directory` is a file or another entry that is not a directory |
+| `spool: directory: <system error text>` | the directory cannot be examined or opened, such as `no such file or directory` |
+| `spool: meta: refused entry` | a refused entry in place of `spool-meta.json` or `spool-meta.json.tmp` |
+| `spool: meta: <system error text>` | the meta file cannot be read or written, such as `permission denied` (a directory the agent cannot write) or `read-only file system` |
+| `spool: read: <system error text>`, `spool: write: <system error text>` | listing the directory, reading a data file, or cutting and sealing one at the start failed |
+
+The directory is listed in chunks of 256 names and at most the 1,026 data files with the highest numbers are kept; a sealed file is
+checked by its header, its summary and its first record, while the newest file and every file without a valid summary are read frame
+by frame. A file without a summary is cut at its last good frame and sealed, unless it is the newest file of the current context,
+below the sealing size and ends cleanly or in a torn frame: that one is appended to. A start that finds no meta file and no data file logs the info `spool created`; a directory that holds only foreign
+entries, `agent-state.json` among them, counts as empty, so a first start logs no warning from the spool or the state file.
+
+**Sequence numbers.** Numbers increase strictly and are never issued twice under one agent ID. The next number at the start is the
+largest of the meta file's `next`, the newest data file's name number and the last good number plus 1. On a fresh spool (no meta file,
+a damaged one, or one of another agent ID), after an unclean stop in an earlier boot (the meta file is not `clean` and names another
+boot, so a power loss may have rolled the counter back) and when the newest data file ends in damage whose numbers cannot be known,
+the **clock bound** is taken as well: the wall clock's microseconds since the Unix epoch plus 1,000,000. The agent issues far fewer
+than 1,000,000 numbers a second, so a number is never more than 1,000,000 ahead of the clock's microseconds when it is issued, and a
+later fresh start lies above it. After a clean stop and after a `kill -9` in the same boot the numbers go on directly after the last
+one issued; an agent's first number is large, and a fresh start or a crash leaves a jump (wire format, *Batch identity*). The gaps the
+spool writes take numbers too, before the records of the hand-over that carries them. A hand-over whose numbers would reach
+2^63 - 1, the largest the backend stores, is refused with `spool: sequence numbers exhausted` as a write failure below. Stated
+residual: a clock set back by more than the time between a lost spool and a fresh one can make new numbers collide with stored ones.
+
+**Reading and acknowledging.** `Read(after, maxRecords, maxBytes)` returns the kept, unacknowledged records with numbers above `after`
+(0 reads from the oldest) in sequence order, at most `maxRecords` records and `maxBytes` bytes of their wire lines (the line feed not
+counted), together with their agent ID, boot ID and clock offset: one result never mixes two capture contexts and never holds a
+record whose write has not completed. A result may end at a file boundary or go on into the next file of the same context. It holds
+at least one record when the first fits; it is empty when the first record alone exceeds `maxBytes` (and when a limit is 0 or less),
+so a caller passes a `maxBytes` of at least the wire format's line limit (1 MiB) to always make progress. A record is handed out by
+every read that reaches it until it is acknowledged. `Ack(first, last)` acknowledges every issued, kept, unacknowledged number of the
+range, whether a read handed it out or not (the spool does not track reads); numbers never issued (below the oldest, above the newest,
+inside a jump), already acknowledged or dropped change nothing, and so does a range with `first` 0 or above `last`. The spool keeps
+at most 64 disjoint acknowledged ranges above its oldest unacknowledged record: an acknowledgement that would make a 65th is refused
+with `spool: more than 64 acknowledged ranges` and changes nothing; its records stay readable and are acknowledged again later (a
+resend is idempotent at the backend). Acknowledged records are never handed out again, also after a restart. A sealed file whose
+numbers are all acknowledged is deleted; the file being written to is never deleted, so once every record is acknowledged the spool
+holds at most that file and the meta file, at most one sixteenth of `spool.max_size`.
+
+**Size bound, free space and file limit.** `agent_spool_bytes` is the size of the spool's own files on disk (the data files, headers
+and summaries included, and the meta file). Before every write the spool checks its room: the data files plus 32 KiB for the meta
+file and its temporary file plus the write (its frames, a header and a summary when a file is created or sealed, and 1 KiB for each
+gap record it owes) must stay within `spool.max_size`; unless `spool.min_free` is 0, the space available to unprivileged users on the
+file system (`statfs` `f_bavail` times `f_bsize`) must be at least the write and what remains after it at least `spool.min_free`,
+compared without overflow; and a new data file may not make more than 1,024. While there is no room the spool drops its oldest data
+file whole and checks again; the file being written to is never dropped, and when only it is left the hand-over is refused
+(`spool: no room for the records`, a write failure below). A hand-over that alone, with the gaps it owes and the 32 KiB, exceeds
+`spool.max_size` is refused before anything is dropped. A full spool therefore never refuses records: it drops its oldest.
+
+- Every drop owes one `gap` with cause `spool_dropped` per run of unacknowledged numbers of the dropped file (acknowledged numbers
+  split runs; runs that join across the files one hand-over drops give one gap): origin and source `agent`, `first_seq` and
+  `last_seq` the run's lowest and highest number, `from` and `to` the earliest and latest capture time of the run's records, the spans
+  of dropped gap records included (from the summary when the run is the whole file, else read from the file), `to` at least one second
+  after `from`, and the spool's clock at the write as its capture time. The gaps are written in the same write as the hand-over, before
+  its records. Stated residual: a gap's sequence range is exact, while its time span is the union of the dropped times and may include
+  moments of which other records were kept.
+- The warning `spool data dropped` (`reason`: `size_bound`, `disk_space` or `file_limit`, the reason of the first drop; `records`: the
+  records that hand-over dropped) is logged at the first drop of an episode, the info `spool data no longer dropped` (`records`: the
+  episode's total) at the first hand-over that fits without a drop.
+
+**Write failures.** A write that fails (no space left, an I/O error, the file system remounted read-only) is cut back to the last good
+frame and the hand-over is refused at once with `spool: write: <system error text>`, so the scheduler logs `sink failed` and the run is
+not kept; the refusal never blocks the watchdog. Unlike at the start the agent keeps running, because the failure may pass. The
+spool logs the warning `spool write failed` (`err`) once per episode; a hand-over refused for want of room or numbers belongs to the
+same episode. The first hand-over that is written again first writes one `gap` with cause `unknown`, source `agent` and no sequence
+range, from the earliest to the latest capture time of every record refused in the episode (at least one second), and logs the info
+`spool writes again`. A gap still owed when the agent stops is lost with it; the backend's time-gap detection (#41) covers that span.
+
+**Damaged data (security area 10).** Values read back from the spool's files are held to consistency rules before they are used:
+the header's, each frame's and the summary's checksum; the format version; a frame length within the bound above; a header boot ID
+that is a lower-case UUID; a name number that is the number of the file's first record, above the previous file's last number and
+below 2^63 - 1; record numbers that increase strictly within and across files; a frame number equal to the `seq` of its line; a line
+that passes the wire decoder's line rules (`wire.UnmarshalRecord`); a summary that agrees with the last record and the count; times
+within 1677-09-21 to 2262-04-11. A break is damage, never a value:
+
+- The damaged record and every later record of its file are never handed out; the records before it and all other files stay
+  readable. The warning `spool data damaged` (`file`: the file's name; `err`: `checksum mismatch`, `file cut short`, `not the spool
+  format`, `unknown format version`, `inconsistent value`, `refused entry` or `too many files`) is logged once per file and start.
+- A `spool_dropped` gap is written per run of unacknowledged dropped numbers where they can be known: from the last good number plus 1
+  (the name number when no record is good) to the summary's last number when the summary is intact and in range, else to the next
+  file's first number minus 1; `from` the latest capture time of the good records before the damage (else the previous file's latest),
+  `to` the summary's latest (else the next file's earliest), a missing side one second from the other, both missing the spool's clock,
+  `to` at least one second after `from`. A gap is never built from a damaged value. The newest file without an intact summary gets no
+  gap for its tail, and a file whose name breaks a rule gets none and does not raise the next number: the backend's sequence detection
+  finds those numbers.
+- At the start a file with good records is cut at the last good frame and sealed; a file damaged as a whole (a header that is missing
+  or broken, such as a file a crash left right after its creation, or no good record) is deleted once its gap is written. A torn tail —
+  an incomplete last frame of the newest file, from a stop during a write — is cut with the warning (`file cut short`) and no gap: the
+  hand-over it belonged to was never accepted. Refused entries and the data files beyond the 1,026 are never touched; the latter are
+  logged once per start (`file`: the lowest such name, `err` `too many files`).
+- Damage found by a read (`Read`, or the age of the self-metrics) ends that file's records in memory; its gap is written by that read
+  when it fits without a drop, else by the next hand-over. In the file being written to, the run ends at the last number and the latest
+  time the spool holds in memory, and the next hand-over starts a new file. The file is not cut on disk and is deleted once its good
+  records are acknowledged or dropped. Stated residual: a restart before that finds the damage again, logs it again and writes a second
+  gap for the same numbers.
+- A meta file that is not JSON (`not the spool format`), of another version (`unknown format version`), with a missing, unknown or
+  repeated key, more than 64 ranges, a range that is not sorted, overlaps another, starts at 0, has its first number above its last or
+  reaches `next`, or a `next` at or above 2^63 - 1 (`inconsistent value`) is damaged (`file` `spool-meta.json`): its acknowledgements
+  are discarded, so those records are handed out again, and the next number is taken as on a fresh spool.
+
+**Another agent ID.** When `agent_id` changed, the start deletes every data file of another agent ID, writes no gap for it (a gap sent
+under the new ID would describe another agent's data) and logs the warning `spool records of another agent dropped` (`records`: their
+count); the new ID's numbers start as on a fresh spool.
+
+**Durability and the stop.** A hand-over is written with one `write` and no `fsync`, so an accepted record survives a `kill -9` (the
+page cache keeps it). Once a second, when something was written, the spool syncs the file being written to, the meta file and the
+directory; at most one sync is in flight, outside the spool's lock, so a slow sync never holds up a hand-over, and a caller that finds
+one running waits for its result. An OS crash or power loss therefore loses at most the records of about the last second, never a
+damaged record handed out and never a number issued twice; the backend sees the loss as a sequence gap (#41), and the `kernel` and
+`logs` collectors read their entries again because every state save first makes the spool durable (*Agent state*). The exception is
+the boot and backup change written before the hand-over (*Kernel events* and *Backup runs*, residuals; #300). At the stop, after the
+scheduler has stopped and the state file's last save, the spool is closed: synced, the meta file written with `clean` true and
+synced. A close that fails or does not end within 5 seconds is given up with the warning `spool not closed`, and the agent exits as
+usual. A disk whose writes hang is not covered: a hand-over that blocks holds up its collector, the watchdog is withheld and systemd
+restarts the agent.
+
+**Memory.** The spool's live memory stays below 4 MiB, apart from the records of a read or hand-over in progress, at every
+`spool.max_size` up to 64 GiB, with 1,024 data files, 64 acknowledged ranges and 100,000 foreign entries: under 256 bytes per data file
+(numbers, size, context, summary times), a sparse index (a number every file size / 64 bytes) for at most the two files the two read
+positions are in, and one frame buffer; it does not grow with the number of records (`TestSpool_MemoryBound`). Opening a spool filled
+to the default cap takes 26.2 ms and one of 1,024 files 15.9 ms on the development host, against a bound of 5 seconds
+([BENCHMARKS](../BENCHMARKS.md), *Spool open*); the server is not measured (#44).
+
+**Capacity.** The default `spool.max_size` holds 7 days of the **reference stream**, an estimate of the server that the tests generate
+from a fixed seed, every record with varying content: per day 2,880 `system` samples of 110 metrics; 1,440 `filesystem` samples of 7
+metrics, `clock` samples of 3 and `self` samples of 5; 1,440 process snapshots of 50 processes with command lines of 60 to 200 bytes
+and 100 programs; 1,440 connection snapshots of 30 listeners, 40 owning processes and 25 remotes; 2,880 MariaDB status records of 60
+status counters, 15 variables and 8 threads; 400 service states; 200,000 log lines of 40 to 400 bytes shaped like the lines of
+`testdata/logs/` and `testdata/journal/`. That is 544,560 records and **209.0 MB per day** as uncompressed JSON lines
+(`TestReferenceStream_FullScaleDay`), so 7 days take about 1.49 GB with the spool's framing, about 70 % of the 2 GiB default. The
+full-scale 7-day run (`TestSpool_SevenDayOutageFullScale` with `VANDOX_LONG_TESTS=1`, without the race detector; 109.6 s on the
+development host, 2026-10-23) kept all 3,811,920 records, held 1,576,818,758 of 2,147,483,648 bytes after the 7 days (73 %, the final
+16-digit sequence numbers, headers and summaries included), dropped nothing, wrote no `spool_dropped` gap and read every record back
+once in order. Every test run checks the same at one eightieth of every daily count (`TestSpool_SevenDayOutage`). The real volume is
+measured on the server in #44; under sustained memory pressure the agent records much more, so less than 7 days may fit and the cap
+drops the oldest with gaps (*Memory pressure mode*).
+
+**Logging.** Through the agent's logger with `component=spool`, one line per change and never a path, a record's content or a system
+error text other than an `errno` text: info `spool created`; warning `spool data dropped` and info `spool data no longer dropped`;
+warning `spool write failed` and info `spool writes again`; warning `spool data damaged`; warning `spool records of another agent
+dropped`; warning `spool not closed`.
 
 ## Rights
 
@@ -1599,8 +1818,11 @@ collector timeouts and backend gap detection each emit a gap record, and each pa
   `permission denied` and not shipped. The unit must keep the journal directories and the configured files reachable (no
   `InaccessiblePaths=` or `TemporaryFileSystem=` over them).
 - **Backup check.** It reads `/proc` as the process collector does and needs no right of its own.
-- **State file.** The agent's one write is `agent-state.json` in `spool.directory` (*Agent state*); the installation creates that
-  directory, writable by the agent's user, and the agent never creates it.
+- **State file and spool.** The agent writes only in `spool.directory`: `agent-state.json` (*Agent state*) and the spool's own files
+  (`segment-*.spool`, `spool-meta.json` and its temporary file; *Spool and sending*), all with mode 0600. The installation creates that
+  directory, writable by the agent's user and not a symbolic link, and the agent never creates it; without it, or when the agent cannot
+  write it, the agent does not start. The spool needs no right beyond the directory: it reads its boot ID from
+  `/proc/sys/kernel/random/boot_id`, which any user can read.
 - For restarting units (self-healing, a later feature) a polkit rule lets this user restart only the units named in the configuration;
   there is no sudo and no shell.
 - Each group, capability and confinement setting is listed and justified in `deploy/agent/` when the collector that needs it is
@@ -1669,6 +1891,10 @@ collector timeouts and backend gap detection each emit a gap record, and each pa
   agent holds `CAP_SYS_PTRACE` alone and not `CAP_DAC_READ_SEARCH`, which barrier stops each write vector examined, which residual
   remains (files whose own mode grants the agent write, reached through other processes' `cwd`, `root` and `exe` links), why the bounding set
   holds `CAP_SYS_PTRACE` only, and why the filter also denies `process_madvise`.
+- [0123](../decisions/0123-agent-spool-segment-files-clock-bound-sequence-numbers-range-acknowledgements.md) — why the spool keeps
+  uncompressed segment files of checksummed frames, takes a fresh spool's numbers from the clock bound, keeps at most 64 acknowledged
+  ranges, bounds its file size and count, reaches its files only relative to the directory's descriptor, and makes the state file wait
+  for the spool's sync.
 
 ## Not here
 
@@ -1690,6 +1916,8 @@ collector timeouts and backend gap detection each emit a gap record, and each pa
 collector and boot check), `internal/logship` (log shipping collector: journal, configured files with the link-free open, filter,
 positions; fixtures `testdata/logs/mail.log`, `kern.log-oom`), `internal/syslogline` (the syslog line rules, the year-less time and
 `/etc/localtime`), `internal/zstdfield` (the bounded zstd decoder over `github.com/klauspost/compress`), `internal/backups` (backup run
-check), `internal/agentstate` (the state file, the `state` job and the save at the stop),
+check), `internal/agentstate` (the state file, the `state` job and the save at the stop), `internal/spool` (the spool: data and meta
+files, sequence numbers, reading, acknowledgements, drops and damage; its tests generate the reference stream and run the hard-kill and
+7-day tests; it uses `wire.MarshalRecord` and `wire.UnmarshalRecord`),
 `internal/sdnotify`, `internal/config`, `internal/model`, `internal/wire`; `deploy/agent/` (example configuration, `mariadb-user.sql`; the unit and install
 scripts follow with the collectors).

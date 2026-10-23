@@ -45,8 +45,14 @@ same boot ID and the same estimate (or all without one).
 
 There is no batch ID. A batch is identified by its `agent_id` and the `seq` values of its records, which come
 from one persistent per-agent counter that is never reused. The backend stores each (agent ID, `seq`) once, so
-a resent batch is idempotent. An agent that loses its counter (reinstall, wiped spool) must keep the counter
-persistent or use a new agent ID (#38, #40).
+a resent batch is idempotent. The agent's spool issues the numbers ([Agent](agent.md), *Spool and sending*): they
+increase strictly and stay below 2^63 - 1. A spool that lost its counter (a reinstall, a wiped spool directory, a meta
+file of another agent ID or a damaged one) and a spool after an unclean stop in an earlier boot start at least at the
+**clock bound**, the wall clock's microseconds since the Unix epoch plus 1,000,000, so the agent keeps its ID and its
+new numbers lie above every number it issued before, unless the clock was set back by more than the time in between
+(record 0123, amending 0045). Two consequences for the backend's sequence detection (#41): an agent's first number is
+large, so numbers below the first number the backend received from an agent are never reported as missing; and a fresh
+start or a crash leaves a jump in the numbers, which is reported as `sequence_missing` like any other gap in them.
 
 ## Records
 
@@ -140,7 +146,8 @@ produced it. Byte values are exact integers in a double (up to 2^53 exactly), co
 | `agent_rss_bytes` | `bytes` | — | resident memory of the agent itself (`VmRSS`, kB times 1,024) |
 | `agent_cpu_seconds_total` | `seconds` | — | user plus system CPU time the agent used since it started |
 | `agent_goroutines` | — | — | number of goroutines of the agent |
-| `agent_spool_bytes` | `bytes` | — | size of the agent's spool |
+| `agent_spool_bytes` | `bytes` | — | size of the agent's spool files on disk (its data files and its meta file) |
+| `agent_spool_age_seconds` | `seconds` | — | the sample's start minus the capture time of the oldest record the spool holds unacknowledged; 0 when it holds none or that time lies after the start |
 | `agent_send_lag_seconds` | `seconds` | — | how far the agent's sending lags behind capture |
 | `mariadb_memory_max_bytes` | `bytes` | — | MariaDB's theoretical maximum memory: its global buffers plus `max_connections` times its per-connection buffers |
 | `mariadb_memory_max_ram_percent` | `percent` | — | that maximum as a share of `MemTotal` |
@@ -483,6 +490,8 @@ Decompressed content of a batch of three records (the real stream is gzip-compre
 - [0044](../decisions/0044-batch-validated-as-a-whole-agent-records-only.md) — why a batch is valid only as a whole, carries only agent records and is bounded.
 - [0045](../decisions/0045-batch-identified-by-agent-id-and-record-sequence-numbers.md) — why per-record sequence numbers and a spool of at least 7 days.
 - [0046](../decisions/0046-batch-header-describes-the-capture-context.md) — why the header describes the capture, not the sending.
+- [0123](../decisions/0123-agent-spool-segment-files-clock-bound-sequence-numbers-range-acknowledgements.md) — why a fresh spool takes
+  its sequence numbers from the clock bound instead of a new agent ID (amends 0045).
 - [0088](../decisions/0088-mariadb-error-log-entries-by-content-and-lifecycle-events-in-log-line.md) — why `log_line` gets an optional `event`.
 - [0075](../decisions/0075-wire-contract-pinned-by-golden-fixtures.md) — why golden fixtures pin the contract between the two languages.
 - [0076](../decisions/0076-strict-gzip-validation-in-the-backend.md) — why the backend decodes gzip strictly.

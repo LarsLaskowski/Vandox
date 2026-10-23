@@ -11,8 +11,8 @@ This document describes the target architecture; as of now the binaries' `--vers
 exist as the storage layer; the service reads it through the logs and incidents views and the report page with its download and writes only the notes of incidents, `vandoxd import` writes through it), listens on the
 web and ingest ports, protects the web UI with a login (one password, server-side sessions, limits on failed sign-ins and the trust in a reverse proxy; `Vandox.Backend` `Security`), answers `/healthz` and shuts down gracefully, and ships as a container with a health
 check. Of the agent, the runtime frame exists: `vandox-agent` loads its configuration, logs to the journal, runs its
-collectors under the scheduler (its self-metrics, the system metrics, the process and the connection snapshots, the state of the configured systemd services, the state of the local MariaDB server, the kernel's OOM kills and the boots, the lines of the journal and of configured `syslog` files, and the backup runs), keeps its small state file and notifies systemd; it drops what it collects until the spool exists.
-Everything else described here — the agent's collectors, spool and sender, the ingest API, retention, alerting, Telegram, the nightly
+collectors under the scheduler (its self-metrics, the system metrics, the process and the connection snapshots, the state of the configured systemd services, the state of the local MariaDB server, the kernel's OOM kills and the boots, the lines of the journal and of configured `syslog` files, and the backup runs), keeps every record in its on-disk spool, keeps its small state file and notifies systemd; nothing sends the spool yet, so it fills up to its size bound and then drops its oldest records with recorded gaps.
+Everything else described here — the agent's other collectors and sender, the ingest API, retention, alerting, Telegram, the nightly
 report and remote actions — is planned and not implemented yet. The decisions behind it are recorded in
 [`docs/decisions/`](decisions/README.md); each section links the records it rests on. Vandox is an own
 project rather than an off-the-shelf stack ([0004](decisions/0004-own-project-instead-of-off-the-shelf-stack.md)).
@@ -62,9 +62,15 @@ way, and agents of the hosting provider are never disabled or changed
   ([0121](decisions/0121-log-shipping-journal-and-syslog-files-positions-per-seqnum-id-zstd-commit-when-kept.md)),
   and the backup check (`internal/backups`) records the start and the end of a backup run from the processes a configured rule names;
   the journal position, the last boot, the open backup run and the log positions survive restarts in one state file in the spool
-  directory, the agent's only file write, saved by a `state` job and once more when the agent stops (`internal/agentstate`); the kernel
+  directory, saved by a `state` job and once more when the agent stops (`internal/agentstate`); the kernel
   collector's journal position is committed only after a run whose result was
   kept ([0120](decisions/0120-oom-kill-events-triggered-snapshots-boots-from-saved-state-and-backup-runs.md));
+  the scheduler hands every run's records to the on-disk spool (`internal/spool`), which numbers them, keeps them in checksummed
+  segment files in the same directory within `spool.max_size` and `spool.min_free`, drops its oldest records with a recorded gap when
+  full, offers reading from any number and acknowledgement of ranges for the sender, and takes a fresh spool's numbers from the clock
+  bound; the state file and the spool's files are the agent's only file writes, and every state save first makes the spool durable, so
+  no saved position covers a record a crash can still lose
+  ([0123](decisions/0123-agent-spool-segment-files-clock-bound-sequence-numbers-range-acknowledgements.md));
   the agent records its own resource use as metrics
   (`internal/selfstats`), and tells systemd that it is ready, alive (a watchdog fed only while every collector runner is on
   time) and stopping (`internal/sdnotify`, `internal/agent`)
@@ -113,7 +119,7 @@ way, and agents of the hosting provider are never disabled or changed
   [0079](decisions/0079-log-parsing-and-import-in-the-backend-without-following-links.md)).
 - `internal/` — the agent's Go packages: data model and the versioned wire encoder (see
   [wire format](areas/wire-format.md)), version information, agent configuration loading (see
-  *Configuration*), command-line handling (`internal/cli`), start-up, logging and the watchdog loop (`internal/agent`), the collector scheduler (`internal/scheduler`), the self-metrics (`internal/selfstats`), the system metrics (`internal/sysstats`), the process collector (`internal/procstats`), the connection collector (`internal/connstats`) with the start-up probe of the socket mount (`internal/sockmount`), the systemd service collector (`internal/svcstats`) with its D-Bus client (`internal/sdbus`), the MariaDB collector with its protocol client (`internal/mariadb`), the journal file reader (`internal/journal`) with its test-only writer of journal files (`internal/journal/journaltest`), the kernel event collector (`internal/kernevents`), the log shipping collector (`internal/logship`) with its syslog line parser (`internal/syslogline`) and its bounded zstd decoder (`internal/zstdfield`), the agent's state file and its `state` job (`internal/agentstate`), the backup run check (`internal/backups`) and the systemd notification (`internal/sdnotify`). The model and the wire format exist twice, in Go
+  *Configuration*), command-line handling (`internal/cli`), start-up, logging and the watchdog loop (`internal/agent`), the collector scheduler (`internal/scheduler`), the self-metrics (`internal/selfstats`), the system metrics (`internal/sysstats`), the process collector (`internal/procstats`), the connection collector (`internal/connstats`) with the start-up probe of the socket mount (`internal/sockmount`), the systemd service collector (`internal/svcstats`) with its D-Bus client (`internal/sdbus`), the MariaDB collector with its protocol client (`internal/mariadb`), the journal file reader (`internal/journal`) with its test-only writer of journal files (`internal/journal/journaltest`), the kernel event collector (`internal/kernevents`), the log shipping collector (`internal/logship`) with its syslog line parser (`internal/syslogline`) and its bounded zstd decoder (`internal/zstdfield`), the agent's state file and its `state` job (`internal/agentstate`), the on-disk spool (`internal/spool`), the backup run check (`internal/backups`) and the systemd notification (`internal/sdnotify`). The model and the wire format exist twice, in Go
   (producer) and in C# (consumer); a golden batch produced by the Go encoder and decoded by the C# decoder keeps
   them in step ([0075](decisions/0075-wire-contract-pinned-by-golden-fixtures.md)).
 
@@ -159,7 +165,8 @@ Records: [0004](decisions/0004-own-project-instead-of-off-the-shelf-stack.md),
 [0118](decisions/0118-mariadb-collector-hand-written-client-captured-statements-refusals-as-not-answering-with-error-code.md),
 [0119](decisions/0119-kernel-messages-from-the-binary-journal-files-read-in-pure-go-without-decompression.md),
 [0120](decisions/0120-oom-kill-events-triggered-snapshots-boots-from-saved-state-and-backup-runs.md),
-[0121](decisions/0121-log-shipping-journal-and-syslog-files-positions-per-seqnum-id-zstd-commit-when-kept.md).
+[0121](decisions/0121-log-shipping-journal-and-syslog-files-positions-per-seqnum-id-zstd-commit-when-kept.md),
+[0123](decisions/0123-agent-spool-segment-files-clock-bound-sequence-numbers-range-acknowledgements.md).
 
 ## Data flow
 
@@ -300,7 +307,8 @@ Records: [0022](decisions/0022-backfill-detection-and-live-only-alerts.md),
 [0028](decisions/0028-data-gaps-are-always-recorded.md),
 [0044](decisions/0044-batch-validated-as-a-whole-agent-records-only.md),
 [0045](decisions/0045-batch-identified-by-agent-id-and-record-sequence-numbers.md),
-[0046](decisions/0046-batch-header-describes-the-capture-context.md).
+[0046](decisions/0046-batch-header-describes-the-capture-context.md),
+[0123](decisions/0123-agent-spool-segment-files-clock-bound-sequence-numbers-range-acknowledgements.md).
 
 ## Storage and retention
 

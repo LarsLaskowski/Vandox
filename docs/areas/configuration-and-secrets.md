@@ -42,6 +42,8 @@ Agent:
 | `agent_id` | none, required | 1 to 64 characters of `A-Z a-z 0-9 . _ -`, starting with a letter or digit (the rule of the [wire format](wire-format.md) for agent IDs) |
 | `backend.url` | none, required | URL with scheme `http` or `https`; a host that is an IP address or a name of letters, digits, `.` and `-` (checked after percent-decoding); an optional port from 1 to 65535; no user info, query, fragment or path other than `/` |
 | `spool.directory` | `/var/lib/vandox/spool` | absolute, clean path (see below) |
+| `spool.max_size` | `2GiB` | a whole number of MiB or GiB from `64MiB` to `64GiB` (see below) |
+| `spool.min_free` | `1GiB` | a whole number of MiB or GiB from `0MiB` to `1024GiB`; zero switches the check off (see below) |
 | `log.level` | `info` | `debug`, `info`, `warn` or `error` |
 | `filesystem.mount_points` | `["/"]` | a list of at most 16 absolute, clean paths of at most 1,024 bytes each, every path listed once (see below) |
 | `processes.programs` | `[]` | a list of at most 64 rules, each a mapping of `program`, one of `command` and `cmdline_prefix`, and optionally `append_next_word` (see below) |
@@ -208,9 +210,29 @@ Backend:
   | `log_shipping.drop` (patterns over 400 instructions together) | `patterns must compile to at most 400 instructions together` |
 
   The agent stops at start-up with exit code 1 on every one of them.
-- `spool.directory` also holds the agent's state file `agent-state.json` (the last boot, the position in the journal, the open
+- `spool.directory` holds the spool's files (`segment-<number>.spool`, `spool-meta.json` and its temporary file; [Agent](agent.md),
+  *Spool and sending*) and the agent's state file `agent-state.json` (the last boot, the position in the journal, the open
   backup run and the positions of the `logs` collector, stored by the SHA-256 of each file's path, never the path, up to 64 KiB;
-  [Agent](agent.md), *Agent state*). The agent never creates the directory: the installation does, writable by the agent's user.
+  [Agent](agent.md), *Agent state*). The agent never creates the directory: the installation does, writable by the agent's user. A
+  directory that is missing, not a directory, a symbolic link (its last element) or not writable stops the agent at start-up with
+  `agent cannot start` and exit code 1 (the spool's start errors, [Agent](agent.md), *Spool and sending*). An existing directory that
+  holds only `agent-state.json` becomes the spool's directory without migration.
+- `spool.max_size` bounds the size of all of the spool's files on disk together; when a write would exceed it, the spool drops its
+  oldest records with a recorded gap. `spool.min_free` is the space that must stay available to unprivileged users on the spool's file
+  system after every write; when less would remain, the spool drops its oldest records the same way, and `0MiB` or `0GiB` switches
+  the check off ([Agent](agent.md), *Spool and sending*). Each value is one to five ASCII digits without a leading zero (`0` alone is
+  allowed), followed directly by `MiB` or `GiB`; the range is checked on the bytes. A key that is absent keeps its default. Any other
+  text (`1024`, `1 GiB`, `1.5GiB`, `1GB`, `1gib`, `-1GiB`, `+1GiB`, `01GiB`, a value outside the range such as `32MiB` or `65GiB` for
+  `spool.max_size` and `1025GiB` for `spool.min_free`, an empty string) is refused with the key and the line, never the value:
+
+  | Key | Reason |
+  | --- | ------ |
+  | `spool.max_size` | `must be a whole number of MiB or GiB from 64MiB to 64GiB, such as 512MiB or 2GiB` |
+  | `spool.min_free` | `must be a whole number of MiB or GiB from 0MiB to 1024GiB, such as 0MiB or 1GiB` |
+
+  A list and a null value are refused by the strict decoder before this rule, as for every string option (`invalid value, want a
+  string`, `has no value`). `spool.max_size` is checked before `spool.min_free`. The agent stops at start-up with exit code 1 on each
+  of them.
 - A directory must be absolute and clean: no trailing slash and no empty, `.` or `..` element. The loader does not
   create it.
 - Plain `http` is allowed for `backend.url`, because the tailnet encrypts and authenticates the transport. Whether
@@ -295,6 +317,8 @@ Backend:
 - [0118](../decisions/0118-mariadb-collector-hand-written-client-captured-statements-refusals-as-not-answering-with-error-code.md) — why the MariaDB collector, which these options switch and point to its socket, connects over the local socket with a client of its own, one connection per run.
 - [0120](../decisions/0120-oom-kill-events-triggered-snapshots-boots-from-saved-state-and-backup-runs.md) — why backup runs are named by literal process rules with `pzstd` as the only default, and why the agent's state lives in `spool.directory` without a new option.
 - [0121](../decisions/0121-log-shipping-journal-and-syslog-files-positions-per-seqnum-id-zstd-commit-when-kept.md) — why log shipping reads the journal and `syslog` files only, why drop patterns are bounded by their compiled size, and why the state file stores a file's position by the hash of its path.
+- [0123](../decisions/0123-agent-spool-segment-files-clock-bound-sequence-numbers-range-acknowledgements.md) — why `spool.max_size` is
+  at most 64 GiB and the spool's files are uncompressed.
 
 ## Not here
 

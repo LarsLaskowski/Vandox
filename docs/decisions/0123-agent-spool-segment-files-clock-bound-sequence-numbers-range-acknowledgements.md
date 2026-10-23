@@ -24,7 +24,8 @@ Storage:
    block, and compression costs CPU on a 2 GB server; at the reference stream 7 days fit uncompressed in the 2 GiB default.
 3. **One file per hand-over** — simple atomicity; hundreds of thousands of files a week, an fsync per file.
 4. **Append-only segment files of length- and CRC-32C-framed wire lines, a trailer when sealed, one small meta file** (chosen) — standard
-   library only; a torn tail is cut at the first bad frame; start-up reads only trailers and the newest segment.
+   library only; a torn tail is cut at the first bad frame; start-up reads the headers, trailers and first records of sealed segments
+   and scans only the newest segment and those without a trailer.
 
 Sequence numbers after a lost or rolled-back counter:
 
@@ -75,7 +76,7 @@ damage, never a number. Its size bound and free-space reserve drop the oldest se
 
 ## Consequences
 
-- Disk use is uncompressed (about 1.2 GB for 7 days of the reference stream); a server with more volume needs a larger
+- Disk use is uncompressed (about 1.5 GB for 7 days of the reference stream, measured at 209 MB a day); a server with more volume needs a larger
   `spool.max_size` or a later compressed format (the format carries a version).
 - An agent's first sequence number is large, and an unclean stop in an earlier boot leaves a jump that #41 reports as
   `sequence_missing`; numbers below an agent's first are never reported.
