@@ -4,7 +4,7 @@
 - **Date:** 2026-10-23
 - **Area:** Agent
 - **Source:** Issue #271
-- **Supersedes:** 0030 (amends it: records which barrier blocks each write vector against another user's process memory, makes the exclusion of CAP_DAC_OVERRIDE and every write-side DAC capability from the bounding set a load-bearing control, and adds `process_madvise` to the system calls the filter denies; 0030 is not edited)
+- **Supersedes:** 0030 (amends it: the agent holds `CAP_SYS_PTRACE` alone instead of `CAP_SYS_PTRACE` and `CAP_DAC_READ_SEARCH`, the exclusion of CAP_DAC_OVERRIDE, every write-side DAC capability and CAP_SYS_NICE from the bounding set becomes a load-bearing control, and `process_madvise` joins the system calls the filter denies; 0030 is not edited)
 
 ## Context
 
@@ -12,93 +12,82 @@ The security review of the process collector (#32) raised a concrete write vecto
 [0030](0030-agent-runs-unprivileged-with-named-capabilities.md) and security area 6 of `.squad/project.md`:
 that a compromised agent cannot use its capabilities to write as or run code as another user. From the kernel
 source, opening `/proc/<pid>/mem` checks `PTRACE_MODE_ATTACH`, which CAP_SYS_PTRACE satisfies, and a `pwrite`
-on the resulting descriptor writes into the target's address space. The agent's system-call filter denies
-`ptrace`, `process_vm_readv`, `process_vm_writev`, `pidfd_getfd` and `open_by_handle_at`, but it denies
-neither `openat` nor `pwrite`. The review therefore could not rule out that CAP_SYS_PTRACE alone lets the
-agent open another user's `mem` read-write and write to it; the measurement was refused in the review
-sandbox, so the claim was left unverified and the systemd unit (#42) was not to grant the capability until it
-was settled.
+on the resulting descriptor writes into the target's address space; the agent's system-call filter denies
+neither `openat` nor `pwrite`.
 
-The measurement was now taken (recorded in the [Agent](../areas/agent.md) area, *Rights*). It shows the
-review's premise is wrong on one step: `PTRACE_MODE_ATTACH` is checked only inside `mem_open`, but the VFS
-runs the ordinary DAC permission check on the file first. `/proc/<pid>/mem` is mode `0600` owned by the
-target's user, so a write-capable open (`O_RDWR`/`O_WRONLY`) of another user's `mem` requires CAP_DAC_OVERRIDE.
-CAP_SYS_PTRACE does not grant it, and CAP_DAC_READ_SEARCH grants read and search only, not write.
+Measured (recorded in the [Agent](../areas/agent.md) area, *Rights*), the `mem` vector is closed by a step the
+review skipped: the VFS runs the ordinary DAC check before `mem_open`, and `mem` is mode `0600` owned by the
+target's user, so a write-capable open needs CAP_DAC_OVERRIDE, which neither CAP_SYS_PTRACE nor
+CAP_DAC_READ_SEARCH grants. A second vector, `pidfd_open` followed by `process_madvise`, is refused by the
+kernel for the agent's capabilities (the call needs CAP_SYS_NICE for any other process since kernel 5.12, and
+destructive advice on another process is refused); which advice the kernel accepts is memory-management
+policy that has grown between versions.
 
-The plan's Security review then found a vector that neither the review of #32 nor the filter covers:
-`pidfd_open` on the target followed by `process_madvise` on the returned descriptor. The filter deliberately
-leaves `pidfd_open` allowed (the Go runtime uses it) and did not name `process_madvise`. Measured on kernel 6.18
-as user 65534 against a root process: without capabilities every advice fails `EACCES` (the ptrace read check);
-with CAP_SYS_PTRACE alone the destructive advice `MADV_DONTNEED` and `MADV_FREE` fail `EINVAL` and the
-non-destructive `MADV_COLD`, `MADV_PAGEOUT` and `MADV_WILLNEED` fail `EPERM`, because since kernel 5.12 the call
-also requires CAP_SYS_NICE; only with CAP_SYS_PTRACE and CAP_SYS_NICE together are the three non-destructive
-values accepted, and the destructive ones still fail `EINVAL`. Security's probe, run against a process of its
-own user, showed the target's memory content unchanged under every accepted advice. Which advice the kernel
-accepts for another process is memory-management policy that has grown between versions (`MADV_COLLAPSE` was
-added later), not a permission rule.
+A third vector breaks the guarantee as 0030 wrote it. The Product Manager measured on kernels 4.4, 5.15, 6.8
+and 7.0: a user holding CAP_SYS_PTRACE and CAP_DAC_READ_SEARCH opens `/proc/<pid>/fd/<n>` of a root process's
+memfd read-write and a `pwrite` changes that process's `MAP_SHARED` mapping; with CAP_SYS_PTRACE alone or no
+capability the open fails `EACCES`. Listing `/proc/<pid>/fd` (mode `0500`, owned by the target's user) needs
+the directory-search bypass of CAP_DAC_READ_SEARCH, following the link needs the ptrace check of
+CAP_SYS_PTRACE, and the opened file is then checked only against its own mode, which for a memfd is `0777`.
+So, with both capabilities, every file another process holds open whose mode grants the agent write is
+writable — the unsealed shared memory of every process, root's included, and the generated code of a runtime
+that maps it from a memfd (an inference from the runtimes' design, not measured). CAP_DAC_READ_SEARCH alone also opens for writing every file whose own mode
+allows it below a directory closed to the agent (measured). The filter cannot stop either (`openat`, `pwrite`).
 
-So no single mechanism stops all the vectors examined; three distinct barriers do:
-
-1. **DAC and the bounding set**, for opening another user's `/proc/<pid>/mem` for writing: the open needs
-   CAP_DAC_OVERRIDE, which the bounding set excludes. The same DAC check covers the other owner-only writable
-   `/proc/<pid>/` files (for example `clear_refs`) in the same way.
-2. **The system-call filter**, for `ptrace` (POKE), `process_vm_writev`, `pidfd_getfd` (stealing a writable
-   descriptor) and `open_by_handle_at`.
-3. **For the `pidfd_open` + `process_madvise` path, the kernel itself:** the call needs CAP_SYS_NICE, which
-   the bounding set excludes, and even with it the kernel refuses destructive advice on another process. The
-   first is a capability rule (since 5.12, so on the production 5.15); the second is version-dependent
-   memory-management policy, measured on 6.18.
+No collector uses CAP_DAC_READ_SEARCH: the process collector needs CAP_SYS_PTRACE alone for `smaps_rollup`
+(0113), the connection collector reads `fdinfo` with CAP_SYS_PTRACE alone and deliberately not the `fd` links
+(0115), and the journal and logs come through the groups `systemd-journal` and `adm`. 0030 granted it only for
+listing `/proc/<pid>/fd`, which 0115 gave up.
 
 ## Options considered
 
-1. **Treat the review's premise as correct and add a mitigation for the `mem` open** (e.g.
-   `proc_mem.force_override=never` on kernel 6.12+, a seccomp rule on `pwrite`, or a different PSS source) —
-   would harden a path that is already closed. `proc_mem.force_override` only governs `FOLL_FORCE` *after* a
-   write-capable descriptor exists; it does nothing for the open gate, which is where the write is actually
-   stopped. A seccomp rule cannot inspect the path of an `openat`. Unnecessary complexity and a false sense of
-   where the barrier is.
-2. **Correct the reasoning and leave `process_madvise` to the kernel alone** — the guarantee holds today, but
-   it would rest on a kernel rule this project neither controls nor tests, and on an advice set that has
-   grown between versions. Rejected: a later change that granted CAP_SYS_NICE (for example to renice
-   processes) or a kernel that widened the set would reopen the vector without anything noticing.
-3. **Correct the reasoning and also deny `process_madvise` in the filter** (chosen) — the agent never calls
-   it (the Go runtime uses `madvise` on its own memory only, and no dependency calls `process_madvise`), so the
-   denial costs nothing and puts the vector behind a control of this project, with barrier 3 as defence in
-   depth. `pidfd_open` stays allowed:
-   the Go runtime uses it to wait for and signal child processes, and alone it gives no access to the target's
-   memory.
+1. **Keep both capabilities and accept the write residual** — no change to the rights, but the guarantee of
+   0030 would no longer hold: a compromised agent could change the shared memory of any process and possibly,
+   where a runtime executes from a memfd mapping, run code as its user. A product decision against the guarantee, for
+   a capability nothing uses. Rejected.
+2. **Keep both capabilities and confine `/proc/<pid>/fd` with an AppArmor or SELinux profile** — a new
+   artifact per distribution, kernel- and policy-dependent; whether AppArmor mediates a magic-link open by the
+   `/proc` path at all was not measured. Rejected.
+3. **systemd `ProtectProc=`, `ProcSubset=` or `hidepid`** — `hidepid` hides no process from a holder of
+   CAP_SYS_PTRACE, and `ProcSubset=pid` hides `/proc/net`, which the connection collector reads; none changes
+   the permission on `/proc/<pid>/fd`. Rejected.
+4. **Drop CAP_SYS_PTRACE instead, or read the PSS from a source without it** — closes the memfd path but loses
+   the PSS and the socket owners, keeps the read-everything residual and leaves CAP_DAC_READ_SEARCH's own write
+   path below closed directories open. Rejected.
+5. **Seccomp rules on `pwrite`/`openat` or `proc_mem.force_override=never`** — seccomp cannot inspect a path,
+   and `force_override` (kernel 6.12+) acts only once a write-capable `mem` descriptor exists. Rejected.
+6. **Leave `process_madvise` to the kernel** — holds today, but rests on a rule this project neither controls
+   nor tests; a later grant of CAP_SYS_NICE or a kernel widening the advice set would reopen it unnoticed.
+   Rejected.
+7. **Drop CAP_DAC_READ_SEARCH, keep CAP_SYS_PTRACE alone, deny `process_madvise` by name and keep the
+   write-side DAC capabilities and CAP_SYS_NICE out of the bounding set** (chosen) — closes the memfd path
+   (measured), costs no collector and also ends the read residual of 0030 that rested on CAP_DAC_READ_SEARCH.
+   The agent never calls `process_madvise`, so denying it costs nothing.
 
 ## Decision
 
-The agent's capability bounding set must exclude CAP_DAC_OVERRIDE and every other write-side DAC capability,
-so that a compromised agent cannot obtain a write-capable handle to another user's `/proc/<pid>/mem`; this is
-a load-bearing control alongside the system-call filter, not covered by it. It also keeps CAP_SYS_NICE out,
-which `process_madvise` on another process requires. The filter's denied system calls
-gain `process_madvise`, so that the `pidfd_open` path to another process's memory is closed by the filter and
-the kernel's refusal of destructive advice is only the second line. The guarantee of 0030 is upheld
-unchanged; no other mitigation is introduced. The measurements, the vector-by-barrier table and the rules they
-establish are in the [Agent](../areas/agent.md) area (*Rights*).
+The agent holds `CAP_SYS_PTRACE` alone, with a bounding set limited to it, so that CAP_DAC_READ_SEARCH,
+CAP_DAC_OVERRIDE, every other write-side DAC capability and CAP_SYS_NICE stay out; the unit's filter also
+denies `process_madvise` by name. The barriers this rests on, their measurements and the remaining residual
+are in the [Agent](../areas/agent.md) area (*Rights*).
 
 ## Consequences
 
-- The dependency this issue guarded is cleared: the systemd unit of #42 may grant CAP_SYS_PTRACE (and, if a
-  collector ever needs it, CAP_DAC_READ_SEARCH) as long as the bounding set keeps CAP_DAC_OVERRIDE and every
-  write-side DAC capability out and its filter denies `process_madvise` with the other five calls.
-- A future change that adds CAP_DAC_OVERRIDE, another write-side DAC capability or CAP_SYS_NICE to the bounding set, or
-  removes `ptrace`, `process_vm_writev`, `pidfd_getfd`, `open_by_handle_at` or `process_madvise` from the
-  denied calls, breaks the 0030 guarantee and is a `security` change that must supersede this record.
-- `process_madvise` sits in systemd's `@ipc` group, which `@system-service` includes, so an allow-list built on
-  `@system-service` admits it: the unit must deny it by name. If the systemd on the server did not know the
-  name, the entry would be skipped and only barrier 3 would remain; #42 checks that the server's systemd lists
-  it. A kernel that let `process_madvise` apply destructive advice to another process would matter only for a
-  unit that neither denies the call nor withholds CAP_SYS_NICE.
-- The read/write boundary now rests on an explicit, measured fact: with CAP_DAC_READ_SEARCH the agent can open
-  another user's `mem` read-only, which is the already-accepted residual of 0030 (its read access equals
-  root's, the memory and environment of every process included); it cannot open it for writing.
-- `proc_mem.force_override=never` (kernel 6.12+) is available as defence in depth but is not required and is
-  not adopted: it only limits `FOLL_FORCE` once a write-capable descriptor exists, which the agent cannot
-  obtain. The production servers (Ubuntu 22.04, kernel 5.15) predate the configurable policy; barrier 1 is
-  independent of it.
-- The documented reasoning in security area 6, `deploy/agent/README.md`, the Agent area and
-  `docs/ARCHITECTURE.md` is corrected so that it no longer attributes the prevention of every vector to the
-  system-call filter, and names `process_madvise` among the denied calls.
+- The dependency this issue guarded is cleared: the systemd unit of #42 may grant CAP_SYS_PTRACE, with a
+  bounding set limited to it and a filter that denies `ptrace`, `process_vm_readv`, `process_vm_writev`,
+  `pidfd_getfd`, `open_by_handle_at` and `process_madvise`.
+- Adding CAP_DAC_READ_SEARCH, CAP_DAC_OVERRIDE, another write-side DAC capability or CAP_SYS_NICE to the
+  bounding set, or removing one of these six calls from the denied set, breaks the guarantee and is a
+  `security` change that must supersede this record. A collector that needs the `/proc/<pid>/fd` links again
+  reopens the memfd write and needs a new decision first.
+- The read residual of 0030 ("its read access equals root's") narrows: without CAP_DAC_READ_SEARCH the agent
+  cannot read `/etc/shadow`, another user's `mem` or `environ`. What remains readable and writable — the
+  ptrace-checked `/proc` files and the files whose own mode allows the agent, also below a closed directory
+  that is another process's working or root directory — is stated in the Agent area and area 6.
+- `process_madvise` sits in systemd's `@ipc` group, which `@system-service` includes, so the unit must deny it
+  by name. If the server's systemd did not know the name, the entry would be skipped and the kernel's refusal
+  would remain; #42 checks that the server's systemd lists it.
+- `proc_mem.force_override=never` stays unset: it is not needed for the `mem` open, and the production kernel
+  (5.15) predates it.
+- Security area 6, `deploy/agent/README.md`, the Agent area and `docs/ARCHITECTURE.md` name CAP_SYS_PTRACE as
+  the one capability, the three barriers per vector and the narrowed residual.
