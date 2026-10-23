@@ -159,8 +159,7 @@ func sameShipping(a, b LogShipping) bool {
 type shippingError struct {
 	name  string
 	lines []string
-	key   string // the key, or the start of the key of an element
-	index int    // the index of the element the key names, or -1
+	key   string // the key the error names
 	why   string // the exact reason, or "" for any
 }
 
@@ -173,30 +172,30 @@ func shippingErrors() []shippingError {
 	file := func(path, format string) string { return "    - {path: " + path + ", format: " + format + "} # bad" }
 	bad := func(pattern string) []string { return []string{"  drop:", ruleLine(pattern) + " # bad"} }
 	return []shippingError{
-		{"an unknown priority name", []string{"  min_priority: warn # bad"}, "log_shipping.min_priority", -1, ""},
-		{"a priority name in upper case", []string{"  min_priority: INFO # bad"}, "log_shipping.min_priority", -1, ""},
-		{"a priority number", []string{"  min_priority: '6' # bad"}, "log_shipping.min_priority", -1, ""},
-		{"an empty priority name", []string{"  min_priority: '' # bad"}, "log_shipping.min_priority", -1, ""},
-		{"a relative path", []string{"  files:", file("var/log/mail.log", "syslog")}, "log_shipping.files", 0, ""},
-		{"a path that is not clean", []string{"  files:", file("/var/log/../mail.log", "syslog")}, "log_shipping.files", 0, ""},
-		{"a path with a trailing slash", []string{"  files:", file("/var/log/", "syslog")}, "log_shipping.files", 0, ""},
-		{"a path with a double slash", []string{"  files:", file("/var//log/mail.log", "syslog")}, "log_shipping.files", 0, ""},
-		{"a path of more than 1,024 bytes", []string{"  files:", file("/"+strings.Repeat("a", 1024), "syslog")}, "log_shipping.files", 0, ""},
-		{"a path with U+0000", []string{"  files:", file(`"/var/log/S3NT1NEL\0x"`, "syslog")}, "log_shipping.files", 0, ""},
-		{"a path listed twice", []string{"  files:", "    - {path: /var/log/mail.log, format: syslog}", file("/var/log/mail.log", "syslog")}, "log_shipping.files", 1, ""},
-		{"more than 16 files", files17, "log_shipping.files", -1, ""},
-		{"a format other than syslog", []string{"  files:", file("/var/log/mail.log", "json")}, "log_shipping.files", 0, ""},
-		{"a format in upper case", []string{"  files:", file("/var/log/mail.log", "SYSLOG")}, "log_shipping.files", 0, ""},
-		{"a rule without a condition", []string{"  drop:", "    - {program: x}", "    - {program: ''} # bad"}, "log_shipping.drop", 1, ""},
-		{"an unknown priority in a rule", []string{"  drop:", "    - {program: x, priority: S3NT1NEL} # bad"}, "log_shipping.drop", 0, ""},
-		{"a log that is neither the journal nor a configured file", []string{"  drop:", "    - {log: /var/log/other.log} # bad"}, "log_shipping.drop", 0, ""},
-		{"more than 64 rules", rules65, "log_shipping.drop", -1, ""},
-		{"a pattern that does not compile", []string{"  drop:", "    - {message: '(S3NT1NEL'} # bad"}, "log_shipping.drop", 0, patternReason},
-		{"a pattern of more than 1,024 bytes", bad(overlong), "log_shipping.drop", 0, patternReason},
-		{"a pattern of 1,017 bytes that compiles to 226,002 instructions", bad(strings.Repeat(".{0,1000}", 113)), "log_shipping.drop", 0, patternReason},
-		{"a pattern of 401 instructions", bad(`\pL{0,199}y`), "log_shipping.drop", 0, patternReason},
-		{"a character class pattern of 401 instructions", bad(`[a-z]{398}y`), "log_shipping.drop", 0, patternReason},
-		{"patterns of 402 instructions together", []string{"  drop: # bad", ruleLine(`\pL{0,99}y`), ruleLine(`\pL{0,99}y`)}, "log_shipping.drop", -1, togetherReason},
+		{"an unknown priority name", []string{"  min_priority: warn # bad"}, "log_shipping.min_priority", ""},
+		{"a priority name in upper case", []string{"  min_priority: INFO # bad"}, "log_shipping.min_priority", ""},
+		{"a priority number", []string{"  min_priority: '6' # bad"}, "log_shipping.min_priority", ""},
+		{"an empty priority name", []string{"  min_priority: '' # bad"}, "log_shipping.min_priority", ""},
+		{"a relative path", []string{"  files:", file("var/log/mail.log", "syslog")}, "log_shipping.files[0].path", ""},
+		{"a path that is not clean", []string{"  files:", file("/var/log/../mail.log", "syslog")}, "log_shipping.files[0].path", ""},
+		{"a path with a trailing slash", []string{"  files:", file("/var/log/", "syslog")}, "log_shipping.files[0].path", ""},
+		{"a path with a double slash", []string{"  files:", file("/var//log/mail.log", "syslog")}, "log_shipping.files[0].path", ""},
+		{"a path of more than 1,024 bytes", []string{"  files:", file("/"+strings.Repeat("a", 1024), "syslog")}, "log_shipping.files[0].path", ""},
+		{"a path with U+0000", []string{"  files:", file(`"/var/log/S3NT1NEL\0x"`, "syslog")}, "log_shipping.files[0].path", ""},
+		{"a path listed twice", []string{"  files:", "    - {path: /var/log/mail.log, format: syslog}", file("/var/log/mail.log", "syslog")}, "log_shipping.files[1].path", ""},
+		{"more than 16 files", files17, "log_shipping.files", ""},
+		{"a format other than syslog", []string{"  files:", file("/var/log/mail.log", "json")}, "log_shipping.files[0].format", ""},
+		{"a format in upper case", []string{"  files:", file("/var/log/mail.log", "SYSLOG")}, "log_shipping.files[0].format", ""},
+		{"a rule without a condition", []string{"  drop:", "    - {program: x}", "    - {program: ''} # bad"}, "log_shipping.drop[1]", ""},
+		{"an unknown priority in a rule", []string{"  drop:", "    - {program: x, priority: S3NT1NEL} # bad"}, "log_shipping.drop[0].priority", ""},
+		{"a log that is neither the journal nor a configured file", []string{"  drop:", "    - {log: /var/log/other.log} # bad"}, "log_shipping.drop[0].log", ""},
+		{"more than 64 rules", rules65, "log_shipping.drop", ""},
+		{"a pattern that does not compile", []string{"  drop:", "    - {message: '(S3NT1NEL'} # bad"}, "log_shipping.drop[0].message", patternReason},
+		{"a pattern of more than 1,024 bytes", bad(overlong), "log_shipping.drop[0].message", patternReason},
+		{"a pattern of 1,017 bytes that compiles to 226,002 instructions", bad(strings.Repeat(".{0,1000}", 113)), "log_shipping.drop[0].message", patternReason},
+		{"a pattern of 401 instructions", bad(`\pL{0,199}y`), "log_shipping.drop[0].message", patternReason},
+		{"a character class pattern of 401 instructions", bad(`[a-z]{398}y`), "log_shipping.drop[0].message", patternReason},
+		{"patterns of 402 instructions together", []string{"  drop: # bad", ruleLine(`\pL{0,99}y`), ruleLine(`\pL{0,99}y`)}, "log_shipping.drop", togetherReason},
 	}
 }
 
@@ -224,11 +223,8 @@ func TestLoadAgent_LogShippingErrors(t *testing.T) {
 func requireShippingError(t *testing.T, tt shippingError, path string, err error, line int) {
 	t.Helper()
 	ke := requireKeyError(t, err, anyKey, line)
-	if tt.index < 0 && ke.Key != tt.key {
+	if ke.Key != tt.key {
 		t.Errorf("KeyError.Key = %q, want %q", ke.Key, tt.key)
-	}
-	if tt.index >= 0 && (!strings.HasPrefix(ke.Key, tt.key+"[") || !strings.Contains(ke.Key, "["+strconv.Itoa(tt.index)+"]")) {
-		t.Errorf("KeyError.Key = %q, want the key %q with the index %d", ke.Key, tt.key, tt.index)
 	}
 	if ke.Reason == "" || (tt.why != "" && ke.Reason != tt.why) {
 		t.Errorf("KeyError.Reason = %q, want %q", ke.Reason, tt.why)

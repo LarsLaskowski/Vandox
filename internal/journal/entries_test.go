@@ -182,9 +182,135 @@ func requireDecodedEntry(t *testing.T, e *Entry, d *rawFrameDecoder, message str
 		t.Errorf("the decoder was called %d times, want 2 (the name of a compressed item is inside the frame, so both are decoded)", d.calls)
 	}
 	for _, limit := range d.limits {
-		if limit < 16384 {
-			t.Errorf("the decoder was given the limit %d, want at least MaxPayload 16384", limit)
+		if limit != 16384+66 {
+			t.Errorf("the decoder was given the limit %d, want MaxPayload + 66 = %d", limit, 16384+66)
 		}
+	}
+}
+
+// requireNoCompressedField checks that NextWith put no field marked compressed into the entry.
+func requireNoCompressedField(t *testing.T, e *Entry) {
+	t.Helper()
+	for _, field := range e.Fields {
+		if field.Compressed {
+			t.Errorf("entry %d holds a field marked compressed, want NextWith to put none into Fields", e.Seqnum)
+		}
+	}
+}
+
+func TestEntries_NextWithCountsTheValueOnly(t *testing.T) {
+	const limit = 100
+	exact := strings.Repeat("e", limit)
+	over := strings.Repeat("o", limit+1)
+	tests := []struct {
+		name    string
+		item    bItem
+		wantCut bool
+		want    string
+	}{
+		{"a plain value of exactly MaxPayload", plain("MESSAGE=" + exact), false, exact},
+		{"a plain value of MaxPayload + 1", plain("MESSAGE=" + over), true, over[:limit]},
+		{"a compressed value of exactly MaxPayload", packed("MESSAGE=" + exact), false, exact},
+		{"a compressed value of MaxPayload + 1", packed("MESSAGE=" + over), true, over[:limit]},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			b, _ := buildFile([]bEntry{seqEntry(1, tt.item)}, testOptions())
+			f := openBytes(t, b, false)
+			d := &rawFrameDecoder{}
+			opt := readOptions(d)
+			opt.MaxPayload = limit
+			c, err := f.SeekAll(0)
+			if err != nil {
+				t.Fatalf("SeekAll(0) error = %v, want nil", err)
+			}
+			var e Entry
+
+			nextWith(t, f, &c, []string{"MESSAGE"}, &e, opt)
+
+			got := value(t, &e, "MESSAGE")
+			if string(got.Value) != tt.want || got.Cut != tt.wantCut || got.Compressed {
+				t.Errorf("MESSAGE = %d bytes cut %v compressed %v, want %d bytes cut %v", len(got.Value), got.Cut, got.Compressed, len(tt.want), tt.wantCut)
+			}
+			for _, limit := range d.limits {
+				if limit != limit+66 {
+					t.Errorf("the decoder was given the limit %d, want MaxPayload + 66 = %d", limit, limit+66)
+				}
+			}
+			requireNoCompressedField(t, &e)
+		})
+	}
+}
+
+// damageByte sets the byte at off of the file bytes b.
+func damageByte(b []byte, off uint64, value byte) { b[off] = value }
+
+func TestEntries_NextWithDamagedEntryKeepsTheCursor(t *testing.T) {
+	b, lay := buildFile([]bEntry{seqEntry(1, plain("MESSAGE=one")), seqEntry(2, plain("MESSAGE=two")), seqEntry(3, plain("MESSAGE=three"))}, testOptions())
+	f := openBytes(t, b, false)
+	c, err := f.SeekAll(0)
+	if err != nil {
+		t.Fatalf("SeekAll(0) error = %v, want nil", err)
+	}
+	var e Entry
+	nextWith(t, f, &c, []string{"MESSAGE"}, &e, readOptions(nil))
+	damageByte(b, lay.entries[1], 0) // the type of the second entry object
+
+	for i := range 2 {
+		ok, err := f.NextWith(&c, []string{"MESSAGE"}, &e, readOptions(nil))
+		if ok || !errors.Is(err, ErrMalformed) {
+			t.Fatalf("NextWith() %d on the damaged entry = %v, %v, want false and ErrMalformed", i, ok, err)
+		}
+	}
+	damageByte(b, lay.entries[1], 3) // the type of an entry object restored
+
+	for _, want := range []string{"two", "three"} {
+		nextWith(t, f, &c, []string{"MESSAGE"}, &e, readOptions(nil))
+		if got := value(t, &e, "MESSAGE"); string(got.Value) != want {
+			t.Errorf("MESSAGE after the repair = %q, want %q: the cursor stayed in front of the damaged entry", got.Value, want)
+		}
+	}
+}
+
+func TestEntries_NextWithDamagedItemObjectIsUndecoded(t *testing.T) {
+	const flagsAndType, sizeField = 0, 8
+	tests := []struct {
+		name   string
+		offset uint64
+		value  byte
+	}{
+		{"a wrong type", flagsAndType, 0},
+		{"a size that leaves the file", sizeField + 6, 0x7f},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			bad := "_HOSTNAME=bad-host"
+			b, lay := buildFile([]bEntry{
+				seqEntry(1, plain("MESSAGE=one"), plain(bad)),
+				seqEntry(2, plain("MESSAGE=two"), plain("_HOSTNAME=good-host")),
+			}, testOptions())
+			b[lay.data[bad]+tt.offset] = tt.value
+			f := openBytes(t, b, false)
+			c, err := f.SeekAll(0)
+			if err != nil {
+				t.Fatalf("SeekAll(0) error = %v, want nil", err)
+			}
+			var e Entry
+
+			nextWith(t, f, &c, []string{"MESSAGE", "_HOSTNAME"}, &e, readOptions(nil))
+
+			if e.Undecoded != 1 || e.Seqnum != 1 {
+				t.Errorf("entry %d Undecoded = %d, want entry 1 with 1 undecoded item (the damaged object)", e.Seqnum, e.Undecoded)
+			}
+			if got := value(t, &e, "MESSAGE"); string(got.Value) != "one" {
+				t.Errorf("MESSAGE = %q, want one: the other items of the entry are read", got.Value)
+			}
+			requireNoCompressedField(t, &e)
+			nextWith(t, f, &c, []string{"MESSAGE", "_HOSTNAME"}, &e, readOptions(nil))
+			if got := value(t, &e, "_HOSTNAME"); string(got.Value) != "good-host" || e.Undecoded != 0 || e.Seqnum != 2 {
+				t.Errorf("next entry %d _HOSTNAME = %q undecoded %d, want entry 2, good-host and 0", e.Seqnum, got.Value, e.Undecoded)
+			}
+		})
 	}
 }
 
@@ -213,8 +339,8 @@ func TestEntries_NextWithMarksCutFields(t *testing.T) {
 
 		got := value(t, &e, "MESSAGE")
 		whole := full[len("MESSAGE="):]
-		if !got.Cut || len(got.Value) == 0 || len(got.Value) > 100 || !strings.HasPrefix(whole, string(got.Value)) {
-			t.Errorf("entry %d MESSAGE = %d bytes cut %v, want a non-empty prefix of at most 100 bytes of the %d byte value with Cut set", i, len(got.Value), got.Cut, len(whole))
+		if !got.Cut || len(got.Value) != 100 || !strings.HasPrefix(whole, string(got.Value)) {
+			t.Errorf("entry %d MESSAGE = %d bytes cut %v, want the first 100 bytes of the %d byte value with Cut set", i, len(got.Value), got.Cut, len(whole))
 		}
 		if host := value(t, &e, "_HOSTNAME"); string(host.Value) != "web-1" || host.Cut {
 			t.Errorf("entry %d _HOSTNAME = %q cut %v, want web-1 uncut", i, host.Value, host.Cut)
@@ -340,6 +466,7 @@ func requireUndecoded(t *testing.T, patch byte, d Decompressor) {
 	if _, ok := e.Field("MESSAGE"); ok {
 		t.Error("the entry holds a MESSAGE, want the undecodable item left out")
 	}
+	requireNoCompressedField(t, &e)
 	if host := value(t, &e, "_HOSTNAME"); string(host.Value) != "web-1" {
 		t.Errorf("_HOSTNAME = %q, want the other fields read", host.Value)
 	}

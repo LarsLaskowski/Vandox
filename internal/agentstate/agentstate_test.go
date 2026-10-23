@@ -766,20 +766,20 @@ func TestSaverWriteFirstUrgentChangeIsSavedAtOnce(t *testing.T) {
 	}
 }
 
-func TestSaverWriteUrgentChangeWaitsTenSecondsSinceTheLastSave(t *testing.T) {
+func TestSaverWriteUrgentChangeWaitsFiveSecondsSinceTheLastSave(t *testing.T) {
 	s, sv, path := ratesSetup(t)
 	update(t, s, true, fullState(1))
 	collect(t, sv, t0)
 	saved := readFile(t, path)
 
 	update(t, s, true, fullState(2))
-	collect(t, sv, t0.Add(9*time.Second))
+	collect(t, sv, t0.Add(4*time.Second))
 	if !bytes.Equal(saved, readFile(t, path)) {
-		t.Error("an urgent change was saved 9 s after the last save, want it to wait for 10 s")
+		t.Error("an urgent change was saved 4 s after the last save, want it to wait for 5 s")
 	}
-	collect(t, sv, t0.Add(10*time.Second))
+	collect(t, sv, t0.Add(5*time.Second))
 	if bytes.Equal(saved, readFile(t, path)) {
-		t.Error("an urgent change was not saved 10 s after the last save")
+		t.Error("an urgent change was not saved 5 s after the last save")
 	}
 }
 
@@ -820,7 +820,7 @@ func TestSaverWriteUrgentChangeCarriesAWaitingPositionAlong(t *testing.T) {
 	}
 }
 
-func TestSaverWriteUrgentWithinTenSecondsAfterHeartbeatSaveWaits(t *testing.T) {
+func TestSaverWriteUrgentWithinFiveSecondsAfterHeartbeatSaveWaits(t *testing.T) {
 	s, sv, path := ratesSetup(t)
 	update(t, s, true, fullState(1))
 	collect(t, sv, t0)
@@ -828,13 +828,13 @@ func TestSaverWriteUrgentWithinTenSecondsAfterHeartbeatSaveWaits(t *testing.T) {
 	collect(t, sv, t0.Add(50*time.Second))
 	saved := readFile(t, path)
 	update(t, s, true, func(st *State) { st.Backup.MaxProcesses = 9 })
-	collect(t, sv, t0.Add(59*time.Second))
+	collect(t, sv, t0.Add(54*time.Second))
 	if !bytes.Equal(saved, readFile(t, path)) {
-		t.Error("an urgent change was saved 9 s after the last save, want it to wait for 10 s")
+		t.Error("an urgent change was saved 4 s after the last save, want it to wait for 5 s")
 	}
-	collect(t, sv, t0.Add(60*time.Second))
+	collect(t, sv, t0.Add(55*time.Second))
 	if bytes.Equal(saved, readFile(t, path)) {
-		t.Error("an urgent change was not saved 10 s after the last save")
+		t.Error("an urgent change was not saved 5 s after the last save")
 	}
 }
 
@@ -1127,7 +1127,7 @@ func TestSaver_SavesALogPositionWithinTenSeconds(t *testing.T) {
 	collect(t, sv, t0) // the last save
 	update(t, s, true, func(st *State) { st.Logs = sampleLogs() })
 
-	// the run starts a few milliseconds early on the 10 s grid of the state job
+	// the run starts a few milliseconds early on the 10 s grid of the state job (the threshold is 5 s, so jitter is tolerated)
 	collect(t, sv, t0.Add(10*time.Second-5*time.Millisecond))
 
 	s2, status := Open(filepath.Dir(path), slog.New(slog.DiscardHandler))

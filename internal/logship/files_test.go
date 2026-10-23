@@ -337,6 +337,12 @@ func TestFiles_RotationWithoutTheOldFileIsAGap(t *testing.T) {
 }
 
 func TestFiles_TruncationRestartsWithOneGap(t *testing.T) {
+	t.Run("after shipped lines", truncationAfterShippedLines)
+	t.Run("nothing shipped yet", truncationBeforeAnyLine)
+	t.Run("the last line is dated after the start of the run", truncationAfterAFutureLine)
+}
+
+func truncationAfterShippedLines(t *testing.T) {
 	w := mailWorld(t)
 	w.appendLog("mail.log", fileLines(3, 5))
 	if got := fileMsgs(w.step()); !slices.Equal(got, []string{"file 3", "file 4", "file 5"}) {
@@ -347,15 +353,37 @@ func TestFiles_TruncationRestartsWithOneGap(t *testing.T) {
 	recs := w.step()
 
 	requireMessages(t, "file lines", fileMsgs(recs), []string{"file 20"})
-	if gaps := gapsOf(recs); len(gaps) != 1 {
-		t.Fatalf("the run that noticed the truncation holds %d gaps, want 1", len(gaps))
-	} else {
-		requireGap(t, gaps[0], fileLineTime(5), w.run.Start)
-	}
+	requireGap(t, oneGap(t, "the run that noticed the truncation", recs), fileLineTime(5), w.run.Start)
 	w.appendLog("mail.log", fileLines(21, 21))
 	next := w.step()
 	requireMessages(t, "file lines of the next run", fileMsgs(next), []string{"file 21"})
 	requireNoGaps(t, "the next run", next)
+}
+
+func truncationBeforeAnyLine(t *testing.T) {
+	w := mailWorld(t) // the first run took the position at the end of the two lines and shipped none
+	taken := w.run.Start
+	w.writeLog("mail.log", fileLines(20, 20)) // shorter than the two lines before
+
+	recs := w.step()
+
+	requireMessages(t, "file lines", fileMsgs(recs), []string{"file 20"})
+	requireGap(t, oneGap(t, "the run that noticed the truncation", recs), taken, w.run.Start)
+}
+
+func truncationAfterAFutureLine(t *testing.T) {
+	future := fileLineTime(5400) // ten minutes after the time of reading
+	if !future.After(startTime.Add(5 * time.Minute)) {
+		t.Fatalf("the test line is dated %v, want it well after the start %v", future, startTime)
+	}
+	w := mailWorld(t)
+	w.appendLog("mail.log", fileLine(5400, "future")+fileLine(5401, "later"))
+	w.step()
+	w.writeLog("mail.log", fileLine(20, "x"))
+
+	recs := w.step()
+
+	requireGap(t, oneGap(t, "the run that noticed the truncation", recs), fileLineTime(5401), fileLineTime(5401).Add(time.Microsecond))
 }
 
 func TestFiles_TruncationRefilledPastThePositionIsDetected(t *testing.T) {

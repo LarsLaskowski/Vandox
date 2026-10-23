@@ -139,6 +139,17 @@ func TestParse_LineWithoutHeaderIsRaw(t *testing.T) {
 		{"an offset of 15 hours", "2026-10-23T07:13:02+15:00 web-1 x: m"},
 		{"a fraction of ten digits", "2026-10-23T07:13:02.1234567890Z web-1 x: m"},
 		{"a point without fraction digits", "2026-10-23T07:13:02.Z web-1 x: m"},
+		{"30 February", "Feb 30 07:13:02 web-1 x: m"},
+		{"31 November", "Nov 31 07:13:02 web-1 x: m"},
+		{"29 February in a common year", "Feb 29 07:13:02 web-1 x: m"},
+		{"an RFC 3339 time on 30 February", "2026-02-30T07:13:02Z web-1 x: m"},
+		{"an RFC 3339 time on 31 November", "2026-11-31T07:13:02Z web-1 x: m"},
+		{"an RFC 3339 time on 29 February in a common year", "2026-02-29T07:13:02Z web-1 x: m"},
+		{"an RFC 3339 time with hour 24", "2026-10-23T24:00:00Z web-1 x: m"},
+		{"an RFC 3339 time with minute 60", "2026-10-23T07:60:00Z web-1 x: m"},
+		{"an RFC 3339 time with second 60", "2026-10-23T07:00:60Z web-1 x: m"},
+		{"an RFC 3339 time before the storable range", "1600-01-01T00:00:00Z web-1 x: m"},
+		{"an RFC 3339 time after the storable range", "2300-01-01T00:00:00Z web-1 x: m"},
 		{"a host of 256 bytes", "Oct 23 07:13:02 " + strings.Repeat("h", 256) + " x: m"},
 	}
 	for _, tt := range tests {
@@ -213,4 +224,24 @@ func TestParse_ReadsTheLinesOfTheImportFixtures(t *testing.T) {
 		requireLine(t, lines[1], syslogline.Parse([]byte(lines[1]), syslogline.NewClock(time.UTC), parseNow),
 			wantLine{utc(2026, time.March, 1, 12, 30, 15), "web-1", "kernel", 0, nil, strings.TrimPrefix(lines[1], "Mar  1 12:30:15 web-1 kernel: ")})
 	})
+}
+
+func TestParse_LineWithoutHeaderLeavesTheClockAlone(t *testing.T) {
+	now := utc(2026, time.October, 26, 0, 0, 0)
+	for _, raw := range []string{"Feb 30 07:13:02 web-1 x: m", "2026-02-30T07:13:02Z web-1 x: m", "2300-01-01T00:00:00Z web-1 x: m", "plain text"} {
+		t.Run(raw, func(t *testing.T) {
+			clock := syslogline.NewClock(centralEuropeLocation(t))
+			first := syslogline.Parse([]byte("Oct 25 02:50:00 web-1 x: m"), clock, now)
+
+			skipped := syslogline.Parse([]byte(raw), clock, now)
+			second := syslogline.Parse([]byte("Oct 25 02:05:00 web-1 x: m"), clock, now)
+
+			if !first.Time.Equal(utc(2026, time.October, 25, 0, 50, 0)) || skipped.Header {
+				t.Fatalf("first = %v, raw header = %v, want 00:50 UTC and a raw line", first.Time, skipped.Header)
+			}
+			if want := utc(2026, time.October, 25, 1, 5, 0); !second.Time.Equal(want) {
+				t.Errorf("line after the raw line = %v, want %v: the previous instant is still 00:50 UTC, so the repeated hour takes the later offset", second.Time, want)
+			}
+		})
+	}
 }

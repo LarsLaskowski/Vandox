@@ -2,6 +2,7 @@ package logship_test
 
 import (
 	"bytes"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io/fs"
@@ -619,4 +620,162 @@ func TestJournal_ReadableAfterAFirstStartStartsAtTheTails(t *testing.T) {
 	}
 	w.online(seqID(1), jentries(1, 6))
 	requireMessages(t, "lines written after it became readable", messages(w.drain(5)), []string{"line 6"})
+}
+
+// entryOffset returns the offset of the entry object with the sequence number seq in the journal file bytes.
+func entryOffset(t *testing.T, data []byte, seq uint64) int {
+	t.Helper()
+	for off := 256; off+24 <= len(data); off += 8 {
+		size := binary.LittleEndian.Uint64(data[off+8:])
+		if data[off] == 3 && size >= 64 && size < 1<<20 && binary.LittleEndian.Uint64(data[off+16:]) == seq {
+			return off
+		}
+	}
+	t.Fatalf("the journal file holds no entry object with the sequence number %d", seq)
+	return 0
+}
+
+// damageJournal changes one byte of the journal file in the world: the type of the entry object seq (when item is empty) or the
+// type of the data object of the item payload.
+func damageJournal(t *testing.T, w *world, file string, seq uint64, item string) {
+	t.Helper()
+	path := filepath.Join(w.jroot, machineID, file)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading %s: %v", file, err)
+	}
+	if item == "" {
+		data[entryOffset(t, data, seq)] = 0
+	} else {
+		at := bytes.Index(data, []byte(item))
+		if at < 64 {
+			t.Fatalf("the journal file holds no stored item %q", item)
+		}
+		data[at-64] = 0 // the type of the data object in front of the payload
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("writing %s: %v", file, err)
+	}
+}
+
+func TestJournal_DamagedFileIsGivenUpWithOneGap(t *testing.T) {
+	t.Run("an archived file with a damaged entry object in the middle", givenUpArchivedFile)
+	t.Run("an online file", givenUpOnlineFile)
+	t.Run("a damaged item object is one gap over its entry only", damagedItemObject)
+}
+
+func givenUpArchivedFile(t *testing.T) {
+	w := newWorld(t)
+	id := seqID(1)
+	name := w.archived(id, jentries(1, 6))
+	w.online(id, jentries(7, 9))
+	damageJournal(t, w, name, 4, "")
+	w.position(id, 0)
+	w.start()
+
+	recs := w.drain(5)
+
+	requireMessages(t, "lines", messages(recs), []string{"line 1", "line 2", "line 3", "line 7", "line 8", "line 9"})
+	requireGap(t, oneGap(t, "the runs", recs), entryTime(3), entryTime(6))
+	logs := w.logsOf("journal not readable")
+	if len(logs) == 0 || logs[0].attrs["err"] != "journal: archived: malformed file" {
+		t.Errorf("warnings %q = %+v, want one with err %q", "journal not readable", logs, "journal: archived: malformed file")
+	}
+}
+
+func givenUpOnlineFile(t *testing.T) {
+	w := newWorld(t)
+	id := seqID(1)
+	w.online(id, jentries(1, 6))
+	damageJournal(t, w, "system.journal", 4, "")
+	w.position(id, 0)
+	w.start()
+
+	first, second, third := w.step(), w.step(), w.step()
+
+	requireMessages(t, "lines of the first run", messages(first), []string{"line 1", "line 2", "line 3"})
+	requireNoGaps(t, "the first run", first)
+	if len(second) != 0 {
+		t.Errorf("the second run returned %v and %d gaps, want nothing: the online file may only have been read while it was written", head(messages(second)), len(gapsOf(second)))
+	}
+	requireMessages(t, "lines of the third run", messages(third), nil)
+	requireGap(t, oneGap(t, "the third run", third), entryTime(3), entryTime(6))
+
+	// journald rotates: the damaged file is set aside and the ID goes on in a new online file
+	w.rename("system.journal", "system@00000000000000000000000000000001-0000000000000001-0005f8d1b1a2c3d4.journal")
+	w.online(id, jentries(7, 9))
+	next := w.drain(5)
+	requireMessages(t, "lines of the next online file", messages(next), []string{"line 7", "line 8", "line 9"})
+	requireNoGaps(t, "the runs after the give-up", next)
+}
+
+func damagedItemObject(t *testing.T) {
+	w := newWorld(t)
+	id := seqID(1)
+	entries := jentries(1, 5)
+	entries[2] = jentry(3, "line 3", "_HOSTNAME", "damaged-host")
+	w.online(id, entries)
+	damageJournal(t, w, "system.journal", 0, "_HOSTNAME=damaged-host")
+	w.position(id, 0)
+	w.start()
+
+	recs := w.drain(5)
+
+	requireMessages(t, "lines", messages(recs), []string{"line 1", "line 2", "line 4", "line 5"})
+	requireGap(t, oneGap(t, "the runs", recs), entryTime(2), entryTime(4))
+}
+
+// pidCase is an entry with the given _PID (nil: absent) and SYSLOG_PID (nil: absent) and the pid its record must have.
+type pidCase struct {
+	name   string
+	pid    *string
+	syslog *string
+	want   int32
+}
+
+func pidCases() []pidCase {
+	str := func(s string) *string { return &s }
+	forms := []struct {
+		name string
+		pid  *string
+	}{{"0", str("0")}, {"2147483648", str("2147483648")}, {"empty", str("")}, {"a non-digit", str("12a")}, {"11 digits", str("12345678901")}, {"absent", nil}}
+	var cases []pidCase
+	for _, f := range forms {
+		cases = append(cases,
+			pidCase{"_PID " + f.name + " with a valid SYSLOG_PID", f.pid, str("42"), 42},
+			pidCase{"_PID " + f.name + " with an invalid SYSLOG_PID", f.pid, str("0"), 0},
+		)
+	}
+	return append(cases, pidCase{"the largest _PID is kept", str("2147483647"), str("42"), 2147483647})
+}
+
+func TestJournal_PidFallsBackToSyslogPid(t *testing.T) {
+	tests := pidCases()
+	w := newWorld(t)
+	var entries []map[string][]byte
+	for i, tt := range tests {
+		e := jentry(uint64(i+1), tt.name) // #nosec G115 -- a small index
+		delete(e, "_PID")
+		if tt.pid != nil {
+			e["_PID"] = []byte(*tt.pid)
+		}
+		if tt.syslog != nil {
+			e["SYSLOG_PID"] = []byte(*tt.syslog)
+		}
+		entries = append(entries, e)
+	}
+	w.online(seqID(1), entries)
+	w.position(seqID(1), 0)
+	w.start()
+
+	got := logLines(w.drain(5))
+
+	if len(got) != len(tests) {
+		t.Fatalf("the collector returned %d records, want %d", len(got), len(tests))
+	}
+	for i, tt := range tests {
+		if got[i].Message != tt.name || got[i].PID != tt.want {
+			t.Errorf("entry %q has the pid %d, want %d", tt.name, got[i].PID, tt.want)
+		}
+	}
 }
