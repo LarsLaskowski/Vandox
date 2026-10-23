@@ -16,4 +16,4 @@ are quoted in full.
 | 2026-10-23 06:57 | 2b Plan | Product Manager | Journal sample provided: system.journal, one archived system@*.journal, user-10000.journal (kept outside the repository) |
 | 2026-10-23 07:08 | 2b Plan | squad-lead | plan.md and tasks.md written; tier security; RESULT: DONE; decision record 0121 proposed, 0119 extended (opus/medium · 146,727 tokens · 39 tool uses · 652 s · continued) |
 | 2026-10-23 07:13 | 2b Plan challenge | squad-devils-advocate | OBJECTIONS 2 major (journal ID re-ship rules; rotation drain window), 4 minor (opus/medium · 87,201 tokens · 18 tool uses · 240 s) |
-| 2026-10-23 07:17 | 3 Plan security review | squad-security | CHANGES_REQUIRED: B1 decoder heap, B2 compressed input bound, B3 compressed items per entry, B4 regex program size; N1-N6 non-blocking (opus/medium · usage pending) |
+| 2026-10-23 07:17 | 3 Plan security review | squad-security | CHANGES_REQUIRED: B1 decoder heap, B2 compressed input bound, B3 compressed items per entry, B4 regex program size; N1-N6 non-blocking (opus/medium · 109,993 tokens · 32 tool uses · 477 s) |
