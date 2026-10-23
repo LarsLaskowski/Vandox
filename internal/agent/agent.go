@@ -4,6 +4,7 @@ package agent
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
@@ -159,8 +160,9 @@ func Run(ctx context.Context, opts Options) int {
 // jobs returns the collectors with their schedules: self, system, processes, connections, systemd (only when a service unit is
 // configured), mariadb (only when enabled), filesystem (only when a mount point is configured), clock, kernel, logs, backups (only
 // when backups.processes has rules) and state, and the system collector, which newScheduler connects to the scheduler. The
-// agent's state file is opened in opts.StateDir or else spool.directory. The collectors log through log.
-func jobs(opts Options, cfg *config.Agent, log *slog.Logger) ([]scheduler.Job, *sysstats.System, *agentstate.Store) {
+// agent's state file is opened in opts.StateDir or else spool.directory. The collectors log through log. It fails, and the agent does not start, when the log shipping collector cannot be built: the error wraps
+// errDropPattern for a pattern that does not compile and never quotes a pattern.
+func jobs(opts Options, cfg *config.Agent, log *slog.Logger) ([]scheduler.Job, *sysstats.System, *agentstate.Store, error) {
 	system := sysstats.NewSystem(opts.System, log)
 	systemdSchedule := scheduler.Schedule{Interval: SystemdInterval, Timeout: SystemdTimeout, PressureInterval: SystemdPressureInterval}
 	list := []scheduler.Job{
@@ -217,14 +219,14 @@ func jobs(opts Options, cfg *config.Agent, log *slog.Logger) ([]scheduler.Job, *
 		Collector: kernevents.New(opts.Kernel, store, log),
 		Schedule:  scheduler.Schedule{Interval: KernelInterval, Timeout: KernelTimeout},
 	})
-	if logs, err := newLogs(opts.Logs, cfg.LogShipping, store, log); err != nil {
-		log.Error("log shipping cannot start", "err", err)
-	} else {
-		list = append(list, scheduler.Job{
-			Collector: logs,
-			Schedule:  scheduler.Schedule{Interval: LogsInterval, Timeout: LogsTimeout},
-		})
+	logs, err := newLogs(opts.Logs, cfg.LogShipping, store, log)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("log shipping: %w", err)
 	}
+	list = append(list, scheduler.Job{
+		Collector: logs,
+		Schedule:  scheduler.Schedule{Interval: LogsInterval, Timeout: LogsTimeout},
+	})
 	if len(cfg.Backups.Processes) > 0 {
 		list = append(list, scheduler.Job{
 			Collector: backups.New(proc, backupRules(cfg.Backups.Processes), store, log),
@@ -234,7 +236,7 @@ func jobs(opts Options, cfg *config.Agent, log *slog.Logger) ([]scheduler.Job, *
 	return append(list, scheduler.Job{
 		Collector: agentstate.NewSaver(store, proc),
 		Schedule:  scheduler.Schedule{Interval: StateInterval, Timeout: StateTimeout},
-	}), system, store
+	}), system, store, nil
 }
 
 // errDropPattern is the error of a drop pattern that does not compile; it does not quote the pattern.
@@ -303,7 +305,10 @@ func newScheduler(opts Options, cfg *config.Agent, log *slog.Logger) (*scheduler
 	if opts.Sink != nil {
 		sink = opts.Sink
 	}
-	list, system, store := jobs(opts, cfg, log)
+	list, system, store, err := jobs(opts, cfg, log)
+	if err != nil {
+		return nil, nil, err
+	}
 	sched, err := scheduler.New(list, sink, log)
 	if err != nil {
 		return nil, nil, err

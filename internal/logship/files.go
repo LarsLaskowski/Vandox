@@ -167,9 +167,14 @@ func (fr *filesRun) findRenamed() bool {
 
 // rotate handles a file at the path that is another file than the one kept: the kept file, found again by its identity after a restart,
 // becomes the renamed file that is read until the writer has moved, and the file at the path is read from its start. A kept file that
-// cannot be found is a gap from the last line read to the first line of the new file.
+// cannot be found is a gap from the last line read to the first line of the new file. An older renamed file that is still read is
+// finished first; when the run stops or a read fails before that, nothing changes, it returns false and the next runs go on with the
+// renamed file.
 func (fr *filesRun) rotate(f *os.File, id identity, adopted *bool) bool {
 	r, st := fr.r, fr.st
+	if st.renamed != nil && !fr.finishRenamed() {
+		return false
+	}
 	old := st.cur
 	if old == nil {
 		found, err := findRotated(fr.spec.Path, st.id)
@@ -178,9 +183,6 @@ func (fr *filesRun) rotate(f *os.File, id identity, adopted *bool) bool {
 			return false
 		}
 		old = found
-	}
-	if st.renamed != nil {
-		fr.finishRenamed()
 	}
 	if old != nil {
 		st.renamed = &renamedFile{f: old, id: st.id, line: st.line, size: -1}
@@ -191,11 +193,20 @@ func (fr *filesRun) rotate(f *os.File, id identity, adopted *bool) bool {
 	return true
 }
 
-// finishRenamed reads the rest of the renamed file, ships its unfinished last line as it is and lets the file go.
-func (fr *filesRun) finishRenamed() {
+// finishRenamed reads the rest of the renamed file, ships its unfinished last line as it is and lets the file go. It returns false, and
+// keeps the file, when the run stopped before the end or a read failed (then the reason is set).
+func (fr *filesRun) finishRenamed() bool {
 	rn := fr.st.renamed
-	_, _ = fr.r.pump(rn.f, &rn.line, true, fr.emitter())
+	done, err := fr.r.pump(rn.f, &rn.line, true, fr.emitter())
+	if err != nil {
+		fr.r.fproblems[fr.i] = reasonReadFailed
+		return false
+	}
+	if !done {
+		return false
+	}
 	fr.st.renamed = nil
+	return true
 }
 
 // emitter returns the function that turns the lines of the file into records.
@@ -256,8 +267,8 @@ func (fr *filesRun) updateHead() {
 // read ships the lines of the renamed file, then those of the file at the path.
 func (fr *filesRun) read() {
 	r, st := fr.r, fr.st
-	if rn := st.renamed; rn != nil {
-		fr.readRenamed(rn)
+	if rn := st.renamed; rn != nil && !fr.readRenamed(rn) {
+		return
 	}
 	if r.stopped || st.cur == nil {
 		return
@@ -267,9 +278,9 @@ func (fr *filesRun) read() {
 	}
 }
 
-// readRenamed reads the renamed file to its end. It is finished, with its unfinished last line shipped as it is, in the run in which the
-// file at the path has data and the renamed file did not grow since the previous run: the writer has moved to the new file.
-func (fr *filesRun) readRenamed(rn *renamedFile) {
+// readRenamed reads the renamed file to its end and returns false when a read failed, which stops the reading of the file in this run.
+// It is finished, with its unfinished last line shipped as it is, in the run in which the file at the path has data and the renamed file did not grow since the previous run: the writer has moved to the new file.
+func (fr *filesRun) readRenamed(rn *renamedFile) bool {
 	r, st := fr.r, fr.st
 	size, _, ok := statOf(rn.f)
 	if !ok {
@@ -279,13 +290,14 @@ func (fr *filesRun) readRenamed(rn *renamedFile) {
 	eof, err := r.pump(rn.f, &rn.line, finish, fr.emitter())
 	if err != nil {
 		r.fproblems[fr.i] = reasonReadFailed
-		return
+		return false
 	}
 	if finish && eof {
 		st.renamed = nil
-		return
+		return true
 	}
 	rn.size = size
+	return true
 }
 
 // endLostGap closes the gap over lines lost to a rotation when the file at the path had no line to close it with.
@@ -351,13 +363,14 @@ func (ls *lineState) heldAppend(seg []byte) {
 
 // pump reads f from where ls stands to its end, or until the run must stop, and hands every line with its line feed to emit. With
 // finish the unfinished last line is handed over too. It reports whether the end of the file was reached. The offset in ls.start is
-// that of the first line not handed over, so an unfinished line is read again after a restart.
+// that of the first line not handed over, so an unfinished line is read again after a restart. A stop by time or context keeps the
+// offset read and the held line for the next run; a stop at the record or text budget goes back to the next line, because the rest of
+// the buffer is read again.
 func (r *run) pump(f *os.File, ls *lineState, finish bool, emit emitLine) (bool, error) {
 	buf := r.l.readBuffer()
 	for {
 		if r.stopped || r.ctx.Err() != nil {
-			ls.rewind()
-			return false, nil
+			return false, nil // the offset and the held line carry into the next run
 		}
 		n, err := f.ReadAt(buf, ls.read)
 		if err != nil && !errors.Is(err, io.EOF) {

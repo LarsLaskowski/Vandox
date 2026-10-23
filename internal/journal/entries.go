@@ -3,6 +3,7 @@ package journal
 import (
 	"bytes"
 	"errors"
+	"slices"
 )
 
 const (
@@ -49,7 +50,8 @@ func (f *File) SeekAll(after uint64) (Cursor, error) {
 // MaxPayload counts the bytes of the value after NAME=; a longer value is cut and its Field has Cut set. Compressed items are decoded
 // when opt allows it and are then ordinary fields; an item that cannot be read (a damaged data object, an XZ or LZ4 item, a failed or
 // refused decoding, an object over MaxCompressedBytes) counts in Entry.Undecoded, and so does the item beyond MaxCompressed, after
-// which the rest of the entry is not read. A damaged entry object or entry array is ErrMalformed and the cursor stays.
+// which the rest of the entry is not read. Only the first item of each wanted name is kept, as the import keeps the first value of a
+// repeated field; a later one is passed over (a plain one before its value is read) and not counted in Omitted. A damaged entry object or entry array is ErrMalformed and the cursor stays.
 func (f *File) NextWith(c *Cursor, want []string, e *Entry, opt *ReadOptions) (bool, error) {
 	return f.advance(c, func(off uint64) error { return f.readEntryWith(off, want, e, opt) })
 }
@@ -77,6 +79,12 @@ func (f *File) readEntryWith(off uint64, want []string, e *Entry, opt *ReadOptio
 	return nil
 }
 
+// holds tells whether e already keeps a field of the name: only the first item of a wanted name is kept, as the import keeps the first
+// value of a repeated field.
+func (e *Entry) holds(name string) bool {
+	return slices.ContainsFunc(e.Fields, func(f Field) bool { return f.Name == name })
+}
+
 // readItemWith reads the data object an item points to. A damaged object is counted in e.Undecoded; only a failure of the reader is
 // returned.
 func (f *File) readItemWith(off uint64, want []string, e *Entry, opt *ReadOptions, compressed *int) error {
@@ -97,7 +105,7 @@ func (f *File) readItemWith(off uint64, want []string, e *Entry, opt *ReadOption
 		return nil
 	}
 	name, ok := wanted(want, head[:eq])
-	if !ok {
+	if !ok || e.holds(name) {
 		return nil
 	}
 	if len(e.Fields) >= maxKept {
@@ -148,7 +156,7 @@ func (f *File) readCompressedItem(off uint64, flags byte, size uint64, want []st
 		return nil
 	}
 	name, ok := wanted(want, out[:eq])
-	if !ok {
+	if !ok || e.holds(name) {
 		return nil
 	}
 	if len(e.Fields) >= maxKept {
