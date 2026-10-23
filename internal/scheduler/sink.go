@@ -14,7 +14,7 @@ type Putter interface {
 	Put(ctx context.Context, records []model.Record) error
 }
 
-// DiscardSink drops every record. The agent uses it until the spool exists (#38).
+// DiscardSink drops every record. The agent does not use it; it is for tests and callers without a spool.
 type DiscardSink struct{}
 
 // Put drops records and returns nil.

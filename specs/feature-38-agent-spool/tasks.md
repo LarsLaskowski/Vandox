@@ -25,7 +25,7 @@ state file, agent), then the documentation. Each group runs Skeleton (Dev), test
 | 15 | G5 | Implement the barrier | internal/agentstate/agentstate.go | AC4, AC6 | 14 | Dev | [x] |
 | 16 | G6 | Skeleton: openStorage, jobs, newScheduler, closeSpool | internal/agent/agent.go | AC1, AC4, AC13, AC19 | 9, 12, 15 | Dev | [x] |
 | 17 | G6 | Tests: records reach the spool, stop order, close give-up, start failures, first start without warning, no token in the spool; adapt the jobs and newScheduler call sites | internal/agent/agent_test.go | AC1, AC4, AC13, AC19 | 16 | Tester | [x] |
-| 18 | G6 | Implement the wiring and stop order; DiscardSink doc | internal/agent/agent.go, internal/scheduler/sink.go | AC1, AC4, AC13, AC19 | 17 | Dev | [ ] |
+| 18 | G6 | Implement the wiring and stop order; DiscardSink doc | internal/agent/agent.go, internal/scheduler/sink.go | AC1, AC4, AC13, AC19 | 17 | Dev | [x] |
 | 19 | G7 | no new API: README option rows for spool.max_size and spool.min_free, the directory row | README.md | AC16 | 6 | Dev | [ ] |
 | 20 | G7 | Example keys spool.max_size and spool.min_free with comments; the directory's contents and the agent's writes | deploy/agent/agent.yaml, deploy/agent/README.md | AC16, AC13 | 6, 18 | Dev | [ ] |
 | 21 | G7 | Security areas 8 (no token in the spool), 9 (files, guards, limits, functions), 10 (UnmarshalRecord, data file and meta readers with bounds), 12 (fixed log texts); Layout package list gains spool | .squad/project.md, .squad/stack.md | AC10, AC11, AC19 | 9 | Dev | [ ] |

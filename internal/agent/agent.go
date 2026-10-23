@@ -134,9 +134,11 @@ func Run(ctx context.Context, opts Options) int {
 		log.Error("agent cannot start", "err", err)
 		return 1
 	}
-	var sink scheduler.Putter = scheduler.DiscardSink{}
-	if opts.Sink != nil {
-		sink = opts.Sink
+	sink := opts.Sink
+	if sp != nil {
+		sink = sp
+		opts.Self.Spool = sp
+		opts.Self.SpoolAge = sp
 	}
 	sched, err := newScheduler(opts, cfg, store, sink, log)
 	if err != nil {
@@ -304,20 +306,66 @@ func programRules(rules []config.ProgramRule) []procstats.Rule {
 	return out
 }
 
+// closeTimeout is how long closeSpool waits for the spool; tests replace it.
+var closeTimeout = 5 * time.Second
+
+// spoolSyncInterval is the interval of the spool's background sync.
+const spoolSyncInterval = time.Second
+
+// Fixed start errors of the boot ID; neither names a path or the content read.
+var (
+	errBootIDRead = errors.New("spool: boot id: not readable")
+	errBootIDForm = errors.New("spool: boot id: not a lower-case UUID")
+)
+
 // openStorage opens the agent's state store and then the spool, both in opts.StateDir or else spool.directory. The spool is nil
-// when opts.Sink is set. The store's barrier is the spool's Sync. It fails, and the agent does not start, when the spool cannot be
-// opened.
+// when opts.Sink is set. The store's barrier is the spool's Sync. It fails, and the agent does not start, when the boot ID cannot
+// be read or the spool cannot be opened.
 func openStorage(opts Options, cfg *config.Agent, log *slog.Logger) (*agentstate.Store, *spool.Spool, error) {
 	stateDir := opts.StateDir
 	if stateDir == "" {
 		stateDir = cfg.Spool.Directory
 	}
 	store, _ := agentstate.Open(stateDir, log)
-	return store, nil, nil
+	if opts.Sink != nil {
+		return store, nil, nil
+	}
+	proc := opts.Kernel.Proc
+	if proc == nil {
+		proc = os.DirFS("/proc")
+	}
+	bootID, err := procstats.ReadBootID(proc)
+	if err != nil {
+		if errors.Unwrap(err) == nil {
+			return store, nil, errBootIDForm
+		}
+		return store, nil, errBootIDRead
+	}
+	sp, err := spool.Open(spool.Options{
+		Dir:          stateDir,
+		AgentID:      cfg.AgentID,
+		BootID:       bootID,
+		MaxBytes:     cfg.Spool.MaxBytes,
+		MinFreeBytes: cfg.Spool.MinFreeBytes,
+		SyncInterval: spoolSyncInterval,
+	}, log)
+	if err != nil {
+		return store, nil, err
+	}
+	store.SetBarrier(sp.Sync)
+	return store, sp, nil
 }
 
-// closeSpool closes the spool within five seconds and logs "spool not closed" otherwise; a nil spool is ignored.
-func closeSpool(_ *spool.Spool, _ *slog.Logger) {
+// closeSpool closes the spool within closeTimeout and logs "spool not closed" otherwise; a nil spool is ignored.
+func closeSpool(sp *spool.Spool, log *slog.Logger) {
+	if sp == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), closeTimeout)
+	defer cancel()
+	if err := sp.Close(ctx); err != nil {
+		log.Error("spool not closed")
+	}
 }
 
 // newScheduler returns the scheduler with the jobs of the configuration, taking the records into sink; the system collector
