@@ -23,6 +23,7 @@ type Entry struct {
 	Undecoded   int     // compressed items NextWith could not decode
 
 	bufs [][]byte
+	zin  []byte // the compressed object NextWith reads, reused
 }
 
 // Field is one field of an entry. A Compressed field is an item stored compressed: it is not decompressed and its name is not known,
@@ -48,7 +49,7 @@ func (e *Entry) Field(name string) ([]Field, bool) {
 // reset empties e for the next entry and keeps its buffers.
 func (e *Entry) reset() {
 	e.Fields = e.Fields[:0]
-	e.Realtime, e.Monotonic, e.Items, e.Omitted = time.Time{}, 0, 0, 0
+	e.Realtime, e.Monotonic, e.Items, e.Omitted, e.Undecoded = time.Time{}, 0, 0, 0, 0
 }
 
 // buffer returns the k-th payload buffer of e, made when first needed.
@@ -59,26 +60,21 @@ func (e *Entry) buffer(k int) []byte {
 	return e.bufs[k]
 }
 
+// sized returns the k-th payload buffer of e with room for n bytes, grown when it is smaller.
+func (e *Entry) sized(k, n int) []byte {
+	b := e.buffer(k)
+	if len(b) < n {
+		b = make([]byte, n)
+		e.bufs[k] = b
+	}
+	return b[:n]
+}
+
 // readEntry reads the entry object at off into e: its stamps and the fields named in want.
 func (f *File) readEntry(off uint64, want []string, e *Entry) error {
-	obj, size, err := f.object(off, typeEntry, entryFixed, entryFixed)
-	if err != nil {
+	count, err := f.beginEntry(off, e)
+	if err != nil || count == 0 {
 		return err
-	}
-	count := (size - entryFixed) / itemSize
-	if (size-entryFixed)%itemSize != 0 || count > maxItems {
-		return ErrMalformed
-	}
-	e.reset()
-	e.Seqnum = byteOrder.Uint64(obj[16:])
-	e.RealtimeUS = byteOrder.Uint64(obj[24:])
-	e.MonotonicUS = byteOrder.Uint64(obj[32:])
-	copy(e.BootID[:], obj[40:56])
-	e.Items = toInt(count)
-	e.Realtime = realtimeOf(e.RealtimeUS)
-	e.Monotonic = monotonicOf(e.MonotonicUS)
-	if count == 0 {
-		return nil
 	}
 	table := f.items[:count*itemSize]
 	if err := f.readAt(off+entryFixed, table); err != nil {
@@ -90,6 +86,27 @@ func (f *File) readEntry(off uint64, want []string, e *Entry) error {
 		}
 	}
 	return nil
+}
+
+// beginEntry reads the entry object at off, empties e and sets its stamps, and returns the number of items of the entry.
+func (f *File) beginEntry(off uint64, e *Entry) (uint64, error) {
+	obj, size, err := f.object(off, typeEntry, entryFixed, entryFixed)
+	if err != nil {
+		return 0, err
+	}
+	count := (size - entryFixed) / itemSize
+	if (size-entryFixed)%itemSize != 0 || count > maxItems {
+		return 0, ErrMalformed
+	}
+	e.reset()
+	e.Seqnum = byteOrder.Uint64(obj[16:])
+	e.RealtimeUS = byteOrder.Uint64(obj[24:])
+	e.MonotonicUS = byteOrder.Uint64(obj[32:])
+	copy(e.BootID[:], obj[40:56])
+	e.Items = toInt(count)
+	e.Realtime = realtimeOf(e.RealtimeUS)
+	e.Monotonic = monotonicOf(e.MonotonicUS)
+	return count, nil
 }
 
 // readItem reads the data object an item points to: its name from the first bytes of its payload, and the payload (up to 4,096

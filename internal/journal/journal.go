@@ -1,7 +1,7 @@
 // Package journal reads the binary journal files of systemd-journald through io.ReaderAt, without mmap.
 //
-// It reads the non-compact layout of systemd 249 (the layout of a 256-byte header, KEYED-HASH, optionally compressed items) and never
-// decompresses anything. Every offset and size of a file is checked against the file's bounds before it is used, chains are followed
+// It reads the non-compact layout of systemd 249 (the layout of a 256-byte header, KEYED-HASH, optionally compressed items) and
+// decompresses only through the Decompressor of NextWith. Every offset and size of a file is checked against the file's bounds before it is used, chains are followed
 // only to strictly larger offsets, and what is read per call is limited, so a damaged or hostile file ends in ErrMalformed and never in
 // a loop or a large allocation. A File and the Cursors and Entries used with it are not safe for concurrent use.
 package journal
@@ -62,8 +62,10 @@ const (
 	atArenaSize    = 96
 	atTableOffset  = 104
 	atTableSize    = 112
+	atEntryCount   = 152
 	atTailSeqnum   = 160
 	atHeadSeqnum   = 168
+	atEntryArray   = 176
 	atHeadRealtime = 184
 	atTailRealtime = 192
 
@@ -105,6 +107,8 @@ type File struct {
 	declEnd  uint64 // end of the arena as the header declares it
 	tableOff uint64 // offset of the first bucket of the data hash table
 	tableLen uint64 // bytes of the data hash table
+	mainN    uint64 // number of entries as the header declares it
+	mainHead uint64 // offset of the first array of the main entry array
 	hdr      Header
 	scratch  [scratchSize]byte
 	items    [itemBufSize]byte
@@ -161,6 +165,8 @@ func (f *File) load(size int64) error {
 	f.declEnd = hs + min(byteOrder.Uint64(b[atArenaSize:]), math.MaxInt64-hs)
 	f.tableOff = byteOrder.Uint64(b[atTableOffset:])
 	f.tableLen = byteOrder.Uint64(b[atTableSize:])
+	f.mainN = byteOrder.Uint64(b[atEntryCount:])
+	f.mainHead = byteOrder.Uint64(b[atEntryArray:])
 	f.hdr = Header{
 		Online:       b[atState] == headerOnline,
 		SetAside:     f.setAside,

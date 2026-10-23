@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -27,12 +28,17 @@ import (
 const FileName = "agent-state.json"
 
 const (
-	// maxFileSize is the largest state file the agent reads.
-	maxFileSize = 16 * 1024
+	// maxFileSize is the largest state file the agent reads: 256 journal positions of about 130 bytes and 16 file positions of about
+	// 650 bytes with a renamed file fit with room.
+	maxFileSize = 64 * 1024
 	// fileVersion is the only version of the state file.
 	fileVersion = 1
-	// urgentInterval is the least time between two saves of an urgent change.
-	urgentInterval = 10 * time.Second
+	// urgentInterval is the least time between two saves of an urgent change: the 10 s grid of the state job minus half of its
+	// interval, so that the jitter of a run's start (it is taken after the tick) does not push a save to the tick after, and a
+	// committed position is saved within one state interval.
+	urgentInterval = 5 * time.Second
+	// flushWait is how long Flush waits for a save that is running.
+	flushWait = 5 * time.Second
 	// heartbeatInterval is the time after which the state is saved anyway.
 	heartbeatInterval = 50 * time.Second
 	// maxUptimeSize is the most bytes read from /proc/uptime.
@@ -44,6 +50,20 @@ const (
 
 	msgUnavailable = "agent state not available"
 	msgNotSaved    = "agent state not saved"
+	reasonRunning  = "agentstate: save still running"
+
+	// maxHeadLen is the most bytes the head hash of a file position covers.
+	maxHeadLen = 256
+)
+
+var (
+	// flushAfter returns the channel that tells Flush to give up waiting; tests replace it.
+	flushAfter = time.After
+
+	// errSaveRunning is the error of a Flush that gave up waiting for a save that did not end.
+	errSaveRunning = errors.New(reasonRunning)
+
+	validDigest = regexp.MustCompile(`^[0-9a-f]{64}$`)
 )
 
 var validUUID = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
@@ -164,12 +184,16 @@ type Store struct {
 	urgentPending bool
 	lastSave      time.Time
 	saveFailed    bool
+
+	// saving is the write lock of the state file: a save holds it by sending and releases it by receiving. It covers encoding, writing
+	// and the update of dirty and the sequence number.
+	saving chan struct{}
 }
 
 // Open reads the state file in dir. It never creates the directory; a file that is not usable is treated as
 // missing, and the first save replaces it.
 func Open(dir string, log *slog.Logger) (*Store, Status) {
-	s := &Store{dir: dir, log: log}
+	s := &Store{dir: dir, log: log, saving: make(chan struct{}, 1)}
 	st, status := load(dir)
 	s.state = st
 	if status == StatusUnavailable {
@@ -247,7 +271,7 @@ func (s *Store) State() State {
 }
 
 // Update changes the state with fn, which runs under the store's lock and must not call the store; urgent marks
-// a kill, boot or backup change (saved after 10 s), else the change waits for the 50 s heartbeat.
+// a kill, boot, backup or log position change (saved after 5 s), else the change waits for the 50 s heartbeat.
 func (s *Store) Update(urgent bool, fn func(*State)) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -260,9 +284,65 @@ func (s *Store) Update(urgent bool, fn func(*State)) {
 	}
 }
 
-// Flush saves the state now if it has changed since the last save, waiting at most 5 s for a save that is running.
+// Flush saves the state now if it has changed since the last save, waiting at most 5 s for a save that is running. It gives up with
+// a warning and an error when that save does not end, and it logs a failed save itself.
 func (s *Store) Flush(now time.Time) error {
-	return errors.New("agentstate: not implemented")
+	select {
+	case s.saving <- struct{}{}:
+	case <-flushAfter(flushWait):
+		s.log.Warn(msgNotSaved, "err", reasonRunning)
+
+		return errSaveRunning
+	}
+	defer func() { <-s.saving }()
+
+	s.mu.Lock()
+	if !s.dirty {
+		s.mu.Unlock()
+
+		return nil
+	}
+	st, seq := copyState(s.state), s.seq
+	s.mu.Unlock()
+
+	err := s.saveLocked(st)
+	s.finishSave(now, seq, err)
+	if err != nil {
+		return errors.New(errText(err))
+	}
+
+	return nil
+}
+
+// saveLocked encodes and writes st; the caller holds the write lock.
+func (s *Store) saveLocked(st State) error {
+	data, err := encode(st)
+	if err == nil {
+		err = write(s.dir, data)
+	}
+
+	return err
+}
+
+// finishSave records the end of a save of the state of sequence number seq at now; the caller holds the write lock.
+func (s *Store) finishSave(now time.Time, seq uint64, err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.lastSave = now
+	if err != nil {
+		if !s.saveFailed {
+			s.saveFailed = true
+			s.log.Warn(msgNotSaved, "err", errText(err))
+		}
+
+		return
+	}
+	s.saveFailed = false
+	if s.seq == seq {
+		s.dirty = false
+		s.urgentPending = false
+	}
 }
 
 // copyState returns a deep copy of st.
@@ -280,6 +360,22 @@ func copyState(st State) State {
 		r := *st.Backup
 		out.Backup = &r
 	}
+	if st.Logs != nil {
+		out.Logs = copyLogs(st.Logs)
+	}
+
+	return out
+}
+
+// copyLogs returns a deep copy of l.
+func copyLogs(l *LogPositions) *LogPositions {
+	out := &LogPositions{Journal: slices.Clone(l.Journal), Files: slices.Clone(l.Files)}
+	for i := range out.Files {
+		if r := out.Files[i].Renamed; r != nil {
+			c := *r
+			out.Files[i].Renamed = &c
+		}
+	}
 
 	return out
 }
@@ -290,6 +386,30 @@ type fileState struct {
 	Boot    *fileBoot    `json:"boot,omitempty"`
 	Journal *fileJournal `json:"journal,omitempty"`
 	Backup  *fileBackup  `json:"backup,omitempty"`
+	Logs    *fileLogs    `json:"logs,omitempty"`
+}
+
+type fileLogs struct {
+	Journal []fileJournal `json:"journal,omitempty"`
+	Files   []fileLogFile `json:"files,omitempty"`
+}
+
+type fileLogFile struct {
+	PathSHA256 string       `json:"path_sha256"`
+	Device     uint64       `json:"device"`
+	Inode      uint64       `json:"inode"`
+	Offset     int64        `json:"offset"`
+	HeadSHA256 string       `json:"head_sha256"`
+	HeadLen    int          `json:"head_len"`
+	LastTime   time.Time    `json:"last_time"`
+	Renamed    *fileRenamed `json:"renamed,omitempty"`
+}
+
+type fileRenamed struct {
+	Device uint64 `json:"device"`
+	Inode  uint64 `json:"inode"`
+	Offset int64  `json:"offset"`
+	Size   int64  `json:"size"`
 }
 
 type fileBoot struct {
@@ -349,8 +469,54 @@ func decode(data []byte) (State, error) {
 		}
 		st.Backup = &OpenRun{BootID: f.Backup.BootID, StartedAt: f.Backup.StartedAt, LastSeen: f.Backup.LastSeen, MaxProcesses: f.Backup.MaxProcesses}
 	}
+	if f.Logs != nil {
+		logs, ok := decodeLogs(f.Logs)
+		if !ok {
+			return State{}, errInvalid
+		}
+		st.Logs = logs
+	}
 
 	return st, nil
+}
+
+// decodeLogs checks the log positions of the state file and returns them; false means they are not valid.
+func decodeLogs(f *fileLogs) (*LogPositions, bool) {
+	if len(f.Journal) > MaxLogJournals || len(f.Files) > MaxLogFiles {
+		return nil, false
+	}
+	logs := &LogPositions{}
+	for _, j := range f.Journal {
+		if !validUUID.MatchString(j.SeqnumID) {
+			return nil, false
+		}
+		logs.Journal = append(logs.Journal, JournalPosition{SeqnumID: j.SeqnumID, Seqnum: j.Seqnum, Realtime: j.Realtime})
+	}
+	for _, p := range f.Files {
+		pos, ok := decodeFilePosition(p)
+		if !ok {
+			return nil, false
+		}
+		logs.Files = append(logs.Files, pos)
+	}
+
+	return logs, true
+}
+
+// decodeFilePosition checks one file position of the state file and returns it.
+func decodeFilePosition(p fileLogFile) (FilePosition, bool) {
+	if !validDigest.MatchString(p.PathSHA256) || !validDigest.MatchString(p.HeadSHA256) || p.HeadLen < 0 || p.HeadLen > maxHeadLen || p.Offset < 0 {
+		return FilePosition{}, false
+	}
+	pos := FilePosition{PathSHA256: p.PathSHA256, Device: p.Device, Inode: p.Inode, Offset: p.Offset, HeadSHA256: p.HeadSHA256, HeadLen: p.HeadLen, LastTime: p.LastTime}
+	if r := p.Renamed; r != nil {
+		if r.Offset < 0 || r.Size < 0 {
+			return FilePosition{}, false
+		}
+		pos.Renamed = &RenamedFile{Device: r.Device, Inode: r.Inode, Offset: r.Offset, Size: r.Size}
+	}
+
+	return pos, true
 }
 
 // maxYear is the first year a time in the state file may not reach.
@@ -372,6 +538,14 @@ func timesInRange(f fileState) bool {
 	}
 	if f.Backup != nil {
 		times = append(times, f.Backup.StartedAt, f.Backup.LastSeen)
+	}
+	if f.Logs != nil {
+		for _, j := range f.Logs.Journal {
+			times = append(times, j.Realtime)
+		}
+		for _, p := range f.Logs.Files {
+			times = append(times, p.LastTime)
+		}
 	}
 	for _, t := range times {
 		if t.UTC().Year() >= maxYear {
@@ -395,8 +569,28 @@ func encode(st State) ([]byte, error) {
 	if st.Backup != nil {
 		f.Backup = &fileBackup{BootID: st.Backup.BootID, StartedAt: st.Backup.StartedAt.UTC(), LastSeen: st.Backup.LastSeen.UTC(), MaxProcesses: st.Backup.MaxProcesses}
 	}
+	if st.Logs != nil {
+		f.Logs = encodeLogs(st.Logs)
+	}
 
 	return json.Marshal(f)
+}
+
+// encodeLogs returns the JSON form of the log positions l.
+func encodeLogs(l *LogPositions) *fileLogs {
+	out := &fileLogs{}
+	for _, j := range l.Journal {
+		out.Journal = append(out.Journal, fileJournal{SeqnumID: j.SeqnumID, Seqnum: j.Seqnum, Realtime: j.Realtime.UTC()})
+	}
+	for _, p := range l.Files {
+		f := fileLogFile{PathSHA256: p.PathSHA256, Device: p.Device, Inode: p.Inode, Offset: p.Offset, HeadSHA256: p.HeadSHA256, HeadLen: p.HeadLen, LastTime: p.LastTime.UTC()}
+		if r := p.Renamed; r != nil {
+			f.Renamed = &fileRenamed{Device: r.Device, Inode: r.Inode, Offset: r.Offset, Size: r.Size}
+		}
+		out.Files = append(out.Files, f)
+	}
+
+	return out
 }
 
 // write saves data to the state file: a fresh owner-only temporary file, fsync, rename, fsync of the directory.
@@ -472,40 +666,28 @@ func (v *Saver) Name() string {
 	return "state"
 }
 
-// Collect saves the state when an urgent change waits and 10 s have passed since the last save, or when 50 s
-// have passed (the uptime heartbeat, which also carries a waiting position).
+// Collect saves the state when an urgent change waits and 5 s have passed since the last save (the state job runs on a 10 s grid, so
+// a change is saved at the next run), or when 50 s have passed (the uptime heartbeat, which also carries a waiting position). A save
+// in progress by Flush is waited for.
 func (v *Saver) Collect(ctx context.Context, run scheduler.Run) ([]model.Record, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 
 	s := v.store
+	select {
+	case s.saving <- struct{}{}:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	defer func() { <-s.saving }()
+
 	st, seq, ok := v.prepare(run.Start)
 	if !ok {
 		return nil, nil
 	}
 
-	data, err := encode(st)
-	if err == nil {
-		err = write(s.dir, data)
-	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.lastSave = run.Start
-	if err != nil {
-		if !s.saveFailed {
-			s.saveFailed = true
-			s.log.Warn(msgNotSaved, "err", errText(err))
-		}
-
-		return nil, nil
-	}
-	s.saveFailed = false
-	if s.seq == seq {
-		s.dirty = false
-		s.urgentPending = false
-	}
+	s.finishSave(run.Start, seq, s.saveLocked(st))
 
 	return nil, nil
 }

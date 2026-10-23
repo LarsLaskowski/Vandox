@@ -2,7 +2,7 @@
 //
 // The layout is that of systemd 249 on the monitored server: a 256-byte header, the KEYED-HASH and COMPRESSED-ZSTD flags, no COMPACT
 // layout, a data hash table keyed with the file ID, entry arrays that double in size, and items of 512 bytes and more stored as zstd
-// frames made of one raw block (so that the file needs no compressor and the reader's refusal to decompress is exercised).
+// frames made of one raw block (so that the file needs no compressor), or as the frames Options.Compress returns.
 package journaltest
 
 import (

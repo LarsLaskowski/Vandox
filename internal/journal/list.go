@@ -15,6 +15,7 @@ type Cursor struct {
 	arr, arrBase, arrCap uint64 // the array that holds chain index idx-1 (0 when unknown), the chain index of its first item, its capacity
 	arrNo                int    // 1-based place of arr in the chain
 	torn                 bool   // the list ended at a cut-off tail of an archived or set-aside file
+	main                 bool   // the list is the file's main entry array (SeekAll), not the entry list of a data object
 }
 
 // Torn reports whether the list ended at a cut-off tail of an archived or set-aside file, as opposed to the normal end of the list.
@@ -100,23 +101,33 @@ func (f *File) Seek(d Data, after uint64) (Cursor, error) {
 }
 
 func (f *File) seek(d Data, after uint64) (Cursor, error) {
-	c := Cursor{data: d.off, first: d.first, head: d.head, n: d.n}
-	if d.n == 0 {
+	return f.seekList(Cursor{data: d.off, first: d.first, head: d.head, n: d.n}, after)
+}
+
+// seekList positions the cursor c, which holds the start of its list, on the first entry with a seqnum greater than after. The first
+// entry of a data object's list is outside its chain of arrays; the main entry array has no such entry.
+func (f *File) seekList(c Cursor, after uint64) (Cursor, error) {
+	if c.n == 0 {
 		return c, nil
 	}
-	greater, err := f.entryAfter(d.first, after)
-	if err != nil || greater {
-		return c, err
+	skip := uint64(1)
+	if c.main {
+		skip = 0
+	} else {
+		greater, err := f.entryAfter(c.first, after)
+		if err != nil || greater {
+			return c, err
+		}
 	}
-	off, base, remaining := d.head, uint64(0), d.n-1
+	off, base, remaining := c.head, uint64(0), c.n-skip
 	for ord := 1; remaining > 0; ord++ {
 		if off == 0 {
-			c.idx = 1 + base
+			c.idx = skip + base
 			return c, nil
 		}
 		capacity, next, err := f.array(off, ord)
 		if errors.Is(err, errTorn) {
-			c.idx = 1 + base
+			c.idx = skip + base
 			return c, nil
 		}
 		if err != nil {
@@ -129,14 +140,14 @@ func (f *File) seek(d Data, after uint64) (Cursor, error) {
 		}
 		if greater {
 			k, err := f.bisect(off, used-1, after)
-			c.idx, c.arr, c.arrBase, c.arrCap, c.arrNo = 1+base+k, off, base, capacity, ord
+			c.idx, c.arr, c.arrBase, c.arrCap, c.arrNo = skip+base+k, off, base, capacity, ord
 			return c, err
 		}
 		remaining -= used
 		base += capacity
 		off = next
 	}
-	c.idx = d.n
+	c.idx = c.n
 	return c, nil
 }
 
@@ -203,7 +214,13 @@ func (f *File) array(off uint64, ord int) (uint64, uint64, error) {
 // end of an archived or set-aside file the list ends; the same tear in an online file is ErrMalformed, and c stays where it was so
 // that the read can be repeated after Refresh.
 func (f *File) Next(c *Cursor, want []string, e *Entry) (bool, error) {
-	ok, err := f.next(c, want, e)
+	return f.advance(c, func(off uint64) error { return f.readEntry(off, want, e) })
+}
+
+// advance reads the entry at the cursor with read and moves the cursor behind it; a tear in an archived or set-aside file ends the
+// list, and an error leaves the cursor where it was.
+func (f *File) advance(c *Cursor, read func(off uint64) error) (bool, error) {
+	ok, err := f.next(c, read)
 	if errors.Is(err, errTorn) {
 		c.torn = true
 		return false, nil
@@ -211,7 +228,7 @@ func (f *File) Next(c *Cursor, want []string, e *Entry) (bool, error) {
 	return ok, err
 }
 
-func (f *File) next(c *Cursor, want []string, e *Entry) (bool, error) {
+func (f *File) next(c *Cursor, read func(off uint64) error) (bool, error) {
 	cur := *c
 	if cur.idx >= cur.n {
 		if err := f.refreshList(&cur); err != nil {
@@ -229,7 +246,7 @@ func (f *File) next(c *Cursor, want []string, e *Entry) (bool, error) {
 	if off == 0 {
 		return false, f.short()
 	}
-	if err := f.readEntry(off, want, e); err != nil {
+	if err := read(off); err != nil {
 		return false, err
 	}
 	cur.idx++
@@ -239,6 +256,10 @@ func (f *File) next(c *Cursor, want []string, e *Entry) (bool, error) {
 
 // refreshList re-reads the length and the starting offsets of the list from its data object, which grows in an online file.
 func (f *File) refreshList(c *Cursor) error {
+	if c.main {
+		c.head, c.n = f.mainHead, f.mainN
+		return nil
+	}
 	obj, _, err := f.object(c.data, typeData, dataFixed, dataFixed)
 	if err != nil {
 		return err
@@ -249,10 +270,13 @@ func (f *File) refreshList(c *Cursor) error {
 
 // listItem returns the entry offset at list index c.idx and leaves c positioned on its array.
 func (f *File) listItem(c *Cursor) (uint64, error) {
-	if c.idx == 0 {
-		return c.first, nil
+	j := c.idx
+	if !c.main {
+		if c.idx == 0 {
+			return c.first, nil
+		}
+		j = c.idx - 1
 	}
-	j := c.idx - 1
 	if err := f.position(c, j); err != nil {
 		return 0, err
 	}
