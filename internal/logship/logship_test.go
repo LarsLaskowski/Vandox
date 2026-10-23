@@ -275,6 +275,62 @@ func TestLogs_FourthDroppedRunGivesUpTheSpan(t *testing.T) {
 	t.Run("four timeouts", giveUpAfterTimeouts)
 	t.Run("refusals and timeouts mixed", giveUpAfterMixedLosses)
 	t.Run("three dropped runs give up nothing", giveUpNothingAfterThree)
+	t.Run("the run that gives up is dropped too: the next kept run carries the gap", giveUpRunDroppedToo)
+	t.Run("the run that gives up is dropped too, for a file", giveUpRunOfAFileDroppedToo)
+}
+
+func giveUpRunDroppedToo(t *testing.T) {
+	w := droppedWorld(t)
+	for range 4 {
+		w.collect()
+		w.refuse()
+	}
+	w.online(seqID(1), jentries(1, 6))
+	w.collect() // the run that gives up the span, and its result is lost
+	w.refuse()
+
+	requireOneGapInTheFirstKeptRun(t, w, entryTime(2), entryTime(5), "line 6")
+}
+
+func giveUpRunOfAFileDroppedToo(t *testing.T) {
+	w := mailWorld(t)
+	w.appendLog("mail.log", fileLines(3, 3))
+	w.step()
+	w.appendLog("mail.log", fileLines(4, 5))
+	for range 4 {
+		w.collect()
+		w.refuse()
+	}
+	w.appendLog("mail.log", fileLines(6, 6))
+	w.collect()
+	w.refuse()
+
+	requireOneGapInTheFirstKeptRun(t, w, fileLineTime(3), fileLineTime(5), "file 6")
+}
+
+// requireOneGapInTheFirstKeptRun runs the collector five times with kept results and checks that the first run carries one gap that
+// starts at from and does not end before minTo, that no later run carries one, and that the line last is shipped once: the span that
+// was given up is covered by a gap even though the run that first gave it up was dropped.
+func requireOneGapInTheFirstKeptRun(t *testing.T, w *world, from, minTo time.Time, last string) {
+	t.Helper()
+	var runs [][]model.Record
+	for range 5 {
+		runs = append(runs, w.step())
+	}
+	gaps := gapsOf(runs[0])
+	if len(gaps) != 1 || !gaps[0].From.Equal(from) || gaps[0].To.Before(minTo) {
+		t.Fatalf("the first kept run holds the gaps %v, want exactly one from %v to at least %v", gaps, from, minTo)
+	}
+	var lines []string
+	for i, recs := range runs {
+		if i > 0 && len(gapsOf(recs)) != 0 {
+			t.Errorf("kept run %d holds %d gaps, want none: the gap is carried by the first kept run only", i+1, len(gapsOf(recs)))
+		}
+		lines = append(lines, messages(recs)...)
+	}
+	if n := strings.Count(strings.Join(lines, "\n")+"\n", last+"\n"); n != 1 {
+		t.Errorf("the line %q was shipped %d times in %v, want once", last, n, head(lines))
+	}
 }
 
 func giveUpAfterRefusals(t *testing.T) {

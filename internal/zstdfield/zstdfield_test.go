@@ -147,10 +147,17 @@ func TestDecoder_RefusesFramesNotOfTheServerForm(t *testing.T) {
 	noSize = append(noSize, rawBlocks(payload)...)
 	dictionary := append(append([]byte{}, magic...), 0x21, 0x07, 0x58) // single segment, dictionary ID of one byte, size 88
 	dictionary = append(dictionary, rawBlocks(payload[:88])...)
+	valid := singleSegmentFrame(uint64(len(payload)), payload)
+	followedBy := func(next []byte) []byte { return append(append([]byte{}, valid...), next...) }
 	tests := []struct {
 		name  string
 		frame []byte
 	}{
+		{"a server frame followed by a frame without a stated size", followedBy(noSize)},
+		{"a server frame followed by a frame that is not a single segment", followedBy(notSingle)},
+		{"a server frame followed by a server frame", followedBy(valid)},
+		{"a server frame followed by trailing bytes", followedBy([]byte{1, 2, 3, 4, 5})},
+		{"a server frame followed by one byte", followedBy([]byte{0})},
 		{"no stated content size", noSize},
 		{"stated content size but not a single segment", notSingle},
 		{"a dictionary", dictionary},
@@ -168,6 +175,27 @@ func TestDecoder_RefusesFramesNotOfTheServerForm(t *testing.T) {
 			}
 			if len(got) != 0 {
 				t.Errorf("Decompress() returned %d bytes with the error, want none", len(got))
+			}
+		})
+	}
+}
+
+func TestDecoder_DecodesAFrameOfSeveralBlocksAndAChecksumlessRealFrame(t *testing.T) {
+	long := text(3*maxRawBlock + 17) // four raw blocks
+	tests := []struct {
+		name    string
+		frame   []byte
+		payload []byte
+	}{
+		{"four raw blocks", singleSegmentFrame(uint64(len(long)), long), long},
+		{"a frame of the library in the form journald writes", encoded(t, text(5000)), text(5000)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := newDecoder(t).Decompress(nil, tt.frame, 1<<20)
+
+			if err != nil || !bytes.Equal(got, tt.payload) {
+				t.Errorf("Decompress() = %d bytes, error %v, want the %d bytes of the payload", len(got), err, len(tt.payload))
 			}
 		})
 	}
@@ -258,16 +286,19 @@ func heapOfAFrameWithoutAStatedSize(t *testing.T) {
 	big := text(6 << 20)
 	noSize := append(append([]byte{}, magic...), 0x00, 0x58)
 	noSize = append(noSize, rawBlocks(big)...)
-	d := newDecoder(t)
-	before := allocated()
+	prefixed := append(singleSegmentFrame(600, text(600)), noSize...) // a valid frame in front: only the first frame looks server-made
+	for name, frame := range map[string][]byte{"a frame without a stated size": noSize, "a valid frame and then one without a stated size": prefixed} {
+		d := newDecoder(t)
+		before := allocated()
 
-	_, err := d.Decompress(nil, noSize, zstdfield.MaxFrameBytes)
+		_, err := d.Decompress(nil, frame, zstdfield.MaxFrameBytes)
 
-	if !errors.Is(err, zstdfield.ErrFrameRefused) {
-		t.Errorf("Decompress() error = %v, want ErrFrameRefused", err)
-	}
-	if grown := allocated() - before; grown > 1<<20 {
-		t.Errorf("refusing a frame without a stated size allocated %d bytes, want it refused before any output (at most 1 MiB)", grown)
+		if !errors.Is(err, zstdfield.ErrFrameRefused) {
+			t.Errorf("%s: Decompress() error = %v, want ErrFrameRefused", name, err)
+		}
+		if grown := allocated() - before; grown > 1<<20 {
+			t.Errorf("%s: refusing allocated %d bytes, want it refused before any output (at most 1 MiB)", name, grown)
+		}
 	}
 }
 

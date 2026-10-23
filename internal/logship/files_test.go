@@ -1230,3 +1230,27 @@ func requireLongLineThenTwo(t *testing.T, all []model.Record, runs int, plain bo
 		t.Errorf("the 2.5 MiB line was read in %d runs, want the time budget to spread it over several", runs)
 	}
 }
+
+func TestFiles_FileThatAppearsLaterKeepsThePreviousInstantOfItsClock(t *testing.T) {
+	w := newWorld(t)
+	w.etc.set("localtime", tzCentralEurope())
+	w.clock.now = time.Date(2026, time.October, 26, 8, 0, 0, 0, time.UTC) // past the fall-back of 25 October
+	w.useFiles("mail.log")
+	w.start()
+	w.step() // the file is missing
+	w.writeLog("mail.log", "Oct 25 02:30:00 web-1 app[7]: first\n")
+
+	first := w.step()
+	w.appendLog("mail.log", "Oct 25 02:05:00 web-1 app[7]: second\n")
+	second := w.step()
+
+	requireMessages(t, "lines of the run that met the file", fileMsgs(first), []string{"first"})
+	requireMessages(t, "lines of the next run", fileMsgs(second), []string{"second"})
+	wantFirst, wantSecond := time.Date(2026, time.October, 25, 0, 30, 0, 0, time.UTC), time.Date(2026, time.October, 25, 1, 5, 0, 0, time.UTC)
+	if got := first[0].CapturedAt; !got.Equal(wantFirst) {
+		t.Errorf("first captured at %v, want %v", got, wantFirst)
+	}
+	if got := second[0].CapturedAt; !got.Equal(wantSecond) {
+		t.Errorf("second captured at %v, want %v: the clock keeps the previous instant across the runs, as for a file that existed from the start", got, wantSecond)
+	}
+}
