@@ -1990,7 +1990,7 @@ func testSpoolCloseHangs(t *testing.T) {
 			close(release)
 			_ = sp.Close(context.Background())
 		}()
-		spoolClose = func(*spool.Spool, context.Context) error {
+		spoolClose = func(context.Context, *spool.Spool) error {
 			<-release
 
 			return nil

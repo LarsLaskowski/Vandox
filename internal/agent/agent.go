@@ -363,7 +363,7 @@ func openStorage(opts Options, cfg *config.Agent, log *slog.Logger) (*agentstate
 }
 
 // spoolClose closes the spool; tests replace it to simulate a close that hangs.
-var spoolClose = func(sp *spool.Spool, ctx context.Context) error { return sp.Close(ctx) }
+var spoolClose = func(ctx context.Context, sp *spool.Spool) error { return sp.Close(ctx) }
 
 // closeSpool closes the spool and gives up after closeTimeout, logging "spool not closed" (no path) on an error or at the
 // deadline; a nil spool is ignored.
@@ -375,7 +375,7 @@ func closeSpool(sp *spool.Spool, log *slog.Logger) {
 	defer cancel()
 	closeFn := spoolClose
 	result := make(chan error, 1)
-	go func() { result <- closeFn(sp, ctx) }()
+	go func() { result <- closeFn(ctx, sp) }()
 	failed := false
 	select {
 	case err := <-result:
