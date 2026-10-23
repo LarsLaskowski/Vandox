@@ -20,4 +20,4 @@ are quoted in full.
 | 2026-10-23 19:25 | 3 Follow-ups | Orchestrator | Opened #300 (boot/backup state after Kept); commented on #41 and #42 |
 | 2026-10-23 19:26 | 4 Skeleton G1 | squad-dev | MarshalRecord/UnmarshalRecord stubs in internal/wire; build and vet clean (sonnet/medium · 62,111 tokens · 6 tool uses · 31 s) |
 | 2026-10-23 19:29 | 5 Tests first G1 | squad-tester | 4 tests in internal/wire/encode_test.go; compile and fail on stubs (35 subtests); 11 damaged-line cases pass on stub by design (sonnet/medium · 105,337 tokens · 11 tool uses · 134 s) |
-| 2026-10-23 19:34 | 6 Implement G1 | squad-dev | MarshalRecord/UnmarshalRecord implemented; 3 of 4 tests green; disputes 2 tests (invalid UTF-8/unpaired surrogate replace target absent; exact-limit subtest always skips); gocognit in test file (sonnet/medium · usage pending) |
+| 2026-10-23 19:34 | 6 Implement G1 | squad-dev | MarshalRecord/UnmarshalRecord implemented; 3 of 4 tests green; disputes 2 tests (invalid UTF-8/unpaired surrogate replace target absent; exact-limit subtest always skips); gocognit in test file (sonnet/medium · 78,288 tokens · 12 tool uses · 305 s) |
