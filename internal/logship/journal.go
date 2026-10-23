@@ -1,6 +1,7 @@
 package logship
 
 import (
+	"context"
 	"errors"
 	"io"
 	"io/fs"
@@ -129,7 +130,7 @@ func (r *run) noteProblem(f fileInfo, err error) {
 }
 
 // readJournal reads the new entries of the journal files of every sequence number ID.
-func (r *run) readJournal() {
+func (r *run) readJournal(ctx context.Context) {
 	if !r.l.cfg.Journal {
 		r.st.journal = map[[16]byte]*jpos{}
 		return
@@ -154,7 +155,7 @@ func (r *run) readJournal() {
 		if r.stopped {
 			break
 		}
-		r.readGroup(dir, &groups[i])
+		r.readGroup(ctx, dir, &groups[i])
 	}
 	r.settle(groups)
 }
@@ -348,14 +349,14 @@ func (r *run) settle(groups []idGroup) {
 }
 
 // readGroup reads the files of one ID from its position.
-func (r *run) readGroup(dir fs.FS, g *idGroup) {
+func (r *run) readGroup(ctx context.Context, dir fs.FS, g *idGroup) {
 	p := r.st.journal[g.id]
 	if p == nil {
 		return
 	}
 	r.detectVacuumed(g, p)
 	for _, fi := range g.files {
-		if r.stopped || !r.readJournalFile(dir, g, fi, p) {
+		if r.stopped || !r.readJournalFile(ctx, dir, g, fi, p) {
 			break
 		}
 	}
@@ -374,7 +375,7 @@ func (r *run) endGap() {
 }
 
 // readJournalFile reads one file of the ID from the position and reports whether the ID goes on with its next file.
-func (r *run) readJournalFile(dir fs.FS, g *idGroup, fi fileInfo, p *jpos) bool {
+func (r *run) readJournalFile(ctx context.Context, dir fs.FS, g *idGroup, fi fileInfo, p *jpos) bool {
 	h := fi.hdr
 	if h.TailSeqnum != 0 && h.TailSeqnum <= p.seq {
 		return true
@@ -389,7 +390,7 @@ func (r *run) readJournalFile(dir fs.FS, g *idGroup, fi fileInfo, p *jpos) bool 
 	}
 	defer o.close()
 	rd := &fileReader{r: r, g: g, fi: fi, o: o, p: p}
-	return rd.read()
+	return rd.read(ctx)
 }
 
 // detectVacuumed records the entries lost when files of the ID remain but none holds the position and one starts after it: one gap from
@@ -443,7 +444,7 @@ func (fr *fileReader) do(op func() error) error {
 }
 
 // read reads the entries after the position and reports whether the ID goes on with its next file.
-func (fr *fileReader) read() bool {
+func (fr *fileReader) read(ctx context.Context) bool {
 	r := fr.r
 	var c journal.Cursor
 	err := fr.do(func() error {
@@ -476,7 +477,7 @@ func (fr *fileReader) read() bool {
 			}
 			return true
 		}
-		fr.entry(e)
+		fr.entry(ctx, e)
 		if r.l.dec.calls > before && !r.stopped {
 			r.stopped = r.timeUp() // decoding costs time: look at the clock after every entry that needed it
 		}
@@ -484,7 +485,7 @@ func (fr *fileReader) read() bool {
 }
 
 // entry handles one entry and moves the position over it.
-func (fr *fileReader) entry(e *journal.Entry) {
+func (fr *fileReader) entry(ctx context.Context, e *journal.Entry) {
 	r, p := fr.r, fr.p
 	from := p.rt
 	if from.IsZero() {
@@ -497,11 +498,11 @@ func (fr *fileReader) entry(e *journal.Entry) {
 		if !e.Realtime.IsZero() {
 			r.lastBad = e.Realtime
 		}
-		r.tick(false)
+		r.tick(ctx, false)
 		return
 	case e.RealtimeUS == 0 || e.RealtimeUS > maxRealtimeUS:
 		p.seq = e.Seqnum
-		r.tick(false)
+		r.tick(ctx, false)
 		return
 	}
 	r.closeGapAt(e.Realtime)
@@ -515,11 +516,11 @@ func (fr *fileReader) entry(e *journal.Entry) {
 	}
 	rec, ok := journalRecord(e)
 	if !ok || r.l.filter.drops(lineOf(rec)) {
-		r.tick(false)
+		r.tick(ctx, false)
 		return
 	}
 	r.emit(rec, from)
-	r.tick(true)
+	r.tick(ctx, true)
 }
 
 // failure handles an error of the reader and reports whether the ID goes on with its next file. A structural damage gives an archived

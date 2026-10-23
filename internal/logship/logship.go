@@ -195,11 +195,11 @@ func (l *Logs) Collect(ctx context.Context, run scheduler.Run) ([]model.Record, 
 	if base != l.committed {
 		st.last = base.last // the span that is given up keeps where the dropped run got
 	}
-	r := newRun(ctx, l, run, st)
+	r := newRun(l, run, st)
 	for _, g := range givenUp {
 		r.emit(g, run.Start)
 	}
-	r.readSources()
+	r.readSources(ctx)
 	records := checkRecords(r.records, run.Start, func(i int) time.Time { return r.froms[i] })
 	if !r.failed {
 		l.fail = failure{}

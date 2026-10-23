@@ -2,6 +2,7 @@ package logship
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -72,7 +73,7 @@ type filesRun struct {
 
 // readFile reads the new lines of the configured file i. A file that cannot be opened keeps its position and is reported once; while
 // the zone of the server is unknown no file is read.
-func (r *run) readFile(i int) {
+func (r *run) readFile(ctx context.Context, i int) {
 	loc := r.zoneOf()
 	if loc == nil {
 		return
@@ -106,10 +107,10 @@ func (r *run) readFile(i int) {
 		if !fromStart {
 			return
 		}
-	} else if !fr.resume(f, id, &adopted) {
+	} else if !fr.resume(ctx, f, id, &adopted) {
 		return
 	}
-	fr.read()
+	fr.read(ctx)
 	fr.endLostGap()
 	fr.updateHead()
 }
@@ -126,7 +127,7 @@ func (fr *filesRun) begin(f *os.File, id identity, fromStart bool) {
 // resume continues the reading of a file that has a position. f is the file now at the path: when it is another file the old one was
 // rotated, and a file whose first bytes changed or that became shorter was truncated. It returns false when the run must not read the
 // file.
-func (fr *filesRun) resume(f *os.File, id identity, adopted *bool) bool {
+func (fr *filesRun) resume(ctx context.Context, f *os.File, id identity, adopted *bool) bool {
 	st := fr.st
 	if st.renamed != nil && st.renamed.f == nil && !fr.findRenamed() {
 		return false
@@ -137,13 +138,13 @@ func (fr *filesRun) resume(f *os.File, id identity, adopted *bool) bool {
 	case id == st.id:
 		st.cur, *adopted = f, true
 	default:
-		if !fr.rotate(f, id, adopted) {
+		if !fr.rotate(ctx, f, id, adopted) {
 			return false
 		}
 		return true
 	}
 	if fr.truncated() {
-		fr.truncate()
+		fr.truncate(ctx)
 	}
 	return true
 }
@@ -171,9 +172,9 @@ func (fr *filesRun) findRenamed() bool {
 // cannot be found is a gap from the last line read to the first line of the new file. An older renamed file that is still read is
 // finished first; when the run stops or a read fails before that, nothing changes, it returns false and the next runs go on with the
 // renamed file.
-func (fr *filesRun) rotate(f *os.File, id identity, adopted *bool) bool {
+func (fr *filesRun) rotate(ctx context.Context, f *os.File, id identity, adopted *bool) bool {
 	r, st := fr.r, fr.st
-	if st.renamed != nil && !fr.finishRenamed() {
+	if st.renamed != nil && !fr.finishRenamed(ctx) {
 		return false
 	}
 	old := st.cur
@@ -196,9 +197,9 @@ func (fr *filesRun) rotate(f *os.File, id identity, adopted *bool) bool {
 
 // finishRenamed reads the rest of the renamed file, ships its unfinished last line as it is and lets the file go. It returns false, and
 // keeps the file, when the run stopped before the end or a read failed (then the reason is set).
-func (fr *filesRun) finishRenamed() bool {
+func (fr *filesRun) finishRenamed(ctx context.Context) bool {
 	rn := fr.st.renamed
-	done, err := fr.r.pump(rn.f, &rn.line, true, fr.emitter())
+	done, err := fr.r.pump(ctx, rn.f, &rn.line, true, fr.emitter(ctx))
 	if err != nil {
 		fr.r.fproblems[fr.i] = reasonReadFailed
 		return false
@@ -211,8 +212,8 @@ func (fr *filesRun) finishRenamed() bool {
 }
 
 // emitter returns the function that turns the lines of the file into records.
-func (fr *filesRun) emitter() emitLine {
-	return func(line []byte, cut bool, begin int64) bool { return fr.line(line, cut, begin) }
+func (fr *filesRun) emitter(ctx context.Context) emitLine {
+	return func(line []byte, cut bool, begin int64) bool { return fr.line(ctx, line, cut, begin) }
 }
 
 // truncated tells whether the file at the path is the kept file but was truncated or replaced in place: it is shorter than what was
@@ -231,10 +232,10 @@ func (fr *filesRun) truncated() bool {
 
 // truncate restarts the reading at the start of the file: the unfinished line that was held is shipped as it is and one gap covers the
 // span from the last line read to the start of the run.
-func (fr *filesRun) truncate() {
+func (fr *filesRun) truncate(ctx context.Context) {
 	r, st := fr.r, fr.st
 	if len(st.line.held) > 0 {
-		fr.line(st.line.held, st.line.cut, st.line.start)
+		fr.line(ctx, st.line.held, st.line.cut, st.line.start)
 	}
 	r.emitGap(st.lastTime, r.start)
 	st.line, st.headLen, st.headSum = lineState{}, 0, ""
@@ -266,29 +267,29 @@ func (fr *filesRun) updateHead() {
 }
 
 // read ships the lines of the renamed file, then those of the file at the path.
-func (fr *filesRun) read() {
+func (fr *filesRun) read(ctx context.Context) {
 	r, st := fr.r, fr.st
-	if rn := st.renamed; rn != nil && !fr.readRenamed(rn) {
+	if rn := st.renamed; rn != nil && !fr.readRenamed(ctx, rn) {
 		return
 	}
 	if r.stopped || st.cur == nil {
 		return
 	}
-	if _, err := r.pump(st.cur, &st.line, false, fr.emitter()); err != nil {
+	if _, err := r.pump(ctx, st.cur, &st.line, false, fr.emitter(ctx)); err != nil {
 		r.fproblems[fr.i] = reasonReadFailed
 	}
 }
 
 // readRenamed reads the renamed file to its end and returns false when a read failed, which stops the reading of the file in this run.
 // It is finished, with its unfinished last line shipped as it is, in the run in which the file at the path has data and the renamed file did not grow since the previous run: the writer has moved to the new file.
-func (fr *filesRun) readRenamed(rn *renamedFile) bool {
+func (fr *filesRun) readRenamed(ctx context.Context, rn *renamedFile) bool {
 	r, st := fr.r, fr.st
 	size, _, ok := statOf(rn.f)
 	if !ok {
 		size = rn.size
 	}
 	finish := fr.size > 0 && rn.size == size
-	eof, err := r.pump(rn.f, &rn.line, finish, fr.emitter())
+	eof, err := r.pump(ctx, rn.f, &rn.line, finish, fr.emitter(ctx))
 	if err != nil {
 		r.fproblems[fr.i] = reasonReadFailed
 		return false
@@ -311,7 +312,7 @@ func (fr *filesRun) endLostGap() {
 
 // line turns one line of the file into a record, unless it is empty or filtered; it returns true when the run must stop. A line without a
 // syslog header gets the capture time of the line before it.
-func (fr *filesRun) line(line []byte, cut bool, begin int64) bool {
+func (fr *filesRun) line(ctx context.Context, line []byte, cut bool, begin int64) bool {
 	r, st := fr.r, fr.st
 	line, over := cutLine(line)
 	cut = cut || over
@@ -319,7 +320,7 @@ func (fr *filesRun) line(line []byte, cut bool, begin int64) bool {
 		line = bytes.TrimPrefix(line, []byte(bom))
 	}
 	if len(line) == 0 {
-		return r.tick(false)
+		return r.tick(ctx, false)
 	}
 	parsed := syslogline.Parse(line, fr.clock, r.start)
 	at := parsed.Time
@@ -337,10 +338,10 @@ func (fr *filesRun) line(line []byte, cut bool, begin int64) bool {
 	}
 	rec, text := fileRecord(fr.spec.Path, parsed, at, cut)
 	if r.l.filter.drops(text) {
-		return r.tick(false)
+		return r.tick(ctx, false)
 	}
 	r.emit(rec, from)
-	return r.tick(true)
+	return r.tick(ctx, true)
 }
 
 // fileRecord maps a parsed syslog line to a log line record.
@@ -382,10 +383,10 @@ func (ls *lineState) heldAppend(seg []byte) {
 // that of the first line not handed over, so an unfinished line is read again after a restart. A stop by time or context keeps the
 // offset read and the held line for the next run; a stop at the record or text budget goes back to the next line, because the rest of
 // the buffer is read again.
-func (r *run) pump(f *os.File, ls *lineState, finish bool, emit emitLine) (bool, error) {
+func (r *run) pump(ctx context.Context, f *os.File, ls *lineState, finish bool, emit emitLine) (bool, error) {
 	buf := r.l.readBuffer()
 	for {
-		if r.stopped || r.ctx.Err() != nil {
+		if r.stopped || ctx.Err() != nil {
 			return false, nil // the offset and the held line carry into the next run
 		}
 		n, err := f.ReadAt(buf, ls.read)

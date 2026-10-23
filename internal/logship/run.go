@@ -21,7 +21,6 @@ type openGap struct {
 // run is one pass over the sources: the fork it works on, the records it returns and its budgets.
 type run struct {
 	l     *Logs
-	ctx   context.Context
 	run   scheduler.Run
 	start time.Time
 	begin time.Time
@@ -49,11 +48,10 @@ type run struct {
 }
 
 // newRun returns a run on the fork st.
-func newRun(ctx context.Context, l *Logs, sr scheduler.Run, st *state) *run {
+func newRun(l *Logs, sr scheduler.Run, st *state) *run {
 	newest, have := l.committed.newestJournal()
 	r := &run{
 		l:         l,
-		ctx:       ctx,
 		run:       sr,
 		start:     sr.Start,
 		begin:     l.src.Now(),
@@ -85,10 +83,10 @@ func (r *run) emitGap(from, to time.Time) {
 // tick counts an examined entry or line and reports whether the run must stop reading: it has produced 1,000 records or 4 MiB of text,
 // its context ended, or it has read for a second. The clock is looked at after every shipped record and after every 1,000 entries or
 // lines examined, so that a flood of filtered lines delays wanted ones without ever stopping them.
-func (r *run) tick(shipped bool) bool {
+func (r *run) tick(ctx context.Context, shipped bool) bool {
 	r.examined++
 	switch {
-	case len(r.records) >= maxRecords || r.bytes >= maxBytes || r.ctx.Err() != nil:
+	case len(r.records) >= maxRecords || r.bytes >= maxBytes || ctx.Err() != nil:
 		r.stopped = true
 	case shipped || r.examined%timeCheckEvery == 0:
 		r.stopped = r.timeUp()
@@ -121,15 +119,15 @@ func (r *run) closeGapAt(to time.Time) {
 
 // readSources reads the journal and the files; the source that comes first changes from run to run, so that a backlog in one never
 // keeps the others waiting for good.
-func (r *run) readSources() {
+func (r *run) readSources(ctx context.Context) {
 	n := 1 + len(r.l.cfg.Files)
 	first := r.l.turn % n
 	r.l.turn++
 	for k := 0; k < n && !r.stopped; k++ {
 		if i := (first + k) % n; i == 0 {
-			r.readJournal()
+			r.readJournal(ctx)
 		} else {
-			r.readFile(i - 1)
+			r.readFile(ctx, i-1)
 		}
 	}
 }
