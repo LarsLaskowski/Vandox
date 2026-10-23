@@ -20,7 +20,7 @@ state file, agent), then the documentation. Each group runs Skeleton (Dev), test
 | 10 | G4 | Skeleton: SpoolAgeReporter, SpoolAge, MetricSpoolAge | internal/selfstats/selfstats.go | AC15 | — | Dev | [x] |
 | 11 | G4 | Tests: age, 0 when empty or in the future, provider error fails the sample | internal/selfstats/selfstats_test.go | AC15 | 10 | Tester | [x] |
 | 12 | G4 | Implement the age metric | internal/selfstats/selfstats.go | AC15 | 11 | Dev | [x] |
-| 13 | G5 | Skeleton: SetBarrier | internal/agentstate/agentstate.go | AC4, AC6 | — | Dev | [ ] |
+| 13 | G5 | Skeleton: SetBarrier | internal/agentstate/agentstate.go | AC4, AC6 | — | Dev | [x] |
 | 14 | G5 | Tests: barrier before every save (job and Flush), failing barrier skips the save with the fixed text | internal/agentstate/agentstate_test.go | AC4, AC6 | 13 | Tester | [ ] |
 | 15 | G5 | Implement the barrier | internal/agentstate/agentstate.go | AC4, AC6 | 14 | Dev | [ ] |
 | 16 | G6 | Skeleton: openStorage, jobs, newScheduler, closeSpool | internal/agent/agent.go | AC1, AC4, AC13, AC19 | 9, 12, 15 | Dev | [ ] |

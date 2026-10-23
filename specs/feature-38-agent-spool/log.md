@@ -38,3 +38,4 @@ are quoted in full.
 | 2026-10-23 21:35 | 4 Skeleton G4 | squad-dev | SpoolAgeReporter, Sources.SpoolAge, MetricSpoolAge in selfstats; not a throwing stub (no body in plan); build/analyzer clean (sonnet/medium · 61,165 tokens · 7 tool uses · 45 s) |
 | 2026-10-23 21:36 | 5 Tests first G4 | squad-tester | 4 tests in selfstats_test.go; fail on skeleton except the nil guard test (deferred in nature); order bytes then age assumed; error prefix 'selfstats: spool age: ' assumed (sonnet/medium · 67,661 tokens · 7 tool uses · 66 s) |
 | 2026-10-23 21:37 | 6 Implement G4 | squad-dev | age branch in appendProviders; 4 SpoolAge tests green; selfstats coverage 97.1%; analyzer 0 (sonnet/medium · 60,262 tokens · 6 tool uses · 42 s) |
+| 2026-10-23 21:38 | 4 Skeleton G5 | squad-dev | Store.SetBarrier stores the barrier, not wired into saveLocked; saveLocked will need a ctx parameter in implement (sonnet/medium · usage pending) |
