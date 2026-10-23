@@ -53,7 +53,15 @@ shipping*) and the [Configuration and secrets](../areas/configuration-and-secret
 
 - The agent gains its first dependency besides the YAML library; `govulncheck` covers it, and its decoder bounds are a security
   property checked by a heap test.
-- Positions per seqnum ID cost up to 32 entries in the state file; an ID whose files are all archived and read to their end is forgotten.
+- Positions per seqnum ID need room for many user journals: up to 256 IDs are saved and the state file's bound rises from 16 to 64 KiB.
+  An ID without a position is read from its start only when it is newer than the newest position held, so a forgotten ID, a journal
+  turned on later or more IDs than the bound never make a file be shipped twice; an unsaved ID costs one gap after a restart.
+- Library and decoder bounds are chosen against hostile input, not only real frames: only single-segment frames with a stated size of at
+  most 4 MiB are decoded, into one fixed buffer, at most 4 per entry, because the library stops other frames only after their output
+  passed the bound and one crafted entry could otherwise use most of a run; drop patterns are bounded by their compiled size, because
+  RE2's linear time still multiplies by the program's length.
+- A renamed log file is read until its writer has moved, and its position is saved, because rsyslog reopens its files only after all
+  renames.
 - A crash repeats at most one state interval plus one collector interval of lines (the spec's E1); exact delivery across a crash needs
   the spool (#38) to store positions with the records.
 - Live lines carry no classification (`event`, mail markers) until #290; the error log formats follow in #289.

@@ -57,9 +57,11 @@ What happens today, checked against the code:
   first journal entry and the first file line after the last one shipped before the stop: none is missing, none is
   shipped twice.
 - S5: Given a configured file is rotated by renaming (logrotate `create`: `mail.log` becomes `mail.log.1`, a new
-  `mail.log` is created), when the writer still appends a few lines to the renamed file before it reopens, then the agent
-  ships the rest of the renamed file to its end and then the new file from its first line; no line is lost or shipped
-  twice, and the records keep `log` `/var/log/mail.log`.
+  `mail.log` is created), when the writer still appends lines to the renamed file before it reopens (rsyslog reopens only
+  at the `HUP` after all renames), then the agent keeps reading the renamed file in every run until the writer has moved
+  (the new file has data and the renamed one did not grow during a whole run), ships each run's lines of the renamed file
+  before those of the new file, and then reads only the new file; no line is lost or shipped twice, the renamed file's
+  position survives a restart, and the records keep `log` `/var/log/mail.log`.
 - S6: Given a configured file is truncated in place (logrotate `copytruncate`), when the writer goes on writing, then the
   agent notices the truncation and reads the file again from its start, and records one gap (collector `logs`, cause
   `unknown`) from the capture time of the last line it shipped from the file to the start of the run that noticed the
@@ -108,7 +110,7 @@ What happens today, checked against the code:
   `truncated` set, as the import does; lengths count UTF-8 bytes after each invalid byte became U+FFFD, the way the wire
   check measures them.
 - E7: The last line of a file has no line feed yet (the writer is in the middle of it) — it is not shipped until its line
-  feed arrives; when the file is rotated or truncated before that, it is shipped as it is.
+  feed arrives; when the file is truncated, or rotated and the writer has moved (S5), before that, it is shipped as it is.
 - E8: A line or journal field with invalid UTF-8 — each invalid byte becomes U+FFFD, as in the import; control characters
   and format characters (for example U+202E) are shipped unchanged as text for whoever displays them to escape.
 - E9: A line of a `syslog` file that has no syslog header (an RFC 5424 line, a continuation, other text) — shipped with the
@@ -162,6 +164,13 @@ What happens today, checked against the code:
   kernel collector's position and the open backup run are kept, and shipping starts at the current ends as on a first start
   (S7). A state file with log positions is read by no released agent (the state file and the agent are unreleased), so no
   downgrade path exists to keep; a later released change of the format follows the state file's version rule.
+- E22: A journal file of a seqnum ID the agent has no position for (journald started a new ID, a new user journal, an archived
+  or set-aside file of an ID whose position was forgotten, or the journal was off or unreadable until now) — it is read from
+  its start only when its first entry is newer than the newest journal position the agent holds; otherwise the ID starts at its
+  end. So no file is ever shipped a second time, and turning `log_shipping.journal` on, or a journal that becomes readable
+  after a first start, starts at the ends as S7 does. Positions of up to 256 IDs with an online file are saved; a further ID is
+  read but its position is not saved, so after a restart it starts at its end with one gap from the newest saved journal
+  position's time to the run's start — never a re-read.
 
 ## Non-functional requirements
 
@@ -169,9 +178,10 @@ What happens today, checked against the code:
   backlog, of an entry and of a line. Worked figure: the records of one run, at most 4 MiB of text plus the one record that
   crosses the budget (at most 16,384 + 3 x 1,024 bytes) and the fixed part of at most 1,000 records (well under 1 MiB); the
   journal reader's buffers and file headers, at most 4 MiB as for the kernel collector (at most 1,024 headers of up to 4 KiB);
-  the zstd decoder, at most 8 MiB (its window bound; a frame that needs more is E12), with a decompressed item read only up to
-  its field's bound (16,384 bytes for `MESSAGE`, 1,024 for the short fields) plus a fixed buffer; the file reader's line
-  buffer and positions, under 1 MiB; together about 18 MiB, leaving room for the scheduler's check of one record at a time.
+  the zstd path, at most 8.5 MiB (one output buffer of 4 MiB + 128 KiB + 16 bytes and one input buffer of at most 4 MiB,
+  each allocated once and reused; a frame or compressed object beyond 4 MiB is E12 without being read), with a decompressed
+  item kept only up to its field's bound (16,384 bytes for `MESSAGE`, 1,024 for the short fields); the file reader's line
+  buffer and positions, under 1 MiB; together about 18.5 MiB, leaving room for the scheduler's check of one record at a time.
   A test asserts the bound with a run of records at the maximum of every field (so the byte budget ends the run after about
   210 records), a journal of 100,000 entries and a file of lines over 16 KiB.
 - **Throughput and delay**: without a backlog a line is in the sink within one collector interval (2 seconds) plus the run
@@ -180,19 +190,19 @@ What happens today, checked against the code:
   footprint test (#44).
 - **Hang**: the collector runs under the scheduler with a deadline (record 0029); a hung source loses only its sample and
   never moves a position.
-- **Durability**: positions are committed at the start of the run after a kept run (as for the kernel collector); they are
-  saved at most 10 seconds after they are committed and once more when the agent stops after its last kept run; an
+- **Durability**: positions are committed when the scheduler reports a run kept (a timed-out or skipped run never commits); they are
+  saved at most 10 seconds (one state interval) after they are committed and once more when the agent stops after its last kept run; an
   abandoned run never moves a saved position. After an unclean end the saved position is at most 10 + 2 seconds behind
   the last kept run (E1).
 - **State file**: the positions live in the agent's state file with its existing rules (security area 9: mode 0600, written
   by rename, read only as a regular file of the agent's user, decoded strictly); the log positions are an optional part, so
-  a file without them stays valid (E21). Its size bound (16 KiB today) is raised to what 16 file positions with paths of
-  1,024 bytes need at the worst JSON escaping of a path (6 bytes per byte), plus the journal positions; the plan sets the
-  number or a smaller encoding of the paths.
+  a file without them stays valid (E21). Paths are stored as their SHA-256; the size bound is raised from 16 KiB to 64 KiB,
+  which holds 16 file positions (each with a renamed file still being read, S5) and 256 journal positions (E22).
 - **Security**: the journal and the files are external input (security area 10): every read is bounded before parsing, a
   hostile line or entry yields a cut, replaced or unshipped line or a gap, never a crash, a hang or an unbounded allocation;
-  decompression is bounded by the output limit (no decompression bomb). Drop rule patterns run in linear time (no
-  backtracking). No path is followed through a symbolic link (E5). Log lines are never written to the agent's own log.
+  decompression is bounded before it starts (only frames that state their size, at most 4 MiB, and at most 4 compressed items
+  decoded per entry; no decompression bomb). Drop rule patterns run in linear time (no backtracking), and a pattern whose
+  compiled program is large is refused at start-up, so one line costs a bounded amount of matching. No path is followed through a symbolic link (E5). Log lines are never written to the agent's own log.
 - **Rights**: no new group, capability or unit setting: the journal is read as a member of `systemd-journal` and the files
   of `/var/log` as a member of `adm` (Agent area, *Rights*); a file readable only through `CAP_DAC_READ_SEARCH` is read
   through it, which `deploy/agent/README.md` states.
@@ -231,8 +241,9 @@ What happens today, checked against the code:
 - [ ] AC5: after an unclean end (the state saved, then more lines read and kept, then no save), the start ships every line
   after the saved position again and none before it, and the saved position is at most one state interval plus one
   collector interval (10 + 2 seconds) behind the last kept run (E1).
-- [ ] AC6: a rotation by rename while the agent runs ships the rest of the renamed file, then the new file from its start,
-  each line once; a rotation while the agent is stopped or the file is unreadable is followed the same way when the renamed
+- [ ] AC6: a rotation by rename while the agent runs ships every line of the renamed file, also those appended after a run
+  that already saw the new file, before the new file's lines, each line once, also across a restart while the renamed file is
+  still being read; a rotation while the agent is stopped or the file is unreadable is followed the same way when the renamed
   file is found under the configured name plus `.1` or `-YYYYMMDD`, and records the gap of E2 when it is not (S5, E2).
 - [ ] AC7: a truncation in place is detected, also when the file has grown past the old position again by the next run,
   and reading restarts at the file's start with the one gap of S6 (S6).
@@ -244,15 +255,19 @@ What happens today, checked against the code:
   run is kept and the lines after it are shipped; and the fourth dropped run in a row from the same committed position
   gives up the span with the one gap of E19 and the next run reads on after it (E19).
 - [ ] AC17: a state file without log positions keeps its boot, kernel position and open backup run and starts shipping at
-  the current ends; a state file with 16 file positions of 1,024-byte paths that need the most escaping is saved and read
-  back intact (E21).
+  the current ends; a state file with 16 file positions (each with a renamed file) and 256 journal positions is saved within
+  64 KiB and read back intact (E21).
+- [ ] AC18: a file of an ID without a position is shipped from its start only when its first entry is newer than the newest
+  held journal position; an archived or set-aside file of a forgotten ID, the journal turned on later and a journal readable
+  only after a first start ship nothing older; with more than 256 IDs with an online file no file is read twice and a
+  restart gives each unsaved ID one gap (E22).
 - [ ] AC10: lines the journal no longer holds at the position, and an unreadable entry, each give the one gap of E3 or E12,
   and an entry without `MESSAGE` gives neither a record nor a gap (E3, E12).
 - [ ] AC11: a missing, unreadable or non-regular configured file, a path with a symbolic link in any element, and an
   unreadable journal produce no record and no gap, log one warning per change without the path, keep the position, and
   continue there once readable (E4, E5, E13).
-- [ ] AC12: a partial last line is held back until its line feed arrives and is shipped as it is at a rotation or
-  truncation (E7).
+- [ ] AC12: a partial last line is held back until its line feed arrives and is shipped as it is at a truncation or when
+  the writer has moved after a rotation (E7).
 - [ ] AC13: a run ends at 1,000 shipped records, at the record that crosses 4 MiB of text or after one second of reading,
   whichever comes first; filtered entries count only against the second, so wanted lines behind a flood of filtered ones
   are shipped in later runs; and the collector stays within 24 MiB live with records at the maximum of every field, a
@@ -355,6 +370,12 @@ What happens today, checked against the code:
 - Minor 5 (time zone source): accepted. S2 and E10 name `/etc/localtime`; the new E20: when it cannot be read, one warning
   `time zone not readable`, no `syslog` file is read while the zone is unknown (positions kept, no loss, no gap), the agent
   retries every run and never falls back to UTC; the journal is unaffected. AC2 and AC15 cover it.
+- Plan challenge M1 (journal ID rules re-ship history): accepted; the new E22 and AC18 hold the time rule and the bound
+  (answered in the plan's *Challenge*).
+- Plan challenge M2 (rotation loses late appends to the renamed file): accepted; S5, E7, AC6, AC12 and the state file's
+  bound now keep reading the renamed file until the writer has moved, across a restart too.
+- Plan security review B1–B4: the memory figure and *Security* now name the zstd buffers, the frame rule and the cap of
+  compressed items, and the pattern size bound.
 - Minor 6 (units and compressions): accepted. E11 and AC13 now count shipped records for the 1,000 and the 4 MiB, and
   filtered entries only against the second of reading, so a flood of filtered lines delays wanted ones but never stops them.
   S9, E12 and the open question say that only zstd is decoded and that an XZ or LZ4 item makes its entry a gap.
