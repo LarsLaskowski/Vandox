@@ -305,6 +305,8 @@ func TestPut_SizeBoundDropsOldest(t *testing.T) {
 	need(t, lines[len(lines)-1].msg == msgNoDropped, "the last drop line is %q after a hand-over fitted again, want %q", lines[len(lines)-1].msg, msgNoDropped)
 }
 
+// TestPut_DroppedGapsPerRun pins that the span of each run is exact: the runs are parts of one file, so the spool
+// must scan the frames (a trailer would give the whole file's span).
 func TestPut_DroppedGapsPerRun(t *testing.T) {
 	r, sp, f := newCapped(t)
 
@@ -373,6 +375,9 @@ func dropSeveralFilesInOneHandOver(t *testing.T, r *rig, sp *Spool, f *feeder) {
 	need(t, len(gaps) == 1, "%d gaps are kept after dropping %d files, want 1 for the one run of dropped numbers", len(gaps), len(names)-len(remaining))
 	gp := gapOf(gaps[0])
 	expect(t, gp.FirstSeq == names[0] && gp.LastSeq == remaining[0]-1, "gap covers %d to %d, want %d to %d", gp.FirstSeq, gp.LastSeq, names[0], remaining[0]-1)
+	// The run is whole files, so its span comes from their trailers: exactly the earliest and latest capture time.
+	from, to := f.expectedSpan(names[0], remaining[0]-1)
+	expect(t, gp.From.Equal(from) && gp.To.Equal(to), "gap spans %v to %v, want %v to %v", gp.From, gp.To, from, to)
 }
 
 func TestPut_DropLogLines(t *testing.T) {

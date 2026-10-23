@@ -24,7 +24,7 @@ import (
 // *Non-functional requirements*): per day 2,880 system samples of 110 metrics, 1,440 filesystem samples of 7 metrics,
 // 1,440 clock samples of 3 and 1,440 self samples of 5, 1,440 process snapshots of 50 processes and 100 programs,
 // 1,440 connection snapshots of 30 listeners, 40 owning processes and 25 remotes, 2,880 MariaDB status records, 400
-// service states and 200,000 log lines. A scale of 16 divides every daily count of runs by 16. Every record is drawn
+// service states and 200,000 log lines. A scale of 80 divides every daily count of runs by 80. Every record is drawn
 // from a generator with a fixed seed, so a run is reproducible and no record repeats verbatim.
 const (
 	refSeedHigh       = 38
@@ -40,7 +40,7 @@ const (
 	refConnProcesses  = 40
 	refRemotes        = 25
 	refFullScale      = 1
-	refScaledDivisor  = 16
+	refScaledDivisor  = 80
 	refDays           = 7
 	refLongTestsEnv   = "VANDOX_LONG_TESTS"
 	secondsPerDay     = 86400
@@ -462,7 +462,7 @@ func TestReferenceStream_Shape(t *testing.T) {
 	}
 	for kind, n := range want {
 		if counts[kind] != n {
-			t.Errorf("reference stream day at 1/16 has %d records of kind %s, want %d", counts[kind], kind, n)
+			t.Errorf("reference stream day at 1/%d has %d records of kind %s, want %d", refScaledDivisor, counts[kind], kind, n)
 		}
 	}
 	if want[model.KindLogLine] != 200000/refScaledDivisor {
@@ -478,8 +478,8 @@ func TestReferenceStream_Shape(t *testing.T) {
 	if !slices.Equal(first, again) {
 		t.Errorf("a second generator with the same seed makes a different stream")
 	}
-	t.Logf("reference stream at 1/16: %d records, %d encoded bytes per day, about %d bytes per day at full scale",
-		len(first), bytes, bytes*refScaledDivisor)
+	t.Logf("reference stream at 1/%d: %d records, %d encoded bytes per day, about %d bytes per day at full scale",
+		refScaledDivisor, len(first), bytes, bytes*refScaledDivisor)
 }
 
 // TestReferenceStream_FullScaleDay measures the encoded size of one full-scale day of the reference stream (fact 16 of

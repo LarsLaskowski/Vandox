@@ -106,7 +106,7 @@ func TestSpool_SevenDayOutage(t *testing.T) {
 
 func TestSpool_SevenDayOutageFullScale(t *testing.T) {
 	if os.Getenv(refLongTestsEnv) != "1" {
-		t.Skip("set VANDOX_LONG_TESTS=1 to run seven days of the reference stream at full scale into the default 2 GiB cap")
+		t.Skip("set VANDOX_LONG_TESTS=1 to run seven days of the reference stream at full scale into the default 2 GiB cap (run it without -race)")
 	}
 	runOutage(t, refFullScale)
 }

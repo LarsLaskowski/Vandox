@@ -62,8 +62,10 @@ func fromRecord(k int) func(w world) *[2]uint64 {
 	return func(w world) *[2]uint64 { return &[2]uint64{w.b.first + ofLenInt(k), w.b.last()} }
 }
 
-func goodSpan(k int) func(w world) *[2]time.Time {
-	return func(w world) *[2]time.Time { return &[2]time.Time{w.b.at(0), w.b.at(k - 1)} }
+// damageSpan is the span of a damage gap when the damage is at record k and the trailer is intact: from the latest
+// capture time of the good records before it, to the trailer's latest, the last record of the file.
+func damageSpan(k int) func(w world) *[2]time.Time {
+	return func(w world) *[2]time.Time { return &[2]time.Time{w.b.at(k - 1), w.b.at(forgedFileSize - 1)} }
 }
 
 // installDamage replaces b of the world with the damaged file of the case and returns the damaged file's name.
@@ -163,7 +165,7 @@ func checkDamageGap(t *testing.T, dc damage, w world, recs []model.Record) {
 	if dc.span != nil {
 		span := dc.span(w)
 		if !gp.From.Equal(span[0]) || !gp.To.Equal(span[1]) {
-			t.Errorf("gap spans %v to %v, want %v to %v (the good records only)", gp.From, gp.To, span[0], span[1])
+			t.Errorf("gap spans %v to %v, want %v to %v (latest good record to the trailer's latest)", gp.From, gp.To, span[0], span[1])
 		}
 	}
 }
@@ -179,7 +181,7 @@ func damagedDataCases() []damage {
 				return w.b.name(), sb.data
 			},
 			handed: func(w world) []uint64 { return firstN(w, 4) },
-			gap:    fromRecord(4), span: goodSpan(4), errs: []string{errChecksum},
+			gap:    fromRecord(4), span: damageSpan(4), errs: []string{errChecksum},
 		},
 		{
 			name: "a file cut short",
@@ -306,7 +308,7 @@ func inconsistentValueCases() []damage {
 				r.CapturedAt = at(3000)
 			}),
 			handed: func(w world) []uint64 { return firstN(w, 4) },
-			gap:    fromRecord(4), span: goodSpan(4), errs: []string{errInconsistent},
+			gap:    fromRecord(4), span: damageSpan(4), errs: []string{errInconsistent},
 		},
 		{
 			name: "a capture time in the year 1600",
@@ -314,7 +316,7 @@ func inconsistentValueCases() []damage {
 				r.CapturedAt = at(1600)
 			}),
 			handed: func(w world) []uint64 { return firstN(w, 4) },
-			gap:    fromRecord(4), span: goodSpan(4), errs: []string{errInconsistent},
+			gap:    fromRecord(4), span: damageSpan(4), errs: []string{errInconsistent},
 		},
 		{
 			name: "a gap record that ends in the year 3000",
@@ -323,7 +325,7 @@ func inconsistentValueCases() []damage {
 				r.Data = &model.Gap{From: w.b.at(4), To: at(3000), Cause: model.GapSpoolDropped, FirstSeq: 1, LastSeq: 2}
 			}),
 			handed: func(w world) []uint64 { return firstN(w, 4) },
-			gap:    fromRecord(4), span: goodSpan(4), errs: []string{errInconsistent},
+			gap:    fromRecord(4), span: damageSpan(4), errs: []string{errInconsistent},
 		},
 		{
 			name: "a file named with the largest number",
