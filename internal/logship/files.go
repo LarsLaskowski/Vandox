@@ -9,6 +9,7 @@ import (
 	"os"
 	"syscall"
 	"time"
+	"unicode/utf8"
 
 	"github.com/LarsLaskowski/Vandox/internal/model"
 	"github.com/LarsLaskowski/Vandox/internal/syslogline"
@@ -115,7 +116,7 @@ func (r *run) readFile(i int) {
 
 // begin takes the first position in a file: its start when it did not exist before, else its end. The file becomes the one kept.
 func (fr *filesRun) begin(f *os.File, id identity, fromStart bool) {
-	*fr.st = fileState{have: true, id: id, cur: f, lastTime: fr.r.start}
+	*fr.st = fileState{have: true, id: id, cur: f, lastTime: fr.r.start, clock: fr.clock}
 	if !fromStart {
 		fr.st.line = lineState{start: fr.size, read: fr.size}
 		fr.updateHead()
@@ -312,6 +313,8 @@ func (fr *filesRun) endLostGap() {
 // syslog header gets the capture time of the line before it.
 func (fr *filesRun) line(line []byte, cut bool, begin int64) bool {
 	r, st := fr.r, fr.st
+	line, over := cutLine(line)
+	cut = cut || over
 	if begin == 0 {
 		line = bytes.TrimPrefix(line, []byte(bom))
 	}
@@ -349,6 +352,19 @@ func fileRecord(path string, p syslogline.Line, at time.Time, cut bool) (model.R
 	l.Message, messageCut = cleaned([]byte(p.Message), maxMessageBytes)
 	l.Truncated = cut || hostCut || programCut || messageCut
 	return model.Record{Meta: model.Meta{Source: sourceSyslog, CapturedAt: at.UTC()}, Data: l}, l
+}
+
+// cutLine cuts a line longer than maxMessageBytes as the import's line reader does: to at most maxMessageBytes bytes, moved back over at
+// most three UTF-8 continuation bytes so that no character is split; cut tells that the line was longer.
+func cutLine(line []byte) (kept []byte, cut bool) {
+	if len(line) <= maxMessageBytes {
+		return line, false
+	}
+	n := maxMessageBytes
+	for back := 0; back < utf8.UTFMax-1 && n > 1 && line[n]&0xC0 == 0x80; back++ {
+		n--
+	}
+	return line[:n], true
 }
 
 // heldAppend adds seg to the unfinished line, which keeps at most lineKeep bytes; cut tells that more of the line followed.
@@ -416,7 +432,11 @@ func splitLines(ls *lineState, emit emitLine, data []byte) bool {
 		ls.heldAppend(data[:idx])
 		begin := ls.start
 		ls.start = off + int64(idx) + 1
-		stop := emit(ls.held, ls.cut, begin)
+		line := ls.held
+		if !ls.cut && len(line) > 0 && line[len(line)-1] == '\r' {
+			line = line[:len(line)-1] // the import's reader removes the \r of a \r\n that fits its buffer
+		}
+		stop := emit(line, ls.cut, begin)
 		ls.held, ls.cut = ls.held[:0], false
 		off += int64(idx) + 1
 		data = data[idx+1:]

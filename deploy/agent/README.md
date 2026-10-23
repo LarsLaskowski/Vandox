@@ -15,7 +15,7 @@ collectors that need them.
 | `CAP_DAC_READ_SEARCH` | `logs` | Reading a file named in `log_shipping.files` that the group `adm` cannot read, and walking to it through a directory the agent has no search right on. Needed only for such a file; see *What the log collector reads and what it needs*. |
 
 The `logs` collector is the first user of `CAP_DAC_READ_SEARCH`, and only for the files `log_shipping.files` names: it opens each one through a
-walk from `/` that refuses a symbolic link in any element and a file with more than one link, so a service user who replaces its log file with
+walk from `/` that refuses a symbolic link in any element and a file with more than one link (against an attacker who races the check, the hard-link refusal relies on the distribution default `fs.protected_hardlinks=1`, Ubuntu's default), so a service user who replaces its log file with
 a link to another file (for example `/etc/shadow`) never gets that file shipped. The connection collector deliberately does not use the
 capability (see below). Without the capability the agent reads the files `adm` can read and logs `log file not readable` with the reason
 `permission denied` for the others.

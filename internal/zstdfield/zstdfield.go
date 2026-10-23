@@ -17,11 +17,17 @@ const (
 	bufferBytes = MaxFrameBytes + 128<<10 + 16
 
 	// frame header layout (RFC 8878, section 3.1.1)
-	magicBytes        = 4
-	descriptorSingle  = 1 << 5
-	descriptorReserve = 1 << 3
-	descriptorDictID  = 3
-	descriptorSizeIdx = 6
+	magicBytes         = 4
+	descriptorSingle   = 1 << 5
+	descriptorReserve  = 1 << 3
+	descriptorDictID   = 3
+	descriptorSizeIdx  = 6
+	descriptorChecksum = 1 << 2
+	blockHeaderBytes   = 3
+	maxBlockBytes      = 128 << 10
+	checksumBytes      = 4
+	blockRLE           = 1
+	blockReserved      = 3
 )
 
 // ErrFrameRefused reports a frame that is not of the form the decoder accepts.
@@ -53,8 +59,8 @@ func New() (*Decoder, error) {
 // Decompress appends the decoded frame src to dst[:0], at most limit bytes; an error makes the item undecoded. When dst is too small
 // for the result, the result is the decoder's own output buffer, valid until the next call, and nothing is allocated for it.
 //
-// A frame is decoded only when it is single-segment, states its content size (at most MaxFrameBytes) and uses no dictionary; every
-// other frame is refused before any output is made.
+// A frame is decoded only when src holds exactly one frame, which is single-segment, states its content size (at most MaxFrameBytes) and
+// uses no dictionary; src is checked up to its last block before any output is made, so no second frame follows the first.
 func (d *Decoder) Decompress(dst, src []byte, limit int) ([]byte, error) {
 	if err := checkFrame(src); err != nil {
 		return nil, err
@@ -76,7 +82,7 @@ func (d *Decoder) Decompress(dst, src []byte, limit int) ([]byte, error) {
 	return append(dst[:0], out...), nil
 }
 
-// checkFrame reads the header of the frame at the start of src and refuses what the decoder does not accept.
+// checkFrame reads the header and the block headers of the frame in src and refuses what the decoder does not accept.
 func checkFrame(src []byte) error {
 	if len(src) < magicBytes+2 || [magicBytes]byte(src[:magicBytes]) != magic {
 		return ErrFrameRefused
@@ -107,6 +113,44 @@ func checkFrame(src []byte) error {
 		size = binary.LittleEndian.Uint64(rest)
 	}
 	if size > MaxFrameBytes {
+		return ErrFrameRefused
+	}
+	return checkBlocks(src, magicBytes+1+sizeFieldBytes(desc>>descriptorSizeIdx), desc&descriptorChecksum != 0)
+}
+
+// sizeFieldBytes returns the bytes of the content size field of a single-segment frame for the flag bits of the descriptor.
+func sizeFieldBytes(flag byte) int {
+	return [...]int{1, 2, 4, 8}[flag&3]
+}
+
+// checkBlocks walks the block headers of the frame that starts after its header at pos and requires that the last block, and the
+// checksum when the frame has one, end exactly at the end of src: src holds one frame, so the decoder finds no second frame behind it.
+func checkBlocks(src []byte, pos int, checksum bool) error {
+	for {
+		if pos+blockHeaderBytes > len(src) {
+			return ErrFrameRefused
+		}
+		h := uint32(src[pos]) | uint32(src[pos+1])<<8 | uint32(src[pos+2])<<16
+		size := int(h >> 3)
+		pos += blockHeaderBytes
+		switch h >> 1 & 3 {
+		case blockRLE:
+			size = 1
+		case blockReserved:
+			return ErrFrameRefused
+		}
+		if size > maxBlockBytes || pos+size > len(src) {
+			return ErrFrameRefused
+		}
+		pos += size
+		if h&1 == 1 {
+			break
+		}
+	}
+	if checksum {
+		pos += checksumBytes
+	}
+	if pos != len(src) {
 		return ErrFrameRefused
 	}
 	return nil

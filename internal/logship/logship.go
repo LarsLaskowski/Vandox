@@ -39,8 +39,8 @@ const (
 	maxCompressed = 4
 	// readChunk is the size of the buffer files are read through.
 	readChunk = 64 << 10
-	// lineKeep is the most bytes of a line that are kept: the message limit and room for the header of the line.
-	lineKeep = maxMessageBytes + 512
+	// lineKeep is the most bytes of a line that are kept: the import's line limit and one byte for a \r before the line feed.
+	lineKeep = maxMessageBytes + 1
 	// refusedGapEvery is the spacing of the further gaps while the online journal file is refused.
 	refusedGapEvery = 600 * time.Second
 	// failuresToGiveUp is the number of runs in a row that stop at the same damage of an online journal file before it is given up.
@@ -98,6 +98,8 @@ type failure struct {
 type pendingRun struct {
 	start time.Time
 	fork  *state
+	// fromSpan tells that the run started from the span that is given up; when it is dropped too, the span stays what it was.
+	fromSpan bool
 }
 
 // Logs is the log shipping collector.
@@ -188,8 +190,12 @@ func (l *Logs) readOptions() *journal.ReadOptions {
 // Collect reads the new lines of the journal and the configured files. It never returns an error: what cannot be read is logged once
 // and, where something is lost, a gap.
 func (l *Logs) Collect(ctx context.Context, run scheduler.Run) ([]model.Record, error) {
-	givenUp := l.begin(run)
-	r := newRun(ctx, l, run, l.committed.clone())
+	givenUp, base := l.begin(run)
+	st := base.clone()
+	if base != l.committed {
+		st.last = base.last // the span that is given up keeps where the dropped run got
+	}
+	r := newRun(ctx, l, run, st)
 	for _, g := range givenUp {
 		r.emit(g, run.Start)
 	}
@@ -199,13 +205,14 @@ func (l *Logs) Collect(ctx context.Context, run scheduler.Run) ([]model.Record, 
 		l.fail = failure{}
 	}
 	l.logOutcome(r)
-	l.pending = &pendingRun{start: run.Start, fork: r.st}
+	l.pending = &pendingRun{start: run.Start, fork: r.st, fromSpan: base != l.committed}
 	return records, nil
 }
 
 // begin resolves the previous run, which no call of Kept reported on when it was lost, and gives up a span that was dropped too
-// often; it returns the gap of that.
-func (l *Logs) begin(run scheduler.Run) []model.Record {
+// often. It returns the gap of that and the state the run starts from: the committed state, or after a give-up the state the last
+// dropped run reached, which stays the start of every run, with its gap, until a run is kept and commits its fork.
+func (l *Logs) begin(run scheduler.Run) ([]model.Record, *state) {
 	if !l.inited {
 		l.inited = true
 		var logs *agentstate.LogPositions
@@ -223,14 +230,15 @@ func (l *Logs) begin(run scheduler.Run) []model.Record {
 		p.fork.release(l.committed, l.lastBack)
 	}
 	if l.drops < giveUpAfter {
-		return nil
+		return nil, l.committed
 	}
 	return l.giveUp(run)
 }
 
-// giveUp gives up the span the dropped runs read: when the result of one of them came back, its positions are committed and one gap
-// covers the span; when none did, one gap from the committed time to the start of the run is made once per committed state.
-func (l *Logs) giveUp(run scheduler.Run) []model.Record {
+// giveUp gives up the span the dropped runs read: when the result of one of them came back, the run starts from the state it reached
+// and one gap covers the span, in every run until one is kept; when none did, one gap from the committed time to the start of the run is
+// made once per committed state.
+func (l *Logs) giveUp(run scheduler.Run) ([]model.Record, *state) {
 	from := l.committed.committedTime()
 	if from.IsZero() {
 		from = run.Start
@@ -240,14 +248,13 @@ func (l *Logs) giveUp(run scheduler.Run) []model.Record {
 		if to.IsZero() {
 			to = run.Start
 		}
-		l.adopt(back)
-		return []model.Record{newGap(from, to, run.Start)}
+		return []model.Record{newGap(from, to, run.Start)}, back
 	}
 	if l.gaveUp {
-		return nil
+		return nil, l.committed
 	}
 	l.gaveUp = true
-	return []model.Record{newGap(from, run.Start, run.Start)}
+	return []model.Record{newGap(from, run.Start, run.Start)}, l.committed
 }
 
 // Kept commits the reading state of run when its records were kept, and counts the run as dropped otherwise.
@@ -262,6 +269,10 @@ func (l *Logs) Kept(run scheduler.Run, kept bool) {
 		return
 	}
 	l.drops++
+	if p.fromSpan {
+		p.fork.release(l.committed, l.lastBack)
+		return
+	}
 	l.lastBack.release(l.committed, p.fork)
 	l.lastBack = p.fork
 }

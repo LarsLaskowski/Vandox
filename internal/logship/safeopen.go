@@ -14,6 +14,9 @@ const (
 	// architecture; only linux/amd64 is built (ci.yml, release.yml).
 	oPath = 0x200000
 
+	// rootDir is the root directory, and the separator of the elements of a path.
+	rootDir = "/"
+
 	// maxDirEntries bounds the names read from the directory of a log file when its rotated file is looked for.
 	maxDirEntries = 1 << 16
 	dirChunk      = 256
@@ -74,10 +77,10 @@ func openat(dirfd int, name string, flags int) (int, error) {
 
 // splitPath returns the directory elements and the base name of an absolute, clean path.
 func splitPath(path string) (dirs []string, base string, err error) {
-	if !strings.HasPrefix(path, "/") || path == "/" || strings.HasSuffix(path, "/") {
+	if !strings.HasPrefix(path, rootDir) || path == rootDir || strings.HasSuffix(path, rootDir) {
 		return nil, "", &pathError{reasonMissing}
 	}
-	elems := strings.Split(path[1:], "/")
+	elems := strings.Split(path[1:], rootDir)
 	for _, e := range elems {
 		if e == "" || e == "." || e == ".." {
 			return nil, "", &pathError{reasonMissing}
@@ -89,7 +92,7 @@ func splitPath(path string) (dirs []string, base string, err error) {
 // walkDir opens the directory with the given elements below "/" without following a link in any element; every directory is opened
 // with O_PATH, so a directory that can only be searched works. The caller closes the descriptor.
 func walkDir(elems []string) (int, error) {
-	fd, err := openat(-1, "/", oPath|syscall.O_DIRECTORY|syscall.O_NOFOLLOW|syscall.O_CLOEXEC)
+	fd, err := openat(-1, rootDir, oPath|syscall.O_DIRECTORY|syscall.O_NOFOLLOW|syscall.O_CLOEXEC)
 	if err != nil {
 		return -1, classify(err)
 	}

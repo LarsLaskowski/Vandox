@@ -1105,7 +1105,7 @@ at its tail by the rule above, with its one gap.
 **Configured files.** Each file is opened through a walk from `/` that follows no link: every directory element with
 `openat(O_PATH|O_DIRECTORY|O_NOFOLLOW|O_CLOEXEC)` (so a directory that may only be searched works), the file with
 `openat(O_RDONLY|O_NOFOLLOW|O_NONBLOCK|O_CLOEXEC)`, and `fstat` of the opened descriptor must show a regular file with exactly one
-link, so a symbolic link in any element and a hard link to another file are refused alike. `O_PATH` is the constant `0x200000` of
+link, so a symbolic link in any element and a hard link to another file are refused alike. Against an attacker who races the check, the refusal of a hard link relies on the distribution default `fs.protected_hardlinks=1` (Ubuntu's default), which stops a user from linking a file he neither owns nor can write. `O_PATH` is the constant `0x200000` of
 every Linux port of Go but sparc64; only `linux/amd64` is built. The reasons a file is not read are `missing` (no such file, an element
 that is no directory, or a path that is not absolute and clean), `link refused`, `not a regular file` (a FIFO or device is opened
 without blocking and closed at once), `permission denied` and `read failed` (any other error of the open, of `fstat` or of a read).
