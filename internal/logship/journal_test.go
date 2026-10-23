@@ -1307,3 +1307,25 @@ func TestJournal_RefusedFileOnAFirstStartIsAGapAtTheRunStart(t *testing.T) {
 	requireGap(t, oneGap(t, "the first run", first), start, start.Add(time.Microsecond))
 	requireNoGaps(t, "the next run", second)
 }
+
+func TestJournal_EntryWithRepeatedFieldsIsShippedWithTheFirstValues(t *testing.T) {
+	kv := []string{"SYSLOG_IDENTIFIER", "first-id", "_PID", "4711"}
+	for n := 2; n <= 20; n++ { // the writer orders the items by name, and NAME#n is a further item named NAME
+		kv = append(kv, fmt.Sprintf("SYSLOG_IDENTIFIER#%d", n), fmt.Sprintf("other-%d", n), fmt.Sprintf("_PID#%d", n), fmt.Sprint(100+n))
+	}
+	w := newWorld(t)
+	w.online(seqID(1), []map[string][]byte{jentry(1, "repeated", kv...)})
+	w.position(seqID(1), 0)
+	w.start()
+
+	recs := w.drain(5)
+
+	got := logLines(recs)
+	if len(got) != 1 {
+		t.Fatalf("the collector returned %d lines, want 1", len(got))
+	}
+	if l := got[0]; l.Program != "first-id" || l.PID != 4711 || l.Message != "repeated" || l.Host != "web-1" {
+		t.Errorf("line = host %q program %q pid %d message %q, want web-1, first-id, 4711 and repeated", l.Host, l.Program, l.PID, l.Message)
+	}
+	requireNoGaps(t, "the runs", recs)
+}

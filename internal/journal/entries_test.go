@@ -3,6 +3,7 @@ package journal
 import (
 	"bytes"
 	"errors"
+	"maps"
 	"slices"
 	"strconv"
 	"strings"
@@ -697,5 +698,72 @@ func TestEntries_NextWithGrowsTheInputBufferForALargeCompressedObject(t *testing
 	}
 	if r.violated != "" {
 		t.Errorf("the reader was asked for %s, want reads of at most 64 KiB", r.violated)
+	}
+}
+
+func TestEntries_NextWithKeepsTheFirstItemOfEachName(t *testing.T) {
+	want := []string{"MESSAGE", "PRIORITY", "_HOSTNAME", "SYSLOG_IDENTIFIER", "_COMM", "_PID", "SYSLOG_PID"}
+	repeated := func(name string, n int) []bItem {
+		var items []bItem
+		for i := range n {
+			items = append(items, plain(name+"="+strconv.Itoa(i)+"-value"))
+		}
+		return items
+	}
+	message := longText("MESSAGE=", 600)
+	tests := []struct {
+		name  string
+		items []bItem
+		want  map[string]string
+	}{
+		{
+			"twenty identifiers, two process IDs and a message",
+			append(append(repeated("SYSLOG_IDENTIFIER", 20), plain("_PID=7"), plain("_PID=8")), plain("MESSAGE=kept")),
+			map[string]string{"SYSLOG_IDENTIFIER": "0-value", "_PID": "7", "MESSAGE": "kept"},
+		},
+		{
+			"twenty process IDs and a compressed message",
+			append(repeated("_PID", 20), packed(message)),
+			map[string]string{"_PID": "0-value", "MESSAGE": message[len("MESSAGE="):]},
+		},
+		{
+			"a plain message and a compressed one",
+			[]bItem{plain("MESSAGE=first"), packed(message)},
+			map[string]string{"MESSAGE": "first"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			b, _ := buildFile([]bEntry{seqEntry(1, tt.items...)}, testOptions())
+			f := openBytes(t, b, false)
+			c, err := f.SeekAll(0)
+			if err != nil {
+				t.Fatalf("SeekAll(0) error = %v, want nil", err)
+			}
+			var e Entry
+
+			nextWith(t, f, &c, want, &e, readOptions(&rawFrameDecoder{}))
+
+			requireFirstItems(t, &e, tt.want)
+		})
+	}
+}
+
+// requireFirstItems fails the test when the fields of e are not exactly want, each name once, or when an item was counted as omitted
+// or undecoded.
+func requireFirstItems(t *testing.T, e *Entry, want map[string]string) {
+	t.Helper()
+	got := map[string]string{}
+	for _, fld := range e.Fields {
+		if _, twice := got[fld.Name]; twice {
+			t.Errorf("the entry holds the field %s twice, want the first item of each name only", fld.Name)
+		}
+		got[fld.Name] = string(fld.Value)
+	}
+	if !maps.Equal(got, want) {
+		t.Errorf("fields = %v, want %v", got, want)
+	}
+	if omittedOf(t, e) != 0 || e.Undecoded != 0 {
+		t.Errorf("Omitted = %d, Undecoded = %d, want 0 and 0: a repeated name is passed over, not counted", omittedOf(t, e), e.Undecoded)
 	}
 }

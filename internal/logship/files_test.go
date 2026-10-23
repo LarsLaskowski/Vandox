@@ -923,18 +923,24 @@ func TestFiles_ReadErrorOfTheRenamedFileKeepsTheNewFileWaiting(t *testing.T) {
 	w.openFiles = rec.open
 	w.start()
 	w.step()
+	w.appendLog("mail.log", fileLines(3, 4)) // not read yet
 	if err := rec.opened[0].Close(); err != nil {
 		t.Fatalf("closing the kept file: %v", err)
 	}
 	w.rename("mail.log", "mail.log.1")
-	w.writeLog("mail.log", "")
+	w.writeLog("mail.log", fileLines(10, 11))
 
 	recs := w.step() // the renamed file cannot be statted or read
 
 	if len(recs) != 0 {
-		t.Errorf("the run returned %v and %d gaps, want nothing", head(messages(recs)), len(gapsOf(recs)))
+		t.Errorf("the run returned %v and %d gaps, want nothing: the new file waits behind the renamed one", head(messages(recs)), len(gapsOf(recs)))
 	}
 	requireReadFailedWarning(t, w)
+	w.restart() // the renamed file is opened anew by its identity
+	after := w.drain(5)
+
+	requireMessages(t, "file lines after the restart", fileMsgs(after), []string{"file 3", "file 4", "file 10", "file 11"})
+	requireNoGaps(t, "the runs after the restart", after)
 }
 
 func TestFiles_CanceledRunReadsNothingAndLosesNothing(t *testing.T) {
@@ -1151,4 +1157,76 @@ func TestFiles_FileThatCannotBeStattedIsNotReadable(t *testing.T) {
 		t.Errorf("warnings %q = %+v, want one with err %q", "log file not readable", logs, "read failed")
 	}
 	requireMessages(t, "file lines once the file can be statted", fileMsgs(after), []string{"file 3"})
+}
+
+func TestFiles_LongLineIsReadOnAcrossRunsAndDoesNotBlockTheFile(t *testing.T) {
+	header := fileLine(3, "")
+	header = header[:len(header)-1]
+	text := header + strings.Repeat("x", 40*64<<10) + "\n" + fileLine(4, "after 1") + fileLine(5, "after 2")
+	tests := []struct {
+		name      string
+		interlude func(w *world)
+	}{
+		{"plain runs", func(*world) {}},
+		{"a dropped run after the fifth run", func(w *world) {
+			w.collect()
+			w.refuse()
+		}},
+		{"a restart after the fifth run", func(w *world) { w.restart() }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			w := mailWorld(t)
+			w.appendLog("mail.log", text)
+			w.clock.step = 1100 * time.Millisecond // every run stops after its first chunk
+			var all []model.Record
+			runs := 0
+			for ; runs < 120 && len(logLines(all)) < 3; runs++ {
+				if runs == 5 {
+					tt.interlude(w)
+				}
+				all = append(all, w.step()...)
+			}
+
+			requireLongLineThenTwo(t, all, runs, tt.name == "plain runs")
+		})
+	}
+}
+
+func TestFiles_SecondRotationWithALongRenamedBacklogFinishesItAcrossRuns(t *testing.T) {
+	w := mailWorld(t)
+	first := w.step()
+	w.appendLog("mail.log", fileLines(3, 2502))
+	w.rename("mail.log", "mail.log.1")
+	w.writeLog("mail.log", fileLines(3000, 3000))
+	second := w.step() // 1,000 lines of the renamed file
+	w.rename("mail.log.1", "mail.log.2")
+	w.rename("mail.log", "mail.log.1")
+	w.writeLog("mail.log", fileLines(4000, 4000))
+
+	rest := w.drain(10)
+
+	all := append(append(first, second...), rest...)
+	want := append(numbered("file", 3, 2502), "file 3000", "file 4000")
+	requireMessages(t, "file lines of all runs", fileMsgs(all), want)
+	requireNoGaps(t, "the runs", all)
+	requireLogPath(t, all, w.logPath("mail.log"))
+}
+
+// requireLongLineThenTwo checks that the records are the cut long line, after 1 and after 2, once each in that order, and no gap; the
+// reading of a long line in plain runs took at least three runs.
+func requireLongLineThenTwo(t *testing.T, all []model.Record, runs int, plain bool) {
+	t.Helper()
+	lines := logLines(all)
+	if len(lines) != 3 {
+		t.Fatalf("%d runs returned %d lines %v, want 3 (the long line, after 1 and after 2)", runs, len(lines), head(messages(all)))
+	}
+	if l := lines[0]; len(l.Message) != 16384 || !l.Truncated {
+		t.Errorf("the long line = %d bytes truncated %v, want 16,384 bytes and truncated", len(l.Message), l.Truncated)
+	}
+	requireMessages(t, "the lines after the long one", messages(all)[1:], []string{"after 1", "after 2"})
+	requireNoGaps(t, "the runs", all)
+	if plain && runs < 3 {
+		t.Errorf("the 2.5 MiB line was read in %d runs, want the time budget to spread it over several", runs)
+	}
 }

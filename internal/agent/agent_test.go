@@ -748,7 +748,13 @@ func TestJobs_Schedules(t *testing.T) {
 			cfg.MariaDB.Enabled = false
 			log := slog.New(slog.NewTextHandler(io.Discard, nil))
 
-			list, _, _ := jobs(Options{Self: fixtureSources(), System: fixtureSystem(), Processes: fixtureProcesses(), Connections: fixtureConnections(), Services: fixtureServices(), MariaDB: fixtureMariaDB(), Kernel: fixtureKernel(), Logs: fixtureLogs(), StateDir: t.TempDir()}, &cfg, log)
+			list, _, _, err := jobs(Options{Self: fixtureSources(), System: fixtureSystem(), Processes: fixtureProcesses(), Connections: fixtureConnections(), Services: fixtureServices(), MariaDB: fixtureMariaDB(), Kernel: fixtureKernel(), Logs: fixtureLogs(), StateDir: t.TempDir()}, &cfg, log)
+
+			if err != nil {
+
+				t.Fatalf("jobs() error = %v, want nil", err)
+
+			}
 
 			if got := scheduleOf(list); !slices.Equal(got, tt.want) {
 				t.Errorf("jobs() = %+v, want %+v", got, tt.want)
@@ -798,7 +804,13 @@ func TestJobs_MariaDBAfterSystemdOnlyWhenEnabled(t *testing.T) {
 			cfg.Services.Units = tt.units
 			log := slog.New(slog.NewTextHandler(io.Discard, nil))
 
-			list, _, _ := jobs(Options{Self: fixtureSources(), System: fixtureSystem(), Processes: fixtureProcesses(), Connections: fixtureConnections(), Services: fixtureServices(), MariaDB: fixtureMariaDB(), Kernel: fixtureKernel(), Logs: fixtureLogs(), StateDir: t.TempDir()}, &cfg, log)
+			list, _, _, err := jobs(Options{Self: fixtureSources(), System: fixtureSystem(), Processes: fixtureProcesses(), Connections: fixtureConnections(), Services: fixtureServices(), MariaDB: fixtureMariaDB(), Kernel: fixtureKernel(), Logs: fixtureLogs(), StateDir: t.TempDir()}, &cfg, log)
+
+			if err != nil {
+
+				t.Fatalf("jobs() error = %v, want nil", err)
+
+			}
 
 			if got := jobNames(list); !slices.Equal(got, tt.want) {
 				t.Errorf("job names = %v, want %v", got, tt.want)
@@ -1202,7 +1214,13 @@ func TestJobs_BackupsOnlyWithRules(t *testing.T) {
 			cfg.Backups.Processes = tt.rules
 			log := slog.New(slog.NewTextHandler(io.Discard, nil))
 
-			list, _, _ := jobs(Options{Self: fixtureSources(), System: fixtureSystem(), Processes: fixtureProcesses(), Connections: fixtureConnections(), Services: fixtureServices(), MariaDB: fixtureMariaDB(), Kernel: fixtureKernel(), Logs: fixtureLogs(), StateDir: t.TempDir()}, &cfg, log)
+			list, _, _, err := jobs(Options{Self: fixtureSources(), System: fixtureSystem(), Processes: fixtureProcesses(), Connections: fixtureConnections(), Services: fixtureServices(), MariaDB: fixtureMariaDB(), Kernel: fixtureKernel(), Logs: fixtureLogs(), StateDir: t.TempDir()}, &cfg, log)
+
+			if err != nil {
+
+				t.Fatalf("jobs() error = %v, want nil", err)
+
+			}
 
 			names := jobNames(list)
 			if len(names) < len(tt.want) || !slices.Equal(names[len(names)-len(tt.want):], tt.want) {
@@ -1425,7 +1443,13 @@ func TestJobs_ZeroKernelSourcesStillBuildAllJobs(t *testing.T) {
 	cfg := config.DefaultAgent()
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 
-	list, _, _ := jobs(Options{Self: fixtureSources(), System: fixtureSystem(), Processes: fixtureProcesses(), Connections: fixtureConnections(), Services: fixtureServices(), MariaDB: fixtureMariaDB(), StateDir: t.TempDir()}, &cfg, log)
+	list, _, _, err := jobs(Options{Self: fixtureSources(), System: fixtureSystem(), Processes: fixtureProcesses(), Connections: fixtureConnections(), Services: fixtureServices(), MariaDB: fixtureMariaDB(), StateDir: t.TempDir()}, &cfg, log)
+
+	if err != nil {
+
+		t.Fatalf("jobs() error = %v, want nil", err)
+
+	}
 
 	names := jobNames(list)
 	if want := []string{"kernel", "logs", "backups", "state"}; len(names) < 4 || !slices.Equal(names[len(names)-4:], want) {
@@ -1640,20 +1664,21 @@ func TestLogshipConfig_PatternThatDoesNotCompileIsRefusedWithoutQuotingIt(t *tes
 			t.Errorf("newLogs() = %v, %v, want no collector and %v", logs, err, errDropPattern)
 		}
 	})
-	t.Run("the jobs leave log shipping out and say so", func(t *testing.T) {
+	t.Run("the agent is not built and says why", func(t *testing.T) {
 		cfg := config.DefaultAgent()
 		cfg.MariaDB.Enabled = false
 		cfg.LogShipping = opts
-		var out bytes.Buffer
-		log := slog.New(slog.NewTextHandler(&out, nil))
+		options := Options{Self: fixtureSources(), System: fixtureSystem(), Processes: fixtureProcesses(), Connections: fixtureConnections(), Services: fixtureServices(), MariaDB: fixtureMariaDB(), Kernel: fixtureKernel(), Logs: fixtureLogs(), StateDir: t.TempDir()}
+		log := slog.New(slog.DiscardHandler)
 
-		list, _, _ := jobs(Options{Self: fixtureSources(), System: fixtureSystem(), Processes: fixtureProcesses(), Connections: fixtureConnections(), Services: fixtureServices(), MariaDB: fixtureMariaDB(), Kernel: fixtureKernel(), Logs: fixtureLogs(), StateDir: t.TempDir()}, &cfg, log)
+		list, _, _, err := jobs(options, &cfg, log)
 
-		if slices.Contains(jobNames(list), "logs") {
-			t.Errorf("jobs() = %v, want no logs job for a pattern that does not compile", jobNames(list))
+		if !errors.Is(err, errDropPattern) || list != nil || strings.Contains(err.Error(), pattern) {
+			t.Errorf("jobs() = %d jobs, error %v, want no jobs and %v without the pattern", len(list), err, errDropPattern)
 		}
-		if !strings.Contains(out.String(), "log shipping cannot start") || strings.Contains(out.String(), pattern) {
-			t.Errorf("log = %q, want the error %q without the pattern", out.String(), "log shipping cannot start")
+		sched, _, err := newScheduler(options, &cfg, log)
+		if !errors.Is(err, errDropPattern) || sched != nil || strings.Contains(err.Error(), pattern) {
+			t.Errorf("newScheduler() = %v, error %v, want no scheduler and %v without the pattern", sched, err, errDropPattern)
 		}
 	})
 }
