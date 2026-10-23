@@ -1976,7 +1976,6 @@ func TestRun_SpoolCloseGivesUp(t *testing.T) {
 	t.Run("a close that hangs is given up at the deadline", testSpoolCloseHangs)
 }
 
-
 // testSpoolCloseHangs checks that closeSpool gives up on a Close that never returns.
 func testSpoolCloseHangs(t *testing.T) {
 	sp, err := spool.Open(spool.Options{Dir: t.TempDir(), AgentID: "web-1", BootID: kernelBootRaw, MaxBytes: 2 << 30}, slog.New(slog.DiscardHandler))
