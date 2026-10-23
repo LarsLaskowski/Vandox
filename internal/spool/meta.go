@@ -21,6 +21,9 @@ const (
 	metaSlack = 32 << 10
 	// metaErrPrefix starts the errors of writing the meta file.
 	metaErrPrefix = "spool: meta: "
+	// maxStoredRanges is the most ranges the meta file holds: MaxAckRanges above the oldest unacknowledged record plus
+	// the one range that reaches down to it, which Ack does not count.
+	maxStoredRanges = MaxAckRanges + 1
 	// clockBoundAhead is added to the clock's microseconds: the agent issues far fewer numbers per second.
 	clockBoundAhead = 1_000_000
 )
@@ -141,7 +144,7 @@ func (m *metaDoc) check(seen map[string]bool) error {
 			return errDamageInconsistent
 		}
 	}
-	if len(m.AgentID) > maxAgentLen || len(m.BootID) > bootIDLen || m.Next >= maxSeq || len(m.Acked) > MaxAckRanges {
+	if len(m.AgentID) > maxAgentLen || len(m.BootID) > bootIDLen || m.Next >= maxSeq || len(m.Acked) > maxStoredRanges {
 		return errDamageInconsistent
 	}
 
