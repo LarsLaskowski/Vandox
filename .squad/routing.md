@@ -377,7 +377,9 @@ PR is opened, the branch stays without one, and the user is told so.
 
 The Lead escalates only when it cannot decide responsibly on its own: an ambiguous requirement (a reader of an
 external format without a real sample in the test data or on the issue is one — it asks for the sample, or for the
-confirmation to build from the description with the residual risk recorded in the decision record), a product
+confirmation to build from the description with the residual risk recorded in the decision record; a sample the
+PM supplies stays outside the repository, the Tester builds an anonymized fixture, a test that reads the sample
+from an environment variable checks the fixture against it, and only counts are reported), a product
 decision (behavior change visible to users, breaking a guarantee in `docs/ARCHITECTURE.md` or an accepted decision
 record), or a loop limit where none of its options is clearly right. The escalation is one concise question with
 the options and the Lead's recommendation. Follow-up issues the Lead decides on are created by the orchestrator and

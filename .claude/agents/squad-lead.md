@@ -69,8 +69,8 @@ The orchestrator tells you which **mode** to run:
     `docs/ARCHITECTURE.md` for every enumeration or "only these …" statement the change extends (routes,
     rules, settings, tables, limits) and list each hit, besides the documents you already know the change
     touches — each update and area document with exactly one owner (Dev, Tester or Lead);
-  - for a feature, `tasks.md`: task groups in build order, each naming the spec's criteria it delivers and the
-    tasks it waits for;
+  - for a feature, `tasks.md`: task groups in build order, each naming the spec's criteria it delivers, the
+    tasks it waits for and a skeleton row for its *Signatures* (or "no new API");
   - the exact **signatures** of every new or changed member (for the Dev's skeleton) and the existing files
     the skeleton must rewrite — a file you call final is one you read and found so;
   - the **test files**, named strictly by *Layout* in `.squad/stack.md` and `docs/UNIT_TESTS.md`, and the
@@ -94,9 +94,8 @@ The orchestrator tells you which **mode** to run:
     each such field whole, generated from nothing of the real value; before you hand it back, decode every
     field of the result and compare each against the set of real values, prefixes included, since a grep for
     the original strings misses a partly replaced field.
-    Without one, return `RESULT: ESCALATE` (*Escalation to the Product Manager*: provide a sample, naming the
-    variants the issue mentions, or confirm building from the description with the residual risk recorded in
-    the decision record) and plan on only with the answer;
+    Without one, return `RESULT: ESCALATE` (*Escalation to the Product Manager*, naming the variants)
+    and plan on only with the answer;
   - an architecture check against `docs/ARCHITECTURE.md`: the guarantees in `.squad/project.md` are not
     weakened without the Product Manager;
   - the **options considered**: each alternative you weighed and why it lost, or "one option" — they decide
@@ -133,7 +132,9 @@ The orchestrator tells you which **mode** to run:
   *Challenge notes* section into *Challenge*, and decide every choice a *Security notes* entry leaves (the
   option taken and why), folding the section into *Security review*. Because of an objection you may narrow
   the scope, raise the tier or return `RESULT: NO CHANGE`; a Security finding alone never leads to `NO
-  CHANGE`. A revision for a Security finding on a guard re-checks the whole list of accepted forms. Update the
+  CHANGE`. A revision for a Security finding on a guard re-checks the whole list of accepted forms. Move settled
+  material (answered entries, verified facts) to the decision record or area document: a plan over
+  `PLAN_HARD_WORDS` fails `plan-check.py`. Update the
   affected decision records (a rejected option and the reason belong under *Options considered*).
 - `decide` — a loop limit was hit or members disagree. Choose one option and justify it, or escalate: accept
   with justification (after the 2nd `CHANGES_REQUIRED` only for the defects *Loop limits* names, Plan ↔

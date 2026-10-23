@@ -41,8 +41,10 @@ mechanics out of the orchestrator's hands:
   came last), `--step "<step>"` selects the last row of the member whose step cell is that text, so an earlier launch row
   is still amended with the tool, never by hand;
 - a row whose trailer is wrong (a launch logged with made-up numbers before its notification arrived) is
-  corrected with `--replace-last MEMBER` and the same options (`--step` selects an earlier row the same way):
-  the trailer of that row is replaced, so the launch is still counted once;
+  corrected with `--replace-last MEMBER` and the same options (`--step` selects an earlier row the same way,
+  also when other rows of the member follow): the trailer of that row, a pending one too, is replaced, so the
+  launch is still counted once. A notification repeated for one task id is no new launch: only the latest
+  numbers of the id are logged, on the same row;
 - a launch whose notification never arrived is marked with `--amend-last MEMBER --unreported --agent
   squad-<role>` (no numbers): the trailer `(opus/medium · usage not reported)` lets the summary count the
   launch, name it as unreported and exit 0, so the table is posted as the tool prints it instead of being
@@ -57,6 +59,11 @@ mechanics out of the orchestrator's hands:
   arrived yet is written with `--agent` (or `--launch`) alone: its trailer `(opus/medium · usage pending)` keeps
   model and effort, the summary lists it as incomplete, and `--amend-last` with the numbers completes it — the
   only way to add the numbers later.
+
+- `--stdin` reads the log from standard input instead of `specs/<folder>/log.md`, for the rows after step 10
+  of `squad-issue` removed the folder: pipe the log table of the "Squad working record" comment in, the result
+  of the command goes to standard error and the whole updated log to standard output (paste it back into the
+  comment); `--summary --stdin` prints the summary of that log, nothing is written to the repository;
 
 Usage, from anywhere inside the repository:
     python3 .squad/tools/squad-log.py <work folder> <step> <member> <result> [--agent squad-lead
@@ -74,6 +81,8 @@ Usage, from anywhere inside the repository:
     python3 .squad/tools/squad-log.py <work folder> "7 Fix" Dev "fixed" --agent squad-dev --tokens 412000
         --tool-uses 9 --seconds 317 --continued-from "6 Implement (rows 9-14)"
     python3 .squad/tools/squad-log.py <work folder> --summary
+    python3 .squad/tools/squad-log.py <work folder> "11 CI" Dev "fixed" --agent squad-dev --tokens 41200
+        --tool-uses 9 --seconds 80 --stdin < log-from-comment.md > log-updated.md
 
 `<work folder>` is the folder's name under `specs/` (`issue-12`, or `specs/issue-12`); it is matched against the
 folders that exist there, never used as a path, so no argument reaches the file system; `--agent` is matched
@@ -92,11 +101,13 @@ replaced, or `--continued` finds no earlier usage of the member (`--continued-fr
 step), 3 when the summary lists launch rows without usage.
 """
 import argparse
+import contextlib
 import datetime
 import os
 import re
 import subprocess
 import sys
+import tempfile
 import unicodedata
 
 CONTROL_CATEGORIES = {"Cc", "Cf", "Zl", "Zp"}
@@ -272,11 +283,11 @@ def agent_launch(root, agent):
 
 def amendable(result, replace):
     """(True, the trailer match or None) when the row may take a new trailer: one without a trailer or with a pending
-    one is amended; one with a full or an unreported trailer is replaced (a pending one is amended, not replaced)."""
+    one is amended; one with any trailer, a pending one included, is replaced."""
     old = ANY_TRAILER.search(result)
     pending = bool(PENDING_TRAILER.search(result))
     if replace:
-        return bool(old) and not pending, old
+        return bool(old), old
     return (not old or pending), old
 
 
@@ -294,7 +305,7 @@ def target_row(path, member, step=None):
 def amend_last(path, member, launch, replace=False, step=None):
     """Add the launch trailer to the last row of `member` (with `step`, to its last row of that step); the amended
     row, or None when no such row exists or it already carries a trailer (a pending one is completed). With
-    `replace`, that trailer is replaced instead; a row without one, or with a pending one, is left alone (None)."""
+    `replace`, that trailer is replaced instead; a row without one is left alone (None); a pending one is replaced too."""
     with open(path, "rb") as handle:
         data = handle.read()
     eol = b"\r\n" if b"\r\n" in data else b"\n"
@@ -483,6 +494,8 @@ def build_parser():
     parser.add_argument("--step", dest="at_step", metavar="STEP", help="with --amend-last or --replace-last: the "
                         "member's last row of this step instead of its last row (for a parallel launch whose "
                         "notification arrived after the next row was written)")
+    parser.add_argument("--stdin", action="store_true", help="read the log from standard input instead of "
+                        "specs/<folder>/log.md (step 10 removed the folder): the updated log goes to standard output")
     parser.add_argument("--unreported", action="store_true",
                         help="with --amend-last: the launch's task notification never arrived; the trailer marks "
                              "it as unreported (with --agent or --launch, without numbers)")
@@ -567,8 +580,6 @@ def amend_command(parser, path, folder, member, launch, replace, continued, step
         parser.error("--unreported marks a row without a trailer: use it with --amend-last")
     own_step, current = target_row(path, member, step)
     current = current or ""
-    if replace and PENDING_TRAILER.search(current):
-        parser.error("the row's usage is still pending: add it with --amend-last, not --replace-last")
     # Only a replaced trailer with real numbers is part of the earlier usage a continuation subtracts.
     launch = share_of_round(path, member, launch, continued, replace and bool(TRAILER.search(current)), step, origin)
     if launch is None:
@@ -613,15 +624,8 @@ def row_command(parser, path, args, launch):
     return 0
 
 
-def main():
-    parser = build_parser()
-    args = parser.parse_args()
-    toplevel = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True, check=False)
-    root = toplevel.stdout.strip() if toplevel.returncode == 0 else os.getcwd()
-    path = resolve_log(root, args.folder)
-    if path is None:
-        print(f"No log.md in {args.folder} (create it from specs/_template/log.md first)")
-        return 1
+def run(parser, args, root, path):
+    """The command the arguments ask for, against the log at `path`; the exit code."""
     if args.summary:
         print(summary(path))
         with open(path, encoding="utf-8-sig") as handle:
@@ -642,6 +646,37 @@ def main():
                              replace=bool(args.replace_last), continued=args.continued, step=args.at_step,
                              origin=args.continued_from)
     return row_command(parser, path, args, launch)
+
+
+def run_on_stdin(parser, args, root):
+    """`--stdin`: the log comes from standard input and lives in a temporary directory only; a command that
+    changes it prints the result to standard error and the whole updated log to standard output."""
+    with tempfile.TemporaryDirectory() as directory:
+        path = os.path.join(directory, "log.md")
+        with open(path, "wb") as handle:
+            handle.write(sys.stdin.buffer.read())
+        if args.summary:
+            return run(parser, args, root, path)
+        with contextlib.redirect_stdout(sys.stderr):
+            code = run(parser, args, root, path)
+        if code == 0:
+            with open(path, "rb") as handle:
+                sys.stdout.buffer.write(handle.read())
+        return code
+
+
+def main():
+    parser = build_parser()
+    args = parser.parse_args()
+    toplevel = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True, check=False)
+    root = toplevel.stdout.strip() if toplevel.returncode == 0 else os.getcwd()
+    if args.stdin:
+        return run_on_stdin(parser, args, root)
+    path = resolve_log(root, args.folder)
+    if path is None:
+        print(f"No log.md in {args.folder} (create it from specs/_template/log.md first)")
+        return 1
+    return run(parser, args, root, path)
 
 
 if __name__ == "__main__":
