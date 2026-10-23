@@ -3,9 +3,12 @@ package agent
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
+	"regexp"
 	"sync"
 	"time"
 
@@ -14,6 +17,7 @@ import (
 	"github.com/LarsLaskowski/Vandox/internal/config"
 	"github.com/LarsLaskowski/Vandox/internal/connstats"
 	"github.com/LarsLaskowski/Vandox/internal/kernevents"
+	"github.com/LarsLaskowski/Vandox/internal/logship"
 	"github.com/LarsLaskowski/Vandox/internal/mariadb"
 	"github.com/LarsLaskowski/Vandox/internal/procstats"
 	"github.com/LarsLaskowski/Vandox/internal/scheduler"
@@ -70,6 +74,12 @@ const (
 	MariaDBTimeout          = 5 * time.Second
 )
 
+// Schedule of the log shipping collector.
+const (
+	LogsInterval = 2 * time.Second
+	LogsTimeout  = 2 * time.Second
+)
+
 // Schedules of the kernel event, backup and state collectors.
 const (
 	KernelInterval  = 2 * time.Second
@@ -97,6 +107,8 @@ type Options struct {
 	MariaDB mariadb.Sources
 	// Kernel are the kernel event sources; zero fields take their defaults.
 	Kernel kernevents.Sources
+	// Logs are the log shipping sources; zero fields take their defaults.
+	Logs logship.Sources
 	// StateDir is the directory of the agent's state file; "" takes spool.directory.
 	StateDir string
 }
@@ -116,7 +128,7 @@ func Run(ctx context.Context, opts Options) int {
 	}
 	log := NewLogger(stderr, cfg.Log.Level, journal)
 
-	sched, err := newScheduler(opts, cfg, log)
+	sched, store, err := newScheduler(opts, cfg, log)
 	if err != nil {
 		log.Error("agent cannot start", "err", err)
 		return 1
@@ -139,15 +151,18 @@ func Run(ctx context.Context, opts Options) int {
 		log.Warn("service manager notification failed", "state", sdnotify.Stopping, "err", err)
 	}
 	wg.Wait()
+	// the last positions of the collectors are saved once the scheduler has stopped; Flush logs a failed save itself
+	_ = store.Flush(time.Now())
 	log.Info("agent stopped")
 	return 0
 }
 
 // jobs returns the collectors with their schedules: self, system, processes, connections, systemd (only when a service unit is
-// configured), mariadb (only when enabled), filesystem (only when a mount point is configured), clock, kernel, backups (only
+// configured), mariadb (only when enabled), filesystem (only when a mount point is configured), clock, kernel, logs, backups (only
 // when backups.processes has rules) and state, and the system collector, which newScheduler connects to the scheduler. The
-// agent's state file is opened in opts.StateDir or else spool.directory. The collectors log through log.
-func jobs(opts Options, cfg *config.Agent, log *slog.Logger) ([]scheduler.Job, *sysstats.System) {
+// agent's state file is opened in opts.StateDir or else spool.directory. The collectors log through log. It fails, and the agent does not start, when the log shipping collector cannot be built: the error wraps
+// errDropPattern for a pattern that does not compile and never quotes a pattern.
+func jobs(opts Options, cfg *config.Agent, log *slog.Logger) ([]scheduler.Job, *sysstats.System, *agentstate.Store, error) {
 	system := sysstats.NewSystem(opts.System, log)
 	systemdSchedule := scheduler.Schedule{Interval: SystemdInterval, Timeout: SystemdTimeout, PressureInterval: SystemdPressureInterval}
 	list := []scheduler.Job{
@@ -204,6 +219,14 @@ func jobs(opts Options, cfg *config.Agent, log *slog.Logger) ([]scheduler.Job, *
 		Collector: kernevents.New(opts.Kernel, store, log),
 		Schedule:  scheduler.Schedule{Interval: KernelInterval, Timeout: KernelTimeout},
 	})
+	logs, err := newLogs(opts.Logs, cfg.LogShipping, store, log)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("log shipping: %w", err)
+	}
+	list = append(list, scheduler.Job{
+		Collector: logs,
+		Schedule:  scheduler.Schedule{Interval: LogsInterval, Timeout: LogsTimeout},
+	})
 	if len(cfg.Backups.Processes) > 0 {
 		list = append(list, scheduler.Job{
 			Collector: backups.New(proc, backupRules(cfg.Backups.Processes), store, log),
@@ -213,7 +236,43 @@ func jobs(opts Options, cfg *config.Agent, log *slog.Logger) ([]scheduler.Job, *
 	return append(list, scheduler.Job{
 		Collector: agentstate.NewSaver(store, proc),
 		Schedule:  scheduler.Schedule{Interval: StateInterval, Timeout: StateTimeout},
-	}), system
+	}), system, store, nil
+}
+
+// errDropPattern is the error of a drop pattern that does not compile; it does not quote the pattern.
+var errDropPattern = errors.New("a drop pattern does not compile")
+
+// newLogs returns the log shipping collector for the options of log_shipping.
+func newLogs(src logship.Sources, opts config.LogShipping, store *agentstate.Store, log *slog.Logger) (*logship.Logs, error) {
+	cfg, err := logshipConfig(opts)
+	if err != nil {
+		return nil, err
+	}
+	return logship.New(src, cfg, store, log)
+}
+
+// logshipConfig converts the checked options of log_shipping for the collector.
+func logshipConfig(opts config.LogShipping) (logship.Config, error) {
+	minLevel, _ := config.PriorityLevel(opts.MinPriority)
+	cfg := logship.Config{Journal: opts.Journal, MinPriority: minLevel}
+	for _, f := range opts.Files {
+		cfg.Files = append(cfg.Files, logship.FileSpec{Path: f.Path, Format: f.Format})
+	}
+	for _, r := range opts.Drop {
+		rule := logship.Rule{Log: r.Log, Program: r.Program}
+		if level, ok := config.PriorityLevel(r.Priority); ok {
+			rule.Priority = &level
+		}
+		if r.Message != "" {
+			re, err := regexp.Compile(r.Message)
+			if err != nil {
+				return logship.Config{}, errDropPattern
+			}
+			rule.Message = re
+		}
+		cfg.Drop = append(cfg.Drop, rule)
+	}
+	return cfg, nil
 }
 
 // backupRules converts the configured backup rules for the backup collector.
@@ -241,15 +300,18 @@ func programRules(rules []config.ProgramRule) []procstats.Rule {
 
 // newScheduler returns the scheduler with the jobs of the configuration; the system collector switches its memory
 // pressure mode and the kernel collector requests the extra runs of the processes and connections collectors.
-func newScheduler(opts Options, cfg *config.Agent, log *slog.Logger) (*scheduler.Scheduler, error) {
+func newScheduler(opts Options, cfg *config.Agent, log *slog.Logger) (*scheduler.Scheduler, *agentstate.Store, error) {
 	var sink scheduler.Putter = scheduler.DiscardSink{}
 	if opts.Sink != nil {
 		sink = opts.Sink
 	}
-	list, system := jobs(opts, cfg, log)
+	list, system, store, err := jobs(opts, cfg, log)
+	if err != nil {
+		return nil, nil, err
+	}
 	sched, err := scheduler.New(list, sink, log)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	system.SetPressureSwitch(sched.SetPressure)
 	for _, j := range list {
@@ -257,7 +319,7 @@ func newScheduler(opts Options, cfg *config.Agent, log *slog.Logger) (*scheduler
 			k.SetTrigger(sched.Trigger)
 		}
 	}
-	return sched, nil
+	return sched, store, nil
 }
 
 // notification returns the notifier of the service manager and the watchdog interval; a problem with either is

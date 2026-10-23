@@ -404,6 +404,26 @@ public class SyslogParserTests
     }
 
     /// <summary>
+    /// The line reader cuts the whole line, header included, before the header is parsed, so the message of a long line is the limit less the header.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task SyslogParserParseAsyncCutsTheWholeLineBeforeItsHeader()
+    {
+        // Arrange
+        var parser = new SyslogParser(DateTimeZone.Utc);
+        var text = $"{Header}{new string('x', 20000)}\n{Valid}\n";
+
+        // Act
+        var emitter = await RecordingEmitter.ParseAsync(parser, _file, text, TestContext.CancellationToken);
+
+        // Assert
+        Assert.HasCount(2, emitter.Records, "both lines are records");
+        Assert.AreEqual(new string('x', LogLineReader.MaxLineBytes - Encoding.UTF8.GetByteCount(Header)), RecordingEmitter.Line(emitter.Records[0]).Message, "the message is the line limit less the header");
+        Assert.IsTrue(RecordingEmitter.Line(emitter.Records[0]).Truncated, "truncated");
+    }
+
+    /// <summary>
     /// Invalid bytes that grow when they are decoded are cut to the limit in UTF-8 bytes and the record is not refused.
     /// </summary>
     /// <param name="header">The header of the line</param>

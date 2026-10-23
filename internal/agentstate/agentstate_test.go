@@ -3,9 +3,12 @@ package agentstate
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -408,8 +411,8 @@ var corruptCases = []corruptCase{
 			t.Skipf("cannot change the owner: %v", err)
 		}
 	}},
-	{"OverSixteenKiB", func(t *testing.T, _, path string) {
-		b := append(readFile(t, path), bytes.Repeat([]byte(" "), 16*1024)...)
+	{"OverSixtyFourKiB", func(t *testing.T, _, path string) {
+		b := append(readFile(t, path), bytes.Repeat([]byte(" "), 64*1024)...)
 		if err := os.WriteFile(path, b, 0o600); err != nil {
 			t.Fatal(err)
 		}
@@ -763,20 +766,20 @@ func TestSaverWriteFirstUrgentChangeIsSavedAtOnce(t *testing.T) {
 	}
 }
 
-func TestSaverWriteUrgentChangeWaitsTenSecondsSinceTheLastSave(t *testing.T) {
+func TestSaverWriteUrgentChangeWaitsFiveSecondsSinceTheLastSave(t *testing.T) {
 	s, sv, path := ratesSetup(t)
 	update(t, s, true, fullState(1))
 	collect(t, sv, t0)
 	saved := readFile(t, path)
 
 	update(t, s, true, fullState(2))
-	collect(t, sv, t0.Add(9*time.Second))
+	collect(t, sv, t0.Add(4*time.Second))
 	if !bytes.Equal(saved, readFile(t, path)) {
-		t.Error("an urgent change was saved 9 s after the last save, want it to wait for 10 s")
+		t.Error("an urgent change was saved 4 s after the last save, want it to wait for 5 s")
 	}
-	collect(t, sv, t0.Add(10*time.Second))
+	collect(t, sv, t0.Add(5*time.Second))
 	if bytes.Equal(saved, readFile(t, path)) {
-		t.Error("an urgent change was not saved 10 s after the last save")
+		t.Error("an urgent change was not saved 5 s after the last save")
 	}
 }
 
@@ -817,7 +820,7 @@ func TestSaverWriteUrgentChangeCarriesAWaitingPositionAlong(t *testing.T) {
 	}
 }
 
-func TestSaverWriteUrgentWithinTenSecondsAfterHeartbeatSaveWaits(t *testing.T) {
+func TestSaverWriteUrgentWithinFiveSecondsAfterHeartbeatSaveWaits(t *testing.T) {
 	s, sv, path := ratesSetup(t)
 	update(t, s, true, fullState(1))
 	collect(t, sv, t0)
@@ -825,13 +828,13 @@ func TestSaverWriteUrgentWithinTenSecondsAfterHeartbeatSaveWaits(t *testing.T) {
 	collect(t, sv, t0.Add(50*time.Second))
 	saved := readFile(t, path)
 	update(t, s, true, func(st *State) { st.Backup.MaxProcesses = 9 })
-	collect(t, sv, t0.Add(59*time.Second))
+	collect(t, sv, t0.Add(54*time.Second))
 	if !bytes.Equal(saved, readFile(t, path)) {
-		t.Error("an urgent change was saved 9 s after the last save, want it to wait for 10 s")
+		t.Error("an urgent change was saved 4 s after the last save, want it to wait for 5 s")
 	}
-	collect(t, sv, t0.Add(60*time.Second))
+	collect(t, sv, t0.Add(55*time.Second))
 	if bytes.Equal(saved, readFile(t, path)) {
-		t.Error("an urgent change was not saved 10 s after the last save")
+		t.Error("an urgent change was not saved 5 s after the last save")
 	}
 }
 
@@ -1045,6 +1048,505 @@ func TestOpenInvalidOpenRunIsMissing(t *testing.T) {
 				}
 				return
 			}
+			requireMissing(t, dir, lc, s, st)
+		})
+	}
+}
+
+// digest returns the 64 lower-case hex digits of the SHA-256 of s.
+func digest(s string) string {
+	sum := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(sum[:])
+}
+
+// sampleLogs returns log positions with values that survive a round trip through a decoded JSON number (below 2^53).
+func sampleLogs() *LogPositions {
+	return &LogPositions{
+		Journal: []JournalPosition{
+			{SeqnumID: seqnumID, Seqnum: 1234, Realtime: t0.Add(-time.Minute)},
+			{SeqnumID: "2f8fad5b-d9cb-469f-a165-70867728950e", Seqnum: 99, Realtime: t0.Add(-time.Hour)},
+		},
+		Files: []FilePosition{
+			{PathSHA256: digest("/var/log/mail.log"), Device: 2049, Inode: 77, Offset: 4096, HeadSHA256: digest("head"), HeadLen: 256, LastTime: t0.Add(-time.Second),
+				Renamed: &RenamedFile{Device: 2049, Inode: 78, Offset: 100, Size: 200}},
+			{PathSHA256: digest("/var/log/other.log"), Device: 2049, Inode: 79, Offset: 0, HeadSHA256: digest(""), HeadLen: 0, LastTime: t0},
+		},
+	}
+}
+
+// worstCaseLogs returns the largest log positions the state file holds: 256 journal positions and 16 file positions, each with a
+// renamed file, with the longest numbers and times.
+func worstCaseLogs() *LogPositions {
+	latest := time.Date(9999, time.December, 31, 23, 59, 59, 999999999, time.UTC)
+	logs := &LogPositions{}
+	for i := 0; i < MaxLogJournals; i++ {
+		logs.Journal = append(logs.Journal, JournalPosition{
+			SeqnumID: fmt.Sprintf("%08x-d9cb-469f-a165-%012x", i, i), Seqnum: math.MaxUint64, Realtime: latest,
+		})
+	}
+	for i := 0; i < MaxLogFiles; i++ {
+		logs.Files = append(logs.Files, FilePosition{
+			PathSHA256: digest(fmt.Sprintf("/var/log/file%d.log", i)), Device: math.MaxUint64, Inode: math.MaxUint64, Offset: math.MaxInt64,
+			HeadSHA256: digest(fmt.Sprintf("head%d", i)), HeadLen: 256, LastTime: latest,
+			Renamed: &RenamedFile{Device: math.MaxUint64, Inode: math.MaxUint64, Offset: math.MaxInt64, Size: math.MaxInt64},
+		})
+	}
+	return logs
+}
+
+// equalLogs reports whether two sets of log positions hold the same values.
+func equalLogs(a, b *LogPositions) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	if len(a.Journal) != len(b.Journal) || len(a.Files) != len(b.Files) {
+		return false
+	}
+	for i := range a.Journal {
+		x, y := a.Journal[i], b.Journal[i]
+		if x.SeqnumID != y.SeqnumID || x.Seqnum != y.Seqnum || !x.Realtime.Equal(y.Realtime) {
+			return false
+		}
+	}
+	for i := range a.Files {
+		x, y := a.Files[i], b.Files[i]
+		if x.PathSHA256 != y.PathSHA256 || x.Device != y.Device || x.Inode != y.Inode || x.Offset != y.Offset || x.HeadSHA256 != y.HeadSHA256 ||
+			x.HeadLen != y.HeadLen || !x.LastTime.Equal(y.LastTime) || (x.Renamed == nil) != (y.Renamed == nil) {
+			return false
+		}
+		if x.Renamed != nil && *x.Renamed != *y.Renamed {
+			return false
+		}
+	}
+	return true
+}
+
+func TestSaver_SavesALogPositionWithinTenSeconds(t *testing.T) {
+	s, sv, path := ratesSetup(t)
+	update(t, s, true, fullState(1))
+	collect(t, sv, t0) // the last save
+	update(t, s, true, func(st *State) { st.Logs = sampleLogs() })
+
+	// the run starts a few milliseconds early on the 10 s grid of the state job (the threshold is 5 s, so jitter is tolerated)
+	collect(t, sv, t0.Add(10*time.Second-5*time.Millisecond))
+
+	s2, status := Open(filepath.Dir(path), slog.New(slog.DiscardHandler))
+	if status != StatusLoaded {
+		t.Fatalf("status = %v, want StatusLoaded", status)
+	}
+	if got := s2.State().Logs; !equalLogs(got, sampleLogs()) {
+		t.Errorf("saved log positions = %+v, want %+v: a committed position is saved within one state interval", got, sampleLogs())
+	}
+}
+
+func TestEncode_FullLogPositionsFitTheBound(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := Open(dir, slog.New(slog.DiscardHandler))
+	update(t, s, true, func(st *State) {
+		fullState(1)(st)
+		st.Logs = worstCaseLogs()
+	})
+
+	collect(t, NewSaver(s, procFS("1000.00")), t0)
+
+	fi, err := os.Stat(filepath.Join(dir, FileName))
+	if err != nil {
+		t.Fatalf("the state file is missing: %v", err)
+	}
+	if fi.Size() > 64*1024 || fi.Size() <= 16*1024 {
+		t.Errorf("the state file holds %d bytes, want more than 16 KiB (the old bound) and at most 64 KiB for 256 journal and 16 file positions", fi.Size())
+	}
+	s2, status := Open(dir, slog.New(slog.DiscardHandler))
+	if status != StatusLoaded {
+		t.Fatalf("status = %v, want StatusLoaded for a file of %d bytes", status, fi.Size())
+	}
+	if got := s2.State().Logs; !equalLogs(got, worstCaseLogs()) {
+		n := 0
+		if got != nil {
+			n = len(got.Journal)
+		}
+		t.Errorf("read back %d journal positions, want 256 file and journal positions read back intact", n)
+	}
+	if got := s2.State(); got.Boot == nil || got.Journal == nil || got.Backup == nil {
+		t.Errorf("State() = %+v, want the boot, the kernel position and the backup run saved beside the log positions", got)
+	}
+}
+
+// savedLogStore returns a directory with a saved state file that holds the sample log positions and the file's path.
+func savedLogStore(t *testing.T) (string, string) {
+	t.Helper()
+	dir := t.TempDir()
+	s, _ := Open(dir, slog.New(slog.DiscardHandler))
+	update(t, s, true, func(st *State) {
+		fullState(7)(st)
+		st.Logs = sampleLogs()
+	})
+	collect(t, NewSaver(s, procFS("1000.00")), t0)
+	return dir, filepath.Join(dir, FileName)
+}
+
+// logsLists returns the saved object of the log positions and its two lists, found by the keys their elements have, whatever the
+// lists are called.
+func logsLists(t *testing.T, obj map[string]any) (logs map[string]any, journalKey string, journal []any, filesKey string, files []any) {
+	t.Helper()
+	logs, ok := obj["logs"].(map[string]any)
+	if !ok {
+		t.Fatalf("the state file holds no object of log positions: %v", obj)
+	}
+	for key, v := range logs {
+		list, ok := v.([]any)
+		if !ok || len(list) == 0 {
+			continue
+		}
+		first, _ := list[0].(map[string]any)
+		if _, has := first["seqnum_id"]; has {
+			journalKey, journal = key, list
+		}
+		if _, has := first["path_sha256"]; has {
+			filesKey, files = key, list
+		}
+	}
+	if journalKey == "" || filesKey == "" {
+		t.Fatalf("the log positions %v hold no list of journal positions or no list of file positions", logs)
+	}
+	return logs, journalKey, journal, filesKey, files
+}
+
+// logMutation changes the decoded state file.
+type logMutation func(t *testing.T, obj map[string]any)
+
+// firstJournal, firstFile and firstRenamed return the first journal position, the first file position and the renamed file of the first
+// file position of the saved state, as the objects to change.
+func firstJournal(t *testing.T, obj map[string]any) map[string]any {
+	t.Helper()
+	_, _, journal, _, _ := logsLists(t, obj)
+	first, _ := journal[0].(map[string]any)
+	return first
+}
+
+func firstFile(t *testing.T, obj map[string]any) map[string]any {
+	t.Helper()
+	_, _, _, _, files := logsLists(t, obj)
+	first, _ := files[0].(map[string]any)
+	return first
+}
+
+func firstRenamed(t *testing.T, obj map[string]any) map[string]any {
+	t.Helper()
+	renamed, ok := firstFile(t, obj)["renamed"].(map[string]any)
+	if !ok {
+		t.Fatal("the first file position holds no renamed file")
+	}
+	return renamed
+}
+
+func setJournal(key string, value any) logMutation {
+	return func(t *testing.T, obj map[string]any) { firstJournal(t, obj)[key] = value }
+}
+
+func setFile(key string, value any) logMutation {
+	return func(t *testing.T, obj map[string]any) { firstFile(t, obj)[key] = value }
+}
+
+func setRenamed(key string, value any) logMutation {
+	return func(t *testing.T, obj map[string]any) { firstRenamed(t, obj)[key] = value }
+}
+
+func setLogs(key string, value any) logMutation {
+	return func(t *testing.T, obj map[string]any) {
+		logs, _, _, _, _ := logsLists(t, obj)
+		logs[key] = value
+	}
+}
+
+// grow adds n copies of the first journal positions (with other IDs) or file positions (with other path hashes).
+func grow(journal bool, n int) logMutation {
+	return func(t *testing.T, obj map[string]any) {
+		t.Helper()
+		logs, journalKey, _, filesKey, _ := logsLists(t, obj)
+		for i := 0; i < n; i++ {
+			if journal {
+				el := copyObject(firstJournal(t, obj))
+				el["seqnum_id"] = fmt.Sprintf("%08x-d9cb-469f-a165-70867728950e", i+100)
+				logs[journalKey] = append(logs[journalKey].([]any), el)
+			} else {
+				el := copyObject(firstFile(t, obj))
+				el["path_sha256"] = digest(fmt.Sprintf("/var/log/extra%d.log", i))
+				logs[filesKey] = append(logs[filesKey].([]any), el)
+			}
+		}
+	}
+}
+
+func copyObject(src map[string]any) map[string]any {
+	out := map[string]any{}
+	for k, v := range src {
+		out[k] = v
+	}
+	return out
+}
+
+// invalidLogCases are changes of the saved log positions that make the state file invalid.
+func invalidLogCases() []struct {
+	name   string
+	mutate logMutation
+} {
+	upper := strings.ToUpper(digest("x"))
+	return []struct {
+		name   string
+		mutate logMutation
+	}{
+		{"UnknownKeyInLogs", setLogs("unexpected", 1)},
+		{"UnknownKeyInAJournalPosition", setJournal("unexpected", 1)},
+		{"UnknownKeyInAFilePosition", setFile("unexpected", 1)},
+		{"UnknownKeyInTheRenamedFile", setRenamed("unexpected", 1)},
+		{"LogsNotAnObject", func(_ *testing.T, obj map[string]any) { obj["logs"] = []any{} }},
+		{"JournalSeqnumIDNotAUUID", setJournal("seqnum_id", "not-a-uuid")},
+		{"JournalSeqnumIDUpperCase", setJournal("seqnum_id", strings.ToUpper(seqnumID))},
+		{"JournalSeqnumAsString", setJournal("seqnum", "7")},
+		{"JournalRealtimeNotATime", setJournal("realtime", "yesterday")},
+		{"JournalRealtimeInYear10000", setJournal("realtime", "10000-01-01T00:00:00Z")},
+		{"PathHashTooShort", setFile("path_sha256", digest("x")[:63])},
+		{"PathHashUpperCase", setFile("path_sha256", upper)},
+		{"PathHashNotHex", setFile("path_sha256", strings.Repeat("g", 64))},
+		{"HeadHashUpperCase", setFile("head_sha256", upper)},
+		{"HeadLengthAbove256", setFile("head_len", 257)},
+		{"HeadLengthNegative", setFile("head_len", -1)},
+		{"OffsetNegative", setFile("offset", -1)},
+		{"DeviceNegative", setFile("device", -1)},
+		{"LastTimeNotATime", setFile("last_time", "yesterday")},
+		{"RenamedOffsetNegative", setRenamed("offset", -1)},
+		{"RenamedSizeNegative", setRenamed("size", -1)},
+		{"MoreThan256JournalPositions", grow(true, MaxLogJournals-1)},
+		{"MoreThan16FilePositions", grow(false, MaxLogFiles-1)},
+	}
+}
+
+func TestDecode_RefusesInvalidLogPositions(t *testing.T) {
+	for _, c := range invalidLogCases() {
+		t.Run(c.name, func(t *testing.T) {
+			dir, path := savedLogStore(t)
+			mutateJSON(t, path, func(obj map[string]any) { c.mutate(t, obj) })
+
+			lc := &logCapture{}
+			s, st := openWithin(t, dir, lc.logger())
+
+			requireMissing(t, dir, lc, s, st)
+			if got := s.State().Logs; got != nil {
+				t.Errorf("State().Logs = %+v, want none from a file treated as missing", got)
+			}
+		})
+	}
+}
+
+func TestDecode_ReadsUnchangedAndMaximalLogPositions(t *testing.T) {
+	t.Run("the unchanged file", func(t *testing.T) {
+		dir, path := savedLogStore(t)
+		mutateJSON(t, path, func(map[string]any) {})
+
+		s, st := openWithin(t, dir, slog.New(slog.DiscardHandler))
+
+		if st != StatusLoaded || !equalLogs(s.State().Logs, sampleLogs()) {
+			t.Errorf("Open() status = %v, logs = %+v, want StatusLoaded and the saved log positions", st, s.State().Logs)
+		}
+	})
+	t.Run("the limits themselves", func(t *testing.T) {
+		dir, path := savedLogStore(t)
+		mutateJSON(t, path, func(obj map[string]any) {
+			grow(true, MaxLogJournals-2)(t, obj)
+			grow(false, MaxLogFiles-2)(t, obj)
+			setFile("head_len", 256)(t, obj)
+		})
+
+		s, st := openWithin(t, dir, slog.New(slog.DiscardHandler))
+
+		if logs := s.State().Logs; st != StatusLoaded || logs == nil || len(logs.Journal) != MaxLogJournals || len(logs.Files) != MaxLogFiles {
+			t.Errorf("Open() status = %v, logs = %+v, want StatusLoaded with %d journal and %d file positions", st, logs, MaxLogJournals, MaxLogFiles)
+		}
+	})
+}
+
+func TestStore_FlushSavesAChangedStateOnly(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := Open(dir, slog.New(slog.DiscardHandler))
+	path := filepath.Join(dir, FileName)
+	update(t, s, false, fullState(3))
+
+	if err := s.Flush(t0); err != nil {
+		t.Fatalf("Flush() error = %v, want nil", err)
+	}
+
+	s2, status := Open(dir, slog.New(slog.DiscardHandler))
+	if status != StatusLoaded || s2.State().Journal == nil || s2.State().Journal.Seqnum != 3 {
+		t.Fatalf("after Flush: status %v, state %+v, want the saved position 3", status, s2.State())
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Flush(t0.Add(time.Second)); err != nil {
+		t.Fatalf("Flush() of an unchanged state error = %v, want nil", err)
+	}
+	if _, err := os.Stat(path); err == nil {
+		t.Error("Flush wrote the state file again although nothing changed since the last save")
+	}
+	update(t, s, false, func(st *State) { st.Journal.Seqnum = 4 })
+	if err := s.Flush(t0.Add(2 * time.Second)); err != nil {
+		t.Fatalf("Flush() of a changed state error = %v, want nil", err)
+	}
+	if s3, _ := Open(dir, slog.New(slog.DiscardHandler)); s3.State().Journal == nil || s3.State().Journal.Seqnum != 4 {
+		t.Errorf("after the second Flush: state %+v, want the position 4", s3.State())
+	}
+}
+
+func TestStore_FlushWaitsForARunningSave(t *testing.T) {
+	const rounds = 100
+	dir := t.TempDir()
+	lc := &logCapture{}
+	s, _ := Open(dir, lc.logger())
+	update(t, s, true, fullState(0))
+	errs := make(chan error, rounds)
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	go saveRepeatedly(&wg, NewSaver(s, procFS("1000.00")), rounds)
+	go flushRepeatedly(t, &wg, s, rounds, errs)
+	wg.Wait()
+	close(errs)
+
+	for err := range errs {
+		t.Errorf("Flush() error = %v, want nil: it waits for a running save and then saves", err)
+	}
+	if n := lc.count(t, warnNotSaved); n != 0 {
+		t.Errorf("%q was logged %d times, want 0: the temporary file of one save must not be in the way of the other", warnNotSaved, n)
+	}
+	if err := s.Flush(t0.Add(time.Hour)); err != nil {
+		t.Fatalf("Flush() error = %v, want nil", err)
+	}
+	if s2, status := Open(dir, slog.New(slog.DiscardHandler)); status != StatusLoaded || s2.State().Journal == nil || s2.State().Journal.Seqnum != rounds {
+		t.Errorf("after the last Flush: status %v, state %+v, want the position %d", status, s2.State(), rounds)
+	}
+}
+
+// saveRepeatedly runs the state job rounds times, each time at a start 11 s after the one before.
+func saveRepeatedly(wg *sync.WaitGroup, sv *Saver, rounds int) {
+	defer wg.Done()
+	for i := 0; i < rounds; i++ {
+		_, _ = sv.Collect(context.Background(), scheduler.Run{Start: t0.Add(time.Duration(i) * 11 * time.Second)})
+	}
+}
+
+// flushRepeatedly changes the position rounds times and flushes the store after each change; the errors go to errs.
+func flushRepeatedly(t *testing.T, wg *sync.WaitGroup, s *Store, rounds int, errs chan<- error) {
+	defer wg.Done()
+	for i := 1; i <= rounds; i++ {
+		seq := uint64(i) // #nosec G115 -- a small positive counter
+		update(t, s, true, func(st *State) { st.Journal.Seqnum = seq })
+		if err := s.Flush(t0.Add(time.Duration(i) * 11 * time.Second)); err != nil {
+			errs <- err
+		}
+	}
+}
+
+func TestStore_FlushGivesUpWhenASaveDoesNotEnd(t *testing.T) {
+	dir := t.TempDir()
+	lc := &logCapture{}
+	s, _ := Open(dir, lc.logger())
+	path := filepath.Join(dir, FileName)
+	update(t, s, false, fullState(1))
+	if err := s.Flush(t0); err != nil {
+		t.Fatalf("Flush() of the first state error = %v, want nil", err)
+	}
+	before := readFile(t, path)
+	update(t, s, false, func(st *State) { st.Journal.Seqnum = 2 })
+
+	fired := make(chan time.Time)
+	close(fired)
+	var waited []time.Duration
+	original := flushAfter
+	flushAfter = func(d time.Duration) <-chan time.Time {
+		waited = append(waited, d)
+		return fired
+	}
+	t.Cleanup(func() { flushAfter = original })
+	s.saving <- struct{}{}
+
+	err := s.Flush(t0.Add(time.Second))
+
+	if err == nil || err.Error() != "agentstate: save still running" {
+		t.Errorf("Flush() error = %v, want %q", err, "agentstate: save still running")
+	}
+	if len(waited) != 1 || waited[0] != 5*time.Second {
+		t.Errorf("Flush() waited for %v, want one wait of 5s", waited)
+	}
+	var warnings []logLine
+	for _, l := range lc.lines(t) {
+		if l.Msg == warnNotSaved {
+			warnings = append(warnings, l)
+		}
+	}
+	if len(warnings) != 1 || warnings[0].Level != "WARN" || warnings[0].Err != "agentstate: save still running" {
+		t.Errorf("warnings %q = %+v, want exactly one WARN with err %q", warnNotSaved, warnings, "agentstate: save still running")
+	}
+	if after := readFile(t, path); !bytes.Equal(after, before) {
+		t.Errorf("the state file = %s, want it unchanged (%s) by a Flush that gave up", after, before)
+	}
+
+	<-s.saving
+	flushAfter = original
+	if err := s.Flush(t0.Add(2 * time.Second)); err != nil {
+		t.Fatalf("Flush() after the running save ended error = %v, want nil", err)
+	}
+	if s2, _ := Open(dir, slog.New(slog.DiscardHandler)); s2.State().Journal == nil || s2.State().Journal.Seqnum != 2 {
+		t.Errorf("state after the later Flush = %+v, want the position 2 that the first Flush kept dirty", s2.State())
+	}
+}
+
+func TestDecode_StateWithoutLogPositionsStaysUsable(t *testing.T) {
+	dir, path := savedStore(t)
+	mutateJSON(t, path, func(obj map[string]any) {
+		if _, has := obj["logs"]; has {
+			t.Fatalf("the state file %v already holds log positions, want a file of the earlier format", obj)
+		}
+	})
+
+	s, status := openWithin(t, dir, slog.New(slog.DiscardHandler))
+
+	if status != StatusLoaded {
+		t.Fatalf("Open() status = %v, want StatusLoaded for a file without log positions", status)
+	}
+	got := s.State()
+	if got.Logs != nil {
+		t.Errorf("State().Logs = %+v, want none", got.Logs)
+	}
+	if got.Boot == nil || got.Journal == nil || got.Backup == nil {
+		t.Errorf("State() = %+v, want the boot, the kernel position and the backup run read as before", got)
+	}
+	update(t, s, true, func(st *State) { st.Logs = sampleLogs() })
+	if err := s.Flush(t0); err != nil {
+		t.Fatalf("Flush() error = %v, want nil", err)
+	}
+	if s2, st := Open(dir, slog.New(slog.DiscardHandler)); st != StatusLoaded || !equalLogs(s2.State().Logs, sampleLogs()) {
+		t.Errorf("Open() after adding log positions: status %v, logs %+v, want StatusLoaded and the added positions", st, s2.State().Logs)
+	}
+}
+
+func TestDecode_RefusesAnInvalidKernelJournalPosition(t *testing.T) {
+	cases := []struct {
+		name  string
+		value string
+	}{
+		{"NotAUUID", "not-a-uuid"},
+		{"UpperCase", strings.ToUpper(seqnumID)},
+		{"Empty", ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			dir, path := savedStore(t)
+			mutateJSON(t, path, func(obj map[string]any) { setField(t, obj, "journal", "seqnum_id", c.value) })
+			lc := &logCapture{}
+
+			s, st := openWithin(t, dir, lc.logger())
+
 			requireMissing(t, dir, lc, s, st)
 		})
 	}

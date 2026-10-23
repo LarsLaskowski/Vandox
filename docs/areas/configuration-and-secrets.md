@@ -49,6 +49,10 @@ Agent:
 | `mariadb.enabled` | `true` | `true` or `false` (see below) |
 | `mariadb.socket` | `/run/mysqld/mysqld.sock` | absolute, clean path of 2 to 107 bytes (see below) |
 | `backups.processes` | `[{command: pzstd}]` | a list of at most 64 rules, each a mapping of exactly one of `command` and `cmdline_prefix` (see below) |
+| `log_shipping.journal` | `true` | `true` or `false` (see below) |
+| `log_shipping.min_priority` | `info` | `emerg`, `alert`, `crit`, `err`, `warning`, `notice`, `info` or `debug` (see below) |
+| `log_shipping.files` | `[]` | a list of at most 16 mappings of `path` and `format` (see below) |
+| `log_shipping.drop` | `[]` | a list of at most 64 rules, each a mapping of at least one of `log`, `program`, `priority` and `message` (see below) |
 
 Backend:
 
@@ -165,9 +169,48 @@ Backend:
   | `backups.processes[<i>].<key>` (an unknown or duplicate key) | `unknown key`, `duplicate key` |
 
   The agent stops at start-up with exit code 1 on every one of them.
-- `spool.directory` also holds the agent's state file `agent-state.json` (the last boot, the position in the journal and the open
-  backup run; [Agent](agent.md), *Agent state*). The agent never creates the directory: the installation does, writable by the
-  agent's user.
+- `log_shipping` configures the `logs` collector ([Agent](agent.md), *Log shipping*); a section without a key, or a null section, keeps
+  the defaults, which ship the journal at `info` and more severe and no file.
+  - `log_shipping.journal` switches the shipping of the journal (the system and the user journal files); `false` reads no journal. A
+    value that is not a boolean is refused by the decoder with the key and the line.
+  - `log_shipping.min_priority`: a line with a known priority less severe than this is not shipped; a line without a priority (the
+    lines of a traditional syslog file) is never dropped by it. The names are compared exactly (lower case).
+  - `log_shipping.files` names the log files shipped besides the journal, in file order: each a mapping with `path`, an absolute,
+    clean path (no trailing slash, no empty, `.` or `..` element) of 2 to 1,024 bytes, listed once, and `format`, which is `syslog`
+    (the only format). A path with U+0000 or another control or format character is refused by the general string rule above. The
+    path is opened at run time without following a link in any element. A file that holds what the journal ships (`/var/log/syslog` on
+    a server whose rsyslog copies the journal) is shipped twice, once per source; the example file says so.
+  - `log_shipping.drop` holds rules for lines that are not shipped: each a mapping with at least one of `log` (`journal` or a path
+    listed in `log_shipping.files`, compared exactly), `program` (compared whole and literally with the line's program), `priority` (a
+    priority name: the line has that priority or a less severe one; a line without a priority never matches) and `message` (an RE2
+    regular expression in Go syntax, searched anywhere in the message unless anchored). An empty value is "not set". A line that meets
+    every condition of a rule is not shipped. A pattern is at most 1,024 bytes and its compiled program at most 400 instructions, and
+    the programs of all patterns together at most 400 (about a dozen ordinary patterns; a rule without `message` costs nothing): the
+    count is that of the program Go's `regexp` builds (Perl syntax, simplified), taken before any expression is built, because
+    matching costs about as much per line as the program is long (about 90 ms for a 16 KiB line at the bound on the measured host).
+
+  The strict decoder walks both lists as for `processes.programs` (a null element is `has no value`, an element that is not a mapping
+  `must be a section (a mapping of keys)`, an unknown or duplicate key is refused). The other errors read
+  `config: <file>:<line>: <key>: <reason>`, at the line of the named key, else of the element, and never contain the value or a
+  pattern's compile error:
+
+  | Key | Reason |
+  | --- | ------ |
+  | `log_shipping.min_priority`, `log_shipping.drop[<i>].priority` | `must be one of emerg, alert, crit, err, warning, notice, info, debug` |
+  | `log_shipping.files` (more than 16 files) | `must be a list of at most 16 files` |
+  | `log_shipping.files[<i>].path` | `must be an absolute, clean path of at most 1024 bytes (no trailing slash, no . or .. elements)` |
+  | `log_shipping.files[<i>].path` (equal to an earlier path; at the later one) | `listed twice` |
+  | `log_shipping.files[<i>].format` | `must be syslog` |
+  | `log_shipping.drop` (more than 64 rules) | `must be a list of at most 64 rules` |
+  | `log_shipping.drop[<i>]` (no condition set) | `must set at least one of log, program, priority and message` |
+  | `log_shipping.drop[<i>].log` | `must be journal or a path listed in log_shipping.files` |
+  | `log_shipping.drop[<i>].message` (does not compile, over 1,024 bytes or over 400 instructions) | `must be an RE2 pattern of at most 1024 bytes and 400 compiled instructions` |
+  | `log_shipping.drop` (patterns over 400 instructions together) | `patterns must compile to at most 400 instructions together` |
+
+  The agent stops at start-up with exit code 1 on every one of them.
+- `spool.directory` also holds the agent's state file `agent-state.json` (the last boot, the position in the journal, the open
+  backup run and the positions of the `logs` collector, stored by the SHA-256 of each file's path, never the path, up to 64 KiB;
+  [Agent](agent.md), *Agent state*). The agent never creates the directory: the installation does, writable by the agent's user.
 - A directory must be absolute and clean: no trailing slash and no empty, `.` or `..` element. The loader does not
   create it.
 - Plain `http` is allowed for `backend.url`, because the tailnet encrypts and authenticates the transport. Whether
@@ -251,6 +294,7 @@ Backend:
 - [0117](../decisions/0117-systemd-collector-hand-written-d-bus-client-per-run-states-recorded-on-change.md) — why the units to track are a list of names and patterns, an entry without a suffix is a service, and other unit types are refused.
 - [0118](../decisions/0118-mariadb-collector-hand-written-client-captured-statements-refusals-as-not-answering-with-error-code.md) — why the MariaDB collector, which these options switch and point to its socket, connects over the local socket with a client of its own, one connection per run.
 - [0120](../decisions/0120-oom-kill-events-triggered-snapshots-boots-from-saved-state-and-backup-runs.md) — why backup runs are named by literal process rules with `pzstd` as the only default, and why the agent's state lives in `spool.directory` without a new option.
+- [0121](../decisions/0121-log-shipping-journal-and-syslog-files-positions-per-seqnum-id-zstd-commit-when-kept.md) — why log shipping reads the journal and `syslog` files only, why drop patterns are bounded by their compiled size, and why the state file stores a file's position by the hash of its path.
 
 ## Not here
 

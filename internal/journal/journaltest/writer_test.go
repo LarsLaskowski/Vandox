@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -15,6 +16,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/klauspost/compress/zstd"
 
 	"github.com/LarsLaskowski/Vandox/internal/journal"
 )
@@ -487,5 +490,192 @@ func TestFixture_CommittedFilesMatchTheWriter(t *testing.T) {
 	}
 	if left, _ := filepath.Glob(filepath.Join(fixtureDir(), "system*")); len(left) != len(files) {
 		t.Errorf("testdata/journal holds %d journal files, want exactly the %d the writer makes", len(left), len(files))
+	}
+}
+
+// serverFrameForms returns the frame forms testdata/journal/zstd-frames.txt lists: descriptor, single segment, checksum,
+// dictionary flag, bytes of the content size, block types, number of blocks and bytes after the last block, in the text of frameForm.
+func serverFrameForms(t *testing.T) map[string]bool {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(fixtureDir(), "zstd-frames.txt"))
+	if err != nil {
+		t.Fatalf("reading zstd-frames.txt: %v", err)
+	}
+	forms := map[string]bool{}
+	for _, line := range strings.Split(string(data), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) != 10 || strings.HasPrefix(line, "#") {
+			continue
+		}
+		forms[strings.Join(fields[1:9], " ")] = true
+	}
+	if len(forms) == 0 {
+		t.Fatal("zstd-frames.txt lists no frame form")
+	}
+	return forms
+}
+
+// frameForm describes the header and the blocks of the zstd frame in the columns of zstd-frames.txt.
+func frameForm(t *testing.T, frame []byte) string {
+	t.Helper()
+	if len(frame) < 6 || !bytes.Equal(frame[:4], []byte{0x28, 0xb5, 0x2f, 0xfd}) {
+		t.Fatalf("stored payload %.12x is not a zstd frame", frame)
+	}
+	desc := frame[4]
+	single := int(desc >> 5 & 1)
+	checksum := int(desc >> 2 & 1)
+	dictFlag := 0
+	if desc&3 != 0 {
+		dictFlag = 1
+	}
+	sizeBytes := []int{1, 2, 4, 8}[desc>>6]
+	if single == 0 && desc>>6 == 0 {
+		sizeBytes = 0
+	}
+	pos := 5
+	if single == 0 {
+		pos++
+	}
+	pos += []int{0, 1, 2, 4}[desc&3] + sizeBytes
+	var types []string
+	last := false
+	for !last {
+		if pos+3 > len(frame) {
+			t.Fatalf("frame ends inside a block header at %d of %d bytes", pos, len(frame))
+		}
+		h := uint32(frame[pos]) | uint32(frame[pos+1])<<8 | uint32(frame[pos+2])<<16
+		last = h&1 == 1
+		kind := []string{"raw", "rle", "compressed", "reserved"}[h>>1&3]
+		types = append(types, kind)
+		size := int(h >> 3)
+		if kind == "rle" {
+			size = 1
+		}
+		pos += 3 + size
+	}
+	if pos > len(frame) {
+		t.Fatalf("frame ends inside a block: blocks need %d of %d bytes", pos, len(frame))
+	}
+	return fmt.Sprintf("0x%02x %d %d %d %d %s %d %d", desc, single, checksum, dictFlag, sizeBytes, strings.Join(types, ","), len(types), len(frame)-pos)
+}
+
+func TestWrite_CompressedFramesMatchTheServerForm(t *testing.T) {
+	f, err := os.Open(filepath.Join(fixtureDir(), "live.export"))
+	if err != nil {
+		t.Fatalf("opening live.export: %v", err)
+	}
+	defer func() { _ = f.Close() }()
+	entries, err := ReadExport(f)
+	if err != nil {
+		t.Fatalf("ReadExport(live.export) error = %v, want nil", err)
+	}
+	enc, err := zstd.NewWriter(nil, zstd.WithEncoderConcurrency(1), zstd.WithEncoderCRC(false), zstd.WithSingleSegment(true))
+	if err != nil {
+		t.Fatalf("zstd.NewWriter() error = %v, want nil", err)
+	}
+	dec, err := zstd.NewReader(nil)
+	if err != nil {
+		t.Fatalf("zstd.NewReader() error = %v, want nil", err)
+	}
+	var buf bytes.Buffer
+	opts := Options{
+		FileID: mustID(t, "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1"), SeqnumID: mustID(t, "0000000000000000000000000000000f"),
+		MachineID: mustID(t, "0badc0de0badc0de0badc0de0badc0de"), Online: true,
+		Compress: func(payload []byte) ([]byte, error) { return enc.EncodeAll(payload, nil), nil },
+	}
+
+	if err := Write(&buf, entries, opts); err != nil {
+		t.Fatalf("Write() with Compress error = %v, want nil", err)
+	}
+
+	compressed, longest := requireServerForms(t, buf.Bytes(), dec)
+	if compressed == 0 {
+		t.Error("Write() with Compress stored no compressed data object, want every payload of 512 bytes and more")
+	}
+	if longest < 20_000 {
+		t.Errorf("the longest decoded payload has %d bytes, want the 20,000 byte message of live.export", longest)
+	}
+}
+
+// requireServerForms checks that every compressed data object of the journal file is a frame of one of the server's forms that decodes to a
+// NAME=value payload, and returns the number of compressed objects and the length of the longest decoded payload.
+func requireServerForms(t *testing.T, file []byte, dec *zstd.Decoder) (compressed, longest int) {
+	t.Helper()
+	flags, payloads := dataObjects(t, file)
+	forms := serverFrameForms(t)
+	for i, flag := range flags {
+		if flag == 0 {
+			continue
+		}
+		compressed++
+		if flag != 4 {
+			t.Errorf("data object %d has flags %d, want 4 (ZSTD)", i, flag)
+		}
+		if form := frameForm(t, payloads[i]); !forms[form] {
+			t.Errorf("data object %d is a frame of the form %q, want one of the forms of zstd-frames.txt %v", i, form, forms)
+		}
+		plain, err := dec.DecodeAll(payloads[i], nil)
+		if err != nil || !bytes.Contains(plain, []byte("=")) {
+			t.Errorf("data object %d does not decode to a NAME=value payload: %d bytes, error %v", i, len(plain), err)
+		}
+		longest = max(longest, len(plain))
+	}
+	return compressed, longest
+}
+
+func TestWrite_CompressIsCalledForPayloadsOf512BytesAndMoreOnly(t *testing.T) {
+	short := strings.Repeat("s", 400)
+	long := strings.Repeat("l", 600)
+	es := []entry{{
+		"__REALTIME_TIMESTAMP": []byte("1790000000000000"), "__MONOTONIC_TIMESTAMP": []byte("5000000000"),
+		"__SEQNUM": []byte("1"), "__SEQNUM_ID": []byte(id1), "_BOOT_ID": []byte(bootA),
+		"MESSAGE": []byte(long), "SHORT": []byte(short),
+	}}
+	var seen []int
+	opts := Options{
+		FileID: mustID(t, "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1"), SeqnumID: mustID(t, id1), MachineID: mustID(t, "0badc0de0badc0de0badc0de0badc0de"),
+		Compress: func(payload []byte) ([]byte, error) {
+			seen = append(seen, len(payload))
+			return append([]byte("COMPRESSED:"), payload...), nil
+		},
+	}
+	var buf bytes.Buffer
+
+	if err := Write(&buf, es, opts); err != nil {
+		t.Fatalf("Write() error = %v, want nil", err)
+	}
+
+	if len(seen) != 1 || seen[0] != len("MESSAGE=")+len(long) {
+		t.Errorf("Compress was called for payloads of %v bytes, want only the %d byte MESSAGE payload", seen, len("MESSAGE=")+len(long))
+	}
+	flags, payloads := dataObjects(t, buf.Bytes())
+	stored := 0
+	for i, flag := range flags {
+		if flag != 0 && bytes.HasPrefix(payloads[i], []byte("COMPRESSED:")) {
+			stored++
+		}
+	}
+	if stored != 1 {
+		t.Errorf("%d data objects hold the bytes Compress returned, want 1", stored)
+	}
+}
+
+func TestWrite_CompressFailureFailsTheWrite(t *testing.T) {
+	es := []entry{{
+		"__REALTIME_TIMESTAMP": []byte("1790000000000000"), "__MONOTONIC_TIMESTAMP": []byte("5000000000"),
+		"__SEQNUM": []byte("1"), "__SEQNUM_ID": []byte(id1), "_BOOT_ID": []byte(bootA),
+		"MESSAGE": []byte(strings.Repeat("l", 600)),
+	}}
+	boom := errors.New("compress: boom")
+	opts := Options{
+		FileID: mustID(t, "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1"), SeqnumID: mustID(t, id1), MachineID: mustID(t, "0badc0de0badc0de0badc0de0badc0de"),
+		Compress: func([]byte) ([]byte, error) { return nil, boom },
+	}
+	var buf bytes.Buffer
+
+	err := Write(&buf, es, opts)
+
+	if !errors.Is(err, boom) {
+		t.Errorf("Write() error = %v, want it to wrap the error of Compress", err)
 	}
 }

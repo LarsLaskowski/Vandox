@@ -3,6 +3,7 @@ package journaltest
 import (
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"math/bits"
 )
 
@@ -77,10 +78,18 @@ func (b *builder) put(off, v uint64) { le.PutUint64(b.buf[off:], v) }
 
 func (b *builder) get(off uint64) uint64 { return le.Uint64(b.buf[off:]) }
 
-// payloadFor returns the bytes stored for a payload and the object flags.
-func payloadFor(p []byte) ([]byte, byte, error) {
+// payloadFor returns the bytes stored for a payload and the object flags; with Options.Compress a payload of 512 bytes and more is
+// stored as the bytes Compress returns, else as a zstd frame of one raw block.
+func payloadFor(p []byte, compress func(payload []byte) ([]byte, error)) ([]byte, byte, error) {
 	if len(p) < compressMin {
 		return p, 0, nil
+	}
+	if compress != nil {
+		out, err := compress(p)
+		if err != nil {
+			return nil, 0, fmt.Errorf("journaltest: compressing a field: %w", err)
+		}
+		return out, flagZSTD, nil
 	}
 	if len(p) > maxRawFrame {
 		return nil, 0, errors.New("journaltest: field too long")
@@ -101,7 +110,7 @@ func (b *builder) data(payload []byte) *record {
 	if r, ok := b.records[string(payload)]; ok {
 		return r
 	}
-	stored, flags, err := payloadFor(payload)
+	stored, flags, err := payloadFor(payload, b.opts.Compress)
 	if err != nil {
 		b.err = err
 		stored = payload

@@ -266,14 +266,23 @@ func (r *runner) invoke(ctx context.Context, run Run) (res result) {
 	return result{records: records, err: err}
 }
 
-// finish handles the result of a run in time.
+// finish handles the result of a run in time and tells an Observer collector whether its records were kept.
 func (r *runner) finish(ctx context.Context, d time.Time, iv time.Duration, run Run, res result) {
+	kept := r.handle(ctx, d, iv, run, res)
+	if o, ok := r.job.Collector.(Observer); ok {
+		o.Kept(run, kept)
+	}
+}
+
+// handle delivers the result of a run in time and reports whether the records were kept: the run did not fail, no record was refused
+// and the sink accepted them.
+func (r *runner) handle(ctx context.Context, d time.Time, iv time.Duration, run Run, res result) bool {
 	if res.err != nil {
 		r.logFailure(res.err)
 		r.failedRuns++
 		r.lost = true
 		r.put(ctx, r.gap(model.GapUnknown, d, d.Add(iv), time.Now()))
-		return
+		return false
 	}
 	if r.failedRuns > 0 {
 		r.s.log.Info("collector recovered", "collector", r.name, "failed_runs", r.failedRuns)
@@ -286,6 +295,7 @@ func (r *runner) finish(ctx context.Context, d time.Time, iv time.Duration, run 
 	}
 	err := r.deliver(ctx, records...)
 	r.lost = refused != nil || err != nil
+	return !r.lost
 }
 
 // logFailure logs the error of a failed run: every panic, and an error only at the first failure after a success.

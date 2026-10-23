@@ -347,7 +347,10 @@ such a content again.
 configuration, not checked on the server), so every kernel line is in both files and importing both stores it twice.
 There is no deduplication across sources. Importing a journal export and the syslog files of the same period stores
 every message twice as well (sources `journal` and `syslog`), MariaDB entries included. `mail.log`, `syslog` and a journal
-export of the same period store each mail line up to three times with the same classification.
+export of the same period store each mail line up to three times with the same classification. The lines the agent ships live
+([Agent](agent.md), *Log shipping*) and an import of the same period are stored twice as well: the import does not know which lines
+arrived live, and the live records carry the agent's `log` (the absolute path of a file) where the import's carry the listed name, and
+no classification. The agent itself ships no history from before its first start, which is what the import is for.
 
 ## MariaDB error log
 
