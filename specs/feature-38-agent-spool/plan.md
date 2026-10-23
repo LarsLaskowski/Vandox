@@ -1,7 +1,7 @@
 # Plan: Persistent on-disk spool (at least 7 days)
 
 Source: Issue #38 | [spec.md](spec.md)
-Status: Revised (2)
+Status: Revised (3) — M1 settled by the Product Manager
 Tier: security — the spool creates guards of security area 9 (no link followed, owner and mode checks on its files, nothing written or deleted outside its own files, the size bound, the file limit and the free-space reserve) and reads its own files back under consistency rules.
 Security areas touched: 8 (the agent token must never reach the spool), 9 (file writes and paths: the spool's files in `spool.directory`, the meta file, deletion of its own files), 10 (parsing: spool files and the meta file read back, damaged or hostile, through a new single-line entry point of the wire decoder), 12 (new fixed log texts of the spool)
 
@@ -15,7 +15,7 @@ See [spec.md](spec.md), *Problem*. The agent's sink is `scheduler.DiscardSink` (
 | - | ----- | -------- | ------ |
 | 1 | Today every record is dropped; the sink assigns sequence numbers | `internal/agent/agent.go:304-307`, `internal/scheduler/sink.go:9-23` | confirmed |
 | 2 | `Put` is called concurrently, one runner goroutine per collector, with the agent's context; a sink error makes the run "not kept" | `internal/scheduler/runner.go:349-364`, `scheduler.go:73-80`, `docs/areas/agent.md:88-91,127-129` | confirmed |
-| 3 | The `logs` positions are written to the state file in `Kept`, after `Put` accepted the run (`internal/logship/logship.go:261-300`), and the kernel journal position is committed in the next run's prepare (`internal/kernevents/kernevents.go:141-147`); but the boot change (`internal/kernevents/boot.go:62`) and the backup run (`internal/backups/backups.go:198,205,217`) are written by `store.Update` inside `Collect`, before `Put`; the `state` job saves on its own goroutine (`internal/agentstate/agentstate.go:699-720`) | the files and lines named (read by the Devil's Advocate, checked by the Lead) | confirmed |
+| 3 | `logs` positions are committed in `Kept` after `Put`, the kernel journal position in the next run's prepare; the boot change and the backup run are written by `store.Update` inside `Collect`, before `Put`; the `state` job saves on its own goroutine | `internal/logship/logship.go:261-300`, `internal/kernevents/kernevents.go:141-147`, `internal/kernevents/boot.go:62`, `internal/backups/backups.go:198,205,217`, `internal/agentstate/agentstate.go:699-720` | confirmed |
 | 4 | The state file treats only an empty directory as a first start; an absent file beside other entries warns | `internal/agentstate/agentstate.go:199-242` | confirmed |
 | 5 | The boot ID is read by `procstats.ReadBootID` from `sys/kernel/random/boot_id` of a `/proc` `fs.FS`; the agent tests' kernel fixture holds that file | `internal/procstats/boottime.go:22,122-140`; `internal/agent/agent_test.go:326,337` | confirmed |
 | 6 | No clock offset estimate exists in the agent | `grep -rn clock_offset internal` finds only the wire header | confirmed |
@@ -33,7 +33,7 @@ See [spec.md](spec.md), *Problem*. The agent's sink is `scheduler.DiscardSink` (
 | 18 | Opening a spool filled to 2 GiB, and one with 1,024 files, each takes at most 5 s on the development host | to verify: `BenchmarkOpen_Full`, `BenchmarkOpen_ManyFiles` (Dev, step 6), recorded in `docs/BENCHMARKS.md` | unverified |
 | 19 | The test process runs as root, so a test can `chown` a file to another user (E8 "owned by another user") | to verify: Tester checks `os.Geteuid()` in step 5; without root that one case is skipped with a reason and reported | unverified |
 | 20 | `os.Root.OpenFile` with `O_NOFOLLOW` opens a symbolic link whose target lies inside the root | measured by Security in its round-2 plan review (`r.OpenFile("inlink", O_RDWR\|O_NOFOLLOW)` succeeded) | confirmed |
-| 21 | `syscall` exports `Openat`, `Unlinkat` (flags 0: removes the entry, never follows), `Renameat` and `Fstat` on linux/amd64, but `Fstatat` only on some architectures (not amd64) and `AT_SYMLINK_NOFOLLOW` nowhere | Go 1.27 `src/syscall/syscall_linux.go:285,334`, `zsyscall_linux_amd64.go:1256`, `syscall_linux_amd64.go:47` (unexported `fstatat`), `syscall_linux_arm64.go:21` | confirmed |
+| 21 | `syscall` exports `Openat`, `Unlinkat` (flags 0: never follows), `Renameat` and `Fstat` on linux/amd64, but `Fstatat` not on amd64 and `AT_SYMLINK_NOFOLLOW` nowhere | Go 1.27 `src/syscall/syscall_linux.go:285,334`, `zsyscall_linux_amd64.go:1256`, `syscall_linux_amd64.go:47` (unexported `fstatat`), `syscall_linux_arm64.go:21` | confirmed |
 | 22 | `openat` with `O_NOFOLLOW` on a symbolic link as the last element fails with `ELOOP`; with `O_NONBLOCK` a FIFO opens without blocking | open(2) man page; the link case is asserted by `TestOpen_RefusedEntries` (Tester, step 5) | confirmed |
 
 ## Acceptance criteria
@@ -68,13 +68,11 @@ Names are top-level test functions, table-driven where the cases share a shape. 
 | AC19 | `TestRun_SpoolHoldsNoSecret` (runs the agent with a token whose bytes are a sentinel, then searches every spool file) | `internal/agent/agent_test.go` |
 
 `TestOpen_RefusedEntries` cases, each for a data-file name (the newest and an older one), `spool-meta.json` and
-`spool-meta.json.tmp`: a symbolic link to `agent-state.json` in the same directory (a trusted file of the agent's user, mode 0600),
-a symbolic link to a file outside the directory, a hard link to `agent-state.json`, a FIFO, a directory, a file with mode 0640,
-a file owned by another user (fact 19), all with a spool that then takes a `Put` and an `Ack`. Each asserts that `agent-state.json`
-(and the outside file) keep their bytes, size and modification time, that the refused entry still exists unchanged (`Lstat`: still
-a link with the same target, still the same inode), that no record from it is handed out, and the outcome of AC10 (data names) or
-AC13 (meta names). The link to `agent-state.json` is the guard against opening through `os.Root` or without `O_NOFOLLOW`; a
-spool whose open followed it would fail the unchanged-bytes assertion. `TestOpen_TooManyFiles`: 1,100 valid data files; `Open`
+`spool-meta.json.tmp`: a symbolic link to `agent-state.json` in the same directory (agent-owned, 0600), a symbolic link outside the
+directory, a hard link to `agent-state.json`, a FIFO, a directory, mode 0640, another owner (fact 19); the spool then takes a `Put`
+and an `Ack`. Each asserts that `agent-state.json` and the outside file keep bytes, size and modification time, that the refused
+entry is unchanged (`Lstat`: same link target, same inode), that nothing from it is handed out, and the outcome of AC10 (data names)
+or AC13 (meta names). The link to `agent-state.json` is the guard that fails for an open through `os.Root` or without `O_NOFOLLOW`. `TestOpen_TooManyFiles`: 1,100 valid data files; `Open`
 keeps the 1,026 with the highest numbers, hands out none of the others, leaves them on disk unread (their bytes unchanged),
 logs `spool data damaged` once with `err` `too many files` and the lowest name, and stays within the AC17 memory bound.
 
@@ -96,8 +94,8 @@ with exactly one link (`Nlink` 1: a hard link to `agent-state.json` is refused l
 Writes, truncation, appends and syncs use the descriptor that passed the check (wrapped by `os.NewFile`), never a path. Before an
 `Unlinkat` or `Renameat`, the entry is opened read-only as above and checked the same way (an absent entry is fine for the meta
 names); a data file is removed only when its device and inode equal those of the trusted descriptor the spool holds for it.
-`syscall.Fstatat` is not used: the standard library exports it on arm64 but not on amd64 (fact 21), and the open-and-`Fstat` check
-refuses the same entries. Removing or renaming a name never touches a link's target, so an entry swapped between check and call costs
+`syscall.Fstatat` is not used (fact 21); the open-and-`Fstat` check stands in for it (to be confirmed by Security, *Security
+review* R1). Removing or renaming a name never touches a link's target, so an entry swapped between check and call costs
 no file outside the spool's own. The meta temporary is removed and the meta file replaced only when each is absent or trusted (E8);
 otherwise the meta write fails (`spool: meta: refused entry`). The directory is listed in chunks of 256 names through a duplicate of
 its descriptor; `Open` keeps at most `maxFiles` + 2 data-file names (the highest name numbers, a bounded set while listing). Every
@@ -115,24 +113,20 @@ before the next is created, the directory after the creation. With `spool.max_si
 `file_limit` (E19). **Restarts:** `Open` appends to the newest data file when its context (agent ID, boot ID, offset) matches and it is
 not sealed, so a restart in the same boot adds no file.
 
-*Consistency rules (area 10; a break is damage, E6).* File name number = first frame's number; numbers strictly increasing within a
-file and across files in name order; frame number = the `seq` in its wire line; trailer last number = last frame's number and its
-count = the frames counted; header and trailer within their sizes; every capture time and gap time within the wire range
-(1677-09-21 to 2262-04-11, checked before a gap is built from it); a 20-digit name number parsed with `strconv.ParseUint(…, 10, 64)`
-and below 2^63 - 1. A damaged frame and every later frame of that file are never handed out. At open the file is cut at the last
-good frame (by `ftruncate` on its descriptor) and sealed; during a read of a sealed file the rest is marked dropped in memory and
-deleted with the file. Either way one `spool_dropped` gap per run of unacknowledged numbers from the damaged frame's number (or the last
-good number plus 1) to the file's last known number (trailer, else the next file's first number minus 1), with the time span of the good
-frames or, when none is usable, the file's modification time; `spool data damaged` once per file, `err` one of `checksum mismatch`,
-`file cut short`, `not the spool format`, `unknown format version`, `inconsistent value`, `refused entry`, `too many files`.
+*Consistency rules (area 10; a break is damage).* Those of spec E6, plus: trailer count = the frames counted; header and trailer
+within their sizes; times within 1677-09-21 to 2262-04-11, checked before a gap is built from them; a 20-digit name number parsed
+with `strconv.ParseUint(…, 10, 64)` and below 2^63 - 1. At open a damaged file is cut at the last good frame (`ftruncate` on its
+descriptor) and sealed; during a read of a sealed file the rest is marked dropped in memory and deleted with the file. Gaps as spec
+E6, one per run of unacknowledged numbers, the last known number from the trailer, else the next file's first number minus 1; the
+time span of the good frames, else the file's modification time. `err` is one of `checksum mismatch`, `file cut short`, `not the
+spool format`, `unknown format version`, `inconsistent value`, `refused entry`, `too many files`.
 
 *Meta file.* JSON, decoded strictly (one object, `version` 1, no unknown key, at most 16 KiB): `agent_id`, `boot_id` of the last
 open, `clean`, `next` (the next number at the time of the write; every meta write carries the current value), `acked` (at most 64
-ranges). Rules (E20): ranges sorted, disjoint, `first <= last`, all below `next`; `next` below 2^63 - 1. A break: `spool data damaged`
-with `file` `spool-meta.json`, `err` `inconsistent value`; the acknowledgements are discarded and the counter is set as on a fresh spool.
+ranges). Its rules and the reaction to a break are spec E20 (`err` `inconsistent value`).
 Written by temporary file and rename in the directory; synced (file and directory) at open, at close and by the sync loop when dirty;
-an acknowledgement rewrites it without a sync (a lost acknowledgement only resends). When the meta was persisted while data files were
-rolled back by a power loss, `acked` numbers at or above the recovered next are dropped by the rule above.
+an acknowledgement rewrites it without a sync (a lost acknowledgement only resends); `acked` numbers at or above a next recovered
+after a power loss break E20's rule.
 
 *Open.* Directory checks; read each data file's header and, for a sealed file, its trailer; scan the newest file and any file without
 a valid trailer frame by frame. Files of another agent ID are deleted with `spool records of another agent dropped` (E18). The next
@@ -170,7 +164,7 @@ syncs, writes the meta with `clean` true and syncs it.
 
 **agentstate.** `Store.SetBarrier` registers a function `saveLocked` calls first; when it fails the save is not written and logs `agent
 state not saved` with `err` `agentstate: save: spool not durable`. `Flush` passes a context of 5 s. Collectors are unchanged: the boot
-and backup window is a stated residual (spec E5, *Challenge* M1).
+and backup window is a stated residual decided by the Product Manager (spec E5, *Challenge* M1).
 
 **agent.** `Run`: load config; `openStorage` opens the state store first (E3), then — unless `opts.Sink` is set (tests) — reads the boot
 ID from `opts.Kernel.Proc` or `/proc` (`spool: boot id: not readable`, `spool: boot id: not a lower-case UUID`) and opens the spool in
@@ -189,20 +183,10 @@ agent line.
 
 ## Options considered
 
-1. Storage: an embedded store (bbolt, SQLite), compressed segments, one file per hand-over, or framed uncompressed data files (chosen) —
-   record 0123.
-2. A lost counter: refusing to start, a counter epoch in the wire header, or the clock bound (chosen) — record 0123.
-3. Acknowledgements: prefix only, a bitmap, or at most 64 ranges (chosen) — record 0123.
-4. Order of state and records: an fsync per hand-over, positions inside the spool, or a spool sync as barrier before every state save
-   (chosen) — record 0123. Moving the boot and backup updates behind `Kept` was weighed and left for later (*Challenge* M1).
-5. Bounding the file count: a fixed size of 64 MiB with no limit (16,384 files at the old 1 TiB cap), a fixed number of files whose
-   size grows with the cap (unbounded file size for start-up scans), or a size of `max_size / 128` clamped to 1–64 MiB, a 64 GiB cap,
-   appending after a restart and a hard limit of 1,024 files (chosen) — record 0123.
-6. File access relative to the directory: `os.Root` (follows in-directory links despite `O_NOFOLLOW`, fact 20),
-   `golang.org/x/sys/unix` for `Fstatat` and `AT_SYMLINK_NOFOLLOW` (a new direct dependency for one check), or `syscall.Openat`,
-   `Unlinkat`, `Renameat` with an open-and-`Fstat` check (chosen) — record 0123.
-7. Wiring order: opening the spool inside `jobs` (the state file would see a non-empty directory on a first start, E3) or a new
-   `openStorage` before `jobs` (chosen).
+The alternatives for storage, a lost counter, acknowledgements, the order of state and records, the file count and file access
+inside the directory, with why each lost, are in record 0123. Moving the boot and backup updates behind `Kept` was weighed and left
+to the follow-up issue (*Challenge* M1). Wiring order: opening the spool inside `jobs` lost to a new `openStorage` before `jobs`,
+because the state file would see a non-empty directory on a first start (E3).
 
 ## Affected projects and types
 
@@ -289,19 +273,19 @@ same code at a larger size, not code of its own.
 ## Areas
 
 - Agent: the spool's rules in *Spool and sending*; *Status*, *Scheduling*, *Self-metrics*, *Agent state* (barrier, the residual
-  warning of spec E3), *Kernel events* and *Backup runs* (the E5 residual), *Log shipping*, *Gaps*, *Rights*, *Implementation*.
+  warning of spec E3), *Kernel events* and *Backup runs* (the E5 residual, naming the follow-up issue by number), *Log shipping*,
+  *Gaps*, *Rights*, *Implementation*.
 - Configuration and secrets: two options.
 - Wire format: the age metric, *Batch identity* (clock bound, first number, jumps).
 
 ## Documentation updates
 
-Sweep done for enumerations the change extends: the option tables (`docs/areas/configuration-and-secrets.md:40-55`, `README.md:67`),
-`AgentKeys` and the example `deploy/agent/agent.yaml`, the metric table (`docs/areas/wire-format.md:143-144`), "the agent's only file
-write" (`docs/ARCHITECTURE.md:64`, `docs/areas/agent.md:1347,1602`, `.squad/project.md:141`), "until the spool exists"
-(`docs/ARCHITECTURE.md:14`, `docs/areas/agent.md:11-13,130`, `internal/scheduler/sink.go:17`), "later a full spool"
-(`docs/areas/agent.md:938,1217`, record 0120 — done), *Not implemented* lists (`docs/ARCHITECTURE.md:15`), the spool directory's
-contents (`deploy/agent/README.md:167-173`), the Implementation list (`docs/areas/agent.md:1681-1695`, `.squad/stack.md` *Layout*),
-security areas 8, 9, 10 and 12 (`.squad/project.md:120-160,257`).
+Sweep hits: option tables (`docs/areas/configuration-and-secrets.md:40-55`, `README.md:67`, `deploy/agent/agent.yaml`); metric table
+(`docs/areas/wire-format.md:143-144`); "only file write" (`docs/ARCHITECTURE.md:64`, `docs/areas/agent.md:1347,1602`,
+`.squad/project.md:141`); "until the spool exists" (`docs/ARCHITECTURE.md:14-15`, `docs/areas/agent.md:11-13,130`,
+`internal/scheduler/sink.go:17`); "later a full spool" (`docs/areas/agent.md:938,1217`; record 0120 done); the directory's contents
+(`deploy/agent/README.md:167-173`); Implementation lists (`docs/areas/agent.md:1681-1695`, `.squad/stack.md`); security areas
+(`.squad/project.md:120-160,257`).
 
 | File | Owner |
 | ---- | ----- |
@@ -319,7 +303,8 @@ security areas 8, 9, 10 and 12 (`.squad/project.md:120-160,257`).
 
 - *No data gaps unless explicitly recorded* (records 0028, 0045): every drop is a `spool_dropped` or `unknown` gap; stated residuals in
   the spec: a pending gap lost at a stop during a write failure, a counter collision after a clock set back, the boot and backup
-  window of E5. Strengthened overall; the E5 window is new behavior that did not exist without a spool.
+  window of E5. The Product Manager decided to keep the E5 window as a stated residual with the guarantee's text unchanged; the
+  follow-up issue closes it before the agent's first release.
 - *A hanging collector never blocks the agent* (0029): unchanged; a stalled disk is out of scope (the watchdog restarts the agent).
 - *Agent never makes the memory situation worse* (0025): spool live memory below 4 MiB at the largest configuration (AC17).
 - The state file stops being the agent's only write; `docs/ARCHITECTURE.md` and `.squad/project.md` area 9 are updated (tasks 21, 26).
@@ -327,11 +312,9 @@ security areas 8, 9, 10 and 12 (`.squad/project.md:120-160,257`).
 
 ## Security considerations
 
-- [ ] Limits on parsed input, all on raw bytes before decoding: a frame payload at most `wire.DefaultLimits().MaxLineBytes` + 8; a
-  header at most 128 bytes; a trailer of fixed size; the meta file at most 16 KiB with at most 64 ranges; a name number of 20 digits
-  parsed into 64 bits and below 2^63 - 1; directory listing in chunks of 256, at most 1,026 data-file names held; at most 1,024 data
-  files created; every open by `Openat` with `O_NOFOLLOW`, trusted only as a regular, agent-owned, 0600, single-link file; sparse indexes for two files of
-  64 entries each; `wire.UnmarshalRecord` applies the decoder's line rules to the raw line.
+- [ ] Limits on parsed input, all on raw bytes before decoding, and the file guards: as under *Approach* (frame, header, trailer,
+  meta size and ranges, name numbers, listing chunks and held names, file limit, `Openat` with `O_NOFOLLOW` and the trust check,
+  sparse indexes, `wire.UnmarshalRecord`'s line rules).
 - [ ] Texts that reach a user: the start errors under *Approach*, `spool: write: <errno text>`, `spool: sequence numbers exhausted`,
   `spool: meta: refused entry`, `spool data damaged` with the fixed `err` values under *Approach*. No path, record content or system
   error string other than the errno text.
@@ -342,61 +325,44 @@ security areas 8, 9, 10 and 12 (`.squad/project.md:120-160,257`).
 
 ## Challenge
 
-- M1 (boot and backup state written before `Put`). Accepted as a stated residual, not fixed: spec E5 and NFR *Durability* now name the
-  window, fact 3 is corrected, and the agent area states it (task 23). Moving the two updates behind `Kept` changes two collectors and
-  their tests for a window of one sync interval after a save that falls between a run's state change and its hand-over, followed by
-  a power loss; the boot stays visible in the batch headers' boot ID. A follow-up issue is proposed (below).
-- M2 (memory bound at large caps). Accepted: file size `clamp(max_size / 128, 1 MiB, 64 MiB)`, `spool.max_size` at most 64 GiB, a
-  hard limit of 1,024 data files (E19), restarts append, sparse indexes for at most two files; AC17 tests the largest configuration.
-- m1 (next after a kill). Accepted: every meta write carries the current next, and `Open` takes the newest file's name number into
-  the maximum; AC14 tests the empty-newest-file case.
-- m2 (frame number and limit constant). Accepted: frame number must equal the line's `seq` (damage otherwise);
-  `wire.DefaultLimits().MaxLineBytes` is used.
-- m3 (damage found while reading). Accepted: rest of that file dropped with gaps from the damaged number, logged once, never handed
-  out; `TestRead_DamagedData`.
-- m4 (spurious state warning). Accepted as a stated residual (spec E3, agent area): the warning is once, after a start that ended
-  within its first seconds; changing the state file's first-start rule would weaken its check for other entries.
+- M1 (boot and backup state written before `Put`). Accepted as a stated residual, decided by the Product Manager (option b of the
+  escalation): spec E5 and NFR *Durability* name the window, the guarantee text stays unchanged, the agent area states the residual
+  with the follow-up issue (task 23), record 0123 names it under *Consequences*; the follow-up is opened before the pull request and
+  merged before the agent's first release. Fixing it here and a permanent exception lost.
+- M2 (memory bound at large caps). Accepted: file size, 64 GiB cap, 1,024-file limit (E19), append after restart, two sparse indexes;
+  AC17.
+- m1 (next after a kill). Accepted: every meta write carries next; `Open` includes the newest name number; AC14.
+- m2 (frame number, limit constant). Accepted: frame number equals the line's `seq`; `wire.DefaultLimits().MaxLineBytes`.
+- m3 (damage while reading). Accepted: `TestRead_DamagedData`.
+- m4 (spurious state warning). Accepted as a stated residual (spec E3); changing the first-start rule would weaken its check.
 - m5 (fsync outside the mutex). Accepted: *Durability*.
-- m6 (AC7 cost). Accepted and decided now: the scaled test always runs; the full-scale test runs with `VANDOX_LONG_TESTS=1`, once
-  by the Tester in step 5, its result in the log and in the agent area.
+- m6 (AC7 cost). Accepted: scaled always, full scale with `VANDOX_LONG_TESTS=1` once in step 5.
 
 ## Security review
 
-- B1 (unbounded file count). Resolved as M2: hard limit of 1,024 data files with drops (`reason` `file_limit`), appending after a
-  restart in the same boot, per-file memory under 256 bytes in the bound, `TestSpool_MemoryBound` and `BenchmarkOpen_ManyFiles` at
-  1,024 files left by simulated reboots.
-- B2 (values read from disk). Resolved: *Consistency rules* and the meta rules under *Approach*; a break is damage (E6, E20) and never
-  yields a number or a gap from a damaged value; E21 refuses a number at 2^63 - 1; tests `TestOpen_InconsistentValues`,
-  `TestOpen_MetaInconsistent`, `TestPut_SequenceExhausted`.
-- B3 (free-space underflow). Resolved: `avail >= need && avail-need >= minFree`; `TestPut_FreeSpaceReserve` has the case.
-- N1 (size accounting). Resolved: `need` counts headers, trailers and gaps; the bound counts the meta file and its temporary;
-  AC8 measures the files on disk.
-- N2 (descriptors, unclean path). Resolved: every operation through the directory descriptor or the file descriptor that passed
-  `fstat`; `Open` refuses an unclean `Dir`.
-- N3 (link text). Resolved: `Lstat` first (fact 14); AC13 checks the text.
-- N4 (meta names against E8). Resolved: the temporary is removed and the meta replaced only when absent or trusted; spec E8.
-- N5 (one fsync in flight). Resolved: *Durability*.
-- N6 (project.md areas). Resolved: task 21 covers areas 8, 9, 10 and 12; AC19 with `TestRun_SpoolHoldsNoSecret`.
-- R1 (round 2: `os.Root` ignores `O_NOFOLLOW` for in-directory links). Resolved: `os.Root` is forbidden; every open is
-  `syscall.Openat` with `O_NOFOLLOW|O_NONBLOCK|O_CLOEXEC`, every removal and rename `Unlinkat`/`Renameat` after an open-and-`Fstat`
-  check (facts 20–22). `Fstatat` with `AT_SYMLINK_NOFOLLOW` as asked is not exported by `syscall` on amd64; the open with `O_NOFOLLOW`
-  refuses the same entries, and a data file is removed only when its device and inode match the descriptor the spool trusted. While
-  re-checking the whole list of accepted forms: a hard link to `agent-state.json` passed every check of round 1 (regular, agent-owned,
-  0600) and would have been cut as damage; the trust check now requires one link (`Nlink` 1). `TestOpen_RefusedEntries` covers a
-  symbolic and a hard link to `agent-state.json`, a link outside, a FIFO, a directory, a group bit and another owner, for every
-  spool name, asserting the target's bytes, size and modification time unchanged and the link not followed or removed.
-- N7 (round 2: listing keeps every spool-named entry). Resolved: `Open` holds at most 1,026 data-file names (the highest numbers);
-  the rest are damage, never opened or deleted, one warning per `Open` (`err` `too many files`); `TestOpen_TooManyFiles`.
-- Note on M1 (round 2): a lost `boot` or `backup_run` record in the E5 window is a loss no gap records, against the guarantee *No
-  data gaps unless explicitly recorded*. Decided by the Lead in `decide` mode: escalated to the Product Manager (see the orchestrator's
-  log); the follow-up issue below is opened before the pull request either way.
+- B1 (file count), B2 (values read from disk), B3 (free-space underflow), N1 (size accounting), N2 (descriptors, unclean path), N3
+  (link text), N4 (meta names), N5 (one fsync), N6 (project.md areas): resolved under *Approach* and task 21, with the tests in
+  *Tests per criterion*.
+- R1 (round 2: `os.Root` follows in-directory links). Resolved: `os.Root` forbidden; `syscall.Openat` with
+  `O_NOFOLLOW|O_NONBLOCK|O_CLOEXEC`, `Unlinkat`/`Renameat` after an open-and-`Fstat` check, `Nlink` 1 (a hard link to
+  `agent-state.json` passed round 1's checks), removal only on matching device and inode (facts 20–22). `Fstatat` with
+  `AT_SYMLINK_NOFOLLOW` is not available from `syscall` on amd64 (fact 21): **Security confirms this substitution** in its diff review.
+- N7 (round 2: listing). Resolved: at most 1,026 data-file names held; `TestOpen_TooManyFiles`.
+- M1 note (round 2: silent loss against *No data gaps unless explicitly recorded*). Escalated; the Product Manager chose the stated
+  residual with the follow-up issue below (*Challenge* M1).
 
 ## Out of scope / follow-ups
 
-As in the spec. Follow-up issue for the orchestrator to open: "[Agent] Save boot and backup state only after the run's records are
-kept" — body: the `kernel` collector's boot change (`internal/kernevents/boot.go:62`) and the `backups` collector's run state
-(`internal/backups/backups.go:198,205,217`) are written to the state file inside `Collect`, before the spool accepted the run's records;
-a state save in between followed by a power loss loses the `boot` event or the `backup_run` record (spec E5 residual of #38). Commit
-both behind the scheduler's `Kept` observer as the `logs` collector does. Comments on existing issues: #41 (an agent's first sequence
+As in the spec. Follow-up issue the orchestrator opens before the pull request (final):
+
+- Title: `[Agent] Save boot and backup state only after the run's records are kept`
+- Body: The `kernel` collector's boot change (`internal/kernevents/boot.go:62`) and the `backups` collector's run state
+  (`internal/backups/backups.go:198,205,217`) are written to the state file inside `Collect`, before the spool accepted the run's
+  records. A state save in that moment followed by a power loss within the next sync interval loses the `boot` event or the
+  `backup_run` record while the state file already holds them, so they are never recorded again and no gap says so. #38 keeps this
+  as a stated residual (spec E5, record 0123, agent area); it breaks the guarantee *No data gaps unless explicitly recorded* and
+  must be closed before the agent's first release. Commit both state changes behind the scheduler's `Kept` observer, as the `logs`
+  collector does, with tests for a save that falls between the change and the hand-over. Label: `bug`; milestone: the agent's first
+  release. Comments on existing issues: #41 (an agent's first sequence
 number is large; a jump after a fresh start or a crash is reported as `sequence_missing`, numbers below the first never), #42
 (`Restart=on-failure` with `RestartSec=` and start limits that keep retrying a failed start).

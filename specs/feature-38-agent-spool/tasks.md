@@ -1,6 +1,6 @@
 # Tasks: Persistent on-disk spool (at least 7 days)
 
-Plan: [plan.md](plan.md) — Status: Draft (revised with plan.md, Revised (2))
+Plan: [plan.md](plan.md) — Status: Draft (revised with plan.md, Revised (3))
 
 Build order: the wire codec and the configuration first (the spool uses both), then the spool, then its consumers (self-metrics,
 state file, agent), then the documentation. Each group runs Skeleton (Dev), tests first (Tester), implementation (Dev).
@@ -29,7 +29,7 @@ state file, agent), then the documentation. Each group runs Skeleton (Dev), test
 | 20 | G7 | Example keys spool.max_size and spool.min_free with comments; the directory's contents and the agent's writes | deploy/agent/agent.yaml, deploy/agent/README.md | AC16, AC13 | 6, 18 | Dev | [ ] |
 | 21 | G7 | Security areas 8 (no token in the spool), 9 (files, guards, limits, functions), 10 (UnmarshalRecord, data file and meta readers with bounds), 12 (fixed log texts); Layout package list gains spool | .squad/project.md, .squad/stack.md | AC10, AC11, AC19 | 9 | Dev | [ ] |
 | 22 | G7 | Benchmark *Spool open* (full 2 GiB and 1,024 files) with host and figures | docs/BENCHMARKS.md | AC17 | 9 | Dev | [ ] |
-| 23 | G8 | Agent area: *Spool and sending* rules, the reference stream's measured bytes per day, the E3 and E5 residuals, and every section the plan names | docs/areas/agent.md | AC1–AC15, AC17, AC18 | 18 | Lead | [ ] |
+| 23 | G8 | Agent area: *Spool and sending* rules, the reference stream's measured bytes per day, the E3 residual, the E5 residual (boot and backup state saved before the hand-over) in *Kernel events* and *Backup runs* with the follow-up issue "[Agent] Save boot and backup state only after the run's records are kept" linked by number, and every section the plan names | docs/areas/agent.md | AC1–AC15, AC17, AC18 | 18 | Lead | [ ] |
 | 24 | G8 | Options spool.max_size and spool.min_free | docs/areas/configuration-and-secrets.md | AC16 | 6 | Lead | [ ] |
 | 25 | G8 | Metric agent_spool_age_seconds; *Batch identity* | docs/areas/wire-format.md | AC14, AC15 | 9 | Lead | [ ] |
 | 26 | G8 | Status line and the only-file-write statement, record 0123 linked | docs/ARCHITECTURE.md | AC1 | 18 | Lead | [ ] |

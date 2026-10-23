@@ -82,5 +82,7 @@ damage, never a number. Its size bound and free-space reserve drop the oldest se
 - A clock set back before a reinstall can make new numbers collide with stored ones (stated residual).
 - Without a sender the running agent fills its spool to the cap and then drops the oldest with gaps; it is not released before #39.
 - A power loss right after a state save that fell between a run's boot or backup change and its hand-over can lose that `boot` or
-  `backup_run` record (stated residual until the follow-up).
+  `backup_run` record. The Product Manager accepted this as a stated residual for this change, with the guarantee *No data gaps unless
+  explicitly recorded* left as it is, on the condition that the follow-up issue ("[Agent] Save boot and backup state only after the
+  run's records are kept") is merged before the agent's first release.
 - `spool.max_size` is at most 64 GiB.

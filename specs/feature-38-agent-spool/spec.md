@@ -1,7 +1,7 @@
 # Spec: Persistent on-disk spool (at least 7 days)
 
 Source: Issue #38
-Status: Approved by Lead
+Status: Approved by Product Manager
 
 ## Problem
 
@@ -88,7 +88,8 @@ of the records to the spool returned without an error.
   their run, before the run's records reach the spool; a state save in that moment followed by a power loss within the next second
   can lose the `boot` event or the `backup_run` record while the state already holds them, so they are not recorded again. The
   backend still sees the new boot in the batch headers' boot ID; the window is one sync interval after a save that fell between a
-  run's state change and its hand-over.
+  run's state change and its hand-over. The Product Manager accepted this residual for this feature; a follow-up issue closes it
+  before the agent's first release.
 - E6: Damaged spool data, found at start or while reading: a checksum that does not match, a file cut short, bytes that are not the
   spool's format, a spool file of a format version the agent does not know, or values that break the spool's consistency rules
   (a file name's number that is not the number of its first record; record numbers that do not increase strictly within and across
@@ -300,6 +301,8 @@ of the records to the spool returned without an error.
 - A maximum age of spooled data: records stay until acknowledged or dropped for size or disk space.
 - A gap pending from E9 when the agent stops while writes still fail is lost with the agent; the backend's time-gap detection (#41)
   covers that span.
+- Saving the boot and backup state only after the run's records are kept (the E5 residual): the follow-up issue "[Agent] Save boot
+  and backup state only after the run's records are kept", to be merged before the agent's first release.
 
 ## Open questions
 
@@ -380,3 +383,6 @@ of the records to the spool returned without an error.
   AC8, AC9, AC10, AC13, AC14 and AC17 cover the new cases; AC19 is new.
 - Security, plan review round 2 (answered in plan.md *Security review*, R1 and N7): E8 now names a link to a file inside the
   directory and a second hard link, NFR *Security* says the same, E19 bounds the data files a start holds, and AC10 covers both.
+- Product Manager, on the escalated plan review note M1: the boot and backup window of E5 stays a stated residual in this feature,
+  the guarantee *No data gaps unless explicitly recorded* keeps its text, and the follow-up issue closes the window before the agent's
+  first release (E5 and *Out of scope* say so).
