@@ -1,6 +1,6 @@
 # 0121: CAP_SYS_PTRACE alone cannot write another user's process memory through `/proc/<pid>/mem` or `/proc/<pid>/fd`: CAP_DAC_READ_SEARCH dropped, `process_madvise` denied, a file-mode residual accepted
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-23
 - **Area:** Agent
 - **Source:** Issue #271

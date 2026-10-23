@@ -415,9 +415,9 @@ stop the write vectors examined: (a) DAC plus the bounding set (the missing `CAP
 process for `process_madvise` (version-dependent, defence in depth). A compromised agent cannot use its capability to write into another
 user's process or file, or to run code as another user, except through a file whose own mode grants the agent's user, its groups (`adm`,
 `systemd-journal`) or others write (accepted residual, record 0121): it follows other processes' `/proc/<pid>/cwd` and `/proc/<pid>/root` links
-(and their `task/<tid>/` variants, the `root` link also into other mount namespaces such as a container's) and `/proc/<pid>/exe` (and
-`task/<tid>/exe`, which reaches that process's executable file, readable or writable as its own mode allows) to such files even below a closed
-directory that contains another process's working or root directory, a write there reaches another user's process memory where that process
+(and their `task/<tid>/` variants, the `root` link also into other mount namespaces such as a container's) to such files even below a closed
+directory that contains another process's working or root directory, and its `/proc/<pid>/exe` link (and `task/<tid>/exe`) to that process's
+executable file, readable or writable as its own mode allows, a write there reaches another user's process memory where that process
 maps the file `MAP_SHARED` and runs code as another user where that user executes the file or reads it as a script or configuration; it reads
 the ptrace-checked `/proc` files whose mode allows it, not another user's `mem` or `environ` and not `/etc/shadow`, and credentials it reads
 may still lead to root through other services (password reuse, Plesk or MariaDB administration)
