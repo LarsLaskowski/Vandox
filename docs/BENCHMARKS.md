@@ -373,3 +373,27 @@ case. The program that wrote the database and timed the reads is not kept in the
 
 The reads are far below the 5 seconds. The Debug build and the development host make the figure an order of magnitude, not a value for the
 reference host; the counts of the tallies are the slowest read because they group every mark of the agent. The reference host is not measured.
+
+## Spool open
+
+Criterion (issue #38, NFR *Start-up time* of the agent spool): opening a spool filled to the default cap of 2 GiB, and one that holds 1,024 files,
+each takes at most **5 seconds** on the development host. Opening lists the directory and reads every data file's header and summary, not its records.
+
+### Procedure
+
+Two Go benchmarks in `internal/spool/open_test.go`: `BenchmarkOpen_Full` fills a spool to about 1.94 GiB under a cap of 2 GiB and times `Open`;
+`BenchmarkOpen_ManyFiles` times `Open` of a spool that holds 1,024 files. Each run of the timed loop opens the existing directory afresh.
+
+```bash
+go test ./internal/spool -run '^$' -bench 'BenchmarkOpen_(Full|ManyFiles)' -benchtime 3x
+```
+
+### Results
+
+| Host | Go | CPU | Date | Case | Time per open |
+| ---- | -- | --- | ---- | ---- | ------------: |
+| development host (4 vCPU, sandbox) | 1.27.0 | Intel Xeon 2.10 GHz | 2026-10-23 | `BenchmarkOpen_Full` (about 1.94 GiB in a cap of 2 GiB) | **26.2 ms** |
+| development host (4 vCPU, sandbox) | 1.27.0 | Intel Xeon 2.10 GHz | 2026-10-23 | `BenchmarkOpen_ManyFiles` (1,024 files) | **15.9 ms** |
+
+Both are far below the 5 seconds. Each figure is the mean of three opens in one run (`-benchtime 3x`), not a median of several runs. The file system
+of the sandbox is not the data volume of a monitored server; the reference host of the agent is not measured.

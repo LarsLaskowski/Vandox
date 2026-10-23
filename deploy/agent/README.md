@@ -164,6 +164,11 @@ neither group, and neither do the connection, systemd and MariaDB collectors.
   it starts after `systemd-journal-flush.service`, so the persistent journal is in place when the `kernel` collector first reads it. A server
   without a persistent journal is read from `/run/log/journal`; if neither can be read, the collector logs
   `kernel messages not readable` once, records no gap and resumes at the saved position once the journal is readable again.
+- **The spool** lives in `spool.directory` too and holds the records the backend has not yet acknowledged. The agent writes segment
+  files `segment-<number>.spool` (mode 0600) and the bookkeeping file `spool-meta.json` (mode 0600, written through `spool-meta.json.tmp`:
+  the agent ID, the boot ID and the acknowledged ranges), and deletes a segment file once the backend has acknowledged all its records or
+  when the oldest data has to give way to new records (`spool.max_size`, `spool.min_free`). Other entries in the directory,
+  `agent-state.json` among them, are never read, changed or deleted by the spool. No spool file holds the agent token.
 - **The state file** `agent-state.json` lives in `spool.directory` and holds the boot, the position in the journal, the open backup run and the
   positions of the `logs` collector (a position per journal sequence number ID, at most 256, and per configured file, at most 16, with the
   SHA-256 of its path instead of the path; up to 64 KiB in all), so a restart neither repeats nor loses a kill or a log line, and a backup
