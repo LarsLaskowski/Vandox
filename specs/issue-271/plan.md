@@ -245,3 +245,16 @@ decision.
 - The agent systemd unit itself (#42): this issue only clears the dependency; the unit is added there and must
   keep `CAP_DAC_OVERRIDE`, write-side DAC capabilities and `CAP_SYS_NICE` out of the bounding set, deny
   `process_madvise` by name with the other five calls, and check fact 14 on the server (0121).
+
+## Challenge notes
+
+Minor objection of the Devil's Advocate (verbatim):
+
+1. Record 0121 calls itself a supersession, while the plan and the index call it an amendment. The record's header says `**Supersedes:** 0030 (amends it: … 0030 is not edited)`. The plan (*Decision records*: "amends released record 0030; 0030 is not edited") and the index row in `docs/decisions/README.md` (line 150, "(amends 0030)") both say amend. Meanwhile 0030 stays `Accepted` in the index (line 80). A `Supersedes:` field implies 0030 becomes `Superseded`, which the plan does not intend, since 0030's guarantee is upheld and only its reasoning is completed. Instruction for the Lead: replace the `Supersedes:` field in record 0121 with the field the decision-record template uses for an amendment (or a plain `Amends: 0030` line), so that 0030's status stays `Accepted` and the header matches the plan and the index. If the template has no such field, say so in the record's *Context* and leave 0030's status unchanged.
+
+## Security notes
+
+Non-blocking findings of Security's plan review (verbatim):
+
+- N1, fact 10 and the plan's Security review section: the stated reason `pm2.c` missed the EPERM is wrong. The CAP_SYS_NICE check is not a cross-user check; it applies to any process other than the caller. A same-user control (uid 65534 against its own `sleep`, no capabilities) also gives EPERM on COLD, PAGEOUT and WILLNEED, and EINVAL on DONTNEED and FREE. `pm2.c` simply ran with CAP_SYS_NICE (as root). Suggested wording: "pm2.c ran with CAP_SYS_NICE, so it did not exercise the CAP_SYS_NICE requirement". Record 0121 does not repeat the wrong reason, so it needs no change for this. Also: the agent's real set, `CAP_SYS_PTRACE` + `CAP_DAC_READ_SEARCH` (CapEff 0x80004), behaves as `CAP_SYS_PTRACE` alone (EPERM / EINVAL); worth adding to fact 10.
+- N2, record 0121 Context ("no single mechanism stops every vector; three distinct barriers do") and plan line 36: this reads as a completeness claim again. Suggest "the vectors examined" and, in the Agent area's vector table, the other owner-only writable `/proc/<pid>/` files (for example `clear_refs`) under barrier (a). DAC covers them the same way as `mem`. Wording fix only.
