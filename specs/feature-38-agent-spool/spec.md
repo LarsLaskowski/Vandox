@@ -1,7 +1,7 @@
 # Spec: Persistent on-disk spool (at least 7 days)
 
 Source: Issue #38
-Status: Draft
+Status: Approved by Lead
 
 ## Problem
 
@@ -58,7 +58,8 @@ of the records to the spool returned without an error.
 ## Errors and edge cases
 
 - E1: A `spool.max_size` or `spool.min_free` value that breaks its rule (`1024`, `1 GiB`, `1.5GiB`, `1GB`, `-1GiB`, `32MiB` for the
-  size, `2048GiB`, a list, `~`): the agent does not start; the error reads `config: <file>:<line>: spool.max_size: must be a whole
+  size, `2048GiB`; a list and a null value such as `~` are refused by the strict decoder as for every option, with `invalid value,
+  want a string` and `has no value`): the agent does not start; the error reads `config: <file>:<line>: spool.max_size: must be a whole
   number of MiB or GiB from 64MiB to 1024GiB, such as 512MiB or 2GiB` (for `spool.min_free`: `... from 0MiB to 1024GiB, such as
   0MiB or 1GiB`) and never contains the value; exit code 1, as for every configuration error.
 - E2: At start the spool directory is missing, is not a directory, is itself a symbolic link (the last element of
@@ -324,3 +325,5 @@ of the records to the spool returned without an error.
 - m5 (union time spans). Accepted as a stated residual in E10: gaps are split per run of dropped numbers, so the sequence range is
   exact, while the time span may include moments of which other records were kept; writing one gap per contiguous time span is
   not possible, because capture times of different collectors interleave.
+- Lead, while planning: E1 claimed the size rule's text also for a list and for `~`; the strict decoder (`internal/config/decode.go`
+  `setLeaf`) answers those before any option rule, with `invalid value, want a string` and `has no value`. E1 now says so.
