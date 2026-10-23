@@ -1,7 +1,7 @@
 # Spec: Continuous log shipping in the agent
 
 Source: Issue #37
-Status: Draft
+Status: Draft (scope of the file formats settled by the Product Manager: option A)
 
 ## Problem
 
@@ -211,8 +211,8 @@ What happens today, checked against the code:
   fields of the minimal parsing; `event` is not among them). Live data therefore carries no `mariadb.*`, `postfix.*` or
   `dovecot.*` events until the backend or a later agent change classifies them.
 - Formats other than the journal and `syslog` files (the Plesk panel, nginx, `sw-cp-server`, Apache and MariaDB error logs,
-  Dovecot's own log file) — pending the Product Manager's answer to the first open question; this spec is written for the
-  recommended option.
+  Dovecot's own log file) — the Product Manager chose option A (first open question); the Plesk panel, nginx,
+  `sw-cp-server` and Apache error logs follow in a separate issue.
 - Reading compressed rotated files (`.gz`) and files of other directories than the configured file's after a rotation.
 - Storing and sending the records: the spool (#38), the sender (#39) and the ingest API (#40).
 - Shipping history from before the first start: `vandoxd import`.
@@ -230,7 +230,8 @@ What happens today, checked against the code:
   rotation and filters, and `format` is an option so later formats add to it); (B) also the four error logs of the import's
   *Plesk and web server error logs* family, with records equal to the import's for the same line; (C) also a `plain` format
   that ships every line whole with the time it was read, so error logs arrive now but the web signatures do not match them.
-  Answered: not yet — escalated to the Product Manager; the spec is written for option A.
+  Answered: option A, by the Product Manager — the journal and `syslog`-format files only; the error log formats
+  (Plesk panel, nginx, `sw-cp-server`, Apache) follow in a separate issue.
 - Does "after an agent restart, without loss or duplicates" include a crash or a power loss? Answered: a restart is a stop
   and a start of the service (S4, AC4), which must be exact. After an unclean end the agent cannot know which read lines
   reached the sink after its last save, so it re-reads them: duplicates bounded to 10 seconds, never a loss (E1, AC5). The
