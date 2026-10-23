@@ -903,6 +903,16 @@ func TestFiles_ReadErrorOfTheKeptFileShipsNothingAndRecordsNoGap(t *testing.T) {
 	if len(recs) != 0 {
 		t.Errorf("runs on a file that cannot be read returned %v and %d gaps, want nothing", head(messages(recs)), len(gapsOf(recs)))
 	}
+	requireReadFailedWarning(t, w)
+}
+
+// requireReadFailedWarning checks that the collector warned exactly once that the file 0 could not be read.
+func requireReadFailedWarning(t *testing.T, w *world) {
+	t.Helper()
+	logs := w.logsOf("log file not readable")
+	if len(logs) != 1 || logs[0].attrs["file"] != "0" || logs[0].attrs["err"] != "read failed" {
+		t.Errorf("warnings %q = %+v, want exactly one with file 0 and err %q", "log file not readable", logs, "read failed")
+	}
 }
 
 func TestFiles_ReadErrorOfTheRenamedFileKeepsTheNewFileWaiting(t *testing.T) {
@@ -924,6 +934,7 @@ func TestFiles_ReadErrorOfTheRenamedFileKeepsTheNewFileWaiting(t *testing.T) {
 	if len(recs) != 0 {
 		t.Errorf("the run returned %v and %d gaps, want nothing", head(messages(recs)), len(gapsOf(recs)))
 	}
+	requireReadFailedWarning(t, w)
 }
 
 func TestFiles_CanceledRunReadsNothingAndLosesNothing(t *testing.T) {
