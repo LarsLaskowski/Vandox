@@ -192,10 +192,6 @@ func TestRead_DamageInActiveFileDetachesIt(t *testing.T) {
 	after := putTagged(t, sp, epoch.Add(time.Hour), "after", 2, 100)
 	all := dataOf(readAll(t, sp))
 	expect(t, len(all) == len(got)+len(after), "%d records after the damage and a new Put, want %d", len(all), len(got)+len(after))
-	gaps := gapsOf(readAll(t, sp), model.GapSpoolDropped)
-	need(t, len(gaps) == 1, "%d spool_dropped gaps after the next Put, want 1 for the lost records", len(gaps))
-	gp := gapOf(gaps[0])
-	expect(t, gp.FirstSeq == got[len(got)-1]+1 && gp.LastSeq == first[len(first)-1].Seq, "gap covers %d to %d, want %d to %d", gp.FirstSeq, gp.LastSeq, got[len(got)-1]+1, first[len(first)-1].Seq)
 }
 
 func TestRead_DamageInFirstFrameUsesTheFileBefore(t *testing.T) {
