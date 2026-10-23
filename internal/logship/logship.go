@@ -17,7 +17,6 @@ import (
 	"github.com/LarsLaskowski/Vandox/internal/journal"
 	"github.com/LarsLaskowski/Vandox/internal/model"
 	"github.com/LarsLaskowski/Vandox/internal/scheduler"
-	"github.com/LarsLaskowski/Vandox/internal/syslogline"
 	"github.com/LarsLaskowski/Vandox/internal/zstdfield"
 )
 
@@ -108,10 +107,9 @@ type Logs struct {
 	store  *agentstate.Store
 	log    *slog.Logger
 	filter *filter
-	dec    *zstdfield.Decoder
+	dec    *countingDecoder
 	entry  journal.Entry
 	buf    []byte
-	clocks []*syslogline.Clock
 
 	inited    bool
 	committed *state
@@ -122,7 +120,6 @@ type Logs struct {
 	saved     *agentstate.LogPositions
 	turn      int
 	fail      failure
-	refused   map[string]time.Time
 
 	journalBad bool
 	fileBad    []string
@@ -156,16 +153,26 @@ func New(src Sources, cfg Config, store *agentstate.Store, log *slog.Logger) (*L
 		store:   store,
 		log:     log,
 		filter:  newFilter(cfg),
-		dec:     dec,
-		clocks:  make([]*syslogline.Clock, len(cfg.Files)),
+		dec:     &countingDecoder{d: dec},
 		fileBad: make([]string, len(cfg.Files)),
-		refused: map[string]time.Time{},
 	}, nil
 }
 
 // Name returns the collector's name.
 func (l *Logs) Name() string {
 	return Name
+}
+
+// countingDecoder counts the calls of the decoder, so that the run can look at the clock after an entry whose reading decoded.
+type countingDecoder struct {
+	d     *zstdfield.Decoder
+	calls int
+}
+
+// Decompress decodes a frame through the decoder.
+func (c *countingDecoder) Decompress(dst, src []byte, limit int) ([]byte, error) {
+	c.calls++
+	return c.d.Decompress(dst, src, limit)
 }
 
 // readOptions returns the limits of reading journal entries.

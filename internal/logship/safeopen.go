@@ -10,7 +10,8 @@ import (
 
 const (
 	// oPath is the O_PATH flag of Linux, which the standard library does not name: the descriptor only names the directory, so that a
-	// directory without read permission can still be passed.
+	// directory without read permission can still be passed. It is the value of golang.org/x/sys v0.48.0 on every supported Linux
+	// architecture; only linux/amd64 is built (ci.yml, release.yml).
 	oPath = 0x200000
 
 	// maxDirEntries bounds the names read from the directory of a log file when its rotated file is looked for.

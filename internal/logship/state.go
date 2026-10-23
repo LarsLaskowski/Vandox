@@ -5,6 +5,8 @@ import (
 	"os"
 	"slices"
 	"time"
+
+	"github.com/LarsLaskowski/Vandox/internal/syslogline"
 )
 
 // jpos is the position in the files of one journal sequence number ID: the last entry read and the time of the last readable entry.
@@ -49,6 +51,8 @@ type fileState struct {
 	// cur is the descriptor of the file kept across runs, nil after a restart until the file is opened.
 	cur     *os.File
 	renamed *renamedFile
+	// clock resolves the year-less times of the file; it keeps the previous instant.
+	clock *syslogline.Clock
 }
 
 // state is what the collector knows about its sources: the committed state, or the fork a run works on.
@@ -57,11 +61,16 @@ type state struct {
 	files   []fileState
 	// last is the latest time of an entry or line the run read, the end of a span that is given up.
 	last time.Time
+	// refused holds the journal files the reader refuses, by name, with the end of the last gap recorded for them.
+	refused map[string]time.Time
 }
 
 // clone returns a copy a run may change. The descriptors are shared; the files of the copy that are not in the original are the run's.
 func (s *state) clone() *state {
-	c := &state{journal: make(map[[16]byte]*jpos, len(s.journal)), files: slices.Clone(s.files)}
+	c := &state{journal: make(map[[16]byte]*jpos, len(s.journal)), files: slices.Clone(s.files), refused: maps.Clone(s.refused)}
+	if c.refused == nil {
+		c.refused = map[string]time.Time{}
+	}
 	for id, p := range s.journal {
 		cp := *p
 		c.journal[id] = &cp
@@ -69,6 +78,10 @@ func (s *state) clone() *state {
 	for i := range c.files {
 		f := &c.files[i]
 		f.line.held = slices.Clone(f.line.held)
+		if f.clock != nil {
+			k := *f.clock
+			f.clock = &k
+		}
 		if f.renamed != nil {
 			r := *f.renamed
 			r.line.held = slices.Clone(r.line.held)

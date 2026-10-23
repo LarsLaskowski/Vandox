@@ -213,8 +213,8 @@ func (r *run) scan(dir fs.FS, names []string) ([]fileInfo, bool) {
 // refuse records the gap for a file the reader cannot read: one the first time this process meets it, and for the online file another
 // one for every refusedGapEvery after the last, so that a journal the reader cannot read stays covered.
 func (r *run) refuse(f fileInfo) {
-	l := r.l
-	last, met := l.refused[f.name]
+	refused := r.st.refused
+	last, met := refused[f.name]
 	from := r.newest
 	if from.IsZero() {
 		from = r.start
@@ -227,8 +227,8 @@ func (r *run) refuse(f fileInfo) {
 	default:
 		return
 	}
-	if met || len(l.refused) < maxTracked {
-		l.refused[f.name] = r.start
+	if met || len(refused) < maxTracked {
+		refused[f.name] = r.start
 	}
 }
 
@@ -461,6 +461,7 @@ func (fr *fileReader) read() bool {
 			return false
 		}
 		var ok bool
+		before := r.l.dec.calls
 		err := fr.do(func() error {
 			var err error
 			ok, err = fr.o.f.NextWith(&c, wantFields, e, opt)
@@ -476,6 +477,9 @@ func (fr *fileReader) read() bool {
 			return true
 		}
 		fr.entry(e)
+		if r.l.dec.calls > before && !r.stopped {
+			r.stopped = r.timeUp() // decoding costs time: look at the clock after every entry that needed it
+		}
 	}
 }
 

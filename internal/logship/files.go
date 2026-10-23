@@ -24,14 +24,15 @@ const (
 // emitLine hands one line of a file over; it returns true when the run must stop.
 type emitLine func(line []byte, cut bool, begin int64) bool
 
-// clockOf returns the clock of file i, which keeps the previous instant across runs, set to the zone of this run.
-func (l *Logs) clockOf(i int, loc *time.Location) *syslogline.Clock {
-	if l.clocks[i] == nil {
-		l.clocks[i] = syslogline.NewClock(loc)
+// clockOf returns the clock of the file, which keeps the previous instant across runs, set to the zone of this run. It belongs to the
+// state a run works on, so a run that is dropped never moves the instant the re-read starts from.
+func (st *fileState) clockOf(loc *time.Location) *syslogline.Clock {
+	if st.clock == nil {
+		st.clock = syslogline.NewClock(loc)
 	} else {
-		l.clocks[i].SetZone(loc)
+		st.clock.SetZone(loc)
 	}
-	return l.clocks[i]
+	return st.clock
 }
 
 // readBuffer returns the buffer files are read through.
@@ -95,7 +96,7 @@ func (r *run) readFile(i int) {
 		r.fproblems[i] = reasonReadFailed
 		return
 	}
-	fr := &filesRun{r: r, i: i, st: st, spec: r.l.cfg.Files[i], clock: r.l.clockOf(i, loc), size: size}
+	fr := &filesRun{r: r, i: i, st: st, spec: r.l.cfg.Files[i], clock: st.clockOf(loc), size: size}
 	if !st.have {
 		fromStart := st.waiting
 		fr.begin(f, id, fromStart)
