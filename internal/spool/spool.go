@@ -5,7 +5,11 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"math"
+	"math/bits"
 	"os"
+	"sync"
+	"syscall"
 	"time"
 
 	"github.com/LarsLaskowski/Vandox/internal/model"
@@ -17,11 +21,24 @@ const MaxAckRanges = 64
 // maxFiles is the largest number of segment files the spool lists.
 const maxFiles = 1024
 
+const (
+	// minFileBytes and maxFileBytes bound the size at which a data file is sealed.
+	minFileBytes = 1 << 20
+	maxFileBytes = 64 << 20
+	// fileDivisor divides spool.max_size into the size of a data file.
+	fileDivisor = 128
+	// defaultSyncInterval is the interval between syncs when none is configured.
+	defaultSyncInterval = time.Second
+)
+
 // ErrTooManyRanges reports that more than MaxAckRanges acknowledged ranges would be held.
 var ErrTooManyRanges = errors.New("spool: more than 64 acknowledged ranges")
 
-// errNotImplemented is returned by every stub until the spool is implemented.
-var errNotImplemented = errors.New("not implemented")
+var (
+	errClosed    = errors.New("spool: closed")
+	errExhausted = errors.New("spool: sequence numbers exhausted")
+	errNoRoom    = errors.New("spool: no room for the records")
+)
 
 // writeFile is the seam the tests replace to make writes fail or stop short.
 var writeFile = func(f *os.File, b []byte, off int64) (int, error) {
@@ -60,59 +77,145 @@ type Batch struct {
 	Records []model.Record
 }
 
+// pendingGap is a gap record the spool owes the data: it is written with the next hand-over.
+type pendingGap struct {
+	first, last uint64
+	from, to    time.Time
+	cause       model.GapCause
+	// drop marks a gap made by dropping records in the current hand-over, which a later drop may extend.
+	drop bool
+}
+
+// refusedStats are the capture times of the records refused in a write failure episode.
+type refusedStats struct {
+	count            int
+	earliest, latest time.Time
+}
+
 // Spool is the on-disk queue of records.
 type Spool struct {
 	opts Options
 	log  *slog.Logger
-	// limit is the largest number of segment files listed.
-	limit int
-	// ext is the extension of segment files.
-	ext string
+	dir  *dirFS
+	// ident is the capture context of the records written by this process; idents are the contexts found at Open.
+	ident   identity
+	idents  []*identity
+	fileMax int64
+
+	mu sync.Mutex
+	// files are the usable data files, oldest first; act is the one being appended to, if any.
+	files []*segFile
+	act   *segFile
+	actF  *os.File
+	// next is the number of the next record.
+	next  uint64
+	acked []ackRange
+	// pend are gaps waiting for the next hand-over; putPend is where the drops of the current hand-over start.
+	pend    []pendingGap
+	putPend int
+	// failing is set during a write failure episode; refused holds what the episode refused.
+	failing bool
+	refused refusedStats
+	// dropping is set during a drop episode; droppedTotal counts its records.
+	dropping     bool
+	droppedTotal int64
+	// healTail is set when the active file could not be cut back to its last good frame.
+	healTail bool
+
+	metaF    *os.File
+	metaSize int64
+	metaNeed bool
+	dirNeed  bool
+
+	// gen counts the writes; syncedGen is the count a finished sync covered.
+	gen, syncedGen uint64
+	run            *syncRun
+	stop           context.CancelFunc
+	loopDone       chan struct{}
+	closing        bool
+	closed         bool
+
+	reader  frameReader
+	cursors [2]cursor
+	indexes [2]*fileIndex
+	stamp   uint64
+	oldest  oldestCache
 }
 
-// Open opens the spool in opts.Dir and recovers its state.
-func Open(opts Options, log *slog.Logger) (*Spool, error) {
-	_ = &Spool{opts: opts, log: log, limit: maxFiles, ext: segmentExt}
+// now returns the current time.
+func (s *Spool) now() time.Time {
+	if s.opts.Now != nil {
+		return s.opts.Now()
+	}
 
-	return nil, errNotImplemented
-}
-
-// Put appends records to the spool.
-func (s *Spool) Put(_ context.Context, _ []model.Record) error {
-	return errNotImplemented
-}
-
-// Read returns the records after the sequence number after, bounded by maxRecords and maxBytes.
-func (s *Spool) Read(_ context.Context, _ uint64, _ int, _ int64) (Batch, error) {
-	return Batch{}, errNotImplemented
-}
-
-// Ack acknowledges the sequence numbers first to last.
-func (s *Spool) Ack(_ context.Context, _, _ uint64) error {
-	return errNotImplemented
+	return time.Now()
 }
 
 // LastSeq returns the sequence number of the newest record.
 func (s *Spool) LastSeq() uint64 {
-	return 0
-}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.next == 0 {
+		return 0
+	}
 
-// Sync flushes the spool's files to stable storage.
-func (s *Spool) Sync(_ context.Context) error {
-	return errNotImplemented
-}
-
-// Close syncs and closes the spool.
-func (s *Spool) Close(_ context.Context) error {
-	return errNotImplemented
+	return s.next - 1
 }
 
 // SpoolBytes returns the size of all spool files.
-func (s *Spool) SpoolBytes(_ context.Context) (int64, error) {
-	return 0, errNotImplemented
+func (s *Spool) SpoolBytes(ctx context.Context) (int64, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return s.diskUsed() + s.metaSize, nil
 }
 
-// OldestCapture returns the capture time of the oldest unacknowledged record; the bool is false when there is none.
-func (s *Spool) OldestCapture(_ context.Context) (time.Time, bool, error) {
-	return time.Time{}, false, errNotImplemented
+// diskUsed returns the size of the data files.
+func (s *Spool) diskUsed() int64 {
+	var sum int64
+	for _, f := range s.files {
+		sum += f.size
+	}
+
+	return sum
+}
+
+// available returns the bytes available to the spool on its file system.
+func (s *Spool) available() (uint64, error) {
+	if s.opts.Available != nil {
+		return s.opts.Available(s.opts.Dir)
+	}
+
+	return statAvailable(s.opts.Dir)
+}
+
+// statAvailable returns f_bavail times f_bsize of the file system holding dir.
+func statAvailable(dir string) (uint64, error) {
+	var st syscall.Statfs_t
+	if err := syscall.Statfs(dir, &st); err != nil {
+		return 0, err
+	}
+	if st.Bsize <= 0 {
+		return 0, nil
+	}
+	hi, lo := bits.Mul64(st.Bavail, uint64(st.Bsize))
+	if hi != 0 {
+		return math.MaxUint64, nil
+	}
+
+	return lo, nil
+}
+
+// fitsDisk reports whether a write of need bytes passes the free-space check: the space is at least the write and what
+// remains is at least the reserve, compared without overflow.
+func fitsDisk(avail uint64, need, reserve int64) bool {
+	if need < 0 || reserve < 0 {
+		return false
+	}
+	n := uint64(need)
+
+	return avail >= n && avail-n >= uint64(reserve)
 }
