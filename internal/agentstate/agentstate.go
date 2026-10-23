@@ -51,6 +51,7 @@ const (
 	msgUnavailable = "agent state not available"
 	msgNotSaved    = "agent state not saved"
 	reasonRunning  = "agentstate: save still running"
+	reasonDurable  = "agentstate: save: spool not durable"
 
 	// maxHeadLen is the most bytes the head hash of a file position covers.
 	maxHeadLen = 256
@@ -62,6 +63,9 @@ var (
 
 	// errSaveRunning is the error of a Flush that gave up waiting for a save that did not end.
 	errSaveRunning = errors.New(reasonRunning)
+
+	// errNotDurable is the error of a save skipped because the spool barrier failed; it never carries the barrier's own text.
+	errNotDurable = errors.New(reasonDurable)
 
 	validDigest = regexp.MustCompile(`^[0-9a-f]{64}$`)
 )
@@ -316,7 +320,10 @@ func (s *Store) Flush(now time.Time) error {
 	st, seq := copyState(s.state), s.seq
 	s.mu.Unlock()
 
-	err := s.saveLocked(st)
+	ctx, cancel := context.WithTimeout(context.Background(), flushWait)
+	defer cancel()
+
+	err := s.saveLocked(ctx, st)
 	s.finishSave(now, seq, err)
 	if err != nil {
 		return errors.New(errText(err))
@@ -325,8 +332,18 @@ func (s *Store) Flush(now time.Time) error {
 	return nil
 }
 
-// saveLocked encodes and writes st; the caller holds the write lock.
-func (s *Store) saveLocked(st State) error {
+// saveLocked calls the barrier, then encodes and writes st; a failing barrier skips the write. The caller holds the write lock.
+func (s *Store) saveLocked(ctx context.Context, st State) error {
+	s.mu.Lock()
+	barrier := s.barrier
+	s.mu.Unlock()
+
+	if barrier != nil {
+		if err := barrier(ctx); err != nil {
+			return errNotDurable
+		}
+	}
+
 	data, err := encode(st)
 	if err == nil {
 		err = write(s.dir, data)
@@ -680,6 +697,10 @@ func writeSync(f *os.File, data []byte) error {
 
 // errText returns the text of the OS error in err without a path.
 func errText(err error) string {
+	if errors.Is(err, errNotDurable) {
+		return reasonDurable
+	}
+
 	var errno syscall.Errno
 	if errors.As(err, &errno) {
 		return "agentstate: save: " + errno.Error()
@@ -725,7 +746,7 @@ func (v *Saver) Collect(ctx context.Context, run scheduler.Run) ([]model.Record,
 		return nil, nil
 	}
 
-	s.finishSave(run.Start, seq, s.saveLocked(st))
+	s.finishSave(run.Start, seq, s.saveLocked(ctx, st))
 
 	return nil, nil
 }
