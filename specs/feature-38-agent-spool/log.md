@@ -37,3 +37,4 @@ are quoted in full.
 | 2026-10-23 21:34 | 6 Fix round G3 (read-time gap) | squad-dev | damageRunEnd returns f.last, readDamageSpan uses f.latest for unsealed last file; spool tests green under -race (88 s), analyzer 0 (sonnet/medium · usage pending) |
 | 2026-10-23 21:35 | 4 Skeleton G4 | squad-dev | SpoolAgeReporter, Sources.SpoolAge, MetricSpoolAge in selfstats; not a throwing stub (no body in plan); build/analyzer clean (sonnet/medium · 61,165 tokens · 7 tool uses · 45 s) |
 | 2026-10-23 21:36 | 5 Tests first G4 | squad-tester | 4 tests in selfstats_test.go; fail on skeleton except the nil guard test (deferred in nature); order bytes then age assumed; error prefix 'selfstats: spool age: ' assumed (sonnet/medium · 67,661 tokens · 7 tool uses · 66 s) |
+| 2026-10-23 21:37 | 6 Implement G4 | squad-dev | age branch in appendProviders; 4 SpoolAge tests green; selfstats coverage 97.1%; analyzer 0 (sonnet/medium · usage pending) |
