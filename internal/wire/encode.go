@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"time"
@@ -90,4 +91,10 @@ func CheckRecord(r *model.Record) (int, error) {
 		return 0, &RecordSizeError{Index: -1, Size: len(line), Limit: limit}
 	}
 	return len(line) + 1, nil
+}
+
+// MarshalRecord validates r like CheckRecord and returns its wire line without the trailing '\n'.
+// A record that fails validation or exceeds the line limit yields the same error CheckRecord returns.
+func MarshalRecord(r *model.Record) ([]byte, error) {
+	return nil, errors.New("not implemented")
 }

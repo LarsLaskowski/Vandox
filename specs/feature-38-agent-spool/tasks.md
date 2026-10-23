@@ -7,7 +7,7 @@ state file, agent), then the documentation. Each group runs Skeleton (Dev), test
 
 | # | Group | Task | Files | Criteria | Depends on | Owner | Done |
 | - | ----- | ---- | ----- | -------- | ---------- | ----- | ---- |
-| 1 | G1 | Skeleton: MarshalRecord, UnmarshalRecord | internal/wire/encode.go, internal/wire/decode.go | AC1 | — | Dev | [ ] |
+| 1 | G1 | Skeleton: MarshalRecord, UnmarshalRecord | internal/wire/encode.go, internal/wire/decode.go | AC1 | — | Dev | [x] |
 | 2 | G1 | Tests: round trip of every record kind, damaged and oversized lines refused | internal/wire/encode_test.go | AC1 | 1 | Tester | [ ] |
 | 3 | G1 | Implement the single-line codec on the existing marshalLine, keyCheck and decodeRecord | internal/wire/encode.go, internal/wire/decode.go | AC1 | 2 | Dev | [ ] |
 | 4 | G2 | Skeleton: Spool fields MaxSize, MinFree, MaxBytes, MinFreeBytes; parseSize | internal/config/agent.go, internal/config/config.go | AC16 | — | Dev | [ ] |

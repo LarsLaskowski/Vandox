@@ -528,3 +528,9 @@ func (d *Decoder) decodeRecord(line []byte) (model.Record, error) {
 
 // Close closes the gzip reader; it does not close the underlying reader.
 func (d *Decoder) Close() error { return d.zr.Close() }
+
+// UnmarshalRecord decodes one wire line (without the trailing '\n') into a record, applying the decoder's
+// line rules. The origin and receive time of the returned record are zero.
+func UnmarshalRecord(line []byte) (model.Record, error) {
+	return model.Record{}, errors.New("not implemented")
+}
