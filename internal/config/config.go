@@ -149,3 +149,12 @@ func checkLogLevel(file string, lines map[string]int, key, value string) error {
 	}
 	return keyError(file, lines, key, "must be one of debug, info, warn, error")
 }
+
+// parseSize converts a size such as 512MiB or 2GiB, a whole number of MiB or GiB, to bytes. The skeleton does
+// not implement it yet and reports every text as refused.
+//
+//nolint:unused // the skeleton; validate calls it once implemented
+func parseSize(text string) (int64, bool) {
+	_ = text
+	return 0, false
+}

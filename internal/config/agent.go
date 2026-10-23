@@ -41,6 +41,14 @@ type BackendTarget struct {
 // Spool configures the local spool.
 type Spool struct {
 	Directory string `yaml:"directory"`
+	// MaxSize is the size cap of the spool as written, such as 2GiB.
+	MaxSize string `yaml:"max_size"`
+	// MinFree is the free space that stays available on the spool's file system as written, such as 1GiB.
+	MinFree string `yaml:"min_free"`
+	// MaxBytes is MaxSize in bytes; it is set by validation.
+	MaxBytes int64 `yaml:"-"`
+	// MinFreeBytes is MinFree in bytes; it is set by validation.
+	MinFreeBytes int64 `yaml:"-"`
 }
 
 // Log configures logging.
@@ -304,8 +312,14 @@ type AgentSecrets struct {
 // DefaultAgent returns the agent configuration with every optional key at its default.
 func DefaultAgent() Agent {
 	return Agent{
-		Spool: Spool{Directory: "/var/lib/vandox/spool"},
-		Log:   Log{Level: "info"},
+		Spool: Spool{
+			Directory:    "/var/lib/vandox/spool",
+			MaxSize:      "2GiB",
+			MinFree:      "1GiB",
+			MaxBytes:     2 << 30,
+			MinFreeBytes: 1 << 30,
+		},
+		Log: Log{Level: "info"},
 
 		Filesystem: Filesystem{MountPoints: []string{"/"}},
 		Backups:    Backups{Processes: []BackupRule{{Command: "pzstd"}}},
@@ -316,12 +330,12 @@ func DefaultAgent() Agent {
 	}
 }
 
-// AgentKeys returns every option key path in file order: agent_id, backend.url, spool.directory, log.level,
+// AgentKeys returns every option key path in file order: agent_id, backend.url, spool.directory, spool.max_size, spool.min_free, log.level,
 // filesystem.mount_points, processes.programs, services.units, mariadb.enabled, mariadb.socket, backups.processes and the log_shipping
 // options journal, min_priority, files and drop.
 func AgentKeys() []string {
 	return []string{
-		keyAgentID, keyBackendURL, "spool.directory", "log.level", "filesystem.mount_points", "processes.programs", "services.units",
+		keyAgentID, keyBackendURL, "spool.directory", "spool.max_size", "spool.min_free", "log.level", "filesystem.mount_points", "processes.programs", "services.units",
 		"mariadb.enabled", "mariadb.socket", "backups.processes",
 		"log_shipping.journal", "log_shipping.min_priority", keyShippingFiles, keyShippingDrop,
 	}
