@@ -398,7 +398,8 @@ carry none of the new fields and read as full with complete aggregates. A regula
 only: an address first seen after the 4,096 are counted, however heavy, is missing from it (a full snapshot says so through `complete`).
 `remotes` does not unmap IPv4-mapped addresses, so one IPv4 peer connected to a `0.0.0.0` and to a `::` listener is two entries.
 
-**Owners.** The agent does not read the `/proc/<pid>/fd` links, because listing them needs `CAP_DAC_READ_SEARCH` (*Rights*). For every
+**Owners.** The agent does not read the `/proc/<pid>/fd` links, because listing them needs `CAP_DAC_READ_SEARCH`, which the agent does not
+hold (*Rights*). For every
 listed process it lists `<pid>/fdinfo` in chunks of 256 and, per descriptor, opens the file, reads at most 256 bytes and closes it. The
 first four lines must be `pos:`, `flags:`, `mnt_id:` (1 to 10 digits, not 0) and `ino:` (1 to 20 digits), each a tab and digits; later lines
 (an epoll's `tfd:`) are not read. A descriptor counts only when its `ino:` is the inode of a tracked socket **and** its `mnt_id:` is the
@@ -1452,8 +1453,11 @@ collector timeouts and backend gap detection each emit a gap record, and each pa
 
 - The agent runs as the dedicated system user `vandox-agent` without a login shell, **never as root**. It authenticates to MariaDB as
   that OS user through `unix_socket` with only the `PROCESS` privilege.
-- For reading it is a member of the groups `adm` (log files) and `systemd-journal` (journal). To read other users' processes and their
-  open files it holds exactly `CAP_SYS_PTRACE` and `CAP_DAC_READ_SEARCH`, as ambient capabilities with a bounding set limited to these two.
+- For reading it is a member of the groups `adm` (log files) and `systemd-journal` (journal). To read other users' processes it holds
+  `CAP_SYS_PTRACE` alone, as an ambient capability with a bounding set limited to it (rule below, record 0122). `CAP_DAC_READ_SEARCH` is
+  **not** granted: together with `CAP_SYS_PTRACE` it opens other processes' open files through `/proc/<pid>/fd/<n>` for writing, memfds
+  included (measured below). The one collector that would use it, log shipping, does without it: a configured file its user and groups
+  cannot read is logged and not shipped (below).
 - **Process collector.** `stat`, `status` and `cmdline` of every process are readable by any user (unless `/proc` is mounted with
   `hidepid`); `smaps_rollup` of **another user's** process needs `CAP_SYS_PTRACE`, and `CAP_DAC_READ_SEARCH` does not replace it. Measured
   on the development host as UID 65534 against a root process in the same namespace, without Yama or `hidepid`: `smaps_rollup` answers
@@ -1462,8 +1466,9 @@ collector timeouts and backend gap detection each emit a gap record, and each pa
   RSS from `status` and leaves the PSS out. `CAP_SYS_PTRACE` is the process collector's use of the capability; the list of rights per
   collector is in `deploy/agent/README.md`.
 - **Connection collector.** It reads another user's `/proc/<pid>/fdinfo/<n>` (`mnt_id:`, `ino:`, the socket's table inode) and uses
-  `CAP_SYS_PTRACE` alone; it does **not** use `CAP_DAC_READ_SEARCH`, which would only be needed for the `/proc/<pid>/fd` links and lets the whole
-  agent read every file (`/etc/shadow`, Plesk's credentials). Measured by Security on the development host (kernel 6.18.44, no Yama, no
+  `CAP_SYS_PTRACE` alone. The `fd` links stay unread, because reading them needs `CAP_DAC_READ_SEARCH`, which lets the whole agent read
+  every file (`/etc/shadow`, Plesk's credentials) and, with `CAP_SYS_PTRACE`, also enables the memfd write (*No write into another user's
+  process or file beyond its own mode*); the agent does not hold it. Measured by Security on the development host (kernel 6.18.44, no Yama, no
   `hidepid`), as UID 65534 against a process of root:
 
   | Capabilities | list `fd/` | readlink `fd/3` | list `fdinfo/` | read `fdinfo/3` | read `/etc/shadow` |
@@ -1496,10 +1501,84 @@ collector timeouts and backend gap detection each emit a gap record, and each pa
   `/run/mysqld` reachable (no `InaccessiblePaths=` or `TemporaryFileSystem=` over it), or every run fails (`mariadb: connect: permission
   denied`) or reads as `down`.
 - As soon as the unit grants any capability, the unit is confined: `NoNewPrivileges=yes`; a system-call filter that denies `ptrace`,
-  `process_vm_readv`, `process_vm_writev`, `pidfd_getfd` and `open_by_handle_at` with `EPERM` (and not `pidfd_open` or
+  `process_vm_readv`, `process_vm_writev`, `pidfd_getfd`, `open_by_handle_at` and `process_madvise` with `EPERM` (and not `pidfd_open` or
   `pidfd_send_signal`) under `SystemCallArchitectures=native`; no write-side capability; `ProtectHome=yes` and `InaccessiblePaths=` for at
   least `/etc/shadow` and `/etc/gshadow`. The last two protect only against accidental reads; they are not a limit on a compromised
-  agent, which can reach the same files through another process's root in `/proc`.
+  agent, which can reach the same files through another process's root in `/proc` where their own mode allows it. `process_madvise` is denied by name: systemd puts it
+  in the group `@ipc`, which `@system-service` includes, so an allow-list built on `@system-service` admits it. The agent never calls it
+  (the Go runtime uses `madvise` on its own memory only). That the server's systemd (249, Ubuntu 22.04) knows the name, so the entry takes
+  effect instead of being skipped, is checked on the server (#42): `systemd-analyze syscall-filter @ipc` lists `process_madvise`. If it
+  did not, barrier (c) below would still stop the write.
+- **No write into another user's process or file beyond its own mode** (record 0122). A compromised agent cannot use its capability to
+  write into another user's process or file, or to run code as another user, except through a file whose own mode grants the agent's
+  user, its groups (`adm`, `systemd-journal`) or others write (accepted residual, below). No single mechanism stops every vector
+  examined; three distinct barriers do, and one vector is the accepted residual:
+
+  | Write vector | Barrier |
+  | ------------ | ------- |
+  | Opening another user's `/proc/<pid>/mem` for writing (`O_RDWR`, `O_WRONLY`), then `pwrite` | (a) DAC and the bounding set: the file is mode `0600`, owned by the target's user, so the open needs `CAP_DAC_OVERRIDE` |
+  | Opening another owner-only writable `/proc/<pid>/` file of another user for writing (for example `clear_refs`) | (a), the same DAC check as for `mem` |
+  | Opening `/proc/<pid>/fd/<n>` of another user's process (an open file or memfd it holds), then `pwrite` | (a) DAC and the bounding set: the directory is mode `0500`, owned by the target's user, so the lookup needs `CAP_DAC_READ_SEARCH` |
+  | Following a link in `/proc/<pid>/map_files/<range>` of another user's process | (a) the bounding set: the link needs `CAP_SYS_ADMIN` or (since kernel 5.9) `CAP_CHECKPOINT_RESTORE`, besides search of the `0500` directory |
+  | `ptrace` (POKE), `process_vm_writev`, `pidfd_getfd` (taking a writable descriptor), `open_by_handle_at` | (b) the system-call filter |
+  | `pidfd_open` on the target, then `process_madvise` | (b) the filter denies `process_madvise`; behind it (c) the kernel: the call needs `CAP_SYS_NICE` (since kernel 5.12), and the kernel refuses destructive advice on another process |
+  | A file whose own mode grants the agent write, reached through another process's `/proc/<pid>/cwd` or `/proc/<pid>/root` link, or that process's executable through its `/proc/<pid>/exe` link (each also below `/proc/<pid>/task/<tid>/`) | none: the accepted residual (last bullet of *Rights*) |
+
+  The filter denies neither `openat` nor `pwrite`, so it is not what stops the `mem` and `fd` writes; barrier (a) is. Barrier (c) is
+  defence in depth only: the `CAP_SYS_NICE` requirement is a capability rule, but which advice the kernel accepts for another process is
+  memory-management policy that has grown between versions. **The bounding set holds `CAP_SYS_PTRACE` only; adding any capability to it
+  is a `security` change that supersedes record 0122**, and so is removing one of the six denied calls. For example,
+  `CAP_DAC_READ_SEARCH` reopens the write through `/proc/<pid>/fd/<n>` into other processes' open files, memfds included, and below
+  closed directories; `CAP_DAC_OVERRIDE` and the other write-side DAC capabilities the write open of `mem`; `CAP_SYS_NICE`
+  `process_madvise` on another process; `CAP_SYS_ADMIN` or `CAP_CHECKPOINT_RESTORE`, together with directory search, the links in
+  `/proc/<pid>/map_files/`. These are examples, not a closed list. `NoNewPrivileges=yes` keeps the agent from gaining a capability
+  outside the set. `proc_mem.force_override=never` (kernel 6.12+) is not required and not set: it limits `FOLL_FORCE` only once a
+  write-capable descriptor exists, which the agent cannot obtain, and the production kernel (5.15) predates it.
+
+  Measured on the development host (kernel 6.18.44, same user namespace, no Yama or other LSM restriction), as UID 65534 against a
+  `sleep` owned by root. Each capability set is given with `capsh --user=nobody --inh=<caps> --addamb=<caps> -- -c <probe>` and checked as
+  `CapEff` in the probe's `/proc/self/status` (`0x80000` for `CAP_SYS_PTRACE`, the agent's set; `0x80004` with `CAP_DAC_READ_SEARCH`
+  added). The `mem` probe opens and closes the target's `/proc/<pid>/mem` and never writes:
+
+  | Capabilities | `O_RDONLY` | `O_RDWR` | `O_WRONLY` |
+  | ------------ | ---------- | -------- | ---------- |
+  | `CAP_SYS_PTRACE` (the agent's set) | `EACCES` | `EACCES` | `EACCES` |
+  | `CAP_SYS_PTRACE` + `CAP_DAC_READ_SEARCH` (not granted) | ok | `EACCES` | `EACCES` |
+  | `CAP_SYS_PTRACE` + `CAP_DAC_OVERRIDE` (control) | ok | ok | ok |
+
+  The `fd` probe (measured by the Product Manager on four kernels): a root `target` maps a memfd `MAP_SHARED` and prints its first bytes;
+  the probe runs as `nobody` under `capsh` with ambient capabilities, opens the target's `/proc/<pid>/fd/<n>` of that memfd `O_RDWR` and
+  writes four bytes with `pwrite`:
+
+  | Host | Kernel | none | `CAP_SYS_PTRACE` (`0x80000`, the agent's set) | `CAP_SYS_PTRACE` + `CAP_DAC_READ_SEARCH` (`0x80004`, not granted) |
+  | ---- | ------ | ---- | --------------------------------------------- | ----------------------------------------------------------------- |
+  | NAS | 4.4.302+ | open `EACCES` | open `EACCES` | open ok, `pwrite` of 4 bytes ok, the target shows them |
+  | Ubuntu 22.04.5 | 5.15.0-198-generic | open `EACCES` | open `EACCES` | open ok, `pwrite` of 4 bytes ok, the target shows them |
+  | Ubuntu 24.04.5 | 6.8.0-147-generic | open `EACCES` | open `EACCES` | open ok, `pwrite` of 4 bytes ok, the target shows them |
+  | Ubuntu 26.04.1 | 7.0.0-38-generic | open `EACCES` | open `EACCES` | open ok, `pwrite` of 4 bytes ok, the target shows them |
+
+  The open needs both capabilities: `CAP_DAC_READ_SEARCH` for the lookup in the `0500` directory and `CAP_SYS_PTRACE` for following the
+  link; the opened file is then checked against its own mode only, which for a memfd is `0777`. On the development host (6.18.44) the
+  open alone was repeated without a write: `/proc/<pid>/fd/<n>` and `/proc/<pid>/task/<tid>/fd/<n>` answer `EACCES` with
+  `CAP_SYS_PTRACE` and open `O_RDWR` with both. `CAP_DAC_READ_SEARCH` alone also opens for writing a `0666` file inside a `0700`
+  directory of root (open and close only); with `CAP_SYS_PTRACE` alone or without a capability that open fails `EACCES`.
+
+  The `process_madvise` probe calls `pidfd_open` on the target, which succeeds without a capability, and then `process_madvise` on the
+  returned descriptor with each advice on the target's first read-only mapping:
+
+  | Capabilities | `MADV_COLD`, `MADV_PAGEOUT`, `MADV_WILLNEED` | `MADV_DONTNEED`, `MADV_FREE` |
+  | ------------ | -------------------------------------------- | ---------------------------- |
+  | none | `EACCES` | `EACCES` |
+  | `CAP_SYS_PTRACE` (the agent's set) | `EPERM` | `EINVAL` |
+  | `CAP_SYS_PTRACE` + `CAP_DAC_READ_SEARCH` (not granted) | `EPERM` | `EINVAL` |
+  | `CAP_SYS_NICE` | `EACCES` | `EACCES` |
+  | `CAP_SYS_PTRACE` + `CAP_SYS_NICE` (control) | accepted | `EINVAL` |
+
+  The `CAP_SYS_NICE` requirement applies to every process other than the caller, not only another user's: as UID 65534 without
+  capabilities against its own `sleep` the call gives the same `EPERM` and `EINVAL`. Under the accepted advice the target's page content
+  stayed unchanged (Security's probe, which also tried `MADV_COLLAPSE`: `EINVAL`). On the production kernel (5.15) the `CAP_SYS_NICE`
+  requirement holds by the kernel's history (since 5.12); the DAC result of the `mem` table rests on file-permission semantics that do
+  not depend on the version; the advice set there was not measured.
 - The system metrics need no right of their own: `/proc/stat`, `/proc/loadavg`, `/proc/meminfo`, `/proc/vmstat`, `/proc/pressure`,
   the agent's own mount table and `/sys/block` are readable by any user, `statfs` needs only search permission on the directories
   above the mount point, and `adjtimex` without a change needs no capability (measured: unprivileged and without capabilities,
@@ -1512,13 +1591,13 @@ collector timeouts and backend gap detection each emit a gap record, and each pa
   directories readable (no `InaccessiblePaths=` or `TemporaryFileSystem=` over them) and start after `systemd-journal-flush.service`.
   That the server's journal files are readable by the group is checked on the server (#42).
 - **Log shipping collector.** It reads the system and user journal files with `systemd-journal`, as the kernel collector does,
-  `/etc/machine-id` and `/etc/localtime`, which any user can read, and the files `log_shipping.files` names with `adm`, or through
-  `CAP_DAC_READ_SEARCH` where neither the group nor other users may read a file or search a directory on its path. It is the first
-  collector that uses `CAP_DAC_READ_SEARCH`, and only on the configured paths: it opens them through the walk of *Log shipping* that
-  refuses a symbolic link in any element and a file with more than one link, so a service user who replaces its log file or a
-  directory with a link to another file (`/etc/shadow`) never gets that file shipped. Without the capability a file that `adm` cannot
-  read is logged `log file not readable` with `permission denied` and not shipped. The unit must keep the journal directories and the
-  configured files reachable (no `InaccessiblePaths=` or `TemporaryFileSystem=` over them).
+  `/etc/machine-id` and `/etc/localtime`, which any user can read, and the files `log_shipping.files` names with `adm`, or because their
+  mode lets any user read them. It uses no capability: `CAP_DAC_READ_SEARCH` is not granted (record 0122). It opens the configured paths through the
+  walk of *Log shipping* that refuses a symbolic link in any element and a file with more than one link, so a service user who replaces
+  its log file or a directory with a link to another file (`/etc/shadow`) never gets that file shipped. A file that the agent's user and
+  groups cannot read, or that lies below a directory they cannot search, is logged `log file not readable` with the reason
+  `permission denied` and not shipped. The unit must keep the journal directories and the configured files reachable (no
+  `InaccessiblePaths=` or `TemporaryFileSystem=` over them).
 - **Backup check.** It reads `/proc` as the process collector does and needs no right of its own.
 - **State file.** The agent's one write is `agent-state.json` in `spool.directory` (*Agent state*); the installation creates that
   directory, writable by the agent's user, and the agent never creates it.
@@ -1527,8 +1606,22 @@ collector timeouts and backend gap detection each emit a gap record, and each pa
 - Each group, capability and confinement setting is listed and justified in `deploy/agent/` when the collector that needs it is
   introduced; anything not listed is not granted. Removing a confinement setting, adding a capability or a group, or adding a collector
   that needs a new right is a `security`-tier change; removing a confinement while a capability is granted needs a superseding record.
-- **Accepted residual:** the agent's read access equals root's (every file, the memory and environment of every process). A separate
-  small helper that holds the capabilities is the way to reduce it.
+- **Accepted residual** (record 0122): with `CAP_SYS_PTRACE` the agent follows another process's `/proc/<pid>/cwd`,
+  `/proc/<pid>/root` and `/proc/<pid>/exe` links and their `/proc/<pid>/task/<tid>/cwd`, `…/root` and `…/exe` variants, which skip the
+  search check of the directories above the file they lead to. So a file whose own mode grants the agent's user, its groups or others
+  read or write is reachable even below a directory closed to the agent, but only along paths from some process's working or root
+  directory, or as that process's executable through `exe`; the path components after a `cwd` or `root` link are still checked against
+  their own modes, so a closed directory below that point still blocks, and the file `exe` leads to is checked against its own mode
+  only. The `root` link of a process in another mount namespace (a container's) resolves in that namespace, so the same holds for its
+  tree. Whether opening a running executable for writing fails with `ETXTBSY` depends on the kernel version and was not measured; it is
+  not counted as a barrier. A write into such a file reaches
+  another user's process memory where that process maps the file `MAP_SHARED`, and runs code as another user where that user executes
+  the file or reads it as a script or configuration. Readable besides are the ptrace-checked `/proc` files whose mode allows reading
+  (`maps`, `smaps_rollup`, `fdinfo`, …), not another user's `mem` or `environ` and not `/etc/shadow` (measured on kernel 6.18.44 with
+  `CAP_SYS_PTRACE` alone: `EACCES`, directly and through `/proc/<pid>/root`; `maps` and `smaps_rollup` of a root process open, and a
+  `0666` file in a `0755` directory below a `0700` directory of root opens for writing through `/proc/<pid>/cwd/` of a root process
+  whose working directory is the `0755` directory); credentials read that way may still lead to root through other services (password reuse, Plesk or MariaDB
+  administration). A separate small helper that holds the capability is the way to reduce it.
 
 ## Related decisions
 
@@ -1572,6 +1665,10 @@ collector timeouts and backend gap detection each emit a gap record, and each pa
   collector reads every system and user journal file with a position per sequence-number ID, decodes zstd items with a library under
   fixed bounds, opens configured files only through a link-free walk, stores their positions by the hash of the path, commits when the
   scheduler reports a run kept and saves once more at the stop, and bounds drop patterns by their compiled size.
+- [0122](../decisions/0122-cap-sys-ptrace-alone-cannot-write-another-users-process-memory-through-proc-pid-mem-or-fd.md) — why the
+  agent holds `CAP_SYS_PTRACE` alone and not `CAP_DAC_READ_SEARCH`, which barrier stops each write vector examined, which residual
+  remains (files whose own mode grants the agent write, reached through other processes' `cwd`, `root` and `exe` links), why the bounding set
+  holds `CAP_SYS_PTRACE` only, and why the filter also denies `process_madvise`.
 
 ## Not here
 

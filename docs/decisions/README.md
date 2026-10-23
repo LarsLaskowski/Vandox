@@ -148,4 +148,5 @@ once in the [area document](../areas/README.md) of the record's area, and the re
 | [0119](0119-kernel-messages-from-the-binary-journal-files-read-in-pure-go-without-decompression.md) | Kernel messages from the binary journal files, read in pure Go without decompression | Accepted | 2026-10-22 |
 | [0120](0120-oom-kill-events-triggered-snapshots-boots-from-saved-state-and-backup-runs.md) | OOM kill events with triggered snapshots, boots from saved state, and backup runs | Accepted | 2026-10-22 |
 | [0121](0121-log-shipping-journal-and-syslog-files-positions-per-seqnum-id-zstd-commit-when-kept.md) | Log shipping: the journal per seqnum ID with bounded zstd decoding, syslog files opened without links, positions committed when the scheduler keeps a run | Accepted | 2026-10-23 |
+| [0122](0122-cap-sys-ptrace-alone-cannot-write-another-users-process-memory-through-proc-pid-mem-or-fd.md) | CAP_SYS_PTRACE alone cannot write another user's process memory through /proc/<pid>/mem or /proc/<pid>/fd: CAP_DAC_READ_SEARCH dropped, process_madvise denied, a file-mode residual accepted (amends 0030) | Accepted | 2026-10-23 |
 <!-- project:end index -->

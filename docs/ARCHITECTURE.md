@@ -413,13 +413,23 @@ failed sign-ins) and runs behind a reverse proxy whose forwarded headers are tru
 exists only on the backend host. The agent reads MariaDB over the local socket as the user `vandox-agent`, identified
 via `unix_socket` and granted only `PROCESS`. Log data is not pseudonymized. Secrets are never logged. The agent runs as the
 dedicated user `vandox-agent`, never as root, with only the groups and capabilities that its installation files under `deploy/agent/` will list (v0.2.0)
-and, from v0.6.0, a polkit rule that allows restarting only the configured units. The two capabilities it
-needs to read other users' processes (`CAP_SYS_PTRACE`, `CAP_DAC_READ_SEARCH`) give it root's read access,
-so its systemd unit denies the process-attach system calls and grants no write-side capability: a
-compromised agent can read everything on the server but cannot use its capabilities to write as or run
-code as another user; credentials it reads may still lead to root through other services (password reuse,
-Plesk or MariaDB administration)
-([0030](decisions/0030-agent-runs-unprivileged-with-named-capabilities.md)). The Telegram bot sends to and
+and, from v0.6.0, a polkit rule that allows restarting only the configured units. The one capability it
+needs to read other users' processes (`CAP_SYS_PTRACE`) is the only one in its bounding set, so its systemd unit denies the process-attach
+system calls and `process_madvise`, grants no write-side capability and keeps every other capability out of the bounding set. Three barriers
+stop the write vectors examined: (a) DAC plus the bounding set (the missing `CAP_DAC_OVERRIDE` stops a write open of another user's
+`/proc/<pid>/mem`, the missing `CAP_DAC_READ_SEARCH` the open of `/proc/<pid>/fd/<n>`), (b) the system-call filter, which does not stop an
+`openat` or `pwrite`, and (c) the kernel, behind the filter, with its `CAP_SYS_NICE` requirement and its refusal of destructive advice on another
+process for `process_madvise` (version-dependent, defence in depth). A compromised agent cannot use its capability to write into another
+user's process or file, or to run code as another user, except through a file whose own mode grants the agent's user, its groups (`adm`,
+`systemd-journal`) or others write (accepted residual, record 0122): it follows other processes' `/proc/<pid>/cwd` and `/proc/<pid>/root` links
+(and their `task/<tid>/` variants, the `root` link also into other mount namespaces such as a container's) to such files even below a closed
+directory that contains another process's working or root directory, and its `/proc/<pid>/exe` link (and `task/<tid>/exe`) to that process's
+executable file, readable or writable as its own mode allows, a write there reaches another user's process memory where that process
+maps the file `MAP_SHARED` and runs code as another user where that user executes the file or reads it as a script or configuration; it reads
+the ptrace-checked `/proc` files whose mode allows it, not another user's `mem` or `environ` and not `/etc/shadow`, and credentials it reads
+may still lead to root through other services (password reuse, Plesk or MariaDB administration)
+([0030](decisions/0030-agent-runs-unprivileged-with-named-capabilities.md),
+[0122](decisions/0122-cap-sys-ptrace-alone-cannot-write-another-users-process-memory-through-proc-pid-mem-or-fd.md)). The Telegram bot sends to and
 accepts updates only from allowlisted users in their private chats
 ([0031](decisions/0031-telegram-user-allowlist.md)). Secrets come only from environment variables or Docker
 secrets ([0032](decisions/0032-secrets-only-from-environment-or-docker-secrets.md)). The only release

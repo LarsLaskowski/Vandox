@@ -111,8 +111,8 @@ log_shipping:
   # are read in the time zone of /etc/localtime. A file that did not exist when the agent started is read
   # from its first line once it appears, a file that exists starts at its end: the history before the first
   # start is imported with `vandoxd import`. The agent follows a rotation by rename and a truncation in place.
-  # The agent's group `adm` or its right CAP_DAC_READ_SEARCH decides which files it can read
-  # (deploy/agent/README.md). Do not name a file that holds what the journal already ships (/var/log/syslog,
+  # The agent's groups (`adm`, `systemd-journal`) decide which files it can read; any other file is logged
+  # "log file not readable" (permission denied) and not shipped (deploy/agent/README.md). Do not name a file that holds what the journal already ships (/var/log/syslog,
   # /var/log/mail.log of a server whose rsyslog copies the journal): every line would be shipped twice, once
   # with the source `journal` and once with the source `syslog`. Default: []
   #
