@@ -1812,6 +1812,29 @@ func TestRun_SpoolKeepsRecords(t *testing.T) {
 	}
 }
 
+// metricRecords returns the records of the metric name in the order of the records.
+func metricRecords(records []model.Record, name string) []model.Record {
+	var found []model.Record
+	for _, r := range records {
+		if p, ok := r.Data.(*model.MetricPoint); ok && p.Name == name {
+			found = append(found, r)
+		}
+	}
+	return found
+}
+
+// requireBootRecordFirst fails unless the first record is the boot event of the kernel fixture at its btime.
+func requireBootRecordFirst(t *testing.T, records []model.Record) {
+	t.Helper()
+
+	const btime = 946681200
+	event, ok := records[0].Data.(*model.KernelEvent)
+	if !ok || event.Type != model.KernelEventBoot || !records[0].CapturedAt.Equal(time.Unix(btime, 0)) {
+		t.Fatalf("first record = %T captured at %v, want the boot event captured at the fixture's btime %d (%v)",
+			records[0].Data, records[0].CapturedAt, btime, time.Unix(btime, 0).UTC())
+	}
+}
+
 func TestRun_SpoolReportersFeedTheSelfMetrics(t *testing.T) {
 	opts, _ := spoolRunOptions(t, validConfig)
 
@@ -1822,30 +1845,36 @@ func TestRun_SpoolReportersFeedTheSelfMetrics(t *testing.T) {
 	}
 	records := readSpool(t, opts.StateDir).Records
 	sizes := metricValues(records, selfstats.MetricSpool)
-	ages := metricValues(records, selfstats.MetricSpoolAge)
+	ages := metricRecords(records, selfstats.MetricSpoolAge)
 	if len(sizes) < 3 || len(ages) < 3 {
 		t.Fatalf("self samples with %s = %d and with %s = %d, want 3 of each in 130 s", selfstats.MetricSpool, len(sizes), selfstats.MetricSpoolAge, len(ages))
 	}
 	if last := sizes[len(sizes)-1]; last <= 0 {
 		t.Errorf("last %s = %v, want the size of the data files, above 0", selfstats.MetricSpool, last)
 	}
-	// the oldest record is from the first runs, about two minutes before the last sample
-	if last := ages[len(ages)-1]; last < 60 || last > 130 {
-		t.Errorf("last %s = %v, want between 60 and 130 seconds", selfstats.MetricSpoolAge, last)
+	// the oldest record by sequence is the fixture's boot event, one hour before the clock start
+	requireBootRecordFirst(t, records)
+	last := ages[len(ages)-1]
+	got := last.Data.(*model.MetricPoint).Value
+	if want := last.CapturedAt.Sub(records[0].CapturedAt).Seconds(); got != want {
+		t.Errorf("last %s = %v, want %v (the sample's capture time minus the oldest capture time)", selfstats.MetricSpoolAge, got, want)
+	}
+	if want := 3720.0; got != want {
+		t.Errorf("last %s = %v, want %v (3600 s boot offset and the 120 s of the third run)", selfstats.MetricSpoolAge, got, want)
 	}
 }
 
 func TestRun_StopOrder(t *testing.T) {
 	var (
 		stderr = &syncBuffer{}
-		opts   Options
 		code   int
 	)
+	// the options are made outside the bubble: a temporary directory of the bubble's t is removed before the reads below
+	opts, _ := spoolRunOptions(t, validConfig)
 	synctest.Test(t, func(t *testing.T) {
 		world := newKernelWorld()
 		origin := time.Now().Add(-time.Hour)
 		world.addJournalFile(t, []map[string][]byte{kernelLine(1, origin, 10, 0, "first"), kernelLine(2, origin, 20, 0, "second")})
-		opts, _ = spoolRunOptions(t, validConfig)
 		opts.Stderr = stderr
 		opts.Kernel = world.sources()
 		opts.Logs = world.logSources()
