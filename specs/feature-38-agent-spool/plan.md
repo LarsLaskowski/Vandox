@@ -1,7 +1,7 @@
 # Plan: Persistent on-disk spool (at least 7 days)
 
 Source: Issue #38 | [spec.md](spec.md)
-Status: Revised (3) — M1 settled by the Product Manager
+Status: Revised (4) — M1 settled by the Product Manager; G3 test details decided by the Lead after step 5
 Tier: security — the spool creates guards of security area 9 (no link followed, owner and mode checks on its files, nothing written or deleted outside its own files, the size bound, the file limit and the free-space reserve) and reads its own files back under consistency rules.
 Security areas touched: 8 (the agent token must never reach the spool), 9 (file writes and paths: the spool's files in `spool.directory`, the meta file, deletion of its own files), 10 (parsing: spool files and the meta file read back, damaged or hostile, through a new single-line entry point of the wire decoder), 12 (new fixed log texts of the spool)
 
@@ -28,8 +28,8 @@ See [spec.md](spec.md), *Problem*. The agent's sink is `scheduler.DiscardSink` (
 | 13 | `statfs` `f_bavail` times `f_bsize` is the space available to unprivileged users | statfs(2) man page | confirmed |
 | 14 | Opening a symbolic link to a directory with `O_DIRECTORY|O_NOFOLLOW` fails with `ENOTDIR`, and a path with a trailing slash follows the link | measured by Security in its plan review | confirmed |
 | 15 | Data written with `write(2)` survives `kill -9` of the writer (page cache), but not a power loss before `fsync` | to verify: AC5 hard-kill test (Tester, step 5); power loss is simulated, never measured | unverified |
-| 16 | The reference stream is about 170 MB per day encoded, so 7 days fit the 2 GiB default uncompressed | to verify: the AC7 test logs the full-scale bytes per day and the Tester runs the full-scale variant once (`VANDOX_LONG_TESTS=1`, step 5); the Lead writes the figure into the agent area (task 23) | unverified |
-| 17 | The scaled AC7 test runs in under 30 s under *Test* with `-race` | to verify: Tester reports its run time in step 5 | unverified |
+| 16 | The reference stream is 209.0 MB per day encoded (544,560 records; not the estimated 170 MB), so 7 days take about 1.49 GB with the spool's framing, about 70 % of the 2 GiB default | `TestReferenceStream_FullScaleDay`, measured by the Tester in step 5; the Lead writes the figure into the agent area (task 23) | confirmed |
+| 17 | The scaled AC7 test at 1/80 runs in under 30 s under *Test* with `-race`, and the full-scale variant passes (at 1/16 the generator and the wire codec alone took about 80 s under `-race`: refuted in step 5) | to verify: Dev reports the run time of the first green run in step 6 and runs the full-scale variant once without `-race` (its cost would pass Go's 10-minute limit): `VANDOX_LONG_TESTS=1 go test ./internal/spool -run '^TestSpool_SevenDayOutageFullScale$' -timeout 30m` | unverified |
 | 18 | Opening a spool filled to 2 GiB, and one with 1,024 files, each takes at most 5 s on the development host | to verify: `BenchmarkOpen_Full`, `BenchmarkOpen_ManyFiles` (Dev, step 6), recorded in `docs/BENCHMARKS.md` | unverified |
 | 19 | The test process runs as root, so a test can `chown` a file to another user (E8 "owned by another user") | to verify: Tester checks `os.Geteuid()` in step 5; without root that one case is skipped with a reason and reported | unverified |
 | 20 | `os.Root.OpenFile` with `O_NOFOLLOW` opens a symbolic link whose target lies inside the root | measured by Security in its round-2 plan review (`r.OpenFile("inlink", O_RDWR\|O_NOFOLLOW)` succeeded) | confirmed |
@@ -53,7 +53,7 @@ Names are top-level test functions, table-driven where the cases share a shape. 
 | AC4 | `TestClose_KeepsRecordsAndContinuesNumbers`, `TestOpen_NewBootKeepsOldBootID`; `TestStore_FlushSyncsBarrierFirst`; `TestRun_StopOrder`, `TestRun_SpoolCloseGivesUp` | `internal/spool/spool_test.go`; `internal/agentstate/agentstate_test.go`; `internal/agent/agent_test.go` |
 | AC5 | `TestSpool_HardKill` (re-executes the test binary as a writer, `TestSpool_HardKillHelper`, SIGKILL at least 20 times at varied moments) | `internal/spool/spool_test.go` |
 | AC6 | `TestOpen_CutFiles`, `TestOpen_RolledBackDirectory`; `TestStore_SaveWaitsForBarrier` | `internal/spool/segment_test.go` (both open tests); `internal/agentstate/agentstate_test.go` |
-| AC7 | `TestSpool_SevenDayOutage` (1/16 scale, always), `TestSpool_SevenDayOutageFullScale` (skipped unless `VANDOX_LONG_TESTS=1`); generator `referenceStream` in the same file | `internal/spool/spool_test.go` |
+| AC7 | `TestSpool_SevenDayOutage` (1/80 scale, always), `TestSpool_SevenDayOutageFullScale` (skipped unless `VANDOX_LONG_TESTS=1`); generator `refStream`, `TestReferenceStream_Shape`, `TestReferenceStream_FullScaleDay` | `internal/spool/outage_test.go`, `internal/spool/refstream_test.go` |
 | AC8 | `TestPut_SizeBoundDropsOldest` (sum of file sizes on disk after every Put), `TestPut_DroppedGapsPerRun`, `TestPut_DroppedGapRecordsFolded`, `TestPut_DropLogLines`, `TestPut_FileLimit`, `TestOpen_RestartAppendsToNewest` | `internal/spool/spool_test.go` |
 | AC9 | `TestPut_FreeSpaceReserve` (incl. available below the write size with a non-zero reserve) | `internal/spool/spool_test.go` |
 | AC10 | `TestOpen_DamagedData`, `TestOpen_InconsistentValues`, `TestRead_DamagedData`, `TestOpen_RefusedEntries`, `TestOpen_TooManyFiles` | `internal/spool/segment_test.go` |
@@ -66,6 +66,9 @@ Names are top-level test functions, table-driven where the cases share a shape. 
 | AC17 | `TestSpool_MemoryBound` (live heap after `runtime.GC`: `spool.max_size` 64 GiB, 1,024 files after simulated reboots, 64 ranges, reads from both ends, 100,000 foreign entries); `BenchmarkOpen_Full`, `BenchmarkOpen_ManyFiles` | `internal/spool/spool_test.go` |
 | AC18 | `TestOpen_OtherAgentID` | `internal/spool/meta_test.go` |
 | AC19 | `TestRun_SpoolHoldsNoSecret` (runs the agent with a token whose bytes are a sentinel, then searches every spool file) | `internal/agent/agent_test.go` |
+
+The G3 tests are split by topic over `internal/spool/{spool,segment,meta,limits,open,outage,refstream,forge,helpers}_test.go`;
+the test names above are binding, the file column only where it names a file outside `internal/spool`.
 
 `TestOpen_RefusedEntries` cases, each for a data-file name (the newest and an older one), `spool-meta.json` and
 `spool-meta.json.tmp`: a symbolic link to `agent-state.json` in the same directory (agent-owned, 0600), a symbolic link outside the
@@ -117,8 +120,7 @@ not sealed, so a restart in the same boot adds no file.
 within their sizes; times within 1677-09-21 to 2262-04-11, checked before a gap is built from them; a 20-digit name number parsed
 with `strconv.ParseUint(…, 10, 64)` and below 2^63 - 1. At open a damaged file is cut at the last good frame (`ftruncate` on its
 descriptor) and sealed; during a read of a sealed file the rest is marked dropped in memory and deleted with the file. Gaps as spec
-E6, one per run of unacknowledged numbers, the last known number from the trailer, else the next file's first number minus 1; the
-time span of the good frames, else the file's modification time. `err` is one of `checksum mismatch`, `file cut short`, `not the
+E6, one per run of unacknowledged numbers, numbers and span as item 6 of *Details decided after the G3 tests*. `err` is one of `checksum mismatch`, `file cut short`, `not the
 spool format`, `unknown format version`, `inconsistent value`, `refused entry`, `too many files`.
 
 *Meta file.* JSON, decoded strictly (one object, `version` 1, no unknown key, at most 16 KiB): `agent_id`, `boot_id` of the last
@@ -142,8 +144,8 @@ reach 2^63 - 1, E21), encode the frames, compute `need` = the frames + a new hea
 65 gaps of 1 KiB. Size room: the sum of the data files' sizes + 32 KiB (meta file and its temporary) + `need` at most `spool.max_size`.
 Disk room, skipped when `spool.min_free` is 0: `avail >= need && avail-need >= minFree` (no unsigned wrap). While there is no room,
 drop the oldest sealed file; when only the active file is left, refuse (E11). Dropping writes one `spool_dropped` gap (source `agent`)
-per run of unacknowledged numbers between the acknowledged ranges, `from`/`to` the trailer's times (`to` at least one second after
-`from`), appended before the records. A write error truncates the active file back to its last good frame on its descriptor, refuses,
+per run of unacknowledged numbers between the acknowledged ranges, `from`/`to` as item 5 below (`to` at least one second after
+`from`), numbered before the records (item 4). A write error truncates the active file back to its last good frame on its descriptor, refuses,
 opens or extends the episode, logs `spool write failed` once; the next successful Put first appends the episode's `unknown` gap and
 logs `spool writes again`. A refusal returns at once. `spool data dropped` (`reason` `size_bound`, `disk_space` or `file_limit`,
 `records`) at the first drop of an episode, `spool data no longer dropped` (`records`) at the first Put that fits without dropping.
@@ -158,6 +160,45 @@ numbers are all acknowledged is deleted; the active file never. `OldestCapture` 
 outside it, so a slow fsync never blocks `Put`; a caller that finds one running waits for its result (no goroutine pile-up on a hung
 disk). The sync loop runs it once a second; `Sync(ctx)` runs or joins it and returns at the context's deadline. `Close` stops the loop,
 syncs, writes the meta with `clean` true and syncs it.
+
+*Details decided after the G3 tests (binding; the tests pin them).*
+
+1. Byte layout of version 1, every integer little-endian. Header: `VXSPOOL1`, version u16, agent ID length u8 (1 to 64), agent ID,
+   boot ID (36 bytes), clock offset flag u8 (0 or 1), clock offset i64 (0 when the flag is 0), CRC-32C u32 of every header byte
+   before it. Frame: payload length u32, CRC-32C u32 of the payload, payload = sequence number u64 and the wire line. Trailer:
+   `0xFFFFFFFF` u32, last number u64, record count u64, earliest and latest capture time i64 (Unix nanoseconds), CRC-32C u32 of the
+   32 bytes after the marker. The extension is `.spool`: the skeleton's `segmentExt` `.seg` changes.
+2. Meta file: `{"version":1,"agent_id":…,"boot_id":…,"clean":…,"next":…,"acked":[{"first":…,"last":…}]}`, every key required.
+   Bytes that do not decode as JSON are `not the spool format`, another version `unknown format version`, a missing, unknown or
+   repeated key and every E20 break `inconsistent value`.
+3. Every write of a data or meta file goes through `writeFile`. A failed meta write returns `spool: meta: <error text>` (from `Open`:
+   the start fails, E2; from `Ack`, `Sync`, `Close`: their error) and neither opens nor ends the E9 episode, which only `Put`'s data
+   writes do; a failed data write returns `spool: write: <error text>`.
+4. A `Put` numbers, contiguously and in this order: the episode's `unknown` gap (when this `Put` ends an episode), its
+   `spool_dropped` gaps in the order of their runs, its records. Dropped numbers that form one run across several files of one `Put`
+   give one gap; the episode logs one warning. The `unknown` gap spans the earliest to the latest capture time of every record refused
+   in the episode (E9, E11, E21), at least one second. Every gap the spool writes has origin `agent`, source `agent` and as capture
+   time the spool's clock at the write. The drop lines alternate: warning at an episode's first drop, info at the first `Put` that
+   fits without one.
+5. The span of an eviction gap (AC8) is exact per run: the earliest and latest capture time of the run's records, dropped gap spans
+   included; from the trailer when the run is the whole file, otherwise by scanning the file frame by frame under the mutex (one
+   frame buffer, no index kept).
+6. Damage gaps (E6, AC10). A run starts at the last good number + 1, or at the name number when no frame is good, and ends at the
+   trailer's last number when the trailer is intact and within range, else at the next file's first number − 1; the newest file
+   without an intact trailer gets no gap for its tail (the backend's sequence detection finds it). A frame whose number differs from
+   its line's `seq` is damage at the frame's place; the line's number is never used. A file whose name breaks a rule (not its first
+   record's number, not above the previous file's last number, at or above 2^63 − 1) gets no gap, and its name never raises the next
+   number. Span: `from` the latest capture time of the good frames before the damage, else the previous file's latest; `to` the
+   trailer's latest when intact and in range, else the next file's earliest; a missing side is the other one ∓ 1 s, both missing the
+   spool's clock; `to` at least one second after `from`. (This replaces "the time span of the good frames", which never covered a
+   dropped record.) A trusted data file damaged as a whole is deleted at open once its gap is written; refused entries (E8) and the
+   files beyond the 1,026 (E19) are never touched.
+7. `Read` may end a piece at a file boundary or go on into the next file of the same context.
+8. `Ack` applies to every issued, kept, unacknowledged number of the range, whether a `Read` handed it out or not (the spool tracks no
+   reads); numbers never issued (below the oldest, above the newest, inside a jump) are ignored (spec E12).
+9. A record-less newest file of the current context is appended to when the next number equals its name number (the max rule raises
+   next to it); otherwise it is removed and a file is created under the next number. A record-less file is never sealed. A hand-over
+   whose last number is 2^63 − 2 is accepted.
 
 **Single-line wire codec.** `wire.MarshalRecord` is `CheckRecord`'s validation and size check returning the line;
 `wire.UnmarshalRecord` runs the decoder's line rules (`keyCheck`, text, depth) and `decodeRecord` on one line.
@@ -258,7 +299,9 @@ Files the skeleton rewrites: internal/agent/agent.go (Run, jobs, newScheduler; r
 
 ## Test files
 
-internal/spool/spool_test.go, internal/spool/segment_test.go, internal/spool/meta_test.go, internal/wire/encode_test.go,
+internal/spool/spool_test.go, internal/spool/segment_test.go, internal/spool/meta_test.go, internal/spool/limits_test.go,
+internal/spool/open_test.go, internal/spool/outage_test.go, internal/spool/refstream_test.go, internal/spool/forge_test.go,
+internal/spool/helpers_test.go, internal/wire/encode_test.go,
 internal/config/agent_test.go, internal/selfstats/selfstats_test.go, internal/agentstate/agentstate_test.go,
 internal/agent/agent_test.go.
 
@@ -336,7 +379,11 @@ Sweep hits: option tables (`docs/areas/configuration-and-secrets.md:40-55`, `REA
 - m3 (damage while reading). Accepted: `TestRead_DamagedData`.
 - m4 (spurious state warning). Accepted as a stated residual (spec E3); changing the first-start rule would weaken its check.
 - m5 (fsync outside the mutex). Accepted: *Durability*.
-- m6 (AC7 cost). Accepted: scaled always, full scale with `VANDOX_LONG_TESTS=1` once in step 5.
+- m6 (AC7 cost). Accepted: scaled always, full scale with `VANDOX_LONG_TESTS=1` once. Lead decision after step 5 (fact 17 refuted):
+  scale 1/80 instead of 1/16. Accepting about 90 s lost to `.squad/stack.md` (*Test time limits*: over a minute is a warning sign);
+  skipping the scaled run under the race detector lost because *Test* and CI always run `-race`, so AC7 would never run. 1/80 divides
+  every daily count and keeps the file size at its 1 MiB floor, so overhead and the one-sixteenth check scale as at 1/16; the
+  capacity claim rests on the full-scale run (fact 17) and the measured bytes per day (fact 16).
 
 ## Security review
 

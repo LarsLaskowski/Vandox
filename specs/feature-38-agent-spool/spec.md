@@ -120,8 +120,9 @@ of the records to the spool returned without an error.
 - E11: The records of one hand-over do not fit even after every unacknowledged record was dropped (a cap smaller than one run's
   records, or available space below `spool.min_free` with an empty spool): they are refused and recorded as in E9; the episode's gap
   is written by the first write that fits again.
-- E12: The reader acknowledges a sequence number the spool never issued, one already acknowledged or dropped, or one it was never
-  handed: nothing changes and no other record is affected. An acknowledgement that would make the spool track more than 64 disjoint
+- E12: The reader acknowledges a sequence number the spool never issued (below the oldest, above the newest or inside a jump of the
+  numbers), or one already acknowledged or dropped: nothing changes and no other record is affected. A kept number is acknowledged
+  whether or not a read handed it out; the spool does not track reads. An acknowledgement that would make the spool track more than 64 disjoint
   acknowledged ranges above its oldest unacknowledged record is refused with an error and changes nothing; the records stay readable
   and are acknowledged again later (a resend is idempotent at the backend).
 - E13: Many collectors hand over records at the same moment while the reader reads and acknowledges: every record gets exactly one
@@ -160,9 +161,10 @@ of the records to the spool returned without an error.
   anew, never a record repeated verbatim): per day 2,880 `system` samples of 110 metrics; 1,440 `filesystem` samples of 7 metrics,
   `clock` samples of 3 and `self` samples of 5; 1,440 process snapshots of 50 processes and 100 programs with command lines of
   60 to 200 bytes; 1,440 regular connection snapshots of 30 listeners, 40 owning processes and 25 remotes; 2,880 MariaDB status
-  records; 400 service states; 200,000 log lines with messages of 40 to 400 bytes drawn from the line shapes of `testdata/logs/` and
-  `testdata/journal/`. Its encoded size per day (uncompressed JSON lines) is measured by the test and written into the agent area;
-  the estimate is about 170 MB, so 7 days are about 1.2 GB, which the 2 GiB default holds with room even without compression. The
+  records of 60 status counters, 15 variables and 8 threads; 400 service states; 200,000 log lines with messages of 40 to 400 bytes
+  drawn from the line shapes of `testdata/logs/` and `testdata/journal/`. Its encoded size per day (uncompressed JSON lines) is
+  measured by the test and written into the agent area: 209 MB per day, so 7 days take about 1.5 GB with the spool's framing, which
+  the 2 GiB default holds with about 30 % to spare even without compression. The
   stream is an estimate of the server, not a measurement; #44 measures the real growth. Under sustained memory pressure the agent
   records much more, so less than 7 days may fit; the cap then drops the oldest data with gaps (the stated residual of *Memory
   pressure mode* in the agent area).
@@ -217,7 +219,7 @@ of the records to the spool returned without an error.
   sequence order, at most the requested number of records and bytes, never two boot IDs or clock offset estimates in one result,
   never a record twice or one whose write has not completed (S2, S9, E13).
 - [ ] AC3: An acknowledged range is never handed out again, also after a restart; the newest records can be acknowledged before the
-  older ones; an acknowledgement of an unknown, already acknowledged, dropped or never handed out number changes nothing; one that
+  older ones; an acknowledgement of a never issued, already acknowledged or dropped number changes nothing; one that
   would make a 65th disjoint acknowledged range is refused with an error and changes nothing; once every record is acknowledged
   `agent_spool_bytes` is at most one sixteenth of `spool.max_size` (S2, S9, E12).
 - [ ] AC4: After a stop with SIGTERM and a new start, and after a simulated clean reboot (a new boot ID), every accepted record is kept
@@ -230,11 +232,12 @@ of the records to the spool returned without an error.
 - [ ] AC6: A spool whose files are cut at arbitrary offsets, or whose newest writes are rolled back to an older state of the
   directory with a new boot ID (a simulated power loss), hands out no damaged record and issues no number it had issued before the
   cut; and a state save waits until the records accepted before it are durable, checked with a spool whose sync is held back (E5).
-- [ ] AC7: Simulated 7-day outage: 7 days of the reference stream at one sixteenth of every daily count, written with an injected
-  clock into a spool of one sixteenth of the default `spool.max_size` (128 MiB), are all kept, no `spool_dropped` gap is written, and
-  reading and acknowledging from the oldest onwards returns every record exactly once in order and leaves the spool empty; the test
-  reports the stream's encoded bytes per day at full scale. The same test at full scale (the default 2 GiB) runs when the
-  environment variable `VANDOX_LONG_TESTS` is `1`; it is run once before the pull request and its result is recorded (S2, S3).
+- [ ] AC7: Simulated 7-day outage: 7 days of the reference stream at one eightieth of every daily count, written with an injected
+  clock into a spool of one eightieth of the default `spool.max_size` (about 25.6 MiB), are all kept, no `spool_dropped` gap is
+  written, and reading and acknowledging from the oldest onwards returns every record exactly once in order and leaves the spool
+  empty; the test reports the stream's encoded bytes per day at full scale. The same test at full scale (the default 2 GiB) runs when
+  the environment variable `VANDOX_LONG_TESTS` is `1`, without the race detector; it is run once before the pull request and its
+  result is recorded (S2, S3).
 - [ ] AC8: Size cap: a spool fed beyond `spool.max_size` never holds more than it, measured as the sum of the sizes of its files on
   disk after every hand-over, drops only its oldest unacknowledged records,
   writes one `spool_dropped` gap per run of dropped numbers that contains no kept or acknowledged number (source `agent`,
@@ -310,7 +313,7 @@ of the records to the spool returned without an error.
   and the gap the outcome when it is hit, and records 0028 and 0045 make dropped data a recorded gap; so the cap always wins, the 7
   days are a sizing requirement on the default (NFR *Reference stream and retention*), and there is no age limit.
 - Which default cap? Answered: `2GiB` (Lead decision, raised from 1 GiB after the challenge). No document states the server's disk
-  size or the agent's data volume; the reference stream's estimate puts 7 days near 1.2 GB uncompressed, and `spool.min_free` now
+  size or the agent's data volume; the reference stream measures about 1.5 GB for 7 days uncompressed, and `spool.min_free` now
   guards the disk, so the larger default costs no safety and holds 7 days without relying on compression.
 - Does "never fill the disk" need more than the size cap? Answered: yes (Lead decision). A cap alone fills a disk that has less free
   space than the cap; `spool.min_free` (default `1GiB`) keeps room for the server's other services, which write as unprivileged users
@@ -386,3 +389,8 @@ of the records to the spool returned without an error.
 - Product Manager, on the escalated plan review note M1: the boot and backup window of E5 stays a stated residual in this feature,
   the guarantee *No data gaps unless explicitly recorded* keeps its text, and the follow-up issue closes the window before the agent's
   first release (E5 and *Out of scope* say so).
+- Lead, deciding after the G3 tests (plan.md *Challenge* m6, *Details decided after the G3 tests*): AC7 runs at one eightieth instead
+  of one sixteenth, because one sixteenth took about 80 s under the race detector that every test run uses; the full-scale run runs
+  without it. NFR *Reference stream* now gives the measured 209 MB per day (the 170 MB estimate was low; 7 days still fit the 2 GiB
+  default) and the MariaDB records' content. E12 and AC3 said "never handed", which the spool cannot know: it means a number never
+  issued; a kept number is acknowledged whether or not a read handed it out.
