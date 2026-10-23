@@ -384,7 +384,7 @@ func closeSpool(sp *spool.Spool, log *slog.Logger) {
 		failed = true
 	}
 	if failed {
-		log.Error("spool not closed", "component", "spool")
+		log.Warn("spool not closed", "component", "spool")
 	}
 }
 
