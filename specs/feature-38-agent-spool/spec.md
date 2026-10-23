@@ -58,38 +58,53 @@ of the records to the spool returned without an error.
 ## Errors and edge cases
 
 - E1: A `spool.max_size` or `spool.min_free` value that breaks its rule (`1024`, `1 GiB`, `1.5GiB`, `1GB`, `-1GiB`, `32MiB` for the
-  size, `2048GiB`; a list and a null value such as `~` are refused by the strict decoder as for every option, with `invalid value,
+  size, `65GiB` and `2048GiB` for the size, `2048GiB` for `min_free`; a list and a null value such as `~` are refused by the strict decoder as for every option, with `invalid value,
   want a string` and `has no value`): the agent does not start; the error reads `config: <file>:<line>: spool.max_size: must be a whole
-  number of MiB or GiB from 64MiB to 1024GiB, such as 512MiB or 2GiB` (for `spool.min_free`: `... from 0MiB to 1024GiB, such as
+  number of MiB or GiB from 64MiB to 64GiB, such as 512MiB or 2GiB` (for `spool.min_free`: `... from 0MiB to 1024GiB, such as
   0MiB or 1GiB`) and never contains the value; exit code 1, as for every configuration error.
 - E2: At start the spool directory is missing, is not a directory, is itself a symbolic link (the last element of
-  `spool.directory`; links in the elements above it are followed as configured) or cannot be written by the agent's user, also
+  `spool.directory`; links in the elements above it are followed as configured; the error says `symbolic link`, not `not a
+  directory`), holds a spool-named entry the spool refuses in place of `spool-meta.json` or its temporary file (E8), or cannot be written by the agent's user, also
   because its file system is read-only: the agent logs `agent cannot start` with the error `spool: <fixed reason or system error
   text>` (never the path) and exits with 1 before it notifies systemd, so `systemctl status` shows the failure instead of an agent that
   silently discards its data. A start failure is retried only by the unit's `Restart=` (#42: `Restart=on-failure` with a
   `RestartSec=` and start limits that keep retrying a failed start).
 - E3: First start in an empty spool directory, or a directory that holds only other entries such as `agent-state.json`: the spool is
   created and logged once as info `spool created`; neither the spool nor the state file logs a warning for it (the state file treats
-  only a directory that is empty at its read as a first start, so the order of the two at start-up matters).
+  only a directory that is empty at its read as a first start, so the order of the two at start-up matters). Stated residual: a
+  start that ends after the spool was created and before the first state save (a `kill -9` in the first seconds, a later start
+  error) leaves spool files without a state file, and the next start logs the state file's warning `agent state not available` once.
 - E4: The spool's files are lost while the agent ID stays (reinstall, a wiped or replaced directory): the new spool's sequence numbers
   start above every number the lost spool can have issued (the rule is in NFR *Sequence numbers*), unless the wall clock now reads
   earlier than when those numbers were issued (stated residual); the backend would otherwise take the new records for duplicates of
   stored ones and drop them silently.
 - E5: The server loses power or the kernel crashes: records accepted more than 5 seconds before survive; records accepted later may be
   missing, but no damaged record is handed out, no sequence number issued before the crash is issued again (NFR *Sequence numbers*),
-  and the state file never holds a log position, kernel position, boot or backup change that covers a record the spool had not made
-  durable: the `kernel` and `logs` collectors read such entries again from the journal and the files, so the loss is limited to
-  records no source can give again (metrics and snapshots of those seconds), which the backend sees as a sequence gap (#41).
-- E6: Damaged spool data, found at start or while reading (a checksum that does not match, a file cut short, bytes that are not the
-  spool's format, a spool file of a format version the agent does not know): the damaged records are never handed out; the records
-  before the damage in that file and all other files stay readable; the spool writes `spool_dropped` gaps naming the sequence
-  numbers of the dropped records where it can know them (otherwise the backend's sequence detection finds them); the warning
-  `spool data damaged` (`file`: the spool file's name, `err`: a fixed reason) is logged once per file.
+  and the state file never holds a log or kernel journal position that covers a record the spool had not made durable: those
+  positions are committed only after the spool accepted the run's records, and every state save first makes the spool durable, so
+  the `kernel` and `logs` collectors read such entries again from the journal and the files. The loss is limited to records no source
+  can give again (metrics and snapshots of those seconds), which the backend sees as a sequence gap (#41). Stated residual: a boot
+  change (`kernel` collector) and a backup start, sighting or end (`backups` collector) are written to the state file from inside
+  their run, before the run's records reach the spool; a state save in that moment followed by a power loss within the next second
+  can lose the `boot` event or the `backup_run` record while the state already holds them, so they are not recorded again. The
+  backend still sees the new boot in the batch headers' boot ID; the window is one sync interval after a save that fell between a
+  run's state change and its hand-over.
+- E6: Damaged spool data, found at start or while reading: a checksum that does not match, a file cut short, bytes that are not the
+  spool's format, a spool file of a format version the agent does not know, or values that break the spool's consistency rules
+  (a file name's number that is not the number of its first record; record numbers that do not increase strictly within and across
+  files; a record whose number differs from the number in its record line; a sealed file's summary that disagrees with its last
+  record; a time outside the range the wire format allows). The damaged record and every later record of that file are never handed
+  out; the records before the damage and all other files stay readable; the spool writes `spool_dropped` gaps for the dropped numbers
+  (from the damaged record's number, or the last good number plus 1, to the file's last known number) where it can know them
+  (otherwise the backend's sequence detection finds them); the warning `spool data damaged` (`file`: the spool file's name, `err`: a
+  fixed reason) is logged once per file. A gap is never built from a damaged value: a time outside the wire range is not used.
 - E7: Entries in the directory that are not the spool's files (`agent-state.json`, `agent-state.json.tmp`, other files,
   subdirectories, up to 100,000 of them): never read, counted, overwritten or deleted by the spool; the spool's memory bound holds.
 - E8: An entry with the name of a spool file that is a symbolic link, not a regular file, owned by another user or with any group or
   other permission bit: never followed, opened for writing, renamed or deleted; it is not counted, and the data the spool expected
-  there is treated as damaged (E6).
+  there is treated as damaged (E6). The spool's own temporary file `spool-meta.json.tmp` is removed and `spool-meta.json` is
+  replaced only when each is absent or a regular file of the agent's user without group or other bits; otherwise the meta file
+  cannot be written (E2 at start; at run time an acknowledgement fails with an error).
 - E9: A write fails at run time (no space left, an I/O error, the file system remounted read-only): unlike at start (E2) the agent
   keeps running, because the failure may pass and its collectors' gaps should then reach the backend. The spool refuses the records it
   could not keep, so the scheduler logs `sink failed` as today; such a refusal returns at once and never stops the watchdog. The spool
@@ -123,6 +138,15 @@ of the records to the spool returned without an error.
   belongs to the new ID, so the old records cannot be sent as theirs. At start the spool drops every record of another agent ID,
   writes no gap for them (a gap sent under the new ID would describe another agent's data) and logs the warning `spool records of
   another agent dropped` (`records`: the count); the new ID's numbers start as on a fresh spool (E4).
+- E19: Many reboots or restarts leave many small spool files (a crash loop with reboots): the spool holds at most 1,024 files; at the
+  limit it drops its oldest unacknowledged records as for the size bound, with `spool_dropped` gaps and the warning's `reason`
+  `file_limit`. A restart in the same boot goes on writing into the newest file, so restarts alone do not add files.
+- E20: The meta file breaks its consistency rules (acknowledged ranges not sorted, overlapping, with a first number above the last,
+  or at or above the next number; a next number at or above 2^63 - 1): it is damaged (E6, `file` `spool-meta.json`); its
+  acknowledgements are discarded, so those records are handed out again (a resend is idempotent), and the next number is taken as on
+  a fresh spool (NFR *Sequence numbers*).
+- E21: The next sequence number would reach 2^63 - 1, the largest the backend stores: the hand-over is refused as in E9 with `err`
+  `spool: sequence numbers exhausted`; no number at or above it is issued.
 
 ## Non-functional requirements
 
@@ -137,14 +161,16 @@ of the records to the spool returned without an error.
   stream is an estimate of the server, not a measurement; #44 measures the real growth. Under sustained memory pressure the agent
   records much more, so less than 7 days may fit; the cap then drops the oldest data with gaps (the stated residual of *Memory
   pressure mode* in the agent area).
-- **Size bound.** `agent_spool_bytes` is the total size of the spool's own files and never exceeds `spool.max_size`. Once every
+- **Size bound.** `agent_spool_bytes` is the total size of the spool's own files on disk (its data files, `spool-meta.json` and
+  `spool-meta.json.tmp` while it exists), headers and summaries included, and never exceeds `spool.max_size`. Once every
   record is acknowledged it is at most one sixteenth of `spool.max_size`.
 - **Disk.** A write is made only when the space available to unprivileged users on the spool's file system (`statfs` `f_bavail`)
-  minus the write is at least `spool.min_free`; otherwise the spool first drops its oldest unacknowledged records, and refuses
+  is at least the write's size and what remains after the write is at least `spool.min_free` (compared without overflow, so an
+  available space smaller than the write never passes); otherwise the spool first drops its oldest unacknowledged records, and refuses
   (E11) when nothing is left to drop. `0MiB` and `0GiB` switch the check off.
 - **Durability.** A record survives `kill -9` once accepted, and an OS crash or power loss once 5 seconds have passed since. Before
   the state file saves a change, every record accepted until then is durable, so no saved position or state ever covers a record a
-  crash can still lose (E5, E14).
+  crash can still lose, apart from the residual of E5 (E5, E14).
 - **Sequence numbers.** Numbers are issued strictly increasing and never twice by one agent ID. After a clean stop, and after `kill -9`
   in the same boot, the next number follows the last issued one. On a fresh spool (E3, E4, E18), and after an unclean stop in an
   earlier boot (a crash or power loss may have rolled the stored counter back, E5), the next number is the larger of the stored
@@ -154,11 +180,11 @@ of the records to the spool returned without an error.
   2^63 - 1, which the backend stores, for about 292,000 years. An agent's first number is therefore large, and a fresh start or a
   crash leaves a jump: the backend's sequence detection (#41) does not report numbers below an agent's first number, and reports a
   jump as `sequence_missing` (wire format, *Batch identity*).
-- **Memory.** The spool's live memory stays below 4 MiB, apart from the records of a read or hand-over in progress, at every spool
-  size up to `spool.max_size`, with at most 64 acknowledged ranges and with the directory of E7; it does not grow with the number of
-  records held. Its persisted acknowledgement state is bounded the same way.
-- **Start-up time.** Opening a spool filled to the default `spool.max_size` takes at most 5 seconds on the development host
-  (a benchmark, recorded in `docs/BENCHMARKS.md`); it is not measured on the server here (#44).
+- **Memory.** The spool's live memory stays below 4 MiB, apart from the records of a read or hand-over in progress, at every
+  `spool.max_size` up to its largest value (64 GiB), with the largest number of files (1,024, E19), 64 acknowledged ranges and the
+  directory of E7; it does not grow with the number of records held. Its persisted acknowledgement state is bounded the same way.
+- **Start-up time.** Opening a spool filled to the default `spool.max_size`, and one holding 1,024 files, each takes at most 5
+  seconds on the development host (a benchmark, recorded in `docs/BENCHMARKS.md`); it is not measured on the server here (#44).
 - **Security (security area 9).** Spool files are created with mode 0600 inside the existing `spool.directory`, which the agent never
   creates; no link is followed and nothing outside the directory is written; only the spool's own files are counted and deleted.
   Records hold no secret: the agent token is never written to the spool. Error texts and log lines name no path, only fixed spool
@@ -166,12 +192,12 @@ of the records to the spool returned without an error.
 - **Compatibility.** Linux only. An existing configuration without the new keys keeps working with the defaults; an existing
   `spool.directory` that holds `agent-state.json` becomes the spool's directory without migration. The spool's on-disk format carries
   a version so a later agent can read or refuse it (E6). Go standard library preferred; a new dependency needs a decision record.
-- **New configuration.** `spool.max_size` (default `2GiB`, 64 MiB to 1024 GiB) and `spool.min_free` (default `1GiB`, 0 to 1024 GiB,
+- **New configuration.** `spool.max_size` (default `2GiB`, 64 MiB to 64 GiB) and `spool.min_free` (default `1GiB`, 0 to 1024 GiB,
   zero switches the check off), each one to five ASCII digits followed directly by `MiB` or `GiB`.
 - **New metric.** `agent_spool_age_seconds` (unit `seconds`, no labels): from the capture time of the oldest unacknowledged record to
   the sample's start. `agent_spool_bytes` keeps its name and unit.
 - **Logs.** Through the agent's logger with `component=spool`, one line per change, never a record's content: info `spool created`;
-  warning `spool data dropped` (`reason`: `size_bound` or `disk_space`, `records`) at the first eviction of an episode and info `spool
+  warning `spool data dropped` (`reason`: `size_bound`, `disk_space` or `file_limit`, `records`) at the first eviction of an episode and info `spool
   data no longer dropped` (`records`: the episode's total) when a hand-over fits again without eviction; warning `spool write failed`
   (`err`) and info `spool writes again`; warning `spool data damaged` (`file`, `err`); warning `spool records of another agent
   dropped` (`records`); warning `spool not closed`.
@@ -198,43 +224,56 @@ of the records to the spool returned without an error.
 - [ ] AC6: A spool whose files are cut at arbitrary offsets, or whose newest writes are rolled back to an older state of the
   directory with a new boot ID (a simulated power loss), hands out no damaged record and issues no number it had issued before the
   cut; and a state save waits until the records accepted before it are durable, checked with a spool whose sync is held back (E5).
-- [ ] AC7: Simulated 7-day outage: 7 days of the reference stream, written with an injected clock into a spool with the default
-  `spool.max_size`, are all kept, no `spool_dropped` gap is written, and reading and acknowledging from the oldest onwards returns
-  every record exactly once in order and leaves the spool empty; the test reports the stream's encoded bytes per day (S2, S3).
-- [ ] AC8: Size cap: a spool fed beyond `spool.max_size` never measures more than it, drops only its oldest unacknowledged records,
+- [ ] AC7: Simulated 7-day outage: 7 days of the reference stream at one sixteenth of every daily count, written with an injected
+  clock into a spool of one sixteenth of the default `spool.max_size` (128 MiB), are all kept, no `spool_dropped` gap is written, and
+  reading and acknowledging from the oldest onwards returns every record exactly once in order and leaves the spool empty; the test
+  reports the stream's encoded bytes per day at full scale. The same test at full scale (the default 2 GiB) runs when the
+  environment variable `VANDOX_LONG_TESTS` is `1`; it is run once before the pull request and its result is recorded (S2, S3).
+- [ ] AC8: Size cap: a spool fed beyond `spool.max_size` never holds more than it, measured as the sum of the sizes of its files on
+  disk after every hand-over, drops only its oldest unacknowledged records,
   writes one `spool_dropped` gap per run of dropped numbers that contains no kept or acknowledged number (source `agent`,
   `first_seq` and `last_seq` the run's lowest and highest number, `from` and `to` the earliest and latest dropped capture time or
   span of a dropped gap, `to` at least one second after `from`), and logs `spool data dropped` with `reason` `size_bound` once per
-  episode and `spool data no longer dropped` at its end (S6, E10).
+  episode and `spool data no longer dropped` at its end; with 1,024 files it drops the same way with `reason` `file_limit`, and a
+  restart in the same boot adds no file (S6, E10, E19).
 - [ ] AC9: With an injected file-system statistic, a write that would leave less than `spool.min_free` available drops as in AC8 with
   `reason` `disk_space` first; with an empty spool and too little space the hand-over is refused and its gap written by the next write
-  that fits; with `0MiB` or `0GiB` the check is off (S7, E11).
-- [ ] AC10: Damaged data (a flipped byte, a file cut short, foreign bytes, an unknown format version, and an entry of E8) is never
-  handed out, the records before it and in other files are, `spool_dropped` gaps name the dropped numbers where known, and
-  `spool data damaged` is logged once per file (E6, E8).
+  that fits; an available space smaller than the write itself, with a non-zero `spool.min_free`, never lets the write through; with
+  `0MiB` or `0GiB` the check is off (S7, E11).
+- [ ] AC10: Damaged data (a flipped byte, a file cut short, foreign bytes, an unknown format version, a file name's number that is
+  not its first record's, numbers that do not increase within or across files, a record number that differs from its line's, a
+  summary that disagrees with the last record, a time outside the wire range, and an entry of E8) is never handed out, at start and
+  when found during a read: the records before it and in other files are, `spool_dropped` gaps name the dropped numbers where
+  known and never carry a damaged value, and `spool data damaged` is logged once per file (E6, E8).
 - [ ] AC11: Foreign entries, `agent-state.json` and `agent-state.json.tmp` among them, are never read, counted, overwritten or deleted,
   and a directory with 100,000 of them opens within the memory bound (E7).
 - [ ] AC12: A failing write (injected: no space, an I/O error, read-only) refuses the hand-over with an error at once, logs `spool write
   failed` once and `spool writes again` at the next success, then writes one `gap` with cause `unknown`, source `agent`, from the
   earliest to the latest capture time of all records refused in the episode (at least one second); a hand-over larger than the whole
   cap is refused the same way (E9, E11).
-- [ ] AC13: Start-up: a missing directory, a file or a symbolic link in its place, a directory the agent cannot write, and an unreadable
+- [ ] AC13: Start-up: a missing directory, a file or a symbolic link in its place (the link with the reason `symbolic link`), a
+  directory path that is not absolute and clean, a refused entry in place of `spool-meta.json` or its temporary file, a directory the agent cannot write, and an unreadable
   or malformed boot ID each make the agent log `agent cannot start` with a `spool:` error without a path and exit with 1 before
   `READY=1`; an empty directory, or one holding only `agent-state.json`, logs `spool created` and no warning from spool or state file
   (E2, E3, E15).
 - [ ] AC14: Sequence numbers with an injected clock: a fresh spool starts at the clock bound; a new spool in a directory whose earlier
   spool files were removed issues numbers above every number of the earlier one, also when the earlier one issued a burst of 100,000
   numbers within one microsecond of the clock and the clock then moved on by one second; an unclean stop in an earlier boot with a
-  rolled-back counter continues above the clock bound; every number stays below 2^63 - 1 (E4, E5).
+  rolled-back counter continues above the clock bound; after a `kill -9` in the same boot with every sealed file acknowledged and
+  deleted and an empty newest file, the next number lies above that file's name; a meta file that breaks a consistency rule of E20
+  is damaged, its acknowledgements discarded and the next number taken as on a fresh spool; a hand-over whose numbers would reach
+  2^63 - 1 is refused with `spool: sequence numbers exhausted` (E4, E5, E20, E21).
 - [ ] AC15: The `self` sample holds `agent_spool_bytes` (the size of the spool's files only) and `agent_spool_age_seconds` (0 for an
   empty spool and for an oldest capture time after the sample's start) (S8, E16).
 - [ ] AC16: `spool.max_size` and `spool.min_free` are read with their defaults and rules, and every value of E1 is refused with its
   error text, which never contains the value (S10, E1).
-- [ ] AC17: The spool's live memory stays below 4 MiB at a spool filled to its cap with 64 acknowledged ranges and with 100,000 foreign
-  entries, and opening a spool filled to the default cap is measured by a benchmark recorded in `docs/BENCHMARKS.md` (NFR *Memory*,
-  *Start-up time*).
+- [ ] AC17: The spool's live memory stays below 4 MiB with `spool.max_size` 64 GiB and 1,024
+  files left by simulated reboots, 64 acknowledged ranges, reads from both ends and 100,000 foreign entries; opening a spool filled to
+  the default cap and one holding 1,024 files is measured by a benchmark recorded in `docs/BENCHMARKS.md` (NFR *Memory*, *Start-up
+  time*).
 - [ ] AC18: A spool holding records of another agent ID, opened under a new ID, hands none of them out, writes no gap for them, logs
   `spool records of another agent dropped` with their count, and issues the new ID's numbers from the clock bound (E18).
+- [ ] AC19: After the agent ran with an agent token set, no spool file holds the token's bytes (NFR *Security*).
 
 ## Out of scope
 
@@ -327,3 +366,8 @@ of the records to the spool returned without an error.
   not possible, because capture times of different collectors interleave.
 - Lead, while planning: E1 claimed the size rule's text also for a list and for `~`; the strict decoder (`internal/config/decode.go`
   `setLeaf`) answers those before any option rule, with `invalid value, want a string` and `has no value`. E1 now says so.
+- Plan review (Devil's Advocate and Security, answered in plan.md *Challenge* and *Security review*): E5 now states the boot and backup
+  residual; E6 names the consistency rules and the read-time behavior; E8 names the meta file's own names; E19 (file limit), E20
+  (meta consistency) and E21 (numbers exhausted) are new; E3 states the residual state-file warning; NFR *Size bound*, *Disk*,
+  *Memory*, *Start-up time* and the `spool.max_size` maximum (now 64 GiB) changed; AC7 runs scaled with a full-scale run on demand;
+  AC8, AC9, AC10, AC13, AC14 and AC17 cover the new cases; AC19 is new.

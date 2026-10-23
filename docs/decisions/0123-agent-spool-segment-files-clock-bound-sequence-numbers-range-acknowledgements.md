@@ -40,17 +40,28 @@ Acknowledgements:
 3. **At most 64 disjoint ranges above the oldest unacknowledged record** (chosen) — enough for a current and a backfill stream;
    one more is refused and the records are sent again (idempotent).
 
+File count:
+
+1. **A fixed file size of 64 MiB without a limit** — thousands of files at large caps, and a crash loop with reboots adds a file
+   per start: memory and start-up grow without bound.
+2. **A fixed number of files whose size grows with the cap** — a start-up scan of the newest file grows with the cap.
+3. **A file size of `spool.max_size` / 128 within 1 to 64 MiB, a cap of at most 64 GiB, appending after a restart in the same
+   boot, and a hard limit of 1,024 files that drops the oldest like the size bound** (chosen) — memory and start-up stay bounded at
+   every configuration.
+
 Order of state and records:
 
 1. **An fsync per hand-over** — the I/O cost every 2 seconds per collector.
 2. **Positions stored inside the spool** (0121's exact delivery) — a larger change to three collectors.
 3. **The state file syncs the spool before every save** (chosen) — a periodic sync every second, and the barrier makes the records
-   durable before any position that covers them.
+   durable before any position that covers them. It does not cover the boot and backup state the `kernel` and `backups` collectors
+   write inside their run, before the hand-over; moving those behind the scheduler's `Kept` was left to a follow-up issue.
 
 ## Decision
 
-The spool is option 4 for storage, the clock bound for a lost counter, at most 64 acknowledged ranges, and a spool sync as a barrier
-before every state save. Its size bound and free-space reserve drop the oldest segments with `spool_dropped` gaps.
+The spool is option 4 for storage, the clock bound for a lost counter, at most 64 acknowledged ranges, option 3 for the file count,
+and a spool sync as a barrier before every state save. Values read back from its files are held to consistency rules, and a break is
+damage, never a number. Its size bound and free-space reserve drop the oldest segments with `spool_dropped` gaps.
 
 ## Consequences
 
@@ -60,3 +71,6 @@ before every state save. Its size bound and free-space reserve drop the oldest s
   `sequence_missing`; numbers below an agent's first are never reported.
 - A clock set back before a reinstall can make new numbers collide with stored ones (stated residual).
 - Without a sender the running agent fills its spool to the cap and then drops the oldest with gaps; it is not released before #39.
+- A power loss right after a state save that fell between a run's boot or backup change and its hand-over can lose that `boot` or
+  `backup_run` record (stated residual until the follow-up).
+- `spool.max_size` is at most 64 GiB.
