@@ -166,14 +166,14 @@ neither group, and neither do the connection, systemd and MariaDB collectors.
   `kernel messages not readable` once, records no gap and resumes at the saved position once the journal is readable again.
 - **The spool** lives in `spool.directory` too and holds the records the backend has not yet acknowledged. The agent writes segment
   files `segment-<number>.spool` (mode 0600) and the bookkeeping file `spool-meta.json` (mode 0600, written through `spool-meta.json.tmp`:
-  the agent ID, the boot ID and the acknowledged ranges), and deletes a segment file once the backend has acknowledged all its records or
-  when the oldest data has to give way to new records (`spool.max_size`, `spool.min_free`). Other entries in the directory,
+  the agent ID, the boot ID, the next sequence number, whether the spool was closed cleanly and the acknowledged ranges), and deletes a segment file once the backend has acknowledged all its records,
+  when it is damaged, or when the oldest data has to give way to new records (`spool.max_size`, `spool.min_free`). Other entries in the directory,
   `agent-state.json` among them, are never read, changed or deleted by the spool. No spool file holds the agent token.
 - **The state file** `agent-state.json` lives in `spool.directory` and holds the boot, the position in the journal, the open backup run and the
   positions of the `logs` collector (a position per journal sequence number ID, at most 256, and per configured file, at most 16, with the
   SHA-256 of its path instead of the path; up to 64 KiB in all), so a restart neither repeats nor loses a kill or a log line, and a backup
   that ended while the agent was down is closed. The agent saves it within 10 seconds after a position changed (the next run of its
-  10-second state job) and once more when it stops; after a crash it ships the lines of the last seconds again. The agent writes this one file
+  10-second state job) and once more when it stops; after a crash it ships the lines of the last seconds again. The agent writes this file and the spool's files
   (mode 0600) and **never creates the directory**: the installation creates `spool.directory` and makes it writable for `vandox-agent`
   (for example `install -d -o vandox-agent -g vandox-agent -m 0700 /var/lib/vandox/spool`). When the file cannot be read or written the agent
   logs `agent state not available` or `agent state not saved` once and runs on without it.

@@ -96,7 +96,7 @@ type Options struct {
 	ConfigPath string            // the configuration file
 	Environ    []string          // the environment, in os.Environ form
 	Stderr     io.Writer         // the log output
-	Sink       scheduler.Putter  // nil: scheduler.DiscardSink
+	Sink       scheduler.Putter  // nil: the spool in StateDir, else in spool.directory
 	Self       selfstats.Sources // the self-metrics sources; zero fields take their defaults
 	System     sysstats.Sources  // the system metrics sources; zero fields take their defaults
 	Processes  procstats.Sources // the process sources; zero fields take their defaults
@@ -364,7 +364,7 @@ func closeSpool(sp *spool.Spool, log *slog.Logger) {
 	ctx, cancel := context.WithTimeout(context.Background(), closeTimeout)
 	defer cancel()
 	if err := sp.Close(ctx); err != nil {
-		log.Error("spool not closed")
+		log.Warn("spool not closed", "component", "spool")
 	}
 }
 

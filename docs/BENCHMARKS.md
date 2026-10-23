@@ -377,7 +377,7 @@ reference host; the counts of the tallies are the slowest read because they grou
 ## Spool open
 
 Criterion (issue #38, NFR *Start-up time* of the agent spool): opening a spool filled to the default cap of 2 GiB, and one that holds 1,024 files,
-each takes at most **5 seconds** on the development host. Opening lists the directory and reads every data file's header and summary, not its records.
+each takes at most **5 seconds** on the development host. Opening lists the directory and reads each sealed data file's header, summary and first record, and scans frame by frame only the newest file and any file without a summary.
 
 ### Procedure
 
