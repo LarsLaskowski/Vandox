@@ -29,6 +29,11 @@ func NewClock(loc *time.Location) *Clock {
 	return &Clock{loc: loc}
 }
 
+// SetZone changes the zone the clock reads the times of the file in, and keeps its previous instant.
+func (c *Clock) SetZone(loc *time.Location) {
+	c.loc = loc
+}
+
 // resolve turns a year-less local time into a UTC instant. The year is the current year of now in the zone, or the year before when the
 // line would lie more than a day ahead of now. A time in the hour skipped at the start of daylight saving time is shifted forward by the
 // gap; a time in the repeated hour takes the earlier offset unless that lies more than ten minutes before the previous line.

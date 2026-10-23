@@ -227,19 +227,7 @@ func parseOffset(line []byte, index int) (minutes, next int, ok bool) {
 
 // parseTag reads the tag "PROGRAM[PID]:" or "PROGRAM:" at start and the message after it; a line without a tag is all message.
 func parseTag(line []byte, start int) (program string, pid int32, message string) {
-	index, width := start, 0
-	for index < len(line) && width <= maxProgramBytes {
-		r, size := utf8.DecodeRune(line[index:])
-		if r == ' ' || r == '[' || r == ']' || r == ':' {
-			break
-		}
-		if r == utf8.RuneError && size <= 1 {
-			size, width = 1, width+replacementBytes
-		} else {
-			width += size
-		}
-		index += size
-	}
+	index, width := tagEnd(line, start)
 	messageStart := -1
 	if index > start && width <= maxProgramBytes && index < len(line) {
 		if line[index] == ':' {
@@ -255,6 +243,25 @@ func parseTag(line []byte, start int) (program string, pid int32, message string
 		messageStart++
 	}
 	return string(line[start:index]), pid, string(line[messageStart:])
+}
+
+// tagEnd returns the position of the first space, bracket or colon at or after start and the UTF-8 bytes of the text before it, an invalid
+// byte counting as the three bytes of U+FFFD; it stops once the text is longer than a program can be.
+func tagEnd(line []byte, start int) (index, width int) {
+	index = start
+	for index < len(line) && width <= maxProgramBytes {
+		r, size := utf8.DecodeRune(line[index:])
+		if r == ' ' || r == '[' || r == ']' || r == ':' {
+			break
+		}
+		if r == utf8.RuneError && size <= 1 {
+			size, width = 1, width+replacementBytes
+		} else {
+			width += size
+		}
+		index += size
+	}
+	return index, width
 }
 
 // parsePid reads "[PID]:" at bracket; the process ID is 0 above 2,147,483,647. The position behind the colon is -1 for a line without

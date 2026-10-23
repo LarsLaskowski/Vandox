@@ -451,37 +451,64 @@ func decode(data []byte) (State, error) {
 	}
 
 	var st State
-	if f.Boot != nil {
-		if !validUUID.MatchString(f.Boot.ID) || f.Boot.UptimeNs < 0 {
-			return State{}, errInvalid
-		}
-		st.Boot = &Boot{ID: f.Boot.ID, Uptime: time.Duration(f.Boot.UptimeNs), BootedAt: f.Boot.BootedAt}
+	var ok bool
+	if st.Boot, ok = decodeBoot(f.Boot); !ok {
+		return State{}, errInvalid
 	}
-	if f.Journal != nil {
-		if !validUUID.MatchString(f.Journal.SeqnumID) {
-			return State{}, errInvalid
-		}
-		st.Journal = &JournalPosition{SeqnumID: f.Journal.SeqnumID, Seqnum: f.Journal.Seqnum, Realtime: f.Journal.Realtime}
+	if st.Journal, ok = decodeJournal(f.Journal); !ok {
+		return State{}, errInvalid
 	}
-	if f.Backup != nil {
-		if !validUUID.MatchString(f.Backup.BootID) || !validRun(f.Backup) {
-			return State{}, errInvalid
-		}
-		st.Backup = &OpenRun{BootID: f.Backup.BootID, StartedAt: f.Backup.StartedAt, LastSeen: f.Backup.LastSeen, MaxProcesses: f.Backup.MaxProcesses}
+	if st.Backup, ok = decodeBackup(f.Backup); !ok {
+		return State{}, errInvalid
 	}
-	if f.Logs != nil {
-		logs, ok := decodeLogs(f.Logs)
-		if !ok {
-			return State{}, errInvalid
-		}
-		st.Logs = logs
+	if st.Logs, ok = decodeLogs(f.Logs); !ok {
+		return State{}, errInvalid
 	}
 
 	return st, nil
 }
 
-// decodeLogs checks the log positions of the state file and returns them; false means they are not valid.
+// decodeBoot checks the boot of the state file and returns it; nil without one.
+func decodeBoot(b *fileBoot) (*Boot, bool) {
+	if b == nil {
+		return nil, true
+	}
+	if !validUUID.MatchString(b.ID) || b.UptimeNs < 0 {
+		return nil, false
+	}
+
+	return &Boot{ID: b.ID, Uptime: time.Duration(b.UptimeNs), BootedAt: b.BootedAt}, true
+}
+
+// decodeJournal checks the journal position of the state file and returns it; nil without one.
+func decodeJournal(j *fileJournal) (*JournalPosition, bool) {
+	if j == nil {
+		return nil, true
+	}
+	if !validUUID.MatchString(j.SeqnumID) {
+		return nil, false
+	}
+
+	return &JournalPosition{SeqnumID: j.SeqnumID, Seqnum: j.Seqnum, Realtime: j.Realtime}, true
+}
+
+// decodeBackup checks the open backup run of the state file and returns it; nil without one.
+func decodeBackup(b *fileBackup) (*OpenRun, bool) {
+	if b == nil {
+		return nil, true
+	}
+	if !validUUID.MatchString(b.BootID) || !validRun(b) {
+		return nil, false
+	}
+
+	return &OpenRun{BootID: b.BootID, StartedAt: b.StartedAt, LastSeen: b.LastSeen, MaxProcesses: b.MaxProcesses}, true
+}
+
+// decodeLogs checks the log positions of the state file and returns them, nil without any; false means they are not valid.
 func decodeLogs(f *fileLogs) (*LogPositions, bool) {
+	if f == nil {
+		return nil, true
+	}
 	if len(f.Journal) > MaxLogJournals || len(f.Files) > MaxLogFiles {
 		return nil, false
 	}
@@ -490,7 +517,7 @@ func decodeLogs(f *fileLogs) (*LogPositions, bool) {
 		if !validUUID.MatchString(j.SeqnumID) {
 			return nil, false
 		}
-		logs.Journal = append(logs.Journal, JournalPosition{SeqnumID: j.SeqnumID, Seqnum: j.Seqnum, Realtime: j.Realtime})
+		logs.Journal = append(logs.Journal, JournalPosition(j))
 	}
 	for _, p := range f.Files {
 		pos, ok := decodeFilePosition(p)

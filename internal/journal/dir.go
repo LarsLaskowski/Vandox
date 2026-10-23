@@ -16,6 +16,8 @@ const (
 	maxMachineFile = 64
 	// maxUserDigits is the most digits of the UID in a user journal file name.
 	maxUserDigits = 10
+	// journalSuffix ends the name of a journal file.
+	journalSuffix = ".journal"
 )
 
 var errMachineID = errors.New("journal: machine ID not readable")
@@ -68,7 +70,7 @@ func isJournalName(name string) bool {
 		return true
 	}
 	rest, ok := strings.CutPrefix(name, "system@")
-	return ok && (strings.HasSuffix(rest, ".journal") || strings.HasSuffix(rest, ".journal~")) && strings.IndexByte(rest, '/') < 0
+	return ok && (strings.HasSuffix(rest, journalSuffix) || strings.HasSuffix(rest, journalSuffix+"~")) && strings.IndexByte(rest, '/') < 0
 }
 
 // isUserJournalName tells whether name is user-<digits>.journal, user-<digits>@*.journal or user-<digits>@*.journal~ with one to ten
@@ -86,11 +88,11 @@ func isUserJournalName(name string) bool {
 		return false
 	}
 	rest = rest[digits:]
-	if rest == ".journal" {
+	if rest == journalSuffix {
 		return true
 	}
 	rest, ok = strings.CutPrefix(rest, "@")
-	return ok && (strings.HasSuffix(rest, ".journal") || strings.HasSuffix(rest, ".journal~")) && strings.IndexByte(rest, '/') < 0
+	return ok && (strings.HasSuffix(rest, journalSuffix) || strings.HasSuffix(rest, journalSuffix+"~")) && strings.IndexByte(rest, '/') < 0
 }
 
 // MachineDir returns the machine ID directory name read from /etc/machine-id in etc: 32 lower-case hex digits and an optional line

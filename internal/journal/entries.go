@@ -36,7 +36,11 @@ type ReadOptions struct {
 
 // SeekAll positions a cursor on the file's main entry array at the first entry after the sequence number after.
 func (f *File) SeekAll(after uint64) (Cursor, error) {
-	return f.seekList(Cursor{main: true, head: f.mainHead, n: f.mainN}, after)
+	c := Cursor{main: true, head: f.mainHead, n: f.mainN}
+	if f.hdr.HeadSeqnum > 0 && after < f.hdr.HeadSeqnum {
+		return c, nil // every entry of the file is after: nothing to look at, so a damaged entry cannot get in the way
+	}
+	return f.seekList(c, after)
 }
 
 // NextWith reads the next entry of the main entry array into e like Next, with the limits and the decompression of opt. It reports

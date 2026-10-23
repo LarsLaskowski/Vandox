@@ -110,14 +110,9 @@ func (f *File) seekList(c Cursor, after uint64) (Cursor, error) {
 	if c.n == 0 {
 		return c, nil
 	}
-	skip := uint64(1)
-	if c.main {
-		skip = 0
-	} else {
-		greater, err := f.entryAfter(c.first, after)
-		if err != nil || greater {
-			return c, err
-		}
+	skip, done, err := f.skipFirst(c, after)
+	if err != nil || done {
+		return c, err
 	}
 	off, base, remaining := c.head, uint64(0), c.n-skip
 	for ord := 1; remaining > 0; ord++ {
@@ -149,6 +144,17 @@ func (f *File) seekList(c Cursor, after uint64) (Cursor, error) {
 	}
 	c.idx = c.n
 	return c, nil
+}
+
+// skipFirst tells how many entries of the list lie outside its chain of arrays: one for the entry list of a data object, none for the main
+// entry array. done is true when the first entry of a data object's list is already after the sequence number, so the cursor stays at
+// the start.
+func (f *File) skipFirst(c Cursor, after uint64) (skip uint64, done bool, err error) {
+	if c.main {
+		return 0, false, nil
+	}
+	greater, err := f.entryAfter(c.first, after)
+	return 1, greater, err
 }
 
 // bisect returns the index of the first item of the array at arr, among items 0..last, whose entry is after seqnum after; item last

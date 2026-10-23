@@ -3,9 +3,11 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"os"
+	"regexp"
 	"sync"
 	"time"
 
@@ -125,7 +127,7 @@ func Run(ctx context.Context, opts Options) int {
 	}
 	log := NewLogger(stderr, cfg.Log.Level, journal)
 
-	sched, _, err := newScheduler(opts, cfg, log)
+	sched, store, err := newScheduler(opts, cfg, log)
 	if err != nil {
 		log.Error("agent cannot start", "err", err)
 		return 1
@@ -148,12 +150,14 @@ func Run(ctx context.Context, opts Options) int {
 		log.Warn("service manager notification failed", "state", sdnotify.Stopping, "err", err)
 	}
 	wg.Wait()
+	// the last positions of the collectors are saved once the scheduler has stopped; Flush logs a failed save itself
+	_ = store.Flush(time.Now())
 	log.Info("agent stopped")
 	return 0
 }
 
 // jobs returns the collectors with their schedules: self, system, processes, connections, systemd (only when a service unit is
-// configured), mariadb (only when enabled), filesystem (only when a mount point is configured), clock, kernel, backups (only
+// configured), mariadb (only when enabled), filesystem (only when a mount point is configured), clock, kernel, logs, backups (only
 // when backups.processes has rules) and state, and the system collector, which newScheduler connects to the scheduler. The
 // agent's state file is opened in opts.StateDir or else spool.directory. The collectors log through log.
 func jobs(opts Options, cfg *config.Agent, log *slog.Logger) ([]scheduler.Job, *sysstats.System, *agentstate.Store) {
@@ -213,7 +217,9 @@ func jobs(opts Options, cfg *config.Agent, log *slog.Logger) ([]scheduler.Job, *
 		Collector: kernevents.New(opts.Kernel, store, log),
 		Schedule:  scheduler.Schedule{Interval: KernelInterval, Timeout: KernelTimeout},
 	})
-	if logs, err := logship.New(opts.Logs, logship.Config{}, store, log); err == nil {
+	if logs, err := newLogs(opts.Logs, cfg.LogShipping, store, log); err != nil {
+		log.Error("log shipping cannot start", "err", err)
+	} else {
 		list = append(list, scheduler.Job{
 			Collector: logs,
 			Schedule:  scheduler.Schedule{Interval: LogsInterval, Timeout: LogsTimeout},
@@ -229,6 +235,42 @@ func jobs(opts Options, cfg *config.Agent, log *slog.Logger) ([]scheduler.Job, *
 		Collector: agentstate.NewSaver(store, proc),
 		Schedule:  scheduler.Schedule{Interval: StateInterval, Timeout: StateTimeout},
 	}), system, store
+}
+
+// errDropPattern is the error of a drop pattern that does not compile; it does not quote the pattern.
+var errDropPattern = errors.New("a drop pattern does not compile")
+
+// newLogs returns the log shipping collector for the options of log_shipping.
+func newLogs(src logship.Sources, opts config.LogShipping, store *agentstate.Store, log *slog.Logger) (*logship.Logs, error) {
+	cfg, err := logshipConfig(opts)
+	if err != nil {
+		return nil, err
+	}
+	return logship.New(src, cfg, store, log)
+}
+
+// logshipConfig converts the checked options of log_shipping for the collector.
+func logshipConfig(opts config.LogShipping) (logship.Config, error) {
+	minLevel, _ := config.PriorityLevel(opts.MinPriority)
+	cfg := logship.Config{Journal: opts.Journal, MinPriority: minLevel}
+	for _, f := range opts.Files {
+		cfg.Files = append(cfg.Files, logship.FileSpec{Path: f.Path, Format: f.Format})
+	}
+	for _, r := range opts.Drop {
+		rule := logship.Rule{Log: r.Log, Program: r.Program}
+		if level, ok := config.PriorityLevel(r.Priority); ok {
+			rule.Priority = &level
+		}
+		if r.Message != "" {
+			re, err := regexp.Compile(r.Message)
+			if err != nil {
+				return logship.Config{}, errDropPattern
+			}
+			rule.Message = re
+		}
+		cfg.Drop = append(cfg.Drop, rule)
+	}
+	return cfg, nil
 }
 
 // backupRules converts the configured backup rules for the backup collector.
