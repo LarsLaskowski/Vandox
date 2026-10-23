@@ -1456,7 +1456,8 @@ collector timeouts and backend gap detection each emit a gap record, and each pa
 - For reading it is a member of the groups `adm` (log files) and `systemd-journal` (journal). To read other users' processes it holds
   `CAP_SYS_PTRACE` alone, as an ambient capability with a bounding set limited to it (rule below, record 0122). `CAP_DAC_READ_SEARCH` is
   **not** granted: together with `CAP_SYS_PTRACE` it opens other processes' open files through `/proc/<pid>/fd/<n>` for writing, memfds
-  included (measured below), and no collector needs it.
+  included (measured below). The one collector that would use it, log shipping, does without it: a configured file its user and groups
+  cannot read is logged and not shipped (below).
 - **Process collector.** `stat`, `status` and `cmdline` of every process are readable by any user (unless `/proc` is mounted with
   `hidepid`); `smaps_rollup` of **another user's** process needs `CAP_SYS_PTRACE`, and `CAP_DAC_READ_SEARCH` does not replace it. Measured
   on the development host as UID 65534 against a root process in the same namespace, without Yama or `hidepid`: `smaps_rollup` answers
@@ -1590,8 +1591,8 @@ collector timeouts and backend gap detection each emit a gap record, and each pa
   directories readable (no `InaccessiblePaths=` or `TemporaryFileSystem=` over them) and start after `systemd-journal-flush.service`.
   That the server's journal files are readable by the group is checked on the server (#42).
 - **Log shipping collector.** It reads the system and user journal files with `systemd-journal`, as the kernel collector does,
-  `/etc/machine-id` and `/etc/localtime`, which any user can read, and the files `log_shipping.files` names with `adm` (or as another
-  user may read them). It uses no capability: `CAP_DAC_READ_SEARCH` is not granted (record 0122). It opens the configured paths through the
+  `/etc/machine-id` and `/etc/localtime`, which any user can read, and the files `log_shipping.files` names with `adm`, or because their
+  mode lets any user read them. It uses no capability: `CAP_DAC_READ_SEARCH` is not granted (record 0122). It opens the configured paths through the
   walk of *Log shipping* that refuses a symbolic link in any element and a file with more than one link, so a service user who replaces
   its log file or a directory with a link to another file (`/etc/shadow`) never gets that file shipped. A file that the agent's user and
   groups cannot read, or that lies below a directory they cannot search, is logged `log file not readable` with the reason

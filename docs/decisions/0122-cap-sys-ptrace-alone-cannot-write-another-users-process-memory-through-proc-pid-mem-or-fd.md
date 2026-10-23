@@ -34,17 +34,20 @@ writable — the unsealed shared memory of every process, root's included, and t
 that maps it from a memfd (an inference from the runtimes' design, not measured). CAP_DAC_READ_SEARCH alone also opens for writing every file whose own mode
 allows it below a directory closed to the agent (measured). The filter cannot stop either (`openat`, `pwrite`).
 
-No collector uses CAP_DAC_READ_SEARCH: the process collector needs CAP_SYS_PTRACE alone for `smaps_rollup`
-(0113), the connection collector reads `fdinfo` with CAP_SYS_PTRACE alone and deliberately not the `fd` links
-(0115), and the journal and logs come through the groups `systemd-journal` and `adm`. 0030 granted it only for
-listing `/proc/<pid>/fd`, which 0115 gave up.
+The process collector needs CAP_SYS_PTRACE alone for `smaps_rollup` (0113), the connection collector reads
+`fdinfo` with CAP_SYS_PTRACE alone and deliberately not the `fd` links (0115), and the journal and logs come
+through the groups `systemd-journal` and `adm`. 0030 granted CAP_DAC_READ_SEARCH only for listing
+`/proc/<pid>/fd`, which 0115 gave up. The log shipping collector
+([0121](0121-log-shipping-journal-and-syslog-files-positions-per-seqnum-id-zstd-commit-when-kept.md)) would use
+it for a configured file that neither its user nor its groups can read; without it, such a file is logged and
+not shipped.
 
 ## Options considered
 
 1. **Keep both capabilities and accept the write residual** — no change to the rights, but the guarantee of
    0030 would no longer hold: a compromised agent could change the shared memory of any process and possibly,
    where a runtime executes from a memfd mapping, run code as its user. A product decision against the guarantee, for
-   a capability nothing uses. Rejected.
+   a capability only the log shipping collector would use, for files its user and groups cannot read. Rejected.
 2. **Keep both capabilities and confine `/proc/<pid>/fd` with an AppArmor or SELinux profile** — a new
    artifact per distribution, kernel- and policy-dependent; whether AppArmor mediates a magic-link open by the
    `/proc` path at all was not measured. Rejected.
@@ -60,8 +63,9 @@ listing `/proc/<pid>/fd`, which 0115 gave up.
    nor tests; a later grant of CAP_SYS_NICE or a kernel widening the advice set would reopen it unnoticed.
    Rejected.
 7. **Drop CAP_DAC_READ_SEARCH, keep CAP_SYS_PTRACE alone with a bounding set holding only it, and deny
-   `process_madvise` by name** (chosen by the Product Manager) — closes the memfd path (measured), costs no
-   collector and also narrows the read residual of 0030 that rested on CAP_DAC_READ_SEARCH. The agent never calls
+   `process_madvise` by name** (chosen by the Product Manager) — closes the memfd path (measured), costs the
+   log shipping collector only the configured files its user and groups cannot read (the Product Manager
+   accepted that such a file is logged and not shipped) and also narrows the read residual of 0030 that rested on CAP_DAC_READ_SEARCH. The agent never calls
    `process_madvise`, so denying it costs nothing. It leaves the residual of files whose own mode grants the
    agent write, reached through other processes' working and root directories or executables (*Consequences*).
 
