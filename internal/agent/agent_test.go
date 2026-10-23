@@ -22,10 +22,12 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/LarsLaskowski/Vandox/internal/agentstate"
 	"github.com/LarsLaskowski/Vandox/internal/config"
 	"github.com/LarsLaskowski/Vandox/internal/connstats"
 	"github.com/LarsLaskowski/Vandox/internal/journal/journaltest"
 	"github.com/LarsLaskowski/Vandox/internal/kernevents"
+	"github.com/LarsLaskowski/Vandox/internal/logship"
 	"github.com/LarsLaskowski/Vandox/internal/mariadb"
 	"github.com/LarsLaskowski/Vandox/internal/model"
 	"github.com/LarsLaskowski/Vandox/internal/procstats"
@@ -401,6 +403,16 @@ func fixtureKernel() kernevents.Sources {
 	return newKernelWorld().sources()
 }
 
+// fixtureLogs returns log shipping sources of a host without a journal and without files, so no agent test reads the host's
+// journal, /etc or log files.
+func fixtureLogs() logship.Sources {
+	return logship.Sources{
+		Etc:     fstest.MapFS{},
+		Journal: []fs.FS{fstest.MapFS{}},
+		Open:    func(string) (*os.File, error) { return nil, os.ErrNotExist },
+	}
+}
+
 // errFixtureMariaDB is what the dialer of fixtureMariaDB answers.
 var errFixtureMariaDB = errors.New("fixture: no database")
 
@@ -520,6 +532,7 @@ func TestRun_ReadyWatchdogAndSelfMetrics(t *testing.T) {
 		Services:    fixtureServices(),
 		MariaDB:     fixtureMariaDB(),
 		Kernel:      fixtureKernel(),
+		Logs:        fixtureLogs(),
 		StateDir:    t.TempDir(),
 	})
 
@@ -580,6 +593,7 @@ func TestRun_ConfigErrorExitsOne(t *testing.T) {
 				Services:    fixtureServices(),
 				MariaDB:     fixtureMariaDB(),
 				Kernel:      fixtureKernel(),
+				Logs:        fixtureLogs(),
 				StateDir:    t.TempDir(),
 			})
 
@@ -615,6 +629,7 @@ func TestRun_DoesNotLogSecret(t *testing.T) {
 		Services:    fixtureServices(),
 		MariaDB:     fixtureMariaDB(),
 		Kernel:      fixtureKernel(),
+		Logs:        fixtureLogs(),
 		StateDir:    t.TempDir(),
 	})
 
@@ -666,6 +681,7 @@ func TestRun_NotificationProblemsDoNotStopTheAgent(t *testing.T) {
 				Services:    fixtureServices(),
 				MariaDB:     fixtureMariaDB(),
 				Kernel:      fixtureKernel(),
+				Logs:        fixtureLogs(),
 				StateDir:    t.TempDir(),
 			})
 
@@ -708,6 +724,7 @@ func TestJobs_Schedules(t *testing.T) {
 
 	systemd := jobSchedule{"systemd", scheduler.Schedule{Interval: 30 * time.Second, Timeout: 5 * time.Second, PressureInterval: 10 * time.Second}}
 	kernel := jobSchedule{"kernel", scheduler.Schedule{Interval: 2 * time.Second, Timeout: 2 * time.Second}}
+	logs := jobSchedule{"logs", scheduler.Schedule{Interval: 2 * time.Second, Timeout: 2 * time.Second}}
 	backups := jobSchedule{"backups", scheduler.Schedule{Interval: 10 * time.Second, Timeout: 5 * time.Second}}
 	state := jobSchedule{"state", scheduler.Schedule{Interval: 10 * time.Second, Timeout: 5 * time.Second}}
 
@@ -717,11 +734,11 @@ func TestJobs_Schedules(t *testing.T) {
 		units       []string
 		want        []jobSchedule
 	}{
-		{"default mount point", []string{"/"}, []string{"nginx.service"}, []jobSchedule{self, system, processes, connections, systemd, filesystem, clock, kernel, backups, state}},
-		{"two mount points", []string{"/", "/var"}, []string{"nginx.service"}, []jobSchedule{self, system, processes, connections, systemd, filesystem, clock, kernel, backups, state}},
-		{"no mount point leaves out the filesystem job", []string{}, []string{"nginx.service"}, []jobSchedule{self, system, processes, connections, systemd, clock, kernel, backups, state}},
-		{"no service unit leaves out the systemd job", []string{"/"}, []string{}, []jobSchedule{self, system, processes, connections, filesystem, clock, kernel, backups, state}},
-		{"no mount point and no service unit", []string{}, []string{}, []jobSchedule{self, system, processes, connections, clock, kernel, backups, state}},
+		{"default mount point", []string{"/"}, []string{"nginx.service"}, []jobSchedule{self, system, processes, connections, systemd, filesystem, clock, kernel, logs, backups, state}},
+		{"two mount points", []string{"/", "/var"}, []string{"nginx.service"}, []jobSchedule{self, system, processes, connections, systemd, filesystem, clock, kernel, logs, backups, state}},
+		{"no mount point leaves out the filesystem job", []string{}, []string{"nginx.service"}, []jobSchedule{self, system, processes, connections, systemd, clock, kernel, logs, backups, state}},
+		{"no service unit leaves out the systemd job", []string{"/"}, []string{}, []jobSchedule{self, system, processes, connections, filesystem, clock, kernel, logs, backups, state}},
+		{"no mount point and no service unit", []string{}, []string{}, []jobSchedule{self, system, processes, connections, clock, kernel, logs, backups, state}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -731,7 +748,7 @@ func TestJobs_Schedules(t *testing.T) {
 			cfg.MariaDB.Enabled = false
 			log := slog.New(slog.NewTextHandler(io.Discard, nil))
 
-			list, _ := jobs(Options{Self: fixtureSources(), System: fixtureSystem(), Processes: fixtureProcesses(), Connections: fixtureConnections(), Services: fixtureServices(), MariaDB: fixtureMariaDB(), Kernel: fixtureKernel(), StateDir: t.TempDir()}, &cfg, log)
+			list, _, _ := jobs(Options{Self: fixtureSources(), System: fixtureSystem(), Processes: fixtureProcesses(), Connections: fixtureConnections(), Services: fixtureServices(), MariaDB: fixtureMariaDB(), Kernel: fixtureKernel(), Logs: fixtureLogs(), StateDir: t.TempDir()}, &cfg, log)
 
 			if got := scheduleOf(list); !slices.Equal(got, tt.want) {
 				t.Errorf("jobs() = %+v, want %+v", got, tt.want)
@@ -770,9 +787,9 @@ func TestJobs_MariaDBAfterSystemdOnlyWhenEnabled(t *testing.T) {
 		units   []string
 		want    []string
 	}{
-		{"enabled follows systemd", true, []string{"nginx.service"}, []string{"self", "system", "processes", "connections", "systemd", "mariadb", "filesystem", "clock", "kernel", "backups", "state"}},
-		{"enabled without systemd follows connections", true, []string{}, []string{"self", "system", "processes", "connections", "mariadb", "filesystem", "clock", "kernel", "backups", "state"}},
-		{"disabled leaves the job out", false, []string{"nginx.service"}, []string{"self", "system", "processes", "connections", "systemd", "filesystem", "clock", "kernel", "backups", "state"}},
+		{"enabled follows systemd", true, []string{"nginx.service"}, []string{"self", "system", "processes", "connections", "systemd", "mariadb", "filesystem", "clock", "kernel", "logs", "backups", "state"}},
+		{"enabled without systemd follows connections", true, []string{}, []string{"self", "system", "processes", "connections", "mariadb", "filesystem", "clock", "kernel", "logs", "backups", "state"}},
+		{"disabled leaves the job out", false, []string{"nginx.service"}, []string{"self", "system", "processes", "connections", "systemd", "filesystem", "clock", "kernel", "logs", "backups", "state"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -781,7 +798,7 @@ func TestJobs_MariaDBAfterSystemdOnlyWhenEnabled(t *testing.T) {
 			cfg.Services.Units = tt.units
 			log := slog.New(slog.NewTextHandler(io.Discard, nil))
 
-			list, _ := jobs(Options{Self: fixtureSources(), System: fixtureSystem(), Processes: fixtureProcesses(), Connections: fixtureConnections(), Services: fixtureServices(), MariaDB: fixtureMariaDB(), Kernel: fixtureKernel(), StateDir: t.TempDir()}, &cfg, log)
+			list, _, _ := jobs(Options{Self: fixtureSources(), System: fixtureSystem(), Processes: fixtureProcesses(), Connections: fixtureConnections(), Services: fixtureServices(), MariaDB: fixtureMariaDB(), Kernel: fixtureKernel(), Logs: fixtureLogs(), StateDir: t.TempDir()}, &cfg, log)
 
 			if got := jobNames(list); !slices.Equal(got, tt.want) {
 				t.Errorf("job names = %v, want %v", got, tt.want)
@@ -807,6 +824,7 @@ func TestRun_RecordsSystemMetrics(t *testing.T) {
 		Services:    fixtureServices(),
 		MariaDB:     fixtureMariaDB(),
 		Kernel:      fixtureKernel(),
+		Logs:        fixtureLogs(),
 		StateDir:    t.TempDir(),
 	})
 
@@ -906,6 +924,7 @@ func lowMemoryOptions(t *testing.T, workers int) Options {
 		Services:    fixtureServices(),
 		MariaDB:     fixtureMariaDB(),
 		Kernel:      fixtureKernel(),
+		Logs:        fixtureLogs(),
 		StateDir:    t.TempDir(),
 	}
 }
@@ -949,7 +968,7 @@ func TestNewScheduler_LowMemoryMakesFullProcessSnapshots(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		sink := &snapshotSink{}
 		opts.Sink = sink
-		sched, err := newScheduler(opts, &cfg, slog.New(slog.DiscardHandler))
+		sched, _, err := newScheduler(opts, &cfg, slog.New(slog.DiscardHandler))
 		if err != nil {
 			t.Fatalf("newScheduler() error = %v, want nil", err)
 		}
@@ -1058,7 +1077,7 @@ func TestNewScheduler_RecordsServiceStatesOfConfiguredUnits(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		sink := &recordSink{}
 		opts.Sink = sink
-		sched, err := newScheduler(opts, &cfg, slog.New(slog.DiscardHandler))
+		sched, _, err := newScheduler(opts, &cfg, slog.New(slog.DiscardHandler))
 		if err != nil {
 			t.Fatalf("newScheduler() error = %v, want nil", err)
 		}
@@ -1090,6 +1109,7 @@ func TestRun_ServiceUnitsFromConfigurationFile(t *testing.T) {
 		Services:    svcstats.Sources{Systemd: fake},
 		MariaDB:     fixtureMariaDB(),
 		Kernel:      fixtureKernel(),
+		Logs:        fixtureLogs(),
 		StateDir:    t.TempDir(),
 	})
 
@@ -1122,7 +1142,7 @@ func TestNewScheduler_EmptyServiceUnitsNeverOpenSystemd(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		sink := &recordSink{}
 		opts.Sink = sink
-		sched, err := newScheduler(opts, &cfg, slog.New(slog.DiscardHandler))
+		sched, _, err := newScheduler(opts, &cfg, slog.New(slog.DiscardHandler))
 		if err != nil {
 			t.Fatalf("newScheduler() error = %v, want nil", err)
 		}
@@ -1170,11 +1190,11 @@ func TestJobs_BackupsOnlyWithRules(t *testing.T) {
 		rules []config.BackupRule
 		want  []string
 	}{
-		{"the default rule", config.DefaultAgent().Backups.Processes, []string{"clock", "kernel", "backups", "state"}},
-		{"a command rule", []config.BackupRule{{Command: "borg"}}, []string{"clock", "kernel", "backups", "state"}},
-		{"a cmdline prefix rule", []config.BackupRule{{CmdlinePrefix: "/usr/bin/restic "}}, []string{"clock", "kernel", "backups", "state"}},
-		{"no rule leaves out the backups job", []config.BackupRule{}, []string{"clock", "kernel", "state"}},
-		{"nil rules leave out the backups job", nil, []string{"clock", "kernel", "state"}},
+		{"the default rule", config.DefaultAgent().Backups.Processes, []string{"clock", "kernel", "logs", "backups", "state"}},
+		{"a command rule", []config.BackupRule{{Command: "borg"}}, []string{"clock", "kernel", "logs", "backups", "state"}},
+		{"a cmdline prefix rule", []config.BackupRule{{CmdlinePrefix: "/usr/bin/restic "}}, []string{"clock", "kernel", "logs", "backups", "state"}},
+		{"no rule leaves out the backups job", []config.BackupRule{}, []string{"clock", "kernel", "logs", "state"}},
+		{"nil rules leave out the backups job", nil, []string{"clock", "kernel", "logs", "state"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1182,7 +1202,7 @@ func TestJobs_BackupsOnlyWithRules(t *testing.T) {
 			cfg.Backups.Processes = tt.rules
 			log := slog.New(slog.NewTextHandler(io.Discard, nil))
 
-			list, _ := jobs(Options{Self: fixtureSources(), System: fixtureSystem(), Processes: fixtureProcesses(), Connections: fixtureConnections(), Services: fixtureServices(), MariaDB: fixtureMariaDB(), Kernel: fixtureKernel(), StateDir: t.TempDir()}, &cfg, log)
+			list, _, _ := jobs(Options{Self: fixtureSources(), System: fixtureSystem(), Processes: fixtureProcesses(), Connections: fixtureConnections(), Services: fixtureServices(), MariaDB: fixtureMariaDB(), Kernel: fixtureKernel(), Logs: fixtureLogs(), StateDir: t.TempDir()}, &cfg, log)
 
 			names := jobNames(list)
 			if len(names) < len(tt.want) || !slices.Equal(names[len(names)-len(tt.want):], tt.want) {
@@ -1216,6 +1236,7 @@ func TestNewScheduler_StateFileIsKeptInTheSpoolDirectoryOrStateDir(t *testing.T)
 				want, unwanted = other, spool
 			}
 			opts.Kernel = newKernelWorld().sources()
+			opts.Logs = fixtureLogs()
 
 			runSchedulerFor(t, opts, &cfg, 25*time.Second)
 
@@ -1229,7 +1250,7 @@ func runSchedulerFor(t *testing.T, opts Options, cfg *config.Agent, d time.Durat
 	t.Helper()
 
 	synctest.Test(t, func(t *testing.T) {
-		sched, err := newScheduler(opts, cfg, slog.New(slog.DiscardHandler))
+		sched, _, err := newScheduler(opts, cfg, slog.New(slog.DiscardHandler))
 		if err != nil {
 			t.Fatalf("newScheduler() error = %v, want nil", err)
 		}
@@ -1265,7 +1286,7 @@ func TestNewScheduler_MissingSpoolDirectoryIsNeverCreated(t *testing.T) {
 	opts.Sink = sink
 
 	synctest.Test(t, func(t *testing.T) {
-		sched, err := newScheduler(opts, &cfg, slog.New(slog.NewTextHandler(out, nil)))
+		sched, _, err := newScheduler(opts, &cfg, slog.New(slog.NewTextHandler(out, nil)))
 		if err != nil {
 			t.Fatalf("newScheduler() error = %v, want nil (a missing spool directory does not stop the agent)", err)
 		}
@@ -1300,12 +1321,13 @@ func TestNewScheduler_LiveKillTriggersExtraSnapshots(t *testing.T) {
 		Services:    fixtureServices(),
 		MariaDB:     fixtureMariaDB(),
 		Kernel:      world.sources(),
+		Logs:        fixtureLogs(),
 		StateDir:    t.TempDir(),
 	}
 	const victim = 4711
 
 	synctest.Test(t, func(t *testing.T) {
-		sched, err := newScheduler(opts, &cfg, slog.New(slog.DiscardHandler))
+		sched, _, err := newScheduler(opts, &cfg, slog.New(slog.DiscardHandler))
 		if err != nil {
 			t.Fatalf("newScheduler() error = %v, want nil", err)
 		}
@@ -1403,10 +1425,10 @@ func TestJobs_ZeroKernelSourcesStillBuildAllJobs(t *testing.T) {
 	cfg := config.DefaultAgent()
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 
-	list, _ := jobs(Options{Self: fixtureSources(), System: fixtureSystem(), Processes: fixtureProcesses(), Connections: fixtureConnections(), Services: fixtureServices(), MariaDB: fixtureMariaDB(), StateDir: t.TempDir()}, &cfg, log)
+	list, _, _ := jobs(Options{Self: fixtureSources(), System: fixtureSystem(), Processes: fixtureProcesses(), Connections: fixtureConnections(), Services: fixtureServices(), MariaDB: fixtureMariaDB(), StateDir: t.TempDir()}, &cfg, log)
 
 	names := jobNames(list)
-	if want := []string{"kernel", "backups", "state"}; len(names) < 3 || !slices.Equal(names[len(names)-3:], want) {
+	if want := []string{"kernel", "logs", "backups", "state"}; len(names) < 4 || !slices.Equal(names[len(names)-4:], want) {
 		t.Errorf("job names = %v, want them to end with %v with zero kernel sources", names, want)
 	}
 }
@@ -1420,6 +1442,7 @@ func TestNewScheduler_BackupsAndStateReadTheKernelProc(t *testing.T) {
 	opts := lowMemoryOptions(t, 0)
 	opts.Sink = sink
 	opts.Kernel = world.sources()
+	opts.Logs = fixtureLogs()
 
 	runSchedulerFor(t, opts, &cfg, 25*time.Second)
 
@@ -1432,4 +1455,58 @@ func TestNewScheduler_BackupsAndStateReadTheKernelProc(t *testing.T) {
 	if starts != 1 {
 		t.Errorf("backup_run start records = %d, want 1 (the backups job reads the process of Kernel.Proc, not Processes.Proc)", starts)
 	}
+}
+
+// logSources returns the log shipping sources that read the journal and /etc of the world.
+func (w *kernelWorld) logSources() logship.Sources {
+	return logship.Sources{Etc: w.etc, Journal: []fs.FS{w.journal}, Open: func(string) (*os.File, error) { return nil, os.ErrNotExist }}
+}
+
+func TestRun_SavesTheStateWhenItStops(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		world := newKernelWorld()
+		origin := time.Now().Add(-time.Hour)
+		world.addJournalFile(t, []map[string][]byte{kernelLine(1, origin, 10, 0, "first"), kernelLine(2, origin, 20, 0, "second")})
+		opts := lowMemoryOptions(t, 0)
+		opts.ConfigPath = writeConfig(t, validConfig)
+		opts.Environ = []string{"VANDOX_AGENT_TOKEN=" + testToken}
+		opts.Kernel = world.sources()
+		opts.Logs = world.logSources()
+		sink := &recordSink{}
+		opts.Sink = sink
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan int, 1)
+		go func() { done <- Run(ctx, opts) }()
+
+		// the first run of the log shipping collector starts at the end of the journal; two lines arrive and are shipped by the run at 2 s
+		time.Sleep(time.Second)
+		synctest.Wait()
+		world.addJournalFile(t, []map[string][]byte{kernelLine(3, origin, 30, 0, "third"), kernelLine(4, origin, 40, 0, "fourth")})
+		time.Sleep(4 * time.Second)
+		synctest.Wait()
+		cancel()
+		code := <-done
+
+		if code != 0 {
+			t.Fatalf("Run() = %d after the cancel, want 0", code)
+		}
+		var shipped []string
+		for _, r := range sink.all() {
+			if l, ok := r.Data.(*model.LogLine); ok && l.Log == "journal" {
+				shipped = append(shipped, l.Message)
+			}
+		}
+		if !slices.Equal(shipped, []string{"third", "fourth"}) {
+			t.Fatalf("log lines shipped = %v, want [third fourth] (nothing older than the start)", shipped)
+		}
+		// the state job saved the state at the start and would save again after 10 s: only the save at the stop holds the last position
+		store, status := agentstate.Open(opts.StateDir, slog.New(slog.DiscardHandler))
+		if status != agentstate.StatusLoaded {
+			t.Fatalf("state file status = %v, want StatusLoaded after the stop", status)
+		}
+		logs := store.State().Logs
+		if logs == nil || len(logs.Journal) != 1 || logs.Journal[0].Seqnum != 4 {
+			t.Errorf("saved log positions = %+v, want the one journal position at the sequence number 4: the agent saves the state when it stops", logs)
+		}
+	})
 }

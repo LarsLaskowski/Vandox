@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"maps"
 	"math"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -548,4 +550,129 @@ func TestRunner_LateStartDoesNotSetPreviousLost(t *testing.T) {
 			runLateStart(t, "a whole-slot gap recorded in startCycle", 30*s, 42*s, seconds(0, 30, 40))
 		})
 	})
+}
+
+// keptCall is one call of Kept.
+type keptCall struct {
+	start time.Time
+	kept  bool
+	puts  int32 // the calls of Put the sink had received when Kept was called
+}
+
+// observedCollector is a scripted collector that also implements scheduler.Observer and records every call of Kept.
+type observedCollector struct {
+	*scriptedCollector
+	sink  *recordingSink
+	mu    sync.Mutex
+	calls []keptCall
+}
+
+func (c *observedCollector) Kept(run scheduler.Run, kept bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.calls = append(c.calls, keptCall{start: run.Start, kept: kept, puts: c.sink.calls.Load()})
+}
+
+func (c *observedCollector) keptCalls() []keptCall {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return slices.Clone(c.calls)
+}
+
+// observedCase is one case of TestRunner_TellsTheObserverWhetherARunWasKept.
+type observedCase struct {
+	name      string
+	first     func() ([]model.Record, error) // what the first run does; every later run returns one clean record
+	sinkFails bool                           // the first Put returns an error
+	until     time.Duration
+	// want maps the number of a run (in the order of the starts) to the flag of its call of Kept; a run that is not in it gets no call.
+	want map[int]bool
+	// putsBefore is true when the run 0 must have been delivered to the sink before Kept was called.
+	putsBefore bool
+}
+
+func observedCases() []observedCase {
+	s := time.Second
+	clean := func() ([]model.Record, error) { return []model.Record{metricRecord("observed", 1)}, nil }
+	refused := func() ([]model.Record, error) {
+		nan := model.Record{Meta: model.Meta{Source: "observed"}, Data: &model.MetricPoint{Name: "sample", Value: math.NaN()}}
+		return []model.Record{metricRecord("observed", 1), nan}, nil
+	}
+	slow := func(d time.Duration) func() ([]model.Record, error) {
+		return func() ([]model.Record, error) {
+			time.Sleep(d) // ignores its context
+			return clean()
+		}
+	}
+	kept := map[int]bool{0: true, 1: true, 2: true}
+	dropped := map[int]bool{0: false, 1: true, 2: true}
+	return []observedCase{
+		{name: "a clean run", first: clean, until: 25 * s, want: kept, putsBefore: true},
+		{name: "a refused record", first: refused, until: 25 * s, want: dropped},
+		{name: "a sink error", first: clean, sinkFails: true, until: 25 * s, want: dropped, putsBefore: true},
+		{name: "an error", first: func() ([]model.Record, error) { return nil, errors.New("disk on fire") }, until: 25 * s, want: dropped},
+		{name: "a panic", first: func() ([]model.Record, error) { panic("boom") }, until: 25 * s, want: dropped},
+		{name: "a timeout", first: slow(5 * s), until: 25 * s, want: map[int]bool{1: true, 2: true}},
+		{name: "skipped runs", first: slow(25 * s), until: 45 * s, want: map[int]bool{1: true, 2: true}},
+	}
+}
+
+func TestRunner_TellsTheObserverWhetherARunWasKept(t *testing.T) {
+	for _, tc := range observedCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) { runObserved(t, tc) })
+		})
+	}
+}
+
+// runObserved runs an observed collector as the case says and checks the calls of Kept.
+func runObserved(t *testing.T, tc observedCase) {
+	t.Helper()
+	sink := &recordingSink{}
+	if tc.sinkFails {
+		sink.hook = func(_ context.Context, n int) error {
+			if n == 0 {
+				return errors.New("spool full")
+			}
+			return nil
+		}
+	}
+	c := &observedCollector{sink: sink}
+	c.scriptedCollector = newScripted("observed", func(_ context.Context, n int, _ scheduler.Run) ([]model.Record, error) {
+		if n == 0 {
+			return tc.first()
+		}
+		return []model.Record{metricRecord("observed", 1)}, nil
+	})
+	h := start(t, []scheduler.Job{job(c, 10*time.Second, 2*time.Second)}, sink)
+
+	h.sleepTo(tc.until)
+
+	got := keptPerRun(t, h, c, tc.putsBefore)
+	if !maps.Equal(got, tc.want) {
+		t.Errorf("calls of Kept per run = %v, want %v after %s (true: kept, false: dropped; no entry: a run that was abandoned or skipped)", got, tc.want, tc.name)
+	}
+}
+
+// keptPerRun maps the number of each run to the flag of its call of Kept and reports calls that belong to no run, twice-called runs and,
+// when putsBefore is set, a call of the run 0 that came before the sink received its records.
+func keptPerRun(t *testing.T, h *harness, c *observedCollector, putsBefore bool) map[int]bool {
+	t.Helper()
+	runs := c.started()
+	got := map[int]bool{}
+	for _, call := range c.keptCalls() {
+		i := slices.IndexFunc(runs, func(r scheduler.Run) bool { return r.Start.Equal(call.start) })
+		if i < 0 {
+			t.Errorf("Kept was called with the start %v, which no run had (run starts %v)", call.start.Sub(h.base), h.offsets(runs))
+			continue
+		}
+		if _, twice := got[i]; twice {
+			t.Errorf("Kept was called twice for run %d", i)
+		}
+		got[i] = call.kept
+		if putsBefore && i == 0 && call.puts == 0 {
+			t.Error("Kept of run 0 was called before the sink received its records, want the call after the delivery")
+		}
+	}
+	return got
 }

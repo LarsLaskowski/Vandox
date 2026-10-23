@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text;
+using System.Text.Json;
 
 using NodaTime;
 
@@ -1221,6 +1222,31 @@ public class JournalExportParserTests
     }
 
     /// <summary>
+    /// The live fixture of the log shipping agent becomes the records of <c>live-records.jsonl</c>, the golden records the Go collector is compared with as well.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task JournalExportParserParsesLiveFixtureAsTheGoldenRecords()
+    {
+        // Arrange
+        var content = await File.ReadAllBytesAsync(RepositoryFiles.Path("testdata/journal/live.export"), TestContext.CancellationToken);
+        var golden = (await File.ReadAllLinesAsync(RepositoryFiles.Path("testdata/journal/live-records.jsonl"), TestContext.CancellationToken)).Where(line => line.Length > 0).ToList();
+
+        // Act
+        var emitter = await RecordingEmitter.ParseAsync(new JournalExportParser(), _file, content, TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsEmpty(emitter.Skips, "nothing is skipped");
+        Assert.HasCount(21, golden, "21 golden records");
+        Assert.HasCount(golden.Count, emitter.Records, "one record per golden record");
+
+        for (var index = 0; index < golden.Count; index++)
+        {
+            Assert.AreEqual(DescribeGolden(golden[index]), RecordingEmitter.Describe(emitter.Records[index]), $"record {index}");
+        }
+    }
+
+    /// <summary>
     /// Returns a journal export with an open MariaDB entry, a line of sshd written inside it, and more lines of the entry's process.
     /// </summary>
     /// <returns>The bytes</returns>
@@ -1276,6 +1302,22 @@ public class JournalExportParserTests
                                          .Entry("1772368217000000", "web-1", "kernel", 0, 6, "[1.1] CPU: 1 PID: 4242 Comm: mariadbd")
                                          .Entry("1772368218000000", "web-1", "kernel", 0, 6, "[1.2] Call Trace:")
                                          .ToArray();
+    }
+
+    /// <summary>
+    /// Describes a line of <c>live-records.jsonl</c> in the form of <see cref="RecordingEmitter.Describe"/>, with the origin, the sequence number and the event of an imported record.
+    /// </summary>
+    /// <param name="json">The line</param>
+    /// <returns>The description</returns>
+    private static string DescribeGolden(string json)
+    {
+        using var document = JsonDocument.Parse(json);
+
+        var root = document.RootElement;
+        var ticks = DateTimeOffset.UnixEpoch.AddTicks(root.GetProperty("captured_at_us").GetInt64() * 10).UtcTicks;
+        var priority = root.GetProperty("priority").ValueKind == JsonValueKind.Null ? "-" : root.GetProperty("priority").GetInt32().ToString(CultureInfo.InvariantCulture);
+
+        return $"{RecordOrigin.Import}|{root.GetProperty("source").GetString()}|0|{ticks}|{root.GetProperty("log").GetString()}|{root.GetProperty("host").GetString()}|{root.GetProperty("program").GetString()}|{root.GetProperty("pid").GetInt32()}|{priority}|{root.GetProperty("truncated").GetBoolean()}||{root.GetProperty("message").GetString()}";
     }
 
     /// <summary>

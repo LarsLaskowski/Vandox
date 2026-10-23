@@ -93,9 +93,24 @@ func TestDefaultAgent(t *testing.T) {
 
 func TestAgentKeys(t *testing.T) {
 	got := AgentKeys()
-	want := []string{"agent_id", "backend.url", "spool.directory", "log.level", "filesystem.mount_points", "processes.programs", "services.units", "mariadb.enabled", "mariadb.socket", "backups.processes"}
-	if strings.Join(got, ",") != strings.Join(want, ",") {
-		t.Errorf("AgentKeys() = %v, want %v", got, want)
+	old := []string{"agent_id", "backend.url", "spool.directory", "log.level", "filesystem.mount_points", "processes.programs", "services.units", "mariadb.enabled", "mariadb.socket", "backups.processes"}
+	shipping := []string{"log_shipping.journal", "log_shipping.min_priority", "log_shipping.files", "log_shipping.drop"}
+	var rest []string
+	for _, key := range got {
+		if !slices.Contains(shipping, key) {
+			rest = append(rest, key)
+		}
+	}
+	if strings.Join(rest, ",") != strings.Join(old, ",") {
+		t.Errorf("AgentKeys() without the log_shipping keys = %v, want the keys in their order %v", rest, old)
+	}
+	for _, key := range shipping {
+		if n := strings.Count(","+strings.Join(got, ",")+",", ","+key+","); n != 1 {
+			t.Errorf("AgentKeys() = %v holds %q %d times, want once", got, key, n)
+		}
+	}
+	if len(got) != len(old)+len(shipping) {
+		t.Errorf("AgentKeys() holds %d keys, want %d", len(got), len(old)+len(shipping))
 	}
 }
 
@@ -131,7 +146,17 @@ func TestLoadAgent_Example(t *testing.T) {
 			t.Errorf("example MariaDB = %+v, want the default %+v", got.MariaDB, def.MariaDB)
 		}
 		requireExampleBackupsDefault(t, got, &def)
+		requireExampleLogShippingDefault(t, got)
 	})
+}
+
+// requireExampleLogShippingDefault checks that the example sets every log_shipping option at its default.
+func requireExampleLogShippingDefault(t *testing.T, got *Agent) {
+	t.Helper()
+	ls := got.LogShipping
+	if !ls.Journal || ls.MinPriority != "info" || len(ls.Files) != 0 || len(ls.Drop) != 0 {
+		t.Errorf("example LogShipping = %+v, want the defaults: journal true, min_priority info, no files and no drop rules", ls)
+	}
 }
 
 // requireExampleBackupsDefault checks that the example keeps the default of backups.processes.
@@ -177,7 +202,7 @@ func requireExampleSetsEveryKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("decodeStrict(%q) error = %v, want nil", agentExample, err)
 	}
-	for _, key := range AgentKeys() {
+	for _, key := range append(AgentKeys(), "log_shipping.journal", "log_shipping.min_priority", "log_shipping.files", "log_shipping.drop") {
 		if lines[key] <= 0 {
 			t.Errorf("example %q does not set %q explicitly (line %d)", agentExample, key, lines[key])
 		}
