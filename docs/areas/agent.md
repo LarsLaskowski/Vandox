@@ -1169,7 +1169,7 @@ collector timeouts and backend gap detection each emit a gap record, and each pa
 - The agent runs as the dedicated system user `vandox-agent` without a login shell, **never as root**. It authenticates to MariaDB as
   that OS user through `unix_socket` with only the `PROCESS` privilege.
 - For reading it is a member of the groups `adm` (log files) and `systemd-journal` (journal). To read other users' processes it holds
-  `CAP_SYS_PTRACE` alone, as an ambient capability with a bounding set limited to it (rule below, record 0121). `CAP_DAC_READ_SEARCH` is
+  `CAP_SYS_PTRACE` alone, as an ambient capability with a bounding set limited to it (rule below, record 0122). `CAP_DAC_READ_SEARCH` is
   **not** granted: together with `CAP_SYS_PTRACE` it opens other processes' open files through `/proc/<pid>/fd/<n>` for writing, memfds
   included (measured below), and no collector needs it.
 - **Process collector.** `stat`, `status` and `cmdline` of every process are readable by any user (unless `/proc` is mounted with
@@ -1223,7 +1223,7 @@ collector timeouts and backend gap detection each emit a gap record, and each pa
   (the Go runtime uses `madvise` on its own memory only). That the server's systemd (249, Ubuntu 22.04) knows the name, so the entry takes
   effect instead of being skipped, is checked on the server (#42): `systemd-analyze syscall-filter @ipc` lists `process_madvise`. If it
   did not, barrier (c) below would still stop the write.
-- **No write into another user's process or file beyond its own mode** (record 0121). A compromised agent cannot use its capability to
+- **No write into another user's process or file beyond its own mode** (record 0122). A compromised agent cannot use its capability to
   write into another user's process or file, or to run code as another user, except through a file whose own mode grants the agent's
   user, its groups (`adm`, `systemd-journal`) or others write (accepted residual, below). No single mechanism stops every vector
   examined; three distinct barriers do, and one vector is the accepted residual:
@@ -1241,7 +1241,7 @@ collector timeouts and backend gap detection each emit a gap record, and each pa
   The filter denies neither `openat` nor `pwrite`, so it is not what stops the `mem` and `fd` writes; barrier (a) is. Barrier (c) is
   defence in depth only: the `CAP_SYS_NICE` requirement is a capability rule, but which advice the kernel accepts for another process is
   memory-management policy that has grown between versions. **The bounding set holds `CAP_SYS_PTRACE` only; adding any capability to it
-  is a `security` change that supersedes record 0121**, and so is removing one of the six denied calls. For example,
+  is a `security` change that supersedes record 0122**, and so is removing one of the six denied calls. For example,
   `CAP_DAC_READ_SEARCH` reopens the write through `/proc/<pid>/fd/<n>` into other processes' open files, memfds included, and below
   closed directories; `CAP_DAC_OVERRIDE` and the other write-side DAC capabilities the write open of `mem`; `CAP_SYS_NICE`
   `process_madvise` on another process; `CAP_SYS_ADMIN` or `CAP_CHECKPOINT_RESTORE`, together with directory search, the links in
@@ -1312,7 +1312,7 @@ collector timeouts and backend gap detection each emit a gap record, and each pa
 - Each group, capability and confinement setting is listed and justified in `deploy/agent/` when the collector that needs it is
   introduced; anything not listed is not granted. Removing a confinement setting, adding a capability or a group, or adding a collector
   that needs a new right is a `security`-tier change; removing a confinement while a capability is granted needs a superseding record.
-- **Accepted residual** (record 0121): with `CAP_SYS_PTRACE` the agent follows another process's `/proc/<pid>/cwd`,
+- **Accepted residual** (record 0122): with `CAP_SYS_PTRACE` the agent follows another process's `/proc/<pid>/cwd`,
   `/proc/<pid>/root` and `/proc/<pid>/exe` links and their `/proc/<pid>/task/<tid>/cwd`, `…/root` and `…/exe` variants, which skip the
   search check of the directories above the file they lead to. So a file whose own mode grants the agent's user, its groups or others
   read or write is reachable even below a directory closed to the agent, but only along paths from some process's working or root
@@ -1367,7 +1367,7 @@ collector timeouts and backend gap detection each emit a gap record, and each pa
   extra snapshots through the scheduler and names them by its identity, why boots come from a saved state file, why the journal
   position is committed only after a kept run with at most three re-reads, and why backup runs are a record kind of their own with
   `pzstd` as the default rule.
-- [0121](../decisions/0121-cap-sys-ptrace-alone-cannot-write-another-users-process-memory-through-proc-pid-mem-or-fd.md) — why the
+- [0122](../decisions/0122-cap-sys-ptrace-alone-cannot-write-another-users-process-memory-through-proc-pid-mem-or-fd.md) — why the
   agent holds `CAP_SYS_PTRACE` alone and not `CAP_DAC_READ_SEARCH`, which barrier stops each write vector examined, which residual
   remains (files whose own mode grants the agent write, reached through other processes' `cwd`, `root` and `exe` links), why the bounding set
   holds `CAP_SYS_PTRACE` only, and why the filter also denies `process_madvise`.

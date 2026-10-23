@@ -79,8 +79,8 @@ fields in [Wire format](../areas/wire-format.md).
   (as the systemd notification needs anyway); the collector itself opens none.
 - The collector adds no right: it uses `CAP_SYS_PTRACE` like the process collector, and `deploy/agent/README.md` lists that use with
   the measurement. `CAP_DAC_READ_SEARCH` stays unused by any collector; a later collector that wants it decides on its own. (Clarified in place:
-  [0121](0121-cap-sys-ptrace-alone-cannot-write-another-users-process-memory-through-proc-pid-mem-or-fd.md) drops the capability and
-  excludes granting it again without a record that supersedes 0121.)
+  [0122](0122-cap-sys-ptrace-alone-cannot-write-another-users-process-memory-through-proc-pid-mem-or-fd.md) drops the capability and
+  excludes granting it again without a record that supersedes 0122.)
 - A run that passes its deadline keeps no state, so a late return cannot make a listener known without a report; the window between
   the last check and the return is a stated residual.
 - The live memory of a run is bounded by fixed caps; the garbage grows with the descriptors read (a fixed amount per descriptor through

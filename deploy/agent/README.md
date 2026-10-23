@@ -14,10 +14,10 @@ collectors that need them.
 | `CAP_SYS_PTRACE` | `connections` | Listing and reading `/proc/<pid>/fdinfo/<n>` of **another user's** process, which names the socket (`ino:`) a descriptor holds and its mount (`mnt_id:`), so a socket gets its owner. |
 
 `CAP_DAC_READ_SEARCH` is **not granted**: with `CAP_SYS_PTRACE` it opens other processes' open files, memfds included, for writing
-(record 0121). No collector needs it; the connection collector deliberately does not use it (see below).
+(record 0122). No collector needs it; the connection collector deliberately does not use it (see below).
 
 `CAP_SYS_PTRACE` is granted as an ambient capability, with a bounding set that holds `CAP_SYS_PTRACE` only; adding any capability to it is a
-`security` change that supersedes record 0121. For example, `CAP_DAC_READ_SEARCH` reopens the write through `/proc/<pid>/fd/<n>` into other
+`security` change that supersedes record 0122. For example, `CAP_DAC_READ_SEARCH` reopens the write through `/proc/<pid>/fd/<n>` into other
 processes' open files, memfds included, and below closed directories; `CAP_DAC_OVERRIDE` and the other write-side DAC capabilities the write
 open of `mem`; `CAP_SYS_NICE` `process_madvise` on another process; `CAP_SYS_ADMIN` or `CAP_CHECKPOINT_RESTORE`, together with directory
 search, the links in `/proc/<pid>/map_files/`. The unit is
@@ -34,8 +34,8 @@ write-side DAC capability too. (b) The system-call filter, for `ptrace`, `proces
 `pidfd_open` plus `process_madvise`: the call needs `CAP_SYS_NICE` (since kernel 5.12), which the bounding set must also keep out, and the
 kernel refuses destructive advice on another process; the accepted advice set is version-dependent, so this is defence in depth only.
 A compromised agent cannot use its capability to write into another user's process or file, or to run code as another user, except through a file
-whose own mode grants the agent's user, its groups (`adm`, `systemd-journal`) or others write (accepted residual, record 0121).
-Measurement and reasoning: record 0121 and the Agent area.
+whose own mode grants the agent's user, its groups (`adm`, `systemd-journal`) or others write (accepted residual, record 0122).
+Measurement and reasoning: record 0122 and the Agent area.
 
 **Accepted residual.** With `CAP_SYS_PTRACE` the agent follows another process's `/proc/<pid>/cwd` and `/proc/<pid>/root` links and their
 `/proc/<pid>/task/<tid>/cwd` and `…/root` variants, and the `/proc/<pid>/exe` and `/proc/<pid>/task/<tid>/exe` links, so a file whose own mode grants the agent's user, its groups or others read or write is
@@ -68,8 +68,8 @@ the ptrace-checked `/proc` files whose mode allows reading (`maps`, `smaps_rollu
 - `/proc/<pid>/fdinfo/<n>` of **another user's** process needs `CAP_SYS_PTRACE`: the kernel checks ptrace access when the directory is listed
   and the file opened. The links `/proc/<pid>/fd/<n>` (`socket:[N]`) would need `CAP_DAC_READ_SEARCH` to list and both capabilities to read,
   and `CAP_DAC_READ_SEARCH` lets the agent read every file on the server (`/etc/shadow`, Plesk's credentials) and, with `CAP_SYS_PTRACE`, open
-  other processes' open files, memfds included, for writing (record 0121), so the collector does not read them (record 0115) and the agent does not hold it
-  (record 0121). Measured on the development host (kernel 6.18.44, no Yama restriction, no `hidepid`), as user 65534 against a process of root:
+  other processes' open files, memfds included, for writing (record 0122), so the collector does not read them (record 0115) and the agent does not hold it
+  (record 0122). Measured on the development host (kernel 6.18.44, no Yama restriction, no `hidepid`), as user 65534 against a process of root:
 
   | Capabilities | list `fd/` | readlink `fd/3` | list `fdinfo/` | read `fdinfo/3` | read `/etc/shadow` |
   | ------------ | ---------- | --------------- | -------------- | --------------- | ------------------ |
