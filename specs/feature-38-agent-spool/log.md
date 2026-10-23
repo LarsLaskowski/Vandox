@@ -18,4 +18,4 @@ are quoted in full.
 | 2026-10-23 19:23 | 3 Escalation answer | Product Manager | M1 residual: option (b), stated residual, follow-up issue opened before the PR |
 | 2026-10-23 19:25 | 3 Plan decide (PM answer) | squad-lead | RESULT: DONE; M1 option (b) recorded in plan/spec/tasks/record 0123; plan.md trimmed to 4,876 words; Security to confirm Fstatat substitution in diff review (opus/medium · 66,404 tokens · 17 tool uses · 140 s) |
 | 2026-10-23 19:25 | 3 Follow-ups | Orchestrator | Opened #300 (boot/backup state after Kept); commented on #41 and #42 |
-| 2026-10-23 19:26 | 4 Skeleton G1 | squad-dev | MarshalRecord/UnmarshalRecord stubs in internal/wire; build and vet clean (sonnet/medium · usage pending) |
+| 2026-10-23 19:26 | 4 Skeleton G1 | squad-dev | MarshalRecord/UnmarshalRecord stubs in internal/wire; build and vet clean (sonnet/medium · 62,111 tokens · 6 tool uses · 31 s) |
