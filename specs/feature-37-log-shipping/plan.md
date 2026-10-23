@@ -59,18 +59,18 @@ The criteria are the spec's AC1–AC17 ([spec.md](spec.md)).
 | AC | Test(s) | Test file |
 | -- | ------- | --------- |
 | AC1 | `TestJournal_EntriesMapAsTheImportGolden` (the generated fixture files from `live.export`, compressed with real frames, against `testdata/journal/live-records.jsonl`), `TestJournal_ReadsUserFilesAndTheVolatileDirectory`, `TestJournal_CutsLongFieldsWithTruncated`, `TestJournal_XzOrLz4ItemIsAGap`; C#: `JournalExportParserParsesLiveFixtureAsTheGoldenRecords`; `TestEntries_SeekAllFindsTheFirstEntryAfter`, `TestEntries_NextWithDecodesCompressedItems`, `TestEntries_NextWithMarksCutFields`, `TestEntries_MoreThanFourCompressedItemsLeaveTheEntryUndecoded`, `TestEntries_CompressedObjectBeyondTheBoundIsNotRead`, `TestListAllFiles_TakesSystemAndUserFiles`, `TestReal_NextWithDecodesEveryEntry` (skips without `VANDOX_REAL_JOURNAL_DIR`), `TestJournal_PidFallsBackToSyslogPid` (decision 8), `TestEntries_NextWithCountsTheValueOnly` (decision 6) | `internal/logship/journal_test.go`, `tests/Vandox.Core.Tests/JournalExportParserTests.cs`, `internal/journal/entries_test.go`, `internal/journal/dir_test.go`, `internal/journal/real_test.go` |
-| AC2 | `TestParse_ReadsTheImportsSyslogForms` (table from `testdata/logs/mail.log`, `kern.log-oom` and the forms of fact 11), `TestParse_LineWithoutHeaderIsRaw` (with the impossible and unstorable header times of decision 5), `TestClock_YearAndDaylightSavingRules`, `TestLoadZone_RefusesWhatIsNotAZoneFile`, `TestFiles_HoldsSyslogFilesWhileTheZoneIsUnknown` | `internal/syslogline/syslogline_test.go`, `internal/syslogline/clock_test.go`, `internal/syslogline/zone_test.go`, `internal/logship/files_test.go` |
+| AC2 | `TestParse_ReadsTheImportsSyslogForms` (table from `testdata/logs/mail.log`, `kern.log-oom` and the forms of fact 11), `TestParse_LineWithoutHeaderIsRaw` (with the impossible and unstorable header times of decision 5), `TestClock_YearAndDaylightSavingRules`, `TestClock_SetZoneKeepsThePreviousInstant` (step 6), `TestLoadZone_RefusesWhatIsNotAZoneFile`, `TestFiles_HoldsSyslogFilesWhileTheZoneIsUnknown` | `internal/syslogline/syslogline_test.go`, `internal/syslogline/clock_test.go`, `internal/syslogline/zone_test.go`, `internal/logship/files_test.go` |
 | AC3 | `TestFilter_MinPriorityAndDropRules` (table: each condition alone and together, a line without priority) | `internal/logship/filter_test.go` |
 | AC4 | `TestLogs_StopAndStartShipEveryLineOnce` (real files in `t.TempDir()`, a fixture journal, `Kept`, `Store.Flush`, a new collector on the saved state), `TestRun_SavesTheStateWhenItStops`, `TestRunner_TellsTheObserverWhetherARunWasKept`, `TestStore_FlushWaitsForARunningSave`, `TestStore_FlushGivesUpWhenASaveDoesNotEnd` (decision 2, coverage mode) | `internal/logship/logship_test.go`, `internal/agent/agent_test.go`, `internal/scheduler/runner_test.go`, `internal/agentstate/agentstate_test.go` |
 | AC5 | `TestLogs_UncleanEndRepeatsOnlyLinesAfterTheSavedPosition`, `TestSaver_SavesALogPositionWithinTenSeconds` (run starts a few milliseconds early on the 10 s grid) | `internal/logship/logship_test.go`, `internal/agentstate/agentstate_test.go` |
 | AC6 | `TestFiles_RotationByRenameWhileRunning` (a collector run between the rename and the writer's last append to the renamed file), `TestFiles_RenamedFileIsReadUntilTheWriterHasMoved`, `TestFiles_RenamedFileSurvivesARestart`, `TestFiles_RotationSearchChecksTheOpenedFile`, `TestFiles_RotationSearchRefusesALinkInTheDirectoryPath` (after a restart), `TestFiles_RotationWhileStoppedFindsTheRenamedFile` (`.1` and `-YYYYMMDD`), `TestFiles_RotationWithoutTheOldFileIsAGap` | `internal/logship/files_test.go` |
 | AC7 | `TestFiles_TruncationRestartsWithOneGap`, `TestFiles_TruncationRefilledPastThePositionIsDetected` | `internal/logship/files_test.go` |
 | AC8 | `TestLogs_FirstStartShipsNothingOlder`, `TestFiles_AddedFileStartsAtItsEnd`, `TestFiles_FileThatAppearsLaterIsReadFromItsStart`, `TestJournal_NewSeqnumIDIsReadFromItsStart` | `internal/logship/logship_test.go`, `internal/logship/files_test.go`, `internal/logship/journal_test.go` |
-| AC9 | `TestLogs_DroppedRunIsReadAgain`, `TestLogs_AbandonedRunNeverMovesAPosition` | `internal/logship/logship_test.go` |
-| AC10 | `TestJournal_VacuumedPositionIsOneGap`, `TestJournal_UnreadableEntriesGiveOneGap`, `TestJournal_EntryWithoutMessageIsSkipped`, `TestJournal_DamagedFileIsGivenUpWithOneGap` (decision 3), `TestEntries_NextWithDamagedItemObjectIsUndecoded`, `TestEntries_NextWithDamagedEntryKeepsTheCursor` | `internal/logship/journal_test.go`, `internal/journal/entries_test.go` |
+| AC9 | `TestLogs_DroppedRunIsReadAgain`, `TestLogs_AbandonedRunNeverMovesAPosition`, `TestFiles_DroppedRunResolvesTheRepeatedHourAlike` (step 6) | `internal/logship/logship_test.go`, `internal/logship/files_test.go` |
+| AC10 | `TestJournal_VacuumedPositionIsOneGap`, `TestJournal_UnreadableEntriesGiveOneGap`, `TestJournal_EntryWithoutMessageIsSkipped`, `TestJournal_DamagedFileIsGivenUpWithOneGap` (decision 3), `TestJournal_RefusedFileIsAGap` (E13, step 6), `TestEntries_NextWithDamagedItemObjectIsUndecoded`, `TestEntries_NextWithDamagedEntryKeepsTheCursor` | `internal/logship/journal_test.go`, `internal/journal/entries_test.go` |
 | AC11 | `TestOpenNoLinks_RefusesALinkInAnyElement`, `TestOpenNoLinks_RefusesNonRegularFiles`, `TestFiles_UnreadableFileKeepsItsPosition`, `TestJournal_UnreadableJournalKeepsThePosition` | `internal/logship/safeopen_test.go`, `internal/logship/files_test.go`, `internal/logship/journal_test.go` |
 | AC12 | `TestFiles_PartialLineWaitsForItsLineFeed`, `TestFiles_PartialLineIsShippedWhenTheWriterHasMoved` | `internal/logship/files_test.go` |
-| AC13 | `TestLogs_RunBudgets` (1,000 records, 4 MiB crossing record, one second with a scripted clock, filtered lines count only against time), `TestLogs_HeapStaysBounded` (records at every field's maximum, a journal of 100,000 entries, lines over 16 KiB), `TestDecoder_HeapStaysBoundedForTheLargestFrame` (the largest accepted frame, a frame without a stated size whose output passes the bound, a frame whose stated size is too small), `TestDecoder_RefusesFramesNotOfTheServerForm` (no stated size, not single-segment, a dictionary, a stated size over 4 MiB), `TestDecoder_NeverKeepsAGrownBuffer` | `internal/logship/logship_test.go`, `internal/zstdfield/zstdfield_test.go` |
+| AC13 | `TestLogs_RunBudgets` (1,000 records, 4 MiB crossing record, one second with a scripted clock, filtered lines count only against time, filtered entries that need decoding look at the clock at each entry (step 6)), `TestLogs_HeapStaysBounded` (records at every field's maximum, a journal of 100,000 entries, lines over 16 KiB), `TestDecoder_HeapStaysBoundedForTheLargestFrame` (the largest accepted frame, a frame without a stated size whose output passes the bound, a frame whose stated size is too small), `TestDecoder_RefusesFramesNotOfTheServerForm` (no stated size, not single-segment, a dictionary, a stated size over 4 MiB), `TestDecoder_NeverKeepsAGrownBuffer` | `internal/logship/logship_test.go`, `internal/zstdfield/zstdfield_test.go` |
 | AC14 | `TestLoadAgent_LogShippingErrors` (every invalid option of E16; the fact-24 pattern `.{0,1000}` repeated 113 times, 1,017 bytes and 226,002 instructions; the worst-case patterns of fact 25 at the bound: `\pL{0,199}y` and `[a-z]{398}y` (401) refused, `\pL{0,198}y`, `(?i)\pL{0,198}y` (399) and `[a-z]{397}y` (400) accepted; `\pL{0,99}y` and `\pL{0,98}y` (201 + 199) accepted together, `\pL{0,99}y` twice (402) refused with the `log_shipping.drop` reason; a path with U+0000; the error holds file, line, key and index and not the value), `TestLoadAgent_LogShippingDefaults`, `TestLoadAgent_Example` (extended) | `internal/config/logshipping_test.go`, `internal/config/agent_test.go` |
 | AC15 | `TestLogs_LogsHoldNoPathFieldOrMessage` (recording handler: the fixed texts only) | `internal/logship/logship_test.go` |
 | AC16 | `TestRecords_RefusedRecordBecomesAGap` (coverage mode, through the seam of decision 7: the check step fed a record the wire check refuses, a negative `pid`, since the cuts make every mapped record pass), `TestLogs_FourthDroppedRunGivesUpTheSpan` (cases: four sink refusals, four timeouts, mixed) | `internal/logship/records_test.go`, `internal/logship/logship_test.go` |
@@ -251,6 +251,78 @@ the Tester, approved in step 9.
    (table: each of those `_PID` forms with `SYSLOG_PID` 42 gives 42 and with an invalid `SYSLOG_PID` gives 0; `_PID` 2,147,483,647
    is kept).
 
+## Decisions after implementation (step 6)
+
+Disputed tests (Tester, task 14b; both are test defects, the implementation is right):
+
+1. `TestEntries_NextWithCountsTheValueOnly` (`internal/journal/entries_test.go:235`): the loop variable shadows the constant `limit`,
+   so `limit != limit+66` always holds. Rename the loop variable (`got`), compare it with the constant (`got != limit+66`), and
+   assert the number of calls: exactly one `Decompress` call in the two compressed cases, none in the two plain ones (a table field
+   `decodes int`), so the check can no longer pass vacuously.
+2. `givenUpOnlineFile` (`internal/logship/journal_test.go:705`): `w.rename` renames in `w.logDir`, the journal is in
+   `w.jroot/<machine ID>`. Add the world helper `renameJournal(from, to string)` (`world_test.go`, renames within
+   `filepath.Join(w.jroot, machineID)`, `Fatalf` with got and want on an error) and call it at line 705; nothing else changes.
+
+The Dev's deviations:
+
+1. **Clock checks: accepted with a correction.** `Sources.Now` is read at the run's start, after every shipped record and every
+   1,000 entries or lines examined, and after every full 64 KiB chunk of a file. Correction (Dev): the clock is also looked at after
+   every entry whose reading called the decoder (a counting wrapper around the decoder in `internal/logship`; no change to
+   `internal/journal`). Without it 1,000 filtered entries of 4 compressed items of 4 MiB each (fact 23: 3.6 ms per frame) read
+   about 14 s past the second, so any local user could force abandoned runs and E19 give-ups. Test: the subcase *filtered entries
+   that need decoding look at the clock at each entry* of `TestLogs_RunBudgets` (20 entries of priority 7 with 700-byte messages, then
+   three wanted ones; clock step 250 ms): the first kept run returns nothing and the saved position of the ID is above 0 and below
+   20; at most 10 further `w.step()` calls (not `drain`, which stops at an empty run) return the three wanted lines and no gap.
+2. **The source read first rotates from run to run: accepted.** Order within a source is kept (S4, AC4); a backlog in one source
+   cannot keep the others waiting (E11). The Agent area states it (Lead, G4).
+3. **`syslogline.(*Clock).SetZone`: accepted and added to *Signatures*,** with a correction (Dev): the per-file clock belongs to
+   the fork (`fileState`, copied by `clone`), not to `Logs`, so a dropped or abandoned run never moves the previous instant the
+   re-read starts from (today a dropped run in the repeated hour gives the re-read lines another offset, against AC9). Tests:
+   `TestClock_SetZoneKeepsThePreviousInstant` (`clock_test.go`: a line in the repeated hour, `SetZone` to the same rules from a new
+   `LoadLocationFromTZData`, the next line still decided against the previous instant), `TestFiles_DroppedRunResolvesTheRepeatedHourAlike`
+   (`files_test.go`: a zone with daylight saving time in `localtime`, lines `02:30` and then `02:05` of the repeated hour, the run
+   refused, the next run returns both lines with the times of the refused run).
+4. **`FilePosition.LastTime` follows every line read, shipped or filtered: accepted.** A filtered line is not lost, so the S6 and
+   E2 gaps start after it, as E12's journal gaps do; the precision of decision 4 (step 5) is replaced, and spec S6 and E2 say so.
+5. **Held partial line of at most 16,896 bytes (16,384 + 512 for the header), shipped as it is at a truncation, saved offset at the
+   line's start: accepted** (E6, E7; the message is cut at 16,384 after the header as the import cuts it). Held lines live in the
+   committed state and up to two forks, so the spec's memory figure for the file reader becomes under 2 MiB (spec fixed).
+6. **`SeekAll` returns the start when `after` is below the header head sequence number: accepted;** equal to the bisection for a
+   file whose head sequence number is its first entry's, which journald sets once at the first entry, and a damaged entry before
+   the position is not met.
+7. **Vacuum gap only when no file of the ID holds the position and the first later file does not start at position + 1:
+   accepted;** the seqnums of one ID's files have holes (fact 7), so a check between files would give false gaps. The rule may
+   over-report (a gap where only user-journal numbers lay between); the Agent area says so.
+8. **The newest journal position is never forgotten: accepted;** forgetting it would lower the newest time and let E22's time
+   rule read the forgotten ID's files again.
+9. **`oPath = 0x200000`: accepted.** It is the value of every Linux port of Go (`golang.org/x/sys` v0.48.0 `zerrors_linux_*.go`:
+   only sparc64, a gccgo-only target, differs), and only `linux/amd64` is built (`ci.yml:213`, `release.yml:117`). The Dev extends
+   the constant's comment with that (comment only).
+10. **Rotated-file search: accepted as equivalent to N2.** The identity is checked on the opened descriptor (no window between a
+    stat and the open), a non-regular candidate is opened non-blocking and closed after `fstat`, as `OpenNoLinks` does for the
+    configured path; the dated names kept are at most 65,536 names of `<base>-` plus 8 digits (about 2 MiB for a short base, once
+    per restart or lost rotation). It departs from N2's wording on a security control, so Security confirms it in the diff review.
+11. **`Saver.Collect` and `Store.Flush` log a failed save themselves: accepted** (once per failing streak; the `Flush` timeout warning
+    every time, decision 2); `agent.Run` does not log it again.
+12. **A refused journal file's gap survives a dropped run (defect found here, Dev).** `Logs.refused` is updated in `Collect`, so the
+    E13 gap of a dropped run is never recorded again. It moves into the fork `state` (`maps.Clone` in `clone`, committed with the
+    fork), as `kernevents` keeps it (`internal/kernevents/state.go:111-133`). Test: `TestJournal_RefusedFileIsAGap` (a file shorter
+    than the header named as an archived file: one gap from the newest position's time to the run's start and none in the next
+    run; the online file refused: one more gap 600 s after the last; the run with the first gap refused: the next run records it).
+    Spec AC10 gains E13, which AC11 named without asserting its gap.
+
+Coverage mode (task 14a), after the two tests of decisions 2 and 7, in this order (the paths that decide whether a line is lost or
+shipped twice first): (a) a file backlog across runs, `pump` stopping mid-file and `rewind` (1,500 lines: 1,000, then 500, none twice,
+also with a partial last line at the stop); (b) a second rotation while the renamed file is still read (`finishRenamed`: its rest and
+partial line shipped before the newer files, nothing twice); (c) a lost rotation while the new file has no line yet (`endLostGap`:
+the gap ends at the run's start) and a restart whose renamed file is gone or behind a link (`findRenamed`); (d) a torn archived file
+(the cut-off end gives one gap to its tail time, `Torn`); (e) `logshipConfig` in `internal/agent` (every option mapped: `journal`
+false, a `min_priority`, files, a drop rule with every condition whose pattern matches); (f) `classify` and `directoryError`
+(a regular file as a directory element is `missing`, a directory without search permission `permission denied`, skipped as root);
+(g) the error branches of `readItemWith` and `readCompressedItem` (a compressed object beyond the file's end or over
+`MaxCompressedBytes`, the input buffer growing once); (h) `decodeJournal` refusals in `internal/agentstate`; then the rest
+(`New` errors, `Name`, `statOf`, `openJournal`, `tailTime`).
+
 ## Options considered
 
 The five choices with their alternatives are in [0121](../../docs/decisions/0121-log-shipping-journal-and-syslog-files-positions-per-seqnum-id-zstd-commit-when-kept.md)
@@ -304,6 +376,7 @@ type Line struct {
 }
 type Clock struct{ /* unexported: location, previous instant */ }
 func NewClock(loc *time.Location) *Clock
+func (c *Clock) SetZone(loc *time.Location) // keeps the previous instant (step 6, deviation 3)
 func Parse(line []byte, clock *Clock, now time.Time) Line
 func LoadZone(etc fs.FS) (*time.Location, error)
 

@@ -64,8 +64,8 @@ What happens today, checked against the code:
   position survives a restart, and the records keep `log` `/var/log/mail.log`.
 - S6: Given a configured file is truncated in place (logrotate `copytruncate`), when the writer goes on writing, then the
   agent notices the truncation and reads the file again from its start, and records one gap (collector `logs`, cause
-  `unknown`) from the capture time of the last line it shipped from the file (else the start of the run that took its
-  position in the file) to the start of the run that noticed the truncation, the span in which lines may have been written
+  `unknown`) from the capture time of the last line it read from the file, shipped or filtered (else the start of the run that
+  took its position in the file) to the start of the run that noticed the truncation, the span in which lines may have been written
   and truncated before the agent read them.
 - S7: Given the agent starts for the first time (or its state file is not usable), when it begins shipping, then it starts
   at the current end of the journal and of each configured file and ships only lines written from then on; older lines are
@@ -91,8 +91,8 @@ What happens today, checked against the code:
   the file it was reading (same device and inode) among the uncompressed regular files of the same directory whose name is
   the configured name plus `.1` or `-YYYYMMDD`; when found, it ships the rest of it first, then the current file from its
   start. When it is not found (deleted, compressed, renamed otherwise), one gap with collector `logs` and cause `unknown`
-  from the capture time of the last line shipped from that file (else the start of the run that took its position in the
-  file) to the capture time of the first line read from the current file (else the run's start).
+  from the capture time of the last line read from that file, shipped or filtered (else the start of the run that took its
+  position in the file) to the capture time of the first line read from the current file (else the run's start).
 - E3: The journal no longer holds the position (journald vacuumed or rotated away entries the agent had not read, or the
   saved journal is gone) — one gap from the position's time to the next entry read (else the run's start); shipping goes on
   there.
@@ -194,8 +194,9 @@ What happens today, checked against the code:
   journal reader's buffers and file headers, at most 4 MiB as for the kernel collector (at most 1,024 headers of up to 4 KiB);
   the zstd path, at most 8.5 MiB (one output buffer of 4 MiB + 128 KiB + 16 bytes and one input buffer of at most 4 MiB,
   each allocated once and reused; a frame or compressed object beyond 4 MiB is E12 without being read), with a decompressed
-  item kept only up to its field's bound (16,384 bytes for `MESSAGE`, 1,024 for the short fields); the file reader's line
-  buffer and positions, under 1 MiB; together about 18.5 MiB, leaving room for the scheduler's check of one record at a time.
+  item kept only up to its field's bound (16,384 bytes for `MESSAGE`, 1,024 for the short fields); the file reader's read
+  buffer, positions and held partial lines (at most 16,896 bytes per current and renamed file, in the committed state and up to
+  two forks), under 2 MiB; together about 19.5 MiB, leaving room for the scheduler's check of one record at a time.
   A test asserts the bound with a run of records at the maximum of every field (so the byte budget ends the run after about
   210 records), a journal of 100,000 entries and a file of lines over 16 KiB.
 - **Throughput and delay**: without a backlog a line is in the sink within one collector interval (2 seconds) plus the run
@@ -279,11 +280,11 @@ What happens today, checked against the code:
   gap up to its end (E22).
 - [ ] AC10: lines the journal no longer holds at the position, and an unreadable entry, each give the one gap of E3 or E12,
   and an entry without `MESSAGE` gives neither a record nor a gap; a file damaged in its structure is given up with the one
-  gap of E23, an archived file at once and an online file at the third run in a row that stops at the damage (E3, E12,
-  E23).
+  gap of E23, an archived file at once and an online file at the third run in a row that stops at the damage; a journal
+  file the reader refuses gives the gap of E13 once, also when the run that recorded it was dropped (E3, E12, E13, E23).
 - [ ] AC11: a missing, unreadable or non-regular configured file, a path with a symbolic link in any element, and an
   unreadable journal produce no record and no gap, log one warning per change without the path, keep the position, and
-  continue there once readable (E4, E5, E13).
+  continue there once readable (E4, E5).
 - [ ] AC12: a partial last line is held back until its line feed arrives and is shipped as it is at a truncation or when
   the writer has moved after a rotation (E7).
 - [ ] AC13: a run ends at 1,000 shipped records, at the record that crosses 4 MiB of text or after one second of reading,
