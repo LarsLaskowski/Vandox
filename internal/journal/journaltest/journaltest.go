@@ -36,6 +36,8 @@ const (
 type Options struct {
 	FileID, MachineID, SeqnumID [16]byte
 	Online                      bool
+	// Compress, when set, compresses the payloads of 512 bytes and more; nil keeps the raw-block frames.
+	Compress func(payload []byte) ([]byte, error)
 }
 
 // Write writes entries as a journal file to w, in the order given. An entry holds the pseudo fields __REALTIME_TIMESTAMP and

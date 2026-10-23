@@ -28,7 +28,9 @@ type Agent struct {
 	Backups    Backups       `yaml:"backups"`
 	Services   Services      `yaml:"services"`
 	MariaDB    MariaDB       `yaml:"mariadb"`
-	Secrets    AgentSecrets  `yaml:"-"`
+	// LogShipping configures the log shipping collector.
+	LogShipping LogShipping  `yaml:"log_shipping"`
+	Secrets     AgentSecrets `yaml:"-"`
 }
 
 // BackendTarget is where the agent sends its data.

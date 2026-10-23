@@ -56,6 +56,56 @@ type State struct {
 	Journal *JournalPosition
 	// Backup is the open backup run.
 	Backup *OpenRun
+	// Logs holds the positions of the log shipping collector, nil when it has none.
+	Logs *LogPositions
+}
+
+// Bounds of the saved log positions.
+const (
+	// MaxLogJournals is the most journal positions saved.
+	MaxLogJournals = 256
+	// MaxLogFiles is the most file positions saved.
+	MaxLogFiles = 16
+)
+
+// LogPositions are the positions of the log shipping collector.
+type LogPositions struct {
+	// Journal holds one position per journal sequence number ID.
+	Journal []JournalPosition
+	// Files holds one position per configured log file.
+	Files []FilePosition
+}
+
+// FilePosition is the position in a configured log file.
+type FilePosition struct {
+	// PathSHA256 is the 64 lower-case hex digits of the SHA-256 of the configured path.
+	PathSHA256 string
+	// Device is the device of the file.
+	Device uint64
+	// Inode is the inode of the file.
+	Inode uint64
+	// Offset is the offset of the next byte to read.
+	Offset int64
+	// HeadSHA256 is the SHA-256 of the first HeadLen bytes.
+	HeadSHA256 string
+	// HeadLen is the number of bytes the head hash covers, 0 to 256.
+	HeadLen int
+	// LastTime is the time of the last line read.
+	LastTime time.Time
+	// Renamed is the rotated file still being read, or nil.
+	Renamed *RenamedFile
+}
+
+// RenamedFile is a rotated file that is still being read.
+type RenamedFile struct {
+	// Device is the device of the file.
+	Device uint64
+	// Inode is the inode of the file.
+	Inode uint64
+	// Offset is the offset of the next byte to read.
+	Offset int64
+	// Size is the size seen at the last run.
+	Size int64
 }
 
 // Boot identifies a boot of the monitored server.
@@ -208,6 +258,11 @@ func (s *Store) Update(urgent bool, fn func(*State)) {
 	if urgent {
 		s.urgentPending = true
 	}
+}
+
+// Flush saves the state now if it has changed since the last save, waiting at most 5 s for a save that is running.
+func (s *Store) Flush(now time.Time) error {
+	return errors.New("agentstate: not implemented")
 }
 
 // copyState returns a deep copy of st.

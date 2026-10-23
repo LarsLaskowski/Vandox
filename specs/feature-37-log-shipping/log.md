@@ -21,3 +21,4 @@ are quoted in full.
 | 2026-10-23 07:28 | 3 Plan security review (round 2) | squad-security | CHANGES_REQUIRED: B5 pattern bounds too high (fact 25 false: 1,000 insts = 160-300 ms per 16 KiB line, 4,000 total ~1.2 s); N7-N9 non-blocking; B1-B4 resolved (opus/medium · 80,840 tokens · 18 tool uses · 247 s) |
 | 2026-10-23 07:33 | 3 Plan/Security decide | squad-lead | DECIDED: B5 applied (pattern bounds 400/400, fact 25 measured 90 ms worst case), N7-N9 taken; Security round 3 to confirm (opus/medium · 87,976 tokens · 30 tool uses · 277 s) |
 | 2026-10-23 07:35 | 3 Plan security review (round 3) | squad-security | APPROVED: B5 resolved (worst case 82 ms), N7 and N9 confirmed (opus/medium · 33,341 tokens · 8 tool uses · 91 s) |
+| 2026-10-23 07:38 | 4 Skeleton (G1) | squad-dev | Task 1 done: build passes; agent_test.go call sites left to Tester (9, not 5); decisions deferred to implementation noted (sonnet/medium · usage pending) |

@@ -14,6 +14,7 @@ import (
 	"github.com/LarsLaskowski/Vandox/internal/config"
 	"github.com/LarsLaskowski/Vandox/internal/connstats"
 	"github.com/LarsLaskowski/Vandox/internal/kernevents"
+	"github.com/LarsLaskowski/Vandox/internal/logship"
 	"github.com/LarsLaskowski/Vandox/internal/mariadb"
 	"github.com/LarsLaskowski/Vandox/internal/procstats"
 	"github.com/LarsLaskowski/Vandox/internal/scheduler"
@@ -70,6 +71,12 @@ const (
 	MariaDBTimeout          = 5 * time.Second
 )
 
+// Schedule of the log shipping collector.
+const (
+	LogsInterval = 2 * time.Second
+	LogsTimeout  = 2 * time.Second
+)
+
 // Schedules of the kernel event, backup and state collectors.
 const (
 	KernelInterval  = 2 * time.Second
@@ -97,6 +104,8 @@ type Options struct {
 	MariaDB mariadb.Sources
 	// Kernel are the kernel event sources; zero fields take their defaults.
 	Kernel kernevents.Sources
+	// Logs are the log shipping sources; zero fields take their defaults.
+	Logs logship.Sources
 	// StateDir is the directory of the agent's state file; "" takes spool.directory.
 	StateDir string
 }
@@ -116,7 +125,7 @@ func Run(ctx context.Context, opts Options) int {
 	}
 	log := NewLogger(stderr, cfg.Log.Level, journal)
 
-	sched, err := newScheduler(opts, cfg, log)
+	sched, _, err := newScheduler(opts, cfg, log)
 	if err != nil {
 		log.Error("agent cannot start", "err", err)
 		return 1
@@ -147,7 +156,7 @@ func Run(ctx context.Context, opts Options) int {
 // configured), mariadb (only when enabled), filesystem (only when a mount point is configured), clock, kernel, backups (only
 // when backups.processes has rules) and state, and the system collector, which newScheduler connects to the scheduler. The
 // agent's state file is opened in opts.StateDir or else spool.directory. The collectors log through log.
-func jobs(opts Options, cfg *config.Agent, log *slog.Logger) ([]scheduler.Job, *sysstats.System) {
+func jobs(opts Options, cfg *config.Agent, log *slog.Logger) ([]scheduler.Job, *sysstats.System, *agentstate.Store) {
 	system := sysstats.NewSystem(opts.System, log)
 	systemdSchedule := scheduler.Schedule{Interval: SystemdInterval, Timeout: SystemdTimeout, PressureInterval: SystemdPressureInterval}
 	list := []scheduler.Job{
@@ -204,6 +213,12 @@ func jobs(opts Options, cfg *config.Agent, log *slog.Logger) ([]scheduler.Job, *
 		Collector: kernevents.New(opts.Kernel, store, log),
 		Schedule:  scheduler.Schedule{Interval: KernelInterval, Timeout: KernelTimeout},
 	})
+	if logs, err := logship.New(opts.Logs, logship.Config{}, store, log); err == nil {
+		list = append(list, scheduler.Job{
+			Collector: logs,
+			Schedule:  scheduler.Schedule{Interval: LogsInterval, Timeout: LogsTimeout},
+		})
+	}
 	if len(cfg.Backups.Processes) > 0 {
 		list = append(list, scheduler.Job{
 			Collector: backups.New(proc, backupRules(cfg.Backups.Processes), store, log),
@@ -213,7 +228,7 @@ func jobs(opts Options, cfg *config.Agent, log *slog.Logger) ([]scheduler.Job, *
 	return append(list, scheduler.Job{
 		Collector: agentstate.NewSaver(store, proc),
 		Schedule:  scheduler.Schedule{Interval: StateInterval, Timeout: StateTimeout},
-	}), system
+	}), system, store
 }
 
 // backupRules converts the configured backup rules for the backup collector.
@@ -241,15 +256,15 @@ func programRules(rules []config.ProgramRule) []procstats.Rule {
 
 // newScheduler returns the scheduler with the jobs of the configuration; the system collector switches its memory
 // pressure mode and the kernel collector requests the extra runs of the processes and connections collectors.
-func newScheduler(opts Options, cfg *config.Agent, log *slog.Logger) (*scheduler.Scheduler, error) {
+func newScheduler(opts Options, cfg *config.Agent, log *slog.Logger) (*scheduler.Scheduler, *agentstate.Store, error) {
 	var sink scheduler.Putter = scheduler.DiscardSink{}
 	if opts.Sink != nil {
 		sink = opts.Sink
 	}
-	list, system := jobs(opts, cfg, log)
+	list, system, store := jobs(opts, cfg, log)
 	sched, err := scheduler.New(list, sink, log)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	system.SetPressureSwitch(sched.SetPressure)
 	for _, j := range list {
@@ -257,7 +272,7 @@ func newScheduler(opts Options, cfg *config.Agent, log *slog.Logger) (*scheduler
 			k.SetTrigger(sched.Trigger)
 		}
 	}
-	return sched, nil
+	return sched, store, nil
 }
 
 // notification returns the notifier of the service manager and the watchdog interval; a problem with either is

@@ -20,6 +20,7 @@ type Entry struct {
 	RealtimeUS  uint64  // the real-time stamp as stored, in µs
 	MonotonicUS uint64  // the monotonic stamp as stored, in µs
 	Omitted     int     // wanted or compressed items beyond the 16 kept in Fields
+	Undecoded   int     // compressed items NextWith could not decode
 
 	bufs [][]byte
 }
@@ -30,6 +31,7 @@ type Field struct {
 	Name       string
 	Value      []byte // without the NAME= prefix; valid until the next call of Next with this Entry
 	Compressed bool
+	Cut        bool // the payload was longer than the bytes kept; Value holds the first ones
 }
 
 // Field returns the fields of e with the given name, in the order of the entry's items.

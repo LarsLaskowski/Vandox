@@ -16,6 +16,8 @@ const (
 	maxMachineFile = 64
 )
 
+var errNotImplemented = errors.New("journal: not implemented")
+
 var errMachineID = errors.New("journal: machine ID not readable")
 
 // ListFiles returns the base names of the journal files in dir: system.journal, system@*.journal and system@*.journal~ (a file set
@@ -47,6 +49,12 @@ func ListFiles(dir fs.FS) ([]string, error) {
 	}
 	sort.Strings(names)
 	return names, nil
+}
+
+// ListAllFiles returns the base names of the journal files in dir like ListFiles and, in addition, the user files user-<digits>.journal,
+// user-<digits>@*.journal and user-<digits>@*.journal~ (one to ten digits), sorted, at most 1,024.
+func ListAllFiles(dir fs.FS) ([]string, error) {
+	return nil, errNotImplemented
 }
 
 // isJournalName tells whether name is one of the journal file names the reader takes.
