@@ -1966,8 +1966,8 @@ func TestRun_SpoolCloseGivesUp(t *testing.T) {
 
 		closeSpool(sp, slog.New(slog.NewTextHandler(out, nil)))
 
-		if n := countLines(out.String(), `msg="spool not closed"`); n != 1 {
-			t.Errorf("lines %q = %d, want 1; log:\n%s", "spool not closed", n, out.String())
+		if n := countLines(out.String(), `level=WARN`, `msg="spool not closed"`); n != 1 {
+			t.Errorf("warning lines %q = %d, want 1; log:\n%s", "spool not closed", n, out.String())
 		}
 		if strings.Contains(out.String(), dir) {
 			t.Errorf("the log holds the spool directory path, want no path; log:\n%s", out.String())
@@ -1976,39 +1976,45 @@ func TestRun_SpoolCloseGivesUp(t *testing.T) {
 	t.Run("a close that hangs is given up at the deadline", testSpoolCloseHangs)
 }
 
-// testSpoolCloseHangs checks that closeSpool gives up on a Close that never returns.
+// testSpoolCloseHangs checks that closeSpool gives up on a Close that never returns, in fake time.
 func testSpoolCloseHangs(t *testing.T) {
-	sp, err := spool.Open(spool.Options{Dir: t.TempDir(), AgentID: "web-1", BootID: kernelBootRaw, MaxBytes: 2 << 30}, slog.New(slog.DiscardHandler))
-	if err != nil {
-		t.Fatalf("spool.Open() error = %v, want nil", err)
-	}
-	release := make(chan struct{})
-	t.Cleanup(func() { _ = sp.Close(context.Background()) })
-	t.Cleanup(func() { close(release) })
 	oldClose, oldTimeout := spoolClose, closeTimeout
 	t.Cleanup(func() { spoolClose, closeTimeout = oldClose, oldTimeout })
-	spoolClose = func(*spool.Spool, context.Context) error {
-		<-release
+	synctest.Test(t, func(t *testing.T) {
+		sp, err := spool.Open(spool.Options{Dir: t.TempDir(), AgentID: "web-1", BootID: kernelBootRaw, MaxBytes: 2 << 30}, slog.New(slog.DiscardHandler))
+		if err != nil {
+			t.Fatalf("spool.Open() error = %v, want nil", err)
+		}
+		release := make(chan struct{})
+		defer func() {
+			close(release)
+			_ = sp.Close(context.Background())
+		}()
+		spoolClose = func(*spool.Spool, context.Context) error {
+			<-release
 
-		return nil
-	}
-	closeTimeout = 100 * time.Millisecond
-	out := &syncBuffer{}
-	done := make(chan struct{})
+			return nil
+		}
+		closeTimeout = 100 * time.Millisecond
+		out := &syncBuffer{}
+		done := make(chan struct{})
 
-	go func() {
-		closeSpool(sp, slog.New(slog.NewTextHandler(out, nil)))
-		close(done)
-	}()
+		go func() {
+			closeSpool(sp, slog.New(slog.NewTextHandler(out, nil)))
+			close(done)
+		}()
+		time.Sleep(closeTimeout)
+		synctest.Wait()
 
-	select {
-	case <-done:
-	case <-time.After(5 * time.Second):
-		t.Fatalf("closeSpool still running 5 s after a 100 ms deadline, want it to give up")
-	}
-	if n := countLines(out.String(), `msg="spool not closed"`); n != 1 {
-		t.Errorf("lines %q = %d, want 1; log:\n%s", "spool not closed", n, out.String())
-	}
+		select {
+		case <-done:
+		default:
+			t.Fatalf("closeSpool still running after the %v deadline, want it to give up", closeTimeout)
+		}
+		if n := countLines(out.String(), `level=WARN`, `msg="spool not closed"`); n != 1 {
+			t.Errorf("warning lines %q = %d, want 1; log:\n%s", "spool not closed", n, out.String())
+		}
+	})
 }
 
 // requireStartFailure fails unless Run answered 1, logged one "agent cannot start" error with err and no path of paths, and
