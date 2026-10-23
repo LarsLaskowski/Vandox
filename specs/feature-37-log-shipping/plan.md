@@ -59,7 +59,7 @@ The criteria are the spec's AC1–AC17 ([spec.md](spec.md)).
 | AC | Test(s) | Test file |
 | -- | ------- | --------- |
 | AC1 | `TestJournal_EntriesMapAsTheImportGolden` (the generated fixture files from `live.export`, compressed with real frames, against `testdata/journal/live-records.jsonl`), `TestJournal_ReadsUserFilesAndTheVolatileDirectory`, `TestJournal_CutsLongFieldsWithTruncated`, `TestJournal_XzOrLz4ItemIsAGap`; C#: `JournalExportParserParsesLiveFixtureAsTheGoldenRecords`; `TestEntries_SeekAllFindsTheFirstEntryAfter`, `TestEntries_NextWithDecodesCompressedItems`, `TestEntries_NextWithMarksCutFields`, `TestEntries_MoreThanFourCompressedItemsLeaveTheEntryUndecoded`, `TestEntries_CompressedObjectBeyondTheBoundIsNotRead`, `TestListAllFiles_TakesSystemAndUserFiles`, `TestReal_NextWithDecodesEveryEntry` (skips without `VANDOX_REAL_JOURNAL_DIR`), `TestJournal_PidFallsBackToSyslogPid` (decision 8), `TestEntries_NextWithCountsTheValueOnly` (decision 6), `TestEntries_NextWithKeepsTheFirstItemOfEachName`, `TestJournal_EntryWithRepeatedFieldsIsShippedWithTheFirstValues` (G4 decision 1) | `internal/logship/journal_test.go`, `tests/Vandox.Core.Tests/JournalExportParserTests.cs`, `internal/journal/entries_test.go`, `internal/journal/dir_test.go`, `internal/journal/real_test.go` |
-| AC2 | `TestParse_ReadsTheImportsSyslogForms` (table from `testdata/logs/mail.log`, `kern.log-oom` and the forms of fact 11), `TestParse_LineWithoutHeaderIsRaw` (with the impossible and unstorable header times of decision 5), `TestClock_YearAndDaylightSavingRules`, `TestClock_SetZoneKeepsThePreviousInstant` (step 6), `TestLoadZone_RefusesWhatIsNotAZoneFile`, `TestFiles_HoldsSyslogFilesWhileTheZoneIsUnknown` | `internal/syslogline/syslogline_test.go`, `internal/syslogline/clock_test.go`, `internal/syslogline/zone_test.go`, `internal/logship/files_test.go` |
+| AC2 | `TestParse_ReadsTheImportsSyslogForms` (table from `testdata/logs/mail.log`, `kern.log-oom` and the forms of fact 11), `TestParse_LineWithoutHeaderIsRaw` (with the impossible and unstorable header times of decision 5), `TestClock_YearAndDaylightSavingRules`, `TestClock_SetZoneKeepsThePreviousInstant` (step 6), `TestLoadZone_RefusesWhatIsNotAZoneFile`, `TestFiles_HoldsSyslogFilesWhileTheZoneIsUnknown`, `TestFiles_LineIsCutAsTheImportCutsIt` (review decision R1); C#: `SyslogParserParseAsyncCutsTheWholeLineBeforeItsHeader` (R1) | `internal/syslogline/syslogline_test.go`, `internal/syslogline/clock_test.go`, `internal/syslogline/zone_test.go`, `internal/logship/files_test.go`, `tests/Vandox.Core.Tests/SyslogParserTests.cs` |
 | AC3 | `TestFilter_MinPriorityAndDropRules` (table: each condition alone and together, a line without priority) | `internal/logship/filter_test.go` |
 | AC4 | `TestLogs_StopAndStartShipEveryLineOnce` (real files in `t.TempDir()`, a fixture journal, `Kept`, `Store.Flush`, a new collector on the saved state), `TestRun_SavesTheStateWhenItStops`, `TestRunner_TellsTheObserverWhetherARunWasKept`, `TestStore_FlushWaitsForARunningSave`, `TestStore_FlushGivesUpWhenASaveDoesNotEnd` (decision 2, coverage mode) | `internal/logship/logship_test.go`, `internal/agent/agent_test.go`, `internal/scheduler/runner_test.go`, `internal/agentstate/agentstate_test.go` |
 | AC5 | `TestLogs_UncleanEndRepeatsOnlyLinesAfterTheSavedPosition`, `TestSaver_SavesALogPositionWithinTenSeconds` (run starts a few milliseconds early on the 10 s grid) | `internal/logship/logship_test.go`, `internal/agentstate/agentstate_test.go` |
@@ -284,9 +284,11 @@ The Dev's deviations:
    refused, the next run returns both lines with the times of the refused run).
 4. **`FilePosition.LastTime` follows every line read, shipped or filtered: accepted.** A filtered line is not lost, so the S6 and
    E2 gaps start after it, as E12's journal gaps do; the precision of decision 4 (step 5) is replaced, and spec S6 and E2 say so.
-5. **Held partial line of at most 16,896 bytes (16,384 + 512 for the header), shipped as it is at a truncation, saved offset at the
-   line's start: accepted** (E6, E7; the message is cut at 16,384 after the header as the import cuts it). Held lines live in the
-   committed state and up to two forks, so the spec's memory figure for the file reader becomes under 2 MiB (spec fixed).
+5. **Held partial line, shipped as it is at a truncation, saved offset at the line's start: accepted** (E6, E7). Held lines live in
+   the committed state and up to two forks, so the spec's memory figure for the file reader becomes under 2 MiB (spec fixed). The
+   bound of 16,896 bytes (16,384 + 512 for the header) accepted here rested on the premise that the import cuts the message after the
+   header; the import cuts the whole line first (`LogLineReader.cs:16`, `:144`), so the review of step 8 replaced it with 16,385 bytes
+   and the import's cut (*Decisions after review*, decision R1).
 6. **`SeekAll` returns the start when `after` is below the header head sequence number: accepted;** equal to the bisection for a
    file whose head sequence number is its first entry's, which journald sets once at the first entry, and a damaged entry before
    the position is not met.
@@ -398,6 +400,82 @@ name is kept), `internal/logship/files.go` (decisions 2, 3, 6: `pump`, `readRena
 `%w` in a fixed text, the `log shipping cannot start` line removed, the doc comment of `jobs`); then *Format*, the tests and the
 *Coverage gate*. The Lead already wrote the Agent area, the spec and record 0121 for the decided behavior and checks them against the
 final code in task 15a.
+
+## Decisions after review (step 8, round 1)
+
+R1. **A cut `syslog` line keeps 16,384 bytes of message after its header, the import 16,384 bytes of line — fixed: option (a), the
+import's cut.** Root cause: `lineKeep = maxMessageBytes + 512` (`internal/logship/logship.go:43`) keeps 16,896 bytes of a line, and
+`fileRecord` (`internal/logship/files.go:349`) cuts only the parsed message to 16,384, so a 30-byte header with 20,000 `x` ships a
+message of 16,384 bytes. The import's `LogLineReader` cuts the whole line to `MaxLineBytes` = 16,384 before `SyslogParser.Map`
+parses it (`src/Vandox.Core/LogParsing/LogLineReader.cs:16`, `Finish` and `CutAt` at `:131-164`; `SyslogParser.cs:110`, `:124`), so
+the import's message is 16,384 − 30 bytes (confirmed by reading; the Reviewer's repro with a 43-byte header: agent 16,384, import
+16,341). Spec E6 ("the first 16,384 bytes are shipped"), AC2 and `docs/areas/wire-format.md` (*Producers*: the `message` the
+import's mappings give) already state the import's behavior; deviation 5 of step 6 accepted the header room on a premise the code
+refutes. Option (b), keeping the behavior and documenting an exception in E6, deviation 5 and the wire format, lost: parity with the
+import is the stated contract of the record, the same line would get two different messages in storage (source `syslog` from the
+agent, from an import of the same file), and (a) also lowers the held line to 16,385 bytes. Related defect found on the way and fixed
+with it: the agent keeps a `\r` before the line feed (no code in `internal/logship` or `internal/syslogline` removes it, and
+`syslogline.Parse` does not trim), where `LogLineReader.Finish` removes `\r\n` from a line that fits its 16,386-byte buffer; at the
+cut that also decides `truncated` (a `\r\n` line of 16,384 bytes is not cut by the import).
+
+The rule, mirroring `Finish` and `CutAt`:
+
+- `lineKeep = maxMessageBytes + 1` (16,385): the import's line limit and one byte for a `\r` before the line feed; a longer line sets
+  `ls.cut` as today.
+- At a line feed (`splitLines`), a line that was not cut (`ls.cut` false) and ends in `\r` is handed over without it (the import's
+  condition "the line with `\r\n` fits 16,386 bytes"). A held line handed over without a line feed (`handOver`) keeps its `\r`, as the
+  import keeps it on a last line without `\n`.
+- Before the byte order mark is removed and before `syslogline.Parse`, a line longer than 16,384 bytes is cut to
+  `n = min(16384, len-1)` bytes, `n` moved back while `line[n]` is a UTF-8 continuation byte (`0b10xxxxxx`), at most three times and
+  not below 1, and `truncated` is set. `fileRecord`'s `cleaned(message, maxMessageBytes)` stays (U+FFFD growth, as `Utf8Text.Cut`).
+
+New member (`internal/logship/files.go`):
+
+```go
+// cutLine cuts a line longer than maxMessageBytes as the import's line reader does: to at most maxMessageBytes bytes, moved back
+// over at most three UTF-8 continuation bytes; cut tells that the line was longer.
+func cutLine(line []byte) (kept []byte, cut bool)
+```
+
+Tests first (task 15b, Tester). `fileLine`'s header (`Oct 23 08:00:03 web-1 app[7]: `) is 30 bytes; the tests derive it as
+`h := strings.TrimSuffix(fileLine(n, ""), "\n")` and use `len(h)`, never the literal.
+
+- New `TestFiles_LineIsCutAsTheImportCutsIt` (`internal/logship/files_test.go`, table-driven, each case one line appended to a file
+  read from its position, then `fileLine(9, "after")`; each asserts message, `truncated` and that `after` follows):
+  (a) `h` + 20,000 `x` + `\n` → message `x` × (16,384 − len(h)), truncated;
+  (b) `h` + `x` × (16,384 − len(h)) + `\n` (16,384 bytes) → that message whole, not truncated;
+  (c) `h` + `x` × (16,385 − len(h)) + `\n` → `x` × (16,384 − len(h)), truncated;
+  (d) `h` + `x` × (16,382 − len(h)) + `€` (`\xe2\x82\xac`, bytes 16,382–16,384) + `yy` + `\n` → `x` × (16,382 − len(h)), truncated;
+  (e) `h` + `x` × (16,381 − len(h)) + `€` (bytes 16,381–16,383) + `yy` + `\n` → `x` × (16,381 − len(h)) + `€`, truncated;
+  (f) `h` + `short\r\n` → `short`, not truncated;
+  (g) `h` + `x` × (16,384 − len(h)) + `\r\n` → `x` × (16,384 − len(h)), not truncated;
+  (h) `h` + `x` × (16,385 − len(h)) + `\r\n` → `x` × (16,384 − len(h)), truncated;
+  (i) a line without header, 20,000 `x` + `\n` → `x` × 16,384, truncated (E9).
+- New `TestFiles_LongFirstLineCountsTheByteOrderMark` (same file): a file read from its start (as in
+  `TestFiles_FileThatAppearsLaterIsReadFromItsStart`) whose content is `\xef\xbb\xbf` + `h` + 20,000 `x` + `\n` → message
+  `x` × (16,384 − 3 − len(h)), truncated.
+- New subcase of `TestFiles_TruncationRestartsWithOneGap` or a new `TestFiles_HeldLineKeepsItsCarriageReturn` (Tester's choice, same
+  file): a held last line `h` + `tail\r` without line feed, handed over at a truncation → message `tail\r`.
+- Adapt `requireLongLineThenTwo` (`files_test.go:1224`): the long line's message is `16384 - len(header)` bytes (header as in
+  `TestFiles_LongLineIsReadOnAcrossRunsAndDoesNotBlockTheFile`), truncated; failure text accordingly.
+- Adapt `peakLive` (`internal/logship/logship_test.go:574`) and `heapOfLongLines`: a line counts as cut when it is truncated and its
+  message is `16384 - len(h)` bytes (the `fileLine` header); the failure text of `heapOfLongLines` says "cut as the import cuts them"
+  instead of "cut to 16,384 bytes". The journal subtests count no cut lines either way.
+- C#: new `SyslogParserParseAsyncCutsTheWholeLineBeforeItsHeader` (`tests/Vandox.Core.Tests/SyslogParserTests.cs`): `Header` +
+  20,000 `x` + `\n` + `Valid` → the first record's message is `x` × (`LogLineReader.MaxLineBytes` − UTF-8 bytes of `Header`),
+  truncated. It passes today and pins the import's side of the contract the Go test asserts.
+
+Before the Dev, (a), (c), (d), (e), (f), (g), (h), the byte-order-mark test, `requireLongLineThenTwo` and `heapOfLongLines` fail; (b),
+(i) and the held `\r` pass.
+
+The Dev (task 15c): `internal/logship/logship.go` (`lineKeep = maxMessageBytes + 1` with the comment "the import's line limit and one
+byte for a `\r` before the line feed"); `internal/logship/files.go`: `cutLine` per the signature above (`utf8.UTFMax - 1` for the three
+steps); in `splitLines` a local `line := ls.held`, without its last byte when `ls.cut` is false and it ends in `\r`, passed to `emit`
+(do not reslice `ls.held` itself); in `(*filesRun).line` first `line, over := cutLine(line)` and `cut = cut || over`, before the byte
+order mark is trimmed; the doc comments of `splitLines` and `line` name the `\r` and the cut. `handOver` and `fileRecord` unchanged.
+Then *Format*, the tests and the *Coverage gate*. The Lead already changed spec E6 and the memory figure (16,385 bytes) and the Agent
+area (*Lines*, *Memory*); `docs/areas/wire-format.md` needs no change (its parity sentence becomes true). The Lead checks them against
+the final code in task 15d.
 
 ## Options considered
 

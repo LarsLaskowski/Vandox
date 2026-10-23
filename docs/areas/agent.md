@@ -1111,9 +1111,12 @@ that is no directory, or a path that is not absolute and clean), `link refused`,
 without blocking and closed at once), `permission denied` and `read failed` (any other error of the open, of `fstat` or of a read).
 The open descriptor of the file is kept across runs.
 
-**Lines.** A file is read from its position through one 64 KiB buffer. A line ends at a line feed; its first 16,896 bytes (16,384 for
-the message and 512 for the header) are kept and the rest is read past without being kept, with `truncated` set. A UTF-8 byte order
-mark at offset 0 is removed and an empty line is not shipped. A last line without a line feed is **held**, at most 16,896 bytes in the
+**Lines.** A file is read from its position through one 64 KiB buffer. A line ends at a line feed; its first 16,385 bytes are kept and the rest is
+read past without being kept. A `\r` directly before the line feed of a line that fit is removed. A line still longer than 16,384 bytes
+is cut as the import's line reader cuts it: to its first 16,384 bytes, less up to three bytes so that no UTF-8 sequence is split, with
+`truncated` set. The cut comes before the syslog header is parsed, so the header counts against the 16,384 bytes and the `message` equals
+the import's for the same line. A UTF-8 byte order mark at offset 0 is removed after the cut and an empty line is not shipped. A last
+line without a line feed is **held**, at most 16,385 bytes in the
 collector's memory, until its line feed arrives; the saved offset is the start of that line, so after a restart it is read again
 from its start. A held line is shipped as it is when its file is truncated or when its renamed file is finished (below). A run that
 stops while it hands over the lines of a chunk (at its record or text budget, or on its time or deadline found at a shipped line)
@@ -1255,7 +1258,7 @@ opened anew by its identity).
 **Memory.** The collector holds at most 24 MiB live, independent of the size of the journal, of the files, of the backlog, of an entry
 and of a line: the records of one run (at most 4 MiB of text, the crossing record and the fixed part of at most 1,000 records), the
 journal reader's buffers and at most 1,024 file headers, the zstd path (the output buffer above and one input buffer grown once to at
-most 4 MiB, both reused), the 64 KiB read buffer, and the held lines of at most 16,896 bytes per current and renamed file in the
+most 4 MiB, both reused), the 64 KiB read buffer, and the held lines of at most 16,385 bytes per current and renamed file in the
 committed state and up to two copies. `TestLogs_HeapStaysBounded` asserts the bound with records at the maximum of every field, a
 journal of 100,000 entries and lines over 16 KiB; `TestDecoder_HeapStaysBoundedForTheLargestFrame` pins the decoder's buffer.
 

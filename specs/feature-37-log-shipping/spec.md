@@ -108,7 +108,10 @@ What happens today, checked against the code:
   follow it and treats the file as not readable (E4), so a service user who replaces its log file with a link to another
   file (for example `/etc/shadow`, readable to the agent) never gets that file shipped.
 - E6: A line longer than 16 KiB — the first 16,384 bytes are shipped at a character boundary with `truncated` set; the rest
-  of the line is discarded without reading it into memory. A `host` or `program` longer than 1,024 bytes (a journal
+  of the line is discarded without reading it into memory. As in the import, the 16,384 bytes count the whole line, its
+  syslog header (and a byte order mark at offset 0) included, so the `message` of a cut `syslog` line is shorter than
+  16,384 bytes by its header; a `\r` directly before the line feed is removed first, so a `\r\n` line of 16,384 bytes is not
+  cut. A `host` or `program` longer than 1,024 bytes (a journal
   `_HOSTNAME` or `SYSLOG_IDENTIFIER`, which the sender chooses) is cut to 1,024 bytes at a character boundary with
   `truncated` set, as the import does; lengths count UTF-8 bytes after each invalid byte became U+FFFD, the way the wire
   check measures them. A line of any length is read to its end over as many runs as it takes (a run that stops on its time in
@@ -201,7 +204,7 @@ What happens today, checked against the code:
   the zstd path, at most 8.5 MiB (one output buffer of 4 MiB + 128 KiB + 16 bytes and one input buffer of at most 4 MiB,
   each allocated once and reused; a frame or compressed object beyond 4 MiB is E12 without being read), with a decompressed
   item kept only up to its field's bound (16,384 bytes for `MESSAGE`, 1,024 for the short fields); the file reader's read
-  buffer, positions and held partial lines (at most 16,896 bytes per current and renamed file, in the committed state and up to
+  buffer, positions and held partial lines (at most 16,385 bytes per current and renamed file, in the committed state and up to
   two forks), under 2 MiB; together about 19.5 MiB, leaving room for the scheduler's check of one record at a time.
   A test asserts the bound with a run of records at the maximum of every field (so the byte budget ends the run after about
   210 records), a journal of 100,000 entries and a file of lines over 16 KiB.
