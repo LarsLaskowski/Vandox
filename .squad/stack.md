@@ -30,8 +30,8 @@ Cloud session notes (found when a cloud image lacked the .NET SDK):
 - If `reihitsu-format` is not on the `PATH`, run it as a local tool:
   `dotnet tool run reihitsu-format --check --force src tests tools`.
 - The *Sonar gate* needs `SONAR_TOKEN`, which a cloud session does not have unless the environment provides it. Without
-  it the gate is CI-only: the orchestrator logs it as "not run" in step 7 and the pull request's CI analysis is the first
-  check of the Sonar rules.
+  it the gate reports NOT CHECKED, the orchestrator logs that in step 7, and step 11 checks the draft pull request's CI
+  analysis with `python3 .squad/tools/sonar-check.py pr <number>` (*Sonar gate* below).
 
 ## Layout
 
@@ -178,7 +178,6 @@ locally, <authoritative check>" once in `log.md` and does not repeat it as an op
 | workflows (`.github/workflows/*.yml`) | a GitHub Actions runner (`actionlint` runs in the *Analyzer gate*) | the *Analyzer gate* (actionlint) | the workflow's own run on the pull request |
 | `deploy/backend/Dockerfile`, `docker-compose.yml`, `.dockerignore`, image contents | a Docker daemon (`hadolint` runs in the *Analyzer gate* on the Dockerfile) | the *Image build check* (restore-order reproduction below), `.github/scripts/check-base-image-pinning.sh`, `.github/scripts/check-builder-dotnet-version.sh`, `bash -n` on the smoke script | CI job *Release build check*, steps "Build and verify image" and "Smoke test backend container" |
 | own browser scripts and style sheets (`src/Vandox.Backend/wwwroot/js/*.js`, `wwwroot/*.css`) | a JavaScript and CSS analyzer | `WebUiContentTests` (`WebSourceScanner` rules) | SonarQube Cloud (step 11) |
-| known vulnerabilities (Go) | `govulncheck` (cloud sessions reach `vuln.go.dev`) | none | CI job *Vulnerability scan* |
 | C# conditions on a local that a lambda assigns (SonarQube Cloud `csharpsquid:S2583`, "condition always evaluates to False", and the other symbolic-execution rules) | the local SonarAnalyzer.CSharp build does not report them (run #27: the quality gate failed in CI with a C reliability rating on a local assigned only inside a callback passed to `PageRunner.RunAsync`) | the captured-local rule under *Writing code*, checked by reading every new lambda that assigns an outer local | SonarQube Cloud (step 11) |
 | values passed to a logger or other sink (CodeQL "Clear text storage of sensitive information") | CodeQL runs only in CI | the logger-argument rule below, checked by grepping the new logger calls | CodeQL code scanning on the pull request |
 | Go conversions of a parsed number to a narrower or signed integer type (CodeQL `go/incorrect-integer-conversion`) | CodeQL runs only in CI | gosec G115 in the *Analyzer gate* (record 0112), which reported every measured CodeQL alert but accepts a 64-bit parse result converted to `int` or `uint` (CodeQL's view unverified); the integer-conversion rule under *Writing code*, checked by grepping the new `strconv.ParseUint`, `strconv.ParseInt` and `strconv.Atoi` calls and every conversion of their results to `int` or `uint` | CodeQL code scanning on the pull request |
