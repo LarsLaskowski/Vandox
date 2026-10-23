@@ -184,6 +184,7 @@ type Store struct {
 	urgentPending bool
 	lastSave      time.Time
 	saveFailed    bool
+	barrier       func(ctx context.Context) error
 
 	// saving is the write lock of the state file: a save holds it by sending and releases it by receiving. It covers encoding, writing
 	// and the update of dirty and the sequence number.
@@ -282,6 +283,16 @@ func (s *Store) Update(urgent bool, fn func(*State)) {
 	if urgent {
 		s.urgentPending = true
 	}
+}
+
+// SetBarrier registers b, which every save of the state file (the state job and Flush) calls first; when b fails the save is not
+// written and is logged as `agent state not saved` with the fixed text `agentstate: save: spool not durable`. A nil b removes the
+// barrier.
+func (s *Store) SetBarrier(b func(ctx context.Context) error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.barrier = b
 }
 
 // Flush saves the state now if it has changed since the last save, waiting at most 5 s for a save that is running. It gives up with
