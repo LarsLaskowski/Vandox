@@ -1501,7 +1501,7 @@ directory, up to 100,000 of them within the memory bound) is foreign: never open
   same boot appends to the newest unsealed file of the context, so restarts alone add no file; a start in a new boot seals it.
 - The meta file is one JSON object, `{"version":1,"agent_id":…,"boot_id":…,"clean":…,"next":…,"acked":[{"first":…,"last":…}]}`, every
   key required, at most 16 KiB: the agent ID and the boot ID of the last start, whether the spool was closed cleanly, the next sequence
-  number at the time of the write and at most 64 acknowledged ranges. It is replaced through its temporary file and a rename: at the
+  number at the time of the write and at most 65 acknowledged ranges (64 above the oldest unacknowledged record and one that reaches down to it). It is replaced through its temporary file and a rename: at the
   start (synced, `clean` false), at every acknowledgement (not synced: a lost acknowledgement only makes records be sent again) and at
   the close (synced, `clean` true).
 
@@ -1622,7 +1622,7 @@ within 1677-09-21 to 2262-04-11. A break is damage, never a value:
   records are acknowledged or dropped. Stated residual: a restart before that finds the damage again, logs it again and writes a second
   gap for the same numbers.
 - A meta file that is not JSON (`not the spool format`), of another version (`unknown format version`), with a missing, unknown or
-  repeated key, more than 64 ranges, a range that is not sorted, overlaps another, starts at 0, has its first number above its last or
+  repeated key, more than 65 ranges, a range that is not sorted, overlaps another, starts at 0, has its first number above its last or
   reaches `next`, or a `next` at or above 2^63 - 1 (`inconsistent value`) is damaged (`file` `spool-meta.json`): its acknowledgements
   are discarded, so those records are handed out again, and the next number is taken as on a fresh spool.
 
