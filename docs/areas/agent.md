@@ -1116,9 +1116,10 @@ the message and 512 for the header) are kept and the rest is read past without b
 mark at offset 0 is removed and an empty line is not shipped. A last line without a line feed is **held**, at most 16,896 bytes in the
 collector's memory, until its line feed arrives; the saved offset is the start of that line, so after a restart it is read again
 from its start. A held line is shipped as it is when its file is truncated or when its renamed file is finished (below). A run that
-stops at its record or text budget drops what it read after the last line it handed over, and the next run reads that again; a run
-that stops on its time or its deadline in the middle of a line keeps the offset it read up to and the held start of the line, and the
-next run reads on from there. So a line of any length is read to its end over as many runs as it takes, at least one 64 KiB chunk per
+stops while it hands over the lines of a chunk (at its record or text budget, or on its time or deadline found at a shipped line)
+drops what it read after the last line it handed over, and the next run reads that again; a run that stops between two chunks (its
+time, looked at after every full 64 KiB, or its deadline) keeps the offset it read up to and the held start of the line, and the next
+run reads on from there. So a line of any length is read to its end over as many runs as it takes, at least one 64 KiB chunk per
 run that reaches the file, and never holds back the lines after it; after a restart such a line is read again from its start.
 
 **Syslog lines.** The line rules are the import's syslog rules ([Log import](log-import.md), *Syslog*), ported to Go: an optional
