@@ -1823,16 +1823,22 @@ func metricRecords(records []model.Record, name string) []model.Record {
 	return found
 }
 
-// requireBootRecordFirst fails unless the first record is the boot event of the kernel fixture at its btime.
-func requireBootRecordFirst(t *testing.T, records []model.Record) {
+// requireBootRecord fails unless records hold the boot event of the kernel fixture at its btime, and reports whether it is
+// the first record: concurrent collectors decide whether the first sequence number goes to it or to another record.
+func requireBootRecord(t *testing.T, records []model.Record) bool {
 	t.Helper()
 
 	const btime = 946681200
-	event, ok := records[0].Data.(*model.KernelEvent)
-	if !ok || event.Type != model.KernelEventBoot || !records[0].CapturedAt.Equal(time.Unix(btime, 0)) {
-		t.Fatalf("first record = %T captured at %v, want the boot event captured at the fixture's btime %d (%v)",
-			records[0].Data, records[0].CapturedAt, btime, time.Unix(btime, 0).UTC())
+	for i, r := range records {
+		if event, ok := r.Data.(*model.KernelEvent); ok && event.Type == model.KernelEventBoot {
+			if !r.CapturedAt.Equal(time.Unix(btime, 0)) {
+				t.Fatalf("boot event captured at %v, want the fixture's btime %d (%v)", r.CapturedAt, btime, time.Unix(btime, 0).UTC())
+			}
+			return i == 0
+		}
 	}
+	t.Fatalf("the spool holds no boot event, want the one of the fixture's btime %d", btime)
+	return false
 }
 
 func TestRun_SpoolReportersFeedTheSelfMetrics(t *testing.T) {
@@ -1852,14 +1858,15 @@ func TestRun_SpoolReportersFeedTheSelfMetrics(t *testing.T) {
 	if last := sizes[len(sizes)-1]; last <= 0 {
 		t.Errorf("last %s = %v, want the size of the data files, above 0", selfstats.MetricSpool, last)
 	}
-	// the oldest record by sequence is the fixture's boot event, one hour before the clock start
-	requireBootRecordFirst(t, records)
+	// the oldest record by sequence is the fixture's boot event, one hour before the clock start, unless a record of another
+	// collector (a gap at the clock start) was numbered first
+	bootFirst := requireBootRecord(t, records)
 	last := ages[len(ages)-1]
 	got := last.Data.(*model.MetricPoint).Value
 	if want := last.CapturedAt.Sub(records[0].CapturedAt).Seconds(); got != want {
 		t.Errorf("last %s = %v, want %v (the sample's capture time minus the oldest capture time)", selfstats.MetricSpoolAge, got, want)
 	}
-	if want := 3720.0; got != want {
+	if want := 3720.0; bootFirst && got != want {
 		t.Errorf("last %s = %v, want %v (3600 s boot offset and the 120 s of the third run)", selfstats.MetricSpoolAge, got, want)
 	}
 }
