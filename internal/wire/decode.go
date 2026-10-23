@@ -498,7 +498,12 @@ func (d *Decoder) Next() (model.Record, error) {
 }
 
 func (d *Decoder) decodeRecord(line []byte) (model.Record, error) {
-	if err := d.keys.checkLine(line); err != nil {
+	return decodeLine(&d.keys, line)
+}
+
+// decodeLine checks line with keys and binds it to a validated agent record.
+func decodeLine(keys *keyCheck, line []byte) (model.Record, error) {
+	if err := keys.checkLine(line); err != nil {
 		return model.Record{}, err
 	}
 	var env envelope
@@ -532,5 +537,9 @@ func (d *Decoder) Close() error { return d.zr.Close() }
 // UnmarshalRecord decodes one wire line (without the trailing '\n') into a record, applying the decoder's
 // line rules. The origin and receive time of the returned record are zero.
 func UnmarshalRecord(line []byte) (model.Record, error) {
-	return model.Record{}, errors.New("not implemented")
+	if limit := DefaultLimits().MaxLineBytes; len(line) > limit {
+		return model.Record{}, fmt.Errorf("%w: line longer than %d bytes", ErrLimitExceeded, limit)
+	}
+	var keys keyCheck
+	return decodeLine(&keys, line)
 }
