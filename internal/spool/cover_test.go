@@ -173,27 +173,6 @@ func TestOldestCapture_ClosedAndEmpty(t *testing.T) {
 	expect(t, errors.Is(err, errClosed), "Put() after Close error = %v, want %v", err, errClosed)
 }
 
-func TestRead_DamageInActiveFileDetachesIt(t *testing.T) {
-	r := newRig(t)
-	sp := r.open()
-	first := putTagged(t, sp, epoch, "act", 6, 100)
-	names := segmentNumbers(t, r.dir())
-	need(t, len(names) == 1, "%d data files, want 1", len(names))
-	path := filepath.Join(r.dir(), segName(names[0]))
-	st, err := os.Stat(path)
-	needNoErr(t, "Stat", err)
-	flipAt(t, path, st.Size()-20)
-
-	recs := readAll(t, sp)
-	got := seqs(dataOf(recs))
-	need(t, len(got) < len(first), "%d records handed out of a damaged file of %d, want fewer", len(got), len(first))
-	expect(t, len(gapsOf(recs, model.GapSpoolDropped)) <= 1, "%d spool_dropped gaps before the next Put, want at most 1", len(gapsOf(recs, model.GapSpoolDropped)))
-
-	after := putTagged(t, sp, epoch.Add(time.Hour), "after", 2, 100)
-	all := dataOf(readAll(t, sp))
-	expect(t, len(all) == len(got)+len(after), "%d records after the damage and a new Put, want %d", len(all), len(got)+len(after))
-}
-
 func TestRead_DamageInFirstFrameUsesTheFileBefore(t *testing.T) {
 	r := newRig(t)
 	w := newWorld(t, r.dir())

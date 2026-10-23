@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/LarsLaskowski/Vandox/internal/model"
+	"github.com/LarsLaskowski/Vandox/internal/wire"
 )
 
 const (
@@ -919,4 +920,54 @@ func TestOpen_FileWithoutCompleteHeaderIsDeleted(t *testing.T) {
 	need(t, len(lines) == 1, "%d lines %q, want one", len(lines), msgDamaged)
 	expect(t, lines[0].str("err") == errCutShort && lines[0].str("file") == w.c.name(), "%q = %v, want %q for %s", msgDamaged, lines[0], errCutShort, w.c.name())
 	expect(t, !slices.Contains(segmentNumbers(t, r.dir()), w.c.first), "the header-less file %s is still on disk, want it deleted", w.c.name())
+}
+
+func TestRead_DamagedActiveFile(t *testing.T) {
+	r := newRig(t)
+	sp := r.open()
+	t0 := epoch
+	t1 := epoch.Add(time.Minute)
+	t2 := epoch.Add(2 * time.Minute)
+	var all []model.Record
+	for _, b := range []struct {
+		at  time.Time
+		tag string
+	}{{t0, "b0"}, {t1, "b1"}, {t2, "b2"}} {
+		all = append(all, putTagged(t, sp, b.at, b.tag, 3, 100)...)
+	}
+	need(t, sp.act != nil, "no active file after three Puts")
+	act := sp.act
+	frameLen := (act.size - act.hdr) / int64(len(all))
+	need(t, frameLen*int64(len(all)) == act.size-act.hdr, "the frames differ in size, the test cannot place the damage")
+	const damaged = 4
+	flipAt(t, filepath.Join(r.dir(), act.name()), act.hdr+damaged*frameLen+frameHeadLen+seqLen+5)
+
+	got := dataOf(readAll(t, sp))
+	requireSame(t, "records before the damage", got, all[:damaged])
+	lastIssued := sp.LastSeq()
+	after := putTagged(t, sp, epoch.Add(time.Hour), "after", 2, 100)
+	need(t, after[0].Seq > lastIssued, "the first number after the damage is %d, want above %d", after[0].Seq, lastIssued)
+
+	recs := readAll(t, sp)
+	gaps := gapsOf(recs, model.GapSpoolDropped)
+	need(t, len(gaps) == 1, "%d spool_dropped gaps, want exactly one for the records lost to the damage", len(gaps))
+	gp := gapOf(gaps[0])
+	expect(t, gp.FirstSeq == all[damaged-1].Seq+1 && gp.LastSeq == all[len(all)-1].Seq, "gap covers %d to %d, want %d to %d", gp.FirstSeq, gp.LastSeq, all[damaged-1].Seq+1, all[len(all)-1].Seq)
+	expect(t, gp.From.Equal(t1) && gp.To.Equal(t2), "gap spans %v to %v, want %v to %v (latest capture before the damage to the latest dropped)", gp.From, gp.To, t1, t2)
+	expect(t, gaps[0].Source == "agent", "gap source = %q, want agent", gaps[0].Source)
+	requireGapsDisjoint(t, recs)
+	requireSame(t, "records around the gap", dataOf(recs), concat2(all[:damaged], after))
+	expect(t, len(segmentNumbers(t, r.dir())) == 2, "%d data files, want the damaged one and a new one", len(segmentNumbers(t, r.dir())))
+}
+
+func TestGapReserve_HoldsTheLargestGapFrame(t *testing.T) {
+	r := newRig(t)
+	r.clk.Set(maxTime)
+	sp := r.open()
+	rec := sp.gapRecord(pendingGap{first: maxSeq - 1, last: maxSeq - 1, from: minTime, to: maxTime, cause: model.GapAgentNotRunning})
+	line, err := wire.MarshalRecord(&rec)
+	needNoErr(t, "MarshalRecord", err)
+	frame := appendFrame(nil, maxSeq-1, withSeq(line, maxSeq-1))
+	expect(t, len(frame) <= gapReserve, "the largest gap frame is %d bytes, want at most gapReserve (%d)", len(frame), gapReserve)
+	t.Logf("largest gap frame: %d bytes of %d", len(frame), gapReserve)
 }
