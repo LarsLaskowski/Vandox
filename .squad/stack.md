@@ -29,6 +29,9 @@ Cloud session notes (found when a cloud image lacked the .NET SDK):
   `UseRazorBuildServer=false UseSharedCompilation=false` (as MSBuild properties).
 - If `reihitsu-format` is not on the `PATH`, run it as a local tool:
   `dotnet tool run reihitsu-format --check --force src tests tools`.
+- The *Sonar gate* needs `SONAR_TOKEN`, which a cloud session does not have unless the environment provides it. Without
+  it the gate is CI-only: the orchestrator logs it as "not run" in step 7 and the pull request's CI analysis is the first
+  check of the Sonar rules.
 
 ## Layout
 
