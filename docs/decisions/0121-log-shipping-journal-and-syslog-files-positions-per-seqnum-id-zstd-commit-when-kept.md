@@ -47,8 +47,9 @@ replace its own log file with a link, and the agent can read every file.
 The `logs` collector reads every system and user journal file of the machine's journal directory with a position per seqnum ID,
 decodes zstd items through option 1's library under a fixed bound (any other compression is a gap), reads configured files only
 through a link-free `openat` walk, and commits its positions when the scheduler reports the run kept (a new optional callback), giving
-up a span after the fourth dropped run as the kernel collector does. The rules are in the [Agent](../areas/agent.md) area (*Log
-shipping*) and the [Configuration and secrets](../areas/configuration-and-secrets.md) area (`log_shipping`).
+up a span after the fourth dropped run as the kernel collector does; the agent saves its state once more when it stops. The rules are
+in the [Agent](../areas/agent.md) area (*Log shipping*, *Agent state*) and the
+[Configuration and secrets](../areas/configuration-and-secrets.md) area (`log_shipping`).
 
 ## Consequences
 
@@ -65,7 +66,17 @@ shipping*) and the [Configuration and secrets](../areas/configuration-and-secret
   16 KiB line, so 1,000 per pattern cost up to 300 ms a line and let a flood of long lines push the collector into gaps; the price is
   about a dozen ordinary patterns.
 - A renamed log file is read until its writer has moved, and its position is saved, because rsyslog reopens its files only after all
-  renames.
+  renames. After a restart the renamed file is searched by name in its directory and accepted only on the identity of the descriptor
+  that was opened, so no window lies between a check and the open; the same link-free walk reaches the directory.
+- Where the import skips a line it cannot date (an impossible or unstorable syslog time), the collector ships it raw, because live a
+  skipped line would be a loss without a gap; live and imported records of such a line therefore differ.
+- The positions within the journal favor no loss over no gap: the newest journal position is never forgotten (forgetting it would
+  let the time rule read a forgotten ID again), and a vacuum is judged only where no file of the ID holds the position, so it may
+  report a gap where only another ID's sequence numbers lay between.
+- A collector whose positions must survive a stop needs the save at the stop and an urgent save within one state interval: the urgent
+  threshold became half the state interval (5 s), because the `state` job's start times jitter on its 10-second grid.
+- The source read first rotates from run to run, so a backlog in the journal or one file never keeps the others waiting; lines are
+  ordered per source, not across sources.
 - A crash repeats at most one state interval plus one collector interval of lines (the spec's E1); exact delivery across a crash needs
   the spool (#38) to store positions with the records.
 - Live lines carry no classification (`event`, mail markers) until #290; the error log formats follow in #289.
