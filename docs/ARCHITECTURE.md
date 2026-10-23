@@ -408,11 +408,14 @@ via `unix_socket` and granted only `PROCESS`. Log data is not pseudonymized. Sec
 dedicated user `vandox-agent`, never as root, with only the groups and capabilities that its installation files under `deploy/agent/` will list (v0.2.0)
 and, from v0.6.0, a polkit rule that allows restarting only the configured units. The two capabilities it
 needs to read other users' processes (`CAP_SYS_PTRACE`, `CAP_DAC_READ_SEARCH`) give it root's read access,
-so its systemd unit denies the process-attach system calls and grants no write-side capability: a
-compromised agent can read everything on the server but cannot use its capabilities to write as or run
-code as another user; credentials it reads may still lead to root through other services (password reuse,
-Plesk or MariaDB administration)
-([0030](decisions/0030-agent-runs-unprivileged-with-named-capabilities.md)). The Telegram bot sends to and
+so its systemd unit denies the process-attach system calls and `process_madvise`, grants no write-side
+capability and keeps `CAP_DAC_OVERRIDE`, every other write-side DAC capability and `CAP_SYS_NICE` out of the
+bounding set (the system-call filter does not stop a write open of another user's `/proc/<pid>/mem`; the
+missing `CAP_DAC_OVERRIDE` does): a compromised agent can read everything on the server but cannot use its
+capabilities to write as or run code as another user; credentials it reads may still lead to root through
+other services (password reuse, Plesk or MariaDB administration)
+([0030](decisions/0030-agent-runs-unprivileged-with-named-capabilities.md),
+[0121](decisions/0121-cap-sys-ptrace-cannot-write-another-users-proc-pid-mem-without-cap-dac-override.md)). The Telegram bot sends to and
 accepts updates only from allowlisted users in their private chats
 ([0031](decisions/0031-telegram-user-allowlist.md)). Secrets come only from environment variables or Docker
 secrets ([0032](decisions/0032-secrets-only-from-environment-or-docker-secrets.md)). The only release
