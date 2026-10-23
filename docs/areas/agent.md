@@ -1218,41 +1218,64 @@ collector timeouts and backend gap detection each emit a gap record, and each pa
   `process_vm_readv`, `process_vm_writev`, `pidfd_getfd`, `open_by_handle_at` and `process_madvise` with `EPERM` (and not `pidfd_open` or
   `pidfd_send_signal`) under `SystemCallArchitectures=native`; no write-side capability; `ProtectHome=yes` and `InaccessiblePaths=` for at
   least `/etc/shadow` and `/etc/gshadow`. The last two protect only against accidental reads; they are not a limit on a compromised
-  agent, which can reach the same files through another process's root in `/proc`. `process_madvise` is denied by name: systemd puts it
+  agent, which can reach the same files through another process's root in `/proc` where their own mode allows it. `process_madvise` is denied by name: systemd puts it
   in the group `@ipc`, which `@system-service` includes, so an allow-list built on `@system-service` admits it. The agent never calls it
   (the Go runtime uses `madvise` on its own memory only). That the server's systemd (249, Ubuntu 22.04) knows the name, so the entry takes
   effect instead of being skipped, is checked on the server (#42): `systemd-analyze syscall-filter @ipc` lists `process_madvise`. If it
   did not, barrier (c) below would still stop the write.
-- **No write into another user's process** (record 0121). A compromised agent cannot use its capabilities to write into another
-  user's process. No single mechanism stops every vector examined; three distinct barriers do:
+- **No write into another user's process or file beyond its own mode** (record 0121). A compromised agent cannot use its capability to
+  write into another user's process or file, or to run code as another user, except through a file whose own mode grants the agent's
+  user, its groups (`adm`, `systemd-journal`) or others write (accepted residual, below). No single mechanism stops every vector
+  examined; three distinct barriers do, and one vector is the accepted residual:
 
   | Write vector | Barrier |
   | ------------ | ------- |
   | Opening another user's `/proc/<pid>/mem` for writing (`O_RDWR`, `O_WRONLY`), then `pwrite` | (a) DAC and the bounding set: the file is mode `0600`, owned by the target's user, so the open needs `CAP_DAC_OVERRIDE` |
   | Opening another owner-only writable `/proc/<pid>/` file of another user for writing (for example `clear_refs`) | (a), the same DAC check as for `mem` |
+  | Opening `/proc/<pid>/fd/<n>` of another user's process (an open file or memfd it holds), then `pwrite` | (a) DAC and the bounding set: the directory is mode `0500`, owned by the target's user, so the lookup needs `CAP_DAC_READ_SEARCH` |
+  | Following a link in `/proc/<pid>/map_files/<range>` of another user's process | (a) the bounding set: the link needs `CAP_SYS_ADMIN` or (since kernel 5.9) `CAP_CHECKPOINT_RESTORE`, besides search of the `0500` directory |
   | `ptrace` (POKE), `process_vm_writev`, `pidfd_getfd` (taking a writable descriptor), `open_by_handle_at` | (b) the system-call filter |
   | `pidfd_open` on the target, then `process_madvise` | (b) the filter denies `process_madvise`; behind it (c) the kernel: the call needs `CAP_SYS_NICE` (since kernel 5.12), and the kernel refuses destructive advice on another process |
+  | A file whose own mode grants the agent write, reached through another process's `/proc/<pid>/cwd` or `/proc/<pid>/root` link (also below `/proc/<pid>/task/<tid>/`) | none: the accepted residual (last bullet of *Rights*) |
 
-  The filter denies neither `openat` nor `pwrite`, so it is not what stops the `mem` write; barrier (a) is. Barrier (c) is defence in
-  depth only: the `CAP_SYS_NICE` requirement is a capability rule, but which advice the kernel accepts for another process is
-  memory-management policy that has grown between versions. The bounding set must therefore keep out `CAP_DAC_OVERRIDE` and every other
-  write-side DAC capability (barrier (a)) and `CAP_SYS_NICE` (barrier (c)); `NoNewPrivileges=yes` keeps the agent from gaining them.
-  Adding one of them to the bounding set, or removing one of the six denied calls, is a `security` change that must supersede record
-  0121. Read and write differ for `mem`: with `CAP_DAC_READ_SEARCH` the agent can open another user's `mem` read-only, which is the
-  accepted residual below, and it cannot open it for writing. `proc_mem.force_override=never` (kernel 6.12+) is not required and not
-  set: it limits `FOLL_FORCE` only once a write-capable descriptor exists, which the agent cannot obtain, and the production kernel (5.15)
-  predates it.
+  The filter denies neither `openat` nor `pwrite`, so it is not what stops the `mem` and `fd` writes; barrier (a) is. Barrier (c) is
+  defence in depth only: the `CAP_SYS_NICE` requirement is a capability rule, but which advice the kernel accepts for another process is
+  memory-management policy that has grown between versions. **The bounding set holds `CAP_SYS_PTRACE` only; adding any capability to it
+  is a `security` change that supersedes record 0121**, and so is removing one of the six denied calls. For example,
+  `CAP_DAC_READ_SEARCH` reopens the write through `/proc/<pid>/fd/<n>` into other processes' open files, memfds included, and below
+  closed directories; `CAP_DAC_OVERRIDE` and the other write-side DAC capabilities the write open of `mem`; `CAP_SYS_NICE`
+  `process_madvise` on another process; `CAP_SYS_ADMIN` or `CAP_CHECKPOINT_RESTORE`, together with directory search, the links in
+  `/proc/<pid>/map_files/`. These are examples, not a closed list. `NoNewPrivileges=yes` keeps the agent from gaining a capability
+  outside the set. `proc_mem.force_override=never` (kernel 6.12+) is not required and not set: it limits `FOLL_FORCE` only once a
+  write-capable descriptor exists, which the agent cannot obtain, and the production kernel (5.15) predates it.
 
   Measured on the development host (kernel 6.18.44, same user namespace, no Yama or other LSM restriction), as UID 65534 against a
   `sleep` owned by root. Each capability set is given with `capsh --user=nobody --inh=<caps> --addamb=<caps> -- -c <probe>` and checked as
-  `CapEff` in the probe's `/proc/self/status` (`0x80000` for `CAP_SYS_PTRACE`, `0x80004` for the agent's set with `CAP_DAC_READ_SEARCH`).
-  The `mem` probe opens and closes the target's `/proc/<pid>/mem` and never writes:
+  `CapEff` in the probe's `/proc/self/status` (`0x80000` for `CAP_SYS_PTRACE`, the agent's set; `0x80004` with `CAP_DAC_READ_SEARCH`
+  added). The `mem` probe opens and closes the target's `/proc/<pid>/mem` and never writes:
 
   | Capabilities | `O_RDONLY` | `O_RDWR` | `O_WRONLY` |
   | ------------ | ---------- | -------- | ---------- |
-  | `CAP_SYS_PTRACE` | `EACCES` | `EACCES` | `EACCES` |
-  | `CAP_SYS_PTRACE` + `CAP_DAC_READ_SEARCH` (the agent's set) | ok | `EACCES` | `EACCES` |
+  | `CAP_SYS_PTRACE` (the agent's set) | `EACCES` | `EACCES` | `EACCES` |
+  | `CAP_SYS_PTRACE` + `CAP_DAC_READ_SEARCH` (not granted) | ok | `EACCES` | `EACCES` |
   | `CAP_SYS_PTRACE` + `CAP_DAC_OVERRIDE` (control) | ok | ok | ok |
+
+  The `fd` probe (measured by the Product Manager on four kernels): a root `target` maps a memfd `MAP_SHARED` and prints its first bytes;
+  the probe runs as `nobody` under `capsh` with ambient capabilities, opens the target's `/proc/<pid>/fd/<n>` of that memfd `O_RDWR` and
+  writes four bytes with `pwrite`:
+
+  | Host | Kernel | none | `CAP_SYS_PTRACE` (`0x80000`, the agent's set) | `CAP_SYS_PTRACE` + `CAP_DAC_READ_SEARCH` (`0x80004`, not granted) |
+  | ---- | ------ | ---- | --------------------------------------------- | ----------------------------------------------------------------- |
+  | NAS | 4.4.302+ | open `EACCES` | open `EACCES` | open ok, `pwrite` of 4 bytes ok, the target shows them |
+  | Ubuntu 22.04.5 | 5.15.0-198-generic | open `EACCES` | open `EACCES` | open ok, `pwrite` of 4 bytes ok, the target shows them |
+  | Ubuntu 24.04.5 | 6.8.0-147-generic | open `EACCES` | open `EACCES` | open ok, `pwrite` of 4 bytes ok, the target shows them |
+  | Ubuntu 26.04.1 | 7.0.0-38-generic | open `EACCES` | open `EACCES` | open ok, `pwrite` of 4 bytes ok, the target shows them |
+
+  The open needs both capabilities: `CAP_DAC_READ_SEARCH` for the lookup in the `0500` directory and `CAP_SYS_PTRACE` for following the
+  link; the opened file is then checked against its own mode only, which for a memfd is `0777`. On the development host (6.18.44) the
+  open alone was repeated without a write: `/proc/<pid>/fd/<n>` and `/proc/<pid>/task/<tid>/fd/<n>` answer `EACCES` with
+  `CAP_SYS_PTRACE` and open `O_RDWR` with both. `CAP_DAC_READ_SEARCH` alone also opens for writing a `0666` file inside a `0700`
+  directory of root (open and close only); with `CAP_SYS_PTRACE` alone or without a capability that open fails `EACCES`.
 
   The `process_madvise` probe calls `pidfd_open` on the target, which succeeds without a capability, and then `process_madvise` on the
   returned descriptor with each advice on the target's first read-only mapping:
@@ -1260,8 +1283,8 @@ collector timeouts and backend gap detection each emit a gap record, and each pa
   | Capabilities | `MADV_COLD`, `MADV_PAGEOUT`, `MADV_WILLNEED` | `MADV_DONTNEED`, `MADV_FREE` |
   | ------------ | -------------------------------------------- | ---------------------------- |
   | none | `EACCES` | `EACCES` |
-  | `CAP_SYS_PTRACE` | `EPERM` | `EINVAL` |
-  | `CAP_SYS_PTRACE` + `CAP_DAC_READ_SEARCH` (the agent's set) | `EPERM` | `EINVAL` |
+  | `CAP_SYS_PTRACE` (the agent's set) | `EPERM` | `EINVAL` |
+  | `CAP_SYS_PTRACE` + `CAP_DAC_READ_SEARCH` (not granted) | `EPERM` | `EINVAL` |
   | `CAP_SYS_NICE` | `EACCES` | `EACCES` |
   | `CAP_SYS_PTRACE` + `CAP_SYS_NICE` (control) | accepted | `EINVAL` |
 
@@ -1289,8 +1312,19 @@ collector timeouts and backend gap detection each emit a gap record, and each pa
 - Each group, capability and confinement setting is listed and justified in `deploy/agent/` when the collector that needs it is
   introduced; anything not listed is not granted. Removing a confinement setting, adding a capability or a group, or adding a collector
   that needs a new right is a `security`-tier change; removing a confinement while a capability is granted needs a superseding record.
-- **Accepted residual:** the agent's read access equals root's (every file, the memory and environment of every process). A separate
-  small helper that holds the capabilities is the way to reduce it.
+- **Accepted residual** (record 0121): with `CAP_SYS_PTRACE` the agent follows another process's `/proc/<pid>/cwd` and
+  `/proc/<pid>/root` links and their `/proc/<pid>/task/<tid>/cwd` and `…/root` variants, which skip the search check of the directories
+  above that process's working or root directory. So a file whose own mode grants the agent's user, its groups or others read or write
+  is reachable even below a closed directory that contains another process's working or root directory; the path components after the
+  link are still checked against their own modes, so a closed directory below that point still blocks. The `root` link of a process in
+  another mount namespace (a container's) resolves in that namespace, so the same holds for its tree. A write into such a file reaches
+  another user's process memory where that process maps the file `MAP_SHARED`, and runs code as another user where that user executes
+  the file or reads it as a script or configuration. Readable besides are the ptrace-checked `/proc` files whose mode allows reading
+  (`maps`, `smaps_rollup`, `fdinfo`, …), not another user's `mem` or `environ` and not `/etc/shadow` (measured on kernel 6.18.44 with
+  `CAP_SYS_PTRACE` alone: `EACCES`, directly and through `/proc/<pid>/root`; `maps` and `smaps_rollup` of a root process open, and a
+  `0666` file in a `0755` directory below a `0700` directory of root opens for writing through `/proc/<pid>/cwd/` of a root process
+  whose working directory is the `0755` directory); credentials read that way may still lead to root through other services (password reuse, Plesk or MariaDB
+  administration). A separate small helper that holds the capability is the way to reduce it.
 
 ## Related decisions
 
@@ -1330,9 +1364,10 @@ collector timeouts and backend gap detection each emit a gap record, and each pa
   extra snapshots through the scheduler and names them by its identity, why boots come from a saved state file, why the journal
   position is committed only after a kept run with at most three re-reads, and why backup runs are a record kind of their own with
   `pzstd` as the default rule.
-- [0121](../decisions/0121-cap-sys-ptrace-cannot-write-another-users-proc-pid-mem-without-cap-dac-override.md) — why `CAP_SYS_PTRACE`
-  cannot write another user's process memory, which barrier stops each write vector, why the bounding set must exclude
-  `CAP_DAC_OVERRIDE`, the other write-side DAC capabilities and `CAP_SYS_NICE`, and why the filter also denies `process_madvise`.
+- [0121](../decisions/0121-cap-sys-ptrace-alone-cannot-write-another-users-process-memory-through-proc-pid-mem-or-fd.md) — why the
+  agent holds `CAP_SYS_PTRACE` alone and not `CAP_DAC_READ_SEARCH`, which barrier stops each write vector examined, which residual
+  remains (files whose own mode grants the agent write, reached through other processes' `cwd` and `root` links), why the bounding set
+  holds `CAP_SYS_PTRACE` only, and why the filter also denies `process_madvise`.
 
 ## Not here
 

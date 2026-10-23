@@ -76,7 +76,7 @@ absolute guarantee ("cannot write as or run code as another user") is therefore 
 | 20 | No collector uses `CAP_DAC_READ_SEARCH`: the process collector needs `CAP_SYS_PTRACE` alone (0113), the connection collector reads `fdinfo` with `CAP_SYS_PTRACE` alone and not the `fd` links (0115), journal and logs come through `systemd-journal` and `adm`; the agent's code opens no `/proc/<pid>/fd` link. | `deploy/agent/README.md` ("`CAP_DAC_READ_SEARCH` is not needed by any collector so far"); `.squad/project.md` area 6 ("which no collector uses"); `docs/areas/agent.md` *Rights*; `grep` over `internal/` and `cmd/`: only `fdinfo` paths, no `readlink`. Issue #42's "what `/proc/<pid>/fd` … require" predates 0115. | confirmed |
 | 21 | A runtime may map its generated code from a memfd (double mapping for W^X JITs, for example .NET's), so the memfd write could reach code of a process, not only data. Whether such a process runs as another user on the production server is unknown. | to verify: not needed — the measurement (Security listing the root processes on the server with an executable memfd mapping) mattered only for option 2 of E1, which the Product Manager declined (option 1 chosen, log 13:03); with `CAP_SYS_PTRACE` alone the memfd open fails (fact 16). Stays an inference from the runtimes' design; no owner. | unverified |
 | 22 | With `CAP_SYS_PTRACE` alone, uid 65534 cannot open a root process's `environ` (`0400`) or `mem`, nor `/etc/shadow` directly or through `/proc/<pid>/root`; it can open the root process's `maps` and `smaps_rollup`. | Measured by the Lead, kernel 6.18.44 (open and close only). | confirmed |
-| 23 | With `CAP_SYS_PTRACE` alone, uid 65534 opens for writing a `0666` file in a `0755` directory below a `0700` root directory through `/proc/<pid>/cwd/` of a root process whose working directory it is; without a capability `EACCES`. | Measured by the Lead (open and close only), kernel 6.18.44. The same holds by construction for `/proc/<pid>/root` and for `/proc/<pid>/task/<tid>/cwd` and `…/root` (the same ptrace-checked link, `proc_cwd_link`/`proc_root_link`); `root` resolves in the target's mount namespace, so it reaches another namespace's whole tree. | confirmed |
+| 23 | With `CAP_SYS_PTRACE` alone, uid 65534 opens for writing a `0666` file in a `0755` directory below a `0700` root directory through `/proc/<pid>/cwd/` of a root process whose working directory it is; without a capability `EACCES`. | Measured by the Lead (open and close only), kernel 6.18.44. The same holds by construction for `/proc/<pid>/root` and for `/proc/<pid>/task/<tid>/cwd` and `…/root` (the same ptrace-checked link, `proc_cwd_link`/`proc_root_link`); `root` resolves in the target's mount namespace, so it reaches another namespace's tree, each later path component still checked against its own mode (Security NB1). | confirmed |
 | 24 | `/proc/<pid>/map_files/<range>` stays closed with `CAP_SYS_PTRACE` alone: following its links needs `CAP_SYS_ADMIN` (or, since kernel 5.9, `CAP_CHECKPOINT_RESTORE`) besides search of the `0500` directory owned by the target's user. | Security's re-review (N2); kernel `proc_map_files_get_link`/`proc_map_files_lookup` check `checkpoint_restore_ns_capable`. Neither capability is in the bounding set, which holds `CAP_SYS_PTRACE` only. | confirmed |
 
 ## Acceptance criteria
@@ -153,10 +153,11 @@ structure and with every element kept, in all four documents (record 0121 states
   the agent's user, its groups (`adm`, `systemd-journal`) or others write (accepted residual, record 0121)."
 - **R — the accepted residual** (replaces "its read access equals root's …" and "can read everything on the
   server"): "With `CAP_SYS_PTRACE` the agent follows another process's `/proc/<pid>/cwd` and `/proc/<pid>/root`
-  links and their `/proc/<pid>/task/<tid>/cwd` and `…/root` variants, so every file whose own mode grants the
-  agent's user, its groups or others read or write is reachable even below a directory closed to it, and the
-  `root` link reaches the whole file tree of another mount namespace (a container's), not only paths below a
-  closed directory. A write into such a file reaches another user's process memory where that process maps the
+  links and their `/proc/<pid>/task/<tid>/cwd` and `…/root` variants, so a file whose own mode grants the
+  agent's user, its groups or others read or write is reachable even below a closed directory that contains
+  another process's working or root directory (the path components after the link are still checked against
+  their own modes), and the `root` link of a process in another mount namespace (a container's) resolves in that
+  namespace on the same terms. A write into such a file reaches another user's process memory where that process maps the
   file `MAP_SHARED`, and runs code as another user where that user executes the file or reads it as a script or
   configuration. Readable besides are the ptrace-checked `/proc` files whose mode allows reading (`maps`,
   `smaps_rollup`, `fdinfo`, …), not another user's `mem` or `environ` and not `/etc/shadow`; credentials read
@@ -327,7 +328,7 @@ option 1, residual accepted).
 
 ## Decision records
 
-- `docs/decisions/0121-cap-sys-ptrace-cannot-write-another-users-proc-pid-mem-without-cap-dac-override.md`
+- `docs/decisions/0121-cap-sys-ptrace-alone-cannot-write-another-users-process-memory-through-proc-pid-mem-or-fd.md`
   (Proposed) — amends released record 0030 (capability set narrowed, controls added); 0030 is not edited.
 
 ## Challenge
@@ -372,6 +373,17 @@ option 1, residual accepted).
   `docs/ARCHITECTURE.md`): folded into AC4 and *Approach* 2 and 4, owner Dev. Non-blocking (0121 *Consequences*
   list all six denied calls incl. `process_vm_readv`; 0121 *Decision* in one to three sentences): done by the Lead
   in this revision.
+- **Delta confirmation NB1 (non-blocking): R overstates the residual.** Accepted: R now says "below a closed
+  directory that contains another process's working or root directory", that later path components are still
+  checked, and that the `root` link of another mount namespace resolves there on the same terms; applied in the
+  Agent area and record 0121 (Lead). The Dev's documents carry the earlier, broader wording, which errs on the safe
+  side; the Dev may tighten it to the new R.
+- **Delta confirmation NB2 (non-blocking): record 0121's title is absolute.** Accepted: the unreleased record is
+  retitled in place and renamed to
+  `0121-cap-sys-ptrace-alone-cannot-write-another-users-process-memory-through-proc-pid-mem-or-fd.md` ("… through
+  `/proc/<pid>/mem` or `/proc/<pid>/fd` …"), its index row and the Agent area link follow, and its residual bullet
+  says that with `CAP_SYS_PTRACE` alone only the residual remains. The link in `docs/ARCHITECTURE.md` is the Dev's
+  to update.
 - A Security diff review of the final diff is required again.
 
 ## Out of scope / follow-ups
@@ -382,10 +394,3 @@ option 1, residual accepted).
   issue comment on #42 (orchestrator): "Per records 0115 and 0121 the agent does not read `/proc/<pid>/fd` and
   holds `CAP_SYS_PTRACE` alone; `CAP_DAC_READ_SEARCH` must not be granted (with it, other processes' open files,
   memfds included, become writable)."
-
-## Security notes (delta confirmation)
-
-Non-blocking findings of Security's `APPROVED` delta confirmation (verbatim):
-
-- NB1. R and record 0121 overstate the residual: "so every file whose own mode grants … is reachable even below a directory closed to it" and "the whole file tree of another mount namespace". In fact a file is reachable only along paths from some process's `cwd` or `root`. Path components after the link are still DAC-checked, so a closed directory below that point still blocks. Fact 22's `/etc/shadow` result through `/proc/<pid>/root` shows this. The overstatement errs on the safe side, so it is no defect. The Lead can tighten it to "below a closed directory that contains another process's working or root directory" if wanted.
-- NB2. Record 0121's title and its row in `docs/decisions/README.md` ("CAP_SYS_PTRACE cannot write another user's process memory") are still unqualified. Under the accepted residual, a write into a `MAP_SHARED`-mapped file reaches another user's process memory. The record is unreleased and can be retitled in place, for example "… cannot write another user's process memory through /proc/<pid>/mem …", so the index does not carry an absolute claim.

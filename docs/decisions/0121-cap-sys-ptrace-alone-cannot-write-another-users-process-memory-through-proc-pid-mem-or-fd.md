@@ -1,4 +1,4 @@
-# 0121: CAP_SYS_PTRACE cannot write another user's process memory: no CAP_DAC_OVERRIDE for `/proc/<pid>/mem`, `process_madvise` denied
+# 0121: CAP_SYS_PTRACE alone cannot write another user's process memory through `/proc/<pid>/mem` or `/proc/<pid>/fd`: CAP_DAC_READ_SEARCH dropped, `process_madvise` denied, a file-mode residual accepted
 
 - **Status:** Proposed
 - **Date:** 2026-10-23
@@ -81,12 +81,15 @@ barriers this rests on, their measurements and the residual are in the [Agent](.
 - The guarantee, qualified: a compromised agent cannot use its capability to write into another user's process
   or file, or to run code as another user, except through a file whose own mode grants the agent's user, its
   groups or others write. 0030's absolute "cannot write as or run code as another user" does not hold.
-- The accepted residual: CAP_SYS_PTRACE lets the agent follow another process's `/proc/<pid>/cwd` and
-  `/proc/<pid>/root` links and their `/proc/<pid>/task/<tid>/` variants, so such a file is reachable even below
-  a directory closed to the agent, and the `root` link reaches the whole file tree of another mount namespace
-  (a container's). A write into such a file reaches another user's process memory where that process maps the
-  file `MAP_SHARED`, and runs code as another user where that user executes the file or reads it as a script
-  or configuration.
+- The accepted residual, and with CAP_SYS_PTRACE alone the only one of the vectors examined: the capability
+  lets the agent follow another process's `/proc/<pid>/cwd` and `/proc/<pid>/root` links and their
+  `/proc/<pid>/task/<tid>/` variants, so such a file is reachable even below a closed directory that contains
+  another process's working or root directory; the path components after the link are still checked against
+  their own modes. The `root` link of a process in another mount namespace (a container's) resolves in that
+  namespace, on the same terms. A write into such a file reaches another user's process memory where that
+  process maps the file `MAP_SHARED`, and runs code as another user where that user executes the file or reads
+  it as a script or configuration. The title's "through `/proc/<pid>/mem` or `/proc/<pid>/fd`" is therefore
+  deliberate: through such a mapped file, the agent can still write another user's process memory.
 - The bounding set holds CAP_SYS_PTRACE only; adding any capability to it, or removing one of these six calls
   from the denied set, is a `security` change that must supersede this record. Examples of what an addition
   reopens: CAP_DAC_READ_SEARCH the `/proc/<pid>/fd/<n>` write and writes below closed directories,
