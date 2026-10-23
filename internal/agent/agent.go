@@ -124,14 +124,14 @@ func Run(ctx context.Context, opts Options) int {
 
 	cfg, err := config.LoadAgent(opts.ConfigPath, opts.Environ)
 	if err != nil {
-		NewLogger(stderr, "info", journal).Error("agent cannot start", "err", err)
+		NewLogger(stderr, "info", journal).Error(msgCannotStart, "err", err)
 		return 1
 	}
 	log := NewLogger(stderr, cfg.Log.Level, journal)
 
 	store, sp, err := openStorage(opts, cfg, log)
 	if err != nil {
-		log.Error("agent cannot start", "err", err)
+		log.Error(msgCannotStart, "err", err)
 		return 1
 	}
 	sink := opts.Sink
@@ -142,7 +142,7 @@ func Run(ctx context.Context, opts Options) int {
 	}
 	sched, err := newScheduler(opts, cfg, store, sink, log)
 	if err != nil {
-		log.Error("agent cannot start", "err", err)
+		log.Error(msgCannotStart, "err", err)
 		return 1
 	}
 	notify, interval := notification(opts.Environ, log)
@@ -221,7 +221,7 @@ func jobs(opts Options, cfg *config.Agent, store *agentstate.Store, log *slog.Lo
 
 	proc := opts.Kernel.Proc
 	if proc == nil {
-		proc = os.DirFS("/proc")
+		proc = os.DirFS(procRoot)
 	}
 	list = append(list, scheduler.Job{
 		Collector: kernevents.New(opts.Kernel, store, log),
@@ -306,6 +306,12 @@ func programRules(rules []config.ProgramRule) []procstats.Rule {
 	return out
 }
 
+// procRoot is the host's /proc; msgCannotStart is the message of every start failure.
+const (
+	procRoot       = "/proc"
+	msgCannotStart = "agent cannot start"
+)
+
 // closeTimeout is how long closeSpool waits for the spool; tests replace it.
 var closeTimeout = 5 * time.Second
 
@@ -332,7 +338,7 @@ func openStorage(opts Options, cfg *config.Agent, log *slog.Logger) (*agentstate
 	}
 	proc := opts.Kernel.Proc
 	if proc == nil {
-		proc = os.DirFS("/proc")
+		proc = os.DirFS(procRoot)
 	}
 	bootID, err := procstats.ReadBootID(proc)
 	if err != nil {
@@ -356,15 +362,26 @@ func openStorage(opts Options, cfg *config.Agent, log *slog.Logger) (*agentstate
 	return store, sp, nil
 }
 
-// closeSpool closes the spool within closeTimeout and logs "spool not closed" otherwise; a nil spool is ignored.
+// spoolClose closes the spool; tests replace it to simulate a close that hangs.
+var spoolClose = func(sp *spool.Spool, ctx context.Context) error { return sp.Close(ctx) }
+
+// closeSpool closes the spool and gives up after closeTimeout, logging "spool not closed" (no path) on an error or at the
+// deadline; a nil spool is ignored.
 func closeSpool(sp *spool.Spool, log *slog.Logger) {
 	if sp == nil {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), closeTimeout)
 	defer cancel()
-	if err := sp.Close(ctx); err != nil {
-		log.Warn("spool not closed", "component", "spool")
+	result := make(chan error, 1)
+	go func() { result <- spoolClose(sp, ctx) }()
+	select {
+	case err := <-result:
+		if err != nil {
+			log.Error("spool not closed", "component", "spool")
+		}
+	case <-ctx.Done():
+		log.Error("spool not closed", "component", "spool")
 	}
 }
 
@@ -413,5 +430,5 @@ func connectionSources(src connstats.Sources, probe func() (int32, error)) conns
 
 // probeSocketMount learns the socket mount from a socket of the agent's own, through the host's /proc.
 func probeSocketMount() (int32, error) {
-	return sockmount.Probe(os.DirFS("/proc"))
+	return sockmount.Probe(os.DirFS(procRoot))
 }

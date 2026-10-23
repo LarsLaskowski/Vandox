@@ -39,6 +39,9 @@ const statusFile = "self/status"
 // maxRSSDigits is the most digits of a VmRSS value: 999,999,999,999 kB times 1024 is below 2^53.
 const maxRSSDigits = 12
 
+// unitSeconds is the unit of the time metrics.
+const unitSeconds = "seconds"
+
 // SpoolBytesReporter reports the size of the spool (implemented by the spool, #38).
 type SpoolBytesReporter interface {
 	SpoolBytes(ctx context.Context) (int64, error)
@@ -101,7 +104,7 @@ func (c *Collector) Collect(ctx context.Context, run scheduler.Run) ([]model.Rec
 	}
 	records := []model.Record{
 		metric(run, MetricRSS, float64(rss), "bytes"),
-		metric(run, MetricCPU, cpu.Seconds(), "seconds"),
+		metric(run, MetricCPU, cpu.Seconds(), unitSeconds),
 		metric(run, MetricGoroutines, float64(c.src.Goroutines()), ""),
 	}
 	return c.appendProviders(ctx, run, records)
@@ -128,7 +131,7 @@ func (c *Collector) appendProviders(ctx context.Context, run scheduler.Run, reco
 		if found {
 			age = max(run.Start.Sub(oldest).Seconds(), 0)
 		}
-		records = append(records, metric(run, MetricSpoolAge, age, "seconds"))
+		records = append(records, metric(run, MetricSpoolAge, age, unitSeconds))
 	}
 	if c.src.Sender != nil {
 		lag, err := c.src.Sender.SendLag(ctx)
@@ -138,7 +141,7 @@ func (c *Collector) appendProviders(ctx context.Context, run scheduler.Run, reco
 		if lag < 0 {
 			return nil, errors.New("selfstats: send lag: negative")
 		}
-		records = append(records, metric(run, MetricSendLag, lag.Seconds(), "seconds"))
+		records = append(records, metric(run, MetricSendLag, lag.Seconds(), unitSeconds))
 	}
 	return records, nil
 }
