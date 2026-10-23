@@ -373,14 +373,17 @@ func closeSpool(sp *spool.Spool, log *slog.Logger) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), closeTimeout)
 	defer cancel()
+	closeFn := spoolClose
 	result := make(chan error, 1)
-	go func() { result <- spoolClose(sp, ctx) }()
+	go func() { result <- closeFn(sp, ctx) }()
+	failed := false
 	select {
 	case err := <-result:
-		if err != nil {
-			log.Error("spool not closed", "component", "spool")
-		}
+		failed = err != nil
 	case <-ctx.Done():
+		failed = true
+	}
+	if failed {
 		log.Error("spool not closed", "component", "spool")
 	}
 }
