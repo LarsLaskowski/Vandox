@@ -37,10 +37,11 @@ own user, showed the target's memory content unchanged under every accepted advi
 accepts for another process is memory-management policy that has grown between versions (`MADV_COLLAPSE` was
 added later), not a permission rule.
 
-So no single mechanism stops every vector; three distinct barriers do:
+So no single mechanism stops all the vectors examined; three distinct barriers do:
 
 1. **DAC and the bounding set**, for opening another user's `/proc/<pid>/mem` for writing: the open needs
-   CAP_DAC_OVERRIDE, which the bounding set excludes.
+   CAP_DAC_OVERRIDE, which the bounding set excludes. The same DAC check covers the other owner-only writable
+   `/proc/<pid>/` files (for example `clear_refs`) in the same way.
 2. **The system-call filter**, for `ptrace` (POKE), `process_vm_writev`, `pidfd_getfd` (stealing a writable
    descriptor) and `open_by_handle_at`.
 3. **For the `pidfd_open` + `process_madvise` path, the kernel itself:** the call needs CAP_SYS_NICE, which

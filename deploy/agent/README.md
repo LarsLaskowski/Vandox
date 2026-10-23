@@ -17,7 +17,16 @@ collectors that need them.
 
 `CAP_SYS_PTRACE` is granted as an ambient capability, with a bounding set limited to the capabilities the Agent area names, and the unit is
 confined as soon as it grants any (`NoNewPrivileges=yes`, a system-call filter that denies `ptrace`, `process_vm_readv`,
-`process_vm_writev`, `pidfd_getfd` and `open_by_handle_at`, no write-side capability).
+`process_vm_writev`, `pidfd_getfd`, `open_by_handle_at` and `process_madvise`, no write-side capability). `process_madvise` is named
+explicitly because `@system-service` includes it; `pidfd_open` stays allowed.
+
+Three barriers keep the agent from writing into another user's process, and the bounding set is one of them: opening another user's
+`/proc/<pid>/mem` for writing needs `CAP_DAC_OVERRIDE` (the file is mode `0600`, owned by the target's user), which `CAP_SYS_PTRACE` and
+`CAP_DAC_READ_SEARCH` do not grant, so the bounding set must keep `CAP_DAC_OVERRIDE` and every write-side DAC capability out, and
+`CAP_SYS_NICE` too, which `process_madvise` on another process requires (since kernel 5.12). The system-call filter covers `ptrace`,
+`process_vm_writev`, `pidfd_getfd`, `open_by_handle_at` and `process_madvise`; it does not deny `openat` or `pwrite`, so it is not what
+stops the `mem` write. `mem` is asymmetric: `CAP_DAC_READ_SEARCH` would let the agent open another user's `mem` read-only (the accepted
+read access equal to root's, which no collector uses), but never for writing. Measurement and reasoning: record 0121 and the Agent area.
 
 ### What the process collector reads and what it needs
 
