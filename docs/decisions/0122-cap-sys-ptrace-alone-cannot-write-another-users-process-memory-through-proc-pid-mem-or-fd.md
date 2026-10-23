@@ -73,7 +73,9 @@ not shipped.
 
 The agent holds `CAP_SYS_PTRACE` alone, with a bounding set that holds only that capability, and the unit's
 filter also denies `process_madvise` by name. The Product Manager accepted the residual this leaves, so the
-write guarantee holds in the qualified form stated under *Consequences*, not in 0030's absolute one. The
+write guarantee holds in the qualified form stated under *Consequences*, not in 0030's absolute one. After the
+log shipping collector (#293, 0121) merged, the Product Manager confirmed this option against its cost there: a
+configured file the agent's user and groups cannot read is not shipped. The
 barriers this rests on, their measurements and the residual are in the [Agent](../areas/agent.md) area
 (*Rights*).
 
@@ -103,6 +105,9 @@ barriers this rests on, their measurements and the residual are in the [Agent](.
   CAP_DAC_OVERRIDE and the other write-side DAC capabilities the `mem` write, CAP_SYS_NICE `process_madvise`,
   CAP_SYS_ADMIN or CAP_CHECKPOINT_RESTORE (with directory search) the links in `/proc/<pid>/map_files/`. A
   collector that needs the `/proc/<pid>/fd` links again reopens the memfd write and needs a new decision first.
+- The cost: the log shipping collector ships only the configured files its user and groups can read; any other
+  is logged `log file not readable` with the reason `permission denied` and not shipped (the Agent area,
+  *Rights*). The Product Manager accepted this cost.
 - The read residual of 0030 ("its read access equals root's") narrows: without CAP_DAC_READ_SEARCH the agent
   cannot read `/etc/shadow`, another user's `mem` or `environ`. It reads the ptrace-checked `/proc` files whose
   mode allows it and, through the same links, the files whose own mode allows the agent; the Agent area and
