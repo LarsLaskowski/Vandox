@@ -40,3 +40,4 @@ are quoted in full.
 | 2026-10-23 21:37 | 6 Implement G4 | squad-dev | age branch in appendProviders; 4 SpoolAge tests green; selfstats coverage 97.1%; analyzer 0 (sonnet/medium · 60,262 tokens · 6 tool uses · 42 s) |
 | 2026-10-23 21:38 | 4 Skeleton G5 | squad-dev | Store.SetBarrier stores the barrier, not wired into saveLocked; saveLocked will need a ctx parameter in implement (sonnet/medium · 69,299 tokens · 6 tool uses · 43 s) |
 | 2026-10-23 21:40 | 5 Tests first G5 | squad-tester | 5 barrier tests in agentstate_test.go; 4 fail on skeleton; TestStore_NilBarrierRemovesIt passes by nature (sonnet/medium · 78,129 tokens · 10 tool uses · 155 s) |
+| 2026-10-23 21:45 | 6 Implement G5 | squad-dev | saveLocked(ctx, st) calls the barrier first; errNotDurable -> fixed text; Flush 5 s ctx; agentstate coverage 94.4%; analyzer 0 (sonnet/medium · usage pending) |
