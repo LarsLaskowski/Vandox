@@ -127,6 +127,13 @@ public sealed class ConnectionSnapshot : IPayload
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public List<string>? Tables { get; set; }
 
+    /// <summary>
+    /// Gets or sets the kills that caused this snapshot, <c>null</c> for a scheduled one.
+    /// </summary>
+    [JsonPropertyName("trigger")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public SnapshotTrigger? Trigger { get; set; }
+
     #endregion // Properties
 
     #region Methods
@@ -316,7 +323,8 @@ public sealed class ConnectionSnapshot : IPayload
                    ?? ValidateList("remotes", Remotes, (item, path) => item.Validate(path))
                    ?? ValidateList("listeners", Listeners, (item, path) => item.Validate(path))
                    ?? ValidateList("connections", Connections, (item, path) => item.Validate(path))
-                   ?? ValidateList("new_listeners", NewListeners, (item, path) => item.Validate(path));
+                   ?? ValidateList("new_listeners", NewListeners, (item, path) => item.Validate(path))
+                   ?? Trigger?.Validate("trigger");
     }
 
     #endregion // IPayload

@@ -1621,3 +1621,278 @@ func requireProbeRefused(t *testing.T, content, name, want string) {
 		t.Errorf("violations = %q, want one containing %q", violations, want)
 	}
 }
+
+// triggerKills are the kills a triggered run names in the tests of the snapshots.
+func triggerKills(n int) []model.KillRef {
+	kills := make([]model.KillRef, n)
+	pid := int32(900)
+	for i := range kills {
+		kills[i] = model.KillRef{BootID: "0f1e2d3c-4b5a-4968-8776-655443322110", KernelTime: time.Duration(i+1) * time.Second, VictimPID: pid}
+		pid++
+	}
+	return kills
+}
+
+// requireTrigger checks the trigger of a snapshot against the kills and the omitted count of the run.
+func requireTrigger(t *testing.T, got *model.SnapshotTrigger, kills []model.KillRef, omitted uint32) {
+	t.Helper()
+
+	if got == nil {
+		t.Fatalf("snapshot trigger = nil, want %d kills and %d omitted", len(kills), omitted)
+	}
+	if !slices.Equal(got.Kills, kills) || got.KillsOmitted != omitted {
+		t.Errorf("snapshot trigger = %+v, want kills %+v and %d omitted", got, kills, omitted)
+	}
+}
+
+func TestProcesses_TriggeredRunIsFullAndNamesKills(t *testing.T) {
+	const n = 120
+	tests := []struct {
+		name     string
+		pressure bool
+		kills    []model.KillRef
+		omitted  uint32
+	}{
+		{"one kill without pressure", false, triggerKills(1), 0},
+		{"kills with omitted ones without pressure", false, triggerKills(model.MaxTriggerKills), 7},
+		{"one kill under pressure", true, triggerKills(1), 0},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			c, _ := newCollector(bulkRank(n), nil)
+			run := scheduler.Run{Start: runStart, Pressure: tc.pressure, Trigger: &scheduler.Trigger{Kills: tc.kills, KillsOmitted: tc.omitted}}
+
+			records, err := c.Collect(context.Background(), run)
+
+			if err != nil {
+				t.Fatalf("Collect(triggered run) error = %v, want nil", err)
+			}
+			snap := snapshotIn(t, records, runStart)
+			if len(snap.Processes) != n || !snap.Complete || total(snap) != n {
+				t.Errorf("listed processes, Complete, Total = %d, %v, %d, want every process: %d, true, %d", len(snap.Processes), snap.Complete, total(snap), n, n)
+			}
+			requireTrigger(t, snap.Trigger, tc.kills, tc.omitted)
+			if err := snap.Validate(); err != nil {
+				t.Errorf("Validate() of the triggered snapshot = %v, want nil", err)
+			}
+		})
+	}
+}
+
+func TestCommandReader_Process(t *testing.T) {
+	t.Run("captured processes", processOfCapturedProcesses)
+
+	t.Run("hostile names match the snapshot", processMatchesSnapshot)
+
+	t.Run("errors", processErrors)
+}
+
+func processOfCapturedProcesses(t *testing.T) {
+	r := NewCommandReader(newTree(t).proc)
+
+	for _, want := range fixtureProcs {
+		got, err := r.Process(want.pid, bootTime)
+
+		if err != nil {
+			t.Errorf("Process(%d) error = %v, want nil", want.pid, err)
+			continue
+		}
+		wantStart := bootTime.Add(time.Duration(want.start) * time.Second / ClockTicks)
+		if got.PID != want.pid || got.Command != want.command || got.Cmdline != want.cmdline || !got.StartedAt.Equal(wantStart) {
+			t.Errorf("Process(%d) = {%d %.60q %.60q %v}, want {%d %.60q %.60q %v}",
+				want.pid, got.PID, got.Command, got.Cmdline, got.StartedAt, want.pid, want.command, want.cmdline, wantStart)
+		}
+		if got.StartedAt.Location() != time.UTC {
+			t.Errorf("Process(%d) StartedAt location = %v, want UTC", want.pid, got.StartedAt.Location())
+		}
+	}
+}
+
+func processMatchesSnapshot(t *testing.T) {
+	tr := synthTree()
+	for _, s := range hostileSpecs() {
+		tr.add(s)
+	}
+	c, _ := newCollector(tr, nil)
+	snap := snapshotOf(t, c, runStart, true)
+	r := NewCommandReader(tr.proc)
+
+	if len(snap.Processes) != len(hostileSpecs()) {
+		t.Fatalf("snapshot holds %d processes, want %d", len(snap.Processes), len(hostileSpecs()))
+	}
+	for _, p := range snap.Processes {
+		got, err := r.Process(p.PID, bootTime)
+
+		if err != nil || got.Command != p.Command || got.Cmdline != p.Cmdline || !got.StartedAt.Equal(p.StartedAt) {
+			t.Errorf("Process(%d) = {%.40q %.40q %v}, %v, want the snapshot's {%.40q %.40q %v}, nil",
+				p.PID, got.Command, got.Cmdline, got.StartedAt, err, p.Command, p.Cmdline, p.StartedAt)
+		}
+	}
+}
+
+func processErrors(t *testing.T) {
+	t.Run("a missing process has ended", func(t *testing.T) {
+		r := NewCommandReader(synthTree().proc)
+
+		got, err := r.Process(4242, bootTime)
+
+		if err == nil || !Ended(err) || got != (ProcessInfo{}) {
+			t.Errorf("Process(4242) = %+v, %v (Ended %v), want the zero value and an error that says the process ended", got, err, Ended(err))
+		}
+	})
+
+	t.Run("a refused file is an error and not an ended process", func(t *testing.T) {
+		for _, name := range []string{"stat", "cmdline"} {
+			tr := synthTree()
+			tr.add(procSpec{pid: 7, comm: "x", cmdline: "x", start: 1})
+			tr.proc.openErr[fileOf(7, name)] = syscall.EACCES
+			r := NewCommandReader(tr.proc)
+
+			got, err := r.Process(7, bootTime)
+
+			if err == nil || Ended(err) || got != (ProcessInfo{}) {
+				t.Errorf("Process(7) with %s refused = %+v, %v (Ended %v), want the zero value and an error that is not an ended process", name, got, err, Ended(err))
+			}
+		}
+	})
+
+	t.Run("a malformed stat is an error", func(t *testing.T) {
+		tr := synthTree()
+		tr.add(procSpec{pid: 7, comm: "x", cmdline: "x", start: 1})
+		setFile(tr.procFiles, fileOf(7, "stat"), "garbage without parentheses\n")
+		r := NewCommandReader(tr.proc)
+
+		_, err := r.Process(7, bootTime)
+
+		if err == nil || Ended(err) {
+			t.Errorf("Process(7) error = %v (Ended %v), want an error that is not an ended process", err, Ended(err))
+		}
+	})
+
+	t.Run("a start beyond the year 9999 is an error", func(t *testing.T) {
+		tr := synthTree()
+		tr.add(procSpec{pid: 7, comm: "x", cmdline: "x", start: 1 << 62})
+		r := NewCommandReader(tr.proc)
+
+		_, err := r.Process(7, bootTime)
+
+		if err == nil || Ended(err) {
+			t.Errorf("Process(7) with a start beyond year 9999 error = %v (Ended %v), want an error that is not an ended process", err, Ended(err))
+		}
+	})
+}
+
+func TestReadBootTime_Exported(t *testing.T) {
+	tests := []struct {
+		name string
+		stat string
+		want time.Time
+		fail bool
+	}{
+		{"captured proc/stat", readFixture(t, "stat"), time.Unix(fixtureBtime, 0).UTC(), false},
+		{"btime alone", "btime 1000\n", time.Unix(1000, 0).UTC(), false},
+		{"missing", "cpu 1 2 3\nctxt 5\n", time.Time{}, true},
+		{"twice", "btime 1000\nbtime 1000\n", time.Time{}, true},
+		{"not a number", "btime 10x\n", time.Time{}, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			proc := fstest.MapFS{"stat": &fstest.MapFile{Data: []byte(tt.stat)}}
+
+			got, err := ReadBootTime(proc)
+
+			if (err != nil) != tt.fail {
+				t.Fatalf("ReadBootTime() error = %v, want an error: %v", err, tt.fail)
+			}
+			if !tt.fail && (!got.Equal(tt.want) || got.Location() != time.UTC) {
+				t.Errorf("ReadBootTime() = %v, want %v in UTC", got, tt.want)
+			}
+		})
+	}
+
+	t.Run("stat file missing", func(t *testing.T) {
+		if _, err := ReadBootTime(fstest.MapFS{}); err == nil {
+			t.Errorf("ReadBootTime(empty /proc) error = nil, want an error")
+		}
+	})
+}
+
+func TestProcesses_ScheduledRunHasNoTrigger(t *testing.T) {
+	const n = 120
+	c, _ := newCollector(bulkRank(n), nil)
+
+	regular := snapshotOf(t, c, runStart, false)
+	pressed := snapshotOf(t, c, runStart.Add(time.Minute), true)
+
+	if regular.Trigger != nil || pressed.Trigger != nil {
+		t.Errorf("Trigger of scheduled snapshots = %+v, %+v, want nil, nil", regular.Trigger, pressed.Trigger)
+	}
+}
+
+func TestProcesses_RunAfterTriggeredRunHasNoTriggerAndTopLists(t *testing.T) {
+	const n = 120
+	c, _ := newCollector(bulkRank(n), nil)
+	triggered := scheduler.Run{Start: runStart, Trigger: &scheduler.Trigger{Kills: triggerKills(2)}}
+	if _, err := c.Collect(context.Background(), triggered); err != nil {
+		t.Fatalf("Collect(triggered run) error = %v, want nil", err)
+	}
+
+	next := snapshotOf(t, c, runStart.Add(time.Minute), false)
+
+	if next.Trigger != nil {
+		t.Errorf("Trigger of the run after a triggered one = %+v, want nil", next.Trigger)
+	}
+	if len(next.Processes) >= n || next.Complete {
+		t.Errorf("run after a triggered one listed %d processes, Complete %v, want the top lists only and not complete", len(next.Processes), next.Complete)
+	}
+}
+
+const (
+	bootIDPath  = "sys/kernel/random/boot_id"
+	bootIDValue = "0b6f9b0c-2d1e-4c43-9a4e-7f1b2c3d4e5f"
+)
+
+func TestReadBootID(t *testing.T) {
+	accepted := map[string]string{
+		"one line feed": bootIDValue + "\n",
+		"no line feed":  bootIDValue,
+	}
+	for name, content := range accepted {
+		t.Run("accepted/"+name, func(t *testing.T) {
+			proc := fstest.MapFS{bootIDPath: &fstest.MapFile{Data: []byte(content)}}
+			got, err := ReadBootID(proc)
+			if err != nil || got != bootIDValue {
+				t.Errorf("ReadBootID(%q) = %q, %v, want %q, nil", content, got, err, bootIDValue)
+			}
+		})
+	}
+
+	const notUUID = "procstats: boot_id: not a lower-case UUID"
+	refused := map[string]string{
+		"upper case":         strings.ToUpper(bootIDValue) + "\n",
+		"two line feeds":     bootIDValue + "\n\n",
+		"35 characters":      bootIDValue[:35],
+		"37 characters":      bootIDValue + "c",
+		"empty file":         "",
+		"longer than 64":     bootIDValue + "\n" + strings.Repeat("x", 40),
+		"line feed only":     "\n",
+		"line feed in front": "\n" + bootIDValue,
+	}
+	for name, content := range refused {
+		t.Run("refused/"+name, func(t *testing.T) {
+			proc := fstest.MapFS{bootIDPath: &fstest.MapFile{Data: []byte(content)}}
+			got, err := ReadBootID(proc)
+			if err == nil || err.Error() != notUUID || got != "" {
+				t.Errorf("ReadBootID(%q) = %q, %v, want \"\", %q", content, got, err, notUUID)
+			}
+		})
+	}
+
+	t.Run("refused/missing file", func(t *testing.T) {
+		got, err := ReadBootID(fstest.MapFS{})
+		want := "procstats: boot_id: open " + bootIDPath + ": file does not exist"
+		if err == nil || err.Error() != want || got != "" {
+			t.Errorf("ReadBootID(empty tree) = %q, %v, want \"\", %q", got, err, want)
+		}
+	})
+}

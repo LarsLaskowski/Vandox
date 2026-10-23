@@ -93,7 +93,7 @@ func TestDefaultAgent(t *testing.T) {
 
 func TestAgentKeys(t *testing.T) {
 	got := AgentKeys()
-	want := []string{"agent_id", "backend.url", "spool.directory", "log.level", "filesystem.mount_points", "processes.programs", "services.units", "mariadb.enabled", "mariadb.socket"}
+	want := []string{"agent_id", "backend.url", "spool.directory", "log.level", "filesystem.mount_points", "processes.programs", "services.units", "mariadb.enabled", "mariadb.socket", "backups.processes"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Errorf("AgentKeys() = %v, want %v", got, want)
 	}
@@ -130,7 +130,16 @@ func TestLoadAgent_Example(t *testing.T) {
 		if got.MariaDB != def.MariaDB {
 			t.Errorf("example MariaDB = %+v, want the default %+v", got.MariaDB, def.MariaDB)
 		}
+		requireExampleBackupsDefault(t, got, &def)
 	})
+}
+
+// requireExampleBackupsDefault checks that the example keeps the default of backups.processes.
+func requireExampleBackupsDefault(t *testing.T, got, def *Agent) {
+	t.Helper()
+	if !slices.Equal(got.Backups.Processes, def.Backups.Processes) {
+		t.Errorf("example Backups.Processes = %#v, want the default %#v", got.Backups.Processes, def.Backups.Processes)
+	}
 }
 
 // requireExampleValues checks the values the agent example file declares.
@@ -150,6 +159,9 @@ func requireExampleValues(t *testing.T, got *Agent) {
 	}
 	if got.Secrets.AgentToken.Value() != agentToken {
 		t.Errorf("Secrets.AgentToken.Value() = %q, want %q", got.Secrets.AgentToken.Value(), agentToken)
+	}
+	if !slices.Equal(got.Backups.Processes, wantDefaultBackupRules) {
+		t.Errorf("Backups.Processes = %#v, want the default %#v", got.Backups.Processes, wantDefaultBackupRules)
 	}
 }
 
@@ -1243,4 +1255,146 @@ func TestLoadAgent_MariaDBRefusesEnabledAndUnknownKey(t *testing.T) {
 
 		_ = requireKeyError(t, err, "mariadb.port", 5)
 	})
+}
+
+// wantDefaultBackupRules is the default of backups.processes: one rule, command pzstd.
+var wantDefaultBackupRules = []BackupRule{{Command: "pzstd"}}
+
+// backupsKeyLine is the line of the key backups.processes in a document built by backupsDoc.
+const backupsKeyLine = 5
+
+// backupsDoc builds an agent file whose key backups.processes (line backupsKeyLine) is followed by value, the raw YAML text
+// after the colon; the first element of a block list is on line 6.
+func backupsDoc(value string) string {
+	return validAgent + "backups:\n  processes:" + value + "\n"
+}
+
+func TestDefaultAgent_BackupProcesses(t *testing.T) {
+	got := DefaultAgent().Backups.Processes
+
+	if !slices.Equal(got, wantDefaultBackupRules) {
+		t.Errorf("DefaultAgent().Backups.Processes = %#v, want exactly %#v", got, wantDefaultBackupRules)
+	}
+}
+
+func TestLoadAgent_BackupProcesses(t *testing.T) {
+	var many strings.Builder
+	for i := 0; i < MaxProgramRules; i++ {
+		many.WriteString("\n    - {command: c" + strconv.Itoa(i) + "}")
+	}
+	tests := []struct {
+		name string
+		doc  string
+		want []BackupRule
+	}{
+		{"absent takes the default", validAgent, wantDefaultBackupRules},
+		{"section without the key takes the default", validAgent + "backups:\n", wantDefaultBackupRules},
+		{"null section takes the default", validAgent + "backups: ~\n", wantDefaultBackupRules},
+		{"command rule replaces the default", backupsDoc("\n    - command: borg"), []BackupRule{{Command: "borg"}}},
+		{"prefix rule", backupsDoc("\n    - cmdline_prefix: \"/usr/bin/restic \""), []BackupRule{{CmdlinePrefix: "/usr/bin/restic "}}},
+		{"rules in file order", backupsDoc("\n    - {command: b}\n    - {cmdline_prefix: \"x \"}\n    - {command: pzstd}"),
+			[]BackupRule{{Command: "b"}, {CmdlinePrefix: "x "}, {Command: "pzstd"}}},
+		{"command of 256 bytes", backupsDoc("\n    - {command: " + strings.Repeat("c", 256) + "}"), []BackupRule{{Command: strings.Repeat("c", 256)}}},
+		{"prefix of 256 bytes in two-byte characters", backupsDoc("\n    - {cmdline_prefix: " + strings.Repeat("\u00e9", 128) + "}"),
+			[]BackupRule{{CmdlinePrefix: strings.Repeat("\u00e9", 128)}}},
+		{"flow list", backupsDoc(" [{command: y}]"), []BackupRule{{Command: "y"}}},
+		{"wildcard characters are literal text", backupsDoc("\n    - {command: \"pz*|(a\"}"), []BackupRule{{Command: "pz*|(a"}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := LoadAgent(writeTemp(t, tt.doc), agentEnv())
+			if err != nil {
+				t.Fatalf("LoadAgent(%q) error = %v, want nil", tt.doc, err)
+			}
+			if !slices.Equal(got.Backups.Processes, tt.want) {
+				t.Errorf("LoadAgent(%q) Backups.Processes = %#v, want %#v", tt.doc, got.Backups.Processes, tt.want)
+			}
+		})
+	}
+
+	t.Run("64 rules", func(t *testing.T) {
+		got, err := LoadAgent(writeTemp(t, backupsDoc(many.String())), agentEnv())
+
+		if err != nil || len(got.Backups.Processes) != MaxProgramRules {
+			t.Errorf("LoadAgent(64 rules) = %d rules, %v, want %d rules and no error", len(got.Backups.Processes), err, MaxProgramRules)
+		}
+	})
+}
+
+func TestLoadAgent_BackupProcessesEmptyListSwitchesTheCheckOff(t *testing.T) {
+	withDefault, err := LoadAgent(writeTemp(t, validAgent), agentEnv())
+	if err != nil {
+		t.Fatalf("LoadAgent(default) error = %v, want nil", err)
+	}
+	if len(withDefault.Backups.Processes) != 1 {
+		t.Fatalf("LoadAgent(default) Backups.Processes = %#v, want the one default rule", withDefault.Backups.Processes)
+	}
+
+	for _, value := range []string{" []", " [ ]"} {
+		doc := backupsDoc(value)
+		got, err := LoadAgent(writeTemp(t, doc), agentEnv())
+		if err != nil {
+			t.Fatalf("LoadAgent(%q) error = %v, want nil", doc, err)
+		}
+		if len(got.Backups.Processes) != 0 {
+			t.Errorf("LoadAgent(%q) Backups.Processes = %#v, want no rule (the check is off, the default is not kept)", doc, got.Backups.Processes)
+		}
+	}
+}
+
+// requireBackupsError loads the document and fails the test unless it is refused with exactly
+// "config: <file>:<line>: <key>: <reason>".
+func requireBackupsError(t *testing.T, tt programsErrorCase) {
+	t.Helper()
+
+	doc := backupsDoc(tt.value)
+	path := writeTemp(t, doc)
+	got, err := LoadAgent(path, agentEnv())
+	if got != nil {
+		t.Errorf("LoadAgent(%q) = %+v, want nil on error", doc, got)
+	}
+	if err == nil {
+		t.Fatalf("LoadAgent(%q) error = nil, want an error for %s at line %d", doc, tt.key, tt.line)
+	}
+	want := "config: " + path + ":" + strconv.Itoa(tt.line) + ": " + tt.key + ": " + tt.reason
+	if err.Error() != want {
+		t.Errorf("LoadAgent(%q) error = %q, want %q", doc, err.Error(), want)
+	}
+	requireNoLeakBesidesFile(t, err, path, sentinel)
+}
+
+func TestLoadAgent_BackupProcessesErrors(t *testing.T) {
+	const (
+		listReason   = "must be a list of at most 64 rules"
+		oneOfReason  = "must set exactly one of command and cmdline_prefix"
+		lengthReason = "must be 1 to 256 bytes"
+		charReason   = "must not contain control, format or line-separating characters"
+		first        = "backups.processes[0]"
+	)
+	var many strings.Builder
+	for i := 0; i <= MaxProgramRules; i++ {
+		many.WriteString("\n    - {command: c" + strconv.Itoa(i) + "}")
+	}
+	tests := []programsErrorCase{
+		{"65 rules", many.String(), backupsKeyLine, "backups.processes", listReason},
+		{"neither command nor prefix", "\n    - {}", 6, first, oneOfReason},
+		{"empty command", "\n    - command: \"\"", 6, first, oneOfReason},
+		{"command and prefix", "\n    - command: a\n      cmdline_prefix: b", 6, first, oneOfReason},
+		{"error of the second rule", "\n    - command: b\n    - cmdline_prefix: \"\"", 7, "backups.processes[1]", oneOfReason},
+		{"command of 257 bytes", "\n    - command: " + strings.Repeat("c", 257), 6, first + ".command", lengthReason},
+		{"prefix of 257 bytes", "\n    - cmdline_prefix: " + strings.Repeat("c", 257), 6, first + ".cmdline_prefix", lengthReason},
+		{"command of 129 two-byte characters", "\n    - command: " + strings.Repeat("\u00e9", 129), 6, first + ".command", lengthReason},
+		{"command that leaks", "\n    - command: " + strings.Repeat(sentinel, 40), 6, first + ".command", lengthReason},
+		{"program key of the process rules", "\n    - program: x\n      command: y", 6, first + ".program", "unknown key"},
+		{"append_next_word key of the process rules", "\n    - command: y\n      append_next_word: true", 7, first + ".append_next_word", "unknown key"},
+		{"duplicate key", "\n    - command: y\n      command: z", 7, first + ".command", "duplicate key"},
+		{"null element", "\n    - ~", 6, first, "has no value"},
+		{"scalar element", "\n    - pzstd", 6, first, "must be a section (a mapping of keys)"},
+		{"sequence element", "\n    - [pzstd]", 6, first, "must be a section (a mapping of keys)"},
+		{"control character in the command", "\n    - command: \"a\\tb\"", 6, first + ".command", charReason},
+		{"list given as text", " pzstd", backupsKeyLine, "backups.processes", "invalid value, want a list"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) { requireBackupsError(t, tt) })
+	}
 }

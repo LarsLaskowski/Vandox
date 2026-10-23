@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"runtime/debug"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -61,7 +62,10 @@ type runner struct {
 	name     string
 	adaptive bool
 	wake     chan struct{}
-	deadline atomic.Int64 // liveness deadline in unix nanoseconds, 0 before the first cycle
+	trigWake chan struct{} // tells the runner that a trigger is waiting
+	trigMu   sync.Mutex    // guards trig
+	trig     *Trigger      // the merged requests for an extra run, nil when none waits
+	deadline atomic.Int64  // liveness deadline in unix nanoseconds, 0 before the first cycle
 
 	pending     chan result // the result channel of an abandoned run, nil when none is out
 	skipped     int         // cycles skipped while pending was out
@@ -77,6 +81,7 @@ func newRunner(s *Scheduler, j Job) *runner {
 		name:     j.Collector.Name(),
 		adaptive: j.Schedule.PressureInterval > 0,
 		wake:     make(chan struct{}, 1),
+		trigWake: make(chan struct{}, 1),
 	}
 }
 
@@ -110,7 +115,7 @@ func (r *runner) loop(ctx context.Context) {
 	for ctx.Err() == nil {
 		seen := r.s.mode.Load()
 		d = r.startCycle(ctx, d, seen)
-		r.cycle(ctx, d, seen)
+		r.cycle(ctx, d, seen, nil)
 		var ok bool
 		if d, ok = r.waitNext(ctx, d, seen); !ok {
 			return
@@ -134,6 +139,10 @@ func (r *runner) startCycle(ctx context.Context, d time.Time, seen *pressureMode
 // waitNext waits for the next due time and returns it; false when ctx ended.
 func (r *runner) waitNext(ctx context.Context, d time.Time, seen *pressureMode) (time.Time, bool) {
 	for {
+		if ctx.Err() != nil {
+			return d, false
+		}
+		d, seen = r.runExtra(ctx, d, seen)
 		n := r.nextDue(d, seen)
 		r.setDeadline(n)
 		wait := time.Until(n)
@@ -146,11 +155,34 @@ func (r *runner) waitNext(ctx context.Context, d time.Time, seen *pressureMode) 
 			return n, true
 		case <-r.wake:
 			timer.Stop()
+		case <-r.trigWake:
+			timer.Stop()
 		case <-ctx.Done():
 			timer.Stop()
 			return n, false
 		}
 	}
+}
+
+// runExtra runs the extra run that a trigger asked for, if one waits, and returns the due time and mode the next run is
+// counted from: without pressure the grid stays, with a pressure interval in pressure mode the extra run's start replaces
+// the due time.
+func (r *runner) runExtra(ctx context.Context, d time.Time, seen *pressureMode) (time.Time, *pressureMode) {
+	r.trigMu.Lock()
+	t := r.trig
+	r.trig = nil
+	r.trigMu.Unlock()
+	if t == nil {
+		return d, seen
+	}
+	cur := r.s.mode.Load()
+	start := time.Now()
+	r.setDeadline(start)
+	r.cycle(ctx, start, cur, t)
+	if r.adaptive && cur.high {
+		return start, cur
+	}
+	return d, seen
 }
 
 // nextDue returns the next due time of a cycle that was due at d under the mode seen.
@@ -168,8 +200,9 @@ func (r *runner) nextDue(d time.Time, seen *pressureMode) time.Time {
 
 // cycle runs one cycle that is due at d. The flag lost is true after a due sample whose result was not kept (timeout,
 // skipped cycle, error or panic, refused record, sink error) and false after a kept one; a late start, including the
-// whole-slot gap recorded in startCycle, does not set it, since no Collect result was lost.
-func (r *runner) cycle(ctx context.Context, d time.Time, seen *pressureMode) {
+// whole-slot gap recorded in startCycle, does not set it, since no Collect result was lost. A non-nil trig makes the run an
+// extra one that starts at d.
+func (r *runner) cycle(ctx context.Context, d time.Time, seen *pressureMode, trig *Trigger) {
 	iv := r.interval(seen.high)
 	if r.pending != nil {
 		select {
@@ -183,7 +216,7 @@ func (r *runner) cycle(ctx context.Context, d time.Time, seen *pressureMode) {
 			return
 		}
 	}
-	run := Run{Start: time.Now().UTC(), Pressure: seen.high, PreviousLost: r.lost}
+	run := Run{Start: time.Now().UTC(), Pressure: seen.high, PreviousLost: r.lost, Trigger: trig}
 	res, out := r.collect(ctx, run)
 	switch out {
 	case outcomeTimedOut:

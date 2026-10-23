@@ -25,6 +25,7 @@ type Agent struct {
 	Log        Log           `yaml:"log"`
 	Filesystem Filesystem    `yaml:"filesystem"`
 	Processes  Processes     `yaml:"processes"`
+	Backups    Backups       `yaml:"backups"`
 	Services   Services      `yaml:"services"`
 	MariaDB    MariaDB       `yaml:"mariadb"`
 	Secrets    AgentSecrets  `yaml:"-"`
@@ -61,6 +62,44 @@ type ProgramRule struct {
 	Command        string `yaml:"command"`
 	CmdlinePrefix  string `yaml:"cmdline_prefix"`
 	AppendNextWord bool   `yaml:"append_next_word"`
+}
+
+// Backups configures the backup run collector.
+type Backups struct {
+	Processes []BackupRule `yaml:"processes"`
+}
+
+// BackupRule names the processes of a backup by command or command line prefix.
+type BackupRule struct {
+	Command       string `yaml:"command"`
+	CmdlinePrefix string `yaml:"cmdline_prefix"`
+}
+
+// checkBackupRules checks the list of backups.processes.
+func checkBackupRules(file string, lines map[string]int, rules []BackupRule) error {
+	if len(rules) > MaxProgramRules {
+		return keyError(file, lines, "backups.processes", programRulesReason)
+	}
+	for i := range rules {
+		path := "backups.processes[" + strconv.Itoa(i) + "]"
+		r := &rules[i]
+		fail := func(key, reason string) error {
+			line := lines[key]
+			if line == 0 {
+				line = lines[path]
+			}
+			return &KeyError{File: file, Line: line, Key: key, Reason: reason}
+		}
+		switch {
+		case (r.Command == "") == (r.CmdlinePrefix == ""):
+			return fail(path, programOneOfReason)
+		case len(r.Command) > MaxRuleMatchBytes:
+			return fail(path+".command", programLengthReason)
+		case len(r.CmdlinePrefix) > MaxRuleMatchBytes:
+			return fail(path+".cmdline_prefix", programLengthReason)
+		}
+	}
+	return nil
 }
 
 // Services configures the systemd service collector.
@@ -267,15 +306,16 @@ func DefaultAgent() Agent {
 		Log:   Log{Level: "info"},
 
 		Filesystem: Filesystem{MountPoints: []string{"/"}},
+		Backups:    Backups{Processes: []BackupRule{{Command: "pzstd"}}},
 		Services:   Services{Units: DefaultServiceUnits()},
 		MariaDB:    MariaDB{Enabled: true, Socket: DefaultMariaDBSocket},
 	}
 }
 
 // AgentKeys returns every option key path in file order: agent_id, backend.url, spool.directory, log.level,
-// filesystem.mount_points, processes.programs, services.units, mariadb.enabled, mariadb.socket.
+// filesystem.mount_points, processes.programs, services.units, mariadb.enabled, mariadb.socket, backups.processes.
 func AgentKeys() []string {
-	return []string{keyAgentID, keyBackendURL, "spool.directory", "log.level", "filesystem.mount_points", "processes.programs", "services.units", "mariadb.enabled", "mariadb.socket"}
+	return []string{keyAgentID, keyBackendURL, "spool.directory", "log.level", "filesystem.mount_points", "processes.programs", "services.units", "mariadb.enabled", "mariadb.socket", "backups.processes"}
 }
 
 // LoadAgent reads the agent configuration file at path and the secrets from environ (in os.Environ form).
@@ -333,7 +373,10 @@ func (a *Agent) validate(file string, lines map[string]int) error {
 		return err
 	}
 	a.Services.Units = units
-	return checkSocketPath(file, lines, "mariadb.socket", a.MariaDB.Socket)
+	if err := checkSocketPath(file, lines, "mariadb.socket", a.MariaDB.Socket); err != nil {
+		return err
+	}
+	return checkBackupRules(file, lines, a.Backups.Processes)
 }
 
 // checkMountPoints checks the list of filesystem.mount_points.

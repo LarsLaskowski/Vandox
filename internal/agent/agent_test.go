@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"log/slog"
@@ -23,6 +24,8 @@ import (
 
 	"github.com/LarsLaskowski/Vandox/internal/config"
 	"github.com/LarsLaskowski/Vandox/internal/connstats"
+	"github.com/LarsLaskowski/Vandox/internal/journal/journaltest"
+	"github.com/LarsLaskowski/Vandox/internal/kernevents"
 	"github.com/LarsLaskowski/Vandox/internal/mariadb"
 	"github.com/LarsLaskowski/Vandox/internal/model"
 	"github.com/LarsLaskowski/Vandox/internal/procstats"
@@ -256,6 +259,148 @@ func fixtureConnections() connstats.Sources {
 	return connstats.Sources{Proc: os.DirFS("../../testdata/proc"), SocketMount: connstats.SocketMount{ID: fixtureSocketMount}}
 }
 
+// The identities of the kernel fixture: the machine, the boot, the sequence number ID of the journal files and the boot time.
+const (
+	kernelMachineID = "0badc0de0badc0de0badc0de0badc0de"
+	kernelSeqID     = "00000000000000000000000000000001"
+	kernelBootRaw   = "c0ffee00-c0ff-ee00-c0ff-ee00c0ffee02"
+	kernelBootStamp = "c0ffee00c0ffee00c0ffee00c0ffee02"
+
+	// kernelMono is the monotonic time in microseconds at second 0 of the timeline of TestNewScheduler_LiveKillTriggersExtraSnapshots.
+	kernelMono = 2_000_000_000
+)
+
+// memTree is a file tree in memory that a test changes while the agent reads it. The kernel sources use it as /proc, /etc and
+// the journal root: the journal is modelled as journald lays it out (the machine directory below the root, files named
+// system@<seqnum ID>-<head seqnum>-<head real time>.journal, written by journaltest in the layout of systemd 249). That layout
+// is pinned against journalctl by journaltest.TestWrite_JournalctlAcceptsFixture and is the one the journal reader and the
+// harness of internal/kernevents use; the growth of a journal is modelled by adding a file, as journald's rotation does.
+type memTree struct {
+	mu    sync.Mutex
+	files map[string][]byte
+}
+
+// newMemTree returns a tree with the files.
+func newMemTree(files map[string]string) *memTree {
+	m := &memTree{files: map[string][]byte{}}
+	for name, data := range files {
+		m.files[name] = []byte(data)
+	}
+	return m
+}
+
+// set stores the bytes of a file.
+func (m *memTree) set(name string, data []byte) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.files[name] = data
+}
+
+// Open implements fs.FS.
+func (m *memTree) Open(name string) (fs.File, error) {
+	m.mu.Lock()
+	tree := fstest.MapFS{}
+	for n, data := range m.files {
+		tree[n] = &fstest.MapFile{Data: data, Mode: 0o640}
+	}
+	m.mu.Unlock()
+
+	return tree.Open(name)
+}
+
+// kernelWorld is the host the kernel collector reads: a /proc with the boot, an /etc with the machine ID and a journal root
+// without files.
+type kernelWorld struct {
+	proc    *memTree
+	etc     *memTree
+	journal *memTree
+}
+
+// newKernelWorld returns the host of boot kernelBootRaw that booted an hour before the start of the fake clock.
+func newKernelWorld() *kernelWorld {
+	return &kernelWorld{
+		proc: newMemTree(map[string]string{
+			"sys/kernel/random/boot_id": kernelBootRaw + "\n",
+			"stat":                      "cpu  1 2 3 4\nbtime 946681200\nprocesses 5\n",
+			"uptime":                    "5000000.00 100.00\n",
+		}),
+		etc:     newMemTree(map[string]string{"machine-id": kernelMachineID + "\n"}),
+		journal: newMemTree(nil),
+	}
+}
+
+// sources returns the kernel sources of the world.
+func (w *kernelWorld) sources() kernevents.Sources {
+	return kernevents.Sources{Journal: []fs.FS{w.journal}, Etc: w.etc, Proc: w.proc}
+}
+
+// setUptime sets the first field of /proc/uptime.
+func (w *kernelWorld) setUptime(seconds float64) {
+	w.proc.set("uptime", []byte(strconv.FormatFloat(seconds, 'f', 2, 64)+" 100.00\n"))
+}
+
+// addJournalFile writes entries as an archived journal file of the machine.
+func (w *kernelWorld) addJournalFile(t *testing.T, entries []map[string][]byte) {
+	t.Helper()
+
+	var id, machine, seqnum [16]byte
+	for i := range id {
+		id[i] = byte(len(w.journal.files) + 1) // #nosec G115 -- a handful of files
+	}
+	for i := range machine {
+		v, err := strconv.ParseUint(kernelMachineID[2*i:2*i+2], 16, 8)
+		if err != nil {
+			t.Fatalf("machine ID %q is not hex: %v", kernelMachineID, err)
+		}
+		machine[i] = byte(v)
+	}
+	seqnum[15] = 1
+	var buf bytes.Buffer
+	if err := journaltest.Write(&buf, entries, journaltest.Options{FileID: id, MachineID: machine, SeqnumID: seqnum}); err != nil {
+		t.Fatalf("journaltest.Write() error = %v, want nil", err)
+	}
+	name := "system@" + kernelSeqID + "-" + hexStamp(t, entries[0]["__SEQNUM"]) + "-" + hexStamp(t, entries[0]["__REALTIME_TIMESTAMP"]) + ".journal"
+	w.journal.set(kernelMachineID+"/"+name, buf.Bytes())
+}
+
+// hexStamp returns the 16 hex digits of a decimal stamp, as journald writes them into a file name.
+func hexStamp(t *testing.T, decimal []byte) string {
+	t.Helper()
+
+	v, err := strconv.ParseUint(string(decimal), 10, 64)
+	if err != nil {
+		t.Fatalf("stamp %q is not a number: %v", decimal, err)
+	}
+	return fmt.Sprintf("%016x", v)
+}
+
+// kernelLine returns a journal entry of the kernel transport and facility 0 that the journal received at second sec of the
+// timeline that starts at origin, and that the kernel wrote lagUS microseconds earlier.
+func kernelLine(seq uint64, origin time.Time, sec int, lagUS uint64, message string) map[string][]byte {
+	us := uint64(sec) * 1_000_000 // #nosec G115 -- small test values
+	mono := kernelMono + us
+	text := func(v uint64) []byte { return []byte(strconv.FormatUint(v, 10)) }
+	return map[string][]byte{
+		"__SEQNUM":                    text(seq),
+		"__REALTIME_TIMESTAMP":        text(uint64(origin.UnixMicro()) + us), // #nosec G115 -- the fake clock is after 1970
+		"__MONOTONIC_TIMESTAMP":       text(mono),
+		"_BOOT_ID":                    []byte(kernelBootStamp),
+		"_TRANSPORT":                  []byte("kernel"),
+		"SYSLOG_FACILITY":             []byte("0"),
+		"SYSLOG_IDENTIFIER":           []byte("kernel"),
+		"PRIORITY":                    []byte("6"),
+		"_SOURCE_MONOTONIC_TIMESTAMP": text(mono - lagUS),
+		"MESSAGE":                     []byte(message),
+	}
+}
+
+// fixtureKernel returns kernel sources in memory (a host without journal files), so no agent test reads the host's journal, /etc
+// or /proc.
+func fixtureKernel() kernevents.Sources {
+	return newKernelWorld().sources()
+}
+
 // errFixtureMariaDB is what the dialer of fixtureMariaDB answers.
 var errFixtureMariaDB = errors.New("fixture: no database")
 
@@ -374,6 +519,8 @@ func TestRun_ReadyWatchdogAndSelfMetrics(t *testing.T) {
 		Connections: fixtureConnections(),
 		Services:    fixtureServices(),
 		MariaDB:     fixtureMariaDB(),
+		Kernel:      fixtureKernel(),
+		StateDir:    t.TempDir(),
 	})
 
 	if first := socket.next(t, r); first != "READY=1" {
@@ -420,18 +567,20 @@ func TestRun_ConfigErrorExitsOne(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			socket := newNotificationSocket(t)
-			var stderr bytes.Buffer
+			stderr := &syncBuffer{}
 
 			code := Run(context.Background(), Options{
 				ConfigPath:  tc.path,
 				Environ:     []string{"VANDOX_AGENT_TOKEN=" + testToken, "NOTIFY_SOCKET=" + socket.path},
-				Stderr:      &stderr,
+				Stderr:      stderr,
 				Self:        fixtureSources(),
 				System:      fixtureSystem(),
 				Processes:   fixtureProcesses(),
 				Connections: fixtureConnections(),
 				Services:    fixtureServices(),
 				MariaDB:     fixtureMariaDB(),
+				Kernel:      fixtureKernel(),
+				StateDir:    t.TempDir(),
 			})
 
 			if code != 1 {
@@ -452,12 +601,12 @@ func TestRun_ConfigErrorExitsOne(t *testing.T) {
 
 func TestRun_DoesNotLogSecret(t *testing.T) {
 	const token = "leak-sentinel-0123456789abcdef0123456789"
-	var stderr bytes.Buffer
+	stderr := &syncBuffer{}
 	sink := newMetricSink()
 	r := startAgent(t, Options{
 		ConfigPath:  writeConfig(t, validConfig+"log:\n  level: debug\n"),
 		Environ:     []string{"VANDOX_AGENT_TOKEN=" + token},
-		Stderr:      &stderr,
+		Stderr:      stderr,
 		Sink:        sink,
 		Self:        fixtureSources(),
 		System:      fixtureSystem(),
@@ -465,6 +614,8 @@ func TestRun_DoesNotLogSecret(t *testing.T) {
 		Connections: fixtureConnections(),
 		Services:    fixtureServices(),
 		MariaDB:     fixtureMariaDB(),
+		Kernel:      fixtureKernel(),
+		StateDir:    t.TempDir(),
 	})
 
 	r.waitMetrics(sink, selfstats.MetricRSS)
@@ -501,12 +652,12 @@ func TestRun_NotificationProblemsDoNotStopTheAgent(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			var stderr bytes.Buffer
+			stderr := &syncBuffer{}
 			sink := newMetricSink()
 			r := startAgent(t, Options{
 				ConfigPath:  writeConfig(t, validConfig),
 				Environ:     []string{"VANDOX_AGENT_TOKEN=" + testToken, tc.env},
-				Stderr:      &stderr,
+				Stderr:      stderr,
 				Sink:        sink,
 				Self:        fixtureSources(),
 				System:      fixtureSystem(),
@@ -514,6 +665,8 @@ func TestRun_NotificationProblemsDoNotStopTheAgent(t *testing.T) {
 				Connections: fixtureConnections(),
 				Services:    fixtureServices(),
 				MariaDB:     fixtureMariaDB(),
+				Kernel:      fixtureKernel(),
+				StateDir:    t.TempDir(),
 			})
 
 			r.waitMetrics(sink, selfstats.MetricRSS)
@@ -554,6 +707,9 @@ func TestJobs_Schedules(t *testing.T) {
 	connections := jobSchedule{"connections", scheduler.Schedule{Interval: 60 * time.Second, Timeout: 10 * time.Second, PressureInterval: 15 * time.Second}}
 
 	systemd := jobSchedule{"systemd", scheduler.Schedule{Interval: 30 * time.Second, Timeout: 5 * time.Second, PressureInterval: 10 * time.Second}}
+	kernel := jobSchedule{"kernel", scheduler.Schedule{Interval: 2 * time.Second, Timeout: 2 * time.Second}}
+	backups := jobSchedule{"backups", scheduler.Schedule{Interval: 10 * time.Second, Timeout: 5 * time.Second}}
+	state := jobSchedule{"state", scheduler.Schedule{Interval: 10 * time.Second, Timeout: 5 * time.Second}}
 
 	tests := []struct {
 		name        string
@@ -561,11 +717,11 @@ func TestJobs_Schedules(t *testing.T) {
 		units       []string
 		want        []jobSchedule
 	}{
-		{"default mount point", []string{"/"}, []string{"nginx.service"}, []jobSchedule{self, system, processes, connections, systemd, filesystem, clock}},
-		{"two mount points", []string{"/", "/var"}, []string{"nginx.service"}, []jobSchedule{self, system, processes, connections, systemd, filesystem, clock}},
-		{"no mount point leaves out the filesystem job", []string{}, []string{"nginx.service"}, []jobSchedule{self, system, processes, connections, systemd, clock}},
-		{"no service unit leaves out the systemd job", []string{"/"}, []string{}, []jobSchedule{self, system, processes, connections, filesystem, clock}},
-		{"no mount point and no service unit", []string{}, []string{}, []jobSchedule{self, system, processes, connections, clock}},
+		{"default mount point", []string{"/"}, []string{"nginx.service"}, []jobSchedule{self, system, processes, connections, systemd, filesystem, clock, kernel, backups, state}},
+		{"two mount points", []string{"/", "/var"}, []string{"nginx.service"}, []jobSchedule{self, system, processes, connections, systemd, filesystem, clock, kernel, backups, state}},
+		{"no mount point leaves out the filesystem job", []string{}, []string{"nginx.service"}, []jobSchedule{self, system, processes, connections, systemd, clock, kernel, backups, state}},
+		{"no service unit leaves out the systemd job", []string{"/"}, []string{}, []jobSchedule{self, system, processes, connections, filesystem, clock, kernel, backups, state}},
+		{"no mount point and no service unit", []string{}, []string{}, []jobSchedule{self, system, processes, connections, clock, kernel, backups, state}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -575,7 +731,7 @@ func TestJobs_Schedules(t *testing.T) {
 			cfg.MariaDB.Enabled = false
 			log := slog.New(slog.NewTextHandler(io.Discard, nil))
 
-			list, _ := jobs(Options{Self: fixtureSources(), System: fixtureSystem(), Processes: fixtureProcesses(), Connections: fixtureConnections(), Services: fixtureServices(), MariaDB: fixtureMariaDB()}, &cfg, log)
+			list, _ := jobs(Options{Self: fixtureSources(), System: fixtureSystem(), Processes: fixtureProcesses(), Connections: fixtureConnections(), Services: fixtureServices(), MariaDB: fixtureMariaDB(), Kernel: fixtureKernel(), StateDir: t.TempDir()}, &cfg, log)
 
 			if got := scheduleOf(list); !slices.Equal(got, tt.want) {
 				t.Errorf("jobs() = %+v, want %+v", got, tt.want)
@@ -614,9 +770,9 @@ func TestJobs_MariaDBAfterSystemdOnlyWhenEnabled(t *testing.T) {
 		units   []string
 		want    []string
 	}{
-		{"enabled follows systemd", true, []string{"nginx.service"}, []string{"self", "system", "processes", "connections", "systemd", "mariadb", "filesystem", "clock"}},
-		{"enabled without systemd follows connections", true, []string{}, []string{"self", "system", "processes", "connections", "mariadb", "filesystem", "clock"}},
-		{"disabled leaves the job out", false, []string{"nginx.service"}, []string{"self", "system", "processes", "connections", "systemd", "filesystem", "clock"}},
+		{"enabled follows systemd", true, []string{"nginx.service"}, []string{"self", "system", "processes", "connections", "systemd", "mariadb", "filesystem", "clock", "kernel", "backups", "state"}},
+		{"enabled without systemd follows connections", true, []string{}, []string{"self", "system", "processes", "connections", "mariadb", "filesystem", "clock", "kernel", "backups", "state"}},
+		{"disabled leaves the job out", false, []string{"nginx.service"}, []string{"self", "system", "processes", "connections", "systemd", "filesystem", "clock", "kernel", "backups", "state"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -625,7 +781,7 @@ func TestJobs_MariaDBAfterSystemdOnlyWhenEnabled(t *testing.T) {
 			cfg.Services.Units = tt.units
 			log := slog.New(slog.NewTextHandler(io.Discard, nil))
 
-			list, _ := jobs(Options{Self: fixtureSources(), System: fixtureSystem(), Processes: fixtureProcesses(), Connections: fixtureConnections(), Services: fixtureServices(), MariaDB: fixtureMariaDB()}, &cfg, log)
+			list, _ := jobs(Options{Self: fixtureSources(), System: fixtureSystem(), Processes: fixtureProcesses(), Connections: fixtureConnections(), Services: fixtureServices(), MariaDB: fixtureMariaDB(), Kernel: fixtureKernel(), StateDir: t.TempDir()}, &cfg, log)
 
 			if got := jobNames(list); !slices.Equal(got, tt.want) {
 				t.Errorf("job names = %v, want %v", got, tt.want)
@@ -650,6 +806,8 @@ func TestRun_RecordsSystemMetrics(t *testing.T) {
 		Connections: fixtureConnections(),
 		Services:    fixtureServices(),
 		MariaDB:     fixtureMariaDB(),
+		Kernel:      fixtureKernel(),
+		StateDir:    t.TempDir(),
 	})
 
 	r.waitMetrics(sink, "load1", "mem_available_bytes", "pressure_avg10", "filesystem_size_bytes", "clock_synchronized")
@@ -747,6 +905,8 @@ func lowMemoryOptions(t *testing.T, workers int) Options {
 		Connections: connstats.Sources{Proc: proc, SocketMount: connstats.SocketMount{ID: fixtureSocketMount}},
 		Services:    fixtureServices(),
 		MariaDB:     fixtureMariaDB(),
+		Kernel:      fixtureKernel(),
+		StateDir:    t.TempDir(),
 	}
 }
 
@@ -929,6 +1089,8 @@ func TestRun_ServiceUnitsFromConfigurationFile(t *testing.T) {
 		Connections: fixtureConnections(),
 		Services:    svcstats.Sources{Systemd: fake},
 		MariaDB:     fixtureMariaDB(),
+		Kernel:      fixtureKernel(),
+		StateDir:    t.TempDir(),
 	})
 
 	limit := time.After(waitLimit)
@@ -980,4 +1142,294 @@ func TestNewScheduler_EmptyServiceUnitsNeverOpenSystemd(t *testing.T) {
 			t.Errorf("no record at all, want the other collectors to run")
 		}
 	})
+}
+
+// syncBuffer is a log destination several goroutines write to.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	return b.buf.String()
+}
+
+func TestJobs_BackupsOnlyWithRules(t *testing.T) {
+	tests := []struct {
+		name  string
+		rules []config.BackupRule
+		want  []string
+	}{
+		{"the default rule", config.DefaultAgent().Backups.Processes, []string{"clock", "kernel", "backups", "state"}},
+		{"a command rule", []config.BackupRule{{Command: "borg"}}, []string{"clock", "kernel", "backups", "state"}},
+		{"a cmdline prefix rule", []config.BackupRule{{CmdlinePrefix: "/usr/bin/restic "}}, []string{"clock", "kernel", "backups", "state"}},
+		{"no rule leaves out the backups job", []config.BackupRule{}, []string{"clock", "kernel", "state"}},
+		{"nil rules leave out the backups job", nil, []string{"clock", "kernel", "state"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := config.DefaultAgent()
+			cfg.Backups.Processes = tt.rules
+			log := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+			list, _ := jobs(Options{Self: fixtureSources(), System: fixtureSystem(), Processes: fixtureProcesses(), Connections: fixtureConnections(), Services: fixtureServices(), MariaDB: fixtureMariaDB(), Kernel: fixtureKernel(), StateDir: t.TempDir()}, &cfg, log)
+
+			names := jobNames(list)
+			if len(names) < len(tt.want) || !slices.Equal(names[len(names)-len(tt.want):], tt.want) {
+				t.Errorf("job names = %v, want them to end with %v", names, tt.want)
+			}
+			if _, err := scheduler.New(list, scheduler.DiscardSink{}, log); err != nil {
+				t.Errorf("scheduler.New(jobs()) error = %v, want nil", err)
+			}
+		})
+	}
+}
+
+func TestNewScheduler_StateFileIsKeptInTheSpoolDirectoryOrStateDir(t *testing.T) {
+	tests := []struct {
+		name     string
+		useState bool
+	}{
+		{"spool.directory when StateDir is empty", false},
+		{"StateDir when it is set", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			spool, other := t.TempDir(), t.TempDir()
+			cfg := config.DefaultAgent()
+			cfg.Spool.Directory = spool
+			want, unwanted := spool, other
+			opts := lowMemoryOptions(t, 0)
+			opts.StateDir = ""
+			if tt.useState {
+				opts.StateDir = other
+				want, unwanted = other, spool
+			}
+			opts.Kernel = newKernelWorld().sources()
+
+			runSchedulerFor(t, opts, &cfg, 25*time.Second)
+
+			requireStateFile(t, want, unwanted)
+		})
+	}
+}
+
+// runSchedulerFor builds the scheduler of opts and cfg and runs it for d of fake time.
+func runSchedulerFor(t *testing.T, opts Options, cfg *config.Agent, d time.Duration) {
+	t.Helper()
+
+	synctest.Test(t, func(t *testing.T) {
+		sched, err := newScheduler(opts, cfg, slog.New(slog.DiscardHandler))
+		if err != nil {
+			t.Fatalf("newScheduler() error = %v, want nil", err)
+		}
+
+		runFor(t, sched, d)
+	})
+}
+
+// requireStateFile fails unless dir holds a state file with the boot of the kernel world and other holds none.
+func requireStateFile(t *testing.T, dir, other string) {
+	t.Helper()
+
+	data, err := os.ReadFile(filepath.Join(dir, "agent-state.json"))
+	if err != nil {
+		t.Fatalf("reading the state file: %v, want the state job to have saved the boot there", err)
+	}
+	if !strings.Contains(string(data), kernelBootRaw) {
+		t.Errorf("state file = %s, want it to hold the boot ID %s", data, kernelBootRaw)
+	}
+	if _, err := os.Stat(filepath.Join(other, "agent-state.json")); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("state file in the other directory: Stat error = %v, want %v", err, fs.ErrNotExist)
+	}
+}
+
+func TestNewScheduler_MissingSpoolDirectoryIsNeverCreated(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "missing-spool")
+	cfg := config.DefaultAgent()
+	cfg.Spool.Directory = missing
+	opts := lowMemoryOptions(t, 0)
+	opts.StateDir = ""
+	out := &syncBuffer{}
+	sink := &recordSink{}
+	opts.Sink = sink
+
+	synctest.Test(t, func(t *testing.T) {
+		sched, err := newScheduler(opts, &cfg, slog.New(slog.NewTextHandler(out, nil)))
+		if err != nil {
+			t.Fatalf("newScheduler() error = %v, want nil (a missing spool directory does not stop the agent)", err)
+		}
+
+		runFor(t, sched, 65*time.Second)
+	})
+
+	if _, err := os.Stat(missing); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("Stat(%s) error = %v, want %v (the agent never creates the directory)", "spool.directory", err, fs.ErrNotExist)
+	}
+	if n := countLines(out.String(), `msg="agent state not saved"`); n != 1 {
+		t.Errorf("lines %q = %d, want 1 (logged once until a save succeeds); log:\n%s", "agent state not saved", n, out.String())
+	}
+	if strings.Contains(out.String(), missing) {
+		t.Errorf("the log holds the spool directory path, want no path; log:\n%s", out.String())
+	}
+	if len(sink.all()) == 0 {
+		t.Errorf("no record at all, want the collectors to run beside the failing state")
+	}
+}
+
+func TestNewScheduler_LiveKillTriggersExtraSnapshots(t *testing.T) {
+	cfg := config.DefaultAgent()
+	world := newKernelWorld()
+	sink := &recordSink{}
+	opts := Options{
+		Sink:        sink,
+		Self:        fixtureSources(),
+		System:      fixtureSystem(),
+		Processes:   fixtureProcesses(),
+		Connections: fixtureConnections(),
+		Services:    fixtureServices(),
+		MariaDB:     fixtureMariaDB(),
+		Kernel:      world.sources(),
+		StateDir:    t.TempDir(),
+	}
+	const victim = 4711
+
+	synctest.Test(t, func(t *testing.T) {
+		sched, err := newScheduler(opts, &cfg, slog.New(slog.DiscardHandler))
+		if err != nil {
+			t.Fatalf("newScheduler() error = %v, want nil", err)
+		}
+		runWithKill(t, sched, world, victim)
+	})
+
+	records := sink.all()
+	if n := countKills(records, victim); n != 1 {
+		t.Fatalf("oom_kill events of PID %d = %d, want 1 (the kernel job read the journal)", victim, n)
+	}
+	processes, connections := countTriggered(t, records, victim)
+	if processes != 1 || connections != 1 {
+		t.Errorf("triggered snapshots = %d process and %d connection, want 1 and 1 within seconds of the kill (the regular ones are 60 s apart)", processes, connections)
+	}
+}
+
+// runWithKill runs sched inside a synctest bubble: the journal of world holds three lines at the first start, and a kill of the
+// victim is added three seconds later. Second s of the timeline is origin + s; the first run is at second 5.
+func runWithKill(t *testing.T, sched *scheduler.Scheduler, world *kernelWorld, victim int) {
+	t.Helper()
+
+	killLine := fmt.Sprintf("Out of memory: Killed process %d (pzstd) total-vm:1000kB, anon-rss:100kB, file-rss:0kB, shmem-rss:0kB, UID:0 pgtables:4kB oom_score_adj:0", victim)
+	origin := time.Now().Add(-5 * time.Second)
+	world.setUptime(kernelMono/1e6 + 5)
+	world.addJournalFile(t, []map[string][]byte{
+		kernelLine(2, origin, 1, 300_000, "handmade kernel line 2"),
+		kernelLine(4, origin, 2, 300_000, "handmade kernel line 4"),
+		kernelLine(6, origin, 3, 300_000, "handmade kernel line 6"),
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		sched.Run(ctx)
+	}()
+
+	time.Sleep(3 * time.Second)
+	synctest.Wait()
+	world.setUptime(kernelMono/1e6 + 8)
+	world.addJournalFile(t, []map[string][]byte{kernelLine(8, origin, 7, 300_000, killLine)})
+	time.Sleep(4 * time.Second)
+	synctest.Wait()
+	cancel()
+	<-done
+}
+
+// countTriggered returns the number of triggered process and connection snapshots in records; every triggered snapshot must name
+// the victim's kill.
+func countTriggered(t *testing.T, records []model.Record, victim int32) (processes, connections int) {
+	t.Helper()
+
+	for _, r := range records {
+		switch d := r.Data.(type) {
+		case *model.ProcessSnapshot:
+			if requireTriggerNames(t, "process", d.Trigger, victim) {
+				processes++
+				if !d.Complete {
+					t.Errorf("triggered process snapshot has Complete = false, want a full snapshot")
+				}
+			}
+		case *model.ConnectionSnapshot:
+			if requireTriggerNames(t, "connection", d.Trigger, victim) {
+				connections++
+			}
+		}
+	}
+	return processes, connections
+}
+
+// countKills returns the number of oom_kill events of the victim in records.
+func countKills(records []model.Record, victim int32) int {
+	n := 0
+	for _, r := range records {
+		if ev, ok := r.Data.(*model.KernelEvent); ok && ev.Type == model.KernelEventOOMKill && ev.OOMKill != nil && ev.OOMKill.VictimPID == victim {
+			n++
+		}
+	}
+	return n
+}
+
+// requireTriggerNames reports whether trigger is set; a set trigger must name exactly the kill of the victim, in the boot of the world.
+func requireTriggerNames(t *testing.T, what string, trigger *model.SnapshotTrigger, victim int32) bool {
+	t.Helper()
+
+	if trigger == nil {
+		return false
+	}
+	if len(trigger.Kills) != 1 || trigger.Kills[0].VictimPID != victim || trigger.Kills[0].BootID != kernelBootRaw || trigger.KillsOmitted != 0 {
+		t.Errorf("trigger of the %s snapshot = %+v, want the one kill of PID %d in boot %s", what, trigger, victim, kernelBootRaw)
+	}
+	return true
+}
+
+func TestJobs_ZeroKernelSourcesStillBuildAllJobs(t *testing.T) {
+	cfg := config.DefaultAgent()
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	list, _ := jobs(Options{Self: fixtureSources(), System: fixtureSystem(), Processes: fixtureProcesses(), Connections: fixtureConnections(), Services: fixtureServices(), MariaDB: fixtureMariaDB(), StateDir: t.TempDir()}, &cfg, log)
+
+	names := jobNames(list)
+	if want := []string{"kernel", "backups", "state"}; len(names) < 3 || !slices.Equal(names[len(names)-3:], want) {
+		t.Errorf("job names = %v, want them to end with %v with zero kernel sources", names, want)
+	}
+}
+
+func TestNewScheduler_BackupsAndStateReadTheKernelProc(t *testing.T) {
+	cfg := config.DefaultAgent()
+	world := newKernelWorld()
+	world.proc.set("1234/stat", []byte("1234 (pzstd) S "+strings.Repeat("0 ", 49)+"\n"))
+	world.proc.set("1234/cmdline", []byte("/usr/bin/pzstd\x00-p\x004\x00"))
+	sink := &recordSink{}
+	opts := lowMemoryOptions(t, 0)
+	opts.Sink = sink
+	opts.Kernel = world.sources()
+
+	runSchedulerFor(t, opts, &cfg, 25*time.Second)
+
+	starts := 0
+	for _, r := range sink.all() {
+		if run, ok := r.Data.(*model.BackupRun); ok && r.Source == "backups" && run.Phase == "start" {
+			starts++
+		}
+	}
+	if starts != 1 {
+		t.Errorf("backup_run start records = %d, want 1 (the backups job reads the process of Kernel.Proc, not Processes.Proc)", starts)
+	}
 }

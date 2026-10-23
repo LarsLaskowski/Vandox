@@ -35,6 +35,20 @@ public sealed class OomKill
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public short? OomScoreAdj { get; set; }
 
+    /// <summary>
+    /// Gets or sets the ID of the boot the kill happened in, empty when absent.
+    /// </summary>
+    [JsonPropertyName("boot_id")]
+    [OmitWhenEmpty]
+    public string BootId { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the kernel clock reading of the kill in nanoseconds.
+    /// </summary>
+    [JsonPropertyName("kernel_time_ns")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public long? KernelTimeNs { get; set; }
+
     #endregion // Properties
 
     #region Methods
@@ -50,7 +64,16 @@ public sealed class OomKill
             return Check.Invalid("oom_kill.victim_pid", "must be greater than 0");
         }
 
-        return Check.RequiredShort("oom_kill.victim_command", VictimCommand) ?? Check.OomScoreAdj("oom_kill.oom_score_adj", OomScoreAdj);
+        var error = Check.RequiredShort("oom_kill.victim_command", VictimCommand)
+                        ?? Check.OomScoreAdj("oom_kill.oom_score_adj", OomScoreAdj)
+                        ?? Check.OptionalUuid("oom_kill.boot_id", BootId);
+
+        if (error is not null)
+        {
+            return error;
+        }
+
+        return KernelTimeNs < 0 ? Check.Invalid("oom_kill.kernel_time_ns", "must not be negative") : null;
     }
 
     #endregion // Methods

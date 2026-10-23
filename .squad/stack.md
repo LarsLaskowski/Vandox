@@ -32,7 +32,7 @@ Cloud session notes (found when a cloud image lacked the .NET SDK):
 
 ## Layout
 
-- Go (agent): `cmd/vandox-agent`, `internal/` (model, wire, config, cli, version, agent, scheduler, selfstats, sdnotify, sysstats, procstats, connstats, sockmount, sdbus, svcstats); tests colocated as
+- Go (agent): `cmd/vandox-agent`, `internal/` (model, wire, config, cli, version, agent, scheduler, selfstats, sdnotify, sysstats, procstats, connstats, sockmount, sdbus, svcstats, journal (with `journaltest`), kernevents, agentstate, backups); tests colocated as
   `foo_test.go` next to `foo.go`.
 - .NET (backend): `src/Vandox.Core` (model, wire decoder, configuration, safe file access, log parsing, log signatures, log templates),
   `src/Vandox.Storage`, `src/Vandox.Import`, `src/Vandox.Backend` (host, CLI, Blazor; assembly `vandoxd`).
@@ -129,6 +129,10 @@ skips literals passed to a call unless `ignore-calls: false`, missed `"invalid v
 concatenations) even then, and with `ignore-calls: false` reports about forty package-wide duplicates on `main`
 that the `--whole-files` gate would raise in any change to those files. The string-literal rule under *Writing
 code* stands in for it.
+For Go, `go:S1871` (the branches of one conditional have the same implementation) and `godre:S8242` (a
+`context.Context` stored in a struct field) are scanner-only too: `gocritic`'s `dupBranchBody` and `containedctx` are
+not enabled. Avoid the first by merging the branches under one condition, and the second by passing the context as a
+parameter to the methods that need it.
 
 Own browser scripts (`src/Vandox.Backend/wwwroot/js/*.js`, no Node build) have no local analyzer: SonarQube
 Cloud's JavaScript rules report on them first in the *Sonar gate* below, so write them to those rules from the start. The

@@ -44,6 +44,7 @@ const (
 	KindKernelEvent        Kind = "kernel_event"
 	KindLogLine            Kind = "log_line"
 	KindGap                Kind = "gap"
+	KindBackupRun          Kind = "backup_run"
 )
 
 // Origin tells who produced a record.

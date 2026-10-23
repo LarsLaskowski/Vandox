@@ -47,5 +47,10 @@ public static class RecordKind
     /// </summary>
     public const string Gap = "gap";
 
+    /// <summary>
+    /// The start or the end of a backup run.
+    /// </summary>
+    public const string BackupRun = "backup_run";
+
     #endregion // Constants
 }

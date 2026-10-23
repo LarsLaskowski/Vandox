@@ -9,8 +9,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/LarsLaskowski/Vandox/internal/agentstate"
+	"github.com/LarsLaskowski/Vandox/internal/backups"
 	"github.com/LarsLaskowski/Vandox/internal/config"
 	"github.com/LarsLaskowski/Vandox/internal/connstats"
+	"github.com/LarsLaskowski/Vandox/internal/kernevents"
 	"github.com/LarsLaskowski/Vandox/internal/mariadb"
 	"github.com/LarsLaskowski/Vandox/internal/procstats"
 	"github.com/LarsLaskowski/Vandox/internal/scheduler"
@@ -67,6 +70,16 @@ const (
 	MariaDBTimeout          = 5 * time.Second
 )
 
+// Schedules of the kernel event, backup and state collectors.
+const (
+	KernelInterval  = 2 * time.Second
+	KernelTimeout   = 2 * time.Second
+	BackupsInterval = 10 * time.Second
+	BackupsTimeout  = 5 * time.Second
+	StateInterval   = 10 * time.Second
+	StateTimeout    = 5 * time.Second
+)
+
 // Options are the process boundaries Run works with.
 type Options struct {
 	ConfigPath string            // the configuration file
@@ -82,6 +95,10 @@ type Options struct {
 	Services svcstats.Sources
 	// MariaDB are the MariaDB sources; zero fields take their defaults.
 	MariaDB mariadb.Sources
+	// Kernel are the kernel event sources; zero fields take their defaults.
+	Kernel kernevents.Sources
+	// StateDir is the directory of the agent's state file; "" takes spool.directory.
+	StateDir string
 }
 
 // Run runs the agent until ctx is done and returns the exit code: 0 after a clean stop, 1 when it cannot start.
@@ -127,8 +144,9 @@ func Run(ctx context.Context, opts Options) int {
 }
 
 // jobs returns the collectors with their schedules: self, system, processes, connections, systemd (only when a service unit is
-// configured), filesystem (only when a mount point is configured) and clock, and the system collector, which newScheduler connects to the scheduler. The collectors log
-// through log.
+// configured), mariadb (only when enabled), filesystem (only when a mount point is configured), clock, kernel, backups (only
+// when backups.processes has rules) and state, and the system collector, which newScheduler connects to the scheduler. The
+// agent's state file is opened in opts.StateDir or else spool.directory. The collectors log through log.
 func jobs(opts Options, cfg *config.Agent, log *slog.Logger) ([]scheduler.Job, *sysstats.System) {
 	system := sysstats.NewSystem(opts.System, log)
 	systemdSchedule := scheduler.Schedule{Interval: SystemdInterval, Timeout: SystemdTimeout, PressureInterval: SystemdPressureInterval}
@@ -168,10 +186,43 @@ func jobs(opts Options, cfg *config.Agent, log *slog.Logger) ([]scheduler.Job, *
 			Schedule:  scheduler.Schedule{Interval: FilesystemInterval, Timeout: FilesystemTimeout},
 		})
 	}
-	return append(list, scheduler.Job{
+	list = append(list, scheduler.Job{
 		Collector: sysstats.NewClock(opts.System),
 		Schedule:  scheduler.Schedule{Interval: ClockInterval, Timeout: ClockTimeout},
+	})
+
+	stateDir := opts.StateDir
+	if stateDir == "" {
+		stateDir = cfg.Spool.Directory
+	}
+	store, _ := agentstate.Open(stateDir, log)
+	proc := opts.Kernel.Proc
+	if proc == nil {
+		proc = os.DirFS("/proc")
+	}
+	list = append(list, scheduler.Job{
+		Collector: kernevents.New(opts.Kernel, store, log),
+		Schedule:  scheduler.Schedule{Interval: KernelInterval, Timeout: KernelTimeout},
+	})
+	if len(cfg.Backups.Processes) > 0 {
+		list = append(list, scheduler.Job{
+			Collector: backups.New(proc, backupRules(cfg.Backups.Processes), store, log),
+			Schedule:  scheduler.Schedule{Interval: BackupsInterval, Timeout: BackupsTimeout},
+		})
+	}
+	return append(list, scheduler.Job{
+		Collector: agentstate.NewSaver(store, proc),
+		Schedule:  scheduler.Schedule{Interval: StateInterval, Timeout: StateTimeout},
 	}), system
+}
+
+// backupRules converts the configured backup rules for the backup collector.
+func backupRules(rules []config.BackupRule) []backups.Rule {
+	out := make([]backups.Rule, 0, len(rules))
+	for _, r := range rules {
+		out = append(out, backups.Rule{Command: r.Command, CmdlinePrefix: r.CmdlinePrefix})
+	}
+	return out
 }
 
 // programRules converts the configured program rules for the process collector.
@@ -189,7 +240,7 @@ func programRules(rules []config.ProgramRule) []procstats.Rule {
 }
 
 // newScheduler returns the scheduler with the jobs of the configuration; the system collector switches its memory
-// pressure mode.
+// pressure mode and the kernel collector requests the extra runs of the processes and connections collectors.
 func newScheduler(opts Options, cfg *config.Agent, log *slog.Logger) (*scheduler.Scheduler, error) {
 	var sink scheduler.Putter = scheduler.DiscardSink{}
 	if opts.Sink != nil {
@@ -201,6 +252,11 @@ func newScheduler(opts Options, cfg *config.Agent, log *slog.Logger) (*scheduler
 		return nil, err
 	}
 	system.SetPressureSwitch(sched.SetPressure)
+	for _, j := range list {
+		if k, ok := j.Collector.(*kernevents.Kernel); ok {
+			k.SetTrigger(sched.Trigger)
+		}
+	}
 	return sched, nil
 }
 

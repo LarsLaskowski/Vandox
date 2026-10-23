@@ -164,7 +164,20 @@ snapshot), `ppid` (>= 0), `user` (short text), `command` (required short text), 
 (command or cmdline cut by the source), `state` (empty or one ASCII letter), `started_at` (optional),
 `cpu_percent`, `rss_bytes`, `pss_bytes`, `swap_bytes` (optional), `oom_score_adj` (optional, -1000 to 1000).
 A program: `program` (required short text, unique), `count` (>= 1), `cpu_percent`, `rss_bytes`, `pss_bytes`
-(optional), `rss_overcounted` (the RSS sum counts shared pages once per process).
+(optional), `rss_overcounted` (the RSS sum counts shared pages once per process). `trigger` (optional, since format 1.1): the
+kills the snapshot was taken for (*Snapshot trigger*).
+
+### Snapshot trigger
+
+`process_snapshot` and `connection_snapshot` carry an optional `trigger` when the producer took the snapshot because of OOM kills:
+`{"kills":[{"boot_id":…,"kernel_time_ns":…,"victim_pid":…}],"kills_omitted":n}`. `kills` holds 1 to 64 distinct kills, each by the
+identity of its `kernel_event` (*`kernel_event`*): `boot_id` (lower-case UUID), `kernel_time_ns` (>= 0) and `victim_pid` (> 0);
+`kills_omitted` (optional, omitted when 0) counts the further kills the snapshot was taken for but does not name. Field errors, in Go
+and C#: `data.trigger.kills`: `at least one kill required` and `too many entries`; `data.trigger.kills[<i>]`: `duplicate kill`;
+`data.trigger.kills[<i>].boot_id`: the UUID rule; `.kernel_time_ns`: `must not be negative`; `.victim_pid`: `must be greater than
+0`. A snapshot without `trigger` is a scheduled one. Producer: the agent's `processes` and `connections` collectors, in the extra run
+the `kernel` collector requests for live kills ([Agent](agent.md), *Kernel events*); such a snapshot lists every process, or every
+connection.
 
 ### `connection_snapshot`
 
@@ -206,6 +219,9 @@ snapshot`; `data.listener_check`: one of `all`, `privileged`, `none`, `start`, a
 A JSON `null` of `listener_check` or `inventory` reads as absent (0089), and a `null` element of `tables` reads as an empty protocol that fails
 the one-of rule; the Go encoder never writes an empty `listener_check`, `inventory` or `tables`.
 
+`trigger` (optional, since format 1.1) names the kills a snapshot was taken for (*Snapshot trigger*); the producer's snapshot with a
+`trigger` is a full one.
+
 ### `service_state`
 
 `unit` (required, `^[A-Za-z0-9:_.@\-]+$`, at most 256 bytes), `load_state` (`loaded not-found bad-setting
@@ -246,9 +262,31 @@ encoded (*Producer size contract*).
 ### `kernel_event`
 
 `type` is `oom_kill` or `boot`; exactly the matching sub-object is set. `oom_kill`: `victim_pid` (> 0),
-`victim_command` (required short text), `anon_rss_bytes` (optional), `oom_score_adj` (optional, -1000 to 1000).
-`boot`: `boot_id` (required lower-case UUID), `previous_boot_id` (optional UUID), `booted_at` (optional),
-`previous_uptime_ns` (optional, >= 0). `message` is text.
+`victim_command` (required short text), `anon_rss_bytes` (optional), `oom_score_adj` (optional, -1000 to 1000), and since format
+1.1 `boot_id` (optional lower-case UUID, field `data.oom_kill.boot_id`) and `kernel_time_ns` (optional, >= 0, field
+`data.oom_kill.kernel_time_ns`: `must not be negative`). `boot`: `boot_id` (required lower-case UUID), `previous_boot_id` (optional
+UUID), `booted_at` (optional), `previous_uptime_ns` (optional, >= 0). `message` is text.
+
+Producer: the agent's `kernel` collector ([Agent](agent.md), *Kernel events*, *Boots*) writes it with source `kernel`. An `oom_kill`
+carries the boot ID of the kill's journal entry and the kernel's clock reading of the kill in nanoseconds; with `victim_pid` they are
+the kill's identity, the same in every reading of the kill and different for any two kills, and a `trigger` names a kill by them
+(*Snapshot trigger*). Its `captured_at` is the moment the kernel wrote the line, `message` the kill line. A `boot` is captured at
+`booted_at` (at the agent's run start when the boot time is unknown).
+
+### `backup_run`
+
+Since format 1.1. The start or the end of a backup run: `phase` (`start` or `end`), `boot_id` (required lower-case UUID, the boot the
+run started in) and `started_at` (required, the start of the run; it pairs an end with its start). A `start` also has `pid` (> 0) and
+`command` (required short text) of the earliest matching process and `processes` (>= 1), the number of matching processes; a producer
+sets `captured_at` to `started_at`. An `end` also has `last_seen_at` (required, not before `started_at`), `gone_by` (required, not
+before `last_seen_at`; the real end lies between the two) and `max_processes` (>= 1); a producer sets `captured_at` to `last_seen_at`.
+A field of the other phase is refused. Field errors, in Go and C#: `data.phase`: `unknown value`; `data.last_seen_at`,
+`data.gone_by`, `data.max_processes`: `not allowed for phase start`; `data.pid`, `data.command`, `data.processes`: `not allowed for
+phase end`; `data.last_seen_at`: `must not be before started_at`; `data.gone_by`: `must not be before last_seen_at`; `data.pid`: `must
+be greater than 0`; `data.processes`, `data.max_processes`: `must be at least 1`; and the rules for UUIDs, required texts and times.
+
+Producer: the agent's `backups` collector ([Agent](agent.md), *Backup runs*), source `backups`. Storage keeps it as a JSON payload
+like the other kinds besides metrics and log lines ([Storage](storage.md)).
 
 ### `log_line`
 
@@ -313,7 +351,7 @@ about 8 MiB). A producer therefore calls `wire.CheckRecord` when it creates a re
 spool. It validates the record, requires origin `agent` and returns the bytes the record adds to the
 decompressed batch, or a `*wire.RecordSizeError` (`wire.ErrRecordTooLarge`, wrapping `ErrLimitExceeded`). On
 that error the producer shortens `cmdline` / `info` and sets `truncated`, then leaves out entries and sets
-`complete` to false. `metric`, `service_state`, `kernel_event`, `log_line` and `gap` always fit: at maximum
+`complete` to false. `metric`, `service_state`, `kernel_event`, `backup_run`, `log_line` and `gap` always fit: at maximum
 field sizes with every byte escaped as `\uXXXX` the largest, a metric with 32 labels, stays near 200 KiB.
 `EncodeBatch` reports the same error with the record's index and writes nothing.
 
@@ -332,8 +370,10 @@ if the rest of that header has an incompatible shape. A header that is not a JSO
 a JSON integer, is `wire.ErrMalformed`: the major is an integer in every version (0043). A minor change is additive: new optional fields and new kinds; a decoder ignores unknown
 keys at any depth and so accepts a newer minor of its major. The current version is **1.1**: 1.1 added the optional fields of
 `connection_snapshot` (`aggregates_only`, `aggregates_incomplete`, `listener_check` with the value `start`, `new_listeners`,
-`new_listeners_omitted`, `inventory`, `tables`; records 0115 and 0116) and the optional field `error_code` of `mariadb_status` (record
-0118); the format is unreleased, so the fields extend 1.1 in place;
+`new_listeners_omitted`, `inventory`, `tables`; records 0115 and 0116), the optional field `error_code` of `mariadb_status` (record
+0118), the optional fields `boot_id` and `kernel_time_ns` of `kernel_event`'s `oom_kill`, the optional `trigger` of `process_snapshot`
+and `connection_snapshot`, and the kind `backup_run` (record 0120); the format is unreleased, so the fields and the kind extend 1.1 in
+place, and both decoders accept the new kind in the same change (a decoder without it would refuse the batch);
 1.0 was released with v0.1.0. An unknown record kind is rejected. Until the
 upgrade rules are settled (#85), upgrade the backend before the agents.
 
@@ -450,6 +490,8 @@ Decompressed content of a batch of three records (the real stream is gzip-compre
 - [0114](../decisions/0114-model-text-limits-measured-after-the-encoders-replacement.md) — why the Go model measures limits as the encoder writes them, invalid UTF-8 counted as its replacement.
 - [0118](../decisions/0118-mariadb-collector-hand-written-client-captured-statements-refusals-as-not-answering-with-error-code.md) — why a
   refused login is `not_answering` with the optional `error_code` instead of a gap or a new availability.
+- [0120](../decisions/0120-oom-kill-events-triggered-snapshots-boots-from-saved-state-and-backup-runs.md) — why a kill carries its own
+  identity, a snapshot names the kills it was taken for, and a backup run is a kind of its own.
 
 ## Not here
 

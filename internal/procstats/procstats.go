@@ -122,10 +122,13 @@ func (c *Processes) Collect(ctx context.Context, run scheduler.Run) ([]model.Rec
 	sortProcesses(samples, allHavePSS(samples))
 	sortPrograms(progs, allProgramsHavePSS(progs))
 	listed := samples
-	if !run.Pressure {
+	if !run.Pressure && run.Trigger == nil {
 		listed = selectTop(samples)
 	}
 	snap, refused, complete := fill(listed, progs, payloadBudget)
+	if run.Trigger != nil {
+		snap.Trigger = &model.SnapshotTrigger{Kills: slices.Clone(run.Trigger.Kills), KillsOmitted: run.Trigger.KillsOmitted}
+	}
 	res.unread += refused
 	if refused > 0 && res.firstErr == nil {
 		res.firstErr = errEntryRefused

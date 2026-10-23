@@ -517,6 +517,85 @@ public class SqliteStoreQueryTests
     }
 
     /// <summary>
+    /// The start and the end of a backup run are stored as JSON documents and read back by their kind and source.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task SqliteStoreQueryRecordsAcceptsBackupRun()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+        const string bootId = "0123abcd-0123-0123-0123-0123456789ab";
+        var started = Samples.Base.AddMinutes(5);
+        var lastSeen = started.AddMinutes(20);
+        var start = new DataRecord
+                    {
+                        Origin = RecordOrigin.Backend,
+                        Source = "backups",
+                        CapturedAt = started,
+                        Data = new BackupRun
+                               {
+                                   Phase = "start",
+                                   BootId = bootId,
+                                   StartedAt = started,
+                                   Pid = 5150,
+                                   Command = "pzstd",
+                                   Processes = 3
+                               }
+                    };
+        var end = new DataRecord
+                  {
+                      Origin = RecordOrigin.Backend,
+                      Source = "backups",
+                      CapturedAt = lastSeen,
+                      Data = new BackupRun
+                             {
+                                 Phase = "end",
+                                 BootId = bootId,
+                                 StartedAt = started,
+                                 LastSeenAt = lastSeen,
+                                 GoneBy = lastSeen.AddSeconds(10),
+                                 MaxProcesses = 4
+                             }
+                  };
+
+        await store.WriteBatchAsync(Samples.Batch(end, start, Samples.Metric(RecordOrigin.Backend, 0, 10, "cpu")), TestContext.CancellationToken);
+
+        var query = Samples.Query(RecordKind.BackupRun);
+
+        // Act
+        var rows = await store.RecordsAsync(query, TestContext.CancellationToken);
+
+        query.Source = "other";
+
+        var otherSource = await store.RecordsAsync(query, TestContext.CancellationToken);
+        var metrics = await store.RecordsAsync(Samples.Query(RecordKind.Metric), TestContext.CancellationToken);
+
+        // Assert
+        Assert.HasCount(2, rows, "the start and the end");
+        Assert.AreEqual(RecordKind.BackupRun, rows[0].Record.Data!.Kind, "kind of the first row");
+        Assert.AreEqual(started, rows[0].Record.CapturedAt, "ordered by capture time: the start first");
+
+        var readStart = (BackupRun)rows[0].Record.Data!;
+        var readEnd = (BackupRun)rows[1].Record.Data!;
+
+        Assert.AreEqual("start", readStart.Phase, "start: phase");
+        Assert.AreEqual(bootId, readStart.BootId, "start: boot_id");
+        Assert.AreEqual(5150, readStart.Pid, "start: pid");
+        Assert.AreEqual("pzstd", readStart.Command, "start: command");
+        Assert.AreEqual(3u, readStart.Processes, "start: processes");
+        Assert.AreEqual(started, readStart.StartedAt, "start: started_at");
+        Assert.AreEqual("end", readEnd.Phase, "end: phase");
+        Assert.AreEqual(started, readEnd.StartedAt, "end: started_at");
+        Assert.AreEqual(lastSeen, readEnd.LastSeenAt, "end: last_seen_at");
+        Assert.AreEqual(lastSeen.AddSeconds(10), readEnd.GoneBy, "end: gone_by");
+        Assert.AreEqual(4u, readEnd.MaxProcesses, "end: max_processes");
+        Assert.IsEmpty(otherSource, "no backup run of another source");
+        Assert.HasCount(1, metrics, "the metric is not a backup run");
+    }
+
+    /// <summary>
     /// A stored payload that is SQL NULL or the JSON text null is refused with the no-data message.
     /// </summary>
     /// <returns>A task that completes when the test is done</returns>

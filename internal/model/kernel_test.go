@@ -1,6 +1,8 @@
 package model_test
 
 import (
+	"encoding/json"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -98,4 +100,92 @@ func TestKernelEvent_Validate_InvalidBoot(t *testing.T) {
 		{"previous_uptime negative", func(p *model.KernelEvent) { p.Boot.PreviousUptime = ptr(-time.Second) }, "boot.previous_uptime_ns"},
 	}
 	runInvalid(t, validBootEvent, cases)
+}
+
+// oomKillEventFromJSON builds an OOM kill event with the identity fields from JSON, so that the test compiles whether or not
+// the struct already has them; a build without the fields drops them and the identity tests fail on the missing behavior.
+func oomKillEventFromJSON(t *testing.T, bootID string, kernelTimeNs string) *model.KernelEvent {
+	t.Helper()
+	fields := ""
+	if bootID != "" {
+		fields += `,"boot_id":` + strconv.Quote(bootID)
+	}
+	if kernelTimeNs != "" {
+		fields += `,"kernel_time_ns":` + kernelTimeNs
+	}
+	raw := `{"type":"oom_kill","oom_kill":{"victim_pid":4242,"victim_command":"mysqld"` + fields + `},"message":"Out of memory"}`
+	var e model.KernelEvent
+	if err := json.Unmarshal([]byte(raw), &e); err != nil {
+		t.Fatalf("test setup: json.Unmarshal(%s) = %v, want nil", raw, err)
+	}
+	return &e
+}
+
+func TestKernelEvent_Validate_KillIdentity(t *testing.T) {
+	t.Run("valid", func(t *testing.T) {
+		for name, e := range map[string]*model.KernelEvent{
+			"boot_id and kernel_time_ns": oomKillEventFromJSON(t, bootIDA, "123456789"),
+			"kernel_time_ns zero":        oomKillEventFromJSON(t, bootIDA, "0"),
+			"no identity":                oomKillEventFromJSON(t, "", ""),
+		} {
+			t.Run(name, func(t *testing.T) { requireValid(t, e) })
+		}
+	})
+
+	invalid := []struct {
+		name   string
+		event  *model.KernelEvent
+		field  string
+		reason string
+	}{
+		{"boot_id malformed", oomKillEventFromJSON(t, "not-a-uuid", "5"), "oom_kill.boot_id", "invalid characters"},
+		{"boot_id upper case", oomKillEventFromJSON(t, strings.ToUpper(bootIDA), "5"), "oom_kill.boot_id", "invalid characters"},
+		{"boot_id with trailing newline", oomKillEventFromJSON(t, bootIDA[:35]+"\n", "5"), "oom_kill.boot_id", "invalid characters"},
+		{"boot_id 37 bytes", oomKillEventFromJSON(t, bootIDA+"c", "5"), "oom_kill.boot_id", "too long"},
+		{"boot_id 37 bytes with trailing newline", oomKillEventFromJSON(t, bootIDA+"\n", "5"), "oom_kill.boot_id", "too long"},
+		{"kernel_time_ns negative", oomKillEventFromJSON(t, bootIDA, "-1"), "oom_kill.kernel_time_ns", "must not be negative"},
+	}
+	for _, tc := range invalid {
+		t.Run("invalid/"+tc.name, func(t *testing.T) {
+			fe := fieldErrorOf(t, tc.event.Validate(), tc.field)
+			if fe.Reason != tc.reason {
+				t.Errorf("Validate() reason = %q, want %q", fe.Reason, tc.reason)
+			}
+		})
+	}
+}
+
+// marshalEvent encodes e as JSON text.
+func marshalEvent(t *testing.T, e *model.KernelEvent) string {
+	t.Helper()
+	out, err := json.Marshal(e)
+	if err != nil {
+		t.Fatalf("json.Marshal() = %v, want nil", err)
+	}
+	return string(out)
+}
+
+func TestKernelEvent_OOMKillIdentityIsWrittenWithAZeroKernelTime(t *testing.T) {
+	out := marshalEvent(t, oomKillEventFromJSON(t, bootIDA, "0"))
+	for _, want := range []string{`"boot_id":"` + bootIDA + `"`, `"kernel_time_ns":0`} {
+		if !strings.Contains(out, want) {
+			t.Errorf("json.Marshal() = %s, want it to contain %s", out, want)
+		}
+	}
+}
+
+func TestKernelEvent_OOMKillWithoutIdentityOmitsIt(t *testing.T) {
+	out := marshalEvent(t, oomKillEventFromJSON(t, "", ""))
+	for _, absent := range []string{"boot_id", "kernel_time_ns"} {
+		if strings.Contains(out, absent) {
+			t.Errorf("json.Marshal() = %s, want %s omitted", out, absent)
+		}
+	}
+}
+
+func TestKernelEvent_OOMKillKernelTimeKeepsAllDigits(t *testing.T) {
+	out := marshalEvent(t, oomKillEventFromJSON(t, bootIDB, "1718000000123456789"))
+	if !strings.Contains(out, `"kernel_time_ns":1718000000123456789`) {
+		t.Errorf("json.Marshal() = %s, want kernel_time_ns 1718000000123456789", out)
+	}
 }
