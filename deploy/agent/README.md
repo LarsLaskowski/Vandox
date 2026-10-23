@@ -57,7 +57,7 @@ the ptrace-checked `/proc` files whose mode allows reading (`maps`, `smaps_rollu
   `user-<UID>@*.journal`, `user-<UID>@*.journal~`) below `/var/log/journal/<machine-id>`, else `/run/log/journal/<machine-id>`, are read with the
   group `systemd-journal`; journald's default `SplitMode=uid` puts the entries of users with a UID of 1000 or more (on Plesk the web-space
   users) into the user files. The agent reads the machine ID from `/etc/machine-id` and decodes zstd-compressed items itself (no `journalctl`).
-- **Configured files.** Each file of `log_shipping.files` is read with the group `adm` (or as another user may read it); a file that is
+- **Configured files.** Each file of `log_shipping.files` is read with the group `adm`, or because its mode lets any user read it; a file that is
   readable by neither, or below a directory the agent has no search right on, is logged `log file not readable` with the reason
   `permission denied` and not shipped, because `CAP_DAC_READ_SEARCH` is not granted (record 0122). The path is walked from `/` without following a link; the directory of a rotated file is reached the same way when the
   agent looks for it after a rotation that happened while it was stopped (`<name>.1` and `<name>-YYYYMMDD`).
