@@ -1040,7 +1040,9 @@ journal and of the files `log_shipping.files` names as `log_line` records ([wire
 (source and collector `logs`, cause `unknown`) for every span of lines it cannot ship. It reads the journal files itself with the
 reader of *Kernel events*, decodes zstd-compressed items with a bounded decoder of its own, and starts no program. Its options are in
 [Configuration and secrets](configuration-and-secrets.md) (`log_shipping`): with `log_shipping.journal: false` it reads no journal
-and drops its journal positions; without configured files it reads no file and no time zone.
+and drops its journal positions; without configured files it reads no file and no time zone. The collector always runs: when it
+cannot be built from the checked options, the agent does not start (`agent cannot start` with the error, exit code 1) rather than run
+without it.
 
 **The journal.** The machine ID and the directory are found as for the kernel collector (*Kernel events*, *Where it reads*):
 `/var/log/journal/<machine-id>`, else `/run/log/journal/<machine-id>`, the first that can be listed. Of its regular files the system
@@ -1053,7 +1055,8 @@ so every entry of every transport is seen.
 
 **Journal entries.** Of each entry the items `MESSAGE`, `PRIORITY`, `_HOSTNAME`, `SYSLOG_IDENTIFIER`, `_COMM`, `_PID` and `SYSLOG_PID`
 are read, each value up to 16,384 bytes (a longer value is cut without reading the rest); of every other item only the first 64
-bytes, to see its name. At most 16 of the seven read items are kept per entry. The mapping is the import's journal mapping
+bytes, to see its name. Of each read name only the first item is kept (a later item of that name is passed over, a plain one
+without reading its value), so an entry keeps at most seven items however often its writer repeats a name. The mapping is the import's journal mapping
 ([Log import](log-import.md), *Journal export*) before its mail, MariaDB and kernel report stages: the capture time from
 `__REALTIME_TIMESTAMP`, `host` from `_HOSTNAME`, `program` from `SYSLOG_IDENTIFIER` (else `_COMM` when it is absent or empty), `pid`
 from `_PID`, else `SYSLOG_PID` (1 to 10 digits, 1 to 2,147,483,647, else 0), `priority` from `PRIORITY` when it is one digit 0 to 7,
@@ -1113,7 +1116,10 @@ the message and 512 for the header) are kept and the rest is read past without b
 mark at offset 0 is removed and an empty line is not shipped. A last line without a line feed is **held**, at most 16,896 bytes in the
 collector's memory, until its line feed arrives; the saved offset is the start of that line, so after a restart it is read again
 from its start. A held line is shipped as it is when its file is truncated or when its renamed file is finished (below). A run that
-stops in the middle of a file drops what it read after the last line it handed over, and the next run reads that again.
+stops at its record or text budget drops what it read after the last line it handed over, and the next run reads that again; a run
+that stops on its time or its deadline in the middle of a line keeps the offset it read up to and the held start of the line, and the
+next run reads on from there. So a line of any length is read to its end over as many runs as it takes, at least one 64 KiB chunk per
+run that reaches the file, and never holds back the lines after it; after a restart such a line is read again from its start.
 
 **Syslog lines.** The line rules are the import's syslog rules ([Log import](log-import.md), *Syslog*), ported to Go: an optional
 `<PRI>` (priority PRI modulo 8), a traditional or RFC 3339 time, `HOST` (1 to 255 bytes), a tag `PROGRAM[PID]:` or `PROGRAM:` (the
@@ -1138,7 +1144,11 @@ the file was rotated: the kept descriptor becomes the **renamed** file and the n
 renamed file from its offset to its end first and ships those lines before the new file's. The renamed file is finished — its rest
 read, its held line shipped as it is, its descriptor closed — in the run in which the new file has data and the renamed file's size
 did not change since the previous run: the writer has moved (rsyslog reopens its files only at the `HUP` after all renames). An append
-to it after that is never read. A rotation while a renamed file is still read finishes that file first. The renamed file's device,
+to it after that is never read. A rotation while a renamed file is still read finishes that file first: the run reads the renamed file
+to its end and ships its held line; when the run stops before that (its budget, its time), the new file at the path is not taken in
+that run, and the next runs go on with the renamed file until it is finished, then with the newer ones. While the renamed file cannot be
+read (a read error), the run reads nothing else of that configured file, so its lines are never shipped after the newer file's. The
+renamed file's device,
 inode, offset and last seen size are saved with the file's position, so it survives a restart.
 
 **Rotation while the agent was stopped.** After a restart the collector has no descriptor. A saved renamed file, and the saved file
@@ -1216,7 +1226,8 @@ truncation, a refused record and a given-up span above, gaps are recorded for:
   that stops at the same file, ID and sequence number gives the file up. Giving up records one gap from the last entry read from the
   file (else the position's time, else the run's start) to the file's tail time (the online file's header read again first; without a
   tail time, to the run's start), moves the position to the file's tail and goes on with the next file of the ID or the entries
-  journald appends later. A cut-off end of an archived or set-aside file ends it the same way.
+  journald appends later. A cut-off end of an archived or set-aside file ends it the same way, also when its tail time is that of the
+  last entry read (the gap then covers 1 µs and marks the cut-off end); a damaged file given up at its tail entry gets the same 1 µs gap.
 
 No gap is recorded while a source cannot be read and its position stays, because its lines are still there: no machine ID, no journal
 directory, a directory that cannot be listed, a journal file that cannot be opened or read for another reason (the run stops reading
@@ -1236,8 +1247,9 @@ agent's own entries in the journal, which it ships like any other, cause no loop
 | info `time zone readable again` | — | the first run that loads it after that |
 
 A `read failed` is also logged for a read error on an open file, the kept current or renamed one; the lines before the error are
-shipped and the position stays at the last whole line. A read error of the renamed file does not stop the reading of the current file
-in that run.
+shipped and the position stays at the last whole line. A read error of the renamed file stops the reading of that configured file for
+the run, the current file included, so the order of its lines is kept; the next run tries again (after a restart the renamed file is
+opened anew by its identity).
 
 **Memory.** The collector holds at most 24 MiB live, independent of the size of the journal, of the files, of the backlog, of an entry
 and of a line: the records of one run (at most 4 MiB of text, the crossing record and the fixed part of at most 1,000 records), the
@@ -1263,11 +1275,8 @@ test and the C# import's test both read.
 - Any local user can write journal entries with any `SYSLOG_IDENTIFIER`, `PRIORITY` and message (`logger`, the native socket), and a
   service user anything into its own log file; such lines are shipped as written. The trusted journal fields (`_PID`, `_COMM`,
   `_HOSTNAME`) are journald's.
-- An entry with more than 16 items of the seven read names keeps the first 16; when its `MESSAGE` is among the rest, the entry counts as
-  one without `MESSAGE` and is neither shipped nor a gap, where the import would store it. Only the writer of the entry can build it.
-- A line without a line feed that is too long to be read to its end within one run's second (hundreds of MiB) is never shipped: every
-  run stops inside it and reads it again from its start, so the file's later lines are not shipped either, without a gap or a warning.
-  Only the writer of the file can produce it.
+- A renamed file whose reads keep failing holds back the newer lines of its configured file, with the warning `log file not readable`
+  (`read failed`) standing, until it reads again or the agent restarts.
 - A `COMPACT` journal (systemd 252 and later), one without keyed hashes, XZ or LZ4 items and entries with more than four compressed items
   are lost to recorded gaps.
 - The user files of the server's sample were empty: user-journal entries are read like system entries without a real one checked. That

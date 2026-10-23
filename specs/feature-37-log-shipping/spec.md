@@ -61,7 +61,9 @@ What happens today, checked against the code:
   at the `HUP` after all renames), then the agent keeps reading the renamed file in every run until the writer has moved
   (the new file has data and the renamed one did not grow during a whole run), ships each run's lines of the renamed file
   before those of the new file, and then reads only the new file; no line is lost or shipped twice, the renamed file's
-  position survives a restart, and the records keep `log` `/var/log/mail.log`.
+  position survives a restart, and the records keep `log` `/var/log/mail.log`. A second rotation while the renamed file is still
+  read finishes it first, over as many runs as its rest needs, and a run in which the renamed file cannot be read reads nothing
+  else of that configured file (E4), so a newer line never precedes an older one.
 - S6: Given a configured file is truncated in place (logrotate `copytruncate`), when the writer goes on writing, then the
   agent notices the truncation and reads the file again from its start, and records one gap (collector `logs`, cause
   `unknown`) from the capture time of the last line it read from the file, shipped or filtered (else the start of the run that
@@ -109,7 +111,9 @@ What happens today, checked against the code:
   of the line is discarded without reading it into memory. A `host` or `program` longer than 1,024 bytes (a journal
   `_HOSTNAME` or `SYSLOG_IDENTIFIER`, which the sender chooses) is cut to 1,024 bytes at a character boundary with
   `truncated` set, as the import does; lengths count UTF-8 bytes after each invalid byte became U+FFFD, the way the wire
-  check measures them.
+  check measures them. A line of any length is read to its end over as many runs as it takes (a run that stops on its time in
+  the middle of a line goes on there in the next run), so it never holds back the lines after it. A journal entry that repeats a
+  read field any number of times is shipped with the first value of each, as the import reads it.
 - E7: The last line of a file has no line feed yet (the writer is in the middle of it) — it is not shipped until its line
   feed arrives; when the file is truncated, or rotated and the writer has moved (S5), before that, it is shipped as it is.
 - E8: A line or journal field with invalid UTF-8 — each invalid byte becomes U+FFFD, as in the import; control characters
@@ -147,7 +151,8 @@ What happens today, checked against the code:
   than 16 files, a format other than `syslog`, a drop rule without a condition or with a pattern that does not compile, more
   than 64 rules, a pattern over 1,024 bytes or over 400 compiled instructions, patterns over 400 compiled instructions
   together) — the agent does not start; the error names the file, the line and the key with
-  its index and a fixed reason, never the value.
+  its index and a fixed reason, never the value. When the collector cannot be built from the checked options all the same, the
+  agent does not start either (`agent cannot start`, exit code 1); it never runs without the collector.
 - E17: A file is removed from `log_shipping.files` or added to it between two starts — a removed file's position is
   forgotten; an added file that exists starts at its current end (S7), one that does not exist yet is read from its start
   when it appears (S8).
@@ -184,7 +189,8 @@ What happens today, checked against the code:
   rest is given up. Giving up records one gap from the last entry read from the file (else the position's time, else the
   run's start) to the file's tail time, moves the position to the file's tail and goes on after it (the next file of the
   ID, or entries journald appends later); the warning `journal not readable` names the reason, as in E13 and as for the
-  kernel collector.
+  kernel collector. A cut-off end of an archived or set-aside file is given up the same way; when the tail time is that of the
+  last entry read, the gap covers 1 µs (a gap's end is always after its start).
 
 ## Non-functional requirements
 
@@ -243,8 +249,9 @@ What happens today, checked against the code:
   the volatile directory, becomes a `log_line` record whose `log`, `source`, capture time, `host`, `program`, `pid`,
   `priority`, `message` and `truncated` equal what the journal mapping of `docs/areas/log-import.md` produces for the same
   entry, before the mail, MariaDB and kernel report stages — also for an entry whose `MESSAGE` is stored zstd-compressed,
-  one longer than 16,384 bytes and one whose `_HOSTNAME` or `SYSLOG_IDENTIFIER` is longer than 1,024 bytes; an entry with
-  an XZ- or LZ4-compressed item gives the gap of E12 (S1, S9, E6, E8).
+  one longer than 16,384 bytes, one whose `_HOSTNAME` or `SYSLOG_IDENTIFIER` is longer than 1,024 bytes and one that repeats
+  read fields more than 16 times before its `MESSAGE` (the first value of each); an entry with an XZ- or LZ4-compressed item
+  gives the gap of E12 (S1, S9, E6, E8).
 - [ ] AC2: a line of a `syslog` file becomes a `log_line` record with `log` the configured path, `source` `syslog` and the
   header fields of the import's syslog mapping, its year-less time resolved in the server's time zone by the rules of E10;
   a line without a syslog header is shipped raw as E9 says, an empty line not at all; while `/etc/localtime` is not
@@ -259,8 +266,10 @@ What happens today, checked against the code:
   collector interval (10 + 2 seconds) behind the last kept run (E1).
 - [ ] AC6: a rotation by rename while the agent runs ships every line of the renamed file, also those appended after a run
   that already saw the new file, before the new file's lines, each line once, also across a restart while the renamed file is
-  still being read; a rotation while the agent is stopped or the file is unreadable is followed the same way when the renamed
-  file is found under the configured name plus `.1` or `-YYYYMMDD`, and records the gap of E2 when it is not (S5, E2).
+  still being read, also when a second rotation comes while the renamed file's rest needs more than one run, and no line of the
+  new file is shipped in a run in which the renamed file cannot be read; a rotation while the agent is stopped or the file is
+  unreadable is followed the same way when the renamed file is found under the configured name plus `.1` or `-YYYYMMDD`, and
+  records the gap of E2 when it is not (S5, E2, E4).
 - [ ] AC7: a truncation in place is detected, also when the file has grown past the old position again by the next run,
   and reading restarts at the file's start with the one gap of S6 (S6).
 - [ ] AC8: on a first start, with no usable state, the agent ships no line written before it started; a file added to the
@@ -281,18 +290,21 @@ What happens today, checked against the code:
 - [ ] AC10: lines the journal no longer holds at the position, and an unreadable entry, each give the one gap of E3 or E12,
   and an entry without `MESSAGE` gives neither a record nor a gap; a file damaged in its structure is given up with the one
   gap of E23, an archived file at once and an online file at the third run in a row that stops at the damage; a journal
-  file the reader refuses gives the gap of E13 once, also when the run that recorded it was dropped (E3, E12, E13, E23).
+  file the reader refuses gives the gap of E13 once, also when the run that recorded it was dropped; a cut-off end of an
+  archived file gives the gap of E23, of 1 µs when its tail is the last entry read (E3, E12, E13, E23).
 - [ ] AC11: a missing, unreadable or non-regular configured file, a path with a symbolic link in any element, and an
   unreadable journal produce no record and no gap, log one warning per change without the path, keep the position, and
   continue there once readable (E4, E5).
 - [ ] AC12: a partial last line is held back until its line feed arrives and is shipped as it is at a truncation or when
-  the writer has moved after a rotation (E7).
+  the writer has moved after a rotation; a line too long to be read within one run is read on by the next runs, also across a
+  dropped run and a restart, shipped once with `truncated` set, and the lines after it follow (E6, E7).
 - [ ] AC13: a run ends at 1,000 shipped records, at the record that crosses 4 MiB of text or after one second of reading,
   whichever comes first; filtered entries count only against the second, so wanted lines behind a flood of filtered ones
   are shipped in later runs; and the collector stays within 24 MiB live with records at the maximum of every field, a
   journal of 100,000 entries and a file of lines over 16 KiB (E11).
 - [ ] AC14: every invalid `log_shipping` option of E16 stops the agent at start-up with the file, line, key and index and
-  without the value, and the example `deploy/agent/agent.yaml` sets every new option at its default (E16).
+  without the value, a collector that cannot be built stops it with `agent cannot start` without the value, and the example
+  `deploy/agent/agent.yaml` sets every new option at its default (E16).
 - [ ] AC15: the agent's own warnings and info lines of the collector are the fixed texts of E4, E13 and E20 and never
   contain a path, a field value or a message (E4, E13, E18, E20).
 
@@ -405,3 +417,7 @@ What happens today, checked against the code:
 - Minor 6 (units and compressions): accepted. E11 and AC13 now count shipped records for the 1,000 and the 4 MiB, and
   filtered entries only against the second of reading, so a flood of filtered lines delays wanted ones but never stops them.
   S9, E12 and the open question say that only zstd is decoded and that an XZ or LZ4 item makes its entry a gap.
+- Lead decision after the documentation pass (G4): an entry keeps the first value of each read field however often it repeats
+  (E6, AC1); a run that stops on its time inside a line goes on there, so no line blocks its file (E6, AC12); a renamed file is
+  finished across runs before a newer file is taken and a read error of it holds the newer file back (S5, AC6); a collector that
+  cannot be built stops the agent (E16, AC14); the 1 µs gap of a cut-off journal file is stated (E23, AC10).

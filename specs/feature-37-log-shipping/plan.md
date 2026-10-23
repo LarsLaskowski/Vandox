@@ -58,20 +58,20 @@ The criteria are the spec's AC1–AC17 ([spec.md](spec.md)).
 
 | AC | Test(s) | Test file |
 | -- | ------- | --------- |
-| AC1 | `TestJournal_EntriesMapAsTheImportGolden` (the generated fixture files from `live.export`, compressed with real frames, against `testdata/journal/live-records.jsonl`), `TestJournal_ReadsUserFilesAndTheVolatileDirectory`, `TestJournal_CutsLongFieldsWithTruncated`, `TestJournal_XzOrLz4ItemIsAGap`; C#: `JournalExportParserParsesLiveFixtureAsTheGoldenRecords`; `TestEntries_SeekAllFindsTheFirstEntryAfter`, `TestEntries_NextWithDecodesCompressedItems`, `TestEntries_NextWithMarksCutFields`, `TestEntries_MoreThanFourCompressedItemsLeaveTheEntryUndecoded`, `TestEntries_CompressedObjectBeyondTheBoundIsNotRead`, `TestListAllFiles_TakesSystemAndUserFiles`, `TestReal_NextWithDecodesEveryEntry` (skips without `VANDOX_REAL_JOURNAL_DIR`), `TestJournal_PidFallsBackToSyslogPid` (decision 8), `TestEntries_NextWithCountsTheValueOnly` (decision 6) | `internal/logship/journal_test.go`, `tests/Vandox.Core.Tests/JournalExportParserTests.cs`, `internal/journal/entries_test.go`, `internal/journal/dir_test.go`, `internal/journal/real_test.go` |
+| AC1 | `TestJournal_EntriesMapAsTheImportGolden` (the generated fixture files from `live.export`, compressed with real frames, against `testdata/journal/live-records.jsonl`), `TestJournal_ReadsUserFilesAndTheVolatileDirectory`, `TestJournal_CutsLongFieldsWithTruncated`, `TestJournal_XzOrLz4ItemIsAGap`; C#: `JournalExportParserParsesLiveFixtureAsTheGoldenRecords`; `TestEntries_SeekAllFindsTheFirstEntryAfter`, `TestEntries_NextWithDecodesCompressedItems`, `TestEntries_NextWithMarksCutFields`, `TestEntries_MoreThanFourCompressedItemsLeaveTheEntryUndecoded`, `TestEntries_CompressedObjectBeyondTheBoundIsNotRead`, `TestListAllFiles_TakesSystemAndUserFiles`, `TestReal_NextWithDecodesEveryEntry` (skips without `VANDOX_REAL_JOURNAL_DIR`), `TestJournal_PidFallsBackToSyslogPid` (decision 8), `TestEntries_NextWithCountsTheValueOnly` (decision 6), `TestEntries_NextWithKeepsTheFirstItemOfEachName`, `TestJournal_EntryWithRepeatedFieldsIsShippedWithTheFirstValues` (G4 decision 1) | `internal/logship/journal_test.go`, `tests/Vandox.Core.Tests/JournalExportParserTests.cs`, `internal/journal/entries_test.go`, `internal/journal/dir_test.go`, `internal/journal/real_test.go` |
 | AC2 | `TestParse_ReadsTheImportsSyslogForms` (table from `testdata/logs/mail.log`, `kern.log-oom` and the forms of fact 11), `TestParse_LineWithoutHeaderIsRaw` (with the impossible and unstorable header times of decision 5), `TestClock_YearAndDaylightSavingRules`, `TestClock_SetZoneKeepsThePreviousInstant` (step 6), `TestLoadZone_RefusesWhatIsNotAZoneFile`, `TestFiles_HoldsSyslogFilesWhileTheZoneIsUnknown` | `internal/syslogline/syslogline_test.go`, `internal/syslogline/clock_test.go`, `internal/syslogline/zone_test.go`, `internal/logship/files_test.go` |
 | AC3 | `TestFilter_MinPriorityAndDropRules` (table: each condition alone and together, a line without priority) | `internal/logship/filter_test.go` |
 | AC4 | `TestLogs_StopAndStartShipEveryLineOnce` (real files in `t.TempDir()`, a fixture journal, `Kept`, `Store.Flush`, a new collector on the saved state), `TestRun_SavesTheStateWhenItStops`, `TestRunner_TellsTheObserverWhetherARunWasKept`, `TestStore_FlushWaitsForARunningSave`, `TestStore_FlushGivesUpWhenASaveDoesNotEnd` (decision 2, coverage mode) | `internal/logship/logship_test.go`, `internal/agent/agent_test.go`, `internal/scheduler/runner_test.go`, `internal/agentstate/agentstate_test.go` |
 | AC5 | `TestLogs_UncleanEndRepeatsOnlyLinesAfterTheSavedPosition`, `TestSaver_SavesALogPositionWithinTenSeconds` (run starts a few milliseconds early on the 10 s grid) | `internal/logship/logship_test.go`, `internal/agentstate/agentstate_test.go` |
-| AC6 | `TestFiles_RotationByRenameWhileRunning` (a collector run between the rename and the writer's last append to the renamed file), `TestFiles_RenamedFileIsReadUntilTheWriterHasMoved`, `TestFiles_RenamedFileSurvivesARestart`, `TestFiles_RotationSearchChecksTheOpenedFile`, `TestFiles_RotationSearchRefusesALinkInTheDirectoryPath` (after a restart), `TestFiles_RotationWhileStoppedFindsTheRenamedFile` (`.1` and `-YYYYMMDD`), `TestFiles_RotationWithoutTheOldFileIsAGap` | `internal/logship/files_test.go` |
+| AC6 | `TestFiles_RotationByRenameWhileRunning` (a collector run between the rename and the writer's last append to the renamed file), `TestFiles_RenamedFileIsReadUntilTheWriterHasMoved`, `TestFiles_RenamedFileSurvivesARestart`, `TestFiles_RotationSearchChecksTheOpenedFile`, `TestFiles_RotationSearchRefusesALinkInTheDirectoryPath` (after a restart), `TestFiles_RotationWhileStoppedFindsTheRenamedFile` (`.1` and `-YYYYMMDD`), `TestFiles_RotationWithoutTheOldFileIsAGap`, `TestFiles_SecondRotationWithALongRenamedBacklogFinishesItAcrossRuns` (G4 decision 6), `TestFiles_ReadErrorOfTheRenamedFileKeepsTheNewFileWaiting` (extended, G4 decision 3) | `internal/logship/files_test.go` |
 | AC7 | `TestFiles_TruncationRestartsWithOneGap`, `TestFiles_TruncationRefilledPastThePositionIsDetected` | `internal/logship/files_test.go` |
 | AC8 | `TestLogs_FirstStartShipsNothingOlder`, `TestFiles_AddedFileStartsAtItsEnd`, `TestFiles_FileThatAppearsLaterIsReadFromItsStart`, `TestJournal_NewSeqnumIDIsReadFromItsStart` | `internal/logship/logship_test.go`, `internal/logship/files_test.go`, `internal/logship/journal_test.go` |
 | AC9 | `TestLogs_DroppedRunIsReadAgain`, `TestLogs_AbandonedRunNeverMovesAPosition`, `TestFiles_DroppedRunResolvesTheRepeatedHourAlike` (step 6) | `internal/logship/logship_test.go`, `internal/logship/files_test.go` |
 | AC10 | `TestJournal_VacuumedPositionIsOneGap`, `TestJournal_UnreadableEntriesGiveOneGap`, `TestJournal_EntryWithoutMessageIsSkipped`, `TestJournal_DamagedFileIsGivenUpWithOneGap` (decision 3), `TestJournal_RefusedFileIsAGap` (E13, step 6), `TestEntries_NextWithDamagedItemObjectIsUndecoded`, `TestEntries_NextWithDamagedEntryKeepsTheCursor` | `internal/logship/journal_test.go`, `internal/journal/entries_test.go` |
 | AC11 | `TestOpenNoLinks_RefusesALinkInAnyElement`, `TestOpenNoLinks_RefusesNonRegularFiles`, `TestFiles_UnreadableFileKeepsItsPosition`, `TestJournal_UnreadableJournalKeepsThePosition` | `internal/logship/safeopen_test.go`, `internal/logship/files_test.go`, `internal/logship/journal_test.go` |
-| AC12 | `TestFiles_PartialLineWaitsForItsLineFeed`, `TestFiles_PartialLineIsShippedWhenTheWriterHasMoved` | `internal/logship/files_test.go` |
+| AC12 | `TestFiles_PartialLineWaitsForItsLineFeed`, `TestFiles_PartialLineIsShippedWhenTheWriterHasMoved`, `TestFiles_LongLineIsReadOnAcrossRunsAndDoesNotBlockTheFile` (G4 decision 2) | `internal/logship/files_test.go` |
 | AC13 | `TestLogs_RunBudgets` (1,000 records, 4 MiB crossing record, one second with a scripted clock, filtered lines count only against time, filtered entries that need decoding look at the clock at each entry (step 6)), `TestLogs_HeapStaysBounded` (records at every field's maximum, a journal of 100,000 entries, lines over 16 KiB), `TestDecoder_HeapStaysBoundedForTheLargestFrame` (the largest accepted frame, a frame without a stated size whose output passes the bound, a frame whose stated size is too small), `TestDecoder_RefusesFramesNotOfTheServerForm` (no stated size, not single-segment, a dictionary, a stated size over 4 MiB), `TestDecoder_NeverKeepsAGrownBuffer` | `internal/logship/logship_test.go`, `internal/zstdfield/zstdfield_test.go` |
-| AC14 | `TestLoadAgent_LogShippingErrors` (every invalid option of E16; the fact-24 pattern `.{0,1000}` repeated 113 times, 1,017 bytes and 226,002 instructions; the worst-case patterns of fact 25 at the bound: `\pL{0,199}y` and `[a-z]{398}y` (401) refused, `\pL{0,198}y`, `(?i)\pL{0,198}y` (399) and `[a-z]{397}y` (400) accepted; `\pL{0,99}y` and `\pL{0,98}y` (201 + 199) accepted together, `\pL{0,99}y` twice (402) refused with the `log_shipping.drop` reason; a path with U+0000; the error holds file, line, key and index and not the value), `TestLoadAgent_LogShippingDefaults`, `TestLoadAgent_Example` (extended) | `internal/config/logshipping_test.go`, `internal/config/agent_test.go` |
+| AC14 | `TestLoadAgent_LogShippingErrors` (every invalid option of E16; the fact-24 pattern `.{0,1000}` repeated 113 times, 1,017 bytes and 226,002 instructions; the worst-case patterns of fact 25 at the bound: `\pL{0,199}y` and `[a-z]{398}y` (401) refused, `\pL{0,198}y`, `(?i)\pL{0,198}y` (399) and `[a-z]{397}y` (400) accepted; `\pL{0,99}y` and `\pL{0,98}y` (201 + 199) accepted together, `\pL{0,99}y` twice (402) refused with the `log_shipping.drop` reason; a path with U+0000; the error holds file, line, key and index and not the value), `TestLoadAgent_LogShippingDefaults`, `TestLoadAgent_Example` (extended), `TestLogshipConfig_PatternThatDoesNotCompileIsRefusedWithoutQuotingIt` (its third subtest rewritten, G4 decision 4) | `internal/config/logshipping_test.go`, `internal/config/agent_test.go`, `internal/agent/agent_test.go` |
 | AC15 | `TestLogs_LogsHoldNoPathFieldOrMessage` (recording handler: the fixed texts only) | `internal/logship/logship_test.go` |
 | AC16 | `TestRecords_RefusedRecordBecomesAGap` (coverage mode, through the seam of decision 7: the check step fed a record the wire check refuses, a negative `pid`, since the cuts make every mapped record pass), `TestLogs_FourthDroppedRunGivesUpTheSpan` (cases: four sink refusals, four timeouts, mixed) | `internal/logship/records_test.go`, `internal/logship/logship_test.go` |
 | AC17 | `TestDecode_StateWithoutLogPositionsStaysUsable`, `TestEncode_FullLogPositionsFitTheBound` (16 file positions with renamed files, 256 journal positions), `TestDecode_RefusesInvalidLogPositions` | `internal/agentstate/agentstate_test.go` |
@@ -323,6 +323,82 @@ false, a `min_priority`, files, a drop rule with every condition whose pattern m
 `MaxCompressedBytes`, the input buffer growing once); (h) `decodeJournal` refusals in `internal/agentstate`; then the rest
 (`New` errors, `Name`, `statOf`, `openJournal`, `tailTime`).
 
+## Decisions after the documentation (step 6, G4)
+
+The Lead's documentation pass found five disagreements between the code and the spec; one more (6) was found while deciding them.
+The deciding rule is *No data gaps unless explicitly recorded* (`.squad/project.md`); 1, 2 and 6 are hostile local input (security
+area 10). Tests first (task 14d), then the Dev (task 14e), then the Lead's check of the documentation (task 15a).
+
+1. **An entry that repeats read names hides its `MESSAGE` — fixed.** `readItemWith` and `readCompressedItem`
+   (`internal/journal/entries.go:103`, `:154`) count every wanted item against `maxKept` (16), so an entry with 16 items of the seven
+   read names before `MESSAGE` keeps no `MESSAGE` and `journalRecord` (`internal/logship/records.go:139`) drops it without a gap; the
+   import keeps the first value of each name (`JournalExportReader.cs` `KeepBytes`, `ShortFieldKeepBytes`: 0 once the slot is set).
+   Fix: `NextWith` keeps only the first item of each wanted name; a later item of a name already in `e.Fields` is passed over (a plain
+   one before its value is read), neither kept nor counted in `Omitted`. So a `NextWith` entry holds at most `len(want)` fields and
+   parity with the import is exact; `Next` (kernel collector) is unchanged. A gap instead was rejected: the line can be shipped as the
+   import stores it. Spec E6, AC1.
+2. **A line that cannot be read within one run blocks its file — fixed.** `pump` (`internal/logship/files.go:358-361`) rewinds to
+   the line's start on every stop, so a line whose reading needs more than the run's remaining time is read again from its start by
+   every run and the lines after it are never shipped, without a gap or a warning. Fix: a stop at the loop top (`r.stopped` from the
+   time check, or `r.ctx.Err()`) returns without `ls.rewind()`; `ls.read` and the held start (at most `lineKeep`, already in the memory
+   figure) carry into the next run through the fork. The rewind stays only where `splitLines` stops at a record or text budget (there
+   the unread rest of the buffer must be read again). Each run that reaches the file reads at least one 64 KiB chunk, and the source
+   order rotates, so the line ends after finitely many runs; a dropped run re-reads from the committed offset, a restart from the
+   saved line start. A recorded gap instead was rejected: nothing needs to be lost. Spec E6, AC12.
+3. **A read error of the renamed file reorders lines — fixed.** `readRenamed` (`files.go:279-283`) returns on the error and `read`
+   (`:257-268`) goes on with the current file. Fix: `readRenamed` reports success and `read` returns without reading `st.cur` when it
+   failed; the warning `read failed` is logged as today and the position stays (E4). Residual, stated in the Agent area: a renamed
+   file whose reads keep failing holds the newer lines back until it reads again or the agent restarts (after a restart it is opened
+   anew by its identity). Giving it up with a gap was rejected: a transient error would lose lines the file still holds. Spec S5, AC6.
+4. **A collector that cannot be built leaves the agent running without it — the code changes.** `jobs`
+   (`internal/agent/agent.go:220-227`) logs `log shipping cannot start` and builds the other jobs, so every log line would be lost
+   without a gap. Config validation refuses the same options first, so the path is defense in depth; it now fails closed: `jobs`
+   returns an error, `newScheduler` passes it on and `Run` logs `agent cannot start` and exits 1. Spec E16, AC14.
+5. **1 µs gap at a given-up or cut-off journal file — confirmed as built.** `endBroken` (`internal/logship/journal.go:547-574`) records
+   the gap to the tail time; when that is the last entry read, `newGap` makes it 1 µs, which marks the cut-off end. E23 and AC10 now
+   say so; `TestJournal_TornArchivedFileIsOneGapToItsTailTime` covers the cut-off end; no code change.
+6. **A second rotation drops the unread rest of the renamed file (found here) — fixed.** `finishRenamed` (`files.go:195-199`) ignores
+   `pump`'s result and sets `st.renamed = nil`, so when the run stops inside it (the 1,000-record or 4 MiB budget under a flood, the
+   time) or a read fails, the rest of the older renamed file is never read and no gap is recorded. Fix: `finishRenamed` reports
+   whether `pump` returned `(true, nil)`, sets `reasonReadFailed` on an error and keeps `st.renamed` otherwise; `rotate` returns false
+   when it did not finish, before it changes the state, so the file at the path is not adopted in that run (closed by `readFile`'s
+   deferred close) and the next runs go on with the renamed file. Spec S5, AC6.
+
+Tests first (Tester, task 14d; each fails before task 14e except where noted):
+
+- `TestEntries_NextWithKeepsTheFirstItemOfEachName` (`internal/journal/entries_test.go`), want = the seven read names, table:
+  (a) `SYSLOG_IDENTIFIER=first`, 19 more `SYSLOG_IDENTIFIER` items of distinct values, `_PID=7`, `_PID=8`, `MESSAGE=kept`: exactly the
+  fields `SYSLOG_IDENTIFIER=first`, `_PID=7`, `MESSAGE=kept`, `Omitted` 0, `Undecoded` 0; (b) 20 `_PID` items of distinct values, then a
+  compressed `MESSAGE` of 600 bytes: `MESSAGE` decoded whole, one `_PID` with the first value, `Omitted` 0; (c) `MESSAGE=first` plain,
+  then a compressed `MESSAGE` of 600 bytes: one `MESSAGE` field, `first`, `Undecoded` 0 (passes before the fix; it pins the rule).
+  `TestEntries_NextWithKeepsAtMostSixteenFields` (17 distinct names) stays as it is.
+- `TestJournal_EntryWithRepeatedFieldsIsShippedWithTheFirstValues` (`internal/logship/journal_test.go`): an entry with 20
+  `SYSLOG_IDENTIFIER` items (the first `first-id`) and 20 `_PID` items (the first `4711`) before `MESSAGE=repeated`, `PRIORITY=6`: one
+  record with program `first-id`, pid 4711, message `repeated`, and no gap.
+- `TestFiles_LongLineIsReadOnAcrossRunsAndDoesNotBlockTheFile` (`internal/logship/files_test.go`), the clock step of
+  `TestFiles_TimeUpAfterAChunkOfFilteredLinesContinuesBehindIt` (1,100 ms, so every run stops after its first chunk), appended: a
+  syslog header and 40 × 64 KiB of `x` with a line feed, then `after 1` and `after 2` as lines; subcases (a) plain runs, (b) one
+  `collect` + `refuse` after the fifth run, (c) a `restart` after the fifth run. Each: within 120 runs the records are the long line
+  (message 16,384 bytes, `truncated`), `after 1`, `after 2`, each once and in that order, no gap; in (a) at least 3 runs were needed.
+- `TestFiles_ReadErrorOfTheRenamedFileKeepsTheNewFileWaiting` (extended): before closing the kept descriptor, append `file 3` and
+  `file 4` (unread) to `mail.log`; the new `mail.log` holds `file 10` and `file 11`. The failing run: no record, no gap, the one
+  `read failed` warning (as today); then `restart` and `drain(5)`: `file 3`, `file 4`, `file 10`, `file 11` in that order, no gap.
+- `TestFiles_SecondRotationWithALongRenamedBacklogFinishesItAcrossRuns` (`internal/logship/files_test.go`): after a first `step`,
+  append 2,500 lines (`file 3` to `file 2502`) to `mail.log`, rename it to `mail.log.1`, write `mail.log` with `file 3000`; `step` (1,000
+  renamed lines); rename `mail.log.1` to `mail.log.2` and `mail.log` to `mail.log.1`, write `mail.log` with `file 4000`; `drain(10)`.
+  All runs together: `file 3` to `file 2502`, `file 3000`, `file 4000`, each once and in that order, no gap, `log` the configured path.
+- `TestLogshipConfig_PatternThatDoesNotCompileIsRefusedWithoutQuotingIt` (`internal/agent/agent_test.go`): the third subtest becomes
+  *the agent is not built and says why*: `jobs` returns an error that `errors.Is` `errDropPattern` and whose text holds no pattern, and
+  `newScheduler` returns no scheduler and that error. Every other call of `jobs` in `internal/agent/agent_test.go` takes the fourth
+  result (and fails on a non-nil error).
+
+The Dev (task 14e): `internal/journal/entries.go` (decision 1; `NextWith`'s doc comment says that only the first item of a wanted
+name is kept), `internal/logship/files.go` (decisions 2, 3, 6: `pump`, `readRenamed() bool`, `read`, `finishRenamed() bool`,
+`rotate`, with their doc comments), `internal/agent/agent.go` (decision 4: `jobs` per *Signatures*, the newLogs error wrapped with
+`%w` in a fixed text, the `log shipping cannot start` line removed, the doc comment of `jobs`); then *Format*, the tests and the
+*Coverage gate*. The Lead already wrote the Agent area, the spec and record 0121 for the decided behavior and checks them against the
+final code in task 15a.
+
 ## Options considered
 
 The five choices with their alternatives are in [0121](../../docs/decisions/0121-log-shipping-journal-and-syslog-files-positions-per-seqnum-id-zstd-commit-when-kept.md)
@@ -476,7 +552,7 @@ const (
 	LogsTimeout  = 2 * time.Second
 )
 // Options gains: Logs logship.Sources
-func jobs(opts Options, cfg *config.Agent, log *slog.Logger) ([]scheduler.Job, *sysstats.System, *agentstate.Store)
+func jobs(opts Options, cfg *config.Agent, log *slog.Logger) ([]scheduler.Job, *sysstats.System, *agentstate.Store, error) // error since G4, decision 4
 func newScheduler(opts Options, cfg *config.Agent, log *slog.Logger) (*scheduler.Scheduler, *agentstate.Store, error)
 ```
 

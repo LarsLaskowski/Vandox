@@ -70,6 +70,11 @@ in the [Agent](../areas/agent.md) area (*Log shipping*, *Agent state*) and the
   that was opened, so no window lies between a check and the open; the same link-free walk reaches the directory.
 - Where the import skips a line it cannot date (an impossible or unstorable syslog time), the collector ships it raw, because live a
   skipped line would be a loss without a gap; live and imported records of such a line therefore differ.
+- What a local writer controls must not hide lines without a gap: an entry keeps only the first item of each read name (the import's
+  rule), so repeating a name cannot push `MESSAGE` out of the kept items; a run that stops on its time inside a line goes on there in
+  the next run, so a line of any length cannot block its file; a renamed file is finished, even across runs, before a newer file is
+  taken, and a read error of it holds the newer file back, so neither a budget stop nor an error drops or reorders its rest. For the
+  same reason the agent refuses to start when the collector cannot be built instead of running without it.
 - The positions within the journal favor no loss over no gap: the newest journal position is never forgotten (forgetting it would
   let the time rule read a forgotten ID again), and a vacuum is judged only where no file of the ID holds the position, so it may
   report a gap where only another ID's sequence numbers lay between.
