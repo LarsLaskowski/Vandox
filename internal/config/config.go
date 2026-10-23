@@ -150,11 +150,32 @@ func checkLogLevel(file string, lines map[string]int, key, value string) error {
 	return keyError(file, lines, key, "must be one of debug, info, warn, error")
 }
 
-// parseSize converts a size such as 512MiB or 2GiB, a whole number of MiB or GiB, to bytes. The skeleton does
-// not implement it yet and reports every text as refused.
-//
-//nolint:unused // the skeleton; validate calls it once implemented
+// parseSize converts a size such as 512MiB or 2GiB, a whole number of MiB or GiB, to bytes. The number is one to
+// five ASCII digits without a leading zero (a lone 0 is allowed), followed directly by MiB or GiB; the second
+// result is false for any other text. The range of the option is checked by the caller.
 func parseSize(text string) (int64, bool) {
-	_ = text
-	return 0, false
+	if len(text) < 4 || len(text) > 8 {
+		return 0, false
+	}
+	digits, unit := text[:len(text)-3], text[len(text)-3:]
+	var shift uint
+	switch unit {
+	case "MiB":
+		shift = 20
+	case "GiB":
+		shift = 30
+	default:
+		return 0, false
+	}
+	if len(digits) > 5 || (len(digits) > 1 && digits[0] == '0') {
+		return 0, false
+	}
+	var n int64
+	for i := range len(digits) {
+		if digits[i] < '0' || digits[i] > '9' {
+			return 0, false
+		}
+		n = n*10 + int64(digits[i]-'0')
+	}
+	return n << shift, true
 }

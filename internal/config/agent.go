@@ -382,6 +382,13 @@ func (a *Agent) validate(file string, lines map[string]int) error {
 	if err := checkDirectory(file, lines, "spool.directory", a.Spool.Directory); err != nil {
 		return err
 	}
+	var err error
+	if a.Spool.MaxBytes, err = checkSize(file, lines, "spool.max_size", a.Spool.MaxSize, minSpoolMax, maxSpoolMax, spoolMaxText); err != nil {
+		return err
+	}
+	if a.Spool.MinFreeBytes, err = checkSize(file, lines, "spool.min_free", a.Spool.MinFree, 0, maxSpoolMinFree, spoolMinFreeText); err != nil {
+		return err
+	}
 	if err := checkLogLevel(file, lines, "log.level", a.Log.Level); err != nil {
 		return err
 	}
@@ -403,6 +410,28 @@ func (a *Agent) validate(file string, lines map[string]int) error {
 		return err
 	}
 	return a.LogShipping.validate(file, lines)
+}
+
+// Bounds of spool.max_size and spool.min_free in bytes.
+const (
+	minSpoolMax     = 64 << 20
+	maxSpoolMax     = 64 << 30
+	maxSpoolMinFree = 1024 << 30
+)
+
+// Reasons spool.max_size and spool.min_free are refused with; none of them quotes a value.
+const (
+	spoolMaxText     = "must be a whole number of MiB or GiB from 64MiB to 64GiB, such as 512MiB or 2GiB"
+	spoolMinFreeText = "must be a whole number of MiB or GiB from 0MiB to 1024GiB, such as 0MiB or 1GiB"
+)
+
+// checkSize parses the size value of key and checks that it lies between lo and hi bytes.
+func checkSize(file string, lines map[string]int, key, value string, lo, hi int64, reason string) (int64, error) {
+	n, ok := parseSize(value)
+	if ok && n >= lo && n <= hi {
+		return n, nil
+	}
+	return 0, keyError(file, lines, key, reason)
 }
 
 // checkMountPoints checks the list of filesystem.mount_points.
