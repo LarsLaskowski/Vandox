@@ -72,11 +72,10 @@ not shipped.
 ## Decision
 
 The agent holds `CAP_SYS_PTRACE` alone, with a bounding set that holds only that capability, and the unit's
-filter also denies `process_madvise` by name. The Product Manager accepted the residual this leaves, so the
-write guarantee holds in the qualified form stated under *Consequences*, not in 0030's absolute one. After the
-log shipping collector (#293, 0121) merged, the Product Manager confirmed this option against its cost there: a
-configured file the agent's user and groups cannot read is not shipped. The
-barriers this rests on, their measurements and the residual are in the [Agent](../areas/agent.md) area
+filter also denies `process_madvise` by name. The Product Manager accepted the residual this leaves and, after
+the log shipping collector (#293, 0121) merged, its cost there (a configured file the agent's user and groups
+cannot read is not shipped), so the write guarantee holds in the qualified form stated under *Consequences*, not
+in 0030's absolute one. The barriers this rests on, their measurements and the residual are in the [Agent](../areas/agent.md) area
 (*Rights*).
 
 ## Consequences

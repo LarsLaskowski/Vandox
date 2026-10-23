@@ -14,7 +14,7 @@ collectors that need them.
 | `CAP_SYS_PTRACE` | `connections` | Listing and reading `/proc/<pid>/fdinfo/<n>` of **another user's** process, which names the socket (`ino:`) a descriptor holds and its mount (`mnt_id:`), so a socket gets its owner. |
 
 `CAP_DAC_READ_SEARCH` is **not granted**: with `CAP_SYS_PTRACE` it opens other processes' open files, memfds included, for writing
-(record 0122). No collector needs it; the connection collector deliberately does not use it (see below). The `logs` collector adds no
+(record 0122). Only the `logs` collector would use it, for configured files the agent's user and groups cannot read, and it does without it; the connection collector deliberately does not use it (see below). The `logs` collector adds no
 capability: it opens each file of `log_shipping.files` through a walk from `/` that refuses a symbolic link in any element and a file with
 more than one link (against an attacker who races the check, the hard-link refusal relies on the distribution default
 `fs.protected_hardlinks=1`, Ubuntu's default), so a service user who replaces its log file with a link to another file (for example
