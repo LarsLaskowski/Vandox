@@ -887,3 +887,36 @@ func TestOpen_TooManyFiles(t *testing.T) {
 
 // head returns at most the first three numbers.
 func head(n []uint64) []uint64 { return n[:min(len(n), 3)] }
+
+func TestOpen_TornTailOfNewestFile(t *testing.T) {
+	r := newRig(t)
+	w := newWorld(t, r.dir())
+	sb := encodeSegment(t, w.c.spec())
+	needNoErr(t, "Truncate", os.Truncate(filepath.Join(w.dir, w.c.name()), int64(sb.frameStart[9]+3)))
+
+	sp := r.open()
+	recs := readAll(t, sp)
+	want := concat(rangeNumbers(w.a.first, w.a.last()), rangeNumbers(w.b.first, w.b.last()), rangeNumbers(w.c.first, w.c.first+8))
+	expectNumbers(t, "numbers handed out (the torn last record is cut away)", seqs(dataOf(recs)), want)
+	expect(t, len(gapsOf(recs, model.GapSpoolDropped)) == 0, "a torn tail of the newest file left %d spool_dropped gaps, want none", len(gapsOf(recs, model.GapSpoolDropped)))
+	lines := r.logs.find(msgDamaged)
+	need(t, len(lines) == 1, "%d lines %q, want one", len(lines), msgDamaged)
+	expect(t, lines[0].level == slog.LevelWarn && lines[0].str("err") == errCutShort, "%q = %v, want a warning with err %q", msgDamaged, lines[0], errCutShort)
+	mustPut(t, sp, []model.Record{logRec(epoch.Add(2*time.Hour), "after", 100)})
+	expect(t, sp.LastSeq() > w.c.last(), "the first number after the torn tail is %d, want above %d", sp.LastSeq(), w.c.last())
+}
+
+func TestOpen_FileWithoutCompleteHeaderIsDeleted(t *testing.T) {
+	r := newRig(t)
+	w := newWorld(t, r.dir())
+	needNoErr(t, "Truncate", os.Truncate(filepath.Join(w.dir, w.c.name()), 5))
+
+	sp := r.open()
+	recs := readAll(t, sp)
+	want := concat(rangeNumbers(w.a.first, w.a.last()), rangeNumbers(w.b.first, w.b.last()))
+	expectNumbers(t, "numbers handed out", seqs(dataOf(recs)), want)
+	lines := r.logs.find(msgDamaged)
+	need(t, len(lines) == 1, "%d lines %q, want one", len(lines), msgDamaged)
+	expect(t, lines[0].str("err") == errCutShort && lines[0].str("file") == w.c.name(), "%q = %v, want %q for %s", msgDamaged, lines[0], errCutShort, w.c.name())
+	expect(t, !slices.Contains(segmentNumbers(t, r.dir()), w.c.first), "the header-less file %s is still on disk, want it deleted", w.c.name())
+}

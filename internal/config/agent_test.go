@@ -1549,3 +1549,36 @@ func testSpoolSizeOrder(t *testing.T) {
 		t.Errorf("LoadAgent(%q) error = %v, want %q", doc, err, want)
 	}
 }
+
+func TestLoadAgent_SpoolSizeForms(t *testing.T) {
+	tests := []struct {
+		name   string
+		key    string
+		line   int
+		value  string
+		reason string
+	}{
+		{"max_size list", "spool.max_size", spoolMaxLine, "[1GiB]", "invalid value, want a string"},
+		{"max_size block list", "spool.max_size", spoolMaxLine, "\n    - 1GiB", "invalid value, want a string"},
+		{"max_size tilde", "spool.max_size", spoolMaxLine, "~", "has no value"},
+		{"min_free list", "spool.min_free", spoolMinFreeLine, "[1GiB]", "invalid value, want a string"},
+		{"min_free tilde", "spool.min_free", spoolMinFreeLine, "~", "has no value"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			doc := spoolDoc(tt.value, "1GiB")
+			if tt.key == "spool.min_free" {
+				doc = spoolDoc("2GiB", tt.value)
+			}
+			path := writeTemp(t, doc)
+			got, err := LoadAgent(path, agentEnv())
+			if got != nil {
+				t.Errorf("LoadAgent(%q) = %+v, want nil on error", doc, got)
+			}
+			want := "config: " + path + ":" + strconv.Itoa(tt.line) + ": " + tt.key + ": " + tt.reason
+			if err == nil || err.Error() != want {
+				t.Errorf("LoadAgent(%q) error = %v, want %q", doc, err, want)
+			}
+		})
+	}
+}
