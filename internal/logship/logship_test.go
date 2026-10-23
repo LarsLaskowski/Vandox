@@ -352,6 +352,7 @@ func TestLogs_RunBudgets(t *testing.T) {
 	t.Run("a run ends at the record that crosses 4 MiB of text", budgetOfBytes)
 	t.Run("a run ends after one second of reading", budgetOfTime)
 	t.Run("filtered entries count only against the second", budgetOfFilteredEntries)
+	t.Run("filtered entries that need decoding look at the clock at each entry", budgetOfFilteredDecodedEntries)
 }
 
 func budgetOfRecords(t *testing.T) {
@@ -435,6 +436,35 @@ func floodedWorld(t *testing.T, step time.Duration) *world {
 	w.clock.step = step
 	w.start()
 	return w
+}
+
+func budgetOfFilteredDecodedEntries(t *testing.T) {
+	w := newWorld(t)
+	var entries []map[string][]byte
+	for seq := uint64(1); seq <= 20; seq++ {
+		entries = append(entries, jentry(seq, fmt.Sprintf("%02d", seq)+strings.Repeat("d", 698), "PRIORITY", "7"))
+	}
+	for seq := uint64(21); seq <= 23; seq++ {
+		entries = append(entries, jentry(seq, fmt.Sprintf("wanted %d", seq)))
+	}
+	w.online(seqID(1), entries)
+	w.position(seqID(1), 0)
+	w.clock.step = 250 * time.Millisecond
+	w.start()
+
+	first := w.step()
+
+	requireMessages(t, "lines of the first run", messages(first), nil)
+	pos := w.savedJournal(seqID(1))
+	if pos == nil || pos.Seqnum == 0 || pos.Seqnum >= 20 {
+		t.Fatalf("journal position after the first run = %+v, want a sequence number above 0 and below 20: the clock is looked at after each entry that was decoded", pos)
+	}
+	var got []model.Record
+	for range 10 {
+		got = append(got, w.step()...)
+	}
+	requireMessages(t, "lines of ten further runs", messages(got), []string{"wanted 21", "wanted 22", "wanted 23"})
+	requireNoGaps(t, "the runs", got)
 }
 
 func budgetOfFilteredEntries(t *testing.T) {

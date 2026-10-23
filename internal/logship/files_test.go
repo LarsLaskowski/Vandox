@@ -597,3 +597,31 @@ func TestFiles_PartialLineIsShippedWhenTheWriterHasMoved(t *testing.T) {
 	}
 	requireNoGaps(t, "the runs", append(append(r2, r3...), r4...))
 }
+
+func TestFiles_DroppedRunResolvesTheRepeatedHourAlike(t *testing.T) {
+	w := newWorld(t)
+	w.etc.set("localtime", tzCentralEurope())
+	w.clock.now = time.Date(2026, time.October, 26, 8, 0, 0, 0, time.UTC) // past the fall-back of 25 October
+	w.useFiles("mail.log")
+	w.writeLog("mail.log", "")
+	w.start()
+	w.step()
+	w.appendLog("mail.log", "Oct 25 02:30:00 web-1 app[7]: first\nOct 25 02:05:00 web-1 app[7]: second\n")
+
+	refused := w.collect()
+	w.refuse()
+	again := w.collect()
+	w.keep()
+
+	wantTimes := []time.Time{time.Date(2026, time.October, 25, 0, 30, 0, 0, time.UTC), time.Date(2026, time.October, 25, 1, 5, 0, 0, time.UTC)}
+	for name, recs := range map[string][]model.Record{"refused run": refused, "re-read": again} {
+		if got := messages(recs); !slices.Equal(got, []string{"first", "second"}) {
+			t.Fatalf("lines of the %s = %v, want first and second", name, got)
+		}
+		for i, r := range recs {
+			if !r.CapturedAt.Equal(wantTimes[i]) {
+				t.Errorf("line %d of the %s captured at %v, want %v: a dropped run must not move the previous instant the re-read starts from", i, name, r.CapturedAt, wantTimes[i])
+			}
+		}
+	}
+}

@@ -702,7 +702,7 @@ func givenUpOnlineFile(t *testing.T) {
 	requireGap(t, oneGap(t, "the third run", third), entryTime(3), entryTime(6))
 
 	// journald rotates: the damaged file is set aside and the ID goes on in a new online file
-	w.rename("system.journal", "system@00000000000000000000000000000001-0000000000000001-0005f8d1b1a2c3d4.journal")
+	w.renameJournal("system.journal", "system@00000000000000000000000000000001-0000000000000001-0005f8d1b1a2c3d4.journal")
 	w.online(id, jentries(7, 9))
 	next := w.drain(5)
 	requireMessages(t, "lines of the next online file", messages(next), []string{"line 7", "line 8", "line 9"})
@@ -778,4 +778,69 @@ func TestJournal_PidFallsBackToSyslogPid(t *testing.T) {
 			t.Errorf("entry %q has the pid %d, want %d", tt.name, got[i].PID, tt.want)
 		}
 	}
+}
+
+// shortJournal writes a file of 100 bytes, shorter than a journal header, below the machine directory of the world.
+func shortJournal(t *testing.T, w *world, name string) {
+	t.Helper()
+	path := filepath.Join(w.jroot, machineID, name)
+	if err := os.WriteFile(path, bytes.Repeat([]byte{1}, 100), 0o600); err != nil {
+		t.Fatalf("writing %s: %v", name, err)
+	}
+}
+
+const archivedShort = "system@00000000000000000000000000000009-0000000000000001-0005f8d1b1a2c3d4.journal"
+
+func TestJournal_RefusedFileIsAGap(t *testing.T) {
+	t.Run("an archived file", refusedArchivedFile)
+	t.Run("the online file", refusedOnlineFile)
+	t.Run("the run with the first gap is refused", refusedGapOfADroppedRun)
+}
+
+func refusedWorld(t *testing.T, name string) *world {
+	t.Helper()
+	w := newWorld(t)
+	w.archived(seqID(1), jentries(1, 3)) // the file that holds the position
+	w.position(seqID(1), 3)              // the newest position is the entry 3
+	shortJournal(t, w, name)
+	w.start()
+	return w
+}
+
+func refusedArchivedFile(t *testing.T) {
+	w := refusedWorld(t, archivedShort)
+
+	first := w.step()
+	start := w.run.Start
+	second := w.step()
+
+	requireGap(t, oneGap(t, "the first run", first), entryTime(3), start)
+	requireNoGaps(t, "the next run", second)
+}
+
+func refusedOnlineFile(t *testing.T) {
+	w := refusedWorld(t, "system.journal")
+
+	first := w.step()
+	start := w.run.Start
+	w.clock.advance(300 * time.Second)
+	early := w.step()
+	w.clock.advance(300 * time.Second)
+	late := w.step()
+
+	requireGap(t, oneGap(t, "the first run", first), entryTime(3), start)
+	requireNoGaps(t, "the run 300 s later", early)
+	requireGap(t, oneGap(t, "the run 600 s later", late), start, w.run.Start)
+}
+
+func refusedGapOfADroppedRun(t *testing.T) {
+	w := refusedWorld(t, archivedShort)
+	w.collect()
+	w.refuse()
+
+	again := w.collect()
+	w.keep()
+
+	requireGap(t, oneGap(t, "the run after the refused one", again), entryTime(3), w.run.Start)
+	requireNoGaps(t, "the next run", w.step())
 }

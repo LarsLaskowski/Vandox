@@ -165,3 +165,19 @@ func TestClock_KeepsItsPreviousInstantPerClock(t *testing.T) {
 		t.Errorf("Parse() on a clock that saw no earlier line = %v, want %v (the earlier offset: the other clock's line is not its previous line)", got.Time, want)
 	}
 }
+
+func TestClock_SetZoneKeepsThePreviousInstant(t *testing.T) {
+	now := utc(2026, time.October, 26, 0, 0, 0)
+	clock := syslogline.NewClock(centralEuropeLocation(t))
+	first := syslogline.Parse([]byte("Oct 25 02:50:00 web-1 x: m"), clock, now)
+
+	clock.SetZone(centralEuropeLocation(t)) // the same rules, loaded again
+	second := syslogline.Parse([]byte("Oct 25 02:05:00 web-1 x: m"), clock, now)
+
+	if want := utc(2026, time.October, 25, 0, 50, 0); !first.Time.Equal(want) {
+		t.Fatalf("first line = %v, want %v", first.Time, want)
+	}
+	if want := utc(2026, time.October, 25, 1, 5, 0); !second.Time.Equal(want) {
+		t.Errorf("line after SetZone = %v, want %v: the previous instant 00:50 UTC is kept, so the repeated hour takes the later offset", second.Time, want)
+	}
+}

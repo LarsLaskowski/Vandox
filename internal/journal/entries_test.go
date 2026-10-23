@@ -207,11 +207,12 @@ func TestEntries_NextWithCountsTheValueOnly(t *testing.T) {
 		item    bItem
 		wantCut bool
 		want    string
+		decodes int
 	}{
-		{"a plain value of exactly MaxPayload", plain("MESSAGE=" + exact), false, exact},
-		{"a plain value of MaxPayload + 1", plain("MESSAGE=" + over), true, over[:limit]},
-		{"a compressed value of exactly MaxPayload", packed("MESSAGE=" + exact), false, exact},
-		{"a compressed value of MaxPayload + 1", packed("MESSAGE=" + over), true, over[:limit]},
+		{"a plain value of exactly MaxPayload", plain("MESSAGE=" + exact), false, exact, 0},
+		{"a plain value of MaxPayload + 1", plain("MESSAGE=" + over), true, over[:limit], 0},
+		{"a compressed value of exactly MaxPayload", packed("MESSAGE=" + exact), false, exact, 1},
+		{"a compressed value of MaxPayload + 1", packed("MESSAGE=" + over), true, over[:limit], 1},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -232,13 +233,22 @@ func TestEntries_NextWithCountsTheValueOnly(t *testing.T) {
 			if string(got.Value) != tt.want || got.Cut != tt.wantCut || got.Compressed {
 				t.Errorf("MESSAGE = %d bytes cut %v compressed %v, want %d bytes cut %v", len(got.Value), got.Cut, got.Compressed, len(tt.want), tt.wantCut)
 			}
-			for _, limit := range d.limits {
-				if limit != limit+66 {
-					t.Errorf("the decoder was given the limit %d, want MaxPayload + 66 = %d", limit, limit+66)
-				}
-			}
+			requireDecoderCalls(t, d, tt.decodes, limit+66)
 			requireNoCompressedField(t, &e)
 		})
+	}
+}
+
+// requireDecoderCalls checks the number of calls of the decoder and that each was given the limit.
+func requireDecoderCalls(t *testing.T, d *rawFrameDecoder, calls, limit int) {
+	t.Helper()
+	if d.calls != calls {
+		t.Errorf("the decoder was called %d times, want %d", d.calls, calls)
+	}
+	for _, got := range d.limits {
+		if got != limit {
+			t.Errorf("the decoder was given the limit %d, want MaxPayload + 66 = %d", got, limit)
+		}
 	}
 }
 

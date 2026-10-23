@@ -535,6 +535,15 @@ func (w *world) rename(from, to string) {
 	}
 }
 
+// renameJournal renames a file of the machine directory of the journal.
+func (w *world) renameJournal(from, to string) {
+	w.t.Helper()
+	dir := filepath.Join(w.jroot, machineID)
+	if err := os.Rename(filepath.Join(dir, from), filepath.Join(dir, to)); err != nil {
+		w.t.Fatalf("renaming the journal file %s to %s: got %v, want nil", from, to, err)
+	}
+}
+
 // fileLineTime is the real time of the file line with number n: the lines of the files lie in the zone of +02:00 on 23 October.
 func fileLineTime(n int) time.Time {
 	return time.Date(2026, time.October, 23, 6, 0, 0, 0, time.UTC).Add(time.Duration(n) * time.Second)
@@ -625,4 +634,23 @@ func head(s []string) []string {
 		return append(append([]string{}, s[:6]...), fmt.Sprintf("... (%d in all)", len(s)))
 	}
 	return s
+}
+
+// tzCentralEurope returns the time zone file of a zone that moves to +02:00 on 2026-03-29 at 01:00 UTC and back to +01:00 on
+// 2026-10-25 at 01:00 UTC.
+func tzCentralEurope() []byte {
+	b := append([]byte("TZif"), 0)
+	b = append(b, make([]byte, 15)...)
+	for _, n := range []uint32{0, 0, 0, 2, 2, 9} {
+		b = binary.BigEndian.AppendUint32(b, n)
+	}
+	for _, at := range []time.Time{time.Date(2026, 3, 29, 1, 0, 0, 0, time.UTC), time.Date(2026, 10, 25, 1, 0, 0, 0, time.UTC)} {
+		b = binary.BigEndian.AppendUint32(b, uint32(at.Unix())) // #nosec G115 -- the instants of 2026 fit 32 bits
+	}
+	b = append(b, 1, 0)
+	b = binary.BigEndian.AppendUint32(b, 3600)
+	b = append(b, 0, 0)
+	b = binary.BigEndian.AppendUint32(b, 7200)
+	b = append(b, 1, 4)
+	return append(b, []byte("CET\x00CEST\x00")...)
 }
