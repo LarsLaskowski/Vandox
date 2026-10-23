@@ -1236,7 +1236,7 @@ collector timeouts and backend gap detection each emit a gap record, and each pa
   | Following a link in `/proc/<pid>/map_files/<range>` of another user's process | (a) the bounding set: the link needs `CAP_SYS_ADMIN` or (since kernel 5.9) `CAP_CHECKPOINT_RESTORE`, besides search of the `0500` directory |
   | `ptrace` (POKE), `process_vm_writev`, `pidfd_getfd` (taking a writable descriptor), `open_by_handle_at` | (b) the system-call filter |
   | `pidfd_open` on the target, then `process_madvise` | (b) the filter denies `process_madvise`; behind it (c) the kernel: the call needs `CAP_SYS_NICE` (since kernel 5.12), and the kernel refuses destructive advice on another process |
-  | A file whose own mode grants the agent write, reached through another process's `/proc/<pid>/cwd` or `/proc/<pid>/root` link (also below `/proc/<pid>/task/<tid>/`) | none: the accepted residual (last bullet of *Rights*) |
+  | A file whose own mode grants the agent write, reached through another process's `/proc/<pid>/cwd` or `/proc/<pid>/root` link, or that process's executable through its `/proc/<pid>/exe` link (each also below `/proc/<pid>/task/<tid>/`) | none: the accepted residual (last bullet of *Rights*) |
 
   The filter denies neither `openat` nor `pwrite`, so it is not what stops the `mem` and `fd` writes; barrier (a) is. Barrier (c) is
   defence in depth only: the `CAP_SYS_NICE` requirement is a capability rule, but which advice the kernel accepts for another process is
@@ -1312,12 +1312,15 @@ collector timeouts and backend gap detection each emit a gap record, and each pa
 - Each group, capability and confinement setting is listed and justified in `deploy/agent/` when the collector that needs it is
   introduced; anything not listed is not granted. Removing a confinement setting, adding a capability or a group, or adding a collector
   that needs a new right is a `security`-tier change; removing a confinement while a capability is granted needs a superseding record.
-- **Accepted residual** (record 0121): with `CAP_SYS_PTRACE` the agent follows another process's `/proc/<pid>/cwd` and
-  `/proc/<pid>/root` links and their `/proc/<pid>/task/<tid>/cwd` and `…/root` variants, which skip the search check of the directories
-  above that process's working or root directory. So a file whose own mode grants the agent's user, its groups or others read or write
-  is reachable even below a closed directory that contains another process's working or root directory; the path components after the
-  link are still checked against their own modes, so a closed directory below that point still blocks. The `root` link of a process in
-  another mount namespace (a container's) resolves in that namespace, so the same holds for its tree. A write into such a file reaches
+- **Accepted residual** (record 0121): with `CAP_SYS_PTRACE` the agent follows another process's `/proc/<pid>/cwd`,
+  `/proc/<pid>/root` and `/proc/<pid>/exe` links and their `/proc/<pid>/task/<tid>/cwd`, `…/root` and `…/exe` variants, which skip the
+  search check of the directories above the file they lead to. So a file whose own mode grants the agent's user, its groups or others
+  read or write is reachable even below a directory closed to the agent, but only along paths from some process's working or root
+  directory, or as that process's executable through `exe`; the path components after a `cwd` or `root` link are still checked against
+  their own modes, so a closed directory below that point still blocks, and the file `exe` leads to is checked against its own mode
+  only. The `root` link of a process in another mount namespace (a container's) resolves in that namespace, so the same holds for its
+  tree. Whether opening a running executable for writing fails with `ETXTBSY` depends on the kernel version and was not measured; it is
+  not counted as a barrier. A write into such a file reaches
   another user's process memory where that process maps the file `MAP_SHARED`, and runs code as another user where that user executes
   the file or reads it as a script or configuration. Readable besides are the ptrace-checked `/proc` files whose mode allows reading
   (`maps`, `smaps_rollup`, `fdinfo`, …), not another user's `mem` or `environ` and not `/etc/shadow` (measured on kernel 6.18.44 with
@@ -1366,7 +1369,7 @@ collector timeouts and backend gap detection each emit a gap record, and each pa
   `pzstd` as the default rule.
 - [0121](../decisions/0121-cap-sys-ptrace-alone-cannot-write-another-users-process-memory-through-proc-pid-mem-or-fd.md) — why the
   agent holds `CAP_SYS_PTRACE` alone and not `CAP_DAC_READ_SEARCH`, which barrier stops each write vector examined, which residual
-  remains (files whose own mode grants the agent write, reached through other processes' `cwd` and `root` links), why the bounding set
+  remains (files whose own mode grants the agent write, reached through other processes' `cwd`, `root` and `exe` links), why the bounding set
   holds `CAP_SYS_PTRACE` only, and why the filter also denies `process_madvise`.
 
 ## Not here

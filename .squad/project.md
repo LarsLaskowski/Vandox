@@ -76,7 +76,7 @@ files or endpoints.
    `NoNewPrivileges=yes`; `SystemCallFilter=` denies at least `ptrace`, `process_vm_readv`,
    `process_vm_writev`, `pidfd_getfd`, `open_by_handle_at` and `process_madvise` (with
    `SystemCallErrorNumber=EPERM`; `process_madvise` is named explicitly because `@system-service` includes
-   it, and `pidfd_open` stays allowed), and `SystemCallArchitectures=native`; no write-side capability. A compromised agent cannot use its capability to write into another process or file, or to run code as another user,
+   it, and `pidfd_open` stays allowed), and `SystemCallArchitectures=native`; no write-side capability. A compromised agent cannot use its capability to write into another user's process or file, or to run code as another user,
    except through a file whose own mode grants the agent's user, its groups (`adm`, `systemd-journal`) or others write (accepted
    residual, record 0121). Three distinct barriers stop the write vectors examined, and none of them alone covers all: (a) DAC plus the
    bounding set: opening another user's `/proc/<pid>/mem` (and any other owner-only writable `/proc/<pid>/` file, such as `clear_refs`)
@@ -92,9 +92,9 @@ files or endpoints.
    `process_madvise` on another process; `CAP_SYS_ADMIN` or `CAP_CHECKPOINT_RESTORE`, together with directory search, the links in
    `/proc/<pid>/map_files/`. Removing one of the six denied calls is such a change too. Accepted residual, stated openly: with
    `CAP_SYS_PTRACE` the agent follows another process's `/proc/<pid>/cwd` and `/proc/<pid>/root` links and their
-   `/proc/<pid>/task/<tid>/cwd` and `…/root` variants, so every file whose own mode grants the agent's user, its groups or others read or
-   write is reachable even below a closed directory that contains another process's working or root directory (a file is reachable only
-   along paths from some process's `cwd` or `root`; the path components after the link are still checked against their own modes), and the
+   `/proc/<pid>/task/<tid>/cwd` and `…/root` variants, and the `/proc/<pid>/exe` and `/proc/<pid>/task/<tid>/exe` links, so every file whose own mode grants the agent's user, its groups or others read or
+   write is reachable even below a closed directory that contains another process's working or root directory, and the `exe` link reaches that process's executable file, readable or writable as its own mode allows (a file is reachable only
+   along paths from some process's `cwd` or `root`, or that process's executable through `exe`; the path components after the link are still checked against their own modes), and the
    `root` link reaches the file tree of another mount namespace (a container's). A write into such a file reaches another user's process
    memory where that process maps the file `MAP_SHARED`, and runs code as another user where that user executes the file or reads it as a
    script or configuration. Readable besides are the ptrace-checked `/proc` files whose mode allows reading (`maps`, `smaps_rollup`,

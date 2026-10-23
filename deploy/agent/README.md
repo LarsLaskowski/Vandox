@@ -38,9 +38,9 @@ whose own mode grants the agent's user, its groups (`adm`, `systemd-journal`) or
 Measurement and reasoning: record 0121 and the Agent area.
 
 **Accepted residual.** With `CAP_SYS_PTRACE` the agent follows another process's `/proc/<pid>/cwd` and `/proc/<pid>/root` links and their
-`/proc/<pid>/task/<tid>/cwd` and `…/root` variants, so a file whose own mode grants the agent's user, its groups or others read or write is
-reachable even below a closed directory that contains another process's working or root directory (a file is reachable only along paths from
-some process's `cwd` or `root`; the path components after the link are still checked against their own modes), and the `root` link reaches the
+`/proc/<pid>/task/<tid>/cwd` and `…/root` variants, and the `/proc/<pid>/exe` and `/proc/<pid>/task/<tid>/exe` links, so a file whose own mode grants the agent's user, its groups or others read or write is
+reachable even below a closed directory that contains another process's working or root directory, and the `exe` link reaches that process's executable file, readable or writable as its own mode allows (a file is reachable only along paths from
+some process's `cwd` or `root`, or that process's executable through `exe`; the path components after the link are still checked against their own modes), and the `root` link reaches the
 file tree of another mount namespace (a container's). A write into such a file reaches another user's process memory where that process maps the
 file `MAP_SHARED`, and runs code as another user where that user executes the file or reads it as a script or configuration. Readable besides are
 the ptrace-checked `/proc` files whose mode allows reading (`maps`, `smaps_rollup`, `fdinfo`, …), not another user's `mem` or `environ` and not
@@ -68,8 +68,8 @@ the ptrace-checked `/proc` files whose mode allows reading (`maps`, `smaps_rollu
 - `/proc/<pid>/fdinfo/<n>` of **another user's** process needs `CAP_SYS_PTRACE`: the kernel checks ptrace access when the directory is listed
   and the file opened. The links `/proc/<pid>/fd/<n>` (`socket:[N]`) would need `CAP_DAC_READ_SEARCH` to list and both capabilities to read,
   and `CAP_DAC_READ_SEARCH` lets the agent read every file on the server (`/etc/shadow`, Plesk's credentials) and, with `CAP_SYS_PTRACE`, open
-  other processes' open files, memfds included, for writing (record 0121), so the collector does not read them and the agent does not hold it
-  (record 0115). Measured on the development host (kernel 6.18.44, no Yama restriction, no `hidepid`), as user 65534 against a process of root:
+  other processes' open files, memfds included, for writing (record 0121), so the collector does not read them (record 0115) and the agent does not hold it
+  (record 0121). Measured on the development host (kernel 6.18.44, no Yama restriction, no `hidepid`), as user 65534 against a process of root:
 
   | Capabilities | list `fd/` | readlink `fd/3` | list `fdinfo/` | read `fdinfo/3` | read `/etc/shadow` |
   | ------------ | ---------- | --------------- | -------------- | --------------- | ------------------ |
