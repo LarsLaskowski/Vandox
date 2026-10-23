@@ -8,8 +8,7 @@
 
 ## Context
 
-#37 ships the journal and configured `syslog`-format files live, without loss or duplicates across a restart
-([spec](../../specs/feature-37-log-shipping/spec.md)). The agent already reads the binary journal in pure Go for the kernel collector
+#37 ships the journal and configured `syslog`-format files live, without loss or duplicates across a restart. The agent already reads the binary journal in pure Go for the kernel collector
 ([0119](0119-kernel-messages-from-the-binary-journal-files-read-in-pure-go-without-decompression.md)), which decompresses nothing and
 keeps one position. Three copies of the server's journal (an online and an archived system file and a user file, inspected read-only and
 not committed) showed: every transport (`syslog`, `stdout`, `journal`, `kernel`, `audit`, `driver`) and audit entries without

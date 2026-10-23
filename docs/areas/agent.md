@@ -1285,8 +1285,8 @@ test and the C# import's test both read.
   `_HOSTNAME`) are journald's.
 - A renamed file whose reads keep failing holds back the newer lines of its configured file, with the warning `log file not readable`
   (`read failed`) standing, until it reads again or the agent restarts.
-- A `COMPACT` journal (systemd 252 and later), one without keyed hashes, XZ or LZ4 items and entries with more than four compressed items
-  are lost to recorded gaps.
+- A `COMPACT` journal (systemd 252 and later, #286), one without keyed hashes, XZ or LZ4 items and entries with more than four
+  compressed items are lost to recorded gaps.
 - The user files of the server's sample were empty: user-journal entries are read like system entries without a real one checked. That
   rsyslog's logrotate configuration on the server renames before its single `HUP` is not checked on the server (#42); the renamed file
   is read until the writer has moved whatever that window is.
