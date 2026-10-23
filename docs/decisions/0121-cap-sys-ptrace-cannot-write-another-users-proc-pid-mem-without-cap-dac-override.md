@@ -4,7 +4,7 @@
 - **Date:** 2026-10-23
 - **Area:** Agent
 - **Source:** Issue #271
-- **Supersedes:** 0030 (amends it: the agent holds `CAP_SYS_PTRACE` alone instead of `CAP_SYS_PTRACE` and `CAP_DAC_READ_SEARCH`, the exclusion of CAP_DAC_OVERRIDE, every write-side DAC capability and CAP_SYS_NICE from the bounding set becomes a load-bearing control, and `process_madvise` joins the system calls the filter denies; 0030 is not edited)
+- **Supersedes:** 0030 (amends it: the agent holds `CAP_SYS_PTRACE` alone instead of `CAP_SYS_PTRACE` and `CAP_DAC_READ_SEARCH`, a bounding set holding only that capability becomes a load-bearing control, `process_madvise` joins the system calls the filter denies, and the write guarantee is restated with an accepted residual; 0030 is not edited)
 
 ## Context
 
@@ -59,35 +59,49 @@ listing `/proc/<pid>/fd`, which 0115 gave up.
 6. **Leave `process_madvise` to the kernel** — holds today, but rests on a rule this project neither controls
    nor tests; a later grant of CAP_SYS_NICE or a kernel widening the advice set would reopen it unnoticed.
    Rejected.
-7. **Drop CAP_DAC_READ_SEARCH, keep CAP_SYS_PTRACE alone, deny `process_madvise` by name and keep the
-   write-side DAC capabilities and CAP_SYS_NICE out of the bounding set** (chosen) — closes the memfd path
-   (measured), costs no collector and also ends the read residual of 0030 that rested on CAP_DAC_READ_SEARCH.
-   The agent never calls `process_madvise`, so denying it costs nothing.
+7. **Drop CAP_DAC_READ_SEARCH, keep CAP_SYS_PTRACE alone with a bounding set holding only it, and deny
+   `process_madvise` by name** (chosen by the Product Manager) — closes the memfd path (measured), costs no
+   collector and also ends the read residual of 0030 that rested on CAP_DAC_READ_SEARCH. The agent never calls
+   `process_madvise`, so denying it costs nothing. It leaves the residual of files whose own mode grants the
+   agent write, reached through other processes' working and root directories (*Consequences*).
 
 ## Decision
 
-The agent holds `CAP_SYS_PTRACE` alone, with a bounding set limited to it, so that CAP_DAC_READ_SEARCH,
-CAP_DAC_OVERRIDE, every other write-side DAC capability and CAP_SYS_NICE stay out; the unit's filter also
-denies `process_madvise` by name. The barriers this rests on, their measurements and the remaining residual
-are in the [Agent](../areas/agent.md) area (*Rights*).
+The agent holds `CAP_SYS_PTRACE` alone, with a bounding set that holds only that capability, and the unit's
+filter also denies `process_madvise` by name. The Product Manager accepted the residual this leaves, so the
+write guarantee holds in the qualified form stated under *Consequences*, not in 0030's absolute one. The
+barriers this rests on, their measurements and the residual are in the [Agent](../areas/agent.md) area
+(*Rights*).
 
 ## Consequences
 
 - The dependency this issue guarded is cleared: the systemd unit of #42 may grant CAP_SYS_PTRACE, with a
   bounding set limited to it and a filter that denies `ptrace`, `process_vm_readv`, `process_vm_writev`,
   `pidfd_getfd`, `open_by_handle_at` and `process_madvise`.
-- Adding CAP_DAC_READ_SEARCH, CAP_DAC_OVERRIDE, another write-side DAC capability or CAP_SYS_NICE to the
-  bounding set, or removing one of these six calls from the denied set, breaks the guarantee and is a
-  `security` change that must supersede this record. A collector that needs the `/proc/<pid>/fd` links again
-  reopens the memfd write and needs a new decision first.
+- The guarantee, qualified: a compromised agent cannot use its capability to write into another user's process
+  or file, or to run code as another user, except through a file whose own mode grants the agent's user, its
+  groups or others write. 0030's absolute "cannot write as or run code as another user" does not hold.
+- The accepted residual: CAP_SYS_PTRACE lets the agent follow another process's `/proc/<pid>/cwd` and
+  `/proc/<pid>/root` links and their `/proc/<pid>/task/<tid>/` variants, so such a file is reachable even below
+  a directory closed to the agent, and the `root` link reaches the whole file tree of another mount namespace
+  (a container's). A write into such a file reaches another user's process memory where that process maps the
+  file `MAP_SHARED`, and runs code as another user where that user executes the file or reads it as a script
+  or configuration.
+- The bounding set holds CAP_SYS_PTRACE only; adding any capability to it, or removing one of these six calls
+  from the denied set, is a `security` change that must supersede this record. Examples of what an addition
+  reopens: CAP_DAC_READ_SEARCH the `/proc/<pid>/fd/<n>` write and writes below closed directories,
+  CAP_DAC_OVERRIDE and the other write-side DAC capabilities the `mem` write, CAP_SYS_NICE `process_madvise`,
+  CAP_SYS_ADMIN or CAP_CHECKPOINT_RESTORE (with directory search) the links in `/proc/<pid>/map_files/`. A
+  collector that needs the `/proc/<pid>/fd` links again reopens the memfd write and needs a new decision first.
 - The read residual of 0030 ("its read access equals root's") narrows: without CAP_DAC_READ_SEARCH the agent
-  cannot read `/etc/shadow`, another user's `mem` or `environ`. What remains readable and writable — the
-  ptrace-checked `/proc` files and the files whose own mode allows the agent, also below a closed directory
-  that is another process's working or root directory — is stated in the Agent area and area 6.
+  cannot read `/etc/shadow`, another user's `mem` or `environ`. It reads the ptrace-checked `/proc` files whose
+  mode allows it and, through the same links, the files whose own mode allows the agent; the Agent area and
+  area 6 state this.
 - `process_madvise` sits in systemd's `@ipc` group, which `@system-service` includes, so the unit must deny it
   by name. If the server's systemd did not know the name, the entry would be skipped and the kernel's refusal
   would remain; #42 checks that the server's systemd lists it.
 - `proc_mem.force_override=never` stays unset: it is not needed for the `mem` open, and the production kernel
   (5.15) predates it.
 - Security area 6, `deploy/agent/README.md`, the Agent area and `docs/ARCHITECTURE.md` name CAP_SYS_PTRACE as
-  the one capability, the three barriers per vector and the narrowed residual.
+  the one capability, the three barriers per vector, the qualified guarantee and the residual with both of its
+  consequences.

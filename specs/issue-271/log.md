@@ -20,3 +20,4 @@ are quoted in full.
 | 2026-10-23 13:02 | 8 Revise after memfd | Lead | ESCALATE: drop CAP_DAC_READ_SEARCH (option 1 recommended) vs accept residual vs AppArmor (opus/medium · 107,467 tokens · 37 tool uses · 486 s) |
 | 2026-10-23 13:03 | 8 Escalation | Product Manager | Chose option 1: agent holds CAP_SYS_PTRACE alone, CAP_DAC_READ_SEARCH dropped; accepts residual via cwd/root links |
 | 2026-10-23 13:06 | 3 Plan security review (re-review) | Security | CHANGES_REQUIRED: headline guarantee absolute vs accepted residual (cwd/root link); N1 stale status; N2 bounding-set rule; N3 task/<tid> and mount-namespace wording (opus/medium · usage pending) |
+| 2026-10-23 13:10 | 3 Plan revise (2) | Lead | DONE: qualified headline H, residual R, bounding-set rule B, status updated (opus/medium · usage pending) |
