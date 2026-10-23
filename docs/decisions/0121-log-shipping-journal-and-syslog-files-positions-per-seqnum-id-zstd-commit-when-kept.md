@@ -36,7 +36,8 @@ replace its own log file with a link, and the agent can read every file.
    whether the last run was kept, so a restart repeats or loses that run (S4); a scheduler callback when a run's records were kept
    (chosen) commits at once and lets the agent save the state once more when it stops.
 7. **Store the configured paths in the state file** — readable, but 16 paths of 1,024 bytes at JSON's worst escaping exceed the 16 KiB
-   bound of the state file; storing a SHA-256 of the path (chosen) keeps that bound unchanged.
+   bound of the state file; storing a SHA-256 of the path (chosen) gives every path the same 64 hex digits, so the bound depends only
+   on the number of positions.
 8. **Refuse links with `openat2(RESOLVE_NO_SYMLINKS)`** — one call, but needs `golang.org/x/sys/unix` as a direct dependency; opening
    each element of the path with `openat` and `O_NOFOLLOW` from `/` (chosen) gives the same refusal with the standard library, without
    a window between check and open. `os.Root` was not taken: it follows links inside the root.
@@ -55,11 +56,14 @@ shipping*) and the [Configuration and secrets](../areas/configuration-and-secret
   property checked by a heap test.
 - Positions per seqnum ID need room for many user journals: up to 256 IDs are saved and the state file's bound rises from 16 to 64 KiB.
   An ID without a position is read from its start only when it is newer than the newest position held, so a forgotten ID, a journal
-  turned on later or more IDs than the bound never make a file be shipped twice; an unsaved ID costs one gap after a restart.
+  turned on later or more IDs than the bound never make a file be shipped twice; an ID started at its end whose end is newer than every
+  position held records one gap, so skipped newer lines (a clock step back, an unsaved ID after a restart) are never lost silently.
 - Library and decoder bounds are chosen against hostile input, not only real frames: only single-segment frames with a stated size of at
   most 4 MiB are decoded, into one fixed buffer, at most 4 per entry, because the library stops other frames only after their output
-  passed the bound and one crafted entry could otherwise use most of a run; drop patterns are bounded by their compiled size, because
-  RE2's linear time still multiplies by the program's length.
+  passed the bound and one crafted entry could otherwise use most of a run; drop patterns are bounded by their compiled size, 400
+  instructions each and together, because RE2's linear time still multiplies by the program's length: about 0.2 ms per instruction on a
+  16 KiB line, so 1,000 per pattern cost up to 300 ms a line and let a flood of long lines push the collector into gaps; the price is
+  about a dozen ordinary patterns.
 - A renamed log file is read until its writer has moved, and its position is saved, because rsyslog reopens its files only after all
   renames.
 - A crash repeats at most one state interval plus one collector interval of lines (the spec's E1); exact delivery across a crash needs

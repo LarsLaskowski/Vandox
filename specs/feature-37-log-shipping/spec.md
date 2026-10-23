@@ -140,7 +140,8 @@ What happens today, checked against the code:
   not). The example file says so.
 - E16: An invalid `log_shipping` option (an unknown priority name, a relative or unclean path, a path listed twice, more
   than 16 files, a format other than `syslog`, a drop rule without a condition or with a pattern that does not compile, more
-  than 64 rules, a pattern over 1,024 bytes) — the agent does not start; the error names the file, the line and the key with
+  than 64 rules, a pattern over 1,024 bytes or over 400 compiled instructions, patterns over 400 compiled instructions
+  together) — the agent does not start; the error names the file, the line and the key with
   its index and a fixed reason, never the value.
 - E17: A file is removed from `log_shipping.files` or added to it between two starts — a removed file's position is
   forgotten; an added file that exists starts at its current end (S7), one that does not exist yet is read from its start
@@ -167,10 +168,10 @@ What happens today, checked against the code:
 - E22: A journal file of a seqnum ID the agent has no position for (journald started a new ID, a new user journal, an archived
   or set-aside file of an ID whose position was forgotten, or the journal was off or unreadable until now) — it is read from
   its start only when its first entry is newer than the newest journal position the agent holds; otherwise the ID starts at its
-  end. So no file is ever shipped a second time, and turning `log_shipping.journal` on, or a journal that becomes readable
+  end, with one gap from the newest held position's time to the time of its end when that is later (its skipped part may hold
+  lines newer than every position, after the clock stepped back or for a user journal whose first entries are older). So no file is ever shipped a second time, and turning `log_shipping.journal` on, or a journal that becomes readable
   after a first start, starts at the ends as S7 does. Positions of up to 256 IDs with an online file are saved; a further ID is
-  read but its position is not saved, so after a restart it starts at its end with one gap from the newest saved journal
-  position's time to the run's start — never a re-read.
+  read but its position is not saved, so after a restart it starts at its end with that one gap — never a re-read.
 
 ## Non-functional requirements
 
@@ -201,8 +202,9 @@ What happens today, checked against the code:
 - **Security**: the journal and the files are external input (security area 10): every read is bounded before parsing, a
   hostile line or entry yields a cut, replaced or unshipped line or a gap, never a crash, a hang or an unbounded allocation;
   decompression is bounded before it starts (only frames that state their size, at most 4 MiB, and at most 4 compressed items
-  decoded per entry; no decompression bomb). Drop rule patterns run in linear time (no backtracking), and a pattern whose
-  compiled program is large is refused at start-up, so one line costs a bounded amount of matching. No path is followed through a symbolic link (E5). Log lines are never written to the agent's own log.
+  decoded per entry; no decompression bomb). Drop rule patterns run in linear time (no backtracking), and patterns whose
+  compiled programs are large (over 400 instructions, alone or together) are refused at start-up, so matching one 16 KiB line
+  against all rules takes under 100 ms on the measured host and a flood of long lines cannot stall the collector into gaps. No path is followed through a symbolic link (E5). Log lines are never written to the agent's own log.
 - **Rights**: no new group, capability or unit setting: the journal is read as a member of `systemd-journal` and the files
   of `/var/log` as a member of `adm` (Agent area, *Rights*); a file readable only through `CAP_DAC_READ_SEARCH` is read
   through it, which `deploy/agent/README.md` states.
@@ -216,8 +218,8 @@ What happens today, checked against the code:
     most 1,024 bytes, listed once; `format` `syslog`.
   - `log_shipping.drop` — default `[]`; at most 64 rules, each with at least one of `log` (`journal` or a configured path),
     `program` (compared whole, literally), `priority` (matches a line of that priority or less severe; a line without
-    priority never matches) and `message` (an RE2 regular expression in Go syntax, at most 1,024 bytes, searched anywhere in
-    the message unless anchored); a line matching every condition of any rule is not shipped.
+    priority never matches) and `message` (an RE2 regular expression in Go syntax, at most 1,024 bytes and 400 compiled instructions, all
+    patterns together at most 400 — about a dozen ordinary patterns —, searched anywhere in the message unless anchored); a line matching every condition of any rule is not shipped.
 - **Logs**: fixed texts only, one line per change (E4, E13, E20); never a path, a field value or a message. Gaps carry collector
   `logs` and cause `unknown`.
 
@@ -260,7 +262,8 @@ What happens today, checked against the code:
 - [ ] AC18: a file of an ID without a position is shipped from its start only when its first entry is newer than the newest
   held journal position; an archived or set-aside file of a forgotten ID, the journal turned on later and a journal readable
   only after a first start ship nothing older; with more than 256 IDs with an online file no file is read twice and a
-  restart gives each unsaved ID one gap (E22).
+  restart gives each unsaved ID one gap; an ID started at its end whose end is newer than the newest held position gives one
+  gap up to its end (E22).
 - [ ] AC10: lines the journal no longer holds at the position, and an unreadable entry, each give the one gap of E3 or E12,
   and an entry without `MESSAGE` gives neither a record nor a gap (E3, E12).
 - [ ] AC11: a missing, unreadable or non-regular configured file, a path with a symbolic link in any element, and an
@@ -376,6 +379,9 @@ What happens today, checked against the code:
   bound now keep reading the renamed file until the writer has moved, across a restart too.
 - Plan security review B1–B4: the memory figure and *Security* now name the zstd buffers, the frame rule and the cap of
   compressed items, and the pattern size bound.
+- Plan security review round 2, B5 and N7 (Lead's decision): E16, *Security* and `log_shipping.drop` bound the patterns at 400
+  compiled instructions each and together (under 100 ms per 16 KiB line); E22 and AC18 add the gap for the skipped part of an ID
+  started at its end whose end is newer than every held position.
 - Minor 6 (units and compressions): accepted. E11 and AC13 now count shipped records for the 1,000 and the 4 MiB, and
   filtered entries only against the second of reading, so a flood of filtered lines delays wanted ones but never stops them.
   S9, E12 and the open question say that only zstd is decoded and that an XZ or LZ4 item makes its entry a gap.
