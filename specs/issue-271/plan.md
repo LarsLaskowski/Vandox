@@ -382,3 +382,10 @@ option 1, residual accepted).
   issue comment on #42 (orchestrator): "Per records 0115 and 0121 the agent does not read `/proc/<pid>/fd` and
   holds `CAP_SYS_PTRACE` alone; `CAP_DAC_READ_SEARCH` must not be granted (with it, other processes' open files,
   memfds included, become writable)."
+
+## Security notes (delta confirmation)
+
+Non-blocking findings of Security's `APPROVED` delta confirmation (verbatim):
+
+- NB1. R and record 0121 overstate the residual: "so every file whose own mode grants … is reachable even below a directory closed to it" and "the whole file tree of another mount namespace". In fact a file is reachable only along paths from some process's `cwd` or `root`. Path components after the link are still DAC-checked, so a closed directory below that point still blocks. Fact 22's `/etc/shadow` result through `/proc/<pid>/root` shows this. The overstatement errs on the safe side, so it is no defect. The Lead can tighten it to "below a closed directory that contains another process's working or root directory" if wanted.
+- NB2. Record 0121's title and its row in `docs/decisions/README.md` ("CAP_SYS_PTRACE cannot write another user's process memory") are still unqualified. Under the accepted residual, a write into a `MAP_SHARED`-mapped file reaches another user's process memory. The record is unreleased and can be retitled in place, for example "… cannot write another user's process memory through /proc/<pid>/mem …", so the index does not carry an absolute claim.
