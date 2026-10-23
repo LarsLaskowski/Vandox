@@ -1446,3 +1446,108 @@ func flushRepeatedly(t *testing.T, wg *sync.WaitGroup, s *Store, rounds int, err
 		}
 	}
 }
+
+func TestStore_FlushGivesUpWhenASaveDoesNotEnd(t *testing.T) {
+	dir := t.TempDir()
+	lc := &logCapture{}
+	s, _ := Open(dir, lc.logger())
+	path := filepath.Join(dir, FileName)
+	update(t, s, false, fullState(1))
+	if err := s.Flush(t0); err != nil {
+		t.Fatalf("Flush() of the first state error = %v, want nil", err)
+	}
+	before := readFile(t, path)
+	update(t, s, false, func(st *State) { st.Journal.Seqnum = 2 })
+
+	fired := make(chan time.Time)
+	close(fired)
+	var waited []time.Duration
+	original := flushAfter
+	flushAfter = func(d time.Duration) <-chan time.Time {
+		waited = append(waited, d)
+		return fired
+	}
+	t.Cleanup(func() { flushAfter = original })
+	s.saving <- struct{}{}
+
+	err := s.Flush(t0.Add(time.Second))
+
+	if err == nil || err.Error() != "agentstate: save still running" {
+		t.Errorf("Flush() error = %v, want %q", err, "agentstate: save still running")
+	}
+	if len(waited) != 1 || waited[0] != 5*time.Second {
+		t.Errorf("Flush() waited for %v, want one wait of 5s", waited)
+	}
+	var warnings []logLine
+	for _, l := range lc.lines(t) {
+		if l.Msg == warnNotSaved {
+			warnings = append(warnings, l)
+		}
+	}
+	if len(warnings) != 1 || warnings[0].Level != "WARN" || warnings[0].Err != "agentstate: save still running" {
+		t.Errorf("warnings %q = %+v, want exactly one WARN with err %q", warnNotSaved, warnings, "agentstate: save still running")
+	}
+	if after := readFile(t, path); !bytes.Equal(after, before) {
+		t.Errorf("the state file = %s, want it unchanged (%s) by a Flush that gave up", after, before)
+	}
+
+	<-s.saving
+	flushAfter = original
+	if err := s.Flush(t0.Add(2 * time.Second)); err != nil {
+		t.Fatalf("Flush() after the running save ended error = %v, want nil", err)
+	}
+	if s2, _ := Open(dir, slog.New(slog.DiscardHandler)); s2.State().Journal == nil || s2.State().Journal.Seqnum != 2 {
+		t.Errorf("state after the later Flush = %+v, want the position 2 that the first Flush kept dirty", s2.State())
+	}
+}
+
+func TestDecode_StateWithoutLogPositionsStaysUsable(t *testing.T) {
+	dir, path := savedStore(t)
+	mutateJSON(t, path, func(obj map[string]any) {
+		if _, has := obj["logs"]; has {
+			t.Fatalf("the state file %v already holds log positions, want a file of the earlier format", obj)
+		}
+	})
+
+	s, status := openWithin(t, dir, slog.New(slog.DiscardHandler))
+
+	if status != StatusLoaded {
+		t.Fatalf("Open() status = %v, want StatusLoaded for a file without log positions", status)
+	}
+	got := s.State()
+	if got.Logs != nil {
+		t.Errorf("State().Logs = %+v, want none", got.Logs)
+	}
+	if got.Boot == nil || got.Journal == nil || got.Backup == nil {
+		t.Errorf("State() = %+v, want the boot, the kernel position and the backup run read as before", got)
+	}
+	update(t, s, true, func(st *State) { st.Logs = sampleLogs() })
+	if err := s.Flush(t0); err != nil {
+		t.Fatalf("Flush() error = %v, want nil", err)
+	}
+	if s2, st := Open(dir, slog.New(slog.DiscardHandler)); st != StatusLoaded || !equalLogs(s2.State().Logs, sampleLogs()) {
+		t.Errorf("Open() after adding log positions: status %v, logs %+v, want StatusLoaded and the added positions", st, s2.State().Logs)
+	}
+}
+
+func TestDecode_RefusesAnInvalidKernelJournalPosition(t *testing.T) {
+	cases := []struct {
+		name  string
+		value string
+	}{
+		{"NotAUUID", "not-a-uuid"},
+		{"UpperCase", strings.ToUpper(seqnumID)},
+		{"Empty", ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			dir, path := savedStore(t)
+			mutateJSON(t, path, func(obj map[string]any) { setField(t, obj, "journal", "seqnum_id", c.value) })
+			lc := &logCapture{}
+
+			s, st := openWithin(t, dir, lc.logger())
+
+			requireMissing(t, dir, lc, s, st)
+		})
+	}
+}

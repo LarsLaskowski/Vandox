@@ -485,3 +485,217 @@ func requireUndecoded(t *testing.T, patch byte, d Decompressor) {
 		t.Errorf("next entry MESSAGE = %q undecoded %d, want after and 0", got.Value, e.Undecoded)
 	}
 }
+
+// hostEntries returns an entry whose items cover the paths of NextWith: a plain item longer than the scratch buffer, a compressed one
+// and a short one.
+func hostEntries() []bEntry {
+	return []bEntry{
+		seqEntry(1, plain(longText("MESSAGE=", 3000)), packed(longText("F1=", 700)), plain("_HOSTNAME=web-1")),
+		seqEntry(2, plain("MESSAGE=after")),
+	}
+}
+
+func TestEntries_NextWithReaderFailureIsErrReadAndKeepsTheCursor(t *testing.T) {
+	b, _ := buildFile(hostEntries(), testOptions())
+	failures := 0
+	for ok := 0; ok < 40; ok++ {
+		if readWithFailureAfter(t, b, ok) {
+			failures++
+		}
+	}
+	if failures < 5 {
+		t.Errorf("only %d of 40 read counts made a read fail, want the failure met in every kind of read (the entry, the table, the items, the payload and the compressed object)", failures)
+	}
+}
+
+// readWithFailureAfter reads the two entries of hostEntries through a reader that fails after okReads reads once the cursor is set, and
+// reports whether a read failed. A failure must be ErrRead, never a damage, and leave the cursor in front of the entry.
+func readWithFailureAfter(t *testing.T, b []byte, okReads int) bool {
+	t.Helper()
+	want := []string{"MESSAGE", "F1", "_HOSTNAME"}
+	fr := &failingReader{r: newRefReader(b), okReads: 1 << 30}
+	f, err := Open(fr, int64(len(b)), false)
+	if err != nil {
+		t.Fatalf("Open() error = %v, want nil", err)
+	}
+	c, err := f.SeekAll(0)
+	if err != nil {
+		t.Fatalf("SeekAll(0) error = %v, want nil", err)
+	}
+	fr.okReads = fr.calls + okReads
+	var e Entry
+
+	got, err := f.NextWith(&c, want, &e, readOptions(&rawFrameDecoder{}))
+
+	if err != nil {
+		if got || !errors.Is(err, ErrRead) || !errors.Is(err, errBoom) || err.Error() != "journal: read failed" {
+			t.Fatalf("after %d good reads: NextWith() = %v, %v, want false and %q wrapping the reader's error", okReads, got, err, "journal: read failed")
+		}
+		fr.okReads = 1 << 30
+		e = Entry{}
+		nextWith(t, f, &c, want, &e, readOptions(&rawFrameDecoder{})) // the cursor stayed: the same entry is read again
+	}
+	fr.okReads = 1 << 30
+	var second Entry
+	nextWith(t, f, &c, want, &second, readOptions(&rawFrameDecoder{}))
+	if e.Seqnum != 1 || e.Undecoded != 0 || len(e.Fields) != 3 || second.Seqnum != 2 {
+		t.Errorf("after %d good reads: entries %d and %d with %d fields and %d undecoded, want entries 1 and 2 and 3 fields and none undecoded: a failing reader is no damage", okReads, e.Seqnum, second.Seqnum, len(e.Fields), e.Undecoded)
+	}
+	return err != nil
+}
+
+func TestEntries_NextWithCompressedObjectBeyondTheFileEnd(t *testing.T) {
+	message := longText("MESSAGE=", 4000)
+	for _, online := range []bool{false, true} {
+		name := "an archived file ends its list"
+		if online {
+			name = "an online file is malformed until it is refreshed"
+		}
+		t.Run(name, func(t *testing.T) {
+			o := testOptions()
+			o.online = online
+			b, lay := buildFile([]bEntry{seqEntry(1, plain("MESSAGE=one")), seqEntry(2, packed(message))}, o)
+			r := newRefReader(b)
+			r.limit = int(lay.data[message]) + 100 // #nosec G115 -- a small fixture offset: the object starts and does not end inside the file
+			f, err := r.openRef(false)
+			if err != nil {
+				t.Fatalf("Open() error = %v, want nil", err)
+			}
+			c, err := f.SeekAll(0)
+			if err != nil {
+				t.Fatalf("SeekAll(0) error = %v, want nil", err)
+			}
+			var e Entry
+			nextWith(t, f, &c, []string{"MESSAGE"}, &e, readOptions(&rawFrameDecoder{}))
+
+			for i := range 2 { // the cursor stays: the second read meets the same cut
+				ok, err := f.NextWith(&c, []string{"MESSAGE"}, &e, readOptions(&rawFrameDecoder{}))
+
+				requireCutEnd(t, i, online, ok, err, &c)
+			}
+		})
+	}
+}
+
+// requireCutEnd checks the result of a read that met the cut-off end of the file: an online file reports a malformed one (the file may
+// have grown), any other ends its list with a torn cursor.
+func requireCutEnd(t *testing.T, i int, online, ok bool, err error, c *Cursor) {
+	t.Helper()
+	if online {
+		if ok || !errors.Is(err, ErrMalformed) {
+			t.Fatalf("NextWith() %d = %v, %v, want false and %v", i, ok, err, ErrMalformed)
+		}
+		return
+	}
+	if ok || err != nil || !c.Torn() {
+		t.Fatalf("NextWith() %d = %v, %v, torn %v, want false, nil and a torn end", i, ok, err, c.Torn())
+	}
+}
+
+func TestEntries_NextWithKeepsAtMostSixteenFields(t *testing.T) {
+	const keep = 16
+	var plains, packs []bItem
+	var want []string
+	for i := range keep + 1 {
+		name := "F" + strconv.Itoa(i)
+		want = append(want, name)
+		plains = append(plains, plain(name+"=v"))
+		packs = append(packs, packed(longText(name+"=", 600)))
+	}
+	b, _ := buildFile([]bEntry{seqEntry(1, plains...), seqEntry(2, packs...)}, testOptions())
+	f := openBytes(t, b, false)
+	c, err := f.SeekAll(0)
+	if err != nil {
+		t.Fatalf("SeekAll(0) error = %v, want nil", err)
+	}
+	opt := readOptions(&rawFrameDecoder{})
+	opt.MaxCompressed = keep + 1
+	for _, kind := range []string{"plain", "compressed"} {
+		var e Entry
+
+		nextWith(t, f, &c, want, &e, opt)
+
+		if len(e.Fields) != keep || omittedOf(t, &e) != 1 || e.Undecoded != 0 {
+			t.Errorf("entry with %d %s items: %d fields, Omitted %d, Undecoded %d, want %d, 1 and 0", keep+1, kind, len(e.Fields), omittedOf(t, &e), e.Undecoded, keep)
+		}
+	}
+}
+
+func TestEntries_NextWithItemsWithoutAName(t *testing.T) {
+	b, _ := buildFile([]bEntry{seqEntry(1, plain("NOVALUE"), plain("=nameless"), packed(strings.Repeat("a", 700)), packed("="+strings.Repeat("b", 700)), plain("MESSAGE=kept"))}, testOptions())
+	f := openBytes(t, b, false)
+	c, err := f.SeekAll(0)
+	if err != nil {
+		t.Fatalf("SeekAll(0) error = %v, want nil", err)
+	}
+	var e Entry
+
+	nextWith(t, f, &c, []string{"MESSAGE", "NOVALUE"}, &e, readOptions(&rawFrameDecoder{}))
+
+	if got := value(t, &e, "MESSAGE"); string(got.Value) != "kept" || len(e.Fields) != 1 {
+		t.Errorf("entry fields = %d, MESSAGE = %q, want only MESSAGE=kept: an item without a name is no field", len(e.Fields), got.Value)
+	}
+	if e.Undecoded != 2 {
+		t.Errorf("Undecoded = %d, want 2 (the two compressed items whose decoded form has no name)", e.Undecoded)
+	}
+}
+
+// ownBufferDecoder answers with a buffer of its own and not the one it was given.
+type ownBufferDecoder struct{ out []byte }
+
+func (d *ownBufferDecoder) Decompress(_, _ []byte, _ int) ([]byte, error) { return d.out, nil }
+
+func TestEntries_NextWithCopiesTheValueOfADecoderThatKeepsItsBuffer(t *testing.T) {
+	b, _ := buildFile([]bEntry{seqEntry(1, packed(longText("MESSAGE=", 700)))}, testOptions())
+	f := openBytes(t, b, false)
+	c, err := f.SeekAll(0)
+	if err != nil {
+		t.Fatalf("SeekAll(0) error = %v, want nil", err)
+	}
+	d := &ownBufferDecoder{out: []byte("MESSAGE=decoded text")}
+	var e Entry
+
+	nextWith(t, f, &c, []string{"MESSAGE"}, &e, readOptions(d))
+	copy(d.out, "MESSAGE=XXXXXXX text")
+
+	if got := value(t, &e, "MESSAGE"); string(got.Value) != "decoded text" {
+		t.Errorf("MESSAGE = %q, want %q: the value must not alias the decoder's buffer", got.Value, "decoded text")
+	}
+}
+
+func TestEntries_NextWithGrowsTheInputBufferForALargeCompressedObject(t *testing.T) {
+	big := longText("MESSAGE=", 60_000)
+	small := longText("MESSAGE=", 900)
+	b, _ := buildFile([]bEntry{seqEntry(1, packed(small)), seqEntry(2, packed(big)), seqEntry(3, packed(small+"x"))}, testOptions())
+	r := newRefReader(b)
+	f, err := r.openRef(false)
+	if err != nil {
+		t.Fatalf("Open() error = %v, want nil", err)
+	}
+	c, err := f.SeekAll(0)
+	if err != nil {
+		t.Fatalf("SeekAll(0) error = %v, want nil", err)
+	}
+	opt := readOptions(&rawFrameDecoder{})
+	var e Entry
+
+	nextWith(t, f, &c, []string{"MESSAGE"}, &e, opt)
+	start := len(e.zin)
+	nextWith(t, f, &c, []string{"MESSAGE"}, &e, opt)
+	grown := len(e.zin)
+	cut := value(t, &e, "MESSAGE")
+	nextWith(t, f, &c, []string{"MESSAGE"}, &e, opt)
+
+	if start != minInputBuffer {
+		t.Errorf("the input buffer holds %d bytes after a small object, want its start size %d", start, minInputBuffer)
+	}
+	if grown < len(big) || len(cut.Value) != 16384 || !cut.Cut {
+		t.Errorf("after the 60,000 byte object the input buffer holds %d bytes and MESSAGE %d bytes (cut %v), want at least %d, 16384 and cut", grown, len(cut.Value), cut.Cut, len(big))
+	}
+	if got := value(t, &e, "MESSAGE"); string(got.Value) != small[len("MESSAGE="):]+"x" || len(e.zin) != grown {
+		t.Errorf("third entry MESSAGE = %d bytes with an input buffer of %d, want the 893 byte value and the buffer kept at %d (grown once)", len(got.Value), len(e.zin), grown)
+	}
+	if r.violated != "" {
+		t.Errorf("the reader was asked for %s, want reads of at most 64 KiB", r.violated)
+	}
+}

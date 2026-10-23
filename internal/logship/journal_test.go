@@ -4,12 +4,15 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 	"unicode/utf8"
@@ -843,4 +846,464 @@ func refusedGapOfADroppedRun(t *testing.T) {
 
 	requireGap(t, oneGap(t, "the run after the refused one", again), entryTime(3), w.run.Start)
 	requireNoGaps(t, "the next run", w.step())
+}
+
+// cutJournal cuts the last n bytes off the journal file in the world, as a copy or a disk that ran full does.
+func cutJournal(t *testing.T, w *world, file string, n int) {
+	t.Helper()
+	path := filepath.Join(w.jroot, machineID, file)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading %s: %v", file, err)
+	}
+	if n <= 0 || n >= len(data) {
+		t.Fatalf("cutting %d bytes off the %d bytes of %s, want a cut inside the file", n, len(data), file)
+	}
+	if err := os.WriteFile(path, data[:len(data)-n], 0o600); err != nil {
+		t.Fatalf("writing %s: %v", file, err)
+	}
+}
+
+func TestJournal_TornArchivedFileIsOneGapToItsTailTime(t *testing.T) {
+	tests := []struct {
+		name     string
+		cut      int
+		wantRead []string
+		gapFrom  time.Time
+	}{
+		{"the last entry is cut off", 500, []string{"line 1", "line 2", "line 3", "line 4", "line 5"}, entryTime(5)},
+		{"most entries are cut off", 1500, []string{"line 1", "line 2"}, entryTime(2)},
+		{"all entries are cut off", 2500, nil, entryTime(0)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			w := newWorld(t)
+			id := seqID(1)
+			name := w.archived(id, jentries(1, 6))
+			w.online(id, jentries(7, 9))
+			cutJournal(t, w, name, tt.cut)
+			w.position(id, 0)
+			w.start()
+
+			recs := w.drain(5)
+
+			requireMessages(t, "lines", messages(recs), append(append([]string{}, tt.wantRead...), "line 7", "line 8", "line 9"))
+			requireGap(t, oneGap(t, "the runs", recs), tt.gapFrom, entryTime(6))
+			if logs := w.logsOf("journal not readable"); len(logs) != 0 {
+				t.Errorf("warnings %q = %+v, want none: a cut-off tail of an archived file is no damage", "journal not readable", logs)
+			}
+			if pos := w.savedJournal(id); pos == nil || pos.Seqnum != 9 {
+				t.Errorf("journal position = %+v, want the sequence number 9", pos)
+			}
+			if again := w.step(); len(again) != 0 {
+				t.Errorf("the next run returned %v and %d gaps, want nothing: the cut-off file is given up once", head(messages(again)), len(gapsOf(again)))
+			}
+		})
+	}
+}
+
+// readerAtFile is what the journal reader needs of a file.
+type readerAtFile interface {
+	fs.File
+	io.ReaderAt
+}
+
+// faultFS is a journal root whose files a test makes fail: fault is asked at every open (name is the path below the root, nth counts the
+// opens of that name from 1) and answers an error to return instead of the file, or a function that wraps the file.
+type faultFS struct {
+	fs.FS
+	mu    sync.Mutex
+	opens map[string]int
+	fault func(name string, nth int) (wrap func(readerAtFile) fs.File, err error)
+}
+
+func newFaultFS(base fs.FS, fault func(name string, nth int) (func(readerAtFile) fs.File, error)) *faultFS {
+	return &faultFS{FS: base, opens: map[string]int{}, fault: fault}
+}
+
+func (f *faultFS) Open(name string) (fs.File, error) {
+	f.mu.Lock()
+	f.opens[name]++
+	nth := f.opens[name]
+	f.mu.Unlock()
+	wrap, err := f.fault(name, nth)
+	if err != nil {
+		return nil, err
+	}
+	file, err := f.FS.Open(name)
+	if err != nil || wrap == nil {
+		return file, err
+	}
+	ra, ok := file.(readerAtFile)
+	if !ok {
+		return file, nil
+	}
+	return wrap(ra), nil
+}
+
+// withoutReadAt hides the ReadAt method of the file.
+type withoutReadAt struct{ fs.File }
+
+// failingStat fails Stat.
+type failingStat struct{ readerAtFile }
+
+func (failingStat) Stat() (fs.FileInfo, error) { return nil, errors.New("stat failed") }
+
+// failingReadAt serves the first okReads reads of ReadAt and fails the others.
+type failingReadAt struct {
+	readerAtFile
+	okReads int
+	calls   int
+}
+
+func (f *failingReadAt) ReadAt(p []byte, off int64) (int, error) {
+	f.calls++
+	if f.calls > f.okReads {
+		return 0, errors.New("read failed")
+	}
+	return f.readerAtFile.ReadAt(p, off)
+}
+
+// onlineName is the name of the online file below the root of the world's journal.
+const onlineName = machineID + "/system.journal"
+
+// faultyWorld returns a world with the online file holding the entries 1 to 6 and the position before them, whose journal root is a
+// faultFS with the given fault.
+func faultyWorld(t *testing.T, fault func(name string, nth int) (func(readerAtFile) fs.File, error)) *world {
+	t.Helper()
+	w := newWorld(t)
+	w.online(seqID(1), jentries(1, 6))
+	w.position(seqID(1), 0)
+	w.journals = []fs.FS{newFaultFS(os.DirFS(w.jroot), fault)}
+	w.start()
+	return w
+}
+
+// healing is a fault that applies while *broken is true.
+func healing(broken *bool, fault func(name string, nth int) (func(readerAtFile) fs.File, error)) func(string, int) (func(readerAtFile) fs.File, error) {
+	return func(name string, nth int) (func(readerAtFile) fs.File, error) {
+		if !*broken {
+			return nil, nil
+		}
+		return fault(name, nth)
+	}
+}
+
+func TestJournal_FileTheReaderCannotUseStopsTheJournalAndKeepsThePosition(t *testing.T) {
+	wrapped := func(wrap func(readerAtFile) fs.File) func(string, int) (func(readerAtFile) fs.File, error) {
+		return func(string, int) (func(readerAtFile) fs.File, error) { return wrap, nil }
+	}
+	tests := []struct {
+		name  string
+		fault func(name string, nth int) (func(readerAtFile) fs.File, error)
+	}{
+		{"opening is refused", func(string, int) (func(readerAtFile) fs.File, error) { return nil, fs.ErrPermission }},
+		{"the file cannot be read at an offset", wrapped(func(f readerAtFile) fs.File { return withoutReadAt{f} })},
+		{"the size cannot be told", wrapped(func(f readerAtFile) fs.File { return failingStat{f} })},
+		{"the header cannot be read", wrapped(func(f readerAtFile) fs.File { return &failingReadAt{readerAtFile: f} })},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) { requireUnusableOnlineFileIsKept(t, tt.fault) })
+	}
+}
+
+// requireUnusableOnlineFileIsKept breaks the online file with fault for three runs and checks that nothing is shipped or recorded as a
+// gap and that one warning tells it; once the file can be used again the lines after the position are shipped once.
+func requireUnusableOnlineFileIsKept(t *testing.T, fault func(name string, nth int) (func(readerAtFile) fs.File, error)) {
+	t.Helper()
+	broken := true
+	w := faultyWorld(t, healing(&broken, func(name string, nth int) (func(readerAtFile) fs.File, error) {
+		if name != onlineName {
+			return nil, nil
+		}
+		return fault(name, nth)
+	}))
+
+	var during []model.Record
+	for range 3 {
+		during = append(during, w.step()...)
+	}
+	broken = false
+	after := w.drain(5)
+
+	if len(during) != 0 {
+		t.Errorf("runs on a file the reader cannot use returned %v and %d gaps, want nothing", head(messages(during)), len(gapsOf(during)))
+	}
+	logs := w.logsOf("journal not readable")
+	if len(logs) != 1 || logs[0].attrs["err"] != "journal: online: read failed" {
+		t.Errorf("warnings %q = %+v, want one with err %q", "journal not readable", logs, "journal: online: read failed")
+	}
+	requireMessages(t, "lines once the file can be used", messages(after), numbered("line", 1, 6))
+	requireNoGaps(t, "the runs once the file can be used", after)
+	if n := len(w.logsOf("journal readable again")); n != 1 {
+		t.Errorf("%q was logged %d times, want once", "journal readable again", n)
+	}
+}
+
+func TestJournal_FileThatFailsWhileItIsReadIsReadOnFromThePosition(t *testing.T) {
+	failed := 0
+	for okReads := 0; okReads < 120; okReads++ {
+		broken := true
+		w := faultyWorld(t, healing(&broken, func(name string, nth int) (func(readerAtFile) fs.File, error) {
+			if name != onlineName || nth < 2 { // the scan opens the file first, the reading second
+				return nil, nil
+			}
+			return func(f readerAtFile) fs.File { return &failingReadAt{readerAtFile: f, okReads: okReads} }, nil
+		}))
+
+		first := w.step()
+		broken = false
+		rest := w.drain(5)
+
+		all := append(append([]model.Record{}, first...), rest...)
+		requireMessages(t, fmt.Sprintf("lines when the reading fails after %d reads", okReads), messages(all), numbered("line", 1, 6))
+		requireNoGaps(t, fmt.Sprintf("the runs when the reading fails after %d reads", okReads), all)
+		if len(w.logsOf("journal not readable")) > 0 {
+			failed++
+		}
+	}
+	if failed < 3 {
+		t.Errorf("the reading failed in the middle of the file for %d of 120 read counts, want it to fail at several places", failed)
+	}
+}
+
+func TestJournal_FileThatIsGoneAfterTheListingIsSkippedForTheRun(t *testing.T) {
+	gone := true
+	w := faultyWorld(t, func(name string, nth int) (func(readerAtFile) fs.File, error) {
+		if name == onlineName && nth == 2 && gone {
+			return nil, fs.ErrNotExist
+		}
+		return nil, nil
+	})
+
+	first := w.step()
+	gone = false
+	rest := w.drain(5)
+
+	if len(first) != 0 || len(w.logsOf("journal not readable")) != 0 {
+		t.Errorf("the run returned %v and %d gaps and %d warnings, want nothing: the file may have been vacuumed", head(messages(first)), len(gapsOf(first)), len(w.logsOf("journal not readable")))
+	}
+	requireMessages(t, "lines of the next runs", messages(rest), numbered("line", 1, 6))
+	requireNoGaps(t, "the next runs", rest)
+}
+
+func TestJournal_FileThatCannotBeOpenedForReadingStopsTheIDForTheRun(t *testing.T) {
+	broken := true
+	w := faultyWorld(t, func(name string, nth int) (func(readerAtFile) fs.File, error) {
+		if name == onlineName && nth == 2 && broken {
+			return nil, fs.ErrPermission
+		}
+		return nil, nil
+	})
+
+	first := w.step()
+	broken = false
+	rest := w.drain(5)
+
+	logs := w.logsOf("journal not readable")
+	if len(first) != 0 || len(logs) != 1 || logs[0].attrs["err"] != "journal: online: read failed" {
+		t.Errorf("the run returned %v, warnings %+v, want nothing and one warning with err %q", head(messages(first)), logs, "journal: online: read failed")
+	}
+	requireMessages(t, "lines of the next runs", messages(rest), numbered("line", 1, 6))
+	requireNoGaps(t, "the next runs", rest)
+}
+
+func TestJournal_UnlistableDirectoryIsReportedWithAFixedText(t *testing.T) {
+	broken := true
+	w := faultyWorld(t, healing(&broken, func(name string, _ int) (func(readerAtFile) fs.File, error) {
+		if name == machineID {
+			return nil, fs.ErrPermission
+		}
+		return nil, nil
+	}))
+
+	for range 2 {
+		if recs := w.step(); len(recs) != 0 {
+			t.Errorf("a run on a journal that cannot be listed returned %v, want nothing", head(messages(recs)))
+		}
+	}
+	broken = false
+	after := w.drain(5)
+
+	logs := w.logsOf("journal not readable")
+	if len(logs) != 1 || logs[0].attrs["err"] != "journal: directory not readable" {
+		t.Errorf("warnings %q = %+v, want one with err %q", "journal not readable", logs, "journal: directory not readable")
+	}
+	requireMessages(t, "lines once the directory is listable", messages(after), numbered("line", 1, 6))
+}
+
+func TestJournal_MissingDirectoryIsReportedWithAFixedText(t *testing.T) {
+	w := newWorld(t)
+	if err := os.RemoveAll(filepath.Join(w.jroot, machineID)); err != nil {
+		t.Fatalf("removing the machine directory: %v", err)
+	}
+	w.start()
+
+	recs := w.step()
+
+	logs := w.logsOf("journal not readable")
+	if len(recs) != 0 || len(logs) != 1 || logs[0].attrs["err"] != "journal: no journal directory" {
+		t.Errorf("the run returned %v, warnings %+v, want nothing and one warning with err %q", head(messages(recs)), logs, "journal: no journal directory")
+	}
+}
+
+func TestJournal_FilesOfAnIDAreReadInSequenceOrderWhateverTheirNames(t *testing.T) {
+	const prefix, suffix = "system@00000000000000000000000000000001-", "-0005f8d1b1a2c3d4.journal"
+	tests := []struct {
+		name         string
+		first, later string // the names of the file with the entries 1 to 3 and of the one with the entries 4 to 6
+	}{
+		{"the names sort as the entries do", prefix + "0000000000000001" + suffix, prefix + "00000000000000ff" + suffix},
+		{"the names sort against the entries", prefix + "00000000000000ff" + suffix, prefix + "0000000000000001" + suffix},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			w := newWorld(t)
+			id := seqID(1)
+			w.writeJournal(journalSpec{name: tt.first, seqnumID: id, entries: jentries(1, 3)})
+			w.writeJournal(journalSpec{name: tt.later, seqnumID: id, entries: jentries(4, 6)})
+			w.online(id, jentries(7, 8))
+			w.position(id, 0)
+			w.start()
+
+			recs := w.drain(5)
+
+			requireMessages(t, "lines", messages(recs), numbered("line", 1, 8))
+			requireNoGaps(t, "the runs", recs)
+		})
+	}
+}
+
+func TestJournal_IDsThatStartAtTheSameTimeAreReadInTheOrderOfTheirIDs(t *testing.T) {
+	w := newWorld(t)
+	w.online(seqID(9), jentries(1, 2))
+	w.start()
+	w.step() // the first start takes the tail of the only ID
+	numberedEntries := func(prefix string) []map[string][]byte {
+		return []map[string][]byte{jentry(10, prefix+" 10"), jentry(11, prefix+" 11")}
+	}
+	w.archived(seqID(4), numberedEntries("four"))
+	w.archived(seqID(3), numberedEntries("three"))
+
+	recs := w.drain(5)
+
+	requireMessages(t, "lines", messages(recs), []string{"three 10", "three 11", "four 10", "four 11"})
+	requireNoGaps(t, "the runs", recs)
+}
+
+func TestJournal_EmptyOnlineFileIsReadFromItsFirstEntry(t *testing.T) {
+	w := newWorld(t)
+	w.writeJournal(journalSpec{name: "system.journal", seqnumID: seqID(1), online: true})
+	w.start()
+
+	first := w.step()
+	start := w.run.Start
+	w.online(seqID(1), jentries(1, 3))
+	rest := w.drain(5)
+
+	if len(first) != 0 {
+		t.Errorf("the first run returned %v, want nothing", head(messages(first)))
+	}
+	requireMessages(t, "lines written after the first run", messages(rest), numbered("line", 1, 3))
+	requireNoGaps(t, "the runs", rest)
+	if pos := w.savedJournal(seqID(1)); pos == nil || pos.Seqnum != 3 || !pos.Realtime.Equal(start) {
+		t.Errorf("journal position = %+v, want the sequence number 3 at %v: the time of an empty file is the start of the run that met it", pos, start)
+	}
+}
+
+func TestJournal_UnreadableEntryEndsItsGapWhereTheRunStopped(t *testing.T) {
+	w := brokenJournal(t, []uint64{1}, func(w *world, message string) { patchFrame(t, w, "system.journal", message, frameMagic, 0x00) })
+	w.clock.step = 1100 * time.Millisecond // the decoding of the broken entry uses up the second of reading
+
+	first := w.step()
+	w.clock.step = 0
+	rest := w.drain(5)
+
+	requireMessages(t, "lines of the run that stopped at the broken entry", messages(first), nil)
+	requireGap(t, oneGap(t, "the run that stopped at the broken entry", first), entryTime(0), entryTime(1))
+	requireMessages(t, "lines of the next runs", messages(rest), numbered("line", 2, 5))
+	requireNoGaps(t, "the next runs", rest)
+}
+
+func TestJournal_VacuumedPositionWithALaterTimeStillGivesAGap(t *testing.T) {
+	w := newWorld(t)
+	w.online(seqID(1), jentries(20, 23))
+	w.positionAt(seqID(1), 10, entryTime(30)) // the clock of the host stepped back: the entries after the position are older than it
+	w.start()
+
+	recs := w.drain(5)
+
+	requireMessages(t, "lines", messages(recs), numbered("line", 20, 23))
+	requireGap(t, oneGap(t, "the runs", recs), entryTime(30), entryTime(30).Add(time.Microsecond))
+}
+
+func TestJournal_PositionWithoutATimeIsReadAndGetsOne(t *testing.T) {
+	w := newWorld(t)
+	w.online(seqID(1), jentries(1, 3))
+	w.positionAt(seqID(1), 0, time.Time{})
+	w.start()
+
+	recs := w.drain(5)
+
+	requireMessages(t, "lines", messages(recs), numbered("line", 1, 3))
+	requireNoGaps(t, "the runs", recs)
+	if pos := w.savedJournal(seqID(1)); pos == nil || pos.Seqnum != 3 || !pos.Realtime.Equal(entryTime(3)) {
+		t.Errorf("journal position = %+v, want the sequence number 3 at %v", pos, entryTime(3))
+	}
+}
+
+func TestJournal_UnreadableEntriesBeforeADamageJoinTheGapOfTheDamage(t *testing.T) {
+	w := newWorld(t)
+	id := seqID(1)
+	entries := jentries(1, 6)
+	entries[1] = jentry(2, longMessage(2))
+	entries[2] = jentry(3, longMessage(3))
+	name := w.archived(id, entries)
+	w.online(id, jentries(7, 8))
+	patchFrame(t, w, name, longMessage(2), objectFlags, 1)
+	patchFrame(t, w, name, longMessage(3), objectFlags, 1)
+	damageJournal(t, w, name, 4, "")
+	w.position(id, 0)
+	w.start()
+
+	recs := w.drain(5)
+
+	requireMessages(t, "lines", messages(recs), []string{"line 1", "line 7", "line 8"})
+	requireGap(t, oneGap(t, "the runs", recs), entryTime(1), entryTime(6))
+}
+
+func TestJournal_BacklogOfOneIDDoesNotStartTheNextBeforeItEnds(t *testing.T) {
+	w := newWorld(t)
+	var backlog []map[string][]byte
+	for seq := uint64(1); seq <= 1200; seq++ {
+		backlog = append(backlog, slimEntry(seq))
+	}
+	w.online(seqID(1), backlog)
+	w.archived(seqID(2), []map[string][]byte{jentry(2000, "later 2000"), jentry(2001, "later 2001")})
+	w.position(seqID(1), 0)
+	w.start()
+
+	first := w.step()
+	second := w.step()
+	third := w.step()
+
+	requireMessages(t, "lines of the first run", messages(first), numbered("line", 1, 1000))
+	requireMessages(t, "lines of the second run", messages(second), append(numbered("line", 1001, 1200), "later 2000", "later 2001"))
+	if len(third) != 0 {
+		t.Errorf("the third run returned %v, want nothing", head(messages(third)))
+	}
+	requireNoGaps(t, "the runs", append(append(first, second...), third...))
+}
+
+func TestJournal_RefusedFileOnAFirstStartIsAGapAtTheRunStart(t *testing.T) {
+	w := newWorld(t)
+	shortJournal(t, w, archivedShort)
+	w.start()
+
+	first := w.step()
+	start := w.run.Start
+	second := w.step()
+
+	requireGap(t, oneGap(t, "the first run", first), start, start.Add(time.Microsecond))
+	requireNoGaps(t, "the next run", second)
 }

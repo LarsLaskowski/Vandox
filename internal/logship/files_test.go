@@ -1,13 +1,21 @@
 package logship_test
 
 import (
+	"context"
+	"errors"
+	"fmt"
+	"io/fs"
 	"os"
+	"regexp"
 	"slices"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
 
+	"github.com/LarsLaskowski/Vandox/internal/logship"
 	"github.com/LarsLaskowski/Vandox/internal/model"
+	"github.com/LarsLaskowski/Vandox/internal/scheduler"
 )
 
 // fileMsgs returns the messages of the file lines among the records.
@@ -624,4 +632,512 @@ func TestFiles_DroppedRunResolvesTheRepeatedHourAlike(t *testing.T) {
 			}
 		}
 	}
+}
+
+func TestFiles_BacklogIsShippedAcrossRunsWithoutRepeats(t *testing.T) {
+	const backlog = 1500
+	t.Run("1,500 lines ship as 1,000 and 500", func(t *testing.T) {
+		w := mailWorld(t)
+		w.appendLog("mail.log", fileLines(3, backlog+2))
+
+		first, second, third := w.step(), w.step(), w.step()
+
+		requireMessages(t, "lines of the first run", fileMsgs(first), numbered("file", 3, 1002))
+		requireMessages(t, "lines of the second run", fileMsgs(second), numbered("file", 1003, backlog+2))
+		if len(third) != 0 {
+			t.Errorf("the third run returned %v, want nothing: no line is shipped twice", head(messages(third)))
+		}
+		requireNoGaps(t, "the runs", append(append(first, second...), third...))
+	})
+	t.Run("a partial last line waits behind the stop", func(t *testing.T) {
+		w := mailWorld(t)
+		partial := fileLine(backlog+3, "partial line")
+		w.appendLog("mail.log", fileLines(3, backlog+2)+partial[:len(partial)-8])
+
+		first, second := w.step(), w.step()
+		w.appendLog("mail.log", partial[len(partial)-8:])
+		third, fourth := w.step(), w.step()
+
+		requireMessages(t, "lines of the first run", fileMsgs(first), numbered("file", 3, 1002))
+		requireMessages(t, "lines of the second run", fileMsgs(second), numbered("file", 1003, backlog+2))
+		requireMessages(t, "lines of the run after the line feed arrived", fileMsgs(third), []string{"partial line"})
+		if len(fourth) != 0 {
+			t.Errorf("the run after it returned %v, want nothing", head(messages(fourth)))
+		}
+	})
+	t.Run("a restart between the runs continues behind the 1,000th line", func(t *testing.T) {
+		w := mailWorld(t)
+		w.appendLog("mail.log", fileLines(3, backlog+2))
+		first := w.step()
+
+		w.restart()
+		rest := w.drain(5)
+
+		requireMessages(t, "lines of the first run", fileMsgs(first), numbered("file", 3, 1002))
+		requireMessages(t, "lines after the restart", fileMsgs(rest), numbered("file", 1003, backlog+2))
+		requireNoGaps(t, "the runs", append(first, rest...))
+	})
+	t.Run("a dropped run reads its 1,000 lines again", func(t *testing.T) {
+		w := mailWorld(t)
+		w.appendLog("mail.log", fileLines(3, backlog+2))
+		w.collect()
+		w.refuse()
+
+		again := w.step()
+		rest := w.step()
+
+		requireMessages(t, "lines of the run that repeats the dropped one", fileMsgs(again), numbered("file", 3, 1002))
+		requireMessages(t, "lines of the run after it", fileMsgs(rest), numbered("file", 1003, backlog+2))
+	})
+}
+
+func TestFiles_SecondRotationFinishesTheRenamedFileFirst(t *testing.T) {
+	w, _ := rotate(t)
+	r2 := w.step() // line 4 of the first renamed file and line 10 of the second file
+	partial := fileLine(6, "last words")
+	w.appendLog("mail.log.1", fileLines(5, 5)+partial[:len(partial)-1]) // the writer never ended its last line
+	w.appendLog("mail.log", fileLines(11, 11))
+	w.rename("mail.log.1", "mail.log.2")
+	w.rename("mail.log", "mail.log.1")
+	w.writeLog("mail.log", fileLines(20, 20)) // a second rotation, before the first renamed file was finished
+
+	r3 := w.step()
+	w.appendLog("mail.log.1", fileLines(12, 12)) // the writer is late again, now with the second file
+	w.appendLog("mail.log", fileLines(21, 21))
+	r4 := w.step()
+	w.appendLog("mail.log", fileLines(22, 22))
+	r5 := w.step()
+	r6 := w.step()
+
+	requireMessages(t, "run after the first rotation", fileMsgs(r2), []string{"file 4", "file 10"})
+	requireMessages(t, "run after the second rotation", fileMsgs(r3), []string{"file 5", "last words", "file 11", "file 20"})
+	requireMessages(t, "run with a late append to the second renamed file", fileMsgs(r4), []string{"file 12", "file 21"})
+	requireMessages(t, "run in which the second writer has moved", fileMsgs(r5), []string{"file 22"})
+	if len(r6) != 0 {
+		t.Errorf("the run after it returned %v, want nothing: no line is shipped twice", head(messages(r6)))
+	}
+	requireNoGaps(t, "the runs", append(append(append(r2, r3...), r4...), r5...))
+	requireLogPath(t, append(append(r3, r4...), r5...), w.logPath("mail.log"))
+}
+
+func TestFiles_LostRotationWithoutALineYetEndsTheGapAtTheRunStart(t *testing.T) {
+	w := mailWorld(t)
+	w.appendLog("mail.log", fileLines(3, 3))
+	w.step()
+	w.stop()
+	if err := os.Remove(w.logPath("mail.log")); err != nil {
+		t.Fatalf("removing the old file: %v", err)
+	}
+	w.writeLog("mail.log", "") // the new file has no line yet
+	w.reopen()
+	w.start()
+
+	first := w.step()
+	start := w.run.Start
+	w.appendLog("mail.log", fileLines(10, 10))
+	second := w.step()
+
+	requireMessages(t, "lines of the run without a line in the new file", fileMsgs(first), nil)
+	requireGap(t, oneGap(t, "the run without a line in the new file", first), fileLineTime(3), start)
+	requireMessages(t, "lines of the next run", fileMsgs(second), []string{"file 10"})
+	requireNoGaps(t, "the next run", second)
+}
+
+func TestFiles_RenamedFileThatIsGoneAtARestartIsAGap(t *testing.T) {
+	t.Run("the renamed file was deleted", func(t *testing.T) {
+		w, _ := rotate(t)
+		w.step() // the saved position now holds the renamed file
+		w.stop()
+		if err := os.Remove(w.logPath("mail.log.1")); err != nil {
+			t.Fatalf("removing the renamed file: %v", err)
+		}
+		w.appendLog("mail.log", fileLines(11, 11))
+		w.reopen()
+		w.start()
+
+		first := w.step()
+		start := w.run.Start
+		second := w.step()
+
+		requireMessages(t, "lines of the first run", fileMsgs(first), []string{"file 11"})
+		requireGap(t, oneGap(t, "the first run", first), fileLineTime(10), start)
+		requireNoGaps(t, "the next run", second)
+	})
+	t.Run("the renamed file is behind a link", func(t *testing.T) {
+		w, _ := rotate(t)
+		w.step()
+		w.stop()
+		moved := w.logDir + ".moved"
+		if err := os.Rename(w.logDir, moved); err != nil {
+			t.Fatalf("moving the log directory: %v", err)
+		}
+		if err := os.Symlink(moved, w.logDir); err != nil {
+			t.Fatalf("linking the log directory: %v", err)
+		}
+		w.reopen()
+		w.start()
+
+		var refused []model.Record
+		for range 2 {
+			refused = append(refused, w.step()...)
+		}
+
+		if len(refused) != 0 {
+			t.Errorf("runs with a link in the directory path returned %v and %d gaps, want nothing: the position stays", head(messages(refused)), len(gapsOf(refused)))
+		}
+		logs := w.logsOf("log file not readable")
+		if len(logs) != 1 || logs[0].attrs["err"] != "link refused" {
+			t.Errorf("warnings %q = %+v, want one with err %q", "log file not readable", logs, "link refused")
+		}
+	})
+}
+
+// openRecorder makes the world open its files through OpenNoLinks and keep the files it was given; failWith, when set, is the error
+// of every open.
+type openRecorder struct {
+	opened   []*os.File
+	failWith error
+	// closeFirst makes the open hand over a file that was closed already.
+	closeFirst bool
+}
+
+func (o *openRecorder) open(path string) (*os.File, error) {
+	if o.failWith != nil {
+		return nil, o.failWith
+	}
+	f, err := logship.OpenNoLinks(path)
+	if err == nil {
+		o.opened = append(o.opened, f)
+		if o.closeFirst {
+			_ = f.Close()
+		}
+	}
+	return f, err
+}
+
+func TestFiles_OpenErrorsAreReportedWithFixedReasons(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{"a file that does not exist", fs.ErrNotExist, "missing"},
+		{"a file without permission", fs.ErrPermission, "permission denied"},
+		{"any other error", errors.New("input/output error at /secret/path"), "read failed"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			w := newWorld(t)
+			w.useFiles("mail.log")
+			w.writeLog("mail.log", fileLines(1, 2))
+			rec := &openRecorder{}
+			w.openFiles = rec.open
+			w.start()
+			w.step()
+			rec.failWith = tt.err
+			w.appendLog("mail.log", fileLines(3, 3))
+
+			var during []model.Record
+			for range 3 {
+				during = append(during, w.step()...)
+			}
+			rec.failWith = nil
+			after := w.drain(5)
+
+			if len(during) != 0 {
+				t.Errorf("runs on a file that cannot be opened returned %v and %d gaps, want nothing", head(messages(during)), len(gapsOf(during)))
+			}
+			logs := w.logsOf("log file not readable")
+			if len(logs) != 1 || logs[0].attrs["file"] != "0" || logs[0].attrs["err"] != tt.want {
+				t.Errorf("warnings %q = %+v, want one with file 0 and err %q", "log file not readable", logs, tt.want)
+			}
+			requireMessages(t, "file lines once the file opens again", fileMsgs(after), []string{"file 3"})
+			requireNoGaps(t, "the runs once the file opens again", after)
+		})
+	}
+}
+
+func TestFiles_FileIsOpenedAgainEveryRunAndTheKeptOneIsNotLeaked(t *testing.T) {
+	w := newWorld(t)
+	w.useFiles("mail.log")
+	w.writeLog("mail.log", "")
+	rec := &openRecorder{}
+	w.openFiles = rec.open
+	w.start()
+
+	for range 3 {
+		w.step()
+	}
+
+	if len(rec.opened) != 3 {
+		t.Fatalf("the collector opened the file %d times in three runs, want once per run", len(rec.opened))
+	}
+	if _, err := rec.opened[0].Stat(); err != nil {
+		t.Errorf("the kept file reports %v, want it still open: the first open is the one kept", err)
+	}
+	for i, f := range rec.opened[1:] {
+		if _, err := f.Stat(); err == nil {
+			t.Errorf("open %d of the file is still open, want the file opened again to be closed at the end of the run", i+1)
+		}
+	}
+}
+
+func TestFiles_ReadErrorOfTheKeptFileShipsNothingAndRecordsNoGap(t *testing.T) {
+	w := newWorld(t)
+	w.useFiles("mail.log")
+	w.writeLog("mail.log", "") // nothing read yet, so that a failed read cannot look like a truncation
+	rec := &openRecorder{}
+	w.openFiles = rec.open
+	w.start()
+	w.step()
+	if err := rec.opened[0].Close(); err != nil { // the kept descriptor fails every read from now on
+		t.Fatalf("closing the kept file: %v", err)
+	}
+	w.appendLog("mail.log", fileLines(3, 3))
+
+	var recs []model.Record
+	for range 2 {
+		recs = append(recs, w.step()...)
+	}
+
+	if len(recs) != 0 {
+		t.Errorf("runs on a file that cannot be read returned %v and %d gaps, want nothing", head(messages(recs)), len(gapsOf(recs)))
+	}
+}
+
+func TestFiles_ReadErrorOfTheRenamedFileKeepsTheNewFileWaiting(t *testing.T) {
+	w := newWorld(t)
+	w.useFiles("mail.log")
+	w.writeLog("mail.log", "")
+	rec := &openRecorder{}
+	w.openFiles = rec.open
+	w.start()
+	w.step()
+	if err := rec.opened[0].Close(); err != nil {
+		t.Fatalf("closing the kept file: %v", err)
+	}
+	w.rename("mail.log", "mail.log.1")
+	w.writeLog("mail.log", "")
+
+	recs := w.step() // the renamed file cannot be statted or read
+
+	if len(recs) != 0 {
+		t.Errorf("the run returned %v and %d gaps, want nothing", head(messages(recs)), len(gapsOf(recs)))
+	}
+}
+
+func TestFiles_CanceledRunReadsNothingAndLosesNothing(t *testing.T) {
+	w := mailWorld(t)
+	w.appendLog("mail.log", fileLines(3, 5))
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	run := scheduler.Run{Start: w.clock.peek().UTC()}
+
+	canceled, err := w.l.Collect(ctx, run)
+	if err != nil {
+		t.Fatalf("Collect() error = %v, want nil", err)
+	}
+	w.l.Kept(run, true)
+	w.clock.advance(runInterval)
+	recs := w.drain(5)
+
+	if len(canceled) != 0 {
+		t.Errorf("the canceled run returned %v, want nothing", head(messages(canceled)))
+	}
+	requireMessages(t, "file lines of the runs after it", fileMsgs(recs), []string{"file 3", "file 4", "file 5"})
+	requireNoGaps(t, "the runs after it", recs)
+}
+
+func TestFiles_TimeUpAfterAChunkOfFilteredLinesContinuesBehindIt(t *testing.T) {
+	const noise = 2500
+	w := newWorld(t)
+	w.useFiles("mail.log")
+	w.writeLog("mail.log", "")
+	w.cfg.Drop = []logship.Rule{{Message: regexp.MustCompile(`^noise`)}}
+	w.start()
+	w.step()
+	var text strings.Builder
+	for n := 1; n <= noise; n++ {
+		text.WriteString(fileLine(n, fmt.Sprintf("noise %d %s", n, strings.Repeat("x", 80))))
+	}
+	text.WriteString(fileLine(noise+1, "wanted 1") + fileLine(noise+2, "wanted 2"))
+	w.appendLog("mail.log", text.String())
+	w.clock.step = 1100 * time.Millisecond // every look at the clock finds the second of reading used up
+
+	var all []model.Record
+	runs := 0
+	for ; runs < 40 && len(fileMsgs(all)) < 2; runs++ {
+		all = append(all, w.step()...)
+	}
+
+	requireMessages(t, "file lines of all runs", fileMsgs(all), []string{"wanted 1", "wanted 2"})
+	requireNoGaps(t, "the runs", all)
+	if runs < 3 {
+		t.Errorf("the 2,500 filtered lines of more than 64 KiB were read in %d runs, want the time budget to end a run after a chunk", runs)
+	}
+}
+
+// linkTheLogDirectory moves the log directory aside and puts a link to it in its place; the returned function undoes that.
+func linkTheLogDirectory(t *testing.T, w *world) (restore func()) {
+	t.Helper()
+	moved, link := w.logDir+".moved", w.logDir
+	if err := os.Rename(link, moved); err != nil {
+		t.Fatalf("moving the log directory: %v", err)
+	}
+	if err := os.Symlink(moved, link); err != nil {
+		t.Fatalf("linking the log directory: %v", err)
+	}
+	return func() {
+		if err := os.Remove(link); err != nil {
+			t.Fatalf("removing the link: %v", err)
+		}
+		if err := os.Rename(moved, link); err != nil {
+			t.Fatalf("restoring the log directory: %v", err)
+		}
+	}
+}
+
+func TestFiles_RotationSearchBehindALinkKeepsThePositionOfAnOpenableFile(t *testing.T) {
+	t.Run("the rotated file is searched after a rotation while stopped", func(t *testing.T) {
+		w := mailWorld(t)
+		w.appendLog("mail.log", fileLines(3, 3))
+		w.step()
+		w.stop()
+		w.appendLog("mail.log", fileLines(4, 4))
+		w.rename("mail.log", "mail.log.1")
+		w.writeLog("mail.log", fileLines(10, 11))
+		restore := linkTheLogDirectory(t, w)
+		w.openFiles = os.Open // a function that follows links, which the link-free walk would refuse
+		w.reopen()
+		w.start()
+
+		var refused []model.Record
+		for range 2 {
+			refused = append(refused, w.step()...)
+		}
+		restore()
+		recs := w.drain(5)
+
+		if len(refused) != 0 {
+			t.Errorf("runs with a link in the directory path returned %v and %d gaps, want nothing: the position stays", head(messages(refused)), len(gapsOf(refused)))
+		}
+		logs := w.logsOf("log file not readable")
+		if len(logs) != 1 || logs[0].attrs["err"] != "link refused" {
+			t.Errorf("warnings %q = %+v, want one with err %q", "log file not readable", logs, "link refused")
+		}
+		requireMessages(t, "file lines once the directory is no link", fileMsgs(recs), []string{"file 4", "file 10", "file 11"})
+		requireNoGaps(t, "the runs once the directory is no link", recs)
+	})
+	t.Run("the renamed file of a saved position is searched after a restart", func(t *testing.T) {
+		w, _ := rotate(t)
+		w.step() // the saved position now holds the renamed file
+		w.appendLog("mail.log.1", fileLines(5, 5))
+		w.stop()
+		restore := linkTheLogDirectory(t, w)
+		w.openFiles = os.Open
+		w.reopen()
+		w.start()
+
+		var refused []model.Record
+		for range 2 {
+			refused = append(refused, w.step()...)
+		}
+		restore()
+		recs := w.drain(5)
+
+		if len(refused) != 0 {
+			t.Errorf("runs with a link in the directory path returned %v and %d gaps, want nothing: the position stays", head(messages(refused)), len(gapsOf(refused)))
+		}
+		logs := w.logsOf("log file not readable")
+		if len(logs) != 1 || logs[0].attrs["err"] != "link refused" {
+			t.Errorf("warnings %q = %+v, want one with err %q", "log file not readable", logs, "link refused")
+		}
+		requireMessages(t, "file lines once the directory is no link", fileMsgs(recs), []string{"file 5"})
+		requireNoGaps(t, "the runs once the directory is no link", recs)
+	})
+}
+
+func TestFiles_OnlyRotatedNamesAreSearched(t *testing.T) {
+	names := []string{"mail.log-2026102x", "mail.log-202610221", "mail.log-2026102", "mail.log.2", "mail.log.10", "mail.log~", "other.log.1", "mail.log-20261022.gz"}
+	for _, name := range names {
+		t.Run(name, func(t *testing.T) {
+			w := mailWorld(t)
+			w.appendLog("mail.log", fileLines(3, 3))
+			w.step()
+			w.stop()
+			w.rename("mail.log", name)
+			w.writeLog("mail.log", fileLines(10, 11))
+			w.reopen()
+			w.start()
+
+			recs := w.drain(5)
+
+			requireMessages(t, "file lines", fileMsgs(recs), []string{"file 10", "file 11"})
+			requireGap(t, oneGap(t, "the runs", recs), fileLineTime(3), fileLineTime(10))
+		})
+	}
+}
+
+func TestFiles_TruncationShipsTheHeldPartialLineFirst(t *testing.T) {
+	w := mailWorld(t)
+	partial := fileLine(3, "cut off before its line feed")
+	w.appendLog("mail.log", partial[:len(partial)-1])
+	if held := w.step(); len(held) != 0 {
+		t.Fatalf("the run on a partial line returned %v, want nothing", head(messages(held)))
+	}
+	w.writeLog("mail.log", fileLines(20, 20)) // shorter than what was read: truncated in place
+
+	recs := w.step()
+
+	requireMessages(t, "file lines", fileMsgs(recs), []string{"cut off before its line feed", "file 20"})
+	requireGap(t, oneGap(t, "the run that noticed the truncation", recs), fileLineTime(3), w.run.Start)
+	if again := w.step(); len(again) != 0 {
+		t.Errorf("the next run returned %v, want nothing: the partial line is shipped once", head(messages(again)))
+	}
+}
+
+func TestFiles_RenamedBacklogIsShippedBeforeTheNewFileAcrossRuns(t *testing.T) {
+	w := mailWorld(t)
+	w.appendLog("mail.log", fileLines(3, 1502))
+	w.rename("mail.log", "mail.log.1")
+	w.writeLog("mail.log", fileLines(3000, 3001))
+
+	first := w.step()
+	second := w.step()
+	third := w.step()
+
+	requireMessages(t, "lines of the first run", fileMsgs(first), numbered("file", 3, 1002))
+	requireMessages(t, "lines of the second run", fileMsgs(second), append(numbered("file", 1003, 1502), "file 3000", "file 3001"))
+	if len(third) != 0 {
+		t.Errorf("the third run returned %v, want nothing", head(messages(third)))
+	}
+	requireNoGaps(t, "the runs", append(append(first, second...), third...))
+}
+
+func TestFiles_FileThatCannotBeStattedIsNotReadable(t *testing.T) {
+	w := newWorld(t)
+	w.useFiles("mail.log")
+	w.writeLog("mail.log", fileLines(1, 2))
+	rec := &openRecorder{}
+	w.openFiles = rec.open
+	w.start()
+	w.step()
+	rec.closeFirst = true
+	w.appendLog("mail.log", fileLines(3, 3))
+
+	var during []model.Record
+	for range 2 {
+		during = append(during, w.step()...)
+	}
+	rec.closeFirst = false
+	after := w.drain(5)
+
+	if len(during) != 0 {
+		t.Errorf("runs on a file that cannot be statted returned %v and %d gaps, want nothing", head(messages(during)), len(gapsOf(during)))
+	}
+	logs := w.logsOf("log file not readable")
+	if len(logs) != 1 || logs[0].attrs["err"] != "read failed" {
+		t.Errorf("warnings %q = %+v, want one with err %q", "log file not readable", logs, "read failed")
+	}
+	requireMessages(t, "file lines once the file can be statted", fileMsgs(after), []string{"file 3"})
 }

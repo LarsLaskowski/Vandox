@@ -59,6 +59,7 @@ func TestFilter_MinPriorityAndDropRules(t *testing.T) {
 		{"all four conditions, one of them wrong", 7, []logship.Rule{{Log: "journal", Program: "cron", Priority: prio(6), Message: regexp.MustCompile(`Disconnected`)}}, everything},
 		{"a log that is a configured path does not match the journal", 7, []logship.Rule{{Log: "/var/log/mail.log"}}, everything},
 		{"two rules drop what either matches", 7, []logship.Rule{{Program: "dovecot-lda"}, {Message: regexp.MustCompile(`disk`)}}, without("delivered", "disk full")},
+		{"a rule without a condition drops nothing", 7, []logship.Rule{{}}, everything},
 		{"the minimum and a rule together", 4, []logship.Rule{{Message: regexp.MustCompile(`slow`)}}, []string{"disk full", "audit line"}},
 	}
 	for _, tt := range tests {

@@ -1,7 +1,11 @@
 package logship_test
 
 import (
+	"context"
+	"errors"
 	"fmt"
+	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -9,11 +13,14 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"github.com/LarsLaskowski/Vandox/internal/agentstate"
 	"github.com/LarsLaskowski/Vandox/internal/logship"
 	"github.com/LarsLaskowski/Vandox/internal/model"
+	"github.com/LarsLaskowski/Vandox/internal/scheduler"
+	"github.com/LarsLaskowski/Vandox/internal/wire"
 )
 
 // ofSource returns the messages of the log lines of source ("journal" or "syslog") among the records.
@@ -704,4 +711,215 @@ func requireFixedAttributes(t *testing.T, e logEntry, root string) {
 			t.Errorf("log file not readable file = %q err = %q, want the index 0 and one of the fixed reasons", e.attrs["file"], e.attrs["err"])
 		}
 	}
+}
+
+// refusePoison swaps the record check for one that refuses the log lines with the message "poison" and checks the rest as the
+// scheduler does.
+func refusePoison(t *testing.T) {
+	t.Helper()
+	restore := logship.SwapRecordCheck(func(r *model.Record) (int, error) {
+		if l, ok := r.Data.(*model.LogLine); ok && l.Message == "poison" {
+			return 0, errors.New("refused by the test")
+		}
+		return wire.CheckRecord(r)
+	})
+	t.Cleanup(restore)
+}
+
+func TestLogs_RefusedRecordBecomesAGapAndTheRunGoesOn(t *testing.T) {
+	t.Run("a journal entry", func(t *testing.T) {
+		refusePoison(t)
+		w := newWorld(t)
+		entries := jentries(1, 4)
+		entries[2] = jentry(3, "poison")
+		w.online(seqID(1), entries)
+		w.position(seqID(1), 0)
+		w.start()
+
+		first := w.step()
+		next := w.step()
+
+		requireMessages(t, "lines of the run", messages(first), []string{"line 1", "line 2", "line 4"})
+		requireGap(t, oneGap(t, "the run", first), entryTime(2), entryTime(3))
+		if len(next) != 0 {
+			t.Errorf("the next run returned %v and %d gaps, want nothing: the refused entry is not read again", head(messages(next)), len(gapsOf(next)))
+		}
+		if pos := w.savedJournal(seqID(1)); pos == nil || pos.Seqnum != 4 {
+			t.Errorf("journal position = %+v, want the sequence number 4: the lines after the refused one are kept", pos)
+		}
+	})
+	t.Run("a file line", func(t *testing.T) {
+		refusePoison(t)
+		w := mailWorld(t)
+		w.appendLog("mail.log", fileLine(3, "ok")+fileLine(4, "poison")+fileLine(5, "after"))
+
+		first := w.step()
+		next := w.step()
+
+		requireMessages(t, "lines of the run", fileMsgs(first), []string{"ok", "after"})
+		requireGap(t, oneGap(t, "the run", first), fileLineTime(3), fileLineTime(4))
+		if len(next) != 0 {
+			t.Errorf("the next run returned %v and %d gaps, want nothing", head(messages(next)), len(gapsOf(next)))
+		}
+	})
+	t.Run("a file line that is the first after the position", func(t *testing.T) {
+		refusePoison(t)
+		w := mailWorld(t)
+		taken := w.run.Start
+		w.appendLog("mail.log", fileLine(3, "poison"))
+
+		recs := w.step()
+
+		requireMessages(t, "lines of the run", fileMsgs(recs), nil)
+		requireGap(t, oneGap(t, "the run", recs), taken, taken.Add(time.Microsecond))
+	})
+}
+
+// logFilesConfig returns a configuration of n log files.
+func logFilesConfig(n int) logship.Config {
+	cfg := logship.Config{}
+	for i := range n {
+		cfg.Files = append(cfg.Files, logship.FileSpec{Path: fmt.Sprintf("/var/log/f%d.log", i), Format: "syslog"})
+	}
+	return cfg
+}
+
+func TestLogs_NewRefusesOneFileMoreThanTheStateFileHolds(t *testing.T) {
+	l, err := logship.New(logship.Sources{}, logFilesConfig(agentstate.MaxLogFiles+1), nil, slog.New(slog.DiscardHandler))
+
+	if err == nil || err.Error() != "logship: too many log files" || l != nil {
+		t.Errorf("New() = %v, %v, want no collector and the error %q", l, err, "logship: too many log files")
+	}
+}
+
+func TestLogs_NewTakesAsManyFilesAsTheStateFileHoldsAndNamesTheCollector(t *testing.T) {
+	sources := logship.Sources{Etc: fstestEmpty(), Journal: []fs.FS{fstestEmpty()}}
+
+	l, err := logship.New(sources, logFilesConfig(agentstate.MaxLogFiles), nil, slog.New(slog.DiscardHandler))
+
+	if err != nil || l == nil {
+		t.Fatalf("New() = %v, %v, want a collector", l, err)
+	}
+	if l.Name() != "logs" || logship.Name != "logs" {
+		t.Errorf("Name() = %q and the constant %q, want %q", l.Name(), logship.Name, "logs")
+	}
+}
+
+func TestLogs_NewFillsTheSourcesThatAreNotGiven(t *testing.T) {
+	l, err := logship.New(logship.Sources{}, logship.Config{Journal: true, MinPriority: 6}, nil, slog.New(slog.DiscardHandler))
+
+	if err != nil || l == nil {
+		t.Fatalf("New() = %v, %v, want a collector that reads the host's /etc, journal, files and clock", l, err)
+	}
+}
+
+// fstestEmpty returns a file system without a file.
+func fstestEmpty() fs.FS { return fstest.MapFS{} }
+
+func TestLogs_WorksWithoutAStateFile(t *testing.T) {
+	w := newWorld(t)
+	w.useFiles("mail.log")
+	w.online(seqID(1), jentries(1, 2))
+	w.writeLog("mail.log", fileLines(1, 2))
+	l, err := logship.New(w.sources(), w.cfg, nil, slog.New(slog.DiscardHandler))
+	if err != nil {
+		t.Fatalf("New() error = %v, want nil", err)
+	}
+	collect := func() []model.Record {
+		run := scheduler.Run{Start: w.clock.peek().UTC()}
+		recs, err := l.Collect(context.Background(), run)
+		if err != nil {
+			t.Fatalf("Collect() error = %v, want nil", err)
+		}
+		l.Kept(run, true)
+		w.clock.advance(runInterval)
+		return recs
+	}
+
+	first := collect()
+	w.online(seqID(1), jentries(1, 4))
+	w.appendLog("mail.log", fileLines(3, 3))
+	second := collect()
+	third := collect()
+
+	if len(first) != 0 {
+		t.Errorf("the first run returned %v, want nothing: a first start ships nothing older", head(messages(first)))
+	}
+	requireMessages(t, "journal lines of the second run", ofSource(second, "journal"), []string{"line 3", "line 4"})
+	requireMessages(t, "file lines of the second run", ofSource(second, "syslog"), []string{"file 3"})
+	if len(third) != 0 {
+		t.Errorf("the third run returned %v, want nothing", head(messages(third)))
+	}
+}
+
+func TestLogs_ReportOfAnotherRunCommitsNothing(t *testing.T) {
+	t.Run("a report for a run that is not the last", func(t *testing.T) {
+		w := droppedWorld(t)
+		first := w.collect()
+
+		w.l.Kept(scheduler.Run{Start: w.run.Start.Add(-time.Hour)}, true)
+		w.clock.advance(runInterval)
+		again := w.collect()
+		w.keep()
+
+		requireMessages(t, "lines of the first run", messages(first), droppedSpan)
+		requireMessages(t, "lines of the run after the report of another run", messages(again), droppedSpan)
+	})
+	t.Run("a report before any run", func(t *testing.T) {
+		w := droppedWorld(t)
+
+		w.l.Kept(scheduler.Run{Start: w.clock.peek()}, true)
+		recs := w.step()
+
+		requireMessages(t, "lines of the first run", messages(recs), droppedSpan)
+	})
+	t.Run("a second report for the same run", func(t *testing.T) {
+		w := droppedWorld(t)
+		w.collect()
+		w.keep()
+
+		w.l.Kept(w.run, false)
+		recs := w.step()
+
+		if len(recs) != 0 {
+			t.Errorf("the run after a late refusal of a kept run returned %v, want nothing: a run is reported once", head(messages(recs)))
+		}
+	})
+}
+
+func TestLogs_FourthDroppedRunOfFilesGivesUpFromTheLastLine(t *testing.T) {
+	w := mailWorld(t)
+	w.appendLog("mail.log", fileLines(3, 3))
+	w.step()
+	w.appendLog("mail.log", fileLines(4, 5))
+	for range 4 {
+		recs := w.collect()
+		requireMessages(t, "lines of a dropped run", fileMsgs(recs), []string{"file 4", "file 5"})
+		w.refuse()
+	}
+
+	giveUp := w.collect()
+	w.keep()
+	next := w.step()
+
+	requireMessages(t, "lines of the run that gives up", fileMsgs(giveUp), nil)
+	requireGap(t, oneGap(t, "the run that gives up", giveUp), fileLineTime(3), fileLineTime(5))
+	if len(next) != 0 {
+		t.Errorf("the run after the give-up returned %v and %d gaps, want nothing: the span is not read again", head(messages(next)), len(gapsOf(next)))
+	}
+}
+
+func TestLogs_FourthDroppedRunWithNothingReadGivesAGapAtTheRunStart(t *testing.T) {
+	w := newWorld(t)
+	w.start()
+	for range 4 {
+		w.collect()
+		w.refuse()
+	}
+
+	giveUp := w.collect()
+	start := w.run.Start
+	w.keep()
+
+	requireGap(t, oneGap(t, "the run that gives up", giveUp), start, start.Add(time.Microsecond))
 }

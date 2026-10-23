@@ -1510,3 +1510,150 @@ func TestRun_SavesTheStateWhenItStops(t *testing.T) {
 		}
 	})
 }
+
+func TestLogshipConfig_MapsEveryOption(t *testing.T) {
+	t.Run("the default options", func(t *testing.T) {
+		opts := config.DefaultAgent().LogShipping
+
+		got, err := logshipConfig(opts)
+
+		if err != nil {
+			t.Fatalf("logshipConfig(defaults) error = %v, want nil", err)
+		}
+		want, _ := config.PriorityLevel(opts.MinPriority)
+		if got.Journal != opts.Journal || got.MinPriority != want || len(got.Files) != len(opts.Files) || len(got.Drop) != len(opts.Drop) {
+			t.Errorf("logshipConfig(defaults) = %+v, want journal %v, min priority %d, %d files and %d rules", got, opts.Journal, want, len(opts.Files), len(opts.Drop))
+		}
+	})
+	t.Run("journal off, a priority and files", func(t *testing.T) {
+		opts := config.LogShipping{
+			Journal:     false,
+			MinPriority: "warning",
+			Files:       []config.LogFile{{Path: "/var/log/mail.log", Format: "syslog"}, {Path: "/var/log/auth.log", Format: "syslog"}},
+		}
+
+		got, err := logshipConfig(opts)
+
+		if err != nil {
+			t.Fatalf("logshipConfig() error = %v, want nil", err)
+		}
+		if got.Journal || got.MinPriority != 4 {
+			t.Errorf("logshipConfig() journal %v, min priority %d, want false and 4 (warning)", got.Journal, got.MinPriority)
+		}
+		wantFiles := []logship.FileSpec{{Path: "/var/log/mail.log", Format: "syslog"}, {Path: "/var/log/auth.log", Format: "syslog"}}
+		if !slices.Equal(got.Files, wantFiles) {
+			t.Errorf("logshipConfig() files = %+v, want %+v", got.Files, wantFiles)
+		}
+	})
+}
+
+// dropRule is what a rule of the collector is expected to hold; a nil priority or pattern is expected to be unset.
+type dropRule struct {
+	log, program string
+	priority     *uint8
+	pattern      string
+	matches      []string
+	misses       []string
+}
+
+func levelOf(n uint8) *uint8 { return &n }
+
+func TestLogshipConfig_MapsEveryDropCondition(t *testing.T) {
+	opts := config.LogShipping{
+		Journal:     true,
+		MinPriority: "info",
+		Drop: []config.DropRule{
+			{Log: "journal", Program: "cron", Priority: "debug", Message: `^session (opened|closed) for user \w+`},
+			{Log: "/var/log/mail.log"},
+			{Program: "noisy"},
+			{Priority: "info"},
+			{Message: "health check"},
+		},
+	}
+	want := []dropRule{
+		{log: "journal", program: "cron", priority: levelOf(7), pattern: `^session (opened|closed) for user \w+`,
+			matches: []string{"session opened for user root"}, misses: []string{"a session opened for user root"}},
+		{log: "/var/log/mail.log"},
+		{program: "noisy"},
+		{priority: levelOf(6)},
+		{pattern: "health check", matches: []string{"a health check ran"}, misses: []string{"a health ran"}},
+	}
+
+	got, err := logshipConfig(opts)
+
+	if err != nil {
+		t.Fatalf("logshipConfig() error = %v, want nil", err)
+	}
+	if len(got.Drop) != len(want) {
+		t.Fatalf("logshipConfig() holds %d rules, want %d", len(got.Drop), len(want))
+	}
+	for i, w := range want {
+		requireDropRule(t, i, got.Drop[i], w)
+	}
+}
+
+// requireDropRule fails the test when the rule i of the collector is not the expected one.
+func requireDropRule(t *testing.T, i int, got logship.Rule, want dropRule) {
+	t.Helper()
+	if got.Log != want.log || got.Program != want.program {
+		t.Errorf("rule %d = log %q program %q, want log %q program %q", i, got.Log, got.Program, want.log, want.program)
+	}
+	if (got.Priority == nil) != (want.priority == nil) || (want.priority != nil && *got.Priority != *want.priority) {
+		t.Errorf("rule %d priority = %v, want %v", i, got.Priority, want.priority)
+	}
+	if (got.Message == nil) != (want.pattern == "") {
+		t.Fatalf("rule %d pattern = %v, want %q", i, got.Message, want.pattern)
+	}
+	if got.Message == nil {
+		return
+	}
+	if got.Message.String() != want.pattern {
+		t.Errorf("rule %d pattern = %q, want %q", i, got.Message, want.pattern)
+	}
+	for _, line := range want.matches {
+		if !got.Message.MatchString(line) {
+			t.Errorf("rule %d pattern %q does not match %q, want a match", i, got.Message, line)
+		}
+	}
+	for _, line := range want.misses {
+		if got.Message.MatchString(line) {
+			t.Errorf("rule %d pattern %q matches %q, want no match", i, got.Message, line)
+		}
+	}
+}
+
+func TestLogshipConfig_PatternThatDoesNotCompileIsRefusedWithoutQuotingIt(t *testing.T) {
+	const pattern = "(unclosed-pattern-text"
+	opts := config.LogShipping{Journal: true, MinPriority: "info", Drop: []config.DropRule{{Program: "cron"}, {Message: pattern}}}
+
+	t.Run("the conversion", func(t *testing.T) {
+		_, err := logshipConfig(opts)
+
+		if !errors.Is(err, errDropPattern) || strings.Contains(err.Error(), pattern) {
+			t.Errorf("logshipConfig() error = %v, want %v without the pattern", err, errDropPattern)
+		}
+	})
+	t.Run("the collector", func(t *testing.T) {
+		logs, err := newLogs(fixtureLogs(), opts, nil, slog.New(slog.DiscardHandler))
+
+		if !errors.Is(err, errDropPattern) || logs != nil {
+			t.Errorf("newLogs() = %v, %v, want no collector and %v", logs, err, errDropPattern)
+		}
+	})
+	t.Run("the jobs leave log shipping out and say so", func(t *testing.T) {
+		cfg := config.DefaultAgent()
+		cfg.MariaDB.Enabled = false
+		cfg.LogShipping = opts
+		var out bytes.Buffer
+		log := slog.New(slog.NewTextHandler(&out, nil))
+
+		list, _, _ := jobs(Options{Self: fixtureSources(), System: fixtureSystem(), Processes: fixtureProcesses(), Connections: fixtureConnections(), Services: fixtureServices(), MariaDB: fixtureMariaDB(), Kernel: fixtureKernel(), Logs: fixtureLogs(), StateDir: t.TempDir()}, &cfg, log)
+
+		if slices.Contains(jobNames(list), "logs") {
+			t.Errorf("jobs() = %v, want no logs job for a pattern that does not compile", jobNames(list))
+		}
+		if !strings.Contains(out.String(), "log shipping cannot start") || strings.Contains(out.String(), pattern) {
+			t.Errorf("log = %q, want the error %q without the pattern", out.String(), "log shipping cannot start")
+		}
+	})
+}
