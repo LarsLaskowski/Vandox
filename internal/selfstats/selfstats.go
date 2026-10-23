@@ -119,6 +119,17 @@ func (c *Collector) appendProviders(ctx context.Context, run scheduler.Run, reco
 		}
 		records = append(records, metric(run, MetricSpool, float64(size), "bytes"))
 	}
+	if c.src.SpoolAge != nil {
+		oldest, found, err := c.src.SpoolAge.OldestCapture(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("selfstats: spool age: %w", err)
+		}
+		age := 0.0
+		if found {
+			age = max(run.Start.Sub(oldest).Seconds(), 0)
+		}
+		records = append(records, metric(run, MetricSpoolAge, age, "seconds"))
+	}
 	if c.src.Sender != nil {
 		lag, err := c.src.Sender.SendLag(ctx)
 		if err != nil {
