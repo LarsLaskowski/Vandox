@@ -478,7 +478,8 @@ func (s *Spool) fileBefore(f *segFile) *segFile {
 	return nil
 }
 
-// damageRunEnd returns the last number damage in f took, or 0 when it cannot be known.
+// damageRunEnd returns the last number damage in f took; with no trailer and no later file it is the file's last
+// number as known in memory, so a run starts only when the damage lies below it.
 func (s *Spool) damageRunEnd(f *segFile, start uint64) uint64 {
 	var nextNum uint64
 	if n := s.fileAfter(f); n != nil {
@@ -491,7 +492,7 @@ func (s *Spool) damageRunEnd(f *segFile, start uint64) uint64 {
 		return nextNum - 1
 	}
 
-	return 0
+	return f.last
 }
 
 // readDamageSpan returns the time span of the gap for damage found in a pass.
@@ -513,6 +514,8 @@ func (s *Spool) readDamageSpan(p *pass) (time.Time, time.Time) {
 		to, haveTo = f.latest, true
 	} else if next := s.fileAfter(f); next != nil && next.last != 0 {
 		to, haveTo = next.earliest, true
+	} else if next == nil && f.count > 0 {
+		to, haveTo = f.latest, true
 	}
 
 	return s.finishSpan(from, haveFrom, to, haveTo)
