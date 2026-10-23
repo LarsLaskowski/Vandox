@@ -1221,8 +1221,8 @@ func requireLongLineThenTwo(t *testing.T, all []model.Record, runs int, plain bo
 	if len(lines) != 3 {
 		t.Fatalf("%d runs returned %d lines %v, want 3 (the long line, after 1 and after 2)", runs, len(lines), head(messages(all)))
 	}
-	if l := lines[0]; len(l.Message) != 16384 || !l.Truncated {
-		t.Errorf("the long line = %d bytes truncated %v, want 16,384 bytes and truncated", len(l.Message), l.Truncated)
+	if l, want := lines[0], 16384-len(strings.TrimSuffix(fileLine(3, ""), "\n")); len(l.Message) != want || !l.Truncated {
+		t.Errorf("the long line = %d bytes truncated %v, want %d bytes (the line cut at 16,384 bytes, header included) and truncated", len(l.Message), l.Truncated, want)
 	}
 	requireMessages(t, "the lines after the long one", messages(all)[1:], []string{"after 1", "after 2"})
 	requireNoGaps(t, "the runs", all)
@@ -1253,4 +1253,74 @@ func TestFiles_FileThatAppearsLaterKeepsThePreviousInstantOfItsClock(t *testing.
 	if got := second[0].CapturedAt; !got.Equal(wantSecond) {
 		t.Errorf("second captured at %v, want %v: the clock keeps the previous instant across the runs, as for a file that existed from the start", got, wantSecond)
 	}
+}
+
+func TestFiles_LineIsCutAsTheImportCutsIt(t *testing.T) {
+	h := strings.TrimSuffix(fileLine(3, ""), "\n")
+	x := func(n int) string { return strings.Repeat("x", n) }
+	const euro = "\xe2\x82\xac"
+	tests := []struct {
+		name      string
+		line      string
+		message   string
+		truncated bool
+	}{
+		{"a long line is cut with its header at 16,384 bytes", h + x(20000) + "\n", x(16384 - len(h)), true},
+		{"a line of 16,384 bytes is whole", h + x(16384-len(h)) + "\n", x(16384 - len(h)), false},
+		{"a line of 16,385 bytes is cut", h + x(16385-len(h)) + "\n", x(16384 - len(h)), true},
+		{"a character across the limit is left out", h + x(16382-len(h)) + euro + "yy\n", x(16382 - len(h)), true},
+		{"a character that ends below the limit is kept", h + x(16381-len(h)) + euro + "yy\n", x(16381-len(h)) + euro, true},
+		{"a carriage return before the line feed is removed", h + "short\r\n", "short", false},
+		{"a carriage return behind a line of 16,384 bytes does not cut it", h + x(16384-len(h)) + "\r\n", x(16384 - len(h)), false},
+		{"a carriage return behind a line of 16,385 bytes", h + x(16385-len(h)) + "\r\n", x(16384 - len(h)), true},
+		{"a long line without a header", x(20000) + "\n", x(16384), true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			w := mailWorld(t)
+			w.appendLog("mail.log", tt.line+fileLine(9, "after"))
+
+			lines := logLines(w.drain(5))
+
+			if len(lines) != 2 {
+				t.Fatalf("the collector returned %d lines, want the line and the one after it", len(lines))
+			}
+			if l := lines[0]; l.Message != tt.message || l.Truncated != tt.truncated {
+				t.Errorf("message = %d bytes truncated %v, want %d bytes and truncated %v (as the import cuts the line)", len(l.Message), l.Truncated, len(tt.message), tt.truncated)
+			}
+			if lines[1].Message != "after" || lines[1].Truncated {
+				t.Errorf("the line after it = %q truncated %v, want after and not truncated", lines[1].Message, lines[1].Truncated)
+			}
+		})
+	}
+}
+
+func TestFiles_LongFirstLineCountsTheByteOrderMark(t *testing.T) {
+	h := strings.TrimSuffix(fileLine(3, ""), "\n")
+	w := newWorld(t)
+	w.useFiles("mail.log")
+	w.start()
+	w.step() // the file is missing
+	w.writeLog("mail.log", "\xef\xbb\xbf"+h+strings.Repeat("x", 20000)+"\n")
+
+	lines := logLines(w.drain(5))
+
+	want := strings.Repeat("x", 16384-3-len(h))
+	if len(lines) != 1 || lines[0].Message != want || !lines[0].Truncated {
+		t.Fatalf("lines = %d, want one line of %d bytes (the mark counts toward the limit) and truncated", len(lines), len(want))
+	}
+}
+
+func TestFiles_HeldLineKeepsItsCarriageReturn(t *testing.T) {
+	h := strings.TrimSuffix(fileLine(3, ""), "\n")
+	w := mailWorld(t)
+	w.appendLog("mail.log", h+"tail\r") // no line feed yet
+	if held := w.step(); len(held) != 0 {
+		t.Fatalf("the run on a held line returned %v, want nothing", head(messages(held)))
+	}
+	w.writeLog("mail.log", fileLines(20, 20)) // truncated in place: the held line is handed over as it is
+
+	recs := w.step()
+
+	requireMessages(t, "file lines", fileMsgs(recs), []string{"tail\r", "file 20"})
 }

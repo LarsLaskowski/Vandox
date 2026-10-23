@@ -571,7 +571,7 @@ func peakLive(w *world, base uint64, limit int) (peak uint64, records int, cut i
 		peak = max(peak, live-min(live, base))
 		records += len(logLines(recs))
 		for _, l := range logLines(recs) {
-			if l.Truncated && len(l.Message) == 16384 {
+			if l.Truncated && len(l.Message) == 16384-len(strings.TrimSuffix(fileLine(1, ""), "\n")) {
 				cut++
 			}
 		}
@@ -653,7 +653,7 @@ func heapOfLongLines(t *testing.T) {
 	peak, _, cut := peakLive(w, base, 10)
 
 	if cut != 40 {
-		t.Errorf("%d records are cut to 16,384 bytes with truncated set, want all 40 long lines", cut)
+		t.Errorf("%d records are cut as the import cuts them (the whole line at 16,384 bytes) with truncated set, want all 40 long lines", cut)
 	}
 	if peak > liveLimit {
 		t.Errorf("the collector held %d bytes of live heap above the base, want at most %d", peak, liveLimit)
