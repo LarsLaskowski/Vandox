@@ -27,6 +27,7 @@ const (
 	MetricGoroutines = "agent_goroutines"
 	MetricSpool      = "agent_spool_bytes"
 	MetricSendLag    = "agent_send_lag_seconds"
+	MetricSpoolAge   = "agent_spool_age_seconds"
 )
 
 // MaxStatusBytes is the most of self/status that is read.
@@ -43,6 +44,12 @@ type SpoolBytesReporter interface {
 	SpoolBytes(ctx context.Context) (int64, error)
 }
 
+// SpoolAgeReporter reports the capture time of the oldest record in the spool (implemented by the spool, #38);
+// the bool is false when the spool holds none.
+type SpoolAgeReporter interface {
+	OldestCapture(ctx context.Context) (time.Time, bool, error)
+}
+
 // SendLagReporter reports how far sending lags behind capture (implemented by the sender, #39).
 type SendLagReporter interface {
 	SendLag(ctx context.Context) (time.Duration, error)
@@ -54,6 +61,7 @@ type Sources struct {
 	CPUTime    func() (time.Duration, error) // default ProcessCPUTime
 	Goroutines func() int                    // default runtime.NumGoroutine
 	Spool      SpoolBytesReporter            // nil: no spool metric
+	SpoolAge   SpoolAgeReporter              // nil: no spool age metric
 	Sender     SendLagReporter               // nil: no send lag metric
 }
 
