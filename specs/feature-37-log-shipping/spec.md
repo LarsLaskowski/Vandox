@@ -64,8 +64,9 @@ What happens today, checked against the code:
   position survives a restart, and the records keep `log` `/var/log/mail.log`.
 - S6: Given a configured file is truncated in place (logrotate `copytruncate`), when the writer goes on writing, then the
   agent notices the truncation and reads the file again from its start, and records one gap (collector `logs`, cause
-  `unknown`) from the capture time of the last line it shipped from the file to the start of the run that noticed the
-  truncation, the span in which lines may have been written and truncated before the agent read them.
+  `unknown`) from the capture time of the last line it shipped from the file (else the start of the run that took its
+  position in the file) to the start of the run that noticed the truncation, the span in which lines may have been written
+  and truncated before the agent read them.
 - S7: Given the agent starts for the first time (or its state file is not usable), when it begins shipping, then it starts
   at the current end of the journal and of each configured file and ships only lines written from then on; older lines are
   imported with `vandoxd import`.
@@ -90,8 +91,8 @@ What happens today, checked against the code:
   the file it was reading (same device and inode) among the uncompressed regular files of the same directory whose name is
   the configured name plus `.1` or `-YYYYMMDD`; when found, it ships the rest of it first, then the current file from its
   start. When it is not found (deleted, compressed, renamed otherwise), one gap with collector `logs` and cause `unknown`
-  from the capture time of the last line shipped from that file (else the committed position's time) to the capture time
-  of the first line read from the current file (else the run's start).
+  from the capture time of the last line shipped from that file (else the start of the run that took its position in the
+  file) to the capture time of the first line read from the current file (else the run's start).
 - E3: The journal no longer holds the position (journald vacuumed or rotated away entries the agent had not read, or the
   saved journal is gone) — one gap from the position's time to the next entry read (else the run's start); shipping goes on
   there.
@@ -113,7 +114,9 @@ What happens today, checked against the code:
   feed arrives; when the file is truncated, or rotated and the writer has moved (S5), before that, it is shipped as it is.
 - E8: A line or journal field with invalid UTF-8 — each invalid byte becomes U+FFFD, as in the import; control characters
   and format characters (for example U+202E) are shipped unchanged as text for whoever displays them to escape.
-- E9: A line of a `syslog` file that has no syslog header (an RFC 5424 line, a continuation, other text) — shipped with the
+- E9: A line of a `syslog` file that has no syslog header (an RFC 5424 line, a continuation, other text), or whose header
+  time does not exist (30 February, 31 November, 29 February in a common year, hour 24, minute or second 60) or lies outside
+  the storable range (the lines the import skips as "invalid date" or "time outside the storable range") — shipped with the
   whole line as the message, empty `host` and `program`, `pid` 0, no priority and the capture time of the previous line of
   that file (else the time it was read); an empty line is not shipped.
 - E10: A year-less syslog time — local time in the time zone of `/etc/localtime`; the year is the current year, or the year before
@@ -128,9 +131,11 @@ What happens today, checked against the code:
   wanted ones but never stops them. The rest is read by the next runs (a backlog), so the agent's memory does not grow. When
   the flood lasts until the journal or a rotation removes unread lines, E2 or E3 records the gap.
 - E12: A journal entry without `MESSAGE`, or with an invalid `__REALTIME_TIMESTAMP` — not shipped and no gap (there is no
-  line). An entry that the reader cannot read (a damaged or torn object, an item compressed with XZ or LZ4, a zstd item
-  that does not decompress or needs more than the decoder's memory bound) — one gap over that entry (from the previous
-  entry read to the next one), and reading goes on; several in a row give one gap.
+  line). An entry whose items the reader cannot read (a damaged data object of an item, an item compressed with XZ or LZ4,
+  a zstd item that does not decompress or needs more than the decoder's memory bound, a fifth compressed item) — one gap
+  over that entry (from the previous entry read, shipped or filtered, else the position's time, to the next entry read,
+  else the run's start), and reading goes on; several in a row give one gap. A damaged entry object or entry array is
+  E23.
 - E13: A journal file in a layout the reader does not support (`COMPACT`, systemd 252 and later; no keyed hash) — its
   entries are lost to a recorded gap, as for the kernel collector, and the warning names the reason.
 - E14: A run that hangs (a file system read that blocks) — the scheduler abandons it at its deadline and records the
@@ -172,6 +177,14 @@ What happens today, checked against the code:
   lines newer than every position, after the clock stepped back or for a user journal whose first entries are older). So no file is ever shipped a second time, and turning `log_shipping.journal` on, or a journal that becomes readable
   after a first start, starts at the ends as S7 does. Positions of up to 256 IDs with an online file are saved; a further ID is
   read but its position is not saved, so after a restart it starts at its end with that one gap — never a re-read.
+- E23: A journal file damaged in its structure (an entry array or an entry object that violates the layout, so the reader
+  cannot reach the next entry) — reading of that file stops at the damage, the lines before it are shipped and the position
+  stays before it. An archived or set-aside file is given up at once; an online file, which may only have been read while
+  journald was writing it, is read again in the next runs, and when the third run in a row stops at the same position its
+  rest is given up. Giving up records one gap from the last entry read from the file (else the position's time, else the
+  run's start) to the file's tail time, moves the position to the file's tail and goes on after it (the next file of the
+  ID, or entries journald appends later); the warning `journal not readable` names the reason, as in E13 and as for the
+  kernel collector.
 
 ## Non-functional requirements
 
@@ -265,7 +278,9 @@ What happens today, checked against the code:
   restart gives each unsaved ID one gap; an ID started at its end whose end is newer than the newest held position gives one
   gap up to its end (E22).
 - [ ] AC10: lines the journal no longer holds at the position, and an unreadable entry, each give the one gap of E3 or E12,
-  and an entry without `MESSAGE` gives neither a record nor a gap (E3, E12).
+  and an entry without `MESSAGE` gives neither a record nor a gap; a file damaged in its structure is given up with the one
+  gap of E23, an archived file at once and an online file at the third run in a row that stops at the damage (E3, E12,
+  E23).
 - [ ] AC11: a missing, unreadable or non-regular configured file, a path with a symbolic link in any element, and an
   unreadable journal produce no record and no gap, log one warning per change without the path, keep the position, and
   continue there once readable (E4, E5, E13).
@@ -382,6 +397,10 @@ What happens today, checked against the code:
 - Plan security review round 2, B5 and N7 (Lead's decision): E16, *Security* and `log_shipping.drop` bound the patterns at 400
   compiled instructions each and together (under 100 ms per 16 KiB line); E22 and AC18 add the gap for the skipped part of an ID
   started at its end whose end is newer than every held position.
+- Lead decision after the tests were written first (step 5): E9 now ships a header with an impossible or unstorable time
+  raw (the import skips it; live, a skipped line would be an unrecorded loss); E12 names the item-level failures and the
+  bounds of its gap; the new E23 gives up a structurally damaged journal file by the kernel collector's rule; S6 and E2 name
+  the start of a truncation or rotation gap when no line of the file was shipped yet. AC10 covers E23.
 - Minor 6 (units and compressions): accepted. E11 and AC13 now count shipped records for the 1,000 and the 4 MiB, and
   filtered entries only against the second of reading, so a flood of filtered lines delays wanted ones but never stops them.
   S9, E12 and the open question say that only zstd is decoded and that an XZ or LZ4 item makes its entry a gap.

@@ -23,3 +23,4 @@ are quoted in full.
 | 2026-10-23 07:35 | 3 Plan security review (round 3) | squad-security | APPROVED: B5 resolved (worst case 82 ms), N7 and N9 confirmed (opus/medium · 33,341 tokens · 8 tool uses · 91 s) |
 | 2026-10-23 07:38 | 4 Skeleton (G1) | squad-dev | Task 1 done: build passes; agent_test.go call sites left to Tester (9, not 5); decisions deferred to implementation noted (sonnet/medium · 137,735 tokens · 19 tool uses · 145 s) |
 | 2026-10-23 08:33 | 5 Tests first (G2) | squad-tester | Tests 2-7 written; builds, fail on skeleton; seam for AC16 record check requested; 3 Lead decisions open (sonnet/medium · usage pending) |
+| 2026-10-23 08:41 | 5 Tests first (G2) | squad-lead | decide: 8 points settled (urgent save 5 s, Flush seam, E23 damaged file rule, raw lines for invalid dates, NextWith value-only limit, records seam, _PID test); new tasks 7a, 14a (opus/medium · usage pending) |

@@ -14,7 +14,7 @@ external text; the collector's own log lines), and a new dependency `github.com/
 
 ## Problem / root cause
 
-The feature is specified in [spec.md](spec.md) (S1–S10, E1–E21, AC1–AC17); this plan builds it.
+The feature is specified in [spec.md](spec.md) (S1–S10, E1–E23, AC1–AC18); this plan builds it.
 
 ## Verified facts
 
@@ -58,22 +58,22 @@ The criteria are the spec's AC1–AC17 ([spec.md](spec.md)).
 
 | AC | Test(s) | Test file |
 | -- | ------- | --------- |
-| AC1 | `TestJournal_EntriesMapAsTheImportGolden` (the generated fixture files from `live.export`, compressed with real frames, against `testdata/journal/live-records.jsonl`), `TestJournal_ReadsUserFilesAndTheVolatileDirectory`, `TestJournal_CutsLongFieldsWithTruncated`, `TestJournal_XzOrLz4ItemIsAGap`; C#: `JournalExportParserParsesLiveFixtureAsTheGoldenRecords`; `TestEntries_SeekAllFindsTheFirstEntryAfter`, `TestEntries_NextWithDecodesCompressedItems`, `TestEntries_NextWithMarksCutFields`, `TestEntries_MoreThanFourCompressedItemsLeaveTheEntryUndecoded`, `TestEntries_CompressedObjectBeyondTheBoundIsNotRead`, `TestListAllFiles_TakesSystemAndUserFiles`, `TestReal_NextWithDecodesEveryEntry` (skips without `VANDOX_REAL_JOURNAL_DIR`) | `internal/logship/journal_test.go`, `tests/Vandox.Core.Tests/JournalExportParserTests.cs`, `internal/journal/entries_test.go`, `internal/journal/dir_test.go`, `internal/journal/real_test.go` |
-| AC2 | `TestParse_ReadsTheImportsSyslogForms` (table from `testdata/logs/mail.log`, `kern.log-oom` and the forms of fact 11), `TestParse_LineWithoutHeaderIsRaw`, `TestClock_YearAndDaylightSavingRules`, `TestLoadZone_RefusesWhatIsNotAZoneFile`, `TestFiles_HoldsSyslogFilesWhileTheZoneIsUnknown` | `internal/syslogline/syslogline_test.go`, `internal/syslogline/clock_test.go`, `internal/syslogline/zone_test.go`, `internal/logship/files_test.go` |
+| AC1 | `TestJournal_EntriesMapAsTheImportGolden` (the generated fixture files from `live.export`, compressed with real frames, against `testdata/journal/live-records.jsonl`), `TestJournal_ReadsUserFilesAndTheVolatileDirectory`, `TestJournal_CutsLongFieldsWithTruncated`, `TestJournal_XzOrLz4ItemIsAGap`; C#: `JournalExportParserParsesLiveFixtureAsTheGoldenRecords`; `TestEntries_SeekAllFindsTheFirstEntryAfter`, `TestEntries_NextWithDecodesCompressedItems`, `TestEntries_NextWithMarksCutFields`, `TestEntries_MoreThanFourCompressedItemsLeaveTheEntryUndecoded`, `TestEntries_CompressedObjectBeyondTheBoundIsNotRead`, `TestListAllFiles_TakesSystemAndUserFiles`, `TestReal_NextWithDecodesEveryEntry` (skips without `VANDOX_REAL_JOURNAL_DIR`), `TestJournal_PidFallsBackToSyslogPid` (decision 8), `TestEntries_NextWithCountsTheValueOnly` (decision 6) | `internal/logship/journal_test.go`, `tests/Vandox.Core.Tests/JournalExportParserTests.cs`, `internal/journal/entries_test.go`, `internal/journal/dir_test.go`, `internal/journal/real_test.go` |
+| AC2 | `TestParse_ReadsTheImportsSyslogForms` (table from `testdata/logs/mail.log`, `kern.log-oom` and the forms of fact 11), `TestParse_LineWithoutHeaderIsRaw` (with the impossible and unstorable header times of decision 5), `TestClock_YearAndDaylightSavingRules`, `TestLoadZone_RefusesWhatIsNotAZoneFile`, `TestFiles_HoldsSyslogFilesWhileTheZoneIsUnknown` | `internal/syslogline/syslogline_test.go`, `internal/syslogline/clock_test.go`, `internal/syslogline/zone_test.go`, `internal/logship/files_test.go` |
 | AC3 | `TestFilter_MinPriorityAndDropRules` (table: each condition alone and together, a line without priority) | `internal/logship/filter_test.go` |
-| AC4 | `TestLogs_StopAndStartShipEveryLineOnce` (real files in `t.TempDir()`, a fixture journal, `Kept`, `Store.Flush`, a new collector on the saved state), `TestRun_SavesTheStateWhenItStops`, `TestRunner_TellsTheObserverWhetherARunWasKept`, `TestStore_FlushWaitsForARunningSave` | `internal/logship/logship_test.go`, `internal/agent/agent_test.go`, `internal/scheduler/runner_test.go`, `internal/agentstate/agentstate_test.go` |
+| AC4 | `TestLogs_StopAndStartShipEveryLineOnce` (real files in `t.TempDir()`, a fixture journal, `Kept`, `Store.Flush`, a new collector on the saved state), `TestRun_SavesTheStateWhenItStops`, `TestRunner_TellsTheObserverWhetherARunWasKept`, `TestStore_FlushWaitsForARunningSave`, `TestStore_FlushGivesUpWhenASaveDoesNotEnd` (decision 2, coverage mode) | `internal/logship/logship_test.go`, `internal/agent/agent_test.go`, `internal/scheduler/runner_test.go`, `internal/agentstate/agentstate_test.go` |
 | AC5 | `TestLogs_UncleanEndRepeatsOnlyLinesAfterTheSavedPosition`, `TestSaver_SavesALogPositionWithinTenSeconds` (run starts a few milliseconds early on the 10 s grid) | `internal/logship/logship_test.go`, `internal/agentstate/agentstate_test.go` |
 | AC6 | `TestFiles_RotationByRenameWhileRunning` (a collector run between the rename and the writer's last append to the renamed file), `TestFiles_RenamedFileIsReadUntilTheWriterHasMoved`, `TestFiles_RenamedFileSurvivesARestart`, `TestFiles_RotationSearchChecksTheOpenedFile`, `TestFiles_RotationSearchRefusesALinkInTheDirectoryPath` (after a restart), `TestFiles_RotationWhileStoppedFindsTheRenamedFile` (`.1` and `-YYYYMMDD`), `TestFiles_RotationWithoutTheOldFileIsAGap` | `internal/logship/files_test.go` |
 | AC7 | `TestFiles_TruncationRestartsWithOneGap`, `TestFiles_TruncationRefilledPastThePositionIsDetected` | `internal/logship/files_test.go` |
 | AC8 | `TestLogs_FirstStartShipsNothingOlder`, `TestFiles_AddedFileStartsAtItsEnd`, `TestFiles_FileThatAppearsLaterIsReadFromItsStart`, `TestJournal_NewSeqnumIDIsReadFromItsStart` | `internal/logship/logship_test.go`, `internal/logship/files_test.go`, `internal/logship/journal_test.go` |
 | AC9 | `TestLogs_DroppedRunIsReadAgain`, `TestLogs_AbandonedRunNeverMovesAPosition` | `internal/logship/logship_test.go` |
-| AC10 | `TestJournal_VacuumedPositionIsOneGap`, `TestJournal_UnreadableEntriesGiveOneGap`, `TestJournal_EntryWithoutMessageIsSkipped` | `internal/logship/journal_test.go` |
+| AC10 | `TestJournal_VacuumedPositionIsOneGap`, `TestJournal_UnreadableEntriesGiveOneGap`, `TestJournal_EntryWithoutMessageIsSkipped`, `TestJournal_DamagedFileIsGivenUpWithOneGap` (decision 3), `TestEntries_NextWithDamagedItemObjectIsUndecoded`, `TestEntries_NextWithDamagedEntryKeepsTheCursor` | `internal/logship/journal_test.go`, `internal/journal/entries_test.go` |
 | AC11 | `TestOpenNoLinks_RefusesALinkInAnyElement`, `TestOpenNoLinks_RefusesNonRegularFiles`, `TestFiles_UnreadableFileKeepsItsPosition`, `TestJournal_UnreadableJournalKeepsThePosition` | `internal/logship/safeopen_test.go`, `internal/logship/files_test.go`, `internal/logship/journal_test.go` |
 | AC12 | `TestFiles_PartialLineWaitsForItsLineFeed`, `TestFiles_PartialLineIsShippedWhenTheWriterHasMoved` | `internal/logship/files_test.go` |
 | AC13 | `TestLogs_RunBudgets` (1,000 records, 4 MiB crossing record, one second with a scripted clock, filtered lines count only against time), `TestLogs_HeapStaysBounded` (records at every field's maximum, a journal of 100,000 entries, lines over 16 KiB), `TestDecoder_HeapStaysBoundedForTheLargestFrame` (the largest accepted frame, a frame without a stated size whose output passes the bound, a frame whose stated size is too small), `TestDecoder_RefusesFramesNotOfTheServerForm` (no stated size, not single-segment, a dictionary, a stated size over 4 MiB), `TestDecoder_NeverKeepsAGrownBuffer` | `internal/logship/logship_test.go`, `internal/zstdfield/zstdfield_test.go` |
 | AC14 | `TestLoadAgent_LogShippingErrors` (every invalid option of E16; the fact-24 pattern `.{0,1000}` repeated 113 times, 1,017 bytes and 226,002 instructions; the worst-case patterns of fact 25 at the bound: `\pL{0,199}y` and `[a-z]{398}y` (401) refused, `\pL{0,198}y`, `(?i)\pL{0,198}y` (399) and `[a-z]{397}y` (400) accepted; `\pL{0,99}y` and `\pL{0,98}y` (201 + 199) accepted together, `\pL{0,99}y` twice (402) refused with the `log_shipping.drop` reason; a path with U+0000; the error holds file, line, key and index and not the value), `TestLoadAgent_LogShippingDefaults`, `TestLoadAgent_Example` (extended) | `internal/config/logshipping_test.go`, `internal/config/agent_test.go` |
 | AC15 | `TestLogs_LogsHoldNoPathFieldOrMessage` (recording handler: the fixed texts only) | `internal/logship/logship_test.go` |
-| AC16 | `TestRecords_RefusedRecordBecomesAGap` (the check step fed a record the wire check refuses, a negative `pid`, since the cuts make every mapped record pass), `TestLogs_FourthDroppedRunGivesUpTheSpan` (cases: four sink refusals, four timeouts, mixed) | `internal/logship/records_test.go`, `internal/logship/logship_test.go` |
+| AC16 | `TestRecords_RefusedRecordBecomesAGap` (coverage mode, through the seam of decision 7: the check step fed a record the wire check refuses, a negative `pid`, since the cuts make every mapped record pass), `TestLogs_FourthDroppedRunGivesUpTheSpan` (cases: four sink refusals, four timeouts, mixed) | `internal/logship/records_test.go`, `internal/logship/logship_test.go` |
 | AC17 | `TestDecode_StateWithoutLogPositionsStaysUsable`, `TestEncode_FullLogPositionsFitTheBound` (16 file positions with renamed files, 256 journal positions), `TestDecode_RefusesInvalidLogPositions` | `internal/agentstate/agentstate_test.go` |
 | AC18 | `TestJournal_IDWithoutPositionIsReadOnlyWhenNewer`, `TestJournal_SkippedNewerPartOfAnIDIsAGap` (a clock step back; a user journal whose first entry is older than the newest committed position and whose tail is newer), `TestJournal_SetAsideFileOfAForgottenIDIsNotReadAgain` (after a restart), `TestJournal_ManyUserIDsAreNeverReadTwice` (300 IDs with an online file, a restart), `TestJournal_TurnedOnLaterStartsAtTheTails`, `TestJournal_ReadableAfterAFirstStartStartsAtTheTails` | `internal/logship/journal_test.go` |
 
@@ -91,8 +91,7 @@ with `Options.Compress` (fact 14); a user file is written with a seqnum ID of it
 **Journal (`internal/journal`).** `ListAllFiles` adds `user-<digits>.journal`, `user-<digits>@*.journal` and `user-<digits>@*.journal~`
 (digits 1 to 10, no other character). `SeekAll` positions a cursor on the file's main entry array (header offsets 152 and 176) at the
 first entry after a sequence number, by the same bisection as `Seek`; `NextWith` reads an entry with `ReadOptions`: wanted payloads up
-to `MaxPayload` bytes (excess not read, `Field.Cut` set), and compressed items with the zstd flag passed to `Decompress` (output up to
-`MaxPayload` plus the name), at most `MaxCompressed` (4) per entry; the compressed object is read whole into the entry's input buffer
+to `MaxPayload` bytes (excess not read, `Field.Cut` set), and compressed items with the zstd flag passed to `Decompress` (limit `MaxPayload + 66`, decision 6), at most `MaxCompressed` (4) per entry; the compressed object is read whole into the entry's input buffer
 (reused, grown once up to `MaxCompressedBytes`, 4 MiB); a larger object, a fifth compressed item (the entry is not decoded further), XZ or
 LZ4 items and failed decodings count in `Entry.Undecoded`. `Next` keeps its behavior (kernel
 collector unchanged).
@@ -125,7 +124,8 @@ deadline.
   after a restart starts at its tail by the rule above (one gap up to its tail time).
 - *Mapping:* fact 10 (`log`/`source` `journal`); host and program cut to 1,024 bytes and the message to 16,384 with `CleanText`,
   `truncated` when any is cut or a field was `Cut`; entries without `MESSAGE` or with a time outside the storable range are skipped;
-  `Undecoded` or a read error of one entry is a gap over it.
+  `Undecoded` makes an entry a gap over it (E12); structural damage (`ErrMalformed` of an entry array or entry object) follows E23
+  (decision 3).
 - *Files:* each configured file is opened through `OpenNoLinks` (from `/`, every directory with `openat` and
   `O_PATH|O_DIRECTORY|O_NOFOLLOW|O_CLOEXEC`, so a search-only directory works, the file with `O_RDONLY|O_NOFOLLOW|O_NONBLOCK|O_CLOEXEC`,
   then `fstat`: a regular file with one link only, so a hard link to another file is refused as well); the open descriptor of the
@@ -142,7 +142,7 @@ deadline.
   partial last line waits. Records: `log` the configured path, `source` `syslog`.
 - *Filter* after mapping (AC3), compiled once from the configuration.
 - *Check:* every record goes through `wire.CheckRecord` (as the scheduler stamps it) before it is returned; a refused one becomes a gap
-  over its line (E19).
+  over its line (E19), through the seam `checkRecords` of decision 7.
 - *Commit:* `Kept(run, true)` commits the fork of that run and calls `store.Update(true, …)`. Dropped runs are counted from
   `Kept(run, false)` and from `Run.PreviousLost` at the next `Collect` (a timeout or skip calls no `Kept`), as `kernevents` does. A fork
   an abandoned worker may still write is never committed. At the fourth dropped run in a row from one committed state the run gives up:
@@ -162,7 +162,8 @@ error or panic: `false`); an abandoned or skipped run calls nothing.
 positions of about 110 bytes and 16 file positions of about 400 bytes fit with room). One store-level write lock covers encode, write
 and the dirty/sequence update in `Saver.Collect` and `Store.Flush`; `Flush` waits at most 5 s for it (else the warning `agent state not
 saved`). `agent.Run` calls `Flush` after the scheduler stopped. The urgent save tolerates the grid's jitter: due when at least 10 s
-minus half the `state` interval have passed since the last save (fact 28), so a committed position is saved within one state interval.
+minus half the `state` interval (5 s, `urgentInterval`) have passed since the last save (fact 28), so a committed position is saved within one state interval
+(decision 1).
 
 **Configuration.** `log_shipping` with `journal` (bool, default `true`), `min_priority` (default `info`), `files` (list of mappings
 `path`, `format`), `drop` (list of mappings `log`, `program`, `priority`, `message`), checked as E16; `message` is parsed with
@@ -174,6 +175,81 @@ is already refused by the decoder's clean-string rule; reasons never quote a val
 
 New user-visible output: the log lines above (fixed texts and attributes as listed) and the example file's comments; layout free for
 the Tester, approved in step 9.
+
+## Decisions after tests first (step 5)
+
+1. **Urgent save threshold: 5 s, as planned.** `urgentInterval` becomes 10 s minus half the `state` interval. A threshold just
+   under 10 s tolerates only that much jitter of `Run.Start` (`time.Now()` after the grid tick, fact 28), and the agent is busiest
+   when it matters most (an OOM storm); with 5 s a late run still saves at the next tick. Since the `state` job runs on a 10 s grid,
+   saves stay at about one per tick; a run delayed by more than 5 s can add one extra write, which is harmless. The existing tests
+   `TestSaverWriteUrgentChangeWaitsTenSecondsSinceTheLastSave` and `TestSaverWriteUrgentWithinTenSecondsAfterHeartbeatSaveWaits` pin
+   the old 10 s rule: the Tester renames them to `TestSaverWriteUrgentChangeWaitsFiveSecondsSinceTheLastSave` and
+   `TestSaverWriteUrgentWithinFiveSecondsAfterHeartbeatSaveWaits` and asserts no save at 4 s (54 s) and a save at 5 s (55 s) after the
+   last save. The Agent area's *Saving* paragraph (Lead, G4) and the comments on `urgentInterval` and `Saver.Collect` (Dev) say so.
+2. **`Store.Flush` gets a seam for its wait.** The store's write lock is `saving chan struct{}` (capacity 1, made in `Open`; a save
+   holds it by sending and releases it by receiving), and `Flush` waits with `select` on the send and on `flushAfter(5 * time.Second)`,
+   where `var flushAfter = time.After` is unexported and swappable. On the timeout `Flush` saves nothing, logs the warning `agent
+   state not saved` with `err` `agentstate: save still running` (fixed text, every time it gives up) and returns a non-nil error;
+   `agent.Run` does not log that error again. Test (coverage mode, after G3): `TestStore_FlushGivesUpWhenASaveDoesNotEnd` fills
+   `s.saving`, replaces `flushAfter` with a function that returns an already-fired channel (no real clock), and asserts the error,
+   one warning with that `err` and the unchanged state file.
+3. **Structural damage of a journal file: spec E23, the kernel collector's rule.** `NextWith` keeps `Next`'s contract: on
+   `ErrMalformed` from an entry array or the entry object, the cursor stays where it was; at the cut-off end of an archived or
+   set-aside file the list ends. A damaged *data object of an item* (a wrong type or size, an offset outside the file or not before
+   the entry object) does not fail the entry: it counts in `Entry.Undecoded`, so the entry is E12's gap and the cursor moves on. In
+   the collector an online file's `ErrMalformed` is first repeated once after re-reading the size (`Refresh`), as `kernevents`
+   `fileReader.do` does; then the run stops reading that ID (records before it returned, position before the damage), and the third
+   run in a row that stops at the same position (file, ID, sequence number) gives the rest up; an archived or set-aside file is given
+   up at once. Giving up: one gap from the last entry read from the file (else the position's time, else the run's start) to the
+   file's header tail time, the position moved to the file's tail sequence number, and reading goes on after it; the warning
+   `journal not readable` with `err` `journal: <kind>: malformed file` as `kernevents` words it. Tests (now, G2):
+   `TestJournal_DamagedFileIsGivenUpWithOneGap` with the cases *archived file with a damaged entry object in the middle* (lines
+   before shipped, one gap to its tail time, the next file of the ID shipped), *online file*: two runs without a gap, the third gives
+   the gap, and the entries of the ID's next online file are shipped, and *a damaged item object is one gap over its entry only*;
+   `TestEntries_NextWithDamagedEntryKeepsTheCursor` (an entry object with a wrong type: `ErrMalformed`, and after restoring the
+   byte the same cursor reads that entry), `TestEntries_NextWithDamagedItemObjectIsUndecoded`.
+4. **The Tester's interpretations, confirmed against the spec, with three precisions.**
+   - The renamed file is finished in the run that finds its size unchanged since the previous run (`RenamedFile.Size`, saved, so also
+     after a restart) and the current file not empty: that run reads its rest, ships its partial last line as it is and closes it; an
+     append after that is never read (the writer has moved, S5). Confirmed.
+   - Truncation gap from the last shipped line's time to `Run.Start` of the run that notices it (S6); rotation-lost gap from the last
+     shipped line's time to the capture time of the first line read from the current file, else `Run.Start` (E2). Confirmed.
+     Precision: `FilePosition.LastTime` is the capture time of the last line shipped from the file, and when the collector takes a
+     position without shipping a line (S7, S8, E17) it is set to that run's `Run.Start`, so it is never zero and is the start of
+     both gaps when nothing was shipped (spec S6, E2 updated). The Tester adds the case *nothing shipped yet* to
+     `TestFiles_TruncationRestartsWithOneGap` (now).
+   - Vacuum and unreadable-entry gaps: from the realtime of the previous entry read in the ID (shipped or filtered), else the
+     position's realtime, to the realtime of the next readable entry, else `Run.Start` (E3, E12). Confirmed.
+   - Precision for every gap of the collector: a gap whose end is not after its start (a line dated after `Run.Start`, a clock step)
+     ends 1 µs after its start, so the gap passes `model.Gap.Validate` and is still recorded.
+   - Configuration error keys follow `processes.programs`: `log_shipping.min_priority`; `log_shipping.files` and `log_shipping.drop`
+     for more than 16 files or 64 rules and for the patterns together, at the line of that key; `log_shipping.files[i].path` (also a
+     path listed twice, at the second) and `log_shipping.files[i].format`; `log_shipping.drop[i]` for a rule without a condition;
+     `log_shipping.drop[i].log`, `.priority` and `.message` for a bad value. The line is the named key's, else the element's.
+     Confirmed; the tests accept these keys as written.
+5. **A syslog line with an impossible or unstorable header time is shipped raw (spec E9).** The import skips it, but live a skipped
+   line would be lost without a gap. `syslogline.Parse` returns `Header` false with the whole line as `Message` for 30 February, 31
+   November, 29 February in a common year, hour 24, minute or second 60, and an RFC 3339 time outside the storable range; such a line
+   does not change the clock's previous instant. Tests (now, G2): those cases in `TestParse_LineWithoutHeaderIsRaw`, traditional and
+   RFC 3339 forms.
+6. **`NextWith` semantics.** `MaxPayload` counts the bytes of the value after `NAME=` (the import's bounds are value bounds), so
+   `MaxPayload` 16,384 keeps 16,384 bytes of `MESSAGE`; `Cut` is set when the value is longer, and the excess is not read. A
+   compressed item is decoded with the limit `MaxPayload + 66` (journald's longest field name of 64 bytes, the `=` and one byte that
+   shows a longer value) and its value cut to `MaxPayload` the same way. `NextWith` never puts a `Compressed` field into
+   `Entry.Fields`: a decoded item is an ordinary field (`Compressed` false) or left out when its name is not wanted, and an item it
+   cannot decode (also with `Decompress` nil) counts only in `Undecoded`. `Next` is unchanged. Test change (now, G2): in
+   `TestEntries_NextWithMarksCutFields` the cut value is exactly 100 bytes, and `TestEntries_NextWithCountsTheValueOnly` reads a
+   value of exactly `MaxPayload` bytes uncut and one of `MaxPayload` + 1 bytes cut, plain and compressed.
+7. **Seam for AC16: confirmed.** `internal/logship/records.go`: `var checkRecord = wire.CheckRecord` (unexported, swappable) and
+   `checkRecords(records []model.Record, at time.Time, gapFrom func(i int) time.Time) []model.Record`, which checks each record as
+   the scheduler stamps it (origin agent, `Seq` `math.MaxInt64`, a zero `CapturedAt` set to `at`) and replaces each refused record i
+   by one gap (collector `logs`, cause `unknown`, captured at `at`) from `gapFrom(i)` to the record's capture time, by the 1 µs rule
+   of decision 4. The Dev adds it in G3 (task 11); the Tester writes `records_test.go` in coverage mode (task 14a).
+8. **The `_PID` fallback gets a test now (G2), not in coverage mode:** the behavior is fixed by S1 and the import's `ParsePid`
+   (`JournalExportParser.cs`): a `_PID` that is not 1 to 10 ASCII digits of at most 2,147,483,647 (0, 2,147,483,648, empty, a
+   non-digit, 11 digits, absent) falls back to `SYSLOG_PID` by the same rule, else 0. `TestJournal_PidFallsBackToSyslogPid`
+   (table: each of those `_PID` forms with `SYSLOG_PID` 42 gives 42 and with an invalid `SYSLOG_PID` gives 0; `_PID` 2,147,483,647
+   is kept).
 
 ## Options considered
 
@@ -257,6 +333,9 @@ func (l *Logs) Name() string
 func (l *Logs) Collect(ctx context.Context, run scheduler.Run) ([]model.Record, error)
 func (l *Logs) Kept(run scheduler.Run, kept bool)
 func OpenNoLinks(path string) (*os.File, error)
+// records.go (unexported, decision 7)
+var checkRecord = wire.CheckRecord
+func checkRecords(records []model.Record, at time.Time, gapFrom func(i int) time.Time) []model.Record
 
 // internal/scheduler
 type Observer interface {
@@ -289,6 +368,7 @@ type RenamedFile struct {
 const MaxLogJournals = 256
 const MaxLogFiles = 16
 func (s *Store) Flush(now time.Time) error
+// unexported (decision 2): Store gains saving chan struct{} (capacity 1, the write lock); var flushAfter = time.After
 
 // internal/config
 type LogShipping struct {
@@ -341,7 +421,9 @@ The files of *Tests per criterion*, colocated as `foo_test.go` (`.squad/stack.md
 lives in `internal/journal/journaltest/writer_test.go`.
 
 Existing test code that calls a changed signature: `internal/agent/agent_test.go` calls `jobs` (lines 734, 784) and `newScheduler`
-(lines 952, 1061, 1125); the Tester adapts them in step 5 (new return values). `AgentKeys` and the example file are pinned by
+(lines 952, 1061, 1125); the Tester adapts them in step 5 (new return values). `internal/agentstate/agentstate_test.go`:
+the Tester changes `TestSaverWriteUrgentChangeWaitsTenSecondsSinceTheLastSave` and
+`TestSaverWriteUrgentWithinTenSecondsAfterHeartbeatSaveWaits` to the 5 s threshold (decision 1). `AgentKeys` and the example file are pinned by
 `TestLoadAgent_Example` and the keys test in `internal/config/agent_test.go` (Tester).
 
 Files of the change no unit test can cover: none (`OpenNoLinks` runs against real files in `t.TempDir()`).
@@ -362,7 +444,7 @@ Files of the change no unit test can cover: none (`OpenNoLinks` runs against rea
 Sweep: `grep` for `agentstate`, `position in the journal`, `the open backup run` and the collector lists; one owner each.
 
 - `docs/areas/agent.md`, `docs/areas/configuration-and-secrets.md`, `docs/areas/wire-format.md`, `docs/areas/log-import.md` — Lead
-  (docs task group).
+  (docs task group); in `agent.md` also *Saving* (the urgent save after 5 s, `Flush` and its timeout warning, decisions 1 and 2).
 - `docs/ARCHITECTURE.md` — Lead: the collector list (line 14), the *Components* bullet of `cmd/vandox-agent` (lines 53-61: the `logs`
   collector, the state file's log positions, the commit when kept), the `internal/` package list (line 110: `internal/zstdfield`,
   `internal/syslogline`, `internal/logship`), the records list (0121).
