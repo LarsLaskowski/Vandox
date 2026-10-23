@@ -748,7 +748,7 @@ func TestJobs_Schedules(t *testing.T) {
 			cfg.MariaDB.Enabled = false
 			log := slog.New(slog.NewTextHandler(io.Discard, nil))
 
-			list, _, _, err := jobs(Options{Self: fixtureSources(), System: fixtureSystem(), Processes: fixtureProcesses(), Connections: fixtureConnections(), Services: fixtureServices(), MariaDB: fixtureMariaDB(), Kernel: fixtureKernel(), Logs: fixtureLogs(), StateDir: t.TempDir()}, &cfg, log)
+			list, _, err := jobs(Options{Self: fixtureSources(), System: fixtureSystem(), Processes: fixtureProcesses(), Connections: fixtureConnections(), Services: fixtureServices(), MariaDB: fixtureMariaDB(), Kernel: fixtureKernel(), Logs: fixtureLogs(), StateDir: t.TempDir()}, &cfg, storeFor(Options{Self: fixtureSources(), System: fixtureSystem(), Processes: fixtureProcesses(), Connections: fixtureConnections(), Services: fixtureServices(), MariaDB: fixtureMariaDB(), Kernel: fixtureKernel(), Logs: fixtureLogs(), StateDir: t.TempDir()}, &cfg), log)
 
 			if err != nil {
 
@@ -804,7 +804,7 @@ func TestJobs_MariaDBAfterSystemdOnlyWhenEnabled(t *testing.T) {
 			cfg.Services.Units = tt.units
 			log := slog.New(slog.NewTextHandler(io.Discard, nil))
 
-			list, _, _, err := jobs(Options{Self: fixtureSources(), System: fixtureSystem(), Processes: fixtureProcesses(), Connections: fixtureConnections(), Services: fixtureServices(), MariaDB: fixtureMariaDB(), Kernel: fixtureKernel(), Logs: fixtureLogs(), StateDir: t.TempDir()}, &cfg, log)
+			list, _, err := jobs(Options{Self: fixtureSources(), System: fixtureSystem(), Processes: fixtureProcesses(), Connections: fixtureConnections(), Services: fixtureServices(), MariaDB: fixtureMariaDB(), Kernel: fixtureKernel(), Logs: fixtureLogs(), StateDir: t.TempDir()}, &cfg, storeFor(Options{Self: fixtureSources(), System: fixtureSystem(), Processes: fixtureProcesses(), Connections: fixtureConnections(), Services: fixtureServices(), MariaDB: fixtureMariaDB(), Kernel: fixtureKernel(), Logs: fixtureLogs(), StateDir: t.TempDir()}, &cfg), log)
 
 			if err != nil {
 
@@ -980,7 +980,7 @@ func TestNewScheduler_LowMemoryMakesFullProcessSnapshots(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		sink := &snapshotSink{}
 		opts.Sink = sink
-		sched, _, err := newScheduler(opts, &cfg, slog.New(slog.DiscardHandler))
+		sched, err := newScheduler(opts, &cfg, storeFor(opts, &cfg), sinkFor(opts), slog.New(slog.DiscardHandler))
 		if err != nil {
 			t.Fatalf("newScheduler() error = %v, want nil", err)
 		}
@@ -1089,7 +1089,7 @@ func TestNewScheduler_RecordsServiceStatesOfConfiguredUnits(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		sink := &recordSink{}
 		opts.Sink = sink
-		sched, _, err := newScheduler(opts, &cfg, slog.New(slog.DiscardHandler))
+		sched, err := newScheduler(opts, &cfg, storeFor(opts, &cfg), sinkFor(opts), slog.New(slog.DiscardHandler))
 		if err != nil {
 			t.Fatalf("newScheduler() error = %v, want nil", err)
 		}
@@ -1154,7 +1154,7 @@ func TestNewScheduler_EmptyServiceUnitsNeverOpenSystemd(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		sink := &recordSink{}
 		opts.Sink = sink
-		sched, _, err := newScheduler(opts, &cfg, slog.New(slog.DiscardHandler))
+		sched, err := newScheduler(opts, &cfg, storeFor(opts, &cfg), sinkFor(opts), slog.New(slog.DiscardHandler))
 		if err != nil {
 			t.Fatalf("newScheduler() error = %v, want nil", err)
 		}
@@ -1214,7 +1214,7 @@ func TestJobs_BackupsOnlyWithRules(t *testing.T) {
 			cfg.Backups.Processes = tt.rules
 			log := slog.New(slog.NewTextHandler(io.Discard, nil))
 
-			list, _, _, err := jobs(Options{Self: fixtureSources(), System: fixtureSystem(), Processes: fixtureProcesses(), Connections: fixtureConnections(), Services: fixtureServices(), MariaDB: fixtureMariaDB(), Kernel: fixtureKernel(), Logs: fixtureLogs(), StateDir: t.TempDir()}, &cfg, log)
+			list, _, err := jobs(Options{Self: fixtureSources(), System: fixtureSystem(), Processes: fixtureProcesses(), Connections: fixtureConnections(), Services: fixtureServices(), MariaDB: fixtureMariaDB(), Kernel: fixtureKernel(), Logs: fixtureLogs(), StateDir: t.TempDir()}, &cfg, storeFor(Options{Self: fixtureSources(), System: fixtureSystem(), Processes: fixtureProcesses(), Connections: fixtureConnections(), Services: fixtureServices(), MariaDB: fixtureMariaDB(), Kernel: fixtureKernel(), Logs: fixtureLogs(), StateDir: t.TempDir()}, &cfg), log)
 
 			if err != nil {
 
@@ -1268,7 +1268,7 @@ func runSchedulerFor(t *testing.T, opts Options, cfg *config.Agent, d time.Durat
 	t.Helper()
 
 	synctest.Test(t, func(t *testing.T) {
-		sched, _, err := newScheduler(opts, cfg, slog.New(slog.DiscardHandler))
+		sched, err := newScheduler(opts, cfg, storeFor(opts, cfg), sinkFor(opts), slog.New(slog.DiscardHandler))
 		if err != nil {
 			t.Fatalf("newScheduler() error = %v, want nil", err)
 		}
@@ -1304,7 +1304,9 @@ func TestNewScheduler_MissingSpoolDirectoryIsNeverCreated(t *testing.T) {
 	opts.Sink = sink
 
 	synctest.Test(t, func(t *testing.T) {
-		sched, _, err := newScheduler(opts, &cfg, slog.New(slog.NewTextHandler(out, nil)))
+		logger := slog.New(slog.NewTextHandler(out, nil))
+		store, _, _ := openStorage(opts, &cfg, logger)
+		sched, err := newScheduler(opts, &cfg, store, sinkFor(opts), logger)
 		if err != nil {
 			t.Fatalf("newScheduler() error = %v, want nil (a missing spool directory does not stop the agent)", err)
 		}
@@ -1345,7 +1347,7 @@ func TestNewScheduler_LiveKillTriggersExtraSnapshots(t *testing.T) {
 	const victim = 4711
 
 	synctest.Test(t, func(t *testing.T) {
-		sched, _, err := newScheduler(opts, &cfg, slog.New(slog.DiscardHandler))
+		sched, err := newScheduler(opts, &cfg, storeFor(opts, &cfg), sinkFor(opts), slog.New(slog.DiscardHandler))
 		if err != nil {
 			t.Fatalf("newScheduler() error = %v, want nil", err)
 		}
@@ -1443,7 +1445,7 @@ func TestJobs_ZeroKernelSourcesStillBuildAllJobs(t *testing.T) {
 	cfg := config.DefaultAgent()
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 
-	list, _, _, err := jobs(Options{Self: fixtureSources(), System: fixtureSystem(), Processes: fixtureProcesses(), Connections: fixtureConnections(), Services: fixtureServices(), MariaDB: fixtureMariaDB(), StateDir: t.TempDir()}, &cfg, log)
+	list, _, err := jobs(Options{Self: fixtureSources(), System: fixtureSystem(), Processes: fixtureProcesses(), Connections: fixtureConnections(), Services: fixtureServices(), MariaDB: fixtureMariaDB(), StateDir: t.TempDir()}, &cfg, storeFor(Options{Self: fixtureSources(), System: fixtureSystem(), Processes: fixtureProcesses(), Connections: fixtureConnections(), Services: fixtureServices(), MariaDB: fixtureMariaDB(), StateDir: t.TempDir()}, &cfg), log)
 
 	if err != nil {
 
@@ -1671,14 +1673,28 @@ func TestLogshipConfig_PatternThatDoesNotCompileIsRefusedWithoutQuotingIt(t *tes
 		options := Options{Self: fixtureSources(), System: fixtureSystem(), Processes: fixtureProcesses(), Connections: fixtureConnections(), Services: fixtureServices(), MariaDB: fixtureMariaDB(), Kernel: fixtureKernel(), Logs: fixtureLogs(), StateDir: t.TempDir()}
 		log := slog.New(slog.DiscardHandler)
 
-		list, _, _, err := jobs(options, &cfg, log)
+		list, _, err := jobs(options, &cfg, storeFor(options, &cfg), log)
 
 		if !errors.Is(err, errDropPattern) || list != nil || strings.Contains(err.Error(), pattern) {
 			t.Errorf("jobs() = %d jobs, error %v, want no jobs and %v without the pattern", len(list), err, errDropPattern)
 		}
-		sched, _, err := newScheduler(options, &cfg, log)
+		sched, err := newScheduler(options, &cfg, storeFor(options, &cfg), sinkFor(options), log)
 		if !errors.Is(err, errDropPattern) || sched != nil || strings.Contains(err.Error(), pattern) {
 			t.Errorf("newScheduler() = %v, error %v, want no scheduler and %v without the pattern", sched, err, errDropPattern)
 		}
 	})
+}
+
+// storeFor opens the state store the way Run does, for the tests that call jobs and newScheduler directly.
+func storeFor(opts Options, cfg *config.Agent) *agentstate.Store {
+	store, _, _ := openStorage(opts, cfg, slog.New(slog.DiscardHandler))
+	return store
+}
+
+// sinkFor returns the sink Run hands the scheduler: opts.Sink or else the discarding one.
+func sinkFor(opts Options) scheduler.Putter {
+	if opts.Sink != nil {
+		return opts.Sink
+	}
+	return scheduler.DiscardSink{}
 }

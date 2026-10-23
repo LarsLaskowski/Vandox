@@ -23,7 +23,7 @@ state file, agent), then the documentation. Each group runs Skeleton (Dev), test
 | 13 | G5 | Skeleton: SetBarrier | internal/agentstate/agentstate.go | AC4, AC6 | — | Dev | [x] |
 | 14 | G5 | Tests: barrier before every save (job and Flush), failing barrier skips the save with the fixed text | internal/agentstate/agentstate_test.go | AC4, AC6 | 13 | Tester | [x] |
 | 15 | G5 | Implement the barrier | internal/agentstate/agentstate.go | AC4, AC6 | 14 | Dev | [x] |
-| 16 | G6 | Skeleton: openStorage, jobs, newScheduler, closeSpool | internal/agent/agent.go | AC1, AC4, AC13, AC19 | 9, 12, 15 | Dev | [ ] |
+| 16 | G6 | Skeleton: openStorage, jobs, newScheduler, closeSpool | internal/agent/agent.go | AC1, AC4, AC13, AC19 | 9, 12, 15 | Dev | [x] |
 | 17 | G6 | Tests: records reach the spool, stop order, close give-up, start failures, first start without warning, no token in the spool; adapt the jobs and newScheduler call sites | internal/agent/agent_test.go | AC1, AC4, AC13, AC19 | 16 | Tester | [ ] |
 | 18 | G6 | Implement the wiring and stop order; DiscardSink doc | internal/agent/agent.go, internal/scheduler/sink.go | AC1, AC4, AC13, AC19 | 17 | Dev | [ ] |
 | 19 | G7 | no new API: README option rows for spool.max_size and spool.min_free, the directory row | README.md | AC16 | 6 | Dev | [ ] |

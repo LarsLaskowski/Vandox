@@ -24,6 +24,7 @@ import (
 	"github.com/LarsLaskowski/Vandox/internal/sdnotify"
 	"github.com/LarsLaskowski/Vandox/internal/selfstats"
 	"github.com/LarsLaskowski/Vandox/internal/sockmount"
+	"github.com/LarsLaskowski/Vandox/internal/spool"
 	"github.com/LarsLaskowski/Vandox/internal/svcstats"
 	"github.com/LarsLaskowski/Vandox/internal/sysstats"
 	"github.com/LarsLaskowski/Vandox/internal/version"
@@ -128,7 +129,16 @@ func Run(ctx context.Context, opts Options) int {
 	}
 	log := NewLogger(stderr, cfg.Log.Level, journal)
 
-	sched, store, err := newScheduler(opts, cfg, log)
+	store, sp, err := openStorage(opts, cfg, log)
+	if err != nil {
+		log.Error("agent cannot start", "err", err)
+		return 1
+	}
+	var sink scheduler.Putter = scheduler.DiscardSink{}
+	if opts.Sink != nil {
+		sink = opts.Sink
+	}
+	sched, err := newScheduler(opts, cfg, store, sink, log)
 	if err != nil {
 		log.Error("agent cannot start", "err", err)
 		return 1
@@ -153,6 +163,7 @@ func Run(ctx context.Context, opts Options) int {
 	wg.Wait()
 	// the last positions of the collectors are saved once the scheduler has stopped; Flush logs a failed save itself
 	_ = store.Flush(time.Now())
+	closeSpool(sp, log)
 	log.Info("agent stopped")
 	return 0
 }
@@ -160,9 +171,9 @@ func Run(ctx context.Context, opts Options) int {
 // jobs returns the collectors with their schedules: self, system, processes, connections, systemd (only when a service unit is
 // configured), mariadb (only when enabled), filesystem (only when a mount point is configured), clock, kernel, logs, backups (only
 // when backups.processes has rules) and state, and the system collector, which newScheduler connects to the scheduler. The
-// agent's state file is opened in opts.StateDir or else spool.directory. The collectors log through log. It fails, and the agent does not start, when the log shipping collector cannot be built: the error wraps
+// state store is the one openStorage opened. The collectors log through log. It fails, and the agent does not start, when the log shipping collector cannot be built: the error wraps
 // errDropPattern for a pattern that does not compile and never quotes a pattern.
-func jobs(opts Options, cfg *config.Agent, log *slog.Logger) ([]scheduler.Job, *sysstats.System, *agentstate.Store, error) {
+func jobs(opts Options, cfg *config.Agent, store *agentstate.Store, log *slog.Logger) ([]scheduler.Job, *sysstats.System, error) {
 	system := sysstats.NewSystem(opts.System, log)
 	systemdSchedule := scheduler.Schedule{Interval: SystemdInterval, Timeout: SystemdTimeout, PressureInterval: SystemdPressureInterval}
 	list := []scheduler.Job{
@@ -206,11 +217,6 @@ func jobs(opts Options, cfg *config.Agent, log *slog.Logger) ([]scheduler.Job, *
 		Schedule:  scheduler.Schedule{Interval: ClockInterval, Timeout: ClockTimeout},
 	})
 
-	stateDir := opts.StateDir
-	if stateDir == "" {
-		stateDir = cfg.Spool.Directory
-	}
-	store, _ := agentstate.Open(stateDir, log)
 	proc := opts.Kernel.Proc
 	if proc == nil {
 		proc = os.DirFS("/proc")
@@ -221,7 +227,7 @@ func jobs(opts Options, cfg *config.Agent, log *slog.Logger) ([]scheduler.Job, *
 	})
 	logs, err := newLogs(opts.Logs, cfg.LogShipping, store, log)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("log shipping: %w", err)
+		return nil, nil, fmt.Errorf("log shipping: %w", err)
 	}
 	list = append(list, scheduler.Job{
 		Collector: logs,
@@ -236,7 +242,7 @@ func jobs(opts Options, cfg *config.Agent, log *slog.Logger) ([]scheduler.Job, *
 	return append(list, scheduler.Job{
 		Collector: agentstate.NewSaver(store, proc),
 		Schedule:  scheduler.Schedule{Interval: StateInterval, Timeout: StateTimeout},
-	}), system, store, nil
+	}), system, nil
 }
 
 // errDropPattern is the error of a drop pattern that does not compile; it does not quote the pattern.
@@ -298,20 +304,32 @@ func programRules(rules []config.ProgramRule) []procstats.Rule {
 	return out
 }
 
-// newScheduler returns the scheduler with the jobs of the configuration; the system collector switches its memory
-// pressure mode and the kernel collector requests the extra runs of the processes and connections collectors.
-func newScheduler(opts Options, cfg *config.Agent, log *slog.Logger) (*scheduler.Scheduler, *agentstate.Store, error) {
-	var sink scheduler.Putter = scheduler.DiscardSink{}
-	if opts.Sink != nil {
-		sink = opts.Sink
+// openStorage opens the agent's state store and then the spool, both in opts.StateDir or else spool.directory. The spool is nil
+// when opts.Sink is set. The store's barrier is the spool's Sync. It fails, and the agent does not start, when the spool cannot be
+// opened.
+func openStorage(opts Options, cfg *config.Agent, log *slog.Logger) (*agentstate.Store, *spool.Spool, error) {
+	stateDir := opts.StateDir
+	if stateDir == "" {
+		stateDir = cfg.Spool.Directory
 	}
-	list, system, store, err := jobs(opts, cfg, log)
+	store, _ := agentstate.Open(stateDir, log)
+	return store, nil, nil
+}
+
+// closeSpool closes the spool within five seconds and logs "spool not closed" otherwise; a nil spool is ignored.
+func closeSpool(_ *spool.Spool, _ *slog.Logger) {
+}
+
+// newScheduler returns the scheduler with the jobs of the configuration, taking the records into sink; the system collector
+// switches its memory pressure mode and the kernel collector requests the extra runs of the processes and connections collectors.
+func newScheduler(opts Options, cfg *config.Agent, store *agentstate.Store, sink scheduler.Putter, log *slog.Logger) (*scheduler.Scheduler, error) {
+	list, system, err := jobs(opts, cfg, store, log)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	sched, err := scheduler.New(list, sink, log)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	system.SetPressureSwitch(sched.SetPressure)
 	for _, j := range list {
@@ -319,7 +337,7 @@ func newScheduler(opts Options, cfg *config.Agent, log *slog.Logger) (*scheduler
 			k.SetTrigger(sched.Trigger)
 		}
 	}
-	return sched, store, nil
+	return sched, nil
 }
 
 // notification returns the notifier of the service manager and the watchdog interval; a problem with either is
