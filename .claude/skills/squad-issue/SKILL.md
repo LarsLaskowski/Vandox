@@ -132,7 +132,8 @@ every Git and GitHub action yourself, including follow-up issues the Lead decide
    - non-blocking findings: *Non-blocking findings*, collected for step 9.
 
    A reviewer or `squad-security` that stops on an API error (`529 Overloaded`; `429`: once the limit has reset) is relaunched
-   unchanged, at most twice; after that report a blocker to the user.
+   unchanged, at most twice; after that report a blocker to the user. A safeguard stop (`invalid_request`, category
+   `cyber`) is not relaunched: escalate to the Product Manager at once (*Loop limits*, Safeguard stop).
 9. **PR approval.** Run *PR approval* (`.squad/routing.md`): the checklist in full, then the record status
    and `decision-check.py`. Launch `squad-lead` in mode `approve-pr` as a fresh launch (never a continuation
    of its plan agent) — with the base ref, the gate output, the review outcome and the open points (after the
