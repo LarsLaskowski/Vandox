@@ -141,7 +141,8 @@ released when a read moves on.
 
 *Room and Put.* Under the spool's mutex: number the records (refuse with `spool: sequence numbers exhausted` before a number would
 reach 2^63 - 1, E21), encode the frames, compute `need` = the frames + a new header and a trailer when a file is created or sealed +
-65 gaps of 1 KiB. Size room: the sum of the data files' sizes + 32 KiB (meta file and its temporary) + `need` at most `spool.max_size`.
+1 KiB per gap owed at that moment (counted again after every drop). A hand-over that alone (with its owed gaps and the 32 KiB)
+exceeds `spool.max_size` is refused before anything is dropped (E11). Size room: the sum of the data files' sizes + 32 KiB (meta file and its temporary) + `need` at most `spool.max_size`.
 Disk room, skipped when `spool.min_free` is 0: `avail >= need && avail-need >= minFree` (no unsigned wrap). While there is no room,
 drop the oldest sealed file; when only the active file is left, refuse (E11). Dropping writes one `spool_dropped` gap (source `agent`)
 per run of unacknowledged numbers between the acknowledged ranges, `from`/`to` as item 5 below (`to` at least one second after
@@ -151,7 +152,7 @@ logs `spool writes again`. A refusal returns at once. `spool data dropped` (`rea
 `records`) at the first drop of an episode, `spool data no longer dropped` (`records`) at the first Put that fits without dropping.
 
 *Read and Ack.* `Read(after, maxRecords, maxBytes)` returns unacknowledged records above `after` in order, from one context only, at
-most the limits (at least one record when the first fits), never beyond the last completed frame. `Ack(first, last)` merges the range;
+most the limits (at least one record when the first fits; an empty batch when the first record alone exceeds `maxBytes`), never beyond the last completed frame. `Ack(first, last)` merges the range;
 a 65th disjoint range returns `ErrTooManyRanges` and changes nothing; numbers outside the kept range are ignored. A sealed file whose
 numbers are all acknowledged is deleted; the active file never. `OldestCapture` returns the oldest unacknowledged record's capture time
 (cached, re-read when the oldest moves); `LastSeq` the newest issued number.
@@ -184,8 +185,12 @@ syncs, writes the meta with `clean` true and syncs it.
    included; from the trailer when the run is the whole file, otherwise by scanning the file frame by frame under the mutex (one
    frame buffer, no index kept).
 6. Damage gaps (E6, AC10). A run starts at the last good number + 1, or at the name number when no frame is good, and ends at the
-   trailer's last number when the trailer is intact and within range, else at the next file's first number − 1; the newest file
-   without an intact trailer gets no gap for its tail (the backend's sequence detection finds it). A frame whose number differs from
+   trailer's last number when the trailer is intact and within range, else at the next file's first number − 1; at open the newest
+   file without an intact trailer gets no gap for its tail (the backend's sequence detection finds it). Damage found by a read in a
+   file without a later file (the active file) ends at the file's last number held in memory, `to` its latest capture time held in
+   memory: the spool wrote or checked those itself. A read-time damage gap is written by that `Read`/`OldestCapture` when it fits
+   without a drop, else owed to the next `Put`; the file is not cut on disk, so a restart before its deletion finds the damage again
+   and writes a second gap for the same numbers and logs the warning again (stated residual: the gap names numbers already named). A frame whose number differs from
    its line's `seq` is damage at the frame's place; the line's number is never used. A file whose name breaks a rule (not its first
    record's number, not above the previous file's last number, at or above 2^63 − 1) gets no gap, and its name never raises the next
    number. Span: `from` the latest capture time of the good frames before the damage, else the previous file's latest; `to` the
