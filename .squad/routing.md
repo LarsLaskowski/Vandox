@@ -372,6 +372,9 @@ PR is opened, the branch stays without one, and the user is told so.
   cover*) is a plan defect the Lead records with the decision.
 - **After the PR (step 11):** CI or quality-gate failures and review comments are fixed on the same
   branch through steps 7–8 again (delta review), at most 2 fix rounds per failure; then the Lead decides.
+- **Safeguard stop (any member, any step):** an API `invalid_request` of category `cyber` is not an API error:
+  relaunching unchanged loops, and rephrasing the request is a workaround. The orchestrator escalates to the
+  Product Manager at once, naming the finding the member had not reviewed as unverified.
 
 ## Escalation to the Product Manager
 
