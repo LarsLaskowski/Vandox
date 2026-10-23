@@ -96,13 +96,13 @@ func (r *run) readFile(i int) {
 		r.fproblems[i] = reasonReadFailed
 		return
 	}
+	r.fproblems[i] = "" // opened: a later failure of the reading sets its reason
 	fr := &filesRun{r: r, i: i, st: st, spec: r.l.cfg.Files[i], clock: st.clockOf(loc), size: size}
 	if !st.have {
 		fromStart := st.waiting
 		fr.begin(f, id, fromStart)
 		adopted = true
 		if !fromStart {
-			r.fproblems[i] = ""
 			return
 		}
 	} else if !fr.resume(f, id, &adopted) {
@@ -111,7 +111,6 @@ func (r *run) readFile(i int) {
 	fr.read()
 	fr.endLostGap()
 	fr.updateHead()
-	r.fproblems[i] = ""
 }
 
 // begin takes the first position in a file: its start when it did not exist before, else its end. The file becomes the one kept.
