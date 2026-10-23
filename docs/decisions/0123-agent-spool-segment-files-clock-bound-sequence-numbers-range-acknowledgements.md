@@ -1,6 +1,6 @@
 # 0123: Agent spool in uncompressed segment files with checksummed frames, clock-bound sequence numbers and range acknowledgements
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-23
 - **Area:** Agent
 - **Source:** Issue #38
