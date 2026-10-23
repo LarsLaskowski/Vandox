@@ -1,6 +1,6 @@
 # Tasks: Persistent on-disk spool (at least 7 days)
 
-Plan: [plan.md](plan.md) — Status: Draft (revised with plan.md, Revised (1))
+Plan: [plan.md](plan.md) — Status: Draft (revised with plan.md, Revised (2))
 
 Build order: the wire codec and the configuration first (the spool uses both), then the spool, then its consumers (self-metrics,
 state file, agent), then the documentation. Each group runs Skeleton (Dev), tests first (Tester), implementation (Dev).
@@ -14,8 +14,8 @@ state file, agent), then the documentation. Each group runs Skeleton (Dev), test
 | 5 | G2 | Tests: defaults, valid values, every E1 value with its exact text; adapt TestAgentKeys and TestDefaultAgent | internal/config/agent_test.go | AC16 | 4 | Tester | [ ] |
 | 6 | G2 | Implement defaults (2GiB, 1GiB), AgentKeys, validation | internal/config/agent.go, internal/config/config.go | AC16 | 5 | Dev | [ ] |
 | 7 | G3 | Skeleton: Spool, Options, Batch, MaxAckRanges, maxFiles, ErrTooManyRanges, Open, Put, Read, Ack, LastSeq, Sync, Close, SpoolBytes, OldestCapture, ClockBound, writeFile seam | internal/spool/spool.go, internal/spool/segment.go, internal/spool/meta.go, internal/spool/export_test.go | AC1–AC14, AC17, AC18 | 3, 6 | Dev | [ ] |
-| 8 | G3 | Tests first, incl. the hard-kill helper, the reference stream generator (scaled and full-scale variants; run the full scale once with VANDOX_LONG_TESTS=1), the consistency and meta rules, the memory bound, BenchmarkOpen_Full and BenchmarkOpen_ManyFiles; report facts 15–17 and 19 | internal/spool/spool_test.go, internal/spool/segment_test.go, internal/spool/meta_test.go | AC1–AC14, AC17, AC18 | 7 | Tester | [ ] |
-| 9 | G3 | Implement the spool: directory descriptor and guards, data files and trailer, consistency rules, file limit and append after restart, meta and its rules, open and cut, numbers and clock bound, room and Put with drops and episodes, Read, Ack, single in-flight sync, Close; run both benchmarks (fact 18) | internal/spool/spool.go, internal/spool/segment.go, internal/spool/meta.go | AC1–AC14, AC17, AC18 | 8 | Dev | [ ] |
+| 8 | G3 | Tests first, incl. the hard-kill helper, the reference stream generator (scaled and full-scale variants; run the full scale once with VANDOX_LONG_TESTS=1), the consistency and meta rules, TestOpen_RefusedEntries (symbolic and hard links to agent-state.json, for every spool name) and TestOpen_TooManyFiles, the memory bound, BenchmarkOpen_Full and BenchmarkOpen_ManyFiles; report facts 15–17 and 19 | internal/spool/spool_test.go, internal/spool/segment_test.go, internal/spool/meta_test.go | AC1–AC14, AC17, AC18 | 7 | Tester | [ ] |
+| 9 | G3 | Implement the spool: directory descriptor and guards (syscall.Openat/Unlinkat/Renameat only, never os.Root; Fstat trust check with Nlink 1; at most 1,026 data-file names held), data files and trailer, consistency rules, file limit and append after restart, meta and its rules, open and cut, numbers and clock bound, room and Put with drops and episodes, Read, Ack, single in-flight sync, Close; run both benchmarks (fact 18) | internal/spool/spool.go, internal/spool/segment.go, internal/spool/meta.go | AC1–AC14, AC17, AC18 | 8 | Dev | [ ] |
 | 10 | G4 | Skeleton: SpoolAgeReporter, SpoolAge, MetricSpoolAge | internal/selfstats/selfstats.go | AC15 | — | Dev | [ ] |
 | 11 | G4 | Tests: age, 0 when empty or in the future, provider error fails the sample | internal/selfstats/selfstats_test.go | AC15 | 10 | Tester | [ ] |
 | 12 | G4 | Implement the age metric | internal/selfstats/selfstats.go | AC15 | 11 | Dev | [ ] |

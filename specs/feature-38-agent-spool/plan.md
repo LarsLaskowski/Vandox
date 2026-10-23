@@ -1,7 +1,7 @@
 # Plan: Persistent on-disk spool (at least 7 days)
 
 Source: Issue #38 | [spec.md](spec.md)
-Status: Revised (1)
+Status: Revised (2)
 Tier: security — the spool creates guards of security area 9 (no link followed, owner and mode checks on its files, nothing written or deleted outside its own files, the size bound, the file limit and the free-space reserve) and reads its own files back under consistency rules.
 Security areas touched: 8 (the agent token must never reach the spool), 9 (file writes and paths: the spool's files in `spool.directory`, the meta file, deletion of its own files), 10 (parsing: spool files and the meta file read back, damaged or hostile, through a new single-line entry point of the wire decoder), 12 (new fixed log texts of the spool)
 
@@ -32,6 +32,9 @@ See [spec.md](spec.md), *Problem*. The agent's sink is `scheduler.DiscardSink` (
 | 17 | The scaled AC7 test runs in under 30 s under *Test* with `-race` | to verify: Tester reports its run time in step 5 | unverified |
 | 18 | Opening a spool filled to 2 GiB, and one with 1,024 files, each takes at most 5 s on the development host | to verify: `BenchmarkOpen_Full`, `BenchmarkOpen_ManyFiles` (Dev, step 6), recorded in `docs/BENCHMARKS.md` | unverified |
 | 19 | The test process runs as root, so a test can `chown` a file to another user (E8 "owned by another user") | to verify: Tester checks `os.Geteuid()` in step 5; without root that one case is skipped with a reason and reported | unverified |
+| 20 | `os.Root.OpenFile` with `O_NOFOLLOW` opens a symbolic link whose target lies inside the root | measured by Security in its round-2 plan review (`r.OpenFile("inlink", O_RDWR\|O_NOFOLLOW)` succeeded) | confirmed |
+| 21 | `syscall` exports `Openat`, `Unlinkat` (flags 0: removes the entry, never follows), `Renameat` and `Fstat` on linux/amd64, but `Fstatat` only on some architectures (not amd64) and `AT_SYMLINK_NOFOLLOW` nowhere | Go 1.27 `src/syscall/syscall_linux.go:285,334`, `zsyscall_linux_amd64.go:1256`, `syscall_linux_amd64.go:47` (unexported `fstatat`), `syscall_linux_arm64.go:21` | confirmed |
+| 22 | `openat` with `O_NOFOLLOW` on a symbolic link as the last element fails with `ELOOP`; with `O_NONBLOCK` a FIFO opens without blocking | open(2) man page; the link case is asserted by `TestOpen_RefusedEntries` (Tester, step 5) | confirmed |
 
 ## Acceptance criteria
 
@@ -53,7 +56,7 @@ Names are top-level test functions, table-driven where the cases share a shape. 
 | AC7 | `TestSpool_SevenDayOutage` (1/16 scale, always), `TestSpool_SevenDayOutageFullScale` (skipped unless `VANDOX_LONG_TESTS=1`); generator `referenceStream` in the same file | `internal/spool/spool_test.go` |
 | AC8 | `TestPut_SizeBoundDropsOldest` (sum of file sizes on disk after every Put), `TestPut_DroppedGapsPerRun`, `TestPut_DroppedGapRecordsFolded`, `TestPut_DropLogLines`, `TestPut_FileLimit`, `TestOpen_RestartAppendsToNewest` | `internal/spool/spool_test.go` |
 | AC9 | `TestPut_FreeSpaceReserve` (incl. available below the write size with a non-zero reserve) | `internal/spool/spool_test.go` |
-| AC10 | `TestOpen_DamagedData`, `TestOpen_InconsistentValues`, `TestRead_DamagedData`, `TestOpen_RefusedEntries` | `internal/spool/segment_test.go` |
+| AC10 | `TestOpen_DamagedData`, `TestOpen_InconsistentValues`, `TestRead_DamagedData`, `TestOpen_RefusedEntries`, `TestOpen_TooManyFiles` | `internal/spool/segment_test.go` |
 | AC11 | `TestOpen_ForeignEntriesUntouched`, `TestOpen_ManyForeignEntries` | `internal/spool/spool_test.go` |
 | AC12 | `TestPut_WriteFailureEpisode`, `TestPut_LargerThanCap` | `internal/spool/spool_test.go` |
 | AC13 | `TestOpen_DirectoryProblems` (incl. the link text, an unclean path, refused meta names, a failing meta write), `TestOpen_FirstStart`; `TestRun_SpoolCannotStart`, `TestRun_FirstStartNoWarning` | `internal/spool/spool_test.go`; `internal/agent/agent_test.go` |
@@ -64,6 +67,17 @@ Names are top-level test functions, table-driven where the cases share a shape. 
 | AC18 | `TestOpen_OtherAgentID` | `internal/spool/meta_test.go` |
 | AC19 | `TestRun_SpoolHoldsNoSecret` (runs the agent with a token whose bytes are a sentinel, then searches every spool file) | `internal/agent/agent_test.go` |
 
+`TestOpen_RefusedEntries` cases, each for a data-file name (the newest and an older one), `spool-meta.json` and
+`spool-meta.json.tmp`: a symbolic link to `agent-state.json` in the same directory (a trusted file of the agent's user, mode 0600),
+a symbolic link to a file outside the directory, a hard link to `agent-state.json`, a FIFO, a directory, a file with mode 0640,
+a file owned by another user (fact 19), all with a spool that then takes a `Put` and an `Ack`. Each asserts that `agent-state.json`
+(and the outside file) keep their bytes, size and modification time, that the refused entry still exists unchanged (`Lstat`: still
+a link with the same target, still the same inode), that no record from it is handed out, and the outcome of AC10 (data names) or
+AC13 (meta names). The link to `agent-state.json` is the guard against opening through `os.Root` or without `O_NOFOLLOW`; a
+spool whose open followed it would fail the unchanged-bytes assertion. `TestOpen_TooManyFiles`: 1,100 valid data files; `Open`
+keeps the 1,026 with the highest numbers, hands out none of the others, leaves them on disk unread (their bytes unchanged),
+logs `spool data damaged` once with `err` `too many files` and the lowest name, and stays within the AC17 memory bound.
+
 ## Approach
 
 **Package `internal/spool`** (new), standard library only.
@@ -72,12 +86,23 @@ Names are top-level test functions, table-driven where the cases share a shape. 
 temporary `spool-meta.json.tmp`; every other name is foreign (E7) and never opened, counted or deleted. `Open` refuses a `Dir` that is
 not absolute and clean (`spool: directory: not an absolute, clean path`). It `Lstat`s the directory first (a link: `spool: directory:
 symbolic link`; not a directory: `spool: directory: not a directory`; other errors: `spool: directory: <errno text>`), then opens it
-with `O_DIRECTORY|O_NOFOLLOW` and keeps that descriptor; every later open, create, remove and rename is relative to it (`openat`,
-`unlinkat`, `renameat` through `syscall`/`os.Root`), never by path. Files are created with `O_CREAT|O_EXCL|O_NOFOLLOW`, mode 0600;
-opened with `O_NOFOLLOW|O_NONBLOCK` and trusted only after `fstat` shows a regular file of the effective UID without group or other
-bits, else refused (E8). Writes, truncation, appends and syncs use the descriptor that passed `fstat`, never a path. The meta
-temporary is removed and the meta file replaced only after `fstatat` without following shows a trusted file or nothing (E8); otherwise
-the meta write fails (`spool: meta: refused entry`). The directory is listed in chunks of 256 names.
+with `O_DIRECTORY|O_NOFOLLOW|O_CLOEXEC` and keeps that descriptor; every later open, create, remove and rename is relative to it,
+never by path, and only through `syscall.Openat`, `syscall.Unlinkat` and `syscall.Renameat` on a plain name without `/`. **`os.Root`
+is forbidden** for every spool file operation: it follows a link that stays inside the directory even with `O_NOFOLLOW` (fact 20).
+Files are created with `Openat(dir, name, O_RDWR|O_CREAT|O_EXCL|O_NOFOLLOW|O_CLOEXEC, 0600)`; opened with
+`Openat(dir, name, <O_RDONLY or O_RDWR>|O_NOFOLLOW|O_NONBLOCK|O_CLOEXEC, 0)` (a symbolic link fails with `ELOOP`, a FIFO does not
+block) and trusted only after `Fstat` on that descriptor shows a regular file of the effective UID without group or other bits and
+with exactly one link (`Nlink` 1: a hard link to `agent-state.json` is refused like a symbolic one), else closed and refused (E8).
+Writes, truncation, appends and syncs use the descriptor that passed the check (wrapped by `os.NewFile`), never a path. Before an
+`Unlinkat` or `Renameat`, the entry is opened read-only as above and checked the same way (an absent entry is fine for the meta
+names); a data file is removed only when its device and inode equal those of the trusted descriptor the spool holds for it.
+`syscall.Fstatat` is not used: the standard library exports it on arm64 but not on amd64 (fact 21), and the open-and-`Fstat` check
+refuses the same entries. Removing or renaming a name never touches a link's target, so an entry swapped between check and call costs
+no file outside the spool's own. The meta temporary is removed and the meta file replaced only when each is absent or trusted (E8);
+otherwise the meta write fails (`spool: meta: refused entry`). The directory is listed in chunks of 256 names through a duplicate of
+its descriptor; `Open` keeps at most `maxFiles` + 2 data-file names (the highest name numbers, a bounded set while listing). Every
+other data-file name is damage (E6): never opened, read, counted or deleted, and logged once per `Open` as `spool data damaged`
+with `file` the lowest such name and `err` `too many files`; the backend's sequence detection finds their numbers.
 
 *Data file format (version 1).* Header (at most 128 bytes): magic `VXSPOOL1`, version (u16), agent ID (length-prefixed, at most 64
 bytes), boot ID (36 bytes), clock offset flag and value (i64), CRC-32C. Frames: payload length (u32, at most
@@ -99,7 +124,7 @@ good frame (by `ftruncate` on its descriptor) and sealed; during a read of a sea
 deleted with the file. Either way one `spool_dropped` gap per run of unacknowledged numbers from the damaged frame's number (or the last
 good number plus 1) to the file's last known number (trailer, else the next file's first number minus 1), with the time span of the good
 frames or, when none is usable, the file's modification time; `spool data damaged` once per file, `err` one of `checksum mismatch`,
-`file cut short`, `not the spool format`, `unknown format version`, `inconsistent value`, `refused entry`.
+`file cut short`, `not the spool format`, `unknown format version`, `inconsistent value`, `refused entry`, `too many files`.
 
 *Meta file.* JSON, decoded strictly (one object, `version` 1, no unknown key, at most 16 KiB): `agent_id`, `boot_id` of the last
 open, `clean`, `next` (the next number at the time of the write; every meta write carries the current value), `acked` (at most 64
@@ -173,7 +198,10 @@ agent line.
 5. Bounding the file count: a fixed size of 64 MiB with no limit (16,384 files at the old 1 TiB cap), a fixed number of files whose
    size grows with the cap (unbounded file size for start-up scans), or a size of `max_size / 128` clamped to 1–64 MiB, a 64 GiB cap,
    appending after a restart and a hard limit of 1,024 files (chosen) — record 0123.
-6. Wiring order: opening the spool inside `jobs` (the state file would see a non-empty directory on a first start, E3) or a new
+6. File access relative to the directory: `os.Root` (follows in-directory links despite `O_NOFOLLOW`, fact 20),
+   `golang.org/x/sys/unix` for `Fstatat` and `AT_SYMLINK_NOFOLLOW` (a new direct dependency for one check), or `syscall.Openat`,
+   `Unlinkat`, `Renameat` with an open-and-`Fstat` check (chosen) — record 0123.
+7. Wiring order: opening the spool inside `jobs` (the state file would see a non-empty directory on a first start, E3) or a new
    `openStorage` before `jobs` (chosen).
 
 ## Affected projects and types
@@ -301,7 +329,8 @@ security areas 8, 9, 10 and 12 (`.squad/project.md:120-160,257`).
 
 - [ ] Limits on parsed input, all on raw bytes before decoding: a frame payload at most `wire.DefaultLimits().MaxLineBytes` + 8; a
   header at most 128 bytes; a trailer of fixed size; the meta file at most 16 KiB with at most 64 ranges; a name number of 20 digits
-  parsed into 64 bits and below 2^63 - 1; directory listing in chunks of 256; at most 1,024 data files; sparse indexes for two files of
+  parsed into 64 bits and below 2^63 - 1; directory listing in chunks of 256, at most 1,026 data-file names held; at most 1,024 data
+  files created; every open by `Openat` with `O_NOFOLLOW`, trusted only as a regular, agent-owned, 0600, single-link file; sparse indexes for two files of
   64 entries each; `wire.UnmarshalRecord` applies the decoder's line rules to the raw line.
 - [ ] Texts that reach a user: the start errors under *Approach*, `spool: write: <errno text>`, `spool: sequence numbers exhausted`,
   `spool: meta: refused entry`, `spool data damaged` with the fixed `err` values under *Approach*. No path, record content or system
@@ -348,6 +377,19 @@ security areas 8, 9, 10 and 12 (`.squad/project.md:120-160,257`).
 - N4 (meta names against E8). Resolved: the temporary is removed and the meta replaced only when absent or trusted; spec E8.
 - N5 (one fsync in flight). Resolved: *Durability*.
 - N6 (project.md areas). Resolved: task 21 covers areas 8, 9, 10 and 12; AC19 with `TestRun_SpoolHoldsNoSecret`.
+- R1 (round 2: `os.Root` ignores `O_NOFOLLOW` for in-directory links). Resolved: `os.Root` is forbidden; every open is
+  `syscall.Openat` with `O_NOFOLLOW|O_NONBLOCK|O_CLOEXEC`, every removal and rename `Unlinkat`/`Renameat` after an open-and-`Fstat`
+  check (facts 20–22). `Fstatat` with `AT_SYMLINK_NOFOLLOW` as asked is not exported by `syscall` on amd64; the open with `O_NOFOLLOW`
+  refuses the same entries, and a data file is removed only when its device and inode match the descriptor the spool trusted. While
+  re-checking the whole list of accepted forms: a hard link to `agent-state.json` passed every check of round 1 (regular, agent-owned,
+  0600) and would have been cut as damage; the trust check now requires one link (`Nlink` 1). `TestOpen_RefusedEntries` covers a
+  symbolic and a hard link to `agent-state.json`, a link outside, a FIFO, a directory, a group bit and another owner, for every
+  spool name, asserting the target's bytes, size and modification time unchanged and the link not followed or removed.
+- N7 (round 2: listing keeps every spool-named entry). Resolved: `Open` holds at most 1,026 data-file names (the highest numbers);
+  the rest are damage, never opened or deleted, one warning per `Open` (`err` `too many files`); `TestOpen_TooManyFiles`.
+- Note on M1 (round 2): a lost `boot` or `backup_run` record in the E5 window is a loss no gap records, against the guarantee *No
+  data gaps unless explicitly recorded*. Decided by the Lead in `decide` mode: escalated to the Product Manager (see the orchestrator's
+  log); the follow-up issue below is opened before the pull request either way.
 
 ## Out of scope / follow-ups
 

@@ -49,6 +49,16 @@ File count:
    boot, and a hard limit of 1,024 files that drops the oldest like the size bound** (chosen) — memory and start-up stay bounded at
    every configuration.
 
+File access inside the spool directory:
+
+1. **`os.Root`** — the standard library's confinement to a directory; it follows a symbolic link whose target stays inside the
+   directory even with `O_NOFOLLOW`, so a spool-named link to `agent-state.json` would be opened and written.
+2. **`golang.org/x/sys/unix`** for `Fstatat` with `AT_SYMLINK_NOFOLLOW` — a new direct dependency for one check.
+3. **`syscall.Openat` with `O_NOFOLLOW`, `Unlinkat` and `Renameat` relative to the directory's descriptor, each file trusted only
+   after `Fstat` on its descriptor shows a regular, agent-owned, 0600 file with one link** (chosen) — standard library only; a link
+   fails to open, a hard link fails the link count, and removing or renaming a name never touches a target. `syscall` exports no
+   `Fstatat` on amd64, so the check before a removal or rename is the same open.
+
 Order of state and records:
 
 1. **An fsync per hand-over** — the I/O cost every 2 seconds per collector.
@@ -60,7 +70,7 @@ Order of state and records:
 ## Decision
 
 The spool is option 4 for storage, the clock bound for a lost counter, at most 64 acknowledged ranges, option 3 for the file count,
-and a spool sync as a barrier before every state save. Values read back from its files are held to consistency rules, and a break is
+`syscall` calls relative to the directory's descriptor for file access (never `os.Root`), and a spool sync as a barrier before every state save. Values read back from its files are held to consistency rules, and a break is
 damage, never a number. Its size bound and free-space reserve drop the oldest segments with `spool_dropped` gaps.
 
 ## Consequences

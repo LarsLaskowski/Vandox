@@ -100,8 +100,9 @@ of the records to the spool returned without an error.
   fixed reason) is logged once per file. A gap is never built from a damaged value: a time outside the wire range is not used.
 - E7: Entries in the directory that are not the spool's files (`agent-state.json`, `agent-state.json.tmp`, other files,
   subdirectories, up to 100,000 of them): never read, counted, overwritten or deleted by the spool; the spool's memory bound holds.
-- E8: An entry with the name of a spool file that is a symbolic link, not a regular file, owned by another user or with any group or
-  other permission bit: never followed, opened for writing, renamed or deleted; it is not counted, and the data the spool expected
+- E8: An entry with the name of a spool file that is a symbolic link (also one whose target is `agent-state.json` or another file
+  of the agent's user in the same directory), not a regular file, a regular file with more than one hard link, owned by another user
+  or with any group or other permission bit: never followed, opened for writing, renamed or deleted, and its target never changes; it is not counted, and the data the spool expected
   there is treated as damaged (E6). The spool's own temporary file `spool-meta.json.tmp` is removed and `spool-meta.json` is
   replaced only when each is absent or a regular file of the agent's user without group or other bits; otherwise the meta file
   cannot be written (E2 at start; at run time an acknowledgement fails with an error).
@@ -140,7 +141,10 @@ of the records to the spool returned without an error.
   another agent dropped` (`records`: the count); the new ID's numbers start as on a fresh spool (E4).
 - E19: Many reboots or restarts leave many small spool files (a crash loop with reboots): the spool holds at most 1,024 files; at the
   limit it drops its oldest unacknowledged records as for the size bound, with `spool_dropped` gaps and the warning's `reason`
-  `file_limit`. A restart in the same boot goes on writing into the newest file, so restarts alone do not add files.
+  `file_limit`. A restart in the same boot goes on writing into the newest file, so restarts alone do not add files. A directory
+  that nevertheless holds more than 1,026 data files (placed there from outside): the spool keeps the 1,026 newest by name; the
+  others are damaged (E6), never read, counted or deleted, and `spool data damaged` is logged once per start with `err` `too many
+  files`.
 - E20: The meta file breaks its consistency rules (acknowledged ranges not sorted, overlapping, with a first number above the last,
   or at or above the next number; a next number at or above 2^63 - 1): it is damaged (E6, `file` `spool-meta.json`); its
   acknowledgements are discarded, so those records are handed out again (a resend is idempotent), and the next number is taken as on
@@ -186,7 +190,8 @@ of the records to the spool returned without an error.
 - **Start-up time.** Opening a spool filled to the default `spool.max_size`, and one holding 1,024 files, each takes at most 5
   seconds on the development host (a benchmark, recorded in `docs/BENCHMARKS.md`); it is not measured on the server here (#44).
 - **Security (security area 9).** Spool files are created with mode 0600 inside the existing `spool.directory`, which the agent never
-  creates; no link is followed and nothing outside the directory is written; only the spool's own files are counted and deleted.
+  creates; no link is followed, also one inside the directory, no file with a second hard link is written, and nothing outside the
+  spool's own files is written; only the spool's own files are counted and deleted.
   Records hold no secret: the agent token is never written to the spool. Error texts and log lines name no path, only fixed spool
   file names and fixed reasons.
 - **Compatibility.** Linux only. An existing configuration without the new keys keeps working with the defaults; an existing
@@ -242,7 +247,9 @@ of the records to the spool returned without an error.
   `0MiB` or `0GiB` the check is off (S7, E11).
 - [ ] AC10: Damaged data (a flipped byte, a file cut short, foreign bytes, an unknown format version, a file name's number that is
   not its first record's, numbers that do not increase within or across files, a record number that differs from its line's, a
-  summary that disagrees with the last record, a time outside the wire range, and an entry of E8) is never handed out, at start and
+  summary that disagrees with the last record, a time outside the wire range, an entry of E8 — among them a symbolic and a hard
+  link to `agent-state.json`, whose bytes, size and modification time stay unchanged — and the data files beyond the 1,026 newest
+  of E19) is never handed out, at start and
   when found during a read: the records before it and in other files are, `spool_dropped` gaps name the dropped numbers where
   known and never carry a damaged value, and `spool data damaged` is logged once per file (E6, E8).
 - [ ] AC11: Foreign entries, `agent-state.json` and `agent-state.json.tmp` among them, are never read, counted, overwritten or deleted,
@@ -371,3 +378,5 @@ of the records to the spool returned without an error.
   (meta consistency) and E21 (numbers exhausted) are new; E3 states the residual state-file warning; NFR *Size bound*, *Disk*,
   *Memory*, *Start-up time* and the `spool.max_size` maximum (now 64 GiB) changed; AC7 runs scaled with a full-scale run on demand;
   AC8, AC9, AC10, AC13, AC14 and AC17 cover the new cases; AC19 is new.
+- Security, plan review round 2 (answered in plan.md *Security review*, R1 and N7): E8 now names a link to a file inside the
+  directory and a second hard link, NFR *Security* says the same, E19 bounds the data files a start holds, and AC10 covers both.
