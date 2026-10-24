@@ -18,4 +18,4 @@ are quoted in full.
 | 2026-10-24 15:57 | 5 Tests first (G1 task 2) | squad-tester | Config and spool tests written; fail on stubs (invalid-input cases cannot, noted) (sonnet/medium · 98,848 tokens · 12 tool uses · 240 s) |
 | 2026-10-24 15:58 | 6 Implement (G1 task 3) | squad-dev | Option and AckRanges implemented; config and spool suites pass (sonnet/medium · 81,135 tokens · 9 tool uses · 59 s) |
 | 2026-10-24 16:31 | 5 Tests first (G2 tasks 4+5) | squad-tester | 40 transport, sender and throttle tests written; compile and fail on stubs; MemoryBound deferred to task 7 (sonnet/medium · 379,594 tokens · 69 tool uses · 1960 s) |
-| 2026-10-24 16:51 | 6 Implement (G2 task 6) | squad-dev | Transport, throttle and sender implemented; 39 of 40 tests pass, TestSender_BackfillThrottledLiveNot disputed (tick-phase luck); coverage 96.1% (sonnet/medium · usage pending) |
+| 2026-10-24 16:51 | 6 Implement (G2 task 6) | squad-dev | Transport, throttle and sender implemented; 39 of 40 tests pass, TestSender_BackfillThrottledLiveNot disputed (tick-phase luck); coverage 96.1% (sonnet/medium · 245,932 tokens · 36 tool uses · 1130 s) |
