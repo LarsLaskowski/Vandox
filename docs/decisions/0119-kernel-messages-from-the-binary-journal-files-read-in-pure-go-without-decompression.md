@@ -85,6 +85,9 @@ and the compact layout is also read from the committed `systemd-journal-remote` 
 - Every chain in a file is followed only to larger offsets, at most 64 entry arrays per chain, and a poll finds its position by
   bisection, so neither a damaged file nor a flood of kernel lines (a firewall's log lines are remote-triggered) can make a run loop or
   grow with the entries before the position.
+- A plain item's name is looked for in the first 64 bytes of its payload in both layouts, so a wanted name of exactly 64 bytes
+  (systemd's maximum) would never match; accepted unfixed in #286, because every name the kernel and log collectors want is far
+  shorter and an unmatched item is passed over like any unwanted one.
 - journald's entry about missed kernel messages is not in the real files; it is built from the systemd 249 source (residual).
 - The reader is checked against the real files only on a developer's machine (`VANDOX_REAL_JOURNAL_DIR`), the server's compact files
   once they exist; CI sees the generated fixtures and the compact samples.
