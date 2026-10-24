@@ -17,3 +17,4 @@ are quoted in full.
 | 2026-10-24 15:53 | 4 Skeleton (G1 task 1) | squad-dev | Skeleton done; gofmt, build, vet pass; existing spool/config/agent suites pass (sonnet/medium · 81,494 tokens · 11 tool uses · 79 s) |
 | 2026-10-24 15:57 | 5 Tests first (G1 task 2) | squad-tester | Config and spool tests written; fail on stubs (invalid-input cases cannot, noted) (sonnet/medium · 98,848 tokens · 12 tool uses · 240 s) |
 | 2026-10-24 15:58 | 6 Implement (G1 task 3) | squad-dev | Option and AckRanges implemented; config and spool suites pass (sonnet/medium · 81,135 tokens · 9 tool uses · 59 s) |
+| 2026-10-24 16:31 | 5 Tests first (G2 tasks 4+5) | squad-tester | 40 transport, sender and throttle tests written; compile and fail on stubs; MemoryBound deferred to task 7 (sonnet/medium · usage pending) |
