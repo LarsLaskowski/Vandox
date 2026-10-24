@@ -1520,6 +1520,33 @@ func TestSender_NoPauseLineWithoutBacklog(t *testing.T) {
 	})
 }
 
+// failAckOnce makes the first acknowledgement of exactly the record seq fail with an injected error and sets failed when it does.
+func failAckOnce(r *rig, seq uint64, failed *bool) {
+	r.sp.setAckErr(func(first, last uint64) error {
+		if first == seq && last == seq && *failed == false {
+			*failed = true
+
+			return errors.New("injected acknowledgement failure")
+		}
+
+		return nil
+	})
+}
+
+// committedGapsFor counts the committed batches that carry a gap record starting at seq.
+func committedGapsFor(calls []call, seq uint64) int {
+	gaps := 0
+	for _, c := range calls {
+		for _, rec := range c.recs {
+			if g := gapOf(rec); g != nil && g.FirstSeq == seq && c.committed {
+				gaps++
+			}
+		}
+	}
+
+	return gaps
+}
+
 func TestSender_GapPutThenFailedAckWritesOneGap(t *testing.T) {
 	bubble(t, func(t *testing.T) {
 		r := newRig(t)
@@ -1532,30 +1559,14 @@ func TestSender_GapPutThenFailedAckWritesOneGap(t *testing.T) {
 		}
 		seqs := r.put(recs...)
 		failed := false
-		r.sp.setAckErr(func(first, last uint64) error {
-			if first == seqs[1] && last == seqs[1] && failed == false {
-				failed = true
-
-				return errors.New("injected acknowledgement failure")
-			}
-
-			return nil
-		})
+		failAckOnce(r, seqs[1], &failed)
 
 		advance(2 * time.Minute)
 
 		if failed == false {
 			t.Fatalf("the acknowledgement of the refused record %d was never attempted, want the give-up to reach it", seqs[1])
 		}
-		gaps := 0
-		for _, c := range r.tr.snapshot() {
-			for _, rec := range c.recs {
-				if g := gapOf(rec); g != nil && g.FirstSeq == seqs[1] && c.committed {
-					gaps++
-				}
-			}
-		}
-		if gaps != 1 {
+		if gaps := committedGapsFor(r.tr.snapshot(), seqs[1]); gaps != 1 {
 			t.Errorf("%d gap records committed for the refused record %d, want exactly one (the retry after the failed acknowledgement must not write a second)", gaps, seqs[1])
 		}
 		if left := r.sp.unacked(t); len(left) != 0 {

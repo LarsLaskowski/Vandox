@@ -2483,6 +2483,55 @@ func backlogRecord(rng *rand.Rand, size int) model.Record {
 	}
 }
 
+// openBackfillSpool opens the spool of the backfill bandwidth test in dir and closes it at the end of the test.
+func openBackfillSpool(t *testing.T, dir string) *spool.Spool {
+	t.Helper()
+
+	sp, err := spool.Open(spool.Options{
+		Dir: dir, AgentID: "web-1", BootID: kernelBootRaw, MaxBytes: 2 << 30, SyncInterval: 10000 * time.Hour,
+		Available: func(string) (uint64, error) { return 1 << 50, nil },
+	}, slog.New(slog.DiscardHandler))
+	if err != nil {
+		t.Fatalf("spool.Open() error = %v, want nil", err)
+	}
+	t.Cleanup(func() { _ = sp.Close(context.Background()) })
+
+	return sp
+}
+
+// backfillBacklog returns n log line records of size bytes of text that hardly compresses.
+func backfillBacklog(rng *rand.Rand, n, size int) []model.Record {
+	backlog := make([]model.Record, 0, n)
+	for range n {
+		backlog = append(backlog, backlogRecord(rng, size))
+	}
+
+	return backlog
+}
+
+// waitForBackfillRequests advances fake time until the transport has seen n backfill requests and fails after two minutes.
+func waitForBackfillRequests(t *testing.T, transport *fakeTransport, n int) {
+	t.Helper()
+
+	for waited := time.Duration(0); len(transport.ofMode(wire.ModeBackfill)) < n; waited += time.Second {
+		if waited > 2*time.Minute {
+			t.Fatalf("backfill requests = %d after %v, want %d (the second waits for the configured rate)", len(transport.ofMode(wire.ModeBackfill)), waited, n)
+		}
+		time.Sleep(time.Second)
+		synctest.Wait()
+	}
+}
+
+// requireBackfillPace checks that the second backfill request waits for the first one at the configured bandwidth.
+func requireBackfillPace(t *testing.T, batches []sentRequest, bandwidth int) {
+	t.Helper()
+
+	want := time.Duration(batches[0].size) * time.Second / time.Duration(bandwidth)
+	if gap := batches[1].at.Sub(batches[0].at); gap < want-time.Millisecond || gap > 2*want {
+		t.Errorf("gap between the first two backfill requests = %v, want about %v for %d bytes at %d bytes per second", gap, want, batches[0].size, bandwidth)
+	}
+}
+
 func TestNewSender_BackfillBandwidthFromConfiguration(t *testing.T) {
 	const bandwidth = 16 << 10
 	cfg := config.DefaultAgent()
@@ -2491,19 +2540,8 @@ func TestNewSender_BackfillBandwidthFromConfiguration(t *testing.T) {
 	dir := t.TempDir()
 
 	synctest.Test(t, func(t *testing.T) {
-		sp, err := spool.Open(spool.Options{
-			Dir: dir, AgentID: "web-1", BootID: kernelBootRaw, MaxBytes: 2 << 30, SyncInterval: 10000 * time.Hour,
-			Available: func(string) (uint64, error) { return 1 << 50, nil },
-		}, slog.New(slog.DiscardHandler))
-		if err != nil {
-			t.Fatalf("spool.Open() error = %v, want nil", err)
-		}
-		t.Cleanup(func() { _ = sp.Close(context.Background()) })
-		backlog := make([]model.Record, 0, 150)
-		for range 150 {
-			backlog = append(backlog, backlogRecord(rng, 15000))
-		}
-		if err := sp.Put(context.Background(), backlog); err != nil {
+		sp := openBackfillSpool(t, dir)
+		if err := sp.Put(context.Background(), backfillBacklog(rng, 150, 15000)); err != nil {
 			t.Fatalf("Put() error = %v, want nil", err)
 		}
 		transport := &fakeTransport{res: sender.Result{Status: http.StatusOK}}
@@ -2528,19 +2566,8 @@ func TestNewSender_BackfillBandwidthFromConfiguration(t *testing.T) {
 			t.Fatalf("Put() error = %v, want nil", err)
 		}
 
-		for waited := time.Duration(0); len(transport.ofMode(wire.ModeBackfill)) < 2; waited += time.Second {
-			if waited > 2*time.Minute {
-				t.Fatalf("backfill requests = %d after %v, want 2 (the second waits for the configured rate)", len(transport.ofMode(wire.ModeBackfill)), waited)
-			}
-			time.Sleep(time.Second)
-			synctest.Wait()
-		}
-
-		batches := transport.ofMode(wire.ModeBackfill)
-		want := time.Duration(batches[0].size) * time.Second / bandwidth
-		if gap := batches[1].at.Sub(batches[0].at); gap < want-time.Millisecond || gap > 2*want {
-			t.Errorf("gap between the first two backfill requests = %v, want about %v for %d bytes at %d bytes per second", gap, want, batches[0].size, bandwidth)
-		}
+		waitForBackfillRequests(t, transport, 2)
+		requireBackfillPace(t, transport.ofMode(wire.ModeBackfill), bandwidth)
 	})
 }
 
