@@ -67,6 +67,7 @@ every Git and GitHub action yourself, including follow-up issues the Lead decide
      row — with the notification's numbers unchanged. Name a fix, delta or revise round as such in its step
      cell; a continuation at another step than its fresh launch draws a warning (a new mode is a fresh launch).
    - Rows of the Orchestrator, the Product Manager and the User take no metric option.
+   - After step 10 every call — row, amend, summary — needs `--stdin` (step 10); without it, it fails.
    - Everything else, and what each refusal means: `python3 .squad/tools/squad-log.py --help`.
 
    After every member's report, commit and push the files it left in the work folder.
