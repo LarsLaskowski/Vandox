@@ -1,7 +1,7 @@
 # Spec: Transmission and backfill
 
 Source: Issue #39
-Status: Draft
+Status: Approved by Lead
 
 ## Problem
 
@@ -165,7 +165,7 @@ self-metrics and what the backend's ingest endpoint receives. "Acknowledged" mea
   a TLS failure, `connection failed` for a refused connection, `timeout` for E1 and `status` with the code for every other non-`2xx`
   answer named in E3; a failure of the `backfill` stream during an episode of the `live` stream logs no second warning (S2, S7, E3, E4,
   E18).
-- [ ] AC3: After a simulated outage of 13 hours at a scaled-down reference stream, the backend has received every sequence number the
+- [ ] AC3: After a simulated outage of 13 hours with a varied stream of metric, log line and snapshot records, the backend has received every sequence number the
   spool issued, the spool holds no unacknowledged record, the first batch acknowledged after the outage is a `live` batch holding no
   record handed to the spool before the start of the last failed attempt, no `backfill` batch is sent before it is acknowledged, the
   `backfill` batches of the first backfill pass (no failure during it) carry the backlog in ascending sequence order, and the info lines
