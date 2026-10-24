@@ -8,9 +8,7 @@ import (
 
 // mergeRanges returns the union of two sorted sets of ranges as one sorted set of ranges that neither overlap nor touch.
 func mergeRanges(a, b []ackRange) []ackRange {
-	all := make([]ackRange, 0, len(a)+len(b))
-	all = append(all, a...)
-	all = append(all, b...)
+	all := slices.Concat(a, b)
 	slices.SortFunc(all, func(x, y ackRange) int {
 		switch {
 		case x.First < y.First:

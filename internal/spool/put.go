@@ -360,15 +360,13 @@ func (s *Spool) gapRecord(g pendingGap) model.Record {
 // bufCapacity returns the capacity reserved for the frames of a hand-over of the given size and the owed gaps. It is a
 // hint, bounded by maxPrealloc; the buffer grows by appending when it needs more.
 func bufCapacity(handBytes int64, gaps int) int {
-	if handBytes < 0 || gaps < 0 || handBytes > maxPrealloc || gaps > maxPrealloc/gapReserve {
+	if handBytes < 0 || gaps < 0 {
 		return maxPrealloc
 	}
-	total := int(handBytes) + gaps*gapReserve
-	if total > maxPrealloc {
-		return maxPrealloc
-	}
+	frames := int(min(handBytes, maxPrealloc))
+	reserve := min(gaps, maxPrealloc/gapReserve) * gapReserve
 
-	return total
+	return min(frames+reserve, maxPrealloc)
 }
 
 // write numbers the owed gaps and the records, appends them as one write and updates the files' figures.
@@ -379,7 +377,7 @@ func (s *Spool) write(h *handover) error {
 	}
 	first := s.next
 	buf := make([]byte, 0, bufCapacity(h.bytes, len(owed)))
-	spans := make([][2]int64, 0, len(owed)+len(h.lines))
+	spans := make([][2]int64, 0, min(len(h.lines), maxPrealloc))
 	seq := first
 	for _, g := range owed {
 		rec := s.gapRecord(g)

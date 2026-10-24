@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"syscall"
@@ -464,4 +465,51 @@ func TestDirFS_Operations(t *testing.T) {
 	expect(t, newFile(-1) == nil, "newFile(-1) != nil")
 	n, err := syscall.Getpagesize(), error(nil)
 	expect(t, n > 0 && err == nil, "page size")
+}
+
+func TestBufCapacity(t *testing.T) {
+	tests := []struct {
+		name  string
+		bytes int64
+		gaps  int
+		want  int
+	}{
+		{"zero inputs", 0, 0, 0},
+		{"bytes only", 4096, 0, 4096},
+		{"gaps only", 0, 3, 3 * gapReserve},
+		{"bytes and gaps", 1000, 2, 1000 + 2*gapReserve},
+		{"sum exactly at the bound", maxPrealloc - 2*gapReserve, 2, maxPrealloc},
+		{"sum one over the bound", maxPrealloc - 2*gapReserve + 1, 2, maxPrealloc},
+		{"bytes exactly at the bound", maxPrealloc, 0, maxPrealloc},
+		{"bytes one over the bound", maxPrealloc + 1, 0, maxPrealloc},
+		{"bytes huge", math.MaxInt64, 0, maxPrealloc},
+		{"gaps exactly at the limit", 0, maxPrealloc / gapReserve, maxPrealloc},
+		{"gaps one over the limit", 0, maxPrealloc/gapReserve + 1, maxPrealloc},
+		{"gaps huge", 0, math.MaxInt, maxPrealloc},
+		{"negative bytes", -1, 0, maxPrealloc},
+		{"negative gaps", 0, -1, maxPrealloc},
+		{"both negative", math.MinInt64, math.MinInt, maxPrealloc},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := bufCapacity(tc.bytes, tc.gaps)
+			expect(t, got == tc.want, "bufCapacity(%d, %d) = %d, want %d", tc.bytes, tc.gaps, got, tc.want)
+		})
+	}
+}
+
+func TestWithSeq(t *testing.T) {
+	t.Run("the number is replaced", func(t *testing.T) {
+		got := withSeq([]byte(`{"seq":7,"x":1}`), 123456)
+		expect(t, string(got) == `{"seq":123456,"x":1}`, "withSeq = %q, want the number replaced", got)
+	})
+	t.Run("the largest number fits", func(t *testing.T) {
+		got := withSeq([]byte(`{"seq":0}`), math.MaxUint64)
+		expect(t, string(got) == `{"seq":18446744073709551615}`, "withSeq = %q, want the largest uint64", got)
+	})
+	t.Run("a line without the key is returned unchanged", func(t *testing.T) {
+		line := []byte(`{"x":1}`)
+		got := withSeq(line, 5)
+		expect(t, string(got) == `{"x":1}`, "withSeq = %q, want the line unchanged", got)
+	})
 }

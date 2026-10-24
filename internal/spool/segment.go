@@ -47,8 +47,6 @@ const (
 	scanBuffer = 64 << 10
 	// maxPrealloc bounds the capacity reserved up front for a buffer; a buffer that needs more grows by appending.
 	maxPrealloc = 64 << 20
-	// seqDigits is the number of digits of the largest uint64.
-	seqDigits = 20
 )
 
 var (
@@ -286,7 +284,7 @@ func withSeq(line []byte, seq uint64) []byte {
 	for end < len(line) && line[end] >= '0' && line[end] <= '9' {
 		end++
 	}
-	out := make([]byte, 0, min(len(line), maxPrealloc)+seqDigits)
+	out := make([]byte, 0, min(len(line), maxPrealloc))
 	out = append(out, line[:start]...)
 	out = strconv.AppendUint(out, seq, 10)
 
