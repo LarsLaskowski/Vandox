@@ -22,3 +22,4 @@ are quoted in full.
 | 2026-10-24 13:28 | 8 Review r1 (security diff) | squad-security | APPROVED on 533be0d; non-blocking: pre-existing stale arrCap on in-place array size rewrite (already on main) (opus/medium · 57,323 tokens · 15 tool uses · 120 s) |
 | 2026-10-24 13:29 | 8 Review r1 | squad-reviewer | APPROVE on 533be0d, no blocking; non-blocking: 64-byte field name still dropped in both layouts (pre-existing; namePrefix 65 or record deviation) (opus/medium · 94,000 tokens · 26 tool uses · 165 s) |
 | 2026-10-24 13:31 | 9 PR approval | squad-lead | APPROVED: 64-byte name accepted unfixed (sentence in 0119 Consequences); stale arrCap to follow-up issue #307; plan deviations (Challenge/Security notes) accepted; step-6 decision confirmed (opus/medium · 67,992 tokens · 18 tool uses · 122 s) |
+| 2026-10-24 13:32 | 8 Review r2 (delta) | squad-reviewer | APPROVE on e836c0b, no findings (opus/medium · 3,201 tokens · 3 tool uses · 23 s · continued) |
