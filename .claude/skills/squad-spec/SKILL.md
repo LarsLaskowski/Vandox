@@ -62,4 +62,5 @@ cells in `log.md`); steps 4–12 follow `squad-issue` with the changes listed af
   area documents now say what the spec's *Area documents* section promised.
 - **Step 10:** the working record (`spec.md`, `plan.md`, `tasks.md`, `log.md`) is posted to the feature
   request issue if one exists (`Closes #<n>` in the PR), otherwise as the first comment on the PR right after
-  opening it.
+  opening it; every log row and amend after it goes through `squad-log.py … --stdin` on that comment's log
+  table.
