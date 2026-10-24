@@ -126,6 +126,9 @@ func tzFixed(offset int32) []byte {
 	return append(b, 'T', 'S', 'T', 0)
 }
 
+// compactFlag is HEADER_INCOMPATIBLE_COMPACT in the low byte of the incompatible flags (offset 12 of the header).
+const compactFlag = 1 << 4
+
 // journalSpec is one journal file of the fixture host.
 type journalSpec struct {
 	name     string
@@ -133,6 +136,7 @@ type journalSpec struct {
 	online   bool
 	entries  []map[string][]byte
 	compress bool // payloads of 512 bytes and more are real zstd frames of the library, else frames of one raw block
+	compact  bool // the COMPACT layout of systemd 255, else the layout of systemd 249
 }
 
 // fakeClock is the clock of the collector: every call of Now returns the current time and then adds step.
@@ -340,7 +344,7 @@ func (w *world) writeJournalIn(root string, spec journalSpec) {
 	var fileID [16]byte
 	copy(fileID[:], sum[:])
 	var buf bytes.Buffer
-	opts := journaltest.Options{FileID: fileID, MachineID: machineBytes(), SeqnumID: spec.seqnumID, Online: spec.online}
+	opts := journaltest.Options{FileID: fileID, MachineID: machineBytes(), SeqnumID: spec.seqnumID, Online: spec.online, Compact: spec.compact}
 	if spec.compress {
 		enc, err := zstd.NewWriter(nil, zstd.WithEncoderConcurrency(1), zstd.WithEncoderCRC(false), zstd.WithSingleSegment(true))
 		if err != nil {
@@ -351,6 +355,9 @@ func (w *world) writeJournalIn(root string, spec journalSpec) {
 	}
 	if err := journaltest.Write(&buf, spec.entries, opts); err != nil {
 		w.t.Fatalf("journaltest.Write(%s) error = %v, want nil", spec.name, err)
+	}
+	if spec.compact && (buf.Len() < 16 || buf.Bytes()[12]&compactFlag == 0) {
+		w.t.Fatalf("journaltest.Write(%s) with Compact wrote a file without the COMPACT flag, want the COMPACT layout", spec.name)
 	}
 	dir := filepath.Join(root, machineID)
 	if err := os.MkdirAll(dir, 0o700); err != nil {

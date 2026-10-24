@@ -58,6 +58,17 @@ func readGolden(t *testing.T) []goldenRecord {
 }
 
 func TestJournal_EntriesMapAsTheImportGolden(t *testing.T) {
+	requireEntriesMapAsGolden(t, false)
+}
+
+func TestJournal_CompactEntriesMapAsTheImportGolden(t *testing.T) {
+	requireEntriesMapAsGolden(t, true)
+}
+
+// requireEntriesMapAsGolden writes the entries of live.export as two journal files of the layout and wants the 21 records of
+// live-records.jsonl.
+func requireEntriesMapAsGolden(t *testing.T, compact bool) {
+	t.Helper()
 	f, err := os.Open(journalFixture("live.export"))
 	if err != nil {
 		t.Fatalf("opening live.export: %v", err)
@@ -73,8 +84,8 @@ func TestJournal_EntriesMapAsTheImportGolden(t *testing.T) {
 	}
 	w := newWorld(t)
 	id := seqID(0x0f)
-	w.writeJournal(journalSpec{name: "system@0000000000000000000000000000000f-00000000000003e8-0005f8d1b1a2c3d4.journal", seqnumID: id, entries: export[:10], compress: true})
-	w.writeJournal(journalSpec{name: "system.journal", seqnumID: id, online: true, entries: export[10:], compress: true})
+	w.writeJournal(journalSpec{name: "system@0000000000000000000000000000000f-00000000000003e8-0005f8d1b1a2c3d4.journal", seqnumID: id, entries: export[:10], compress: true, compact: compact})
+	w.writeJournal(journalSpec{name: "system.journal", seqnumID: id, online: true, entries: export[10:], compress: true, compact: compact})
 	w.cfg.MinPriority = 7
 	w.positionAt(id, 999, time.UnixMicro(golden[0].CapturedAtUS-1_000_000).UTC())
 	w.start()

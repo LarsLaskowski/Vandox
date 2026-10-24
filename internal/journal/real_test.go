@@ -287,15 +287,24 @@ func TestFixture_HoldsNoRealPrivateValue(t *testing.T) {
 		}
 		checkExportAgainst(t, set, data)
 	})
-	t.Run("journal files", func(t *testing.T) {
-		files, _ := filepath.Glob(filepath.Join(fixtureDir(), "system*.journal*"))
-		if len(files) != 3 {
-			t.Fatalf("found %d generated journal files in testdata/journal, want 3 (online, archived and set aside)", len(files))
-		}
-		for i, path := range files {
-			checkJournalFileAgainst(t, set, i, path)
-		}
-	})
+	for _, c := range []struct {
+		name, dir, pattern string
+		want               int
+	}{
+		{"journal files", fixtureDir(), "system*.journal*", 3},
+		{"compact journal files", filepath.Join(fixtureDir(), "compact"), "system*.journal*", 3},
+		{"journal files of systemd 255", filepath.Join(fixtureDir(), "systemd-255"), "*.journal", 2},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			files, _ := filepath.Glob(filepath.Join(c.dir, c.pattern))
+			if len(files) != c.want {
+				t.Fatalf("found %d journal files in %s, want %d", len(files), c.dir, c.want)
+			}
+			for i, path := range files {
+				checkJournalFileAgainst(t, set, i, path)
+			}
+		})
+	}
 }
 
 func checkExportAgainst(t *testing.T, set *privateSet, data []byte) {
@@ -326,6 +335,10 @@ func checkJournalFileAgainst(t *testing.T, set *privateSet, idx int, path string
 			t.Errorf("generated file %d: header ID at %d holds a private value of class %q", idx, off, classes)
 		}
 	}
+	payloadAt := uint64(64) // the payload of a data object lies behind its fixed part: at 72 in the COMPACT layout
+	if le.Uint32(b[hdrIncompat:])&incompatCompact != 0 {
+		payloadAt = 72
+	}
 	hs, arena := le.Uint64(b[hdrHeaderSize:]), le.Uint64(b[hdrArenaSize:])
 	end := min(uint64(len(b)), hs+arena)
 	for off := hs; off+16 <= end; {
@@ -335,7 +348,7 @@ func checkJournalFileAgainst(t *testing.T, set *privateSet, idx int, path string
 		}
 		switch b[off] {
 		case objData:
-			checkDataObject(t, set, idx, b[off:off+size])
+			checkDataObject(t, set, idx, b[off:off+size], payloadAt)
 		case objEntry:
 			if classes := set.leakClasses(hex.EncodeToString(b[off+40:off+56]), true); len(classes) > 0 {
 				t.Errorf("generated file %d: entry at %d holds a private boot ID of class %q", idx, off, classes)
@@ -345,9 +358,9 @@ func checkJournalFileAgainst(t *testing.T, set *privateSet, idx int, path string
 	}
 }
 
-func checkDataObject(t *testing.T, set *privateSet, idx int, obj []byte) {
+func checkDataObject(t *testing.T, set *privateSet, idx int, obj []byte, payloadAt uint64) {
 	t.Helper()
-	payload := obj[64:]
+	payload := obj[payloadAt:]
 	compressed := obj[1] != 0
 	value := payload
 	if i := bytes.IndexByte(payload, '='); i >= 0 && !compressed {

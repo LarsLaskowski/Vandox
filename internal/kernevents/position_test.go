@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/LarsLaskowski/Vandox/internal/agentstate"
 	"github.com/LarsLaskowski/Vandox/internal/model"
 )
 
@@ -89,6 +90,82 @@ func TestKernel_ResumesAtSavedPositionAcrossBoots(t *testing.T) {
 	requireGap(t, gaps[0], micro(1790790389787497), micro(1790790392787497))
 	requireGap(t, gaps[1], micro(1790790392787497), micro(1790915966787497))
 	checkValid(t, recs, t0)
+}
+
+// fixtureOutcome is what a run over a fixture directory returns, in a form two runs can be compared in.
+type fixtureOutcome struct {
+	pids      []int32
+	boots     []string
+	captured  []time.Time
+	gaps      [][2]time.Time
+	trigCalls int
+	position  agentstate.JournalPosition
+}
+
+// fixtureRun makes the saved-position run of TestKernel_ResumesAtSavedPositionAcrossBoots over the fixture that load copies into
+// the journal, then a second run that commits the position.
+func fixtureRun(t *testing.T, load func(j *journalFS, t testing.TB)) fixtureOutcome {
+	t.Helper()
+	e := newEnv(t)
+	load(e.j, t)
+	e.seed(dashed(bootB), position(seqIDA, 0, 1789000000000000))
+
+	recs := e.run(false)
+
+	var out fixtureOutcome
+	for _, k := range killsOf(recs) {
+		out.pids = append(out.pids, k.ev.OOMKill.VictimPID)
+		out.boots = append(out.boots, k.ev.OOMKill.BootID)
+		out.captured = append(out.captured, k.rec.CapturedAt)
+	}
+	for _, g := range gapsOf(recs) {
+		out.gaps = append(out.gaps, [2]time.Time{g.gap.From, g.gap.To})
+	}
+	out.trigCalls = e.trig.count()
+	e.run(false)
+	if st := e.store.State().Journal; st != nil {
+		out.position = *st
+	}
+	return out
+}
+
+func TestKernel_CompactJournalGivesTheSameKillsGapsAndPosition(t *testing.T) {
+	want := fixtureRun(t, (*journalFS).loadFixture)
+
+	got := fixtureRun(t, (*journalFS).loadCompactFixture)
+
+	if wantPIDs := []int32{3021, 352448, 351416, 5150, 6161}; !slices.Equal(got.pids, wantPIDs) {
+		t.Fatalf("compact fixture: kills = %v, want %v", got.pids, wantPIDs)
+	}
+	if !slices.Equal(got.pids, want.pids) || !slices.Equal(got.boots, want.boots) {
+		t.Errorf("compact fixture: kills %v in boots %v, want %v in boots %v (as the non-compact fixture)", got.pids, got.boots, want.pids, want.boots)
+	}
+	requireSameTimes(t, "kill capture times", got.captured, want.captured)
+	if len(got.gaps) != 2 || len(want.gaps) != 2 {
+		t.Fatalf("gaps = %d (compact) and %d (non-compact), want 2 each", len(got.gaps), len(want.gaps))
+	}
+	for i := range want.gaps {
+		requireSameTimes(t, "gap "+strconv.Itoa(i), got.gaps[i][:], want.gaps[i][:])
+	}
+	if got.trigCalls != 0 || want.trigCalls != 0 {
+		t.Errorf("trigger calls = %d (compact) and %d (non-compact), want none", got.trigCalls, want.trigCalls)
+	}
+	if got.position.SeqnumID == "" || got.position.SeqnumID != want.position.SeqnumID || got.position.Seqnum != want.position.Seqnum || !got.position.Realtime.Equal(want.position.Realtime) {
+		t.Errorf("compact fixture: position after the next run = %+v, want %+v (the non-compact one, not empty)", got.position, want.position)
+	}
+}
+
+// requireSameTimes wants the compact times to equal the non-compact ones.
+func requireSameTimes(t *testing.T, what string, got, want []time.Time) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("compact fixture: %d times of %s, want %d", len(got), what, len(want))
+	}
+	for i := range want {
+		if !got[i].Equal(want[i]) {
+			t.Errorf("compact fixture: time %d of %s = %s, want %s", i, what, got[i], want[i])
+		}
+	}
 }
 
 func TestKernel_CommitsPositionAtTheStartOfTheNextRun(t *testing.T) {

@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/LarsLaskowski/Vandox/internal/zstdfield"
 )
 
 var errDecode = errors.New("decoder: refused")
@@ -765,5 +767,115 @@ func requireFirstItems(t *testing.T, e *Entry, want map[string]string) {
 	}
 	if omittedOf(t, e) != 0 || e.Undecoded != 0 {
 		t.Errorf("Omitted = %d, Undecoded = %d, want 0 and 0: a repeated name is passed over, not counted", omittedOf(t, e), e.Undecoded)
+	}
+}
+
+func TestEntries_NextWithReadsEveryEntryOfTheRealCompactSamples(t *testing.T) {
+	dec, err := zstdfield.New()
+	if err != nil {
+		t.Fatalf("zstdfield.New() error = %v, want nil", err)
+	}
+	opt := &ReadOptions{MaxPayload: 16384 + 1, Decompress: dec, MaxCompressed: 4, MaxCompressedBytes: zstdfield.MaxFrameBytes}
+	for _, c := range []struct {
+		journal, export string
+		entries         uint64
+	}{{"kernel.journal", "kernel.export", 100}, {"live.journal", "live.export", 40}} {
+		t.Run(c.journal, func(t *testing.T) {
+			requireRealSample(t, c.journal, c.export, c.entries, opt)
+		})
+	}
+}
+
+// requireRealSample reads the real sample journal in full with NextWith and compares it with its export.
+func requireRealSample(t *testing.T, journal, export string, entries uint64, opt *ReadOptions) {
+	t.Helper()
+	byStamps := exportByStamps(t, export)
+	f, raw, r := openSample(t, journal)
+	if n := le.Uint64(raw[hdrNEntries:]); n != entries {
+		t.Fatalf("the sample counts %d entries in its header, want %d", n, entries)
+	}
+
+	seqs, long := readSampleWith(t, f, byStamps, opt)
+
+	if uint64(len(seqs)) != entries { // #nosec G115 -- len is never negative
+		t.Fatalf("read %d entries, want the %d the header counts", len(seqs), entries)
+	}
+	if journal == "live.journal" {
+		if want := []uint64{16, 36}; !slices.Equal(long, want) {
+			t.Errorf("entries with the 700-byte MESSAGE decoded from zstd = %v, want %v", long, want)
+		}
+		for i, seq := range seqs {
+			if seq != uint64(i+1) { // #nosec G115 -- i is never negative
+				t.Errorf("entry %d has the seqnum %d, want %d (SeekAll(s) stands on entry s+1)", i, seq, i+1)
+				break
+			}
+		}
+	}
+	requireSeekAllAfterEverySeqnum(t, f, seqs, opt)
+	if r.violated != "" {
+		t.Errorf("reader misbehaved: %s", r.violated)
+	}
+}
+
+// readSampleWith reads every entry of a real sample with NextWith, compares MESSAGE with the export entry of the same stamps and
+// returns the seqnums and those of the entries whose MESSAGE is 700 bytes long.
+func readSampleWith(t *testing.T, f *File, export map[stampKey][]exField, opt *ReadOptions) (seqs, long []uint64) {
+	t.Helper()
+	c, err := f.SeekAll(0)
+	if err != nil {
+		t.Fatalf("SeekAll(0) error = %v, want nil", err)
+	}
+	var e Entry
+	for {
+		ok, err := f.NextWith(&c, []string{"MESSAGE"}, &e, opt)
+		if err != nil {
+			t.Fatalf("NextWith() after %d entries: error = %v, want nil", len(seqs), err)
+		}
+		if !ok {
+			break
+		}
+		seqs = append(seqs, e.Seqnum)
+		if e.Undecoded != 0 {
+			t.Errorf("entry %d has %d undecoded items, want 0", e.Seqnum, e.Undecoded)
+		}
+		if requireSameMessage(t, &e, export) == 700 {
+			long = append(long, e.Seqnum)
+		}
+	}
+	if c.Torn() {
+		t.Error("Torn() = true after the end of the list, want false for a whole file")
+	}
+	return seqs, long
+}
+
+// requireSameMessage wants the MESSAGE of e to equal that of the export entry of the same stamps and returns its length (0 when it differs).
+func requireSameMessage(t *testing.T, e *Entry, export map[stampKey][]exField) int {
+	t.Helper()
+	pair, found := export[stampKey{e.RealtimeUS, e.MonotonicUS}]
+	if !found {
+		t.Fatalf("entry %d (realtime %d, monotonic %d) has no entry of the same stamps in the export", e.Seqnum, e.RealtimeUS, e.MonotonicUS)
+	}
+	msg, _ := e.Field("MESSAGE")
+	if len(msg) != 1 || msg[0].Cut || !bytes.Equal(msg[0].Value, exValue(pair, "MESSAGE")) {
+		t.Errorf("entry %d holds %d MESSAGE fields, want 1 equal to the %d bytes of the export", e.Seqnum, len(msg), len(exValue(pair, "MESSAGE")))
+		return 0
+	}
+	return len(msg[0].Value)
+}
+
+// requireSeekAllAfterEverySeqnum wants SeekAll(s) to stand on the first entry of seqs after s, for every s up to the last seqnum.
+func requireSeekAllAfterEverySeqnum(t *testing.T, f *File, seqs []uint64, opt *ReadOptions) {
+	t.Helper()
+	var e Entry
+	for s := uint64(0); s < seqs[len(seqs)-1]; s++ {
+		c, err := f.SeekAll(s)
+		if err != nil {
+			t.Fatalf("SeekAll(%d) error = %v, want nil", s, err)
+		}
+		want, _ := slices.BinarySearch(seqs, s+1)
+		ok, err := f.NextWith(&c, []string{"MESSAGE"}, &e, opt)
+		if err != nil || !ok || e.Seqnum != seqs[want] {
+			t.Fatalf("SeekAll(%d) then NextWith() = seqnum %d, %v, %v, want seqnum %d", s, e.Seqnum, ok, err, seqs[want])
+		}
 	}
 }

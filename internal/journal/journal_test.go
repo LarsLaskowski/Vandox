@@ -1,12 +1,17 @@
 package journal
 
 import (
+	"bytes"
+	"encoding/hex"
 	"errors"
 	"io"
 	"io/fs"
 	"math"
+	"os"
+	"path/filepath"
 	"reflect"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -327,7 +332,7 @@ func TestFile_RefusesUnsupportedLayout(t *testing.T) {
 		{"header size 248", setHeaderSize(248)},
 		{"header size 4104", setHeaderSize(4104)},
 		{"header size 1<<40", setHeaderSize(1 << 40)},
-		{"compact layout", setIncompat(incompatKeyed | incompatZSTD | incompatCompact)},
+		{"compact without keyed hash", setIncompat(incompatZSTD | incompatCompact)},
 		{"no keyed hash", setIncompat(incompatZSTD)},
 		{"no flag at all", setIncompat(0)},
 		{"unknown flag 1<<5", setIncompat(incompatKeyed | 1<<5)},
@@ -362,6 +367,35 @@ func TestFile_ReadsEveryAcceptedFlagCombination(t *testing.T) {
 				t.Errorf("Open() error = %v, want nil", err)
 			}
 		})
+	}
+}
+
+func TestFile_ReadsEveryAcceptedCompactFlagCombination(t *testing.T) {
+	accepted := map[string]uint32{
+		"compact with keyed hash":      incompatKeyed | incompatCompact,
+		"compact with XZ":              incompatKeyed | incompatCompact | incompatXZ,
+		"compact with LZ4":             incompatKeyed | incompatCompact | incompatLZ4,
+		"compact with ZSTD":            incompatKeyed | incompatCompact | incompatZSTD,
+		"compact with all compression": incompatKeyed | incompatCompact | incompatXZ | incompatLZ4 | incompatZSTD,
+	}
+	entries := kernelEntries(30, true)
+	want := kernelOnly(entries)
+	for name, flags := range accepted {
+		for _, hs := range []int{264, 272} {
+			t.Run(name+" header "+strconv.Itoa(hs), func(t *testing.T) {
+				o := testOptions()
+				o.compact, o.incompat, o.headerSize = true, flags, hs
+				b, _ := buildFile(entries, o)
+				var res walkResult
+				f := openBytes(t, b, false)
+				if err := readAll(f, kernelList(t, f), 0, &res); err != nil || len(res.entries) != len(want) {
+					t.Fatalf("reading the compact file: %d entries, error %v, want %d entries", len(res.entries), err, len(want))
+				}
+				for i, got := range res.entries {
+					checkKernelEntry(t, i, got, want[i])
+				}
+			})
+		}
 	}
 }
 
@@ -532,6 +566,12 @@ func expectChainOutcome(t *testing.T, b []byte, ok bool, entries int) {
 
 func TestFile_BoundsEveryOffsetSweep(t *testing.T) {
 	base, _, _ := boundsBase(12)
+	sweepAll(t, base)
+}
+
+// sweepAll changes every byte of base in four ways, one byte at a time, and walks each file.
+func sweepAll(t *testing.T, base []byte) {
+	t.Helper()
 	flips := []func(byte) byte{
 		func(byte) byte { return 0xff },
 		func(byte) byte { return 0x00 },
@@ -683,6 +723,441 @@ func TestFile_TornTailOfAnOnlineFileIsRetriedAfterRefresh(t *testing.T) {
 	}
 	if got, want := append(append([]uint64(nil), seen...), rest...), firstSeqnums(10); !sameSeqnums(got, want) {
 		t.Fatalf("after the file grew, read seqnums %v, want %v (no entry lost or repeated)", got, want)
+	}
+}
+
+// boundsBaseCompact is boundsBase in the COMPACT layout.
+func boundsBaseCompact(kernel int) ([]byte, *layout, int) {
+	o := testOptions()
+	o.compact = true
+	o.buckets = 1 // one hash chain holds every data object
+	entries := kernelEntries(kernel, true)
+	b, l := buildFile(entries, o)
+	return b, l, len(kernelOnly(entries))
+}
+
+// compactBoundsCases are the bounds cases of the COMPACT layout: the cases of boundsCases that do not write an item or a slot (their
+// 64-bit values cannot address a 4-byte one), and the cases that write 32-bit values.
+func compactBoundsCases() []boundsCase {
+	var out []boundsCase
+	for _, c := range boundsCases() {
+		if !strings.HasPrefix(c.name, "entry array: entry offset") && !strings.HasPrefix(c.name, "entry item:") {
+			out = append(out, c)
+		}
+	}
+	kd := func(l *layout) uint64 { return l.data[kernelPayload] }
+	arrays := func(l *layout) []uint64 { return l.dataArrays[kernelPayload] }
+	item := func(l *layout) uint64 { return l.itemAt(l.entries[1], 0) }
+	slot := func(l *layout) uint64 { return l.slotAt(arrays(l)[0], 0) }
+	end := func(b []byte) uint32 { return u32(len(b) + 4096) }
+	return append(out, []boundsCase{
+		{"data object: 71 bytes, one short of its fixed part", func(b []byte, l *layout) []byte { return mutated(b, kd(l)+8, 71) }},
+		{"data object: 68 bytes, the size of the fixed part of the other layout", func(b []byte, l *layout) []byte { return mutated(b, kd(l)+8, 68) }},
+		{"entry: size 1 byte over a whole number of items", func(b []byte, l *layout) []byte { return mutated(b, l.entries[1]+8, 64+4*7+1) }},
+		{"entry: size 2 bytes over a whole number of items", func(b []byte, l *layout) []byte { return mutated(b, l.entries[1]+8, 64+4*7+2) }},
+		{"entry: size 3 bytes over a whole number of items", func(b []byte, l *layout) []byte { return mutated(b, l.entries[1]+8, 64+4*7+3) }},
+		{"entry array: size 2 bytes over a whole number of items", func(b []byte, l *layout) []byte { return mutated(b, arrays(l)[0]+8, 24+4*4+2) }},
+		{"entry array: size 1 byte over a whole number of items", func(b []byte, l *layout) []byte { return mutated(b, arrays(l)[0]+8, 24+4*4+1) }},
+		{"entry array: size without any item", func(b []byte, l *layout) []byte { return mutated(b, arrays(l)[0]+8, 24) }},
+		{"entry array: size 26, smaller than the fixed part and one item", func(b []byte, l *layout) []byte { return mutated(b, arrays(l)[0]+8, 26) }},
+		{"entry item: offset beyond the arena", func(b []byte, l *layout) []byte { return mutated32(b, item(l), end(b)) }},
+		{"entry item: offset inside the header", func(b []byte, l *layout) []byte { return mutated32(b, item(l), 32) }},
+		{"entry item: offset not 8-aligned", func(b []byte, l *layout) []byte { return mutated32(b, item(l), u32(asInt(kd(l)+4))) }},
+		{"entry array: slot beyond the arena", func(b []byte, l *layout) []byte { return mutated32(b, slot(l), end(b)) }},
+		{"entry array: slot inside the header", func(b []byte, l *layout) []byte { return mutated32(b, slot(l), 16) }},
+		{"entry array: slot not 8-aligned", func(b []byte, l *layout) []byte { return mutated32(b, slot(l), u32(asInt(l.entries[2]+4))) }},
+		{"entry array: slot beyond the arena in the last array", func(b []byte, l *layout) []byte {
+			a := arrays(l)
+			return mutated32(b, l.slotAt(a[len(a)-1], 0), end(b))
+		}},
+	}...)
+}
+
+func TestFile_BoundsEveryOffsetCompact(t *testing.T) {
+	base, lay, kernel := boundsBaseCompact(30) // the kernel list spans four entry arrays
+	if res := walkBytes(base, false); res.err != nil || len(res.entries) != kernel {
+		t.Fatalf("the unmodified compact file reads %d entries, error %v, want %d entries", len(res.entries), res.err, kernel)
+	}
+	for _, c := range compactBoundsCases() {
+		for _, online := range []bool{false, true} {
+			t.Run(c.name+" online="+strconv.FormatBool(online), func(t *testing.T) {
+				b := c.mutate(base, lay)
+				if online {
+					b[hdrState] = stateOnline
+				}
+				expectMalformed(t, b)
+			})
+		}
+	}
+}
+
+func TestFile_BoundsEveryOffsetSweepCompact(t *testing.T) {
+	base, _, _ := boundsBaseCompact(12)
+	if res := walkBytes(base, false); res.err != nil || res.panic != nil || len(res.entries) == 0 {
+		t.Fatalf("the unmodified compact file: %v, want its kernel entries and no error", res)
+	}
+	sweepAll(t, base)
+}
+
+func TestFile_LayoutFlagFlippedIsNeverAPanic(t *testing.T) {
+	for _, c := range []struct {
+		name    string
+		compact bool
+	}{{"non-compact file with the COMPACT bit set", false}, {"compact file with the COMPACT bit cleared", true}} {
+		for _, online := range []bool{false, true} {
+			t.Run(c.name+" online="+strconv.FormatBool(online), func(t *testing.T) {
+				o := testOptions()
+				o.compact, o.online = c.compact, online
+				b, _ := buildFile(kernelEntries(30, true), o)
+				b[hdrIncompat] ^= incompatCompact
+				r := newRefReader(b)
+
+				res := walk(r, r.size(), false)
+
+				requireNoPanicNoAbuse(t, res, r)
+			})
+		}
+	}
+}
+
+// requireNoPanicNoAbuse wants the walk to end without a panic and without a read the reader flags, and in success or ErrMalformed.
+func requireNoPanicNoAbuse(t *testing.T, res walkResult, r *refReader) {
+	t.Helper()
+	if res.panic != nil {
+		t.Fatalf("panic: %v", res.panic)
+	}
+	if res.err != nil && !errors.Is(res.err, ErrMalformed) {
+		t.Errorf("walk error = %v, want nil or %v", res.err, ErrMalformed)
+	}
+	if r.violated != "" {
+		t.Errorf("reader misbehaved: %s", r.violated)
+	}
+}
+
+func TestFile_RefreshRefusesAFlippedLayoutFlag(t *testing.T) {
+	for _, compact := range []bool{false, true} {
+		t.Run("compact="+strconv.FormatBool(compact), func(t *testing.T) {
+			o := testOptions()
+			o.compact, o.online = compact, true
+			entries := kernelEntries(30, true)
+			want := kernelOnly(entries)
+			b, _ := buildFile(entries, o)
+			r := newRefReader(b)
+			f, err := r.openRef(false)
+			if err != nil {
+				t.Fatalf("Open() error = %v, want nil", err)
+			}
+			c := cursorAfter(t, f, 5)
+
+			r.data[hdrIncompat] ^= incompatCompact
+			err = f.Refresh(r.size())
+
+			if !errors.Is(err, ErrMalformed) || err.Error() != "journal: malformed file" {
+				t.Fatalf("Refresh() after the COMPACT bit changed: error = %v, want %v", err, ErrMalformed)
+			}
+			requireReadsOn(t, f, &c, len(want))
+		})
+	}
+}
+
+// requireReadsOn wants the cursor c, 5 entries into the kernel list of f, to read the other entries, and a new read to see all.
+func requireReadsOn(t *testing.T, f *File, c *Cursor, entries int) {
+	t.Helper()
+	rest, stop := drain(f, c)
+	if stop != nil || len(rest) != entries-5 {
+		t.Errorf("reading on with the cursor after the refused Refresh: %d entries, error %v, want the other %d entries and no error", len(rest), stop, entries-5)
+	}
+	var res walkResult
+	if err := readAll(f, kernelList(t, f), 0, &res); err != nil || len(res.entries) != entries {
+		t.Errorf("reading again after the refused Refresh: %d entries, error %v, want %d entries", len(res.entries), err, entries)
+	}
+}
+
+// cursorAfter returns a cursor on the kernel list of f that stands behind its first n entries.
+func cursorAfter(t *testing.T, f *File, n int) Cursor {
+	t.Helper()
+	c, err := f.Seek(kernelList(t, f), 0)
+	if err != nil {
+		t.Fatalf("Seek() error = %v, want nil", err)
+	}
+	var e Entry
+	for i := 0; i < n; i++ {
+		if ok, err := f.Next(&c, wantNames, &e); err != nil || !ok {
+			t.Fatalf("Next() %d = %v, %v, want true, nil", i, ok, err)
+		}
+	}
+	return c
+}
+
+// tornCompact opens the compact file of 10 kernel entries cut inside (or at the start of) entry 7 and reads its kernel list.
+func tornCompact(t *testing.T, o bOptions, into int, setAside bool) (seen []uint64, c Cursor, err error) {
+	t.Helper()
+	o.compact = true
+	_, cut, _ := tornFile(10, 7, into, o)
+	f := openBytes(t, cut, setAside)
+	c, err = f.Seek(kernelList(t, f), 0)
+	if err != nil {
+		return nil, c, err
+	}
+	seen, err = drain(f, &c)
+	return seen, c, err
+}
+
+func TestFile_TornTailIsEndOfFileCompact(t *testing.T) {
+	cases := []struct {
+		name     string
+		online   bool
+		setAside bool
+		into     int
+		torn     bool
+	}{
+		{"archived file cut inside an entry", false, false, 20, true},
+		{"archived file cut inside the items of an entry", false, false, 66, true},
+		{"archived file cut between entries", false, false, 0, false},
+		{"set-aside file cut inside an entry", true, true, 20, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			o := testOptions()
+			o.online = c.online
+
+			seen, cur, err := tornCompact(t, o, c.into, c.setAside)
+
+			if err != nil {
+				t.Fatalf("reading the cut file: error = %v, want the entries before the tear and no error", err)
+			}
+			if want := firstSeqnums(7); !sameSeqnums(seen, want) {
+				t.Errorf("read seqnums %v, want %v (the entries before the torn one)", seen, want)
+			}
+			if c.torn && !cur.Torn() {
+				t.Errorf("Torn() = false, want true after the list ended at the tear")
+			}
+		})
+	}
+}
+
+func TestFile_TornTailOfAnOnlineFileIsMalformedCompact(t *testing.T) {
+	o := testOptions()
+	o.online = true
+
+	seen, _, err := tornCompact(t, o, 20, false)
+
+	if !errors.Is(err, ErrMalformed) {
+		t.Errorf("reading an online compact file cut inside an entry: error = %v (%d entries), want %v", err, len(seen), ErrMalformed)
+	}
+	if len(seen) > 7 {
+		t.Errorf("read %d entries, want at most the 7 before the tear", len(seen))
+	}
+}
+
+func TestFile_ReadsFieldNamesUpToTheNameWindowInBothLayouts(t *testing.T) {
+	for _, compact := range []bool{false, true} {
+		for _, n := range []int{8, 55, 56, 57, 60, 63} {
+			t.Run("compact="+strconv.FormatBool(compact)+" name of "+strconv.Itoa(n)+" bytes", func(t *testing.T) {
+				name := strings.Repeat("N", n)
+				entries := kernelEntries(3, false)
+				entries[1].items = append(entries[1].items, plain(name+"=long name value"))
+				o := testOptions()
+				o.compact = compact
+				b, _ := buildFile(entries, o)
+
+				viaNext, viaNextWith := namedValues(t, openBytes(t, b, false), name)
+
+				if !slices.Equal(viaNext, []string{"long name value"}) {
+					t.Errorf("Next() found the values %q of the %d-byte name, want [long name value]", viaNext, n)
+				}
+				if !slices.Equal(viaNextWith, []string{"long name value"}) {
+					t.Errorf("NextWith() found the values %q of the %d-byte name, want [long name value]", viaNextWith, n)
+				}
+			})
+		}
+	}
+}
+
+// namedValues reads the three entries of the file with Next (kernel list) and with NextWith (all entries) and returns the values of the
+// field name each one found.
+func namedValues(t *testing.T, f *File, name string) (viaNext, viaNextWith []string) {
+	t.Helper()
+	want := []string{name}
+	c, err := f.Seek(kernelList(t, f), 0)
+	if err != nil {
+		t.Fatalf("Seek() error = %v, want nil", err)
+	}
+	var e Entry
+	for i := 0; i < 3; i++ {
+		if ok, err := f.Next(&c, want, &e); err != nil || !ok {
+			t.Fatalf("Next() %d = %v, %v, want true, nil", i, ok, err)
+		}
+		viaNext = append(viaNext, valuesOf(&e, name)...)
+	}
+	all, err := f.SeekAll(0)
+	if err != nil {
+		t.Fatalf("SeekAll() error = %v, want nil", err)
+	}
+	for i := 0; i < 3; i++ {
+		nextWith(t, f, &all, want, &e, readOptions(nil))
+		viaNextWith = append(viaNextWith, valuesOf(&e, name)...)
+	}
+	return viaNext, viaNextWith
+}
+
+func valuesOf(e *Entry, name string) []string {
+	var out []string
+	fields, _ := e.Field(name)
+	for _, f := range fields {
+		out = append(out, string(f.Value))
+	}
+	return out
+}
+
+// stampKey is the pair of stamps that identifies an entry of the exports.
+type stampKey struct{ realtime, monotonic uint64 }
+
+func sampleDir() string { return filepath.Join(fixtureDir(), "systemd-255") }
+
+// exportByStamps reads the export file name of testdata/journal and returns its entries by their stamps.
+func exportByStamps(t *testing.T, name string) map[stampKey][]exField {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(fixtureDir(), name))
+	if err != nil {
+		t.Fatalf("reading %s: %v", name, err)
+	}
+	out := map[stampKey][]exField{}
+	err = readExport(bytes.NewReader(data), func(fields []exField) {
+		rt, rerr := strconv.ParseUint(string(exValue(fields, "__REALTIME_TIMESTAMP")), 10, 64)
+		mono, merr := strconv.ParseUint(string(exValue(fields, "__MONOTONIC_TIMESTAMP")), 10, 64)
+		if rerr != nil || merr != nil {
+			t.Fatalf("%s: an entry has no stamps", name)
+		}
+		out[stampKey{rt, mono}] = fields
+	})
+	if err != nil || len(out) == 0 {
+		t.Fatalf("reading %s: %d entries, error %v", name, len(out), err)
+	}
+	return out
+}
+
+// exValue returns the value of the first field with the name, nil when there is none.
+func exValue(fields []exField, name string) []byte {
+	for _, f := range fields {
+		if f.name == name {
+			return f.value
+		}
+	}
+	return nil
+}
+
+func exCount(fields []exField, name string) int {
+	n := 0
+	for _, f := range fields {
+		if f.name == name {
+			n++
+		}
+	}
+	return n
+}
+
+// openSample opens a real journal file of testdata/journal/systemd-255 and returns it with its bytes and its reader.
+func openSample(t *testing.T, name string) (*File, []byte, *refReader) {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join(sampleDir(), name))
+	if err != nil {
+		t.Fatalf("reading the sample %s: %v", name, err)
+	}
+	r := newRefReader(b)
+	f, err := r.openRef(false)
+	if err != nil {
+		t.Fatalf("Open(%s) error = %v, want nil", name, err)
+	}
+	return f, b, r
+}
+
+func TestFile_ReadsTheRealCompactKernelSample(t *testing.T) {
+	export := exportByStamps(t, "kernel.export")
+	f, raw, r := openSample(t, "kernel.journal")
+	if n := le.Uint64(raw[hdrNEntries:]); n != 100 {
+		t.Fatalf("the sample counts %d entries in its header, want 100", n)
+	}
+	d := kernelList(t, f)
+	c, err := f.Seek(d, 0)
+	if err != nil {
+		t.Fatalf("Seek(0) error = %v, want nil", err)
+	}
+
+	var seqs, kills []uint64
+	var e Entry
+	for {
+		ok, err := f.Next(&c, []string{"MESSAGE", "SYSLOG_FACILITY"}, &e)
+		if err != nil {
+			t.Fatalf("Next() after %d entries: error = %v, want nil", len(seqs), err)
+		}
+		if !ok {
+			break
+		}
+		seqs = append(seqs, e.Seqnum)
+		if checkSampleEntry(t, &e, export) {
+			kills = append(kills, e.Seqnum)
+		}
+	}
+
+	if len(seqs) != 95 || !slices.IsSorted(seqs) || len(slices.Compact(slices.Clone(seqs))) != 95 {
+		t.Fatalf("read %d kernel entries with the seqnums %v, want 95 in strictly increasing order", len(seqs), seqs)
+	}
+	if want := []uint64{4, 10, 14, 20, 25, 29, 97, 100}; !slices.Equal(kills, want) {
+		t.Errorf("entries with one facility 0 and a kill message = %v, want %v", kills, want)
+	}
+	if c.Torn() {
+		t.Error("Torn() = true after the end of the list, want false for a whole file")
+	}
+	requireSeekAfterEverySeqnum(t, f, d, seqs)
+	if r.violated != "" {
+		t.Errorf("reader misbehaved: %s", r.violated)
+	}
+}
+
+// checkSampleEntry compares an entry with the export entry of the same stamps and reports whether it is a kill line.
+func checkSampleEntry(t *testing.T, e *Entry, export map[stampKey][]exField) bool {
+	t.Helper()
+	pair, ok := export[stampKey{e.RealtimeUS, e.MonotonicUS}]
+	if !ok {
+		t.Fatalf("entry %d (realtime %d, monotonic %d) has no entry of the same stamps in kernel.export", e.Seqnum, e.RealtimeUS, e.MonotonicUS)
+	}
+	if got, want := hex.EncodeToString(e.BootID[:]), string(exValue(pair, "_BOOT_ID")); got != want {
+		t.Errorf("entry %d boot ID = %s, want %s", e.Seqnum, got, want)
+	}
+	msg, _ := e.Field("MESSAGE")
+	if len(msg) != 1 || !bytes.Equal(msg[0].Value, exValue(pair, "MESSAGE")) {
+		t.Errorf("entry %d holds %d MESSAGE fields, want 1 equal to %q", e.Seqnum, len(msg), exValue(pair, "MESSAGE"))
+		return false
+	}
+	fac, _ := e.Field("SYSLOG_FACILITY")
+	if len(fac) != exCount(pair, "SYSLOG_FACILITY") {
+		t.Errorf("entry %d has %d SYSLOG_FACILITY items, want %d", e.Seqnum, len(fac), exCount(pair, "SYSLOG_FACILITY"))
+	}
+	return len(fac) == 1 && string(fac[0].Value) == "0" && strings.HasPrefix(string(msg[0].Value), "Out of memory: Killed process ")
+}
+
+// requireSeekAfterEverySeqnum wants Seek(d, s) to stand on the first entry of seqs after s, for every s up to the last one.
+func requireSeekAfterEverySeqnum(t *testing.T, f *File, d Data, seqs []uint64) {
+	t.Helper()
+	last := seqs[len(seqs)-1]
+	var e Entry
+	for s := uint64(0); s <= last; s++ {
+		c, err := f.Seek(d, s)
+		if err != nil {
+			t.Fatalf("Seek(%d) error = %v, want nil", s, err)
+		}
+		ok, err := f.Next(&c, []string{"MESSAGE"}, &e)
+		want, _ := slices.BinarySearch(seqs, s+1) // the index of the first seqnum of seqs that is at least s+1
+		if want < len(seqs) {
+			if err != nil || !ok || e.Seqnum != seqs[want] {
+				t.Fatalf("Seek(%d) then Next() = seqnum %d, %v, %v, want seqnum %d", s, e.Seqnum, ok, err, seqs[want])
+			}
+			continue
+		}
+		if err != nil || ok {
+			t.Fatalf("Seek(%d) then Next() = %v, %v, want the end of the list", s, ok, err)
+		}
 	}
 }
 

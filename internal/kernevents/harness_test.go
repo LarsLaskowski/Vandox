@@ -170,7 +170,8 @@ const (
 //
 // It models a journal directory as journald writes it: files named as journald names them (system.journal, system@<seqnum
 // ID>-<head seqnum>-<head real time>.journal and the .journal~ suffix of a set-aside file), written by journaltest in the layout
-// of systemd 249 (pinned against journalctl by journaltest.TestWrite_JournalctlAcceptsFixture). Growth of a journal is modelled by
+// of systemd 249 (the non-compact layout) or, for the compact fixture, of systemd 255 (both pinned against journalctl by
+// journaltest.TestWrite_JournalctlAcceptsFixture). Growth of a journal is modelled by
 // adding a file, as journald's rotation does, because journaltest cannot append to a file.
 type journalFS struct {
 	mu     sync.Mutex
@@ -273,17 +274,28 @@ func (j *journalFS) setNoDir(v bool) {
 	j.noDir = v
 }
 
-// loadFixture copies the committed journal fixture files into j.
+// loadFixture copies the committed journal fixture files of the non-compact layout into j.
 func (j *journalFS) loadFixture(t testing.TB) {
 	t.Helper()
-	dir := filepath.Join("..", "..", "testdata", "journal")
+	j.loadFixtureDir(t, filepath.Join("..", "..", "testdata", "journal"))
+}
+
+// loadCompactFixture copies the committed journal fixture files of the COMPACT layout (testdata/journal/compact) into j.
+func (j *journalFS) loadCompactFixture(t testing.TB) {
+	t.Helper()
+	j.loadFixtureDir(t, filepath.Join("..", "..", "testdata", "journal", "compact"))
+}
+
+// loadFixtureDir copies the journal files at the top level of dir into j and wants exactly 3.
+func (j *journalFS) loadFixtureDir(t testing.TB, dir string) {
+	t.Helper()
 	names, err := os.ReadDir(dir)
 	if err != nil {
 		t.Fatalf("reading the fixture directory: %v", err)
 	}
 	n := 0
 	for _, de := range names {
-		if !strings.HasPrefix(de.Name(), "system") {
+		if de.IsDir() || !strings.HasPrefix(de.Name(), "system") {
 			continue
 		}
 		b, err := os.ReadFile(filepath.Join(dir, de.Name()))
@@ -294,7 +306,7 @@ func (j *journalFS) loadFixture(t testing.TB) {
 		n++
 	}
 	if n != 3 {
-		t.Fatalf("the fixture directory holds %d journal files, want 3", n)
+		t.Fatalf("the fixture directory %s holds %d journal files, want 3", dir, n)
 	}
 }
 
