@@ -15,3 +15,4 @@ are quoted in full.
 | 2026-10-24 15:50 | 2b Plan revise round | squad-lead | RESULT: DONE; DA M1/M2, Security B1 and all minors accepted; plan-check passes (length warning) (opus/medium · 30,551 tokens · 9 tool uses · 190 s · continued) |
 | 2026-10-24 15:51 | 3 Plan security review (round 2) | squad-security | APPROVED; 3 non-blocking notes appended to plan.md as Security notes (opus/medium · 25,855 tokens · 5 tool uses · 54 s · continued) |
 | 2026-10-24 15:53 | 4 Skeleton (G1 task 1) | squad-dev | Skeleton done; gofmt, build, vet pass; existing spool/config/agent suites pass (sonnet/medium · 81,494 tokens · 11 tool uses · 79 s) |
+| 2026-10-24 15:57 | 5 Tests first (G1 task 2) | squad-tester | Config and spool tests written; fail on stubs (invalid-input cases cannot, noted) (sonnet/medium · usage pending) |
