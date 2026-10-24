@@ -3,7 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-10-22
 - **Area:** Agent
-- **Source:** Issue #36
+- **Source:** Issue #36, issue #286
 - **Supersedes:** —
 
 ## Context
@@ -15,6 +15,12 @@ copied from it (not committed): systemd 249.11, a 256-byte header, the incompati
 without `COMPACT`, zstd-compressed data objects only for other entries (none of the 3,563 kernel entries references a compressed
 object; the kill lines are 159 to 171 bytes), and 221 entries of the kernel transport whose facility is not 0 (userspace writes to
 `/dev/kmsg`).
+
+systemd 252 and later write the `COMPACT` layout by default (systemd 255 `journal-file.c`: `SYSTEMD_JOURNAL_COMPACT` unset means
+compact): 32-bit offsets in entry items and entry arrays, the item hashes dropped, and two 32-bit tail fields before the payload of a
+data object. An upgrade of the server (Ubuntu 24.04 ships systemd 255) would make the reader refuse every file (#286). The compact
+layout was read from two files that `systemd-journal-remote` of systemd 255 wrote from the committed, anonymized exports; the real
+compact files of the server are checked later on a developer's machine, like the 249 files.
 
 ## Options considered
 
@@ -44,28 +50,47 @@ object; the kill lines are 159 to 171 bytes), and 221 entries of the kernel tran
    last 64 lines is that of a line days old and overstates the delay (by 5.8 s for the 2 Oct `pzstd` kill).
 10. **Commit `systemd-journal-remote` output as the fixture** — easy to produce, but systemd 255 here writes only the `COMPACT`
    variant, which the server never writes, so it would test the wrong layout; an anonymized copy of a real 80 MiB file cannot be
-   made either, because rewriting a field breaks its keyed hash.
+   made either, because rewriting a field breaks its keyed hash. For the `COMPACT` layout (#286) this output is exactly the layout to
+   test and is committed as its real sample, with the header's machine ID (that of the machine that ran it) replaced; residual: it is
+   `systemd-journal-remote`'s output, not journald's, and holds no set-aside file.
+11. **Read `COMPACT` with the same reader, the item widths and the payload offset taken per file from the header's flag** (chosen,
+   #286) — one set of bounds checks for both layouts; the flag is untrusted input like every other header field, so a flipped flag must
+   end in `malformed file` or a misread within the file's bounds, never a panic or an unbounded read.
+12. **A second reader for the compact layout** — no layout switch in the shared code, but every bounds check twice.
+13. **Use the tail fields of the larger header and of the compact data objects** (`tail_entry_array_offset`, `tail_entry_offset`) —
+   they let the writer append without walking a chain; the reader's bisection already needs a fixed number of reads, and trusting them
+   would add input to bound for nothing.
+14. **Commit the journal-remote samples cut after their last object** — 7.6 MiB less each in the working tree, but the files would no
+   longer be as systemd wrote them; Git stores the 8 MiB of mostly zeros in about 20 KB each.
 
 ## Decision
 
 The agent reads the system journal files itself, set-aside files included (options 1 and 8), and times a kill by its receipt corrected for the kernel clock's drift (option 9). It counts only entries of the kernel transport with exactly one facility `0`,
 decompresses nothing (a compressed item, whose name cannot be known without decompressing it, makes a kernel entry unreadable,
-recorded as a gap; so do items beyond the per-entry cap of kept fields), and supports only the
-keyed-hash, non-compact layout the server writes; any other layout fails closed, also as a gap. The committed fixtures are generated
-in that layout from an anonymized export by a test-only writer whose output `journalctl --verify` and `journalctl -o export` must
-accept. The rules are in the [Agent](../areas/agent.md) area (*Kernel events*).
+recorded as a gap; so do items beyond the per-entry cap of kept fields), and supports only the two
+keyed-hash layouts journald writes, the non-compact one of the server (systemd 249) and `COMPACT` (systemd 252 and later), chosen per
+file from the header's flag (option 11); any other layout fails closed, also as a gap. The committed fixtures are generated in both
+layouts from an anonymized export by a test-only writer whose output `journalctl --verify` and `journalctl -o export` must accept,
+and the compact layout is also read from the committed `systemd-journal-remote` samples. The rules are in the
+[Agent](../areas/agent.md) area (*Kernel events*).
 
 ## Consequences
 
-- A journal written with a compression threshold below the size of a kill line, in the `COMPACT` layout (systemd 252 and later) or
-  without keyed hashes loses its kernel events to recorded gaps until the reader learns that layout; an upgrade of the server's
-  systemd is a reason to revisit this record.
+- A journal written with a compression threshold below the size of a kill line or without keyed hashes loses its kernel events to
+  recorded gaps until the reader learns that layout; a systemd release after 255 that changes the layout again is a reason to revisit
+  this record.
+- The compact samples are `systemd-journal-remote` output and hold some entries twice (it ran twice into one file), so `journalctl
+  --verify` reports their timestamps out of order although every object is well-formed; the reader's result is pinned against the
+  committed exports the samples were written from.
 - Every chain in a file is followed only to larger offsets, at most 64 entry arrays per chain, and a poll finds its position by
   bisection, so neither a damaged file nor a flood of kernel lines (a firewall's log lines are remote-triggered) can make a run loop or
   grow with the entries before the position.
+- A plain item's name is looked for in the first 64 bytes of its payload in both layouts, so a wanted name of exactly 64 bytes
+  (systemd's maximum) would never match; accepted unfixed in #286, because every name the kernel and log collectors want is far
+  shorter and an unmatched item is passed over like any unwanted one.
 - journald's entry about missed kernel messages is not in the real files; it is built from the systemd 249 source (residual).
-- The reader is checked against the real files only on a developer's machine (`VANDOX_REAL_JOURNAL_DIR`); CI sees the generated
-  fixtures.
+- The reader is checked against the real files only on a developer's machine (`VANDOX_REAL_JOURNAL_DIR`), the server's compact files
+  once they exist; CI sees the generated fixtures and the compact samples.
 - #37 (log shipping) reuses the reader for other fields and adds a bounded zstd path that only the log collector uses
   ([0121](0121-log-shipping-journal-and-syslog-files-positions-per-seqnum-id-zstd-commit-when-kept.md)); the kernel collector still
   decompresses nothing.

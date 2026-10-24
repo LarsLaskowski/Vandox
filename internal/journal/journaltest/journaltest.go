@@ -1,8 +1,10 @@
-// Package journaltest writes journal files in the server's layout and reads journal export text; tests only.
+// Package journaltest writes journal files in the two layouts journald writes and reads journal export text; tests only.
 //
-// The layout is that of systemd 249 on the monitored server: a 256-byte header, the KEYED-HASH and COMPRESSED-ZSTD flags, no COMPACT
-// layout, a data hash table keyed with the file ID, entry arrays that double in size, and items of 512 bytes and more stored as zstd
-// frames made of one raw block (so that the file needs no compressor), or as the frames Options.Compress returns.
+// The default layout is that of systemd 249 on the monitored server: a 256-byte header, the KEYED-HASH and COMPRESSED-ZSTD flags, no
+// COMPACT layout. With Options.Compact the layout is that of systemd 255: a 272-byte header, the COMPACT flag, 32-bit entry items
+// without hashes and 32-bit entry-array items, and a data object payload at offset 72. Both have a data hash table keyed with the file
+// ID, entry arrays that double in size, and items of 512 bytes and more stored as zstd frames made of one raw block (so that the file
+// needs no compressor), or as the frames Options.Compress returns.
 package journaltest
 
 import (
@@ -16,6 +18,9 @@ import (
 
 const (
 	headerSize     = 256
+	headerCompact  = 272 // header of systemd 255
+	dataFixed      = 64  // payload offset of a data object
+	dataCompact    = 72  // payload offset of a data object of COMPACT
 	compressMin    = 512 // journald compresses a payload (NAME=value) from this size on
 	maxRawFrame    = 65792 - 1
 	firstArrayCap  = 4
@@ -28,6 +33,8 @@ const (
 	flagZSTD       = 4
 	incompatKeyed  = 1 << 2
 	incompatZSTD   = 1 << 3
+	incompatCompat = 1 << 4
+	compatBootID   = 1 << 1 // HEADER_COMPATIBLE_TAIL_ENTRY_BOOT_ID
 	stateOnline    = 1
 	stateArchived  = 2
 )
@@ -38,6 +45,8 @@ type Options struct {
 	Online                      bool
 	// Compress, when set, compresses the payloads of 512 bytes and more; nil keeps the raw-block frames.
 	Compress func(payload []byte) ([]byte, error)
+	// Compact writes the COMPACT layout of systemd 255 (272-byte header, 32-bit items) instead of the server's systemd 249 layout.
+	Compact bool
 }
 
 // Write writes entries as a journal file to w, in the order given. An entry holds the pseudo fields __REALTIME_TIMESTAMP and

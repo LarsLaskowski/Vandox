@@ -894,10 +894,15 @@ read. Of its regular files only `system.journal` (the **online** file, which jou
 `system@*.journal~` (set aside by journald after an unclean close, read like an archived file) are read; the directory is listed in
 chunks of 256 entries and at most 1,024 files are taken. The header of every listed file is read at every run.
 
-**Layout (security area 10).** Only the layout of systemd 249 on the server is read: the signature `LPKSHHRH`, a header of 256 to
-4,096 bytes (a multiple of 8, within the file), the incompatible flag `KEYED-HASH` set and no incompatible flag other than
-`COMPRESSED-XZ`, `COMPRESSED-LZ4`, `KEYED-HASH` and `COMPRESSED-ZSTD`. Any other file — a `COMPACT` journal (systemd 252 and later), a
-journal without keyed hashes, a file shorter than 256 bytes — is refused as `unsupported layout`. Before anything is decoded, every
+**Layout (security area 10).** The two layouts journald writes are read: the signature `LPKSHHRH`, a header of 256 to 4,096 bytes (a
+multiple of 8, within the file; systemd 249 writes 256, 252 and 253 write 264, 254 and later 272), the incompatible flag `KEYED-HASH`
+set and no incompatible flag other than `COMPRESSED-XZ`, `COMPRESSED-LZ4`, `KEYED-HASH`, `COMPRESSED-ZSTD` and `COMPACT`. The
+`COMPACT` flag of the header switches the layout per file: without it (systemd 249 on the server) a data object's payload starts at
+byte 64, an entry item is 16 bytes (a 64-bit offset and a hash) and an entry-array item 8 bytes; with it (systemd 252 and later by
+default) the payload starts at byte 72, so a data object is at least 72 bytes, and entry items and entry-array items are 32-bit
+offsets of 4 bytes. The tail fields the compact layout adds to the header and to data objects are not read. Any other file — a
+journal without keyed hashes, one with an unknown incompatible flag, a file shorter than 256 bytes — is refused as `unsupported
+layout`; a file whose `COMPACT` flag differs when its header is read again is `malformed file`. Before anything is decoded, every
 offset must be 8-aligned and inside the header's arena and the file, and every object at least its fixed size and end there; hash
 chains and entry-array chains are followed only to strictly larger offsets, a hash chain for at most 65,536 objects and an
 entry-array chain for at most 64 arrays; an entry has at most 512 items. A violation is `malformed file`. An object that lies beyond
@@ -1039,9 +1044,9 @@ records per run. Two tests assert it at journals of 1,000 and 100,000 kernel ent
 
 - The facility rule proves that the kernel wrote the line, not that the OOM killer did: kernel code (a module or a driver) that
   prints a line of the same form at facility 0 is recorded as a kill.
-- A `COMPACT` journal (systemd 252 and later), one without keyed hashes or one that stores the kill lines compressed is not read; its
-  kernel events are lost to recorded gaps while it is refused. An upgrade of the server's systemd needs the reader to learn the
-  layout.
+- A journal without keyed hashes or one that stores the kill lines compressed is not read; its kernel events are lost to recorded
+  gaps while it is refused. The compact layout is read as checked against systemd-journal-remote 255 output; files journald itself
+  writes in that layout on the server are not yet checked.
 - Whether a kill is live compares `/proc/uptime`, which counts time in suspend, with the journal's monotonic clock, which does not.
   They agree on a server that never suspends (to be checked on the server, #42); after a suspend every kill reads as late and gets no
   snapshots, never a snapshot too many.
@@ -1338,8 +1343,7 @@ test and the C# import's test both read.
   `_HOSTNAME`) are journald's.
 - A renamed file whose reads keep failing holds back the newer lines of its configured file, with the warning `log file not readable`
   (`read failed`) standing, until it reads again or the agent restarts.
-- A `COMPACT` journal (systemd 252 and later, #286), one without keyed hashes, XZ or LZ4 items and entries with more than four
-  compressed items are lost to recorded gaps.
+- A journal without keyed hashes, XZ or LZ4 items and entries with more than four compressed items are lost to recorded gaps.
 - The user files of the server's sample were empty: user-journal entries are read like system entries without a real one checked. That
   rsyslog's logrotate configuration on the server renames before its single `HUP` is not checked on the server (#42); the renamed file
   is read until the writer has moved whatever that window is.
@@ -1919,9 +1923,9 @@ dropped`; warning `spool not closed`.
   the captured layout bits, records a refused login as `not_answering` with its error number, keeps the statement text of only the first
   64 threads, and counts exposure from the kernel's TCP tables.
 - [0119](../decisions/0119-kernel-messages-from-the-binary-journal-files-read-in-pure-go-without-decompression.md) — why the kernel
-  messages are read from the binary journal files in pure Go, set-aside files included, without decompression and only in the layout
-  the server writes, why only the kernel transport with facility 0 counts, and why a kill is timed by its receipt corrected for the
-  kernel clock's drift.
+  messages are read from the binary journal files in pure Go, set-aside files included, without decompression and only in the two
+  layouts journald writes (the server's and the compact one), why only the kernel transport with facility 0 counts, and why a kill is
+  timed by its receipt corrected for the kernel clock's drift.
 - [0120](../decisions/0120-oom-kill-events-triggered-snapshots-boots-from-saved-state-and-backup-runs.md) — why a live kill requests
   extra snapshots through the scheduler and names them by its identity, why boots come from a saved state file, why the journal
   position is committed only after a kept run with at most three re-reads, and why backup runs are a record kind of their own with
@@ -1954,7 +1958,9 @@ dropped`; warning `spool not closed`.
 `internal/svcstats` (systemd collector) and `internal/sdbus` (its D-Bus client; fixture `testdata/systemd/`, a capture of systemd 249's replies),
 `internal/mariadb` (MariaDB collector and its protocol client; fixture `testdata/mariadb/`, two captures of MariaDB 12.3.3's replies to a `unix_socket` login; it uses `sysstats.MemTotal`, `connstats.TCPListeners` and `procstats.CleanText`),
 `internal/journal` (the journal file reader) and `internal/journal/journaltest` (a writer of journal files for tests; fixtures
-`testdata/journal/`: an online, an archived and a set-aside file generated from `kernel.export`; `live.export`, `live-records.jsonl` and
+`testdata/journal/`: an online, an archived and a set-aside file generated from `kernel.export`, the same three in the compact layout
+under `testdata/journal/compact/`, and under `testdata/journal/systemd-255/` two compact files systemd-journal-remote 255 wrote from
+`kernel.export` and `live.export` (header machine ID replaced); `live.export`, `live-records.jsonl` and
 `zstd-frames.txt` for the log collector, whose binary files the writer generates at test time with zstd frames), `internal/kernevents` (kernel event
 collector and boot check), `internal/logship` (log shipping collector: journal, configured files with the link-free open, filter,
 positions; fixtures `testdata/logs/mail.log`, `kern.log-oom`), `internal/syslogline` (the syslog line rules, the year-less time and

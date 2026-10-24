@@ -9,7 +9,7 @@ import (
 	"strconv"
 )
 
-// Object types, flags and header states of the non-compact journal layout (systemd 249, JOURNAL_FILE_FORMAT.md).
+// Object types, flags and header states of the journal layouts (systemd 249 non-compact and systemd 255 COMPACT, JOURNAL_FILE_FORMAT.md).
 const (
 	objData       = 1
 	objEntry      = 3
@@ -52,8 +52,12 @@ const (
 	hdrTailMono     = 200
 	hdrNData        = 208
 	hdrNEntryArrays = 232
+	hdrTailArray    = 256 // le32 offset of the last array of the main entry array chain (header of systemd 254 and later)
+	hdrTailArrayN   = 260 // le32 number of the items used in that array
+	hdrTailEntry    = 264 // le64 offset of the last entry
 
-	fixedHeaderSize = 256
+	fixedHeaderSize   = 256
+	compactHeaderSize = 272 // header of systemd 255
 )
 
 var le = binary.LittleEndian
@@ -119,8 +123,9 @@ type bEntry struct {
 type bOptions struct {
 	fileID, machineID, seqnumID [16]byte
 	online                      bool
-	headerSize                  int                         // 0 takes 256
-	incompat                    uint32                      // 0 takes KEYED-HASH and ZSTD
+	compact                     bool                        // builds the COMPACT layout of systemd 255: payload at 72, 4-byte items and slots
+	headerSize                  int                         // 0 takes 256, or 272 when compact
+	incompat                    uint32                      // 0 takes KEYED-HASH and ZSTD, and COMPACT when compact
 	buckets                     int                         // buckets of the data hash table, 0 takes 16
 	arrayCap                    func(i int) int             // capacity of the i-th array of a chain, nil doubles from 4
 	hash                        func(payload []byte) uint64 // nil takes SipHash-2-4 keyed with the file ID
@@ -128,6 +133,7 @@ type bOptions struct {
 
 // layout tells a test where the objects of a built file lie.
 type layout struct {
+	compact     bool
 	headerSize  int
 	size        int
 	buckets     int
@@ -139,6 +145,26 @@ type layout struct {
 	mainArrays  []uint64
 	entryCounts map[string]uint64
 }
+
+// itemWidth, slotWidth and payloadOff are the widths of the layout of the file.
+func (l *layout) itemWidth() uint64 { return pick(l.compact, 4, 16) }
+
+func (l *layout) slotWidth() uint64 { return pick(l.compact, 4, 8) }
+
+func (l *layout) payloadOff() uint64 { return pick(l.compact, 72, 64) }
+
+func pick(compact bool, compactValue, plainValue uint64) uint64 {
+	if compact {
+		return compactValue
+	}
+	return plainValue
+}
+
+// itemAt is the offset of item i of the entry at entry.
+func (l *layout) itemAt(entry uint64, i int) uint64 { return entry + 64 + u64(i)*l.itemWidth() }
+
+// slotAt is the offset of item k of the entry array at arr.
+func (l *layout) slotAt(arr uint64, k int) uint64 { return arr + 24 + u64(k)*l.slotWidth() }
 
 type chain struct {
 	arrays []uint64
@@ -184,6 +210,15 @@ func (w *fileBuilder) alloc(typ, flags byte, size int) uint64 {
 
 func (w *fileBuilder) set(off, v uint64) { le.PutUint64(w.b[off:], v) }
 
+// setOffset stores an object offset where the layout keeps one: 32 bits when compact, else 64.
+func (w *fileBuilder) setOffset(off, v uint64) {
+	if w.lay.compact {
+		le.PutUint32(w.b[off:], u32(asInt(v)))
+		return
+	}
+	w.set(off, v)
+}
+
 func (w *fileBuilder) get(off uint64) uint64 { return le.Uint64(w.b[off:]) }
 
 func (w *fileBuilder) hashOf(payload []byte) uint64 {
@@ -224,9 +259,9 @@ func (w *fileBuilder) addData(it bItem) *dataRec {
 	if it.compressed {
 		stored, flags = zstdRawFrame(it.payload), objFlagZSTD
 	}
-	off := w.alloc(objData, flags, 64+len(stored))
+	off := w.alloc(objData, flags, asInt(w.lay.payloadOff())+len(stored))
 	w.set(off+16, hash)
-	copy(w.b[off+64:], stored)
+	copy(w.b[off+w.lay.payloadOff():], stored)
 	bucket := w.table + 16 + 16*(hash%u64(w.lay.buckets))
 	if tail := w.get(bucket + 8); tail == 0 {
 		w.set(bucket, off)
@@ -251,7 +286,7 @@ func (w *fileBuilder) appendArray(ch *chain, entryOff uint64, first func(off uin
 	}
 	if i == len(ch.caps) {
 		c := w.capFor(i)
-		off := w.alloc(objArray, 0, 24+8*c)
+		off := w.alloc(objArray, 0, asInt(w.lay.slotAt(0, c)))
 		w.nArrays++
 		if i == 0 {
 			first(off)
@@ -261,7 +296,7 @@ func (w *fileBuilder) appendArray(ch *chain, entryOff uint64, first func(off uin
 		ch.arrays = append(ch.arrays, off)
 		ch.caps = append(ch.caps, c)
 	}
-	w.set(ch.arrays[i]+24+u64(8*(idx-acc)), entryOff)
+	w.setOffset(w.lay.slotAt(ch.arrays[i], idx-acc), entryOff)
 	ch.n++
 }
 
@@ -270,7 +305,7 @@ func (w *fileBuilder) addEntry(e bEntry) {
 	for i, it := range e.items {
 		recs[i] = w.addData(it)
 	}
-	off := w.alloc(objEntry, 0, 64+16*len(e.items))
+	off := w.alloc(objEntry, 0, asInt(w.lay.itemAt(0, len(e.items))))
 	w.set(off+16, e.seqnum)
 	w.set(off+24, e.realtime)
 	w.set(off+32, e.mono)
@@ -278,8 +313,10 @@ func (w *fileBuilder) addEntry(e bEntry) {
 	var xor uint64
 	seen := map[*dataRec]bool{}
 	for i, r := range recs {
-		w.set(off+64+u64(16*i), r.off)
-		w.set(off+72+u64(16*i), r.hash)
+		w.setOffset(w.lay.itemAt(off, i), r.off)
+		if !w.lay.compact {
+			w.set(w.lay.itemAt(off, i)+8, r.hash)
+		}
 		xor ^= r.hash
 		if seen[r] {
 			continue
@@ -302,7 +339,7 @@ func (w *fileBuilder) addEntry(e bEntry) {
 func sizeHint(entries []bEntry) int {
 	n := 4096
 	for _, e := range entries {
-		n += 64 + 16*len(e.items) + 48
+		n += 72 + 16*len(e.items) + 48
 		for _, it := range e.items {
 			n += len(it.payload) + 8
 		}
@@ -314,7 +351,7 @@ func sizeHint(entries []bEntry) int {
 func buildFile(entries []bEntry, o bOptions) ([]byte, *layout) {
 	hs := o.headerSize
 	if hs == 0 {
-		hs = fixedHeaderSize
+		hs = asInt(pick(o.compact, compactHeaderSize, fixedHeaderSize))
 	}
 	nb := o.buckets
 	if nb == 0 {
@@ -322,7 +359,7 @@ func buildFile(entries []bEntry, o bOptions) ([]byte, *layout) {
 	}
 	w := &fileBuilder{
 		o: o, hs: hs, records: map[string]*dataRec{},
-		lay: &layout{headerSize: hs, buckets: nb, data: map[string]uint64{}, dataArrays: map[string][]uint64{}, entryCounts: map[string]uint64{}},
+		lay: &layout{compact: o.compact, headerSize: hs, buckets: nb, data: map[string]uint64{}, dataArrays: map[string][]uint64{}, entryCounts: map[string]uint64{}},
 	}
 	w.b = make([]byte, hs, hs+sizeHint(entries))
 	w.table = w.alloc(objDataTable, 0, 16+16*nb)
@@ -341,6 +378,9 @@ func (w *fileBuilder) finish(entries []bEntry, fieldTable uint64) {
 	incompat := w.o.incompat
 	if incompat == 0 {
 		incompat = incompatKeyed | incompatZSTD
+		if w.o.compact {
+			incompat |= incompatCompact
+		}
 	}
 	le.PutUint32(b[hdrIncompat:], incompat)
 	state := byte(stateArchived)
@@ -372,12 +412,27 @@ func (w *fileBuilder) finish(entries []bEntry, fieldTable uint64) {
 		copy(b[hdrBootID:], last.boot[:])
 	}
 	w.set(hdrTailObject, w.tail)
+	if w.lay.compact && len(w.main.arrays) > 0 {
+		w.setTailFields()
+	}
 	w.lay.size = len(b)
 	w.lay.mainArrays = w.main.arrays
 	for k, r := range w.records {
 		w.lay.dataArrays[k] = r.chain.arrays
 		w.lay.entryCounts[k] = r.n
 	}
+}
+
+// setTailFields stores the tail fields of the header of systemd 255, which journalctl wants (the reader does not read them): the last
+// array of the main chain with its used items, and the last entry.
+func (w *fileBuilder) setTailFields() {
+	used := w.main.n
+	for _, c := range w.main.caps[:len(w.main.caps)-1] {
+		used -= c
+	}
+	le.PutUint32(w.b[hdrTailArray:], u32(asInt(w.main.arrays[len(w.main.arrays)-1])))
+	le.PutUint32(w.b[hdrTailArrayN:], u32(used))
+	w.set(hdrTailEntry, w.lay.entries[len(w.lay.entries)-1])
 }
 
 // refReader serves a byte slice through io.ReaderAt, counts the reads, refuses to be slurped and can hide a tail.
@@ -586,5 +641,12 @@ func (w walkResult) String() string {
 func mutated(b []byte, off uint64, v uint64) []byte {
 	c := append([]byte(nil), b...)
 	le.PutUint64(c[off:], v)
+	return c
+}
+
+// mutated32 returns a copy of b with the 4-byte little-endian value v written at off: the width of an offset of the COMPACT layout.
+func mutated32(b []byte, off uint64, v uint32) []byte {
+	c := append([]byte(nil), b...)
+	le.PutUint32(c[off:], v)
 	return c
 }

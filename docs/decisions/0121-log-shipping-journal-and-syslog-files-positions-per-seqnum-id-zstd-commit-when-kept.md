@@ -84,4 +84,4 @@ in the [Agent](../areas/agent.md) area (*Log shipping*, *Agent state*) and the
 - A crash repeats at most one state interval plus one collector interval of lines (the spec's E1); exact delivery across a crash needs
   the spool (#38) to store positions with the records.
 - Live lines carry no classification (`event`, mail markers) until #290; the error log formats follow in #289.
-- A systemd upgrade to the `COMPACT` layout loses log lines to gaps, as for the kernel events (0119).
+- The `COMPACT` layout of systemd 252 and later is read like the server's layout, by the same reader (0119, #286).

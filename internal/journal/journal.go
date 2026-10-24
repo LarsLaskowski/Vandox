@@ -1,7 +1,9 @@
 // Package journal reads the binary journal files of systemd-journald through io.ReaderAt, without mmap.
 //
-// It reads the non-compact layout of systemd 249 (the layout of a 256-byte header, KEYED-HASH, optionally compressed items) and
-// decompresses only through the Decompressor of NextWith. Every offset and size of a file is checked against the file's bounds before it is used, chains are followed
+// It reads the two layouts journald writes, both with KEYED-HASH and optionally compressed items: the non-compact layout of systemd 249
+// (64-bit offsets, 16-byte entry items) and the COMPACT layout of systemd 252 and later (32-bit entry items and entry-array items, a
+// data object payload at 72). The incompatible-flags word of the header switches between them per file. It decompresses only through
+// the Decompressor of NextWith. Every offset and size of a file is checked against the file's bounds before it is used, chains are followed
 // only to strictly larger offsets, and what is read per call is limited, so a damaged or hostile file ends in ErrMalformed and never in
 // a loop or a large allocation. A File and the Cursors and Entries used with it are not safe for concurrent use.
 package journal
@@ -45,11 +47,12 @@ const (
 	typeEntry = 3
 	typeArray = 6
 
-	flagsXZ     = 1 << 0
-	flagsLZ4    = 1 << 1
-	flagsKeyed  = 1 << 2
-	flagsZSTD   = 1 << 3
-	objCompress = 7 // XZ, LZ4 or ZSTD in the flags byte of an object header
+	flagsXZ      = 1 << 0
+	flagsLZ4     = 1 << 1
+	flagsKeyed   = 1 << 2
+	flagsZSTD    = 1 << 3
+	flagsCompact = 1 << 4
+	objCompress  = 7 // XZ, LZ4 or ZSTD in the flags byte of an object header
 
 	headerOnline = 1
 
@@ -69,22 +72,26 @@ const (
 	atHeadRealtime = 184
 	atTailRealtime = 192
 
-	dataFixed     = 64 // object header and the fixed part of a data object
-	entryFixed    = 64
-	arrayFixed    = 24
-	itemSize      = 16 // size of an item of an entry
-	bucketSize    = 16 // size of a bucket of the data hash table
-	tableHeader   = 16
-	maxArrays     = 64   // entry arrays of one chain; they double in size, so 64 cover any file
-	maxItems      = 512  // items of one entry
-	maxPayload    = 4096 // bytes of a payload read
-	namePrefix    = 64   // bytes of a payload read to see its name
-	maxChain      = 1 << 16
-	maxKept       = 16 // fields of one entry handed to the caller
-	itemBufSize   = maxItems * itemSize
-	scratchSize   = 256
-	realtimeLimit = 253402300800000000 // 1 Jan 10000 UTC in µs, the first time time.Time.MarshalJSON refuses
-	monotonicMax  = math.MaxInt64 / 1000
+	dataFixed        = 64 // object header and the fixed part of a data object
+	entryFixed       = 64
+	arrayFixed       = 24
+	itemSize         = 16 // size of an item of an entry
+	dataFixedCompact = 72 // data object of COMPACT: the fixed part plus two 32-bit tail fields
+	itemSizeCompact  = 4  // entry item of COMPACT: a 32-bit offset, no hash
+	slotSize         = 8  // entry-array item of the non-compact layout
+	slotSizeCompact  = 4  // entry-array item of COMPACT
+	bucketSize       = 16 // size of a bucket of the data hash table
+	tableHeader      = 16
+	maxArrays        = 64   // entry arrays of one chain; they double in size, so 64 cover any file
+	maxItems         = 512  // items of one entry
+	maxPayload       = 4096 // bytes of a payload read
+	namePrefix       = 64   // bytes of a payload read to see its name
+	maxChain         = 1 << 16
+	maxKept          = 16 // fields of one entry handed to the caller
+	itemBufSize      = maxItems * itemSize
+	scratchSize      = 256
+	realtimeLimit    = 253402300800000000 // 1 Jan 10000 UTC in µs, the first time time.Time.MarshalJSON refuses
+	monotonicMax     = math.MaxInt64 / 1000
 )
 
 var byteOrder = binary.LittleEndian
@@ -112,6 +119,32 @@ type File struct {
 	hdr      Header
 	scratch  [scratchSize]byte
 	items    [itemBufSize]byte
+
+	payloadOff uint64 // offset of the payload in a data object: dataFixed or dataFixedCompact
+	itemWidth  uint64 // bytes of an entry item: itemSize or itemSizeCompact
+	slotWidth  uint64 // bytes of an entry-array item: slotSize or slotSizeCompact
+}
+
+// itemOffset returns the data object offset in item i of the item table of an entry.
+func (f *File) itemOffset(table []byte, i uint64) uint64 {
+	at := i * f.itemWidth
+	if f.itemWidth == itemSizeCompact {
+		return uint64(byteOrder.Uint32(table[at:]))
+	}
+	return byteOrder.Uint64(table[at:])
+}
+
+// arraySlot reads the entry offset in item k of the entry array at arr.
+func (f *File) arraySlot(arr, k uint64) (uint64, error) {
+	at := arr + arrayFixed + f.slotWidth*k
+	if f.slotWidth == slotSizeCompact {
+		b := f.scratch[:slotSizeCompact]
+		if err := f.readAt(at, b); err != nil {
+			return 0, err
+		}
+		return uint64(byteOrder.Uint32(b)), nil
+	}
+	return f.readUint64(at)
 }
 
 // Open reads the header of the journal file r of the given size; setAside marks a *.journal~ file.
@@ -133,6 +166,9 @@ func (f *File) Refresh(size int64) error {
 	next := *f
 	if err := next.load(size); err != nil {
 		return err
+	}
+	if next.itemWidth != f.itemWidth {
+		return ErrMalformed // the layout flag of a file does not change; a cursor never mixes widths
 	}
 	*f = next
 	return nil
@@ -156,12 +192,16 @@ func (f *File) load(size int64) error {
 	}
 	hs := byteOrder.Uint64(b[atHeaderSize:])
 	incompat := byteOrder.Uint32(b[atIncompat:])
-	known := uint32(flagsXZ | flagsLZ4 | flagsKeyed | flagsZSTD)
+	known := uint32(flagsXZ | flagsLZ4 | flagsKeyed | flagsZSTD | flagsCompact)
 	if hs < minHeaderSize || hs > maxHeaderSize || hs%alignment != 0 || hs > f.fileSize ||
 		incompat&^known != 0 || incompat&flagsKeyed == 0 {
 		return ErrUnsupported
 	}
 	f.hs = hs
+	f.payloadOff, f.itemWidth, f.slotWidth = dataFixed, itemSize, slotSize
+	if incompat&flagsCompact != 0 {
+		f.payloadOff, f.itemWidth, f.slotWidth = dataFixedCompact, itemSizeCompact, slotSizeCompact
+	}
 	f.declEnd = hs + min(byteOrder.Uint64(b[atArenaSize:]), math.MaxInt64-hs)
 	f.tableOff = byteOrder.Uint64(b[atTableOffset:])
 	f.tableLen = byteOrder.Uint64(b[atTableSize:])

@@ -8,9 +8,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -23,6 +25,8 @@ import (
 )
 
 const (
+	incompatCompact = 1 << 4 // HEADER_INCOMPATIBLE_COMPACT
+
 	bootA = "c0ffee00c0ffee00c0ffee00c0ffee01"
 	bootB = "c0ffee00c0ffee00c0ffee00c0ffee02"
 	id1   = "00000000000000000000000000000001"
@@ -36,6 +40,23 @@ const (
 type entry = map[string][]byte
 
 func fixtureDir() string { return filepath.Join("..", "..", "..", "testdata", "journal") }
+
+// compactFixtureDir holds the fixture files of the COMPACT layout, with the names, IDs and entries of the files in fixtureDir.
+func compactFixtureDir() string { return filepath.Join(fixtureDir(), "compact") }
+
+// layouts are the two layouts the fixture files come in.
+var layouts = []struct {
+	name    string
+	compact bool
+}{{"non-compact", false}, {"compact", true}}
+
+// fixtureDirOf returns the directory of the committed fixture files of a layout.
+func fixtureDirOf(compact bool) string {
+	if compact {
+		return compactFixtureDir()
+	}
+	return fixtureDir()
+}
 
 func readFixtureExport(t *testing.T) []entry {
 	t.Helper()
@@ -71,7 +92,7 @@ type fixtureFile struct {
 
 // fixtureFiles splits the export by the seqnum ID and the boot of each entry: ID 2 is the set-aside file, ID 1 with boot A the
 // archived file, ID 1 with boot B the online one.
-func fixtureFiles(t *testing.T, all []entry) []fixtureFile {
+func fixtureFiles(t *testing.T, all []entry, compact bool) []fixtureFile {
 	t.Helper()
 	files := []fixtureFile{
 		{name: archivedName, opts: Options{FileID: mustID(t, "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1"), SeqnumID: mustID(t, id1)}},
@@ -92,6 +113,7 @@ func fixtureFiles(t *testing.T, all []entry) []fixtureFile {
 	}
 	for i := range files {
 		files[i].opts.MachineID = mustID(t, string(all[0]["_MACHINE_ID"]))
+		files[i].opts.Compact = compact
 		if len(files[i].entries) == 0 {
 			t.Fatalf("no export entry for %s", files[i].name)
 		}
@@ -276,6 +298,22 @@ func parseJournalctl(t *testing.T, out []byte) []entry {
 	return res
 }
 
+// requireLayoutOf checks the header of a written file for the layout asked for: the COMPACT flag and the header size.
+func requireLayoutOf(t *testing.T, name string, b []byte, compact bool) {
+	t.Helper()
+	if len(b) < 96 {
+		t.Fatalf("%s: written file of %d bytes, want a header", name, len(b))
+	}
+	gotCompact := binary.LittleEndian.Uint32(b[12:])&incompatCompact != 0
+	wantSize := uint64(256)
+	if compact {
+		wantSize = 272
+	}
+	if gotCompact != compact || binary.LittleEndian.Uint64(b[88:]) != wantSize {
+		t.Fatalf("%s: written with Compact %v: COMPACT flag %v and header size %d, want the flag %v and header size %d", name, compact, gotCompact, binary.LittleEndian.Uint64(b[88:]), compact, wantSize)
+	}
+}
+
 func writeFixtureFiles(t *testing.T, dir string, files []fixtureFile) {
 	t.Helper()
 	for _, f := range files {
@@ -283,6 +321,7 @@ func writeFixtureFiles(t *testing.T, dir string, files []fixtureFile) {
 		if err := Write(&buf, f.entries, f.opts); err != nil {
 			t.Fatalf("Write(%s) error = %v, want nil", f.name, err)
 		}
+		requireLayoutOf(t, f.name, buf.Bytes(), f.opts.Compact)
 		if err := os.WriteFile(filepath.Join(dir, f.name), buf.Bytes(), 0o600); err != nil {
 			t.Fatal(err)
 		}
@@ -293,28 +332,37 @@ func TestWrite_JournalctlAcceptsFixture(t *testing.T) {
 	if _, err := exec.LookPath("journalctl"); err != nil {
 		t.Skip("journalctl is not installed")
 	}
-	files := fixtureFiles(t, readFixtureExport(t))
-	dir := t.TempDir()
-	writeFixtureFiles(t, dir, files)
-	for _, f := range files {
-		path := filepath.Join(dir, f.name)
-		if out, err := exec.Command("journalctl", "--verify", "--file="+path).CombinedOutput(); err != nil {
-			t.Errorf("journalctl --verify of %s failed: %v\n%s", f.name, err, out)
-		}
-		out, err := exec.Command("journalctl", "--file="+path, "-o", "export", "--no-pager").Output()
-		if err != nil {
-			t.Errorf("journalctl -o export of %s failed: %v", f.name, err)
-			continue
-		}
-		got := parseJournalctl(t, out)
-		if len(got) != len(f.entries) {
-			t.Errorf("%s: journalctl exports %d entries, want %d", f.name, len(got), len(f.entries))
-			continue
-		}
-		for i := range got {
-			if d := diffEntries(f.entries[i], got[i]); d != "" {
-				t.Errorf("%s: entry %d (seqnum %s): %s", f.name, i, f.entries[i]["__SEQNUM"], d)
+	for _, l := range layouts {
+		t.Run(l.name, func(t *testing.T) {
+			files := fixtureFiles(t, readFixtureExport(t), l.compact)
+			dir := t.TempDir()
+			writeFixtureFiles(t, dir, files)
+			for _, f := range files {
+				requireJournalctlReads(t, filepath.Join(dir, f.name), f)
 			}
+		})
+	}
+}
+
+// requireJournalctlReads wants journalctl to verify the file at path and to export the entries of f.
+func requireJournalctlReads(t *testing.T, path string, f fixtureFile) {
+	t.Helper()
+	if out, err := exec.Command("journalctl", "--verify", "--file="+path).CombinedOutput(); err != nil {
+		t.Errorf("journalctl --verify of %s failed: %v\n%s", f.name, err, out)
+	}
+	out, err := exec.Command("journalctl", "--file="+path, "-o", "export", "--no-pager").Output()
+	if err != nil {
+		t.Errorf("journalctl -o export of %s failed: %v", f.name, err)
+		return
+	}
+	got := parseJournalctl(t, out)
+	if len(got) != len(f.entries) {
+		t.Errorf("%s: journalctl exports %d entries, want %d", f.name, len(got), len(f.entries))
+		return
+	}
+	for i := range got {
+		if d := diffEntries(f.entries[i], got[i]); d != "" {
+			t.Errorf("%s: entry %d (seqnum %s): %s", f.name, i, f.entries[i]["__SEQNUM"], d)
 		}
 	}
 }
@@ -324,6 +372,10 @@ func dataObjects(t *testing.T, b []byte) (flags []byte, payloads [][]byte) {
 	t.Helper()
 	hs := binary.LittleEndian.Uint64(b[88:])
 	end := min(uint64(len(b)), hs+binary.LittleEndian.Uint64(b[96:]))
+	payloadAt := uint64(64)
+	if binary.LittleEndian.Uint32(b[12:])&incompatCompact != 0 {
+		payloadAt = 72
+	}
 	for off := hs; off+16 <= end; {
 		size := binary.LittleEndian.Uint64(b[off+8:])
 		if size < 16 || off+size > end {
@@ -331,11 +383,141 @@ func dataObjects(t *testing.T, b []byte) (flags []byte, payloads [][]byte) {
 		}
 		if b[off] == 1 {
 			flags = append(flags, b[off+1])
-			payloads = append(payloads, b[off+64:off+size])
+			payloads = append(payloads, b[off+payloadAt:off+size])
 		}
 		off += (size + 7) &^ 7
 	}
 	return flags, payloads
+}
+
+// objectAt is an object of a written file.
+type objectAt struct {
+	off, size uint64
+	typ       byte
+}
+
+// objectsOf walks the objects of a written file after its header.
+func objectsOf(t *testing.T, b []byte) []objectAt {
+	t.Helper()
+	hs := binary.LittleEndian.Uint64(b[88:])
+	end := min(uint64(len(b)), hs+binary.LittleEndian.Uint64(b[96:]))
+	var out []objectAt
+	for off := hs; off+16 <= end; {
+		size := binary.LittleEndian.Uint64(b[off+8:])
+		if size < 16 || off+size > end {
+			t.Fatalf("object at %d has size %d, want a well-formed file", off, size)
+		}
+		out = append(out, objectAt{off: off, size: size, typ: b[off]})
+		off += (size + 7) &^ 7
+	}
+	return out
+}
+
+func TestWrite_CompactHeaderAndItemWidths(t *testing.T) {
+	var es []entry
+	for i := 1; i <= 6; i++ {
+		es = append(es, entry{
+			"__REALTIME_TIMESTAMP": []byte(strconv.Itoa(1790000000000000 + i*1000000)), "__MONOTONIC_TIMESTAMP": []byte(strconv.Itoa(5000000000 + i*1000000)),
+			"__SEQNUM": []byte(strconv.Itoa(i)), "__SEQNUM_ID": []byte(id1), "_BOOT_ID": []byte(bootA),
+			"_TRANSPORT": []byte("kernel"), "MESSAGE": []byte("line " + strconv.Itoa(i)), "PRIORITY": []byte("6"),
+		})
+	}
+	opts := Options{FileID: mustID(t, "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1"), SeqnumID: mustID(t, id1), MachineID: mustID(t, "0badc0de0badc0de0badc0de0badc0de"), Compact: true}
+	var buf bytes.Buffer
+
+	if err := Write(&buf, es, opts); err != nil {
+		t.Fatalf("Write() with Compact error = %v, want nil", err)
+	}
+
+	b := buf.Bytes()
+	le := binary.LittleEndian
+	if string(b[:8]) != "LPKSHHRH" || le.Uint64(b[88:]) != 272 || le.Uint32(b[12:]) != 4|8|16 || le.Uint32(b[8:]) != 2 {
+		t.Fatalf("header = signature %q size %d incompatible flags %#x compatible flags %#x, want LPKSHHRH, 272, 0x1c (KEYED-HASH, ZSTD, COMPACT) and 0x2 (TAIL-ENTRY-BOOT-ID)",
+			b[:8], le.Uint64(b[88:]), le.Uint32(b[12:]), le.Uint32(b[8:]))
+	}
+	if first := objectsOf(t, b)[0].off; first != 272 {
+		t.Errorf("the first object lies at %d, want 272 (right after the header)", first)
+	}
+	dataAt := requireCompactData(t, b)
+	entries := requireCompactEntries(t, b, dataAt, len(es))
+	requireCompactArrays(t, b, entries)
+}
+
+// requireCompactData wants every data object to hold its payload at 72 and returns the offsets of the data objects.
+func requireCompactData(t *testing.T, b []byte) map[uint64]bool {
+	t.Helper()
+	want := map[string]bool{"_TRANSPORT=kernel": true, "PRIORITY=6": true, "_BOOT_ID=" + bootA: true}
+	for i := 1; i <= 6; i++ {
+		want["MESSAGE=line "+strconv.Itoa(i)] = true
+	}
+	dataAt := map[uint64]bool{}
+	for _, o := range objectsOf(t, b) {
+		if o.typ != objectData {
+			continue
+		}
+		dataAt[o.off] = true
+		payload := string(b[o.off+72 : o.off+o.size])
+		if !want[payload] {
+			t.Errorf("data object at %d holds %q from offset 72, want one of the payloads of the entries", o.off, payload)
+		}
+		delete(want, payload)
+	}
+	if len(want) != 0 {
+		t.Errorf("no data object holds the payloads %v, want one for each", want)
+	}
+	return dataAt
+}
+
+// requireCompactEntries wants every entry object to be 64 bytes plus 4 bytes per item, each item the 32-bit offset of a data object, and
+// returns the offsets of the entry objects.
+func requireCompactEntries(t *testing.T, b []byte, dataAt map[uint64]bool, count int) []uint64 {
+	t.Helper()
+	var entries []uint64
+	for _, o := range objectsOf(t, b) {
+		if o.typ != objectEntry {
+			continue
+		}
+		entries = append(entries, o.off)
+		items := (o.size - 64) / 4
+		if (o.size-64)%4 != 0 || items != 4 { // _TRANSPORT, MESSAGE, PRIORITY and _BOOT_ID
+			t.Errorf("entry at %d has the size %d, want 64 plus 4 bytes for each of 4 items", o.off, o.size)
+			continue
+		}
+		for i := uint64(0); i < items; i++ {
+			if p := uint64(binary.LittleEndian.Uint32(b[o.off+64+4*i:])); !dataAt[p] {
+				t.Errorf("item %d of the entry at %d is %d, want the offset of a data object", i, o.off, p)
+			}
+		}
+	}
+	if len(entries) != count {
+		t.Fatalf("the file holds %d entry objects, want %d", len(entries), count)
+	}
+	return entries
+}
+
+// requireCompactArrays wants the main entry array chain to hold 4-byte items: arrays of 4 and 8 items for 6 entries.
+func requireCompactArrays(t *testing.T, b []byte, entries []uint64) {
+	t.Helper()
+	le := binary.LittleEndian
+	arr := le.Uint64(b[176:])
+	var got []uint64
+	for i, capacity := range []uint64{4, 8} {
+		if arr == 0 {
+			t.Fatalf("the main entry array chain has %d arrays, want 2", i)
+		}
+		if size := le.Uint64(b[arr+8:]); b[arr] != objectArray || size != 24+4*capacity {
+			t.Fatalf("main entry array %d at %d has type %d and size %d, want type %d and size %d (4-byte items)", i+1, arr, b[arr], size, objectArray, 24+4*capacity)
+		}
+		for k := uint64(0); k < capacity; k++ {
+			if v := uint64(le.Uint32(b[arr+24+4*k:])); v != 0 {
+				got = append(got, v)
+			}
+		}
+		arr = le.Uint64(b[arr+16:])
+	}
+	if !slices.Equal(got, entries) {
+		t.Errorf("the 4-byte items of the main entry arrays are %v, want the offsets of the entries %v", got, entries)
+	}
 }
 
 func TestWrite_StoresLongFieldsAsZstdFramesOfRawBlocks(t *testing.T) {
@@ -374,16 +556,21 @@ func TestWrite_StoresLongFieldsAsZstdFramesOfRawBlocks(t *testing.T) {
 }
 
 func TestWrite_ReaderSeesEveryKernelEntry(t *testing.T) {
-	for _, f := range fixtureFiles(t, readFixtureExport(t)) {
-		var buf bytes.Buffer
-		if err := Write(&buf, f.entries, f.opts); err != nil {
-			t.Fatalf("Write(%s) error = %v, want nil", f.name, err)
-		}
-		jf, err := journal.Open(bytes.NewReader(buf.Bytes()), int64(buf.Len()), strings.HasSuffix(f.name, "~"))
-		if err != nil {
-			t.Fatalf("%s: journal.Open() error = %v, want nil", f.name, err)
-		}
-		compareKernelEntries(t, f, jf)
+	for _, l := range layouts {
+		t.Run(l.name, func(t *testing.T) {
+			for _, f := range fixtureFiles(t, readFixtureExport(t), l.compact) {
+				var buf bytes.Buffer
+				if err := Write(&buf, f.entries, f.opts); err != nil {
+					t.Fatalf("Write(%s) error = %v, want nil", f.name, err)
+				}
+				requireLayoutOf(t, f.name, buf.Bytes(), l.compact)
+				jf, err := journal.Open(bytes.NewReader(buf.Bytes()), int64(buf.Len()), strings.HasSuffix(f.name, "~"))
+				if err != nil {
+					t.Fatalf("%s: journal.Open() error = %v, want nil", f.name, err)
+				}
+				compareKernelEntries(t, f, jf)
+			}
+		})
 	}
 }
 
@@ -461,17 +648,33 @@ func checkTimes(t *testing.T, file string, i int, e *journal.Entry, w entry) {
 	}
 }
 
-// TestFixture_UpdateGolden writes the fixture journal files; run with VANDOX_UPDATE_GOLDEN=1.
+// TestFixture_UpdateGolden writes the fixture journal files of both layouts (testdata/journal and testdata/journal/compact); run with
+// VANDOX_UPDATE_GOLDEN=1.
 func TestFixture_UpdateGolden(t *testing.T) {
 	if os.Getenv("VANDOX_UPDATE_GOLDEN") != "1" {
 		t.Skip("VANDOX_UPDATE_GOLDEN is not 1")
 	}
-	files := fixtureFiles(t, readFixtureExport(t))
-	writeFixtureFiles(t, fixtureDir(), files)
+	for _, l := range layouts {
+		dir := fixtureDirOf(l.compact)
+		if err := os.MkdirAll(dir, 0o750); err != nil {
+			t.Fatalf("creating %s: %v", dir, err)
+		}
+		writeFixtureFiles(t, dir, fixtureFiles(t, readFixtureExport(t), l.compact))
+	}
 }
 
 func TestFixture_CommittedFilesMatchTheWriter(t *testing.T) {
-	files := fixtureFiles(t, readFixtureExport(t))
+	for _, l := range layouts {
+		t.Run(l.name, func(t *testing.T) {
+			requireCommittedFiles(t, l.compact)
+		})
+	}
+}
+
+// requireCommittedFiles wants the committed fixture files of a layout to equal the writer's output, and no other journal file beside them.
+func requireCommittedFiles(t *testing.T, compact bool) {
+	t.Helper()
+	files := fixtureFiles(t, readFixtureExport(t), compact)
 	dir := t.TempDir()
 	writeFixtureFiles(t, dir, files)
 	for _, f := range files {
@@ -479,7 +682,7 @@ func TestFixture_CommittedFilesMatchTheWriter(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		got, err := os.ReadFile(filepath.Join(fixtureDir(), f.name))
+		got, err := os.ReadFile(filepath.Join(fixtureDirOf(compact), f.name))
 		if err != nil {
 			t.Errorf("%s is not committed: %v (regenerate with VANDOX_UPDATE_GOLDEN=1)", f.name, err)
 			continue
@@ -488,8 +691,8 @@ func TestFixture_CommittedFilesMatchTheWriter(t *testing.T) {
 			t.Errorf("%s differs from the writer's output (%d bytes committed, %d generated); regenerate with VANDOX_UPDATE_GOLDEN=1", f.name, len(got), len(want))
 		}
 	}
-	if left, _ := filepath.Glob(filepath.Join(fixtureDir(), "system*")); len(left) != len(files) {
-		t.Errorf("testdata/journal holds %d journal files, want exactly the %d the writer makes", len(left), len(files))
+	if left, _ := filepath.Glob(filepath.Join(fixtureDirOf(compact), "system*.journal*")); len(left) != len(files) {
+		t.Errorf("%s holds %d journal files, want exactly the %d the writer makes", fixtureDirOf(compact), len(left), len(files))
 	}
 }
 
@@ -677,5 +880,24 @@ func TestWrite_CompressFailureFailsTheWrite(t *testing.T) {
 
 	if !errors.Is(err, boom) {
 		t.Errorf("Write() error = %v, want it to wrap the error of Compress", err)
+	}
+}
+
+func TestU32ClampsAboveTheCompactWidth(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		in   uint64
+		want uint32
+	}{
+		{"zero", 0, 0},
+		{"the largest 32-bit value", math.MaxUint32, math.MaxUint32},
+		{"one above the 32-bit range", math.MaxUint32 + 1, math.MaxUint32},
+		{"the largest 64-bit value", math.MaxUint64, math.MaxUint32},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := u32(tt.in); got != tt.want {
+				t.Errorf("u32(%d) = %d, want %d", tt.in, got, tt.want)
+			}
+		})
 	}
 }
