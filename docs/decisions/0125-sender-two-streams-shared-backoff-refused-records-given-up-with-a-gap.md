@@ -36,7 +36,8 @@ Refused records:
 2. **Give the whole refused batch up with a gap** — no hole, but one bad record costs up to about 2,700 good ones.
 3. **Split the refused batch until only the refused records remain, give each of them up with a recorded gap, at most 10 an
    hour** (chosen) — no hole, the loss is one record per bad record and is recorded; a backend that refuses everything is
-   caught by the hourly bound and treated as not accepting, so it costs at most 10 records an hour.
+   caught by the hourly bound: the stream that meets it waits until a give-up slot frees, so it costs at most 10 records and a
+   bounded number of requests an hour, while the other stream goes on.
 
 Ranges after reconnects:
 
@@ -53,7 +54,7 @@ the backend's disk differ between installations; the throttle counts compressed 
 
 The sender runs a live and a backfill stream over one shared episode and backoff, throttles only the backfill stream, splits a
 refused batch and gives each refused record up with a `gap` record (cause `unknown`, its sequence number) at most 10 times an
-hour, jumps the live stream forward only while fewer than 32 acknowledged ranges are open, and pauses the backfill in the
+hour (beyond that the stream waits for a free slot), advances a stream's position only after the spool kept the acknowledgement, jumps the live stream forward only while fewer than 32 acknowledged ranges are open, and pauses the backfill in the
 memory pressure mode. The values, log lines and order of events are in the [Agent](../areas/agent.md) area (*Spool and
 sending*); the option is in [Configuration and secrets](../areas/configuration-and-secrets.md).
 
@@ -62,6 +63,8 @@ sending*); the option is in [Configuration and secrets](../areas/configuration-a
 - A record the backend refuses on its own is lost, but recorded as a gap the backend receives; the guarantee holds.
 - A version mismatch must not be answered with a refusal status (record 0124), or the hourly bound would still give up 10
   records an hour.
-- The backend's lateness check (#41) must allow the 5-second send interval plus a request's time.
+- The backend's lateness check (#41) must allow the 4-second send interval plus up to ten back-to-back requests (10 seconds in all).
+- The hourly bound is kept in memory: each start of the agent allows 10 more give-ups. Restarts are rare and each give-up is a recorded
+  gap, so a persisted bound was not worth a second state file.
 - The sender needs the spool's count of open acknowledged ranges, a read-only addition to the spool.
 - Revisit the 32-range threshold and the hourly bound if the server measurement (#44) or real outages show other figures.

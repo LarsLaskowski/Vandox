@@ -64,15 +64,20 @@ self-metrics and what the backend's ingest endpoint receives. "Acknowledged" mea
 - E1: The backend accepts the connection but never answers, or answers slowly: every request ends after at most 30 seconds (connecting,
   sending and the answer together) as a failed attempt with `reason` `timeout`, and the agent waits and tries again as in S2; a hanging
   request never holds up the collectors, the spool, the watchdog or the other stream.
-- E2: The backend refuses one batch as invalid (status `400`, `413` or `422`): the stream that sent it splits it into two halves and
+- E2: The backend refuses one batch as invalid (status `400`, `413` or `422` with the header `Vandox-Refused: batch`, which only the
+  ingest endpoint sends; the same statuses without it come from something else, such as a TLS listener reached with `http`, and count
+  as E3): the stream that sent it splits it into two halves and
   sends them in turn, splitting again on every refusal, so the acceptable records are acknowledged and only the refused ones remain; a
   batch of one record that is refused is given up: the agent marks the record acknowledged in the spool, hands the spool a `gap` with
   cause `unknown`, source `agent`, `first_seq` and `last_seq` the record's number and `from`/`to` its capture time (to one second
   later), which is sent like any record, and logs the warning `record refused` with the `status`, `seq` and `kind`. A refused record
   therefore never stays unacknowledged and never stops other data. At most 10 records are given up per hour (on the monotonic clock);
-  a refusal beyond that counts as the backend not accepting batches (`reason` `refused`, E3), so a backend that refuses everything costs
-  at most 10 records an hour, each recorded as a gap, and keeps the rest in the spool.
-- E3: Any other answer that is not `2xx` — `401` or `403` (`reason` `token refused`), `404` (a backend with an ingest listener but
+  when the bound is reached, the stream that met the refusal stops and waits until the oldest give-up of the hour is an hour old, then
+  sends the refused batch again; the warning `backend not accepting batches` with `reason` `refused` and the `status` is logged once
+  for that wait, no acknowledgement of the other stream ends it, and the other stream goes on. A backend that refuses everything
+  therefore costs at most 10 records an hour, each recorded as a gap, and a bounded number of requests; the rest stays in the spool.
+  The bound is kept in memory, so each start of the agent allows 10 more.
+- E3: Any other answer that is not `2xx` — `401` or `403` (`reason` `token refused`), `400`, `413` or `422` without `Vandox-Refused: batch`, `404` (a backend with an ingest listener but
   without the ingest endpoint, which answers `404` there today), `408`, `415`, `429`, a `3xx` redirect, a `5xx` — and a connection or TLS
   failure (`reason` `connection failed`, `tls failed`) count as the backend not accepting batches: nothing is acknowledged, both streams
   wait as in S2. A redirect is never followed. A backend that does not know the batch's format version must answer with such a status,
@@ -174,7 +179,8 @@ self-metrics and what the backend's ingest endpoint receives. "Acknowledged" mea
 - [ ] AC4: During a backfill of a backlog many times the size of one batch, against a backend that answers every request within 0.5
   seconds, while records are handed to the spool at the live rate (10 MiB of record lines in 10 seconds, in bursts of 1,000 records
   every 2 seconds), every record handed over after the backend accepts batches again is received at the latest 10 seconds after its
-  hand-over; above that rate the `live` batches go back to back, in order, and no record is dropped or moved to `backfill` (S4).
+  hand-over, also when 10 MiB are handed over right after a send tick; above that rate the `live` batches go back to back, in order,
+  and no record is dropped or moved to `backfill` (S4).
 - [ ] AC5: With `backend.backfill_bandwidth` set to a value B, the compressed bytes of the `backfill` request bodies sent in any span of
   T seconds are at most B times T plus one batch, `live` batches are not counted and not delayed, and without the key B is `256KiB`
   (S5).
@@ -182,18 +188,22 @@ self-metrics and what the backend's ingest endpoint receives. "Acknowledged" mea
   README options table, and a value outside the rule stops the agent with exit code 1 and the error text of E17, without the value (E17).
 - [ ] AC7: An agent started on a spool that holds unacknowledged records sends current data first and those records as backlog, never
   sends a record the spool holds acknowledged, and a record whose answer was lost is sent again (S6, E7).
-- [ ] AC8: For a batch with one record the backend refuses (`400`, `413` or `422` whenever that record is in the batch), every other
+- [ ] AC8: For a batch with one record the backend refuses (`400`, `413` or `422` with `Vandox-Refused: batch` whenever that record is
+  in the batch), every other
   record of the batch is acknowledged, the refused record is acknowledged in the spool, a `gap` with cause `unknown` and that record's
   number as `first_seq` and `last_seq` is handed to the spool and received by the backend, `record refused` is logged once with its
   status, number and kind, and later `live` and `backfill` batches go on; the eleventh refused record within an hour is not given up
-  but starts an episode with `reason` `refused` and stays in the spool (E2).
+  and stays in the spool, its stream waits until a give-up slot frees while the other stream's acknowledgements go on; over two hours
+  of a backlog holding 20 records the backend always refuses, at most 20 records are given up, the warning with `reason` `refused` is
+  logged at most twice and at most 500 requests are sent; a `400` without the header gives nothing up and counts as E3 (E2, E3).
 - [ ] AC9: A request that gets no answer ends after at most 30 seconds as a failed attempt, and while it hangs the other stream and a
   new hand-over to the spool go on (E1).
 - [ ] AC10: The agent follows no redirect, uses no proxy from the environment, verifies an `https` certificate, sends the token only in
   its requests to `backend.url`, and judges an answer by its status after reading at most 4 KiB of its body; no log line of the sender
   contains the URL, its host, the token or the answer's body (E3, E4, E5, E6).
 - [ ] AC11: An acknowledgement the spool refuses logs `acknowledgement not kept` once per episode and leaves the records to be sent
-  again, and a failed spool read logs `spool not readable` once per episode and is retried after a wait while the other stream goes on
+  again — the stream's position does not move, the batch is sent again only after a wait of the backoff schedule (never at once), and
+  records a backfill pass left unacknowledged are sent by a later pass —, and a failed spool read logs `spool not readable` once per episode and is retried after a wait while the other stream goes on
   (E8, E13).
 - [ ] AC12: While the memory pressure mode is on no `backfill` batch is sent and `live` batches go on; `backfill paused` and `backfill
   resumed` are logged at the changes (E12).

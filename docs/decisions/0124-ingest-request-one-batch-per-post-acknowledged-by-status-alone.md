@@ -28,19 +28,23 @@ them apart.
 4. **`Content-Encoding: gzip` on a JSON Lines body** — HTTP-conformant, but invites a server's request decompression to
    unpack the body before the strict gzip check (record 0076) and before the limit on compressed bytes; a gzip body type keeps
    the decoding in the ingest code.
-5. **Token in a custom header or the URL** — a URL ends up in access logs; a custom header gains nothing over the standard
+5. **Refusal by status alone** — `400`, `413` and `422` also come from things that are not the ingest endpoint: a TLS listener
+   reached with `http` answers `400`, a proxy or server limit `413`. The agent would give records up for a configuration error.
+   A response header that only the ingest endpoint sets (`Vandox-Refused: batch`) marks a refusal of the batch itself; without it
+   the status counts as "not accepting" and nothing is given up.
+6. **Token in a custom header or the URL** — a URL ends up in access logs; a custom header gains nothing over the standard
    `Authorization` scheme, which proxies and server frameworks already treat as a credential.
 
 ## Decision
 
 Option 1 with a gzip body type and a bearer token: one wire-format batch per `POST` to a fixed path under `backend.url`,
-acknowledged by a `2xx` status that the backend sends only after its commit, with `400`, `413` and `422` reserved for a batch
-that is invalid as a whole. The request, the headers and the status classes are in the [Agent](../areas/agent.md) area
+acknowledged by a `2xx` status that the backend sends only after its commit, with `400`, `413` and `422` plus the header `Vandox-Refused: batch` reserved for a batch that is invalid as a whole (option 5). The request, the headers and the status classes are in the [Agent](../areas/agent.md) area
 (*Spool and sending*) and, as the contract #40 implements, in [Backend host](../areas/backend-host.md) (*Ingest endpoint*).
 
 ## Consequences
 
-- The agent needs no response parser; a hostile or broken backend can only choose a status.
+- The agent needs no response parser; a hostile or broken backend can only choose a status and one fixed header value.
+- A wrong scheme or a proxy limit costs no record: such answers lack the header and only make the agent wait and retry.
 - #40 has to answer an unsupported format version, a missing or wrong token, a full disk or a busy store with a status outside
   `400`, `413` and `422`, so the agent keeps the batch instead of giving its records up (record 0125).
 - A lost answer makes the agent send the batch again; the backend's deduplication (records 0045, 0063) stores it once.
