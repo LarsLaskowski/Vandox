@@ -33,6 +33,7 @@ import (
 	"github.com/LarsLaskowski/Vandox/internal/procstats"
 	"github.com/LarsLaskowski/Vandox/internal/scheduler"
 	"github.com/LarsLaskowski/Vandox/internal/selfstats"
+	"github.com/LarsLaskowski/Vandox/internal/sender"
 	"github.com/LarsLaskowski/Vandox/internal/spool"
 	"github.com/LarsLaskowski/Vandox/internal/svcstats"
 	"github.com/LarsLaskowski/Vandox/internal/sysstats"
@@ -1708,9 +1709,61 @@ func spoolRunOptions(t *testing.T, config string) (Options, *syncBuffer) {
 	opts := lowMemoryOptions(t, 0)
 	opts.ConfigPath = writeConfig(t, config)
 	opts.Environ = []string{"VANDOX_AGENT_TOKEN=" + testToken}
+	opts.Transport = &fakeTransport{hang: true}
 	stderr := &syncBuffer{}
 	opts.Stderr = stderr
 	return opts, stderr
+}
+
+// fakeTransport is a sender.Transport that never touches the network. With hang it holds every request until the request's
+// context ends (and then, with linger, a further span of fake time) and answers like the real transport does; else it answers
+// every request with res.
+type fakeTransport struct {
+	hang   bool
+	res    sender.Result
+	linger time.Duration
+
+	mu       sync.Mutex
+	sends    int
+	inflight int
+}
+
+// Send implements sender.Transport.
+func (f *fakeTransport) Send(ctx context.Context, _ []byte) sender.Result {
+	f.mu.Lock()
+	f.sends++
+	f.inflight++
+	f.mu.Unlock()
+	defer func() {
+		f.mu.Lock()
+		f.inflight--
+		f.mu.Unlock()
+	}()
+	if f.hang {
+		return f.hold(ctx)
+	}
+
+	return f.res
+}
+
+// hold waits for the end of ctx and answers as the real transport does.
+func (f *fakeTransport) hold(ctx context.Context) sender.Result {
+	<-ctx.Done()
+	if f.linger > 0 {
+		time.Sleep(f.linger)
+	}
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return sender.Result{Reason: "timeout"}
+	}
+	return sender.Result{}
+}
+
+// counts returns the requests made so far and the requests in flight.
+func (f *fakeTransport) counts() (sends, inflight int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	return f.sends, f.inflight
 }
 
 // runInBubble runs the agent for d of fake time, stops it and returns its exit code.
@@ -2194,5 +2247,116 @@ func TestRun_SpoolHoldsNoSecret(t *testing.T) {
 	}
 	if spoolFiles < 2 {
 		t.Errorf("spool files in the directory = %d, want a data file and the meta file, so that the search covers the spool", spoolFiles)
+	}
+}
+
+func TestRun_StartsWithUnreachableBackend(t *testing.T) {
+	opts, stderr := spoolRunOptions(t, validConfig)
+	transport := &fakeTransport{res: sender.Result{Reason: "connection failed"}}
+	opts.Transport = transport
+
+	code := runInBubble(t, opts, 65*time.Second)
+
+	out := stderr.String()
+	if code != 0 {
+		t.Fatalf("Run() = %d, want 0 (an unreachable backend does not stop the agent); log:\n%s", code, out)
+	}
+	if n := countLines(out, `msg="agent cannot start"`); n != 0 {
+		t.Errorf("lines %q = %d, want 0; log:\n%s", "agent cannot start", n, out)
+	}
+	if n := countLines(out, `level=WARN`, `msg="backend not accepting batches"`, `component=sender`, `reason="connection failed"`); n != 1 {
+		t.Errorf("warning lines %q from the sender = %d, want 1 for the whole episode; log:\n%s", "backend not accepting batches", n, out)
+	}
+	if sends, _ := transport.counts(); sends < 2 {
+		t.Errorf("requests to the unreachable backend = %d, want at least 2 (the sender tries again after its waits)", sends)
+	}
+	records := readSpool(t, opts.StateDir).Records
+	if len(records) == 0 {
+		t.Errorf("records in the spool = %d, want the agent's records kept while the backend is down", len(records))
+	}
+}
+
+func TestNewScheduler_PressureReachesSender(t *testing.T) {
+	opts := lowMemoryOptions(t, 0)
+	cfg := config.DefaultAgent()
+	var (
+		mu    sync.Mutex
+		first []bool
+		other []bool
+	)
+	record := func(into *[]bool) func(bool) {
+		return func(high bool) {
+			mu.Lock()
+			defer mu.Unlock()
+			*into = append(*into, high)
+		}
+	}
+
+	synctest.Test(t, func(t *testing.T) {
+		sched, err := newScheduler(opts, &cfg, storeFor(opts, &cfg), sinkFor(opts), slog.New(slog.DiscardHandler), record(&first), record(&other))
+		if err != nil {
+			t.Fatalf("newScheduler() error = %v, want nil", err)
+		}
+
+		runFor(t, sched, 35*time.Second)
+	})
+
+	mu.Lock()
+	defer mu.Unlock()
+	if !slices.Equal(first, []bool{true}) {
+		t.Errorf("states passed to the first callback = %v, want [true] (the low memory fixture switches the mode on once)", first)
+	}
+	if !slices.Equal(other, []bool{true}) {
+		t.Errorf("states passed to the second callback = %v, want [true]", other)
+	}
+}
+
+func TestRun_SenderStopsBeforeSpoolCloses(t *testing.T) {
+	oldClose := spoolClose
+	t.Cleanup(func() { spoolClose = oldClose })
+	// the request outlives the cancel by one second of fake time, so only a Run that waits for the sender sees it end
+	transport := &fakeTransport{hang: true, linger: time.Second}
+	opts, stderr := spoolRunOptions(t, validConfig)
+	opts.Transport = transport
+	var sendsAtClose, inflightAtClose int
+	spoolClose = func(ctx context.Context, sp *spool.Spool) error {
+		sendsAtClose, inflightAtClose = transport.counts()
+
+		return sp.Close(ctx)
+	}
+	var (
+		code           int
+		sendsBeforeEnd int
+	)
+
+	synctest.Test(t, func(*testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan int, 1)
+		go func() { done <- Run(ctx, opts) }()
+		time.Sleep(10 * time.Second)
+		synctest.Wait()
+		sendsBeforeEnd, _ = transport.counts()
+		cancel()
+		code = <-done
+	})
+
+	out := stderr.String()
+	if code != 0 {
+		t.Fatalf("Run() = %d after the cancel, want 0; log:\n%s", code, out)
+	}
+	if sendsBeforeEnd < 1 {
+		t.Fatalf("requests before the cancel = %d, want at least 1 (a send in flight at the stop)", sendsBeforeEnd)
+	}
+	if inflightAtClose != 0 {
+		t.Errorf("requests in flight when the spool closed = %d, want 0 (the sender stops before the spool closes)", inflightAtClose)
+	}
+	if sends, _ := transport.counts(); sends != sendsAtClose {
+		t.Errorf("requests after the spool closed = %d, want 0", sends-sendsAtClose)
+	}
+	if n := countLines(out, `msg="spool not closed"`); n != 0 {
+		t.Errorf("lines %q = %d, want 0; log:\n%s", "spool not closed", n, out)
+	}
+	if n := countLines(out, `level=WARN`, `component=sender`); n != 0 {
+		t.Errorf("sender warnings = %d, want 0 (a stop is not a failure); log:\n%s", n, out)
 	}
 }
