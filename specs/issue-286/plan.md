@@ -252,3 +252,11 @@ only forward, and fail-closed for any other layout. `docs/ARCHITECTURE.md` gets 
 - Journals without keyed hashes, XZ/LZ4 items, and the 4 GiB size cap of compact files (no reader change needed).
 - Optional, not blocking: regenerate the samples into fresh output files after the `live.export` fix, which changes only the
   pinned numbers and the sha256.
+
+## Challenge notes
+
+- minor: The plan gives the minimum size and the payload position of a data object, but not how many bytes are read to find the field name. `readItem` (`internal/journal/entry.go:115`) and `readItemWith` (`internal/journal/entries.go:91`) read `dataFixed+namePrefix` (64+64) bytes and take `head := obj[dataFixed:]`. If only the slice start moves to `payloadOff` (72), a compact file shows just 56 name bytes. A wanted field whose name is 56 to 64 bytes long (systemd allows 64) would then have no `=` in `head` and would be dropped without a sign. Instruction for the Dev: read `f.payloadOff+namePrefix` bytes in both functions (128 + 8 still fits `scratchSize` 256). Instruction for the Tester: add a compact case to the AC4/AC5 tests with a wanted field whose name is 64 bytes long, read through both `Next` and `NextWith`.
+
+## Security notes
+
+- non-blocking (plan, step 1, "`Refresh` recomputes them through `load`"): the widths are re-derived on every `Refresh`, but a `Cursor` keeps `arrCap`, which `array()` computed with the old `slotWidth`. If the COMPACT bit of an online file changes between `Open` and `Refresh`, `listItem` and `position()` reuse the stale `arrCap`. That happens with a hostile or replaced file; journald never does it. Example: capacity counted with 4-byte slots, then read with 8-byte slots. `arr + 24 + 8*k` can then reach up to about twice the array's size past its start. That is an unchecked offset, possibly beyond `declEnd`. The impact is low. The read goes into the fixed scratch buffer, and the value is then checked by `object()`. Rewriting an array's size in place can already cause a similar stale-capacity read today. Suggested fix: `Refresh` refuses a COMPACT bit that differs from the one seen at `Open` (`ErrMalformed`, keeping the previous state, as `Refresh` already does on error), with one case in AC4. Then a cursor never mixes widths. AC4's "flag flipped" case covers only a static file at `Open`, not a flip across `Refresh`.
