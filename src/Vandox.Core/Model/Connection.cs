@@ -51,6 +51,20 @@ public sealed class Connection
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public string Command { get; set; } = string.Empty;
 
+    /// <summary>
+    /// Gets or sets the UID of the socket from the kernel table; <c>null</c> when unknown.
+    /// </summary>
+    [JsonPropertyName("uid")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public uint? Uid { get; set; }
+
+    /// <summary>
+    /// Gets or sets the name of the UID, empty when absent.
+    /// </summary>
+    [JsonPropertyName("user")]
+    [OmitWhenEmpty]
+    public string User { get; set; } = string.Empty;
+
     #endregion // Properties
 
     #region Methods

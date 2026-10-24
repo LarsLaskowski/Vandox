@@ -1,6 +1,7 @@
 package model
 
 import (
+	"errors"
 	"net/netip"
 )
 
@@ -82,6 +83,12 @@ type Listener struct {
 	Local   netip.AddrPort `json:"local"`
 	PID     int32          `json:"pid,omitempty"`
 	Command string         `json:"command,omitempty"`
+	// UID is the socket's UID from the kernel table; nil means unknown, 0 is root.
+	UID *uint32 `json:"uid,omitempty"`
+	// User is the name of UID, or its decimal form when no name is known.
+	User string `json:"user,omitempty"`
+	// MixedUIDs is true when sockets of several UIDs share the endpoint; UID is then the lowest.
+	MixedUIDs bool `json:"mixed_uids,omitempty"`
 }
 
 // Connection is a socket with a remote endpoint.
@@ -92,6 +99,10 @@ type Connection struct {
 	State   string         `json:"state,omitempty"`
 	PID     int32          `json:"pid,omitempty"`
 	Command string         `json:"command,omitempty"`
+	// UID is the socket's UID from the kernel table; nil means unknown, 0 is root.
+	UID *uint32 `json:"uid,omitempty"`
+	// User is the name of UID, or its decimal form when no name is known.
+	User string `json:"user,omitempty"`
 }
 
 // Kind returns KindConnectionSnapshot.
@@ -309,6 +320,11 @@ func checkCountValue(path string, n uint32) error {
 		return invalid(path+".count", "must be at least 1")
 	}
 	return nil
+}
+
+// checkSocketUser checks the socket's UID, user name and mixed-UIDs flag of an entry.
+func checkSocketUser(path string, uid *uint32, user string, mixed bool) error {
+	return errors.New("not implemented")
 }
 
 func checkProcess(path string, pid int32, command string) error {

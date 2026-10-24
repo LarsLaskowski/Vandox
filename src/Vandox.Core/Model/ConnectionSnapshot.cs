@@ -197,6 +197,21 @@ public sealed class ConnectionSnapshot : IPayload
     }
 
     /// <summary>
+    /// Checks the UID, the user name and the mixed-UIDs flag of an entry.
+    /// </summary>
+    /// <param name="path">Path of the entry</param>
+    /// <param name="uid">The UID; <c>null</c> when unknown</param>
+    /// <param name="user">The user name</param>
+    /// <param name="mixedUids">Whether sockets of several UIDs share the endpoint</param>
+    /// <returns>The first rule that is broken, or <c>null</c></returns>
+#pragma warning disable RH2003, S2325
+    internal static FieldError? CheckSocketUser(string path, uint? uid, string user, bool mixedUids)
+    {
+        throw new NotImplementedException();
+    }
+#pragma warning restore RH2003, S2325
+
+    /// <summary>
     /// Checks every entry of a list.
     /// </summary>
     /// <typeparam name="TItem">Type of the entries</typeparam>
