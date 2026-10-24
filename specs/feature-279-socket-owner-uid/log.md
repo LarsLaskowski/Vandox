@@ -15,4 +15,4 @@ are quoted in full.
 | 2026-10-24 08:57 | 5 Tests first G1 | squad-tester | Tests for AC8/AC9 written; Go 15 subtests and C# 13 cases fail as intended; S46-S51 agree in both decoders; deferred (pass on skeleton): null test, UID-zero test, 3 storage tests (sonnet/medium · 172,481 tokens · 45 tool uses · 590 s) |
 | 2026-10-24 09:01 | 6 Implement G1 | squad-dev | checkSocketUser/CheckSocketUser implemented and called; Go and .NET tests green (sonnet/medium · 72,206 tokens · 13 tool uses · 263 s) |
 | 2026-10-24 09:02 | 4 Skeleton G2 | squad-dev | Skeleton for collector done; build and existing tests pass (sonnet/medium · 100,399 tokens · 14 tool uses · 39 s) |
-| 2026-10-24 09:14 | 5 Tests first G2 | squad-tester | Collector tests for AC1-AC7 written; 31 connstats tests fail as intended; deferred: 3 tests (procstats ReadUsers/UserName, late-run log) (sonnet/medium · usage pending) |
+| 2026-10-24 09:14 | 5 Tests first G2 | squad-tester | Collector tests for AC1-AC7 written; 31 connstats tests fail as intended; deferred: 3 tests (procstats ReadUsers/UserName, late-run log) (sonnet/medium · 297,589 tokens · 46 tool uses · 684 s) |
