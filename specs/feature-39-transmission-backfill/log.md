@@ -37,4 +37,4 @@ are quoted in full.
 | 2026-10-24 18:52 | 8 Tester fix round 2 (pause lines) | squad-tester | reconnect-under-pressure subtest moved to TestSender_BackfillPausedUnderMemoryPressure (1/1); sender package 105.6 s under -race (sonnet/medium · 3,174 tokens · 3 tool uses · 135 s · continued) |
 | 2026-10-24 19:00 | 7 Code Officer (review round 1 fixes) | squad-code-officer | Two gocognit findings in tests fixed by helper extraction; analyzer gate passes (haiku/medium · 82,038 tokens · 11 tool uses · 238 s) |
 | 2026-10-24 19:10 | 8 Security diff review round 2 (delta) | squad-security | APPROVED, no new findings (opus/medium · 7,430 tokens · 3 tool uses · 38 s · continued) |
-| 2026-10-24 19:10 | 8 Review round 2 (delta) | squad-reviewer | APPROVE; all 3 blocking findings resolved, mutations now fail the new tests; sender package 108 s under -race noted (opus/medium · usage pending) |
+| 2026-10-24 19:10 | 8 Review round 2 (delta) | squad-reviewer | APPROVE; all 3 blocking findings resolved, mutations now fail the new tests; sender package 108 s under -race noted (opus/medium · 20,081 tokens · 10 tool uses · 568 s · continued) |
