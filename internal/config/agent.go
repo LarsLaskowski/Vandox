@@ -41,6 +41,14 @@ type BackendTarget struct {
 // Spool configures the local spool.
 type Spool struct {
 	Directory string `yaml:"directory"`
+	// MaxSize is the size cap of the spool as written, such as 2GiB.
+	MaxSize string `yaml:"max_size"`
+	// MinFree is the free space that stays available on the spool's file system as written, such as 1GiB.
+	MinFree string `yaml:"min_free"`
+	// MaxBytes is MaxSize in bytes; it is set by validation.
+	MaxBytes int64 `yaml:"-"`
+	// MinFreeBytes is MinFree in bytes; it is set by validation.
+	MinFreeBytes int64 `yaml:"-"`
 }
 
 // Log configures logging.
@@ -304,8 +312,14 @@ type AgentSecrets struct {
 // DefaultAgent returns the agent configuration with every optional key at its default.
 func DefaultAgent() Agent {
 	return Agent{
-		Spool: Spool{Directory: "/var/lib/vandox/spool"},
-		Log:   Log{Level: "info"},
+		Spool: Spool{
+			Directory:    "/var/lib/vandox/spool",
+			MaxSize:      "2GiB",
+			MinFree:      "1GiB",
+			MaxBytes:     2 << 30,
+			MinFreeBytes: 1 << 30,
+		},
+		Log: Log{Level: "info"},
 
 		Filesystem: Filesystem{MountPoints: []string{"/"}},
 		Backups:    Backups{Processes: []BackupRule{{Command: "pzstd"}}},
@@ -316,12 +330,12 @@ func DefaultAgent() Agent {
 	}
 }
 
-// AgentKeys returns every option key path in file order: agent_id, backend.url, spool.directory, log.level,
+// AgentKeys returns every option key path in file order: agent_id, backend.url, spool.directory, spool.max_size, spool.min_free, log.level,
 // filesystem.mount_points, processes.programs, services.units, mariadb.enabled, mariadb.socket, backups.processes and the log_shipping
 // options journal, min_priority, files and drop.
 func AgentKeys() []string {
 	return []string{
-		keyAgentID, keyBackendURL, "spool.directory", "log.level", "filesystem.mount_points", "processes.programs", "services.units",
+		keyAgentID, keyBackendURL, "spool.directory", "spool.max_size", "spool.min_free", "log.level", "filesystem.mount_points", "processes.programs", "services.units",
 		"mariadb.enabled", "mariadb.socket", "backups.processes",
 		"log_shipping.journal", "log_shipping.min_priority", keyShippingFiles, keyShippingDrop,
 	}
@@ -368,6 +382,13 @@ func (a *Agent) validate(file string, lines map[string]int) error {
 	if err := checkDirectory(file, lines, "spool.directory", a.Spool.Directory); err != nil {
 		return err
 	}
+	var err error
+	if a.Spool.MaxBytes, err = checkSize(file, lines, "spool.max_size", a.Spool.MaxSize, minSpoolMax, maxSpoolMax, spoolMaxText); err != nil {
+		return err
+	}
+	if a.Spool.MinFreeBytes, err = checkSize(file, lines, "spool.min_free", a.Spool.MinFree, 0, maxSpoolMinFree, spoolMinFreeText); err != nil {
+		return err
+	}
 	if err := checkLogLevel(file, lines, "log.level", a.Log.Level); err != nil {
 		return err
 	}
@@ -389,6 +410,28 @@ func (a *Agent) validate(file string, lines map[string]int) error {
 		return err
 	}
 	return a.LogShipping.validate(file, lines)
+}
+
+// Bounds of spool.max_size and spool.min_free in bytes.
+const (
+	minSpoolMax     = 64 << 20
+	maxSpoolMax     = 64 << 30
+	maxSpoolMinFree = 1024 << 30
+)
+
+// Reasons spool.max_size and spool.min_free are refused with; none of them quotes a value.
+const (
+	spoolMaxText     = "must be a whole number of MiB or GiB from 64MiB to 64GiB, such as 512MiB or 2GiB"
+	spoolMinFreeText = "must be a whole number of MiB or GiB from 0MiB to 1024GiB, such as 0MiB or 1GiB"
+)
+
+// checkSize parses the size value of key and checks that it lies between lo and hi bytes.
+func checkSize(file string, lines map[string]int, key, value string, lo, hi int64, reason string) (int64, error) {
+	n, ok := parseSize(value)
+	if ok && n >= lo && n <= hi {
+		return n, nil
+	}
+	return 0, keyError(file, lines, key, reason)
 }
 
 // checkMountPoints checks the list of filesystem.mount_points.

@@ -44,6 +44,16 @@ type fakeSender struct {
 
 func (f fakeSender) SendLag(context.Context) (time.Duration, error) { return f.lag, f.err }
 
+type fakeSpoolAge struct {
+	oldest time.Time
+	found  bool
+	err    error
+}
+
+func (f fakeSpoolAge) OldestCapture(context.Context) (time.Time, bool, error) {
+	return f.oldest, f.found, f.err
+}
+
 func readSample(t *testing.T) string {
 	t.Helper()
 
@@ -331,6 +341,93 @@ func TestCollector_ProviderErrors(t *testing.T) {
 				t.Errorf("Collect() returned %d records with an error, want none", len(got))
 			}
 		})
+	}
+}
+
+func TestCollect_SpoolAge(t *testing.T) {
+	tests := []struct {
+		name string
+		age  fakeSpoolAge
+		want float64
+	}{
+		{"oldest 90.5 seconds before the start", fakeSpoolAge{oldest: runStart.Add(-90500 * time.Millisecond), found: true}, 90.5},
+		{"oldest at the start", fakeSpoolAge{oldest: runStart, found: true}, 0},
+		{"oldest after the start", fakeSpoolAge{oldest: runStart.Add(time.Hour), found: true}, 0},
+		{"empty spool", fakeSpoolAge{found: false}, 0},
+		{"empty spool ignores the time", fakeSpoolAge{oldest: runStart.Add(-time.Hour), found: false}, 0},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			src := sources(readSample(t))
+			src.Spool = fakeSpool{bytes: 4096}
+			src.SpoolAge = tc.age
+
+			got, err := collect(t, src)
+
+			if err != nil {
+				t.Fatalf("Collect() error = %v, want nil", err)
+			}
+			requireMetrics(t, got, []wantMetric{
+				{selfstats.MetricRSS, sampleRSSKB * 1024, "bytes"},
+				{selfstats.MetricCPU, 1.5, "seconds"},
+				{selfstats.MetricGoroutines, 12, ""},
+				{selfstats.MetricSpool, 4096, "bytes"},
+				{selfstats.MetricSpoolAge, tc.want, "seconds"},
+			})
+		})
+	}
+}
+
+func TestCollect_SpoolAgeWithoutSpoolBytes(t *testing.T) {
+	src := sources(readSample(t))
+	src.SpoolAge = fakeSpoolAge{oldest: runStart.Add(-2 * time.Second), found: true}
+
+	got, err := collect(t, src)
+
+	if err != nil {
+		t.Fatalf("Collect() error = %v, want nil", err)
+	}
+	requireMetrics(t, got, []wantMetric{
+		{selfstats.MetricRSS, sampleRSSKB * 1024, "bytes"},
+		{selfstats.MetricCPU, 1.5, "seconds"},
+		{selfstats.MetricGoroutines, 12, ""},
+		{selfstats.MetricSpoolAge, 2, "seconds"},
+	})
+}
+
+func TestCollect_SpoolAgeNilEmitsNoMetric(t *testing.T) {
+	src := sources(readSample(t))
+	src.Spool = fakeSpool{bytes: 1}
+
+	got, err := collect(t, src)
+
+	if err != nil {
+		t.Fatalf("Collect() error = %v, want nil", err)
+	}
+	for _, r := range got {
+		if p, ok := r.Data.(*model.MetricPoint); ok && p.Name == selfstats.MetricSpoolAge {
+			t.Errorf("Collect() holds %s without a SpoolAge provider, want none", selfstats.MetricSpoolAge)
+		}
+	}
+}
+
+func TestCollect_SpoolAgeProviderError(t *testing.T) {
+	boom := errors.New("boom")
+	src := sources(readSample(t))
+	src.Spool = fakeSpool{bytes: 1}
+	src.SpoolAge = fakeSpoolAge{err: boom}
+
+	got, err := collect(t, src)
+
+	if !errors.Is(err, boom) {
+		t.Errorf("Collect() error = %v, want it to wrap the provider's error", err)
+	}
+	if err != nil && !strings.HasPrefix(err.Error(), "selfstats: spool age: ") {
+		t.Errorf("Collect() error = %q, want the prefix %q", err, "selfstats: spool age: ")
+	}
+	if len(got) != 0 {
+		t.Errorf("Collect() returned %d records with an error, want none", len(got))
 	}
 }
 

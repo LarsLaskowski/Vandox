@@ -63,7 +63,7 @@ events*, *Boots*, *Backup runs*) and the [wire format](../areas/wire-format.md).
 - An extra snapshot is a sample like any other (predecessor, `Run.PreviousLost`, gaps); without pressure mode it costs at most one more
   snapshot per collector per 15 seconds.
 - A span whose result is dropped more than three times in a row is given up with a gap; its kills are then lost although the journal
-  may still hold them, for example during a sink error lasting more than four runs (later a full spool, #38) even when the sink
+  may still hold them, for example during a sink error lasting more than four runs (a spool write that keeps failing, #38; a full spool drops its oldest data instead of refusing) even when the sink
   recovers soon after.
 - Whether a kill is live is judged with `/proc/uptime`, which counts time in suspend, against the journal's monotonic clock, which
   does not; they agree on a server that never suspends, which could not be measured before the first run on the server (#42 checks

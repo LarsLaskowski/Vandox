@@ -91,3 +91,12 @@ func CheckRecord(r *model.Record) (int, error) {
 	}
 	return len(line) + 1, nil
 }
+
+// MarshalRecord validates r like CheckRecord and returns its wire line without the trailing '\n'.
+// A record that fails validation or exceeds the line limit yields the same error CheckRecord returns.
+func MarshalRecord(r *model.Record) ([]byte, error) {
+	if _, err := CheckRecord(r); err != nil {
+		return nil, err
+	}
+	return marshalLine(r)
+}

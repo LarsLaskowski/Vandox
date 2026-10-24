@@ -33,6 +33,7 @@ import (
 	"github.com/LarsLaskowski/Vandox/internal/procstats"
 	"github.com/LarsLaskowski/Vandox/internal/scheduler"
 	"github.com/LarsLaskowski/Vandox/internal/selfstats"
+	"github.com/LarsLaskowski/Vandox/internal/spool"
 	"github.com/LarsLaskowski/Vandox/internal/svcstats"
 	"github.com/LarsLaskowski/Vandox/internal/sysstats"
 )
@@ -748,7 +749,7 @@ func TestJobs_Schedules(t *testing.T) {
 			cfg.MariaDB.Enabled = false
 			log := slog.New(slog.NewTextHandler(io.Discard, nil))
 
-			list, _, _, err := jobs(Options{Self: fixtureSources(), System: fixtureSystem(), Processes: fixtureProcesses(), Connections: fixtureConnections(), Services: fixtureServices(), MariaDB: fixtureMariaDB(), Kernel: fixtureKernel(), Logs: fixtureLogs(), StateDir: t.TempDir()}, &cfg, log)
+			list, _, err := jobs(Options{Self: fixtureSources(), System: fixtureSystem(), Processes: fixtureProcesses(), Connections: fixtureConnections(), Services: fixtureServices(), MariaDB: fixtureMariaDB(), Kernel: fixtureKernel(), Logs: fixtureLogs(), StateDir: t.TempDir()}, &cfg, storeFor(Options{Self: fixtureSources(), System: fixtureSystem(), Processes: fixtureProcesses(), Connections: fixtureConnections(), Services: fixtureServices(), MariaDB: fixtureMariaDB(), Kernel: fixtureKernel(), Logs: fixtureLogs(), StateDir: t.TempDir()}, &cfg), log)
 
 			if err != nil {
 
@@ -804,7 +805,7 @@ func TestJobs_MariaDBAfterSystemdOnlyWhenEnabled(t *testing.T) {
 			cfg.Services.Units = tt.units
 			log := slog.New(slog.NewTextHandler(io.Discard, nil))
 
-			list, _, _, err := jobs(Options{Self: fixtureSources(), System: fixtureSystem(), Processes: fixtureProcesses(), Connections: fixtureConnections(), Services: fixtureServices(), MariaDB: fixtureMariaDB(), Kernel: fixtureKernel(), Logs: fixtureLogs(), StateDir: t.TempDir()}, &cfg, log)
+			list, _, err := jobs(Options{Self: fixtureSources(), System: fixtureSystem(), Processes: fixtureProcesses(), Connections: fixtureConnections(), Services: fixtureServices(), MariaDB: fixtureMariaDB(), Kernel: fixtureKernel(), Logs: fixtureLogs(), StateDir: t.TempDir()}, &cfg, storeFor(Options{Self: fixtureSources(), System: fixtureSystem(), Processes: fixtureProcesses(), Connections: fixtureConnections(), Services: fixtureServices(), MariaDB: fixtureMariaDB(), Kernel: fixtureKernel(), Logs: fixtureLogs(), StateDir: t.TempDir()}, &cfg), log)
 
 			if err != nil {
 
@@ -980,7 +981,7 @@ func TestNewScheduler_LowMemoryMakesFullProcessSnapshots(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		sink := &snapshotSink{}
 		opts.Sink = sink
-		sched, _, err := newScheduler(opts, &cfg, slog.New(slog.DiscardHandler))
+		sched, err := newScheduler(opts, &cfg, storeFor(opts, &cfg), sinkFor(opts), slog.New(slog.DiscardHandler))
 		if err != nil {
 			t.Fatalf("newScheduler() error = %v, want nil", err)
 		}
@@ -1089,7 +1090,7 @@ func TestNewScheduler_RecordsServiceStatesOfConfiguredUnits(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		sink := &recordSink{}
 		opts.Sink = sink
-		sched, _, err := newScheduler(opts, &cfg, slog.New(slog.DiscardHandler))
+		sched, err := newScheduler(opts, &cfg, storeFor(opts, &cfg), sinkFor(opts), slog.New(slog.DiscardHandler))
 		if err != nil {
 			t.Fatalf("newScheduler() error = %v, want nil", err)
 		}
@@ -1154,7 +1155,7 @@ func TestNewScheduler_EmptyServiceUnitsNeverOpenSystemd(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		sink := &recordSink{}
 		opts.Sink = sink
-		sched, _, err := newScheduler(opts, &cfg, slog.New(slog.DiscardHandler))
+		sched, err := newScheduler(opts, &cfg, storeFor(opts, &cfg), sinkFor(opts), slog.New(slog.DiscardHandler))
 		if err != nil {
 			t.Fatalf("newScheduler() error = %v, want nil", err)
 		}
@@ -1214,7 +1215,7 @@ func TestJobs_BackupsOnlyWithRules(t *testing.T) {
 			cfg.Backups.Processes = tt.rules
 			log := slog.New(slog.NewTextHandler(io.Discard, nil))
 
-			list, _, _, err := jobs(Options{Self: fixtureSources(), System: fixtureSystem(), Processes: fixtureProcesses(), Connections: fixtureConnections(), Services: fixtureServices(), MariaDB: fixtureMariaDB(), Kernel: fixtureKernel(), Logs: fixtureLogs(), StateDir: t.TempDir()}, &cfg, log)
+			list, _, err := jobs(Options{Self: fixtureSources(), System: fixtureSystem(), Processes: fixtureProcesses(), Connections: fixtureConnections(), Services: fixtureServices(), MariaDB: fixtureMariaDB(), Kernel: fixtureKernel(), Logs: fixtureLogs(), StateDir: t.TempDir()}, &cfg, storeFor(Options{Self: fixtureSources(), System: fixtureSystem(), Processes: fixtureProcesses(), Connections: fixtureConnections(), Services: fixtureServices(), MariaDB: fixtureMariaDB(), Kernel: fixtureKernel(), Logs: fixtureLogs(), StateDir: t.TempDir()}, &cfg), log)
 
 			if err != nil {
 
@@ -1268,7 +1269,7 @@ func runSchedulerFor(t *testing.T, opts Options, cfg *config.Agent, d time.Durat
 	t.Helper()
 
 	synctest.Test(t, func(t *testing.T) {
-		sched, _, err := newScheduler(opts, cfg, slog.New(slog.DiscardHandler))
+		sched, err := newScheduler(opts, cfg, storeFor(opts, cfg), sinkFor(opts), slog.New(slog.DiscardHandler))
 		if err != nil {
 			t.Fatalf("newScheduler() error = %v, want nil", err)
 		}
@@ -1304,7 +1305,9 @@ func TestNewScheduler_MissingSpoolDirectoryIsNeverCreated(t *testing.T) {
 	opts.Sink = sink
 
 	synctest.Test(t, func(t *testing.T) {
-		sched, _, err := newScheduler(opts, &cfg, slog.New(slog.NewTextHandler(out, nil)))
+		logger := slog.New(slog.NewTextHandler(out, nil))
+		store, _, _ := openStorage(opts, &cfg, logger)
+		sched, err := newScheduler(opts, &cfg, store, sinkFor(opts), logger)
 		if err != nil {
 			t.Fatalf("newScheduler() error = %v, want nil (a missing spool directory does not stop the agent)", err)
 		}
@@ -1345,7 +1348,7 @@ func TestNewScheduler_LiveKillTriggersExtraSnapshots(t *testing.T) {
 	const victim = 4711
 
 	synctest.Test(t, func(t *testing.T) {
-		sched, _, err := newScheduler(opts, &cfg, slog.New(slog.DiscardHandler))
+		sched, err := newScheduler(opts, &cfg, storeFor(opts, &cfg), sinkFor(opts), slog.New(slog.DiscardHandler))
 		if err != nil {
 			t.Fatalf("newScheduler() error = %v, want nil", err)
 		}
@@ -1443,7 +1446,7 @@ func TestJobs_ZeroKernelSourcesStillBuildAllJobs(t *testing.T) {
 	cfg := config.DefaultAgent()
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 
-	list, _, _, err := jobs(Options{Self: fixtureSources(), System: fixtureSystem(), Processes: fixtureProcesses(), Connections: fixtureConnections(), Services: fixtureServices(), MariaDB: fixtureMariaDB(), StateDir: t.TempDir()}, &cfg, log)
+	list, _, err := jobs(Options{Self: fixtureSources(), System: fixtureSystem(), Processes: fixtureProcesses(), Connections: fixtureConnections(), Services: fixtureServices(), MariaDB: fixtureMariaDB(), StateDir: t.TempDir()}, &cfg, storeFor(Options{Self: fixtureSources(), System: fixtureSystem(), Processes: fixtureProcesses(), Connections: fixtureConnections(), Services: fixtureServices(), MariaDB: fixtureMariaDB(), StateDir: t.TempDir()}, &cfg), log)
 
 	if err != nil {
 
@@ -1671,14 +1674,525 @@ func TestLogshipConfig_PatternThatDoesNotCompileIsRefusedWithoutQuotingIt(t *tes
 		options := Options{Self: fixtureSources(), System: fixtureSystem(), Processes: fixtureProcesses(), Connections: fixtureConnections(), Services: fixtureServices(), MariaDB: fixtureMariaDB(), Kernel: fixtureKernel(), Logs: fixtureLogs(), StateDir: t.TempDir()}
 		log := slog.New(slog.DiscardHandler)
 
-		list, _, _, err := jobs(options, &cfg, log)
+		list, _, err := jobs(options, &cfg, storeFor(options, &cfg), log)
 
 		if !errors.Is(err, errDropPattern) || list != nil || strings.Contains(err.Error(), pattern) {
 			t.Errorf("jobs() = %d jobs, error %v, want no jobs and %v without the pattern", len(list), err, errDropPattern)
 		}
-		sched, _, err := newScheduler(options, &cfg, log)
+		sched, err := newScheduler(options, &cfg, storeFor(options, &cfg), sinkFor(options), log)
 		if !errors.Is(err, errDropPattern) || sched != nil || strings.Contains(err.Error(), pattern) {
 			t.Errorf("newScheduler() = %v, error %v, want no scheduler and %v without the pattern", sched, err, errDropPattern)
 		}
 	})
+}
+
+// storeFor opens the state store the way Run does, for the tests that call jobs and newScheduler directly.
+func storeFor(opts Options, cfg *config.Agent) *agentstate.Store {
+	store, _, _ := openStorage(opts, cfg, slog.New(slog.DiscardHandler))
+	return store
+}
+
+// sinkFor returns the sink Run hands the scheduler: opts.Sink or else the discarding one.
+func sinkFor(opts Options) scheduler.Putter {
+	if opts.Sink != nil {
+		return opts.Sink
+	}
+	return scheduler.DiscardSink{}
+}
+
+// spoolRunOptions returns the options of a run without Options.Sink, so the agent keeps its records in a real spool in
+// Options.StateDir, and the buffer that holds the agent's log.
+func spoolRunOptions(t *testing.T, config string) (Options, *syncBuffer) {
+	t.Helper()
+
+	opts := lowMemoryOptions(t, 0)
+	opts.ConfigPath = writeConfig(t, config)
+	opts.Environ = []string{"VANDOX_AGENT_TOKEN=" + testToken}
+	stderr := &syncBuffer{}
+	opts.Stderr = stderr
+	return opts, stderr
+}
+
+// runInBubble runs the agent for d of fake time, stops it and returns its exit code.
+func runInBubble(t *testing.T, opts Options, d time.Duration) int {
+	t.Helper()
+
+	var code int
+	synctest.Test(t, func(*testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan int, 1)
+		go func() { done <- Run(ctx, opts) }()
+		time.Sleep(d)
+		synctest.Wait()
+		cancel()
+		code = <-done
+	})
+	return code
+}
+
+// readSpool opens the spool the agent left in dir (agent web-1 in the boot of the kernel fixture) and returns every record it
+// holds, with the identity of the batches.
+func readSpool(t *testing.T, dir string) spool.Batch {
+	t.Helper()
+
+	ctx := context.Background()
+	sp, err := spool.Open(spool.Options{Dir: dir, AgentID: "web-1", BootID: kernelBootRaw, MaxBytes: 2 << 30}, slog.New(slog.DiscardHandler))
+	if err != nil {
+		t.Fatalf("spool.Open() error = %v, want the spool the agent left to open", err)
+	}
+	defer func() {
+		if err := sp.Close(ctx); err != nil {
+			t.Errorf("Close() error = %v, want nil", err)
+		}
+	}()
+
+	var all spool.Batch
+	for after := uint64(0); ; {
+		batch, err := sp.Read(ctx, after, 100000, 1<<30)
+		if err != nil {
+			t.Fatalf("Read(%d) error = %v, want nil", after, err)
+		}
+		if len(batch.Records) == 0 {
+			return all
+		}
+		all.AgentID, all.BootID, all.ClockOffsetNS = batch.AgentID, batch.BootID, batch.ClockOffsetNS
+		all.Records = append(all.Records, batch.Records...)
+		after = batch.Records[len(batch.Records)-1].Seq
+	}
+}
+
+// metricValues returns the values of the metric name in the order of the records.
+func metricValues(records []model.Record, name string) []float64 {
+	var values []float64
+	for _, r := range records {
+		if p, ok := r.Data.(*model.MetricPoint); ok && p.Name == name {
+			values = append(values, p.Value)
+		}
+	}
+	return values
+}
+
+// requireIncreasing fails unless the sequence numbers of records are above 0 and strictly increasing.
+func requireIncreasing(t *testing.T, records []model.Record) {
+	t.Helper()
+
+	var prev uint64
+	for i, r := range records {
+		if r.Seq <= prev {
+			t.Fatalf("record %d has sequence number %d after %d, want strictly increasing numbers above 0", i, r.Seq, prev)
+		}
+		prev = r.Seq
+	}
+}
+
+func TestRun_SpoolKeepsRecords(t *testing.T) {
+	opts, stderr := spoolRunOptions(t, validConfig)
+
+	code := runInBubble(t, opts, 65*time.Second)
+
+	if code != 0 {
+		t.Fatalf("Run() = %d, want 0", code)
+	}
+	batch := readSpool(t, opts.StateDir)
+	if len(batch.Records) == 0 {
+		t.Fatalf("the spool holds no record after a run without a sink, want the records of the collectors; log:\n%s", stderr.String())
+	}
+	if batch.AgentID != "web-1" || batch.BootID != kernelBootRaw {
+		t.Errorf("batch identity = %q/%q, want web-1/%s (the agent ID and the boot ID read at start)", batch.AgentID, batch.BootID, kernelBootRaw)
+	}
+	if batch.ClockOffsetNS != nil {
+		t.Errorf("clock offset = %d, want none (the agent has no estimate)", *batch.ClockOffsetNS)
+	}
+	requireIncreasing(t, batch.Records)
+	if len(metricValues(batch.Records, selfstats.MetricRSS)) == 0 {
+		t.Errorf("the spool holds no %s sample, want the self metrics", selfstats.MetricRSS)
+	}
+	if n := countLines(stderr.String(), `msg="sink failed"`); n != 0 {
+		t.Errorf("lines %q = %d, want 0 (the spool takes every run); log:\n%s", "sink failed", n, stderr.String())
+	}
+}
+
+// metricRecords returns the records of the metric name in the order of the records.
+func metricRecords(records []model.Record, name string) []model.Record {
+	var found []model.Record
+	for _, r := range records {
+		if p, ok := r.Data.(*model.MetricPoint); ok && p.Name == name {
+			found = append(found, r)
+		}
+	}
+	return found
+}
+
+// requireBootRecord fails unless records hold the boot event of the kernel fixture at its btime, and reports whether it is
+// the first record: concurrent collectors decide whether the first sequence number goes to it or to another record.
+func requireBootRecord(t *testing.T, records []model.Record) bool {
+	t.Helper()
+
+	const btime = 946681200
+	for i, r := range records {
+		if event, ok := r.Data.(*model.KernelEvent); ok && event.Type == model.KernelEventBoot {
+			if !r.CapturedAt.Equal(time.Unix(btime, 0)) {
+				t.Fatalf("boot event captured at %v, want the fixture's btime %d (%v)", r.CapturedAt, btime, time.Unix(btime, 0).UTC())
+			}
+			return i == 0
+		}
+	}
+	t.Fatalf("the spool holds no boot event, want the one of the fixture's btime %d", btime)
+	return false
+}
+
+func TestRun_SpoolReportersFeedTheSelfMetrics(t *testing.T) {
+	opts, _ := spoolRunOptions(t, validConfig)
+
+	code := runInBubble(t, opts, 130*time.Second)
+
+	if code != 0 {
+		t.Fatalf("Run() = %d, want 0", code)
+	}
+	records := readSpool(t, opts.StateDir).Records
+	sizes := metricValues(records, selfstats.MetricSpool)
+	ages := metricRecords(records, selfstats.MetricSpoolAge)
+	if len(sizes) < 3 || len(ages) < 3 {
+		t.Fatalf("self samples with %s = %d and with %s = %d, want 3 of each in 130 s", selfstats.MetricSpool, len(sizes), selfstats.MetricSpoolAge, len(ages))
+	}
+	if last := sizes[len(sizes)-1]; last <= 0 {
+		t.Errorf("last %s = %v, want the size of the data files, above 0", selfstats.MetricSpool, last)
+	}
+	// the oldest record by sequence is the fixture's boot event, one hour before the clock start, unless a record of another
+	// collector (a gap at the clock start) was numbered first
+	bootFirst := requireBootRecord(t, records)
+	last := ages[len(ages)-1]
+	got := last.Data.(*model.MetricPoint).Value
+	if want := last.CapturedAt.Sub(records[0].CapturedAt).Seconds(); got != want {
+		t.Errorf("last %s = %v, want %v (the sample's capture time minus the oldest capture time)", selfstats.MetricSpoolAge, got, want)
+	}
+	if want := 3720.0; bootFirst && got != want {
+		t.Errorf("last %s = %v, want %v (3600 s boot offset and the 120 s of the third run)", selfstats.MetricSpoolAge, got, want)
+	}
+}
+
+func TestRun_StopOrder(t *testing.T) {
+	var (
+		stderr = &syncBuffer{}
+		code   int
+	)
+	// the options are made outside the bubble: a temporary directory of the bubble's t is removed before the reads below
+	opts, _ := spoolRunOptions(t, validConfig)
+	synctest.Test(t, func(t *testing.T) {
+		world := newKernelWorld()
+		origin := time.Now().Add(-time.Hour)
+		world.addJournalFile(t, []map[string][]byte{kernelLine(1, origin, 10, 0, "first"), kernelLine(2, origin, 20, 0, "second")})
+		opts.Stderr = stderr
+		opts.Kernel = world.sources()
+		opts.Logs = world.logSources()
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan int, 1)
+		go func() { done <- Run(ctx, opts) }()
+
+		time.Sleep(time.Second)
+		synctest.Wait()
+		world.addJournalFile(t, []map[string][]byte{kernelLine(3, origin, 30, 0, "third"), kernelLine(4, origin, 40, 0, "fourth")})
+		time.Sleep(4 * time.Second)
+		synctest.Wait()
+		cancel()
+		code = <-done
+	})
+
+	if code != 0 {
+		t.Fatalf("Run() = %d after the cancel, want 0", code)
+	}
+	out := stderr.String()
+	if n := countLines(out, `msg="sink failed"`); n != 0 {
+		t.Errorf("lines %q = %d, want 0 (the scheduler has stopped before the spool closes); log:\n%s", "sink failed", n, out)
+	}
+	if lines := logLines(out); !strings.Contains(lines[len(lines)-1], `msg="agent stopped"`) {
+		t.Errorf("last log line = %q, want %q", lines[len(lines)-1], "agent stopped")
+	}
+	meta, err := os.ReadFile(filepath.Join(opts.StateDir, "spool-meta.json"))
+	if err != nil {
+		t.Fatalf("reading the meta file: %v, want the spool to have written it", err)
+	}
+	if !strings.Contains(string(meta), `"clean":true`) {
+		t.Errorf("meta file = %s, want the spool closed cleanly at the stop", meta)
+	}
+	requireSavedPositionKept(t, opts.StateDir)
+}
+
+// requireSavedPositionKept fails unless the state saved at the stop holds the journal position 4 and the spool in dir holds the
+// log line of that position: the state never runs ahead of the spool.
+func requireSavedPositionKept(t *testing.T, dir string) {
+	t.Helper()
+
+	store, status := agentstate.Open(dir, slog.New(slog.DiscardHandler))
+	if status != agentstate.StatusLoaded {
+		t.Fatalf("state file status = %v, want StatusLoaded after the stop", status)
+	}
+	logs := store.State().Logs
+	if logs == nil || len(logs.Journal) != 1 || logs.Journal[0].Seqnum != 4 {
+		t.Fatalf("saved log positions = %+v, want the one journal position at the sequence number 4", logs)
+	}
+	var shipped []string
+	for _, r := range readSpool(t, dir).Records {
+		if l, ok := r.Data.(*model.LogLine); ok && l.Log == "journal" {
+			shipped = append(shipped, l.Message)
+		}
+	}
+	if !slices.Equal(shipped, []string{"third", "fourth"}) {
+		t.Errorf("log lines in the spool = %v, want [third fourth] (every line the saved position covers)", shipped)
+	}
+}
+
+func TestRun_SpoolCloseGivesUp(t *testing.T) {
+	t.Run("a nil spool is ignored", func(t *testing.T) {
+		out := &syncBuffer{}
+
+		closeSpool(nil, slog.New(slog.NewTextHandler(out, nil)))
+
+		if out.String() != "" {
+			t.Errorf("log = %q, want no line for a nil spool", out.String())
+		}
+	})
+	t.Run("a spool that cannot be closed is logged once without its path", func(t *testing.T) {
+		dir := t.TempDir()
+		sp, err := spool.Open(spool.Options{Dir: dir, AgentID: "web-1", BootID: kernelBootRaw, MaxBytes: 2 << 30}, slog.New(slog.DiscardHandler))
+		if err != nil {
+			t.Fatalf("spool.Open() error = %v, want nil", err)
+		}
+		// a FIFO in place of the meta file's temporary file: the meta write of the close is refused
+		if err := syscall.Mkfifo(filepath.Join(dir, "spool-meta.json.tmp"), 0o600); err != nil {
+			t.Fatalf("Mkfifo: %v", err)
+		}
+		out := &syncBuffer{}
+
+		closeSpool(sp, slog.New(slog.NewTextHandler(out, nil)))
+
+		if n := countLines(out.String(), `level=WARN`, `msg="spool not closed"`); n != 1 {
+			t.Errorf("warning lines %q = %d, want 1; log:\n%s", "spool not closed", n, out.String())
+		}
+		if strings.Contains(out.String(), dir) {
+			t.Errorf("the log holds the spool directory path, want no path; log:\n%s", out.String())
+		}
+	})
+	t.Run("a close that hangs is given up at the deadline", testSpoolCloseHangs)
+}
+
+// testSpoolCloseHangs checks that closeSpool gives up on a Close that never returns, in fake time.
+func testSpoolCloseHangs(t *testing.T) {
+	oldClose, oldTimeout := spoolClose, closeTimeout
+	t.Cleanup(func() { spoolClose, closeTimeout = oldClose, oldTimeout })
+	synctest.Test(t, func(t *testing.T) {
+		sp, err := spool.Open(spool.Options{Dir: t.TempDir(), AgentID: "web-1", BootID: kernelBootRaw, MaxBytes: 2 << 30}, slog.New(slog.DiscardHandler))
+		if err != nil {
+			t.Fatalf("spool.Open() error = %v, want nil", err)
+		}
+		release := make(chan struct{})
+		defer func() {
+			close(release)
+			_ = sp.Close(context.Background())
+		}()
+		spoolClose = func(context.Context, *spool.Spool) error {
+			<-release
+
+			return nil
+		}
+		closeTimeout = 100 * time.Millisecond
+		out := &syncBuffer{}
+		done := make(chan struct{})
+
+		go func() {
+			closeSpool(sp, slog.New(slog.NewTextHandler(out, nil)))
+			close(done)
+		}()
+		time.Sleep(closeTimeout)
+		synctest.Wait()
+
+		select {
+		case <-done:
+		default:
+			t.Fatalf("closeSpool still running after the %v deadline, want it to give up", closeTimeout)
+		}
+		if n := countLines(out.String(), `level=WARN`, `msg="spool not closed"`); n != 1 {
+			t.Errorf("warning lines %q = %d, want 1; log:\n%s", "spool not closed", n, out.String())
+		}
+	})
+}
+
+// requireStartFailure fails unless Run answered 1, logged one "agent cannot start" error with err and no path of paths, and
+// notified the service manager of nothing.
+func requireStartFailure(t *testing.T, code int, out string, socket *notificationSocket, wantErr string, paths ...string) {
+	t.Helper()
+
+	if code != 1 {
+		t.Errorf("Run() = %d, want 1", code)
+	}
+	if n := countLines(out, "level=ERROR", `msg="agent cannot start"`, `err="`+wantErr+`"`); n != 1 {
+		t.Errorf("lines %q with err=%q = %d, want 1; log:\n%s", "agent cannot start", wantErr, n, out)
+	}
+	for _, p := range paths {
+		if p != "" && strings.Contains(out, p) {
+			t.Errorf("the log holds the path %q, want no path; log:\n%s", p, out)
+		}
+	}
+	socket.requireSilent(t)
+}
+
+func TestRun_SpoolCannotStart(t *testing.T) {
+	const (
+		dirPrefix = "spool: directory: "
+		noBootID  = "spool: boot id: not readable"
+	)
+	tests := []struct {
+		name    string
+		setup   func(t *testing.T, base string, opts *Options)
+		wantErr string
+	}{
+		{"missing directory", func(_ *testing.T, base string, o *Options) { o.StateDir = filepath.Join(base, "missing") },
+			dirPrefix + "no such file or directory"},
+		{"a file in place of the directory", func(t *testing.T, base string, o *Options) {
+			o.StateDir = filepath.Join(base, "file")
+			if err := os.WriteFile(o.StateDir, nil, 0o600); err != nil {
+				t.Fatalf("WriteFile: %v", err)
+			}
+		}, dirPrefix + "not a directory"},
+		{"a symbolic link in place of the directory", func(t *testing.T, base string, o *Options) {
+			if err := os.Mkdir(filepath.Join(base, "real"), 0o700); err != nil {
+				t.Fatalf("Mkdir: %v", err)
+			}
+			o.StateDir = filepath.Join(base, "link")
+			if err := os.Symlink(filepath.Join(base, "real"), o.StateDir); err != nil {
+				t.Fatalf("Symlink: %v", err)
+			}
+		}, dirPrefix + "symbolic link"},
+		{"a path that is not clean", func(_ *testing.T, base string, o *Options) { o.StateDir = base + "/." },
+			dirPrefix + "not an absolute, clean path"},
+		{"a path that is not absolute", func(_ *testing.T, _ string, o *Options) { o.StateDir = "relative-spool" },
+			dirPrefix + "not an absolute, clean path"},
+		{"missing directory from the configuration", func(t *testing.T, base string, o *Options) {
+			o.StateDir = ""
+			o.ConfigPath = writeConfig(t, validConfig+"spool:\n  directory: "+filepath.Join(base, "missing")+"\n")
+		}, dirPrefix + "no such file or directory"},
+		{"a directory in place of the meta file", func(t *testing.T, base string, o *Options) {
+			o.StateDir = base
+			if err := os.Mkdir(filepath.Join(base, "spool-meta.json"), 0o700); err != nil {
+				t.Fatalf("Mkdir: %v", err)
+			}
+		}, "spool: meta: refused entry"},
+		{"a FIFO in place of the temporary meta file", func(t *testing.T, base string, o *Options) {
+			o.StateDir = base
+			if err := syscall.Mkfifo(filepath.Join(base, "spool-meta.json.tmp"), 0o600); err != nil {
+				t.Fatalf("Mkfifo: %v", err)
+			}
+		}, "spool: meta: refused entry"},
+		{"unreadable boot ID", func(_ *testing.T, base string, o *Options) {
+			o.StateDir = base
+			o.Kernel.Proc = newMemTree(map[string]string{"stat": "cpu  1 2 3 4\nbtime 946681200\nprocesses 5\n", "uptime": "5000000.00 100.00\n"})
+		}, noBootID},
+		{"malformed boot ID", func(_ *testing.T, base string, o *Options) {
+			o.StateDir = base
+			o.Kernel.Proc = newMemTree(map[string]string{"sys/kernel/random/boot_id": "not-a-boot-id\n", "uptime": "5000000.00 100.00\n"})
+		}, "spool: boot id: not a lower-case UUID"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			base := t.TempDir()
+			socket := newNotificationSocket(t)
+			opts, stderr := spoolRunOptions(t, validConfig)
+			opts.Environ = append(opts.Environ, "NOTIFY_SOCKET="+socket.path)
+			tc.setup(t, base, &opts)
+			// a cancelled context ends a run that does start at once, so a missing failure shows as exit code 0
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+
+			code := Run(ctx, opts)
+
+			requireStartFailure(t, code, stderr.String(), socket, tc.wantErr, base)
+		})
+	}
+}
+
+// saveStateFile runs the agent once with a sink, so that the directory of opts holds the state file and no spool file.
+func saveStateFile(t *testing.T, opts Options) {
+	t.Helper()
+
+	opts.Sink = &recordSink{}
+	opts.Stderr = &syncBuffer{}
+	if code := runInBubble(t, opts, 5*time.Second); code != 0 {
+		t.Fatalf("first Run() = %d, want 0", code)
+	}
+	if _, err := os.Stat(filepath.Join(opts.StateDir, "agent-state.json")); err != nil {
+		t.Fatalf("Stat(state file) error = %v, want the first run to have saved it", err)
+	}
+}
+
+// requireSpoolCreatedQuietly fails unless out holds one info line "spool created" and no warning of the state file or the spool.
+func requireSpoolCreatedQuietly(t *testing.T, out string) {
+	t.Helper()
+
+	if n := countLines(out, "level=INFO", `msg="spool created"`); n != 1 {
+		t.Errorf("info lines %q = %d, want 1; log:\n%s", "spool created", n, out)
+	}
+	if n := countLines(out, `msg="agent state not available"`); n != 0 {
+		t.Errorf("lines %q = %d, want 0 (the state file is read before the spool exists); log:\n%s", "agent state not available", n, out)
+	}
+	if n := countLines(out, "level=WARN", "spool"); n != 0 {
+		t.Errorf("warnings that mention the spool = %d, want 0; log:\n%s", n, out)
+	}
+}
+
+func TestRun_FirstStartNoWarning(t *testing.T) {
+	tests := []struct {
+		name      string
+		withState bool
+	}{
+		{"empty directory", false},
+		{"directory that holds only the state file", true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			opts, stderr := spoolRunOptions(t, validConfig)
+			if tc.withState {
+				saveStateFile(t, opts)
+			}
+
+			code := runInBubble(t, opts, 5*time.Second)
+
+			if code != 0 {
+				t.Fatalf("Run() = %d, want 0; log:\n%s", code, stderr.String())
+			}
+			requireSpoolCreatedQuietly(t, stderr.String())
+		})
+	}
+}
+
+func TestRun_SpoolHoldsNoSecret(t *testing.T) {
+	const token = "leak-sentinel-0123456789abcdef0123456789"
+	opts, _ := spoolRunOptions(t, validConfig+"log:\n  level: debug\n")
+	opts.Environ = []string{"VANDOX_AGENT_TOKEN=" + token}
+
+	code := runInBubble(t, opts, 65*time.Second)
+
+	if code != 0 {
+		t.Fatalf("Run() = %d, want 0", code)
+	}
+	entries, err := os.ReadDir(opts.StateDir)
+	if err != nil {
+		t.Fatalf("ReadDir: %v", err)
+	}
+	spoolFiles := 0
+	for _, e := range entries {
+		data, err := os.ReadFile(filepath.Join(opts.StateDir, e.Name()))
+		if err != nil {
+			t.Fatalf("reading %s: %v", e.Name(), err)
+		}
+		if strings.HasPrefix(e.Name(), "segment-") || e.Name() == "spool-meta.json" {
+			spoolFiles++
+		}
+		if bytes.Contains(data, []byte(token)) || bytes.Contains(data, []byte(token[:16])) {
+			t.Errorf("file %s holds the agent token or its first 16 bytes, want no secret in any file of the directory", e.Name())
+		}
+	}
+	if spoolFiles < 2 {
+		t.Errorf("spool files in the directory = %d, want a data file and the meta file, so that the search covers the spool", spoolFiles)
+	}
 }

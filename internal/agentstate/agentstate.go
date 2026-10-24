@@ -51,6 +51,7 @@ const (
 	msgUnavailable = "agent state not available"
 	msgNotSaved    = "agent state not saved"
 	reasonRunning  = "agentstate: save still running"
+	reasonDurable  = "agentstate: save: spool not durable"
 
 	// maxHeadLen is the most bytes the head hash of a file position covers.
 	maxHeadLen = 256
@@ -62,6 +63,9 @@ var (
 
 	// errSaveRunning is the error of a Flush that gave up waiting for a save that did not end.
 	errSaveRunning = errors.New(reasonRunning)
+
+	// errNotDurable is the error of a save skipped because the spool barrier failed; it never carries the barrier's own text.
+	errNotDurable = errors.New(reasonDurable)
 
 	validDigest = regexp.MustCompile(`^[0-9a-f]{64}$`)
 )
@@ -184,6 +188,7 @@ type Store struct {
 	urgentPending bool
 	lastSave      time.Time
 	saveFailed    bool
+	barrier       func(ctx context.Context) error
 
 	// saving is the write lock of the state file: a save holds it by sending and releases it by receiving. It covers encoding, writing
 	// and the update of dirty and the sequence number.
@@ -284,6 +289,16 @@ func (s *Store) Update(urgent bool, fn func(*State)) {
 	}
 }
 
+// SetBarrier registers b, which every save of the state file (the state job and Flush) calls first; when b fails the save is not
+// written and is logged as `agent state not saved` with the fixed text `agentstate: save: spool not durable`. A nil b removes the
+// barrier.
+func (s *Store) SetBarrier(b func(ctx context.Context) error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.barrier = b
+}
+
 // Flush saves the state now if it has changed since the last save, waiting at most 5 s for a save that is running. It gives up with
 // a warning and an error when that save does not end, and it logs a failed save itself.
 func (s *Store) Flush(now time.Time) error {
@@ -305,7 +320,10 @@ func (s *Store) Flush(now time.Time) error {
 	st, seq := copyState(s.state), s.seq
 	s.mu.Unlock()
 
-	err := s.saveLocked(st)
+	ctx, cancel := context.WithTimeout(context.Background(), flushWait)
+	defer cancel()
+
+	err := s.saveLocked(ctx, st)
 	s.finishSave(now, seq, err)
 	if err != nil {
 		return errors.New(errText(err))
@@ -314,8 +332,18 @@ func (s *Store) Flush(now time.Time) error {
 	return nil
 }
 
-// saveLocked encodes and writes st; the caller holds the write lock.
-func (s *Store) saveLocked(st State) error {
+// saveLocked calls the barrier, then encodes and writes st; a failing barrier skips the write. The caller holds the write lock.
+func (s *Store) saveLocked(ctx context.Context, st State) error {
+	s.mu.Lock()
+	barrier := s.barrier
+	s.mu.Unlock()
+
+	if barrier != nil {
+		if err := barrier(ctx); err != nil {
+			return errNotDurable
+		}
+	}
+
 	data, err := encode(st)
 	if err == nil {
 		err = write(s.dir, data)
@@ -669,6 +697,10 @@ func writeSync(f *os.File, data []byte) error {
 
 // errText returns the text of the OS error in err without a path.
 func errText(err error) string {
+	if errors.Is(err, errNotDurable) {
+		return reasonDurable
+	}
+
 	var errno syscall.Errno
 	if errors.As(err, &errno) {
 		return "agentstate: save: " + errno.Error()
@@ -714,7 +746,7 @@ func (v *Saver) Collect(ctx context.Context, run scheduler.Run) ([]model.Record,
 		return nil, nil
 	}
 
-	s.finishSave(run.Start, seq, s.saveLocked(st))
+	s.finishSave(run.Start, seq, s.saveLocked(ctx, st))
 
 	return nil, nil
 }

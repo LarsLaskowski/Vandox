@@ -30,6 +30,14 @@ spool:
   # absolute, clean path (no trailing slash). Default: /var/lib/vandox/spool
   directory: /var/lib/vandox/spool
 
+  # Size cap of all files of the spool: a whole number followed by MiB or GiB, from 64MiB to 64GiB. When
+  # the cap leaves no room for new records, the agent drops the oldest spool data first. Default: 2GiB
+  max_size: 2GiB
+
+  # Free space that stays available on the file system of the spool: a whole number followed by MiB or
+  # GiB, from 0MiB to 1024GiB. 0MiB (or 0GiB) switches the check off. Default: 1GiB
+  min_free: 1GiB
+
 log:
   # Log level: debug, info, warn or error. Default: info
   level: info

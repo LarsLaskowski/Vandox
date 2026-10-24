@@ -77,6 +77,9 @@ func TestDefaultAgent(t *testing.T) {
 	if got.Spool.Directory != "/var/lib/vandox/spool" {
 		t.Errorf("DefaultAgent().Spool.Directory = %q, want %q", got.Spool.Directory, "/var/lib/vandox/spool")
 	}
+	if want := (Spool{Directory: "/var/lib/vandox/spool", MaxSize: "2GiB", MinFree: "1GiB", MaxBytes: 2 << 30, MinFreeBytes: 1 << 30}); got.Spool != want {
+		t.Errorf("DefaultAgent().Spool = %+v, want %+v", got.Spool, want)
+	}
 	if got.Log.Level != "info" {
 		t.Errorf("DefaultAgent().Log.Level = %q, want %q", got.Log.Level, "info")
 	}
@@ -93,7 +96,7 @@ func TestDefaultAgent(t *testing.T) {
 
 func TestAgentKeys(t *testing.T) {
 	got := AgentKeys()
-	old := []string{"agent_id", "backend.url", "spool.directory", "log.level", "filesystem.mount_points", "processes.programs", "services.units", "mariadb.enabled", "mariadb.socket", "backups.processes"}
+	old := []string{"agent_id", "backend.url", "spool.directory", "spool.max_size", "spool.min_free", "log.level", "filesystem.mount_points", "processes.programs", "services.units", "mariadb.enabled", "mariadb.socket", "backups.processes"}
 	shipping := []string{"log_shipping.journal", "log_shipping.min_priority", "log_shipping.files", "log_shipping.drop"}
 	var rest []string
 	for _, key := range got {
@@ -1421,5 +1424,161 @@ func TestLoadAgent_BackupProcessesErrors(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) { requireBackupsError(t, tt) })
+	}
+}
+
+const (
+	spoolMaxReason     = "must be a whole number of MiB or GiB from 64MiB to 64GiB, such as 512MiB or 2GiB"
+	spoolMinFreeReason = "must be a whole number of MiB or GiB from 0MiB to 1024GiB, such as 0MiB or 1GiB"
+	spoolMaxLine       = 5
+	spoolMinFreeLine   = 6
+)
+
+// spoolDoc builds a valid agent file whose spool section sets max_size (line 5) and min_free (line 6) to the
+// raw YAML texts given; an empty text leaves the key out.
+func spoolDoc(maxSize, minFree string) string {
+	doc := validAgent + "spool:\n"
+	if maxSize != "" {
+		doc += "  max_size: " + maxSize + "\n"
+	}
+	if minFree != "" {
+		doc += "  min_free: " + minFree + "\n"
+	}
+	return doc
+}
+
+func TestLoadAgent_SpoolSizes(t *testing.T) {
+	t.Run("defaults", testSpoolSizeDefaults)
+	t.Run("valid values", testSpoolSizeValid)
+	t.Run("max_size refused", func(t *testing.T) {
+		testSpoolSizeRefused(t, "spool.max_size", spoolMaxLine, spoolMaxReason, maxSizeBad)
+	})
+	t.Run("min_free refused", func(t *testing.T) {
+		testSpoolSizeRefused(t, "spool.min_free", spoolMinFreeLine, spoolMinFreeReason, minFreeBad)
+	})
+	t.Run("max_size is checked before min_free", testSpoolSizeOrder)
+}
+
+func testSpoolSizeDefaults(t *testing.T) {
+	path := writeTemp(t, validAgent)
+	got, err := LoadAgent(path, agentEnv())
+	if err != nil {
+		t.Fatalf("LoadAgent(%q) error = %v, want nil", validAgent, err)
+	}
+	want := Spool{Directory: "/var/lib/vandox/spool", MaxSize: "2GiB", MinFree: "1GiB", MaxBytes: 2 << 30, MinFreeBytes: 1 << 30}
+	if got.Spool != want {
+		t.Errorf("LoadAgent(%q).Spool = %+v, want %+v", validAgent, got.Spool, want)
+	}
+}
+
+func testSpoolSizeValid(t *testing.T) {
+	tests := []struct {
+		name             string
+		maxSize, minFree string
+		wantMax, wantMin int64
+	}{
+		{"smallest cap and no reserve", "64MiB", "0MiB", 64 << 20, 0},
+		{"largest cap and largest reserve", "64GiB", "1024GiB", 64 << 30, 1024 << 30},
+		{"reserve of zero GiB", "2GiB", "0GiB", 2 << 30, 0},
+		{"mebibytes", "512MiB", "1MiB", 512 << 20, 1 << 20},
+		{"quoted", "'4GiB'", "\"256MiB\"", 4 << 30, 256 << 20},
+		{"MiB value above one GiB", "65536MiB", "99999MiB", 64 << 30, 99999 << 20},
+		{"only max_size set", "8GiB", "", 8 << 30, 1 << 30},
+		{"only min_free set", "", "3GiB", 2 << 30, 3 << 30},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			doc := spoolDoc(tt.maxSize, tt.minFree)
+			got, err := LoadAgent(writeTemp(t, doc), agentEnv())
+			if err != nil {
+				t.Fatalf("LoadAgent(%q) error = %v, want nil", doc, err)
+			}
+			if got.Spool.MaxBytes != tt.wantMax {
+				t.Errorf("LoadAgent(%q).Spool.MaxBytes = %d, want %d", doc, got.Spool.MaxBytes, tt.wantMax)
+			}
+			if got.Spool.MinFreeBytes != tt.wantMin {
+				t.Errorf("LoadAgent(%q).Spool.MinFreeBytes = %d, want %d", doc, got.Spool.MinFreeBytes, tt.wantMin)
+			}
+		})
+	}
+}
+
+// maxSizeBad and minFreeBad are the raw YAML values the rule of the option refuses (spec E1).
+var (
+	maxSizeBad = []string{
+		"1024", "'1 GiB'", "1.5GiB", "1GB", "-1GiB", "32MiB", "63MiB", "0MiB", "65GiB", "65537MiB", "2048GiB",
+		"''", "1gib", "1GIB", "1MB", "1G", "GiB", "' 1GiB'", "'1GiB '", "+1GiB", "'1_0GiB'", "0x10GiB",
+		"123456MiB", "99999999999999999999GiB", "'1GiB\\n'", "7" + sentinel + "GiB",
+	}
+	minFreeBad = []string{
+		"1024", "'1 GiB'", "1.5GiB", "1GB", "-1GiB", "-0MiB", "2048GiB", "1025GiB", "1048577MiB",
+		"''", "1gib", "1GIB", "1MB", "1G", "GiB", "' 1GiB'", "'1GiB '", "+1GiB", "'1_0GiB'",
+		"123456MiB", "99999999999999999999GiB", "7" + sentinel + "GiB",
+	}
+)
+
+func testSpoolSizeRefused(t *testing.T, key string, line int, reason string, values []string) {
+	for _, value := range values {
+		doc := spoolDoc(value, "1GiB")
+		if key == "spool.min_free" {
+			doc = spoolDoc("2GiB", value)
+		}
+		path := writeTemp(t, doc)
+		got, err := LoadAgent(path, agentEnv())
+		if got != nil {
+			t.Errorf("LoadAgent(%q) = %+v, want nil on error", doc, got)
+		}
+		if err == nil {
+			t.Errorf("LoadAgent(%q) error = nil, want an error for %s", doc, key)
+			continue
+		}
+		want := "config: " + path + ":" + strconv.Itoa(line) + ": " + key + ": " + reason
+		if err.Error() != want {
+			t.Errorf("LoadAgent(%q) error = %q, want %q", doc, err.Error(), want)
+		}
+		requireNoLeakBesidesFile(t, err, path, sentinel)
+	}
+}
+
+func testSpoolSizeOrder(t *testing.T) {
+	doc := spoolDoc("32MiB", "2048GiB")
+	path := writeTemp(t, doc)
+	_, err := LoadAgent(path, agentEnv())
+	want := "config: " + path + ":5: spool.max_size: " + spoolMaxReason
+	if err == nil || err.Error() != want {
+		t.Errorf("LoadAgent(%q) error = %v, want %q", doc, err, want)
+	}
+}
+
+func TestLoadAgent_SpoolSizeForms(t *testing.T) {
+	tests := []struct {
+		name   string
+		key    string
+		line   int
+		value  string
+		reason string
+	}{
+		{"max_size list", "spool.max_size", spoolMaxLine, "[1GiB]", "invalid value, want a string"},
+		{"max_size block list", "spool.max_size", spoolMaxLine, "\n    - 1GiB", "invalid value, want a string"},
+		{"max_size tilde", "spool.max_size", spoolMaxLine, "~", "has no value"},
+		{"min_free list", "spool.min_free", spoolMinFreeLine, "[1GiB]", "invalid value, want a string"},
+		{"min_free tilde", "spool.min_free", spoolMinFreeLine, "~", "has no value"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			doc := spoolDoc(tt.value, "1GiB")
+			if tt.key == "spool.min_free" {
+				doc = spoolDoc("2GiB", tt.value)
+			}
+			path := writeTemp(t, doc)
+			got, err := LoadAgent(path, agentEnv())
+			if got != nil {
+				t.Errorf("LoadAgent(%q) = %+v, want nil on error", doc, got)
+			}
+			want := "config: " + path + ":" + strconv.Itoa(tt.line) + ": " + tt.key + ": " + tt.reason
+			if err == nil || err.Error() != want {
+				t.Errorf("LoadAgent(%q) error = %v, want %q", doc, err, want)
+			}
+		})
 	}
 }

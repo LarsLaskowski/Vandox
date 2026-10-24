@@ -24,6 +24,7 @@ import (
 	"github.com/LarsLaskowski/Vandox/internal/sdnotify"
 	"github.com/LarsLaskowski/Vandox/internal/selfstats"
 	"github.com/LarsLaskowski/Vandox/internal/sockmount"
+	"github.com/LarsLaskowski/Vandox/internal/spool"
 	"github.com/LarsLaskowski/Vandox/internal/svcstats"
 	"github.com/LarsLaskowski/Vandox/internal/sysstats"
 	"github.com/LarsLaskowski/Vandox/internal/version"
@@ -95,7 +96,7 @@ type Options struct {
 	ConfigPath string            // the configuration file
 	Environ    []string          // the environment, in os.Environ form
 	Stderr     io.Writer         // the log output
-	Sink       scheduler.Putter  // nil: scheduler.DiscardSink
+	Sink       scheduler.Putter  // nil: the spool in StateDir, else in spool.directory
 	Self       selfstats.Sources // the self-metrics sources; zero fields take their defaults
 	System     sysstats.Sources  // the system metrics sources; zero fields take their defaults
 	Processes  procstats.Sources // the process sources; zero fields take their defaults
@@ -123,14 +124,25 @@ func Run(ctx context.Context, opts Options) int {
 
 	cfg, err := config.LoadAgent(opts.ConfigPath, opts.Environ)
 	if err != nil {
-		NewLogger(stderr, "info", journal).Error("agent cannot start", "err", err)
+		NewLogger(stderr, "info", journal).Error(msgCannotStart, "err", err)
 		return 1
 	}
 	log := NewLogger(stderr, cfg.Log.Level, journal)
 
-	sched, store, err := newScheduler(opts, cfg, log)
+	store, sp, err := openStorage(opts, cfg, log)
 	if err != nil {
-		log.Error("agent cannot start", "err", err)
+		log.Error(msgCannotStart, "err", err)
+		return 1
+	}
+	sink := opts.Sink
+	if sp != nil {
+		sink = sp
+		opts.Self.Spool = sp
+		opts.Self.SpoolAge = sp
+	}
+	sched, err := newScheduler(opts, cfg, store, sink, log)
+	if err != nil {
+		log.Error(msgCannotStart, "err", err)
 		return 1
 	}
 	notify, interval := notification(opts.Environ, log)
@@ -153,6 +165,7 @@ func Run(ctx context.Context, opts Options) int {
 	wg.Wait()
 	// the last positions of the collectors are saved once the scheduler has stopped; Flush logs a failed save itself
 	_ = store.Flush(time.Now())
+	closeSpool(sp, log)
 	log.Info("agent stopped")
 	return 0
 }
@@ -160,9 +173,9 @@ func Run(ctx context.Context, opts Options) int {
 // jobs returns the collectors with their schedules: self, system, processes, connections, systemd (only when a service unit is
 // configured), mariadb (only when enabled), filesystem (only when a mount point is configured), clock, kernel, logs, backups (only
 // when backups.processes has rules) and state, and the system collector, which newScheduler connects to the scheduler. The
-// agent's state file is opened in opts.StateDir or else spool.directory. The collectors log through log. It fails, and the agent does not start, when the log shipping collector cannot be built: the error wraps
+// state store is the one openStorage opened. The collectors log through log. It fails, and the agent does not start, when the log shipping collector cannot be built: the error wraps
 // errDropPattern for a pattern that does not compile and never quotes a pattern.
-func jobs(opts Options, cfg *config.Agent, log *slog.Logger) ([]scheduler.Job, *sysstats.System, *agentstate.Store, error) {
+func jobs(opts Options, cfg *config.Agent, store *agentstate.Store, log *slog.Logger) ([]scheduler.Job, *sysstats.System, error) {
 	system := sysstats.NewSystem(opts.System, log)
 	systemdSchedule := scheduler.Schedule{Interval: SystemdInterval, Timeout: SystemdTimeout, PressureInterval: SystemdPressureInterval}
 	list := []scheduler.Job{
@@ -206,14 +219,9 @@ func jobs(opts Options, cfg *config.Agent, log *slog.Logger) ([]scheduler.Job, *
 		Schedule:  scheduler.Schedule{Interval: ClockInterval, Timeout: ClockTimeout},
 	})
 
-	stateDir := opts.StateDir
-	if stateDir == "" {
-		stateDir = cfg.Spool.Directory
-	}
-	store, _ := agentstate.Open(stateDir, log)
 	proc := opts.Kernel.Proc
 	if proc == nil {
-		proc = os.DirFS("/proc")
+		proc = os.DirFS(procRoot)
 	}
 	list = append(list, scheduler.Job{
 		Collector: kernevents.New(opts.Kernel, store, log),
@@ -221,7 +229,7 @@ func jobs(opts Options, cfg *config.Agent, log *slog.Logger) ([]scheduler.Job, *
 	})
 	logs, err := newLogs(opts.Logs, cfg.LogShipping, store, log)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("log shipping: %w", err)
+		return nil, nil, fmt.Errorf("log shipping: %w", err)
 	}
 	list = append(list, scheduler.Job{
 		Collector: logs,
@@ -236,7 +244,7 @@ func jobs(opts Options, cfg *config.Agent, log *slog.Logger) ([]scheduler.Job, *
 	return append(list, scheduler.Job{
 		Collector: agentstate.NewSaver(store, proc),
 		Schedule:  scheduler.Schedule{Interval: StateInterval, Timeout: StateTimeout},
-	}), system, store, nil
+	}), system, nil
 }
 
 // errDropPattern is the error of a drop pattern that does not compile; it does not quote the pattern.
@@ -298,20 +306,98 @@ func programRules(rules []config.ProgramRule) []procstats.Rule {
 	return out
 }
 
-// newScheduler returns the scheduler with the jobs of the configuration; the system collector switches its memory
-// pressure mode and the kernel collector requests the extra runs of the processes and connections collectors.
-func newScheduler(opts Options, cfg *config.Agent, log *slog.Logger) (*scheduler.Scheduler, *agentstate.Store, error) {
-	var sink scheduler.Putter = scheduler.DiscardSink{}
-	if opts.Sink != nil {
-		sink = opts.Sink
+// procRoot is the host's /proc; msgCannotStart is the message of every start failure.
+const (
+	procRoot       = "/proc"
+	msgCannotStart = "agent cannot start"
+)
+
+// closeTimeout is how long closeSpool waits for the spool; tests replace it.
+var closeTimeout = 5 * time.Second
+
+// spoolSyncInterval is the interval of the spool's background sync.
+const spoolSyncInterval = time.Second
+
+// Fixed start errors of the boot ID; neither names a path or the content read.
+var (
+	errBootIDRead = errors.New("spool: boot id: not readable")
+	errBootIDForm = errors.New("spool: boot id: not a lower-case UUID")
+)
+
+// openStorage opens the agent's state store and then the spool, both in opts.StateDir or else spool.directory. The spool is nil
+// when opts.Sink is set. The store's barrier is the spool's Sync. It fails, and the agent does not start, when the boot ID cannot
+// be read or the spool cannot be opened.
+func openStorage(opts Options, cfg *config.Agent, log *slog.Logger) (*agentstate.Store, *spool.Spool, error) {
+	stateDir := opts.StateDir
+	if stateDir == "" {
+		stateDir = cfg.Spool.Directory
 	}
-	list, system, store, err := jobs(opts, cfg, log)
+	store, _ := agentstate.Open(stateDir, log)
+	if opts.Sink != nil {
+		return store, nil, nil
+	}
+	proc := opts.Kernel.Proc
+	if proc == nil {
+		proc = os.DirFS(procRoot)
+	}
+	bootID, err := procstats.ReadBootID(proc)
 	if err != nil {
-		return nil, nil, err
+		if errors.Unwrap(err) == nil {
+			return store, nil, errBootIDForm
+		}
+		return store, nil, errBootIDRead
+	}
+	sp, err := spool.Open(spool.Options{
+		Dir:          stateDir,
+		AgentID:      cfg.AgentID,
+		BootID:       bootID,
+		MaxBytes:     cfg.Spool.MaxBytes,
+		MinFreeBytes: cfg.Spool.MinFreeBytes,
+		SyncInterval: spoolSyncInterval,
+	}, log)
+	if err != nil {
+		return store, nil, err
+	}
+	store.SetBarrier(sp.Sync)
+	return store, sp, nil
+}
+
+// spoolClose closes the spool; tests replace it to simulate a close that hangs.
+var spoolClose = func(ctx context.Context, sp *spool.Spool) error { return sp.Close(ctx) }
+
+// closeSpool closes the spool and gives up after closeTimeout, logging "spool not closed" (no path) on an error or at the
+// deadline; a nil spool is ignored.
+func closeSpool(sp *spool.Spool, log *slog.Logger) {
+	if sp == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), closeTimeout)
+	defer cancel()
+	closeFn := spoolClose
+	result := make(chan error, 1)
+	go func() { result <- closeFn(ctx, sp) }()
+	failed := false
+	select {
+	case err := <-result:
+		failed = err != nil
+	case <-ctx.Done():
+		failed = true
+	}
+	if failed {
+		log.Warn("spool not closed", "component", "spool")
+	}
+}
+
+// newScheduler returns the scheduler with the jobs of the configuration, taking the records into sink; the system collector
+// switches its memory pressure mode and the kernel collector requests the extra runs of the processes and connections collectors.
+func newScheduler(opts Options, cfg *config.Agent, store *agentstate.Store, sink scheduler.Putter, log *slog.Logger) (*scheduler.Scheduler, error) {
+	list, system, err := jobs(opts, cfg, store, log)
+	if err != nil {
+		return nil, err
 	}
 	sched, err := scheduler.New(list, sink, log)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	system.SetPressureSwitch(sched.SetPressure)
 	for _, j := range list {
@@ -319,7 +405,7 @@ func newScheduler(opts Options, cfg *config.Agent, log *slog.Logger) (*scheduler
 			k.SetTrigger(sched.Trigger)
 		}
 	}
-	return sched, store, nil
+	return sched, nil
 }
 
 // notification returns the notifier of the service manager and the watchdog interval; a problem with either is
@@ -347,5 +433,5 @@ func connectionSources(src connstats.Sources, probe func() (int32, error)) conns
 
 // probeSocketMount learns the socket mount from a socket of the agent's own, through the host's /proc.
 func probeSocketMount() (int32, error) {
-	return sockmount.Probe(os.DirFS("/proc"))
+	return sockmount.Probe(os.DirFS(procRoot))
 }

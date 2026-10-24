@@ -27,6 +27,7 @@ const (
 	MetricGoroutines = "agent_goroutines"
 	MetricSpool      = "agent_spool_bytes"
 	MetricSendLag    = "agent_send_lag_seconds"
+	MetricSpoolAge   = "agent_spool_age_seconds"
 )
 
 // MaxStatusBytes is the most of self/status that is read.
@@ -38,9 +39,18 @@ const statusFile = "self/status"
 // maxRSSDigits is the most digits of a VmRSS value: 999,999,999,999 kB times 1024 is below 2^53.
 const maxRSSDigits = 12
 
+// unitSeconds is the unit of the time metrics.
+const unitSeconds = "seconds"
+
 // SpoolBytesReporter reports the size of the spool (implemented by the spool, #38).
 type SpoolBytesReporter interface {
 	SpoolBytes(ctx context.Context) (int64, error)
+}
+
+// SpoolAgeReporter reports the capture time of the oldest record in the spool (implemented by the spool, #38);
+// the bool is false when the spool holds none.
+type SpoolAgeReporter interface {
+	OldestCapture(ctx context.Context) (time.Time, bool, error)
 }
 
 // SendLagReporter reports how far sending lags behind capture (implemented by the sender, #39).
@@ -54,6 +64,7 @@ type Sources struct {
 	CPUTime    func() (time.Duration, error) // default ProcessCPUTime
 	Goroutines func() int                    // default runtime.NumGoroutine
 	Spool      SpoolBytesReporter            // nil: no spool metric
+	SpoolAge   SpoolAgeReporter              // nil: no spool age metric
 	Sender     SendLagReporter               // nil: no send lag metric
 }
 
@@ -93,7 +104,7 @@ func (c *Collector) Collect(ctx context.Context, run scheduler.Run) ([]model.Rec
 	}
 	records := []model.Record{
 		metric(run, MetricRSS, float64(rss), "bytes"),
-		metric(run, MetricCPU, cpu.Seconds(), "seconds"),
+		metric(run, MetricCPU, cpu.Seconds(), unitSeconds),
 		metric(run, MetricGoroutines, float64(c.src.Goroutines()), ""),
 	}
 	return c.appendProviders(ctx, run, records)
@@ -111,6 +122,17 @@ func (c *Collector) appendProviders(ctx context.Context, run scheduler.Run, reco
 		}
 		records = append(records, metric(run, MetricSpool, float64(size), "bytes"))
 	}
+	if c.src.SpoolAge != nil {
+		oldest, found, err := c.src.SpoolAge.OldestCapture(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("selfstats: spool age: %w", err)
+		}
+		age := 0.0
+		if found {
+			age = max(run.Start.Sub(oldest).Seconds(), 0)
+		}
+		records = append(records, metric(run, MetricSpoolAge, age, unitSeconds))
+	}
 	if c.src.Sender != nil {
 		lag, err := c.src.Sender.SendLag(ctx)
 		if err != nil {
@@ -119,7 +141,7 @@ func (c *Collector) appendProviders(ctx context.Context, run scheduler.Run, reco
 		if lag < 0 {
 			return nil, errors.New("selfstats: send lag: negative")
 		}
-		records = append(records, metric(run, MetricSendLag, lag.Seconds(), "seconds"))
+		records = append(records, metric(run, MetricSendLag, lag.Seconds(), unitSeconds))
 	}
 	return records, nil
 }
