@@ -203,7 +203,7 @@ self-metrics and what the backend's ingest endpoint receives. "Acknowledged" mea
   contains the URL, its host, the token or the answer's body (E3, E4, E5, E6).
 - [ ] AC11: An acknowledgement the spool refuses logs `acknowledgement not kept` once per episode and leaves the records to be sent
   again — the stream's position does not move, the batch is sent again only after a wait of the backoff schedule (never at once), and
-  records a backfill pass left unacknowledged are sent by a later pass —, and a failed spool read logs `spool not readable` once per episode and is retried after a wait while the other stream goes on
+  the backfill never moves past a record it left unacknowledged, so every such record is sent again —, and a failed spool read logs `spool not readable` once per episode and is retried after a wait while the other stream goes on
   (E8, E13).
 - [ ] AC12: While the memory pressure mode is on no `backfill` batch is sent and `live` batches go on; `backfill paused` and `backfill
   resumed` are logged at the changes (E12).

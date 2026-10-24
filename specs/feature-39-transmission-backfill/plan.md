@@ -30,6 +30,7 @@ See [spec.md](spec.md), *Problem*: nothing reads the spool, so no record reaches
 | 15 | The sender's peak heap growth with a full batch in flight on both streams stays below 16 MiB and does not grow with the backlog | to verify: (estimate: decoded records about 3x their 1 MiB of lines, the 1 MiB plain buffer of `EncodeBatch`, its gzip output and writer, per stream) Tester writes `TestSender_MemoryBound` (step 6, resource bound); Dev records the measured figure in `docs/areas/agent.md` (*Memory*); above 16 MiB the Dev reports it and the Lead decides | unverified |
 | 16 | At the default `256KiB` per second of compressed bodies the backfill delivers between 1,000 and 8,500 records a second of the reference stream (below the backend's measured HDD throughput, and a 13-hour backlog within 30 minutes) | to verify: (the gzip ratio of the stream is not measured) Tester writes `TestReferenceStream_BackfillRate` in `internal/spool/refstream_test.go` (step 6), which encodes one scaled day of the reference stream in 1 MiB batches with `wire.EncodeBatch` and logs the ratio and the rate; Dev records both in `docs/areas/agent.md` (*Capacity*); outside the band the Lead revisits the default | unverified |
 | 17 | Spec claim "the header's boot ID is the capture's, not the sending boot's" | record 0046, `spool.Batch.BootID` | confirmed |
+| 18 | Go's client, when a response body is closed before EOF and its `Content-Length` is at most 256 KiB or unknown (chunked), drains up to 256 KiB + 1 for up to 50 ms to reuse the connection, unless the request's context is done, which closes the connection instead | Go 1.27 `src/net/http/transport.go:2417-2442` (`maxPostCloseReadBytes`, `maybeDrainBody`), `:2603-2621` (readLoop select: `ctx.Done` → `cancelRequest`); `TestHTTPTransport_ReadsAtMostFourKiBOfBody` (chunked cases) pins it | confirmed |
 
 ## Tests per criterion
 
@@ -45,7 +46,7 @@ See [spec.md](spec.md), *Problem*: nothing reads the spool, so no record reaches
 | AC8 | `TestSender_RefusedRecordIsolatedAndGivenUp`, `TestSender_EleventhRefusalParksOnlyItsStream`, `TestSender_PermanentRefusalBoundsRequestsAndLogs` (two hours, 20 always-refused records: at most 20 give-ups, 2 `refused` warnings, 500 requests), `TestSender_RefusalWithoutHeaderGivesNothingUp`; `TestHTTPTransport_RefusedOnlyWithHeader` | `internal/sender/sender_test.go`; `internal/sender/transport_test.go` |
 | AC9 | `TestSender_HangingRequestEndsAfterThirtySeconds`; `TestHTTPTransport_DeadlineIsTimeout` | `internal/sender/sender_test.go`; `internal/sender/transport_test.go` |
 | AC10 | `TestHTTPTransport_BuiltWithoutProxyAndRedirects`, `TestHTTPTransport_FollowsNoRedirect`, `TestHTTPTransport_IgnoresProxyEnvironment` (non-loopback `backend.url` through the dial hook), `TestHTTPTransport_RefusesUntrustedCertificate`, `TestHTTPTransport_SendsTokenOnlyToBackend`, `TestHTTPTransport_ReadsAtMostFourKiBOfBody`, `TestHTTPTransport_RefusesOversizedHeaders`; `TestSender_LogsHoldNoURLTokenOrBody` | `internal/sender/transport_test.go`; `internal/sender/sender_test.go` |
-| AC11 | `TestSender_AcknowledgementRefusedLoggedOncePerEpisode` (position kept, the resend only after a backoff wait, request count bounded), `TestSender_LeftoverBelowLiveStartSentByNextPass`, `TestSender_SpoolReadFailureRetried` | `internal/sender/sender_test.go` |
+| AC11 | `TestSender_AcknowledgementRefusedLoggedOncePerEpisode` (position kept, the resend only after a backoff wait, request count bounded), `TestSender_LeftoverBelowLiveStartSentAgain`, `TestSender_SpoolReadFailureRetried` | `internal/sender/sender_test.go` |
 | AC12 | `TestSender_BackfillPausedUnderMemoryPressure`; `TestNewScheduler_PressureReachesSender` | `internal/sender/sender_test.go`; `internal/agent/agent_test.go` |
 | AC13 | `TestSender_LargestRecordSentAlone`, `TestSender_BatchBounds` | `internal/sender/sender_test.go` |
 | AC14 | `TestSender_StopEndsWithinTwoSeconds`; `TestRun_SenderStopsBeforeSpoolCloses` | `internal/sender/sender_test.go`; `internal/agent/agent_test.go` |
@@ -70,7 +71,8 @@ injected short deadlines (about 50 ms) per record 0062, never `time.Sleep`. AC3'
   returning `http.ErrUseLastResponse` and an own `http.Transport`: `Proxy: nil`, `MaxResponseHeaderBytes: 16 KiB`,
   `DisableCompression: true`, `MaxConnsPerHost: 2`, `ForceAttemptHTTP2: false`, default TLS verification with system roots
   (`TLSClientConfig` only sets `MinVersion: tls.VersionTLS12`; never `InsecureSkipVerify`). The answer body is read through
-  `io.LimitReader(body, 4096)` and closed; nothing of it is kept. The deadline comes from the caller's context. Classification
+  `io.LimitReader(body, 4096)` and closed; nothing of it is kept. Each request gets its own cancellable context, cancelled
+  before the close once 4096 bytes were read, so the transport closes the connection instead of draining the rest (fact 18). The deadline comes from the caller's context. Classification
   into `Result{Status, Reason, Refused}`: a status → `Status` (and `Reason` `token refused` for 401/403, `status` for other
   non-2xx); `Refused` is true only for 400/413/422 carrying the header `Vandox-Refused: batch` (record 0124), so a `400` from a TLS
   listener reached with `http`, or a `413` of a proxy limit, is `status` and gives nothing up; no status → `timeout` (`context.DeadlineExceeded` or a `net.Error` with `Timeout()`), `tls failed`
@@ -102,9 +104,10 @@ injected short deadlines (about 50 ms) per record 0062, never `time.Sleep`. AC3'
     `records`, only when the pass sent any; info `backfill started` before its first batch). Each batch waits for the throttle
     and for the pressure flag to be off (info `backfill paused` / `backfill resumed` on the change, only while a pass runs).
     `bfAfter` starts at 0 and moves to a batch's last number after its kept acknowledgement; after an episode the backfill
-    resumes from `bfAfter`, not from 0, so the acknowledged front of the oldest file is not read again. The pass remembers the
-    lowest number it left unacknowledged (a record whose resend waits, a record parked under the refusal bound); when the pass
-    ends with such a number, the next pass starts after one backoff wait from just below it.
+    resumes from `bfAfter`, not from 0, so the acknowledged front of the oldest file is not read again. A failed delivery inside a
+    pass (`Ack` or gap `Put` failure, a stream parked under the refusal bound) does not end the pass: after its wait the pass
+    reads again from `bfAfter`, so it never moves past an unacknowledged record and never leaves one below `liveStart` behind
+    (decided in step 6; see *Options considered*).
   - **Request**: each `Send` gets `context.WithTimeout(ctx, RequestTimeout)` (30 s). Body: `wire.EncodeBatch` into a per-stream
     reused buffer, header `format` 1.1, the batch's agent ID, boot ID and offset, `mode` `live` or `backfill`.
   - **Acknowledgement**: `Ack(first, last)` of the batch's (or piece's) first and last number; `ErrTooManyRanges` → warning
@@ -153,6 +156,9 @@ injected short deadlines (about 50 ms) per record 0062, never `time.Sleep`. AC3'
   a tick, so a longer tick leaves no time for reading and encoding within the bound.
 - A refusal beyond the hourly bound as a shared episode (the first plan): rejected in the plan challenge (M1), a live
   acknowledgement would end it at once and the backfill would loop on the refused record.
+- Resending a failed backfill delivery in a later pass, started below the lowest leftover (the revised plan): replaced in step 6
+  by the retry inside the pass from `bfAfter`. Both resend after a backoff wait and never pass an unacknowledged record; the
+  retry inside the pass needs no leftover bookkeeping and logs one `backfill started`/`finished` pair per release.
 - A hole count kept by the sender itself rather than `Spool.AckRanges`: rejected, the spool's own count is exactly what its cap
   refuses on, including ranges after a restart.
 
@@ -339,9 +345,8 @@ Devil's Advocate (plan):
   other stream ends it, the warning is logged once per wait (*Approach*, *Refused*). Spec E2 and AC8 changed accordingly; AC8 now
   bounds a two-hour run with 20 always-refused records (`TestSender_PermanentRefusalBoundsRequestsAndLogs`). Record 0125 updated.
 - M2 (records left unacknowledged outside an episode have no resend path): accepted. Positions move only after a kept
-  acknowledgement; after an `Ack` or `Put` failure the stream waits one backoff wait and resends; a backfill pass that leaves a
-  record unacknowledged starts another pass after a wait from just below it (*Approach*). Spec AC11 changed; new
-  `TestSender_LeftoverBelowLiveStartSentByNextPass`.
+  acknowledgement; after an `Ack` or `Put` failure the stream waits one backoff wait and resends; the backfill retries inside
+  its pass from `bfAfter` (step 6 decision, *Approach*). Spec AC11 changed; new `TestSender_LeftoverBelowLiveStartSentAgain`.
 - m1 (no hole check at the start): accepted; with 32 open ranges at `Run` the live stream starts at 0; a case in
   `TestSender_StartWithBacklogSendsLiveFirst`.
 - m2 (no margin in the 10 s bound): accepted; `SendInterval` is 4 s, AC4 gains a burst right after a tick
@@ -350,7 +355,7 @@ Devil's Advocate (plan):
   `Vandox-Refused: batch` is a refusal (record 0124 option 5, still Proposed; spec E2, E3, AC8); the agent area and the example
   file name the case.
 - m4 (resetting `bfAfter` to 0 rescans the acknowledged front under the spool lock): accepted; after an episode the backfill
-  resumes from `bfAfter`, and a further pass starts below its lowest leftover, not at 0.
+  resumes from `bfAfter`, and a failed delivery is retried inside the pass from `bfAfter`, never from 0.
 - m5 (fact 2 only partly true): accepted; fact 2 corrected, and the agent area's *Memory* says the age read shares the positions.
 
 Security (plan, round 1):
