@@ -3,7 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-10-18
 - **Area:** Agent
-- **Source:** Issue #33
+- **Source:** Issue #33, Issue #279 (the socket's UID)
 - **Supersedes:** —
 
 ## Context
@@ -16,6 +16,13 @@ aggregate-only snapshot cannot be told from a full one by it. The agent may hold
 and a local user can open as many sockets and listeners as the limits allow. Wire format 1.0 was released with v0.1.0. The behavior is
 in [Agent](../areas/agent.md) (*Connections*) and [Wire format](../areas/wire-format.md) (*`connection_snapshot`*); the spec is in the
 squad record of #33.
+
+Issue #279 adds who holds a socket in a form no process chooses: the `command` is the process's own text and is missing
+whenever the owner scan cannot see the holder (no `CAP_SYS_PTRACE`, `hidepid=2`, a failed probe, a cap), while the tables carry the
+kernel's `uid` column (field 8), which the reader counted and skipped. That number is the socket's UID, the file-system UID of the
+process that created it, changed only by an `fchown` (which needs `CAP_CHOWN` to give it to another user); for a line with inode 0 it
+is 0 (time-wait), root or the former UID (orphaned, 5.15 and 6.x differ) or the listener's (pending), so it names no holder there
+(upstream `net/ipv4/tcp_ipv4.c`, `net/ipv4/udp.c`, `net/ipv6/*`, `include/net/sock.h`, `net/socket.c`, read at v5.15 and v6.18).
 
 ## Options considered
 
@@ -65,6 +72,28 @@ squad record of #33.
     a user namespace, duplicated up to the open-file limit, or a low PID filling a cap on matches before the real holders are read, makes
     the owners of every socket theirs to choose or erase. Rejected; a restated residual and re-adding `CAP_DAC_READ_SEARCH` for the
     `fd/` links (option 10) were declined by the Product Manager.
+13. **The socket's `uid` column of the tables, with a name from `/etc/passwd`** (chosen, #279) — the kernel's number, present for every
+    socket with a file whether or not its holder is known, and named by the process collector's rules, so one UID has one name in both
+    snapshots. It is the creator's UID, not the holder's: a daemon that binds as root and then switches to `www-data`, or a socket
+    systemd creates for a socket-activated service, reads root.
+14. **The holder's effective UID from `/proc/<pid>/status`** — the process's user, but only where the owner scan already named the
+    holder, so it is missing exactly where the `command` is, and the process snapshot already records it. Rejected.
+15. **The UID attached through the inode index when owners are assigned** — one place for owner and UID, but the index drops sockets
+    beyond 65,536 and repeated inodes, which would lose their UID. Rejected for the UID taken when the table line is filed as a
+    listener or a connection (spec challenge).
+16. **Several UIDs on one endpoint** (sockets bound to different devices, UDP `SO_REUSEADDR`, an `fchown` inside a `SO_REUSEPORT`
+    group): a list of UIDs per entry — complete, but an entry's size would grow with what a user binds; or the UID as part of the
+    inventory key — a second user on a service's endpoint would become a new listener, but the comparison of this record and of 0116
+    changes and a user could split the inventory. Both rejected for the **lowest UID and a flag `mixed_uids`**, which keeps the entry
+    bounded and the case visible.
+17. **The printed number for lines with inode 0** — no rule needed, but time-wait lines print 0, which reads as root, and orphaned
+    lines differ between kernels. Rejected: such entries carry no UID.
+18. **Names for only the run's UIDs, or cached across runs** — less memory or fewer reads, but a second passwd reader or a cache
+    that can be stale; the file is root's, bounded at 1 MiB and read by the process collector every run already. Rejected for the
+    process collector's reader (`procstats.ReadUsers`), once per run.
+19. **The name alone, without the number** — shorter, but names are neither unique nor always present (UIDs without a line). Rejected
+    for `uid` as an optional number, absent meaning unknown, with `user` beside it; wire format 1.1 is unreleased, so the fields
+    extend it in place.
 
 ## Decision
 
@@ -72,6 +101,10 @@ Options 2, 3, 4, 6, 7, 8, 9 and 11: a collector `connections` in `internal/conns
 most 4,096 processes within fixed caps, needing no right beyond `CAP_SYS_PTRACE`, and records one `connection_snapshot` per run, regular or full, with the new-listener check and
 its outcome in the same record; wire format 1.1. The rules, caps and log lines are in [Agent](../areas/agent.md) (*Connections*), the
 fields in [Wire format](../areas/wire-format.md).
+
+For #279, options 13, 15, 16, 17, 18 and 19: listener and connection entries carry the table line's `uid` and its `user` from
+`/etc/passwd`, taken when the line is filed and left out for lines with inode 0, an inventory entry with several UIDs carries the
+lowest and `mixed_uids`; the rules are in [Agent](../areas/agent.md) (*Connections*) and [Wire format](../areas/wire-format.md).
 
 ## Consequences
 
@@ -97,3 +130,10 @@ fields in [Wire format](../areas/wire-format.md).
 - IPv4-mapped addresses stay as the kernel reports them, so one peer can be two `remotes` entries.
 - The backend must be upgraded to read 1.1 before agents send it (wire format, *Versioning*); a 1.0 backend reads the new fields as
   absent.
+- The `uid` says whose socket it is, not whose process: a root-created socket held by a `www-data` worker reads root, and a reader
+  that wants the process's user takes the process snapshot. Only a holder of `CAP_CHOWN` (or of `CAP_SETUID` before it creates the
+  socket) can make a socket show another user's UID. A snapshot without `uid` (a 1.0 agent, an imported `lsof` snapshot) reads as
+  "UID unknown", never as root.
+- The connection collector reads `/etc/passwd` once per run, so the run's live data grows by the names of that bounded file; a table
+  line whose `uid` field is not 1 to 10 digits within 32 bits is unreadable like a bad inode, which also makes `connstats.TCPListeners`
+  (the MariaDB collector's exposed-listener count) refuse that table. Showing the UID in the report and the web UI is a follow-up.
