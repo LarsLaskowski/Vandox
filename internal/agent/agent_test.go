@@ -1719,7 +1719,7 @@ func spoolRunOptions(t *testing.T, config string) (Options, *syncBuffer) {
 	return opts, stderr
 }
 
-// fakeTransport is a sender.Transport that never touches the network. With hang it holds every request until the request's
+// fakeTransport is a sender.BatchSender that never touches the network. With hang it holds every request until the request's
 // context ends (and then, with linger, a further span of fake time) and answers like the real transport does; else it answers
 // every request with res.
 type fakeTransport struct {
@@ -1740,7 +1740,7 @@ type sentRequest struct {
 	at   time.Time
 }
 
-// Send implements sender.Transport.
+// Send implements sender.BatchSender.
 func (f *fakeTransport) Send(ctx context.Context, body []byte) sender.Result {
 	req := sentRequest{size: len(body), at: time.Now()}
 	if dec, err := wire.NewDecoder(bytes.NewReader(body), wire.DefaultLimits()); err == nil {

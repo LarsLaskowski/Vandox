@@ -88,7 +88,7 @@ type Options struct {
 	// Spool is the spool to send from.
 	Spool Spool
 	// Transport sends the batches.
-	Transport Transport
+	Transport BatchSender
 	// Bandwidth is the bytes per second of backfill request bodies.
 	Bandwidth int64
 	// Rand returns a number in [0, 1); nil: math/rand/v2.Float64.

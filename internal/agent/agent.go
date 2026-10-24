@@ -114,7 +114,7 @@ type Options struct {
 	// StateDir is the directory of the agent's state file; "" takes spool.directory.
 	StateDir string
 	// Transport sends the batches; nil: the HTTP transport to backend.url.
-	Transport sender.Transport
+	Transport sender.BatchSender
 }
 
 // Run runs the agent until ctx is done and returns the exit code: 0 after a clean stop, 1 when it cannot start.

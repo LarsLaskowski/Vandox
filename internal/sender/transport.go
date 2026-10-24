@@ -71,8 +71,8 @@ func (r Result) Outcome() Outcome {
 	}
 }
 
-// Transport sends one encoded batch.
-type Transport interface {
+// BatchSender sends one encoded batch.
+type BatchSender interface {
 	// Send sends body and returns what came back.
 	Send(ctx context.Context, body []byte) Result
 }
