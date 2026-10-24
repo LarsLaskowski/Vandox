@@ -26,5 +26,5 @@ are quoted in full.
 | 2026-10-24 17:29 | 6 Implement (G3 tasks 9+10) | squad-dev | Sender wired into agent.Run, documentation written with measured figures; agent suite passes (sonnet/medium · 143,300 tokens · 28 tool uses · 300 s) |
 | 2026-10-24 17:33 | 6 Docs (G4 task 11) | squad-lead | Backend host, network and architecture docs written; spec E5/AC10 fixed; decision-check and plan-check pass (opus/medium · 143,658 tokens · 38 tool uses · 243 s) |
 | 2026-10-24 18:06 | 7 Code check | squad-orchestrator | Format, build, tests with coverage, analyzer and scope gates pass; coverage new/changed 92.0%, overall 96.7%; Sonar gate NOT CHECKED (no SONAR_TOKEN) |
-| 2026-10-24 18:28 | 8 Review round 1 | squad-reviewer | BLOCKING 3 (agent wiring untested; throttle-wait gate untested; unlisted security area 6), NON-BLOCKING 6 (opus/medium · usage pending) |
-| 2026-10-24 18:28 | 8 Security diff review round 1 | squad-security | APPROVED, 2 non-blocking (duplicate gap on Ack failure; MaxGivenUpPerHour comment) (opus/medium · usage pending) |
+| 2026-10-24 18:28 | 8 Review round 1 | squad-reviewer | BLOCKING 3 (agent wiring untested; throttle-wait gate untested; unlisted security area 6), NON-BLOCKING 6 (opus/medium · 145,965 tokens · 39 tool uses · 1273 s) |
+| 2026-10-24 18:28 | 8 Security diff review round 1 | squad-security | APPROVED, 2 non-blocking (duplicate gap on Ack failure; MaxGivenUpPerHour comment) (opus/medium · 70,208 tokens · 18 tool uses · 151 s) |
