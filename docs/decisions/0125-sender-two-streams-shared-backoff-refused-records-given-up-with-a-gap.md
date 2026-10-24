@@ -1,6 +1,6 @@
 # 0125: Sender with a live and a backfill stream, one shared backoff, refused records given up with a recorded gap
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-24
 - **Area:** Agent
 - **Source:** Issue #39

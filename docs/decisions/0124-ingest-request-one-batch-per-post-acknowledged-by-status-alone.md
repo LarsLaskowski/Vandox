@@ -1,6 +1,6 @@
 # 0124: Ingest request: one batch per POST, bearer token, acknowledged by the status alone
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-24
 - **Area:** Agent
 - **Source:** Issue #39
