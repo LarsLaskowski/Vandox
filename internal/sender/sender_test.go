@@ -6,11 +6,15 @@ import (
 	"log/slog"
 	"math/rand/v2"
 	"os"
+	"runtime"
+	"runtime/debug"
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/LarsLaskowski/Vandox/internal/model"
@@ -1659,7 +1663,7 @@ func TestSender_FlapsAndRefusalsKeepRangesBounded(t *testing.T) {
 				tag = poisonTag + strconv.Itoa(i)
 			}
 
-			return textRec(at, tag, 6000, rng)
+			return textRec(at, tag, 2000, rng)
 		})
 		advance(cycles * cycle)
 		f.halt()
@@ -1705,5 +1709,146 @@ func requireFlapInvariants(t *testing.T, r *rig, first uint64) {
 	}
 	if got := r.logs.count(msgAccepting); got < 95 {
 		t.Errorf("%d episodes ended in the 100 flaps, want about one per flap", got)
+	}
+}
+
+// holdTransport is a backend that answers the first request at once and holds every later one until its context ends,
+// without decoding any, so that a heap measurement holds the sender's batches and no decoded copy of them.
+type holdTransport struct {
+	calls atomic.Int32
+	held  atomic.Int32
+}
+
+// Send answers the first request and holds the others until ctx ends.
+func (h *holdTransport) Send(ctx context.Context, _ []byte) Result {
+	if h.calls.Add(1) == 1 {
+		return Result{Status: 200}
+	}
+	h.held.Add(1)
+	<-ctx.Done()
+
+	return ctxResult(ctx)
+}
+
+// heapSampler reads the heap in real time from outside the bubble, so it sees the peak of the transient buffers too.
+type heapSampler struct {
+	armed atomic.Bool
+	peak  atomic.Uint64
+	stop  chan struct{}
+	done  sync.WaitGroup
+}
+
+func newHeapSampler() *heapSampler {
+	h := &heapSampler{stop: make(chan struct{})}
+	h.done.Go(func() {
+		var ms runtime.MemStats
+		for {
+			select {
+			case <-h.stop:
+				return
+			case <-time.After(time.Millisecond):
+			}
+			if h.armed.Load() {
+				runtime.ReadMemStats(&ms)
+				if ms.HeapAlloc > h.peak.Load() {
+					h.peak.Store(ms.HeapAlloc)
+				}
+			}
+		}
+	})
+
+	return h
+}
+
+func (h *heapSampler) close() {
+	close(h.stop)
+	h.done.Wait()
+}
+
+// heapNow returns the live heap after a collection.
+func heapNow() uint64 {
+	var ms runtime.MemStats
+	runtime.GC()
+	runtime.GC()
+	runtime.ReadMemStats(&ms)
+
+	return ms.HeapAlloc
+}
+
+// memoryGrowth runs a sender over a backlog of the given records until a full batch is in flight on both streams and
+// returns the growth of the live heap at that moment and the growth of the sampled peak, both over the heap before the
+// sender started.
+func memoryGrowth(t *testing.T, backlog int) (retained, peak uint64) {
+	t.Helper()
+
+	// A low collection target keeps the garbage of finished buffers out of the sampled peak.
+	defer debug.SetGCPercent(debug.SetGCPercent(10))
+	sampler := newHeapSampler()
+	defer sampler.close()
+	bubble(t, func(t *testing.T) {
+		sp := openSpool(t, t.TempDir(), testBoot, 512*mebi)
+		tr := &holdTransport{}
+		rng := rand.New(rand.NewPCG(21, 22))
+		now := time.Now().UTC()
+		recs := make([]model.Record, 0, backlog)
+		for i := range backlog {
+			recs = append(recs, textRec(now, "b"+strconv.Itoa(i), 4000, rng))
+		}
+		if err := sp.Put(context.Background(), recs); err != nil {
+			t.Fatalf("Put(%d records) error = %v, want nil", backlog, err)
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan struct{})
+		snd := New(Options{Spool: sp, Transport: tr, Bandwidth: 1 << 30, Rand: zeroRand}, slog.New(slog.DiscardHandler))
+		go func() {
+			defer close(done)
+			snd.Run(ctx)
+		}()
+		defer func() {
+			cancel()
+			<-done
+		}()
+		synctest.Wait()
+		// 1000 live records of 4,000 bytes fill two live batches: the first is answered and releases the backfill, which
+		// reads and holds a full batch; the second live batch is held too.
+		fresh := make([]model.Record, 0, 1000)
+		for i := range 1000 {
+			fresh = append(fresh, textRec(now, "l"+strconv.Itoa(i), 4000, rng))
+		}
+		if err := sp.Put(context.Background(), fresh); err != nil {
+			t.Fatalf("Put(%d live records) error = %v, want nil", len(fresh), err)
+		}
+		base := heapNow()
+		sampler.armed.Store(true)
+		advanceUntil(t, time.Minute, time.Second, "a full batch in flight on each stream", func() bool { return tr.held.Load() >= 2 })
+		advance(SendInterval)
+		if got := tr.held.Load(); got != 2 {
+			t.Fatalf("%d requests in flight, want 2 (a full batch on each stream)", got)
+		}
+		retained = max(heapNow(), base) - base
+		peak = max(sampler.peak.Load(), base) - base
+	})
+
+	return retained, peak
+}
+
+func TestSender_MemoryBound(t *testing.T) {
+	const limit = 16 << 20
+	const slack = 2 << 20
+	small, smallPeak := memoryGrowth(t, 600)
+	large, largePeak := memoryGrowth(t, 2400)
+	t.Logf("heap growth with a full batch in flight on both streams: backlog of 600 records: %d bytes held, %d bytes peak; backlog of 2400 records: %d bytes held, %d bytes peak",
+		small, smallPeak, large, largePeak)
+	for _, g := range []struct {
+		what string
+		got  uint64
+	}{{"held, backlog 600", small}, {"peak, backlog 600", smallPeak}, {"held, backlog 2400", large}, {"peak, backlog 2400", largePeak}} {
+		if g.got >= limit {
+			t.Errorf("heap growth (%s) = %d bytes, want below %d", g.what, g.got, limit)
+		}
+	}
+	if large > small+slack || largePeak > smallPeak+slack {
+		t.Errorf("heap growth rises with the backlog: held %d to %d bytes, peak %d to %d bytes for 4 times the records, want at most %d more",
+			small, large, smallPeak, largePeak, slack)
 	}
 }

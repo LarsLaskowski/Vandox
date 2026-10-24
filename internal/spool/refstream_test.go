@@ -2,6 +2,7 @@ package spool
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -498,5 +499,82 @@ func TestReferenceStream_FullScaleDay(t *testing.T) {
 		records, bytes, float64(bytes)/1e6, float64(bytes)*refDays/1e9)
 	if limit := refDefaultMaxSize / refDays; bytes >= limit {
 		t.Errorf("one day of the reference stream is %d bytes, 7 days of it do not fit the default cap of %d bytes", bytes, refDefaultMaxSize)
+	}
+}
+
+// The backfill's batch and bandwidth bounds (plan, fact 16): a batch holds at most 1 MiB of record lines and 20,000
+// records, and the backfill sends 256 KiB of compressed bodies per second.
+const (
+	backfillBatchBytes   = 1 << 20
+	backfillBatchRecords = 20000
+	backfillBandwidth    = 256 << 10
+	backfillMinRate      = 1000
+	backfillMaxRate      = 8500
+	// backfillHeaderRoom is what the header line takes of a batch's byte bound.
+	backfillHeaderRoom = 512
+	refBackfillBoot    = "0f0f0f0f-1111-4222-8333-444455556666"
+)
+
+// refBatch is a batch of the backfill: its records and the bytes of their lines.
+type refBatch struct {
+	records []model.Record
+	lines   int64
+}
+
+// refBatches cuts one scaled day of the reference stream into batches of the backfill's bounds.
+func refBatches(t *testing.T) []refBatch {
+	t.Helper()
+
+	var batches []refBatch
+	var current refBatch
+	var seq uint64
+	newRefStream(t, refScaledDivisor).day(0, func(run []model.Record) {
+		for _, r := range run {
+			seq++
+			r.Seq = seq
+			line, err := wire.MarshalRecord(&r)
+			if err != nil {
+				t.Fatalf("MarshalRecord(%s from %s) = %v, want a valid reference record", r.Kind(), r.Source, err)
+			}
+			size := int64(len(line)) + 1
+			if current.lines+size+backfillHeaderRoom > backfillBatchBytes || len(current.records) >= backfillBatchRecords {
+				batches = append(batches, current)
+				current = refBatch{}
+			}
+			current.records = append(current.records, r)
+			current.lines += size
+		}
+	})
+
+	return append(batches, current)
+}
+
+// TestReferenceStream_BackfillRate encodes one scaled day of the reference stream in batches of the backfill's bounds
+// and checks that at the default bandwidth the backfill delivers 1,000 to 8,500 records a second: the compressed bytes
+// of the day take bytes/256 KiB seconds to send, and every record of the day is delivered in that time.
+func TestReferenceStream_BackfillRate(t *testing.T) {
+	batches := refBatches(t)
+	var records int
+	var plain, compressed int64
+	for i, batch := range batches {
+		var buf bytes.Buffer
+		b := wire.Batch{Header: wire.NewHeader("agent-one", refBackfillBoot, wire.ModeBackfill), Records: batch.records}
+		if err := wire.EncodeBatch(&buf, &b); err != nil {
+			t.Fatalf("EncodeBatch(batch %d of %d records) = %v, want nil", i, len(batch.records), err)
+		}
+		compressed += int64(buf.Len())
+		plain += batch.lines
+		records += len(batch.records)
+	}
+	if records == 0 || compressed == 0 {
+		t.Fatalf("the scaled day made %d records in %d compressed bytes, want a stream", records, compressed)
+	}
+	ratio := float64(plain) / float64(compressed)
+	rate := float64(records) / (float64(compressed) / backfillBandwidth)
+	t.Logf("reference stream day at 1/%d: %d records in %d batches, %d bytes of lines, %d compressed bytes, gzip ratio %.2f, %.0f records a second at %d bytes a second of compressed bodies",
+		refScaledDivisor, records, len(batches), plain, compressed, ratio, rate, backfillBandwidth)
+	if rate < backfillMinRate || rate > backfillMaxRate {
+		t.Errorf("the backfill delivers %.0f records a second of the reference stream at %d bytes a second (gzip ratio %.2f), want %d to %d",
+			rate, backfillBandwidth, ratio, backfillMinRate, backfillMaxRate)
 	}
 }
