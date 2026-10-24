@@ -6,7 +6,7 @@ namespace Vandox.Core.Model;
 /// <summary>
 /// A socket with a remote endpoint.
 /// </summary>
-public sealed class Connection
+public sealed class Connection : SocketOwner
 {
     #region Properties
 
@@ -65,7 +65,8 @@ public sealed class Connection
         return ConnectionSnapshot.CheckProto(path, Proto, State)
                    ?? Check.AddressPort($"{path}.local", Local)
                    ?? Check.AddressPort($"{path}.remote", Remote)
-                   ?? ConnectionSnapshot.CheckProcess(path, Pid, Command);
+                   ?? ConnectionSnapshot.CheckProcess(path, Pid, Command)
+                   ?? ConnectionSnapshot.CheckSocketUser(path, Uid, User, false);
     }
 
     #endregion // Methods

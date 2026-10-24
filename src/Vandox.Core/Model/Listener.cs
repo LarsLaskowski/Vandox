@@ -6,7 +6,7 @@ namespace Vandox.Core.Model;
 /// <summary>
 /// A socket without a remote endpoint.
 /// </summary>
-public sealed class Listener
+public sealed class Listener : SocketOwner
 {
     #region Properties
 
@@ -37,6 +37,14 @@ public sealed class Listener
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public string Command { get; set; } = string.Empty;
 
+    /// <summary>
+    /// Gets or sets a value indicating whether sockets of several UIDs share the endpoint.
+    /// </summary>
+    [JsonPropertyName("mixed_uids")]
+    [JsonPropertyOrder(102)]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool MixedUids { get; set; }
+
     #endregion // Properties
 
     #region Methods
@@ -50,7 +58,8 @@ public sealed class Listener
     {
         return ConnectionSnapshot.CheckProtoOnly(path, Proto)
                    ?? Check.AddressPort($"{path}.local", Local)
-                   ?? ConnectionSnapshot.CheckProcess(path, Pid, Command);
+                   ?? ConnectionSnapshot.CheckProcess(path, Pid, Command)
+                   ?? ConnectionSnapshot.CheckSocketUser(path, Uid, User, MixedUids);
     }
 
     #endregion // Methods

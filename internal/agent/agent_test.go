@@ -259,7 +259,7 @@ const fixtureSocketMount = 10
 
 // fixtureConnections returns connection sources that read the fixture tree, so no agent test reads the host's /proc.
 func fixtureConnections() connstats.Sources {
-	return connstats.Sources{Proc: os.DirFS("../../testdata/proc"), SocketMount: connstats.SocketMount{ID: fixtureSocketMount}}
+	return connstats.Sources{Proc: os.DirFS("../../testdata/proc"), Etc: os.DirFS("../../testdata/etc"), SocketMount: connstats.SocketMount{ID: fixtureSocketMount}}
 }
 
 // The identities of the kernel fixture: the machine, the boot, the sequence number ID of the journal files and the boot time.
@@ -933,7 +933,7 @@ func lowMemoryOptions(t *testing.T, workers int) Options {
 		System:    sysstats.Sources{Proc: proc, Sys: loadDir(t, "../../testdata/sys"), StatFS: fixtureSystem().StatFS, Clock: fixtureSystem().Clock},
 		Processes: procstats.Sources{Proc: proc, Etc: loadDir(t, "../../testdata/etc")},
 		// The in-memory /proc holds the captured socket tables (net/ is in the fixture tree); the socket mount is the captured sockets'.
-		Connections: connstats.Sources{Proc: proc, SocketMount: connstats.SocketMount{ID: fixtureSocketMount}},
+		Connections: connstats.Sources{Proc: proc, Etc: loadDir(t, "../../testdata/etc"), SocketMount: connstats.SocketMount{ID: fixtureSocketMount}},
 		Services:    fixtureServices(),
 		MariaDB:     fixtureMariaDB(),
 		Kernel:      fixtureKernel(),

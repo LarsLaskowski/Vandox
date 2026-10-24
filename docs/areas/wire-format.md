@@ -191,10 +191,24 @@ connection.
 `complete` (true only if no entry the producer saw was left out of any list, in particular `connections` holds
 every socket; false after a reduction for size) and the lists `states` (`proto`, `state`, `count`),
 `processes` (`pid` > 0, `command`, `count`), `remotes` (`addr`, `count`), `listeners` (`proto`, `local`, `pid`,
-`command`) and `connections` (`proto`, `local`, `remote`, `state`, `pid`, `command`). An empty snapshot is
-valid. `proto` is `tcp`, `tcp6`, `udp` or `udp6`; `state` is required for `tcp`/`tcp6` and optional for
+`command`, `uid`, `user`, `mixed_uids`) and `connections` (`proto`, `local`, `remote`, `state`, `pid`, `command`, `uid`, `user`). An
+empty snapshot is valid. `proto` is `tcp`, `tcp6`, `udp` or `udp6`; `state` is required for `tcp`/`tcp6` and optional for
 `udp`/`udp6`, from `ESTABLISHED SYN_SENT SYN_RECV FIN_WAIT1 FIN_WAIT2 TIME_WAIT CLOSE CLOSE_WAIT LAST_ACK
 LISTEN CLOSING NEW_SYN_RECV`; `count` >= 1; `pid` >= 0.
+
+**Socket UID (since format 1.1, record 0115).** A listener entry (`listeners`, `new_listeners`) and a connection entry carry the optional
+`uid` (an integer from 0 to 4294967295: the socket's UID from the kernel's table, not the UID of a process that holds it) and `user`
+(short text: the name of that UID, or the UID in decimal when the producer knows no name); a listener entry also the optional `mixed_uids`
+(true: the endpoint's sockets have more than one UID, and `uid` is the lowest of them). An **absent `uid` means unknown**, never root: a
+socket without a file, an imported legacy snapshot, a 1.0 agent's snapshot or a stored record from before the field. A `uid` of 0 is
+written (Go `UID *uint32`, C# `uint?`); `user` is left out when empty and `mixed_uids` when false. The rules, checked in Go and C# after
+the `pid`/`command` rules of the entry and in this order: a non-empty `user` without `uid` is `data.<list>[<i>].user`: `requires uid`; a
+`mixed_uids` true without `uid` is `data.<list>[<i>].mixed_uids`: `requires uid`; then `user` follows the short-text rule (`too long` over
+1,024 bytes). `uid` without `user` is accepted (a reader shows the number). A JSON `null` of any of the three reads as absent (0089), and
+`"user":""` and `"mixed_uids":false` read as absent too, so they are accepted with or without `uid`. A `uid` that is negative (also `-0`),
+a fraction, above 4294967295, a string or `1e400` is `wire.ErrMalformed`, the rule for integers out of range. `mixed_uids` on a connection
+entry is an unknown key and ignored. The agent's producer rules (which line gets a UID, the name lookup) are in [Agent](agent.md),
+*Connections*, *Socket UIDs*.
 
 Since format 1.1 seven optional fields say what kind of snapshot it is, what its producer compared and what its own list holds (all omitted
 when false, zero or absent):
@@ -208,7 +222,7 @@ when false, zero or absent):
   made for this snapshot: the whole inventory; only the listeners on ports 1 to 1023, because an inventory was cut at 4,096; none; or `start`,
   the first run after the producer started, which has no earlier inventory (nothing is compared, like `none`; record 0116).
 - `new_listeners` (listener entries, at most 4,096): the listeners the producer found new in the run, with the owner's `pid` and `command`
-  when known. Requires `listener_check` `all` or `privileged`.
+  when known and the socket UID fields as the endpoint's `listeners` entry has them. Requires `listener_check` `all` or `privileged`.
 - `new_listeners_omitted` (>= 1): how many more new listeners were found than `new_listeners` holds. Requires `listener_check` `all` or
   `privileged`.
 - `inventory` (`all`, `privileged`, `cut`, `skipped`): how much of the run's listener inventory this snapshot's `listeners` list holds: all of
@@ -383,7 +397,8 @@ if the rest of that header has an incompatible shape. A header that is not a JSO
 a JSON integer, is `wire.ErrMalformed`: the major is an integer in every version (0043). A minor change is additive: new optional fields and new kinds; a decoder ignores unknown
 keys at any depth and so accepts a newer minor of its major. The current version is **1.1**: 1.1 added the optional fields of
 `connection_snapshot` (`aggregates_only`, `aggregates_incomplete`, `listener_check` with the value `start`, `new_listeners`,
-`new_listeners_omitted`, `inventory`, `tables`; records 0115 and 0116), the optional field `error_code` of `mariadb_status` (record
+`new_listeners_omitted`, `inventory`, `tables`; records 0115 and 0116; and `uid`, `user`, `mixed_uids` of its listener entries and `uid`,
+`user` of its connection entries, record 0115), the optional field `error_code` of `mariadb_status` (record
 0118), the optional fields `boot_id` and `kernel_time_ns` of `kernel_event`'s `oom_kill`, the optional `trigger` of `process_snapshot`
 and `connection_snapshot`, and the kind `backup_run` (record 0120); the format is unreleased, so the fields and the kind extend 1.1 in
 place, and both decoders accept the new kind in the same change (a decoder without it would refuse the batch);
@@ -499,7 +514,8 @@ Decompressed content of a batch of three records (the real stream is gzip-compre
 - [0090](../decisions/0090-wire-keys-matched-ignoring-ascii-case-duplicates-rejected-header-shape-malformed.md) — why both decoders check
   keys and nesting before binding, match keys ignoring ASCII case and report a misshapen header as malformed.
 - [0115](../decisions/0115-connection-collector-proc-net-tables-owners-from-fd-regular-and-full-snapshots-bounded-listener-check.md) — why a
-  regular and a full snapshot are one record kind with additive fields, and format 1.1.
+  regular and a full snapshot are one record kind with additive fields, and format 1.1; why entries carry the socket's `uid` beside a
+  `user` name, absent meaning unknown, and an endpoint's lowest UID with `mixed_uids`.
 - [0116](../decisions/0116-listeners-across-agent-starts-compared-when-stored-and-shown-in-the-forensics-report.md) — why `listener_check` gains
   `start` and a snapshot says what its listener list holds (`inventory`, `tables`).
 - [0114](../decisions/0114-model-text-limits-measured-after-the-encoders-replacement.md) — why the Go model measures limits as the encoder writes them, invalid UTF-8 counted as its replacement.

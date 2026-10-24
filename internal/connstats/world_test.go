@@ -61,9 +61,28 @@ func quietLogger() *slog.Logger {
 	return slog.New(slog.DiscardHandler)
 }
 
-// newCollector returns a collector over proc that knows the socket mount of the captured samples.
+// etcDir holds the passwd file the tests resolve user names from: it names UID 0 (root), 33 (www-data) and 65534 (nobody), none of
+// the other UIDs of the captured tables.
+const etcDir = "../../testdata/etc"
+
+// etcOf returns an /etc that holds the given passwd file.
+func etcOf(passwd string) fs.FS {
+	return fstest.MapFS{"passwd": {Data: []byte(passwd)}}
+}
+
+// fixtureEtc returns the /etc of the captured server (testdata/etc).
+func fixtureEtc() fs.FS {
+	return os.DirFS(etcDir)
+}
+
+// newCollector returns a collector over proc that knows the socket mount of the captured samples and reads the captured passwd.
 func newCollector(proc fs.FS) *Connections {
-	return New(Sources{Proc: proc, SocketMount: SocketMount{ID: socketMount}}, quietLogger())
+	return newCollectorWith(proc, fixtureEtc())
+}
+
+// newCollectorWith returns the collector of newCollector over the given /etc.
+func newCollectorWith(proc, etc fs.FS) *Connections {
+	return New(Sources{Proc: proc, Etc: etc, SocketMount: SocketMount{ID: socketMount}}, quietLogger())
 }
 
 // snapshotOf runs the collector once and returns its single record and snapshot.
@@ -212,13 +231,14 @@ func endpointHex(ap netip.AddrPort) string {
 	return b.String()
 }
 
-// socketLine builds a table line from a captured line of the same table, replacing local, remote, state and inode.
-func socketLine(t *testing.T, tmpl string, local, remote netip.AddrPort, state string, inode uint64) string {
+// socketLine builds a table line from a captured line of the same table, replacing local, remote, state, uid and inode.
+func socketLine(t *testing.T, tmpl string, local, remote netip.AddrPort, state string, uid uint32, inode uint64) string {
 	t.Helper()
 
 	line := setField(t, tmpl, 1, endpointHex(local))
 	line = setField(t, line, 2, endpointHex(remote))
 	line = setField(t, line, 3, state)
+	line = setField(t, line, 7, strconv.FormatUint(uint64(uid), 10))
 	return setField(t, line, 9, strconv.FormatUint(inode, 10))
 }
 
@@ -230,36 +250,50 @@ func zeroRemote(table string) netip.AddrPort {
 	return netip.AddrPortFrom(netip.IPv4Unspecified(), 0)
 }
 
-// addSocket appends a socket to a table; the line is a captured one of that table with the values replaced.
+// addSocket appends a socket of the UID 0 to a table; the line is a captured one of that table with the values replaced.
 func (w *world) addSocket(table, local, remote, state string, inode uint64) {
+	w.t.Helper()
+
+	w.addSocketUID(table, local, remote, state, 0, inode)
+}
+
+// addSocketUID appends a socket of the given UID to a table; the line is a captured one of that table with the values replaced.
+func (w *world) addSocketUID(table, local, remote, state string, uid uint32, inode uint64) {
 	w.t.Helper()
 
 	r := zeroRemote(table)
 	if remote != "" {
 		r = addrPort(remote)
 	}
-	w.lines[table] = append(w.lines[table], socketLine(w.t, w.tmpl[table], addrPort(local), r, state, inode))
+	w.lines[table] = append(w.lines[table], socketLine(w.t, w.tmpl[table], addrPort(local), r, state, uid, inode))
 	w.dirty = true
 }
 
-// addListener appends a listener: TCP in state LISTEN, UDP without remote endpoint.
+// addListener appends a listener of the UID 0: TCP in state LISTEN, UDP without remote endpoint.
 func (w *world) addListener(table, local string, inode uint64) {
+	w.t.Helper()
+
+	w.addListenerUID(table, local, 0, inode)
+}
+
+// addListenerUID appends a listener of the given UID: TCP in state LISTEN, UDP without remote endpoint.
+func (w *world) addListenerUID(table, local string, uid uint32, inode uint64) {
 	w.t.Helper()
 
 	state := stateListen
 	if strings.HasPrefix(table, "udp") {
 		state = stateUDPOpen
 	}
-	w.addSocket(table, local, "", state, inode)
+	w.addSocketUID(table, local, "", state, uid, inode)
 }
 
-// addListeners appends one TCP listener per port on addr, from first on, with the inodes from inode on.
+// addListeners appends one TCP listener of the UID 0 per port on addr, from first on, with the inodes from inode on.
 func (w *world) addListeners(addr string, first, count uint16, inode uint64) {
 	w.t.Helper()
 
 	for i := range count {
 		local := netip.AddrPortFrom(netip.MustParseAddr(addr), first+i)
-		w.lines["tcp"] = append(w.lines["tcp"], socketLine(w.t, w.tmpl["tcp"], local, zeroRemote("tcp"), stateListen, inode+uint64(i)))
+		w.lines["tcp"] = append(w.lines["tcp"], socketLine(w.t, w.tmpl["tcp"], local, zeroRemote("tcp"), stateListen, 0, inode+uint64(i)))
 	}
 	w.dirty = true
 }
@@ -390,10 +424,15 @@ func (h *recordingHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 
 func (h *recordingHandler) WithGroup(string) slog.Handler { return h }
 
-// newRecordingCollector returns a collector over proc and the store of its log lines.
+// newRecordingCollector returns a collector over proc and the captured passwd, and the store of its log lines.
 func newRecordingCollector(proc fs.FS, mount SocketMount) (*Connections, *logStore) {
+	return newRecordingCollectorWith(proc, fixtureEtc(), mount)
+}
+
+// newRecordingCollectorWith returns the collector of newRecordingCollector over the given /etc.
+func newRecordingCollectorWith(proc, etc fs.FS, mount SocketMount) (*Connections, *logStore) {
 	store := &logStore{}
-	return New(Sources{Proc: proc, SocketMount: mount}, slog.New(&recordingHandler{store: store})), store
+	return New(Sources{Proc: proc, Etc: etc, SocketMount: mount}, slog.New(&recordingHandler{store: store})), store
 }
 
 // wantLogged checks that exactly n lines with message msg and level were logged, each from the collector, and returns them.
@@ -527,10 +566,12 @@ func (s *gapSink) samples() int {
 // Generated tables and descriptors for the tests of the caps. They produce their bytes on demand, so a table of 400,000 lines
 // or a process of 200,000 descriptors is never in memory, and a Read or an Open allocates nothing beyond what a real file does.
 
-// sockSpec is one generated socket (IPv4 tables only); state is the kernel's code, inode at most 99,999,999.
+// sockSpec is one generated socket (IPv4 tables only); state is the kernel's code, uid at most 99,999 (the width of the captured
+// field) and inode at most 99,999,999.
 type sockSpec struct {
 	local, remote netip.AddrPort
 	state         string
+	uid           uint32
 	inode         uint64
 }
 
@@ -538,6 +579,7 @@ type sockSpec struct {
 type lineTemplate struct {
 	line                          []byte
 	local, remote, state, inodeAt int
+	uidEnd                        int // the offset after the uid field, whose width is uidDigits
 }
 
 // newLineTemplate cuts the offsets of the fields out of a captured line of an IPv4 table.
@@ -558,13 +600,20 @@ func newLineTemplate(t *testing.T, name string) *lineTemplate {
 		}
 	}
 	tp.local, tp.remote, tp.state, tp.inodeAt = offsets[1], offsets[2], offsets[3], offsets[9]
+	tp.uidEnd = offsets[7] + 1
+	if tp.uidEnd < uidDigits || string(tp.line[tp.uidEnd-uidDigits:tp.uidEnd]) != "    0" {
+		t.Fatalf("template line %q: the uid field is not %d characters wide and 0", raw, uidDigits)
+	}
 	if got := string(tp.line[tp.inodeAt : tp.inodeAt+inodeDigits]); len(strings.Fields(got)) != 1 || tp.line[tp.inodeAt+inodeDigits] != ' ' {
 		t.Fatalf("template line %q: the inode field is not %d digits wide", raw, inodeDigits)
 	}
 	return tp
 }
 
-const inodeDigits = 8
+const (
+	inodeDigits = 8
+	uidDigits   = 5
+)
 
 // hexInto writes v as digits upper-case hex digits at dst.
 func hexInto(dst []byte, v uint64, digits int) {
@@ -588,6 +637,11 @@ func (tp *lineTemplate) fill(buf []byte, s *sockSpec) []byte {
 	endpointInto(buf[tp.local:], s.local)
 	endpointInto(buf[tp.remote:], s.remote)
 	copy(buf[tp.state:], s.state)
+	uid := strconv.AppendUint(make([]byte, 0, uidDigits), uint64(s.uid), 10)
+	for i := tp.uidEnd - uidDigits; i < tp.uidEnd; i++ {
+		buf[i] = ' '
+	}
+	copy(buf[tp.uidEnd-len(uid):], uid)
 	var tmp [20]byte
 	digits := strconv.AppendUint(tmp[:0], s.inode, 10)
 	for i := range inodeDigits {

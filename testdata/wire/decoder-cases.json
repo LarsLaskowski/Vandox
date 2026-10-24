@@ -1597,6 +1597,212 @@
         "field": "data.oom_kill.boot_id",
         "reason": "too long"
       }
+    },
+    {
+      "name": "S42 listener user without uid",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":1,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"connection_snapshot\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"complete\":true,\"listeners\":[{\"proto\":\"tcp\",\"local\":\"0.0.0.0:22\",\"user\":\"root\"}]}}"
+      ],
+      "want": {
+        "error": "Invalid",
+        "line": 2,
+        "field": "data.listeners[0].user",
+        "reason": "requires uid"
+      }
+    },
+    {
+      "name": "S43 listener mixed_uids without uid",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":1,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"connection_snapshot\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"complete\":true,\"listeners\":[{\"proto\":\"tcp\",\"local\":\"0.0.0.0:22\",\"mixed_uids\":true}]}}"
+      ],
+      "want": {
+        "error": "Invalid",
+        "line": 2,
+        "field": "data.listeners[0].mixed_uids",
+        "reason": "requires uid"
+      }
+    },
+    {
+      "name": "S44 new listener user without uid",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":1,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"connection_snapshot\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"complete\":true,\"listener_check\":\"all\",\"new_listeners\":[{\"proto\":\"tcp\",\"local\":\"0.0.0.0:22\",\"user\":\"root\"}]}}"
+      ],
+      "want": {
+        "error": "Invalid",
+        "line": 2,
+        "field": "data.new_listeners[0].user",
+        "reason": "requires uid"
+      }
+    },
+    {
+      "name": "S45 connection user without uid",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":1,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"connection_snapshot\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"complete\":true,\"connections\":[{\"proto\":\"tcp\",\"local\":\"10.0.0.1:80\",\"remote\":\"192.0.2.1:5000\",\"state\":\"ESTABLISHED\",\"user\":\"root\"}]}}"
+      ],
+      "want": {
+        "error": "Invalid",
+        "line": 2,
+        "field": "data.connections[0].user",
+        "reason": "requires uid"
+      }
+    },
+    {
+      "name": "S46 listener uid minus one",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":1,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"connection_snapshot\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"complete\":true,\"listeners\":[{\"proto\":\"tcp\",\"local\":\"0.0.0.0:22\",\"uid\":-1}]}}"
+      ],
+      "want": {
+        "error": "Malformed",
+        "line": 2
+      }
+    },
+    {
+      "name": "S47 listener uid 4294967296",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":1,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"connection_snapshot\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"complete\":true,\"listeners\":[{\"proto\":\"tcp\",\"local\":\"0.0.0.0:22\",\"uid\":4294967296}]}}"
+      ],
+      "want": {
+        "error": "Malformed",
+        "line": 2
+      }
+    },
+    {
+      "name": "S48 listener uid fractional",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":1,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"connection_snapshot\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"complete\":true,\"listeners\":[{\"proto\":\"tcp\",\"local\":\"0.0.0.0:22\",\"uid\":1.5}]}}"
+      ],
+      "want": {
+        "error": "Malformed",
+        "line": 2
+      }
+    },
+    {
+      "name": "S49 listener uid as string",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":1,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"connection_snapshot\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"complete\":true,\"listeners\":[{\"proto\":\"tcp\",\"local\":\"0.0.0.0:22\",\"uid\":\"0\"}]}}"
+      ],
+      "want": {
+        "error": "Malformed",
+        "line": 2
+      }
+    },
+    {
+      "name": "S50 listener uid 1e400",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":1,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"connection_snapshot\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"complete\":true,\"listeners\":[{\"proto\":\"tcp\",\"local\":\"0.0.0.0:22\",\"uid\":1e400}]}}"
+      ],
+      "want": {
+        "error": "Malformed",
+        "line": 2
+      }
+    },
+    {
+      "name": "S51 listener uid minus zero",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":1,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"connection_snapshot\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"complete\":true,\"listeners\":[{\"proto\":\"tcp\",\"local\":\"0.0.0.0:22\",\"uid\":-0}]}}"
+      ],
+      "want": {
+        "error": "Malformed",
+        "line": 2
+      }
+    },
+    {
+      "name": "S52 listener uid 4294967295 with user",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":1,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"connection_snapshot\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"complete\":true,\"listeners\":[{\"proto\":\"tcp\",\"local\":\"0.0.0.0:22\",\"uid\":4294967295,\"user\":\"nobody\"}]}}"
+      ],
+      "want": {
+        "records": [
+          {
+            "kind": "connection_snapshot",
+            "seq": 1
+          }
+        ]
+      }
+    },
+    {
+      "name": "S53 listener uid, user and mixed_uids null",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":1,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"connection_snapshot\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"complete\":true,\"listeners\":[{\"proto\":\"tcp\",\"local\":\"0.0.0.0:22\",\"uid\":null,\"user\":null,\"mixed_uids\":null}]}}"
+      ],
+      "want": {
+        "records": [
+          {
+            "kind": "connection_snapshot",
+            "seq": 1
+          }
+        ]
+      }
+    },
+    {
+      "name": "S54 listener empty user and mixed_uids false without uid",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":1,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"connection_snapshot\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"complete\":true,\"listeners\":[{\"proto\":\"tcp\",\"local\":\"0.0.0.0:22\",\"user\":\"\",\"mixed_uids\":false}]}}"
+      ],
+      "want": {
+        "records": [
+          {
+            "kind": "connection_snapshot",
+            "seq": 1
+          }
+        ]
+      }
+    },
+    {
+      "name": "S55 listener uid without user",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":1,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"connection_snapshot\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"complete\":true,\"listeners\":[{\"proto\":\"tcp\",\"local\":\"0.0.0.0:22\",\"uid\":0}]}}"
+      ],
+      "want": {
+        "records": [
+          {
+            "kind": "connection_snapshot",
+            "seq": 1
+          }
+        ]
+      }
+    },
+    {
+      "name": "S56 connection mixed_uids true without uid is an unknown key",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":1,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"connection_snapshot\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"complete\":true,\"connections\":[{\"proto\":\"tcp\",\"local\":\"10.0.0.1:80\",\"remote\":\"192.0.2.1:5000\",\"state\":\"ESTABLISHED\",\"mixed_uids\":true}]}}"
+      ],
+      "want": {
+        "records": [
+          {
+            "kind": "connection_snapshot",
+            "seq": 1
+          }
+        ]
+      }
+    },
+    {
+      "name": "S57 listener user of 1025 bytes",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":1,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"connection_snapshot\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"complete\":true,\"listeners\":[{\"proto\":\"tcp\",\"local\":\"0.0.0.0:22\",\"uid\":0,\"user\":\"uuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuu\"}]}}"
+      ],
+      "want": {
+        "error": "Invalid",
+        "line": 2,
+        "field": "data.listeners[0].user",
+        "reason": "too long"
+      }
     }
   ]
 }

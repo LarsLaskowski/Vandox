@@ -446,6 +446,51 @@ public class SqliteStoreListenerHistoryTests
     }
 
     /// <summary>
+    /// A stored list of new listeners written before the socket's UID was recorded reads with the UID unknown, not 0, and a stored list that has the fields reads them back.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task SqliteStoreListenerHistoryReadsListenersWithoutUidAsUnknown()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        await using var store = await SqliteStore.OpenAsync(directory.Path, TestContext.CancellationToken);
+
+        await store.WriteBatchAsync(ListenerSamples.Batch(Agent, ListenerSamples.Record(1, 0, ListenerSamples.Found("all", [ListenerSamples.Tcp("0.0.0.0", 23, 7, "telnetd")], 0))), TestContext.CancellationToken);
+        await store.WriteBatchAsync(ListenerSamples.Batch(Agent,
+                                                          ListenerSamples.Record(2,
+                                                                                 60,
+                                                                                 ListenerSamples.Found("all",
+                                                                                                       [
+                                                                                                           new Listener
+                                                                                                           {
+                                                                                                               Proto = Proto.Tcp,
+                                                                                                               Local = new IPEndPoint(IPAddress.Parse("0.0.0.0"), 24),
+                                                                                                               Uid = 0,
+                                                                                                               User = "root",
+                                                                                                               MixedUids = true
+                                                                                                           }
+                                                                                                       ],
+                                                                                                       0))),
+                                    TestContext.CancellationToken);
+        await ExecuteAsync(directory, """UPDATE connection_marks SET new_listeners = '[{"proto":"tcp","local":"0.0.0.0:23","pid":7,"command":"telnetd"}]' WHERE seq = 1""");
+
+        // Act
+        var page = await ReadAsync(store, ListenerFindingKind.Agent);
+        var old = page.Findings.Single(finding => finding.Seq == 1).Listeners[0];
+        var current = page.Findings.Single(finding => finding.Seq == 2).Listeners[0];
+
+        // Assert
+        Assert.IsNull(old.Uid, "a stored listener without the fields has no UID, not root");
+        Assert.AreEqual(string.Empty, old.User, "a stored listener without the fields has no user");
+        Assert.IsFalse(old.MixedUids, "a stored listener without the fields is not mixed");
+        Assert.AreEqual(7, old.Pid, "the owner of the old list is kept");
+        Assert.AreEqual((uint?)0, current.Uid, "a stored UID 0 reads back as 0");
+        Assert.AreEqual("root", current.User, "a stored user reads back");
+        Assert.IsTrue(current.MixedUids, "a stored mixed_uids reads back");
+    }
+
+    /// <summary>
     /// A finding query with a defined kind and a limit from 1 to the maximum is accepted.
     /// </summary>
     /// <param name="kind">The kind</param>

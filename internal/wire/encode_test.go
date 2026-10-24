@@ -110,12 +110,12 @@ func allKindRecords(loc *time.Location) []model.Record {
 				{Addr: netip.MustParseAddr("2001:db8::1"), Count: 4},
 				{Addr: netip.MustParseAddr("::ffff:192.0.2.7"), Count: 1},
 			},
-			Listeners: []model.Listener{{Proto: model.ProtoTCP6, Local: netip.MustParseAddrPort("[::]:443"), PID: 10, Command: "nginx"}},
+			Listeners: []model.Listener{{Proto: model.ProtoTCP6, Local: netip.MustParseAddrPort("[::]:443"), PID: 10, Command: "nginx", UID: ptr(uint32(0)), User: "root"}},
 			Connections: []model.Connection{{
 				Proto: model.ProtoTCP, Local: netip.MustParseAddrPort("10.0.0.1:80"), Remote: netip.MustParseAddrPort("192.0.2.1:5000"),
-				State: "ESTABLISHED", PID: 10, Command: "nginx",
+				State: "ESTABLISHED", PID: 10, Command: "nginx", UID: ptr(uint32(33)), User: "www-data",
 			}},
-			NewListeners:        []model.Listener{{Proto: model.ProtoUDP, Local: netip.MustParseAddrPort("0.0.0.0:5353"), PID: 11, Command: "avahi"}},
+			NewListeners:        []model.Listener{{Proto: model.ProtoUDP, Local: netip.MustParseAddrPort("0.0.0.0:5353"), PID: 11, Command: "avahi", UID: ptr(uint32(105)), User: "avahi", MixedUIDs: true}},
 			NewListenersOmitted: 2,
 		}},
 		{Meta: agentMeta(4, "systemd", loc), Data: &model.ServiceState{
@@ -151,7 +151,7 @@ func allKindRecords(loc *time.Location) []model.Record {
 			ListenerCheck:        model.ListenerCheckPrivileged,
 			States:               []model.StateCount{{Proto: model.ProtoUDP, Count: 1}},
 			Remotes:              []model.RemoteCount{{Addr: netip.MustParseAddr("::ffff:192.0.2.7"), Count: 1}},
-			Listeners:            []model.Listener{{Proto: model.ProtoTCP, Local: netip.MustParseAddrPort("0.0.0.0:22")}},
+			Listeners:            []model.Listener{{Proto: model.ProtoTCP, Local: netip.MustParseAddrPort("0.0.0.0:22"), UID: ptr(uint32(4294967295))}},
 			NewListeners:         []model.Listener{{Proto: model.ProtoTCP, Local: netip.MustParseAddrPort("0.0.0.0:23")}},
 		}},
 		{Meta: agentMeta(11, "connections", loc), Data: &model.ConnectionSnapshot{

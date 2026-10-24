@@ -197,6 +197,32 @@ public sealed class ConnectionSnapshot : IPayload
     }
 
     /// <summary>
+    /// Checks the UID, the user name and the mixed-UIDs flag of an entry.
+    /// </summary>
+    /// <param name="path">Path of the entry</param>
+    /// <param name="uid">The UID; <c>null</c> when unknown</param>
+    /// <param name="user">The user name</param>
+    /// <param name="mixedUids">Whether sockets of several UIDs share the endpoint</param>
+    /// <returns>The first rule that is broken, or <c>null</c></returns>
+    internal static FieldError? CheckSocketUser(string path, uint? uid, string user, bool mixedUids)
+    {
+        if (uid is null)
+        {
+            if (user.Length > 0)
+            {
+                return Check.Invalid($"{path}.user", "requires uid");
+            }
+
+            if (mixedUids)
+            {
+                return Check.Invalid($"{path}.mixed_uids", "requires uid");
+            }
+        }
+
+        return Check.Short($"{path}.user", user);
+    }
+
+    /// <summary>
     /// Checks every entry of a list.
     /// </summary>
     /// <typeparam name="TItem">Type of the entries</typeparam>

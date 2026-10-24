@@ -306,6 +306,76 @@ public class WireContractTests
     }
 
     /// <summary>
+    /// The connection snapshots of the Go encoder's golden batch carry the socket's UID, user and mixed-UIDs flag, UID 0 stays a value, and the decoder applies the pairing rule to the golden text.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task WireContractConnectionSnapshotCarriesTheSocketUid()
+    {
+        // Arrange
+        var text = Encoding.UTF8.GetString(await File.ReadAllBytesAsync(RepositoryFiles.Path("testdata/wire/all-kinds.jsonl"), CancellationToken.None));
+        const string rootEntry = "\"uid\":0,\"user\":\"root\"";
+
+        Assert.Contains(rootEntry, text, "the golden batch holds a listener of UID 0 with its user");
+
+        var snapshots = new List<ConnectionSnapshot>();
+
+        using (var compressed = GzipOf(Encoding.UTF8.GetBytes(text)))
+            using (var decoder = await BatchDecoder.OpenAsync(compressed, null, CancellationToken.None))
+            {
+                for (var record = await decoder.NextAsync(CancellationToken.None); record is not null; record = await decoder.NextAsync(CancellationToken.None))
+                {
+                    if (record.Data is ConnectionSnapshot snapshot)
+                    {
+                        snapshots.Add(snapshot);
+                    }
+                }
+            }
+
+        // Act
+        var withoutUid = text.Replace(rootEntry, "\"user\":\"root\"", StringComparison.Ordinal);
+
+        using var withoutUidInput = GzipOf(Encoding.UTF8.GetBytes(withoutUid));
+        using var withoutUidDecoder = await BatchDecoder.OpenAsync(withoutUidInput, null, CancellationToken.None);
+
+        Assert.IsNotNull(await withoutUidDecoder.NextAsync(CancellationToken.None), "first record of the golden batch");
+        Assert.IsNotNull(await withoutUidDecoder.NextAsync(CancellationToken.None), "second record of the golden batch");
+
+        var exception = await Assert.ThrowsExactlyAsync<WireException>(() => withoutUidDecoder.NextAsync(CancellationToken.None), "a user without a uid");
+
+        // Assert
+        Assert.HasCount(4, snapshots, "connection snapshots of the golden batch");
+
+        var full = snapshots[0];
+
+        Assert.IsNotNull(full.Listeners, "full: listeners");
+        Assert.AreEqual((uint?)0, full.Listeners[0].Uid, "full: listener uid 0 is a value, not absent");
+        Assert.AreEqual("root", full.Listeners[0].User, "full: listener user");
+        Assert.IsFalse(full.Listeners[0].MixedUids, "full: listener mixed_uids");
+        Assert.IsNotNull(full.Connections, "full: connections");
+        Assert.AreEqual((uint?)33, full.Connections[0].Uid, "full: connection uid");
+        Assert.AreEqual("www-data", full.Connections[0].User, "full: connection user");
+        Assert.IsNotNull(full.NewListeners, "full: new_listeners");
+        Assert.AreEqual((uint?)105, full.NewListeners[0].Uid, "full: new listener uid");
+        Assert.AreEqual("avahi", full.NewListeners[0].User, "full: new listener user");
+        Assert.IsTrue(full.NewListeners[0].MixedUids, "full: new listener mixed_uids");
+
+        var aggregatesListeners = snapshots[1].Listeners;
+        var startListeners = snapshots[2].Listeners;
+
+        Assert.IsNotNull(aggregatesListeners, "aggregates: listeners");
+        Assert.AreEqual((uint?)uint.MaxValue, aggregatesListeners[0].Uid, "aggregates: the largest uid");
+        Assert.AreEqual(string.Empty, aggregatesListeners[0].User, "aggregates: a uid without user");
+
+        Assert.IsNotNull(startListeners, "start: listeners");
+        Assert.IsNull(startListeners[0].Uid, "start: an entry without uid reads as unknown");
+
+        Assert.AreEqual(WireErrorKind.Invalid, exception.Kind, "error class");
+        Assert.AreEqual("data.listeners[0].user", exception.FieldError?.Field, "field");
+        Assert.AreEqual("requires uid", exception.FieldError?.Reason, "reason");
+    }
+
+    /// <summary>
     /// The texts of the replaced-text golden batch sit exactly at their limits after the Go encoder's replacement of invalid bytes.
     /// </summary>
     /// <returns>A task that completes when the test is done</returns>
@@ -431,7 +501,7 @@ public class WireContractTests
                          ("X", 4),
                          ("M", 5),
                          ("U", 2),
-                         ("S", 40)
+                         ("S", 57)
                      };
         var required = groups.SelectMany(pair => Enumerable.Range(1, pair.Count).Select(number => $"{pair.Prefix}{number}"));
 

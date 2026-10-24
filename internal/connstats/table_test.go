@@ -2,6 +2,7 @@ package connstats
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"net/netip"
 	"os"
@@ -83,23 +84,23 @@ func TestParseLine_ServerSamples(t *testing.T) {
 	}
 
 	checkSamples(t, []sample{
-		{serverNetDir, "tcp", tcpTable, 0, socket{model.ProtoTCP, addrPort("0.0.0.0:110"), addrPort("0.0.0.0:0"), "LISTEN", 16364321}},
-		{serverNetDir, "tcp", tcpTable, 2, socket{model.ProtoTCP, addrPort("127.0.0.1:3306"), addrPort("0.0.0.0:0"), "LISTEN", 16365476}},
-		{serverNetDir, "tcp", tcpTable, 16, socket{model.ProtoTCP, addrPort("192.0.2.10:443"), addrPort("0.0.0.0:0"), "LISTEN", 16364675}},
+		{serverNetDir, "tcp", tcpTable, 0, socket{proto: model.ProtoTCP, local: addrPort("0.0.0.0:110"), remote: addrPort("0.0.0.0:0"), state: "LISTEN", inode: 16364321, uid: 0}},
+		{serverNetDir, "tcp", tcpTable, 2, socket{proto: model.ProtoTCP, local: addrPort("127.0.0.1:3306"), remote: addrPort("0.0.0.0:0"), state: "LISTEN", inode: 16365476, uid: 114}},
+		{serverNetDir, "tcp", tcpTable, 16, socket{proto: model.ProtoTCP, local: addrPort("192.0.2.10:443"), remote: addrPort("0.0.0.0:0"), state: "LISTEN", inode: 16364675, uid: 0}},
 		// ESTABLISHED, a running timer, a non-zero send queue and a last field of -1.
-		{serverNetDir, "tcp", tcpTable, 26, socket{model.ProtoTCP, addrPort("192.0.2.10:22"), addrPort("198.51.100.7:25249"), "ESTABLISHED", 17280839}},
+		{serverNetDir, "tcp", tcpTable, 26, socket{proto: model.ProtoTCP, local: addrPort("192.0.2.10:22"), remote: addrPort("198.51.100.7:25249"), state: "ESTABLISHED", inode: 17280839, uid: 0}},
 		// TIME_WAIT: inode 0 and fewer tail fields.
-		{serverNetDir, "tcp", tcpTable, 27, socket{model.ProtoTCP, addrPort("192.0.2.10:56518"), addrPort("198.51.100.20:443"), "TIME_WAIT", 0}},
-		{serverNetDir, "tcp6", tcp6Table, 0, socket{model.ProtoTCP6, addrPort("[::]:106"), addrPort("[::]:0"), "LISTEN", 22074}},
-		{serverNetDir, "tcp6", tcp6Table, 7, socket{model.ProtoTCP6, addrPort("[2001:db8::10]:53"), addrPort("[::]:0"), "LISTEN", 16364562}},
-		{serverNetDir, "tcp6", tcp6Table, 10, socket{model.ProtoTCP6, addrPort("[::1]:53"), addrPort("[::]:0"), "LISTEN", 16364558}},
-		{serverNetDir, "tcp6", tcp6Table, 15, socket{model.ProtoTCP6, addrPort("[fe80::200:5eff:fe00:5301]:53"), addrPort("[::]:0"), "LISTEN", 16364566}},
+		{serverNetDir, "tcp", tcpTable, 27, socket{proto: model.ProtoTCP, local: addrPort("192.0.2.10:56518"), remote: addrPort("198.51.100.20:443"), state: "TIME_WAIT", inode: 0, uid: 0}},
+		{serverNetDir, "tcp6", tcp6Table, 0, socket{proto: model.ProtoTCP6, local: addrPort("[::]:106"), remote: addrPort("[::]:0"), state: "LISTEN", inode: 22074, uid: 0}},
+		{serverNetDir, "tcp6", tcp6Table, 7, socket{proto: model.ProtoTCP6, local: addrPort("[2001:db8::10]:53"), remote: addrPort("[::]:0"), state: "LISTEN", inode: 16364562, uid: 116}},
+		{serverNetDir, "tcp6", tcp6Table, 10, socket{proto: model.ProtoTCP6, local: addrPort("[::1]:53"), remote: addrPort("[::]:0"), state: "LISTEN", inode: 16364558, uid: 116}},
+		{serverNetDir, "tcp6", tcp6Table, 15, socket{proto: model.ProtoTCP6, local: addrPort("[fe80::200:5eff:fe00:5301]:53"), remote: addrPort("[::]:0"), state: "LISTEN", inode: 16364566, uid: 116}},
 		// A connected UDP socket and an unconnected one; the state is dropped.
-		{serverNetDir, "udp", udpTable, 0, socket{model.ProtoUDP, addrPort("192.0.2.10:11651"), addrPort("192.0.2.53:53"), "", 16955396}},
-		{serverNetDir, "udp", udpTable, 2, socket{model.ProtoUDP, addrPort("192.0.2.10:53"), addrPort("0.0.0.0:0"), "", 16364553}},
-		{serverNetDir, "udp", udpTable, 6, socket{model.ProtoUDP, addrPort("127.0.0.53:53"), addrPort("0.0.0.0:0"), "", 14358468}},
-		{serverNetDir, "udp6", udp6Table, 0, socket{model.ProtoUDP6, addrPort("[::1]:53"), addrPort("[::]:0"), "", 16364556}},
-		{serverNetDir, "udp6", udp6Table, 4, socket{model.ProtoUDP6, addrPort("[fe80::200:5eff:fe00:5301]:53"), addrPort("[::]:0"), "", 16364564}},
+		{serverNetDir, "udp", udpTable, 0, socket{proto: model.ProtoUDP, local: addrPort("192.0.2.10:11651"), remote: addrPort("192.0.2.53:53"), state: "", inode: 16955396, uid: 30}},
+		{serverNetDir, "udp", udpTable, 2, socket{proto: model.ProtoUDP, local: addrPort("192.0.2.10:53"), remote: addrPort("0.0.0.0:0"), state: "", inode: 16364553, uid: 116}},
+		{serverNetDir, "udp", udpTable, 6, socket{proto: model.ProtoUDP, local: addrPort("127.0.0.53:53"), remote: addrPort("0.0.0.0:0"), state: "", inode: 14358468, uid: 102}},
+		{serverNetDir, "udp6", udp6Table, 0, socket{proto: model.ProtoUDP6, local: addrPort("[::1]:53"), remote: addrPort("[::]:0"), state: "", inode: 16364556, uid: 116}},
+		{serverNetDir, "udp6", udp6Table, 4, socket{proto: model.ProtoUDP6, local: addrPort("[fe80::200:5eff:fe00:5301]:53"), remote: addrPort("[::]:0"), state: "", inode: 16364564, uid: 116}},
 	})
 
 	t.Run("a link-local address carries no zone", func(t *testing.T) {
@@ -167,12 +168,12 @@ func TestParseLine_SandboxSamples(t *testing.T) {
 	}
 
 	checkSamples(t, []sample{
-		{sandboxNetDir, "tcp", tcpTable, 1, socket{model.ProtoTCP, addrPort("0.0.0.0:4444"), addrPort("0.0.0.0:0"), "LISTEN", 16082}},
-		{sandboxNetDir, "tcp", tcpTable, 7, socket{model.ProtoTCP, addrPort("127.0.0.1:4444"), addrPort("127.0.0.1:55388"), "ESTABLISHED", 16084}},
-		{sandboxNetDir, "tcp", tcpTable, 38, socket{model.ProtoTCP, addrPort("127.0.0.1:55388"), addrPort("127.0.0.1:4444"), "ESTABLISHED", 16083}},
-		{sandboxNetDir, "tcp", tcpTable, 39, socket{model.ProtoTCP, addrPort("127.0.0.1:46462"), addrPort("127.0.0.1:44645"), "TIME_WAIT", 0}},
-		{sandboxNetDir, "udp", udpTable, 0, socket{model.ProtoUDP, addrPort("127.0.0.1:36728"), addrPort("127.0.0.1:53"), "", 16081}},
-		{sandboxNetDir, "udp", udpTable, 1, socket{model.ProtoUDP, addrPort("0.0.0.0:5353"), addrPort("0.0.0.0:0"), "", 16080}},
+		{sandboxNetDir, "tcp", tcpTable, 1, socket{proto: model.ProtoTCP, local: addrPort("0.0.0.0:4444"), remote: addrPort("0.0.0.0:0"), state: "LISTEN", inode: 16082, uid: 0}},
+		{sandboxNetDir, "tcp", tcpTable, 7, socket{proto: model.ProtoTCP, local: addrPort("127.0.0.1:4444"), remote: addrPort("127.0.0.1:55388"), state: "ESTABLISHED", inode: 16084, uid: 0}},
+		{sandboxNetDir, "tcp", tcpTable, 38, socket{proto: model.ProtoTCP, local: addrPort("127.0.0.1:55388"), remote: addrPort("127.0.0.1:4444"), state: "ESTABLISHED", inode: 16083, uid: 0}},
+		{sandboxNetDir, "tcp", tcpTable, 39, socket{proto: model.ProtoTCP, local: addrPort("127.0.0.1:46462"), remote: addrPort("127.0.0.1:44645"), state: "TIME_WAIT", inode: 0, uid: 0}},
+		{sandboxNetDir, "udp", udpTable, 0, socket{proto: model.ProtoUDP, local: addrPort("127.0.0.1:36728"), remote: addrPort("127.0.0.1:53"), state: "", inode: 16081, uid: 0}},
+		{sandboxNetDir, "udp", udpTable, 1, socket{proto: model.ProtoUDP, local: addrPort("0.0.0.0:5353"), remote: addrPort("0.0.0.0:0"), state: "", inode: 16080, uid: 0}},
 	})
 }
 
@@ -191,6 +192,78 @@ func checkSamples(t *testing.T, samples []sample) {
 				t.Errorf("parseLine(%s line %d) = %+v, want %+v", s.file, s.index, got, s.want)
 			}
 		})
+	}
+}
+
+func TestParseLine_UID(t *testing.T) {
+	line := tableLines(t, serverNetDir, "tcp")[1]
+
+	t.Run("accepted", func(t *testing.T) { checkUIDAccepted(t, line) })
+	t.Run("refused", func(t *testing.T) { checkUIDRefused(t, line) })
+	t.Run("on every table", checkUIDOnEveryTable)
+}
+
+// uidField is the index of the uid field of a table line.
+const uidField = 7
+
+// checkUIDAccepted checks that the uid field values a real table can hold are read as printed.
+func checkUIDAccepted(t *testing.T, line string) {
+	t.Helper()
+
+	accepted := []struct {
+		field string
+		want  uint32
+	}{
+		{"0", 0},
+		{"65534", 65534},
+		{"4294967295", 4294967295},
+		{"0000000001", 1},
+		{"1000", 1000},
+	}
+	for _, c := range accepted {
+		got, err := parseLine([]byte(setField(t, line, uidField, c.field)), tcpTable)
+
+		if err != nil {
+			t.Errorf("parseLine(uid %q) error = %v, want nil", c.field, err)
+		} else if got.uid != c.want {
+			t.Errorf("parseLine(uid %q).uid = %d, want %d", c.field, got.uid, c.want)
+		}
+	}
+}
+
+// checkUIDRefused checks that any other uid field makes the line unreadable with the format reason.
+func checkUIDRefused(t *testing.T, line string) {
+	t.Helper()
+
+	for _, field := range []string{"4294967296", "12345678901", "-1", "+1", "1a", "0x10", "1.5", "99999999999999999999"} {
+		got, err := parseLine([]byte(setField(t, line, uidField, field)), tcpTable)
+
+		if !errors.Is(err, errFormat) {
+			t.Errorf("parseLine(uid %q) = %+v, %v, want the error %v", field, got, err, errFormat)
+		}
+	}
+}
+
+// checkUIDOnEveryTable checks that all four tables read the field alike.
+func checkUIDOnEveryTable(t *testing.T) {
+	t.Helper()
+
+	bases := []struct {
+		table table
+		line  string
+	}{
+		{tcp6Table, tableLines(t, serverNetDir, "tcp6")[2]},
+		{udpTable, tableLines(t, serverNetDir, "udp")[2]},
+		{udp6Table, tableLines(t, serverNetDir, "udp6")[0]},
+	}
+	for _, b := range bases {
+		got, err := parseLine([]byte(setField(t, b.line, uidField, "4242")), b.table)
+		if err != nil || got.uid != 4242 {
+			t.Errorf("parseLine(%s, uid 4242) = uid %d, %v, want 4242 and nil", b.table.name, got.uid, err)
+		}
+		if _, err := parseLine([]byte(setField(t, b.line, uidField, "4294967296")), b.table); !errors.Is(err, errFormat) {
+			t.Errorf("parseLine(%s, uid 4294967296) error = %v, want %v", b.table.name, err, errFormat)
+		}
 	}
 }
 
@@ -298,7 +371,7 @@ func TestParseLine_Rejects(t *testing.T) {
 	}{
 		{"inode with 20 digits within 64 bits", tcpTable, setField(t, v4, inode, "18446744073709551615"), func(s socket) bool { return s.inode == 18446744073709551615 }},
 		{"exactly ten fields", tcpTable, strings.Join(strings.Fields(v4)[:10], " "), func(s socket) bool { return s.inode == 16364272 }},
-		{"fields five to nine are not interpreted", tcpTable, strings.Join(append(strings.Fields(v4)[:4], "zz", "zz", "zz", "zz", "zz", "16364272"), " "), func(s socket) bool { return s.inode == 16364272 }},
+		{"fields five to seven and nine are not interpreted", tcpTable, strings.Join(append(strings.Fields(v4)[:4], "zz", "zz", "zz", "0", "zz", "16364272"), " "), func(s socket) bool { return s.uid == 0 && s.inode == 16364272 }},
 		{"runs of spaces between the fields", tcpTable, "   " + strings.Join(strings.Fields(v4), "   "), func(s socket) bool { return s.inode == 16364272 }},
 		{"any two hex digits as a UDP state", udpTable, setField(t, u4, state, "FF"), func(s socket) bool { return s.state == "" }},
 		{"UDP state dropped", udp6Table, u6, func(s socket) bool { return s.state == "" }},
@@ -472,4 +545,26 @@ func TestTCPListeners_CapturedServerTables(t *testing.T) {
 	if !slices.Contains(got, addrPort("127.0.0.1:3306")) {
 		t.Errorf("TCPListeners(captured tables) = %v, want it to hold 127.0.0.1:3306", got)
 	}
+}
+
+func TestTCPListeners_RefusesABadUID(t *testing.T) {
+	good4 := generatedTable([]tcpTestEntry{{addrPort("127.0.0.1:3306"), "0A"}}, zeroRemote4)
+	good6 := generatedTable([]tcpTestEntry{{addrPort("[::1]:3306"), "0A"}}, zeroRemote6)
+	const badUID = "   1: 0100007F:0CEA 00000000:0000 0A 00000000:00000000 00:00000000 00000000 4294967296 0 5 1\n"
+
+	t.Run("tcp", func(t *testing.T) {
+		_, err := collectListeners(fstest.MapFS{"net/tcp": {Data: []byte(good4 + badUID)}, "net/tcp6": {Data: []byte(good6)}})
+
+		if err == nil || !errors.Is(err, errFormat) {
+			t.Errorf("TCPListeners() with a uid of 4294967296 in tcp error = %v, want one wrapping %v", err, errFormat)
+		}
+	})
+	t.Run("tcp6", func(t *testing.T) {
+		line := strings.Replace(badUID, "0100007F", "00000000000000000000000001000000", 1)
+		_, err := collectListeners(fstest.MapFS{"net/tcp": {Data: []byte(good4)}, "net/tcp6": {Data: []byte(good6 + line)}})
+
+		if err == nil || !errors.Is(err, errFormat) {
+			t.Errorf("TCPListeners() with a uid of 4294967296 in tcp6 error = %v, want one wrapping %v", err, errFormat)
+		}
+	})
 }

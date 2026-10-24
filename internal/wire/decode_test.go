@@ -1323,7 +1323,7 @@ var escapedCaseIDs = []string{"K4", "K5", "N4", "N7", "N8", "N9", "N10", "N11", 
 // requiredCaseIDs lists the cases the fixture must hold, from the plans of issues 175 and 182.
 func requiredCaseIDs() []string {
 	var ids []string
-	for prefix, count := range map[string]int{"K": 6, "N": 11, "D": 28, "H": 31, "O": 4, "X": 4, "M": 5, "U": 2, "S": 40} {
+	for prefix, count := range map[string]int{"K": 6, "N": 11, "D": 28, "H": 31, "O": 4, "X": 4, "M": 5, "U": 2, "S": 57} {
 		for i := 1; i <= count; i++ {
 			ids = append(ids, prefix+strconv.Itoa(i))
 		}
@@ -2407,4 +2407,44 @@ func TestDecoder_AcceptsBackupRunEndSeenAtItsStart(t *testing.T) {
 func mustEncodeLine(t *testing.T, r model.Record) []byte {
 	t.Helper()
 	return envelopeLine(t, &r)
+}
+
+func TestDecoder_NullSocketUserReadsAsAbsent(t *testing.T) {
+	entry := `{"proto":"tcp","local":"0.0.0.0:22","uid":null,"user":null,"mixed_uids":null}`
+	conn := `{"proto":"tcp","local":"10.0.0.1:80","remote":"192.0.2.1:5000","state":"ESTABLISHED","uid":null,"user":null}`
+	data := `{"complete":true,"listener_check":"all","listeners":[` + entry + `],"new_listeners":[` + entry + `],"connections":[` + conn + `]}`
+	recs, err := decodeAll(t, withHeader(t, kindLine("connection_snapshot", data)), wire.DefaultLimits())
+	if err != nil {
+		t.Fatalf("decoding = %v, want nil", err)
+	}
+	if len(recs) != 1 {
+		t.Fatalf("decoded %d records, want 1", len(recs))
+	}
+	snap, ok := recs[0].Data.(*model.ConnectionSnapshot)
+	if !ok {
+		t.Fatalf("data = %T, want *model.ConnectionSnapshot", recs[0].Data)
+	}
+	for name, l := range map[string]model.Listener{"listeners[0]": snap.Listeners[0], "new_listeners[0]": snap.NewListeners[0]} {
+		if l.UID != nil || l.User != "" || l.MixedUIDs {
+			t.Errorf("%s = uid %v, user %q, mixed %v, want absent (nil, empty, false)", name, l.UID, l.User, l.MixedUIDs)
+		}
+	}
+	if c := snap.Connections[0]; c.UID != nil || c.User != "" {
+		t.Errorf("connections[0] = uid %v, user %q, want absent (nil, empty)", c.UID, c.User)
+	}
+}
+
+func TestDecoder_SocketUIDZeroIsKept(t *testing.T) {
+	data := `{"complete":true,"listeners":[{"proto":"tcp","local":"0.0.0.0:22","uid":0,"user":"root"}]}`
+	recs, err := decodeAll(t, withHeader(t, kindLine("connection_snapshot", data)), wire.DefaultLimits())
+	if err != nil {
+		t.Fatalf("decoding = %v, want nil", err)
+	}
+	snap, ok := recs[0].Data.(*model.ConnectionSnapshot)
+	if !ok {
+		t.Fatalf("data = %T, want *model.ConnectionSnapshot", recs[0].Data)
+	}
+	if l := snap.Listeners[0]; l.UID == nil || *l.UID != 0 || l.User != "root" {
+		t.Errorf("listeners[0] = uid %v, user %q, want uid 0 and root", l.UID, l.User)
+	}
 }

@@ -40,9 +40,10 @@ type SocketMount struct {
 	Err error
 }
 
-// Sources are the places the collector reads; a nil Proc is os.DirFS("/proc").
+// Sources are the places the collector reads; a nil Proc is os.DirFS("/proc") and a nil Etc os.DirFS("/etc").
 type Sources struct {
 	Proc        fs.FS
+	Etc         fs.FS
 	SocketMount SocketMount
 }
 
@@ -68,6 +69,7 @@ type logState struct {
 	linesBad         bool
 	ownersUnknown    bool
 	ownersUnreadable bool
+	usersUnavailable bool
 }
 
 // Connections is the connection collector.
@@ -83,6 +85,9 @@ type Connections struct {
 func New(src Sources, log *slog.Logger) *Connections {
 	if src.Proc == nil {
 		src.Proc = os.DirFS("/proc")
+	}
+	if src.Etc == nil {
+		src.Etc = os.DirFS("/etc")
 	}
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
@@ -103,6 +108,8 @@ type runResult struct {
 	firstErr      error
 	pidCapped     bool
 	ownersUnknown error
+	users         map[uint32]string
+	usersErr      error
 }
 
 // Collect takes one connection snapshot.
@@ -119,6 +126,8 @@ func (c *Connections) Collect(ctx context.Context, run scheduler.Run) ([]model.R
 	if err != nil {
 		return nil, err
 	}
+
+	res.users, res.usersErr = procstats.ReadUsers(c.src.Etc)
 
 	cur := col.inventory()
 	check, added := compare(prev, cur)
@@ -268,6 +277,7 @@ func (c *Connections) logChanges(col *collection, res *runResult) {
 		}
 		st.linesBad = bad
 	}
+	c.logUsers(res)
 	if res.ownersUnknown != nil {
 		if !st.ownersUnknown {
 			c.log.Warn("socket owners unknown", "err", res.ownersUnknown)
@@ -283,6 +293,21 @@ func (c *Connections) logChanges(col *collection, res *runResult) {
 		}
 		st.ownersUnreadable = unreadable
 	}
+}
+
+// logUsers writes a line when the passwd file became unreadable or readable again.
+func (c *Connections) logUsers(res *runResult) {
+	st := &c.state
+	unavailable := res.usersErr != nil
+	if unavailable == st.usersUnavailable {
+		return
+	}
+	if unavailable {
+		c.log.Warn("user names unavailable", "err", res.usersErr)
+	} else {
+		c.log.Info("user names available")
+	}
+	st.usersUnavailable = unavailable
 }
 
 // missingNames lists the missing tables in table order, comma-separated.
