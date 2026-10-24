@@ -486,8 +486,8 @@ func (s *Sender) awaitRelease(ctx context.Context, gen uint64) bool {
 }
 
 // waitOpen blocks while an episode runs or the memory pressure mode is on, and logs the pause and the resume of a
-// pass that is running (has sent a batch). It reports false when ctx ended.
-func (s *Sender) waitOpen(ctx context.Context, running bool, paused *bool) bool {
+// pass whose cut holds records. It reports false when ctx ended.
+func (s *Sender) waitOpen(ctx context.Context, paused *bool) bool {
 	for {
 		s.mu.Lock()
 		blocked, pressure, changed := s.ep.active, s.pressure, s.changed
@@ -500,7 +500,7 @@ func (s *Sender) waitOpen(ctx context.Context, running bool, paused *bool) bool 
 
 			return true
 		}
-		if pressure && running && !*paused {
+		if pressure && !*paused {
 			s.log.Info(logBfPaused, keyReason, "memory_pressure")
 			*paused = true
 		}
@@ -564,8 +564,8 @@ func (s *Sender) passStep(ctx context.Context, ps *passState) (uint64, bool, boo
 		return gen, true, true
 	}
 	if !s.open() {
-		// Only a pass that has begun to send logs a pause; the records are read again once the backfill may go on.
-		return 0, false, s.waitOpen(ctx, ps.started, &ps.paused)
+		// The pause is logged for a pass whose cut holds records; they are read again once the backfill may go on.
+		return 0, false, s.waitOpen(ctx, &ps.paused)
 	}
 	if !ps.started {
 		ps.started = true
