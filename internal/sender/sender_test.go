@@ -602,6 +602,8 @@ func TestSender_BackfillThrottledLiveNot(t *testing.T) {
 		if limit := int64(span/time.Second)*bandwidth + int64(largest); int64(total-backfill[len(backfill)-1].size) > limit {
 			t.Errorf("backfill bodies sent over %v hold %d bytes, want at most %d (the rate times the span plus one batch)", span, total, limit)
 		}
+		f.halt()
+		advance(10 * time.Second)
 		requireLatency(t, f.handedAt(), r.tr.callsOf(wire.ModeLive), 10*time.Second)
 	})
 }
@@ -1208,7 +1210,7 @@ func requireAckWarnings(t *testing.T, r *rig, want int) {
 	}
 }
 
-func TestSender_LeftoverBelowLiveStartSentByNextPass(t *testing.T) {
+func TestSender_LeftoverBelowLiveStartSentAgain(t *testing.T) {
 	bubble(t, func(t *testing.T) {
 		r := newRig(t)
 		r.tr.setScript(refusePoison)
