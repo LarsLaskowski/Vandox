@@ -179,3 +179,8 @@ func parseSize(text string) (int64, bool) {
 	}
 	return n << shift, true
 }
+
+// parseBandwidth converts a bandwidth such as 256KiB into bytes per second and reports whether the text is valid.
+func parseBandwidth(text string) (int64, bool) {
+	return 0, false
+}

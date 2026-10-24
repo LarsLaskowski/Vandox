@@ -23,6 +23,7 @@ import (
 	"github.com/LarsLaskowski/Vandox/internal/scheduler"
 	"github.com/LarsLaskowski/Vandox/internal/sdnotify"
 	"github.com/LarsLaskowski/Vandox/internal/selfstats"
+	"github.com/LarsLaskowski/Vandox/internal/sender"
 	"github.com/LarsLaskowski/Vandox/internal/sockmount"
 	"github.com/LarsLaskowski/Vandox/internal/spool"
 	"github.com/LarsLaskowski/Vandox/internal/svcstats"
@@ -112,6 +113,8 @@ type Options struct {
 	Logs logship.Sources
 	// StateDir is the directory of the agent's state file; "" takes spool.directory.
 	StateDir string
+	// Transport sends the batches; nil: the HTTP transport to backend.url.
+	Transport sender.Transport
 }
 
 // Run runs the agent until ctx is done and returns the exit code: 0 after a clean stop, 1 when it cannot start.
@@ -390,7 +393,7 @@ func closeSpool(sp *spool.Spool, log *slog.Logger) {
 
 // newScheduler returns the scheduler with the jobs of the configuration, taking the records into sink; the system collector
 // switches its memory pressure mode and the kernel collector requests the extra runs of the processes and connections collectors.
-func newScheduler(opts Options, cfg *config.Agent, store *agentstate.Store, sink scheduler.Putter, log *slog.Logger) (*scheduler.Scheduler, error) {
+func newScheduler(opts Options, cfg *config.Agent, store *agentstate.Store, sink scheduler.Putter, log *slog.Logger, pressure ...func(high bool)) (*scheduler.Scheduler, error) {
 	list, system, err := jobs(opts, cfg, store, log)
 	if err != nil {
 		return nil, err

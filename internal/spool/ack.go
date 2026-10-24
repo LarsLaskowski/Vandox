@@ -133,7 +133,7 @@ func (s *Spool) Ack(ctx context.Context, first, last uint64) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closing {
-		return errClosed
+		return ErrClosed
 	}
 	if first == 0 || first > last {
 		return nil
@@ -181,4 +181,9 @@ func (s *Spool) removeFile(f *segFile) error {
 	s.gen++
 
 	return nil
+}
+
+// AckRanges returns the number of acknowledged ranges above the oldest kept sequence number.
+func (s *Spool) AckRanges() int {
+	return 0
 }

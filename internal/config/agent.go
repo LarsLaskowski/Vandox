@@ -36,6 +36,10 @@ type Agent struct {
 // BackendTarget is where the agent sends its data.
 type BackendTarget struct {
 	URL string `yaml:"url"`
+	// BackfillBandwidth is the bandwidth of the backfill as written, such as 256KiB.
+	BackfillBandwidth string `yaml:"backfill_bandwidth"`
+	// BackfillBytes is BackfillBandwidth in bytes per second; it is set by validation.
+	BackfillBytes int64 `yaml:"-"`
 }
 
 // Spool configures the local spool.
