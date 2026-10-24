@@ -41,6 +41,7 @@ Agent:
 | --- | ------- | ---- |
 | `agent_id` | none, required | 1 to 64 characters of `A-Z a-z 0-9 . _ -`, starting with a letter or digit (the rule of the [wire format](wire-format.md) for agent IDs) |
 | `backend.url` | none, required | URL with scheme `http` or `https`; a host that is an IP address or a name of letters, digits, `.` and `-` (checked after percent-decoding); an optional port from 1 to 65535; no user info, query, fragment or path other than `/` |
+| `backend.backfill_bandwidth` | `256KiB` | a whole number of one to five digits without a leading zero, then `KiB` or `MiB`, from `16KiB` to `1024MiB`; error text `must be a whole number of KiB or MiB from 16KiB to 1024MiB, such as 256KiB or 4MiB` (see below) |
 | `spool.directory` | `/var/lib/vandox/spool` | absolute, clean path (see below) |
 | `spool.max_size` | `2GiB` | a whole number of MiB or GiB from `64MiB` to `64GiB` (see below) |
 | `spool.min_free` | `1GiB` | a whole number of MiB or GiB from `0MiB` to `1024GiB`; zero switches the check off (see below) |
@@ -236,7 +237,12 @@ Backend:
 - A directory must be absolute and clean: no trailing slash and no empty, `.` or `..` element. The loader does not
   create it.
 - Plain `http` is allowed for `backend.url`, because the tailnet encrypts and authenticates the transport. Whether
-  the host is a tailnet address is not checked; the network ACL is the boundary (see the network area).
+  the host is a tailnet address is not checked; the network ACL is the boundary (see the network area). `http` is meant only for
+  the backend host's tailnet address or MagicDNS name, and the scheme must match the listener ([Agent](agent.md), *Connection*).
+- `backend.backfill_bandwidth` is the bandwidth of the agent's backfill: the bytes a second of compressed request body it sends
+  while it catches up on the spool after an outage ([Agent](agent.md), *Sending*; the live stream is not limited). It is checked right
+  after `backend.url`; the value is written as `256KiB`, not as a number of bytes, and a decimal point, a unit other than `KiB` or `MiB`,
+  a space or a value out of range is refused with the key, the line and the text above, never the value.
 - A new option is added with its key, default, entry in the commented example file, row in the README table and
   test. The example files `deploy/agent/agent.yaml` and `deploy/backend/vandoxd.yaml` set every option explicitly
   (an optional one at its default; an option without a default commented out with an example value), and tests load
@@ -319,6 +325,8 @@ Backend:
 - [0121](../decisions/0121-log-shipping-journal-and-syslog-files-positions-per-seqnum-id-zstd-commit-when-kept.md) — why log shipping reads the journal and `syslog` files only, why drop patterns are bounded by their compiled size, and why the state file stores a file's position by the hash of its path.
 - [0123](../decisions/0123-agent-spool-segment-files-clock-bound-sequence-numbers-range-acknowledgements.md) — why `spool.max_size` is
   at most 64 GiB and the spool's files are uncompressed.
+- [0125](../decisions/0125-sender-two-streams-shared-backoff-refused-records-given-up-with-a-gap.md) — why the backfill has its own,
+  configurable bandwidth.
 
 ## Not here
 

@@ -143,8 +143,20 @@ func Run(ctx context.Context, opts Options) int {
 		opts.Self.Spool = sp
 		opts.Self.SpoolAge = sp
 	}
-	sched, err := newScheduler(opts, cfg, store, sink, log)
+	snd, err := newSender(opts, cfg, sp, log)
 	if err != nil {
+		closeSpool(sp, log)
+		log.Error(msgCannotStart, "err", err)
+		return 1
+	}
+	var pressure []func(high bool)
+	if snd != nil {
+		opts.Self.Sender = snd
+		pressure = append(pressure, snd.SetPressure)
+	}
+	sched, err := newScheduler(opts, cfg, store, sink, log, pressure...)
+	if err != nil {
+		closeSpool(sp, log)
 		log.Error(msgCannotStart, "err", err)
 		return 1
 	}
@@ -152,6 +164,9 @@ func Run(ctx context.Context, opts Options) int {
 
 	var wg sync.WaitGroup
 	wg.Go(func() { sched.Run(ctx) })
+	if snd != nil {
+		wg.Go(func() { snd.Run(ctx) })
+	}
 	if err := notify.Notify(sdnotify.Ready); err != nil {
 		log.Warn("service manager notification failed", "state", sdnotify.Ready, "err", err)
 	}
@@ -171,6 +186,24 @@ func Run(ctx context.Context, opts Options) int {
 	closeSpool(sp, log)
 	log.Info("agent stopped")
 	return 0
+}
+
+// newSender returns the sender of the spool sp, or nil when there is no spool (opts.Sink is set). Its transport is
+// opts.Transport, else the HTTP transport to backend.url with the agent token. It fails, and the agent does not start, only when
+// the transport cannot be built; a backend that is not reachable does not stop the agent.
+func newSender(opts Options, cfg *config.Agent, sp *spool.Spool, log *slog.Logger) (*sender.Sender, error) {
+	if sp == nil {
+		return nil, nil
+	}
+	transport := opts.Transport
+	if transport == nil {
+		t, err := sender.NewHTTPTransport(cfg.Backend.URL, cfg.Secrets.AgentToken)
+		if err != nil {
+			return nil, err
+		}
+		transport = t
+	}
+	return sender.New(sender.Options{Spool: sp, Transport: transport, Bandwidth: cfg.Backend.BackfillBytes}, log.With("component", "sender")), nil
 }
 
 // jobs returns the collectors with their schedules: self, system, processes, connections, systemd (only when a service unit is
@@ -392,7 +425,7 @@ func closeSpool(sp *spool.Spool, log *slog.Logger) {
 }
 
 // newScheduler returns the scheduler with the jobs of the configuration, taking the records into sink; the system collector
-// switches its memory pressure mode and the kernel collector requests the extra runs of the processes and connections collectors.
+// switches its memory pressure mode (of the scheduler and of every function in pressure) and the kernel collector requests the extra runs of the processes and connections collectors.
 func newScheduler(opts Options, cfg *config.Agent, store *agentstate.Store, sink scheduler.Putter, log *slog.Logger, pressure ...func(high bool)) (*scheduler.Scheduler, error) {
 	list, system, err := jobs(opts, cfg, store, log)
 	if err != nil {
@@ -402,7 +435,12 @@ func newScheduler(opts Options, cfg *config.Agent, store *agentstate.Store, sink
 	if err != nil {
 		return nil, err
 	}
-	system.SetPressureSwitch(sched.SetPressure)
+	system.SetPressureSwitch(func(high bool) {
+		sched.SetPressure(high)
+		for _, f := range pressure {
+			f(high)
+		}
+	})
 	for _, j := range list {
 		if k, ok := j.Collector.(*kernevents.Kernel); ok {
 			k.SetTrigger(sched.Trigger)

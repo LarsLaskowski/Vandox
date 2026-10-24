@@ -35,7 +35,7 @@ Cloud session notes (found when a cloud image lacked the .NET SDK):
 
 ## Layout
 
-- Go (agent): `cmd/vandox-agent`, `internal/` (model, wire, config, cli, version, agent, scheduler, selfstats, sdnotify, sysstats, procstats, connstats, sockmount, sdbus, svcstats, journal (with `journaltest`), zstdfield, syslogline, kernevents, logship, agentstate, backups, spool); tests colocated as
+- Go (agent): `cmd/vandox-agent`, `internal/` (model, wire, config, cli, version, agent, scheduler, selfstats, sdnotify, sysstats, procstats, connstats, sockmount, sdbus, svcstats, journal (with `journaltest`), zstdfield, syslogline, kernevents, logship, agentstate, backups, spool, sender); tests colocated as
   `foo_test.go` next to `foo.go`.
 - .NET (backend): `src/Vandox.Core` (model, wire decoder, configuration, safe file access, log parsing, log signatures, log templates),
   `src/Vandox.Storage`, `src/Vandox.Import`, `src/Vandox.Backend` (host, CLI, Blazor; assembly `vandoxd`).

@@ -118,7 +118,7 @@ the ptrace-checked `/proc` files whose mode allows reading (`maps`, `smaps_rollu
 
 ### Unit settings that must stay as they are
 
-- `RestrictAddressFamilies=` must keep **`AF_UNIX`** (the probe above, the notification socket of systemd and the system bus of the systemd collector).
+- `RestrictAddressFamilies=` must keep **`AF_UNIX`** (the probe above, the notification socket of systemd and the system bus of the systemd collector) and **`AF_INET`** and **`AF_INET6`** (the sender's connection to the backend; an `IPAddressAllow=` for the backend address is left to the unit, #42).
 - No own network namespace: no `PrivateNetwork=` and no `NetworkNamespacePath=`, or `/proc/net` shows another namespace's sockets.
 - `/run/dbus/system_bus_socket` stays reachable: no `InaccessiblePaths=` or `TemporaryFileSystem=` over `/run/dbus`.
 - No `ProcSubset=pid`: it hides `/proc/net`.

@@ -13,7 +13,7 @@ backend, written in .NET 10 with a Blazor web UI. Both implement the same data m
 
 | Binary | Runs on | Purpose |
 |---|---|---|
-| `vandox-agent` (Go) | the monitored Linux server | collects data and ships it to the backend (planned for v0.2.0; v0.1.0 ships the backend only); the runtime frame (configuration, collector scheduler, self-metrics, systemd notification) and the system, process and connection collectors exist; the other collectors and the sender do not yet |
+| `vandox-agent` (Go) | the monitored Linux server | collects data and ships it to the backend (planned for v0.2.0; v0.1.0 ships the backend only); the runtime frame (configuration, collector scheduler, self-metrics, systemd notification), the system, process and connection collectors and the sender (live and throttled backfill) exist; the other collectors and the backend's ingest endpoint do not yet |
 | `vandoxd` (.NET) | Docker container on any Docker host in the home network (NAS, mini PC, server) | backend with web UI |
 
 Both support `--version`, which prints version, commit and build date. `vandoxd` without arguments runs the
@@ -28,7 +28,7 @@ statistics* below, and `vandoxd report` writes the forensics report as Markdown,
 
 ```
 cmd/vandox-agent/   entry point of the agent (Go)
-internal/           the agent's Go packages: agent (start-up, logging, watchdog), scheduler, selfstats, sdnotify, config, model, wire (batch encoder), cli, version
+internal/           the agent's Go packages: agent (start-up, logging, watchdog), scheduler, selfstats, sdnotify, config, model, wire (batch encoder), cli, sender (HTTP transport, live and backfill sending), version
 src/Vandox.Backend/ the backend vandoxd: host, command line, Blazor web UI
 src/Vandox.Core/    record model, wire decoder, configuration, safe file access, log parser framework, log signatures
 src/Vandox.Storage/ SQLite store: schema, migrations, batched writes, queries, log search and exploration
