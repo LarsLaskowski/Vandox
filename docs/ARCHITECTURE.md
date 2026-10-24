@@ -50,8 +50,8 @@ way, and agents of the hosting provider are never disabled or changed
   under load or memory pressure, its process list, records a refused login as `not_answering` with the error number, and derives the
   theoretical memory maximum, rates and the number of non-loopback listeners on its ports
   ([0118](decisions/0118-mariadb-collector-hand-written-client-captured-statements-refusals-as-not-answering-with-error-code.md)),
-  and the kernel event collector (`internal/kernevents`) reads the binary journal files itself with a bounded reader of the server's
-  layout (`internal/journal`), records each OOM kill of the kernel transport with facility 0 with an identity and its drift-corrected
+  and the kernel event collector (`internal/kernevents`) reads the binary journal files itself with a bounded reader of the two
+  layouts journald writes (`internal/journal`), records each OOM kill of the kernel transport with facility 0 with an identity and its drift-corrected
   time, gaps for what it cannot read, and a boot event when the boot ID differs from the saved one; for a live kill it asks the
   scheduler for an extra full run of the process and the connection collector, at most one per collector per 15 seconds, whose
   snapshots name the kills ([0119](decisions/0119-kernel-messages-from-the-binary-journal-files-read-in-pure-go-without-decompression.md)),
