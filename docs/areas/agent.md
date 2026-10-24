@@ -1838,6 +1838,7 @@ by the agent logs nothing.
   it: `RestrictAddressFamilies=` keeps **`AF_INET` and `AF_INET6`** beside `AF_UNIX`, and a system-call filter must not deny `socket` and
   `connect` for them, or every request fails as `connection failed`. (A restriction of the addresses the agent may reach, such as
   `IPAddressAllow=` for the backend, is left to the unit, #42.)
+  With a host name in `backend.url` the agent also queries the name server of `/etc/resolv.conf` (port 53), which an `IPAddressAllow=` must include.
 - **Systemd collector.** Reading unit states over the system bus needs no group and no capability: systemd's bus policy lets every user
   call `Properties.Get`, `ListUnitsByPatterns`, `ListUnitsByNames` and `LoadUnit` (the server capture was taken with every call made
   as `nobody`). The unit must keep the bus reachable: `RestrictAddressFamilies=` keeps `AF_UNIX` (also for this connection) and

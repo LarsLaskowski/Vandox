@@ -57,7 +57,7 @@ const (
 	MaxBatchRecords = 20000
 	// MaxHoles is the largest number of holes the sender keeps.
 	MaxHoles = 32
-	// MaxGivenUpPerHour is the largest number of batches given up in an hour.
+	// MaxGivenUpPerHour is the largest number of records given up in an hour.
 	MaxGivenUpPerHour = 10
 	// MaxAnswerBody is the largest number of bytes read from an answer's body.
 	MaxAnswerBody = 4096
@@ -162,6 +162,8 @@ type Sender struct {
 	// giveMu serializes the give-ups, so the hourly bound holds for both streams.
 	giveMu  sync.Mutex
 	givenUp []time.Time
+	// gapped holds the numbers whose gap the spool already has but whose acknowledgement is still to be kept.
+	gapped map[uint64]bool
 
 	mu sync.Mutex
 	// changed is closed and replaced whenever something a stream waits for changes.
@@ -196,6 +198,7 @@ func New(opts Options, log *slog.Logger) *Sender {
 		live:    stream{mode: wire.ModeLive},
 		back:    stream{mode: wire.ModeBackfill},
 		changed: make(chan struct{}),
+		gapped:  map[uint64]bool{},
 	}
 }
 
@@ -482,9 +485,9 @@ func (s *Sender) awaitRelease(ctx context.Context, gen uint64) bool {
 	}
 }
 
-// waitOpen blocks while an episode runs or the memory pressure mode is on, and logs the pause and the resume of the
-// pass. It reports false when ctx ended.
-func (s *Sender) waitOpen(ctx context.Context, paused *bool) bool {
+// waitOpen blocks while an episode runs or the memory pressure mode is on, and logs the pause and the resume of a
+// pass that is running (has sent a batch). It reports false when ctx ended.
+func (s *Sender) waitOpen(ctx context.Context, running bool, paused *bool) bool {
 	for {
 		s.mu.Lock()
 		blocked, pressure, changed := s.ep.active, s.pressure, s.changed
@@ -497,7 +500,7 @@ func (s *Sender) waitOpen(ctx context.Context, paused *bool) bool {
 
 			return true
 		}
-		if pressure && !*paused {
+		if pressure && running && !*paused {
 			s.log.Info(logBfPaused, keyReason, "memory_pressure")
 			*paused = true
 		}
@@ -547,9 +550,6 @@ func (s *Sender) pass(ctx context.Context) (uint64, bool) {
 // passStep reads and sends one batch of a pass. It reports whether the pass is finished, and false when ctx ended.
 func (s *Sender) passStep(ctx context.Context, ps *passState) (uint64, bool, bool) {
 	st := &s.back
-	if !s.waitOpen(ctx, &ps.paused) {
-		return 0, false, false
-	}
 	limit, gen := s.liveBound()
 	recs, bc, ok := s.read(ctx, st, st.pos)
 	if !ok {
@@ -562,6 +562,10 @@ func (s *Sender) passStep(ctx context.Context, ps *passState) (uint64, bool, boo
 		}
 
 		return gen, true, true
+	}
+	if !s.open() {
+		// Only a pass that has begun to send logs a pause; the records are read again once the backfill may go on.
+		return 0, false, s.waitOpen(ctx, ps.started, &ps.paused)
 	}
 	if !ps.started {
 		ps.started = true
@@ -720,23 +724,27 @@ func (s *Sender) giveUp(ctx context.Context, st *stream, rec *model.Record, stat
 
 		return outParked
 	}
-	gap := model.Record{
-		Meta: model.Meta{Origin: model.OriginAgent, Source: "agent", CapturedAt: now.UTC()},
-		Data: &model.Gap{
-			From: rec.CapturedAt, To: rec.CapturedAt.Add(gapSpan), Cause: model.GapUnknown,
-			FirstSeq: rec.Seq, LastSeq: rec.Seq,
-		},
-	}
-	if err := s.opts.Spool.Put(ctx, []model.Record{gap}); err != nil {
-		if ctx.Err() != nil {
-			return outStop
+	if !s.gapped[rec.Seq] {
+		gap := model.Record{
+			Meta: model.Meta{Origin: model.OriginAgent, Source: "agent", CapturedAt: now.UTC()},
+			Data: &model.Gap{
+				From: rec.CapturedAt, To: rec.CapturedAt.Add(gapSpan), Cause: model.GapUnknown,
+				FirstSeq: rec.Seq, LastSeq: rec.Seq,
+			},
 		}
+		if err := s.opts.Spool.Put(ctx, []model.Record{gap}); err != nil {
+			if ctx.Err() != nil {
+				return outStop
+			}
 
-		return outRetry
+			return outRetry
+		}
+		s.gapped[rec.Seq] = true
 	}
 	if err := s.opts.Spool.Ack(ctx, rec.Seq, rec.Seq); err != nil {
 		return s.ackFailed(ctx, err)
 	}
+	delete(s.gapped, rec.Seq)
 	s.givenUp = append(s.givenUp, now)
 	st.pos = rec.Seq
 	st.wait = 0
