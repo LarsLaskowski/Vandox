@@ -3,7 +3,9 @@ package connstats
 import (
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -60,11 +62,13 @@ var (
 		{Addr: netip.MustParseAddr("198.51.100.7"), Count: 1},
 		{Addr: netip.MustParseAddr("198.51.100.20"), Count: 1},
 	}
+	// The UIDs are those of the captured tables: the sshd connection is root's, the two UDP sockets are UID 30's (no line in the captured
+	// passwd, so the decimal number is the name), and the TIME_WAIT line has inode 0, so it has no UID.
 	ownedConnections = []model.Connection{
-		{Proto: model.ProtoTCP, Local: addrPort("192.0.2.10:22"), Remote: addrPort(sshdConnection), State: "ESTABLISHED", PID: 100, Command: cmdSSHD},
+		{Proto: model.ProtoTCP, Local: addrPort("192.0.2.10:22"), Remote: addrPort(sshdConnection), State: "ESTABLISHED", PID: 100, Command: cmdSSHD, UID: uidOf(0), User: "root"},
 		{Proto: model.ProtoTCP, Local: addrPort("192.0.2.10:56518"), Remote: addrPort("198.51.100.20:443"), State: "TIME_WAIT"},
-		{Proto: model.ProtoUDP, Local: addrPort("192.0.2.10:11651"), Remote: addrPort("192.0.2.53:53"), PID: 300, Command: cmdNamed},
-		{Proto: model.ProtoUDP, Local: addrPort("192.0.2.10:59433"), Remote: addrPort("192.0.2.53:53")},
+		{Proto: model.ProtoUDP, Local: addrPort("192.0.2.10:11651"), Remote: addrPort("192.0.2.53:53"), PID: 300, Command: cmdNamed, UID: uidOf(30), User: "30"},
+		{Proto: model.ProtoUDP, Local: addrPort("192.0.2.10:59433"), Remote: addrPort("192.0.2.53:53"), UID: uidOf(30), User: "30"},
 	}
 )
 
@@ -81,14 +85,111 @@ func listenerAt(snap *model.ConnectionSnapshot, proto model.Proto, local string)
 	return out
 }
 
-// wantListener checks that exactly one listener sits on the endpoint and that it has the owner.
-func wantListener(t *testing.T, snap *model.ConnectionSnapshot, proto model.Proto, local string, pid int32, command string) {
+// uidOf returns a pointer to v, the form of an optional UID of an entry.
+func uidOf(v uint32) *uint32 {
+	return &v
+}
+
+// uidText writes an optional UID for a failure message.
+func uidText(u *uint32) string {
+	if u == nil {
+		return "none"
+	}
+	return strconv.FormatUint(uint64(*u), 10)
+}
+
+// sameUID reports whether two optional UIDs are both absent or hold the same number.
+func sameUID(a, b *uint32) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return *a == *b
+}
+
+// sameListener compares two listener entries, the UID by value.
+func sameListener(a, b model.Listener) bool {
+	return a.Proto == b.Proto && a.Local == b.Local && a.PID == b.PID && a.Command == b.Command &&
+		sameUID(a.UID, b.UID) && a.User == b.User && a.MixedUIDs == b.MixedUIDs
+}
+
+// sameConnection compares two connection entries, the UID by value.
+func sameConnection(a, b model.Connection) bool {
+	return a.Proto == b.Proto && a.Local == b.Local && a.Remote == b.Remote && a.State == b.State && a.PID == b.PID && a.Command == b.Command &&
+		sameUID(a.UID, b.UID) && a.User == b.User
+}
+
+// listenerText writes a listener entry for a failure message, the UID as its number.
+func listenerText(l model.Listener) string {
+	return fmt.Sprintf("{%s %v pid=%d command=%q uid=%s user=%q mixed_uids=%v}", l.Proto, l.Local, l.PID, l.Command, uidText(l.UID), l.User, l.MixedUIDs)
+}
+
+// connectionText writes a connection entry for a failure message, the UID as its number.
+func connectionText(c model.Connection) string {
+	return fmt.Sprintf("{%s %v -> %v %s pid=%d command=%q uid=%s user=%q}", c.Proto, c.Local, c.Remote, c.State, c.PID, c.Command, uidText(c.UID), c.User)
+}
+
+// listenersText writes a list of listener entries.
+func listenersText(list []model.Listener) string {
+	parts := make([]string, len(list))
+	for i, l := range list {
+		parts[i] = listenerText(l)
+	}
+	return "[" + strings.Join(parts, " ") + "]"
+}
+
+// connectionsText writes a list of connection entries.
+func connectionsText(list []model.Connection) string {
+	parts := make([]string, len(list))
+	for i, c := range list {
+		parts[i] = connectionText(c)
+	}
+	return "[" + strings.Join(parts, " ") + "]"
+}
+
+// wantListeners compares two lists of listener entries in order.
+func wantListeners(t *testing.T, what string, got, want []model.Listener) {
+	t.Helper()
+
+	if !slices.EqualFunc(got, want, sameListener) {
+		t.Errorf("%s = %s, want %s", what, listenersText(got), listenersText(want))
+	}
+}
+
+// wantConnections compares two lists of connection entries in order.
+func wantConnections(t *testing.T, what string, got, want []model.Connection) {
+	t.Helper()
+
+	if !slices.EqualFunc(got, want, sameConnection) {
+		t.Errorf("%s = %s, want %s", what, connectionsText(got), connectionsText(want))
+	}
+}
+
+// hasConnection reports whether the list holds the connection entry.
+func hasConnection(list []model.Connection, want model.Connection) bool {
+	return slices.ContainsFunc(list, func(c model.Connection) bool { return sameConnection(c, want) })
+}
+
+// rootListener is the listener entry of a generated socket without owner as the collector reports it: the helpers of the world give
+// their sockets the UID 0, and the captured passwd names it root.
+func rootListener(proto model.Proto, local string) model.Listener {
+	return model.Listener{Proto: proto, Local: addrPort(local), UID: uidOf(0), User: "root"}
+}
+
+// withOwner returns the listener entry with its owner.
+func withOwner(l model.Listener, pid int32, command string) model.Listener {
+	l.PID, l.Command = pid, command
+	return l
+}
+
+// wantListener checks that exactly one listener sits on the endpoint and that it has the owner, the UID and the user name, and that
+// the endpoint has no mixed UIDs.
+func wantListener(t *testing.T, snap *model.ConnectionSnapshot, proto model.Proto, local string, pid int32, command string, uid uint32, user string) {
 	t.Helper()
 
 	got := listenerAt(snap, proto, local)
-	want := model.Listener{Proto: proto, Local: addrPort(local), PID: pid, Command: command}
-	if len(got) != 1 || got[0] != want {
-		t.Errorf("listeners on %s %s = %+v, want exactly %+v", proto, local, got, want)
+	want := model.Listener{Proto: proto, Local: addrPort(local), PID: pid, Command: command, UID: uidOf(uid), User: user}
+	if len(got) != 1 || !sameListener(got[0], want) {
+		t.Errorf("listeners on %s %s = %s, want exactly %s", proto, local, listenersText(got), listenerText(want))
 	}
 }
 
@@ -121,7 +222,7 @@ func wantInventory(t *testing.T, snap *model.ConnectionSnapshot, state model.Inv
 func wantNewListeners(t *testing.T, snap *model.ConnectionSnapshot, omitted uint32, want ...model.Listener) {
 	t.Helper()
 
-	wantList(t, "new_listeners", snap.NewListeners, want)
+	wantListeners(t, "new_listeners", snap.NewListeners, want)
 	if snap.NewListenersOmitted != omitted {
 		t.Errorf("new_listeners_omitted = %d, want %d", snap.NewListenersOmitted, omitted)
 	}
@@ -153,11 +254,11 @@ func TestConnections_RegularSnapshotHoldsAggregatesAndInventory(t *testing.T) {
 	if len(snap.Listeners) != ownedListeners {
 		t.Errorf("listeners = %d entries, want %d (one per protocol, address and port)", len(snap.Listeners), ownedListeners)
 	}
-	wantListener(t, snap, model.ProtoTCP, sshdListener, 100, cmdSSHD)
-	wantListener(t, snap, model.ProtoTCP, nginxListener, 200, cmdNginx)
-	wantListener(t, snap, model.ProtoTCP, "0.0.0.0:25", 400, cmdMaster)
-	wantListener(t, snap, model.ProtoTCP, "0.0.0.0:110", 0, "")
-	wantListener(t, snap, model.ProtoUDP6, "[::1]:53", 0, "")
+	wantListener(t, snap, model.ProtoTCP, sshdListener, 100, cmdSSHD, 0, "root")
+	wantListener(t, snap, model.ProtoTCP, nginxListener, 200, cmdNginx, 0, "root")
+	wantListener(t, snap, model.ProtoTCP, "0.0.0.0:25", 400, cmdMaster, 0, "root")
+	wantListener(t, snap, model.ProtoTCP, "0.0.0.0:110", 0, "", 0, "root")
+	wantListener(t, snap, model.ProtoUDP6, "[::1]:53", 0, "", 116, "116")
 
 	t.Run("the remotes are the top 25", func(t *testing.T) {
 		w := ownedWorld(t)
@@ -183,7 +284,7 @@ func TestConnections_ListOrders(t *testing.T) {
 	wantList(t, "states (by protocol, then state)", snap.States, ownedStates)
 	wantList(t, "processes (by count descending, then PID)", snap.Processes, ownedProcesses)
 	wantList(t, "remotes (by count descending, then address)", snap.Remotes, ownedRemotes)
-	wantList(t, "connections (by protocol, local, remote)", snap.Connections, ownedConnections)
+	wantConnections(t, "connections (by protocol, local, remote)", snap.Connections, ownedConnections)
 
 	if len(snap.Listeners) != ownedListeners {
 		t.Fatalf("listeners = %d entries, want %d", len(snap.Listeners), ownedListeners)
@@ -227,8 +328,8 @@ func TestConnections_ReusePortEndpointIsOneListener(t *testing.T) {
 		}
 	}
 	// Two sockets on tcp 127.0.0.1:53: PID 601 holds the first one of the table, PID 600 the second; the lowest owning PID names the listener.
-	wantListener(t, snap, model.ProtoTCP, "127.0.0.1:53", 600, cmdNamed)
-	wantListener(t, snap, model.ProtoUDP, "192.0.2.10:53", 300, cmdNamed)
+	wantListener(t, snap, model.ProtoTCP, "127.0.0.1:53", 600, cmdNamed, 116, "116")
+	wantListener(t, snap, model.ProtoUDP, "192.0.2.10:53", 300, cmdNamed, 116, "116")
 	wantList(t, "states (every socket counts)", snap.States, ownedStates)
 }
 
@@ -252,9 +353,9 @@ func TestConnections_MappedAddressesKept(t *testing.T) {
 	if counts[mapped] != 2 || counts[plain] != 1 {
 		t.Errorf("remotes of %s = %d and of %s = %d, want 2 and 1 (a mapped address is not unmapped, so one peer is two entries)", mapped, counts[mapped], plain, counts[plain])
 	}
-	want := model.Connection{Proto: model.ProtoTCP6, Local: addrPort(mappedLocal), Remote: addrPort("[::ffff:" + peer + "]:40000"), State: "ESTABLISHED"}
-	if !slices.Contains(snap.Connections, want) {
-		t.Errorf("connections = %+v, want one with the mapped endpoints %+v", snap.Connections, want)
+	want := model.Connection{Proto: model.ProtoTCP6, Local: addrPort(mappedLocal), Remote: addrPort("[::ffff:" + peer + "]:40000"), State: "ESTABLISHED", UID: uidOf(0), User: "root"}
+	if !hasConnection(snap.Connections, want) {
+		t.Errorf("connections = %s, want one with the mapped endpoints %s", connectionsText(snap.Connections), connectionText(want))
 	}
 	linkLocal := addrPort("[fe80::200:5eff:fe00:5301]:53")
 	if got := listenerAt(snap, model.ProtoUDP6, linkLocal.String()); len(got) != 1 || got[0].Local.Addr().Zone() != "" {
@@ -326,7 +427,7 @@ func TestConnections_FullSnapshotUnderPressure(t *testing.T) {
 
 	wantFlags(t, regular, true, false, false, model.ListenerCheckAll)
 	wantFlags(t, pressed, false, true, false, model.ListenerCheckAll)
-	wantList(t, "connections under pressure", pressed.Connections, ownedConnections)
+	wantConnections(t, "connections under pressure", pressed.Connections, ownedConnections)
 	wantList(t, "remotes under pressure", pressed.Remotes, ownedRemotes)
 	wantFlags(t, after, true, false, false, model.ListenerCheckAll)
 	if len(after.Connections) != 0 {
@@ -346,8 +447,8 @@ func TestConnections_FullSnapshotOnNewListener(t *testing.T) {
 		rec, snap := snapshotOf(t, c, runAt(1, false))
 
 		wantFlags(t, snap, false, true, false, model.ListenerCheckAll)
-		wantNewListeners(t, snap, 0, model.Listener{Proto: model.ProtoTCP, Local: addrPort(newBackdoor), PID: 700, Command: "evil"})
-		wantList(t, "connections of the full snapshot", snap.Connections, ownedConnections)
+		wantNewListeners(t, snap, 0, withOwner(rootListener(model.ProtoTCP, newBackdoor), 700, "evil"))
+		wantConnections(t, "connections of the full snapshot", snap.Connections, ownedConnections)
 		if !rec.CapturedAt.Equal(runAt(1, false).Start) {
 			t.Errorf("captured at %v, want the run's start", rec.CapturedAt)
 		}
@@ -382,7 +483,7 @@ func TestConnections_FullSnapshotOnNewListener(t *testing.T) {
 		_, snap := snapshotOf(t, c, runAt(1, false))
 
 		wantFlags(t, snap, false, true, false, model.ListenerCheckAll)
-		wantNewListeners(t, snap, 0, model.Listener{Proto: model.ProtoUDP, Local: addrPort("0.0.0.0:5353")})
+		wantNewListeners(t, snap, 0, rootListener(model.ProtoUDP, "0.0.0.0:5353"))
 	})
 }
 
@@ -408,7 +509,7 @@ func TestConnections_FailedRunIsNotCompared(t *testing.T) {
 	_, snap := snapshotOf(t, c, runAt(3, false))
 
 	wantFlags(t, snap, false, true, false, model.ListenerCheckAll)
-	wantNewListeners(t, snap, 0, model.Listener{Proto: model.ProtoTCP, Local: addrPort(newBackdoor)})
+	wantNewListeners(t, snap, 0, rootListener(model.ProtoTCP, newBackdoor))
 }
 
 func TestConnections_LateRunKeepsNoInventory(t *testing.T) {
@@ -446,7 +547,7 @@ func TestConnections_LateRunKeepsNoInventory(t *testing.T) {
 	last.armed.Store(false)
 	_, snap := snapshotOf(t, c, runAt(2, false))
 	wantFlags(t, snap, false, true, false, model.ListenerCheckAll)
-	wantNewListeners(t, snap, 0, model.Listener{Proto: model.ProtoTCP, Local: addrPort(newBackdoor)})
+	wantNewListeners(t, snap, 0, rootListener(model.ProtoTCP, newBackdoor))
 }
 
 func TestConnections_ReportsAtMost64NewListeners(t *testing.T) {
@@ -460,7 +561,7 @@ func TestConnections_ReportsAtMost64NewListeners(t *testing.T) {
 
 	var want []model.Listener
 	for _, port := range slices.Concat([]uint16{1000, 1001, 1002}, portsFrom(5000, 61)) {
-		want = append(want, model.Listener{Proto: model.ProtoTCP, Local: netip.AddrPortFrom(netip.IPv4Unspecified(), port)})
+		want = append(want, rootListener(model.ProtoTCP, netip.AddrPortFrom(netip.IPv4Unspecified(), port).String()))
 	}
 	wantFlags(t, snap, false, true, false, model.ListenerCheckAll)
 	wantNewListeners(t, snap, 39, want...)
@@ -508,12 +609,12 @@ func TestConnections_OwnerlessSockets(t *testing.T) {
 	_, snap := snapshotOf(t, newCollector(w), runAt(0, false))
 
 	ownerless := []model.Connection{
-		{Proto: model.ProtoTCP, Local: addrPort("192.0.2.10:50000"), Remote: addrPort("203.0.113.50:443"), State: "ESTABLISHED"},
+		{Proto: model.ProtoTCP, Local: addrPort("192.0.2.10:50000"), Remote: addrPort("203.0.113.50:443"), State: "ESTABLISHED", UID: uidOf(0), User: "root"},
 		ownedConnections[1],
 	}
 	for _, want := range ownerless {
-		if !slices.Contains(snap.Connections, want) {
-			t.Errorf("connections = %+v, want %+v without PID and command", snap.Connections, want)
+		if !hasConnection(snap.Connections, want) {
+			t.Errorf("connections = %s, want %s without PID and command", connectionsText(snap.Connections), connectionText(want))
 		}
 	}
 	remotes := map[netip.Addr]uint32{}
@@ -547,7 +648,10 @@ func TestConnections_InodeZeroLinesAreSeparateSockets(t *testing.T) {
 	}
 	for _, conn := range snap.Connections {
 		if conn.PID != 0 || conn.Command != "" {
-			t.Errorf("connection %+v has an owner, want none for inode 0", conn)
+			t.Errorf("connection %s has an owner, want none for inode 0", connectionText(conn))
+		}
+		if conn.UID != nil || conn.User != "" {
+			t.Errorf("connection %s has a UID, want none for inode 0", connectionText(conn))
 		}
 	}
 	if len(snap.Processes) != 0 {
@@ -576,7 +680,7 @@ func TestConnections_UnreadableDescriptorsLogOnce(t *testing.T) {
 	if !snap.AggregatesIncomplete {
 		t.Error("aggregates_incomplete = false, want true while a process cannot be read")
 	}
-	wantListener(t, snap, model.ProtoTCP, nginxListener, 201, cmdNginx) // PID 200 could not be read, so its twin owns the socket
+	wantListener(t, snap, model.ProtoTCP, nginxListener, 201, cmdNginx, 0, "root") // PID 200 could not be read, so its twin owns the socket
 	if slices.ContainsFunc(snap.Processes, func(p model.ProcessConnections) bool { return p.PID == 200 }) {
 		t.Errorf("processes = %+v, want none for the unreadable PID 200", snap.Processes)
 	}
@@ -587,7 +691,7 @@ func TestConnections_UnreadableDescriptorsLogOnce(t *testing.T) {
 
 	wantLogged(t, logs, slog.LevelInfo, "socket owners known again", 1)
 	wantLogged(t, logs, slog.LevelWarn, "socket owners partly unknown", 1)
-	wantListener(t, snap, model.ProtoTCP, nginxListener, 200, cmdNginx)
+	wantListener(t, snap, model.ProtoTCP, nginxListener, 200, cmdNginx, 0, "root")
 	if snap.AggregatesIncomplete {
 		t.Error("aggregates_incomplete = true after the process could be read again, want false")
 	}
@@ -941,7 +1045,7 @@ func TestConnections_ReusePortDuplicatesDoNotCutTheInventory(t *testing.T) {
 	}
 	// Duplicates do not count toward the cut, so the whole inventory is compared.
 	wantFlags(t, second, false, true, false, model.ListenerCheckAll)
-	wantNewListeners(t, second, 0, model.Listener{Proto: model.ProtoTCP, Local: addrPort("0.0.0.0:6000")})
+	wantNewListeners(t, second, 0, rootListener(model.ProtoTCP, "0.0.0.0:6000"))
 	if len(second.Listeners) != 4001 {
 		t.Errorf("second run: %d listeners, want 4001", len(second.Listeners))
 	}
@@ -985,19 +1089,22 @@ func TestConnections_BlockingReadIsAbandonedAsGap(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			synctest.Test(t, func(t *testing.T) { runWithBlockedRead(t, tc.blocked) })
+			synctest.Test(t, func(t *testing.T) {
+				stuck := newBlockingFS(t, ownedWorld(t), tc.blocked)
+				runWithBlockedRead(t, newCollectorWith(stuck, etcOf(rootPasswd)), stuck, tc.blocked)
+			})
 		})
 	}
 }
 
-// runWithBlockedRead runs the collector under the scheduler with one blocked file and checks the gaps.
-func runWithBlockedRead(t *testing.T, blocked string) {
+// runWithBlockedRead runs the collector c, whose reads go through stuck, under the scheduler with the file blocked blocked and
+// checks the gaps.
+func runWithBlockedRead(t *testing.T, c *Connections, stuck *blockingFS, blocked string) {
 	t.Helper()
 
-	stuck := newBlockingFS(t, ownedWorld(t), blocked)
 	sink := &gapSink{}
 	schedule := scheduler.Schedule{Interval: 10 * time.Second, Timeout: 2 * time.Second}
-	jobs := []scheduler.Job{{Collector: newCollector(stuck), Schedule: schedule}, {Collector: &okCollector{}, Schedule: schedule}}
+	jobs := []scheduler.Job{{Collector: c, Schedule: schedule}, {Collector: &okCollector{}, Schedule: schedule}}
 	sched, err := scheduler.New(jobs, sink, quietLogger())
 	if err != nil {
 		t.Fatalf("scheduler.New() error = %v, want nil", err)
@@ -1063,7 +1170,7 @@ func TestConnections_HostileNameYieldsValidRecord(t *testing.T) {
 		if want == "" || len(want) > 1024 || !utf8.ValidString(want) {
 			t.Fatalf("%s: the process collector's command %q is not valid (test setup)", tc.name, want)
 		}
-		wantListener(t, snap, model.ProtoTCP, "0.0.0.0:"+strconv.Itoa(3000+i), pid, want)
+		wantListener(t, snap, model.ProtoTCP, "0.0.0.0:"+strconv.Itoa(3000+i), pid, want, 0, "root")
 		if !slices.Contains(snap.Processes, model.ProcessConnections{PID: pid, Command: want, Count: 1}) {
 			t.Errorf("%s: processes = %+v, want PID %d with command %q", tc.name, snap.Processes, pid, want)
 		}
@@ -1074,25 +1181,30 @@ func TestConnections_LogsHoldNoProcessTextOrAddress(t *testing.T) {
 	const (
 		sentinelProcess = "SENTINELPROC"
 		sentinelLine    = "LINECONTENT42"
+		sentinelUser    = "SENTINELUSER"
 	)
+	namedEtc := etcOf(sentinelUser + ":x:0:0::/:/bin/sh\n" + sentinelUser + "2:x:116:116::/:/bin/sh\n" + sentinelUser + "3:x:998:998::/:/bin/sh\n")
 	w := ownedWorld(t)
 	w.process(200, sentinelProcess, "/usr/bin/"+sentinelProcess+"\x00")
 	w.replaceLine("tcp", 5, sentinelLine+" 192.0.2.10:1 198.51.100.7:1")
 	w.dropTable("tcp6")
 	faulty := newFaultFS(w)
 	faulty.openErr[fdinfoName(200, 3)] = syscall.EACCES
-	c, logs := newRecordingCollector(faulty, SocketMount{ID: socketMount})
+	c, logs := newRecordingCollectorWith(faulty, namedEtc, SocketMount{ID: socketMount})
 
-	snapshotOf(t, c, runAt(0, false))
+	_, snap := snapshotOf(t, c, runAt(0, false))
 	snapshotOf(t, c, runAt(1, false))
 
+	if got := listenerAt(snap, model.ProtoTCP, "127.0.0.1:53"); len(got) != 1 || got[0].User != sentinelUser+"2" {
+		t.Fatalf("listeners on tcp 127.0.0.1:53 = %s, want the user %q the sentinel passwd gives UID 116 (test setup)", listenersText(got), sentinelUser+"2")
+	}
 	for _, msg := range []string{"socket owners partly unknown", "socket lines not read", "socket tables unavailable"} {
 		if len(logs.find(msg)) != 1 {
 			t.Errorf("log holds %d lines %q, want 1 (test setup)", len(logs.find(msg)), msg)
 		}
 	}
 	text := logs.text()
-	for _, leak := range []string{sentinelProcess, sentinelLine, "192.0.2", "198.51.100", "0A0200C0", "076433C6", "sshd", "nginx"} {
+	for _, leak := range []string{sentinelProcess, sentinelLine, sentinelUser, "192.0.2", "198.51.100", "0A0200C0", "076433C6", "sshd", "nginx", "116", "998"} {
 		if strings.Contains(text, leak) {
 			t.Errorf("log holds %q, want no process text, address or line content; log:\n%s", leak, text)
 		}
@@ -1102,6 +1214,19 @@ func TestConnections_LogsHoldNoProcessTextOrAddress(t *testing.T) {
 	snapshotOf(t, unknown, runAt(0, false))
 	if strings.Contains(unknownLogs.text(), "192.0.2") || strings.Contains(unknownLogs.text(), sentinelProcess) {
 		t.Errorf("log of the unknown socket mount holds an address or process text:\n%s", unknownLogs.text())
+	}
+
+	// A passwd that cannot be read names its reason, never a user or a UID.
+	brokenEtc := etcOf(sentinelUser + ":x:0:0::/:/bin/sh\nx:x:116:" + strings.Repeat("g", 5000) + "\n")
+	unnamed, unnamedLogs := newRecordingCollectorWith(w, brokenEtc, SocketMount{ID: socketMount})
+	snapshotOf(t, unnamed, runAt(0, false))
+	if len(unnamedLogs.find("user names unavailable")) != 1 {
+		t.Fatalf("log holds %d lines %q, want 1 (test setup)", len(unnamedLogs.find("user names unavailable")), "user names unavailable")
+	}
+	for _, leak := range []string{sentinelUser, "116", "192.0.2"} {
+		if strings.Contains(unnamedLogs.text(), leak) {
+			t.Errorf("log of the unreadable passwd holds %q, want no user name, UID or address; log:\n%s", leak, unnamedLogs.text())
+		}
 	}
 }
 
@@ -1183,7 +1308,7 @@ func TestConnections_ListenerFloodCausesNoFullSnapshot(t *testing.T) {
 	}
 	wantFlags(t, privileged, false, false, true, model.ListenerCheckPrivileged)
 	wantInventory(t, privileged, model.InventoryPrivileged, allTableProtos...)
-	wantNewListeners(t, privileged, 0, model.Listener{Proto: model.ProtoTCP, Local: addrPort("0.0.0.0:23")})
+	wantNewListeners(t, privileged, 0, rootListener(model.ProtoTCP, "0.0.0.0:23"))
 }
 
 // newTableGen returns the generated IPv4 table name of n sockets.
@@ -1474,11 +1599,11 @@ func TestConnstats_ImportsOnlyAllowedPackages(t *testing.T) {
 func TestNew_TakesDefaults(t *testing.T) {
 	c := New(Sources{}, nil)
 
-	if c.src.Proc == nil || c.log == nil || c.Name() != Name {
-		t.Errorf("New(Sources{}, nil) = proc %v, log %v, name %q, want the host's /proc, a logger and %q", c.src.Proc, c.log, c.Name(), Name)
+	if c.src.Proc == nil || c.src.Etc == nil || c.log == nil || c.Name() != Name {
+		t.Errorf("New(Sources{}, nil) = proc %v, etc %v, log %v, name %q, want the host's /proc and /etc, a logger and %q", c.src.Proc, c.src.Etc, c.log, c.Name(), Name)
 	}
 	w := ownedWorld(t)
-	quiet := New(Sources{Proc: w, SocketMount: SocketMount{ID: socketMount}}, nil)
+	quiet := New(Sources{Proc: w, Etc: fixtureEtc(), SocketMount: SocketMount{ID: socketMount}}, nil)
 	snapshotOf(t, quiet, runAt(0, false)) // logs through the default logger without failing
 }
 
@@ -1554,7 +1679,7 @@ func TestConnections_CommandLookupErrors(t *testing.T) {
 		if slices.ContainsFunc(snap.Processes, func(p model.ProcessConnections) bool { return p.PID == 100 }) {
 			t.Errorf("processes = %+v, want none for the ended PID 100", snap.Processes)
 		}
-		wantListener(t, snap, model.ProtoTCP, sshdListener, 0, "")
+		wantListener(t, snap, model.ProtoTCP, sshdListener, 0, "", 0, "root")
 		wantLogged(t, logs, slog.LevelWarn, "socket owners partly unknown", 0)
 	})
 
@@ -1569,7 +1694,7 @@ func TestConnections_CommandLookupErrors(t *testing.T) {
 		if slices.ContainsFunc(snap.Processes, func(p model.ProcessConnections) bool { return p.PID == 100 }) {
 			t.Errorf("processes = %+v, want none for the unreadable PID 100", snap.Processes)
 		}
-		wantListener(t, snap, model.ProtoTCP, sshdListener, 0, "")
+		wantListener(t, snap, model.ProtoTCP, sshdListener, 0, "", 0, "root")
 		if !snap.AggregatesIncomplete {
 			t.Error("aggregates_incomplete = false, want true")
 		}
@@ -1844,7 +1969,7 @@ func TestConnections_TriggeredRunIsFullAndNamesKills(t *testing.T) {
 
 			wantFlags(t, regular, true, false, false, model.ListenerCheckAll)
 			wantFlags(t, snap, false, true, false, model.ListenerCheckAll)
-			wantList(t, "connections of the triggered run", snap.Connections, ownedConnections)
+			wantConnections(t, "connections of the triggered run", snap.Connections, ownedConnections)
 			wantList(t, "remotes of the triggered run", snap.Remotes, ownedRemotes)
 			if len(snap.Listeners) != ownedListeners {
 				t.Errorf("listeners of the triggered run = %d, want %d", len(snap.Listeners), ownedListeners)
@@ -1890,4 +2015,651 @@ func TestConnections_TriggeredRunKeepsTheListenerComparison(t *testing.T) {
 	if snap.Trigger != nil {
 		t.Errorf("trigger of the run after a triggered one = %+v, want nil", snap.Trigger)
 	}
+}
+
+// Passwd files of the tests of the socket's UID.
+const (
+	rootPasswd  = "root:x:0:0:root:/root:/bin/bash\n"
+	usersPasswd = rootPasswd + "www-data:x:33:33:www-data:/var/www:/usr/sbin/nologin\nalice:x:1001:1001::/home/alice:/bin/bash\n"
+)
+
+// holderPID is the process of the UID tests that holds their sockets.
+const holderPID = int32(9000)
+
+// aliceWorld returns a /proc with a listener on 0.0.0.0:2222 and an established connection, both sockets of UID 1001 (alice), held by
+// the process holderPID, which calls itself sshd.
+func aliceWorld(t *testing.T) *world {
+	t.Helper()
+
+	w := newWorld(t)
+	w.clear()
+	w.addListenerUID("tcp", "0.0.0.0:2222", 1001, 96100001)
+	w.addSocketUID("tcp", "192.0.2.10:2222", "198.51.100.9:50000", stateEstablished, 1001, 96100002)
+	w.process(holderPID, "sshd", "/tmp/sshd\x00")
+	w.holdAll(holderPID, 96100001, 96100002)
+	return w
+}
+
+// wantAliceEntries checks the listener and the connection of aliceWorld: the owner as given, the UID and user of the table lines.
+func wantAliceEntries(t *testing.T, snap *model.ConnectionSnapshot, pid int32, command string) {
+	t.Helper()
+
+	wantListener(t, snap, model.ProtoTCP, "0.0.0.0:2222", pid, command, 1001, "alice")
+	want := model.Connection{Proto: model.ProtoTCP, Local: addrPort("192.0.2.10:2222"), Remote: addrPort("198.51.100.9:50000"), State: "ESTABLISHED",
+		PID: pid, Command: command, UID: uidOf(1001), User: "alice"}
+	if !hasConnection(snap.Connections, want) {
+		t.Errorf("connections = %s, want %s", connectionsText(snap.Connections), connectionText(want))
+	}
+}
+
+// hidingFS leaves one process directory out of the listing of /proc, as hidepid=2 does for the processes of other users; the files
+// of the process stay readable.
+type hidingFS struct {
+	fs.FS
+	hide string
+}
+
+func (h hidingFS) Open(name string) (fs.File, error) {
+	file, err := h.FS.Open(name)
+	if err != nil || name != "." {
+		return file, err
+	}
+	dir, ok := file.(fs.ReadDirFile)
+	if !ok {
+		return file, nil
+	}
+	return hidingDir{ReadDirFile: dir, hide: h.hide}, nil
+}
+
+// hidingDir is the root directory of a hidingFS.
+type hidingDir struct {
+	fs.ReadDirFile
+	hide string
+}
+
+func (d hidingDir) ReadDir(n int) ([]fs.DirEntry, error) {
+	entries, err := d.ReadDirFile.ReadDir(n)
+	return slices.DeleteFunc(entries, func(e fs.DirEntry) bool { return e.Name() == d.hide }), err
+}
+
+func TestConnections_ListenersCarryTheSocketUID(t *testing.T) {
+	w := ownedWorld(t)
+	// The process that holds the sshd socket runs as www-data; the collector reads no status file, so the entry keeps the socket's UID.
+	w.files["100/status"] = &fstest.MapFile{Data: []byte("Name:\tsshd\nUid:\t33\t33\t33\t33\n")}
+	rec := &recordingFS{FS: w}
+
+	_, snap := snapshotOf(t, newCollector(rec), runAt(0, false))
+
+	cases := []struct {
+		proto   model.Proto
+		local   string
+		pid     int32
+		command string
+		uid     uint32
+		user    string
+	}{
+		{model.ProtoTCP, sshdListener, 100, cmdSSHD, 0, "root"},
+		{model.ProtoTCP, nginxListener, 200, cmdNginx, 0, "root"},
+		{model.ProtoTCP, "0.0.0.0:110", 0, "", 0, "root"},
+		{model.ProtoTCP, "127.0.0.1:3306", 0, "", 114, "114"},
+		{model.ProtoTCP, "0.0.0.0:2224", 0, "", 998, "998"},
+		{model.ProtoTCP, "127.0.0.1:53", 600, cmdNamed, 116, "116"},
+		{model.ProtoTCP, "127.0.0.53:53", 0, "", 102, "102"},
+		{model.ProtoUDP, "192.0.2.10:53", 300, cmdNamed, 116, "116"},
+		{model.ProtoUDP, "127.0.0.53:53", 0, "", 102, "102"},
+		{model.ProtoTCP6, "[::]:106", 0, "", 0, "root"},
+		{model.ProtoTCP6, "[::1]:53", 0, "", 116, "116"},
+		{model.ProtoUDP6, "[::1]:53", 0, "", 116, "116"},
+	}
+	for _, c := range cases {
+		t.Run(string(c.proto)+" "+c.local, func(t *testing.T) {
+			wantListener(t, snap, c.proto, c.local, c.pid, c.command, c.uid, c.user)
+		})
+	}
+	for _, l := range snap.Listeners {
+		if l.UID == nil || l.User == "" || l.MixedUIDs {
+			t.Errorf("listener %s, want a UID, a user and no mixed UIDs (every captured socket has an inode and one UID per endpoint)", listenerText(l))
+		}
+	}
+	for _, name := range rec.opened() {
+		if strings.HasSuffix(name, "/status") {
+			t.Errorf("collector opened %q, want the UID taken from the socket tables only", name)
+		}
+	}
+
+	t.Run("uid 0 is written", func(t *testing.T) {
+		got := listenerAt(snap, model.ProtoTCP, sshdListener)
+		if len(got) != 1 {
+			t.Fatalf("listeners on tcp %s = %s, want one", sshdListener, listenersText(got))
+		}
+		data, err := json.Marshal(got[0])
+
+		const want = `{"proto":"tcp","local":"0.0.0.0:22","pid":100,"command":"sshd","uid":0,"user":"root"}`
+		if err != nil || string(data) != want {
+			t.Errorf("json.Marshal(sshd listener) = %s, %v, want %s", data, err, want)
+		}
+	})
+}
+
+func TestConnections_UIDWithoutOwners(t *testing.T) {
+	probeErr := errors.New("sockmount: socket: permission denied")
+
+	t.Run("the probe of the socket mount failed", func(t *testing.T) {
+		c, _ := newRecordingCollectorWith(aliceWorld(t), etcOf(usersPasswd), SocketMount{Err: probeErr})
+
+		_, snap := snapshotOf(t, c, runAt(0, false))
+
+		wantAliceEntries(t, snap, 0, "")
+	})
+	t.Run("the socket mount was not learned", func(t *testing.T) {
+		c, _ := newRecordingCollectorWith(aliceWorld(t), etcOf(usersPasswd), SocketMount{})
+
+		_, snap := snapshotOf(t, c, runAt(0, false))
+
+		wantAliceEntries(t, snap, 0, "")
+	})
+	t.Run("the descriptors cannot be read", func(t *testing.T) {
+		faulty := newFaultFS(aliceWorld(t))
+		faulty.openErr[fdinfoName(holderPID, 3)] = syscall.EACCES
+		c := newCollectorWith(faulty, etcOf(usersPasswd))
+
+		_, snap := snapshotOf(t, c, runAt(0, false))
+
+		wantAliceEntries(t, snap, 0, "")
+	})
+	t.Run("the holder is not listed", func(t *testing.T) {
+		c := newCollectorWith(hidingFS{FS: aliceWorld(t), hide: strconv.Itoa(int(holderPID))}, etcOf(usersPasswd))
+
+		_, snap := snapshotOf(t, c, runAt(0, false))
+
+		wantAliceEntries(t, snap, 0, "")
+	})
+	t.Run("the holder is beyond the PID cap", func(t *testing.T) {
+		w := aliceWorld(t)
+		for pid := 1; pid <= procstats.MaxProcesses; pid++ {
+			w.files[strconv.Itoa(pid)+"/stat"] = &fstest.MapFile{Data: []byte("x")}
+		}
+		c := newCollectorWith(w, etcOf(usersPasswd))
+
+		_, snap := snapshotOf(t, c, runAt(0, false))
+
+		wantAliceEntries(t, snap, 0, "")
+		if !snap.AggregatesIncomplete {
+			t.Error("aggregates_incomplete = false, want true (the precondition of this case: the holder was not scanned)")
+		}
+	})
+	t.Run("the holder is scanned", func(t *testing.T) {
+		c := newCollectorWith(aliceWorld(t), etcOf(usersPasswd))
+
+		_, snap := snapshotOf(t, c, runAt(0, false))
+
+		wantAliceEntries(t, snap, holderPID, "sshd")
+	})
+	t.Run("the socket is beyond MaxSockets", func(t *testing.T) {
+		const total = MaxSockets + 10
+		w := newWorld(t)
+		w.clear()
+		w.process(1, "init", "/sbin/init\x00")
+		w.add(1, 3, socketMount, 10000000)
+		gen := &genFS{base: w, tables: map[string]*tableGen{"net/tcp": newTableGen(t, "tcp", total, func(i uint32) sockSpec {
+			// Descending addresses: the last lines have the lowest keys, so they head the listener list.
+			return sockSpec{local: netip.AddrPortFrom(netip.AddrFrom4(addr4(0x0A000000+total-1-i)), 8000), remote: netip.AddrPortFrom(netip.IPv4Unspecified(), 0),
+				state: stateListen, uid: 1001, inode: 10000000 + uint64(i)}
+		})}}
+
+		_, snap := snapshotOf(t, newCollectorWith(gen, etcOf(usersPasswd)), runAt(0, false))
+
+		want := model.Listener{Proto: model.ProtoTCP, Local: addrPort("10.0.0.0:8000"), UID: uidOf(1001), User: "alice"}
+		if len(snap.Listeners) == 0 || !sameListener(snap.Listeners[0], want) {
+			t.Errorf("first listener = %s, want %s (beyond the inode index: no owner, but its line's UID)", listenersText(snap.Listeners[:min(1, len(snap.Listeners))]), listenerText(want))
+		}
+	})
+	t.Run("the inode is repeated", func(t *testing.T) {
+		w := newWorld(t)
+		w.clear()
+		w.addListenerUID("tcp", "0.0.0.0:7001", 1001, 96200001)
+		w.addListenerUID("tcp", "0.0.0.0:7002", 33, 96200001)
+		w.process(holderPID, "holder", "/usr/bin/holder\x00")
+		w.holdAll(holderPID, 96200001)
+
+		_, snap := snapshotOf(t, newCollectorWith(w, etcOf(usersPasswd)), runAt(0, false))
+
+		wantListener(t, snap, model.ProtoTCP, "0.0.0.0:7001", holderPID, "holder", 1001, "alice")
+		wantListener(t, snap, model.ProtoTCP, "0.0.0.0:7002", 0, "", 33, "www-data")
+	})
+}
+
+func TestConnections_NewListenerCarriesTheInventoryUID(t *testing.T) {
+	t.Run("one UID", func(t *testing.T) {
+		w := ownedWorld(t)
+		c := newCollectorWith(w, etcOf(usersPasswd))
+		snapshotOf(t, c, runAt(0, false))
+		w.addListenerUID("tcp", "0.0.0.0:2222", 1001, 99000010)
+		w.process(710, "sshd", "/tmp/sshd\x00")
+		w.holdAll(710, 99000010)
+
+		_, snap := snapshotOf(t, c, runAt(1, false))
+
+		want := model.Listener{Proto: model.ProtoTCP, Local: addrPort("0.0.0.0:2222"), PID: 710, Command: cmdSSHD, UID: uidOf(1001), User: "alice"}
+		wantNewListeners(t, snap, 0, want)
+		wantListener(t, snap, model.ProtoTCP, "0.0.0.0:2222", 710, cmdSSHD, 1001, "alice")
+	})
+	t.Run("two UIDs on the endpoint", func(t *testing.T) {
+		w := ownedWorld(t)
+		c := newCollectorWith(w, etcOf(usersPasswd))
+		snapshotOf(t, c, runAt(0, false))
+		w.addListenerUID("tcp", "0.0.0.0:2222", 1001, 99000010)
+		w.addListenerUID("tcp", "0.0.0.0:2222", 33, 99000011)
+		w.process(710, "sshd", "/tmp/sshd\x00")
+		w.holdAll(710, 99000010)
+
+		_, snap := snapshotOf(t, c, runAt(1, false))
+
+		want := model.Listener{Proto: model.ProtoTCP, Local: addrPort("0.0.0.0:2222"), PID: 710, Command: cmdSSHD, UID: uidOf(33), User: "www-data", MixedUIDs: true}
+		wantNewListeners(t, snap, 0, want)
+		inventory := listenerAt(snap, model.ProtoTCP, "0.0.0.0:2222")
+		if len(inventory) != 1 || !sameListener(inventory[0], want) {
+			t.Errorf("listeners on tcp 0.0.0.0:2222 = %s, want exactly the new listener %s", listenersText(inventory), listenerText(want))
+		}
+	})
+}
+
+func TestConnections_ConnectionsCarryTheSocketUID(t *testing.T) {
+	w := ownedWorld(t)
+	w.addSocketUID("tcp6", "[2001:db8::10]:443", "[2001:db8::99]:50000", stateEstablished, 33, 99100001) // held by a process
+	w.addSocketUID("tcp6", "[2001:db8::10]:443", "[2001:db8::99]:50001", stateEstablished, 33, 99100002) // nobody holds it
+	w.process(720, "apache2", "/usr/sbin/apache2\x00")
+	w.holdAll(720, 99100001)
+	c := newCollector(w)
+
+	_, full := snapshotOf(t, c, runAt(0, false))
+	_, regular := snapshotOf(t, c, runAt(1, false))
+
+	wants := []model.Connection{
+		{Proto: model.ProtoTCP6, Local: addrPort("[2001:db8::10]:443"), Remote: addrPort("[2001:db8::99]:50000"), State: "ESTABLISHED", PID: 720, Command: "apache2", UID: uidOf(33), User: "www-data"},
+		{Proto: model.ProtoTCP6, Local: addrPort("[2001:db8::10]:443"), Remote: addrPort("[2001:db8::99]:50001"), State: "ESTABLISHED", UID: uidOf(33), User: "www-data"},
+	}
+	for _, want := range append(wants, ownedConnections...) {
+		if !hasConnection(full.Connections, want) {
+			t.Errorf("connections of the full snapshot = %s, want %s", connectionsText(full.Connections), connectionText(want))
+		}
+	}
+	if len(regular.Connections) != 0 {
+		t.Errorf("connections of the regular snapshot = %s, want none", connectionsText(regular.Connections))
+	}
+}
+
+func TestConnections_InodeZeroEntriesCarryNoUID(t *testing.T) {
+	t.Run("connections", inodeZeroConnections)
+	t.Run("a UDP endpoint of one socket without inode and one of UID 33, inode 0 first", func(t *testing.T) { inodeZeroUDPEndpoint(t, true) })
+	t.Run("a UDP endpoint of one socket without inode and one of UID 33, inode 0 last", func(t *testing.T) { inodeZeroUDPEndpoint(t, false) })
+	t.Run("a UDP endpoint of only a socket without inode", func(t *testing.T) {
+		w := newWorld(t)
+		w.clear()
+		w.addListenerUID("udp", "0.0.0.0:5454", 33, 0)
+
+		_, snap := snapshotOf(t, newCollector(w), runAt(0, false))
+
+		want := model.Listener{Proto: model.ProtoUDP, Local: addrPort("0.0.0.0:5454")}
+		if got := listenerAt(snap, model.ProtoUDP, "0.0.0.0:5454"); len(got) != 1 || !sameListener(got[0], want) {
+			t.Errorf("listeners on udp 0.0.0.0:5454 = %s, want exactly %s without UID, user and mixed UIDs", listenersText(got), listenerText(want))
+		}
+	})
+}
+
+// inodeZeroConnections checks the connections of lines with inode 0, which the kernel prints with a UID that is no owner.
+func inodeZeroConnections(t *testing.T) {
+	w := ownedWorld(t)
+	// The pending connection with its listener's UID, a time-wait form of FIN_WAIT2 with UID 0, and orphaned sockets with the UID
+	// they had (6.x) or root (5.15).
+	w.addSocketUID("tcp", "192.0.2.10:443", "203.0.113.11:40001", "03", 116, 0)  // SYN_RECV
+	w.addSocketUID("tcp", "192.0.2.10:443", "203.0.113.12:40002", "05", 0, 0)    // FIN_WAIT2
+	w.addSocketUID("tcp", "192.0.2.10:443", "203.0.113.13:40003", "04", 0, 0)    // FIN_WAIT1, orphaned
+	w.addSocketUID("tcp", "192.0.2.10:443", "203.0.113.14:40004", "09", 1001, 0) // LAST_ACK, orphaned
+	c := newCollectorWith(w, etcOf(usersPasswd))
+
+	_, snap := snapshotOf(t, c, runAt(0, false))
+
+	for _, want := range []model.Connection{
+		{Proto: model.ProtoTCP, Local: addrPort("192.0.2.10:56518"), Remote: addrPort("198.51.100.20:443"), State: "TIME_WAIT"},
+		{Proto: model.ProtoTCP, Local: addrPort("192.0.2.10:443"), Remote: addrPort("203.0.113.11:40001"), State: "SYN_RECV"},
+		{Proto: model.ProtoTCP, Local: addrPort("192.0.2.10:443"), Remote: addrPort("203.0.113.12:40002"), State: "FIN_WAIT2"},
+		{Proto: model.ProtoTCP, Local: addrPort("192.0.2.10:443"), Remote: addrPort("203.0.113.13:40003"), State: "FIN_WAIT1"},
+		{Proto: model.ProtoTCP, Local: addrPort("192.0.2.10:443"), Remote: addrPort("203.0.113.14:40004"), State: "LAST_ACK"},
+	} {
+		if !hasConnection(snap.Connections, want) {
+			t.Errorf("connections = %s, want %s without UID and user", connectionsText(snap.Connections), connectionText(want))
+		}
+	}
+	withUID := 0
+	for _, conn := range snap.Connections {
+		if conn.UID != nil {
+			withUID++
+		}
+	}
+	if withUID != 3 {
+		t.Errorf("connections with a UID = %d, want the 3 with an inode (sshd's and the two UDP sockets) of %s", withUID, connectionsText(snap.Connections))
+	}
+}
+
+// inodeZeroUDPEndpoint checks that a UDP socket without inode adds no UID to an endpoint, whichever line comes first.
+func inodeZeroUDPEndpoint(t *testing.T, inodeZeroFirst bool) {
+	w := newWorld(t)
+	w.clear()
+	if inodeZeroFirst {
+		w.addListenerUID("udp", "0.0.0.0:5353", 0, 0)
+	}
+	w.addListenerUID("udp", "0.0.0.0:5353", 33, 96300001)
+	if !inodeZeroFirst {
+		w.addListenerUID("udp", "0.0.0.0:5353", 0, 0)
+	}
+
+	_, snap := snapshotOf(t, newCollector(w), runAt(0, false))
+
+	wantListener(t, snap, model.ProtoUDP, "0.0.0.0:5353", 0, "", 33, "www-data")
+}
+
+func TestConnections_MixedUIDsOnOneEndpoint(t *testing.T) {
+	cases := []struct {
+		name  string
+		table string
+		local string
+		proto model.Proto
+		uids  []uint32
+		want  uint32
+		user  string
+		mixed bool
+	}{
+		{"tcp 1001 then 33", "tcp", "0.0.0.0:8080", model.ProtoTCP, []uint32{1001, 33}, 33, "www-data", true},
+		{"tcp 33 then 1001", "tcp", "0.0.0.0:8080", model.ProtoTCP, []uint32{33, 1001}, 33, "www-data", true},
+		{"udp 0 then 1001", "udp", "0.0.0.0:5353", model.ProtoUDP, []uint32{0, 1001}, 0, "root", true},
+		{"udp 1001 then 0", "udp", "0.0.0.0:5353", model.ProtoUDP, []uint32{1001, 0}, 0, "root", true},
+		{"tcp three sockets of two UIDs", "tcp", "0.0.0.0:8080", model.ProtoTCP, []uint32{1001, 33, 1001}, 33, "www-data", true},
+		{"tcp6 two UIDs", "tcp6", "[::]:8080", model.ProtoTCP6, []uint32{1001, 33}, 33, "www-data", true},
+		{"two sockets of UID 116", "tcp", "0.0.0.0:8081", model.ProtoTCP, []uint32{116, 116}, 116, "116", false},
+		{"one socket", "tcp", "0.0.0.0:8082", model.ProtoTCP, []uint32{1001}, 1001, "alice", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			w := newWorld(t)
+			w.clear()
+			for i, uid := range tc.uids {
+				w.addListenerUID(tc.table, tc.local, uid, 96400001+uint64(i))
+			}
+
+			_, snap := snapshotOf(t, newCollectorWith(w, etcOf(usersPasswd)), runAt(0, false))
+
+			want := model.Listener{Proto: tc.proto, Local: addrPort(tc.local), UID: uidOf(tc.want), User: tc.user, MixedUIDs: tc.mixed}
+			if got := listenerAt(snap, tc.proto, tc.local); len(got) != 1 || !sameListener(got[0], want) {
+				t.Errorf("listeners on %s %s = %s, want exactly %s", tc.proto, tc.local, listenersText(got), listenerText(want))
+			}
+		})
+	}
+}
+
+func TestConnections_BadUIDLineIsUnreadable(t *testing.T) {
+	w := newWorld(t)
+	original := slices.Clone(w.lines["tcp"])
+	w.replaceLine("tcp", 3, setField(t, original[3], 7, "4294967296")) // physical line 5
+	c, logs := newRecordingCollector(w, SocketMount{ID: socketMount})
+
+	_, first := snapshotOf(t, c, runAt(0, false))
+	_, second := snapshotOf(t, c, runAt(1, false))
+
+	wantFlags(t, first, false, false, true, model.ListenerCheckStart)
+	wantInventory(t, first, model.InventorySkipped, allTableProtos...)
+	wantFlags(t, second, true, false, true, model.ListenerCheckNone)
+	wantInventory(t, second, model.InventorySkipped, allTableProtos...)
+	if got := first.States[1]; got != (model.StateCount{Proto: model.ProtoTCP, State: "LISTEN", Count: 25}) {
+		t.Errorf("states[1] = %+v, want the 25 readable LISTEN sockets (the line with the bad uid is left out)", got)
+	}
+	warns := wantLogged(t, logs, slog.LevelWarn, "socket lines not read", 1)
+	if len(warns) == 1 && (warns[0].attrs["lines"] != "1" || warns[0].attrs["err"] != "connstats: net/tcp: line 5: not in the expected format") {
+		t.Errorf("warning attributes = %v, want lines=1 and err=connstats: net/tcp: line 5: not in the expected format", warns[0].attrs)
+	}
+}
+
+func TestConnections_UserNamesFollowTheProcessRules(t *testing.T) {
+	passwd := "first:x:2001:2001::/:/bin/sh\n" +
+		"second:x:2001:2001::/:/bin/sh\n" +
+		"bad\xffname:x:2002:2002::/:/bin/sh\n" +
+		strings.Repeat("n", 300) + ":x:2003:2003::/:/bin/sh\n" +
+		strings.Repeat("€", 100) + ":x:2004:2004::/:/bin/sh\n" +
+		"ctl\x01\x1bname:x:2005:2005::/:/bin/sh\n"
+	cases := []struct {
+		uid  uint32
+		want string
+	}{
+		{2001, "first"},
+		{2002, "bad�name"},
+		{2003, strings.Repeat("n", 256)},
+		{2004, strings.Repeat("€", 85)},
+		{2005, "ctl\x01\x1bname"},
+		{2006, "2006"},
+	}
+	w := newWorld(t)
+	w.clear()
+	for i, tc := range cases {
+		w.addListenerUID("tcp", "0.0.0.0:"+strconv.Itoa(9001+i), tc.uid, 96500001+uint64(i))
+	}
+	etc := etcOf(passwd)
+	users, err := procstats.ReadUsers(etc)
+	if err != nil {
+		t.Fatalf("procstats.ReadUsers() error = %v, want nil (test setup)", err)
+	}
+
+	rec, snap := snapshotOf(t, newCollectorWith(w, etc), runAt(0, false))
+
+	checkWire(t, rec)
+	for i, tc := range cases {
+		local := "0.0.0.0:" + strconv.Itoa(9001+i)
+		got := listenerAt(snap, model.ProtoTCP, local)
+		if len(got) != 1 || got[0].UID == nil || *got[0].UID != tc.uid || got[0].User != tc.want {
+			t.Errorf("listeners on tcp %s = %s, want UID %d and user %q", local, listenersText(got), tc.uid, tc.want)
+			continue
+		}
+		if oracle := procstats.UserName(users, tc.uid); got[0].User != oracle {
+			t.Errorf("user of UID %d = %q, want %q, the name the process snapshot gives", tc.uid, got[0].User, oracle)
+		}
+	}
+	t.Run("control characters are escaped in the JSON", func(t *testing.T) {
+		got := listenerAt(snap, model.ProtoTCP, "0.0.0.0:9005")
+		if len(got) != 1 {
+			t.Fatalf("listeners on tcp 0.0.0.0:9005 = %s, want one", listenersText(got))
+		}
+		data, err := json.Marshal(got[0])
+
+		if want := `"user":"ctl\u0001\u001bname"`; err != nil || !strings.Contains(string(data), want) {
+			t.Errorf("json.Marshal(listener) = %s, %v, want it to hold %s", data, err, want)
+		}
+	})
+}
+
+// passwdFault is an /etc whose passwd cannot be read and the repair of it.
+type passwdFault struct {
+	name string
+	etc  fs.FS
+	fix  func()
+}
+
+// passwdFaults returns the ways the passwd can be unreadable within the bounds of the process collector.
+func passwdFaults() []passwdFault {
+	restore := func(etc fstest.MapFS) func() {
+		return func() { etc["passwd"] = &fstest.MapFile{Data: []byte(rootPasswd)} }
+	}
+	missing := fstest.MapFS{}
+	large := fstest.MapFS{"passwd": {Data: []byte(strings.Repeat("a:x:1:1\n", (1<<20)/8+10))}}
+	longLine := fstest.MapFS{"passwd": {Data: []byte(rootPasswd + "a:x:1:" + strings.Repeat("g", 5000) + "\n")}}
+	denied := newFaultFS(etcOf(rootPasswd))
+	denied.openErr["passwd"] = syscall.EACCES
+	return []passwdFault{
+		{"missing", missing, restore(missing)},
+		{"open error", denied, func() { delete(denied.openErr, "passwd") }},
+		{"larger than 1 MiB", large, restore(large)},
+		{"a line over 4 KiB", longLine, restore(longLine)},
+	}
+}
+
+// wantDecimalUsers checks that the entries of snap carry the decimal UID as their user.
+func wantDecimalUsers(t *testing.T, snap *model.ConnectionSnapshot) {
+	t.Helper()
+
+	for _, l := range snap.Listeners {
+		if l.UID == nil || l.User != uidText(l.UID) {
+			t.Fatalf("listener %s, want the user to be the decimal UID while the passwd is unavailable", listenerText(l))
+		}
+	}
+	for _, conn := range snap.Connections {
+		if conn.UID != nil && conn.User != uidText(conn.UID) {
+			t.Errorf("connection %s, want the user to be the decimal UID while the passwd is unavailable", connectionText(conn))
+		}
+	}
+}
+
+// wantUnavailableWarning checks the one warning of an unreadable passwd: the error as procstats.ReadUsers returns it and no other
+// attribute than the collector's.
+func wantUnavailableWarning(t *testing.T, logs *logStore, wantErr error) {
+	t.Helper()
+
+	warns := wantLogged(t, logs, slog.LevelWarn, "user names unavailable", 1)
+	if len(warns) != 1 {
+		return
+	}
+	if got := warns[0].attrs["err"]; got != wantErr.Error() || !strings.HasPrefix(got, "procstats: passwd: ") {
+		t.Errorf("warning err = %q, want %q", got, wantErr)
+	}
+	if len(warns[0].attrs) != 2 {
+		t.Errorf("warning attributes = %v, want only collector and err", warns[0].attrs)
+	}
+}
+
+func TestConnections_PasswdUnavailableLogsOnce(t *testing.T) {
+	for _, tc := range passwdFaults() {
+		t.Run(tc.name, func(t *testing.T) {
+			_, wantErr := procstats.ReadUsers(tc.etc)
+			if wantErr == nil {
+				t.Fatal("procstats.ReadUsers() error = nil, want one (test setup)")
+			}
+			c, logs := newRecordingCollectorWith(ownedWorld(t), tc.etc, SocketMount{ID: socketMount})
+
+			_, first := snapshotOf(t, c, runAt(0, false))
+			_, second := snapshotOf(t, c, runAt(1, false))
+
+			wantDecimalUsers(t, first)
+			wantDecimalUsers(t, second)
+			wantUnavailableWarning(t, logs, wantErr)
+			wantLogged(t, logs, slog.LevelInfo, "user names available", 0)
+
+			tc.fix()
+			_, third := snapshotOf(t, c, runAt(2, false))
+			snapshotOf(t, c, runAt(3, false))
+
+			wantListener(t, third, model.ProtoTCP, sshdListener, 100, cmdSSHD, 0, "root")
+			wantLogged(t, logs, slog.LevelInfo, "user names available", 1)
+			wantLogged(t, logs, slog.LevelWarn, "user names unavailable", 1)
+		})
+	}
+
+	t.Run("also while the socket owners are unknown", func(t *testing.T) {
+		c, logs := newRecordingCollectorWith(ownedWorld(t), fstest.MapFS{}, SocketMount{Err: errors.New("sockmount: socket: permission denied")})
+
+		snapshotOf(t, c, runAt(0, false))
+		snapshotOf(t, c, runAt(1, false))
+
+		wantLogged(t, logs, slog.LevelWarn, "socket owners unknown", 1)
+		wantLogged(t, logs, slog.LevelWarn, "user names unavailable", 1)
+	})
+}
+
+func TestConnections_ReadsPasswdOncePerRun(t *testing.T) {
+	etc := &recordingFS{FS: fixtureEtc()}
+	c := newCollectorWith(ownedWorld(t), etc)
+
+	for i, run := range []scheduler.Run{runAt(0, false), runAt(1, false), runAt(2, true)} {
+		snapshotOf(t, c, run)
+
+		want := slices.Repeat([]string{"passwd"}, i+1)
+		if got := etc.opened(); !slices.Equal(got, want) {
+			t.Errorf("after run %d the collector opened %q in /etc, want one open of passwd per run: %q", i, got, want)
+		}
+	}
+}
+
+func TestConnections_BlockingPasswdReadIsAbandonedAsGap(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		stuck := newBlockingFS(t, etcOf(rootPasswd), "passwd")
+		runWithBlockedRead(t, newCollectorWith(ownedWorld(t), stuck), stuck, "passwd")
+	})
+}
+
+// longNamesEtc returns an /etc that names the UIDs 1000 to 1007 by 256 control characters each.
+func longNamesEtc() fs.FS {
+	var passwd strings.Builder
+	for i := range longNameUIDs {
+		fmt.Fprintf(&passwd, "%s:x:%d:%d::/:/bin/sh\n", strings.Repeat("\x01", 256), 1000+i, 1000+i)
+	}
+	return etcOf(passwd.String())
+}
+
+// longNameUIDs is the number of UIDs of longNamesEtc; longNameEntries the size of the lists of the cap.
+const (
+	longNameUIDs    = 8
+	longNameEntries = 4096
+)
+
+// addLongNameConnections adds an established connection of a named UID per entry of the cap.
+func addLongNameConnections(w *world) {
+	for i := range longNameEntries {
+		remote := "100.64." + strconv.Itoa(i/200) + "." + strconv.Itoa(i%200+1) + ":443"
+		w.addSocketUID("tcp", "192.0.2.10:"+strconv.Itoa(1024+i), remote, stateEstablished, uint32(1000+i%longNameUIDs), 81000000+uint64(i))
+	}
+}
+
+func TestConnections_LongUserNamesStillFit(t *testing.T) {
+	t.Run("listeners and connections", longNamesCutListeners)
+	t.Run("connections only", longNamesCutConnections)
+}
+
+// longNamesCutListeners fills the caps with listeners and connections of long names: the listeners are cut and stop the later lists.
+func longNamesCutListeners(t *testing.T) {
+	w := newWorld(t)
+	w.clear()
+	addLongNameConnections(w)
+	for i := range longNameEntries {
+		w.addListenerUID("tcp", "0.0.0.0:"+strconv.Itoa(1024+i), uint32(1000+i%longNameUIDs), 80000000+uint64(i))
+	}
+
+	rec, snap := snapshotOf(t, newCollectorWith(w, longNamesEtc()), runAt(0, false))
+
+	checkWire(t, rec)
+	if len(snap.Listeners) == 0 || len(snap.Listeners) >= longNameEntries {
+		t.Fatalf("listeners = %d entries, want a list cut by the size budget (names of 256 control characters)", len(snap.Listeners))
+	}
+	if snap.Complete || !snap.AggregatesIncomplete || len(snap.Connections) != 0 {
+		t.Errorf("complete = %v, aggregates_incomplete = %v, connections = %d, want false, true and 0 (a cut list stops the later ones)",
+			snap.Complete, snap.AggregatesIncomplete, len(snap.Connections))
+	}
+	wantInventory(t, snap, model.InventoryPrivileged, allTableProtos...)
+	if first := snap.Listeners[0]; first.UID == nil || len(first.User) != 256 {
+		t.Errorf("first listener = %s, want a user of 256 bytes", listenerText(first))
+	}
+}
+
+// longNamesCutConnections fills the cap with connections of long names: only the connections are cut.
+func longNamesCutConnections(t *testing.T) {
+	w := newWorld(t)
+	w.clear()
+	addLongNameConnections(w)
+	w.addListenerUID("tcp", "0.0.0.0:22", 1000, 80000001)
+
+	rec, snap := snapshotOf(t, newCollectorWith(w, longNamesEtc()), runAt(0, false))
+
+	checkWire(t, rec)
+	if len(snap.Connections) == 0 || len(snap.Connections) >= longNameEntries {
+		t.Fatalf("connections = %d entries, want a list cut by the size budget", len(snap.Connections))
+	}
+	if snap.Complete || snap.AggregatesIncomplete {
+		t.Errorf("complete = %v, aggregates_incomplete = %v, want false and false (only the connections are cut)", snap.Complete, snap.AggregatesIncomplete)
+	}
+	wantInventory(t, snap, model.InventoryAll, allTableProtos...)
 }
