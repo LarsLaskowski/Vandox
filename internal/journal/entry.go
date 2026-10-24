@@ -76,12 +76,12 @@ func (f *File) readEntry(off uint64, want []string, e *Entry) error {
 	if err != nil || count == 0 {
 		return err
 	}
-	table := f.items[:count*itemSize]
+	table := f.items[:count*f.itemWidth]
 	if err := f.readAt(off+entryFixed, table); err != nil {
 		return err
 	}
 	for i := uint64(0); i < count; i++ {
-		if err := f.readItem(byteOrder.Uint64(table[i*itemSize:]), want, e); err != nil {
+		if err := f.readItem(f.itemOffset(table, i), want, e); err != nil {
 			return err
 		}
 	}
@@ -94,8 +94,8 @@ func (f *File) beginEntry(off uint64, e *Entry) (uint64, error) {
 	if err != nil {
 		return 0, err
 	}
-	count := (size - entryFixed) / itemSize
-	if (size-entryFixed)%itemSize != 0 || count > maxItems {
+	count := (size - entryFixed) / f.itemWidth
+	if (size-entryFixed)%f.itemWidth != 0 || count > maxItems {
 		return 0, ErrMalformed
 	}
 	e.reset()
@@ -112,7 +112,7 @@ func (f *File) beginEntry(off uint64, e *Entry) (uint64, error) {
 // readItem reads the data object an item points to: its name from the first bytes of its payload, and the payload (up to 4,096
 // bytes) when the name is wanted.
 func (f *File) readItem(off uint64, want []string, e *Entry) error {
-	obj, size, err := f.object(off, typeData, dataFixed, dataFixed+namePrefix)
+	obj, size, err := f.object(off, typeData, f.payloadOff, f.payloadOff+namePrefix)
 	if err != nil {
 		return err
 	}
@@ -124,7 +124,7 @@ func (f *File) readItem(off uint64, want []string, e *Entry) error {
 		e.Fields = append(e.Fields, Field{Compressed: true})
 		return nil
 	}
-	head := obj[dataFixed:]
+	head := obj[f.payloadOff:]
 	eq := bytes.IndexByte(head, '=')
 	if eq <= 0 {
 		return nil
@@ -137,12 +137,12 @@ func (f *File) readItem(off uint64, want []string, e *Entry) error {
 		e.Omitted++
 		return nil
 	}
-	take := min(size-dataFixed, maxPayload)
+	take := min(size-f.payloadOff, maxPayload)
 	buf := e.buffer(len(e.Fields))[:take]
 	have := min(take, uint64(len(head)))
 	copy(buf, head[:have])
 	if have < take {
-		if err := f.readAt(off+dataFixed+have, buf[have:]); err != nil {
+		if err := f.readAt(off+f.payloadOff+have, buf[have:]); err != nil {
 			return err
 		}
 	}

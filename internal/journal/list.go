@@ -58,12 +58,12 @@ func (f *File) walkChain(off, hash uint64, payload []byte) (Data, bool, error) {
 		if steps >= maxChain || off <= prev {
 			return Data{}, false, ErrMalformed
 		}
-		obj, size, err := f.object(off, typeData, dataFixed, dataFixed)
+		obj, size, err := f.object(off, typeData, f.payloadOff, f.payloadOff)
 		if err != nil {
 			return Data{}, false, err
 		}
 		next := byteOrder.Uint64(obj[24:])
-		if byteOrder.Uint64(obj[16:]) == hash && obj[1]&objCompress == 0 && size == dataFixed+uint64(len(payload)) {
+		if byteOrder.Uint64(obj[16:]) == hash && obj[1]&objCompress == 0 && size == f.payloadOff+uint64(len(payload)) {
 			d := Data{
 				off:   off,
 				first: byteOrder.Uint64(obj[40:]),
@@ -83,7 +83,7 @@ func (f *File) walkChain(off, hash uint64, payload []byte) (Data, bool, error) {
 // samePayload compares the payload of the data object at off with want.
 func (f *File) samePayload(off uint64, want []byte) (bool, error) {
 	got := f.items[:len(want)]
-	if err := f.readAt(off+dataFixed, got); err != nil {
+	if err := f.readAt(off+f.payloadOff, got); err != nil {
 		return false, err
 	}
 	return string(got) == string(want), nil
@@ -178,7 +178,7 @@ func (f *File) bisect(arr, last, after uint64) (uint64, error) {
 
 // itemAfter tells whether the entry in item k of the array at arr has a seqnum greater than after.
 func (f *File) itemAfter(arr, k, after uint64) (bool, error) {
-	off, err := f.readUint64(arr + arrayFixed + 8*k)
+	off, err := f.arraySlot(arr, k)
 	if err != nil {
 		return false, err
 	}
@@ -205,15 +205,15 @@ func (f *File) array(off uint64, ord int) (uint64, uint64, error) {
 	if ord > maxArrays {
 		return 0, 0, ErrMalformed
 	}
-	obj, size, err := f.object(off, typeArray, arrayFixed+8, arrayFixed)
+	obj, size, err := f.object(off, typeArray, arrayFixed+f.slotWidth, arrayFixed)
 	if err != nil {
 		return 0, 0, err
 	}
 	next := byteOrder.Uint64(obj[16:])
-	if (size-arrayFixed)%8 != 0 || (next != 0 && next <= off) {
+	if (size-arrayFixed)%f.slotWidth != 0 || (next != 0 && next <= off) {
 		return 0, 0, ErrMalformed
 	}
-	return (size - arrayFixed) / 8, next, nil
+	return (size - arrayFixed) / f.slotWidth, next, nil
 }
 
 // Next reads the entry at c into e, keeping only the fields named in want, and advances c; false means the list ended. At the cut-off
@@ -266,7 +266,7 @@ func (f *File) refreshList(c *Cursor) error {
 		c.head, c.n = f.mainHead, f.mainN
 		return nil
 	}
-	obj, _, err := f.object(c.data, typeData, dataFixed, dataFixed)
+	obj, _, err := f.object(c.data, typeData, f.payloadOff, f.payloadOff)
 	if err != nil {
 		return err
 	}
@@ -286,7 +286,7 @@ func (f *File) listItem(c *Cursor) (uint64, error) {
 	if err := f.position(c, j); err != nil {
 		return 0, err
 	}
-	return f.readUint64(c.arr + arrayFixed + 8*(j-c.arrBase))
+	return f.arraySlot(c.arr, j-c.arrBase)
 }
 
 // position moves c to the array that holds chain index j, from the head of the chain or onwards from the current array.

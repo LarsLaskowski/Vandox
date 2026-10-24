@@ -1,7 +1,9 @@
 // Package journal reads the binary journal files of systemd-journald through io.ReaderAt, without mmap.
 //
-// It reads the non-compact layout of systemd 249 (the layout of a 256-byte header, KEYED-HASH, optionally compressed items) and
-// decompresses only through the Decompressor of NextWith. Every offset and size of a file is checked against the file's bounds before it is used, chains are followed
+// It reads the two layouts journald writes, both with KEYED-HASH and optionally compressed items: the non-compact layout of systemd 249
+// (64-bit offsets, 16-byte entry items) and the COMPACT layout of systemd 252 and later (32-bit entry items and entry-array items, a
+// data object payload at 72). The incompatible-flags word of the header switches between them per file. It decompresses only through
+// the Decompressor of NextWith. Every offset and size of a file is checked against the file's bounds before it is used, chains are followed
 // only to strictly larger offsets, and what is read per call is limited, so a damaged or hostile file ends in ErrMalformed and never in
 // a loop or a large allocation. A File and the Cursors and Entries used with it are not safe for concurrent use.
 package journal
@@ -125,12 +127,24 @@ type File struct {
 
 // itemOffset returns the data object offset in item i of the item table of an entry.
 func (f *File) itemOffset(table []byte, i uint64) uint64 {
-	return 0
+	at := i * f.itemWidth
+	if f.itemWidth == itemSizeCompact {
+		return uint64(byteOrder.Uint32(table[at:]))
+	}
+	return byteOrder.Uint64(table[at:])
 }
 
 // arraySlot reads the entry offset in item k of the entry array at arr.
 func (f *File) arraySlot(arr, k uint64) (uint64, error) {
-	return 0, errors.New("not implemented")
+	at := arr + arrayFixed + f.slotWidth*k
+	if f.slotWidth == slotSizeCompact {
+		b := f.scratch[:slotSizeCompact]
+		if err := f.readAt(at, b); err != nil {
+			return 0, err
+		}
+		return uint64(byteOrder.Uint32(b)), nil
+	}
+	return f.readUint64(at)
 }
 
 // Open reads the header of the journal file r of the given size; setAside marks a *.journal~ file.
@@ -152,6 +166,9 @@ func (f *File) Refresh(size int64) error {
 	next := *f
 	if err := next.load(size); err != nil {
 		return err
+	}
+	if next.itemWidth != f.itemWidth {
+		return ErrMalformed // the layout flag of a file does not change; a cursor never mixes widths
 	}
 	*f = next
 	return nil
@@ -175,12 +192,16 @@ func (f *File) load(size int64) error {
 	}
 	hs := byteOrder.Uint64(b[atHeaderSize:])
 	incompat := byteOrder.Uint32(b[atIncompat:])
-	known := uint32(flagsXZ | flagsLZ4 | flagsKeyed | flagsZSTD)
+	known := uint32(flagsXZ | flagsLZ4 | flagsKeyed | flagsZSTD | flagsCompact)
 	if hs < minHeaderSize || hs > maxHeaderSize || hs%alignment != 0 || hs > f.fileSize ||
 		incompat&^known != 0 || incompat&flagsKeyed == 0 {
 		return ErrUnsupported
 	}
 	f.hs = hs
+	f.payloadOff, f.itemWidth, f.slotWidth = dataFixed, itemSize, slotSize
+	if incompat&flagsCompact != 0 {
+		f.payloadOff, f.itemWidth, f.slotWidth = dataFixedCompact, itemSizeCompact, slotSizeCompact
+	}
 	f.declEnd = hs + min(byteOrder.Uint64(b[atArenaSize:]), math.MaxInt64-hs)
 	f.tableOff = byteOrder.Uint64(b[atTableOffset:])
 	f.tableLen = byteOrder.Uint64(b[atTableSize:])

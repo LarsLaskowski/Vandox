@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"math"
 	"math/bits"
 )
 
@@ -15,6 +16,14 @@ func u(n int) uint64 {
 		return 0
 	}
 	return uint64(n)
+}
+
+// u32 converts an offset or count that fits 32 bits, the width of the COMPACT layout.
+func u32(n uint64) uint32 {
+	if n > math.MaxUint32 {
+		return math.MaxUint32
+	}
+	return uint32(n)
 }
 
 // chain is a chain of entry arrays that double in size.
@@ -43,6 +52,12 @@ type builder struct {
 	arrays   uint64
 	tail     uint64
 	err      error
+
+	hdrSize   int // bytes of the header
+	dataFixed int // offset of the payload in a data object
+	itemSize  int // bytes of an item of an entry
+	slotSize  int // bytes of an item of an entry array
+	lastEntry uint64
 }
 
 func newBuilder(entries []parsedEntry, opts Options) *builder {
@@ -53,7 +68,11 @@ func newBuilder(entries []parsedEntry, opts Options) *builder {
 		}
 	}
 	buckets := max(minBuckets, len(unique)*3/2)
-	b := &builder{buf: make([]byte, headerSize), opts: opts, buckets: u(buckets), records: map[string]*record{}}
+	b := &builder{opts: opts, buckets: u(buckets), records: map[string]*record{}, hdrSize: headerSize, dataFixed: dataFixed, itemSize: 16, slotSize: 8}
+	if opts.Compact {
+		b.hdrSize, b.dataFixed, b.itemSize, b.slotSize = headerCompact, dataCompact, 4, 4
+	}
+	b.buf = make([]byte, b.hdrSize)
 	b.table = b.alloc(objectDataHash, 0, 16+16*buckets)
 	b.fields = b.alloc(objectFieldTab, 0, 16+16*4)
 	return b
@@ -116,9 +135,9 @@ func (b *builder) data(payload []byte) *record {
 		stored = payload
 	}
 	hash := sipHash24(b.opts.FileID, payload)
-	off := b.alloc(objectData, flags, 64+len(stored))
+	off := b.alloc(objectData, flags, b.dataFixed+len(stored))
 	b.put(off+16, hash)
-	copy(b.buf[off+64:], stored)
+	copy(b.buf[off+u(b.dataFixed):], stored)
 	bucket := b.table + 16 + 16*(hash%b.buckets)
 	if tail := b.get(bucket + 8); tail == 0 {
 		b.put(bucket, off)
@@ -141,7 +160,7 @@ func (b *builder) appendArray(ch *chain, entryOff uint64, first func(off uint64)
 	}
 	if i == len(ch.caps) {
 		capacity := firstArrayCap << min(i, 30)
-		off := b.alloc(objectArray, 0, 24+8*capacity)
+		off := b.alloc(objectArray, 0, 24+b.slotSize*capacity)
 		b.arrays++
 		if i == 0 {
 			first(off)
@@ -151,7 +170,12 @@ func (b *builder) appendArray(ch *chain, entryOff uint64, first func(off uint64)
 		ch.arrays = append(ch.arrays, off)
 		ch.caps = append(ch.caps, capacity)
 	}
-	b.put(ch.arrays[i]+24+u(8*(ch.n-acc)), entryOff)
+	slot := ch.arrays[i] + 24 + u(b.slotSize*(ch.n-acc))
+	if b.opts.Compact {
+		le.PutUint32(b.buf[slot:], u32(entryOff))
+	} else {
+		b.put(slot, entryOff)
+	}
 	ch.n++
 }
 
@@ -160,7 +184,8 @@ func (b *builder) addEntry(e *parsedEntry) {
 	for i, it := range e.items {
 		recs[i] = b.data(it)
 	}
-	off := b.alloc(objectEntry, 0, 64+16*len(e.items))
+	off := b.alloc(objectEntry, 0, 64+b.itemSize*len(e.items))
+	b.lastEntry = off
 	b.put(off+16, e.seqnum)
 	b.put(off+24, e.realtime)
 	b.put(off+32, e.mono)
@@ -168,8 +193,12 @@ func (b *builder) addEntry(e *parsedEntry) {
 	var xor uint64
 	linked := map[*record]bool{}
 	for i, r := range recs {
-		b.put(off+64+u(16*i), r.off)
-		b.put(off+72+u(16*i), r.hash)
+		if b.opts.Compact {
+			le.PutUint32(b.buf[off+64+u(4*i):], u32(r.off))
+		} else {
+			b.put(off+64+u(16*i), r.off)
+			b.put(off+72+u(16*i), r.hash)
+		}
 		xor ^= r.hash
 		if linked[r] {
 			continue
@@ -198,6 +227,11 @@ func (b *builder) finish(entries []parsedEntry) error {
 	h := b.buf
 	copy(h, "LPKSHHRH")
 	le.PutUint32(h[12:], incompatKeyed|incompatZSTD)
+	if b.opts.Compact {
+		le.PutUint32(h[8:], compatBootID)
+		le.PutUint32(h[12:], incompatKeyed|incompatZSTD|incompatCompat)
+		b.putTails()
+	}
 	h[16] = stateArchived
 	if b.opts.Online {
 		h[16] = stateOnline
@@ -205,8 +239,8 @@ func (b *builder) finish(entries []parsedEntry) error {
 	copy(h[24:], b.opts.FileID[:])
 	copy(h[40:], b.opts.MachineID[:])
 	copy(h[72:], b.opts.SeqnumID[:])
-	b.put(88, headerSize)
-	b.put(96, u(len(h)-headerSize))
+	b.put(88, u(b.hdrSize))
+	b.put(96, u(len(h)-b.hdrSize))
 	b.put(104, b.table+16)
 	b.put(112, 16*b.buckets)
 	b.put(120, b.fields+16)
@@ -227,6 +261,34 @@ func (b *builder) finish(entries []parsedEntry) error {
 		copy(h[56:], last.boot[:])
 	}
 	return nil
+}
+
+// putTails writes the tail fields of the COMPACT layout: the offset of the last array of each chain with the number of its used items
+// (0 and 0 while a data object has no array), and in the header the offset of the last entry.
+func (b *builder) putTails() {
+	for _, r := range b.records {
+		if off, n := b.tailOf(&r.list); off != 0 {
+			le.PutUint32(b.buf[r.off+64:], u32(off))
+			le.PutUint32(b.buf[r.off+68:], n)
+		}
+	}
+	if off, n := b.tailOf(&b.main); off != 0 {
+		le.PutUint32(b.buf[256:], u32(off))
+		le.PutUint32(b.buf[260:], n)
+	}
+	b.put(264, b.lastEntry)
+}
+
+// tailOf returns the offset of the last array of ch and the number of items used in it.
+func (b *builder) tailOf(ch *chain) (uint64, uint32) {
+	if len(ch.arrays) == 0 {
+		return 0, 0
+	}
+	last, acc := len(ch.arrays)-1, 0
+	for _, c := range ch.caps[:last] {
+		acc += c
+	}
+	return ch.arrays[last], u32(u(ch.n - acc))
 }
 
 // sipHash24 is SipHash-2-4 of data keyed with the file ID, the hash of a data object in a file with the KEYED-HASH flag. It is

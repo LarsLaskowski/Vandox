@@ -62,13 +62,13 @@ func (f *File) readEntryWith(off uint64, want []string, e *Entry, opt *ReadOptio
 	if err != nil || count == 0 {
 		return err
 	}
-	table := f.items[:count*itemSize]
+	table := f.items[:count*f.itemWidth]
 	if err := f.readAt(off+entryFixed, table); err != nil {
 		return err
 	}
 	compressed := 0
 	for i := uint64(0); i < count; i++ {
-		err := f.readItemWith(byteOrder.Uint64(table[i*itemSize:]), want, e, opt, &compressed)
+		err := f.readItemWith(f.itemOffset(table, i), want, e, opt, &compressed)
 		if errors.Is(err, errEntryStop) {
 			return nil
 		}
@@ -88,7 +88,7 @@ func (e *Entry) holds(name string) bool {
 // readItemWith reads the data object an item points to. A damaged object is counted in e.Undecoded; only a failure of the reader is
 // returned.
 func (f *File) readItemWith(off uint64, want []string, e *Entry, opt *ReadOptions, compressed *int) error {
-	obj, size, err := f.object(off, typeData, dataFixed, dataFixed+namePrefix)
+	obj, size, err := f.object(off, typeData, f.payloadOff, f.payloadOff+namePrefix)
 	if errors.Is(err, ErrMalformed) || errors.Is(err, errTorn) {
 		e.Undecoded++
 		return nil
@@ -99,7 +99,7 @@ func (f *File) readItemWith(off uint64, want []string, e *Entry, opt *ReadOption
 	if obj[1]&objCompress != 0 {
 		return f.readCompressedItem(off, obj[1], size, want, e, opt, compressed)
 	}
-	head := obj[dataFixed:]
+	head := obj[f.payloadOff:]
 	eq := bytes.IndexByte(head, '=')
 	if eq <= 0 {
 		return nil
@@ -112,13 +112,13 @@ func (f *File) readItemWith(off uint64, want []string, e *Entry, opt *ReadOption
 		e.Omitted++
 		return nil
 	}
-	length := size - dataFixed - uint64(eq) - 1
+	length := size - f.payloadOff - uint64(eq) - 1
 	keep := min(length, uint64(max(opt.MaxPayload, 0)))
 	buf := e.sized(len(e.Fields), eq+1+toInt(keep))
 	have := min(len(buf), len(head))
 	copy(buf, head[:have])
 	if have < len(buf) {
-		if err := f.readAt(off+dataFixed+uint64(have), buf[have:]); err != nil {
+		if err := f.readAt(off+f.payloadOff+uint64(have), buf[have:]); err != nil {
 			return err
 		}
 	}
@@ -134,12 +134,12 @@ func (f *File) readCompressedItem(off uint64, flags byte, size uint64, want []st
 		e.Undecoded++
 		return errEntryStop
 	}
-	stored := size - dataFixed
+	stored := size - f.payloadOff
 	if flags&objCompress != objZSTD || opt.Decompress == nil || stored > uint64(max(opt.MaxCompressedBytes, 0)) {
 		e.Undecoded++
 		return nil
 	}
-	in, err := f.readCompressed(off+dataFixed, stored, e)
+	in, err := f.readCompressed(off+f.payloadOff, stored, e)
 	if err != nil {
 		return err
 	}
