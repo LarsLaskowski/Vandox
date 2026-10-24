@@ -21,14 +21,14 @@ agent_id: web-1
 
 backend:
   # Base URL of the vandoxd ingest endpoint (required). Scheme http or https, a host (IP address or
-  # name) and an optional port; no user info, path, query or fragment. Plain http is fine inside the
-  # tailnet. No default.
+  # name) and an optional port; no user info, path, query or fragment. Plain http is fine only for the
+  # backend host's tailnet address or MagicDNS name, which the tailnet encrypts; use https for any other
+  # network. The scheme must match the listener. No default.
   url: http://100.64.0.1:8081
 
   # Bandwidth the agent may use to send spooled data it has accumulated while the backend was
   # unreachable (the backfill): a whole number of KiB or MiB per second, from 16KiB to 1024MiB, such as
-  # 256KiB or 4MiB. Current data is not limited by it. Plain http is fine only inside the tailnet,
-  # which encrypts the traffic; use https for any other network. Default: 256KiB
+  # 256KiB or 4MiB. Current data is not limited by it. Default: 256KiB
   backfill_bandwidth: 256KiB
 
 spool:

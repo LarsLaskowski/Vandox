@@ -39,7 +39,7 @@ them apart.
 
 Option 1 with a gzip body type and a bearer token: one wire-format batch per `POST` to a fixed path under `backend.url`,
 acknowledged by a `2xx` status that the backend sends only after its commit, with `400`, `413` and `422` plus the header `Vandox-Refused: batch` reserved for a batch that is invalid as a whole (option 5). The request, the headers and the status classes are in the [Agent](../areas/agent.md) area
-(*Spool and sending*) and, as the contract #40 implements, in [Backend host](../areas/backend-host.md) (*Ingest endpoint*).
+(*Connection*, *Sending*) and, as the contract #40 implements, in [Backend host](../areas/backend-host.md) (*Ingest endpoint*).
 
 ## Consequences
 

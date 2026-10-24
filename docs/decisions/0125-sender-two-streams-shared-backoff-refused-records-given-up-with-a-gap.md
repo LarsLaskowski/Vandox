@@ -55,8 +55,7 @@ the backend's disk differ between installations; the throttle counts compressed 
 The sender runs a live and a backfill stream over one shared episode and backoff, throttles only the backfill stream, splits a
 refused batch and gives each refused record up with a `gap` record (cause `unknown`, its sequence number) at most 10 times an
 hour (beyond that the stream waits for a free slot), advances a stream's position only after the spool kept the acknowledgement, jumps the live stream forward only while fewer than 32 acknowledged ranges are open, and pauses the backfill in the
-memory pressure mode. The values, log lines and order of events are in the [Agent](../areas/agent.md) area (*Spool and
-sending*); the option is in [Configuration and secrets](../areas/configuration-and-secrets.md).
+memory pressure mode. The values, log lines and order of events are in the [Agent](../areas/agent.md) area (*Sending*); the option is in [Configuration and secrets](../areas/configuration-and-secrets.md).
 
 ## Consequences
 
