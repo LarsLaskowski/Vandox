@@ -381,3 +381,84 @@ func TestConnectionSnapshot_Validate_NewFields(t *testing.T) {
 		})
 	}
 }
+
+func socketUserSnapshot(mutate func(p *model.ConnectionSnapshot)) *model.ConnectionSnapshot {
+	p := validConnectionSnapshot()
+	p.ListenerCheck = model.ListenerCheckAll
+	p.NewListeners = validNewListeners()
+	mutate(p)
+	return p
+}
+
+func TestConnectionSnapshot_Validate_SocketUser(t *testing.T) {
+	const (
+		requiresUID = "requires uid"
+		tooLong     = "too long"
+	)
+	accepted := []struct {
+		name   string
+		mutate func(p *model.ConnectionSnapshot)
+	}{
+		{"uid 0 with user", func(p *model.ConnectionSnapshot) {
+			p.Listeners[0].UID, p.Listeners[0].User = ptr(uint32(0)), "root"
+		}},
+		{"largest uid", func(p *model.ConnectionSnapshot) {
+			p.Listeners[0].UID, p.Listeners[0].User = ptr(uint32(4294967295)), "nobody"
+		}},
+		{"uid without user", func(p *model.ConnectionSnapshot) { p.Listeners[0].UID = ptr(uint32(1001)) }},
+		{"empty user and mixed false without uid", func(p *model.ConnectionSnapshot) {
+			p.Listeners[0].User, p.Listeners[0].MixedUIDs = "", false
+		}},
+		{"mixed uids with uid", func(p *model.ConnectionSnapshot) {
+			p.Listeners[0].UID, p.Listeners[0].User, p.Listeners[0].MixedUIDs = ptr(uint32(33)), "www-data", true
+		}},
+		{"new listener with uid, user and mixed uids", func(p *model.ConnectionSnapshot) {
+			p.NewListeners[0].UID, p.NewListeners[0].User, p.NewListeners[0].MixedUIDs = ptr(uint32(1001)), "alice", true
+		}},
+		{"connection with uid and user", func(p *model.ConnectionSnapshot) {
+			p.Connections[0].UID, p.Connections[0].User = ptr(uint32(33)), "www-data"
+		}},
+		{"user of the limit", func(p *model.ConnectionSnapshot) {
+			p.Listeners[0].UID, p.Listeners[0].User = ptr(uint32(5)), strings.Repeat("u", model.MaxShortTextBytes)
+		}},
+	}
+	for _, tc := range accepted {
+		t.Run("accepts "+tc.name, func(t *testing.T) { requireValid(t, socketUserSnapshot(tc.mutate)) })
+	}
+
+	refused := []struct {
+		name   string
+		mutate func(p *model.ConnectionSnapshot)
+		field  string
+		reason string
+	}{
+		{"listener user without uid", func(p *model.ConnectionSnapshot) { p.Listeners[0].User = "root" }, "listeners[0].user", requiresUID},
+		{"listener mixed uids without uid", func(p *model.ConnectionSnapshot) { p.Listeners[0].MixedUIDs = true }, "listeners[0].mixed_uids", requiresUID},
+		{"new listener user without uid", func(p *model.ConnectionSnapshot) { p.NewListeners[0].User = "root" }, "new_listeners[0].user", requiresUID},
+		{"new listener mixed uids without uid", func(p *model.ConnectionSnapshot) { p.NewListeners[0].MixedUIDs = true }, "new_listeners[0].mixed_uids", requiresUID},
+		{"connection user without uid", func(p *model.ConnectionSnapshot) { p.Connections[0].User = "root" }, "connections[0].user", requiresUID},
+		{"listener user too long", func(p *model.ConnectionSnapshot) {
+			p.Listeners[0].UID, p.Listeners[0].User = ptr(uint32(5)), strings.Repeat("u", model.MaxShortTextBytes+1)
+		}, "listeners[0].user", tooLong},
+		{"new listener user too long", func(p *model.ConnectionSnapshot) {
+			p.NewListeners[0].UID, p.NewListeners[0].User = ptr(uint32(5)), strings.Repeat("u", model.MaxShortTextBytes+1)
+		}, "new_listeners[0].user", tooLong},
+		{"connection user too long", func(p *model.ConnectionSnapshot) {
+			p.Connections[0].UID, p.Connections[0].User = ptr(uint32(5)), strings.Repeat("u", model.MaxShortTextBytes+1)
+		}, "connections[0].user", tooLong},
+		{"user counted after replacement", func(p *model.ConnectionSnapshot) {
+			p.Listeners[0].UID, p.Listeners[0].User = ptr(uint32(5)), strings.Repeat("\xff", model.MaxShortTextBytes/3+1)
+		}, "listeners[0].user", tooLong},
+		{"user without uid before mixed uids", func(p *model.ConnectionSnapshot) {
+			p.Listeners[0].User, p.Listeners[0].MixedUIDs = "root", true
+		}, "listeners[0].user", requiresUID},
+	}
+	for _, tc := range refused {
+		t.Run("refuses "+tc.name, func(t *testing.T) {
+			fe := fieldErrorOf(t, socketUserSnapshot(tc.mutate).Validate(), tc.field)
+			if fe.Reason != tc.reason {
+				t.Errorf("Validate() reason = %q, want %q", fe.Reason, tc.reason)
+			}
+		})
+	}
+}

@@ -163,6 +163,147 @@ public class ConnectionSnapshotTests
     }
 
     /// <summary>
+    /// The socket's UID, user and mixed-UIDs flag are accepted in the combinations the rules allow.
+    /// </summary>
+    /// <param name="json">The payload</param>
+    [TestMethod]
+    [DataRow("""{"complete":true,"listeners":[{"proto":"tcp","local":"0.0.0.0:22","uid":0,"user":"root"}]}""")]
+    [DataRow("""{"complete":true,"listeners":[{"proto":"tcp","local":"0.0.0.0:22","uid":4294967295,"user":"nobody"}]}""")]
+    [DataRow("""{"complete":true,"listeners":[{"proto":"tcp","local":"0.0.0.0:22","uid":1001}]}""")]
+    [DataRow("""{"complete":true,"listeners":[{"proto":"tcp","local":"0.0.0.0:22","user":"","mixed_uids":false}]}""")]
+    [DataRow("""{"complete":true,"listeners":[{"proto":"tcp","local":"0.0.0.0:22","uid":null,"user":null,"mixed_uids":null}]}""")]
+    [DataRow("""{"complete":true,"listeners":[{"proto":"udp","local":"0.0.0.0:5353","uid":33,"user":"www-data","mixed_uids":true}]}""")]
+    [DataRow("""{"complete":true,"listener_check":"all","new_listeners":[{"proto":"udp","local":"0.0.0.0:5353","uid":105,"user":"avahi","mixed_uids":true}]}""")]
+    [DataRow("""{"complete":true,"connections":[{"proto":"tcp","local":"10.0.0.1:80","remote":"192.0.2.1:5000","state":"ESTABLISHED","uid":33,"user":"www-data"}]}""")]
+    [DataRow("""{"complete":true,"connections":[{"proto":"tcp","local":"10.0.0.1:80","remote":"192.0.2.1:5000","state":"ESTABLISHED","mixed_uids":true}]}""")]
+    public void ConnectionSnapshotValidateAcceptsTheSocketUser(string json)
+    {
+        // Arrange
+        var snapshot = Parse(json);
+
+        // Act
+        var error = snapshot.Validate();
+
+        // Assert
+        Assert.IsNull(error, $"the socket user rules allow {json}, got {error?.Field}: {error?.Reason}");
+    }
+
+    /// <summary>
+    /// A user or a mixed-UIDs flag without a UID, and a user over the limit, are refused with the field and the reason.
+    /// </summary>
+    /// <param name="json">The payload</param>
+    /// <param name="field">The expected field</param>
+    /// <param name="reason">The expected reason</param>
+    [TestMethod]
+    [DataRow("""{"complete":true,"listeners":[{"proto":"tcp","local":"0.0.0.0:22","user":"root"}]}""", "listeners[0].user", "requires uid")]
+    [DataRow("""{"complete":true,"listeners":[{"proto":"tcp","local":"0.0.0.0:22","mixed_uids":true}]}""", "listeners[0].mixed_uids", "requires uid")]
+    [DataRow("""{"complete":true,"listeners":[{"proto":"tcp","local":"0.0.0.0:22","user":"root","mixed_uids":true}]}""", "listeners[0].user", "requires uid")]
+    [DataRow("""{"complete":true,"listener_check":"all","new_listeners":[{"proto":"tcp","local":"0.0.0.0:22","user":"root"}]}""", "new_listeners[0].user", "requires uid")]
+    [DataRow("""{"complete":true,"listener_check":"all","new_listeners":[{"proto":"tcp","local":"0.0.0.0:22","mixed_uids":true}]}""", "new_listeners[0].mixed_uids", "requires uid")]
+    [DataRow("""{"complete":true,"connections":[{"proto":"tcp","local":"10.0.0.1:80","remote":"192.0.2.1:5000","state":"ESTABLISHED","user":"root"}]}""", "connections[0].user", "requires uid")]
+    public void ConnectionSnapshotValidateChecksTheSocketUser(string json, string field, string reason)
+    {
+        // Arrange
+        var snapshot = Parse(json);
+
+        // Act
+        var error = snapshot.Validate();
+
+        // Assert
+        Assert.IsNotNull(error, "a socket user that breaks a rule is refused");
+        Assert.AreEqual(field, error.Field, "field");
+        Assert.AreEqual(reason, error.Reason, "reason");
+    }
+
+    /// <summary>
+    /// A user over the short-text limit is refused on listeners, new listeners and connections, and a user at the limit is accepted.
+    /// </summary>
+    [TestMethod]
+    public void ConnectionSnapshotValidateRefusesATooLongSocketUser()
+    {
+        // Arrange
+        var atLimit = new string('u', ModelLimits.MaxShortTextBytes);
+        var tooLong = new string('u', ModelLimits.MaxShortTextBytes + 1);
+
+        // Act
+        var accepted = Parse($$"""{"complete":true,"listeners":[{"proto":"tcp","local":"0.0.0.0:22","uid":5,"user":"{{atLimit}}"}]}""").Validate();
+        var listener = Parse($$"""{"complete":true,"listeners":[{"proto":"tcp","local":"0.0.0.0:22","uid":5,"user":"{{tooLong}}"}]}""").Validate();
+        var newListener = Parse($$"""{"complete":true,"listener_check":"all","new_listeners":[{"proto":"tcp","local":"0.0.0.0:22","uid":5,"user":"{{tooLong}}"}]}""").Validate();
+        var connection = Parse($$"""{"complete":true,"connections":[{"proto":"tcp","local":"10.0.0.1:80","remote":"192.0.2.1:5000","state":"ESTABLISHED","uid":5,"user":"{{tooLong}}"}]}""").Validate();
+
+        // Assert
+        Assert.IsNull(accepted, "a user at the limit is accepted");
+        Assert.IsNotNull(listener, "a listener user over the limit is refused");
+        Assert.AreEqual("listeners[0].user", listener.Field, "listener field");
+        Assert.AreEqual("too long", listener.Reason, "listener reason");
+        Assert.IsNotNull(newListener, "a new listener user over the limit is refused");
+        Assert.AreEqual("new_listeners[0].user", newListener.Field, "new listener field");
+        Assert.AreEqual("too long", newListener.Reason, "new listener reason");
+        Assert.IsNotNull(connection, "a connection user over the limit is refused");
+        Assert.AreEqual("connections[0].user", connection.Field, "connection field");
+        Assert.AreEqual("too long", connection.Reason, "connection reason");
+    }
+
+    /// <summary>
+    /// An absent UID, user and mixed-UIDs flag are not written, whether never set, read as <c>null</c> or empty; UID 0 is written.
+    /// </summary>
+    [TestMethod]
+    public void ConnectionSnapshotSerializeOmitsAbsentSocketUser()
+    {
+        // Arrange
+        var absent = Parse("""{"complete":true,"listeners":[{"proto":"tcp","local":"0.0.0.0:22","uid":null,"user":null,"mixed_uids":null},{"proto":"tcp","local":"0.0.0.0:23","user":"","mixed_uids":false}],"connections":[{"proto":"tcp","local":"10.0.0.1:80","remote":"192.0.2.1:5000","state":"ESTABLISHED","uid":null,"user":""}]}""");
+        var root = Parse("""{"complete":true,"listeners":[{"proto":"tcp","local":"0.0.0.0:22","uid":0,"user":"root","mixed_uids":true}],"connections":[{"proto":"tcp","local":"10.0.0.1:80","remote":"192.0.2.1:5000","state":"ESTABLISHED","uid":0}]}""");
+
+        // Act
+        var writtenAbsent = JsonNode.Parse(PayloadRegistry.Serialize(absent))?.AsObject();
+        var writtenRoot = JsonNode.Parse(PayloadRegistry.Serialize(root))?.AsObject();
+
+        // Assert
+        Assert.IsNotNull(writtenAbsent, "the payload is written as an object");
+        Assert.IsNotNull(writtenRoot, "the payload of UID 0 is written as an object");
+
+        foreach (var entry in writtenAbsent["listeners"]!.AsArray().Concat(writtenAbsent["connections"]!.AsArray()))
+        {
+            foreach (var key in new[] { "uid", "user", "mixed_uids" })
+            {
+                Assert.IsFalse(entry!.AsObject().ContainsKey(key), $"{key} is absent from {entry.ToJsonString()}");
+            }
+        }
+
+        var listener = writtenRoot["listeners"]![0]!.AsObject();
+        var connection = writtenRoot["connections"]![0]!.AsObject();
+
+        Assert.AreEqual(0, (int)listener["uid"]!, "listener: uid 0 is written");
+        Assert.AreEqual("root", (string)listener["user"]!, "listener: user");
+        Assert.IsTrue((bool)listener["mixed_uids"]!, "listener: mixed_uids");
+        Assert.AreEqual(0, (int)connection["uid"]!, "connection: uid 0 is written");
+        Assert.IsFalse(connection.ContainsKey("user"), "connection: an empty user is not written");
+    }
+
+    /// <summary>
+    /// A UID that is out of range, negative, fractional or a string is a malformed payload.
+    /// </summary>
+    /// <param name="uid">The JSON text of the UID</param>
+    [TestMethod]
+    [DataRow("-1")]
+    [DataRow("4294967296")]
+    [DataRow("1.5")]
+    [DataRow("\"0\"")]
+    [DataRow("1e400")]
+    [DataRow("-0")]
+    public void ConnectionSnapshotDeserializeRefusesABadUid(string uid)
+    {
+        // Arrange
+        using var document = JsonDocument.Parse($$"""{"complete":true,"listeners":[{"proto":"tcp","local":"0.0.0.0:22","uid":{{uid}}}]}""");
+
+        // Act
+        var exception = Assert.Throws<JsonException>(() => PayloadRegistry.Deserialize(RecordKind.ConnectionSnapshot, document.RootElement), $"uid {uid} is not a 32-bit unsigned number");
+
+        // Assert
+        Assert.IsNotNull(exception, "the payload is refused");
+    }
+
+    /// <summary>
     /// Reads a payload.
     /// </summary>
     /// <param name="json">The JSON text</param>
