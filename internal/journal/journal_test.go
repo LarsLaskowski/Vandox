@@ -1588,7 +1588,7 @@ func TestFile_ArraySlotReportsAShortReadInBothLayouts(t *testing.T) {
 			if got, err := f.arraySlot(arr, 0); err != nil || !slices.Contains(lay.entries, got) {
 				t.Fatalf("arraySlot(first array, 0) = %d, %v, want the offset of an entry of %v and no error", got, err, lay.entries)
 			}
-			r.limit = int(arr) + arrayFixed // the file ends where the first slot would start
+			r.limit = asInt(arr) + arrayFixed // the file ends where the first slot would start
 			got, err := f.arraySlot(arr, 0)
 
 			if !errors.Is(err, errTorn) || got != 0 {
