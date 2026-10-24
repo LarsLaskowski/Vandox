@@ -1740,7 +1740,8 @@ at most 20,000 records and 1 MiB of lines, one batch per request, batch after ba
 sends the older, unacknowledged records oldest first (`mode: backfill`, the same limits). Only the backfill is throttled, to
 `backend.backfill_bandwidth` of compressed request body bytes a second (the bodies of any span sum to at most the bandwidth times the
 span plus one batch), and it pauses (info `backfill paused`, `reason=memory_pressure`, and `backfill resumed`) while the memory
-pressure mode is on (*Memory pressure mode*); the live stream is never throttled. At the start the live stream begins after the newest
+pressure mode is on (*Memory pressure mode*) — the lines are logged only when records wait to be backfilled, also before a pass's
+first batch, never when there is nothing to backfill; the live stream is never throttled. At the start the live stream begins after the newest
 record, unless the spool already holds 32 acknowledged ranges (below), when it begins at the oldest unacknowledged record; the backfill
 waits for the first acknowledgement of the live stream and then sends everything below that stream's first record (info `backfill
 started` before its first batch and `backfill finished` with `records`, the number of records acknowledged, after the pass, both only when the pass found records to send). A request carries one

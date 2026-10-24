@@ -107,7 +107,9 @@ self-metrics and what the backend's ingest endpoint receives. "Acknowledged" mea
 - E11: A single record of the largest size the wire format allows (a line of 1 MiB): it is sent alone in a batch, so sending always makes
   progress.
 - E12: The memory pressure mode turns on during a backfill: the agent logs the info `backfill paused` and sends no `backfill` batch
-  until the mode turns off (info `backfill resumed`); current data goes on as in S4.
+  until the mode turns off (info `backfill resumed`); current data goes on as in S4. A backfill is held back whenever records wait to
+  be backfilled and the mode keeps them from being sent, also before the first `backfill` batch (the agent starts under the mode with
+  a backlog); with nothing to backfill no pause or resume line is logged.
 - E13: Reading the spool fails (`spool: read: <system error text>`) or meets damaged data: damaged records are handled by the spool as
   today (never handed out, a `spool_dropped` gap); a failed read makes the agent log the warning `spool not readable` with the spool's
   error once per episode and try that stream again after a wait as in S2, while the other stream goes on.
@@ -206,7 +208,8 @@ self-metrics and what the backend's ingest endpoint receives. "Acknowledged" mea
   the backfill never moves past a record it left unacknowledged, so every such record is sent again —, and a failed spool read logs `spool not readable` once per episode and is retried after a wait while the other stream goes on
   (E8, E13).
 - [ ] AC12: While the memory pressure mode is on no `backfill` batch is sent and `live` batches go on; `backfill paused` and `backfill
-  resumed` are logged at the changes (E12).
+  resumed` are logged at the changes while records wait to be backfilled, also before the first `backfill` batch, and neither line is
+  logged when nothing waits to be backfilled (E12).
 - [ ] AC13: A record of the largest allowed size is sent alone in a batch and acknowledged; no batch holds more than 1 MiB of record
   lines (without their line feeds) or 20,000 records or two capture contexts (E10, E11).
 - [ ] AC14: A stop during a send ends within 2 seconds of the sender's share, the sender has stopped before the spool is closed, an

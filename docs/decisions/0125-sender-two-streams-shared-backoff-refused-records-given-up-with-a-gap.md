@@ -72,4 +72,8 @@ memory pressure mode. The values, log lines and order of events are in the [Agen
   test. A hook variable or an injectable constructor only to reach them would add production code with no other use. Removing
   the close after a scheduler failure would leave the spool open on a path that a looser loader would make real. Add a test
   when a loader change makes either failure reachable.
+- The pause lines mark a backfill the memory pressure mode holds back, so they depend on records waiting to be backfilled, not on
+  a batch already sent: an agent that starts under the mode with a backlog logs the pause before its first batch (the operator
+  sees why the backlog does not move), one without a backlog logs nothing. An outage always leaves the records of its failed
+  live batch to the backfill, so a reconnect under the mode is a pause with a backlog, not a case without one.
 - Revisit the 32-range threshold and the hourly bound if the server measurement (#44) or real outages show other figures.

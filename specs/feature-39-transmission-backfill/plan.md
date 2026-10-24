@@ -47,7 +47,7 @@ See [spec.md](spec.md), *Problem*: nothing reads the spool, so no record reaches
 | AC9 | `TestSender_HangingRequestEndsAfterThirtySeconds`; `TestHTTPTransport_DeadlineIsTimeout` | `internal/sender/sender_test.go`; `internal/sender/transport_test.go` |
 | AC10 | `TestHTTPTransport_BuiltWithoutProxyAndRedirects`, `TestHTTPTransport_FollowsNoRedirect`, `TestHTTPTransport_IgnoresProxyEnvironment` (non-loopback `backend.url` through the dial hook), `TestHTTPTransport_RefusesUntrustedCertificate`, `TestHTTPTransport_SendsTokenOnlyToBackend`, `TestHTTPTransport_ReadsAtMostFourKiBOfBody`, `TestHTTPTransport_RefusesOversizedHeaders`; `TestSender_LogsHoldNoURLTokenOrBody` | `internal/sender/transport_test.go`; `internal/sender/sender_test.go` |
 | AC11 | `TestSender_AcknowledgementRefusedLoggedOncePerEpisode` (position kept, the resend only after a backoff wait, request count bounded), `TestSender_LeftoverBelowLiveStartSentAgain`, `TestSender_SpoolReadFailureRetried` | `internal/sender/sender_test.go` |
-| AC12 | `TestSender_BackfillPausedUnderMemoryPressure`; `TestNewScheduler_PressureReachesSender` | `internal/sender/sender_test.go`; `internal/agent/agent_test.go` |
+| AC12 | `TestSender_BackfillPausedUnderMemoryPressure`; `TestSender_NoPauseLineWithoutBacklog`; `TestNewScheduler_PressureReachesSender`; `TestRun_MemoryPressureHoldsBackTheBackfill` | `internal/sender/sender_test.go`; `internal/agent/agent_test.go` |
 | AC13 | `TestSender_LargestRecordSentAlone`, `TestSender_BatchBounds` | `internal/sender/sender_test.go` |
 | AC14 | `TestSender_StopEndsWithinTwoSeconds`; `TestRun_SenderStopsBeforeSpoolCloses` | `internal/sender/sender_test.go`; `internal/agent/agent_test.go` |
 | AC15 | `TestSender_SendLag` | `internal/sender/sender_test.go` |
@@ -102,7 +102,7 @@ injected short deadlines (about 50 ms) per record 0062, never `time.Sleep`. AC3'
   - **Backfill stream**: released, it reads `Read(bfAfter, 20000, 1 MiB)` (acknowledged records are skipped by the spool) and cuts
     the result before the first record at or above `liveStart`; an empty cut ends the pass (info `backfill finished` with
     `records`, only when the pass sent any; info `backfill started` before its first batch). Each batch waits for the throttle
-    and for the pressure flag to be off (info `backfill paused` / `backfill resumed` on the change, only while a pass runs).
+    and for the pressure flag to be off (info `backfill paused` / `backfill resumed` on the change, only when the cut holds records, so also before a pass's first batch).
     `bfAfter` starts at 0 and moves to a batch's last number after its kept acknowledgement; after an episode the backfill
     resumes from `bfAfter`, not from 0, so the acknowledged front of the oldest file is not read again. A failed delivery inside a
     pass (`Ack` or gap `Put` failure, a stream parked under the refusal bound) does not end the pass: after its wait the pass
