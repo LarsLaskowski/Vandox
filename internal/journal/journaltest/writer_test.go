@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -879,5 +880,24 @@ func TestWrite_CompressFailureFailsTheWrite(t *testing.T) {
 
 	if !errors.Is(err, boom) {
 		t.Errorf("Write() error = %v, want it to wrap the error of Compress", err)
+	}
+}
+
+func TestU32ClampsAboveTheCompactWidth(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		in   uint64
+		want uint32
+	}{
+		{"zero", 0, 0},
+		{"the largest 32-bit value", math.MaxUint32, math.MaxUint32},
+		{"one above the 32-bit range", math.MaxUint32 + 1, math.MaxUint32},
+		{"the largest 64-bit value", math.MaxUint64, math.MaxUint32},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := u32(tt.in); got != tt.want {
+				t.Errorf("u32(%d) = %d, want %d", tt.in, got, tt.want)
+			}
+		})
 	}
 }

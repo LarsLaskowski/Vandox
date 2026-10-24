@@ -1571,3 +1571,67 @@ func TestMachineDir_TakesOnlyThirtyTwoLowerCaseHexDigits(t *testing.T) {
 		t.Errorf("MachineDir() without the file = %q, %v, want an error", got, err)
 	}
 }
+
+func TestFile_ArraySlotReportsAShortReadInBothLayouts(t *testing.T) {
+	for _, compact := range []bool{false, true} {
+		t.Run("compact="+strconv.FormatBool(compact), func(t *testing.T) {
+			o := testOptions()
+			o.compact = compact
+			b, lay := buildFile(kernelEntries(10, true), o)
+			r := newRefReader(b)
+			f, err := r.openRef(false)
+			if err != nil {
+				t.Fatalf("Open() error = %v, want nil", err)
+			}
+			arr := lay.dataArrays[kernelPayload][0]
+
+			if got, err := f.arraySlot(arr, 0); err != nil || !slices.Contains(lay.entries, got) {
+				t.Fatalf("arraySlot(first array, 0) = %d, %v, want the offset of an entry of %v and no error", got, err, lay.entries)
+			}
+			r.limit = int(arr) + arrayFixed // the file ends where the first slot would start
+			got, err := f.arraySlot(arr, 0)
+
+			if !errors.Is(err, errTorn) || got != 0 {
+				t.Errorf("arraySlot() on a file cut before the slot = %d, %v, want 0 and %v", got, err, errTorn)
+			}
+		})
+	}
+}
+
+func TestFile_RefreshKeepsTheFileWhenTheHeaderIsRefused(t *testing.T) {
+	for _, compact := range []bool{false, true} {
+		t.Run("compact="+strconv.FormatBool(compact), func(t *testing.T) {
+			o := testOptions()
+			o.compact = compact
+			b, _ := buildFile(kernelEntries(10, true), o)
+			f, err := newRefReader(b).openRef(false)
+			if err != nil {
+				t.Fatalf("Open() error = %v, want nil", err)
+			}
+			before := f.Header()
+
+			err = f.Refresh(minHeaderSize - 1)
+
+			if !errors.Is(err, ErrUnsupported) {
+				t.Errorf("Refresh() of a size below the header = %v, want %v", err, ErrUnsupported)
+			}
+			if f.Header() != before || len(kernelListEntries(t, f)) != 10 {
+				t.Errorf("after the refused Refresh the header is %v, want the unchanged %v and all 10 entries readable", f.Header(), before)
+			}
+		})
+	}
+}
+
+// kernelListEntries reads every entry of the kernel list of f.
+func kernelListEntries(t *testing.T, f *File) []uint64 {
+	t.Helper()
+	c, err := f.Seek(kernelList(t, f), 0)
+	if err != nil {
+		t.Fatalf("Seek() error = %v, want nil", err)
+	}
+	seen, stop := drain(f, &c)
+	if stop != nil {
+		t.Fatalf("Next() error = %v, want nil", stop)
+	}
+	return seen
+}

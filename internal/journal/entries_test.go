@@ -770,12 +770,16 @@ func requireFirstItems(t *testing.T, e *Entry, want map[string]string) {
 	}
 }
 
+// realSampleMaxPayload is the value cap of the log collector (logship.maxMessageBytes, model.MaxTextBytes); the journal package cannot
+// import logship, so the number is repeated here.
+const realSampleMaxPayload = 16384
+
 func TestEntries_NextWithReadsEveryEntryOfTheRealCompactSamples(t *testing.T) {
 	dec, err := zstdfield.New()
 	if err != nil {
 		t.Fatalf("zstdfield.New() error = %v, want nil", err)
 	}
-	opt := &ReadOptions{MaxPayload: 16384 + 1, Decompress: dec, MaxCompressed: 4, MaxCompressedBytes: zstdfield.MaxFrameBytes}
+	opt := &ReadOptions{MaxPayload: realSampleMaxPayload, Decompress: dec, MaxCompressed: 4, MaxCompressedBytes: zstdfield.MaxFrameBytes}
 	for _, c := range []struct {
 		journal, export string
 		entries         uint64
@@ -795,7 +799,7 @@ func requireRealSample(t *testing.T, journal, export string, entries uint64, opt
 		t.Fatalf("the sample counts %d entries in its header, want %d", n, entries)
 	}
 
-	seqs, long := readSampleWith(t, f, byStamps, opt)
+	seqs, long, cut := readSampleWith(t, f, byStamps, opt)
 
 	if uint64(len(seqs)) != entries { // #nosec G115 -- len is never negative
 		t.Fatalf("read %d entries, want the %d the header counts", len(seqs), entries)
@@ -804,12 +808,18 @@ func requireRealSample(t *testing.T, journal, export string, entries uint64, opt
 		if want := []uint64{16, 36}; !slices.Equal(long, want) {
 			t.Errorf("entries with the 700-byte MESSAGE decoded from zstd = %v, want %v", long, want)
 		}
+		if want := []uint64{15, 35}; !slices.Equal(cut, want) {
+			t.Errorf("entries with a cut MESSAGE (the 20,000-byte one decoded from zstd) = %v, want %v", cut, want)
+		}
 		for i, seq := range seqs {
 			if seq != uint64(i+1) { // #nosec G115 -- i is never negative
 				t.Errorf("entry %d has the seqnum %d, want %d (SeekAll(s) stands on entry s+1)", i, seq, i+1)
 				break
 			}
 		}
+	}
+	if journal == "kernel.journal" && len(cut) != 0 {
+		t.Errorf("entries with a cut MESSAGE = %v, want none", cut)
 	}
 	requireSeekAllAfterEverySeqnum(t, f, seqs, opt)
 	if r.violated != "" {
@@ -818,8 +828,8 @@ func requireRealSample(t *testing.T, journal, export string, entries uint64, opt
 }
 
 // readSampleWith reads every entry of a real sample with NextWith, compares MESSAGE with the export entry of the same stamps and
-// returns the seqnums and those of the entries whose MESSAGE is 700 bytes long.
-func readSampleWith(t *testing.T, f *File, export map[stampKey][]exField, opt *ReadOptions) (seqs, long []uint64) {
+// returns the seqnums, those of the entries whose MESSAGE is 700 bytes long and those of the entries whose MESSAGE is cut.
+func readSampleWith(t *testing.T, f *File, export map[stampKey][]exField, opt *ReadOptions) (seqs, long, cut []uint64) {
 	t.Helper()
 	c, err := f.SeekAll(0)
 	if err != nil {
@@ -838,29 +848,44 @@ func readSampleWith(t *testing.T, f *File, export map[stampKey][]exField, opt *R
 		if e.Undecoded != 0 {
 			t.Errorf("entry %d has %d undecoded items, want 0", e.Seqnum, e.Undecoded)
 		}
-		if requireSameMessage(t, &e, export) == 700 {
+		n, wasCut := requireSameMessage(t, &e, export, opt.MaxPayload)
+		if n == 700 {
 			long = append(long, e.Seqnum)
+		}
+		if wasCut {
+			cut = append(cut, e.Seqnum)
 		}
 	}
 	if c.Torn() {
 		t.Error("Torn() = true after the end of the list, want false for a whole file")
 	}
-	return seqs, long
+	return seqs, long, cut
 }
 
-// requireSameMessage wants the MESSAGE of e to equal that of the export entry of the same stamps and returns its length (0 when it differs).
-func requireSameMessage(t *testing.T, e *Entry, export map[stampKey][]exField) int {
+// requireSameMessage wants e to hold exactly one MESSAGE, equal to that of the export entry of the same stamps when the export value
+// has at most limit bytes (Cut false) and equal to its first limit bytes with Cut true when it is longer. It returns the length of the
+// value read (0 when the check failed) and its Cut flag.
+func requireSameMessage(t *testing.T, e *Entry, export map[stampKey][]exField, limit int) (length int, cut bool) {
 	t.Helper()
 	pair, found := export[stampKey{e.RealtimeUS, e.MonotonicUS}]
 	if !found {
 		t.Fatalf("entry %d (realtime %d, monotonic %d) has no entry of the same stamps in the export", e.Seqnum, e.RealtimeUS, e.MonotonicUS)
 	}
+	want := exValue(pair, "MESSAGE")
 	msg, _ := e.Field("MESSAGE")
-	if len(msg) != 1 || msg[0].Cut || !bytes.Equal(msg[0].Value, exValue(pair, "MESSAGE")) {
-		t.Errorf("entry %d holds %d MESSAGE fields, want 1 equal to the %d bytes of the export", e.Seqnum, len(msg), len(exValue(pair, "MESSAGE")))
-		return 0
+	if len(msg) != 1 {
+		t.Errorf("entry %d holds %d MESSAGE fields, want 1", e.Seqnum, len(msg))
+		return 0, false
 	}
-	return len(msg[0].Value)
+	wantCut := len(want) > limit
+	if wantCut {
+		want = want[:limit]
+	}
+	if msg[0].Cut != wantCut || !bytes.Equal(msg[0].Value, want) {
+		t.Errorf("entry %d MESSAGE = %d bytes cut %v, want the %d bytes of the export cut %v", e.Seqnum, len(msg[0].Value), msg[0].Cut, len(want), wantCut)
+		return 0, false
+	}
+	return len(msg[0].Value), msg[0].Cut
 }
 
 // requireSeekAllAfterEverySeqnum wants SeekAll(s) to stand on the first entry of seqs after s, for every s up to the last seqnum.
