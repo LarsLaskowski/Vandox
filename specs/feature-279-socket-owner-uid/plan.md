@@ -226,3 +226,18 @@ As in the spec. Follow-up issue for the orchestrator: title "[Backend] Show the 
 body: "The agent's connection snapshots carry `uid`, `user` and `mixed_uids` on listener entries since #279 (record 0115). The forensics
 report's *New listeners* section and the web UI show only the owner's `pid` and `command`, which the process chooses. Show the UID and
 user next to them, escaped like the command, and say when the endpoint has several UIDs."
+
+## Challenge notes
+
+Minor objections of the plan challenge, for Dev and Tester to follow.
+
+1. Test data for AC2 and S4 has to be generated. The captured `testdata/proc/net/tcp6` has only `LISTEN` (`0A`) lines, and `testdata/etc/passwd` names UID 33 (`www-data`) and 65534 but no UID 1001. So the AC2 `tcp6 ESTABLISHED uid 33 -> www-data` connection is a generated line (`world.addSocket` with a UID). The S4 test (`TestConnections_NewListenerCarriesTheInventoryUID`, uid 1001 -> `alice`) needs an `fstest.MapFS` passwd that names `alice`. With the default `Etc` = `testdata/etc`, the user would be `"1001"`.
+2. `docs/areas/agent.md:1912` is missing from the doc edits. That line lists the `internal/procstats` exports the connection collector shares (`ListPIDs`, `CommandReader`, `Ended`). The Lead adds `ReadUsers` and `UserName` there in task 10.
+3. Rename the procstats helpers instead of wrapping them. Make `ReadUsers` and `UserName` the renamed `readPasswd` and `userName`, and point the process collector's call sites (`internal/procstats/procstats.go:101`, `:348`) and `passwd_test.go` at the new names. Do not leave the unexported functions behind as one-line wrappers or as dead code; golangci-lint's `unused` would flag them and they would duplicate the rule.
+
+## Security notes
+
+Non-blocking findings of Security's plan review (APPROVED).
+
+1. Memory bound. The bound is claimed but not pinned yet. A 1 MiB passwd of minimal lines (`a::0`) gives about 200,000 map entries, roughly 10 MB of live data while a run lasts. The process collector may hold its own copy at the same time. The file is root-controlled, so this is not an attack vector. The Tester's step-6 measurement (fact 14, `TestConnections_ManySocketsStayWithinCaps` with the 1 MiB short-line passwd) reports this worst case, and the agent area's *Bounded memory* figure states it.
+2. Possible follow-up issue (hardening, not a defect). A local user can bind a device-bound socket (`SO_BINDTODEVICE`) on a known endpoint such as `0.0.0.0:22`. That endpoint then shows `uid` 0 with `mixed_uids` true, and it is still not reported as a new listener, as today with `pid`. A known endpoint whose `mixed_uids` turns from absent to true is a useful signal: "[Agent] Report a known listener endpoint that gains a second UID".
