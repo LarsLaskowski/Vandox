@@ -1743,7 +1743,7 @@ span plus one batch), and it pauses (info `backfill paused`, `reason=memory_pres
 pressure mode is on (*Memory pressure mode*); the live stream is never throttled. At the start the live stream begins after the newest
 record, unless the spool already holds 32 acknowledged ranges (below), when it begins at the oldest unacknowledged record; the backfill
 waits for the first acknowledgement of the live stream and then sends everything below that stream's first record (info `backfill
-started` before its first batch and `backfill finished` with `records` after the pass, only when it sent any). A request carries one
+started` before its first batch and `backfill finished` with `records`, the number of records acknowledged, after the pass, both only when the pass found records to send). A request carries one
 batch with the header `mode` as a hint (the backend classifies by lateness, [wire format](wire-format.md)). The batch is the capture
 context of its records (agent ID, boot ID, clock offset), so a batch never mixes contexts.
 

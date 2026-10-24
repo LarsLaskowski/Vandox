@@ -85,7 +85,7 @@ self-metrics and what the backend's ingest endpoint receives. "Acknowledged" mea
 - E4: The `https` backend presents a certificate the system does not trust: the attempt fails with `reason` `tls failed`; certificate
   verification is never switched off.
 - E5: The answer carries a large or hostile body or headers: the agent reads at most 4 KiB of the body and 16 KiB of headers, never
-  parses, stores or logs the body, and judges the answer by its status alone.
+  parses, stores or logs the body, and judges the answer by its status and the exact value of `Vandox-Refused`.
 - E6: The proxy environment variables (`HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`, any case) are set on the server: the agent ignores them
   and connects only to the host and port of `backend.url`.
 - E7: The answer of an acknowledged batch is lost (the connection breaks after the backend committed): the records are sent again later
@@ -199,7 +199,7 @@ self-metrics and what the backend's ingest endpoint receives. "Acknowledged" mea
 - [ ] AC9: A request that gets no answer ends after at most 30 seconds as a failed attempt, and while it hangs the other stream and a
   new hand-over to the spool go on (E1).
 - [ ] AC10: The agent follows no redirect, uses no proxy from the environment, verifies an `https` certificate, sends the token only in
-  its requests to `backend.url`, and judges an answer by its status after reading at most 4 KiB of its body; no log line of the sender
+  its requests to `backend.url`, and judges an answer by its status and the exact value of `Vandox-Refused` after reading at most 4 KiB of its body; no log line of the sender
   contains the URL, its host, the token or the answer's body (E3, E4, E5, E6).
 - [ ] AC11: An acknowledgement the spool refuses logs `acknowledgement not kept` once per episode and leaves the records to be sent
   again — the stream's position does not move, the batch is sent again only after a wait of the backoff schedule (never at once), and
