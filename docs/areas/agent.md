@@ -361,20 +361,27 @@ and #45**.
 The collector `connections` (interval 60 seconds, pressure interval 15 seconds, timeout 10 seconds, placed after `processes` in the job
 list) records one `connection_snapshot` record per run with source `connections` and the capture time of the run's start. It replaces the
 `lsof -ni` half of the legacy script (record 0019). It reads `/proc/net/tcp`, `tcp6`, `udp` and `udp6`, lists `/proc`, reads
-`/proc/<pid>/fdinfo/<n>` (the first lines only) and what the process collector reads to derive a `command` (`stat`, `cmdline`), through the
-replaceable file-system interface. It starts no program, opens no socket and makes no raw system call; `TestConnstats_ImportsOnlyAllowedPackages`
+`/proc/<pid>/fdinfo/<n>` (the first lines only), what the process collector reads to derive a `command` (`stat`, `cmdline`) and, once per
+run, `/etc/passwd` for user names (with the process collector's bounds, *Processes*), through the replaceable file-system interface. It starts no program, opens no socket and makes no raw system call; `TestConnstats_ImportsOnlyAllowedPackages`
 pins the imports (`os` only for `DirFS`, no `syscall`). The one socket the agent opens for it is the start-up probe below, outside the collector.
 
 **Terms.** A **socket** is one line of the four tables of the agent's network namespace (`/proc/net` is the reader's own namespace);
 two lines are two sockets, also when both have inode 0 (`TIME_WAIT`, `SYN_RECV`), and such a line never matches a descriptor. A
 **listener** is a TCP socket in `LISTEN` or a UDP socket whose remote address is all zeros with port 0; a **connection** is a socket with a
 non-zero remote address or port; any other TCP socket counts in `states` only. The **owner** of a socket is the lowest PID among the
-processes that hold it.
+processes that hold it. The **socket's UID** is the `uid` field of its table line: the UID of the socket, not of a process that holds it.
+The kernel gives a socket the file-system UID of the process that creates it (`sock_alloc`, `current_fsuid()`), and only an `fchown` of the
+socket changes it, which needs `CAP_CHOWN` to give the socket to another user. So a daemon that creates its listener as root and then
+switches its effective user to `www-data` (`nginx`, `apache2`), a socket that systemd creates for a socket-activated service and any socket a
+root process hands on read UID 0, while the process snapshot shows the holder's own user.
 
 **Tables.** `tcp`, `tcp6`, `udp`, `udp6` are read in that order, line by line; the first line is the header. A line longer than 512 bytes is
 skipped to its end and counted unreadable. A line needs at least 10 fields: `sl` (digits and `:`), the local and remote endpoint (8 upper-case
-hex digits for IPv4 and 32 for IPv6, `:`, 4 upper-case hex digits), the state (2 upper-case hex digits) and the inode (field 10, 1 to 20
-digits within 64 bits); the fields between and after are not interpreted. Each address word is read as a 32-bit number and written in the
+hex digits for IPv4 and 32 for IPv6, `:`, 4 upper-case hex digits), the state (2 upper-case hex digits), the `uid` (field 8, 1 to 10
+digits within 32 bits; the kernel prints it as an unsigned decimal, so `0`, `65534`, the overflow UID of a UID without a mapping in the
+agent's user namespace, and `4294967295` are read as printed) and the inode (field 10, 1 to 20 digits within 64 bits); the fields between
+and after are not interpreted. A `uid` field with a sign, a letter or more than 32 bits makes the line unreadable (`not in the expected
+format`), like a bad inode; this also makes `connstats.TCPListeners` refuse the table (*MariaDB*). Each address word is read as a 32-bit number and written in the
 kernel's host byte order, so `0100007F` is `127.0.0.1`. An IPv4-mapped address in `tcp6` is kept as the kernel reports it (`::ffff:a.b.c.d`,
 no unmapping) and so is a link-local one, without a zone ([wire format](wire-format.md), *Producer mapping for connection endpoints*). The
 TCP states `01` to `0C` map to the model's twelve names; any other code makes the line unreadable; for UDP the state is checked and dropped.
@@ -417,7 +424,26 @@ directory); a descriptor closed meanwhile is skipped; an ended process owns noth
 is not in the four tables (another network namespace, a Unix socket) counts nowhere. Sockets without an owner (`TIME_WAIT`, a closed or
 unreadable one) count in `states` and, as connections, in `remotes` and `connections`; their entries carry no PID and no `command`. The
 `command` is the process collector's (*Processes*, **Names**, through `procstats.CommandReader`). It is text the process chooses; the
-PID is the kernel's. The kernel's `uid` column of the tables is not recorded (a follow-up).
+PID is the kernel's.
+
+**Socket UIDs.** `listeners`, `new_listeners` and `connections` entries carry the socket's UID (`uid`) and its user name (`user`), taken
+from the table line when the line is filed as a listener or a connection, not from the descriptors or the inode index. So an entry
+without an owner still has them: when the start-up probe failed, `fdinfo` cannot be read, `hidepid=2` hides the holder, the holder lies
+beyond the PID cap, or the socket lies beyond the inode index or repeats an inode it already holds. A line with inode 0 (`TIME_WAIT`, a
+`FIN_WAIT2` or other socket whose file is closed, a pending `SYN_RECV`) adds no UID: the kernel prints 0 for a time-wait socket, the
+listener's UID for a pending one and, for an orphaned one, root (5.15) or the UID the socket had (6.x); none of it is a socket a process
+holds, and 0 would read as root. An entry built only from such lines has no `uid`, no `user` and no `mixed_uids`. An inventory entry is
+one endpoint of possibly several sockets: it carries the **lowest** UID of its sockets with an inode, and `mixed_uids` true when they have
+two or more distinct UIDs (sockets bound to different devices with `SO_BINDTODEVICE`, which any user may set once and which lets sockets of
+different users share an endpoint, TCP and UDP alike; UDP sockets bound with `SO_REUSEADDR`; a `SO_REUSEPORT` group of which one socket was
+given to another user by an `fchown`); its `pid` stays the lowest owning PID and may belong to another of the sockets. A `new_listeners`
+entry is built from the same inventory entry, so it carries the same `uid`, `user` and `mixed_uids`. The `processes` aggregate carries no
+UID (the sockets of one process can have several; its user is in the process snapshot). The `user` is `procstats.UserName` over the names
+`procstats.ReadUsers` reads from `/etc/passwd` once per run, after the owner scan: the process collector's rules (*Processes*, *Readers*:
+the first line of a UID wins, a name is made valid UTF-8 and cut to 256 bytes, control characters are kept and escaped by the encoder),
+else the UID in decimal, so one UID has one name in both snapshots of a run that read the same file. A `passwd` that cannot be read within
+its bounds (missing, an open or read error, over 1 MiB, a line over 4 KiB) makes every `user` the decimal UID; `uid` is unchanged and the
+sample succeeds. A change of the UID on a known protocol, address and port is not a new listener (*The listener check*).
 
 **The socket mount.** An inode number alone does not tell a socket from a file with the same number, which any user can create on a mount
 of their own (a tmpfs in a user namespace, FUSE, a container). Every socket of every family, in any namespace, is allocated on one
@@ -467,17 +493,20 @@ encoded alone to measure it), in the order `states`, `new_listeners`, `listeners
 that does not fit, that list and every later one stop (a cut in `states`, `listeners` or `processes` sets `aggregates_incomplete`). The
 record is checked with the producer contract of the [wire format](wire-format.md); as a safety net a record still too long is shortened by
 halving `connections`, then `remotes`, `processes` and `listeners`, and is marked not complete. Size never fails the sample. No text a
-user chooses can: the `command` follows the process collector's rules.
+user chooses can: the `command` and the `user` follow the process collector's rules; a 256-byte name of control characters encodes to at
+most 1,536 bytes, so long names mean fewer entries before the cut, marked as above, never a failed sample.
 
 **Logging.** One line per change, through the collector's logger with `collector=connections`, no per-run line, no line per new listener, no
-process text and no address: info `socket tables unavailable` (`tables`: the missing ones, comma-separated, in table order) and `socket tables
+process text, no address, no user name and no UID value: info `socket tables unavailable` (`tables`: the missing ones, comma-separated, in table order) and `socket tables
 available`; warning `socket lines not read` (`lines`: the number, `err`: `connstats: net/<table>: line <n>: <reason>` with a fixed reason
 `not in the expected format`, `unknown state` or `line too long`) and info `socket lines read again`; warning `socket owners partly unknown`
 (`processes`: the number of listed processes whose descriptors could not be read, `err`: `connstats: <pid>/fdinfo: <fixed reason or os error>`)
-and info `socket owners known again`; warning `socket owners unknown` (above). The lines are written only for a run that finishes in time.
+and info `socket owners known again`; warning `socket owners unknown` (above); warning `user names unavailable` (`err`: `procstats: passwd:
+<fixed reason or os error>`, as `procstats.ReadUsers` returns it, never file content) and info `user names available` (*Socket UIDs*), both
+also while `socket owners unknown` holds. The lines are written only for a run that finishes in time.
 
 **Failures and rights.** The sample fails (a gap) when no table exists, a table cannot be read, `/proc` cannot be listed or the run's context ends.
-It succeeds when a process or a descriptor cannot be read: the first `EACCES`, `EPERM` or other error on a process, or an `fdinfo` that does not
+It succeeds when `/etc/passwd` cannot be read (*Socket UIDs*) and when a process or a descriptor cannot be read: the first `EACCES`, `EPERM` or other error on a process, or an `fdinfo` that does not
 have the four-line shape (a file changed or damaged after the start-up probe succeeded), counts that process unreadable once, stops its scan,
 and the sockets it held have no owner. Without `CAP_SYS_PTRACE` that is every process of another user, so the warning is logged. With `hidepid=1` and without the
 capability the same. With `hidepid=2` and without the capability other users' processes are **not listed at all**, so their sockets have no owner
@@ -489,16 +518,22 @@ the start-up probe already fails (`sockmount: not in the expected format`), no `
 there.
 
 **Bounded memory.** The live data of a run is bounded by the caps: the inode index of 65,536 sockets (two 32-bit numbers each for owner and
-last counting PID), two heaps of 4,096 entries and 4,096 remote counts. Measured by `TestConnections_ManySocketsStayWithinCaps` on Go 1.27
-(Xeon 2.1 GHz, an in-memory file system) at two sizes of each axis: the live data at the run's peak (the inode index and the owner map alive) is 5.5 MB at
-100,000 table lines and 4.8 MB at 400,000, and 0.75 MB at 50,000 and 200,000 descriptors of one process, so it does not grow with the input
-beyond the caps. The **garbage** does grow: reading a table line leaves none (0 B per extra line), reading a descriptor through `io/fs` allocates a fixed
-amount (about 170 B per extra descriptor, the test's generated file system included), and a run that reaches the caps allocates a fixed
-about 24.7 MB more (about 9 MB of it the growth of the 65,536-entry index map), all reclaimed by the garbage collector. The 24.7 MB is
-accepted; the live figure, not the garbage, is the bound.
+last counting PID), two heaps of 4,096 entries (each entry with one 32-bit UID more), 4,096 remote counts and the user names of
+`/etc/passwd`, which its 1 MiB bound limits: a file of the shortest lines a name and a UID allow (`a::N`) holds at most 115,968 distinct
+users. Measured by `TestConnections_ManySocketsStayWithinCaps` on Go 1.27 (an in-memory file system) at two sizes of each axis: the live
+data at the run's peak (the inode index, the owner map and the user map alive) is 4.7 to 5.6 MB at 100,000 and 400,000 table lines with
+the fixture `passwd` (18 lines) and 9.4 to 10.3 MB at 100,000 and 200,000 table lines with a 1 MiB `passwd` of 115,968 short lines, so
+the user map adds at most about 4.6 MB; 0.75 MB at 50,000 and 200,000 descriptors of one process. It does not grow with the input beyond
+the caps. A process collector run at the same time holds its own map of the same file. The **garbage** does grow: reading a table line
+leaves none (0 B per extra line, also with the `uid` field read), reading a descriptor through `io/fs` allocates a fixed amount (about
+170 B per extra descriptor, the test's generated file system included), a run that reaches the caps allocates a fixed about 24.7 MB more
+(about 9 MB of it the growth of the 65,536-entry index map), and reading a 1 MiB `passwd` allocates about 20 MB per run, constant, not
+per table line, all reclaimed by the garbage collector. The garbage is accepted; the live figure, not the garbage, is the bound.
 
-**Speed.** `BenchmarkConnections_Collect` over the captured server tables with 300 processes of 30 descriptors takes 50.7 ms per run and
-allocates 1.99 MB in 26,307 allocations ([Benchmarks](../BENCHMARKS.md), *Connection snapshot*); not measured on the server (#44).
+**Speed.** `BenchmarkConnections_Collect` over the captured server tables with 300 processes of 30 descriptors, the fixture `passwd`
+included, takes 57.8 ms per run and allocates 2.02 MB in 26,484 allocations; the tree before the socket UIDs, on the same host and day,
+took 57.3 ms with 1.99 MB in 26,310 allocations, so the `passwd` read and the UIDs cost no measurable time ([Benchmarks](../BENCHMARKS.md),
+*Connection snapshot*); not measured on the server (#44).
 
 **Residuals.**
 
@@ -523,6 +558,10 @@ allocates 1.99 MB in 26,307 allocations ([Benchmarks](../BENCHMARKS.md), *Connec
 - The incident's connection peak is taken over every source in its window, so the agent's higher totals win it against imported snapshots
   ([Detection, alerts and reports](detection-and-reports.md)).
 - A skipped table line (it is counted, not parsed) makes the snapshot's aggregates incomplete and the run's comparison `none`.
+- The `uid` says whose socket it is, not whose process: a root-created socket held by another user's process reads root. A user who binds
+  a second socket on a known endpoint (for example bound to a device) leaves the entry's `uid` at the lower UID with `mixed_uids` true, and
+  the endpoint is not reported as a new listener, as a change of owner is not; a listener whose UID changes between two runs is not
+  reported either. Names come only from `/etc/passwd` (no NSS, LDAP or `systemd-userdbd` dynamic users), so such a UID reads as a number.
 
 ## Services
 
@@ -1868,7 +1907,8 @@ dropped`; warning `spool not closed`.
   that fails its check is left out.
 - [0115](../decisions/0115-connection-collector-proc-net-tables-owners-from-fd-regular-and-full-snapshots-bounded-listener-check.md) — why the
   connection collector reads the `/proc/net` tables with owners from `fdinfo` on a socket mount the agent learns at its start (`CAP_SYS_PTRACE`
-  alone), records a regular or a full snapshot in the one record kind, and bounds the new-listener check, favoring privileged ports.
+  alone), records a regular or a full snapshot in the one record kind, bounds the new-listener check, favoring privileged ports, and
+  records the socket's `uid` from the tables with a name from `/etc/passwd` (the lowest UID and `mixed_uids` per endpoint, none for inode 0).
 - [0116](../decisions/0116-listeners-across-agent-starts-compared-when-stored-and-shown-in-the-forensics-report.md) — why the first snapshot after
   a start is marked `start`, every snapshot says what its listener list holds, and the backend compares across the start.
 - [0117](../decisions/0117-systemd-collector-hand-written-d-bus-client-per-run-states-recorded-on-change.md) — why the systemd collector
@@ -1909,8 +1949,8 @@ dropped`; warning `spool not closed`.
 
 `cmd/vandox-agent` and `internal/cli` (Go), `internal/agent` (start-up, logging, watchdog), `internal/scheduler`, `internal/selfstats`,
 `internal/sysstats` (system metrics and the memory pressure mode; fixtures `testdata/proc/`, `testdata/sys/`),
-`internal/procstats` (process collector; fixtures `testdata/proc/<pid>/`, `testdata/etc/passwd`, `testdata/processes/names.json`; `ListPIDs`, `CommandReader` and `Ended` are shared with the connection collector),
-`internal/connstats` (connection collector; fixtures `testdata/proc/net/`, `testdata/connections/sandbox/`), `internal/sockmount` (the start-up probe of the socket mount),
+`internal/procstats` (process collector; fixtures `testdata/proc/<pid>/`, `testdata/etc/passwd`, `testdata/processes/names.json`; `ListPIDs`, `CommandReader`, `Ended`, `ReadUsers` and `UserName` are shared with the connection collector),
+`internal/connstats` (connection collector; fixtures `testdata/proc/net/`, `testdata/connections/sandbox/`, `testdata/etc/passwd`), `internal/sockmount` (the start-up probe of the socket mount),
 `internal/svcstats` (systemd collector) and `internal/sdbus` (its D-Bus client; fixture `testdata/systemd/`, a capture of systemd 249's replies),
 `internal/mariadb` (MariaDB collector and its protocol client; fixture `testdata/mariadb/`, two captures of MariaDB 12.3.3's replies to a `unix_socket` login; it uses `sysstats.MemTotal`, `connstats.TCPListeners` and `procstats.CleanText`),
 `internal/journal` (the journal file reader) and `internal/journal/journaltest` (a writer of journal files for tests; fixtures

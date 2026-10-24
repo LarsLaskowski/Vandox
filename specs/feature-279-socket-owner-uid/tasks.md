@@ -17,5 +17,5 @@ documentation edit is in one row.
 | 7 | G2 | `deploy/agent/README.md`: the `/etc/passwd` bullet of the connection collector's reads | `deploy/agent/README.md` | AC6 | 6 | Dev | [x] |
 | 8 | G2 | `.squad/project.md`: security areas 6, 10 and 12 as the plan's *Documentation updates* name them | `.squad/project.md` | AC5, AC6 | 6 | Dev | [x] |
 | 9 | G2 | Measure the live peak (fixture passwd and a 1 MiB passwd of short lines), the per-line garbage and the benchmark; report the figures and write them into `docs/BENCHMARKS.md` | `internal/connstats/connstats_test.go`, `docs/BENCHMARKS.md` | AC7 | 6 | Tester | [x] |
-| 10 | G3 | Agent area *Connections*: terms, tables, owners, files read, logging, bounded memory and speed with the figures of task 9 | `docs/areas/agent.md` | AC1, AC2, AC3, AC4, AC5, AC6, AC7 | 9 | Lead | [ ] |
-| 11 | G3 | Wire format area: the three fields, their rules and errors, the 1.1 list | `docs/areas/wire-format.md` | AC8, AC9 | 3 | Lead | [ ] |
+| 10 | G3 | Agent area *Connections*: terms, tables, owners, files read, logging, bounded memory and speed with the figures of task 9 | `docs/areas/agent.md` | AC1, AC2, AC3, AC4, AC5, AC6, AC7 | 9 | Lead | [x] |
+| 11 | G3 | Wire format area: the three fields, their rules and errors, the 1.1 list | `docs/areas/wire-format.md` | AC8, AC9 | 3 | Lead | [x] |
