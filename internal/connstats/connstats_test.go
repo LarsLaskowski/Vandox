@@ -1082,6 +1082,34 @@ func TestConnections_RemotesBeyondCapNotCounted(t *testing.T) {
 	}
 }
 
+func TestConnections_LateRunLogsNoUserNames(t *testing.T) {
+	stuck := newBlockingFS(t, fstest.MapFS{}, "passwd") // a passwd that cannot be read, once the read returns
+	c, logs := newRecordingCollectorWith(ownedWorld(t), stuck, SocketMount{ID: socketMount})
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	done := make(chan error, 1)
+	go func() {
+		_, err := c.Collect(ctx, runAt(0, false))
+		done <- err
+	}()
+	select {
+	case <-stuck.reached:
+	case err := <-done:
+		t.Fatalf("Collect() = %v before reading the passwd, want it to block there", err)
+	}
+	cancel()
+	stuck.open()
+
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		t.Errorf("Collect() error = %v, want the context's error", err)
+	}
+	if got := logs.all(); len(got) != 0 {
+		t.Errorf("a late run logged %+v, want nothing (its state is not kept)", got)
+	}
+	snapshotOf(t, c, runAt(1, false))
+	wantLogged(t, logs, slog.LevelWarn, "user names unavailable", 1)
+}
+
 func TestConnections_BlockingReadIsAbandonedAsGap(t *testing.T) {
 	cases := []struct{ name, blocked string }{
 		{"a table", "net/tcp"},
@@ -1321,7 +1349,7 @@ func newTableGen(t *testing.T, name string, n uint32, spec func(i uint32) sockSp
 // Sizes and limits of the bounded-memory test (plan fact 17).
 const (
 	liveSlack            = 1 << 20  // bytes the live data of a run may differ between the two sizes
-	liveLimit            = 16 << 20 // bytes of live data of one run
+	liveLimit            = 16 << 20 // bytes of live data of one run, also at its peak with the user map of a 1 MiB passwd
 	garbagePerLine       = 16.0     // bytes allocated per extra table line
 	garbagePerDescriptor = 1024.0   // bytes allocated per extra descriptor
 	maxListEntries       = 4096
@@ -1329,7 +1357,8 @@ const (
 
 // memRun is what one run held and allocated.
 type memRun struct {
-	live  float64 // heap in use at PID 1's last descriptor read (the run's peak, the inode index and owner map alive), less the heap before the run, after a collection
+	live  float64 // heap in use at PID 1's last descriptor read (the inode index and owner map alive), less the heap before the run, after a collection
+	peak  float64 // the larger of live and the same measure when the passwd read ends (the user map alive), the run's peak
 	alloc float64 // bytes allocated by the run
 	snap  *model.ConnectionSnapshot
 }
@@ -1348,41 +1377,79 @@ func lineSpec(i uint32) sockSpec {
 	}
 }
 
-// measureRun runs the collector once over g and measures the live data when the collector opens hookName, the last fdinfo file it
-// reads for PID 1, when the inode index and the owner map are still referenced (the run's peak), and the bytes the run allocated.
-func measureRun(t *testing.T, g *genFS, hookName string) memRun {
+// closeHookFS runs hook when the file name is closed.
+type closeHookFS struct {
+	fs.FS
+	name string
+	hook func()
+}
+
+func (c *closeHookFS) Open(name string) (fs.File, error) {
+	f, err := c.FS.Open(name)
+	if err != nil || name != c.name {
+		return f, err
+	}
+	return &closeHookFile{File: f, hook: c.hook}, nil
+}
+
+// closeHookFile runs hook once when it is closed.
+type closeHookFile struct {
+	fs.File
+	hook func()
+}
+
+func (f *closeHookFile) Close() error {
+	f.hook()
+	return f.File.Close()
+}
+
+// measureRun runs the collector once over g and etc and measures the live data when the collector opens hookName, the last fdinfo
+// file it reads for PID 1, when the inode index and the owner map are still referenced, and when it closes the passwd, when the
+// user map is referenced as well (the run's peak), and the bytes the run allocated.
+func measureRun(t *testing.T, g *genFS, hookName string, etc fs.FS) memRun {
 	t.Helper()
 
-	var before, mid, after runtime.MemStats
+	var before, mid, end, after runtime.MemStats
 	g.hookName = hookName
 	g.hook = func() {
 		runtime.GC()
 		runtime.ReadMemStats(&mid)
 	}
-	c := newCollector(g)
+	passwdRead := false
+	etc = &closeHookFS{FS: etc, name: "passwd", hook: func() {
+		passwdRead = true
+		runtime.GC()
+		runtime.ReadMemStats(&end)
+	}}
+	c := newCollectorWith(g, etc)
 	runtime.GC()
 	runtime.ReadMemStats(&before)
 	_, snap := snapshotOf(t, c, runAt(0, false))
 	runtime.ReadMemStats(&after)
-	if !g.hooked {
-		t.Fatalf("collector never opened %s, want the last descriptor of PID 1 read", hookName)
+	if !g.hooked || !passwdRead {
+		t.Fatalf("collector never opened %s (%v) or closed the passwd (%v), want the last descriptor of PID 1 and the passwd read", hookName, g.hooked, passwdRead)
 	}
-	return memRun{live: float64(mid.HeapAlloc) - float64(before.HeapAlloc), alloc: float64(after.TotalAlloc) - float64(before.TotalAlloc), snap: snap}
+	return memRun{
+		live:  float64(mid.HeapAlloc) - float64(before.HeapAlloc),
+		peak:  max(float64(mid.HeapAlloc), float64(end.HeapAlloc)) - float64(before.HeapAlloc),
+		alloc: float64(after.TotalAlloc) - float64(before.TotalAlloc),
+		snap:  snap,
+	}
 }
 
 // measureTableLines runs over a generated table of n lines and one process that holds five of its sockets.
-func measureTableLines(t *testing.T, n uint32) memRun {
+func measureTableLines(t *testing.T, n uint32, etc fs.FS) memRun {
 	t.Helper()
 
 	w := newWorld(t)
 	w.clear()
 	w.process(1, "init", "/sbin/init\x00")
 	w.holdRange(1, 3, 10000000, 5)
-	return measureRun(t, &genFS{base: w, tables: map[string]*tableGen{"net/tcp": newTableGen(t, "tcp", n, lineSpec)}}, "1/fdinfo/7")
+	return measureRun(t, &genFS{base: w, tables: map[string]*tableGen{"net/tcp": newTableGen(t, "tcp", n, lineSpec)}}, "1/fdinfo/7", etc)
 }
 
 // measureDescriptors runs over a table of 2,000 listeners and one process with n generated descriptors, half of them sockets of the table.
-func measureDescriptors(t *testing.T, n uint32) memRun {
+func measureDescriptors(t *testing.T, n uint32, etc fs.FS) memRun {
 	t.Helper()
 
 	w := newWorld(t)
@@ -1391,7 +1458,7 @@ func measureDescriptors(t *testing.T, n uint32) memRun {
 	w.process(1, "init", "/sbin/init\x00")
 	fds := &fdGen{dir: "1/fdinfo", count: n, inode: func(i uint32) uint64 { return 10000000 + uint64(i%4000) }}
 	// fdGen names the descriptors 3 to count+2 and the collector reads them all.
-	return measureRun(t, &genFS{base: w, fds: fds}, fds.dir+"/"+strconv.Itoa(2+int(n)))
+	return measureRun(t, &genFS{base: w, fds: fds}, fds.dir+"/"+strconv.Itoa(2+int(n)), etc)
 }
 
 // checkBounded checks that the live data did not grow from the small to the large run and that the garbage per extra unit stays small.
@@ -1403,6 +1470,12 @@ func checkBounded(t *testing.T, unit string, small, large memRun, extra, maxGarb
 	}
 	if large.live > liveLimit {
 		t.Errorf("live data of the large run = %.0f bytes, want at most %d", large.live, liveLimit)
+	}
+	if grown := large.peak - small.peak; grown > liveSlack {
+		t.Errorf("peak of the large run is %.0f bytes above the small run's (%.0f and %.0f), want at most %d (it must not grow with the %s count)", grown, large.peak, small.peak, liveSlack, unit)
+	}
+	if large.peak > liveLimit {
+		t.Errorf("peak of the large run = %.0f bytes, want at most %d", large.peak, liveLimit)
 	}
 	if per := (large.alloc - small.alloc) / extra; per > maxGarbage {
 		t.Errorf("garbage per extra %s = %.1f bytes, want at most %.0f", unit, per, maxGarbage)
@@ -1426,25 +1499,64 @@ func totalCounted(snap *model.ConnectionSnapshot) uint64 {
 	return total
 }
 
-func TestConnections_ManySocketsStayWithinCaps(t *testing.T) {
-	t.Run("table lines", func(t *testing.T) {
-		small, large := measureTableLines(t, 100000), measureTableLines(t, 400000)
+// shortLinesEtc returns an /etc whose passwd is as large as the agent reads it (1 MiB) and holds the most distinct UIDs: the shortest
+// lines "a::N" in ascending order.
+func shortLinesEtc(t *testing.T) fs.FS {
+	t.Helper()
 
-		checkBounded(t, "table line", small, large, 300000, garbagePerLine)
-		for _, run := range []struct {
-			snap *model.ConnectionSnapshot
-			want uint64
-		}{{small.snap, 100000}, {large.snap, 400000}} {
-			if got := totalCounted(run.snap); got != run.want || run.snap.Complete || !run.snap.AggregatesIncomplete {
-				t.Errorf("states count %d sockets, complete = %v, aggregates_incomplete = %v, want every one of %d counted, not complete and incomplete aggregates",
-					got, run.snap.Complete, run.snap.AggregatesIncomplete, run.want)
-			}
+	var b strings.Builder
+	b.Grow(1 << 20)
+	n := 0
+	for uid := 0; ; uid++ {
+		line := "a::" + strconv.Itoa(uid) + "\n"
+		if b.Len()+len(line) > 1<<20 {
+			break
 		}
-	})
+		b.WriteString(line)
+		n++
+	}
+	users, err := procstats.ReadUsers(etcOf(b.String()))
+	if err != nil || len(users) != n {
+		t.Fatalf("ReadUsers(short lines) = %d users, %v, want %d users and no error (test setup)", len(users), err, n)
+	}
+	t.Logf("passwd of %d bytes with %d users", b.Len(), n)
+	return etcOf(b.String())
+}
+
+func TestConnections_ManySocketsStayWithinCaps(t *testing.T) {
+	etcs := []struct {
+		name         string
+		etc          fs.FS
+		small, large uint32
+	}{
+		{"table lines", fixtureEtc(), 100000, 400000},
+		{"table lines with a 1 MiB passwd of short lines", shortLinesEtc(t), 100000, 200000}, // the passwd costs the time, not the lines
+	}
+	for _, e := range etcs {
+		t.Run(e.name, func(t *testing.T) {
+			small, large := measureTableLines(t, e.small, e.etc), measureTableLines(t, e.large, e.etc)
+			extra := float64(e.large - e.small)
+
+			t.Logf("small run: live %.0f, peak %.0f, allocated %.0f bytes; large run: live %.0f, peak %.0f, allocated %.0f bytes; garbage per extra line %.2f bytes",
+				small.live, small.peak, small.alloc, large.live, large.peak, large.alloc, (large.alloc-small.alloc)/extra)
+			checkBounded(t, "table line", small, large, extra, garbagePerLine)
+			for _, run := range []struct {
+				snap *model.ConnectionSnapshot
+				want uint64
+			}{{small.snap, uint64(e.small)}, {large.snap, uint64(e.large)}} {
+				if got := totalCounted(run.snap); got != run.want || run.snap.Complete || !run.snap.AggregatesIncomplete {
+					t.Errorf("states count %d sockets, complete = %v, aggregates_incomplete = %v, want every one of %d counted, not complete and incomplete aggregates",
+						got, run.snap.Complete, run.snap.AggregatesIncomplete, run.want)
+				}
+			}
+		})
+	}
 
 	t.Run("descriptors of one process", func(t *testing.T) {
-		small, large := measureDescriptors(t, 50000), measureDescriptors(t, 200000)
+		small, large := measureDescriptors(t, 50000, fixtureEtc()), measureDescriptors(t, 200000, fixtureEtc())
 
+		t.Logf("small run: live %.0f, peak %.0f, allocated %.0f bytes; large run: live %.0f, peak %.0f, allocated %.0f bytes; garbage per extra descriptor %.2f bytes",
+			small.live, small.peak, small.alloc, large.live, large.peak, large.alloc, (large.alloc-small.alloc)/150000)
 		checkBounded(t, "descriptor", small, large, 150000, garbagePerDescriptor)
 		for _, snap := range []*model.ConnectionSnapshot{small.snap, large.snap} {
 			wantList(t, "processes", snap.Processes, []model.ProcessConnections{{PID: 1, Command: "init", Count: 2000}})

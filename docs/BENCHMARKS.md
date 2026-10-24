@@ -347,9 +347,12 @@ go test ./internal/connstats -run '^$' -bench Collect -benchmem
 
 | Host | Go | CPU | Date | Processes × descriptors | Time per run | Memory per run | Allocations per run |
 | ---- | -- | --- | ---- | ----------------------: | -----------: | -------------: | ------------------: |
-| development host (4 vCPU, sandbox) | 1.27.0 | Intel Xeon 2.1 GHz | 2026-10-18 | 300 × 30 | **50.7 ms** | 1.99 MB | 26,307 |
+| development host (4 vCPU, sandbox) | 1.27.0 | Intel Xeon 2.80 GHz | 2026-10-24 | 300 × 30 | **57.8 ms** | 2.02 MB | 26,484 |
 
-One measurement of the benchmark's own report, not a median of several. The file system is in memory, so the figure leaves out the kernel's cost to
+Median of six runs of the benchmark's own report (56.4 to 62.4 ms) since a run also reads the user names (`/etc/passwd`, a captured file of 18 lines,
+issue #279). The tree before that change, measured the same day on the same host: median 57.3 ms (55.3 to 59.2 ms), 1.99 MB and 26,310 allocations per run, so the read
+adds about 0.03 MB and 174 allocations and its time is within the noise. A passwd of the largest size the agent reads (1 MiB, 115,968 users) costs one run about
+20 MB of garbage and 4.6 MB of live data more (Agent area, *Connections*, **Bounded memory**). The file system is in memory, so the figure leaves out the kernel's cost to
 produce `fdinfo` files and to resolve a path in `/proc`; the value on the server (Ubuntu 22.04, kernel 5.15, 2 GB) is **not measured**: #44 measures it.
 The memory figures of a run (live data, garbage per line and per descriptor) are in the Agent area (*Connections*, **Bounded memory**).
 

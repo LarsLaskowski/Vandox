@@ -371,7 +371,7 @@ func TestParseLine_Rejects(t *testing.T) {
 	}{
 		{"inode with 20 digits within 64 bits", tcpTable, setField(t, v4, inode, "18446744073709551615"), func(s socket) bool { return s.inode == 18446744073709551615 }},
 		{"exactly ten fields", tcpTable, strings.Join(strings.Fields(v4)[:10], " "), func(s socket) bool { return s.inode == 16364272 }},
-		{"fields five to nine are not interpreted", tcpTable, strings.Join(append(strings.Fields(v4)[:4], "zz", "zz", "zz", "zz", "zz", "16364272"), " "), func(s socket) bool { return s.inode == 16364272 }},
+		{"fields five to seven and nine are not interpreted", tcpTable, strings.Join(append(strings.Fields(v4)[:4], "zz", "zz", "zz", "0", "zz", "16364272"), " "), func(s socket) bool { return s.uid == 0 && s.inode == 16364272 }},
 		{"runs of spaces between the fields", tcpTable, "   " + strings.Join(strings.Fields(v4), "   "), func(s socket) bool { return s.inode == 16364272 }},
 		{"any two hex digits as a UDP state", udpTable, setField(t, u4, state, "FF"), func(s socket) bool { return s.state == "" }},
 		{"UDP state dropped", udp6Table, u6, func(s socket) bool { return s.state == "" }},

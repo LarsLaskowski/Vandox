@@ -2,9 +2,11 @@ package procstats
 
 import (
 	"maps"
+	"strconv"
 	"strings"
 	"testing"
 	"testing/fstest"
+	"time"
 	"unicode/utf8"
 )
 
@@ -87,5 +89,45 @@ func TestReadPasswd_InvalidUTF8InANameIsReplaced(t *testing.T) {
 	}
 	if n := got[7]; n == "" || len(n) > 256 || !utf8.ValidString(n) {
 		t.Errorf("name of UID 7 = %d bytes, valid UTF-8 %v, want 1 to 256 bytes of valid UTF-8", len(n), utf8.ValidString(n))
+	}
+}
+
+func TestReadUsers_GivesTheProcessSnapshotsNames(t *testing.T) {
+	tr := newTree(t)
+	users, err := ReadUsers(tr.etc)
+	if err != nil {
+		t.Fatalf("ReadUsers() error = %v, want nil", err)
+	}
+	c, _ := newCollector(tr, nil)
+
+	snap := snapshotOf(t, c, time.Unix(fixtureBtime+100, 0), false)
+
+	for pid, uid := range map[int32]uint32{pidFpmMaster: 0, pidFpmChild: 33} {
+		want := UserName(users, uid)
+		if p := processOf(snap, pid); p == nil || p.User != want || want == strconv.FormatUint(uint64(uid), 10) {
+			t.Errorf("process %d user = %+v, want %q, the name ReadUsers and UserName give for UID %d", pid, p, want, uid)
+		}
+	}
+}
+
+func TestUserName_DecimalForAnUnknownUID(t *testing.T) {
+	users := map[uint32]string{0: "root"}
+	tests := []struct {
+		name  string
+		users map[uint32]string
+		uid   uint32
+		want  string
+	}{
+		{"known UID", users, 0, "root"},
+		{"unknown UID", users, 1000, "1000"},
+		{"largest UID", users, 4294967295, "4294967295"},
+		{"nil map", nil, 0, "0"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := UserName(tt.users, tt.uid); got != tt.want {
+				t.Errorf("UserName(%v, %d) = %q, want %q", tt.users, tt.uid, got, tt.want)
+			}
+		})
 	}
 }
