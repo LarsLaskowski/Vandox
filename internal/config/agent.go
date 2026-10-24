@@ -15,6 +15,8 @@ import (
 const (
 	keyAgentID    = "agent_id"
 	keyBackendURL = "backend.url"
+
+	keyBackendBandwidth = "backend.backfill_bandwidth"
 )
 
 // Agent is the configuration of vandox-agent.
@@ -323,7 +325,8 @@ func DefaultAgent() Agent {
 			MaxBytes:     2 << 30,
 			MinFreeBytes: 1 << 30,
 		},
-		Log: Log{Level: "info"},
+		Backend: BackendTarget{BackfillBandwidth: "256KiB", BackfillBytes: 256 << 10},
+		Log:     Log{Level: "info"},
 
 		Filesystem: Filesystem{MountPoints: []string{"/"}},
 		Backups:    Backups{Processes: []BackupRule{{Command: "pzstd"}}},
@@ -334,12 +337,12 @@ func DefaultAgent() Agent {
 	}
 }
 
-// AgentKeys returns every option key path in file order: agent_id, backend.url, spool.directory, spool.max_size, spool.min_free, log.level,
+// AgentKeys returns every option key path in file order: agent_id, backend.url, backend.backfill_bandwidth, spool.directory, spool.max_size, spool.min_free, log.level,
 // filesystem.mount_points, processes.programs, services.units, mariadb.enabled, mariadb.socket, backups.processes and the log_shipping
 // options journal, min_priority, files and drop.
 func AgentKeys() []string {
 	return []string{
-		keyAgentID, keyBackendURL, "spool.directory", "spool.max_size", "spool.min_free", "log.level", "filesystem.mount_points", "processes.programs", "services.units",
+		keyAgentID, keyBackendURL, keyBackendBandwidth, "spool.directory", "spool.max_size", "spool.min_free", "log.level", "filesystem.mount_points", "processes.programs", "services.units",
 		"mariadb.enabled", "mariadb.socket", "backups.processes",
 		"log_shipping.journal", "log_shipping.min_priority", keyShippingFiles, keyShippingDrop,
 	}
@@ -383,10 +386,13 @@ func (a *Agent) validate(file string, lines map[string]int) error {
 	if reason := urlProblem(a.Backend.URL); reason != "" {
 		return keyError(file, lines, keyBackendURL, reason)
 	}
+	var err error
+	if a.Backend.BackfillBytes, err = checkBandwidth(file, lines, keyBackendBandwidth, a.Backend.BackfillBandwidth); err != nil {
+		return err
+	}
 	if err := checkDirectory(file, lines, "spool.directory", a.Spool.Directory); err != nil {
 		return err
 	}
-	var err error
 	if a.Spool.MaxBytes, err = checkSize(file, lines, "spool.max_size", a.Spool.MaxSize, minSpoolMax, maxSpoolMax, spoolMaxText); err != nil {
 		return err
 	}
@@ -428,6 +434,22 @@ const (
 	spoolMaxText     = "must be a whole number of MiB or GiB from 64MiB to 64GiB, such as 512MiB or 2GiB"
 	spoolMinFreeText = "must be a whole number of MiB or GiB from 0MiB to 1024GiB, such as 0MiB or 1GiB"
 )
+
+// Bounds of backend.backfill_bandwidth in bytes per second and the reason it is refused with.
+const (
+	minBackfillBandwidth  = 16 << 10
+	maxBackfillBandwidth  = 1024 << 20
+	backfillBandwidthText = "must be a whole number of KiB or MiB from 16KiB to 1024MiB, such as 256KiB or 4MiB"
+)
+
+// checkBandwidth parses the bandwidth value of key and checks that it lies between 16KiB and 1024MiB.
+func checkBandwidth(file string, lines map[string]int, key, value string) (int64, error) {
+	n, ok := parseBandwidth(value)
+	if ok && n >= minBackfillBandwidth && n <= maxBackfillBandwidth {
+		return n, nil
+	}
+	return 0, keyError(file, lines, key, backfillBandwidthText)
+}
 
 // checkSize parses the size value of key and checks that it lies between lo and hi bytes.
 func checkSize(file string, lines map[string]int, key, value string, lo, hi int64, reason string) (int64, error) {

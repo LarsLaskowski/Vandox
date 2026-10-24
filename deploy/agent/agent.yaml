@@ -25,6 +25,12 @@ backend:
   # tailnet. No default.
   url: http://100.64.0.1:8081
 
+  # Bandwidth the agent may use to send spooled data it has accumulated while the backend was
+  # unreachable (the backfill): a whole number of KiB or MiB per second, from 16KiB to 1024MiB, such as
+  # 256KiB or 4MiB. Current data is not limited by it. Plain http is fine only inside the tailnet,
+  # which encrypts the traffic; use https for any other network. Default: 256KiB
+  backfill_bandwidth: 256KiB
+
 spool:
   # Directory of the local spool where the agent keeps data until the backend has received it. An
   # absolute, clean path (no trailing slash). Default: /var/lib/vandox/spool

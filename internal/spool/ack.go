@@ -185,5 +185,8 @@ func (s *Spool) removeFile(f *segFile) error {
 
 // AckRanges returns the number of acknowledged ranges above the oldest kept sequence number.
 func (s *Spool) AckRanges() int {
-	return 0
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return countAbove(s.acked, s.oldestKept())
 }

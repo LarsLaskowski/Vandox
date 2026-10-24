@@ -16,3 +16,4 @@ are quoted in full.
 | 2026-10-24 15:51 | 3 Plan security review (round 2) | squad-security | APPROVED; 3 non-blocking notes appended to plan.md as Security notes (opus/medium · 25,855 tokens · 5 tool uses · 54 s · continued) |
 | 2026-10-24 15:53 | 4 Skeleton (G1 task 1) | squad-dev | Skeleton done; gofmt, build, vet pass; existing spool/config/agent suites pass (sonnet/medium · 81,494 tokens · 11 tool uses · 79 s) |
 | 2026-10-24 15:57 | 5 Tests first (G1 task 2) | squad-tester | Config and spool tests written; fail on stubs (invalid-input cases cannot, noted) (sonnet/medium · 98,848 tokens · 12 tool uses · 240 s) |
+| 2026-10-24 15:58 | 6 Implement (G1 task 3) | squad-dev | Option and AckRanges implemented; config and spool suites pass (sonnet/medium · usage pending) |
