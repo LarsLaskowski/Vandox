@@ -417,7 +417,7 @@ func (s *Spool) appendBuf(buf []byte) error {
 	if err == nil {
 		return nil
 	}
-	if cutErr := s.actF.Truncate(s.act.size); cutErr != nil {
+	if s.actF.Truncate(s.act.size) != nil {
 		s.healTail = true
 	}
 

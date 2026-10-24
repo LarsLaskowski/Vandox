@@ -157,7 +157,7 @@ func (s *Spool) writeTrailer(f *os.File, seg *segFile) error {
 func (s *Spool) removeDoomed(doomed []doomedFile) {
 	for _, d := range doomed {
 		id := d.id
-		if err := s.dir.removeTrusted(d.name, &id); err == nil {
+		if s.dir.removeTrusted(d.name, &id) == nil {
 			s.dirNeed = true
 			s.gen++
 		}
