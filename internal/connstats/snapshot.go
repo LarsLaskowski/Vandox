@@ -156,8 +156,16 @@ type slotRef struct {
 
 // listenerEntry is an inventory entry: one listener endpoint and its owner (0: none).
 type listenerEntry struct {
-	key   listenerKey
-	owner int32
+	key       listenerKey
+	owner     int32
+	uid       uint32 // the lowest UID of the endpoint's sockets that have an inode
+	hasUID    bool
+	mixedUIDs bool // the sockets of the endpoint have more than one UID
+}
+
+// addUID records the UID of one more socket of the endpoint: the first is kept, a different one makes the lower win and sets
+// mixedUIDs.
+func (e *listenerEntry) addUID(uid uint32) {
 }
 
 // connEntry is a connection of the full snapshot and its owner (0: none).
@@ -166,6 +174,8 @@ type connEntry struct {
 	local, remote netip.AddrPort
 	state         string
 	owner         int32
+	uid           uint32
+	hasUID        bool
 }
 
 // lessConn orders connections by protocol, local endpoint, remote endpoint.
@@ -450,18 +460,18 @@ func (c *collection) remoteList() []model.RemoteCount {
 func buildSnapshot(col *collection, res *runResult, check model.ListenerCheck, added []listenerKey, full bool) *model.ConnectionSnapshot {
 	var l lists
 	l.states = col.stateList()
-	l.listeners = col.listenerList(res.commands)
+	l.listeners = col.listenerList(res)
 	l.processes = processList(res)
 	l.remotes = col.remoteList()
 	if full {
-		l.connections = col.connectionList(res.commands)
+		l.connections = col.connectionList(res)
 	} else {
 		l.remotes = l.remotes[:min(TopRemotes, len(l.remotes))]
 	}
 	reported := added[:min(MaxNewListeners, len(added))]
 	for _, key := range reported {
 		if id, ok := col.endpoints[key]; ok {
-			l.newListeners = append(l.newListeners, listenerOf(&col.listeners.items[id], res.commands))
+			l.newListeners = append(l.newListeners, listenerOf(&col.listeners.items[id], res))
 		}
 	}
 	l.omitted = uint32(min(max(len(added)-len(reported), 0), math.MaxUint32))
@@ -474,34 +484,34 @@ func buildSnapshot(col *collection, res *runResult, check model.ListenerCheck, a
 	return snap
 }
 
-// listenerOf returns the listener entry with its owner's command.
-func listenerOf(e *listenerEntry, commands map[int32]string) model.Listener {
+// listenerOf returns the listener entry with its owner's command and the socket's UID and user name.
+func listenerOf(e *listenerEntry, res *runResult) model.Listener {
 	l := model.Listener{Proto: e.key.proto, Local: netip.AddrPortFrom(e.key.addr, e.key.port)}
 	if e.owner != 0 {
-		l.PID, l.Command = e.owner, commands[e.owner]
+		l.PID, l.Command = e.owner, res.commands[e.owner]
 	}
 	return l
 }
 
 // listenerList returns the inventory in inventory order.
-func (c *collection) listenerList(commands map[int32]string) []model.Listener {
+func (c *collection) listenerList(res *runResult) []model.Listener {
 	entries := c.listeners.sorted()
 	out := make([]model.Listener, len(entries))
 	for i := range entries {
-		out[i] = listenerOf(&entries[i], commands)
+		out[i] = listenerOf(&entries[i], res)
 	}
 	return out
 }
 
 // connectionList returns the kept connections by protocol, local endpoint, remote endpoint.
-func (c *collection) connectionList(commands map[int32]string) []model.Connection {
+func (c *collection) connectionList(res *runResult) []model.Connection {
 	entries := c.conns.sorted()
 	out := make([]model.Connection, len(entries))
 	for i := range entries {
 		e := &entries[i]
 		out[i] = model.Connection{Proto: e.proto, Local: e.local, Remote: e.remote, State: e.state}
 		if e.owner != 0 {
-			out[i].PID, out[i].Command = e.owner, commands[e.owner]
+			out[i].PID, out[i].Command = e.owner, res.commands[e.owner]
 		}
 	}
 	return out

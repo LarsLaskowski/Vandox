@@ -98,7 +98,7 @@ func (c *Processes) Collect(ctx context.Context, run scheduler.Run) ([]model.Rec
 	if err != nil {
 		return nil, err
 	}
-	users, usersErr := readPasswd(c.src.Etc)
+	users, usersErr := ReadUsers(c.src.Etc)
 	pids, seen, err := listPIDs(c.src.Proc)
 	if err != nil {
 		return nil, err
@@ -345,7 +345,7 @@ func (c *Processes) readProcess(r *reader, pid int32, boot time.Time, users map[
 	comm, _ := cleanText(st.comm, maxTextBytes)
 	command := commandFor(cmdline, comm)
 	p := model.ProcessSample{
-		PID: st.pid, PPID: st.ppid, User: userName(users, status.euid), Command: command, Cmdline: cmdline, Truncated: truncated,
+		PID: st.pid, PPID: st.ppid, User: UserName(users, status.euid), Command: command, Cmdline: cmdline, Truncated: truncated,
 		StartedAt: startedAt, RSSBytes: rss, PSSBytes: pss,
 	}
 	if st.state >= 'a' && st.state <= 'z' || st.state >= 'A' && st.state <= 'Z' {
@@ -358,8 +358,8 @@ func (c *Processes) readProcess(r *reader, pid int32, boot time.Time, users map[
 	return readProc{sample: p, program: programFor(c.rules, cmdline, command), start: st.starttime, ticks: satAdd(st.utime, st.stime)}, nil
 }
 
-// userName returns the name of the user uid, or the UID in decimal.
-func userName(users map[uint32]string, uid uint32) string {
+// UserName returns the name of the user uid, or the UID in decimal.
+func UserName(users map[uint32]string, uid uint32) string {
 	if name, ok := users[uid]; ok {
 		return name
 	}

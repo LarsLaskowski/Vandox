@@ -83,23 +83,23 @@ func TestParseLine_ServerSamples(t *testing.T) {
 	}
 
 	checkSamples(t, []sample{
-		{serverNetDir, "tcp", tcpTable, 0, socket{model.ProtoTCP, addrPort("0.0.0.0:110"), addrPort("0.0.0.0:0"), "LISTEN", 16364321}},
-		{serverNetDir, "tcp", tcpTable, 2, socket{model.ProtoTCP, addrPort("127.0.0.1:3306"), addrPort("0.0.0.0:0"), "LISTEN", 16365476}},
-		{serverNetDir, "tcp", tcpTable, 16, socket{model.ProtoTCP, addrPort("192.0.2.10:443"), addrPort("0.0.0.0:0"), "LISTEN", 16364675}},
+		{serverNetDir, "tcp", tcpTable, 0, socket{proto: model.ProtoTCP, local: addrPort("0.0.0.0:110"), remote: addrPort("0.0.0.0:0"), state: "LISTEN", inode: 16364321}},
+		{serverNetDir, "tcp", tcpTable, 2, socket{proto: model.ProtoTCP, local: addrPort("127.0.0.1:3306"), remote: addrPort("0.0.0.0:0"), state: "LISTEN", inode: 16365476}},
+		{serverNetDir, "tcp", tcpTable, 16, socket{proto: model.ProtoTCP, local: addrPort("192.0.2.10:443"), remote: addrPort("0.0.0.0:0"), state: "LISTEN", inode: 16364675}},
 		// ESTABLISHED, a running timer, a non-zero send queue and a last field of -1.
-		{serverNetDir, "tcp", tcpTable, 26, socket{model.ProtoTCP, addrPort("192.0.2.10:22"), addrPort("198.51.100.7:25249"), "ESTABLISHED", 17280839}},
+		{serverNetDir, "tcp", tcpTable, 26, socket{proto: model.ProtoTCP, local: addrPort("192.0.2.10:22"), remote: addrPort("198.51.100.7:25249"), state: "ESTABLISHED", inode: 17280839}},
 		// TIME_WAIT: inode 0 and fewer tail fields.
-		{serverNetDir, "tcp", tcpTable, 27, socket{model.ProtoTCP, addrPort("192.0.2.10:56518"), addrPort("198.51.100.20:443"), "TIME_WAIT", 0}},
-		{serverNetDir, "tcp6", tcp6Table, 0, socket{model.ProtoTCP6, addrPort("[::]:106"), addrPort("[::]:0"), "LISTEN", 22074}},
-		{serverNetDir, "tcp6", tcp6Table, 7, socket{model.ProtoTCP6, addrPort("[2001:db8::10]:53"), addrPort("[::]:0"), "LISTEN", 16364562}},
-		{serverNetDir, "tcp6", tcp6Table, 10, socket{model.ProtoTCP6, addrPort("[::1]:53"), addrPort("[::]:0"), "LISTEN", 16364558}},
-		{serverNetDir, "tcp6", tcp6Table, 15, socket{model.ProtoTCP6, addrPort("[fe80::200:5eff:fe00:5301]:53"), addrPort("[::]:0"), "LISTEN", 16364566}},
+		{serverNetDir, "tcp", tcpTable, 27, socket{proto: model.ProtoTCP, local: addrPort("192.0.2.10:56518"), remote: addrPort("198.51.100.20:443"), state: "TIME_WAIT", inode: 0}},
+		{serverNetDir, "tcp6", tcp6Table, 0, socket{proto: model.ProtoTCP6, local: addrPort("[::]:106"), remote: addrPort("[::]:0"), state: "LISTEN", inode: 22074}},
+		{serverNetDir, "tcp6", tcp6Table, 7, socket{proto: model.ProtoTCP6, local: addrPort("[2001:db8::10]:53"), remote: addrPort("[::]:0"), state: "LISTEN", inode: 16364562}},
+		{serverNetDir, "tcp6", tcp6Table, 10, socket{proto: model.ProtoTCP6, local: addrPort("[::1]:53"), remote: addrPort("[::]:0"), state: "LISTEN", inode: 16364558}},
+		{serverNetDir, "tcp6", tcp6Table, 15, socket{proto: model.ProtoTCP6, local: addrPort("[fe80::200:5eff:fe00:5301]:53"), remote: addrPort("[::]:0"), state: "LISTEN", inode: 16364566}},
 		// A connected UDP socket and an unconnected one; the state is dropped.
-		{serverNetDir, "udp", udpTable, 0, socket{model.ProtoUDP, addrPort("192.0.2.10:11651"), addrPort("192.0.2.53:53"), "", 16955396}},
-		{serverNetDir, "udp", udpTable, 2, socket{model.ProtoUDP, addrPort("192.0.2.10:53"), addrPort("0.0.0.0:0"), "", 16364553}},
-		{serverNetDir, "udp", udpTable, 6, socket{model.ProtoUDP, addrPort("127.0.0.53:53"), addrPort("0.0.0.0:0"), "", 14358468}},
-		{serverNetDir, "udp6", udp6Table, 0, socket{model.ProtoUDP6, addrPort("[::1]:53"), addrPort("[::]:0"), "", 16364556}},
-		{serverNetDir, "udp6", udp6Table, 4, socket{model.ProtoUDP6, addrPort("[fe80::200:5eff:fe00:5301]:53"), addrPort("[::]:0"), "", 16364564}},
+		{serverNetDir, "udp", udpTable, 0, socket{proto: model.ProtoUDP, local: addrPort("192.0.2.10:11651"), remote: addrPort("192.0.2.53:53"), state: "", inode: 16955396}},
+		{serverNetDir, "udp", udpTable, 2, socket{proto: model.ProtoUDP, local: addrPort("192.0.2.10:53"), remote: addrPort("0.0.0.0:0"), state: "", inode: 16364553}},
+		{serverNetDir, "udp", udpTable, 6, socket{proto: model.ProtoUDP, local: addrPort("127.0.0.53:53"), remote: addrPort("0.0.0.0:0"), state: "", inode: 14358468}},
+		{serverNetDir, "udp6", udp6Table, 0, socket{proto: model.ProtoUDP6, local: addrPort("[::1]:53"), remote: addrPort("[::]:0"), state: "", inode: 16364556}},
+		{serverNetDir, "udp6", udp6Table, 4, socket{proto: model.ProtoUDP6, local: addrPort("[fe80::200:5eff:fe00:5301]:53"), remote: addrPort("[::]:0"), state: "", inode: 16364564}},
 	})
 
 	t.Run("a link-local address carries no zone", func(t *testing.T) {
@@ -167,12 +167,12 @@ func TestParseLine_SandboxSamples(t *testing.T) {
 	}
 
 	checkSamples(t, []sample{
-		{sandboxNetDir, "tcp", tcpTable, 1, socket{model.ProtoTCP, addrPort("0.0.0.0:4444"), addrPort("0.0.0.0:0"), "LISTEN", 16082}},
-		{sandboxNetDir, "tcp", tcpTable, 7, socket{model.ProtoTCP, addrPort("127.0.0.1:4444"), addrPort("127.0.0.1:55388"), "ESTABLISHED", 16084}},
-		{sandboxNetDir, "tcp", tcpTable, 38, socket{model.ProtoTCP, addrPort("127.0.0.1:55388"), addrPort("127.0.0.1:4444"), "ESTABLISHED", 16083}},
-		{sandboxNetDir, "tcp", tcpTable, 39, socket{model.ProtoTCP, addrPort("127.0.0.1:46462"), addrPort("127.0.0.1:44645"), "TIME_WAIT", 0}},
-		{sandboxNetDir, "udp", udpTable, 0, socket{model.ProtoUDP, addrPort("127.0.0.1:36728"), addrPort("127.0.0.1:53"), "", 16081}},
-		{sandboxNetDir, "udp", udpTable, 1, socket{model.ProtoUDP, addrPort("0.0.0.0:5353"), addrPort("0.0.0.0:0"), "", 16080}},
+		{sandboxNetDir, "tcp", tcpTable, 1, socket{proto: model.ProtoTCP, local: addrPort("0.0.0.0:4444"), remote: addrPort("0.0.0.0:0"), state: "LISTEN", inode: 16082}},
+		{sandboxNetDir, "tcp", tcpTable, 7, socket{proto: model.ProtoTCP, local: addrPort("127.0.0.1:4444"), remote: addrPort("127.0.0.1:55388"), state: "ESTABLISHED", inode: 16084}},
+		{sandboxNetDir, "tcp", tcpTable, 38, socket{proto: model.ProtoTCP, local: addrPort("127.0.0.1:55388"), remote: addrPort("127.0.0.1:4444"), state: "ESTABLISHED", inode: 16083}},
+		{sandboxNetDir, "tcp", tcpTable, 39, socket{proto: model.ProtoTCP, local: addrPort("127.0.0.1:46462"), remote: addrPort("127.0.0.1:44645"), state: "TIME_WAIT", inode: 0}},
+		{sandboxNetDir, "udp", udpTable, 0, socket{proto: model.ProtoUDP, local: addrPort("127.0.0.1:36728"), remote: addrPort("127.0.0.1:53"), state: "", inode: 16081}},
+		{sandboxNetDir, "udp", udpTable, 1, socket{proto: model.ProtoUDP, local: addrPort("0.0.0.0:5353"), remote: addrPort("0.0.0.0:0"), state: "", inode: 16080}},
 	})
 }
 

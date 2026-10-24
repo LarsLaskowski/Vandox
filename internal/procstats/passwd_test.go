@@ -44,21 +44,21 @@ func TestReadPasswd(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			etc := fstest.MapFS{"passwd": &fstest.MapFile{Data: []byte(tt.data)}}
 
-			got, err := readPasswd(etc)
+			got, err := ReadUsers(etc)
 
 			if (err != nil) != tt.fail {
-				t.Fatalf("readPasswd() error = %v, want an error: %v", err, tt.fail)
+				t.Fatalf("ReadUsers() error = %v, want an error: %v", err, tt.fail)
 			}
 			if !tt.fail && !maps.Equal(got, tt.want) {
-				t.Errorf("readPasswd() = %v, want %v", got, tt.want)
+				t.Errorf("ReadUsers() = %v, want %v", got, tt.want)
 			}
 		})
 	}
 }
 
 func TestReadPasswd_FileMissing(t *testing.T) {
-	if _, err := readPasswd(fstest.MapFS{}); err == nil {
-		t.Errorf("readPasswd(empty /etc) error = nil, want an error")
+	if _, err := ReadUsers(fstest.MapFS{}); err == nil {
+		t.Errorf("ReadUsers(empty /etc) error = nil, want an error")
 	}
 }
 
@@ -69,18 +69,18 @@ func TestReadPasswd_FileOfExactlyOneMiB(t *testing.T) {
 		t.Fatalf("test setup: %d bytes, want exactly 1 MiB", len(data))
 	}
 
-	got, err := readPasswd(fstest.MapFS{"passwd": &fstest.MapFile{Data: []byte(data)}})
+	got, err := ReadUsers(fstest.MapFS{"passwd": &fstest.MapFile{Data: []byte(data)}})
 
 	if err != nil || got[1] != "a" {
-		t.Errorf("readPasswd(1 MiB) = %v, %v, want UID 1 named a and no error", got[1], err)
+		t.Errorf("ReadUsers(1 MiB) = %v, %v, want UID 1 named a and no error", got[1], err)
 	}
 }
 
 func TestReadPasswd_InvalidUTF8InANameIsReplaced(t *testing.T) {
-	got, err := readPasswd(fstest.MapFS{"passwd": &fstest.MapFile{Data: []byte("a\xffb:x:6:6\n" + strings.Repeat("\xff", 300) + ":x:7:7\n")}})
+	got, err := ReadUsers(fstest.MapFS{"passwd": &fstest.MapFile{Data: []byte("a\xffb:x:6:6\n" + strings.Repeat("\xff", 300) + ":x:7:7\n")}})
 
 	if err != nil {
-		t.Fatalf("readPasswd() error = %v, want nil", err)
+		t.Fatalf("ReadUsers() error = %v, want nil", err)
 	}
 	if got[6] != "a\uFFFDb" {
 		t.Errorf("name of UID 6 = %q, want %q", got[6], "a\uFFFDb")

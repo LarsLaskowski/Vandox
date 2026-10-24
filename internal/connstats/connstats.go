@@ -40,9 +40,10 @@ type SocketMount struct {
 	Err error
 }
 
-// Sources are the places the collector reads; a nil Proc is os.DirFS("/proc").
+// Sources are the places the collector reads; a nil Proc is os.DirFS("/proc") and a nil Etc os.DirFS("/etc").
 type Sources struct {
 	Proc        fs.FS
+	Etc         fs.FS
 	SocketMount SocketMount
 }
 
@@ -68,6 +69,7 @@ type logState struct {
 	linesBad         bool
 	ownersUnknown    bool
 	ownersUnreadable bool
+	usersUnavailable bool
 }
 
 // Connections is the connection collector.
@@ -83,6 +85,9 @@ type Connections struct {
 func New(src Sources, log *slog.Logger) *Connections {
 	if src.Proc == nil {
 		src.Proc = os.DirFS("/proc")
+	}
+	if src.Etc == nil {
+		src.Etc = os.DirFS("/etc")
 	}
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
@@ -103,6 +108,8 @@ type runResult struct {
 	firstErr      error
 	pidCapped     bool
 	ownersUnknown error
+	users         map[uint32]string
+	usersErr      error
 }
 
 // Collect takes one connection snapshot.

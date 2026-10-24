@@ -54,6 +54,7 @@ type socket struct {
 	local, remote netip.AddrPort
 	state         string
 	inode         uint64
+	uid           uint32
 }
 
 // parseLine parses one line of table t, given without its newline.
@@ -198,6 +199,11 @@ func parseInode(f []byte) (uint64, error) {
 		return 0, errFormat
 	}
 	return v, nil
+}
+
+// parseUID parses 1 to 10 decimal digits within 32 bits.
+func parseUID(f []byte) (uint32, error) {
+	return 0, errors.New("not implemented")
 }
 
 // readTable reads table t and calls visit per socket and bad per unreadable line (numbered from 1, the header being line 1);
