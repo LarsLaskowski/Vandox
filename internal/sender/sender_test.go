@@ -956,8 +956,8 @@ func TestSender_PermanentRefusalBoundsRequestsAndLogs(t *testing.T) {
 		r := newRig(t)
 		r.tr.setScript(refusePoison)
 		now := time.Now().UTC()
-		recs := make([]model.Record, 0, 20)
-		for i := range 20 {
+		recs := make([]model.Record, 0, 30)
+		for i := range 30 {
 			recs = append(recs, textRec(now, poisonTag+strconv.Itoa(i), 300, r.rng))
 		}
 		seqs := r.put(recs...)
@@ -970,12 +970,18 @@ func TestSender_PermanentRefusalBoundsRequestsAndLogs(t *testing.T) {
 
 		advance(95 * time.Minute)
 
-		if got := len(giveUps(r)); got < MaxGivenUpPerHour || got > 20 {
-			t.Errorf("%d records given up in two hours, want 10 to 20", got)
+		if got := len(giveUps(r)); got != 30 {
+			t.Errorf("%d records given up in two hours, want all 30 (ten per hour)", got)
 		}
 		requireHourlyBound(t, giveUps(r))
-		if got := r.logs.notAccepting(); len(got) < 1 || len(got) > 2 || got[0].str("reason") != "refused" {
-			t.Errorf("%d warnings %q (first %v), want one or two with reason refused", len(got), msgNotAccepting, got)
+		got := r.logs.notAccepting()
+		if len(got) != 2 {
+			t.Fatalf("%d warnings %q, want exactly two with reason refused, one for each of the two waits", len(got), msgNotAccepting)
+		}
+		for _, e := range got {
+			if e.str("reason") != "refused" {
+				t.Errorf("warning %q, want reason=refused", e.text())
+			}
 		}
 		if got := len(r.tr.snapshot()); got > 500 {
 			t.Errorf("%d requests in two hours for %d refused records, want at most 500", got, len(seqs))
@@ -1401,6 +1407,150 @@ func testPressureDuringPass(t *testing.T) {
 	requireComplete(t, r, backlog[0])
 }
 
+func TestSender_GateAfterThrottleWaitHoldsBackfill(t *testing.T) {
+	t.Run("pressure turns on during the wait", func(t *testing.T) {
+		bubble(t, func(t *testing.T) {
+			r, backlog := throttledBackfill(t)
+
+			r.snd.SetPressure(true)
+			requireBackfillHeld(t, r, 1, 40*time.Second)
+
+			r.snd.SetPressure(false)
+			advanceUntil(t, 10*time.Minute, time.Second, "the backfill to finish", func() bool { return r.logs.count(msgBfFinished) > 0 })
+			requireComplete(t, r, backlog[0])
+		})
+	})
+	t.Run("an episode starts during the wait", func(t *testing.T) {
+		bubble(t, func(t *testing.T) {
+			r, backlog := throttledBackfill(t)
+
+			r.tr.setScript(func(c call) reply {
+				if c.mode() == wire.ModeLive {
+					return replyFail(connFail)
+				}
+
+				return replyOK()
+			})
+			r.live("down", 200)
+			advanceUntil(t, 10*time.Second, 100*time.Millisecond, "the episode to start", r.snd.episodeActive)
+			requireBackfillHeld(t, r, 1, 40*time.Second)
+
+			r.tr.setScript(allOK)
+			r.live("up", 200)
+			advanceUntil(t, 10*time.Minute, time.Second, "the backfill to finish", func() bool { return r.logs.count(msgBfFinished) > 0 })
+			requireComplete(t, r, backlog[0])
+		})
+	})
+}
+
+// throttledBackfill returns a rig whose backfill has sent its first batch and waits in the throttle for the second: the
+// bandwidth lets a megabyte batch pass in about sixteen seconds.
+func throttledBackfill(t *testing.T) (*rig, []uint64) {
+	t.Helper()
+
+	r := newRig(t)
+	r.bandwidth = 64 << 10
+	backlog := r.backlog("b", 150, 15000)
+	r.start()
+	advance(time.Second)
+	r.live("probe", 200)
+	advanceUntil(t, time.Minute, 100*time.Millisecond, "the first backfill batch", func() bool { return len(r.tr.callsOf(wire.ModeBackfill)) > 0 })
+
+	return r, backlog
+}
+
+// requireBackfillHeld fails the test when a backfill request is made beyond sent in the span.
+func requireBackfillHeld(t *testing.T, r *rig, sent int, span time.Duration) {
+	t.Helper()
+
+	advance(span)
+	if got := len(r.tr.callsOf(wire.ModeBackfill)); got != sent {
+		t.Errorf("%d backfill requests, want %d: the backfill must not send while the backend is down or the memory is short", got, sent)
+	}
+}
+
+func TestSender_NoPauseLineWithoutBacklog(t *testing.T) {
+	t.Run("start under pressure", func(t *testing.T) {
+		bubble(t, func(t *testing.T) {
+			r := newRig(t)
+			r.start()
+			r.snd.SetPressure(true)
+			advance(time.Second)
+			r.live("probe", 200)
+			advance(30 * time.Second)
+
+			r.snd.SetPressure(false)
+			advance(30 * time.Second)
+
+			requireBackfillState(t, r, 0, 0)
+		})
+	})
+	t.Run("reconnect under pressure", func(t *testing.T) {
+		bubble(t, func(t *testing.T) {
+			r := newRig(t)
+			r.tr.setScript(failAll(connFail))
+			r.start()
+			r.snd.SetPressure(true)
+			advance(time.Second)
+			r.live("probe", 200)
+			advance(30 * time.Second)
+
+			r.tr.setScript(allOK)
+			r.live("up", 200)
+			advanceUntil(t, 5*time.Minute, time.Second, "the backend to be accepted again", func() bool { return r.logs.count(msgAccepting) > 0 })
+			advance(30 * time.Second)
+			r.snd.SetPressure(false)
+			advance(30 * time.Second)
+
+			requireBackfillState(t, r, 0, 0)
+		})
+	})
+}
+
+func TestSender_GapPutThenFailedAckWritesOneGap(t *testing.T) {
+	bubble(t, func(t *testing.T) {
+		r := newRig(t)
+		r.tr.setScript(refusePoison)
+		r.start()
+		recs := []model.Record{
+			textRec(time.Now().UTC(), "n0", 200, r.rng),
+			textRec(time.Now().UTC(), poisonTag, 200, r.rng),
+			textRec(time.Now().UTC(), "n2", 200, r.rng),
+		}
+		seqs := r.put(recs...)
+		failed := false
+		r.sp.setAckErr(func(first, last uint64) error {
+			if first == seqs[1] && last == seqs[1] && failed == false {
+				failed = true
+
+				return errors.New("injected acknowledgement failure")
+			}
+
+			return nil
+		})
+
+		advance(2 * time.Minute)
+
+		if failed == false {
+			t.Fatalf("the acknowledgement of the refused record %d was never attempted, want the give-up to reach it", seqs[1])
+		}
+		gaps := 0
+		for _, c := range r.tr.snapshot() {
+			for _, rec := range c.recs {
+				if g := gapOf(rec); g != nil && g.FirstSeq == seqs[1] && c.committed {
+					gaps++
+				}
+			}
+		}
+		if gaps != 1 {
+			t.Errorf("%d gap records committed for the refused record %d, want exactly one (the retry after the failed acknowledgement must not write a second)", gaps, seqs[1])
+		}
+		if left := r.sp.unacked(t); len(left) != 0 {
+			t.Errorf("%d records unacknowledged afterwards, want none (first seq %d)", len(left), left[0].Seq)
+		}
+	})
+}
+
 // requireBatchBounds checks that no batch is above the bounds of a batch.
 func requireBatchBounds(t *testing.T, calls []call) {
 	t.Helper()
@@ -1652,18 +1802,18 @@ func TestSender_FlapsAndRefusalsKeepRangesBounded(t *testing.T) {
 			cycle  = 380 * time.Second
 		)
 		r := newRig(t)
-		r.bandwidth = 200
+		r.bandwidth = 20
 		first := r.sp.LastSeq() + 1
 		r.tr.setScript(flapBackend(time.Now(), up, cycle))
 		r.start()
 		rng := r.ownRng()
-		f := r.feed(123*time.Millisecond, 30*time.Second, func(i int, at time.Time) model.Record {
+		f := r.feed(123*time.Millisecond, 45*time.Second, func(i int, at time.Time) model.Record {
 			tag := "n" + strconv.Itoa(i)
-			if i%12 == 7 && i < 1200 {
+			if i%8 == 5 && i < 800 {
 				tag = poisonTag + strconv.Itoa(i)
 			}
 
-			return textRec(at, tag, 2000, rng)
+			return textRec(at, tag, 200, rng)
 		})
 		advance(cycles * cycle)
 		f.halt()
