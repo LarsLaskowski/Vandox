@@ -71,7 +71,8 @@ public sealed class Listener
     {
         return ConnectionSnapshot.CheckProtoOnly(path, Proto)
                    ?? Check.AddressPort($"{path}.local", Local)
-                   ?? ConnectionSnapshot.CheckProcess(path, Pid, Command);
+                   ?? ConnectionSnapshot.CheckProcess(path, Pid, Command)
+                   ?? ConnectionSnapshot.CheckSocketUser(path, Uid, User, MixedUids);
     }
 
     #endregion // Methods

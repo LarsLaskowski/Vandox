@@ -79,7 +79,8 @@ public sealed class Connection
         return ConnectionSnapshot.CheckProto(path, Proto, State)
                    ?? Check.AddressPort($"{path}.local", Local)
                    ?? Check.AddressPort($"{path}.remote", Remote)
-                   ?? ConnectionSnapshot.CheckProcess(path, Pid, Command);
+                   ?? ConnectionSnapshot.CheckProcess(path, Pid, Command)
+                   ?? ConnectionSnapshot.CheckSocketUser(path, Uid, User, false);
     }
 
     #endregion // Methods

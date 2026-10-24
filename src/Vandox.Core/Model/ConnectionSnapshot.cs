@@ -204,12 +204,23 @@ public sealed class ConnectionSnapshot : IPayload
     /// <param name="user">The user name</param>
     /// <param name="mixedUids">Whether sockets of several UIDs share the endpoint</param>
     /// <returns>The first rule that is broken, or <c>null</c></returns>
-#pragma warning disable RH2003, S2325
     internal static FieldError? CheckSocketUser(string path, uint? uid, string user, bool mixedUids)
     {
-        throw new NotImplementedException();
+        if (uid is null)
+        {
+            if (user.Length > 0)
+            {
+                return Check.Invalid($"{path}.user", "requires uid");
+            }
+
+            if (mixedUids)
+            {
+                return Check.Invalid($"{path}.mixed_uids", "requires uid");
+            }
+        }
+
+        return Check.Short($"{path}.user", user);
     }
-#pragma warning restore RH2003, S2325
 
     /// <summary>
     /// Checks every entry of a list.

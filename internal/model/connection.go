@@ -1,7 +1,6 @@
 package model
 
 import (
-	"errors"
 	"net/netip"
 )
 
@@ -229,6 +228,9 @@ func (s *ConnectionSnapshot) validateConnections() error {
 		if err := checkProcess(path, e.PID, e.Command); err != nil {
 			return err
 		}
+		if err := checkSocketUser(path, e.UID, e.User, false); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -290,6 +292,9 @@ func checkListeners(name string, listeners []Listener) error {
 		if err := checkProcess(path, e.PID, e.Command); err != nil {
 			return err
 		}
+		if err := checkSocketUser(path, e.UID, e.User, e.MixedUIDs); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -324,7 +329,15 @@ func checkCountValue(path string, n uint32) error {
 
 // checkSocketUser checks the socket's UID, user name and mixed-UIDs flag of an entry.
 func checkSocketUser(path string, uid *uint32, user string, mixed bool) error {
-	return errors.New("not implemented")
+	if uid == nil {
+		if user != "" {
+			return invalid(path+".user", "requires uid")
+		}
+		if mixed {
+			return invalid(path+".mixed_uids", "requires uid")
+		}
+	}
+	return checkShort(path+".user", user)
 }
 
 func checkProcess(path string, pid int32, command string) error {
