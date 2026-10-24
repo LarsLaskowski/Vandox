@@ -374,3 +374,11 @@ Security (plan, round 1):
 
 The ingest endpoint (#40) implements the contract in `backend-host.md`; #41 must allow the 4 s send interval plus up to ten
 back-to-back requests (10 s) as lateness tolerance (stated in 0125). No new follow-up issue.
+
+## Security notes
+
+Security, plan review round 2 (APPROVED), non-blocking:
+
+1. Spec E5 is now stale. It still says the agent "judges the answer by its status alone" (spec.md line 88), and AC10 says the same at line 202. Since the revision, the agent also reads the `Vandox-Refused` value. Suggested wording: "by its status and the exact value of `Vandox-Refused`".
+2. The #40 contract should say two more things (backend host *Ingest endpoint* section, Lead, G4): the endpoint checks the token before it reads or decodes the body; it sends `Vandox-Refused` only on an authenticated request.
+3. Header comparison: say in the transport that the agent reads `Header.Get(RefusedHeader)` and compares it exactly, case-sensitive, with `RefusedValue`, so that the Tester's `TestHTTPTransport_RefusedOnlyWithHeader` pins one rule.
