@@ -66,4 +66,10 @@ memory pressure mode. The values, log lines and order of events are in the [Agen
 - The hourly bound is kept in memory: each start of the agent allows 10 more give-ups. Restarts are rare and each give-up is a recorded
   gap, so a persisted bound was not worth a second state file.
 - The sender needs the spool's count of open acknowledged ranges, a read-only addition to the spool.
+- The agent opens the spool before it builds the sender and the scheduler, so it closes the spool when either of them fails.
+  Both failures are defensive only: `config.LoadAgent` already rejects every backend URL the HTTP transport refuses and every
+  log-shipping setting the scheduler refuses, and the scheduler's sink is always the spool. The two closes stay without a unit
+  test. A hook variable or an injectable constructor only to reach them would add production code with no other use. Removing
+  the close after a scheduler failure would leave the spool open on a path that a looser loader would make real. Add a test
+  when a loader change makes either failure reachable.
 - Revisit the 32-range threshold and the hourly bound if the server measurement (#44) or real outages show other figures.

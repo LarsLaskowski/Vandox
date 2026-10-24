@@ -288,7 +288,9 @@ Existing test call sites: `internal/spool/cover_test.go:170-174` uses `errClosed
 `spoolRunOptions` in `internal/agent/agent_test.go:1704` must set `Options.Transport` to a fake that answers `NotAccepting`, so no
 agent test dials a real address — the Tester in step 5 (old and new coexist). `newScheduler` stays call-compatible (variadic).
 
-Files no unit test can cover: none.
+Files no unit test can cover: none. Lines: in `Run` (`internal/agent/agent.go`) the `closeSpool` on the `newSender` and on the
+`newScheduler` failure path stay untested by decision (step-7 finding): `config.LoadAgent` already rejects every input that
+reaches them, and a seam only for them was not worth it (record 0125, *Consequences*).
 
 ## Areas
 
