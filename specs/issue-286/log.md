@@ -12,3 +12,4 @@ are quoted in full.
 | 2026-10-24 12:40 | 2 Plan (after PM answer) | squad-lead | RESULT: DONE: tier security, area 10 parsing of external input; plan.md, records 0119/0121 edited in place; plan-check PASS (opus/medium · 173,510 tokens · 68 tool uses · 718 s · continued) |
 | 2026-10-24 12:42 | 3 Plan security review | squad-security | APPROVED; one non-blocking finding: Refresh must refuse a COMPACT bit differing from Open (stale arrCap in Cursor) (opus/medium · 56,787 tokens · 11 tool uses · 109 s) |
 | 2026-10-24 12:42 | 2 Plan challenge | squad-devils-advocate | OBJECTIONS 0 major, 1 minor (name prefix read width at payloadOff); appended as Challenge notes with Security's note (opus/medium · 62,056 tokens · 13 tool uses · 126 s) |
+| 2026-10-24 12:43 | 4 Skeleton | squad-dev | DONE: constants, File width fields, itemOffset/arraySlot stubs, Options.Compact; go build passes, load untouched (sonnet/medium · usage pending) |

@@ -38,6 +38,8 @@ type Options struct {
 	Online                      bool
 	// Compress, when set, compresses the payloads of 512 bytes and more; nil keeps the raw-block frames.
 	Compress func(payload []byte) ([]byte, error)
+	// Compact writes the COMPACT layout of systemd 255 (272-byte header, 32-bit items) instead of the server's systemd 249 layout.
+	Compact bool
 }
 
 // Write writes entries as a journal file to w, in the order given. An entry holds the pseudo fields __REALTIME_TIMESTAMP and

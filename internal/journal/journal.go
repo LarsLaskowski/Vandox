@@ -45,11 +45,12 @@ const (
 	typeEntry = 3
 	typeArray = 6
 
-	flagsXZ     = 1 << 0
-	flagsLZ4    = 1 << 1
-	flagsKeyed  = 1 << 2
-	flagsZSTD   = 1 << 3
-	objCompress = 7 // XZ, LZ4 or ZSTD in the flags byte of an object header
+	flagsXZ      = 1 << 0
+	flagsLZ4     = 1 << 1
+	flagsKeyed   = 1 << 2
+	flagsZSTD    = 1 << 3
+	flagsCompact = 1 << 4
+	objCompress  = 7 // XZ, LZ4 or ZSTD in the flags byte of an object header
 
 	headerOnline = 1
 
@@ -69,22 +70,26 @@ const (
 	atHeadRealtime = 184
 	atTailRealtime = 192
 
-	dataFixed     = 64 // object header and the fixed part of a data object
-	entryFixed    = 64
-	arrayFixed    = 24
-	itemSize      = 16 // size of an item of an entry
-	bucketSize    = 16 // size of a bucket of the data hash table
-	tableHeader   = 16
-	maxArrays     = 64   // entry arrays of one chain; they double in size, so 64 cover any file
-	maxItems      = 512  // items of one entry
-	maxPayload    = 4096 // bytes of a payload read
-	namePrefix    = 64   // bytes of a payload read to see its name
-	maxChain      = 1 << 16
-	maxKept       = 16 // fields of one entry handed to the caller
-	itemBufSize   = maxItems * itemSize
-	scratchSize   = 256
-	realtimeLimit = 253402300800000000 // 1 Jan 10000 UTC in µs, the first time time.Time.MarshalJSON refuses
-	monotonicMax  = math.MaxInt64 / 1000
+	dataFixed        = 64 // object header and the fixed part of a data object
+	entryFixed       = 64
+	arrayFixed       = 24
+	itemSize         = 16 // size of an item of an entry
+	dataFixedCompact = 72 // data object of COMPACT: the fixed part plus two 32-bit tail fields
+	itemSizeCompact  = 4  // entry item of COMPACT: a 32-bit offset, no hash
+	slotSize         = 8  // entry-array item of the non-compact layout
+	slotSizeCompact  = 4  // entry-array item of COMPACT
+	bucketSize       = 16 // size of a bucket of the data hash table
+	tableHeader      = 16
+	maxArrays        = 64   // entry arrays of one chain; they double in size, so 64 cover any file
+	maxItems         = 512  // items of one entry
+	maxPayload       = 4096 // bytes of a payload read
+	namePrefix       = 64   // bytes of a payload read to see its name
+	maxChain         = 1 << 16
+	maxKept          = 16 // fields of one entry handed to the caller
+	itemBufSize      = maxItems * itemSize
+	scratchSize      = 256
+	realtimeLimit    = 253402300800000000 // 1 Jan 10000 UTC in µs, the first time time.Time.MarshalJSON refuses
+	monotonicMax     = math.MaxInt64 / 1000
 )
 
 var byteOrder = binary.LittleEndian
@@ -112,6 +117,20 @@ type File struct {
 	hdr      Header
 	scratch  [scratchSize]byte
 	items    [itemBufSize]byte
+
+	payloadOff uint64 // offset of the payload in a data object: dataFixed or dataFixedCompact
+	itemWidth  uint64 // bytes of an entry item: itemSize or itemSizeCompact
+	slotWidth  uint64 // bytes of an entry-array item: slotSize or slotSizeCompact
+}
+
+// itemOffset returns the data object offset in item i of the item table of an entry.
+func (f *File) itemOffset(table []byte, i uint64) uint64 {
+	return 0
+}
+
+// arraySlot reads the entry offset in item k of the entry array at arr.
+func (f *File) arraySlot(arr, k uint64) (uint64, error) {
+	return 0, errors.New("not implemented")
 }
 
 // Open reads the header of the journal file r of the given size; setAside marks a *.journal~ file.
