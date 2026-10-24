@@ -1326,6 +1326,39 @@ func requireReadWarnings(t *testing.T, r *rig, lo, hi int) {
 func TestSender_BackfillPausedUnderMemoryPressure(t *testing.T) {
 	t.Run("pressure before the pass", func(t *testing.T) { bubble(t, testPressureBeforePass) })
 	t.Run("pressure during the pass", func(t *testing.T) { bubble(t, testPressureDuringPass) })
+	t.Run("outage hole under pressure", func(t *testing.T) { bubble(t, testOutageHoleUnderPressure) })
+}
+
+// testOutageHoleUnderPressure ends an outage under memory pressure: the probe the outage left behind is a hole below the
+// new live start, so it is backfilled once the pressure is off and not before.
+func testOutageHoleUnderPressure(t *testing.T) {
+	r := newRig(t)
+	r.tr.setScript(failAll(connFail))
+	r.start()
+	r.snd.SetPressure(true)
+	advance(time.Second)
+	probe := r.live("probe", 200)
+	advance(30 * time.Second)
+
+	r.tr.setScript(allOK)
+	r.live("up", 200)
+	advanceUntil(t, 5*time.Minute, time.Second, "the backend to be accepted again", func() bool { return r.logs.count(msgAccepting) > 0 })
+	advance(30 * time.Second)
+
+	if got := len(r.tr.callsOf(wire.ModeBackfill)); got != 0 {
+		t.Errorf("%d backfill batches under memory pressure, want none", got)
+	}
+	requireBackfillState(t, r, 1, 0)
+
+	r.snd.SetPressure(false)
+	advanceUntil(t, 5*time.Minute, time.Second, "the backfill to finish", func() bool { return r.logs.count(msgBfFinished) > 0 })
+	advance(30 * time.Second)
+
+	requireBackfillState(t, r, 1, 1)
+	if r.tr.committedSet()[probe] != 1 {
+		t.Errorf("the probe %d was committed %d times, want once (backfilled after the pressure)", probe, r.tr.committedSet()[probe])
+	}
+	requireComplete(t, r, probe)
 }
 
 // requireBackfillState checks how often the pause and resume lines were logged and their content.
@@ -1479,26 +1512,6 @@ func TestSender_NoPauseLineWithoutBacklog(t *testing.T) {
 			r.live("probe", 200)
 			advance(30 * time.Second)
 
-			r.snd.SetPressure(false)
-			advance(30 * time.Second)
-
-			requireBackfillState(t, r, 0, 0)
-		})
-	})
-	t.Run("reconnect under pressure", func(t *testing.T) {
-		bubble(t, func(t *testing.T) {
-			r := newRig(t)
-			r.tr.setScript(failAll(connFail))
-			r.start()
-			r.snd.SetPressure(true)
-			advance(time.Second)
-			r.live("probe", 200)
-			advance(30 * time.Second)
-
-			r.tr.setScript(allOK)
-			r.live("up", 200)
-			advanceUntil(t, 5*time.Minute, time.Second, "the backend to be accepted again", func() bool { return r.logs.count(msgAccepting) > 0 })
-			advance(30 * time.Second)
 			r.snd.SetPressure(false)
 			advance(30 * time.Second)
 
