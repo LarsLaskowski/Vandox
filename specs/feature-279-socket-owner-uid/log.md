@@ -13,4 +13,4 @@ are quoted in full.
 | 2026-10-24 08:45 | 3 Plan security review | squad-security | APPROVED; 2 non-blocking notes appended verbatim as Security notes (opus/medium · 92,981 tokens · 25 tool uses · 197 s) |
 | 2026-10-24 08:47 | 4 Skeleton G1 | squad-dev | Skeleton for wire fields done; go build and dotnet build pass (sonnet/medium · 87,277 tokens · 23 tool uses · 118 s) |
 | 2026-10-24 08:57 | 5 Tests first G1 | squad-tester | Tests for AC8/AC9 written; Go 15 subtests and C# 13 cases fail as intended; S46-S51 agree in both decoders; deferred (pass on skeleton): null test, UID-zero test, 3 storage tests (sonnet/medium · 172,481 tokens · 45 tool uses · 590 s) |
-| 2026-10-24 09:01 | 6 Implement G1 | squad-dev | checkSocketUser/CheckSocketUser implemented and called; Go and .NET tests green (sonnet/medium · usage pending) |
+| 2026-10-24 09:01 | 6 Implement G1 | squad-dev | checkSocketUser/CheckSocketUser implemented and called; Go and .NET tests green (sonnet/medium · 72,206 tokens · 13 tool uses · 263 s) |
