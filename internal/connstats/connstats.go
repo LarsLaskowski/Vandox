@@ -127,6 +127,8 @@ func (c *Connections) Collect(ctx context.Context, run scheduler.Run) ([]model.R
 		return nil, err
 	}
 
+	res.users, res.usersErr = procstats.ReadUsers(c.src.Etc)
+
 	cur := col.inventory()
 	check, added := compare(prev, cur)
 	full := run.Pressure || run.Trigger != nil || prev == nil || len(added) > 0
@@ -275,6 +277,7 @@ func (c *Connections) logChanges(col *collection, res *runResult) {
 		}
 		st.linesBad = bad
 	}
+	c.logUsers(res)
 	if res.ownersUnknown != nil {
 		if !st.ownersUnknown {
 			c.log.Warn("socket owners unknown", "err", res.ownersUnknown)
@@ -290,6 +293,21 @@ func (c *Connections) logChanges(col *collection, res *runResult) {
 		}
 		st.ownersUnreadable = unreadable
 	}
+}
+
+// logUsers writes a line when the passwd file became unreadable or readable again.
+func (c *Connections) logUsers(res *runResult) {
+	st := &c.state
+	unavailable := res.usersErr != nil
+	if unavailable == st.usersUnavailable {
+		return
+	}
+	if unavailable {
+		c.log.Warn("user names unavailable", "err", res.usersErr)
+	} else {
+		c.log.Info("user names available")
+	}
+	st.usersUnavailable = unavailable
 }
 
 // missingNames lists the missing tables in table order, comma-separated.

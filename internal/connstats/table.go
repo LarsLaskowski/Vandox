@@ -18,8 +18,11 @@ const (
 	maxLine       = 512 // longest table line read, without its newline
 	readerSize    = 4096
 	minFields     = 10 // sl, local, remote, state, queues, timer, retransmits, uid, timeout, inode
+	uidFieldIndex = 7
 	inodeField    = 9
 	maxInodeDigit = 20 // digits of a 64-bit inode
+	maxUIDDigit   = 10 // digits of a 32-bit UID
+	uidBits       = 32
 	stateDigits   = 2
 	portDigits    = 4
 	wordDigits    = 8
@@ -78,11 +81,15 @@ func parseLine(line []byte, t table) (socket, error) {
 	if err != nil {
 		return socket{}, err
 	}
+	uid, err := parseUID(fields[uidFieldIndex])
+	if err != nil {
+		return socket{}, err
+	}
 	inode, err := parseInode(fields[inodeField])
 	if err != nil {
 		return socket{}, err
 	}
-	return socket{proto: t.proto, local: local, remote: remote, state: state, inode: inode}, nil
+	return socket{proto: t.proto, local: local, remote: remote, state: state, inode: inode, uid: uid}, nil
 }
 
 // splitFields stores the first len(out) fields of line, separated by runs of spaces, in out and returns how many it found.
@@ -203,7 +210,14 @@ func parseInode(f []byte) (uint64, error) {
 
 // parseUID parses 1 to 10 decimal digits within 32 bits.
 func parseUID(f []byte) (uint32, error) {
-	return 0, errors.New("not implemented")
+	if len(f) > maxUIDDigit || !allDigits(f) {
+		return 0, errFormat
+	}
+	v, err := strconv.ParseUint(string(f), decimalBase, uidBits)
+	if err != nil {
+		return 0, errFormat
+	}
+	return uint32(v), nil
 }
 
 // readTable reads table t and calls visit per socket and bad per unreadable line (numbered from 1, the header being line 1);

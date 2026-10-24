@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/LarsLaskowski/Vandox/internal/model"
+	"github.com/LarsLaskowski/Vandox/internal/procstats"
 	"github.com/LarsLaskowski/Vandox/internal/wire"
 )
 
@@ -166,6 +167,14 @@ type listenerEntry struct {
 // addUID records the UID of one more socket of the endpoint: the first is kept, a different one makes the lower win and sets
 // mixedUIDs.
 func (e *listenerEntry) addUID(uid uint32) {
+	if e.hasUID {
+		if uid != e.uid {
+			e.uid = min(e.uid, uid)
+			e.mixedUIDs = true
+		}
+		return
+	}
+	e.uid, e.hasUID = uid, true
 }
 
 // connEntry is a connection of the full snapshot and its owner (0: none).
@@ -353,9 +362,15 @@ func hasNoRemote(s *socket) bool {
 func (c *collection) addListener(s *socket) slotRef {
 	key := listenerKey{proto: s.proto, addr: s.local.Addr(), port: s.local.Port()}
 	if id, ok := c.endpoints[key]; ok {
+		if s.inode != 0 {
+			c.listeners.items[id].addUID(s.uid)
+		}
 		return slotRef{kind: kindListener, id: id, gen: c.listeners.gens[id]}
 	}
 	entry := listenerEntry{key: key}
+	if s.inode != 0 {
+		entry.addUID(s.uid)
+	}
 	if !c.listeners.admits(entry) {
 		c.listeners.cut = true
 		return slotRef{}
@@ -371,7 +386,7 @@ func (c *collection) addListener(s *socket) slotRef {
 // addConnection files a connection and counts its remote address.
 func (c *collection) addConnection(s *socket) slotRef {
 	c.countRemote(s.remote.Addr())
-	entry := connEntry{proto: s.proto, local: s.local, remote: s.remote, state: s.state}
+	entry := connEntry{proto: s.proto, local: s.local, remote: s.remote, state: s.state, uid: s.uid, hasUID: s.inode != 0}
 	if !c.conns.admits(entry) {
 		c.conns.cut = true
 		return slotRef{}
@@ -490,6 +505,10 @@ func listenerOf(e *listenerEntry, res *runResult) model.Listener {
 	if e.owner != 0 {
 		l.PID, l.Command = e.owner, res.commands[e.owner]
 	}
+	if e.hasUID {
+		uid := e.uid
+		l.UID, l.User, l.MixedUIDs = &uid, procstats.UserName(res.users, uid), e.mixedUIDs
+	}
 	return l
 }
 
@@ -512,6 +531,10 @@ func (c *collection) connectionList(res *runResult) []model.Connection {
 		out[i] = model.Connection{Proto: e.proto, Local: e.local, Remote: e.remote, State: e.state}
 		if e.owner != 0 {
 			out[i].PID, out[i].Command = e.owner, res.commands[e.owner]
+		}
+		if e.hasUID {
+			uid := e.uid
+			out[i].UID, out[i].User = &uid, procstats.UserName(res.users, uid)
 		}
 	}
 	return out

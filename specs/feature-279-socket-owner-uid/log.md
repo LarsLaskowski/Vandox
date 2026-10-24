@@ -16,3 +16,4 @@ are quoted in full.
 | 2026-10-24 09:01 | 6 Implement G1 | squad-dev | checkSocketUser/CheckSocketUser implemented and called; Go and .NET tests green (sonnet/medium · 72,206 tokens · 13 tool uses · 263 s) |
 | 2026-10-24 09:02 | 4 Skeleton G2 | squad-dev | Skeleton for collector done; build and existing tests pass (sonnet/medium · 100,399 tokens · 14 tool uses · 39 s) |
 | 2026-10-24 09:14 | 5 Tests first G2 | squad-tester | Collector tests for AC1-AC7 written; 31 connstats tests fail as intended; deferred: 3 tests (procstats ReadUsers/UserName, late-run log) (sonnet/medium · 297,589 tokens · 46 tool uses · 684 s) |
+| 2026-10-24 09:22 | 6 Implement G2 | squad-dev | Collector, README and project.md implemented; one Tester case disputed (table_test.go fields five to nine); coverage gate not run (sonnet/medium · 110,273 tokens · 29 tool uses · 485 s) |

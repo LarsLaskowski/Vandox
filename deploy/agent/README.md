@@ -90,6 +90,9 @@ the ptrace-checked `/proc` files whose mode allows reading (`maps`, `smaps_rollu
 
 - `/proc/net/tcp`, `tcp6`, `udp` and `udp6` are readable by any user and need no right. `tcp6` and `udp6` are missing on a kernel without IPv6;
   the collector then leaves those protocols out.
+- `/etc/passwd` is world-readable and needs no right. The collector reads it once per run, with the process collector's bounds (1 MiB, lines of
+  4 KiB), to name the UID the kernel prints for each socket. Without it the sample still succeeds and every `user` is the decimal UID; the agent
+  logs `user names unavailable` once and `user names available` when the file reads again.
 - `/proc/<pid>/fdinfo/<n>` of **another user's** process needs `CAP_SYS_PTRACE`: the kernel checks ptrace access when the directory is listed
   and the file opened. The links `/proc/<pid>/fd/<n>` (`socket:[N]`) would need `CAP_DAC_READ_SEARCH` to list and both capabilities to read,
   and `CAP_DAC_READ_SEARCH` lets the agent read every file on the server (`/etc/shadow`, Plesk's credentials) and, with `CAP_SYS_PTRACE`, open
