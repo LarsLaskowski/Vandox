@@ -20,3 +20,5 @@ are quoted in full.
 | 2026-10-25 08:44 | 6 Coverage G1 | squad-tester | Deferred WireContractGoGzipDecodesToGoldenRecords and partial-header test added; all suites green; Coverage gate PASS (new 81.9%, overall 96.5%) (sonnet/medium · 85,139 tokens · 24 tool uses · 863 s) |
 | 2026-10-25 08:45 | 4 Skeleton G2 | squad-dev | IngestConfig skeleton and BackendConfig.Ingest; build 0 warnings 0 errors; ListenerConfig now unreferenced (sonnet/medium · 84,774 tokens · 8 tool uses · 69 s) |
 | 2026-10-25 08:49 | 5 Tests first G2 | squad-tester | Ingest agent_id/min_free loader tests and adapted key list/example tests; 32 of 145 fail on current code as expected (sonnet/medium · 92,359 tokens · 11 tool uses · 180 s) |
+| 2026-10-25 09:04 | 6 Implement G2 | squad-dev | ingest.agent_id and ingest.min_free validated in loader, Keys(), example file, ListenerConfig removed; Core 4022 and Backend 980 green, build and analyzer gate clean (sonnet/medium · usage pending) |
+| 2026-10-25 09:04 | 6 Coverage G2 | squad-orchestrator | Tester coverage pass skipped for G2: all new lines are exercised by the 32 tests; Coverage gate runs after G3 |
