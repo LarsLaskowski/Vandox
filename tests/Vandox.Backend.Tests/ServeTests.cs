@@ -1310,16 +1310,15 @@ public class ServeTests
 
         using var release = new ManualResetEventSlim(false);
 
-        var space = new FreeSpace("unused",
-                                  _ =>
+        Func<string, long?> space = _ =>
                                   {
                                       entered.TrySetResult();
                                       release.Wait(TimeSpan.FromSeconds(30), TestContext.CancellationToken);
 
                                       return 5L << 30;
-                                  });
+                                  };
 
-        await using var service = await IngestService.StartAsync(TestContext.CancellationToken, minFree: "1MiB", record: true, clock: new FakeTimeProvider(), freeSpace: space);
+        await using var service = await IngestService.StartAsync(TestContext.CancellationToken, minFree: "1MiB", record: true, clock: new FakeTimeProvider(), freeSpaceProbe: space);
 
         var post = service.PostAsync(IngestSamples.Valid(1, 3), TestContext.CancellationToken);
 

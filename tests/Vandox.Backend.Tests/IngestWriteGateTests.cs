@@ -81,15 +81,22 @@ public class IngestWriteGateTests
 
         var enteredAfterClose = gate.TryEnter();
 
-        await gate.CloseAsync(TestContext.CancellationToken).WaitAsync(TimeSpan.FromSeconds(10), TestContext.CancellationToken);
+        using var cancelled = new CancellationTokenSource();
+
+        await cancelled.CancelAsync();
+
+        var closing = gate.CloseAsync(cancelled.Token);
+
+        await closing.WaitAsync(TimeSpan.FromSeconds(10), TestContext.CancellationToken);
 
         // Assert
         Assert.IsFalse(enteredAfterClose, "no write enters after the close");
+        Assert.IsTrue(closing.IsCompletedSuccessfully, "without writes in flight the close completes normally, whatever its token");
         Assert.IsFalse(gate.TryEnter(), "the gate stays closed");
     }
 
     /// <summary>
-    /// The close of a gate with a write in flight ends when its token is cancelled, so the drain is bounded by the deadline.
+    /// The close of a gate with a write in flight throws OperationCanceledException when its token is cancelled while the write remains, so the drain is bounded by the deadline.
     /// </summary>
     /// <returns>A task that completes when the test is done</returns>
     [TestMethod]
@@ -106,17 +113,10 @@ public class IngestWriteGateTests
         // Act
         await deadline.CancelAsync();
 
-        try
-        {
-            await closing.WaitAsync(TimeSpan.FromSeconds(10), TestContext.CancellationToken);
-        }
-        catch (OperationCanceledException)
-        {
-            // The close may report the cancellation; it must end.
-        }
+        var failure = await Assert.ThrowsAsync<OperationCanceledException>(() => closing.WaitAsync(TimeSpan.FromSeconds(10), TestContext.CancellationToken));
 
         // Assert
-        Assert.IsTrue(closing.IsCompleted, "the close ended although a write is in flight");
+        Assert.IsNotNull(failure, "the close reports the cancellation while a write remains");
         Assert.IsFalse(gate.TryEnter(), "the gate stays closed");
     }
 

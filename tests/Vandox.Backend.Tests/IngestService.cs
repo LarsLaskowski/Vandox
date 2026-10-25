@@ -1,5 +1,4 @@
 using System.Net.Http.Headers;
-using System.Reflection;
 
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -107,17 +106,17 @@ internal sealed class IngestService : IAsyncDisposable
     /// <param name="record">Whether a recording writer sits in front of the store</param>
     /// <param name="hold">Whether the recording writer holds every write until the test releases it</param>
     /// <param name="clock">The clock of the service, <c>null</c> for the real one</param>
-    /// <param name="freeSpace">The free space the endpoint uses, <c>null</c> for the real one</param>
+    /// <param name="freeSpaceProbe">The probe of the free space the endpoint uses, <c>null</c> for the real one</param>
     /// <param name="shutdownTimeout">The shutdown timeout of the host, <c>null</c> for the service's own</param>
     /// <param name="onStarted">Runs on the thread that announces the start, after the test knows the service listens</param>
     /// <returns>The service</returns>
-    internal static async Task<IngestService> StartAsync(CancellationToken cancellationToken, bool tokenMissing = false, bool agentMissing = false, string minFree = "0MiB", bool record = false, bool hold = false, FakeTimeProvider? clock = null, FreeSpace? freeSpace = null, TimeSpan? shutdownTimeout = null, Action? onStarted = null)
+    internal static async Task<IngestService> StartAsync(CancellationToken cancellationToken, bool tokenMissing = false, bool agentMissing = false, string minFree = "0MiB", bool record = false, bool hold = false, FakeTimeProvider? clock = null, Func<string, long?>? freeSpaceProbe = null, TimeSpan? shutdownTimeout = null, Action? onStarted = null)
     {
         var service = new IngestService();
 
         try
         {
-            await service.BeginAsync(tokenMissing, agentMissing, minFree, record || hold, hold, clock, freeSpace, shutdownTimeout, onStarted, cancellationToken);
+            await service.BeginAsync(tokenMissing, agentMissing, minFree, record || hold, hold, clock, freeSpaceProbe, shutdownTimeout, onStarted, cancellationToken);
 
             return service;
         }
@@ -174,19 +173,6 @@ internal sealed class IngestService : IAsyncDisposable
     }
 
     /// <summary>
-    /// Replaces a field of the running endpoint.
-    /// </summary>
-    /// <param name="endpoint">The endpoint</param>
-    /// <param name="name">The name of the field</param>
-    /// <param name="value">The new value</param>
-    private static void Replace(IngestEndpoint endpoint, string name, object value)
-    {
-        var field = typeof(IngestEndpoint).GetField(name, BindingFlags.Instance | BindingFlags.NonPublic) ?? throw new InvalidOperationException($"the endpoint has no field {name}");
-
-        field.SetValue(endpoint, value);
-    }
-
-    /// <summary>
     /// Writes the configuration, starts the service and waits until it listens.
     /// </summary>
     /// <param name="tokenMissing">Whether the agent token is left out</param>
@@ -195,12 +181,12 @@ internal sealed class IngestService : IAsyncDisposable
     /// <param name="record">Whether a recording writer sits in front of the store</param>
     /// <param name="hold">Whether the recording writer holds every write</param>
     /// <param name="clock">The clock of the service, <c>null</c> for the real one</param>
-    /// <param name="freeSpace">The free space the endpoint uses, <c>null</c> for the real one</param>
+    /// <param name="freeSpaceProbe">The probe of the free space the endpoint uses, <c>null</c> for the real one</param>
     /// <param name="shutdownTimeout">The shutdown timeout of the host, <c>null</c> for the service's own</param>
     /// <param name="onStarted">Runs when the start is announced</param>
     /// <param name="cancellationToken">Stops the wait</param>
     /// <returns>A task that completes when the service listens</returns>
-    private async Task BeginAsync(bool tokenMissing, bool agentMissing, string minFree, bool record, bool hold, FakeTimeProvider? clock, FreeSpace? freeSpace, TimeSpan? shutdownTimeout, Action? onStarted, CancellationToken cancellationToken)
+    private async Task BeginAsync(bool tokenMissing, bool agentMissing, string minFree, bool record, bool hold, FakeTimeProvider? clock, Func<string, long?>? freeSpaceProbe, TimeSpan? shutdownTimeout, Action? onStarted, CancellationToken cancellationToken)
     {
         var agent = agentMissing ? string.Empty : $"  agent_id: {IngestSamples.AgentId}\n";
 
@@ -209,7 +195,9 @@ internal sealed class IngestService : IAsyncDisposable
         var hooks = new ServeHooks
                     {
                         Clock = clock,
-                        Built = provider => Prepare(provider, record, hold, freeSpace, shutdownTimeout),
+                        IngestWriter = record ? inner => CreateWriter(inner, hold) : null,
+                        FreeSpaceProbe = freeSpaceProbe,
+                        Built = provider => Prepare(provider, shutdownTimeout),
                         Started = _ =>
                                   {
                                       _started.TrySetResult();
@@ -233,38 +221,36 @@ internal sealed class IngestService : IAsyncDisposable
     }
 
     /// <summary>
+    /// Creates the recording writer in front of the store.
+    /// </summary>
+    /// <param name="inner">The store</param>
+    /// <param name="hold">Whether the writer holds every write</param>
+    /// <returns>The writer</returns>
+    private IRecordWriter CreateWriter(IRecordWriter inner, bool hold)
+    {
+        Writer = new RecordingRecordWriter(inner);
+
+        if (hold)
+        {
+            Writer.Hold();
+        }
+
+        return Writer;
+    }
+
+    /// <summary>
     /// Hooks the running service after it was built: observes the stop signal and puts the test doubles into the endpoint.
     /// </summary>
     /// <param name="provider">The services of the application</param>
-    /// <param name="record">Whether a recording writer sits in front of the store</param>
-    /// <param name="hold">Whether the recording writer holds every write</param>
-    /// <param name="freeSpace">The free space the endpoint uses, <c>null</c> for the real one</param>
     /// <param name="shutdownTimeout">The shutdown timeout of the host, <c>null</c> for the service's own</param>
-    private void Prepare(IServiceProvider provider, bool record, bool hold, FreeSpace? freeSpace, TimeSpan? shutdownTimeout)
+    private void Prepare(IServiceProvider provider, TimeSpan? shutdownTimeout)
     {
         var lifetime = provider.GetRequiredService<IHostApplicationLifetime>();
 
         lifetime.ApplicationStopping.Register(() => _stopping.TrySetResult());
         lifetime.ApplicationStopped.Register(() => _stopped.TrySetResult());
 
-        var endpoint = provider.GetRequiredService<IngestEndpoint>();
-
-        if (record)
-        {
-            Writer = new RecordingRecordWriter(provider.GetRequiredService<IRecordWriter>());
-
-            if (hold)
-            {
-                Writer.Hold();
-            }
-
-            Replace(endpoint, "_writer", Writer);
-        }
-
-        if (freeSpace is not null)
-        {
-            Replace(endpoint, "_freeSpace", freeSpace);
-        }
+        provider.GetRequiredService<IngestEndpoint>();
 
         if (shutdownTimeout is not null)
         {
