@@ -515,6 +515,33 @@ public class WireContractTests
     }
 
     /// <summary>
+    /// Gzip files of the golden batch, one written by Go's encoder, one by Go's gzip writer in two members and one by gzip(1) with a file name, decode to the records of the plaintext golden file and are read to their last byte.
+    /// </summary>
+    /// <param name="file">The name of the gzip file in <c>testdata/wire</c></param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [DataRow("all-kinds.jsonl.gz")]
+    [DataRow("all-kinds-two-members.jsonl.gz")]
+    [DataRow("all-kinds-gzip1.jsonl.gz")]
+    public async Task WireContractGoGzipDecodesToGoldenRecords(string file)
+    {
+        // Arrange
+        var plain = await File.ReadAllBytesAsync(RepositoryFiles.Path("testdata/wire/all-kinds.jsonl"), CancellationToken.None);
+        var sample = await File.ReadAllBytesAsync(RepositoryFiles.Path($"testdata/wire/{file}"), CancellationToken.None);
+        using var expectedInput = GzipOf(plain);
+        using var sampleInput = new MemoryStream(sample);
+
+        // Act
+        var expected = await DescribeAllAsync(expectedInput);
+        var actual = await DescribeAllAsync(sampleInput);
+
+        // Assert
+        Assert.IsGreaterThan(0, expected.Count, "the golden file holds records");
+        Assert.AreSequenceEqual(expected, actual, $"{file}: records equal the plaintext golden file");
+        Assert.AreEqual(sampleInput.Length, sampleInput.Position, $"{file}: every input byte was consumed");
+    }
+
+    /// <summary>
     /// Reads the shared decoder cases.
     /// </summary>
     /// <returns>The cases</returns>
@@ -607,6 +634,26 @@ public class WireContractTests
     private static int GzipNumber(JsonElement gzip, string key)
     {
         return gzip.TryGetProperty(key, out var value) ? value.GetInt32() : 0;
+    }
+
+    /// <summary>
+    /// Decodes a batch to its end and describes every record by its envelope and its serialized payload.
+    /// </summary>
+    /// <param name="input">The compressed batch</param>
+    /// <returns>The descriptions in order</returns>
+    private static async Task<List<string>> DescribeAllAsync(Stream input)
+    {
+        var records = new List<string>();
+        using var decoder = await BatchDecoder.OpenAsync(input, null, CancellationToken.None);
+
+        for (var record = await decoder.NextAsync(CancellationToken.None); record is not null; record = await decoder.NextAsync(CancellationToken.None))
+        {
+            var payload = record.Data is null ? string.Empty : JsonSerializer.Serialize(record.Data, record.Data.GetType());
+
+            records.Add($"{record.Kind}:{record.Seq}:{record.Source}:{record.CapturedAt:O}:{payload}");
+        }
+
+        return records;
     }
 
     /// <summary>
