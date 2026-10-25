@@ -10,6 +10,7 @@ using Microsoft.Extensions.Logging;
 using Vandox.Backend.Cli;
 using Vandox.Backend.Components;
 using Vandox.Backend.Incidents;
+using Vandox.Backend.Ingest;
 using Vandox.Backend.Logging;
 using Vandox.Backend.Logs;
 using Vandox.Backend.Reports;
@@ -216,6 +217,7 @@ internal static class ServeCommand
         builder.Services.AddSingleton(hooks.Clock ?? TimeProvider.System);
         builder.Services.AddSingleton(provider => CreateReportService(store, config, provider.GetRequiredService<WebReaderGate>(), provider.GetRequiredService<TimeProvider>()));
         builder.Services.AddSingleton<IImportTracker>(store);
+        builder.Services.AddSingleton(provider => CreateIngestEndpoint(store, config, loggerFactory, provider));
         builder.Services.Configure<HostOptions>(options => options.ShutdownTimeout = _shutdownTimeout);
         builder.Services.AddRazorComponents().AddInteractiveServerComponents();
         WebAuthentication.AddServices(builder.Services, verifier, hooks.Clock ?? TimeProvider.System, loggerFactory);
@@ -251,6 +253,21 @@ internal static class ServeCommand
         app.MapRazorComponents<App>().AddInteractiveServerRenderMode(options => options.ContentSecurityFrameAncestorsPolicy = null);
 
         return app;
+    }
+
+    /// <summary>
+    /// Creates the ingest endpoint: ingest is disabled, and the endpoint answers 503, when the token or <c>ingest.agent_id</c> is not set.
+    /// </summary>
+    /// <param name="store">The open database</param>
+    /// <param name="config">The configuration</param>
+    /// <param name="loggerFactory">The logger factory</param>
+    /// <param name="provider">The services</param>
+    /// <returns>The endpoint</returns>
+    private static IngestEndpoint CreateIngestEndpoint(SqliteStore store, BackendConfig config, ILoggerFactory loggerFactory, IServiceProvider provider)
+    {
+        var settings = IngestSettings.Create(config, loggerFactory.CreateLogger("ingest"));
+
+        return new IngestEndpoint(settings, store, new FreeSpace(config.Storage.Directory, FreeSpace.Probe), provider.GetRequiredService<IHostApplicationLifetime>(), provider.GetRequiredService<TimeProvider>(), loggerFactory);
     }
 
     /// <summary>

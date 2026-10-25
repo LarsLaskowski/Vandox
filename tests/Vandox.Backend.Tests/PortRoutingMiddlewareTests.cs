@@ -1,7 +1,9 @@
 using Microsoft.AspNetCore.Connections.Features;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging.Abstractions;
 
 using Vandox.Backend.Hosting;
+using Vandox.Backend.Ingest;
 
 namespace Vandox.Backend.Tests;
 
@@ -33,7 +35,8 @@ public class PortRoutingMiddlewareTests
                                                        called = true;
 
                                                        return Task.CompletedTask;
-                                                   });
+                                                   },
+                                                   CreateIngest());
         var context = new DefaultHttpContext();
         var items = new Dictionary<object, object?>();
 
@@ -66,7 +69,8 @@ public class PortRoutingMiddlewareTests
                                                        called = true;
 
                                                        return Task.CompletedTask;
-                                                   });
+                                                   },
+                                                   CreateIngest());
 
         // Act
         await middleware.InvokeAsync(new DefaultHttpContext());
@@ -108,6 +112,15 @@ public class PortRoutingMiddlewareTests
     {
         // Act and Assert
         Assert.ThrowsExactly<FormatException>(() => ListenAddress.Parse(value), "invalid address");
+    }
+
+    /// <summary>
+    /// Creates an ingest endpoint that the test never reaches.
+    /// </summary>
+    /// <returns>The endpoint</returns>
+    private static IngestEndpoint CreateIngest()
+    {
+        return new IngestEndpoint(null, new UnusedRecordWriter(), new FreeSpace(string.Empty, _ => null), new StoppedApplicationLifetime(), TimeProvider.System, NullLoggerFactory.Instance);
     }
 
     #endregion // Methods

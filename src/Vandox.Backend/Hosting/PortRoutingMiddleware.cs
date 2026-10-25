@@ -1,17 +1,26 @@
 using Microsoft.AspNetCore.Connections.Features;
 using Microsoft.AspNetCore.Http;
 
+using Vandox.Backend.Ingest;
+
 namespace Vandox.Backend.Hosting;
+
+#pragma warning disable S4487
 
 /// <summary>
 /// Keeps the two listeners apart: a request on the ingest listener never reaches the web UI. The ingest API does not exist yet, so
 /// the ingest listener answers 404.
 /// </summary>
-public sealed class PortRoutingMiddleware
+internal sealed class PortRoutingMiddleware
 {
     #region Fields
 
     private readonly RequestDelegate _next;
+
+    /// <summary>
+    /// The ingest endpoint, called for <c>POST /v1/batches</c> on an ingest connection.
+    /// </summary>
+    private readonly IngestEndpoint _ingest;
 
     #endregion // Fields
 
@@ -21,9 +30,11 @@ public sealed class PortRoutingMiddleware
     /// Initializes a new instance of the <see cref="PortRoutingMiddleware"/> class.
     /// </summary>
     /// <param name="next">The rest of the pipeline</param>
-    public PortRoutingMiddleware(RequestDelegate next)
+    /// <param name="ingest">The ingest endpoint</param>
+    public PortRoutingMiddleware(RequestDelegate next, IngestEndpoint ingest)
     {
         _next = next;
+        _ingest = ingest;
     }
 
     #endregion // Constructors
