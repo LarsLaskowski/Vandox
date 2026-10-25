@@ -4,7 +4,7 @@
 - **Date:** 2026-10-17
 - **Area:** —
 - **Source:** Squad refreshed from Squad-Spec-Repository-Template (daa6b39)
-- **Supersedes:** [0002](0002-squad-working-records-off-main.md) — the agent rules moved to `AGENTS.md`, which product PRs may not change either
+- **Supersedes:** [0002](0002-squad-working-records-off-main.md) — the agent rules moved to `AGENTS.md`, which product PRs may change only inside its project blocks
 
 ## Context
 
@@ -23,8 +23,8 @@ refresh.
 ## Decision
 
 Option 2. In addition, an issue or feature PR never changes the squad or the agent instructions
-(`.squad/` except `stack.md` and `project.md`, `.claude/`, `AGENTS.md`, `CLAUDE.md` and the Copilot
-mirror `.github/copilot-instructions.md`). Lessons about the squad become a GitHub issue
+(`.squad/` except `stack.md` and `project.md`, `.claude/`, `CLAUDE.md`, and `AGENTS.md` and its Copilot
+mirror `.github/copilot-instructions.md` outside their project blocks). Lessons about the squad become a GitHub issue
 labelled `squad`: lessons about template-managed files in the template repository
 (LarsLaskowski/Squad-Spec-Repository-Template), fixed there and rolled out with `adopt-template`; lessons
 about project knowledge in the product repository, worked in a separate squad-maintenance PR.
