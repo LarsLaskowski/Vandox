@@ -154,4 +154,7 @@ once in the [area document](../areas/README.md) of the record's area, and the re
 | [0123](0123-agent-spool-segment-files-clock-bound-sequence-numbers-range-acknowledgements.md) | Agent spool in uncompressed segment files with checksummed frames, clock-bound sequence numbers and range acknowledgements (amends 0045) | Accepted | 2026-10-23 |
 | [0124](0124-ingest-request-one-batch-per-post-acknowledged-by-status-alone.md) | Ingest request: one batch per POST, bearer token, acknowledged by the status alone | Accepted | 2026-10-24 |
 | [0125](0125-sender-two-streams-shared-backoff-refused-records-given-up-with-a-gap.md) | Sender with a live and a backfill stream, one shared backoff, refused records given up with a recorded gap | Accepted | 2026-10-24 |
+| [0126](0126-ingest-endpoint-token-bound-to-one-agent-id-two-slots-through-the-commit-no-rate-cap.md) | Ingest endpoint: the token bound to one configured agent ID, two slots held through the commit, no request-rate cap | Proposed | 2026-10-25 |
+| [0127](0127-backend-host-needs-tailscale-in-tun-mode-ingest-port-on-a-required-bind-address.md) | The backend host needs Tailscale in TUN mode; the ingest port is published on a required bind address (amends 0060) | Proposed | 2026-10-25 |
+| [0128](0128-csharp-decoder-reads-the-gzip-framing-itself-to-match-the-go-decoder.md) | The C# decoder reads the gzip framing itself, so trailing bytes and header rules match the Go decoder (amends 0076) | Proposed | 2026-10-25 |
 <!-- project:end index -->

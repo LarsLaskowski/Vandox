@@ -1,7 +1,7 @@
 # Spec: Ingest API
 
 Source: Issue #40
-Status: Draft
+Status: Approved by Lead
 
 ## Problem
 
@@ -49,9 +49,11 @@ that is invalid as a whole (record 0124); every other non-`2xx` answer leaves th
 below is anything of the batch stored.
 
 - E1: A request without an `Authorization` header, with another scheme (`Basic …`), with a bearer token that is not the token (also
-  one that only shares a prefix with it, or has a trailing space or line break), with two `Authorization` headers, or with the token in
-  the query string only: `401` with `WWW-Authenticate: Bearer`, no refusal header. The body is never read, decompressed or parsed.
-  The service logs the warning `ingest token refused` with `peer` (the peer address as the service sees it) and `reason`
+  one that only shares a prefix with it, is longer or shorter, or has two spaces after the scheme), with two `Authorization` headers, or
+  with the token in the query string only: `401` with `WWW-Authenticate: Bearer`, no refusal header. The body is never read, decompressed or parsed.
+  Spaces and tabs around a header value are not part of it (HTTP removes them before the endpoint sees the value), and a line break or
+  other control character in a header is refused by the server itself with `400` without the refusal header, before the endpoint
+  runs. The service logs the warning `ingest token refused` with `peer` (the peer address as the service sees it) and `reason`
   (`missing` or `wrong`), never the presented value or the header.
 - E2: Many refused requests in a row (a scan, a misconfigured agent that retries every second): at most one `ingest token refused`
   line per minute; the next line after a quiet minute carries `suppressed`, the number of refusals not logged since the last line.
@@ -76,7 +78,9 @@ below is anything of the batch stored.
   records that decoded well, such as a bad CRC at the end of the stream: nothing is committed before the decoder reached the end.
   Trailing bytes after the last gzip member (garbage, one byte, zero padding) are refused by the C# decoder too: today it accepts
   them, unlike the Go decoder and the Wire format area (*Accepted forms*), so this change fixes `BatchDecoder` and pins the case
-  in the shared fixture `testdata/wire/decoder-cases.json` for both decoders; concatenated members stay accepted.
+  in the shared fixture `testdata/wire/decoder-cases.json` for both decoders; concatenated members stay accepted. The same fix gives
+  the C# decoder the Go decoder's header rules, which the Wire format area also states for both: a file name or comment of more than
+  511 bytes and a wrong header checksum (`FHCRC`) are `Malformed`, an extra field is accepted.
   The service logs the warning `ingest batch refused` with `agent_id` (once the header was read), `status`, a fixed `reason` and,
   where known, `line` and `field` (the field path of the wire format); never a value, a record's content or a parser's own text.
 - E8: A newer minor of format 1 with fields the backend does not know: the records are stored, the unknown keys are dropped (the
@@ -182,8 +186,9 @@ below is anything of the batch stored.
   when the error comes after well-decoded records; a newer minor with unknown keys is stored with those keys dropped and one with an
   unknown kind is answered `422`; the warning `ingest batch refused` carries only `agent_id`, `status`, a fixed `reason`, `line` and
   `field` (E7, E8).
-- [ ] AC19: `BatchDecoder` refuses any byte after the last complete gzip member as `Malformed` (garbage, a single byte, zero padding)
-  while still reading concatenated members, and `testdata/wire/decoder-cases.json` holds these cases so the Go and the C# decoder
+- [ ] AC19: `BatchDecoder` refuses any byte after the last complete gzip member as `Malformed` (garbage, a single byte, zero padding,
+  the start of a second header) while still reading concatenated members, refuses a gzip file name or comment over 511 bytes and a
+  wrong header checksum as `Malformed` and accepts an extra field, and `testdata/wire/decoder-cases.json` holds these cases so the Go and the C# decoder
   are both pinned to them (E7).
 - [ ] AC9: An unsupported major, a content type other than `application/gzip` and any `Content-Encoding` are answered `415` without the
   refusal header and store nothing; `Application/GZIP` is accepted and every other content type form of E9 is answered `415`; for
@@ -293,3 +298,8 @@ below is anything of the batch stored.
   `ingest.agent_id: agent-1` in its copy of the example configuration.
 - m4 (minor, content type comparison): accepted. E9 fixes the rule (exactly `application/gzip` ignoring ASCII case, no parameter, no
   surrounding space, one header) with accepted and refused forms, and AC9 names the accepted form and the refusal of the others.
+- Planning (Lead, not an objection): E1 no longer lists a trailing space or a line break as a refused token form: HTTP removes spaces
+  and tabs around a header value before the endpoint sees it, and Kestrel refuses a control character in a header with `400`
+  before the endpoint runs; E1 says so. E7 and AC19 add the gzip header rules (name or comment over 511 bytes, header checksum,
+  extra field), because the C# decoder now reads the gzip framing itself and has to choose them; they are the Go decoder's rules
+  and the Wire format area's *Accepted forms*.
