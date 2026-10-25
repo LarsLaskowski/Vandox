@@ -12,6 +12,8 @@ set -euo pipefail
 
 image="${1:?usage: smoke-test-backend.sh <image>}"
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# The curl write-out format that prints only the HTTP status code of a request.
+readonly status_format='%{http_code}'
 
 fail() {
   echo "::error::$*" >&2
@@ -118,7 +120,7 @@ check_web_ui() {
   local path code headers got
   local -a found
   for path in /_framework/blazor.web.js /app.css /lib/uplot/uPlot.esm.js; do
-    code="$(curl -sS -o /dev/null -w '%{http_code}' "http://127.0.0.1:8080$path")"
+    code="$(curl -sS -o /dev/null -w "$status_format" "http://127.0.0.1:8080$path")"
     [[ "$code" == "200" ]] || fail "GET $path on the web port answered $code, want 200"
   done
   headers="$(curl -fsS -D - -o /dev/null http://127.0.0.1:8080/login | tr -d '\r')"
@@ -142,9 +144,9 @@ check_login() {
   html="$(curl -fsS -c "$jar" "$base/login")"
   token="$(grep -oE 'name="__RequestVerificationToken"[^>]*value="[^"]*"' <<<"$html" | head -n 1 | sed -E 's/.*value="([^"]*)"/\1/')"
   [[ -n "$token" ]] || fail "the login page has no antiforgery token"
-  code="$(curl -sS -b "$jar" -c "$jar" -o /dev/null -w '%{http_code}' --data-urlencode "__RequestVerificationToken=$token" --data-urlencode "_handler=login" --data-urlencode "password=$pass" "$base/login")"
+  code="$(curl -sS -b "$jar" -c "$jar" -o /dev/null -w "$status_format" --data-urlencode "__RequestVerificationToken=$token" --data-urlencode "_handler=login" --data-urlencode "password=$pass" "$base/login")"
   [[ "$code" == "302" ]] || fail "POST /login with the right password answered $code, want 302"
-  code="$(curl -sS -b "$jar" -o /dev/null -w '%{http_code}' "$base_url")"
+  code="$(curl -sS -b "$jar" -o /dev/null -w "$status_format" "$base_url")"
   [[ "$code" == "200" ]] || fail "GET / with the session answered $code, want 200"
 }
 
@@ -160,7 +162,7 @@ ingest="$(inspect '{{range (index .NetworkSettings.Ports "8081/tcp")}}{{.HostIp}
 # Posts a file to the ingest endpoint with the given Authorization value and prints the status code.
 post_batch() {
   local auth="$1" file="$2"
-  curl -sS -o /dev/null -w '%{http_code}' -X POST --data-binary "@$file" \
+  curl -sS -o /dev/null -w "$status_format" -X POST --data-binary "@$file" \
     -H "Authorization: Bearer $auth" -H 'Content-Type: application/gzip' http://127.0.0.1:8081/v1/batches
 }
 
@@ -174,7 +176,7 @@ check_ingest() {
   [[ "$code" == "204" ]] || fail "repeated POST of the golden batch answered $code, want 204"
   code="$(post_batch "wrong-$token" "$golden")"
   [[ "$code" == "401" ]] || fail "POST with a wrong token answered $code, want 401"
-  code="$(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:8081/healthz)"
+  code="$(curl -sS -o /dev/null -w "$status_format" http://127.0.0.1:8081/healthz)"
   [[ "$code" == "404" ]] || fail "GET /healthz on the ingest port answered $code, want 404"
 }
 
