@@ -74,21 +74,30 @@ below is anything of the batch stored.
   `kind`, a header without records, sequence numbers that do not increase, a record the store refuses although the decoder accepted
   it (a capture time outside 1677-09-21 to 2262-04-11): `422` with the refusal header. This holds also when the damage comes after
   records that decoded well, such as a bad CRC at the end of the stream: nothing is committed before the decoder reached the end.
+  Trailing bytes after the last gzip member (garbage, one byte, zero padding) are refused by the C# decoder too: today it accepts
+  them, unlike the Go decoder and the Wire format area (*Accepted forms*), so this change fixes `BatchDecoder` and pins the case
+  in the shared fixture `testdata/wire/decoder-cases.json` for both decoders; concatenated members stay accepted.
   The service logs the warning `ingest batch refused` with `agent_id` (once the header was read), `status`, a fixed `reason` and,
   where known, `line` and `field` (the field path of the wire format); never a value, a record's content or a parser's own text.
-- E8: A newer minor of format 1 with fields the backend does not know: accepted and stored (unknown keys are ignored). A newer minor
+- E8: A newer minor of format 1 with fields the backend does not know: the records are stored, the unknown keys are dropped (the
+  store writes the payload of the backend's own model, so they are not kept). A newer minor
   with a record kind the backend does not know: refused as in E7 (`422`), as the wire format prescribes (upgrade the backend first,
   #85); the agent then gives those records up with recorded gaps, at most 10 an hour.
 - E9: A header with a major other than 1 (the decoder's `UnsupportedVersion`), a `Content-Type` other than `application/gzip`, or any
-  `Content-Encoding` header: `415`, no refusal header, logged as the warning `ingest request not accepted` with `status` and a fixed
+  `Content-Encoding` header (the content type is accepted when it is exactly `application/gzip` compared ignoring ASCII case, with no
+  parameter and no surrounding space: `Application/GZIP` is accepted; `application/gzip; charset=x`, `application/x-gzip`, an empty
+  or missing value and two `Content-Type` headers are not): `415`, no refusal header, logged as the warning `ingest request not accepted` with `status` and a fixed
   `reason` (`format version`, `content type`, `content encoding`). For the content type and encoding the body is not read.
 - E10: The store fails while writing (disk full, an I/O error, a lock held by another process beyond the busy timeout): the
   transaction rolls back, the answer is `503` without the refusal header, and the error line `ingest store failed` names `agent_id`
   and the exception type. A later resend of the same batch is stored normally.
-- E11: More requests than the endpoint decodes at once (two): the further requests wait for a free slot. A request whose waiting,
-  reading and decoding together take more than 30 seconds from its arrival gets no `2xx` (`503`, or `408` when the body was still
-  arriving, wherever an answer can still be sent) and logs the warning `ingest request timed out`. Once its write has started, a
-  request runs to its commit or rollback; when the agent's own 30-second timeout ends it first, the agent resends and S3 applies.
+- E11: More requests than the endpoint handles at once (two): the further requests wait for a free slot. A slot is held from the
+  first byte of the body read through decoding, the wait for the writer and the commit or rollback, so no decoded batch ever waits
+  outside a slot. A request whose waiting, reading and decoding together take more than 30 seconds from its arrival gets no `2xx`
+  (`503`, or `408` when the body was still arriving, wherever an answer can still be sent) and logs the warning `ingest request
+  timed out`. Once its write has started, a request runs to its commit or rollback, whatever happens to its connection: neither the
+  request's abort nor the 30-second bound cancels it, only the 10-second shutdown deadline governs it (E16); when the agent's own
+  30-second timeout ends the request first, the agent resends and S3 applies.
 - E12: A body that trickles in (a few bytes a second): ended by the 30-second bound of E11 at the latest, not held open for hours.
 - E13: More than 16 connections open on the ingest listener at once: a further connection is closed at once, without a request
   being read; the web listener is not affected.
@@ -115,11 +124,15 @@ below is anything of the batch stored.
   records (the wire format's own line and record limits; its 16 MiB batch default is lowered for ingest). Every batch the agent's
   sender builds fits: at most 20,000 records and 1 MiB of record lines, plus one line feed per line and the header line.
 - **Time:** waiting, reading and decoding of one request take at most 30 seconds (the agent's request timeout); the existing header
-  timeout (5 s), header size (16 KiB) and keep-alive (120 s) stay. The write itself is never interrupted (Storage area).
-- **Concurrency and memory:** at most two batches are read and decoded at once across the service (the agent's two streams), at most
-  16 connections are open on the ingest listener. The memory of one request at the limits, with the hostile line shapes of #175, is
-  measured on the C# decoder (the area document's figures were measured on the Go decoder) and the two slots together stay within
-  128 MiB of the container's 512 MiB limit; the measured figures go into the Wire format area (*Duties of the ingest API*).
+  timeout (5 s), header size (16 KiB) and keep-alive (120 s) stay. Once started, the write runs under a cancellation that neither the
+  request's abort nor the 30-second bound triggers; only the shutdown deadline ends it (the store's writer is never interrupted in
+  the middle, Storage area).
+- **Concurrency and memory:** at most two requests hold a slot at once across the service (the agent's two streams); a slot covers
+  reading, decoding, the materialized batch, the wait for the writer and the write; at most 16 connections are open on the ingest
+  listener. The peak memory of one request at the limits — the decoder with the hostile line shapes of #175 **and** the materialized
+  batch of 20,000 records from 2 MiB of JSON through the write — is measured on the backend (the area document's figures were
+  measured on the Go decoder alone), and the two slots together stay within 128 MiB of the container's 512 MiB limit; the measured
+  figures go into the Wire format area (*Duties of the ingest API*).
 - **Rate:** the request rate is bounded by the two decode slots and the one writer connection; there is no request-per-second cap
   (see *Open questions*).
 - **Security:** the token is checked before the body is read, in time that depends neither on how much of the presented token is
@@ -166,17 +179,24 @@ below is anything of the batch stored.
   records or a line over 1 MiB is answered `413` with `Vandox-Refused: batch` and stores nothing; a `Content-Length` over the limit is
   answered before the body is read (E5, E6).
 - [ ] AC8: Each body of E7 is answered `400` (unreadable) or `422` (rule broken) with `Vandox-Refused: batch` and stores nothing, also
-  when the error comes after well-decoded records; a newer minor with unknown keys is stored and one with an unknown kind is answered
-  `422`; the warning `ingest batch refused` carries only `agent_id`, `status`, a fixed `reason`, `line` and `field` (E7, E8).
+  when the error comes after well-decoded records; a newer minor with unknown keys is stored with those keys dropped and one with an
+  unknown kind is answered `422`; the warning `ingest batch refused` carries only `agent_id`, `status`, a fixed `reason`, `line` and
+  `field` (E7, E8).
+- [ ] AC19: `BatchDecoder` refuses any byte after the last complete gzip member as `Malformed` (garbage, a single byte, zero padding)
+  while still reading concatenated members, and `testdata/wire/decoder-cases.json` holds these cases so the Go and the C# decoder
+  are both pinned to them (E7).
 - [ ] AC9: An unsupported major, a content type other than `application/gzip` and any `Content-Encoding` are answered `415` without the
-  refusal header and store nothing; for the content type and encoding no byte of the body is read; the warning `ingest request not
-  accepted` names `status` and the fixed `reason` (E9).
+  refusal header and store nothing; `Application/GZIP` is accepted and every other content type form of E9 is answered `415`; for
+  the content type and encoding no byte of the body is read; the warning `ingest request not accepted` names `status` and the fixed
+  `reason` (E9).
 - [ ] AC10: A store failure during the write rolls the batch back and is answered `503` without the refusal header, logged as
   `ingest store failed` with `agent_id` and the exception type; the same batch sent again later is stored and answered `204` (E10).
-- [ ] AC11: At most two requests are read and decoded at once and further ones wait; a request that has not finished waiting, reading
+- [ ] AC11: At most two requests hold a slot at once, from the body read through the commit or rollback, and further ones wait; a
+  request whose connection is aborted after its write started still commits; a request that has not finished waiting, reading
   and decoding 30 seconds after its arrival gets no `2xx`, stores nothing and logs `ingest request timed out`, also for a body that
   trickles in; a 17th concurrent connection to the ingest listener is closed without affecting the web listener (E11, E12, E13).
-- [ ] AC12: The memory of one request at the limits is measured on the C# decoder with the hostile shapes of #175, a test bounds it,
+- [ ] AC12: The peak memory of one request at the limits — the C# decoder with the hostile shapes of #175 and the materialized batch of
+  20,000 records from 2 MiB of JSON through its write — is measured, a test bounds it,
   the two slots together stay within 128 MiB, and the figures are written in the Wire format area (*Duties of the ingest API*) in
   place of the Go-only statement (E6, E11).
 - [ ] AC13: On the ingest listener every request other than `POST /v1/batches` is answered `404`; `POST /v1/batches` on the web
@@ -188,7 +208,8 @@ below is anything of the batch stored.
 - [ ] AC16: `deploy/backend/docker-compose.yml` publishes `${INGEST_BIND_ADDRESS:?<message>}:8081:8081` beside the unchanged web
   entry, `docker compose config` without the variable fails with a message naming it, and the Dockerfile still declares no `EXPOSE`
   (S6, E18).
-- [ ] AC17: The CI smoke test starts the compose file with `INGEST_BIND_ADDRESS=127.0.0.1` and checks that 8081 is bound on exactly that
+- [ ] AC17: The CI smoke test sets `ingest.agent_id: agent-1` (the golden batch's agent ID) in its copy of `deploy/backend/vandoxd.yaml`,
+  starts the compose file with `INGEST_BIND_ADDRESS=127.0.0.1` and checks that 8081 is bound on exactly that
   address, that a gzip of the golden batch `testdata/wire/all-kinds.jsonl` posted with the token is answered `204` and a repeat too,
   that a wrong token gets `401`, that `/healthz` on the ingest port gets `404`, and that the compose file refuses to start without the
   variable (S1, S3, S6, E1, E14, E18).
@@ -245,8 +266,30 @@ below is anything of the batch stored.
   the smoke test's new checks); *Exposure and trust* (TUN mode supported, userspace not, and why).
 - `docs/areas/wire-format.md`: *Duties of the ingest API* rewritten for the .NET endpoint: the compressed and decompressed limits it
   uses, the measured C# memory of one request and the two slots, the mapping of the decoder's errors to statuses; *Not here* points to
-  the implemented endpoint.
+  the implemented endpoint; *Accepted forms* and *Implementation* name the trailing-bytes cases now pinned in the shared fixture for
+  both decoders.
 - `docs/areas/configuration-and-secrets.md`: the option `ingest.agent_id`; the backend now uses `VANDOX_AGENT_TOKEN`, and ingest is
   disabled without it or the option.
 - `docs/areas/storage.md`: the ingest path is no longer planned: it acknowledges after the commit and supplies the receive time.
 - `docs/areas/network-and-security-model.md`: *Agent to backend* is implemented; the backend host needs Tailscale in TUN mode.
+
+## Challenge
+
+- M1 (major, trailing bytes after the gzip data): accepted. Checked: `BatchDecoder.OpenAsync` wraps the input in a plain `GZipStream`
+  and nothing reads the input after it ends. The decoder fix is now in scope (E7, new AC19): any byte after the last complete member
+  is `Malformed`, concatenated members stay accepted, and the cases go into `testdata/wire/decoder-cases.json` so both decoders are
+  pinned. Dropping the case would have left the Wire format area's *Accepted forms* untrue for the backend on the one path that
+  takes agent input.
+- M2 (major, decoded batches waiting for the writer outside the bound): accepted. Checked: `SqliteStore.WriteBatchAsync` takes a
+  materialized `RecordBatch` and then waits on `_writeLock`. A slot is now held from the body read through the commit or rollback
+  (E11, *Concurrency and memory*, AC11), so at most two decoded batches exist at once, and AC12 measures one request's peak including
+  the materialized batch of 20,000 records from 2 MiB of JSON through the write, not the decoder alone.
+- m1 (minor, a write must not be cancellable by the request): accepted. E11 and *Time* now say the write runs under a cancellation
+  that neither the request's abort nor the 30-second bound triggers, only the shutdown deadline; AC11 adds that a request aborted
+  after its write started still commits.
+- m2 (minor, unknown keys are not stored): accepted. E8 and AC8 now say the records are stored and unknown keys are dropped, because
+  the store writes the payload of the backend's own model.
+- m3 (minor, smoke test agent ID): accepted. Checked: the golden header has `agent_id` `agent-1`. AC17 now has the smoke test set
+  `ingest.agent_id: agent-1` in its copy of the example configuration.
+- m4 (minor, content type comparison): accepted. E9 fixes the rule (exactly `application/gzip` ignoring ASCII case, no parameter, no
+  surrounding space, one header) with accepted and refused forms, and AC9 names the accepted form and the refusal of the others.
