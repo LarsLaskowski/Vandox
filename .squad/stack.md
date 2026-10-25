@@ -29,8 +29,9 @@ Cloud session notes (found when a cloud image lacked the .NET SDK):
   `UseRazorBuildServer=false UseSharedCompilation=false` (as MSBuild properties).
 - If `reihitsu-format` is not on the `PATH`, run it as a local tool:
   `dotnet tool run reihitsu-format --check --force src tests tools`.
-- The *Sonar gate* needs `SONAR_TOKEN`, which a cloud session does not have unless the environment provides it. Without
-  it the gate reports NOT CHECKED, the orchestrator logs that in step 7, and step 11 checks the draft pull request's CI
+- The *Sonar gate* needs a SonarQube credential (a network secret of the cloud environment, or `SONAR_TOKEN`; *Sonar
+  gate* below), which a cloud session does not have unless the environment provides it. Without it the gate reports
+  NOT CHECKED, the orchestrator logs that in step 7, and step 11 checks the draft pull request's CI
   analysis with `python3 .squad/tools/sonar-check.py pr <number>` (*Sonar gate* below).
 
 ## Layout
@@ -57,7 +58,7 @@ Cloud session notes (found when a cloud image lacked the .NET SDK):
 | *Test with coverage* | `rm -rf TestResults coverage.out && go test ./... -race -coverprofile=coverage.out && python3 .squad/tools/go-coverage-to-cobertura.py && dotnet test Vandox.slnx --settings coverlet.runsettings --results-directory TestResults` (clears the results first) |
 | *Coverage gate* | `python3 .squad/tools/coverage-check.py` |
 | *Analyzer gate* | `python3 .squad/tools/analyzer-check.py` |
-| *Sonar gate* | `python3 .squad/tools/sonar-check.py branch -- bash -c 'dotnet tool run dotnet-sonarscanner begin /k:networlddev_vandox /o:networlddev /d:sonar.token="$SONAR_TOKEN" /d:sonar.host.url=https://sonarcloud.io /d:sonar.branch.name="$(git branch --show-current)" /d:sonar.projectBaseDir="$PWD" /d:sonar.cs.opencover.reportsPaths="TestResults/**/coverage.opencover.xml" /d:sonar.go.coverage.reportPaths=coverage.out /d:sonar.test.inclusions="**/*_test.go,tests/**" /d:sonar.exclusions="**/*_test.go,tests/**,bin/**,dist/**,**/obj/**,**/bin/**,TestResults/**,src/Vandox.Backend/wwwroot/lib/**" /d:sonar.coverage.exclusions=".squad/**,.claude/**,src/Vandox.Backend/wwwroot/js/**" && dotnet build Vandox.slnx -c Release --no-incremental && dotnet tool run dotnet-sonarscanner end /d:sonar.token="$SONAR_TOKEN"'` (after *Test with coverage*, so the analysis carries the coverage of both languages; needs `SONAR_TOKEN`, see *Sonar gate* below) |
+| *Sonar gate* | `python3 .squad/tools/sonar-check.py branch -- bash -c 'dotnet tool run dotnet-sonarscanner begin /k:networlddev_vandox /o:networlddev ${SONAR_TOKEN:+/d:sonar.token="$SONAR_TOKEN"} /d:sonar.host.url=https://sonarcloud.io /d:sonar.branch.name="$(git branch --show-current)" /d:sonar.projectBaseDir="$PWD" /d:sonar.cs.opencover.reportsPaths="TestResults/**/coverage.opencover.xml" /d:sonar.go.coverage.reportPaths=coverage.out /d:sonar.test.inclusions="**/*_test.go,tests/**" /d:sonar.exclusions="**/*_test.go,tests/**,bin/**,dist/**,**/obj/**,**/bin/**,TestResults/**,src/Vandox.Backend/wwwroot/lib/**" /d:sonar.coverage.exclusions=".squad/**,.claude/**,src/Vandox.Backend/wwwroot/js/**" && dotnet build Vandox.slnx -c Release --no-incremental && dotnet tool run dotnet-sonarscanner end ${SONAR_TOKEN:+/d:sonar.token="$SONAR_TOKEN"}'` (after *Test with coverage*, so the analysis carries the coverage of both languages; needs a SonarQube credential, see *Sonar gate* below; the token is passed only when `SONAR_TOKEN` is set) |
 | *Image build check* | .NET: `docker build -f deploy/backend/Dockerfile .` where Docker runs, otherwise the restore-order reproduction under *Image build check* below (`.squad/routing.md`, *Criteria verified only in CI*); Go: none, the agent builds no image |
 
 `reihitsu-format` needs `DOTNET_ROOT` when it runs as a global tool outside the SDK's directory (for example
@@ -154,9 +155,11 @@ reported by the *Sonar gate* below.
 `sonar-check.py` runs the scanner with the branch name, waits for the analysis and fails on every open issue or
 security hotspot on a line the branch changed, so the rules no local analyzer has stop surfacing only after the
 pull request. It runs on the committed change (the scanner uploads the working tree, so it refuses uncommitted or
-untracked files other than the coverage reports) and needs `SONAR_TOKEN` in the session's environment (an environment secret) and network access to the
-scanner's download hosts (`api.sonarcloud.io`, `scanner.sonarcloud.io` and the NuGet registry); without them it
-reports NOT CHECKED, and step 11 reads the draft pull request with `python3 .squad/tools/sonar-check.py pr <number>`
+untracked files other than the coverage reports) and needs a SonarQube credential: a network secret of the cloud environment for `sonarcloud.io` and
+`*.sonarcloud.io` (the agent proxy attaches the token to those requests, so no session or member sees it), or
+else `SONAR_TOKEN` in the environment, which every process of the session can read. The scanner also needs
+network access to its download hosts (`api.sonarcloud.io` and `scanner.sonarcloud.io`, which the secret's
+hosts cover, and the NuGet registry); without them it reports NOT CHECKED, and step 11 reads the draft pull request with `python3 .squad/tools/sonar-check.py pr <number>`
 instead. A finding of a rule no local analyzer reports is noted in this section, in the same change, instead of a
 squad lesson.
 One analysis covers both languages, as in CI: the scanner for .NET (`dotnet-sonarscanner` from the tool manifest)
