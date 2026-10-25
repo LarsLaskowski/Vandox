@@ -1,4 +1,4 @@
-# 0126: Ingest endpoint: the token bound to one configured agent ID, two slots held through the commit, no request-rate cap
+# 0126: Ingest endpoint: the token bound to one configured agent ID, two slots held through the commit, a free-space floor instead of a rate cap
 
 - **Status:** Proposed
 - **Date:** 2026-10-25
@@ -39,14 +39,32 @@ Rate:
    and it does not bound disk growth, which retention (#46) does.
 2. **No cap; the two slots and the one writer bound the rate** (chosen).
 
+Disk:
+
+1. **Accept the residual until retention (#46)** — rejected: a compromised monitored server holds the token and could fill the data
+   volume, often a NAS volume shared with other services, against the goal of security area 1; #46 bounds by age, not size.
+2. **A free-space floor `ingest.min_free` checked before every write, answered `503`** (chosen) — the rule of the agent's
+   `spool.min_free`; the agent keeps its records while the floor holds; one `statvfs` per batch.
+
+Shutdown:
+
+1. **The write under the request's token** — an aborted connection would roll back a batch the agent may already count as sent
+   (record 0045 needs the commit).
+2. **An uncancellable write and an unbounded drain** — a write waiting for another process's lock could outlast the container's
+   stop grace period.
+3. **The write under a token that only the shutdown deadline (stop signal plus 10 s) cancels, a gate closed at the stop signal and a
+   drain bounded by the same deadline** (chosen) — no write starts after the stop signal, a started one ends by the deadline, and
+   the store is closed only after it.
+
 Token comparison: a plain `FixedTimeEquals` of the two strings returns early on a different length; comparing the SHA-256 digests
 of both (fixed length) does not, at the cost of one hash per request.
 
 ## Decision
 
 The endpoint accepts a batch only when the bearer token's SHA-256 digest equals the configured token's (`FixedTimeEquals`) and the
-header's `agent_id` equals `ingest.agent_id` ordinally; it holds one of two slots from the body read through the commit or rollback
-and has no request-rate cap. The statuses, limits, timeouts and log lines are in the [Backend host](../areas/backend-host.md) area
+header's `agent_id` equals `ingest.agent_id` ordinally; it holds one of two slots from the body read through the commit or rollback,
+writes nothing while less than `ingest.min_free` is free, has no request-rate cap, and writes under a token that only the shutdown
+deadline cancels. The statuses, limits, timeouts and log lines are in the [Backend host](../areas/backend-host.md) area
 (*Ingest endpoint*).
 
 ## Consequences
@@ -55,6 +73,11 @@ and has no request-rate cap. The statuses, limits, timeouts and log lines are in
   ingest answers `503` (logged at start as `ingest disabled`).
 - A wrong `ingest.agent_id` is answered `403`, which the agent logs as `token refused`; the backend's `ingest agent refused` line
   names the presented ID.
-- The write runs uncancellable once it started, so the service drains running ingest writes before it closes the store at shutdown.
+- The service closes the ingest write gate at the stop signal and drains the running writes, bounded by the shutdown deadline, in a
+  `finally` before it closes the store; a write cancelled by the deadline rolls back and the agent resends it.
+- The store's connections set `DefaultTimeout` to 5 seconds, so a write waits for another process's lock as long as the documented
+  busy timeout and not the library's default of 30 seconds.
+- A token holder can still grow the database up to the floor; the web UI and the import keep working there, and ingest resumes when
+  space is freed or retention (#46) removes data.
 - Revisit the slot count when the measured memory of one request (Wire format area, *Duties of the ingest API*) or several agents
   (#89) change the budget.

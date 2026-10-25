@@ -52,8 +52,8 @@ below is anything of the batch stored.
   one that only shares a prefix with it, is longer or shorter, or has two spaces after the scheme), with two `Authorization` headers, or
   with the token in the query string only: `401` with `WWW-Authenticate: Bearer`, no refusal header. The body is never read, decompressed or parsed.
   Spaces and tabs around a header value are not part of it (HTTP removes them before the endpoint sees the value), and a line break or
-  other control character in a header is refused by the server itself with `400` without the refusal header, before the endpoint
-  runs. The service logs the warning `ingest token refused` with `peer` (the peer address as the service sees it) and `reason`
+  other control character below U+0020 in a header is refused by the server itself with `400` without the refusal header, before the
+  endpoint runs; DEL (U+007F) and non-ASCII bytes do reach the endpoint and are answered `401` like any other wrong token. The service logs the warning `ingest token refused` with `peer` (the peer address as the service sees it) and `reason`
   (`missing` or `wrong`), never the presented value or the header.
 - E2: Many refused requests in a row (a scan, a misconfigured agent that retries every second): at most one `ingest token refused`
   line per minute; the next line after a quiet minute carries `suppressed`, the number of refusals not logged since the last line.
@@ -82,7 +82,10 @@ below is anything of the batch stored.
   the C# decoder the Go decoder's header rules, which the Wire format area also states for both: a file name or comment of more than
   511 bytes and a wrong header checksum (`FHCRC`) are `Malformed`, an extra field is accepted.
   The service logs the warning `ingest batch refused` with `agent_id` (once the header was read), `status`, a fixed `reason` and,
-  where known, `line` and `field` (the field path of the wire format); never a value, a record's content or a parser's own text.
+  where known, `line` and `field` (the field path of the wire format with every bracketed map key reduced to `[]`, such as
+  `data.labels[]`, because a map key is text from the batch; list indexes stay); never a value, a map key, a record's content or a
+  parser's own text. The same mapping applies to an error in the header line (an unreadable header `400`, a header line over 1 MiB
+  `413`, an invalid header `422`, an unsupported major `415`).
 - E8: A newer minor of format 1 with fields the backend does not know: the records are stored, the unknown keys are dropped (the
   store writes the payload of the backend's own model, so they are not kept). A newer minor
   with a record kind the backend does not know: refused as in E7 (`422`), as the wire format prescribes (upgrade the backend first,
@@ -92,15 +95,25 @@ below is anything of the batch stored.
   parameter and no surrounding space: `Application/GZIP` is accepted; `application/gzip; charset=x`, `application/x-gzip`, an empty
   or missing value and two `Content-Type` headers are not): `415`, no refusal header, logged as the warning `ingest request not accepted` with `status` and a fixed
   `reason` (`format version`, `content type`, `content encoding`). For the content type and encoding the body is not read.
-- E10: The store fails while writing (disk full, an I/O error, a lock held by another process beyond the busy timeout): the
+- E10: The store fails while writing (disk full, an I/O error, a lock held by another process — `vandoxd import`, `vandoxd templates`,
+  a backup — for more than the busy timeout of 5 seconds): the
   transaction rolls back, the answer is `503` without the refusal header, and the error line `ingest store failed` names `agent_id`
   and the exception type. A later resend of the same batch is stored normally.
+- E20: The free space on the file system of `storage.directory` is below `ingest.min_free` (default 1 GiB) when a batch is about
+  to be written, for example because a token holder writes batch after batch: the batch is not written, the answer is `503` without
+  the refusal header (the agent keeps the records and retries), and the warning `ingest paused: free space low` is logged once, with
+  `available_bytes`; the first batch written after the space is back logs the info `ingest resumed`. A free space that cannot be
+  read counts as low. The overshoot below the floor is at most what the two slots write at once. The web UI and the import are not
+  affected by this check.
+- E21: An unexpected exception in the endpoint (a defect): `503` without the refusal header, the error `ingest request failed` with the
+  exception's type name only.
 - E11: More requests than the endpoint handles at once (two): the further requests wait for a free slot. A slot is held from the
   first byte of the body read through decoding, the wait for the writer and the commit or rollback, so no decoded batch ever waits
   outside a slot. A request whose waiting, reading and decoding together take more than 30 seconds from its arrival gets no `2xx`
   (`503`, or `408` when the body was still arriving, wherever an answer can still be sent) and logs the warning `ingest request
   timed out`. Once its write has started, a request runs to its commit or rollback, whatever happens to its connection: neither the
-  request's abort nor the 30-second bound cancels it, only the 10-second shutdown deadline governs it (E16); when the agent's own
+  request's abort nor the 30-second bound cancels it, only the 10-second shutdown deadline does (E16); a write waits for the store's
+  write lock at most the busy timeout of 5 seconds (E10); when the agent's own
   30-second timeout ends the request first, the agent resends and S3 applies.
 - E12: A body that trickles in (a few bytes a second): ended by the 30-second bound of E11 at the latest, not held open for hours.
 - E13: More than 16 connections open on the ingest listener at once: a further connection is closed at once, without a request
@@ -110,8 +123,10 @@ below is anything of the batch stored.
   and the answer is never `2xx`. No ingest answer carries the web UI's security headers.
 - E15: Two requests carry overlapping records at the same time (a backfill batch and a resend of a live batch): every record is stored
   once and both answers are `204`; neither request fails for the other's records.
-- E16: The service is stopped (`SIGTERM`) while a request is in flight: a request whose write has started commits or rolls back and
-  answers if the 10-second shutdown deadline allows; any other request gets no `2xx` and stores nothing. A batch that was committed but
+- E16: The service is stopped (`SIGTERM`) while a request is in flight: from the stop signal on no write starts (a request that has
+  not started its write gets `503` or no answer and stores nothing); a write that has started commits or rolls back within the
+  10-second shutdown deadline, which cancels it otherwise (the transaction then rolls back); the store is closed only after every
+  started write has ended. A batch that was committed but
   not answered is resent after the restart and handled as in S3.
 - E17: A record with a sequence number that is already stored but different content (a hostile or broken agent): counted as a
   duplicate; the stored record is never replaced.
@@ -147,7 +162,10 @@ below is anything of the batch stored.
 - **Compatibility:** the request and answers are those of record 0124, which the released agent code already relies on; wire format
   1.0 and 1.1 batches are accepted. The backend still starts without the token or `ingest.agent_id` (E4), so an import-only setup
   keeps working. The Dockerfile keeps no `EXPOSE`.
-- **New configuration:** backend option `ingest.agent_id`, no default (optional: while unset ingest is disabled, E4), the agent ID
+- **Disk:** a token holder cannot fill the data volume: ingest stops writing while less than `ingest.min_free` is free (E20). The
+  database still grows up to that floor; retention (#46) bounds it by age.
+- **New configuration:** backend option `ingest.min_free`, default `1GiB`, a whole number of MiB or GiB from `0MiB` to `1024GiB`
+  (the rule of the agent's `spool.min_free`; `0` switches the check off), the error naming the key and never the value; backend option `ingest.agent_id`, no default (optional: while unset ingest is disabled, E4), the agent ID
   rule of the wire format (1 to 64 characters of `A-Z a-z 0-9 . _ -`, starting with a letter or digit), compared exactly; an invalid
   value stops the service at start with an error that names the key and never the value. Compose variable `INGEST_BIND_ADDRESS`,
   required, no default (E18).
@@ -200,16 +218,23 @@ below is anything of the batch stored.
   request whose connection is aborted after its write started still commits; a request that has not finished waiting, reading
   and decoding 30 seconds after its arrival gets no `2xx`, stores nothing and logs `ingest request timed out`, also for a body that
   trickles in; a 17th concurrent connection to the ingest listener is closed without affecting the web listener (E11, E12, E13).
-- [ ] AC12: The peak memory of one request at the limits — the C# decoder with the hostile shapes of #175 and the materialized batch of
-  20,000 records from 2 MiB of JSON through its write — is measured, a test bounds it,
+- [ ] AC12: The peak memory of one request at the limits — the C# decoder with the hostile shapes of #175, and the materialized batch
+  through a real `SqliteStore` write (20,000 distinct log lines filling 2 MiB, and the largest connection snapshot), with SQLite's
+  native memory high-water mark — is measured, the body buffers belong to the two slots, a test bounds it,
   the two slots together stay within 128 MiB, and the figures are written in the Wire format area (*Duties of the ingest API*) in
   place of the Go-only statement (E6, E11).
 - [ ] AC13: On the ingest listener every request other than `POST /v1/batches` is answered `404`; `POST /v1/batches` on the web
   listener stores nothing and is never answered `2xx`; ingest answers carry no web security headers (E14).
-- [ ] AC14: A request in flight at shutdown either commits and is answered `204`, or stores nothing and gets no `2xx` (E16).
+- [ ] AC14: From the stop signal on no ingest write starts (a request that tries gets no `2xx` and stores nothing); a started write
+  commits or is cancelled and rolled back by the 10-second shutdown deadline; the store is closed only after every started write
+  ended, on every exit path of the service (E16).
+- [ ] AC20: A batch to be written while the free space of `storage.directory` is below `ingest.min_free` (or unreadable) is answered
+  `503` without the refusal header and not written, `ingest paused: free space low` is logged once and `ingest resumed` at the next
+  written batch; `ingest.min_free` follows the rule of `spool.min_free`, is in `vandoxd.yaml` at its default and in the README options
+  table; an unexpected exception is answered `503` and logged with its type name only (E20, E21).
 - [ ] AC15: The first stored batch after a start logs the info line `ingest first batch stored` with `agent_id`, every stored batch
   the debug line `ingest batch stored` with `agent_id`, `mode`, `records`, `stored` and `duplicates`, and no ingest log line of any
-  scenario or edge case contains the token, the `Authorization` header, body bytes or record content (S7, E1, E7).
+  scenario or edge case contains the token, the `Authorization` header, body bytes, a map key or other record content (S7, E1, E7).
 - [ ] AC16: `deploy/backend/docker-compose.yml` publishes `${INGEST_BIND_ADDRESS:?<message>}:8081:8081` beside the unchanged web
   entry, `docker compose config` without the variable fails with a message naming it, and the Dockerfile still declares no `EXPOSE`
   (S6, E18).
@@ -220,7 +245,8 @@ below is anything of the batch stored.
   variable (S1, S3, S6, E1, E14, E18).
 - [ ] AC18: The compose file's comments, `README.md`, `docs/INSTALL.md` and `SECURITY.md` state the TUN prerequisite, how to read the
   tailnet address (`tailscale ip -4`), how to switch the Synology package to TUN mode, the symptoms of E18 and E19 with their remedies,
-  why userspace mode is not supported, and that the token, not the binding, is the boundary; a decision record holds the choice of
+  why userspace mode is not supported, that LAN hosts may reach the ingest port on the tailnet address as they may the web port
+  (Docker matches only the destination), and that the token, not the binding, is the boundary; a decision record holds the choice of
   the Tailscale mode and the binding (S6, E18, E19).
 
 ## Out of scope
@@ -229,7 +255,7 @@ below is anything of the batch stored.
 - Several agents with one token each (#89): this change binds the one token to one agent ID; the variable scheme for several tokens
   supersedes it there (record 0050).
 - The example Tailscale ACL policy and its test from the monitored server (#43).
-- A request-per-second cap and disk quotas: disk growth is retention's job (#46); a full disk is E10.
+- A request-per-second cap; age-based retention (#46). The disk floor of E20 bounds what a token holder can fill.
 - TLS on the ingest listener: the tailnet encrypts and authenticates the transport (Agent area, *Connection*; record 0010).
 - Upgrade rules between agent and backend versions (#85); E8 follows the current rule "upgrade the backend first".
 - Gap detection from missing sequence numbers (`sequence_missing`, #41).
@@ -247,7 +273,7 @@ below is anything of the batch stored.
   memory or disk. Memory is bounded by the body, batch and line limits, the two decode slots and the connection cap; time by the
   30-second bound and Kestrel's existing header and keep-alive limits. A request-per-second cap would answer the agent's backfill with a
   non-`2xx`, which starts the shared backoff of both streams and holds current data back (record 0125), and it would not stop disk
-  growth, which retention (#46) bounds; so there is none.
+  growth, which the free-space floor `ingest.min_free` (E20) bounds; so there is none.
 - Which statuses answer which failure?
   Answered: record 0124 and the Backend host area (*Ingest endpoint*) fix the classes: `2xx` only after the commit; `400`, `413` and
   `422` with `Vandox-Refused: batch` only for a batch invalid as a whole, on an authenticated request; everything else outside those
@@ -303,3 +329,8 @@ below is anything of the batch stored.
   before the endpoint runs; E1 says so. E7 and AC19 add the gzip header rules (name or comment over 511 bytes, header checksum,
   extra field), because the C# decoder now reads the gzip framing itself and has to choose them; they are the Go decoder's rules
   and the Wire format area's *Accepted forms*.
+- Plan round (Security plan review and the plan challenge, answered in `plan.md`): the spec now holds the disk floor `ingest.min_free`
+  (E20, AC20, *Disk*, *New configuration*), the catch-all (E21), the shutdown rule that no write starts after the stop signal and a
+  started one is bounded by the deadline (E16, AC14), the 5-second lock wait (E10, E11), the real-store memory measurement (AC12), map
+  keys reduced in logged field paths and header-line errors (E7, AC8, AC15), DEL and non-ASCII header bytes answered `401` (E1), and
+  LAN reachability of the ingest port in the documentation (AC18).

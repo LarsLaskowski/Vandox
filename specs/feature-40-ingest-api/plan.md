@@ -1,7 +1,7 @@
 # Plan: Ingest API
 
 Source: Issue #40 | [spec.md](spec.md)
-Status: Draft
+Status: Revised (1)
 Tier: security — the change creates the ingest authentication (token check, agent binding), new network exposure (the ingest endpoint and its published port) and request bounds, all security controls.
 Security areas touched: 1 Ingest authentication (`Vandox.Backend.Ingest`, `BatchWriter` use); 2 Tailscale ACL and port binding (`deploy/backend/docker-compose.yml`, TUN prerequisite); 8 Secrets handling (`VANDOX_AGENT_TOKEN` now used by the backend, `IngestToken`); 10 Parsing of external input (`BatchDecoder`, new `GzipMemberReader`, `IngestLimits`); 12 Logging of external data (ingest log lines with `agent_id` and peer); 13 Release pipeline (`.github/scripts/smoke-test-backend.sh`, compose file); Docker/CI configuration (compose file, smoke test); no dependency change
 
@@ -25,10 +25,15 @@ See [spec.md](spec.md), *Problem*.
 | 10 | The golden batch's header has `agent_id` `agent-1` | `testdata/wire/all-kinds.jsonl` line 1 | confirmed |
 | 11 | Kestrel removes spaces and tabs around a header value and refuses a control character in a header with `400` before the pipeline runs | to verify: a `ServeTests` case against real Kestrel (`Authorization: Bearer <token>` plus a trailing space gives `204`); owner Tester, step 5 | unverified |
 | 12 | Kestrel collects two `Authorization` headers into one `StringValues` of two entries | to verify: the same `ServeTests` case with two headers gives `401`; owner Tester, step 5 | unverified |
-| 13 | Peak memory of one request at the limits (hostile 1 MiB line; 20,000 records from 2 MiB of JSON through the write) times two stays within 128 MiB | to verify: `IngestEndpointTests` heap and allocation bounds (*Tests per criterion*, AC12); owner Tester, step 6; a breach goes to the Lead (fewer slots or lower limits) | unverified |
+| 13 | Peak memory of one request at the limits (hostile 1 MiB line; 20,000 distinct log lines filling 2 MiB and the largest connection snapshot through a real `SqliteStore` write, its `TemplateTally`, `_labelBuffer`, `ListenerMarkWriter` state and SQLite's native memory included) times two stays within 128 MiB | to verify: `IngestEndpointTests` heap bound and `SQLitePCL.raw.sqlite3_memory_highwater` around the write (*Tests per criterion*, AC12); owner Tester, step 6; a breach goes to the Lead (fewer slots or lower limits) | unverified |
 | 14 | In userspace mode the tailnet address cannot be bound by Docker, and Tailscale forwards inbound tailnet connections to `127.0.0.1` | to verify: on the Synology host by the PM before release (#45); source so far the issue #40 comment and record 0060; the Lead's docs step states it as reported, not measured | unverified |
 | 15 | Synology's package switches to TUN mode with `tailscale configure-host` and a package restart, repeated at boot by a triggered task | to verify: Tailscale's Synology documentation read by the Lead in the docs step and quoted with its link; the PM confirms on the host (#45) | unverified |
 | 16 | Docker's userland proxy binds the host address (fails while it is missing), the iptables-only path does not; a container whose bind fails at daemon start is not restarted by `unless-stopped` | to verify: CI smoke test cannot check it (no tailnet); the Lead states it as a possible symptom with the remedy `docker compose up -d` after Tailscale is up, not as a fact | unverified |
+| 18 | Microsoft.Data.Sqlite retries `SQLITE_BUSY` until the connection's `DefaultTimeout` (30 s by default) on top of `busy_timeout`, so the store's writer waits about 30-35 s, not the documented 5 s | DA scratch program `/tmp/claude-0/-home-user-Vandox/12e5a606-84aa-5097-9899-979fbf03d825/scratchpad/busy/Program.cs`: `DefaultTimeout=4` error 5 after 4,477 ms, default after 31,097 ms; `SqliteStore.cs` `ConnectionString` (lines 281-289) sets none | confirmed |
+| 19 | `DefaultTimeout` bounds only the busy retry, not a statement that runs long without a lock conflict | to verify: the Dev reads `SqliteCommand` in the Microsoft.Data.Sqlite 10.0.13 source in step 4 and reports; the existing `SqliteStore` tests (template rebuild, imports) stay green | unverified |
+| 20 | `DriveInfo` on Linux answers `AvailableFreeSpace` for the file system of any directory path (`statvfs` `f_bavail * f_frsize`) | to verify: the Dev reads `DriveInfo.Unix` in the .NET 10 source in step 4 and a `TempDirectory` test in step 5 compares it with `df`-free reasoning (positive, at most the total size); owner Dev, Tester | unverified |
+| 21 | Kestrel lets DEL (`0x7F`) and non-ASCII bytes in a header value reach the application | to verify: the fact-11 `ServeTests` case expects `401` for DEL and a non-ASCII byte (source: Security plan review, non-blocking 1); owner Tester, step 5 | unverified |
+| 22 | `ApplicationStopping` fires at the stop signal before Kestrel stops accepting; `StopAsync` waits for running requests at most `ShutdownTimeout` (10 s) and does not wait for application code beyond it | Security plan review B3; `ServeCommand.cs` lines 166-170, `HostOptions.ShutdownTimeout`; covered by `ServeShutdown*` tests | confirmed |
 | 17 | `docker compose config` fails for `${INGEST_BIND_ADDRESS:?message}` when the variable is unset; Synology Container Manager and QNAP Container Station run Compose v2 and honor it | to verify: the smoke test (CI job *Release build check*) for Compose v2; NAS managers by the PM before release (#45) | unverified |
 
 ## Tests per criterion
@@ -41,16 +46,17 @@ See [spec.md](spec.md), *Problem*.
 | AC4 | `IngestTokenComparesFixedLengthDigests` (a probe of the comparison input: both sides 32 bytes for presented tokens of 1, 64 and 16,000 characters) | `tests/Vandox.Backend.Tests/IngestTokenTests.cs` |
 | AC5 | `IngestEndpointOtherAgentIdAnswers403`, `IngestEndpointAgentIdIsComparedOrdinally` | `tests/Vandox.Backend.Tests/IngestEndpointTests.cs` |
 | AC6 | `IngestSettingsMissingTokenOrAgentIdDisablesIngest`; `IngestEndpointDisabledAnswers503`; `ServeIngestDisabledLogsOnceAndServesWeb`; `BackendConfigLoaderReadsIngestAgentId`, `BackendConfigLoaderRefusesInvalidIngestAgentIdWithoutValue` (rows from the wire agent ID rule), existing `BackendConfigLoaderLoadsRepositoryExample` and key-list tests adapted | `tests/Vandox.Backend.Tests/IngestSettingsTests.cs`, `IngestEndpointTests.cs`, `ServeTests.cs`, `tests/Vandox.Core.Tests/BackendConfigLoaderTests.cs` |
-| AC7 | `IngestEndpointContentLengthOverLimitAnswers413BeforeReading`, `IngestEndpointChunkedBodyOverLimitAnswers413`, `IngestEndpointOversizedBatchAnswers413` (rows: decompressed over 2 MiB, 20,001 records, line over 1 MiB, 1 KB body to a hostile line) | `tests/Vandox.Backend.Tests/IngestEndpointTests.cs` |
-| AC8 | `IngestEndpointUnreadableBodyAnswers400Refused` (rows: not gzip, empty, truncated, bad CRC, trailing bytes, bad JSON, key rule), `IngestEndpointInvalidBatchAnswers422Refused` (rows: field error, unknown kind, no records, sequence, capture time outside the storable range), `IngestEndpointErrorAfterGoodRecordsStoresNothing`, `IngestEndpointNewerMinorStoresWithUnknownKeysDropped`, `IngestEndpointRefusedBatchLogsFixedReasonOnly` | `tests/Vandox.Backend.Tests/IngestEndpointTests.cs` |
-| AC9 | `IngestEndpointUnsupportedMajorAnswers415`, `IngestEndpointContentTypeForms` (rows: `Application/GZIP` accepted; parameter, `application/x-gzip`, empty, missing, two headers refused), `IngestEndpointContentEncodingAnswers415WithoutReading` | `tests/Vandox.Backend.Tests/IngestEndpointTests.cs` |
-| AC10 | `IngestEndpointStoreFailureAnswers503AndStoresNothing` (scripted writer failure; and a real store whose writer lock another connection holds beyond the busy timeout), `IngestEndpointResendAfterStoreFailureIsStored` | `tests/Vandox.Backend.Tests/IngestEndpointTests.cs` |
-| AC11 | `IngestEndpointAtMostTwoRequestsHoldASlot` (gated writer counts concurrency), `IngestEndpointSlotIsHeldUntilTheCommit`, `IngestEndpointAbortedRequestStillCommits`, `IngestEndpointRequestOverBudgetGetsNo2xx` (rows: slot wait, trickling body; `FakeTimeProvider`), `ServeIngestSeventeenthConnectionIsClosed` | `tests/Vandox.Backend.Tests/IngestEndpointTests.cs`, `ServeTests.cs` |
-| AC12 | `IngestEndpointHostileLineStaysWithinMemoryBound`, `IngestEndpointMaximalBatchStaysWithinMemoryBound` (heap bound with `GC.GetTotalMemory(true)` sampled while the gated write waits, allocation bound beyond a baseline) | `tests/Vandox.Backend.Tests/IngestEndpointTests.cs` |
+| AC7 | `IngestEndpointContentLengthOverLimitAnswers413BeforeReading`, `IngestEndpointChunkedBodyOverLimitAnswers413`, `IngestEndpointOversizedBatchAnswers413` (rows: decompressed over 2 MiB, 20,001 records, line over 1 MiB, header line over 1 MiB, 1 KB body to a hostile line) | `tests/Vandox.Backend.Tests/IngestEndpointTests.cs` |
+| AC8 | `IngestEndpointUnreadableBodyAnswers400Refused` (rows: not gzip, empty, truncated, bad CRC, trailing bytes, bad JSON, key rule, unreadable header line), `IngestEndpointInvalidBatchAnswers422Refused` (rows: field error, unknown kind, no records, sequence, capture time outside the storable range), `IngestEndpointErrorAfterGoodRecordsStoresNothing`, `IngestEndpointNewerMinorStoresWithUnknownKeysDropped`, `IngestEndpointRefusedBatchLogsFixedReasonOnly` (a refused label key holds a sentinel; the logged `field` is `data.labels[]`), `IngestFieldPathReducesMapKeys` | `tests/Vandox.Backend.Tests/IngestEndpointTests.cs` |
+| AC9 | `IngestEndpointUnsupportedMajorAnswers415` (header line), `IngestEndpointContentTypeForms` (rows: `Application/GZIP` accepted; parameter, `application/x-gzip`, empty, missing, two headers refused), `IngestEndpointContentEncodingAnswers415WithoutReading` | `tests/Vandox.Backend.Tests/IngestEndpointTests.cs` |
+| AC10 | `IngestEndpointStoreFailureAnswers503AndStoresNothing` (scripted writer failure; and a real store whose writer lock a second connection holds, answered after about 5 s), `IngestEndpointResendAfterStoreFailureIsStored`; `SqliteStoreWriteGivesUpAfterBusyTimeout` (the writer waits at least 5 s and less than 10 s, measured as a ratio to the configured timeout) | `tests/Vandox.Backend.Tests/IngestEndpointTests.cs`, `tests/Vandox.Storage.Tests/SqliteStoreTests.cs` |
+| AC11 | `IngestEndpointAtMostTwoRequestsHoldASlot` (gated writer counts concurrency), `IngestEndpointSlotIsHeldUntilTheCommit`, `IngestEndpointAbortedRequestStillCommits`, `IngestEndpointBodyBuffersBelongToTheSlots`, `IngestEndpointRequestOverBudgetGetsNo2xx` (rows: slot wait, trickling body; `FakeTimeProvider`), `ServeIngestSeventeenthConnectionIsClosed` | `tests/Vandox.Backend.Tests/IngestEndpointTests.cs`, `ServeTests.cs` |
+| AC12 | `IngestEndpointHostileLineStaysWithinMemoryBound` (decoder), `IngestEndpointMaximalBatchStaysWithinMemoryBound` (a real `SqliteStore` in a `TempDirectory`: 20,000 distinct log lines filling 2 MiB, and a batch with the largest connection snapshot; the heap sampled with `GC.GetTotalMemory(true)` by a second thread while the real write runs, its maximum kept, plus `sqlite3_memory_highwater(1)` reset before and read after the write) | `tests/Vandox.Backend.Tests/IngestEndpointTests.cs` |
 | AC13 | `PortRoutingMiddlewareSendsOnlyPostV1BatchesToIngest` (rows: other path, `/v1/batches/`, `/V1/batches`, `GET`, `/healthz`), existing ingest-`404` cases of `ServeTests` kept, `ServeWebPortPostV1BatchesStoresNothing`, `ServeIngestAnswerCarriesNoSecurityHeaders` | `tests/Vandox.Backend.Tests/PortRoutingMiddlewareTests.cs`, `ServeTests.cs` |
-| AC14 | `ServeShutdownDuringIngestWriteCommitsOrStoresNothing` (gated writer released after the stop signal), `ServeShutdownDrainsIngestWritesBeforeClosingStore` | `tests/Vandox.Backend.Tests/ServeTests.cs` |
-| AC15 | `IngestEndpointLogsFirstBatchOnceAndEveryBatchAtDebug`, `IngestEndpointLogsHoldNoTokenOrContent` (a sentinel token and sentinel record text, every ingest log line of the other tests' scenarios checked) | `tests/Vandox.Backend.Tests/IngestEndpointTests.cs` |
-| AC19 | shared decoder cases `G1`-`G13` run by `DecodeSharedCaseGivesExpectedResult` and `TestDecoder_SharedCases`; `SharedCasesHaveUniqueNamesAndHoldEveryRequiredCase` and `requiredCaseIDs` extended by `G`; `GzipMemberReaderReadsConcatenatedMembers`, `Crc32MatchesReferenceVectors` | `testdata/wire/decoder-cases.json`, `tests/Vandox.Core.Tests/WireContractTests.cs`, `internal/wire/decode_test.go`, `tests/Vandox.Core.Tests/GzipMemberReaderTests.cs`, `tests/Vandox.Core.Tests/Crc32Tests.cs` |
+| AC14 | `ServeShutdownDuringIngestWriteCommitsOrStoresNothing` (gated writer released after the stop signal), `ServeShutdownDrainsIngestWritesBeforeClosingStore`, `ServeShutdownRefusesAWriteThatStartsAfterTheDrain` (a request that finished decoding when the drain began gets no `2xx` and the writer sees no call), `ServeShutdownCancelsAWriteAfterTheDeadline` (`FakeTimeProvider`: the write's token is cancelled 10 s after the stop), `ServeFailureAfterStartStillDrains` (a listener failure path), `IngestWriteGateClosesAtomically` | `tests/Vandox.Backend.Tests/ServeTests.cs`, `IngestWriteGateTests.cs` |
+| AC15 | `IngestEndpointLogsFirstBatchOnceAndEveryBatchAtDebug`, `IngestEndpointLogsHoldNoTokenOrContent` (a sentinel token, sentinel record text and a sentinel map key, every ingest log line of the other tests' scenarios checked) | `tests/Vandox.Backend.Tests/IngestEndpointTests.cs` |
+| AC19 | shared decoder cases `G1`-`G13` run by `DecodeSharedCaseGivesExpectedResult` and `TestDecoder_SharedCases`; `SharedCasesHaveUniqueNamesAndHoldEveryRequiredCase` and `requiredCaseIDs` extended by `G`; `GzipMemberReaderReadsConcatenatedMembers`, `Crc32MatchesReferenceVectors`; `WireContractGoGzipDecodesToGoldenRecords` (rows: `all-kinds.jsonl.gz` and `all-kinds-two-members.jsonl.gz` written by Go, `all-kinds-gzip1.jsonl.gz` written by `gzip -9 -c` with `FNAME`; records equal the plaintext golden file, every input byte consumed); `TestGolden_GzipSamples` (Go regenerates or checks the two Go samples under `VANDOX_UPDATE_GOLDEN=1`) | `testdata/wire/decoder-cases.json`, `tests/Vandox.Core.Tests/WireContractTests.cs`, `internal/wire/decode_test.go`, `internal/wire/golden_test.go`, `tests/Vandox.Core.Tests/GzipMemberReaderTests.cs`, `tests/Vandox.Core.Tests/Crc32Tests.cs` |
+| AC20 | `IngestEndpointLowFreeSpaceAnswers503AndWritesNothing` (rows: below floor, unreadable, floor 0 off), `IngestEndpointLogsPauseOnceAndResume`, `IngestEndpointUnexpectedExceptionAnswers503WithTypeOnly`; `BackendConfigLoaderReadsIngestMinFree`, `BackendConfigLoaderRefusesInvalidIngestMinFreeWithoutValue` (the `spool.min_free` rows); `FreeSpaceReadsTheVolumeOfADirectory` | `tests/Vandox.Backend.Tests/IngestEndpointTests.cs`, `tests/Vandox.Core.Tests/BackendConfigLoaderTests.cs`, `tests/Vandox.Backend.Tests/FreeSpaceTests.cs` |
 
 ## Verification without tests
 
@@ -64,7 +70,7 @@ Only the deployment criteria; the rest of the change has tests.
 
 **Routing.** `PortRoutingMiddleware` takes the `IngestEndpoint` from DI. On an ingest connection it calls the endpoint only for method `POST` and path exactly `/v1/batches` (ordinal, no trailing slash, query ignored); every other ingest request stays `404`. The web pipeline (forwarded headers, security headers, login, antiforgery) never runs on ingest. `ListenerRoutes.Ingest` adds a `ConnectionCap` of 16 to its listener (one instance per listener; a 17th connection is aborted before Kestrel reads a request).
 
-**Endpoint, in this order** (each answer without a body; `R` = `Vandox-Refused: batch`):
+**Endpoint, in this order** (each answer without a body; `R` = `Vandox-Refused: batch`; `HandleAsync` has a catch-all after the steps: `503`, `ingest request failed` with the exception's type name):
 
 | Step | Condition | Answer, log |
 | ---- | --------- | ----------- |
@@ -73,20 +79,30 @@ Only the deployment criteria; the rest of the change has tests.
 | 3 | `IngestToken.Matches` false | `401`, `WWW-Authenticate: Bearer`; `ingest token refused` (`peer`, `reason` `missing`/`wrong`), rate-limited |
 | 4 | any `Content-Encoding`; `Content-Type` not one value equal to `application/gzip` ignoring ASCII case | `415`; `ingest request not accepted` (`status`, `reason` `content encoding`/`content type`) |
 | 5 | `Content-Length` > 2 MiB | `413` R; `ingest batch refused` (`reason` `body too large`) |
-| 6 | 30-second budget (from step 1, `TimeProvider`, linked with `RequestAborted`) starts; wait for one of 2 slots | budget passed: `503`; `ingest request timed out` |
-| 7 | read the body into a pooled buffer of at most 2 MiB (`MaxRequestBodySize` feature set as backstop) | over: `413` R; budget passed or `BadHttpRequestException` (data rate): `408` where possible, `ingest request timed out`; aborted: nothing |
-| 8 | `BatchDecoder.OpenAsync` with `IngestLimits.Wire`; header `agent_id` ≠ `ingest.agent_id` (ordinal) | `403`; `ingest agent refused` (`agent_id`, `peer`), rate-limited |
-| 9 | `NextAsync` to the end into a list | `WireException`: `Malformed` → `400` R, `LimitExceeded` → `413` R, `UnknownKind`/`Sequence`/`EmptyBatch`/`Invalid` → `422` R, `UnsupportedVersion` → `415`; `ingest batch refused` / `ingest request not accepted` with `reason` from `IngestStatus.Reason(kind)`, `line`, `field` (`FieldError.Field` and `Reason` only) |
-| 10 | `WriteBatchAsync(batch, CancellationToken.None)`, registered with the endpoint's write tracker | `InvalidBatchException` → `422` R (`reason` `refused by the store`); other `StoreException`, `SqliteException`, `IOException` → `503`, `ingest store failed` (`agent_id`, `exception` type name) |
-| 11 | release the slot (finally, after step 10) | `204`; debug `ingest batch stored`; info `ingest first batch stored` once per process |
+| 6 | 30-second budget (from step 1, `TimeProvider`) linked with `RequestAborted` and `ApplicationStopping`; wait for one of 2 slots | budget passed or stopping: `503`; `ingest request timed out` (not on stopping) |
+| 7 | read the body into the slot's own buffer of 2 MiB (allocated once per slot on first use, never pooled; `MaxRequestBodySize` feature set as backstop) | over: `413` R; budget passed or `BadHttpRequestException` (data rate): `408` where possible, `ingest request timed out`; aborted: nothing |
+| 8 | `BatchDecoder.OpenAsync` with `IngestLimits.Wire`; its `WireException` mapped as in step 9; header `agent_id` ≠ `ingest.agent_id` (ordinal) | as step 9; `403`, `ingest agent refused` (`agent_id`, `peer`), rate-limited |
+| 9 | `NextAsync` to the end into a list | `WireException`: `Malformed` → `400` R, `LimitExceeded` → `413` R, `UnknownKind`/`Sequence`/`EmptyBatch`/`Invalid` → `422` R, `UnsupportedVersion` → `415`; `ingest batch refused` / `ingest request not accepted` with `reason` from `IngestStatus.Reason(kind)`, `line`, `field` (`IngestFieldPath.Reduce(FieldError.Field)`: every `["…"]` segment becomes `[]`) |
+| 10 | free space of `storage.directory` (`FreeSpace.Available`) below `ingest.min_free` (0 = off) or unreadable | `503`; warning `ingest paused: free space low` (`available_bytes`, or none when unreadable) once per episode |
+| 11 | `IngestWriteGate.TryEnter` (false once the drain began) | false: `503`, nothing written |
+| 12 | `WriteBatchAsync(batch, shutdownToken)`: `shutdownToken` is cancelled 10 s after `ApplicationStopping` (`IngestEndpoint` owns the source, `TimeProvider`), never by the request | `InvalidBatchException` → `422` R (`reason` `refused by the store`); other `StoreException`, `SqliteException`, `IOException`, and `OperationCanceledException` of the shutdown token → `503`, `ingest store failed` (`agent_id`, `exception` type name) |
+| 13 | leave the gate, release the slot (finally) | `204`; debug `ingest batch stored`; info `ingest first batch stored` once per process; info `ingest resumed` after a pause |
 
-The refusal header is set only in steps 5, 7, 9 and 10. The rate limit (`IngestRefusalLog`, one per message) lets one line through when a minute has passed since the last one, with `suppressed` the count of refusals in between. `ServeCommand` calls `IngestEndpoint.DrainAsync` after `app.StopAsync` and before the store is disposed (fact 4). `IngestSettings.Create` logs `ingest disabled` with `missing` once at start.
+The refusal header is set only in steps 5, 7, 8, 9 and 12. The rate limit (`IngestRefusalLog`, one per message) lets one line through when a minute has passed since the last one, with `suppressed` the count of refusals in between. `IngestSettings.Create` logs `ingest disabled` with `missing` once at start.
+
+**Shutdown.** `IngestWriteGate` counts writes in flight under one lock: `TryEnter` fails once `Close` was called, so no write can register after the drain began. `IngestEndpoint.DrainAsync` closes the gate and waits for the writes in flight, at most until the shutdown token (stop signal + 10 s) is cancelled and the cancelled writes have rolled back. `ServeAsync` calls it in a `finally` that covers every exit after `app.StartAsync` succeeded (normal stop, the catch paths, an exception of `StopAsync`), so the store is disposed only after it (facts 4, 22). A cancelled write is a rollback the agent resends after the restart.
+
+**Store.** `SqliteStore.ConnectionString` sets `DefaultTimeout = 5`, so a write waits at most the documented busy timeout of 5 s for another process's lock (fact 18), not about 30 s; the Storage area keeps "5 seconds" and now says it bounds the whole wait.
+
+**Listener.** `ListenerRoutes.Ingest` sets `HttpProtocols.Http1` (one request at a time per connection, so 16 connections bound 16 requests).
 
 **Decoder.** `BatchDecoder.OpenAsync` reads through `GzipMemberReader` instead of `GZipStream` (record 0128): the header rules of fact 9, a raw `DeflateStream` per member fed one byte per read from the reader's own buffer, CRC-32 (`Crc32`, table in code) and ISIZE of the output against the trailer; after a trailer, end of input ends the stream, else the next bytes must be a header. Every framing error is `WireException` `Malformed`, raised at the read where Go raises it (records before it are returned). `StrictGzip.Require()` stays in `OpenAsync`.
 
 **Shared cases.** Each case of `testdata/wire/decoder-cases.json` may carry `"gzip": {"members": n, "trailing_hex": "…", "name_bytes": n, "comment_bytes": n, "extra_bytes": n, "header_crc": "right" | "wrong"}`; both loaders build the stream from it (Go with `DisallowUnknownFields`, so the struct gains the field). Cases: `G1` 20 garbage bytes, `G2` one zero byte, `G3` 16 zero bytes, `G4` `1f 8b` alone, `G6` two members then garbage → records then `Malformed`; `G5` two members → ok; `G7` name 511 ok, `G8` name 512 `Malformed`, `G9`/`G10` the same for the comment, `G11` extra field of 100 bytes ok, `G12` right and `G13` wrong header CRC.
 
-**Compose and smoke test.** Ports entry `"${INGEST_BIND_ADDRESS:?set INGEST_BIND_ADDRESS to this host's tailnet address (tailscale ip -4), or 127.0.0.1 without agents}:8081:8081"`. The smoke test keeps the token in a variable before `chown`, adds `ingest:\n  agent_id: agent-1` to its copy of `vandoxd.yaml`, exports `INGEST_BIND_ADDRESS=127.0.0.1`, replaces the "no ingest binding" check by "8081 bound on exactly `127.0.0.1`", posts the gzip of `all-kinds.jsonl` twice (`204`, `204`), a wrong token (`401`), `GET /healthz` on 8081 (`404`), and runs `docker compose config` once with the variable unset (fails, message names it).
+**Gzip samples.** `internal/wire/golden_test.go` writes or checks `testdata/wire/all-kinds.jsonl.gz` (the bytes `EncodeBatch` writes for the golden records) and `all-kinds-two-members.jsonl.gz` (the golden lines split into two members by Go's `gzip.Writer`) under `VANDOX_UPDATE_GOLDEN=1`; the Tester commits `all-kinds-gzip1.jsonl.gz` made once with `gzip -9 -c all-kinds.jsonl` (`FNAME` and `MTIME` set by gzip(1)), which only the C# test reads.
+
+**Compose and smoke test.** Ports entry `"${INGEST_BIND_ADDRESS:?set INGEST_BIND_ADDRESS to this host's tailnet address (tailscale ip -4), or 127.0.0.1 without agents}:8081:8081"`. The smoke test keeps the token in a variable before `chown`, replaces the commented line `# agent_id: web-1` under the existing `ingest:` block of its copy of `vandoxd.yaml` by `  agent_id: agent-1` (and fails when the file did not change, so no second `ingest:` key is ever written), exports `INGEST_BIND_ADDRESS=127.0.0.1`, replaces the "no ingest binding" check by "8081 bound on exactly `127.0.0.1`", posts the gzip of `all-kinds.jsonl` twice (`204`, `204`), a wrong token (`401`), `GET /healthz` on 8081 (`404`), and runs `docker compose config` once with the variable unset (fails, message names it).
 
 Log lines are fixed texts as above; layout of the documentation free for the Lead, approved in step 9.
 
@@ -102,20 +118,24 @@ Log lines are fixed texts as above; layout of the documentation free for the Lea
 
 | Project | Type / file | Change |
 | ------- | ----------- | ------ |
-| Vandox.Core | `Configuration/IngestConfig.cs` (new), `BackendConfig.cs`, `BackendConfigLoader.cs` | `ingest.agent_id` option, rule, key list |
+| Vandox.Core | `Configuration/IngestConfig.cs` (new), `BackendConfig.cs`, `BackendConfigLoader.cs` | `ingest.agent_id` and `ingest.min_free` options, rules, key list |
+| Vandox.Storage | `SqliteStore.cs` `ConnectionString` | `DefaultTimeout = 5` |
 | Vandox.Core | `Wire/GzipMemberReader.cs`, `Wire/Crc32.cs` (new), `Wire/BatchDecoder.cs` | own gzip framing |
-| Vandox.Backend | `Ingest/IngestEndpoint.cs`, `IngestSettings.cs`, `IngestToken.cs`, `IngestLimits.cs`, `IngestStatus.cs`, `IngestRefusalLog.cs`, `ConnectionCap.cs` (new) | the endpoint |
+| Vandox.Backend | `Ingest/IngestEndpoint.cs`, `IngestSettings.cs`, `IngestToken.cs`, `IngestLimits.cs`, `IngestStatus.cs`, `IngestRefusalLog.cs`, `ConnectionCap.cs`, `IngestWriteGate.cs`, `FreeSpace.cs`, `IngestFieldPath.cs` (new) | the endpoint |
 | Vandox.Backend | `Hosting/PortRoutingMiddleware.cs`, `ListenerRoutes.cs`, `ServeCommand.cs`, `BackendLog.cs` | routing, cap, DI, drain, log methods |
 | deploy | `backend/docker-compose.yml`, `backend/vandoxd.yaml` | ports entry and comments; commented `agent_id` |
 | CI | `.github/scripts/smoke-test-backend.sh` | ingest checks |
-| testdata | `wire/decoder-cases.json` | cases `G1`-`G13` |
+| testdata | `wire/decoder-cases.json`, `wire/all-kinds.jsonl.gz`, `wire/all-kinds-two-members.jsonl.gz`, `wire/all-kinds-gzip1.jsonl.gz` | cases `G1`-`G13`; gzip samples |
 
 ## Signatures (for the Dev's skeleton)
 
-- `public sealed class IngestConfig` with `[ConfigKey("listen")] public string Listen { get; set; }` and `[ConfigKey("agent_id")] public string? AgentId { get; set; }`; `BackendConfig.Ingest` becomes `public IngestConfig Ingest { get; }`
+- `public sealed class IngestConfig` with `[ConfigKey("listen")] public string Listen { get; set; }` `[ConfigKey("agent_id")] public string? AgentId { get; set; }` and `[ConfigKey("min_free")] public string MinFree { get; set; }` (default 1GiB) with `public long GetMinFreeBytes()`; `BackendConfig.Ingest` becomes `public IngestConfig Ingest { get; }`
 - `internal sealed class GzipMemberReader : Stream` with `internal GzipMemberReader(Stream input)` and the `ReadAsync(Memory<byte>, CancellationToken)` and `Read(Span<byte>)` overrides
 - `internal static class Crc32` with `internal static uint Update(uint crc, ReadOnlySpan<byte> data)`
-- `internal sealed class IngestEndpoint` with `internal IngestEndpoint(IngestSettings? settings, IRecordWriter writer, TimeProvider clock, ILoggerFactory loggerFactory)`, `internal Task HandleAsync(HttpContext context)`, `internal Task DrainAsync()`
+- `internal sealed class IngestEndpoint : IDisposable` with `internal IngestEndpoint(IngestSettings? settings, IRecordWriter writer, FreeSpace freeSpace, IHostApplicationLifetime lifetime, TimeProvider clock, ILoggerFactory loggerFactory)`, `internal Task HandleAsync(HttpContext context)`, `internal Task DrainAsync()`
+- `internal sealed class IngestWriteGate` with `internal bool TryEnter()`, `internal void Exit()`, `internal Task CloseAsync(CancellationToken cancellationToken)`
+- `internal sealed class FreeSpace` with `internal FreeSpace(string directory, Func<string, long?> probe)`, `internal long? Available()` and `internal static long? Probe(string directory)` (through DriveInfo, no value on any failure)
+- `internal static class IngestFieldPath` with `internal static string Reduce(string field)`
 - `internal sealed class IngestSettings` with `internal static IngestSettings? Create(BackendConfig config, ILogger logger)`, `internal string AgentId { get; }`, `internal IngestToken Token { get; }`
 - `internal sealed class IngestToken` with `internal IngestToken(Secret token)`, `internal bool Matches(StringValues authorization)`, `internal static byte[] Digest(ReadOnlySpan<char> token)`
 - `internal static class IngestLimits` with `MaxBodyBytes`, `MaxBatchBytes` (both `2 << 20`), `MaxLineBytes` (`1 << 20`), `MaxRecords` (20,000), `Slots` (2), `MaxConnections` (16), `RequestBudget` (30 s) and `internal static WireLimits Wire()`
@@ -123,11 +143,11 @@ Log lines are fixed texts as above; layout of the documentation free for the Lea
 - `internal sealed class IngestRefusalLog` with `internal IngestRefusalLog(TimeProvider clock)`, `internal bool TryTake(out int suppressed)`
 - `internal sealed class ConnectionCap` with `internal ConnectionCap(int max)`, `internal ConnectionDelegate Wrap(ConnectionDelegate next)`
 - `PortRoutingMiddleware(RequestDelegate next, IngestEndpoint ingest)` replaces `PortRoutingMiddleware(RequestDelegate next)`
-- `BackendLog`: `IngestDisabled(this ILogger logger, string missing)`, `IngestTokenRefused(this ILogger logger, string peer, string reason, int suppressed)`, `IngestAgentRefused(this ILogger logger, string agentId, string peer, int suppressed)`, `IngestBatchRefused(this ILogger logger, string? agentId, int status, string reason, long? line, string? field)`, `IngestRequestNotAccepted(this ILogger logger, int status, string reason)`, `IngestRequestTimedOut(this ILogger logger, string peer)`, `IngestStoreFailed(this ILogger logger, string agentId, string exception)`, `IngestFirstBatchStored(this ILogger logger, string agentId)`, `IngestBatchStored(this ILogger logger, string agentId, string mode, int records, int stored, int duplicates)`
+- `BackendLog`: `IngestDisabled(this ILogger logger, string missing)`, `IngestTokenRefused(this ILogger logger, string peer, string reason, int suppressed)`, `IngestAgentRefused(this ILogger logger, string agentId, string peer, int suppressed)`, `IngestBatchRefused(this ILogger logger, string? agentId, int status, string reason, long? line, string? field)`, `IngestRequestNotAccepted(this ILogger logger, int status, string reason)`, `IngestRequestTimedOut(this ILogger logger, string peer)`, `IngestStoreFailed(this ILogger logger, string agentId, string exception)`, `IngestRequestFailed(this ILogger logger, string exception)`, `IngestPaused(this ILogger logger, long? availableBytes)`, `IngestResumed(this ILogger logger)`, `IngestFirstBatchStored(this ILogger logger, string agentId)`, `IngestBatchStored(this ILogger logger, string agentId, string mode, int records, int stored, int duplicates)`
 
 ## Test files
 
-`tests/Vandox.Backend.Tests/IngestEndpointTests.cs`, `IngestTokenTests.cs`, `IngestSettingsTests.cs`, `IngestRefusalLogTests.cs`, `ServeTests.cs`, `PortRoutingMiddlewareTests.cs`; `tests/Vandox.Core.Tests/BackendConfigLoaderTests.cs`, `WireContractTests.cs`, `GzipMemberReaderTests.cs`, `Crc32Tests.cs`; `internal/wire/decode_test.go`; fixture `testdata/wire/decoder-cases.json`. New doubles (Tester): `RecordingRecordWriter` (an `IRecordWriter` that keeps every batch and token, counts writes in flight, can hold a write until released and fail with a scripted exception) and `CountingBodyStream` (a request body that counts reads), each in its own file of `tests/Vandox.Backend.Tests`.
+`tests/Vandox.Backend.Tests/IngestEndpointTests.cs`, `IngestTokenTests.cs`, `IngestSettingsTests.cs`, `IngestRefusalLogTests.cs`, `IngestWriteGateTests.cs`, `FreeSpaceTests.cs`, `IngestFieldPathTests.cs`, `ServeTests.cs`, `PortRoutingMiddlewareTests.cs`; `tests/Vandox.Storage.Tests/SqliteStoreTests.cs`; `tests/Vandox.Core.Tests/BackendConfigLoaderTests.cs`, `WireContractTests.cs`, `GzipMemberReaderTests.cs`, `Crc32Tests.cs`; `internal/wire/decode_test.go`, `internal/wire/golden_test.go`; fixtures `testdata/wire/decoder-cases.json` and the three gzip samples. New doubles (Tester): `RecordingRecordWriter` (an `IRecordWriter` that keeps every batch and token, counts writes in flight, can hold a write until released and fail with a scripted exception) and `CountingBodyStream` (a request body that counts reads), each in its own file of `tests/Vandox.Backend.Tests`.
 
 Existing call sites: `PortRoutingMiddlewareTests` lines 31 and 64 (`new PortRoutingMiddleware(...)`) — Dev adapts in step 4 (old signature removed); `BackendConfigLoaderTests` key-list assertion (line 672) and the example-file test — Tester in step 5; `ServeTests` line 194 (`ListenerRoutes.Ingest` method group, unchanged signature) — none.
 
@@ -137,8 +157,8 @@ Files no unit test can cover: none (the compose file and smoke script are under 
 
 - `docs/areas/backend-host.md`: *Ingest endpoint* implemented (the step table above as behavior, limits, timeouts, slots, log lines); *Listeners and routing*; *Compose file* (ports entry, variable, smoke checks); *Exposure and trust* (TUN mode); *Implementation* (`Ingest/`).
 - `docs/areas/wire-format.md`: *Duties of the ingest API* rewritten with the measured C# figures (fact 13); *Accepted forms* rows for trailing bytes and header rules naming the shared cases; *Implementation* (`GzipMemberReader`); *Not here*.
-- `docs/areas/configuration-and-secrets.md`: `ingest.agent_id` row and rule; backend uses `VANDOX_AGENT_TOKEN`.
-- `docs/areas/storage.md`: ingest path implemented (lines 17-19).
+- `docs/areas/configuration-and-secrets.md`: `ingest.agent_id` and `ingest.min_free` rows and rules; backend uses `VANDOX_AGENT_TOKEN`.
+- `docs/areas/storage.md`: ingest path implemented (lines 17-19); the busy timeout of 5 s bounds the whole wait for the lock (`DefaultTimeout`, lines 20-23).
 - `docs/areas/network-and-security-model.md`: *Agent to backend* implemented, TUN prerequisite.
 
 ## Documentation updates
@@ -148,9 +168,9 @@ Sweep of enumerations: `grep -n -i -E 'ingest|8081|not published|planned \(#40\)
 | File | Owner |
 | ---- | ----- |
 | `docs/areas/*.md` (all five above), `docs/ARCHITECTURE.md` (status lines 14-15, 268; the ingest component) | Lead (mode `docs`) |
-| `README.md` (status line 16, options table `ingest.agent_id`, line 151, lines 253-254: binding, TUN, `INGEST_BIND_ADDRESS` in `.env`), `docs/INSTALL.md` (Synology TUN steps, the variable, symptoms), `SECURITY.md` line 46 | Lead (mode `docs`) |
-| `deploy/backend/docker-compose.yml` comments, `deploy/backend/vandoxd.yaml` (`agent_id` commented with an example, header lines 12-13) | Dev |
-| `.squad/project.md` security areas 1 and 2 (implemented, the types, the binding) | Dev |
+| `README.md` (status line 16, options table `ingest.agent_id` and `ingest.min_free`, line 151, lines 253-254: binding, TUN, `INGEST_BIND_ADDRESS` in `.env`), `docs/INSTALL.md` (Synology TUN steps, the variable, symptoms), `SECURITY.md` line 46 (LAN hosts may reach the ingest port on the tailnet address; the token is the boundary; the disk floor) | Lead (mode `docs`) |
+| `deploy/backend/docker-compose.yml` comments, `deploy/backend/vandoxd.yaml` (`agent_id` commented with an example, `min_free: 1GiB`, header lines 5-6 name `ingest.agent_id` beside `import.time_zone` as without default, lines 12-13) | Dev |
+| `.squad/project.md` security areas 1 and 2 (implemented, the types, the binding, the disk floor `ingest.min_free` as how the goal's disk bound is met) | Dev |
 | `.squad/project.md` *Test doubles* row for `RecordingRecordWriter`, `CountingBodyStream` | Tester |
 
 ## Architecture check
@@ -162,8 +182,9 @@ Sweep of enumerations: `grep -n -i -E 'ingest|8081|not published|planned \(#40\)
 
 ## Security considerations
 
+- [ ] Disk: writes stop below `ingest.min_free` (default 1 GiB); the overshoot is at most two batches being written.
 - [ ] Limits: compressed body 2 MiB before decoding (on the raw request bytes); decompressed batch 2 MiB and line 1 MiB after gzip, before JSON (decoder); records 20,000 after decoding; the `Authorization` value is bounded by Kestrel's 16 KiB header limit before the token check.
-- [ ] User-visible failure texts: none; every answer has no body, log lines carry fixed reasons, `FieldError.Field`/`Reason`, a line number and exception type names only; `WireException.Message` (which can wrap parser text) and `StoreException.Message` are never logged by the endpoint.
+- [ ] User-visible failure texts: none; every answer has no body, log lines carry fixed reasons, `FieldError.Field`/`Reason`, a line number and exception type names only; `WireException.Message` (which can wrap parser text) and `StoreException.Message` are never logged by the endpoint; map keys of a field path are reduced to `[]` before logging.
 - [ ] Guard of the token, the forms the parser accepts (Kestrel header parsing, fact 11 and 12): one value only; scheme `Bearer` in any ASCII case; one space; the rest hashed as is (non-ASCII and controls cannot match the printable-ASCII token); OWS trimmed by Kestrel; query string, cookies and other headers never read.
 - [ ] Content type guard: one value, exactly `application/gzip` ignoring ASCII case; `Content-Encoding` present in any form refused, so no server decompression can run (record 0124).
 
@@ -171,7 +192,28 @@ Sweep of enumerations: `grep -n -i -E 'ingest|8081|not published|planned \(#40\)
 
 - `docs/decisions/0126-ingest-endpoint-token-bound-to-one-agent-id-two-slots-through-the-commit-no-rate-cap.md` (Proposed)
 - `docs/decisions/0127-backend-host-needs-tailscale-in-tun-mode-ingest-port-on-a-required-bind-address.md` (Proposed, amends 0060)
+- 0126 extended: the disk floor (option chosen over the accepted residual), the uncancellable-by-the-request but deadline-bounded write, the closed gate and the drain.
 - `docs/decisions/0128-csharp-decoder-reads-the-gzip-framing-itself-to-match-the-go-decoder.md` (Proposed, amends 0076)
+
+## Challenge
+
+- M1 (major, uncancellable write and unbounded drain; the lock wait is about 30 s): accepted. The write runs under a shutdown token cancelled 10 s after `ApplicationStopping`; `DrainAsync` waits at most until then; the step-6 budget is linked with `ApplicationStopping` and the gate refuses every write after the drain began, so no write starts after the stop signal (E16, AC14). `DefaultTimeout = 5` on the store's connections makes the documented busy timeout true (fact 18; fact 19 to verify); the AC10 real-store row waits about 5 s.
+- M2 (major, no real gzip sample): accepted. Two samples written by Go (`all-kinds.jsonl.gz` from `EncodeBatch`, a two-member variant) and one by `gzip -9 -c` with `FNAME`; `WireContractGoGzipDecodesToGoldenRecords` compares the records with the plaintext golden file and checks that every input byte was consumed (*Gzip samples*).
+- m1 (duplicate `ingest:` key in the smoke config): accepted. The script replaces the commented `agent_id` line inside the existing block and fails if nothing changed; the example's header names `ingest.agent_id` as without default.
+- m2 (a map key in the logged field): accepted. `IngestFieldPath.Reduce` turns every bracketed key into `[]`; the sentinel test holds a map key (spec E7, AC8, AC15).
+- m3 (header-line errors unmapped): accepted. Step 8 maps `OpenAsync`'s `WireException` as step 9; header-line rows added to AC7, AC8, AC9.
+- m4 (drain on every exit): accepted, with B3 (*Shutdown*).
+
+## Security review
+
+- B1 (disk exhaustion by a token holder): option (a) taken, no escalation: the free-space floor `ingest.min_free` (default `1GiB`, the agent's `spool.min_free` rule) is checked before every write and answered `503`, which the agent treats as not accepting and keeps its records (step 10, spec E20, AC20, record 0126). Option (b) would leave area 1's goal untrue for the NAS volume the data often shares; the floor costs one `statvfs` per batch. `.squad/project.md` area 1 states the floor as the disk bound.
+- B2 (memory of the real write): accepted. AC12 measures through a real `SqliteStore` with 20,000 distinct log lines filling 2 MiB and the largest connection snapshot, heap sampled during the write and SQLite's native high-water mark read; the figures go into the Wire format area. Body buffers are owned by the two slots, never `ArrayPool<byte>.Shared`.
+- B3 (drain race): accepted (*Shutdown*): `IngestWriteGate` closes atomically, a later `TryEnter` gets `503` without starting, the drain runs in a `finally` over every exit after `StartAsync`, and `ServeShutdownRefusesAWriteThatStartsAfterTheDrain` and `ServeFailureAfterStartStillDrains` cover it.
+- Non-blocking 1 (DEL and non-ASCII reach the endpoint): spec E1 corrected; fact 21; the fact-11 case expects `401` for DEL.
+- Non-blocking 2: `HttpProtocols.Http1` on the ingest listener (*Listener*).
+- Non-blocking 3: AC18 and `SECURITY.md` state that LAN hosts may reach the ingest port on the tailnet address.
+- Non-blocking 4: catch-all `503` with the type name only (spec E21, AC20).
+- Non-blocking 5: map keys in field paths reduced (m2).
 
 ## Out of scope / follow-ups
 
