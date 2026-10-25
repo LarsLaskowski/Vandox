@@ -246,8 +246,7 @@ public class IngestEndpointConcurrencyTests
         }
 
         // Act
-        rig.Clock.Advance(TimeSpan.FromSeconds(31));
-        await run.WaitAsync(TimeSpan.FromSeconds(30), TestContext.CancellationToken);
+        await AdvanceUntilDoneAsync(rig, run);
         rig.Writer.ReleaseAll();
         await Task.WhenAll(holders).WaitAsync(TimeSpan.FromSeconds(30), TestContext.CancellationToken);
 
@@ -452,6 +451,32 @@ public class IngestEndpointConcurrencyTests
         // Assert
         Assert.IsFalse(call.Status is >= 200 and < 300, $"status {call.Status} is not a 2xx");
         Assert.AreEqual(0, rig.Writer.Calls, "the writer sees no call");
+    }
+
+    /// <summary>
+    /// Moves the fake clock past the 30-second budget until the request is done. The request may take its receive time and create its budget timer only after
+    /// the first step, so the clock moves again until the timer fires; no fixed delay decides the outcome.
+    /// </summary>
+    /// <param name="rig">The rig whose clock moves</param>
+    /// <param name="run">The request</param>
+    /// <returns>A task that completes when the request is done</returns>
+    private async Task AdvanceUntilDoneAsync(IngestRig rig, Task run)
+    {
+        using var bound = CancellationTokenSource.CreateLinkedTokenSource(TestContext.CancellationToken);
+
+        bound.CancelAfter(TimeSpan.FromSeconds(60));
+
+        Task finished;
+
+        do
+        {
+            rig.Clock.Advance(TimeSpan.FromSeconds(31));
+            finished = await Task.WhenAny(run, Task.Delay(10, bound.Token));
+            bound.Token.ThrowIfCancellationRequested();
+        }
+        while (finished != run);
+
+        await run;
     }
 
     /// <summary>
