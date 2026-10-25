@@ -218,3 +218,10 @@ Sweep of enumerations: `grep -n -i -E 'ingest|8081|not published|planned \(#40\)
 ## Out of scope / follow-ups
 
 - Spec *Out of scope*. Related defect found: none beyond fact 4, which this plan fixes (`DrainAsync`). The import's `GZipStream` keeps accepting trailing bytes after an archive (record 0128, *Consequences*), deliberately.
+
+## Security notes
+
+Squad-security, round 2 (APPROVED), non-blocking, appended verbatim:
+
+1. **When the gate closes.** Spec E16, AC14 and record 0126 say "from the stop signal on no write starts", and 0126 says the gate is closed at the stop signal. The plan's *Shutdown* section closes it only in `DrainAsync`, which runs after `app.StopAsync`, up to 10 s later. In that window, a request that had already finished decoding can still pass `TryEnter`; the budget linked to `ApplicationStopping` stops only requests that are still waiting, reading or decoding. This is safe: the drain still waits for such a write, and the deadline bounds it. The fix is to call `Close` from an `ApplicationStopping` registration, so the plan matches the spec, and to let `ServeShutdownRefusesAWriteThatStartsAfterTheDrain` probe at the stop signal itself.
+2. **`IngestFieldPath.Reduce` must parse every form `FieldError` produces.** "Every `["…"]` segment becomes `[]`" is not enough. `Check.Keyed` builds `field[QuoteName(key)]`, and `Quote` escapes `"` as `\"` and `\` as `\\`. A cut key is followed by `...` after its closing quote, giving `["abc"...]`. A reducer that looks for the next `"]` lets key text through in four cases: a key containing `\"` or `"]`; a key ending in a backslash (`\\"]`); a key containing `]` or `[`; a cut key, where `...` stands between the closing quote and `]`. Fix: walk the quoted string honouring the escapes, allow the optional `...`, and fail closed by logging no `field` when the path does not parse. Add these rows to `IngestFieldPathReducesMapKeys` and the AC15 sentinel test.
