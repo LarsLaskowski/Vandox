@@ -70,7 +70,9 @@ The options of the configuration file are in [Configuration and secrets](configu
   headers, security headers, login, antiforgery) never runs on an ingest connection, so no ingest answer carries the security headers.
   `POST /v1/batches` on the web listener goes down the web pipeline and never reaches the ingest endpoint.
 - The ingest listener speaks HTTP/1.1 only (one request at a time per connection) and keeps at most **16 connections** open; a further
-  connection is closed at once, before a request is read. The web listener has no such cap.
+  connection is closed at once, before a request is read. The web listener has no such cap. The cap counts idle connections too: a host
+  that reaches the port can hold all 16 for the keep-alive time without sending the token, and the agent's connection is then closed
+  until one is free; the agent keeps its records and retries (record 0126).
 - The server sends no `Server` header and limits a request's header read to 5 seconds, its header size to 16 KiB and the idle keep-alive
   to 120 seconds.
 - The web UI is a Blazor Web App in the *Interactive Server* render mode: every open page holds one live connection to the server.
@@ -147,7 +149,9 @@ How the agent reacts to each answer is in the [Agent](agent.md) area (*Sending*)
   so the rest becomes a header of its own (measured against the server, `ServeIngestHeaderWhitespaceAndDuplicates`). The agent
   sends only printable ASCII, so none of the server's answers concerns it.
 - **Log limits.** `ingest token refused` and `ingest agent refused` are each logged at most once a minute; the next line after a
-  quiet minute carries in `suppressed` the number of refusals not logged since the last line. No ingest log line holds the token, the
+  quiet minute carries in `suppressed` the number of refusals not logged since the last line. The other ingest warnings
+  (`ingest request not accepted`, `ingest batch refused`, `ingest request timed out` and the rest) have no such limit; only a request
+  that passed the token check produces them. No ingest log line holds the token, the
   `Authorization` header, body bytes, a map key, other record content or a parser's or the store's own text; an exception is logged
   by its type name only. An unexpected exception of the endpoint is answered `503` (when the answer has not started) and logged as
   the error `ingest request failed` with `exception`.

@@ -26,7 +26,7 @@ files or endpoints.
    at most 2 MiB (`Content-Length` before the read, a 2 MiB buffer owned by each of two slots, never pooled), the decompressed batch at most 2 MiB, a
    line 1 MiB and 20,000 records (`BatchDecoder` through `IngestLimits.Wire`), two slots held from the body read through the commit, 16 connections on
    the listener (`ConnectionCap`, HTTP/1.1 only), 30 seconds for waiting, reading and decoding; there is no request-rate cap (record 0126). The disk
-   bound is the free-space floor `ingest.min_free` (default `1GiB`, `0` off): `FreeSpace` is read before every write and a batch below the floor, or
+   bound is the free-space floor `ingest.min_free` (default `1GiB`, `0MiB` off): `FreeSpace` is read before every write and a batch below the floor, or
    with an unreadable volume, is answered `503` and not written. The drain: `IngestWriteGate` closes at the stop signal (the endpoint's
    `ApplicationStopping` callback), a write that started runs under a token that only the shutdown deadline (10 seconds after the stop signal)
    cancels, and `ServeCommand` waits for the writes in flight (`IngestEndpoint.DrainAsync`) in a `finally` before it closes the store. Logs carry the peer, fixed reasons,

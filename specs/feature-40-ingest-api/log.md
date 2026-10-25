@@ -38,3 +38,5 @@ are quoted in full.
 | 2026-10-25 12:40 | 8 Review round 1 | squad-reviewer | BLOCKING 1 (backend-host.md: refusal header also sent in step 8), NON-BLOCKING 2 (project.md says 0 off, needs 0MiB; real-clock tests in Storage/Serve tests) (opus/medium · 236,114 tokens · 57 tool uses · 670 s) |
 | 2026-10-25 12:40 | 8 Verbatim doc fix | squad-orchestrator | Applied the reviewer's verbatim fix in docs/areas/backend-host.md line 129 (steps 5, 7, 8, 9 and 12) |
 | 2026-10-25 12:41 | 8 Review round 2 (delta) | squad-reviewer | APPROVE; blocking finding resolved (opus/medium · 2,150 tokens · 59 tool uses · 709 s · continued from 8 Review round 1) |
+| 2026-10-25 12:45 | 9 PR approval | squad-lead | APPROVED: project.md 0MiB fix (verbatim, applied), real-time tests accepted with note in 0126 + follow-up issue B, idle-connection cap residual accepted + follow-up issue A, fact 13/19/20 confirmed, deviations accepted (opus/medium · usage pending) |
+| 2026-10-25 12:45 | 9 Records accepted | squad-orchestrator | 0126-0128 set to Accepted; decision-check PASS; project.md 0MiB wording applied |

@@ -1,6 +1,6 @@
 # 0128: The C# decoder reads the gzip framing itself, so trailing bytes and header rules match the Go decoder
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-25
 - **Area:** Wire format
 - **Source:** Issue #40

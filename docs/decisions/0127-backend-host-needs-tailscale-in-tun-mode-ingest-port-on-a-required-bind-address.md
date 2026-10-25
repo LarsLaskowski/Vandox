@@ -1,6 +1,6 @@
 # 0127: The backend host needs Tailscale in TUN mode; the ingest port is published on a required bind address
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-25
 - **Area:** Backend host
 - **Source:** Issue #40

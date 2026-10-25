@@ -167,7 +167,7 @@ below is anything of the batch stored.
 - **Disk:** a token holder cannot fill the data volume: ingest stops writing while less than `ingest.min_free` is free (E20). The
   database still grows up to that floor; retention (#46) bounds it by age.
 - **New configuration:** backend option `ingest.min_free`, default `1GiB`, a whole number of MiB or GiB from `0MiB` to `1024GiB`
-  (the rule of the agent's `spool.min_free`; `0` switches the check off), the error naming the key and never the value; backend option `ingest.agent_id`, no default (optional: while unset ingest is disabled, E4), the agent ID
+  (the rule of the agent's `spool.min_free`; `0MiB` or `0GiB` switches the check off), the error naming the key and never the value; backend option `ingest.agent_id`, no default (optional: while unset ingest is disabled, E4), the agent ID
   rule of the wire format (1 to 64 characters of `A-Z a-z 0-9 . _ -`, starting with a letter or digit), compared exactly; an invalid
   value stops the service at start with an error that names the key and never the value. Compose variable `INGEST_BIND_ADDRESS`,
   required, no default (E18).

@@ -1,6 +1,6 @@
 # 0126: Ingest endpoint: the token bound to one configured agent ID, two slots held through the commit, a free-space floor instead of a rate cap
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-25
 - **Area:** Backend host
 - **Source:** Issue #40
@@ -79,5 +79,14 @@ deadline cancels. The statuses, limits, timeouts and log lines are in the [Backe
   busy timeout and not the library's default of 30 seconds.
 - A token holder can still grow the database up to the floor; the web UI and the import keep working there, and ingest resumes when
   space is freed or retention (#46) removes data.
+- Accepted residuals, availability only (the agent keeps its spool and retries): a host that reaches the ingest port can hold the
+  16 connections idle for the keep-alive time without the token, because Kestrel's keep-alive and header timeouts are server-wide
+  and an idle connection never reaches the token check (follow-up issue); the ingest warnings other than the token and agent
+  refusals are not rate-limited, since only a token holder reaches them and the container's log cap bounds their volume.
+- Three tests rest on the real clock against `docs/UNIT_TESTS.md`, accepted for this change: `SqliteStoreWriteGivesUpAfterBusyTimeout`
+  measures SQLite's busy handler, which runs on the real clock inside the native library and no `TimeProvider` drives, against the
+  configured 5 seconds; `ServeShutdownDrainsIngestWritesBeforeClosingStore` and `ServeFailureAfterStartStillDrains` wait 500 ms to
+  show that the service has not ended while a write runs, which can only miss a regression on a slow host, never fail correct code.
+  A follow-up issue replaces the wait by a drain signal and settles the convention for timers of native libraries.
 - Revisit the slot count when the measured memory of one request (Wire format area, *Duties of the ingest API*) or several agents
   (#89) change the budget.
