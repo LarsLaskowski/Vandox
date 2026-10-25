@@ -4,7 +4,7 @@
 - **Date:** 2026-10-17
 - **Area:** —
 - **Source:** Squad refreshed from Squad-Spec-Repository-Template (daa6b39)
-- **Supersedes:** [0002](0002-squad-working-records-off-main.md) — the agent rules moved to `AGENTS.md`, which product PRs may not change either
+- **Supersedes:** [0002](0002-squad-working-records-off-main.md) — the agent rules moved to `AGENTS.md`, which product PRs may change only inside its project blocks
 
 ## Context
 
