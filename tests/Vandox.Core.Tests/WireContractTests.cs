@@ -463,7 +463,7 @@ public class WireContractTests
         }
 
         // Act
-        var (records, formatMinor, failure) = await ReadSharedCaseAsync(lines, latin1);
+        var (records, formatMinor, failure) = await ReadSharedCaseAsync(lines, latin1, matches[0].TryGetProperty("gzip", out var gzip) ? gzip : null);
 
         // Assert
         Assert.AreSequenceEqual(want.TryGetProperty("records", out var wanted) ? wanted.EnumerateArray().Select(DescribeWanted).ToList() : [], records, $"{name}: records before the end or the error");
@@ -501,7 +501,8 @@ public class WireContractTests
                          ("X", 4),
                          ("M", 5),
                          ("U", 2),
-                         ("S", 57)
+                         ("S", 57),
+                         ("G", 13)
                      };
         var required = groups.SelectMany(pair => Enumerable.Range(1, pair.Count).Select(number => $"{pair.Prefix}{number}"));
 
@@ -539,12 +540,13 @@ public class WireContractTests
     /// </summary>
     /// <param name="lines">The lines of the batch</param>
     /// <param name="latin1"><c>true</c> to write every character of the lines as one byte, <c>false</c> to encode the lines as UTF-8</param>
+    /// <param name="gzip">The <c>gzip</c> object of the case that frames the lines by hand, or <c>null</c> for a plain gzip stream</param>
     /// <returns>The descriptions of the records, the minor version of the header and the error, if any</returns>
-    private static async Task<(List<string> Records, long FormatMinor, WireException? Failure)> ReadSharedCaseAsync(string[] lines, bool latin1)
+    private static async Task<(List<string> Records, long FormatMinor, WireException? Failure)> ReadSharedCaseAsync(string[] lines, bool latin1, JsonElement? gzip)
     {
         var records = new List<string>();
         long formatMinor = 0;
-        using var input = latin1 ? BatchBuilder.Gzip(Encoding.Latin1.GetBytes(string.Concat(lines.Select(line => line + "\n")))) : BatchBuilder.Gzip(lines);
+        using var input = OpenSharedCaseInput(lines, latin1, gzip);
 
         try
         {
@@ -563,6 +565,48 @@ public class WireContractTests
         }
 
         return (records, formatMinor, null);
+    }
+
+    /// <summary>
+    /// Compresses the lines of a case in the way the case asks for.
+    /// </summary>
+    /// <param name="lines">The lines of the batch</param>
+    /// <param name="latin1"><c>true</c> to write every character of the lines as one byte</param>
+    /// <param name="gzip">The <c>gzip</c> object of the case, or <c>null</c></param>
+    /// <returns>The stream, positioned at its start</returns>
+    private static MemoryStream OpenSharedCaseInput(string[] lines, bool latin1, JsonElement? gzip)
+    {
+        if (gzip is not null)
+        {
+            return FrameSharedCase(lines, gzip.Value);
+        }
+
+        return latin1 ? BatchBuilder.Gzip(Encoding.Latin1.GetBytes(string.Concat(lines.Select(line => line + "\n")))) : BatchBuilder.Gzip(lines);
+    }
+
+    /// <summary>
+    /// Frames the lines of a case as the <c>gzip</c> object of the case describes.
+    /// </summary>
+    /// <param name="lines">The lines of the batch</param>
+    /// <param name="gzip">The <c>gzip</c> object of the case</param>
+    /// <returns>The stream, positioned at its start</returns>
+    private static MemoryStream FrameSharedCase(string[] lines, JsonElement gzip)
+    {
+        var trailing = Convert.FromHexString(gzip.TryGetProperty("trailing_hex", out var hex) ? hex.GetString() ?? string.Empty : string.Empty);
+        var headerCrc = gzip.TryGetProperty("header_crc", out var crc) ? crc.GetString() : null;
+
+        return GzipFixture.Frame(lines, GzipNumber(gzip, "members"), trailing, GzipNumber(gzip, "name_bytes"), GzipNumber(gzip, "comment_bytes"), GzipNumber(gzip, "extra_bytes"), headerCrc);
+    }
+
+    /// <summary>
+    /// Reads a number of the <c>gzip</c> object of a case.
+    /// </summary>
+    /// <param name="gzip">The <c>gzip</c> object of the case</param>
+    /// <param name="key">The key</param>
+    /// <returns>The number, 0 when the key is absent</returns>
+    private static int GzipNumber(JsonElement gzip, string key)
+    {
+        return gzip.TryGetProperty(key, out var value) ? value.GetInt32() : 0;
     }
 
     /// <summary>
