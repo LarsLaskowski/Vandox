@@ -226,7 +226,7 @@ internal sealed class IngestService : IAsyncDisposable
     /// <param name="inner">The store</param>
     /// <param name="hold">Whether the writer holds every write</param>
     /// <returns>The writer</returns>
-    private IRecordWriter CreateWriter(IRecordWriter inner, bool hold)
+    private RecordingRecordWriter CreateWriter(IRecordWriter inner, bool hold)
     {
         Writer = new RecordingRecordWriter(inner);
 
