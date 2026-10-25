@@ -1803,6 +1803,303 @@
         "field": "data.listeners[0].user",
         "reason": "too long"
       }
+    },
+    {
+      "name": "G1 twenty garbage bytes after the member",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":2,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "gzip": {
+        "members": 1,
+        "trailing_hex": "0123456789abcdef0123456789abcdef01234567"
+      },
+      "want": {
+        "error": "Malformed",
+        "line": 4,
+        "records": [
+          {
+            "kind": "metric",
+            "seq": 1
+          },
+          {
+            "kind": "metric",
+            "seq": 2
+          }
+        ]
+      }
+    },
+    {
+      "name": "G2 one zero byte after the member",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":2,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "gzip": {
+        "members": 1,
+        "trailing_hex": "00"
+      },
+      "want": {
+        "error": "Malformed",
+        "line": 4,
+        "records": [
+          {
+            "kind": "metric",
+            "seq": 1
+          },
+          {
+            "kind": "metric",
+            "seq": 2
+          }
+        ]
+      }
+    },
+    {
+      "name": "G3 sixteen zero bytes after the member",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":2,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "gzip": {
+        "members": 1,
+        "trailing_hex": "00000000000000000000000000000000"
+      },
+      "want": {
+        "error": "Malformed",
+        "line": 4,
+        "records": [
+          {
+            "kind": "metric",
+            "seq": 1
+          },
+          {
+            "kind": "metric",
+            "seq": 2
+          }
+        ]
+      }
+    },
+    {
+      "name": "G4 the start of a second header after the member",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":2,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "gzip": {
+        "members": 1,
+        "trailing_hex": "1f8b"
+      },
+      "want": {
+        "error": "Malformed",
+        "line": 4,
+        "records": [
+          {
+            "kind": "metric",
+            "seq": 1
+          },
+          {
+            "kind": "metric",
+            "seq": 2
+          }
+        ]
+      }
+    },
+    {
+      "name": "G5 two concatenated members",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":2,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "gzip": {
+        "members": 2
+      },
+      "want": {
+        "records": [
+          {
+            "kind": "metric",
+            "seq": 1
+          },
+          {
+            "kind": "metric",
+            "seq": 2
+          }
+        ]
+      }
+    },
+    {
+      "name": "G6 two members then garbage",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":2,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "gzip": {
+        "members": 2,
+        "trailing_hex": "0123456789abcdef0123456789abcdef01234567"
+      },
+      "want": {
+        "error": "Malformed",
+        "line": 4,
+        "records": [
+          {
+            "kind": "metric",
+            "seq": 1
+          },
+          {
+            "kind": "metric",
+            "seq": 2
+          }
+        ]
+      }
+    },
+    {
+      "name": "G7 file name of 511 bytes",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":2,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "gzip": {
+        "members": 1,
+        "name_bytes": 511
+      },
+      "want": {
+        "records": [
+          {
+            "kind": "metric",
+            "seq": 1
+          },
+          {
+            "kind": "metric",
+            "seq": 2
+          }
+        ]
+      }
+    },
+    {
+      "name": "G8 file name of 512 bytes",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":2,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "gzip": {
+        "members": 1,
+        "name_bytes": 512
+      },
+      "want": {
+        "error": "Malformed",
+        "line": 1
+      }
+    },
+    {
+      "name": "G9 comment of 511 bytes",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":2,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "gzip": {
+        "members": 1,
+        "comment_bytes": 511
+      },
+      "want": {
+        "records": [
+          {
+            "kind": "metric",
+            "seq": 1
+          },
+          {
+            "kind": "metric",
+            "seq": 2
+          }
+        ]
+      }
+    },
+    {
+      "name": "G10 comment of 512 bytes",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":2,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "gzip": {
+        "members": 1,
+        "comment_bytes": 512
+      },
+      "want": {
+        "error": "Malformed",
+        "line": 1
+      }
+    },
+    {
+      "name": "G11 extra field of 100 bytes",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":2,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "gzip": {
+        "members": 1,
+        "extra_bytes": 100
+      },
+      "want": {
+        "records": [
+          {
+            "kind": "metric",
+            "seq": 1
+          },
+          {
+            "kind": "metric",
+            "seq": 2
+          }
+        ]
+      }
+    },
+    {
+      "name": "G12 right header checksum",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":2,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "gzip": {
+        "members": 1,
+        "header_crc": "right"
+      },
+      "want": {
+        "records": [
+          {
+            "kind": "metric",
+            "seq": 1
+          },
+          {
+            "kind": "metric",
+            "seq": 2
+          }
+        ]
+      }
+    },
+    {
+      "name": "G13 wrong header checksum",
+      "lines": [
+        "{\"format_major\":1,\"format_minor\":0,\"agent_id\":\"agent-1\",\"boot_id\":\"0123abcd-0123-0123-0123-0123456789ab\",\"mode\":\"live\"}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":1,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}",
+        "{\"kind\":\"metric\",\"source\":\"host\",\"seq\":2,\"captured_at\":\"2026-10-01T10:00:00Z\",\"data\":{\"name\":\"cpu\",\"value\":1}}"
+      ],
+      "gzip": {
+        "members": 1,
+        "header_crc": "wrong"
+      },
+      "want": {
+        "error": "Malformed",
+        "line": 1
+      }
     }
   ]
 }

@@ -10,6 +10,7 @@ using Microsoft.Extensions.Logging;
 using Vandox.Backend.Cli;
 using Vandox.Backend.Components;
 using Vandox.Backend.Incidents;
+using Vandox.Backend.Ingest;
 using Vandox.Backend.Logging;
 using Vandox.Backend.Logs;
 using Vandox.Backend.Reports;
@@ -164,10 +165,7 @@ internal static class ServeCommand
             await using var app = Build(config, loggerFactory, hooks, store, verifier);
 
             await app.StartAsync(cancellationToken).ConfigureAwait(false);
-            Announce(app, config, hooks, logger);
-            await app.WaitForShutdownAsync(cancellationToken).ConfigureAwait(false);
-            logger.ShuttingDown();
-            await app.StopAsync(CancellationToken.None).ConfigureAwait(false);
+            await RunStartedAsync(app, config, hooks, logger, cancellationToken).ConfigureAwait(false);
 
             return 0;
         }
@@ -183,6 +181,31 @@ internal static class ServeCommand
             logger.ServingFailed(exception, exception.Message);
 
             return 1;
+        }
+    }
+
+    /// <summary>
+    /// Serves until the stop signal, stops the application and, on every way out including a failure, waits for the ingest writes in flight, so the
+    /// store is closed only after them.
+    /// </summary>
+    /// <param name="app">The started application</param>
+    /// <param name="config">The configuration</param>
+    /// <param name="hooks">Tells the test when the service serves</param>
+    /// <param name="logger">The logger</param>
+    /// <param name="cancellationToken">Stops the service</param>
+    /// <returns>A task that completes when the application stopped and the ingest writes ended</returns>
+    private static async Task RunStartedAsync(WebApplication app, BackendConfig config, ServeHooks hooks, ILogger logger, CancellationToken cancellationToken)
+    {
+        try
+        {
+            Announce(app, config, hooks, logger);
+            await app.WaitForShutdownAsync(cancellationToken).ConfigureAwait(false);
+            logger.ShuttingDown();
+            await app.StopAsync(CancellationToken.None).ConfigureAwait(false);
+        }
+        finally
+        {
+            await app.Services.GetRequiredService<IngestEndpoint>().DrainAsync().ConfigureAwait(false);
         }
     }
 
@@ -216,6 +239,7 @@ internal static class ServeCommand
         builder.Services.AddSingleton(hooks.Clock ?? TimeProvider.System);
         builder.Services.AddSingleton(provider => CreateReportService(store, config, provider.GetRequiredService<WebReaderGate>(), provider.GetRequiredService<TimeProvider>()));
         builder.Services.AddSingleton<IImportTracker>(store);
+        builder.Services.AddSingleton(provider => CreateIngestEndpoint(store, config, hooks, loggerFactory, provider));
         builder.Services.Configure<HostOptions>(options => options.ShutdownTimeout = _shutdownTimeout);
         builder.Services.AddRazorComponents().AddInteractiveServerComponents();
         WebAuthentication.AddServices(builder.Services, verifier, hooks.Clock ?? TimeProvider.System, loggerFactory);
@@ -224,6 +248,8 @@ internal static class ServeCommand
 
         var app = builder.Build();
 
+        // The endpoint registers its stop callback when it is created, so it exists before the service starts.
+        app.Services.GetRequiredService<IngestEndpoint>();
         hooks.Built?.Invoke(app.Services);
 
         var checker = new PingChecker(store.PingAsync, _pingTimeout);
@@ -251,6 +277,22 @@ internal static class ServeCommand
         app.MapRazorComponents<App>().AddInteractiveServerRenderMode(options => options.ContentSecurityFrameAncestorsPolicy = null);
 
         return app;
+    }
+
+    /// <summary>
+    /// Creates the ingest endpoint: ingest is disabled, and the endpoint answers 503, when the token or <c>ingest.agent_id</c> is not set.
+    /// </summary>
+    /// <param name="store">The open database</param>
+    /// <param name="config">The configuration</param>
+    /// <param name="hooks">Wraps the writer and replaces the free-space probe in tests</param>
+    /// <param name="loggerFactory">The logger factory</param>
+    /// <param name="provider">The services</param>
+    /// <returns>The endpoint</returns>
+    private static IngestEndpoint CreateIngestEndpoint(SqliteStore store, BackendConfig config, ServeHooks hooks, ILoggerFactory loggerFactory, IServiceProvider provider)
+    {
+        var settings = IngestSettings.Create(config, loggerFactory.CreateLogger("ingest"));
+
+        return new IngestEndpoint(settings, hooks.IngestWriter?.Invoke(store) ?? store, new FreeSpace(config.Storage.Directory, hooks.FreeSpaceProbe ?? FreeSpace.Probe), provider.GetRequiredService<IHostApplicationLifetime>(), provider.GetRequiredService<TimeProvider>(), loggerFactory);
     }
 
     /// <summary>

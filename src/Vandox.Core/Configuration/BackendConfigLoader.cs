@@ -4,6 +4,7 @@ using System.Text;
 using Vandox.Core.IO;
 using Vandox.Core.LogParsing;
 using Vandox.Core.Model;
+using Vandox.Core.Wire;
 
 namespace Vandox.Core.Configuration;
 
@@ -16,6 +17,10 @@ public static class BackendConfigLoader
     #region Constants
 
     private const string KeyIngestListen = "ingest.listen";
+    private const string KeyIngestAgentId = "ingest.agent_id";
+    private const string KeyIngestMinFree = "ingest.min_free";
+    private const string AgentIdReason = "must be 1 to 64 characters of [A-Za-z0-9._-], starting with a letter or digit";
+    private const string MinFreeReason = "must be a whole number of MiB or GiB from 0MiB to 1024GiB, such as 0MiB or 1GiB";
     private const string TrustedProxiesReason = "must be a comma-separated list of at most 16 IP addresses or networks, such as 172.18.0.1 or 172.18.0.0/16";
     private const string ListenReason = "must be [host]:port with an empty host or an IP address and a port of 1 to 65535";
     private const int MaxPortDigits = 5;
@@ -172,6 +177,8 @@ public static class BackendConfigLoader
 
         Require(ingestPort > 0, file, lines, KeyIngestListen, ListenReason);
         Require(webPort != ingestPort, file, lines, KeyIngestListen, "must not use the same port as web.listen");
+        Require(config.Ingest.AgentId is null || WireFormat.ValidateAgentId(config.Ingest.AgentId) is null, file, lines, KeyIngestAgentId, AgentIdReason);
+        Require(IngestConfig.TryParseMinFree(config.Ingest.MinFree, out _), file, lines, KeyIngestMinFree, MinFreeReason);
         Require(IsCleanAbsolutePath(config.Storage.Directory), file, lines, "storage.directory", "must be an absolute, clean path (no trailing slash, no . or .. elements)");
         Require(config.Log.Level is "debug" or "info" or "warn" or "error", file, lines, "log.level", "must be one of debug, info, warn, error");
         Require(IsLogFilePath(config.Import.PleskPanelLog), file, lines, "import.plesk_panel_log", LogFileReason);

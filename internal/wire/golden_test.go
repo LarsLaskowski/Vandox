@@ -2,6 +2,9 @@ package wire_test
 
 import (
 	"bytes"
+	"compress/gzip"
+	"errors"
+	"io"
 	"net/netip"
 	"os"
 	"path/filepath"
@@ -152,4 +155,87 @@ func TestEncodeBatchStartSnapshotCarriesInventoryAndTables(t *testing.T) {
 			}
 		}
 	})
+}
+
+// gzipMembers writes each part as one gzip member, one after the other.
+func gzipMembers(t *testing.T, parts ...string) []byte {
+	t.Helper()
+	var out bytes.Buffer
+	for _, part := range parts {
+		zw := gzip.NewWriter(&out)
+		if _, err := zw.Write([]byte(part)); err != nil {
+			t.Fatalf("gzip write = %v, want nil", err)
+		}
+		if err := zw.Close(); err != nil {
+			t.Fatalf("gzip close = %v, want nil", err)
+		}
+	}
+	return out.Bytes()
+}
+
+// countRecords decodes a batch to its end and returns the number of records.
+func countRecords(t *testing.T, data []byte) int {
+	t.Helper()
+	dec, err := wire.NewDecoder(bytes.NewReader(data), wire.DefaultLimits())
+	if err != nil {
+		t.Fatalf("NewDecoder() = %v, want nil", err)
+	}
+	defer func() { _ = dec.Close() }()
+	count := 0
+	for {
+		_, err := dec.Next()
+		if errors.Is(err, io.EOF) {
+			return count
+		}
+		if err != nil {
+			t.Fatalf("Next() after %d records = %v, want io.EOF", count, err)
+		}
+		count++
+	}
+}
+
+// requireGoldenFile rewrites the golden file with want when VANDOX_UPDATE_GOLDEN is set, then compares the file with want.
+func requireGoldenFile(t *testing.T, path string, want []byte) []byte {
+	t.Helper()
+	if os.Getenv(updateGoldenEnv) != "" {
+		if err := os.WriteFile(path, want, 0o600); err != nil {
+			t.Fatalf("writing golden file = %v, want nil", err)
+		}
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading golden file = %v, want nil (set %s=1 to create it)", err, updateGoldenEnv)
+	}
+	if !bytes.Equal(got, want) {
+		t.Errorf("%s differs from what Go writes (set %s=1 to update)", path, updateGoldenEnv)
+	}
+	return got
+}
+
+// TestGolden_GzipSamples pins the two gzip files of the golden batch that Go writes: the bytes EncodeBatch writes, and the same
+// lines split into two members by gzip.Writer. The .NET backend decodes both in its contract test, so the hand-written gzip
+// reader is held to what Go's reader accepts. With VANDOX_UPDATE_GOLDEN set the files are rewritten.
+func TestGolden_GzipSamples(t *testing.T) {
+	batch := &wire.Batch{
+		Header:  wire.NewHeader("agent-1", testBootID, wire.ModeLive),
+		Records: allKindRecords(time.UTC),
+	}
+	var encoded bytes.Buffer
+	if err := wire.EncodeBatch(&encoded, batch); err != nil {
+		t.Fatalf("EncodeBatch() = %v, want nil", err)
+	}
+	lines := strings.SplitAfter(gunzip(t, encoded.Bytes()), "\n")
+	half := len(lines) / 2
+	samples := map[string][]byte{
+		"all-kinds.jsonl.gz":             encoded.Bytes(),
+		"all-kinds-two-members.jsonl.gz": gzipMembers(t, strings.Join(lines[:half], ""), strings.Join(lines[half:], "")),
+	}
+	for name, want := range samples {
+		t.Run(name, func(t *testing.T) {
+			got := requireGoldenFile(t, filepath.Join("..", "..", "testdata", "wire", name), want)
+			if count := countRecords(t, got); count != len(batch.Records) {
+				t.Errorf("%s holds %d records, want %d", name, count, len(batch.Records))
+			}
+		})
+	}
 }

@@ -384,5 +384,114 @@ internal static partial class BackendLog
     [LoggerMessage(EventId = 53, Level = LogLevel.Error, Message = "report download: making the report failed")]
     internal static partial void ReportDownloadFailed(this ILogger logger, Exception exception);
 
+    /// <summary>
+    /// Logs that ingest is disabled because a setting is missing.
+    /// </summary>
+    /// <param name="logger">The logger</param>
+    /// <param name="missing">The names of the missing settings</param>
+    [LoggerMessage(EventId = 54, Level = LogLevel.Warning, Message = "ingest disabled {Missing}")]
+    internal static partial void IngestDisabled(this ILogger logger, string missing);
+
+    /// <summary>
+    /// Logs a refused ingest token; the token itself is never logged.
+    /// </summary>
+    /// <param name="logger">The logger</param>
+    /// <param name="peer">The peer address</param>
+    /// <param name="reason">The fixed reason</param>
+    /// <param name="suppressed">The refusals suppressed since the last line</param>
+    [LoggerMessage(EventId = 55, Level = LogLevel.Warning, Message = "ingest token refused {Peer} {Reason} {Suppressed}")]
+    internal static partial void IngestTokenRefused(this ILogger logger, string peer, string reason, int suppressed);
+
+    /// <summary>
+    /// Logs a batch of another agent than the one the token is bound to.
+    /// </summary>
+    /// <param name="logger">The logger</param>
+    /// <param name="agentId">The agent ID of the batch header</param>
+    /// <param name="peer">The peer address</param>
+    /// <param name="suppressed">The refusals suppressed since the last line</param>
+    [LoggerMessage(EventId = 56, Level = LogLevel.Warning, Message = "ingest agent refused {AgentId} {Peer} {Suppressed}")]
+    internal static partial void IngestAgentRefused(this ILogger logger, string agentId, string peer, int suppressed);
+
+    /// <summary>
+    /// Logs a refused batch; only fixed reasons, a line number and a reduced field path.
+    /// </summary>
+    /// <param name="logger">The logger</param>
+    /// <param name="agentId">The agent ID of the batch header, when it was read</param>
+    /// <param name="status">The HTTP status</param>
+    /// <param name="reason">The fixed reason</param>
+    /// <param name="line">The line number, when known</param>
+    /// <param name="field">The reduced field path, when it parsed</param>
+    [LoggerMessage(EventId = 57, Level = LogLevel.Warning, Message = "ingest batch refused {AgentId} {Status} {Reason} {Line} {Field}")]
+    internal static partial void IngestBatchRefused(this ILogger logger, string? agentId, int status, string reason, long? line, string? field);
+
+    /// <summary>
+    /// Logs a request that was not accepted and is not a refusal of the batch.
+    /// </summary>
+    /// <param name="logger">The logger</param>
+    /// <param name="status">The HTTP status</param>
+    /// <param name="reason">The fixed reason</param>
+    [LoggerMessage(EventId = 58, Level = LogLevel.Warning, Message = "ingest request not accepted {Status} {Reason}")]
+    internal static partial void IngestRequestNotAccepted(this ILogger logger, int status, string reason);
+
+    /// <summary>
+    /// Logs a request that passed its time budget.
+    /// </summary>
+    /// <param name="logger">The logger</param>
+    /// <param name="peer">The peer address</param>
+    [LoggerMessage(EventId = 59, Level = LogLevel.Warning, Message = "ingest request timed out {Peer}")]
+    internal static partial void IngestRequestTimedOut(this ILogger logger, string peer);
+
+    /// <summary>
+    /// Logs a failed write of a batch; the message of the failure is never logged.
+    /// </summary>
+    /// <param name="logger">The logger</param>
+    /// <param name="agentId">The agent ID</param>
+    /// <param name="exception">The type name of the failure</param>
+    [LoggerMessage(EventId = 60, Level = LogLevel.Error, Message = "ingest store failed {AgentId} {Exception}")]
+    internal static partial void IngestStoreFailed(this ILogger logger, string agentId, string exception);
+
+    /// <summary>
+    /// Logs an unexpected failure of a request; the message of the failure is never logged.
+    /// </summary>
+    /// <param name="logger">The logger</param>
+    /// <param name="exception">The type name of the failure</param>
+    [LoggerMessage(EventId = 61, Level = LogLevel.Error, Message = "ingest request failed {Exception}")]
+    internal static partial void IngestRequestFailed(this ILogger logger, string exception);
+
+    /// <summary>
+    /// Logs that ingest is paused because the free space fell below the floor.
+    /// </summary>
+    /// <param name="logger">The logger</param>
+    /// <param name="availableBytes">The free bytes; none when they could not be read</param>
+    [LoggerMessage(EventId = 62, Level = LogLevel.Warning, Message = "ingest paused: free space low {AvailableBytes}")]
+    internal static partial void IngestPaused(this ILogger logger, long? availableBytes);
+
+    /// <summary>
+    /// Logs that ingest resumed after a pause.
+    /// </summary>
+    /// <param name="logger">The logger</param>
+    [LoggerMessage(EventId = 63, Level = LogLevel.Information, Message = "ingest resumed")]
+    internal static partial void IngestResumed(this ILogger logger);
+
+    /// <summary>
+    /// Logs the first stored batch of the process.
+    /// </summary>
+    /// <param name="logger">The logger</param>
+    /// <param name="agentId">The agent ID</param>
+    [LoggerMessage(EventId = 64, Level = LogLevel.Information, Message = "ingest first batch stored {AgentId}")]
+    internal static partial void IngestFirstBatchStored(this ILogger logger, string agentId);
+
+    /// <summary>
+    /// Logs a stored batch.
+    /// </summary>
+    /// <param name="logger">The logger</param>
+    /// <param name="agentId">The agent ID</param>
+    /// <param name="mode">The mode of the batch header</param>
+    /// <param name="records">The records of the batch</param>
+    /// <param name="stored">The records stored</param>
+    /// <param name="duplicates">The records that were already present</param>
+    [LoggerMessage(EventId = 65, Level = LogLevel.Debug, Message = "ingest batch stored {AgentId} {Mode} {Records} {Stored} {Duplicates}")]
+    internal static partial void IngestBatchStored(this ILogger logger, string agentId, string mode, int records, int stored, int duplicates);
+
     #endregion // Methods
 }

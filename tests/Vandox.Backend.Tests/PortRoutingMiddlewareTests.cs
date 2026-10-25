@@ -1,7 +1,9 @@
 using Microsoft.AspNetCore.Connections.Features;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging.Abstractions;
 
 using Vandox.Backend.Hosting;
+using Vandox.Backend.Ingest;
 
 namespace Vandox.Backend.Tests;
 
@@ -33,7 +35,8 @@ public class PortRoutingMiddlewareTests
                                                        called = true;
 
                                                        return Task.CompletedTask;
-                                                   });
+                                                   },
+                                                   CreateIngest());
         var context = new DefaultHttpContext();
         var items = new Dictionary<object, object?>();
 
@@ -53,6 +56,88 @@ public class PortRoutingMiddlewareTests
     }
 
     /// <summary>
+    /// An ingest connection hands only a POST to exactly /v1/batches (ordinal, no trailing slash, the query ignored) to the ingest endpoint; every other
+    /// request stays 404. A disabled endpoint answers 503, so that status shows who got the request.
+    /// </summary>
+    /// <param name="method">The method</param>
+    /// <param name="path">The path</param>
+    /// <param name="query">The query string</param>
+    /// <param name="status">The expected status</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [DataRow("POST", "/v1/batches", "", 503)]
+    [DataRow("POST", "/v1/batches", "?token=x", 503)]
+    [DataRow("POST", "/v1/batches/", "", 404)]
+    [DataRow("POST", "/V1/batches", "", 404)]
+    [DataRow("POST", "/v1/batches2", "", 404)]
+    [DataRow("POST", "/v1", "", 404)]
+    [DataRow("GET", "/v1/batches", "", 404)]
+    [DataRow("PUT", "/v1/batches", "", 404)]
+    [DataRow("POST", "/healthz", "", 404)]
+    [DataRow("POST", "/", "", 404)]
+    public async Task PortRoutingMiddlewareSendsOnlyPostV1BatchesToIngest(string method, string path, string query, int status)
+    {
+        // Arrange
+        var called = false;
+        var middleware = new PortRoutingMiddleware(_ =>
+                                                   {
+                                                       called = true;
+
+                                                       return Task.CompletedTask;
+                                                   },
+                                                   CreateIngest());
+        var context = new DefaultHttpContext();
+
+        context.Request.Method = method;
+        context.Request.Path = path;
+        context.Request.QueryString = new QueryString(query);
+        context.Features.Set<IConnectionItemsFeature>(new ConnectionItems(new Dictionary<object, object?>
+                                                                          {
+                                                                              [ListenerRoutes.ItemName] = ListenerRoutes.IngestLabel
+                                                                          }));
+
+        // Act
+        await middleware.InvokeAsync(context);
+
+        // Assert
+        Assert.IsFalse(called, "the web pipeline never runs on an ingest connection");
+        Assert.AreEqual(status, context.Response.StatusCode, "status");
+    }
+
+    /// <summary>
+    /// A post to /v1/batches on a web connection goes down the web pipeline and never to the ingest endpoint.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task PortRoutingMiddlewareKeepsPostV1BatchesOnWebAwayFromIngest()
+    {
+        // Arrange
+        var called = false;
+        var middleware = new PortRoutingMiddleware(_ =>
+                                                   {
+                                                       called = true;
+
+                                                       return Task.CompletedTask;
+                                                   },
+                                                   CreateIngest());
+        var context = new DefaultHttpContext();
+
+        context.Request.Method = "POST";
+        context.Request.Path = "/v1/batches";
+        context.Features.Set<IConnectionItemsFeature>(new ConnectionItems(new Dictionary<object, object?>
+                                                                          {
+                                                                              [ListenerRoutes.ItemName] = ListenerRoutes.WebLabel
+                                                                          }));
+
+        // Act
+        await middleware.InvokeAsync(context);
+
+        // Assert
+        Assert.IsTrue(called, "the web pipeline runs");
+        Assert.AreEqual(200, context.Response.StatusCode, "the ingest endpoint did not answer");
+    }
+
+    /// <summary>
     /// A request without connection items is not served: the routing fails closed.
     /// </summary>
     /// <returns>A task that completes when the test is done</returns>
@@ -66,7 +151,8 @@ public class PortRoutingMiddlewareTests
                                                        called = true;
 
                                                        return Task.CompletedTask;
-                                                   });
+                                                   },
+                                                   CreateIngest());
 
         // Act
         await middleware.InvokeAsync(new DefaultHttpContext());
@@ -108,6 +194,15 @@ public class PortRoutingMiddlewareTests
     {
         // Act and Assert
         Assert.ThrowsExactly<FormatException>(() => ListenAddress.Parse(value), "invalid address");
+    }
+
+    /// <summary>
+    /// Creates an ingest endpoint that the test never reaches.
+    /// </summary>
+    /// <returns>The endpoint</returns>
+    private static IngestEndpoint CreateIngest()
+    {
+        return new IngestEndpoint(null, new UnusedRecordWriter(), new FreeSpace(string.Empty, _ => null), new StoppedApplicationLifetime(), TimeProvider.System, NullLoggerFactory.Instance);
     }
 
     #endregion // Methods

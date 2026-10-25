@@ -17,10 +17,7 @@ public sealed class BackendConfig
     /// Gets the ingest listener.
     /// </summary>
     [ConfigKey("ingest")]
-    public ListenerConfig Ingest { get; } = new()
-                                            {
-                                                Listen = ":8081"
-                                            };
+    public IngestConfig Ingest { get; } = new();
 
     /// <summary>
     /// Gets the storage options.
@@ -61,7 +58,7 @@ public sealed class BackendConfig
     /// <returns>The key paths</returns>
     public static IReadOnlyList<string> Keys()
     {
-        return ["web.listen", "web.trusted_proxies", "ingest.listen", "storage.directory", "log.level", "import.plesk_panel_log", "import.sw_cp_server_error_log", "import.nginx_error_log", "import.apache_error_log", "import.time_zone", "incidents.window_before", "incidents.window_after"];
+        return ["web.listen", "web.trusted_proxies", "ingest.listen", "ingest.agent_id", "ingest.min_free", "storage.directory", "log.level", "import.plesk_panel_log", "import.sw_cp_server_error_log", "import.nginx_error_log", "import.apache_error_log", "import.time_zone", "incidents.window_before", "incidents.window_after"];
     }
 
     #endregion // Methods

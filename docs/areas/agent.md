@@ -9,9 +9,9 @@ sends is in the [wire format](wire-format.md); its configuration file is in [Con
 **Status.** The command line, the start-up with the configuration file, logging, the scheduler with its gaps and the memory pressure
 switch, the self-metrics, the system metrics, the process collector with the memory pressure mode, the connection collector (with its start-up probe of the socket mount), the systemd service collector, the MariaDB collector, the kernel event collector with the boot check and the extra snapshots it requests, the log shipping collector (the journal and configured `syslog` files), the backup run check, the agent's state file, the on-disk spool and the notification of systemd exist, as do
 the shared data model and the wire encoder, and the sender (*Spool and sending*, *Sending*). The other collectors and the systemd unit are **not implemented
-yet**, and the backend's ingest endpoint is not either (#40): until it is, the sender finds no backend that accepts batches, waits and
-tries again (*Sending*), and the agent keeps every record it produces in its spool, which fills up to `spool.max_size` and then drops
-its oldest records with recorded gaps (it is not released in that state; v0.2.0 waits for the endpoint). The
+yet**. The backend's ingest endpoint accepts the sender's batches ([Backend host](backend-host.md), *Ingest endpoint*); while the
+backend is unreachable or not accepting, the sender waits and tries again (*Sending*), and the spool fills up to `spool.max_size` and
+then drops its oldest records with recorded gaps. The
 rules below for the parts not implemented are the target the implementation is held to and the tests must check.
 
 ## Command line and start-up

@@ -15,12 +15,17 @@ readable by the next, whichever language implements it, so the schema below is p
   `vandox.db`, `vandox.db-wal` or `vandox.db-shm` is refused, because SQLite would write next to the link target, outside
   `storage.directory`.
 - The database runs in WAL mode with `foreign_keys` on and **`synchronous=FULL`**: a committed batch survives a power cut. The
-  ingest path (planned with v0.2.0) is to acknowledge a batch only after its commit, and the agent then deletes it from its spool, so an
-  acknowledged batch must not become a silent gap.
+  ingest endpoint acknowledges a batch only after its commit ([Backend host](backend-host.md), *Ingest endpoint*), and the agent then
+  deletes it from its spool, so an acknowledged batch must not become a silent gap. The endpoint supplies the batch's receive time
+  (`RecordBatch.ReceivedAt`, the same for every record of the batch) and writes under a token that only the service's shutdown
+  deadline cancels, never the request.
 - **One writer connection**, whose transactions start with `BEGIN IMMEDIATE` (the lock is taken at the start, so the busy timeout
   applies instead of a failure in the middle of a transaction), and up to four **query-only reader connections**. Readers never wait
-  for the writer. The busy timeout is 5 seconds; it matters only against another process that opens the same file, such as
-  `vandoxd import` or a backup. The writer has a page cache of up to 16 MiB; readers keep the default.
+  for the writer. The busy timeout is 5 seconds and bounds the **whole** wait for a lock: every connection sets both
+  `PRAGMA busy_timeout=5000` and Microsoft.Data.Sqlite's `DefaultTimeout` of 5 seconds, because the library otherwise retries
+  `SQLITE_BUSY` on its own for its default of 30 seconds (measured: about 31 s without it, about 4.5 s with 4 s). It matters only
+  against another process that opens the same file, such as `vandoxd import`, `vandoxd templates` or a backup; an ingest write that
+  hits it fails and is answered `503`. The writer has a page cache of up to 16 MiB; readers keep the default.
 - A **cancelled token or a passed deadline interrupts a running reader statement.** Every reader connection gets a SQLite progress
   handler bound to the token of its call, checked every 1,000 virtual-machine instructions, so it also stops the work SQLite does
   before the first row (a sort, an aggregate, the `MATCH` of a search). The call then ends with `OperationCanceledException` carrying
@@ -368,6 +373,8 @@ weakened silently, and `synchronous=FULL` stays unless the Product Manager decid
 - [0106](../decisions/0106-logs-view-address-as-the-view-bounded-search-pages-template-lines-by-normalization.md) — why the logs view's search chooses between the index and a bounded scan and finds a template's lines by normalizing candidates.
 - [0107](../decisions/0107-incidents-view-summaries-notes-per-incident-number-time-links-to-the-logs.md) — why notes are rows per incident number moved in the merge, and why the incidents view reads summaries.
 - [0116](../decisions/0116-listeners-across-agent-starts-compared-when-stored-and-shown-in-the-forensics-report.md) — why the write path stores a mark per agent connection snapshot and the comparison of each agent start, computed once per batch.
+- [0126](../decisions/0126-ingest-endpoint-token-bound-to-one-agent-id-two-slots-through-the-commit-no-rate-cap.md) — why the
+  connections set `DefaultTimeout` to the busy timeout and why the ingest write is cancelled only by the shutdown deadline.
 
 ## Not here
 

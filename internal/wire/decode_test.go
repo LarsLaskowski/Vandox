@@ -2,10 +2,14 @@ package wire_test
 
 import (
 	"bytes"
+	"compress/flate"
 	"compress/gzip"
+	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash/crc32"
 	"io"
 	"math"
 	"os"
@@ -1299,10 +1303,22 @@ type sharedWant struct {
 
 // sharedCase is one case of testdata/wire/decoder-cases.json.
 type sharedCase struct {
-	Name   string     `json:"name"`
-	Lines  []string   `json:"lines"`
-	Latin1 bool       `json:"latin1"`
-	Want   sharedWant `json:"want"`
+	Name   string      `json:"name"`
+	Lines  []string    `json:"lines"`
+	Latin1 bool        `json:"latin1"`
+	Gzip   *sharedGzip `json:"gzip"`
+	Want   sharedWant  `json:"want"`
+}
+
+// sharedGzip describes how a shared case frames its lines as gzip: the number of members the lines are split into, the
+// bytes after the last member (hex), the sizes of the optional header fields and whether the header checksum is written.
+type sharedGzip struct {
+	Members      int    `json:"members"`
+	TrailingHex  string `json:"trailing_hex"`
+	NameBytes    int    `json:"name_bytes"`
+	CommentBytes int    `json:"comment_bytes"`
+	ExtraBytes   uint16 `json:"extra_bytes"`
+	HeaderCRC    string `json:"header_crc"`
 }
 
 // sharedErrors maps the error names of the fixture (the names of WireErrorKind in the backend) to the Go errors.
@@ -1323,7 +1339,7 @@ var escapedCaseIDs = []string{"K4", "K5", "N4", "N7", "N8", "N9", "N10", "N11", 
 // requiredCaseIDs lists the cases the fixture must hold, from the plans of issues 175 and 182.
 func requiredCaseIDs() []string {
 	var ids []string
-	for prefix, count := range map[string]int{"K": 6, "N": 11, "D": 28, "H": 31, "O": 4, "X": 4, "M": 5, "U": 2, "S": 57} {
+	for prefix, count := range map[string]int{"K": 6, "N": 11, "D": 28, "H": 31, "O": 4, "X": 4, "M": 5, "U": 2, "S": 57, "G": 13} {
 		for i := 1; i <= count; i++ {
 			ids = append(ids, prefix+strconv.Itoa(i))
 		}
@@ -1435,12 +1451,77 @@ func latin1Stream(t *testing.T, lines []string) []byte {
 	return buf.Bytes()
 }
 
+// framedStream writes the lines as the gzip members and header fields the case describes. It frames the bytes itself, because
+// gzip.Writer writes neither a header checksum nor a name over its own limits.
+func framedStream(t *testing.T, lines []string, spec sharedGzip) []byte {
+	t.Helper()
+	members := max(spec.Members, 1)
+	var out []byte
+	for i := range members {
+		from, to := i*len(lines)/members, (i+1)*len(lines)/members
+		out = append(out, gzipMember(t, joinLines(lines[from:to]...), spec)...)
+	}
+	trailing, err := hex.DecodeString(spec.TrailingHex)
+	if err != nil {
+		t.Fatalf("trailing_hex %q = %v, want hexadecimal digits", spec.TrailingHex, err)
+	}
+	return append(out, trailing...)
+}
+
+// gzipMember writes one member whose header carries the optional fields of the spec (extra field, name, comment, header checksum).
+func gzipMember(t *testing.T, plain string, spec sharedGzip) []byte {
+	t.Helper()
+	var flags byte
+	header := []byte{0x1f, 0x8b, 0x08, 0, 0, 0, 0, 0, 0, 0xff}
+	if spec.ExtraBytes > 0 {
+		flags |= 0x04
+		header = binary.LittleEndian.AppendUint16(header, spec.ExtraBytes)
+		header = append(header, bytes.Repeat([]byte{'x'}, int(spec.ExtraBytes))...)
+	}
+	if spec.NameBytes > 0 {
+		flags |= 0x08
+		header = append(append(header, bytes.Repeat([]byte{'n'}, spec.NameBytes)...), 0)
+	}
+	if spec.CommentBytes > 0 {
+		flags |= 0x10
+		header = append(append(header, bytes.Repeat([]byte{'c'}, spec.CommentBytes)...), 0)
+	}
+	if spec.HeaderCRC != "" {
+		flags |= 0x02
+	}
+	header[3] = flags
+	if spec.HeaderCRC != "" {
+		sum := binary.LittleEndian.AppendUint32(nil, crc32.ChecksumIEEE(header))[:2]
+		if spec.HeaderCRC == "wrong" {
+			sum[0] ^= 0xff
+		}
+		header = append(header, sum...)
+	}
+	var body bytes.Buffer
+	zw, err := flate.NewWriter(&body, flate.DefaultCompression)
+	if err != nil {
+		t.Fatalf("flate.NewWriter() = %v, want nil", err)
+	}
+	if _, err := zw.Write([]byte(plain)); err != nil {
+		t.Fatalf("flate write = %v, want nil", err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatalf("flate close = %v, want nil", err)
+	}
+	trailer := binary.LittleEndian.AppendUint32(nil, crc32.ChecksumIEEE([]byte(plain)))
+	trailer = binary.LittleEndian.AppendUint32(trailer, uint32(len(plain))) //nolint:gosec // test input is a few hundred bytes
+	return slices.Concat(header, body.Bytes(), trailer)
+}
+
 // decodeSharedCase gzips the lines of a case and decodes the batch to its end.
 func decodeSharedCase(t *testing.T, c sharedCase) ([]sharedRecord, int64, error) {
 	t.Helper()
 	data := stream(t, c.Lines...)
 	if c.Latin1 {
 		data = latin1Stream(t, c.Lines)
+	}
+	if c.Gzip != nil {
+		data = framedStream(t, c.Lines, *c.Gzip)
 	}
 	d, err := wire.NewDecoder(bytes.NewReader(data), wire.DefaultLimits())
 	if err != nil {

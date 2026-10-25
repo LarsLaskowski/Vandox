@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Sockets;
 using System.Reflection;
+using System.Text;
 
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.Extensions.DependencyInjection;
@@ -8,6 +9,7 @@ using Microsoft.Extensions.Time.Testing;
 
 using Vandox.Backend.Hosting;
 using Vandox.Backend.Incidents;
+using Vandox.Backend.Ingest;
 using Vandox.Backend.Logs;
 using Vandox.Backend.Security;
 using Vandox.Storage;
@@ -1037,6 +1039,406 @@ public class ServeTests
     }
 
     /// <summary>
+    /// Without the token or without <c>ingest.agent_id</c> the service starts, logs <c>ingest disabled</c> once with the missing names, serves the web port and
+    /// answers every post to /v1/batches with 503.
+    /// </summary>
+    /// <param name="tokenMissing">Whether the token is left out</param>
+    /// <param name="agentMissing">Whether the agent ID is left out</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [DataRow(true, false)]
+    [DataRow(false, true)]
+    [DataRow(true, true)]
+    public async Task ServeIngestDisabledLogsOnceAndServesWeb(bool tokenMissing, bool agentMissing)
+    {
+        // Arrange
+        await using var service = await IngestService.StartAsync(TestContext.CancellationToken, tokenMissing, agentMissing);
+
+        using var client = CreateClient();
+
+        var body = IngestSamples.Valid();
+
+        // Act
+        using var health = await client.GetAsync($"http://127.0.0.1:{service.Fixture.WebPort}/healthz", TestContext.CancellationToken);
+        using var anonymous = await service.PostAsync(body, TestContext.CancellationToken, null);
+        using var withToken = await service.PostAsync(body, TestContext.CancellationToken);
+        using var read = await client.GetAsync($"{service.IngestUrl}/v1/batches", TestContext.CancellationToken);
+
+        // Assert
+        var lines = service.Fixture.LogEntries().Where(entry => entry.GetValueOrDefault("msg") == "ingest disabled").ToArray();
+        var missing = lines.Length == 1 ? lines[0].GetValueOrDefault("missing") ?? string.Empty : string.Empty;
+
+        Assert.AreEqual(HttpStatusCode.OK, health.StatusCode, "the web port is served");
+        Assert.AreEqual(HttpStatusCode.ServiceUnavailable, anonymous.StatusCode, "a post without a token");
+        Assert.AreEqual(HttpStatusCode.ServiceUnavailable, withToken.StatusCode, "a post with a token");
+        Assert.AreEqual(HttpStatusCode.NotFound, read.StatusCode, "a read of /v1/batches stays 404");
+        Assert.HasCount(1, lines, "ingest disabled is logged once");
+        Assert.AreEqual("WARN", lines[0].GetValueOrDefault("level"), "level");
+        Assert.AreEqual(tokenMissing, missing.Contains("VANDOX_AGENT_TOKEN", StringComparison.Ordinal), "the token is named when it is missing");
+        Assert.AreEqual(agentMissing, missing.Contains("ingest.agent_id", StringComparison.Ordinal), "the agent ID is named when it is missing");
+    }
+
+    /// <summary>
+    /// Real Kestrel hands the endpoint the Authorization header as the plan assumes: spaces and tabs around the value are removed, two headers arrive as two
+    /// values, DEL, a UTF-8 character and a control character other than a line break reach the endpoint and are refused as a wrong token; a single byte that is
+    /// no UTF-8 and an obsolete line fold are refused by Kestrel itself with 400 and no refusal header.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task ServeIngestHeaderWhitespaceAndDuplicates()
+    {
+        // Arrange
+        await using var service = await IngestService.StartAsync(TestContext.CancellationToken);
+
+        var body = IngestSamples.Valid(1, 3);
+        var token = IngestService.Token;
+        var split = 8;
+        var cases = new List<(string Name, byte[] Headers, int Status)>
+                    {
+                        ("trailing space", Latin1($"Authorization: Bearer {token} \r\n"), 204),
+                        ("leading and trailing tab", Latin1($"Authorization:\tBearer {token}\t\r\n"), 204),
+                        ("two headers", Latin1($"Authorization: Bearer {token}\r\nAuthorization: Bearer {token}\r\n"), 401),
+                        ("DEL inside the token", Latin1($"Authorization: Bearer {token[..split]}{(char)0x7f}{token[split..]}\r\n"), 401),
+                        ("UTF-8 character", Encoding.UTF8.GetBytes($"Authorization: Bearer {token[..split]}{(char)0xf6}{token[split..]}\r\n"), 401),
+                        ("control character", Latin1($"Authorization: Bearer {token[..split]}{(char)1}{token[split..]}\r\n"), 401),
+                        ("one byte that is not UTF-8", [.. Latin1("Authorization: Bearer abc"), 0xe9, .. Latin1("def\r\n")], 400),
+                        ("obsolete line folding", Latin1($"Authorization: Bearer {token}\r\n more\r\n"), 400)
+                    };
+        var problems = new List<string>();
+
+        // Act
+        foreach (var (name, headers, status) in cases)
+        {
+            var (actual, head) = await SendRawAsync(service.Fixture.IngestPort, headers, body);
+
+            if (actual != status)
+            {
+                problems.Add($"{name}: answered {actual}, expected {status}");
+            }
+
+            if (head.Contains("Vandox-Refused", StringComparison.OrdinalIgnoreCase))
+            {
+                problems.Add($"{name}: the answer carries a refusal header");
+            }
+
+            if (status == 401 && head.IndexOf("WWW-Authenticate: Bearer", StringComparison.OrdinalIgnoreCase) < 0)
+            {
+                problems.Add($"{name}: no bearer challenge");
+            }
+        }
+
+        var rows = await service.RowsAsync(TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsEmpty(problems, $"problems: {string.Join("; ", problems)}");
+        Assert.HasCount(3, rows, "the batch of the accepted forms is stored once");
+    }
+
+    /// <summary>
+    /// No answer of the ingest listener, a refusal or the acknowledgement, carries the security headers of the web UI.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task ServeIngestAnswerCarriesNoSecurityHeaders()
+    {
+        // Arrange
+        await using var service = await IngestService.StartAsync(TestContext.CancellationToken);
+
+        using var client = CreateClient();
+
+        var body = IngestSamples.Valid();
+
+        // Act
+        using var refused = await service.PostAsync(body, TestContext.CancellationToken, "wrong-token");
+        using var stored = await service.PostAsync(body, TestContext.CancellationToken);
+        using var other = await client.GetAsync($"{service.IngestUrl}/healthz", TestContext.CancellationToken);
+
+        // Assert
+        var problems = new List<string>();
+
+        AddStatusProblem(problems, "POST with a wrong token", HttpStatusCode.Unauthorized, refused);
+        AddStatusProblem(problems, "POST with the token", HttpStatusCode.NoContent, stored);
+        AddStatusProblem(problems, "GET /healthz", HttpStatusCode.NotFound, other);
+
+        foreach (var (label, response) in new[] { ("401", refused), ("204", stored), ("404", other) })
+        {
+            foreach (var header in new[] { "Content-Security-Policy", "X-Content-Type-Options", "Referrer-Policy", "X-Frame-Options" })
+            {
+                if (HeaderValues(response, header).Length > 0)
+                {
+                    problems.Add($"the {label} answer carries {header}");
+                }
+            }
+        }
+
+        Assert.IsEmpty(problems, $"problems: {string.Join("; ", problems)}");
+        Assert.AreEqual("Bearer", HeaderValues(refused, "WWW-Authenticate").Single(), "the 401 carries the bearer challenge");
+    }
+
+    /// <summary>
+    /// A 17th concurrent connection to the ingest listener is closed without a request being read, and the web listener is not affected.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task ServeIngestSeventeenthConnectionIsClosed()
+    {
+        // Arrange
+        await using var service = await IngestService.StartAsync(TestContext.CancellationToken);
+
+        using var client = CreateClient();
+
+        var held = new List<TcpClient>();
+        var problems = new List<string>();
+        bool closed;
+
+        try
+        {
+            // Act
+            for (var index = 1; index <= IngestLimits.MaxConnections; index++)
+            {
+                var connection = new TcpClient();
+
+                held.Add(connection);
+                await connection.ConnectAsync(IPAddress.Loopback, service.Fixture.IngestPort, TestContext.CancellationToken);
+
+                var (status, _) = await ExchangeAsync(connection);
+
+                if (status != 404)
+                {
+                    problems.Add($"connection {index} answered {status}");
+                }
+            }
+
+            var seventeenth = new TcpClient();
+
+            held.Add(seventeenth);
+            await seventeenth.ConnectAsync(IPAddress.Loopback, service.Fixture.IngestPort, TestContext.CancellationToken);
+
+            closed = await IsClosedAsync(seventeenth);
+
+            using var web = await client.GetAsync($"http://127.0.0.1:{service.Fixture.WebPort}/healthz", TestContext.CancellationToken);
+
+            AddStatusProblem(problems, "GET web /healthz", HttpStatusCode.OK, web);
+        }
+        finally
+        {
+            held.ForEach(connection => connection.Dispose());
+        }
+
+        // Assert
+        Assert.IsEmpty(problems, $"problems: {string.Join("; ", problems)}");
+        Assert.IsTrue(closed, "the 17th connection is closed without an answer");
+    }
+
+    /// <summary>
+    /// A write that is running at the stop signal commits when it ends before the deadline, and the acknowledgement or nothing is the answer, never a 2xx
+    /// without a commit.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task ServeShutdownDuringIngestWriteCommitsOrStoresNothing()
+    {
+        // Arrange
+        await using var service = await IngestService.StartAsync(TestContext.CancellationToken, hold: true, clock: new FakeTimeProvider());
+
+        var post = service.PostAsync(IngestSamples.Valid(1, 3), TestContext.CancellationToken);
+
+        await service.Writer!.WaitForCallsAsync(1, TestContext.CancellationToken, post);
+
+        // Act
+        service.Stop();
+        await service.Stopping.WaitAsync(TimeSpan.FromSeconds(20), TestContext.CancellationToken);
+
+        var cancelledAtStop = service.Writer.Tokens[0].IsCancellationRequested;
+
+        service.Writer.ReleaseAll();
+
+        var status = await AnswerOrNullAsync(post);
+        var code = await service.Run.WaitAsync(TimeSpan.FromSeconds(30), TestContext.CancellationToken);
+        var rows = await service.RowsAsync(TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsFalse(cancelledAtStop, "the write is not cancelled by the stop signal");
+        Assert.AreEqual(1, service.Writer.Completed, "the write committed");
+        Assert.HasCount(3, rows, "the committed records are stored");
+        Assert.IsTrue(status is null or HttpStatusCode.NoContent, $"the answer {status} is the acknowledgement or none");
+        Assert.AreEqual(0, code, "exit code after a graceful stop");
+    }
+
+    /// <summary>
+    /// The service ends only after the write in flight, also when the host stopped before the write ended: the store is closed after the drain, so the write
+    /// commits against an open store.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task ServeShutdownDrainsIngestWritesBeforeClosingStore()
+    {
+        // Arrange
+        await using var service = await IngestService.StartAsync(TestContext.CancellationToken, hold: true, clock: new FakeTimeProvider(), shutdownTimeout: TimeSpan.FromMilliseconds(300));
+
+        var post = service.PostAsync(IngestSamples.Valid(1, 3), TestContext.CancellationToken);
+
+        await service.Writer!.WaitForCallsAsync(1, TestContext.CancellationToken, post);
+
+        // Act
+        service.Stop();
+        await service.Stopped.WaitAsync(TimeSpan.FromSeconds(30), TestContext.CancellationToken);
+
+        var finishedEarly = await Task.WhenAny(service.Run, Task.Delay(TimeSpan.FromMilliseconds(500), TestContext.CancellationToken)) == service.Run;
+
+        service.Writer.ReleaseAll();
+        await service.Run.WaitAsync(TimeSpan.FromSeconds(30), TestContext.CancellationToken);
+        await AnswerOrNullAsync(post);
+
+        var rows = await service.RowsAsync(TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsFalse(finishedEarly, "the service waits for the write that is still running after the host stopped");
+        Assert.AreEqual(1, service.Writer.Completed, "the write committed against an open store");
+        Assert.HasCount(3, rows, "the committed records are stored");
+    }
+
+    /// <summary>
+    /// A request that finished decoding when the stop signal fired gets no 2xx and the writer sees no call: the gate closes at the stop signal itself.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task ServeShutdownRefusesAWriteThatStartsAfterTheDrain()
+    {
+        // Arrange
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        using var release = new ManualResetEventSlim(false);
+
+        long? Probe(string directory)
+        {
+            entered.TrySetResult();
+            release.Wait(TimeSpan.FromSeconds(30), TestContext.CancellationToken);
+
+            return 5L << 30;
+        }
+
+        await using var service = await IngestService.StartAsync(TestContext.CancellationToken, minFree: "1MiB", record: true, clock: new FakeTimeProvider(), freeSpaceProbe: Probe);
+
+        var post = service.PostAsync(IngestSamples.Valid(1, 3), TestContext.CancellationToken);
+
+        try
+        {
+            await Task.WhenAny(entered.Task, post).WaitAsync(TimeSpan.FromSeconds(30), TestContext.CancellationToken);
+            Assert.IsTrue(entered.Task.IsCompleted, "the request reached the free space check");
+
+            // Act
+            service.Stop();
+            await service.Stopping.WaitAsync(TimeSpan.FromSeconds(20), TestContext.CancellationToken);
+        }
+        finally
+        {
+            release.Set();
+        }
+
+        var status = await AnswerOrNullAsync(post);
+
+        await service.Run.WaitAsync(TimeSpan.FromSeconds(30), TestContext.CancellationToken);
+
+        var rows = await service.RowsAsync(TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsFalse(status is >= HttpStatusCode.OK and < HttpStatusCode.MultipleChoices, $"the answer {status} is no 2xx");
+        Assert.AreEqual(0, service.Writer!.Calls, "the writer sees no call");
+        Assert.IsEmpty(rows, "nothing is stored");
+    }
+
+    /// <summary>
+    /// A write that is still running 10 seconds after the stop signal is cancelled, rolls back and is answered with 503; before that it is not cancelled.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task ServeShutdownCancelsAWriteAfterTheDeadline()
+    {
+        // Arrange
+        var clock = new FakeTimeProvider();
+
+        await using var service = await IngestService.StartAsync(TestContext.CancellationToken, hold: true, clock: clock);
+
+        var post = service.PostAsync(IngestSamples.Valid(1, 3), TestContext.CancellationToken);
+
+        await service.Writer!.WaitForCallsAsync(1, TestContext.CancellationToken, post);
+
+        var token = service.Writer.Tokens[0];
+
+        // Act
+        service.Stop();
+        await service.Stopping.WaitAsync(TimeSpan.FromSeconds(20), TestContext.CancellationToken);
+        clock.Advance(TimeSpan.FromSeconds(9));
+
+        var cancelledAtNine = token.IsCancellationRequested;
+
+        clock.Advance(TimeSpan.FromSeconds(1));
+
+        var status = await AnswerOrNullAsync(post);
+
+        await service.Run.WaitAsync(TimeSpan.FromSeconds(30), TestContext.CancellationToken);
+
+        var rows = await service.RowsAsync(TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsFalse(cancelledAtNine, "the write is not cancelled 9 seconds after the stop signal");
+        Assert.IsTrue(token.IsCancellationRequested, "the write is cancelled 10 seconds after the stop signal");
+        Assert.IsTrue(status is null or HttpStatusCode.ServiceUnavailable, $"the answer {status} is 503 or none");
+        Assert.AreEqual(0, service.Writer.Completed, "the cancelled write returned no result");
+        Assert.IsEmpty(rows, "the cancelled write rolled back");
+    }
+
+    /// <summary>
+    /// When the service fails after it started, the write in flight still ends before the store is closed.
+    /// </summary>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    public async Task ServeFailureAfterStartStillDrains()
+    {
+        // Arrange
+        using var fail = new ManualResetEventSlim(false);
+
+        await using var service = await IngestService.StartAsync(TestContext.CancellationToken,
+                                                                 hold: true,
+                                                                 clock: new FakeTimeProvider(),
+                                                                 onStarted: () =>
+                                                                            {
+                                                                                fail.Wait(TimeSpan.FromSeconds(30), TestContext.CancellationToken);
+
+                                                                                throw new InvalidOperationException("the listener failed");
+                                                                            });
+
+        var post = service.PostAsync(IngestSamples.Valid(1, 3), TestContext.CancellationToken);
+
+        try
+        {
+            await service.Writer!.WaitForCallsAsync(1, TestContext.CancellationToken, post);
+        }
+        finally
+        {
+            fail.Set();
+        }
+
+        // Act
+        var finishedEarly = await Task.WhenAny(service.Run, Task.Delay(TimeSpan.FromMilliseconds(500), TestContext.CancellationToken)) == service.Run;
+
+        service.Writer.ReleaseAll();
+
+        var code = await service.Run.WaitAsync(TimeSpan.FromSeconds(30), TestContext.CancellationToken);
+
+        await AnswerOrNullAsync(post);
+
+        var rows = await service.RowsAsync(TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsFalse(finishedEarly, "the failed service waits for the write in flight");
+        Assert.AreEqual(1, code, "exit code of the failed service");
+        Assert.AreEqual(1, service.Writer.Completed, "the write committed against an open store");
+        Assert.HasCount(3, rows, "the committed records are stored");
+    }
+
+    /// <summary>
     /// Reads the values of the instance fields of an object.
     /// </summary>
     /// <param name="instance">The object</param>
@@ -1198,6 +1600,16 @@ public class ServeTests
     }
 
     /// <summary>
+    /// Encodes text one byte per character.
+    /// </summary>
+    /// <param name="text">The text</param>
+    /// <returns>The bytes</returns>
+    private static byte[] Latin1(string text)
+    {
+        return Encoding.Latin1.GetBytes(text);
+    }
+
+    /// <summary>
     /// Adds a problem when the client no longer gets the home page.
     /// </summary>
     /// <param name="problems">The problems</param>
@@ -1235,6 +1647,135 @@ public class ServeTests
         Assert.AreEqual(HttpStatusCode.Found, response.StatusCode, "the sign-in is answered with a redirect");
         Assert.AreEqual("/", LoginTestClient.LocationOf(response), "the redirect goes to the home page");
         Assert.IsTrue(client.HasSession, "the client holds a session cookie");
+    }
+
+    /// <summary>
+    /// Sends a post to /v1/batches with exactly the given header lines on a raw connection and reads the head of the answer.
+    /// </summary>
+    /// <param name="port">The port of the ingest listener</param>
+    /// <param name="headers">The header lines, each ended by a carriage return and a line feed</param>
+    /// <param name="body">The body</param>
+    /// <returns>The status and the head of the answer</returns>
+    private async Task<(int Status, string Head)> SendRawAsync(int port, byte[] headers, byte[] body)
+    {
+        using var client = new TcpClient();
+
+        await client.ConnectAsync(IPAddress.Loopback, port, TestContext.CancellationToken);
+
+        var stream = client.GetStream();
+        var start = Latin1($"POST /v1/batches HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\nContent-Type: application/gzip\r\nContent-Length: {body.Length}\r\n");
+
+        try
+        {
+            await stream.WriteAsync((byte[])[.. start, .. headers, .. "\r\n"u8.ToArray(), .. body], TestContext.CancellationToken);
+        }
+        catch (IOException)
+        {
+            // The server may have answered and closed before it read the whole request.
+        }
+
+        return await ReadHeadAsync(stream);
+    }
+
+    /// <summary>
+    /// Sends a request for /healthz on a connection that stays open and reads the head of the answer.
+    /// </summary>
+    /// <param name="client">The connection</param>
+    /// <returns>The status and the head of the answer</returns>
+    private async Task<(int Status, string Head)> ExchangeAsync(TcpClient client)
+    {
+        var stream = client.GetStream();
+
+        await stream.WriteAsync(Latin1("GET /healthz HTTP/1.1\r\nHost: localhost\r\n\r\n"), TestContext.CancellationToken);
+
+        return await ReadHeadAsync(stream);
+    }
+
+    /// <summary>
+    /// Sends a request on a connection and reports whether the server closed it without an answer.
+    /// </summary>
+    /// <param name="client">The connection</param>
+    /// <returns><c>true</c> when the connection ended without an answer</returns>
+    private async Task<bool> IsClosedAsync(TcpClient client)
+    {
+        using var limit = CancellationTokenSource.CreateLinkedTokenSource(TestContext.CancellationToken);
+
+        limit.CancelAfter(TimeSpan.FromSeconds(10));
+
+        try
+        {
+            var stream = client.GetStream();
+
+            await stream.WriteAsync(Latin1("GET /healthz HTTP/1.1\r\nHost: localhost\r\n\r\n"), limit.Token);
+
+            var buffer = new byte[256];
+
+            return await stream.ReadAsync(buffer, limit.Token) == 0;
+        }
+        catch (Exception exception) when (exception is IOException or SocketException or ObjectDisposedException)
+        {
+            return true;
+        }
+        catch (OperationCanceledException) when (TestContext.CancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (OperationCanceledException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Reads from a connection up to the end of the head of an answer.
+    /// </summary>
+    /// <param name="stream">The stream of the connection</param>
+    /// <returns>The status and the head</returns>
+    private async Task<(int Status, string Head)> ReadHeadAsync(NetworkStream stream)
+    {
+        using var limit = CancellationTokenSource.CreateLinkedTokenSource(TestContext.CancellationToken);
+
+        limit.CancelAfter(TimeSpan.FromSeconds(20));
+
+        var received = new List<byte>();
+        var buffer = new byte[1024];
+        var head = string.Empty;
+
+        while (head.IndexOf("\r\n\r\n", StringComparison.Ordinal) < 0)
+        {
+            var count = await stream.ReadAsync(buffer, limit.Token);
+
+            if (count == 0)
+            {
+                break;
+            }
+
+            received.AddRange(buffer.AsSpan(0, count).ToArray());
+            head = Encoding.Latin1.GetString([.. received]);
+        }
+
+        var parts = head.Split(' ', 3);
+
+        return (parts.Length > 1 && int.TryParse(parts[1], out var status) ? status : 0, head);
+    }
+
+    /// <summary>
+    /// Waits for the answer to a request and gives its status, or <c>null</c> when the connection ended without one.
+    /// </summary>
+    /// <param name="post">The request</param>
+    /// <returns>The status, or <c>null</c></returns>
+    private async Task<HttpStatusCode?> AnswerOrNullAsync(Task<HttpResponseMessage> post)
+    {
+        try
+        {
+            using var response = await post.WaitAsync(TimeSpan.FromSeconds(30), TestContext.CancellationToken);
+
+            return response.StatusCode;
+        }
+        catch (HttpRequestException)
+        {
+            return null;
+        }
     }
 
     #endregion // Methods

@@ -13,6 +13,10 @@ public class BackendConfigLoaderTests
 
     private const string Secret = "s3cr3t-value-that-must-never-leak";
 
+    private const string AgentIdReason = "must be 1 to 64 characters of [A-Za-z0-9._-], starting with a letter or digit";
+
+    private const string MinFreeReason = "must be a whole number of MiB or GiB from 0MiB to 1024GiB, such as 0MiB or 1GiB";
+
     #endregion // Constants
 
     #region Methods
@@ -34,11 +38,12 @@ public class BackendConfigLoaderTests
         // Assert
         Assert.AreEqual(":8080", config.Web.Listen, "web.listen");
         Assert.AreEqual(":8081", config.Ingest.Listen, "ingest.listen");
+        Assert.AreEqual("1GiB", config.Ingest.MinFree, "ingest.min_free");
         Assert.AreEqual("/data", config.Storage.Directory, "storage.directory");
         Assert.AreEqual("info", config.Log.Level, "log.level");
         Assert.IsFalse(config.Secrets.AgentToken.IsSet || config.Secrets.WebPasswordHash.IsSet || config.Secrets.TelegramBotToken.IsSet, "no secret is set");
 
-        foreach (var key in BackendConfig.Keys().Where(key => key != "import.time_zone"))
+        foreach (var key in BackendConfig.Keys().Where(key => key != "import.time_zone" && key != "ingest.agent_id"))
         {
             Assert.IsGreaterThan(0, lines.GetValueOrDefault(key), $"the example sets {key} explicitly");
         }
@@ -46,6 +51,9 @@ public class BackendConfigLoaderTests
         Assert.AreEqual(ErrorLogPaths.Default, config.Import.GetErrorLogPaths(), "the example sets the default error log paths");
         Assert.IsNull(config.Import.TimeZone, "import.time_zone has no default and the example leaves it unset");
         Assert.AreEqual(0, lines.GetValueOrDefault("import.time_zone"), "the example does not set import.time_zone");
+        Assert.IsNull(config.Ingest.AgentId, "ingest.agent_id has no default and the example leaves it unset");
+        Assert.AreEqual(0, lines.GetValueOrDefault("ingest.agent_id"), "the example does not set ingest.agent_id");
+        Assert.Contains("\n  # agent_id: ", File.ReadAllText(path).Replace("\r\n", "\n", StringComparison.Ordinal), "the example holds ingest.agent_id commented out");
         Assert.Contains("\n  # time_zone: Europe/Berlin\n", File.ReadAllText(path).Replace("\r\n", "\n", StringComparison.Ordinal), "the example holds the option commented out");
     }
 
@@ -660,6 +668,121 @@ public class BackendConfigLoaderTests
     }
 
     /// <summary>
+    /// The option <c>ingest.agent_id</c> has no default and is read as written.
+    /// </summary>
+    [TestMethod]
+    public void BackendConfigLoaderReadsIngestAgentId()
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        var absent = directory.Write("absent.yaml", "ingest:\n  listen: :9000\n");
+        var set = directory.Write("set.yaml", "ingest:\n  agent_id: Web-1.a_b\n");
+        var longest = new string('a', 64);
+        var longestPath = directory.Write("longest.yaml", $"ingest:\n  agent_id: {longest}\n");
+
+        // Act
+        var absentConfig = BackendConfigLoader.Load(absent, []);
+        var setConfig = BackendConfigLoader.Load(set, []);
+        var longestConfig = BackendConfigLoader.Load(longestPath, []);
+
+        // Assert
+        Assert.IsNull(absentConfig.Ingest.AgentId, "no default");
+        Assert.AreEqual("Web-1.a_b", setConfig.Ingest.AgentId, "the value as written, case kept");
+        Assert.AreEqual(longest, longestConfig.Ingest.AgentId, "64 characters are allowed");
+    }
+
+    /// <summary>
+    /// An <c>ingest.agent_id</c> without value or against the agent ID rule is refused at the line of its key with a fixed text that does not show the value.
+    /// </summary>
+    /// <param name="value">The raw YAML value</param>
+    /// <param name="reason">The expected reason</param>
+    [TestMethod]
+    [DataRow("~", "has no value")]
+    [DataRow("", "has no value")]
+    [DataRow("\"\"", AgentIdReason)]
+    [DataRow("\"-web\"", AgentIdReason)]
+    [DataRow("\".web\"", AgentIdReason)]
+    [DataRow("\"_web\"", AgentIdReason)]
+    [DataRow("\"web 1\"", AgentIdReason)]
+    [DataRow("\"web/1\"", AgentIdReason)]
+    [DataRow("\"web:1\"", AgentIdReason)]
+    [DataRow("\"w\\u00e9b\"", AgentIdReason)]
+    [DataRow("\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"", AgentIdReason)]
+    public void BackendConfigLoaderRefusesInvalidIngestAgentIdWithoutValue(string value, string reason)
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        var path = directory.Write("vandoxd.yaml", $"ingest:\n  agent_id: {value}\n");
+
+        // Act
+        var exception = Assert.ThrowsExactly<ConfigException>(() => BackendConfigLoader.Load(path, []), "invalid agent ID");
+
+        // Assert
+        Assert.AreEqual($"config: {path}:2: ingest.agent_id: {reason}", exception.Message, "message");
+    }
+
+    /// <summary>
+    /// The option <c>ingest.min_free</c> is one gibibyte by default and is read in bytes.
+    /// </summary>
+    /// <param name="document">The configuration document</param>
+    /// <param name="bytes">The expected number of bytes</param>
+    [TestMethod]
+    [DataRow("ingest:\n  listen: :9000\n", 1073741824L)]
+    [DataRow("ingest:\n  min_free: 0MiB\n", 0L)]
+    [DataRow("ingest:\n  min_free: 0GiB\n", 0L)]
+    [DataRow("ingest:\n  min_free: 1MiB\n", 1048576L)]
+    [DataRow("ingest:\n  min_free: 512MiB\n", 536870912L)]
+    [DataRow("ingest:\n  min_free: 2GiB\n", 2147483648L)]
+    [DataRow("ingest:\n  min_free: 99999MiB\n", 104856551424L)]
+    [DataRow("ingest:\n  min_free: 1024GiB\n", 1099511627776L)]
+    public void BackendConfigLoaderReadsIngestMinFree(string document, long bytes)
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        var path = directory.Write("vandoxd.yaml", document);
+
+        // Act
+        var config = BackendConfigLoader.Load(path, []);
+
+        // Assert
+        Assert.AreEqual(bytes, config.Ingest.GetMinFreeBytes(), "bytes");
+    }
+
+    /// <summary>
+    /// An <c>ingest.min_free</c> without value or against the size rule is refused at the line of its key with a fixed text that does not show the value.
+    /// </summary>
+    /// <param name="value">The raw YAML value</param>
+    /// <param name="reason">The expected reason</param>
+    [TestMethod]
+    [DataRow("~", "has no value")]
+    [DataRow("", "has no value")]
+    [DataRow("\"\"", MinFreeReason)]
+    [DataRow("1024", MinFreeReason)]
+    [DataRow("\"1 GiB\"", MinFreeReason)]
+    [DataRow("1.5GiB", MinFreeReason)]
+    [DataRow("1GB", MinFreeReason)]
+    [DataRow("1gib", MinFreeReason)]
+    [DataRow("-1GiB", MinFreeReason)]
+    [DataRow("+1GiB", MinFreeReason)]
+    [DataRow("01GiB", MinFreeReason)]
+    [DataRow("GiB", MinFreeReason)]
+    [DataRow("1025GiB", MinFreeReason)]
+    [DataRow("1048577MiB", MinFreeReason)]
+    [DataRow("100000MiB", MinFreeReason)]
+    public void BackendConfigLoaderRefusesInvalidIngestMinFreeWithoutValue(string value, string reason)
+    {
+        // Arrange
+        using var directory = new TempDirectory();
+        var path = directory.Write("vandoxd.yaml", $"ingest:\n  min_free: {value}\n");
+
+        // Act
+        var exception = Assert.ThrowsExactly<ConfigException>(() => BackendConfigLoader.Load(path, []), "invalid minimum free space");
+
+        // Assert
+        Assert.AreEqual($"config: {path}:2: ingest.min_free: {reason}", exception.Message, "message");
+    }
+
+    /// <summary>
     /// The list of keys names the error log paths after <c>log.level</c> and before the time zone, and the incident windows last.
     /// </summary>
     [TestMethod]
@@ -669,7 +792,7 @@ public class BackendConfigLoaderTests
         var keys = BackendConfig.Keys();
 
         // Assert
-        Assert.AreSequenceEqual(["web.listen", "web.trusted_proxies", "ingest.listen", "storage.directory", "log.level", "import.plesk_panel_log", "import.sw_cp_server_error_log", "import.nginx_error_log", "import.apache_error_log", "import.time_zone", "incidents.window_before", "incidents.window_after"], keys, "keys in order");
+        Assert.AreSequenceEqual(["web.listen", "web.trusted_proxies", "ingest.listen", "ingest.agent_id", "ingest.min_free", "storage.directory", "log.level", "import.plesk_panel_log", "import.sw_cp_server_error_log", "import.nginx_error_log", "import.apache_error_log", "import.time_zone", "incidents.window_before", "incidents.window_after"], keys, "keys in order");
     }
 
     /// <summary>

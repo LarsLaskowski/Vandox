@@ -13,8 +13,8 @@ backend, written in .NET 10 with a Blazor web UI. Both implement the same data m
 
 | Binary | Runs on | Purpose |
 |---|---|---|
-| `vandox-agent` (Go) | the monitored Linux server | collects data and ships it to the backend (planned for v0.2.0; v0.1.0 ships the backend only); the runtime frame (configuration, collector scheduler, self-metrics, systemd notification), the system, process and connection collectors and the sender (live and throttled backfill) exist; the other collectors and the backend's ingest endpoint do not yet |
-| `vandoxd` (.NET) | Docker container on any Docker host in the home network (NAS, mini PC, server) | backend with web UI |
+| `vandox-agent` (Go) | the monitored Linux server | collects data and ships it to the backend (planned for v0.2.0; v0.1.0 ships the backend only); the runtime frame (configuration, collector scheduler, self-metrics, systemd notification), the system, process and connection collectors and the sender (live and throttled backfill) exist, and the backend's ingest endpoint accepts its batches; the other collectors do not yet |
+| `vandoxd` (.NET) | Docker container on any Docker host in the home network (NAS, mini PC, server) | backend with web UI and ingest API |
 
 Both support `--version`, which prints version, commit and build date. `vandoxd` without arguments runs the
 service; `-config <file>` names its configuration file (default `/etc/vandox/vandoxd.yaml`) and
@@ -87,6 +87,8 @@ the value.
 | `web.listen` | `:8080` | Address of the web UI as `[host]:port`. |
 | `web.trusted_proxies` | empty | Addresses or networks of the reverse proxies whose `X-Forwarded-For` and `X-Forwarded-Proto` headers are trusted, comma-separated, at most 16 entries such as `172.18.0.1` or `172.18.0.0/16` (IPv4 prefix 8 to 32, IPv6 prefix 16 to 128, no host bits set). Without it, all clients behind a proxy share the proxy's address and its sign-in lockout (see *Run the backend with Docker Compose* and `docs/REVERSE_PROXY.md`). |
 | `ingest.listen` | `:8081` | Address of the ingest endpoint, on a port other than `web.listen`. |
+| `ingest.agent_id` | none | The `agent_id` of the one agent the token belongs to: 1 to 64 characters of `[A-Za-z0-9._-]`, starting with a letter or digit, compared exactly (case included). While it or `VANDOX_AGENT_TOKEN` is unset, ingest is disabled: the service logs `ingest disabled` at start and answers every batch `503`; the web UI and the import work as before. |
+| `ingest.min_free` | `1GiB` | Free space on the file system of `storage.directory` below which ingest writes nothing and answers `503` (the agent keeps its records and retries): a whole number followed by `MiB` or `GiB`, from `0MiB` to `1024GiB`; `0MiB` switches the check off. |
 | `storage.directory` | `/data` | Directory of the backend's data, an absolute and clean path. |
 | `log.level` | `info` | `debug`, `info`, `warn` or `error`. |
 | `import.plesk_panel_log` | `/var/log/plesk/panel.log` | Server path of the Plesk panel log; a file at this path is read as that log whatever it holds. An absolute, clean path of a file in a directory. The default is not verified against a Plesk server (see *Import logs*). |
@@ -101,7 +103,7 @@ the value.
 
 | Variable | File variant | Binary | Required | Rule |
 | -------- | ------------ | ------ | -------- | ---- |
-| `VANDOX_AGENT_TOKEN` | `VANDOX_AGENT_TOKEN_FILE` | agent, backend | agent: yes, backend: no | At least 32 printable ASCII characters without spaces, e.g. `openssl rand -hex 32`. |
+| `VANDOX_AGENT_TOKEN` | `VANDOX_AGENT_TOKEN_FILE` | agent, backend | agent: yes, backend: no (ingest is disabled without it) | At least 32 printable ASCII characters without spaces, e.g. `openssl rand -hex 32`. |
 | `VANDOX_WEB_PASSWORD_HASH` | `VANDOX_WEB_PASSWORD_HASH_FILE` | backend | no at load, but the service refuses to start without it | The argon2id hash of the web UI password in the form `$argon2id$v=19$m=...,t=...,p=...$<salt>$<hash>`, created with `vandoxd hash-password` (see *Run the backend with Docker Compose* and `docs/areas/web-login.md`). |
 | `VANDOX_TELEGRAM_BOT_TOKEN` | `VANDOX_TELEGRAM_BOT_TOKEN_FILE` | backend | no | Printable ASCII without spaces, 1 to 4096 characters. Read and validated, but unused until the Telegram notifier (planned). |
 
@@ -200,7 +202,8 @@ a memory limit of 512 MiB. Copy it and `deploy/backend/vandoxd.yaml` into one di
 (Synology Container Manager, QNAP Container Station or plain `docker compose`) and create:
 
 - `vandoxd.yaml`, the configuration file (every key is optional). Its `web.listen` port must match the
-  container side of the `ports` entry in the compose file (8080).
+  container side of the `ports` entry in the compose file (8080). For agents, set `ingest.agent_id` to the agent's `agent_id`
+  (uncomment `agent_id: web-1` under `ingest:` and change the name).
 - `secrets/vandox_agent_token`, the token the agents present (at least 32 printable ASCII characters, for
   example `openssl rand -hex 32 > secrets/vandox_agent_token`). Compose sets no owner or mode on file
   secrets outside Swarm, and the container sees the host file's owner and mode, so give the file to the
@@ -228,7 +231,9 @@ a memory limit of 512 MiB. Copy it and `deploy/backend/vandoxd.yaml` into one di
   password, create the file again and recreate the container.
 
 - `import/`, the directory for the log import (mounted read-only).
-- optionally `.env` with `WEB_BIND_ADDRESS=<address>` (default `127.0.0.1`).
+- `.env` with `INGEST_BIND_ADDRESS=<this host's tailnet address>` (required, no default; `tailscale ip -4` prints it; `127.0.0.1`
+  for an import-only setup without agents) and optionally `WEB_BIND_ADDRESS=<address>` (default `127.0.0.1`). Without
+  `INGEST_BIND_ADDRESS`, `docker compose` refuses to start and names the variable.
 
 Then start it:
 
@@ -250,8 +255,28 @@ job: `docs/REVERSE_PROXY.md` explains the proxy settings, the certificate and th
 `web.trusted_proxies` in `vandoxd.yaml` to the proxy's address as the container sees it; without it, the cookies are never `Secure`
 and every client behind the proxy shares one lockout.
 
-The ingest port (8081) is not published yet: the ingest API arrives with issue #40, which adds the binding on
-the host's tailnet address. The database lives in the named volume `vandox-data` (Docker lists it as `vandox_vandox-data`; `/data` in the container,
+**Ingest port and Tailscale.** The ingest port 8081 is published on `INGEST_BIND_ADDRESS` only, the address the agents reach at
+`http://<tailnet address>:8081` (their `backend.url`). This needs **Tailscale in TUN mode** on the Docker host, where the tailnet
+address is a host interface Docker can bind. Userspace-networking mode is not supported: there the address is no host interface, and
+Tailscale forwards inbound tailnet connections to `127.0.0.1`, where the web port is published, which would leave only the Tailscale
+ACL between the tailnet and the web UI. The Synology package runs in userspace mode by default; `docs/INSTALL.md` shows how to
+switch it to TUN mode. What to look for (the Synology and userspace behavior below is reported, not verified on a host):
+
+- `docker compose up` stops with `set INGEST_BIND_ADDRESS to this host's tailnet address ...`: the variable is missing from `.env`.
+- The container does not start and Docker reports a port binding error: the host does
+  not have the address in `INGEST_BIND_ADDRESS`, because Tailscale is down or runs in userspace mode. Switch to TUN mode or fix the
+  address, then `docker compose up -d`.
+- After a reboot the container is not running although Tailscale is up: Docker may have started it before Tailscale brought up its
+  address, and `unless-stopped` may not retry a failed binding. Run `docker compose up -d` once Tailscale is up.
+- The agent logs `token refused`: it got `401` (wrong token) or `403` (another agent ID). Check the backend's log first for
+  `ingest agent refused` (the presented `agent_id` differs from `ingest.agent_id`) and `ingest token refused`; `ingest disabled`
+  at start names what is missing.
+
+The binding is defense in depth, as for the web port: Docker matches only the destination address, so hosts on the LAN may reach
+the ingest port on the tailnet address too. The token is the boundary: the endpoint checks it before it reads the body, accepts only
+the agent named in `ingest.agent_id`, and stops writing while less than `ingest.min_free` is free (records 0126 and 0127).
+
+The database lives in the named volume `vandox-data` (Docker lists it as `vandox_vandox-data`; `/data` in the container,
 owned by 65532); a bind-mounted data directory instead of the volume must be owned by 65532 as well. To keep the files readable for
 a user of the host (on a NAS, for example), run the container as that user's IDs (`user:` in the compose file, `--user` for
 `docker run`) with a bind-mounted data directory, and give the secret and import files to that user instead of 65532;

@@ -43,9 +43,19 @@ allowlist must be set.
 Keep the web port as `deploy/backend/docker-compose.yml` publishes it, on `127.0.0.1` (or on the address of the
 host that runs the reverse proxy). That binding is defense in depth, not an access boundary: depending on the
 Docker Engine version and the host firewall, hosts on the LAN may reach a published container port directly,
-so use a current Docker Engine and a host firewall where that matters. The ingest port is not published until
-the ingest API exists. The agent token file (`secrets/vandox_agent_token`) must be owned by the container's user (UID 65532 by default, or the IDs set with `user:` or `--user`) with mode
-`0400`, never world-readable, because Compose sets no owner or mode on file secrets outside Swarm. The same holds for the
+so use a current Docker Engine and a host firewall where that matters.
+
+The ingest port 8081 is published only on the address in `INGEST_BIND_ADDRESS`, the backend host's tailnet address, which needs
+Tailscale in TUN mode on the Docker host. Do not run Tailscale there in userspace-networking mode: it forwards inbound tailnet
+connections to `127.0.0.1`, where the web port is published, so the web UI would face the tailnet with only the ACL in between. The
+ingest binding is defense in depth as well: Docker matches a published port by its destination address only, so LAN hosts that route
+packets to the tailnet address may reach the ingest port, as they may the web port. **The agent token is the boundary of ingest**:
+the backend checks it, in constant time, before it reads a request's body and accepts batches only of the one agent named in
+`ingest.agent_id`. Whoever holds the token (the monitored server, or whoever has taken it over) can write batches of that agent until
+the free space of the data volume falls to `ingest.min_free` (default 1 GiB), where ingest stops writing; keep that floor above what
+other services on the same volume need. The agent token file (`secrets/vandox_agent_token`) must be owned by the container's user (UID 65532 by default, or the IDs set with `user:` or `--user`) with mode
+`0400`, never world-readable, because Compose sets no owner or mode on file secrets outside Swarm; a token that may have leaked is
+replaced in this file and on the agent, then the container is recreated. The same holds for the
 web password hash file (`secrets/vandox_web_password_hash`, created with `vandoxd hash-password` as the README shows, without `-t`
 so the terminal does not echo the password); the hash is argon2id, but a copied file still allows offline guessing.
 

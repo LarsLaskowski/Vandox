@@ -193,6 +193,12 @@ Shell pitfalls that shellcheck does not report and the *Analyzer gate* checks it
 them too): use `[[ … ]]`, never `[ … ]` (`shelldre:S7688`), and assign every positional parameter to a named
 `local` variable before using it inside a function (`shelldre:S7679`).
 
+A string literal repeated three or more times in one shell script is reported by SonarQube Cloud as `shelldre:S1192`
+(PR #316 reported `'%{http_code}'` five times in `.github/scripts/smoke-test-backend.sh`), and no local analyzer
+reports it, the *Analyzer gate* included: declare it once as a `readonly` variable and use it by name, checked by
+reading the repeated literals of each changed script, for example with
+`grep -o "'[^']*'" <file> | sort | uniq -c | awk '$1 >= 3'`.
+
 Logger arguments: the C# CodeQL query treats a variable, property or constant as sensitive when its name, ignoring
 case, contains `password`, `passwd` or `trusted`, `account` or `accnt` followed by `id` or `key`, `license` or
 `licence` followed by `key`, or `voucher` followed by `code`, unless the name also contains `hashed`,

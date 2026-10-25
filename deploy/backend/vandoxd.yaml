@@ -2,15 +2,15 @@
 #
 # The file is parsed strictly: an unknown key, a duplicate key, a second YAML document, an anchor, a
 # custom tag or an invalid value stops the backend at start-up, and the error names the file, the line and
-# the key. Every key is optional; the values below are the defaults, except import.time_zone, which has no
-# default and is commented out.
+# the key. Every key is optional; the values below are the defaults, except ingest.agent_id and
+# import.time_zone, which have no default and are commented out.
 #
 # Secrets NEVER go into this file. They are read from the environment of the container (or, for a Docker
 # secret, from a file whose absolute path is given in the variable with the _FILE suffix). Set either the
 # variable or its _FILE form, not both:
 #
-#   VANDOX_AGENT_TOKEN           token the agents present (at least 32 printable ASCII characters; unused until the
-#                                ingest API of v0.2.0)
+#   VANDOX_AGENT_TOKEN           token the agents present (at least 32 printable ASCII characters); the
+#                                ingest API accepts only the agent named by ingest.agent_id (no default)
 #   VANDOX_WEB_PASSWORD_HASH     password hash of the web UI, required: an argon2id hash in the PHC form
 #                                $argon2id$v=19$m=...,t=...,p=...$<salt>$<hash>, created with
 #                                `vandoxd hash-password` (docs/areas/web-login.md)
@@ -34,6 +34,13 @@ web:
 ingest:
   # Address of the ingest endpoint the agents send to, same format as web.listen. Default: :8081
   listen: :8081
+  # ID of the one agent the ingest token belongs to: 1 to 64 characters of [A-Za-z0-9._-], starting with a
+  # letter or digit, the agent_id of the agent's configuration. Ingest stays disabled until it and
+  # VANDOX_AGENT_TOKEN are both set. No default.
+  # agent_id: web-1
+  # Free space of the storage volume below which ingest answers 503 and pauses: a whole number of MiB or GiB
+  # from 0MiB to 1024GiB, such as 512MiB or 1GiB; 0MiB switches the check off. Default: 1GiB
+  min_free: 1GiB
 
 storage:
   # Directory where the backend keeps its data. An absolute, clean path (no trailing slash). Default: /data
