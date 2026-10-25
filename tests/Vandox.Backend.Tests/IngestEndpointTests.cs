@@ -1168,11 +1168,13 @@ public class IngestEndpointTests
         await Finish(rig.RunAsync(call));
 
         // Assert
-        Assert.IsFalse(call.Status is >= 200 and < 300 && aborted == false, $"status {call.Status} is not a 2xx for a request that is still there");
-
-        if (aborted == false)
+        if (aborted)
         {
-            Assert.AreEqual(503, call.Status, "status");
+            Assert.AreEqual(200, call.Status, "no answer is set for a gone connection");
+        }
+        else
+        {
+            Assert.AreEqual(503, call.Status, "status of a request that is still there");
             Assert.IsNull(call.Refused, "no refusal header");
         }
 
