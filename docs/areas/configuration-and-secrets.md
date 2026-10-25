@@ -344,6 +344,7 @@ Backend:
 - [0125](../decisions/0125-sender-two-streams-shared-backoff-refused-records-given-up-with-a-gap.md) — why the backfill has its own,
   configurable bandwidth.
 - [0126](../decisions/0126-ingest-endpoint-token-bound-to-one-agent-id-two-slots-through-the-commit-no-rate-cap.md) — why the
+- [0129](../decisions/0129-configuration-and-secret-files-opened-without-blocking.md) — why the configuration file and a `_FILE` secret file are opened without blocking and their type is checked on the opened file.
   backend binds the one token to `ingest.agent_id` and stops ingest below `ingest.min_free`.
 
 ## Not here

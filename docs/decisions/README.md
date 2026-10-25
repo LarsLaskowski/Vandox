@@ -157,4 +157,5 @@ once in the [area document](../areas/README.md) of the record's area, and the re
 | [0126](0126-ingest-endpoint-token-bound-to-one-agent-id-two-slots-through-the-commit-no-rate-cap.md) | Ingest endpoint: the token bound to one configured agent ID, two slots held through the commit, a free-space floor instead of a rate cap | Accepted | 2026-10-25 |
 | [0127](0127-backend-host-needs-tailscale-in-tun-mode-ingest-port-on-a-required-bind-address.md) | The backend host needs Tailscale in TUN mode; the ingest port is published on a required bind address (amends 0060) | Accepted | 2026-10-25 |
 | [0128](0128-csharp-decoder-reads-the-gzip-framing-itself-to-match-the-go-decoder.md) | The C# decoder reads the gzip framing itself, so trailing bytes and header rules match the Go decoder (amends 0076) | Accepted | 2026-10-25 |
+| [0129](0129-configuration-and-secret-files-opened-without-blocking.md) | Configuration and secret files are opened without blocking and their type is checked on the opened file (amends 0049) | Accepted | 2026-10-25 |
 <!-- project:end index -->
