@@ -271,6 +271,20 @@ internal sealed class IngestEndpoint : IDisposable
     }
 
     /// <summary>
+    /// Answers 503 to a request whose body could not be read, unless the connection is gone: then there is nobody to answer.
+    /// </summary>
+    /// <param name="context">The request</param>
+    private static void AnswerUnlessAborted(HttpContext context)
+    {
+        if (context.RequestAborted.IsCancellationRequested)
+        {
+            return;
+        }
+
+        Answer(context, StatusCodes.Status503ServiceUnavailable);
+    }
+
+    /// <summary>
     /// Limits the body that Kestrel reads to the limit of the endpoint, as a backstop to the check of the endpoint.
     /// </summary>
     /// <param name="context">The request</param>
@@ -580,6 +594,8 @@ internal sealed class IngestEndpoint : IDisposable
         }
         catch (IOException)
         {
+            AnswerUnlessAborted(context);
+
             return -1;
         }
 
