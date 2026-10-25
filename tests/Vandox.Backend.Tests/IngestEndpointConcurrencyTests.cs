@@ -238,6 +238,12 @@ public class IngestEndpointConcurrencyTests
             await Task.WhenAny(late.Body.FirstRead, run).WaitAsync(TimeSpan.FromSeconds(30), TestContext.CancellationToken);
             Assert.IsTrue(late.Body.FirstRead.IsCompleted, "the request started to read its body");
         }
+        else
+        {
+            // The late request takes its receive time and creates its budget timer before the clock moves.
+            await IngestRig.SettleAsync();
+            Assert.IsFalse(run.IsCompleted, "the late request waits for a slot");
+        }
 
         // Act
         rig.Clock.Advance(TimeSpan.FromSeconds(31));
@@ -259,6 +265,60 @@ public class IngestEndpointConcurrencyTests
             Assert.AreEqual(204, holder.Status, "the first write that started is not cancelled by the bound");
             Assert.AreEqual(204, other.Status, "the second write that started is not cancelled by the bound");
         }
+    }
+
+    /// <summary>
+    /// A request that waits for a slot when its connection is aborted is not answered, logs nothing and never reaches the writer; the stop signal answers it
+    /// 503 without the timeout line.
+    /// </summary>
+    /// <param name="event">What ends the wait: <c>abort</c> or <c>stop</c></param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [DataRow("abort")]
+    [DataRow("stop")]
+    public async Task IngestEndpointWaitingRequestEndsWithAbortOrStop(string @event)
+    {
+        // Arrange
+        await using var rig = IngestRig.Create();
+
+        rig.Writer.Hold();
+
+        using var holder = IngestCall.Post(IngestSamples.Valid(1, 2));
+        using var other = IngestCall.Post(IngestSamples.Valid(11, 2));
+        using var waiting = IngestCall.Post(IngestSamples.Valid(21, 2));
+
+        var holders = new List<Task>
+                      {
+                          Task.Run(() => rig.RunAsync(holder), TestContext.CancellationToken),
+                          Task.Run(() => rig.RunAsync(other), TestContext.CancellationToken)
+                      };
+
+        await rig.Writer.WaitForCallsAsync(2, TestContext.CancellationToken, [.. holders]);
+
+        var run = Task.Run(() => rig.RunAsync(waiting), TestContext.CancellationToken);
+
+        await IngestRig.SettleAsync();
+
+        // Act
+        if (@event == "abort")
+        {
+            await waiting.AbortAsync();
+        }
+        else
+        {
+            rig.Lifetime.Stop();
+        }
+
+        await run.WaitAsync(TimeSpan.FromSeconds(30), TestContext.CancellationToken);
+        rig.Writer.ReleaseAll();
+        await Task.WhenAll(holders).WaitAsync(TimeSpan.FromSeconds(30), TestContext.CancellationToken);
+
+        // Assert
+        Assert.AreEqual(@event == "abort" ? 200 : 503, waiting.Status, "no answer is set for a gone connection, 503 at the stop signal");
+        Assert.IsNull(waiting.Refused, "no refusal header");
+        Assert.AreEqual(0, waiting.Body.ReadCalls, "the waiting request never read its body");
+        Assert.AreEqual(2, rig.Writer.Calls, "the waiting request never reaches the writer");
+        Assert.IsEmpty(rig.Log.Named(TimedOut), "the wait is not logged as a timeout");
     }
 
     /// <summary>

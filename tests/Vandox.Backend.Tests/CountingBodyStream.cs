@@ -2,7 +2,7 @@ namespace Vandox.Backend.Tests;
 
 /// <summary>
 /// A request body that counts how often and how far it was read. It serves fixed bytes, an endless run of zero bytes, or fixed bytes followed by a read that
-/// never returns until it is cancelled (a body that trickles in).
+/// never returns until it is cancelled (a body that trickles in) or by a read that throws a scripted exception.
 /// </summary>
 internal sealed class CountingBodyStream : Stream
 {
@@ -67,6 +67,11 @@ internal sealed class CountingBodyStream : Stream
     /// Gets a task that completes when the first read starts.
     /// </summary>
     internal Task FirstRead => _firstRead.Task;
+
+    /// <summary>
+    /// Gets or sets the exception that a read after the last byte throws instead of returning the end of the body, <c>null</c> for none.
+    /// </summary>
+    internal Exception? FailAtEnd { get; set; }
 
     #endregion // Properties
 
@@ -134,6 +139,11 @@ internal sealed class CountingBodyStream : Stream
 
         if (left <= 0)
         {
+            if (FailAtEnd is not null)
+            {
+                throw FailAtEnd;
+            }
+
             if (_blockAtEnd)
             {
                 await Task.Delay(Timeout.Infinite, cancellationToken);

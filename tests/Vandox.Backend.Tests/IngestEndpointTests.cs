@@ -1,3 +1,5 @@
+using System.Globalization;
+
 using Microsoft.AspNetCore.Http;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging;
@@ -1101,6 +1103,170 @@ public class IngestEndpointTests
         Assert.AreEqual(LogLevel.Error, lines[0].Level, "level");
         Assert.AreEqual(nameof(InvalidOperationException), lines[0].Value("Exception"), "type name");
         Assert.DoesNotContain("SENTINEL", string.Join('\n', rig.Log.AllTexts()), "the text of the exception is not logged");
+    }
+
+    /// <summary>
+    /// A body that the server itself fails while it is read is answered by the kind of the failure: 408 and the timeout line for a data rate that is too low,
+    /// 413 as the refusal of a body over the limit, 400 without the refusal header for any other request error; the writer sees no call.
+    /// </summary>
+    /// <param name="status">The status of the server's request error</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [DataRow(408)]
+    [DataRow(413)]
+    [DataRow(400)]
+    public async Task IngestEndpointServerBodyErrorIsAnsweredByItsStatus(int status)
+    {
+        // Arrange
+        await using var rig = IngestRig.Create();
+
+        var body = new CountingBodyStream(IngestSamples.Valid(1, 3)[..10])
+                   {
+                       FailAtEnd = new BadHttpRequestException("request error", status)
+                   };
+
+        using var call = IngestCall.Chunked(body);
+
+        // Act
+        await Finish(rig.RunAsync(call));
+
+        // Assert
+        Assert.AreEqual(status, call.Status, "status");
+        Assert.AreEqual(status == 400 || status == 408 ? null : Refusal, call.Refused, "the refusal header only for the body over the limit");
+        Assert.HasCount(status == 408 ? 1 : 0, rig.Log.Named("ingest request timed out"), "the timeout line only for the data rate");
+        Assert.HasCount(status == 413 ? 1 : 0, rig.Log.Named(BatchRefused), "the refusal line only for the body over the limit");
+        Assert.AreEqual(0, rig.Writer.Calls, "nothing is written");
+    }
+
+    /// <summary>
+    /// One request with a record line of 1 MB of a hostile shape (a body of a few kilobytes) keeps a live heap that, for the two slots together, stays within
+    /// 128 MiB together with the two body buffers.
+    /// </summary>
+    /// <param name="shape">The shape of the unknown envelope key</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [DataRow("distinct keys")]
+    [DataRow("objects of 24 keys")]
+    [DataRow("small objects")]
+    public async Task IngestEndpointHostileLineStaysWithinMemoryBound(string shape)
+    {
+        // Arrange
+        await using var rig = IngestRig.Create();
+
+        var (body, lineLength) = IngestMemoryBodies.HostileLine(shape);
+
+        using var warmup = await rig.PostAsync(body);
+
+        // Act
+        var (peak, call) = await MeasureAsync(false, () => rig.PostAsync(body));
+
+        // Assert
+        TestContext.WriteLine($"hostile line '{shape}': line {lineLength} bytes, body {body.Length} bytes, live heap above the start {peak.HeapBytes} bytes, allocated {peak.AllocatedBytes} bytes");
+
+        try
+        {
+            Assert.AreEqual(204, warmup.Status, "the warm-up request is answered 204");
+            Assert.AreEqual(204, call.Status, "the measured request is answered 204");
+            Assert.IsGreaterThan(IngestMemoryBodies.HostileLineBytes * 9 / 10, lineLength, "the line is about 1 MB");
+            Assert.IsLessThan(IngestLimits.MaxBodyBytes, body.Length, "the compressed body is far below the body limit");
+            AssertWithinBudget(peak);
+        }
+        finally
+        {
+            call.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// A batch that fills the 2 MiB batch limit, written by a real store, keeps the live heap plus SQLite's native memory of one request so low that the two
+    /// slots together stay within 128 MiB together with the two body buffers.
+    /// </summary>
+    /// <param name="batch">The batch: distinct log lines or the largest connection snapshots</param>
+    /// <returns>A task that completes when the test is done</returns>
+    [TestMethod]
+    [DataRow("distinct log lines")]
+    [DataRow("largest connection snapshots")]
+    public async Task IngestEndpointMaximalBatchStaysWithinMemoryBound(string batch)
+    {
+        // Arrange
+        await using var rig = await IngestRig.CreateWithStoreAsync(TestContext.CancellationToken);
+
+        var (body, size) = batch == "distinct log lines" ? IngestMemoryBodies.DistinctLogLines() : IngestMemoryBodies.LargestConnectionSnapshots();
+
+        var records = batch == "distinct log lines" ? size : 2;
+
+        using var warmup = await rig.PostAsync(IngestSamples.Valid(1_000_001, 3));
+
+        // Act
+        var (peak, call) = await MeasureAsync(true, () => rig.PostAsync(body));
+
+        // Assert
+        var rows = await rig.RowsAsync(TestContext.CancellationToken);
+        var templates = Convert.ToInt64(await rig.ScalarAsync("SELECT COUNT(*) FROM log_templates", TestContext.CancellationToken), CultureInfo.InvariantCulture);
+
+        TestContext.WriteLine($"{batch}: {records} records ({(batch == "distinct log lines" ? "-" : size.ToString(CultureInfo.InvariantCulture))} line bytes), body {body.Length} bytes, {templates} templates, live heap above the start {peak.HeapBytes} bytes, SQLite native {peak.NativeBytes} bytes, allocated {peak.AllocatedBytes} bytes");
+
+        try
+        {
+            Assert.AreEqual(204, warmup.Status, "the warm-up request is answered 204");
+            Assert.AreEqual(204, call.Status, "the measured request is answered 204");
+            Assert.HasCount(records + 3, rows, "the real store holds every record of the batch");
+
+            if (batch == "distinct log lines")
+            {
+                Assert.IsGreaterThan(15_000, records, "the batch holds many records");
+                Assert.IsGreaterThan(records / 2, templates, "the lines have distinct templates");
+            }
+
+            AssertWithinBudget(peak);
+        }
+        finally
+        {
+            call.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// Runs a piece of work and measures its peak memory: the live heap, sampled by a second thread, SQLite's native high-water mark when asked, and the bytes
+    /// allocated.
+    /// </summary>
+    /// <param name="native">Whether SQLite has been opened and its high-water mark is read</param>
+    /// <param name="work">The work</param>
+    /// <returns>The peak and the finished call</returns>
+    private static async Task<(MemoryPeak Peak, IngestCall Call)> MeasureAsync(bool native, Func<Task<IngestCall>> work)
+    {
+        var heapBefore = HeapSampler.RetainedBytes();
+        var allocatedBefore = GC.GetTotalAllocatedBytes(true);
+        var nativeBefore = native ? SQLitePCL.raw.sqlite3_memory_used() : 0;
+
+        if (native)
+        {
+            SQLitePCL.raw.sqlite3_memory_highwater(1);
+        }
+
+        long heapPeak;
+        IngestCall call;
+
+        using (var sampler = new HeapSampler())
+        {
+            call = await work();
+            heapPeak = sampler.Stop();
+        }
+
+        var nativePeak = native ? SQLitePCL.raw.sqlite3_memory_highwater(0) - nativeBefore : 0;
+
+        return (new MemoryPeak(Math.Max(0, heapPeak - heapBefore), GC.GetTotalAllocatedBytes(true) - allocatedBefore, Math.Max(0, nativePeak)), call);
+    }
+
+    /// <summary>
+    /// Asserts that two requests of this peak and the two body buffers stay within 128 MiB.
+    /// </summary>
+    /// <param name="peak">The peak of one request</param>
+    private static void AssertWithinBudget(MemoryPeak peak)
+    {
+        var slots = (IngestLimits.Slots * peak.TotalBytes) + (IngestLimits.Slots * (long)IngestLimits.MaxBodyBytes);
+
+        Assert.IsLessThan(128L << 20, slots, $"{IngestLimits.Slots} slots at the peak of one request ({peak.TotalBytes} bytes) and their body buffers");
     }
 
     /// <summary>
