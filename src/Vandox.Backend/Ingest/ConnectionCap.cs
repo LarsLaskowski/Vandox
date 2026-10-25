@@ -2,8 +2,6 @@ using Microsoft.AspNetCore.Connections;
 
 namespace Vandox.Backend.Ingest;
 
-#pragma warning disable RH2003, S2325, S4487
-
 /// <summary>
 /// Limits the open connections of a listener: a connection over the limit is aborted before Kestrel reads a request.
 /// </summary>
@@ -15,6 +13,11 @@ internal sealed class ConnectionCap
     /// The most connections.
     /// </summary>
     private readonly int _max;
+
+    /// <summary>
+    /// The number of connections that are open.
+    /// </summary>
+    private int _open;
 
     #endregion // Fields
 
@@ -40,7 +43,25 @@ internal sealed class ConnectionCap
     /// <returns>The wrapped delegate</returns>
     internal ConnectionDelegate Wrap(ConnectionDelegate next)
     {
-        throw new NotImplementedException();
+        return async context =>
+               {
+                   if (Interlocked.Increment(ref _open) > _max)
+                   {
+                       Interlocked.Decrement(ref _open);
+                       context.Abort();
+
+                       return;
+                   }
+
+                   try
+                   {
+                       await next(context).ConfigureAwait(false);
+                   }
+                   finally
+                   {
+                       Interlocked.Decrement(ref _open);
+                   }
+               };
     }
 
     #endregion // Methods

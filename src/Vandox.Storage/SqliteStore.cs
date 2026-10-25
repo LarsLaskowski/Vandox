@@ -41,6 +41,11 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
     /// </summary>
     private const string ListenersContext = "store: reading listener findings";
 
+    /// <summary>
+    /// The seconds a connection waits for a lock another connection holds, the whole wait (<c>DefaultTimeout</c> retries on top of the busy timeout pragma).
+    /// </summary>
+    private const int BusyTimeoutSeconds = 5;
+
     private const string CommonPragmas = "PRAGMA busy_timeout=5000; PRAGMA foreign_keys=1; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;";
 
     // The writer connection holds up to 16 MiB of pages (the default is 2 MiB), so a large transaction does not spill pages to the
@@ -284,7 +289,8 @@ public sealed class SqliteStore : IRecordWriter, IRecordReader, ILogSearcher, IL
                {
                    DataSource = path,
                    Mode = SqliteOpenMode.ReadWrite,
-                   Pooling = false
+                   Pooling = false,
+                   DefaultTimeout = BusyTimeoutSeconds
                }.ToString();
     }
 

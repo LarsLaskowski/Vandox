@@ -2,8 +2,6 @@ using Vandox.Core.Wire;
 
 namespace Vandox.Backend.Ingest;
 
-#pragma warning disable RH2003, S2325
-
 /// <summary>
 /// The bounds of one ingest request.
 /// </summary>
@@ -60,7 +58,12 @@ internal static class IngestLimits
     /// <returns>The limits</returns>
     internal static WireLimits Wire()
     {
-        throw new NotImplementedException();
+        return new WireLimits
+               {
+                   MaxLineBytes = MaxLineBytes,
+                   MaxBatchBytes = MaxBatchBytes,
+                   MaxRecords = MaxRecords
+               };
     }
 
     #endregion // Methods

@@ -1,22 +1,32 @@
+using System.Security.Cryptography;
+using System.Text;
+
 using Microsoft.Extensions.Primitives;
 
 using Vandox.Core.Configuration;
 
 namespace Vandox.Backend.Ingest;
 
-#pragma warning disable RH2003, S2325, S4487
-
 /// <summary>
 /// Checks the bearer token of an ingest request against the configured token.
 /// </summary>
 internal sealed class IngestToken
 {
+    #region Constants
+
+    /// <summary>
+    /// The scheme of the header value, followed by the one space that separates it from the token.
+    /// </summary>
+    private const string Scheme = "Bearer ";
+
+    #endregion // Constants
+
     #region Fields
 
     /// <summary>
-    /// The configured token.
+    /// The digest of the configured token.
     /// </summary>
-    private readonly Secret _token;
+    private readonly byte[] _digest;
 
     #endregion // Fields
 
@@ -28,7 +38,7 @@ internal sealed class IngestToken
     /// <param name="token">The configured token</param>
     internal IngestToken(Secret token)
     {
-        _token = token;
+        _digest = Digest(token.Reveal());
     }
 
     #endregion // Constructors
@@ -42,7 +52,7 @@ internal sealed class IngestToken
     /// <returns>The digest</returns>
     internal static byte[] Digest(ReadOnlySpan<char> token)
     {
-        throw new NotImplementedException();
+        return SHA256.HashData(Encoding.UTF8.GetBytes(token.ToString()));
     }
 
     /// <summary>
@@ -52,7 +62,12 @@ internal sealed class IngestToken
     /// <returns><c>true</c> when the token matches</returns>
     internal bool Matches(StringValues authorization)
     {
-        throw new NotImplementedException();
+        if (authorization.Count == 1 && authorization[0] is { } value && value.StartsWith(Scheme, StringComparison.OrdinalIgnoreCase))
+        {
+            return CryptographicOperations.FixedTimeEquals(Digest(value.AsSpan(Scheme.Length)), _digest);
+        }
+
+        return false;
     }
 
     #endregion // Methods

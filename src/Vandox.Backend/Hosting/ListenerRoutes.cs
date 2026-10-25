@@ -1,5 +1,7 @@
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 
+using Vandox.Backend.Ingest;
+
 namespace Vandox.Backend.Hosting;
 
 /// <summary>
@@ -39,12 +41,15 @@ public static class ListenerRoutes
     }
 
     /// <summary>
-    /// Labels the connections of a listener as ingest connections.
+    /// Labels the connections of a listener as ingest connections, serves them over HTTP/1.1 only (one request at a time per connection) and
+    /// closes a connection beyond <see cref="IngestLimits.MaxConnections"/>.
     /// </summary>
     /// <param name="listener">The listener</param>
     public static void Ingest(ListenOptions listener)
     {
+        listener.Protocols = HttpProtocols.Http1;
         Label(listener, IngestLabel);
+        listener.Use(new ConnectionCap(IngestLimits.MaxConnections).Wrap);
     }
 
     /// <summary>

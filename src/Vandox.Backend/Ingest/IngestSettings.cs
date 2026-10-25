@@ -1,16 +1,24 @@
 using Microsoft.Extensions.Logging;
 
+using Vandox.Backend.Hosting;
 using Vandox.Core.Configuration;
 
 namespace Vandox.Backend.Ingest;
-
-#pragma warning disable RH2003, S2325
 
 /// <summary>
 /// The configuration the ingest endpoint needs: the token and the agent ID it is bound to. Without both, ingest is disabled.
 /// </summary>
 internal sealed class IngestSettings
 {
+    #region Constants
+
+    /// <summary>
+    /// The configuration key of the agent ID, named in the log line that reports ingest disabled.
+    /// </summary>
+    private const string AgentIdKey = "ingest.agent_id";
+
+    #endregion // Constants
+
     #region Constructors
 
     /// <summary>
@@ -57,8 +65,26 @@ internal sealed class IngestSettings
     /// <returns>The settings; <c>null</c> when the token or <c>ingest.agent_id</c> is not set</returns>
     internal static IngestSettings? Create(BackendConfig config, ILogger logger)
     {
-        // Skeleton stub: returns the zero value so the serve tests that exist today stay green; the implementation replaces it.
-        return null;
+        var missing = new List<string>();
+
+        if (string.IsNullOrEmpty(config.Secrets.AgentToken.Reveal()))
+        {
+            missing.Add(ConfigConstants.EnvAgentToken);
+        }
+
+        if (string.IsNullOrEmpty(config.Ingest.AgentId))
+        {
+            missing.Add(AgentIdKey);
+        }
+
+        if (missing.Count > 0)
+        {
+            logger.IngestDisabled(string.Join(", ", missing));
+
+            return null;
+        }
+
+        return new IngestSettings(config.Ingest.AgentId!, new IngestToken(config.Secrets.AgentToken), config.Ingest.GetMinFreeBytes());
     }
 
     #endregion // Methods

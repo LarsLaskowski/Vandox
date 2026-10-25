@@ -165,10 +165,7 @@ internal static class ServeCommand
             await using var app = Build(config, loggerFactory, hooks, store, verifier);
 
             await app.StartAsync(cancellationToken).ConfigureAwait(false);
-            Announce(app, config, hooks, logger);
-            await app.WaitForShutdownAsync(cancellationToken).ConfigureAwait(false);
-            logger.ShuttingDown();
-            await app.StopAsync(CancellationToken.None).ConfigureAwait(false);
+            await RunStartedAsync(app, config, hooks, logger, cancellationToken).ConfigureAwait(false);
 
             return 0;
         }
@@ -184,6 +181,31 @@ internal static class ServeCommand
             logger.ServingFailed(exception, exception.Message);
 
             return 1;
+        }
+    }
+
+    /// <summary>
+    /// Serves until the stop signal, stops the application and, on every way out including a failure, waits for the ingest writes in flight, so the
+    /// store is closed only after them.
+    /// </summary>
+    /// <param name="app">The started application</param>
+    /// <param name="config">The configuration</param>
+    /// <param name="hooks">Tells the test when the service serves</param>
+    /// <param name="logger">The logger</param>
+    /// <param name="cancellationToken">Stops the service</param>
+    /// <returns>A task that completes when the application stopped and the ingest writes ended</returns>
+    private static async Task RunStartedAsync(WebApplication app, BackendConfig config, ServeHooks hooks, ILogger logger, CancellationToken cancellationToken)
+    {
+        try
+        {
+            Announce(app, config, hooks, logger);
+            await app.WaitForShutdownAsync(cancellationToken).ConfigureAwait(false);
+            logger.ShuttingDown();
+            await app.StopAsync(CancellationToken.None).ConfigureAwait(false);
+        }
+        finally
+        {
+            await app.Services.GetRequiredService<IngestEndpoint>().DrainAsync().ConfigureAwait(false);
         }
     }
 
@@ -226,6 +248,8 @@ internal static class ServeCommand
 
         var app = builder.Build();
 
+        // The endpoint registers its stop callback when it is created, so it exists before the service starts.
+        app.Services.GetRequiredService<IngestEndpoint>();
         hooks.Built?.Invoke(app.Services);
 
         var checker = new PingChecker(store.PingAsync, _pingTimeout);

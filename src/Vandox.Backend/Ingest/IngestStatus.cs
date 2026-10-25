@@ -1,8 +1,8 @@
+using Microsoft.AspNetCore.Http;
+
 using Vandox.Core.Wire;
 
 namespace Vandox.Backend.Ingest;
-
-#pragma warning disable RH2003, S2325
 
 /// <summary>
 /// Maps the errors of the decoder to the answers of the ingest endpoint.
@@ -18,7 +18,13 @@ internal static class IngestStatus
     /// <returns>The status</returns>
     internal static int ForWireError(WireErrorKind kind)
     {
-        throw new NotImplementedException();
+        return kind switch
+               {
+                   WireErrorKind.Malformed => StatusCodes.Status400BadRequest,
+                   WireErrorKind.LimitExceeded => StatusCodes.Status413PayloadTooLarge,
+                   WireErrorKind.UnsupportedVersion => StatusCodes.Status415UnsupportedMediaType,
+                   _ => StatusCodes.Status422UnprocessableEntity
+               };
     }
 
     /// <summary>
@@ -28,7 +34,16 @@ internal static class IngestStatus
     /// <returns>The reason</returns>
     internal static string Reason(WireErrorKind kind)
     {
-        throw new NotImplementedException();
+        return kind switch
+               {
+                   WireErrorKind.UnsupportedVersion => "format version",
+                   WireErrorKind.Malformed => "malformed",
+                   WireErrorKind.UnknownKind => "unknown kind",
+                   WireErrorKind.Sequence => "sequence",
+                   WireErrorKind.EmptyBatch => "empty batch",
+                   WireErrorKind.LimitExceeded => "limit exceeded",
+                   _ => "invalid"
+               };
     }
 
     /// <summary>
@@ -38,7 +53,7 @@ internal static class IngestStatus
     /// <returns><c>true</c> for a refusal</returns>
     internal static bool IsRefusal(int status)
     {
-        throw new NotImplementedException();
+        return status is StatusCodes.Status400BadRequest or StatusCodes.Status413PayloadTooLarge or StatusCodes.Status422UnprocessableEntity;
     }
 
     #endregion // Methods

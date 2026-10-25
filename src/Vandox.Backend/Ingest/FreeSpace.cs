@@ -1,7 +1,5 @@
 namespace Vandox.Backend.Ingest;
 
-#pragma warning disable RH2003, S2325, S4487
-
 /// <summary>
 /// Reads the free space of the volume that holds the storage directory.
 /// </summary>
@@ -45,7 +43,14 @@ internal sealed class FreeSpace
     /// <returns>The free bytes; <c>null</c> on any failure</returns>
     internal static long? Probe(string directory)
     {
-        throw new NotImplementedException();
+        try
+        {
+            return new DriveInfo(directory).AvailableFreeSpace;
+        }
+        catch (Exception exception) when (exception is ArgumentException or IOException or UnauthorizedAccessException or NotSupportedException)
+        {
+            return null;
+        }
     }
 
     /// <summary>
@@ -54,7 +59,7 @@ internal sealed class FreeSpace
     /// <returns>The free bytes; <c>null</c> when they cannot be read</returns>
     internal long? Available()
     {
-        throw new NotImplementedException();
+        return _probe(_directory);
     }
 
     #endregion // Methods

@@ -1,7 +1,5 @@
 namespace Vandox.Backend.Ingest;
 
-#pragma warning disable RH2003, S2325, S4487
-
 /// <summary>
 /// Lets one log line of a kind through per minute and counts the refusals suppressed in between.
 /// </summary>
@@ -13,6 +11,21 @@ internal sealed class IngestRefusalLog
     /// The clock.
     /// </summary>
     private readonly TimeProvider _clock;
+
+    /// <summary>
+    /// Guards the state below.
+    /// </summary>
+    private readonly Lock _lock = new();
+
+    /// <summary>
+    /// The refusals not logged since the last line.
+    /// </summary>
+    private int _suppressed;
+
+    /// <summary>
+    /// The time of the last line, <c>null</c> before the first one.
+    /// </summary>
+    private DateTimeOffset? _last;
 
     #endregion // Fields
 
@@ -38,7 +51,24 @@ internal sealed class IngestRefusalLog
     /// <returns><c>true</c> when the line may be written</returns>
     internal bool TryTake(out int suppressed)
     {
-        throw new NotImplementedException();
+        var now = _clock.GetUtcNow();
+
+        lock (_lock)
+        {
+            if (_last is null || now - _last.Value >= TimeSpan.FromMinutes(1))
+            {
+                suppressed = _suppressed;
+                _suppressed = 0;
+                _last = now;
+
+                return true;
+            }
+
+            _suppressed++;
+            suppressed = 0;
+
+            return false;
+        }
     }
 
     #endregion // Methods

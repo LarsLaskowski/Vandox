@@ -13,22 +13,38 @@ A change that touches one of these lists it under *Security areas touched* in it
 plan (`.squad/routing.md`, *Tiers*, which also says when a change is tier `security`). Name the concrete types,
 files or endpoints.
 
-1. **Ingest authentication** (backend ingest API, not implemented yet): the agent token, request limits and
+1. **Ingest authentication** (implemented, `src/Vandox.Backend/Ingest`: `IngestEndpoint`, `IngestSettings`, `IngestToken`, `IngestLimits`,
+   `IngestStatus`, `IngestRefusalLog`, `IngestWriteGate`, `ConnectionCap`, `FreeSpace`, `IngestFieldPath`; the request branch in
+   `Hosting/PortRoutingMiddleware`, the listener in `Hosting/ListenerRoutes`, the drain in `Hosting/ServeCommand`): the agent token, request limits and
    deduplication. *Goal:* only an agent holding a valid token can store data; the token is compared in
    constant time; request size, batch size and rate are bounded so a valid agent cannot exhaust the
    backend's memory or disk; a resent record (same agent ID
-   and sequence number), and so a resent batch, is stored once and never overwrites stored data. The
-   deduplication is implemented by `BatchWriter` in `src/Vandox.Storage` (partial unique index `records_agent_seq`,
+   and sequence number), and so a resent batch, is stored once and never overwrites stored data. The token check runs before the body is read:
+   `IngestToken` compares the SHA-256 digests of the presented and the configured token with `CryptographicOperations.FixedTimeEquals` (one value,
+   scheme `Bearer`, never the query string), and the batch header's `agent_id` must equal `ingest.agent_id` ordinally (`403` otherwise): the one
+   token is bound to one agent, and ingest answers `503` while the token or `ingest.agent_id` is unset (`IngestSettings.Create`). The bounds: the compressed body
+   at most 2 MiB (`Content-Length` before the read, a 2 MiB buffer owned by each of two slots, never pooled), the decompressed batch at most 2 MiB, a
+   line 1 MiB and 20,000 records (`BatchDecoder` through `IngestLimits.Wire`), two slots held from the body read through the commit, 16 connections on
+   the listener (`ConnectionCap`, HTTP/1.1 only), 30 seconds for waiting, reading and decoding; there is no request-rate cap (record 0126). The disk
+   bound is the free-space floor `ingest.min_free` (default `1GiB`, `0` off): `FreeSpace` is read before every write and a batch below the floor, or
+   with an unreadable volume, is answered `503` and not written. The drain: `IngestWriteGate` closes at the stop signal (the endpoint's
+   `ApplicationStopping` callback), a write that started runs under a token that only the shutdown deadline (10 seconds after the stop signal)
+   cancels, and `ServeCommand` waits for the writes in flight (`IngestEndpoint.DrainAsync`) in a `finally` before it closes the store. Logs carry the peer, fixed reasons,
+   line numbers, field paths with map keys reduced to `[]` (`IngestFieldPath`) and exception type names, never the token, the header, the body or
+   record content. The deduplication is implemented by `BatchWriter` in `src/Vandox.Storage` (partial unique index `records_agent_seq`,
    `INSERT ... ON CONFLICT DO NOTHING`, no code path updates a record row). `BatchWriter` also writes the derived listener rows (`ListenerMarkWriter`: `connection_marks` and `listener_comparisons`)
    only for a usable agent snapshot whose record insert returned an ID, in the same transaction, so a resent batch writes none; the only rows it ever updates are `listener_comparisons` rows,
-   never a `records` row. Records 0032, 0044, 0045, 0063, 0077, 0116.
+   never a `records` row. Records 0032, 0044, 0045, 0063, 0077, 0116, 0126, 0128.
 2. **Tailscale ACL and port binding** (deployment files under `deploy/backend/` and the documented ACL):
    *Goal:* a compromised monitored server can reach only the ingest port on the backend host's tailnet
    address and nothing else in the tailnet or home LAN; the ingest port is bound only to the tailnet
    address; the web UI is not offered on the tailnet to the monitored server.
    `deploy/backend/docker-compose.yml` publishes the web port on `127.0.0.1` by default (defense in depth, not
-   the boundary) and publishes no ingest port yet (issue #40); the Dockerfile has no `EXPOSE`. Records 0010,
-   0016, 0017, 0059, 0060.
+   the boundary) and the ingest port 8081 on `${INGEST_BIND_ADDRESS}`, a required variable without a default (the host's tailnet address, `127.0.0.1` for an
+   import-only setup), so the port is never published on an address the operator did not choose; the Dockerfile has no `EXPOSE`. The host needs Tailscale in TUN
+   mode, because in userspace mode the tailnet address is no host interface (record 0127). In the service the ingest listener (`ListenerRoutes.Ingest`) serves
+   only `POST /v1/batches` (`PortRoutingMiddleware`, `404` for everything else, the web pipeline never runs on it) over HTTP/1.1 with at most 16 connections. Records 0010,
+   0016, 0017, 0059, 0060, 0081, 0127.
 3. **Web UI login** (implemented): password hashing, sessions, CSRF, rate limiting, reverse-proxy
    trust. *Goal:* the password is stored only as a salted, deliberately slow hash; session IDs are random,
    expire, are invalidated on logout and travel only in `HttpOnly`, `SameSite` cookies that are `Secure`
