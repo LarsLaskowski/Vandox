@@ -7,7 +7,7 @@ files (G4) and the documentation (G5).
 
 | # | Group | Task | Files | Criteria | Depends on | Owner | Done |
 | - | ----- | ---- | ----- | -------- | ---------- | ----- | ---- |
-| 1 | G1 | Skeleton: `GzipMemberReader` (sealed `Stream` with `ReadAsync` and `Read` overrides) and `Crc32.Update`; `BatchDecoder` still on `GZipStream` | `src/Vandox.Core/Wire/GzipMemberReader.cs`, `Crc32.cs` | AC19 | — | Dev | [ ] |
+| 1 | G1 | Skeleton: `GzipMemberReader` (sealed `Stream` with `ReadAsync` and `Read` overrides) and `Crc32.Update`; `BatchDecoder` still on `GZipStream` | `src/Vandox.Core/Wire/GzipMemberReader.cs`, `Crc32.cs` | AC19 | — | Dev | [x] |
 | 2 | G1 | Tests first: cases `G1`-`G13` with the `gzip` field in the fixture, both loaders and required-ID lists extended; `GzipMemberReaderReadsConcatenatedMembers`, `Crc32MatchesReferenceVectors`; the gzip samples (two from Go through `golden_test.go`, one from `gzip -9 -c`) and `WireContractGoGzipDecodesToGoldenRecords`; the trailing-bytes rows fail on C# | `testdata/wire/decoder-cases.json`, `testdata/wire/*.jsonl.gz`, `tests/Vandox.Core.Tests/WireContractTests.cs`, `GzipMemberReaderTests.cs`, `Crc32Tests.cs`, `internal/wire/decode_test.go`, `internal/wire/golden_test.go` | AC19 | 1 | Tester | [ ] |
 | 3 | G1 | Implement the reader by the rules of plan fact 9, `BatchDecoder.OpenAsync` reads through it; every existing decoder test stays green | `src/Vandox.Core/Wire/GzipMemberReader.cs`, `Crc32.cs`, `BatchDecoder.cs` | AC19 | 2 | Dev | [ ] |
 | 4 | G2 | Skeleton: sealed `IngestConfig` with `Listen`, `string? AgentId` (`ConfigKey` `agent_id`), `MinFree` and `GetMinFreeBytes`; `BackendConfig.Ingest` of that type | `src/Vandox.Core/Configuration/IngestConfig.cs`, `BackendConfig.cs` | AC6, AC20 | — | Dev | [ ] |
