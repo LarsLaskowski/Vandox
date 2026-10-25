@@ -37,3 +37,4 @@ are quoted in full.
 | 2026-10-25 12:34 | 8 Review round 1 (security diff) | squad-security | APPROVED at 5a3adc3; no blocking; 3 non-blocking: idle connections can fill the 16-connection cap without token (availability); plan fact 19 resolution note; non-token warnings not rate-limited (opus/medium · 105,232 tokens · 27 tool uses · 299 s) |
 | 2026-10-25 12:40 | 8 Review round 1 | squad-reviewer | BLOCKING 1 (backend-host.md: refusal header also sent in step 8), NON-BLOCKING 2 (project.md says 0 off, needs 0MiB; real-clock tests in Storage/Serve tests) (opus/medium · 236,114 tokens · 57 tool uses · 670 s) |
 | 2026-10-25 12:40 | 8 Verbatim doc fix | squad-orchestrator | Applied the reviewer's verbatim fix in docs/areas/backend-host.md line 129 (steps 5, 7, 8, 9 and 12) |
+| 2026-10-25 12:41 | 8 Review round 2 (delta) | squad-reviewer | APPROVE; blocking finding resolved (opus/medium · 2,150 tokens · 59 tool uses · 709 s · continued from 8 Review round 1) |
