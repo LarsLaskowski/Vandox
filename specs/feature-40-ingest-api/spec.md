@@ -51,9 +51,11 @@ below is anything of the batch stored.
 - E1: A request without an `Authorization` header, with another scheme (`Basic …`), with a bearer token that is not the token (also
   one that only shares a prefix with it, is longer or shorter, or has two spaces after the scheme), with two `Authorization` headers, or
   with the token in the query string only: `401` with `WWW-Authenticate: Bearer`, no refusal header. The body is never read, decompressed or parsed.
-  Spaces and tabs around a header value are not part of it (HTTP removes them before the endpoint sees the value), and a line break or
-  other control character below U+0020 in a header is refused by the server itself with `400` without the refusal header, before the
-  endpoint runs; DEL (U+007F) and non-ASCII bytes do reach the endpoint and are answered `401` like any other wrong token. The service logs the warning `ingest token refused` with `peer` (the peer address as the service sees it) and `reason`
+  Spaces and tabs around a header value are not part of it (HTTP removes them before the endpoint sees the value, so a token with a
+  trailing space or tab is accepted). Control characters (such as U+0001), DEL (U+007F) and valid UTF-8 characters reach the endpoint
+  and are answered `401` like any other wrong token. The server itself answers `400` without the refusal header, before the endpoint
+  runs, to a header byte that is not valid UTF-8 (such as `E9` alone) and to obsolete line folding; a bare line feed ends the header
+  line, so the rest is read as a header of its own. The agent sends only printable ASCII, so none of these server answers concerns it. The service logs the warning `ingest token refused` with `peer` (the peer address as the service sees it) and `reason`
   (`missing` or `wrong`), never the presented value or the header.
 - E2: Many refused requests in a row (a scan, a misconfigured agent that retries every second): at most one `ingest token refused`
   line per minute; the next line after a quiet minute carries `suppressed`, the number of refusals not logged since the last line.
@@ -325,8 +327,8 @@ below is anything of the batch stored.
 - m4 (minor, content type comparison): accepted. E9 fixes the rule (exactly `application/gzip` ignoring ASCII case, no parameter, no
   surrounding space, one header) with accepted and refused forms, and AC9 names the accepted form and the refusal of the others.
 - Planning (Lead, not an objection): E1 no longer lists a trailing space or a line break as a refused token form: HTTP removes spaces
-  and tabs around a header value before the endpoint sees it, and Kestrel refuses a control character in a header with `400`
-  before the endpoint runs; E1 says so. E7 and AC19 add the gzip header rules (name or comment over 511 bytes, header checksum,
+  and tabs around a header value before the endpoint sees it; E1 says so, and what the server itself refuses was measured in step 5
+  (see the next entry). E7 and AC19 add the gzip header rules (name or comment over 511 bytes, header checksum,
   extra field), because the C# decoder now reads the gzip framing itself and has to choose them; they are the Go decoder's rules
   and the Wire format area's *Accepted forms*.
 - Plan round (Security plan review and the plan challenge, answered in `plan.md`): the spec now holds the disk floor `ingest.min_free`
@@ -334,3 +336,6 @@ below is anything of the batch stored.
   started one is bounded by the deadline (E16, AC14), the 5-second lock wait (E10, E11), the real-store memory measurement (AC12), map
   keys reduced in logged field paths and header-line errors (E7, AC8, AC15), DEL and non-ASCII header bytes answered `401` (E1), and
   LAN reachability of the ingest port in the documentation (AC18).
+- Step 5 (Tester's measurement against real Kestrel, Lead decision): E1 corrected. Kestrel does not refuse control characters: U+0001,
+  DEL and UTF-8 characters reach the endpoint (`401`); an invalid UTF-8 byte and obsolete line folding get Kestrel's own `400` without
+  the refusal header; a bare line feed splits the header. The earlier sentence that Kestrel refuses control characters was wrong.
