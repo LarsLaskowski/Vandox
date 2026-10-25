@@ -13,7 +13,7 @@ backend, written in .NET 10 with a Blazor web UI. Both implement the same data m
 
 | Binary | Runs on | Purpose |
 |---|---|---|
-| `vandox-agent` (Go) | the monitored Linux server | collects data and ships it to the backend (planned for v0.2.0; v0.1.0 ships the backend only); the runtime frame (configuration, collector scheduler, self-metrics, systemd notification) and the system, process and connection collectors exist; the other collectors and the sender do not yet |
+| `vandox-agent` (Go) | the monitored Linux server | collects data and ships it to the backend (planned for v0.2.0; v0.1.0 ships the backend only); the runtime frame (configuration, collector scheduler, self-metrics, systemd notification), the system, process and connection collectors and the sender (live and throttled backfill) exist; the other collectors and the backend's ingest endpoint do not yet |
 | `vandoxd` (.NET) | Docker container on any Docker host in the home network (NAS, mini PC, server) | backend with web UI |
 
 Both support `--version`, which prints version, commit and build date. `vandoxd` without arguments runs the
@@ -28,7 +28,7 @@ statistics* below, and `vandoxd report` writes the forensics report as Markdown,
 
 ```
 cmd/vandox-agent/   entry point of the agent (Go)
-internal/           the agent's Go packages: agent (start-up, logging, watchdog), scheduler, selfstats, sdnotify, config, model, wire (batch encoder), cli, version
+internal/           the agent's Go packages: agent (start-up, logging, watchdog), scheduler, selfstats, sdnotify, config, model, wire (batch encoder), cli, sender (HTTP transport, live and backfill sending), version
 src/Vandox.Backend/ the backend vandoxd: host, command line, Blazor web UI
 src/Vandox.Core/    record model, wire decoder, configuration, safe file access, log parser framework, log signatures
 src/Vandox.Storage/ SQLite store: schema, migrations, batched writes, queries, log search and exploration
@@ -64,6 +64,7 @@ the value.
 | --- | ------- | ----------- |
 | `agent_id` | required | Name of the server, 1 to 64 characters of `[A-Za-z0-9._-]`, starting with a letter or digit. |
 | `backend.url` | required | Base URL of the backend ingest endpoint: `http` or `https`, a host and an optional port, no user info, path or query. |
+| `backend.backfill_bandwidth` | `256KiB` | Bandwidth the agent may use to send spooled data after the backend was unreachable: a whole number followed by `KiB` or `MiB`, from `16KiB` to `1024MiB`, such as `256KiB` or `4MiB`. |
 | `spool.directory` | `/var/lib/vandox/spool` | Directory of the local spool, an absolute and clean path. It holds the spooled records in segment files `segment-<number>.spool` and the spool's bookkeeping file `spool-meta.json`, besides the agent's state file `agent-state.json` (the boot, the position in the journal, the open backup run and the positions of the log shipping collector: a position per journal sequence number ID and per configured file, up to 64 KiB). The agent never creates the directory, the installation does; it must exist, be a real directory (not a link) and be writable for the agent. |
 | `spool.max_size` | `2GiB` | Size cap of all spool files: a whole number followed by `MiB` or `GiB`, from `64MiB` to `64GiB`. When the cap or `spool.min_free` leaves no room for new records, the agent drops the oldest spool data first and records the gap. |
 | `spool.min_free` | `1GiB` | Free space that stays available on the file system of the spool: a whole number followed by `MiB` or `GiB`, from `0MiB` to `1024GiB`. `0MiB` (or `0GiB`) switches the check off. |

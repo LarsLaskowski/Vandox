@@ -31,7 +31,7 @@ added by the backend and cannot be supplied by the agent.
 | `agent_id` | string | `^[A-Za-z0-9][A-Za-z0-9._-]*$`, 1 to 64 bytes |
 | `boot_id` | string | lower-case UUID, `^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$` |
 | `clock_offset_ns` | integer, optional | agent clock minus the reference time of its time synchronization, in nanoseconds; positive means the agent is ahead; omitted means unknown |
-| `mode` | string | `live` or `backfill`; a hint only, the backend classifies records itself (0022) |
+| `mode` | string | `live` or `backfill`; a hint only, the backend classifies records itself (0022). The agent's sender sets `live` on the stream that sends current records and `backfill` on the throttled stream that sends the spool's older ones ([Agent](agent.md), *Sending*) |
 
 ### Capture context (0046)
 
@@ -148,7 +148,7 @@ produced it. Byte values are exact integers in a double (up to 2^53 exactly), co
 | `agent_goroutines` | — | — | number of goroutines of the agent |
 | `agent_spool_bytes` | `bytes` | — | size of the agent's spool files on disk (its data files and its meta file) |
 | `agent_spool_age_seconds` | `seconds` | — | the sample's start minus the capture time of the oldest record the spool holds unacknowledged; 0 when it holds none or that time lies after the start |
-| `agent_send_lag_seconds` | `seconds` | — | how far the agent's sending lags behind capture |
+| `agent_send_lag_seconds` | `seconds` | — | the sample's time minus the capture time of the newest record the sender has had acknowledged since the agent started (before the first acknowledgement: minus the start), never negative; it stays high while the backend does not accept batches |
 | `mariadb_memory_max_bytes` | `bytes` | — | MariaDB's theoretical maximum memory: its global buffers plus `max_connections` times its per-connection buffers |
 | `mariadb_memory_max_ram_percent` | `percent` | — | that maximum as a share of `MemTotal` |
 | `mariadb_questions_per_second` | `per_second` | — | increase of the status value `Questions` / seconds between two samples |

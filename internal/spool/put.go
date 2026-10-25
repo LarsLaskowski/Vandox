@@ -72,7 +72,7 @@ func (s *Spool) Put(ctx context.Context, records []model.Record) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closing {
-		return errClosed
+		return ErrClosed
 	}
 	if err := s.place(ctx, h); err != nil {
 		return s.refuse(ctx, h, len(records), err)

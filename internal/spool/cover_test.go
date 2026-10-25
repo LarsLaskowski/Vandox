@@ -167,11 +167,11 @@ func TestOldestCapture_ClosedAndEmpty(t *testing.T) {
 	expect(t, err == nil && !ok, "OldestCapture() of an empty spool = %v, %v, want none", ok, err)
 	r.closeSpool(sp)
 	_, _, err = sp.OldestCapture(context.Background())
-	expect(t, errors.Is(err, errClosed), "OldestCapture() after Close error = %v, want %v", err, errClosed)
+	expect(t, errors.Is(err, ErrClosed), "OldestCapture() after Close error = %v, want %v", err, ErrClosed)
 	_, err = sp.Read(context.Background(), 0, 1, mebi)
-	expect(t, errors.Is(err, errClosed), "Read() after Close error = %v, want %v", err, errClosed)
+	expect(t, errors.Is(err, ErrClosed), "Read() after Close error = %v, want %v", err, ErrClosed)
 	err = sp.Put(context.Background(), batchOf(epoch, "late", 1, 50))
-	expect(t, errors.Is(err, errClosed), "Put() after Close error = %v, want %v", err, errClosed)
+	expect(t, errors.Is(err, ErrClosed), "Put() after Close error = %v, want %v", err, ErrClosed)
 }
 
 func TestRead_DamageInFirstFrameUsesTheFileBefore(t *testing.T) {

@@ -34,8 +34,10 @@ const (
 // ErrTooManyRanges reports that more than MaxAckRanges acknowledged ranges would be held.
 var ErrTooManyRanges = errors.New("spool: more than 64 acknowledged ranges")
 
+// ErrClosed reports that the spool is closed.
+var ErrClosed = errors.New("spool: closed")
+
 var (
-	errClosed    = errors.New("spool: closed")
 	errExhausted = errors.New("spool: sequence numbers exhausted")
 	errNoRoom    = errors.New("spool: no room for the records")
 )

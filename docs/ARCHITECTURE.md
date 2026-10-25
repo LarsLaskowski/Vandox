@@ -11,8 +11,8 @@ This document describes the target architecture; as of now the binaries' `--vers
 exist as the storage layer; the service reads it through the logs and incidents views and the report page with its download and writes only the notes of incidents, `vandoxd import` writes through it), listens on the
 web and ingest ports, protects the web UI with a login (one password, server-side sessions, limits on failed sign-ins and the trust in a reverse proxy; `Vandox.Backend` `Security`), answers `/healthz` and shuts down gracefully, and ships as a container with a health
 check. Of the agent, the runtime frame exists: `vandox-agent` loads its configuration, logs to the journal, runs its
-collectors under the scheduler (its self-metrics, the system metrics, the process and the connection snapshots, the state of the configured systemd services, the state of the local MariaDB server, the kernel's OOM kills and the boots, the lines of the journal and of configured `syslog` files, and the backup runs), keeps every record in its on-disk spool, keeps its small state file and notifies systemd; nothing sends the spool yet, so it fills up to its size bound and then drops its oldest records with recorded gaps.
-Everything else described here — the agent's other collectors and sender, the ingest API, retention, alerting, Telegram, the nightly
+collectors under the scheduler (its self-metrics, the system metrics, the process and the connection snapshots, the state of the configured systemd services, the state of the local MariaDB server, the kernel's OOM kills and the boots, the lines of the journal and of configured `syslog` files, and the backup runs), keeps every record in its on-disk spool, keeps its small state file and notifies systemd, and its sender sends the spool to the ingest endpoint, current data first and the backlog throttled beside it; until the ingest API exists (#40) no backend accepts the batches, so the sender waits and tries again, and the spool fills up to its size bound and then drops its oldest records with recorded gaps.
+Everything else described here — the agent's other collectors, the ingest API, retention, alerting, Telegram, the nightly
 report and remote actions — is planned and not implemented yet. The decisions behind it are recorded in
 [`docs/decisions/`](decisions/README.md); each section links the records it rests on. Vandox is an own
 project rather than an off-the-shelf stack ([0004](decisions/0004-own-project-instead-of-off-the-shelf-stack.md)).
@@ -71,6 +71,12 @@ way, and agents of the hosting provider are never disabled or changed
   bound; the state file and the spool's files are the agent's only file writes, and every state save first makes the spool durable, so
   no saved position covers a record a crash can still lose
   ([0123](decisions/0123-agent-spool-segment-files-clock-bound-sequence-numbers-range-acknowledgements.md));
+  the sender (`internal/sender`) reads the spool in a live and a throttled backfill stream that share one backoff, posts one gzip
+  batch per request to the ingest endpoint under `backend.url` with the agent token as a bearer token, through a client that uses no
+  proxy and follows no redirect, acknowledges records in the spool only after a `2xx` answer, and gives a record the backend refuses
+  on its own up only with a recorded gap
+  ([0124](decisions/0124-ingest-request-one-batch-per-post-acknowledged-by-status-alone.md),
+  [0125](decisions/0125-sender-two-streams-shared-backoff-refused-records-given-up-with-a-gap.md));
   the agent records its own resource use as metrics
   (`internal/selfstats`), and tells systemd that it is ready, alive (a watchdog fed only while every collector runner is on
   time) and stopping (`internal/sdnotify`, `internal/agent`)
@@ -119,7 +125,7 @@ way, and agents of the hosting provider are never disabled or changed
   [0079](decisions/0079-log-parsing-and-import-in-the-backend-without-following-links.md)).
 - `internal/` — the agent's Go packages: data model and the versioned wire encoder (see
   [wire format](areas/wire-format.md)), version information, agent configuration loading (see
-  *Configuration*), command-line handling (`internal/cli`), start-up, logging and the watchdog loop (`internal/agent`), the collector scheduler (`internal/scheduler`), the self-metrics (`internal/selfstats`), the system metrics (`internal/sysstats`), the process collector (`internal/procstats`), the connection collector (`internal/connstats`) with the start-up probe of the socket mount (`internal/sockmount`), the systemd service collector (`internal/svcstats`) with its D-Bus client (`internal/sdbus`), the MariaDB collector with its protocol client (`internal/mariadb`), the journal file reader (`internal/journal`) with its test-only writer of journal files (`internal/journal/journaltest`), the kernel event collector (`internal/kernevents`), the log shipping collector (`internal/logship`) with its syslog line parser (`internal/syslogline`) and its bounded zstd decoder (`internal/zstdfield`), the agent's state file and its `state` job (`internal/agentstate`), the on-disk spool (`internal/spool`), the backup run check (`internal/backups`) and the systemd notification (`internal/sdnotify`). The model and the wire format exist twice, in Go
+  *Configuration*), command-line handling (`internal/cli`), start-up, logging and the watchdog loop (`internal/agent`), the collector scheduler (`internal/scheduler`), the self-metrics (`internal/selfstats`), the system metrics (`internal/sysstats`), the process collector (`internal/procstats`), the connection collector (`internal/connstats`) with the start-up probe of the socket mount (`internal/sockmount`), the systemd service collector (`internal/svcstats`) with its D-Bus client (`internal/sdbus`), the MariaDB collector with its protocol client (`internal/mariadb`), the journal file reader (`internal/journal`) with its test-only writer of journal files (`internal/journal/journaltest`), the kernel event collector (`internal/kernevents`), the log shipping collector (`internal/logship`) with its syslog line parser (`internal/syslogline`) and its bounded zstd decoder (`internal/zstdfield`), the agent's state file and its `state` job (`internal/agentstate`), the on-disk spool (`internal/spool`), the sender with its HTTP transport (`internal/sender`), the backup run check (`internal/backups`) and the systemd notification (`internal/sdnotify`). The model and the wire format exist twice, in Go
   (producer) and in C# (consumer); a golden batch produced by the Go encoder and decoded by the C# decoder keeps
   them in step ([0075](decisions/0075-wire-contract-pinned-by-golden-fixtures.md)).
 
@@ -166,7 +172,9 @@ Records: [0004](decisions/0004-own-project-instead-of-off-the-shelf-stack.md),
 [0119](decisions/0119-kernel-messages-from-the-binary-journal-files-read-in-pure-go-without-decompression.md),
 [0120](decisions/0120-oom-kill-events-triggered-snapshots-boots-from-saved-state-and-backup-runs.md),
 [0121](decisions/0121-log-shipping-journal-and-syslog-files-positions-per-seqnum-id-zstd-commit-when-kept.md),
-[0123](decisions/0123-agent-spool-segment-files-clock-bound-sequence-numbers-range-acknowledgements.md).
+[0123](decisions/0123-agent-spool-segment-files-clock-bound-sequence-numbers-range-acknowledgements.md),
+[0124](decisions/0124-ingest-request-one-batch-per-post-acknowledged-by-status-alone.md),
+[0125](decisions/0125-sender-two-streams-shared-backoff-refused-records-given-up-with-a-gap.md).
 
 ## Data flow
 
@@ -293,7 +301,11 @@ The rules for live data, alerts and the nightly report are in [Detection, alerts
 
 The backend host runs 24/7 but is sometimes switched off at night (typically 22:00–09:00) a few times a year. While
 the backend is unreachable the agent keeps collecting and spools at least 7 days on disk. When the backend
-is reachable again it sends current data first, then backfills the spool chronologically and throttled.
+is reachable again it sends current data first, then backfills the spool chronologically and throttled: a live and a backfill
+stream share one backoff, so current data never waits behind the backlog, and only the backfill is limited to
+`backend.backfill_bandwidth` ([Agent](areas/agent.md), *Sending*). The spool counts a record as delivered only after a `2xx` answer,
+which the backend sends after its commit ([Backend host](areas/backend-host.md), *Ingest endpoint*), or once a record the backend
+refused on its own was replaced by a recorded gap.
 Every agent record carries a sequence number from a persistent per-agent counter, and every batch the
 agent's ID; a batch is identified by the agent ID and the sequence numbers of its records, so a resend is
 idempotent (the backend stores each agent ID and sequence number once) and the backend can detect gaps. `vandoxd` classifies every record as live or backfilled from its capture time, its receive time and
@@ -308,7 +320,9 @@ Records: [0022](decisions/0022-backfill-detection-and-live-only-alerts.md),
 [0044](decisions/0044-batch-validated-as-a-whole-agent-records-only.md),
 [0045](decisions/0045-batch-identified-by-agent-id-and-record-sequence-numbers.md),
 [0046](decisions/0046-batch-header-describes-the-capture-context.md),
-[0123](decisions/0123-agent-spool-segment-files-clock-bound-sequence-numbers-range-acknowledgements.md).
+[0123](decisions/0123-agent-spool-segment-files-clock-bound-sequence-numbers-range-acknowledgements.md),
+[0124](decisions/0124-ingest-request-one-batch-per-post-acknowledged-by-status-alone.md),
+[0125](decisions/0125-sender-two-streams-shared-backoff-refused-records-given-up-with-a-gap.md).
 
 ## Storage and retention
 

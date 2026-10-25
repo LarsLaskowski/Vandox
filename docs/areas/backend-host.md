@@ -4,7 +4,8 @@
 
 How the backend `vandoxd` runs as a service: its command line and exit codes, the two listeners and what each may serve, the health
 probe, logging, shutdown, the container image and compose file, and how the web UI and the ingest endpoint are exposed. The ingest
-endpoint itself (authentication, decoding, storage calls) is **not implemented yet**; this document fixes the host it will run in.
+endpoint itself (authentication, decoding, storage calls) is **not implemented yet** (#40); this document fixes the host it will run in
+and the request and answers the agent already relies on (*Ingest endpoint*).
 The options of the configuration file are in [Configuration and secrets](configuration-and-secrets.md), the import sub-command in
 [Log import](log-import.md).
 
@@ -70,6 +71,40 @@ The options of the configuration file are in [Configuration and secrets](configu
   to 120 seconds.
 - The web UI is a Blazor Web App in the *Interactive Server* render mode: every open page holds one live connection to the server.
   HTML output is escaped by default. The number of concurrent pages is bounded only by the single-user home-network use.
+
+## Ingest endpoint
+
+**Planned (#40).** The agent's sender (#39) exists and sends by these rules
+([0124](../decisions/0124-ingest-request-one-batch-per-post-acknowledged-by-status-alone.md)); they are the contract the endpoint
+implements. How the agent reacts to each answer is in the [Agent](agent.md) area (*Sending*).
+
+- **Request.** `POST /v1/batches` on the ingest listener (the path is exact: the agent's `backend.url` carries no path), one request
+  per batch. Headers: `Authorization: Bearer <agent token>` (the secret `VANDOX_AGENT_TOKEN`, [Configuration and
+  secrets](configuration-and-secrets.md)), `Content-Type: application/gzip`, `User-Agent: vandox-agent/<version>` and
+  `Content-Length`; no `Content-Encoding`, so the server's request decompression never unpacks the body before the endpoint's own
+  checks. The body is one gzip stream of one batch of the [wire format](wire-format.md), format version 1.1, with the agent ID, the
+  boot ID and the clock offset of its records' capture context and the header `mode` (`live` or `backfill`, a hint only). A batch holds
+  at most 20,000 records and 1 MiB (1,048,576 bytes) of record lines before compression, counted without their line feeds, so the
+  endpoint can bound a request's body at a little over 1 MiB of compressed bytes.
+- **Order of the checks.** The endpoint checks the token **before it reads or decodes the body**: a request without the right token is
+  answered `401` (or `403`) and its body is never decompressed or parsed. Only then does it read and decode the batch, store it and
+  answer.
+- **Acknowledgement.** A `2xx` answer acknowledges every record of the batch; the endpoint sends it only after the batch is committed
+  ([Storage](storage.md), *Writing*: one batch, one transaction). The agent then acknowledges the records in its spool, which may then
+  delete them, so a `2xx` before the commit would lose data. The agent reads at most 4,096 bytes of an answer's body, discards them and never
+  parses them, and reads at most 16 KiB of an answer's header; it looks at nothing but the status and the exact value of
+  `Vandox-Refused`.
+- **Refused batch.** `400`, `413` or `422` **with the header `Vandox-Refused: batch`** (exactly this value, compared case-sensitively)
+  means the batch itself is invalid and sending it again cannot succeed. The agent then splits the batch and gives up each record refused alone, replacing it
+  with a recorded `gap`. The endpoint sends the header only on an authenticated request and only for such a batch. The same
+  statuses without the header (a TLS listener reached with `http`, a proxy's size limit) are not a refusal.
+- **Every other answer** means "not accepting": the agent keeps the batch and sends it again after a wait (1 to 60 seconds). The
+  endpoint answers with a status outside `400`, `413` and `422`, and never with the refusal header, for everything that is not the
+  batch's fault: a missing or wrong token (`401` or `403`), a format version it does not support, a full disk, a busy or failing
+  store. A redirect is not followed. So a version mismatch or a temporary fault never makes the agent give up records.
+- **Repeats and timing.** A batch whose answer was lost is sent again, and the endpoint stores each agent ID and sequence number once
+  ([Wire format](wire-format.md), *Batch identity*). The agent ends a request after 30 seconds, keeps at most two requests in flight
+  (one `live`, one `backfill`) and sends current data every 4 seconds.
 
 ## Health
 
@@ -161,13 +196,16 @@ deadline and the health timeout are constants, not options.
 - [0060](../decisions/0060-compose-file-port-bindings-volumes-and-memory-limit.md) — why these port bindings, volumes and limits.
 - [0072](../decisions/0072-vandoxd-import-sub-command-output-and-exit-codes.md) — why no arguments run the service and a JSON log handler.
 - [0081](../decisions/0081-backend-host-two-listeners-json-logs-blazor-interactive-server.md) — why two labelled listeners, JSON logs and Blazor Interactive Server.
+- [0124](../decisions/0124-ingest-request-one-batch-per-post-acknowledged-by-status-alone.md) — why the ingest request carries one
+  batch with a bearer token and is acknowledged by its status, and why a refused batch is marked with a header.
 - [0103](../decisions/0103-web-login-server-side-sessions-static-login-page-circuits-bound-to-session.md), [0104](../decisions/0104-argon2id-password-hash-konscious-strict-phc-form-hash-password-command.md) and [0105](../decisions/0105-forwarded-headers-only-from-trusted-proxies-failed-logins-locked-per-client-and-capped.md) — the login, the password hash and the proxy trust.
 
 ## Not here
 
 - The configuration file and the secrets: [Configuration and secrets](configuration-and-secrets.md).
 - The import sub-command: [Log import](log-import.md). The incident reconstruction itself: [Detection, alerts and reports](detection-and-reports.md).
-- The database: [Storage](storage.md). The batch format: [Wire format](wire-format.md).
+- The database: [Storage](storage.md). The batch format: [Wire format](wire-format.md). The agent's sending, its waits and its
+  reaction to each answer: [Agent](agent.md), *Sending*.
 - The pages, layout, theme, static files, charts and security headers of the web UI: [Web UI](web-ui.md).
 - Passwords, sessions, the failed-sign-in limits and the proxy trust: [Web login](web-login.md).
 - The Tailscale ACL and the security model of the monitored server: the network area.
