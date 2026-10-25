@@ -126,7 +126,7 @@ How the agent reacts to each answer is in the [Agent](agent.md) area (*Sending*)
 - **Refused batch.** `400`, `413` or `422` **with the header `Vandox-Refused: batch`** (exactly this value, compared case-sensitively)
   means the batch itself is invalid and sending it again cannot succeed. The agent then splits the batch and gives up each record refused alone, replacing it
   with a recorded `gap`. The endpoint sends the header only on a request that passed the token check and only for such a batch
-  (steps 5, 7, 9 and 12). The same statuses without the header (a TLS listener reached with `http`, a proxy's size limit, the
+  (steps 5, 7, 8, 9 and 12). The same statuses without the header (a TLS listener reached with `http`, a proxy's size limit, the
   server's own `400`) are not a refusal.
 - **Every other answer** means "not accepting": the agent keeps the batch and sends it again after a wait (1 to 60 seconds). The
   endpoint answers with a status outside `400`, `413` and `422`, and never with the refusal header, for everything that is not the
