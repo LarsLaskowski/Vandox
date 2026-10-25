@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 
 using Vandox.Core.LogParsing;
+using Vandox.Storage;
 
 namespace Vandox.Backend.Hosting;
 
@@ -42,6 +43,16 @@ public sealed class ServeHooks
     /// Gets or sets the standard input of <c>hash-password</c>; <see cref="Console.In"/> when <c>null</c>.
     /// </summary>
     public TextReader? Input { get; set; }
+
+    /// <summary>
+    /// Gets or sets a function that wraps the store the ingest endpoint writes to; the store itself when <c>null</c>; tests only.
+    /// </summary>
+    internal Func<IRecordWriter, IRecordWriter>? IngestWriter { get; set; }
+
+    /// <summary>
+    /// Gets or sets a function that replaces <c>FreeSpace.Probe</c> for the ingest endpoint; tests only.
+    /// </summary>
+    internal Func<string, long?>? FreeSpaceProbe { get; set; }
 
     #endregion // Properties
 }
