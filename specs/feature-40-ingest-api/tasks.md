@@ -19,8 +19,8 @@ files (G4) and the documentation (G5).
 | 10 | G3 | Coverage pass and the memory bounds: `IngestEndpointHostileLineStaysWithinMemoryBound`, `IngestEndpointMaximalBatchStaysWithinMemoryBound` through a real `SqliteStore` with SQLite's native high-water mark; report the measured figures (fact 13) | `tests/Vandox.Backend.Tests/IngestEndpointTests.cs` | AC12 | 9 | Tester | [x] |
 | 11 | G3 | `.squad/project.md` *Test doubles*: rows for `RecordingRecordWriter` and `CountingBodyStream` | `.squad/project.md` | AC12 | 10 | Tester | [x] |
 | 12 | G3 | `.squad/project.md` security areas 1 and 2: the ingest types, the binding, the drain | `.squad/project.md` | AC13 | 9 | Dev | [x] |
-| 13 | G4 | Ports entry with the required `INGEST_BIND_ADDRESS` and the comments (TUN prerequisite, `tailscale ip -4`, symptom, token as the boundary); no new API | `deploy/backend/docker-compose.yml` | AC16, AC18 | 9 | Dev | [ ] |
-| 14 | G4 | Smoke test ingest checks (plan *Approach*, *Compose and smoke test*); `bash -n` and the lint pass; no new API | `.github/scripts/smoke-test-backend.sh` | AC17 | 13 | Dev | [ ] |
+| 13 | G4 | Ports entry with the required `INGEST_BIND_ADDRESS` and the comments (TUN prerequisite, `tailscale ip -4`, symptom, token as the boundary); no new API | `deploy/backend/docker-compose.yml` | AC16, AC18 | 9 | Dev | [x] |
+| 14 | G4 | Smoke test ingest checks (plan *Approach*, *Compose and smoke test*); `bash -n` and the lint pass; no new API | `.github/scripts/smoke-test-backend.sh` | AC17 | 13 | Dev | [x] |
 | 15 | G5 | Area documents (backend host, wire format with the figures of task 10, configuration and secrets, storage, network); no new API | `docs/areas/backend-host.md`, `wire-format.md`, `configuration-and-secrets.md`, `storage.md`, `network-and-security-model.md` | AC12, AC18 | 10, 14 | Lead | [ ] |
 | 16 | G5 | `docs/ARCHITECTURE.md` status lines and the ingest component, linking 0126-0128 | `docs/ARCHITECTURE.md` | AC18 | 15 | Lead | [ ] |
 | 17 | G5 | `README.md`, `docs/INSTALL.md` (Synology TUN steps with facts 14-17 as the plan marks them), `SECURITY.md` | `README.md`, `docs/INSTALL.md`, `SECURITY.md` | AC18 | 15 | Lead | [ ] |
