@@ -17,10 +17,7 @@ public sealed class BackendConfig
     /// Gets the ingest listener.
     /// </summary>
     [ConfigKey("ingest")]
-    public ListenerConfig Ingest { get; } = new()
-                                            {
-                                                Listen = ":8081"
-                                            };
+    public IngestConfig Ingest { get; } = new();
 
     /// <summary>
     /// Gets the storage options.
