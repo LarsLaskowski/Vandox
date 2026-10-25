@@ -64,6 +64,8 @@ Backend:
 | `web.listen` | `:8080` | `[host]:port` |
 | `web.trusted_proxies` | empty | a comma-separated list of at most 16 IP addresses or networks (see below) |
 | `ingest.listen` | `:8081` | `[host]:port`, a port different from `web.listen` |
+| `ingest.agent_id` | none (optional) | the agent ID rule of the [wire format](wire-format.md): 1 to 64 characters of `A-Z a-z 0-9 . _ -`, starting with a letter or digit (see below) |
+| `ingest.min_free` | `1GiB` | a whole number of MiB or GiB from `0MiB` to `1024GiB`, the rule of `spool.min_free`; zero switches the check off (see below) |
 | `storage.directory` | `/data` | absolute, clean path |
 | `log.level` | `info` | `debug`, `info`, `warn` or `error` |
 | `import.plesk_panel_log` | `/var/log/plesk/panel.log` | absolute, clean path of a file in a directory |
@@ -86,6 +88,16 @@ Backend:
   ports, an empty entry, and more than 16 entries. An empty value trusts no proxy. The error reads `config: <file>:<line>:
   web.trusted_proxies: must be a comma-separated list of at most 16 IP addresses or networks, such as 172.18.0.1 or 172.18.0.0/16`
   and never contains the value. It is an option, not a secret: an environment variable cannot set it.
+- `ingest.agent_id` names the one agent whose batches the ingest endpoint accepts with the token ([Backend host](backend-host.md),
+  *Ingest endpoint*); it is compared ordinally with the header's `agent_id`, so `Web-1` is not `web-1`. It has no default: while it
+  or the secret `VANDOX_AGENT_TOKEN` is unset, the service runs without ingest. A value that breaks the rule (an empty string
+  included) is refused with `config: <file>:<line>: ingest.agent_id: must be 1 to 64 characters of [A-Za-z0-9._-], starting with a
+  letter or digit`, never with the value; a null value as `has no value`.
+- `ingest.min_free` is the free space of the file system of `storage.directory` below which ingest writes nothing and answers `503`
+  ([Backend host](backend-host.md), *Ingest endpoint*). Its form is that of `spool.min_free` (a size such as `512MiB` or `1GiB`; `0MiB`
+  or `0GiB` switches the check off; a bare number, a sign, a leading zero, `MB` or `GB` and more than `1024GiB` are refused); the
+  error reads `config: <file>:<line>: ingest.min_free: must be a whole number of MiB or GiB from 0MiB to 1024GiB, such as 0MiB or
+  1GiB` and never contains the value. The web UI and the import do not check it.
 - A duration (`incidents.window_before`, `incidents.window_after`) is one to four ASCII digits followed by `m` (minutes) or `h` (hours),
   nothing before or after, and from 1 minute to 24 hours (`30m`, `1h`, `24h`, `1440m`). A sign, a space, a fraction, another digit
   script, a second unit (`1h30m`), a missing unit (`60`) and any other unit (`1d`, `1s`) are rejected. The error reads
@@ -280,15 +292,19 @@ Backend:
   control characters are rejected instead of becoming part of the secret. A secret that needs other characters must
   be encoded, for example as base64. The agent token has at least 32 characters.
 - On the backend an unset secret is not an error when the configuration loads; the feature that needs it decides:
-  the web UI refuses to start without the password hash, the planned ingest endpoint will refuse without the token, and
-  the planned Telegram notifier will stay off without its token (both tokens are read and validated, but unused in v0.1.0). This is what lets the backend run for log import without agents or Telegram.
+  the web UI refuses to start without the password hash; without `VANDOX_AGENT_TOKEN` (or without `ingest.agent_id`) the service
+  starts, logs `ingest disabled` once and answers every ingest request `503` ([Backend host](backend-host.md), *Ingest endpoint*); and
+  the planned Telegram notifier will stay off without its token (read and validated, but unused). This is what lets the backend run
+  for log import without agents or Telegram.
 - Every environment variable that starts with `VANDOX_` (in any letter case) must be known to the binary and may
   appear once; otherwise loading fails, so a typo cannot silently disable a feature.
 - The web UI password hash must also be in the form of [Web login](web-login.md) (*Password*): an argon2id hash in the PHC form. The
   service checks that form at start-up, after the configuration is loaded; a hash that passes the secret rules above but not that form
   stops the service with exit 1 and one of the reasons listed there.
 - A secret is never logged, shown in the web UI, written to the spool or put into an error text. A value that is
-  compared with input (the ingest token an agent presents) is compared in constant time; the web UI password is
+  compared with input (the ingest token an agent presents) is compared in constant time — the backend compares the SHA-256 digests of
+  the presented and the configured token with `CryptographicOperations.FixedTimeEquals`, so neither the length nor a matching
+  prefix changes the steps; the web UI password is
   checked through the comparison of its hash function.
 
 ## Limits and errors
@@ -327,6 +343,8 @@ Backend:
   at most 64 GiB and the spool's files are uncompressed.
 - [0125](../decisions/0125-sender-two-streams-shared-backoff-refused-records-given-up-with-a-gap.md) — why the backfill has its own,
   configurable bandwidth.
+- [0126](../decisions/0126-ingest-endpoint-token-bound-to-one-agent-id-two-slots-through-the-commit-no-rate-cap.md) — why the
+  backend binds the one token to `ingest.agent_id` and stops ingest below `ingest.min_free`.
 
 ## Not here
 

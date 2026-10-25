@@ -87,7 +87,8 @@ printf '%s\n' "$pw" | sudo docker run --rm -i networlddev/vandox:0.1.0 hash-pass
 unset pw
 ```
 
-**Agent token.** v0.1.0 does not use it, but the compose file passes it, so the file must exist:
+**Agent token.** v0.1.0 does not use it, but the compose file passes it, so the file must exist; from v0.2.0 on it is the token the
+agent presents (step 10):
 
 ```
 openssl rand -hex 32 > secrets/vandox_agent_token
@@ -101,6 +102,11 @@ sudo chmod 0400 secrets/vandox_web_password_hash secrets/vandox_agent_token
 ```
 
 ## 4. Start the backend
+
+From v0.2.0 on, the compose file publishes the ingest port on the address in `INGEST_BIND_ADDRESS` and refuses to start without it
+(`set INGEST_BIND_ADDRESS to this host's tailnet address (tailscale ip -4), or 127.0.0.1 without agents`). Create `.env` in the
+project directory first: `INGEST_BIND_ADDRESS=127.0.0.1` while no agent sends, the tailnet address once one does (step 10). The
+v0.1.0 compose file publishes no ingest port and ignores the variable.
 
 **Command line (any host):**
 
@@ -237,3 +243,60 @@ sudo docker exec vandoxd dotnet /app/vandoxd.dll report > forensics.md
   before, and a rotated copy that was imported already is skipped. A newer journal export is imported as a whole, so export only
   the new period (`journalctl -o export --since ...`).
 - **Security:** read [SECURITY.md](../SECURITY.md), *Deployment Security Considerations*.
+
+## 10. Prepare the ingest port for the agent (v0.2.0)
+
+From v0.2.0 on, the agent on the monitored server sends its data to the backend over Tailscale, to
+`http://<tailnet address of the Docker host>:8081`. The backend side needs three things.
+
+> The Synology steps and the userspace-mode behavior in this section come from Tailscale's documentation and the project's notes and
+> have **not been verified on a device**; they are to be checked on a Synology host before the release (#45). The source of the
+> Synology steps is Tailscale's Synology guide, <https://tailscale.com/kb/1131/synology>; follow it where it differs from the
+> commands below.
+
+**Tailscale in TUN mode on the Docker host.** Docker can publish a port only on an address of a host interface. In Tailscale's TUN
+mode the tailnet address is on the interface `tailscale0`; in userspace-networking mode it is on no interface, so the binding fails,
+and Tailscale forwards inbound tailnet connections to `127.0.0.1` instead, where the web port is published, which would put the web
+UI on the tailnet behind nothing but the ACL. Userspace mode is therefore not supported. Check the mode with
+`ip -4 addr show tailscale0`: in TUN mode it lists the address that `tailscale ip -4` prints.
+
+**Synology:** the Tailscale package runs in userspace mode by default. Over SSH, switch it to TUN mode and restart the package:
+
+```
+sudo tailscale configure-host
+sudo synosystemctl restart pkgctl-Tailscale.service
+```
+
+The setting does not survive a reboot, so repeat it at every boot with a triggered task: *Control Panel → Task Scheduler → Create → Triggered Task →
+User-defined script*, user `root`, event *Boot-up*, script
+`/var/packages/Tailscale/target/bin/tailscale configure-host; synosystemctl restart pkgctl-Tailscale.service`.
+
+**The bind address and the agent ID.** Set `INGEST_BIND_ADDRESS` in `.env` to the address `tailscale ip -4` prints (for example
+`INGEST_BIND_ADDRESS=100.101.102.103`, beside a `WEB_BIND_ADDRESS` line if you have one), and the agent's `agent_id` in
+`vandoxd.yaml` (uncomment `agent_id: web-1` in the existing `ingest:` section and change the name; a second `ingest:` block stops the
+start). Then recreate the container:
+
+```
+sudo docker compose up -d
+```
+
+Without `docker compose`, add `-p <tailnet address>:8081:8081` to the `docker run` command of step 4. The token of step 3 is the
+one the agent presents; `ingest.min_free` (default `1GiB`) is the free space below which the backend stops writing agent data.
+
+**Symptoms:**
+
+- `docker compose up` stops and names `INGEST_BIND_ADDRESS`: `.env` lacks the variable.
+- The container does not start and Docker reports a port binding error: the host does not have the address in `.env` (Tailscale
+  down, or in userspace mode). Switch to TUN mode or correct the address, then `sudo docker compose up -d`.
+- After a reboot the container is not running although Tailscale is up: Docker may have started before Tailscale brought up its
+  address, and the restart policy may not retry a failed binding (expected from Docker's behavior, not verified). Run
+  `sudo docker compose up -d` once Tailscale is up; if it happens at every boot, add that command to the end of the triggered task.
+- The backend logs `ingest disabled` at start: the token or `ingest.agent_id` is missing; ingest answers `503` until both are set.
+- The agent logs `token refused`: look in `sudo docker logs vandoxd` for `ingest agent refused` (the agent's `agent_id` differs from
+  `ingest.agent_id`, compared exactly) or `ingest token refused` (the agent has another token).
+- `ingest paused: free space low`: the data volume has less than `ingest.min_free` free; the agent keeps its data until space is freed.
+
+**What the binding does not do.** Docker matches a published port by its destination address only, so a host in the LAN that routes
+packets to the tailnet address may reach the ingest port, as it may the web port. The agent token is the boundary: the backend checks
+it before it reads a request, accepts only the agent named in `ingest.agent_id` and bounds what one request may cost. Keep the
+Tailscale ACL strict, so the monitored server reaches only this port ([SECURITY.md](../SECURITY.md)).

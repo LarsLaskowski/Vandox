@@ -21,7 +21,8 @@ need the agent and the ingest API of v0.2.0), and this document fixes the princi
 
 ## Live data and backfill
 
-Planned with the ingest API (v0.2.0); until then every stored record is imported (origin `import`).
+Planned (#41). The ingest API stores agent records with their receive time and the header's `mode` is only logged; no record is
+classified yet, and no alert exists that could fire on one.
 
 - The backend classifies **every record as live or backfilled** from its capture time (corrected by the batch's clock offset), its
   receive time and gaps in the sequence numbers. It does not trust a flag from the agent; the batch header's live/backfill mode is only
