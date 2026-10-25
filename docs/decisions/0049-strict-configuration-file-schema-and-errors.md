@@ -59,9 +59,5 @@ defaults and the error texts are in [Configuration and secrets](../areas/configu
 - A typo or a leftover option stops start-up instead of being ignored, so upgrades that remove an option
   need a note in the release notes.
 - Configuration files cannot use anchors, aliases or `!env`-style tags. For files this small that is acceptable.
-- Both binaries open the configuration file and a `_FILE` secret file without blocking (`O_NONBLOCK`) and check the
-  type on the opened descriptor (issue #263): a type check of the path before the open leaves a window in which a
-  swapped-in FIFO blocks start-up. An `O_PATH` open with a second open through `/proc/self/fd` would avoid opening a
-  swapped-in device at all, but needs `/proc` and two opens for a race only root can trigger in `/etc/vandox`.
 - Containers that want to change a non-secret option mount a file. If that proves impractical, a later record can
   supersede this one with explicit, enumerated overrides.
